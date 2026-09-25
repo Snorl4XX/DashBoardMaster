@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="light">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    /* Carrega Chart.js com CDN reserva: se a rede bloquear o jsDelivr, tenta o cdnjs.
+       Se ambos falharem, o painel continua funcionando com tabelas no lugar dos gráficos. */
+    window.__chartLibs = (function () {
+      function load(srcs) {
+        return new Promise(function (resolve) {
+          var i = 0;
+          (function next() {
+            if (i >= srcs.length) { resolve(false); return; }
+            var s = document.createElement('script');
+            s.src = srcs[i++]; s.async = false;
+            s.onload = function () { resolve(true); };
+            s.onerror = function () { s.remove(); next(); };
+            document.head.appendChild(s);
+          })();
+        });
+      }
+      return load([
+        'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js'
+      ]).then(function (ok) {
+        return ok ? load([
+          'https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js',
+          'https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js'
+        ]) : false;
+      });
+    })();
+  </script>
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="scrim" id="scrim" hidden></div>
+
+    <!-- ============ MENU LATERAL ============ -->
+    <aside class="sidebar" id="sidebar" aria-label="Menu">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">J&amp;T</div>
+        <div class="brand-copy">
+          <strong>EXPRESS</strong>
+          <small><span id="brandCenter">SP GRU</span> · <span data-i18n="panel">Painel Operacional</span></small>
+        </div>
+      </div>
+      <nav class="side-nav" id="sideNav"></nav>
+      <div class="sidebar-foot">
+        <div class="sync-line"><span class="sync-dot" id="syncDot"></span><div><b data-i18n="autoSync">Atualização automática</b><small id="lastSync">—</small></div></div>
+        <div class="queue-line" id="queueLine"></div>
+        <span class="version" id="appVersion"></span>
+      </div>
+    </aside>
+
+    <!-- ============ CONTEÚDO ============ -->
+    <main class="main" id="main">
+      <header class="topbar">
+        <button class="icon-btn only-mobile" id="menuBtn" type="button" aria-label="Menu" aria-controls="sidebar" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <div class="title-wrap">
+          <div class="eyebrow"><span>J&amp;T EXPRESS</span><span class="dot-sep"></span><span id="eyebrowCenter">SP GRU</span></div>
+          <h1 id="pageTitle">Painel de Indicadores</h1>
+          <p id="pageSubtitle"></p>
+        </div>
+        <div class="top-actions">
+          <div class="lang-switch" role="group" aria-label="Idioma / 语言">
+            <button type="button" class="lang-btn" data-lang="pt" aria-pressed="true">PT-BR</button>
+            <button type="button" class="lang-btn" data-lang="zh" aria-pressed="false">中文</button>
+          </div>
+          <button type="button" class="btn btn-light" id="refreshBtn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+            <span data-i18n="refresh">Atualizar</span>
+          </button>
+          <div class="menu-wrap" id="reportMenu">
+            <button type="button" class="btn btn-red" id="reportBtn" aria-haspopup="menu" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>
+              <span data-i18n="downloadReport">Baixar relatório</span>
+            </button>
+            <div class="menu-pop" id="reportPop" role="menu" hidden>
+              <button type="button" role="menuitem" data-format="pdf"><b>PDF</b><small data-i18n="pdfHint">Resumo executivo</small></button>
+              <button type="button" role="menuitem" data-format="xlsx"><b>Excel (.xlsx)</b><small data-i18n="xlsxHint">Resumo + todas as remessas</small></button>
+              <button type="button" role="menuitem" data-format="csv"><b>CSV</b><small data-i18n="csvHint">Remessas filtradas (rápido)</small></button>
+            </div>
+          </div>
+        </div>
+      </header>
+      <div class="progress" id="progress" aria-hidden="true"><span></span></div>
+
+      <!-- Barra de período e indicador -->
+      <section class="card toolbar" aria-label="Período">
+        <div class="field field-indicator" id="indicatorField">
+          <label for="indicatorSelect" data-i18n="indicator">Indicador</label>
+          <div class="select-wrap"><select id="indicatorSelect"></select></div>
+        </div>
+        <div class="field field-results hidden" id="resultsIndicatorField">
+          <label for="resultsIndicator" data-i18n="indicator">Indicador</label>
+          <div class="select-wrap"><select id="resultsIndicator"></select></div>
+        </div>
+        <div class="field field-results hidden" id="resultsShiftField">
+          <label for="resultsShift" data-i18n="shift">Turno</label>
+          <div class="select-wrap"><select id="resultsShift"></select></div>
+        </div>
+        <div class="field field-date">
+          <label for="fromDate" data-i18n="startDate">Data inicial</label>
+          <input type="date" id="fromDate">
+        </div>
+        <div class="field field-date">
+          <label for="toDate" data-i18n="endDate">Data final</label>
+          <input type="date" id="toDate">
+        </div>
+        <div class="presets" id="presets" role="group" aria-label="Atalhos de período"></div>
+        <button class="btn btn-dark" type="button" id="applyBtn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg><span data-i18n="apply">Aplicar</span>
+        </button>
+      </section>
+
+      <div class="alert hidden" id="alertBox" role="alert"></div>
+
+      <!-- ============ DASHBOARD ============ -->
+      <section id="viewDashboard" class="view">
+        <section class="card filters" aria-labelledby="filtersTitle">
+          <div class="section-head">
+            <div>
+              <span class="kicker" data-i18n="filters">Filtros</span>
+              <h2 id="filtersTitle" data-i18n="filtersTitle">Refine os resultados</h2>
+            </div>
+            <div class="badges" id="coverageBadges"></div>
+          </div>
+          <div class="filter-grid" id="filterGrid"></div>
+          <div class="chips-row" id="activeChips" hidden></div>
+        </section>
+
+        <section class="kpi-grid" id="kpiGrid" aria-live="polite"></section>
+
+        <section class="card target" id="targetBanner">
+          <div class="maomao" aria-hidden="true"><?!= include('Mascot'); ?></div>
+          <div class="target-copy">
+            <span class="pill" id="targetPill">—</span>
+            <h3 id="targetTitle">—</h3>
+            <p id="targetText">—</p>
+          </div>
+          <div class="target-goal"><span data-i18n="goal">Meta</span><strong id="goalValue">—</strong></div>
+        </section>
+
+        <section class="charts-grid" id="chartsGrid"></section>
+
+        <section class="card table-card hidden" id="summaryCard"></section>
+
+        <section class="card table-card" id="detailCard">
+          <div class="section-head">
+            <div>
+              <span class="kicker" data-i18n="details">Detalhamento</span>
+              <h2 data-i18n="shipmentTable">Tabela de remessas</h2>
+            </div>
+            <div class="table-tools">
+              <label class="find">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
+                <input type="text" id="tableFind" autocomplete="off" data-i18n-placeholder="tableFind" placeholder="Localizar remessa na tabela">
+              </label>
+              <span class="count" id="tableCount">—</span>
+            </div>
+          </div>
+          <div class="table-scroll"><table class="data-table" id="dataTable"><thead></thead><tbody></tbody></table></div>
+          <div class="table-foot">
+            <span class="note" id="tableNote"></span>
+            <div class="pager" id="pager"></div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ============ RESULTADOS ============ -->
+      <section id="viewResults" class="view hidden">
+        <section class="card results-head">
+          <div class="section-head">
+            <div>
+              <span class="kicker" data-i18n="results">Resultados</span>
+              <h2 id="resultsTitle" data-i18n="resultsTitle">Evolução consolidada</h2>
+              <p class="muted small" id="resultsNote"></p>
+            </div>
+            <div class="seg" id="periodTabs" role="tablist">
+              <button type="button" role="tab" data-period="day" data-i18n="daily">Diário</button>
+              <button type="button" role="tab" data-period="week" data-i18n="weekly">Semanal</button>
+              <button type="button" role="tab" data-period="month" data-i18n="monthly">Mensal</button>
+              <button type="button" role="tab" data-period="quarter" data-i18n="quarterly">Trimestral</button>
+            </div>
+          </div>
+        </section>
+        <section class="results-grid" id="resultsGrid"></section>
+      </section>
+
+      <footer class="foot" id="footNote"></footer>
+    </main>
+  </div>
+
+  <div class="boot" id="bootScreen">
+    <div class="boot-card">
+      <div class="brand-mark big" aria-hidden="true">J&amp;T</div>
+      <div class="loader" aria-hidden="true"></div>
+      <strong id="bootText">Carregando painel…</strong>
+      <small>正在加载看板…</small>
+    </div>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script>window.__BOOT__ = <?!= boot ?>;</script>
+  <script><?!= coreSource_(); ?></script>
+  <?!= include('Client'); ?>
+</body>
+</html>
