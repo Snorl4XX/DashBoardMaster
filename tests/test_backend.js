@@ -1,5 +1,5 @@
 /* Testes de regressão do servidor (Node). Uso: node tests/test_backend.js */
-const {createContext, fakeJms, makeDay} = require('./mocks');
+const {createContext, fakeJms, makeDay, bigWrongSend} = require('./mocks');
 let passed = 0;
 function check(cond, name, extra) { if (!cond) { console.error('FALHOU: ' + name, extra === undefined ? '' : extra); process.exit(1); } passed++; }
 function hasDate(o) { if (o instanceof Date) return true; if (o && typeof o === 'object') return Object.keys(o).some(k => hasDate(o[k])); return false; }
@@ -190,7 +190,8 @@ check(/401/.test(det401.erro || ''), 'diagnosticarDetalheJms propaga HTTP 401 de
 // diagnosticarTodosOsErros: diagnóstico completo — TODOS os dias com erro no período (não só
 // o mais recente, como diagnosticarDashboard), agrupados pela causa TÉCNICA bruta (sem passar
 // pela mensagem amigável do painel, que resume/oculta detalhes como "Campos recebidos").
-const ctx2e = createContext({props: baseProps, jms: fakeJms(days, {status: 401}), quiet: true});
+// (V3.7: erro de regra do JMS — credencial recusada agora pausa a rota, ver seção 11.)
+const ctx2e = createContext({props: baseProps, jms: fakeJms(days, {appError: {code: 500, msg: 'Erro interno do relatório'}}), quiet: true});
 ctx2e.setupProject();
 ctx2e.queueHistory('2026-09-17', '2026-09-19', true);
 ctx2e.processSyncQueue({budgetMs: 600000});
@@ -200,8 +201,10 @@ check(wsErros.diasComErroNoPeriodo === 3, 'diagnosticarTodosOsErros conta TODOS 
 const causas = Object.keys(wsErros.causas);
 check(causas.length === 1 && wsErros.causas[causas[0]].ocorrencias === 3 && wsErros.causas[causas[0]].datas.length === 3,
   'diagnosticarTodosOsErros agrupa a mesma causa e lista todas as datas afetadas', wsErros.causas);
-check(/HTTP 401/.test(wsErros.causas[causas[0]].textoCompletoExemplo) && /autenticação recusada/.test(wsErros.causas[causas[0]].textoCompletoExemplo),
-  'diagnosticarTodosOsErros mostra o texto TÉCNICO bruto (não a versão amigável resumida)', wsErros.causas[causas[0]]);
+check(/JMS recusou a consulta/.test(wsErros.causas[causas[0]].textoCompletoExemplo) && /código da aplicação 500: Erro interno do relatório/.test(wsErros.causas[causas[0]].textoCompletoExemplo),
+  'diagnosticarTodosOsErros mostra o texto TÉCNICO bruto (código e mensagem do JMS)', wsErros.causas[causas[0]]);
+check(ctx2e.publicJmsError_(wsErros.causas[causas[0]].textoCompletoExemplo) === 'JMS recusou a consulta (código 500: Erro interno do relatório)',
+  'mensagem amigável traz o código e a mensagem do JMS (antes: "ver excerto abaixo" sem excerto)', ctx2e.publicJmsError_(wsErros.causas[causas[0]].textoCompletoExemplo));
 check(!hasDate(diagErros), 'diagnosticarTodosOsErros não devolve objetos Date crus (google.script.run-safe)', diagErros);
 
 const ctx3 = createContext({props: baseProps, jms: fakeJms(days, {status: 401}), quiet: true});
@@ -241,11 +244,229 @@ const t0 = Date.now();
 for (let i = 0; i < 800; i++) ctx.findRowKey_('PAGES', 'sc_sc', '2025-03-01', 1 + (i % 100));
 check(Date.now() - t0 < 3000, 'findRowKey_ rápido com 30 mil linhas', Date.now() - t0 + 'ms');
 check(ctx.findRowKey_('PAGES', 'sc_sc', '2025-01-01', 1) > 1 && ctx.findRowKey_('PAGES', 'sc_sc', '2031-01-01', 1) === -1, 'findRowKey_ encontra/não encontra');
-// (d) Compactação respeita o tempo restante.
-check(ctx.compactDay_('wrong_send', '2026-09-19', Date.now() + 1000).partial === true, 'compactação interrompe perto do limite');
+// (d) Compactação (dias com páginas soltas: V2 ou download retomado) respeita o tempo restante.
+ctx.STORAGE_CACHE_ = null; ctx.TAB_CACHE_ = {}; ctx.TAB_INDEX_ = {};
+const legacyRows = ctx.getArchivedRange_('wrong_send', '2026-09-18', '2026-09-18').rows;
+ctx.saveDetailPage_('wrong_send', '2026-09-18', 1, legacyRows.slice(0, 100), 2, legacyRows.length, 100);
+ctx.saveDetailPage_('wrong_send', '2026-09-18', 2, legacyRows.slice(100), 2, legacyRows.length, legacyRows.length - 100);
+ctx.updateDayStatus_('wrong_send', '2026-09-18', {detailsStatus: 'COMPLETE', expectedPages: 2, expectedRecords: legacyRows.length});
+check(ctx.compactDay_('wrong_send', '2026-09-18', Date.now() + 1000).partial === true, 'compactação interrompe perto do limite');
+const compacted = ctx.compactDay_('wrong_send', '2026-09-18', Date.now() + 600000);
+check(compacted.rows === legacyRows.length && ctx.getArchivedRange_('wrong_send', '2026-09-18', '2026-09-18').rows.length === legacyRows.length,
+  'compactação junta as páginas num arquivo diário', compacted);
 // (e) Relatório Excel.
 ctx.STORAGE_CACHE_ = null; ctx.TAB_CACHE_ = {};
 const repX = ctx.generateReport('sorting_error', {from: '2026-09-17', to: '2026-09-19'}, 'xlsx');
 check(repX.ok && /\.xlsx$/.test(repX.fileName) && repX.rows > 0, 'relatório Excel');
+
+// ---------- 11. V3.7: diagnóstico "gráficos sem valores / fica carregando / dá erro" ----------
+function runAll(c, runs) {
+  let r;
+  for (let i = 0; i < (runs || 8); i++) {
+    c.STORAGE_CACHE_ = null; c.TAB_CACHE_ = {}; c.TAB_INDEX_ = {};
+    r = c.processSyncQueue({budgetMs: 600000});
+    if (r.idle || r.remaining === 0) break;
+  }
+  return r;
+}
+function freshCtx(dayData, jmsOpts, props) {
+  const c = createContext({props: Object.assign({}, baseProps, props || {}), jms: fakeJms(dayData, jmsOpts), quiet: true});
+  c.setupProject();
+  return c;
+}
+function withBig(date, n, seed) { const o = {}; o[date] = makeDay(date, seed || 5); o[date].ws = bigWrongSend(date, n); return o; }
+const ALL = ['wrong_send', 'sorting_error', 'missing_receipt', 'missing_dispatch', 'sc_sc', 'sc_dc'];
+const isDetailUrl = u => /_detail$|_verification$|_detailed$/.test(u) && !/total/.test(u);
+const D19 = '2026-09-19';
+
+// (a) Página de 1000 e UM arquivo por dia (antes: páginas de 100 e 1 arquivo + 1 linha por página).
+const cA = freshCtx({'2026-09-19': makeDay(D19, 99)});
+cA.queueHistory(D19, D19, true);
+runAll(cA);
+const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url));
+check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 1000 registros por página (antes 100)', detA.map(f => f.payload.size));
+check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
+check(Object.keys(cA.__state.files).length === 6, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
+check(cA.loadDetailFile_(cA.dayFilesMap_('wrong_send', D19, D19)[D19].fileId).kind === 'jt-day', 'arquivo diário no formato colunar');
+check(cA.allTabRows_('PAGES').length === 0, 'índice de páginas não cresce no caminho normal');
+// Fila vazia: depois de UMA execução de conferência, o gatilho de 5 min sai sem abrir a planilha.
+const confA = cA.processSyncQueue();
+check(!confA.idle && confA.remaining === 0, 'execução de conferência depois de uma execução com trabalho', confA);
+const writesA = cA.__state.writes;
+const idle = cA.processSyncQueue();
+check(idle.idle === true && cA.__state.writes === writesA, 'gatilho sai na hora com a fila vazia (economiza a cota de execução)', idle);
+// O painel recebe exatamente as mesmas remessas que o relatório (formato colunar).
+const dashA = cA.getDashboardData('wrong_send', {from: D19, to: D19});
+const rowsA = C.decodeDataset(dashA.dataset), repA = cA.getArchivedRange_('wrong_send', D19, D19).rows;
+check(rowsA.length === repA.length && rowsA.length === new Set(cA.__state.fetches.length ? (function () {
+  const d = makeDay(D19, 99); return d.ws.map(r => r.billcode); })() : []).size, 'painel e relatório com as mesmas remessas', [rowsA.length, repA.length]);
+check(rowsA.every(r => r.login && r.shift && r.segment), 'campos derivados preservados no formato colunar');
+
+// (b) JMS corta a página em silêncio (máx. 50): o robô aprende e baixa tudo.
+const cB = freshCtx(withBig(D19, 1234), {maxPageSize: 50});
+cB.queueHistory(D19, D19, true);
+runAll(cB);
+const stB = cB.getDayStatus_('wrong_send', D19);
+check(cB.__state.props.JMS_PAGE_SIZE_WRONG_SEND === '50', 'limite silencioso de página aprendido por rota', cB.__state.props.JMS_PAGE_SIZE_WRONG_SEND);
+check(stB.details === 'COMPLETE' && stB.savedRows === 1234 && cB.getArchivedRange_('wrong_send', D19, D19).rows.length === 1234, 'dia completo com página limitada', stB);
+
+// (c) JMS recusa páginas grandes (erro da aplicação): desce para 100 e guarda.
+const cC = freshCtx(withBig(D19, 777), {rejectAbove: 100});
+cC.queueHistory(D19, D19, true);
+runAll(cC);
+check(cC.__state.props.JMS_PAGE_SIZE_WRONG_SEND === '100' && cC.getDayStatus_('wrong_send', D19).details === 'COMPLETE', 'tamanho recusado → volta para 100 sozinho', cC.getDayStatus_('wrong_send', D19));
+check(ALL.every(k => cC.getDayStatus_(k, D19).details === 'COMPLETE'), 'todas as rotas se ajustam (sem erro na fila)');
+
+// (d) Paginação profunda recusada (deslocamento ≥ 10 mil): dia grande em fatias de horário.
+const cD = freshCtx(withBig(D19, 25000), {resultWindow: 10000});
+cD.queueHistory(D19, D19, true);
+runAll(cD);
+const wsD = cD.__state.fetches.filter(f => /center_wrong_send_detail/.test(f.url));
+check(wsD.every(f => (f.payload.current - 1) * f.payload.size < 10000), 'nenhuma página além do limite do JMS');
+check(wsD.some(f => f.payload.startTime !== D19 + ' 00:00:00'), 'dia grande baixado em fatias de horário');
+check(cD.getDayStatus_('wrong_send', D19).details === 'COMPLETE' && cD.getArchivedRange_('wrong_send', D19, D19).rows.length === 25000,
+  '25 mil remessas completas (a V3 parava na página 101)', cD.getDayStatus_('wrong_send', D19));
+
+// (e) JMS ignora a hora do filtro: o robô percebe e volta à paginação normal.
+const cE = freshCtx(withBig(D19, 25000), {ignoreTime: true});
+cE.queueHistory(D19, D19, true);
+runAll(cE);
+check(cE.__state.props.JMS_NO_SLICE_WRONG_SEND === '1', 'fatias desativadas quando a soma não bate com o total');
+check(cE.getDayStatus_('wrong_send', D19).details === 'COMPLETE' && cE.getArchivedRange_('wrong_send', D19, D19).rows.length === 25000, 'dia completo sem fatias');
+
+// (f) Dia ainda recebendo registros durante o download: sem ciclo de erro.
+const cF = freshCtx(withBig(D19, 2500), {grow: {date: D19, perRequest: 3}});
+cF.queueHistory(D19, D19, true);
+runAll(cF);
+const jobF = cF.allTabRows_('JOBS').filter(r => r[1] === 'DETAIL_INIT' && r[2] === 'wrong_send')[0];
+check(cF.getDayStatus_('wrong_send', D19).details === 'COMPLETE' && jobF[5] === 'DONE' && Number(jobF[6]) === 0,
+  'contagem mudando durante o download não vira erro (a V3 refazia 4× e marcava ERRO)', [cF.getDayStatus_('wrong_send', D19), jobF[5], jobF[6]]);
+
+// (g) Token expirado com HTTP 200 + código da aplicação: pausa as rotas, sem gastar tentativas.
+const optsG = {appError: {code: 135010037, msg: 'token失效，请重新登录'}};
+const cG = freshCtx({'2026-09-19': makeDay(D19, 3)}, optsG);
+cG.queueHistory(D19, D19, true);
+cG.processSyncQueue({budgetMs: 600000});
+const pausesG = cG.publicPauses_();
+check(pausesG.length === 5 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
+  'token expirado pausa as 5 rotas com aviso claro', pausesG);
+check(cG.__state.fetches.length === 5, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
+check(cG.pendingJobs_().length === 12 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
+cG.processSyncQueue({budgetMs: 600000});
+check(cG.__state.fetches.length === 5, 'fila pausada não insiste no JMS');
+check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 5 && cG.getAppBootstrap().pauses.length === 5, 'pausa chega ao painel');
+delete optsG.appError;
+cG.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO';
+runAll(cG);
+check(cG.publicPauses_().length === 0 && ALL.every(k => cG.getDayStatus_(k, D19).details === 'COMPLETE'), 'trocar o token retoma a importação sozinho');
+
+// (h) Página HTML de login (redirecionamento do SSO) também é credencial.
+const cH = freshCtx({'2026-09-19': makeDay(D19, 3)}, {html: true});
+cH.queueHistory(D19, D19, true);
+cH.processSyncQueue({budgetMs: 600000});
+check(cH.publicPauses_().length === 5 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
+
+// (i) Cota diária do Google esgotada: pausa geral por 1 h, sem marcar erro nos jobs.
+const cI = freshCtx({'2026-09-19': makeDay(D19, 3)}, {onFetch: () => { throw new Error('Service invoked too many times for one day: urlfetch.'); }});
+cI.queueHistory(D19, D19, true);
+cI.processSyncQueue({budgetMs: 600000});
+const pI = cI.publicPauses_();
+check(pI.length === 1 && pI[0].route === '*' && pI[0].kind === 'QUOTA' && /Cota diária/.test(pI[0].reason), 'cota esgotada pausa tudo', pI);
+check(cI.__state.fetches.length === 1 && cI.pendingJobs_().every(j => j.attempts === 0), 'para na primeira falha de cota', cI.__state.fetches.length);
+
+// (j) Mensagens: números com 401/403 não viram "autenticação recusada".
+check(ctx.publicJmsError_('Detalhe retornou 14013 registros, mas o resumo tem 4012 erros: payload do detalhe sem filtro.') === 'Detalhe bloqueado: retorno maior que o resumo',
+  'número "401" dentro da mensagem não é erro de autenticação');
+check(!/HTTP 403|permissão/.test(ctx.publicJmsError_('JMS informou 4031 registros no resumo, mas entregou 4029 em sc_sc 2026-09-19')), 'número "403" idem');
+check(ctx.errorKind_('HTTP 401 em x') === 'AUTH' && ctx.errorKind_('Sessão do JMS expirada') === 'AUTH' && ctx.errorKind_('Service invoked too many times for one day: urlfetch.') === 'QUOTA' &&
+  ctx.errorKind_('Detalhe retornou 4013 registros') === 'OTHER', 'classificação dos erros da fila');
+
+// (k) Campos com outra grafia (MAIÚSCULAS): gráficos não ficam "N/A".
+const cK = freshCtx({'2026-09-19': makeDay(D19, 99)}, {keyCase: 'upper'});
+cK.queueHistory(D19, D19, true);
+runAll(cK);
+const rowsK = cK.getArchivedRange_('wrong_send', D19, D19).rows;
+check(rowsK.length === rowsA.length && rowsK.every(r => r.login && r.segment && r.destination && r.shift !== 'N/A'), 'campos lidos sem depender de maiúsculas/minúsculas', rowsK[0]);
+check(cK.getArchivedRange_('sc_dc', D19, D19).rows.every(r => r.tripId && r.route), 'idem SC→DC');
+
+// (l) Campo da remessa ausente: erro claro com os campos recebidos (antes: dia vazio, sem aviso).
+const dL = {'2026-09-19': makeDay(D19, 3)};
+dL[D19].ws = dL[D19].ws.map(r => { const o = Object.assign({}, r); o.waybillCode = o.billcode; delete o.billcode; return o; });
+const cL = freshCtx(dL);
+cL.queueHistory(D19, D19, true);
+cL.processSyncQueue({budgetMs: 600000});
+const stL = cL.getDayStatus_('wrong_send', D19);
+check(stL.details === 'ERROR' && /Nenhuma remessa reconhecida/.test(stL.error) && /waybillCode/.test(cL.publicJmsError_(stL.error)), 'mapeamento quebrado vira erro legível', cL.publicJmsError_(stL.error));
+const diagL = cL.diagnosticarDetalheJms('wrong_send', D19);
+check(diagL.campos && diagL.campos.shipment.encontrado === null && diagL.campos.login.encontrado === 'scanUser' && diagL.camposRecebidos.indexOf('waybillCode') >= 0,
+  'diagnosticarDetalheJms mostra o mapeamento de campos', diagL.campos && diagL.campos.shipment);
+
+// (m) Dia retomado: tempo acabando grava os pedaços em ordem e a próxima execução continua de onde parou.
+const cM = freshCtx(withBig(D19, 1234), {maxPageSize: 50});
+cM.queueHistory(D19, D19, true);
+cM.processJob_(cM.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'wrong_send')[0], Date.now() + 600000);
+const rM1 = cM.processJob_(cM.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'wrong_send')[0], Date.now() + 30000);
+const stM1 = cM.getDayStatus_('wrong_send', D19), jobM1 = cM.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'wrong_send')[0];
+check(rM1 === 'partial' && stM1.details === 'PARTIAL' && stM1.expectedPages === 25 && jobM1.page > 1, 'tempo acabando: grava o que baixou e guarda o cursor', [rM1, stM1, jobM1 && jobM1.page]);
+const fetchesBefore = cM.__state.fetches.length;
+const rM2 = cM.processJob_(jobM1, Date.now() + 600000);
+const fetchedAgain = cM.__state.fetches.slice(fetchesBefore).filter(f => /center_wrong_send_detail/.test(f.url)).map(f => f.payload.current);
+check(rM2 === 'done' && cM.getDayStatus_('wrong_send', D19).details === 'COMPLETE' && cM.getArchivedRange_('wrong_send', D19, D19).rows.length === 1234,
+  'retomada completa o dia', cM.getDayStatus_('wrong_send', D19));
+check(fetchedAgain.filter(p => p > 1).every(p => p >= jobM1.page), 'retomada não baixa de novo as páginas já gravadas', fetchedAgain);
+
+// (n) Hoje/ontem: taxa de hora em hora, mas o detalhe só é rebaixado a cada 3 h (antes: toda hora).
+const yday = ctx.lastClosedDate_('wrong_send'), today = ctx.isoToday_();
+const dN = {}; dN[yday] = makeDay(yday, 41); dN[today] = makeDay(today, 43);
+const cN = freshCtx(dN);
+cN.queueHistory(yday, yday, true);
+runAll(cN);
+check(cN.getDayStatus_('wrong_send', yday).details === 'COMPLETE', 'ontem completo');
+dN[yday].ws.push(Object.assign({}, dN[yday].ws[1], {billcode: 'NOVO1'}));
+const detailBefore = cN.__state.fetches.filter(f => /center_wrong_send_detail/.test(f.url)).length;
+cN.queueRecentRefresh_();
+runAll(cN);
+const detailAfter = cN.__state.fetches.filter(f => /center_wrong_send_detail/.test(f.url)).length;
+check(cN.getRateDay_('wrong_send', yday).errorCount === dN[yday].ws.length, 'taxa de ontem atualizada na hora');
+check(detailAfter === detailBefore + (dN[today] ? 1 : 0), 'detalhe de ontem NÃO é rebaixado antes de 3 h (só o de hoje, que ainda não existia)', [detailBefore, detailAfter]);
+check(cN.getDayStatus_('wrong_send', yday).details === 'STALE' && cN.getCoverage_('wrong_send', yday, yday).incompleteDetails.length === 1,
+  'dia com taxa nova e detalhe antigo fica marcado (painel mostra "parcial" e o download sai quando der 3 h)', cN.getDayStatus_('wrong_send', yday));
+// Passadas as 3 h, a próxima revalidação baixa de novo mesmo sem nova mudança na taxa.
+const dfN = cN.dayFilesMap_('wrong_send', yday, yday)[yday];
+const dfRow = cN.findRowKey_('DAYFILES', 'wrong_send', yday);
+cN.writeCells_('DAYFILES', dfRow, 7, [new Date(Date.now() - 4 * 3600000)]);
+cN.queueRecentRefresh_();
+runAll(cN);
+check(cN.getDayStatus_('wrong_send', yday).details === 'COMPLETE' && cN.getArchivedRange_('wrong_send', yday, yday).rows.some(r => r.shipment === 'NOVO1'),
+  'depois de 3 h o detalhe é rebaixado e inclui a remessa nova', [dfN.createdAt, cN.getDayStatus_('wrong_send', yday)]);
+dN[yday].ws.push(Object.assign({}, dN[yday].ws[2], {billcode: 'NOVO2'}));
+const manual = cN.refreshNow('wrong_send', yday, yday);
+check(manual.detailsQueued === 1, 'botão Atualizar ignora o intervalo e rebaixa na hora', manual);
+// O painel abre no último dia FECHADO (hoje ainda está incompleto no JMS).
+check(cN.getRates_('wrong_send', today, today).length === 1 && cN.getDashboardData('wrong_send', {}).meta.to === yday && cN.getAppBootstrap().latestByIndicator.wrong_send.date === yday,
+  'painel abre no último dia fechado, não no dia corrente', cN.getDashboardData('wrong_send', {}).meta.to);
+
+// (o) Mais de 50 mil remessas no período (a V3 cortava em 50 mil: "não pega todos os dados").
+const dO = Object.assign(withBig('2026-09-17', 25000, 1), withBig('2026-09-18', 25000, 2), withBig('2026-09-19', 25000, 3));
+const cO = freshCtx(dO);
+cO.queueHistory('2026-09-17', '2026-09-19', true);
+runAll(cO, 12);
+const dashO = cO.getDashboardData('wrong_send', {from: '2026-09-17', to: '2026-09-19'});
+check(dashO.meta.rowsLoaded === 75000 && dashO.meta.archive.fullyLoaded && C.decodeDataset(dashO.dataset).length === 75000, '75 mil remessas no painel (3 dias)', dashO.meta.rowsLoaded);
+
+// (p) Trava ocupada pela sincronização não derruba o botão Atualizar (antes: erro após 60 s).
+const origLock = cO.LockService;
+cO.LockService = {getScriptLock: () => ({tryLock: () => false, releaseLock: () => {}, hasLock: () => false})};
+let lockErr = null, queuedP = 0;
+try { queuedP = cO.enqueueJobs_(Array.from({length: 30}, (_, i) => ['SUMMARY', 'sc_sc', cO.addDaysIso_('2026-08-01', i), 0]), {}); } catch (e) { lockErr = e.message; }
+cO.LockService = origLock;
+check(!lockErr && queuedP === 30, 'fila ocupada: enfileira linha a linha em vez de falhar', lockErr);
+// Job enfileirado por OUTRA execução (painel) durante o trabalho do gatilho não fica esquecido.
+runAll(cO, 12); cO.processSyncQueue();
+check(cO.processSyncQueue().idle === true, 'fila dormindo');
+cO.STORAGE_CACHE_ = null; cO.TAB_CACHE_ = {}; cO.TAB_INDEX_ = {};
+cO.enqueueJobs_([['SUMMARY', 'wrong_send', '2026-09-16', 0]], {});
+const wake = cO.processSyncQueue();
+check(!wake.idle && wake.done >= 1, 'job novo acorda a fila na hora', wake);
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

@@ -9,6 +9,21 @@
  *    os detalhes jamais eram processados e o "Atualizar" não reprocessava nada).
  *  - Detalhes paginados com cursor + download paralelo (fetchAll) e arquivo único
  *    por dia (compactação) para abrir o dashboard rapidamente.
+ *
+ * V3.7 (diagnóstico "não puxa os valores / fica carregando / dá erro"):
+ *  - Download do dia inteiro em memória (páginas de 1000, fatias de horário quando
+ *    o dia é grande) e UM arquivo por dia, direto. Antes: 1 arquivo no Drive + 1
+ *    linha na planilha POR PÁGINA DE 100 — ~10 mil arquivos/dia só de manutenção,
+ *    o que esgotava a cota diária de execução dos gatilhos (90 min em conta Gmail,
+ *    6 h no Workspace) e a sincronização parava no meio do dia.
+ *  - O dia corrente não entra mais em ciclo de erro: pequenas diferenças de
+ *    contagem durante o download (o JMS continua recebendo dados) são aceitas, e o
+ *    detalhe de hoje/ontem é rebaixado no máximo a cada 3 h (a taxa continua de hora em hora).
+ *  - Token expirado ou cota do Google esgotada PAUSAM a fila (sem gastar as 4
+ *    tentativas de cada job) e a pausa aparece no painel com o que fazer.
+ *  - Gatilho de 5 min sai na hora quando não há nada na fila (não abre a planilha).
+ *  - Arquivos diários em formato colunar: o painel carrega até 150 mil remessas
+ *    por consulta sem estourar a memória do servidor (antes: 50 mil).
  */
 var STORAGE_CACHE_ = null;
 var TAB_CACHE_ = {};
@@ -27,18 +42,23 @@ const DB_HEADERS_ = Object.freeze({
   DAYFILES: ['indicator', 'date', 'fileId', 'rows', 'expectedPages', 'expectedRecords', 'createdAt'],
   AGG: ['indicator', 'date', 'T1', 'T2', 'T3', 'NA', 'total', 'updatedAt']
 });
+/**
+ * Status de detalhe que já têm dados utilizáveis:
+ *  CHECK_COUNTS = todos os pedaços baixados, mas a soma diverge do total do JMS;
+ *  STALE        = a taxa oficial mudou depois do download (novo download agendado).
+ */
+const DETAIL_USABLE_ = ['COMPLETE', 'CHECK_COUNTS', 'STALE'];
 
 // ------------------------------------------------------------------ infraestrutura
 function ensureStorage_() {
   if (STORAGE_CACHE_) return STORAGE_CACHE_;
-  const props = PropertiesService.getScriptProperties();
-  const dbId = props.getProperty('DB_SPREADSHEET_ID');
+  const dbId = getProp_('DB_SPREADSHEET_ID', '');
   let ss;
   if (dbId) ss = SpreadsheetApp.openById(dbId);
   else {
     ss = SpreadsheetApp.create(APP_CONFIG.DB_FILE_NAME);
     try { ss.setSpreadsheetTimeZone(APP_CONFIG.TZ); } catch (e) {}
-    props.setProperty('DB_SPREADSHEET_ID', ss.getId());
+    setProp_('DB_SPREADSHEET_ID', ss.getId());
     ss.getSheets()[0].setName(DB_TABS_.RATES);
   }
   SHEET_TZ_ = ss.getSpreadsheetTimeZone() || APP_CONFIG.TZ;
@@ -73,11 +93,10 @@ function ensureSheet_(ss, name, headers, existing) {
 }
 
 function folderFromProp_(prop, name) {
-  const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty(prop);
+  const id = getProp_(prop, '');
   if (id) return DriveApp.getFolderById(id);
   const folder = DriveApp.createFolder(name);
-  props.setProperty(prop, folder.getId());
+  setProp_(prop, folder.getId());
   return folder;
 }
 function dataFolder_() {
@@ -222,18 +241,19 @@ function getLatestSyncedAt_(indicator) {
 }
 
 // ------------------------------------------------------------------ Drive (páginas e arquivos diários)
-function writeGzJson_(name, rows) {
-  const blob = Utilities.gzip(Utilities.newBlob(JSON.stringify(rows), 'application/json', name.replace(/\.gz$/, '')));
+function writeGzJson_(name, data) {
+  const blob = Utilities.gzip(Utilities.newBlob(JSON.stringify(data), 'application/json', name.replace(/\.gz$/, '')));
   blob.setName(name);
   return dataFolder_().createFile(blob);
 }
+/** Lista de linhas (páginas e arquivos antigos) ou conjunto colunar 'jt-day' (arquivos diários V3.7). */
 function loadDetailFile_(fileId) {
   const bytes = Utilities.ungzip(DriveApp.getFileById(fileId).getBlob());
-  const rows = JSON.parse(bytes.getDataAsString('UTF-8'));
-  if (!Array.isArray(rows)) throw new Error('Arquivo de detalhe inválido ' + fileId);
-  return rows;
+  const data = JSON.parse(bytes.getDataAsString('UTF-8'));
+  if (!Array.isArray(data) && !isDayDataset_(data)) throw new Error('Arquivo de detalhe inválido ' + fileId);
+  return data;
 }
-function loadDetailPage_(fileId) { return loadDetailFile_(fileId); }
+function loadDetailPage_(fileId) { return fileRows_(loadDetailFile_(fileId)); }
 function trashQuietly_(fileId, indicator, date) {
   if (!fileId) return;
   try { DriveApp.getFileById(fileId).setTrashed(true); }
@@ -266,13 +286,20 @@ function saveDetailPage_(indicator, date, page, normalized, totalPages, expected
   if (prev && prev[3] && prev[3] !== file.getId()) trashQuietly_(prev[3], indicator, date);
   return {fileId: file.getId(), page: page, records: normalized.length};
 }
+/**
+ * COMPLETE: todos os pedaços gravados e a soma bate com o total (com tolerância —
+ * o dia corrente continua mudando no JMS durante o download).
+ * CHECK_COUNTS: todos os pedaços gravados, mas a soma diverge além da tolerância
+ * (os dados ficam visíveis e o dia é conferido de novo mais tarde, sem ciclo de erro).
+ */
 function refreshDetailCoverage_(indicator, date, expectedPages, expectedRecords) {
   const pages = (archiveIndexMap_(indicator, date, date)[date] || []).filter(p => p.page >= 1 && p.page <= expectedPages);
   const savedRaw = pages.reduce((s, p) => s + p.rows, 0);
   let status = 'PARTIAL';
   if (expectedPages === 0) status = 'NO_RECORD';
-  else if (pages.length === expectedPages && (!expectedRecords || savedRaw === expectedRecords)) status = 'COMPLETE';
-  else if (pages.length === expectedPages && expectedRecords && savedRaw !== expectedRecords) status = 'CHECK_COUNTS';
+  else if (pages.length === expectedPages) {
+    status = !expectedRecords || Math.abs(savedRaw - expectedRecords) <= countTolerance_(expectedRecords) ? 'COMPLETE' : 'CHECK_COUNTS';
+  }
   updateDayStatus_(indicator, date, {detailsStatus: status, expectedPages: expectedPages, savedPages: pages.length,
     expectedRecords: expectedRecords, savedRows: savedRaw});
   return status;
@@ -289,7 +316,7 @@ function dayFilesMap_(indicator, from, to) {
   return out;
 }
 function saveDayFile_(indicator, date, rows, expectedPages, expectedRecords) {
-  const file = writeGzJson_(indicator + '__' + date + '__dia.json.gz', rows);
+  const file = writeGzJson_(indicator + '__' + date + '__dia.json.gz', encodeDayFile_(rows));
   const rowNum = findRowKey_('DAYFILES', indicator, date);
   const prev = rowNum > 0 ? allTabRows_('DAYFILES')[rowNum - 2] : null;
   const row = [indicator, date, file.getId(), rows.length, expectedPages, expectedRecords, new Date()];
@@ -317,15 +344,23 @@ function getAgg_(indicator, from, to) {
   return Object.keys(byDate).sort().map(d => byDate[d]);
 }
 
-/** Junta as páginas de um dia COMPLETO em um único arquivo e grava o agregado por turno. */
+/** Junta os pedaços de um dia (download retomado ou dados da V2) em um único arquivo e grava o agregado por turno. */
 function compactDay_(indicator, date, deadline) {
   const st = getDayStatus_(indicator, date);
-  if (!st || st.details !== 'COMPLETE') return {skipped: true, reason: 'detalhes incompletos'};
+  if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) return {skipped: true, reason: 'detalhes incompletos'};
   const pages = (archiveIndexMap_(indicator, date, date)[date] || []).filter(p => p.page >= 1 && p.page <= st.expectedPages);
+  if (!pages.length) {
+    // Marcado como completo, mas sem nenhum arquivo: baixa de novo em vez de repetir a compactação para sempre.
+    if (!dayFilesMap_(indicator, date, date)[date]) {
+      updateDayStatus_(indicator, date, {detailsStatus: 'PENDING'});
+      enqueueJobs_([['DETAIL_INIT', indicator, date, 1]], {reset: true});
+    }
+    return {skipped: true, reason: 'sem páginas'};
+  }
   let rows = [];
   for (const p of pages) {
     if (deadline && Date.now() > deadline - 15000) return {partial: true};
-    loadDetailFile_(p.fileId).forEach(r => rows.push(r));
+    fileRows_(loadDetailFile_(p.fileId)).forEach(r => rows.push(r));
   }
   rows = dedupeDetailRows_(rows.map(r => rederiveRow_(indicator, r)));
   const fileId = saveDayFile_(indicator, date, rows, st.expectedPages, st.expectedRecords);
@@ -334,10 +369,12 @@ function compactDay_(indicator, date, deadline) {
 }
 
 /**
- * Carrega os detalhes do período (do mais recente para o mais antigo), respeitando
- * limites de arquivos, linhas e tempo. Dias incompletos são carregados e marcados.
+ * Percorre os detalhes do período (do mais recente para o mais antigo), respeitando
+ * limites de arquivos, linhas e tempo, e entrega cada dia ao coletor (`sink`):
+ * DatasetBuilder_ (painel, sem criar objetos) ou RowsCollector_ (relatórios).
+ * Dias incompletos são carregados e marcados.
  */
-function getArchivedRange_(indicator, from, to, opts) {
+function scanArchive_(indicator, from, to, opts, sink) {
   opts = opts || {};
   const maxFiles = opts.maxFiles === undefined ? APP_CONFIG.MAX_DETAIL_FILES_PER_DASHBOARD : opts.maxFiles;
   const maxRows = opts.maxRows === undefined ? APP_CONFIG.MAX_CLIENT_ROWS : opts.maxRows;
@@ -345,21 +382,21 @@ function getArchivedRange_(indicator, from, to, opts) {
   const statuses = statusMap_(indicator, from, to);
   const dayFiles = dayFilesMap_(indicator, from, to);
   let pageMap = null;
-  const rows = [], loaded = [], partial = [], stale = [], notDownloaded = [], notLoaded = [], empty = [];
+  const loaded = [], partial = [], stale = [], notDownloaded = [], notLoaded = [], empty = [];
   let readFiles = 0, stop = false;
   const dates = dateRangeIso_(from, to).reverse();
   for (const date of dates) {
     const s = statuses[indicator + '|' + date];
     if (s && s.summary === 'NO_RECORD') { empty.push(date); continue; }
     if (stop) { notLoaded.push(date); continue; }
-    const complete = !!(s && s.details === 'COMPLETE');
+    const usable = !!(s && DETAIL_USABLE_.indexOf(s.details) >= 0);
     const df = dayFiles[date];
     let files = [], kind = '';
     if (df) {
-      if (complete) {
+      if (usable) {
         if (!pageMap) pageMap = archiveIndexMap_(indicator, from, to);
         const newestPage = (pageMap[date] || []).reduce((m, p) => p.syncedAt > m ? p.syncedAt : m, '');
-        if (!newestPage || df.createdAt >= newestPage) { files = [df.fileId]; kind = 'day'; }
+        if (!newestPage || df.createdAt >= newestPage) { files = [df.fileId]; kind = s.details === 'COMPLETE' ? 'day' : 'stale'; }
       } else { files = [df.fileId]; kind = 'stale'; }
     }
     if (!files.length) {
@@ -368,31 +405,47 @@ function getArchivedRange_(indicator, from, to, opts) {
       const pages = (pageMap[date] || []).filter(p => p.page >= 1 && (!exp || p.page <= exp));
       if (!pages.length) { notDownloaded.push(date); continue; }
       files = pages.map(p => p.fileId);
-      kind = complete ? 'pages' : 'partial';
+      kind = s && s.details === 'COMPLETE' ? 'pages' : 'partial';
     }
     // O dia mais recente sempre é tentado (mesmo acima do limite de arquivos), respeitando o tempo.
-    if ((loaded.length && readFiles + files.length > maxFiles) || rows.length >= maxRows || Date.now() > deadline) {
+    if ((loaded.length && readFiles + files.length > maxFiles) || sink.count() >= maxRows || Date.now() > deadline) {
       notLoaded.push(date); stop = true; continue;
     }
-    let dayRows = [], cut = false;
+    const parts = [];
+    let cut = false;
     for (const id of files) {
       if (Date.now() > deadline) { cut = true; break; }
-      loadDetailFile_(id).forEach(r => dayRows.push(r));
+      parts.push(loadDetailFile_(id));
       readFiles++;
     }
     if (cut) { kind = 'partial'; stop = true; }
-    dayRows = dedupeDetailRows_(dayRows.map(r => rederiveRow_(indicator, r)));
-    if (rows.length + dayRows.length > maxRows) { notLoaded.push(date); stop = true; continue; }
-    dayRows.forEach(r => rows.push(r));
+    const day = dayPayload_(indicator, parts);
+    const n = day.encoded ? day.encoded.n : day.rows.length;
+    if (loaded.length && sink.count() + n > maxRows) { notLoaded.push(date); stop = true; continue; }
+    if (day.encoded) sink.addEncoded(day.encoded); else sink.addRows(day.rows);
     loaded.push(date);
     if (kind === 'partial') partial.push(date);
     if (kind === 'stale') stale.push(date);
   }
   return {
-    rows: rows, loadedDates: loaded.sort(), partialDates: partial.sort(), staleDates: stale.sort(),
+    loadedDates: loaded.sort(), partialDates: partial.sort(), staleDates: stale.sort(),
     notDownloaded: notDownloaded.sort(), notLoaded: notLoaded.sort(), emptyDates: empty.sort(), readFiles: readFiles,
     fullyLoaded: !notDownloaded.length && !notLoaded.length && !partial.length && !stale.length
   };
+}
+/** Arquivo diário atual entra direto (colunar); o resto vira linhas re-derivadas e deduplicadas. */
+function dayPayload_(indicator, parts) {
+  if (parts.length === 1 && isDayDataset_(parts[0]) && parts[0].dv === DERIVE_VERSION_) return {encoded: parts[0]};
+  const rows = [];
+  parts.forEach(x => fileRows_(x).forEach(r => rows.push(rederiveRow_(indicator, r))));
+  return {rows: dedupeDetailRows_(rows)};
+}
+/** Linhas do período (relatórios e testes). Mesmo retorno da V3: {rows, loadedDates, ...}. */
+function getArchivedRange_(indicator, from, to, opts) {
+  const sink = RowsCollector_();
+  const meta = scanArchive_(indicator, from, to, opts, sink);
+  meta.rows = sink.rows;
+  return meta;
 }
 
 function getCoverage_(indicator, from, to) {
@@ -423,6 +476,62 @@ function lastErrorFor_(indicator, from, to) {
   return best ? {date: best.date, reason: best.reason, at: best.t} : null;
 }
 function lastJobErrorFor_(indicator, from, to) { return lastErrorFor_(indicator, from, to); }
+
+// ------------------------------------------------------------------ pausa da fila e "dica" de fila vazia
+const PAUSE_PROP_ = 'SYNC_PAUSE_V37';
+const HINT_PROP_ = 'QUEUE_HINT_V37';
+
+/** Pausas ativas por rota (ou '*' = tudo). Pausa de credencial cai sozinha quando o token é trocado. */
+function activePauses_() {
+  const raw = getProp_(PAUSE_PROP_, '');
+  if (!raw) return {};
+  const all = safeJsonParse_(raw, {}) || {};
+  const now = Date.now(), sig = credentialSignature_(), out = {};
+  let changed = false;
+  Object.keys(all).forEach(k => {
+    const p = all[k];
+    if (!p || !(p.until > now) || (p.kind === 'AUTH' && p.sig !== sig)) { changed = true; return; }
+    out[k] = p;
+  });
+  if (changed) { if (Object.keys(out).length) setProp_(PAUSE_PROP_, JSON.stringify(out)); else deleteProp_(PAUSE_PROP_); }
+  return out;
+}
+function pauseFor_(routeKey, pauses) { const p = pauses || activePauses_(); return p['*'] || p[routeKey] || null; }
+function setPause_(routeKey, kind, message) {
+  const all = activePauses_();
+  const now = Date.now();
+  const ms = kind === 'QUOTA' ? APP_CONFIG.PAUSE_QUOTA_MINUTES * 60000 : APP_CONFIG.PAUSE_AUTH_HOURS * 3600000;
+  all[routeKey] = {kind: kind, reason: String(message || '').slice(0, 400), since: (all[routeKey] && all[routeKey].since) || now,
+    until: now + ms, sig: kind === 'AUTH' ? credentialSignature_() : ''};
+  setProp_(PAUSE_PROP_, JSON.stringify(all));
+}
+function clearPauses_() { if (getProp_(PAUSE_PROP_, '')) deleteProp_(PAUSE_PROP_); }
+/** Pausas em formato seguro para a tela (sem texto bruto). */
+function publicPauses_() {
+  const p = activePauses_();
+  return Object.keys(p).map(k => ({
+    route: k, kind: p[k].kind, reason: publicJmsError_(p[k].reason),
+    since: new Date(p[k].since).toISOString(), until: new Date(p[k].until).toISOString(),
+    indicators: Object.keys(INDICATORS).filter(i => k === '*' || INDICATORS[i].routeKey === k)
+  }));
+}
+
+function setQueueHint_(state) {
+  try { setProp_(HINT_PROP_, JSON.stringify({s: state, at: Date.now(), sig: state === 'PAUSED' ? credentialSignature_() : ''})); } catch (e) {}
+}
+/**
+ * O gatilho de 5 min sai sem abrir a planilha quando a última execução deixou a fila
+ * vazia (ou só com rotas pausadas). Uma verificação completa acontece ao menos a cada
+ * hora, e qualquer job novo (resumo horário, botão Atualizar) reativa na hora.
+ */
+function queueLooksIdle_() {
+  const h = safeJsonParse_(getProp_(HINT_PROP_, ''), null);
+  if (!h) return false;
+  const age = Date.now() - Number(h.at || 0);
+  if (h.s === 'IDLE') return age >= 0 && age < 60 * 60000;
+  if (h.s === 'PAUSED') return age >= 0 && age < 30 * 60000 && h.sig === credentialSignature_();
+  return false;
+}
 
 // ------------------------------------------------------------------ fila de jobs
 function jobIdentity_(type, indicator, date, page) {
@@ -459,12 +568,20 @@ function enqueueJobs_(jobs, opts) {
     index[id] = {rowNum: -1, status: 'PENDING'};
     fresh.push(row); count++;
   });
+  if (count) setQueueHint_('PENDING');
   if (!fresh.length) return count;
   if (fresh.length <= 25) { fresh.forEach(r => appendRow_('JOBS', r)); return count; }
-  // Lotes grandes (histórico): escrita em bloco protegida por trava.
+  // Lotes grandes (histórico): escrita em bloco protegida por trava. Se a trava já é
+  // desta execução (o trabalhador), não pega de novo nem solta no fim (antes soltava
+  // a trava do próprio trabalhador no meio da execução).
   const lock = LockService.getScriptLock();
-  const own = opts.lockHeld ? false : lock.tryLock(60000);
-  if (!opts.lockHeld && !own) throw new Error('A fila está ocupada pela sincronização. Tente novamente em alguns minutos.');
+  const held = !!opts.lockHeld || (typeof lock.hasLock === 'function' && lock.hasLock());
+  const own = held ? false : lock.tryLock(20000);
+  if (!held && !own) {
+    // Trava ocupada pela sincronização: grava linha a linha (appendRow é atômico). Mais lento, mas não falha.
+    fresh.forEach(r => appendRow_('JOBS', r));
+    return count;
+  }
   try {
     const sh = tab_('JOBS');
     for (let i = 0; i < fresh.length; i += 2000) {
@@ -493,18 +610,21 @@ function queueHistory(from, to, includeDetails) {
   installTriggers();
   return {ok: true, from: start, to: end, days: dates.length, indicators: keys.length, queued: queued, details: includeDetails !== false};
 }
-/** Hora a hora: revalida as taxas dos 3 últimos dias. Detalhes só são rebaixados se a taxa mudar. */
+/** Hora a hora: revalida as taxas dos 3 últimos dias (rotas pausadas ficam de fora). Detalhes só se a taxa mudar. */
 function queueRecentRefresh_() {
+  const pauses = activePauses_();
+  if (pauses['*']) return 0;
   const days = [isoToday_(), addDaysIso_(isoToday_(), -1), addDaysIso_(isoToday_(), -2)];
   const jobs = [];
-  days.forEach(d => Object.keys(INDICATORS).forEach(k => jobs.push(['SUMMARY', k, d, 0])));
-  return enqueueJobs_(jobs, {reset: true});
+  days.forEach(d => Object.keys(INDICATORS).forEach(k => { if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, d, 0]); }));
+  return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
 }
 function retryFailedJobs() {
   let count = 0;
   allTabRows_('JOBS').forEach((r, i) => {
     if (r[5] === 'ERROR') { writeCells_('JOBS', i + 2, 6, ['PENDING', 0]); writeCells_('JOBS', i + 2, 9, [new Date(), '']); count++; }
   });
+  if (count) setQueueHint_('PENDING');
   return {ok: true, requeued: count};
 }
 function recoverStaleRunning_() {
@@ -522,41 +642,80 @@ function pendingJobs_() {
       (a.date < b.date ? 1 : a.date > b.date ? -1 : 0) || a.page - b.page || a.attempts - b.attempts);
 }
 
+/**
+ * Uma vez após instalar a V3.7: downloads de detalhe pela metade (páginas de 100)
+ * recomeçam do início no formato novo, e jobs que falharam pelos problemas corrigidos
+ * voltam para a fila.
+ */
+function migrateToV37_() {
+  if (getProp_('MIGRATION_V37', '')) return 0;
+  let n = 0;
+  allTabRows_('JOBS').forEach((r, i) => {
+    if (r[1] === 'DETAIL_INIT' && r[5] !== 'DONE' && Number(r[4]) > 1) { writeCells_('JOBS', i + 2, 5, [1]); n++; }
+  });
+  const reopened = retryFailedJobs().requeued;
+  setProp_('MIGRATION_V37', new Date().toISOString());
+  if (n || reopened) logSync_('INFO', '', '', 'V3.7: ' + n + ' download(s) de detalhe recomeçam no formato novo; ' + reopened + ' job(s) com erro reabertos.');
+  return n + reopened;
+}
+
 /** Trabalhador da fila (gatilho a cada 5 min). Uma execução por vez. */
 function processSyncQueue(opts) {
   opts = opts || {};
+  if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return {ok: false, busy: true};
-  const deadline = Date.now() + (opts.budgetMs || APP_CONFIG.WORKER_BUDGET_MS);
-  let done = 0, failed = 0, waiting = 0, partial = 0;
+  const startedAt = Date.now();
+  const deadline = startedAt + (opts.budgetMs || APP_CONFIG.WORKER_BUDGET_MS);
+  let done = 0, failed = 0, waiting = 0, partial = 0, paused = 0, stopped = false;
   const attempted = {};
   try {
     recoverStaleRunning_();
+    migrateToV37_();
     // Várias passadas: jobs criados nesta execução (ex.: detalhe após o resumo) já entram.
-    for (let pass = 0; pass < 6 && Date.now() < deadline - 20000; pass++) {
+    for (let pass = 0; pass < 6 && !stopped && Date.now() < deadline - 20000; pass++) {
       const queue = pendingJobs_().filter(j => !attempted[j.rowNum]);
       if (!queue.length) break;
       let progressed = false;
+      const pauses = activePauses_();
       for (const job of queue) {
         if (Date.now() > deadline - 20000) break;
         attempted[job.rowNum] = 1;
+        if (pauseFor_(INDICATORS[job.indicator].routeKey, pauses)) { paused++; continue; }
         if (!jobReady_(job)) { waiting++; continue; }
         if (job.type === 'COMPACT' && Date.now() > deadline - 90000) { waiting++; continue; }
+        if (job.type === 'DETAIL_INIT' && Date.now() > deadline - APP_CONFIG.DETAIL_MIN_START_MS) { waiting++; continue; }
         const r = processJob_(job, deadline);
         progressed = true;
-        if (r === 'done') done++; else if (r === 'skip') waiting++; else if (r === 'partial') partial++; else failed++;
+        if (r === 'done') done++;
+        else if (r === 'skip') waiting++;
+        else if (r === 'partial') partial++;
+        else if (r === 'paused') { paused++; Object.assign(pauses, activePauses_()); }
+        else if (r === 'quota') { failed++; stopped = true; break; }
+        else failed++;
       }
       if (!progressed) break;
     }
-    if (Date.now() < deadline - 45000 && queueMissingCompactions_(30)) {
+    if (!stopped && Date.now() < deadline - 45000 && queueMissingCompactions_(30)) {
       pendingJobs_().filter(j => j.type === 'COMPACT' && !attempted[j.rowNum]).forEach(job => {
         if (Date.now() > deadline - 30000) return;
         attempted[job.rowNum] = 1;
         if (processJob_(job, deadline) === 'done') done++; else failed++;
       });
     }
+    const remaining = pendingJobs_();
+    const pausesNow = activePauses_();
+    // Jobs enfileirados durante esta execução (por ela ou pelo painel) não aparecem no cache
+    // desta execução: nesse caso a próxima execução confere a fila inteira antes de dormir.
+    invalidateProps_();
+    const hint = safeJsonParse_(getProp_(HINT_PROP_, ''), null);
+    const touched = hint && hint.s === 'PENDING' && Number(hint.at) >= startedAt;
+    if (!touched) {
+      if (!remaining.length) setQueueHint_('IDLE');
+      else if (remaining.every(j => pauseFor_(INDICATORS[j.indicator].routeKey, pausesNow))) setQueueHint_('PAUSED');
+    }
     writeSyncStatusCache_();
-    return {ok: true, done: done, failed: failed, waiting: waiting, partial: partial};
+    return {ok: true, done: done, failed: failed, waiting: waiting, partial: partial, paused: paused, remaining: remaining.length};
   } finally { lock.releaseLock(); }
 }
 
@@ -586,16 +745,58 @@ function processJob_(job, deadline) {
     }
     return result;
   } catch (e) {
-    const attempts = job.attempts + 1;
     const message = String(e && e.message || e).slice(0, 950);
+    const kind = errorKind_(message);
+    const st = job.type === 'COMPACT' ? null : getDayStatus_(job.indicator, job.date);
+    if (kind === 'AUTH' || kind === 'QUOTA') {
+      // Credencial recusada / cota do Google: insistir não resolve. Pausa sem gastar tentativa.
+      setPause_(kind === 'QUOTA' ? '*' : INDICATORS[job.indicator].routeKey, kind, message);
+      writeCells_('JOBS', job.rowNum, 6, ['PENDING']);
+      writeCells_('JOBS', job.rowNum, 9, [new Date(), message]);
+      if (job.type !== 'COMPACT') updateDayStatus_(job.indicator, job.date, {error: message});
+      logSync_('ERROR', job.indicator, job.date, (kind === 'QUOTA' ? 'Fila pausada (cota do Google): ' : 'Rota pausada (credencial): ') + message);
+      return kind === 'QUOTA' ? 'quota' : 'paused';
+    }
+    const attempts = job.attempts + 1;
     writeCells_('JOBS', job.rowNum, 6, [attempts >= 4 ? 'ERROR' : 'PENDING', attempts]);
     writeCells_('JOBS', job.rowNum, 9, [new Date(), message]);
-    if (job.type !== 'COMPACT') {
-      updateDayStatus_(job.indicator, job.date, job.type === 'SUMMARY' ? {summaryStatus: 'ERROR', error: message} : {detailsStatus: 'ERROR', error: message});
+    if (job.type === 'SUMMARY') {
+      // Falha ao ATUALIZAR uma taxa já gravada não apaga o dia: só registra o erro.
+      updateDayStatus_(job.indicator, job.date, st && st.summary === 'COMPLETE' ? {error: message} : {summaryStatus: 'ERROR', error: message});
+    } else if (job.type !== 'COMPACT') {
+      // Idem para detalhe: o dia completo anterior continua valendo até o novo download dar certo.
+      updateDayStatus_(job.indicator, job.date, st && DETAIL_USABLE_.indexOf(st.details) >= 0 ? {error: message} : {detailsStatus: 'ERROR', error: message});
     }
     logSync_('ERROR', job.indicator, job.date, message);
     return 'error';
   }
+}
+
+/**
+ * Rebaixar o detalhe? Sempre, se ainda não há detalhe utilizável. Se já há e a
+ * contagem mudou: dias antigos sim; hoje/ontem no máximo a cada DETAIL_REFRESH_HOURS
+ * (antes era a cada hora — o dia corrente de SC→SC sozinho consumia a cota do dia).
+ * O botão "Atualizar" (manual) ignora o intervalo.
+ */
+function detailRefreshHours_() {
+  const v = Number(getProp_('DETAIL_REFRESH_HOURS', ''));
+  return v > 0 ? v : APP_CONFIG.DETAIL_REFRESH_HOURS;
+}
+/** Decide e, se o download ficar para depois, marca o dia como STALE (senão a próxima hora não veria mais a mudança). */
+function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
+  if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) return true;
+  const changed = !prev || prev.errorCount !== summary.errorCount || prev.totalCount !== summary.totalCount;
+  if (!changed && st.details === 'COMPLETE') return false;
+  if (manual) return true;
+  // Dia antigo cuja contagem mudou de verdade: rebaixa já.
+  if (changed && date < addDaysIso_(isoToday_(), -1)) return true;
+  // Hoje/ontem mudando (ou já STALE), ou contagem divergente (CHECK_COUNTS): respeita o intervalo.
+  const hours = st.details === 'CHECK_COUNTS' && !changed ? Math.max(6, detailRefreshHours_()) : detailRefreshHours_();
+  const df = dayFilesMap_(indicator, date, date)[date];
+  const last = df && df.createdAt ? Date.parse(df.createdAt) : 0;
+  const due = !(last > 0) || Date.now() - last >= hours * 3600000;
+  if (!due && changed && st.details === 'COMPLETE') updateDayStatus_(indicator, date, {detailsStatus: 'STALE'});
+  return due;
 }
 
 function runSummaryJob_(job) {
@@ -607,9 +808,9 @@ function runSummaryJob_(job) {
     return 'done';
   }
   upsertRate_(summary);
-  const unchanged = prev && st && st.details === 'COMPLETE' &&
-    prev.errorCount === summary.errorCount && prev.totalCount === summary.totalCount;
-  if (!unchanged) enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
+  if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, false)) {
+    enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
+  }
   return 'done';
 }
 
@@ -617,9 +818,7 @@ function runSummaryJob_(job) {
 function validateDetailTotal_(cfg, indicator, date, total) {
   const rate = getRateDay_(indicator, date);
   // Mensagem sem "payload do detalhe" / "sem filtro" de propósito: essas frases são
-  // o gatilho do outro caso (abaixo) em publicJmsError_. Antes as duas caíam na MESMA
-  // mensagem amigável ("bloqueado: retorno maior que o resumo"), que é o diagnóstico
-  // ERRADO para este caso (aqui o detalhe veio ZERADO, não maior).
+  // o gatilho do outro caso (abaixo) em publicJmsError_.
   if (total === 0 && rate && (rate.errorCount === null || rate.errorCount > 0)) {
     throw new Error('Detalhe zerado apesar do resumo ter erros. Confira a janela de datas/parâmetros do detalhe para ' + indicator + ' ' + date);
   }
@@ -630,61 +829,117 @@ function validateDetailTotal_(cfg, indicator, date, total) {
 }
 
 function savePageRecords_(indicator, date, page, records, expectedPages, expectedRecords) {
-  const normalized = records.map(r => normalizeDetailRow_(indicator, r, date)).filter(Boolean);
+  const normalized = normalizeRecords_(indicator, date, records);
   return saveDetailPage_(indicator, date, page, normalized, expectedPages, expectedRecords, records.length);
 }
 
-/** Baixa as páginas do dia com cursor (coluna "page" do job) — retoma de onde parou. */
+/**
+ * Baixa o detalhe do dia.
+ *  - Caminho normal: plano (páginas de até 1000 e, em dias grandes, fatias de horário),
+ *    tudo em memória e UM arquivo diário no fim. Nenhum arquivo por página.
+ *  - Se o tempo da execução acabar no meio: grava os pedaços já baixados (em ordem),
+ *    guarda o cursor na coluna "page" do job e continua na próxima execução.
+ */
 function runDetailJob_(job, deadline) {
   const cfg = getIndicatorConfig_(job.indicator);
   const st = getDayStatus_(job.indicator, job.date);
   if (!st || ['COMPLETE', 'NO_RECORD'].indexOf(st.summary) < 0) return 'skip';
   if (st.summary === 'NO_RECORD') return 'done';
-  const size = APP_CONFIG.PAGE_SIZE;
-  let cursor = Math.max(1, Number(job.page) || 1);
-  let expectedPages = st.expectedPages, expectedRecords = st.expectedRecords;
-  if (cursor === 1 || !expectedPages) {
-    const got = fetchDetailPage_(job.indicator, job.date, 1, size);
-    validateDetailTotal_(cfg, job.indicator, job.date, got.total);
-    expectedRecords = got.total;
-    expectedPages = got.total === 0 ? 1 : Math.max(got.pages, Math.ceil(got.total / size), 1);
-    if (got.total > 0 && !got.records.length) throw new Error('JMS retornou página 1 vazia com total ' + got.total);
-    savePageRecords_(job.indicator, job.date, 1, got.records, expectedPages, expectedRecords);
-    updateDayStatus_(job.indicator, job.date, {detailsStatus: 'PARTIAL',
-      expectedPages: expectedPages, expectedRecords: expectedRecords, error: ''});
-    cursor = 2;
-    writeCells_('JOBS', job.rowNum, 5, [cursor]);
-  }
-  while (cursor <= expectedPages) {
-    if (Date.now() > deadline - 20000) return 'partial';
-    const batch = [];
-    for (let p = cursor; p <= Math.min(expectedPages, cursor + APP_CONFIG.FETCH_ALL_BATCH - 1); p++) batch.push(p);
-    fetchDetailPagesParallel_(job.indicator, job.date, batch).forEach(res => {
-      const expectedOnPage = Math.min(size, Math.max(0, expectedRecords - (res.page - 1) * size));
-      if (!res.records.length && expectedOnPage > 0) throw new Error('JMS retornou página vazia (' + res.page + ') com total ' + expectedRecords);
-      savePageRecords_(job.indicator, job.date, res.page, res.records, expectedPages, expectedRecords);
+  const plan = planDetailDownload_(job.indicator, job.date, total => validateDetailTotal_(cfg, job.indicator, job.date, total));
+  const n = plan.chunks.length;
+  const tol = countTolerance_(plan.total);
+  const cursor = Math.max(1, Number(job.page) || 1);
+  const resume = cursor > 1 && cursor <= n + 1 && st.details === 'PARTIAL' && st.expectedPages === n &&
+    Math.abs(st.expectedRecords - plan.total) <= tol;
+  const start = resume ? cursor : 1;
+  const expected = resume ? st.expectedRecords : plan.total;
+
+  // Pedaços baixados (índice 1..n): {raw: registros do JMS, rows: linhas normalizadas}.
+  const got = {};
+  let sampleRaw = null;
+  plan.chunks.forEach((c, i) => {
+    const w = plan.windows[c.w];
+    if (c.page === 1 && i + 1 >= start) {
+      if (!sampleRaw && w.first.length) sampleRaw = w.first[0];
+      got[i + 1] = {raw: w.first.length, rows: normalizeRecords_(job.indicator, job.date, w.first)};
+    }
+  });
+  plan.windows.forEach(w => { w.first = null; }); // libera memória
+  const pending = [];
+  for (let i = start; i <= n; i++) if (!got[i]) pending.push(i);
+  const parallel = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
+  let slowest = 8000;
+  for (let k = 0; k < pending.length; k += parallel) {
+    let contiguous = 0;
+    while (got[start + contiguous]) contiguous++;
+    if (Date.now() + slowest + contiguous * 1500 + 15000 > deadline) {
+      return flushPartialDetail_(job, start, n, expected, got);
+    }
+    const batch = pending.slice(k, k + parallel);
+    const t0 = Date.now();
+    const res = fetchDetailBatch_(job.indicator, job.date, batch.map(i => {
+      const c = plan.chunks[i - 1], w = plan.windows[c.w];
+      return {page: c.page, size: plan.size, win: plan.sliced ? {start: w.start, end: w.end} : null};
+    }));
+    slowest = Math.max(slowest, Date.now() - t0);
+    res.forEach((r, j) => {
+      if (!sampleRaw && r.records.length) sampleRaw = r.records[0];
+      got[batch[j]] = {raw: r.records.length, rows: normalizeRecords_(job.indicator, job.date, r.records)};
     });
-    cursor = batch[batch.length - 1] + 1;
-    writeCells_('JOBS', job.rowNum, 5, [cursor]);
   }
-  const status = refreshDetailCoverage_(job.indicator, job.date, expectedPages, expectedRecords);
-  if (status === 'COMPLETE') { enqueueJobs_([['COMPACT', job.indicator, job.date, 0]], {reset: true}); return 'done'; }
-  if (status === 'NO_RECORD') return 'done';
-  // O total mudou durante a paginação (dados do dia ainda em movimento): recomeça do início.
+
+  let rawTotal = 0;
+  for (let i = start; i <= n; i++) rawTotal += got[i] ? got[i].raw : 0;
+  if (!resume && rawTotal < plan.total * 0.9 - tol) {
+    // Faltou muito (páginas vazias no meio): não é variação normal do dia; nova tentativa.
+    throw new Error('Detalhes incompletos para ' + job.indicator + ' ' + job.date + ': o JMS informou ' + plan.total +
+      ' registros, mas entregou ' + rawTotal + '; a importação será refeita.');
+  }
+  if (!resume) {
+    // Caminho normal: o dia inteiro em memória → um único arquivo diário, direto.
+    let rows = [];
+    for (let i = 1; i <= n; i++) got[i].rows.forEach(r => rows.push(r));
+    rows = dedupeDetailRows_(rows);
+    warnEmptyFields_(job.indicator, job.date, rows, sampleRaw);
+    const ok = Math.abs(rawTotal - plan.total) <= tol;
+    saveDayFile_(job.indicator, job.date, rows, n, plan.total);
+    upsertAgg_(job.indicator, job.date, rows);
+    updateDayStatus_(job.indicator, job.date, {detailsStatus: ok ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: n, savedPages: n,
+      expectedRecords: plan.total, savedRows: rawTotal, error: ''});
+    if (!ok) {
+      logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + plan.total + ' registros no detalhe, mas entregou ' + rawTotal +
+        (plan.sliced ? ' (download em ' + plan.windows.length + ' fatias de horário)' : '') + '. Dados gravados; o dia será conferido de novo mais tarde.');
+    }
+    return 'done';
+  }
+  // Retomada: grava os pedaços restantes e consolida o dia.
+  for (let i = start; i <= n; i++) saveDetailPage_(job.indicator, job.date, i, got[i].rows, n, expected, got[i].raw);
+  writeCells_('JOBS', job.rowNum, 5, [n + 1]);
+  const status = refreshDetailCoverage_(job.indicator, job.date, n, expected);
+  if (DETAIL_USABLE_.indexOf(status) >= 0) {
+    const c = Date.now() < deadline - 60000 ? compactDay_(job.indicator, job.date, deadline) : {partial: true};
+    if (c.partial) enqueueJobs_([['COMPACT', job.indicator, job.date, 0]], {reset: true});
+    return 'done';
+  }
+  // Algum pedaço de uma execução anterior sumiu do índice: recomeça do início.
   writeCells_('JOBS', job.rowNum, 5, [1]);
   throw new Error('Detalhes incompletos para ' + job.indicator + ' ' + job.date + ' (' + status + '); a importação será refeita.');
 }
 
-/** Compatibilidade com jobs DETAIL_PAGE criados pela V2. */
+/** Tempo acabando: grava os pedaços contíguos já baixados e guarda o cursor. */
+function flushPartialDetail_(job, start, n, expected, got) {
+  let last = start - 1;
+  while (last < n && got[last + 1]) last++;
+  for (let i = start; i <= last; i++) saveDetailPage_(job.indicator, job.date, i, got[i].rows, n, expected, got[i].raw);
+  writeCells_('JOBS', job.rowNum, 5, [last + 1]);
+  updateDayStatus_(job.indicator, job.date, {detailsStatus: 'PARTIAL', expectedPages: n, expectedRecords: expected, savedPages: last, error: ''});
+  return 'partial';
+}
+
+/** Jobs DETAIL_PAGE da V2: viram um download do dia no formato novo. */
 function runLegacyDetailPageJob_(job) {
   const st = getDayStatus_(job.indicator, job.date);
-  if (!st || ['COMPLETE', 'NO_RECORD'].indexOf(st.summary) < 0) return 'skip';
-  if (st.summary === 'NO_RECORD' || !st.expectedPages || job.page > st.expectedPages) return 'done';
-  const got = fetchDetailPage_(job.indicator, job.date, job.page, APP_CONFIG.PAGE_SIZE);
-  savePageRecords_(job.indicator, job.date, job.page, got.records, st.expectedPages, st.expectedRecords);
-  if (refreshDetailCoverage_(job.indicator, job.date, st.expectedPages, st.expectedRecords) === 'COMPLETE') {
-    enqueueJobs_([['COMPACT', job.indicator, job.date, 0]], {reset: true});
-  }
+  if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
   return 'done';
 }
 
@@ -696,7 +951,7 @@ function queueMissingCompactions_(limit) {
   allTabRows_('STATUS').forEach(r => {
     if (jobs.length >= limit) return;
     const d = dateCellIso_(r[1]);
-    if (r[3] === 'COMPLETE' && INDICATORS[r[0]] && !files[r[0] + '|' + d]) jobs.push(['COMPACT', r[0], d, 0]);
+    if (DETAIL_USABLE_.indexOf(r[3]) >= 0 && INDICATORS[r[0]] && !files[r[0] + '|' + d]) jobs.push(['COMPACT', r[0], d, 0]);
   });
   return jobs.length ? enqueueJobs_(jobs, {}) : 0;
 }

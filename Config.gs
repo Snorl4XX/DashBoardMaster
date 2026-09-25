@@ -7,18 +7,26 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.2.0',
+  VERSION: '3.7.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
-  PAGE_SIZE: 100,              // limite de linhas por página no JMS
+  PAGE_SIZE: 100,              // resumo e compatibilidade (o detalhe usa DETAIL_PAGE_SIZE)
+  DETAIL_PAGE_SIZE: 1000,      // registros por página no detalhe; se o JMS limitar/recusar, o robô aprende o limite sozinho
+  DETAIL_MAX_OFFSET: 10000,    // acima disso o dia é baixado em fatias de horário (paginação profunda costuma falhar)
+  MAX_DETAIL_PER_DAY: 200000,  // trava contra detalhe sem filtro (evita estourar a memória)
   FETCH_ALL_BATCH: 4,          // páginas de detalhe baixadas em paralelo
   WORKER_BUDGET_MS: 270000,    // gatilho a cada 5 min; execução máxima de 6 min
+  DETAIL_MIN_START_MS: 60000,  // não começa um detalhe com menos de 1 min de execução restante
+  DETAIL_REFRESH_HOURS: 3,     // hoje/ontem: detalhe rebaixado no máximo a cada 3 h (a taxa continua de hora em hora)
   REFRESH_BUDGET_MS: 25000,    // botão "Atualizar" (web) consulta taxas por até 25 s
   REFRESH_MAX_DAYS: 31,
   REFRESH_COOLDOWN_S: 90,
+  PAUSE_AUTH_HOURS: 6,         // credencial recusada: nova tentativa em 6 h (ou assim que o token for trocado)
+  PAUSE_QUOTA_MINUTES: 60,     // cota do Google esgotada: nova tentativa em 1 h
+  PROPS_TTL_MS: 10000,         // propriedades do script relidas no máximo a cada 10 s
   MAX_DETAIL_FILES_PER_DASHBOARD: 150,
-  MAX_CLIENT_ROWS: 50000,      // remessas enviadas ao navegador por consulta
+  MAX_CLIENT_ROWS: 150000,     // remessas enviadas ao navegador por consulta (formato colunar)
   DASHBOARD_LOAD_BUDGET_MS: 22000,
   MAX_REPORT_DETAIL_ROWS: 60000,
   MAX_PDF_DETAIL_ROWS: 1500,

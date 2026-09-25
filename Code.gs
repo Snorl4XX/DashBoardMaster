@@ -1,5 +1,5 @@
 /**
- * J&T EXPRESS — Ponto de entrada do Web App (V3).
+ * J&T EXPRESS — Ponto de entrada do Web App (V3.7).
  * Nenhuma credencial vai para o navegador. Todas as funções chamadas pelo
  * navegador devolvem dados via safeReturn_ (sem objetos Date, que fariam o
  * google.script.run entregar null ao dashboard).
@@ -37,21 +37,26 @@ function getAppBootstrap() {
   const initialized = !!getProp_('DB_SPREADSHEET_ID', '');
   const latest = {};
   let lastUpdated = null, earliest = null;
+  let pauses = [];
   if (initialized) {
+    // O painel abre no último dia FECHADO com taxa: o dia corrente ainda está
+    // incompleto no JMS (gráficos pareciam vazios/parciais ao abrir).
     Object.keys(INDICATORS).forEach(k => {
       const r = getRates_(k, null, isoToday_());
-      const last = r.length ? r[r.length - 1] : null;
+      const anchor = anchorDate_(k, r);
+      const last = r.filter(x => x.date === anchor)[0] || null;
       latest[k] = last ? {date: last.date, rate: last.rate, met: JTCore_.goalMet(last.rate, INDICATORS[k].goal)} : null;
     });
     lastUpdated = getLatestSyncedAt_();
     earliest = getEarliestRateDate_();
+    pauses = publicPauses_();
   }
   return safeReturn_({
     app: {name: APP_CONFIG.APP_NAME, nameZh: APP_CONFIG.APP_NAME_ZH, version: APP_CONFIG.VERSION, red: APP_CONFIG.RED},
     center: centerName_(), catalog: getPublicCatalog_(), shiftColors: SHIFT_COLORS,
     today: isoToday_(), historyStart: getProp_('DATA_START_DATE', '') || earliest || '',
     latestByIndicator: latest, lastUpdated: lastUpdated, initialized: initialized,
-    sync: initialized ? getSyncStatus() : null
+    sync: initialized ? getSyncStatus() : null, pauses: pauses
   });
 }
 
@@ -64,7 +69,7 @@ function getAppBootstrap() {
 function refreshNow(indicatorKey, from, to) {
   requireDb_();
   validateJmsAuth_();
-  getIndicatorConfig_(indicatorKey);
+  const cfg = getIndicatorConfig_(indicatorKey);
   const today = isoToday_();
   to = isIso_(to) ? to : addDaysIso_(today, -1);
   from = isIso_(from) ? from : to;
@@ -89,21 +94,24 @@ function refreshNow(indicatorKey, from, to) {
       if (s.empty) { updateDayStatus_(indicatorKey, d, {summaryStatus: 'NO_RECORD', detailsStatus: 'NO_RECORD', error: ''}); result.empty++; return; }
       upsertRate_(s);
       result.updated++;
-      const unchanged = prev && st && st.details === 'COMPLETE' && prev.errorCount === s.errorCount && prev.totalCount === s.totalCount;
-      if (!unchanged) result.detailsQueued += enqueueJobs_([['DETAIL_INIT', indicatorKey, d, 1]], {reset: true});
+      if (detailNeedsRefresh_(indicatorKey, d, prev, s, st, true)) result.detailsQueued += enqueueJobs_([['DETAIL_INIT', indicatorKey, d, 1]], {reset: true});
     } catch (e) {
       const msg = String(e && e.message || e).slice(0, 900);
+      const kind = errorKind_(msg);
       result.failed++;
       if (result.errors.length < 3) result.errors.push({date: d, reason: publicJmsError_(msg)});
       const st = getDayStatus_(indicatorKey, d);
-      updateDayStatus_(indicatorKey, d, st && st.summary === 'COMPLETE' ? {error: msg} : {summaryStatus: 'ERROR', error: msg});
+      if (kind === 'OTHER') updateDayStatus_(indicatorKey, d, st && st.summary === 'COMPLETE' ? {error: msg} : {summaryStatus: 'ERROR', error: msg});
+      else updateDayStatus_(indicatorKey, d, {error: msg});
       logSync_('ERROR', indicatorKey, d, 'Atualização manual: ' + msg);
-      if (/HTTP 40[13]|Credencial|JMS_AUTH/i.test(msg)) authError = true;
+      // Credencial recusada ou cota esgotada: para aqui e pausa (o painel mostra o aviso).
+      if (kind !== 'OTHER') { authError = true; setPause_(kind === 'QUOTA' ? '*' : cfg.routeKey, kind, msg); }
     }
   });
   if (later.length) { result.pendingDays = later.length; enqueueJobs_(later, {reset: true}); }
   try { installTriggers(); } catch (e) { logSync_('WARN', indicatorKey, '', 'Gatilhos não verificados: ' + e); }
   result.ok = result.failed === 0 || result.updated > 0;
+  result.pauses = publicPauses_();
   return safeReturn_(result);
 }
 
@@ -167,6 +175,23 @@ function atualizarParaV3() {
   report.compactacoesAgendadas = queueMissingCompactions_(1000);
   installTriggers();
   writeSyncStatusCache_();
+  console.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+/**
+ * Execute UMA vez após instalar a V3.7 (também roda sozinho na 1ª execução da fila):
+ * downloads de detalhe pela metade recomeçam no formato novo, jobs com erro voltam
+ * para a fila, pausas antigas são limpas e a fila é processada na hora.
+ */
+function atualizarParaV37() {
+  ensureStorage_();
+  deleteProp_('MIGRATION_V37');
+  clearPauses_();
+  const migrated = migrateToV37_();
+  installTriggers();
+  const worker = processSyncQueue({budgetMs: 240000, force: true});
+  const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};
   console.log(JSON.stringify(report, null, 2));
   return report;
 }
@@ -259,7 +284,7 @@ function getConfigurationStatus() {
 
 /** Não expor token/cookie nem em logs. */
 function authConfigSafe_() {
-  const p = PropertiesService.getScriptProperties().getProperties();
+  const p = scriptProps_();
   return {modo: p.JMS_AUTH_MODE || (p.JMS_AUTHTOKEN ? 'AUTHTOKEN' : 'não definido'),
     authToken: !!p.JMS_AUTHTOKEN, cookie: !!p.JMS_COOKIE, authorization: !!p.JMS_AUTHORIZATION};
 }
@@ -284,12 +309,75 @@ function testarESalvarDia(indicatorKey) {
 }
 function testarESalvarDiaTriagem() { return testarESalvarDia('sorting_error'); }
 
-/** Após corrigir a autenticação, devolve à fila as consultas que falharam. */
+/** Após corrigir a autenticação, tira as pausas, devolve à fila as consultas que falharam e processa na hora. */
 function retomarImportacao() {
   validateJmsAuth_();
+  clearPauses_();
   const retried = retryFailedJobs();
-  const worker = processSyncQueue({budgetMs: 240000});
+  const worker = processSyncQueue({budgetMs: 240000, force: true});
   const result = {ok: true, requeued: retried.requeued, worker: worker};
   console.log(JSON.stringify(result));
   return result;
+}
+
+/**
+ * DIAGNÓSTICO COMPLETO (V3.7) — rode no editor (▶ Executar) e leia o Registro de execução.
+ * Para cada indicador: consulta a taxa do dia, testa o detalhe (tamanho de página aceito,
+ * total de registros, quais campos do JMS alimentam cada gráfico) e mostra o estado do
+ * banco/fila/pausas. Não grava remessas; só aprende o tamanho de página, se for o caso.
+ * Uso: diagnosticoCompleto() — último dia fechado; diagnosticoCompleto('2026-09-20') — dia específico.
+ */
+function diagnosticoCompleto(date) {
+  const lines = [];
+  const out = {versao: APP_CONFIG.VERSION, credenciais: authConfigSafe_(), bancoConfigurado: !!getProp_('DB_SPREADSHEET_ID', ''),
+    gatilhos: ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction()), indicadores: {}};
+  try { out.pausas = publicPauses_(); } catch (e) { out.pausas = []; }
+  if (out.bancoConfigurado) { try { out.fila = computeSyncStatus_(); } catch (e) { out.fila = {erro: String(e.message || e)}; } }
+  lines.push('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico completo');
+  lines.push('Credenciais: modo ' + out.credenciais.modo + ' · AuthToken ' + (out.credenciais.authToken ? 'OK' : 'AUSENTE'));
+  lines.push('Gatilhos: ' + (out.gatilhos.join(', ') || 'NENHUM — rode setupProject'));
+  if (out.fila) lines.push('Fila: ' + JSON.stringify(out.fila));
+  (out.pausas || []).forEach(p => lines.push('PAUSA ' + p.route + ' (' + p.kind + ') desde ' + p.since + ': ' + p.reason));
+  Object.keys(INDICATORS).sort((a, b) => INDICATORS[a].order - INDICATORS[b].order).forEach(key => {
+    const cfg = INDICATORS[key];
+    const d = isIso_(date) ? date : lastClosedDate_(key);
+    const item = {data: d};
+    try {
+      const s = fetchSummaryDay_(key, d);
+      item.resumo = s.empty ? 'sem registros' : {taxa: s.rate, erros: s.errorCount, base: s.totalCount};
+    } catch (e) { item.resumo = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
+    try {
+      const probe = probeDetail_(key, d);
+      const map = fieldMappingReport_(key, probe.records);
+      item.detalhe = {total: probe.total, tamanhoDePagina: probe.size, paginasNecessarias: Math.ceil(probe.total / probe.size),
+        fatiasDeHorario: probe.total > detailMaxOffset_() && detailMaxOffset_() > 0 && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')};
+      item.campos = map.campos;
+      item.camposRecebidos = map.camposRecebidos;
+    } catch (e) { item.detalhe = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
+    if (out.bancoConfigurado) {
+      try {
+        const cov = getCoverage_(key, addDaysIso_(d, -6), d);
+        item.ultimos7dias = {semTaxa: cov.missingSummary.length, detalhesIncompletos: cov.incompleteDetails.length, ultimoErro: lastErrorFor_(key, addDaysIso_(d, -6), d)};
+      } catch (e) { item.ultimos7dias = {erro: String(e.message || e)}; }
+    }
+    out.indicadores[key] = item;
+    lines.push('');
+    lines.push('■ ' + cfg.name.pt + ' (' + key + ') — ' + d);
+    lines.push('  Resumo: ' + (item.resumo.erro ? 'ERRO — ' + item.resumo.erro : typeof item.resumo === 'string' ? item.resumo :
+      'taxa ' + item.resumo.taxa + '% · erros ' + item.resumo.erros + ' · base ' + item.resumo.base));
+    lines.push('  Detalhe: ' + (item.detalhe.erro ? 'ERRO — ' + item.detalhe.erro : item.detalhe.total + ' registros · página de ' +
+      item.detalhe.tamanhoDePagina + ' · ' + item.detalhe.paginasNecessarias + ' requisição(ões)' + (item.detalhe.fatiasDeHorario ? ' · em fatias de horário' : '')));
+    if (item.campos) {
+      const missing = Object.keys(item.campos).filter(k => !item.campos[k].encontrado);
+      lines.push('  Campos: ' + (missing.length ? 'NÃO ENCONTRADOS → ' + missing.map(k => k + ' (' + item.campos[k].configurado + ')').join(', ') : 'todos encontrados'));
+      if (missing.length) lines.push('  Campos recebidos do JMS: ' + item.camposRecebidos.join(', '));
+    }
+    if (item.ultimos7dias && !item.ultimos7dias.erro) {
+      lines.push('  Banco (7 dias): ' + item.ultimos7dias.semTaxa + ' dia(s) sem taxa · ' + item.ultimos7dias.detalhesIncompletos +
+        ' com detalhe incompleto' + (item.ultimos7dias.ultimoErro ? ' · último erro: ' + item.ultimos7dias.ultimoErro.reason : ''));
+    }
+  });
+  console.log(lines.join('\n'));
+  out.texto = lines.join('\n');
+  return out;
 }

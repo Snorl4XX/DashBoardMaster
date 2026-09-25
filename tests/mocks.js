@@ -104,15 +104,22 @@ function makeBlob(bytes, type, name) {
 
 function createContext(opts) {
   opts = opts || {};
-  const state = {seq: 0, spreadsheets: {}, files: {}, folders: {}, props: Object.assign({}, opts.props || {}), cache: {},
+  const state = {seq: 0, spreadsheets: {}, files: {}, folders: {}, props: null, cache: {},
     triggers: [], fetches: [], writes: 0};
+  // Alterar S.props direto no teste equivale a editar as Propriedades do script:
+  // descarta o cache de propriedades do projeto (como uma nova execução faria).
+  state.props = new Proxy(Object.assign({}, opts.props || {}), {
+    set(t, k, v) { t[k] = v; if (typeof context !== 'undefined') context.PROPS_CACHE_ = null; return true; },
+    deleteProperty(t, k) { delete t[k]; if (typeof context !== 'undefined') context.PROPS_CACHE_ = null; return true; }
+  });
   const context = {
     console: opts.quiet ? {log() {}, error() {}, warn() {}} : console,
     Date, JSON, Math, Object, Array, String, Number, Boolean, RegExp, Error, Set, Map, Intl, encodeURIComponent, Buffer,
     PropertiesService: {getScriptProperties: () => ({
       getProperty: k => (state.props[k] === undefined ? null : state.props[k]),
       getProperties: () => Object.assign({}, state.props),
-      setProperty: (k, v) => { state.props[k] = String(v); }
+      setProperty: (k, v) => { state.props[k] = String(v); },
+      deleteProperty: k => { delete state.props[k]; }
     })},
     CacheService: {getScriptCache: () => ({
       get: k => (state.cache[k] === undefined ? null : state.cache[k]), put: (k, v) => { state.cache[k] = String(v); },
@@ -164,20 +171,60 @@ function createContext(opts) {
 /**
  * JMS falso: responde como as capturas dos PDFs. Valida o payload de cada rota
  * (ex.: Envio Errado sem isWrong:"Y" devolve TODAS as remessas, como o JMS real).
+ * Opções (para simular o JMS real e os problemas vistos em produção):
+ *  status       → responde sempre esse HTTP
+ *  maxPageSize  → corta a página em silêncio (o JMS entrega no máximo N por página)
+ *  rejectAbove  → recusa (código da aplicação) páginas maiores que N
+ *  resultWindow → recusa páginas cujo deslocamento passa de N (paginação profunda)
+ *  ignoreTime   → ignora a hora da janela (fatias devolveriam o dia inteiro)
+ *  keyCase      → 'upper' devolve os campos em MAIÚSCULAS (grafia diferente)
+ *  appError     → {code, msg} em toda resposta (ex.: token expirado com HTTP 200)
+ *  html         → devolve uma página HTML (redirecionamento para o login)
+ *  grow         → {date, perRequest}: o dia continua recebendo registros durante o download
+ *  onFetch      → callback(url, body) antes de responder (pode lançar exceção)
  */
+const TIME_FIELD = {center_wrong_send_: 'sendTime', center_error_rate_new_: 'transferCenterSendTime', departure_transport_timely_: 'actualDispatchTime',
+  inward_transport_timely_rate_: 'dispatchTime'};
+function addDay(iso, n) { return new Date(Date.parse(iso + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10); }
 function fakeJms(dayData, options) {
   options = options || {};
   return function (url, req, state) {
     state.fetches.push({url: url, headers: req.headers, payload: JSON.parse(req.payload)});
     const body = JSON.parse(req.payload);
     const route = url.split('/').pop();
-    const respond = (code, obj) => ({getResponseCode: () => code, getContentText: () => JSON.stringify(obj)});
+    if (options.onFetch) options.onFetch(url, body);
+    const respond = (code, obj) => ({getResponseCode: () => code, getContentText: () => typeof obj === 'string' ? obj : JSON.stringify(obj)});
     if (options.status) return respond(options.status, {});
-    const ok = (records, total, current, size) => respond(200, {code: 1, msg: '请求成功', data: {records: records, total: total,
-      size: size, current: current, pages: Math.ceil(total / size) || 0, other: null, heads: null}, fail: false, succ: true});
-    const date = String(body.startTime || body.startTime1 || '').slice(0, 10);
+    if (options.html) return respond(200, '<!DOCTYPE html><html><head><title>JMS Login</title></head><body>login</body></html>');
+    if (options.appError) return respond(200, {code: options.appError.code, msg: options.appError.msg, data: null, fail: true, succ: false});
+    const isDetail = /detail|_verification$|detailed$/.test(route) && !/total/.test(route);
+    const size = options.maxPageSize ? Math.min(options.maxPageSize, body.size) : body.size;
+    if (isDetail && options.rejectAbove && body.size > options.rejectAbove) return respond(200, {code: 500, msg: 'size参数超出限制', fail: true});
+    if (isDetail && options.resultWindow && (body.current - 1) * size >= options.resultWindow) return respond(200, {code: 500, msg: 'Result window is too large', fail: true});
+    const ok = (records, total, current, sz) => respond(200, {code: 1, msg: '请求成功', data: {records: records, total: total,
+      size: sz, current: current, pages: Math.ceil(total / sz) || 0, other: null, heads: null}, fail: false, succ: true});
+    const start = String(body.startTime || body.startTime1 || ''), end = String(body.endTime || body.endTime1 || '');
+    const op = /departure_transport|inward_transport/.test(route);
+    // Dia a que a janela pertence (janela 14h: antes das 14h é do dia anterior).
+    const date = op && start.slice(11) < '14:00:00' ? addDay(start.slice(0, 10), -1) : start.slice(0, 10);
     const d = dayData[date];
-    const page = (list, b) => ok(list.slice((b.current - 1) * b.size, b.current * b.size), list.length, b.current, b.size);
+    if (d && options.grow && options.grow.date === date && isDetail) {
+      for (let i = 0; i < options.grow.perRequest; i++) d.ws.push({billcode: 'LIVE' + d.ws.length, sendTime: date + ' 23:30:00', scanUser: 'X', dateTime: date});
+    }
+    const full = op ? {start: date + ' 14:00:00', end: addDay(date, 1) + ' 13:59:59'} : {start: date + ' 00:00:00', end: date + ' 23:59:59'};
+    const tf = Object.keys(TIME_FIELD).filter(k => route.indexOf(k) === 0).map(k => TIME_FIELD[k])[0] ||
+      (/missscan/.test(route) ? (body.detailType === 'billcodeArrive' ? 'loadPackageTime' : 'unloadArriveTime') : null);
+    const inWindow = list => {
+      if (options.ignoreTime || !tf || (start === full.start && end === full.end)) return list;
+      // Posição do registro na linha do tempo da janela do dia (registros do simulado ficam no próprio dia).
+      const pos = r => { const t = String(r[tf] || '').slice(11); return (op && t < '14:00:00' ? addDay(date, 1) : date) + ' ' + t; };
+      return list.filter(r => { const p = pos(r); return p >= start && p <= end; });
+    };
+    const shape = r => {
+      if (options.keyCase !== 'upper') return r;
+      const o = {}; Object.keys(r).forEach(k => { o[k.toUpperCase()] = r[k]; }); return o;
+    };
+    const page = (list, b) => { const l = inWindow(list); return ok(l.slice((b.current - 1) * size, b.current * size).map(shape), l.length, b.current, size); };
     switch (route) {
       case 'center_wrong_send_total':
         if (!d) return ok([], 0, 1, body.size);
@@ -218,6 +265,18 @@ function fakeJms(dayData, options) {
   };
 }
 
+/** Dia de Envio Errado com N remessas (volume real de SC→SC / dias grandes). */
+function bigWrongSend(date, n) {
+  const list = [];
+  for (let i = 0; i < n; i++) {
+    const h = Math.floor(i * 24 / n);
+    list.push({dateTime: date, billcode: 'BIG' + date.replace(/-/g, '') + String(i).padStart(6, '0'), sendTime: date + ' ' + String(h).padStart(2, '0') + ':' +
+      String(i % 60).padStart(2, '0') + ':00', scanUser: 'OP' + (i % 37), orderFirstCode: 'SP', orderThirdCode: 'SP,977-00,000', nextstation: 'ST' + (i % 11),
+      packageNo: 'BR' + (i % 90), orderSourceName: 'C' + (i % 7), shouldNextstation: 'ST' + (i % 13)});
+  }
+  return list;
+}
+
 /** Gera detalhes determinísticos parecidos com os reais para uma data. */
 function makeDay(date, seed) {
   let s = seed || 7;
@@ -252,4 +311,4 @@ function makeDay(date, seed) {
     md: md, mdRate: pct(0.4 + rnd() * 0.9), sc: sc, scRate: pct(88 + rnd() * 9), dc: dc, dcRate: pct(89 + rnd() * 8)};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, sheetCoerce: sheetCoerce};
+module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};

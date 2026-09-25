@@ -1,5 +1,5 @@
 /**
- * J&T Dashboard V3 — Cliente da API JMS (servidor). Nenhum segredo vai ao HTML.
+ * J&T Dashboard — Cliente da API JMS (servidor). Nenhum segredo vai ao HTML.
  *
  * Correções da V3 em relação ao JmsApi (1).gs:
  *  1. Routernamelist era enviado com caracteres chineses crus. Cabeçalhos HTTP só
@@ -14,15 +14,24 @@
  *  5. Routename por indicador (padrão = rota da página do JMS, igual ao
  *     ErrorSendRate validado no Envio Errado), configurável por propriedade.
  *  6. Routername/Routernamelist reais capturados ao vivo (DevTools) para Triagem
- *     Errada, Falta de Bipagem (Recebimento/Expedição), SC→SC e SC→DC — antes só
- *     Envio Errado tinha captura real; os outros usavam um nome de tela "chutado"
- *     que o RESUMO aceitava mas o DETALHE rejeitava. Triagem Errada também tinha
- *     Routename incompleto: falta o sufixo "|biIndex".
+ *     Errada, Falta de Bipagem (Recebimento/Expedição), SC→SC e SC→DC.
+ *
+ * V3.7 (diagnóstico "gráficos sem valores / fica carregando / dá erro"):
+ *  7. Página de detalhe de 1000 registros (antes 100): 10× menos requisições.
+ *     Se o JMS recusar ou cortar o tamanho, o robô desce (500, 200, 100...) e
+ *     GUARDA o limite aprendido por rota (JMS_PAGE_SIZE_<ROTA>).
+ *  8. Dias muito grandes (SC→SC ≈ 34 mil remessas/dia) são baixados em fatias de
+ *     horário, sem paginação profunda (o JMS costuma falhar além de ~10 mil).
+ *     Se o JMS ignorar a hora no filtro, o robô percebe (a soma das fatias não
+ *     bate com o total) e volta ao modo normal.
+ *  9. Token expirado agora é reconhecido também quando vem com HTTP 200 + código
+ *     da aplicação, redirecionamento ou página HTML de login — a fila pausa a rota
+ *     em vez de gastar tentativas, e o painel mostra o que fazer.
+ * 10. Mensagem do JMS (código + msg) aparece no erro; antes a tela dizia
+ *     "ver excerto abaixo" e não mostrava nada.
  */
 
-function jmsReadProperties_() {
-  return PropertiesService.getScriptProperties().getProperties();
-}
+function jmsReadProperties_() { return scriptProps_(); }
 
 /**
  * Escolha UMA combinação aprovada para a rota consultada:
@@ -39,6 +48,12 @@ function jmsAuthMode_(p) {
   ];
   if (accepted.indexOf(mode) === -1) throw new Error('JMS_AUTH_MODE inválido. Use um dos modos documentados.');
   return mode;
+}
+
+/** Assinatura das credenciais atuais: muda quando o responsável troca o token. */
+function credentialSignature_() {
+  const p = scriptProps_();
+  return hashText_([p.JMS_AUTH_MODE, p.JMS_AUTHTOKEN, p.JMS_COOKIE, p.JMS_AUTHORIZATION].join('\u0001'));
 }
 
 /**
@@ -141,25 +156,61 @@ function jmsRequestObject_(url, payload) {
   };
 }
 
+function routeName_(url) { return String(url).split('/').pop().split('?')[0]; }
+
+/** Mensagens do JMS que indicam sessão/credencial recusada (mesmo com HTTP 200). */
+const JMS_AUTH_MSG_RE_ = /token|登录|登陆|login|expired|expirad|过期|失效|unauthori|未授权|无权限|权限不足|没有权限|认证|会话|session|sess[aã]o/i;
+
 function parseJmsResponse_(resp, url) {
   const status = resp.getResponseCode();
-  const route = String(url).split('/').pop().split('?')[0];
+  const route = routeName_(url);
   if (status === 401) {
     throw new Error('HTTP 401 em ' + route + ': autenticação recusada. Confirme AuthToken, Routename e ' +
       'Routernamelist desta rota e se a integração pelos servidores do Google é autorizada.');
   }
   if (status === 403) throw new Error('HTTP 403 em ' + route + ': sem permissão. Solicite à TI acesso autorizado a essa API.');
-  if (status >= 300 && status < 400) throw new Error('HTTP ' + status + ' em ' + route + ': redirecionamento inesperado; verifique SSO/autorização.');
+  if (status >= 300 && status < 400) {
+    throw new Error('HTTP ' + status + ' em ' + route + ': o gateway redirecionou (normalmente para a tela de login: sessão do JMS expirada).');
+  }
+  if (status === 429) throw new Error('HTTP 429 em ' + route + ': limite de requisições do JMS.');
+  if (status >= 500) throw new Error('HTTP ' + status + ' em ' + route + ': JMS temporariamente indisponível.');
   if (status < 200 || status >= 300) throw new Error('HTTP ' + status + ' em ' + route + ': requisição não concluída.');
+  const text = resp.getContentText('UTF-8');
   let json;
-  try { json = JSON.parse(resp.getContentText('UTF-8')); }
-  catch (_) { throw new Error('HTTP ' + status + ': resposta não é JSON válido em ' + route); }
+  try { json = JSON.parse(text); }
+  catch (_) {
+    const start = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 80).replace(/[^\x20-\x7EÀ-ÿ]/g, '?');
+    if (/^\s*</.test(String(text || ''))) {
+      throw new Error('Sessão do JMS expirada ou bloqueada em ' + route + ': o JMS devolveu uma página HTML em vez de dados (código HTML: ' + start + ').');
+    }
+    throw new Error('HTTP ' + status + ': resposta não é JSON válido em ' + route + ' (início: ' + start + ')');
+  }
   if (!json || typeof json !== 'object' || json.fail === true ||
-      (json.code !== undefined && Number(json.code) !== 1 && Number(json.code) !== 200)) {
-    throw new Error('JMS respondeu HTTP ' + status + ', mas o código da aplicação foi ' +
-      String(json && json.code) + ' em ' + route + (json && json.msg ? ' (' + String(json.msg).slice(0, 120) + ')' : ''));
+      (json.code !== undefined && json.code !== null && Number(json.code) !== 1 && Number(json.code) !== 200)) {
+    const code = json && json.code !== undefined ? String(json.code) : '?';
+    const msg = json && (json.msg || json.message) ? String(json.msg || json.message).replace(/\s+/g, ' ').slice(0, 140) : '';
+    if (code === '401' || code === '403' || JMS_AUTH_MSG_RE_.test(msg)) {
+      throw new Error('Sessão do JMS expirada ou sem permissão em ' + route + ' (código ' + code + (msg ? ': ' + msg : '') +
+        '). Gere um novo AuthToken no JMS e atualize JMS_AUTHTOKEN nas Propriedades do script.');
+    }
+    throw new Error('JMS recusou a consulta em ' + route + ' (código da aplicação ' + code + (msg ? ': ' + msg : '') + ')');
   }
   return json;
+}
+
+/** UrlFetch com mensagem clara para falha de rede e para cota do Google esgotada. */
+function urlFetch_(req) {
+  try { return UrlFetchApp.fetch(req.url, req); }
+  catch (e) {
+    const m = String(e && e.message || e).slice(0, 200);
+    if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m);
+    throw new Error('Falha de rede ao consultar o JMS: ' + m);
+  }
+}
+
+function isRetryable_(e) {
+  const s = String(e && e.message || e);
+  return errorKind_(s) === 'OTHER' && /HTTP 429|HTTP 5\d\d|Falha de rede|não é JSON|timeout|timed out/i.test(s);
 }
 
 function jmsPost_(url, payload, attempts) {
@@ -167,22 +218,13 @@ function jmsPost_(url, payload, attempts) {
   const tries = Math.min(3, Math.max(1, Number(attempts) || 1));
   let error;
   for (let i = 0; i < tries; i++) {
-    let resp;
-    try { resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, payload)); }
+    try { return parseJmsResponse_(urlFetch_(jmsRequestObject_(url, payload)), url); }
     catch (e) {
-      // Falha de rede/timeout do UrlFetch: tenta de novo com espera exponencial.
-      error = new Error('Falha de rede ao consultar o JMS: ' + String(e && e.message || e).slice(0, 200));
-      if (i + 1 < tries) { Utilities.sleep(800 * Math.pow(2, i)); continue; }
-      throw error;
+      error = e;
+      // Nunca repetir credencial recusada nem erro de regra do JMS: retentativas não consertam.
+      if (!isRetryable_(e) || i + 1 >= tries) throw e;
+      Utilities.sleep(800 * Math.pow(2, i));
     }
-    const status = resp.getResponseCode();
-    // Nunca repetir 401/403: retentativas não consertam credenciais.
-    if (status === 429 || status >= 500) {
-      error = new Error('JMS temporariamente indisponível: HTTP ' + status);
-      if (i + 1 < tries) { Utilities.sleep(800 * Math.pow(2, i)); continue; }
-      throw error;
-    }
-    return parseJmsResponse_(resp, url);
   }
   throw error || new Error('Falha sem diagnóstico.');
 }
@@ -205,14 +247,17 @@ function pagingOf_(json) {
   };
 }
 
-/** Payloads idênticos às requisições capturadas no DevTools (ver PDFs de cada indicador). */
-function buildPayload_(indicatorKey, isoDate, page, size, detail) {
+/**
+ * Payloads idênticos às requisições capturadas no DevTools (ver PDFs de cada indicador).
+ * `win` (opcional) troca a janela do dia por uma fatia de horário {start, end}.
+ */
+function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
   const cfg = getIndicatorConfig_(indicatorKey);
   const centerCode = centerCode_();
   const agentCode = agentCode_();
   const pageNo = page || 1;
   const pageSize = size || APP_CONFIG.PAGE_SIZE;
-  const w = dayWindow_(isoDate, indicatorKey === 'sc_sc' || indicatorKey === 'sc_dc');
+  const w = win || dayWindow_(isoDate, isOperational_(indicatorKey));
 
   switch (cfg.apiProfile) {
     case 'wrong_send':
@@ -305,9 +350,10 @@ function fetchSummaryDay_(indicatorKey, isoDate) {
   });
   if (!sameDate.length) return {indicator: indicatorKey, date: isoDate, empty: true};
   const parsed = sameDate.map(r => {
-    const rate = parsePercent_(firstValue_(r, cfg.summary.rateKeys, null));
-    const errorRaw = firstValue_(r, cfg.summary.errorKeys, null);
-    const totalRaw = firstValue_(r, cfg.summary.totalKeys, null);
+    const rd = fieldReader_(r);
+    const rate = parsePercent_(rd(cfg.summary.rateKeys).value);
+    const errorRaw = rd(cfg.summary.errorKeys).value;
+    const totalRaw = rd(cfg.summary.totalKeys).value;
     return {rate: rate, errors: errorRaw === null ? null : num_(errorRaw, null), total: totalRaw === null ? null : num_(totalRaw, null), raw: r};
   });
   let rate, errors, total;
@@ -335,37 +381,164 @@ function fetchSummaryDay_(indicatorKey, isoDate) {
   };
 }
 
-function fetchDetailPage_(indicatorKey, isoDate, page, size) {
+function fetchDetailPage_(indicatorKey, isoDate, page, size, win) {
   const cfg = getIndicatorConfig_(indicatorKey);
   const endpoint = endpointFor_(cfg, 'detail');
-  const json = jmsPost_(endpoint, buildPayload_(indicatorKey, isoDate, page, size, true), 3);
+  const json = jmsPost_(endpoint, buildPayload_(indicatorKey, isoDate, page, size || detailPageSize_(cfg), true, win), 3);
   const p = pagingOf_(json);
   return {records: recordsOf_(json), total: p.total, pages: p.pages, current: p.current, size: p.size};
 }
 
 /**
- * Baixa várias páginas em paralelo (UrlFetchApp.fetchAll). Página com falha é
- * refeita individualmente; se continuar falhando, o erro sobe (nada é inventado).
+ * Baixa várias páginas em paralelo (UrlFetchApp.fetchAll). Cada item: {page, size, win}.
+ * Página com falha é refeita individualmente; credencial/cota recusada sobe na hora.
  */
-function fetchDetailPagesParallel_(indicatorKey, isoDate, pages) {
+function fetchDetailBatch_(indicatorKey, isoDate, items) {
+  if (!items.length) return [];
+  validateJmsAuth_();
   const cfg = getIndicatorConfig_(indicatorKey);
   const endpoint = endpointFor_(cfg, 'detail');
-  const reqs = pages.map(p => jmsRequestObject_(endpoint, buildPayload_(indicatorKey, isoDate, p, APP_CONFIG.PAGE_SIZE, true)));
+  const reqs = items.map(it => jmsRequestObject_(endpoint, buildPayload_(indicatorKey, isoDate, it.page, it.size, true, it.win)));
   let responses;
   try { responses = UrlFetchApp.fetchAll(reqs); }
-  catch (e) { responses = pages.map(() => null); }
-  return pages.map((page, i) => {
+  catch (e) {
+    const m = String(e && e.message || e);
+    if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m.slice(0, 200));
+    responses = items.map(() => null);
+  }
+  return items.map((it, i) => {
     let json;
     try {
       if (!responses[i]) throw new Error('sem resposta');
       json = parseJmsResponse_(responses[i], endpoint);
     } catch (e) {
-      if (/HTTP 40[13]/.test(String(e.message))) throw e;
-      json = jmsPost_(endpoint, buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, true), 3);
+      if (errorKind_(e.message) !== 'OTHER') throw e;
+      json = jmsPost_(endpoint, buildPayload_(indicatorKey, isoDate, it.page, it.size, true, it.win), 3);
     }
     const pg = pagingOf_(json);
-    return {page: page, records: recordsOf_(json), total: pg.total, pages: pg.pages};
+    return {page: it.page, records: recordsOf_(json), total: pg.total, pages: pg.pages};
   });
+}
+
+/** Compatível com a V3: páginas do dia inteiro no tamanho informado (padrão: o do detalhe). */
+function fetchDetailPagesParallel_(indicatorKey, isoDate, pages, size) {
+  const s = size || detailPageSize_(getIndicatorConfig_(indicatorKey));
+  return fetchDetailBatch_(indicatorKey, isoDate, pages.map(p => ({page: p, size: s})));
+}
+
+// ------------------------------------------------------------------ tamanho de página e fatias de horário
+const PAGE_SIZE_STEPS_ = [1000, 500, 200, 100, 50, 20];
+
+/** JMS_PAGE_SIZE (forçado) > limite aprendido da rota > padrão. */
+function detailPageSize_(cfg) {
+  const forced = Number(getProp_('JMS_PAGE_SIZE', ''));
+  if (forced >= 1) return Math.min(2000, Math.floor(forced));
+  const learned = Number(getProp_('JMS_PAGE_SIZE_' + cfg.routeKey, ''));
+  if (learned >= 1) return Math.min(2000, Math.floor(learned));
+  return APP_CONFIG.DETAIL_PAGE_SIZE;
+}
+function learnPageSize_(cfg, size, why) {
+  if (getProp_('JMS_PAGE_SIZE', '')) return;
+  if (Number(getProp_('JMS_PAGE_SIZE_' + cfg.routeKey, '')) === size) return;
+  setProp_('JMS_PAGE_SIZE_' + cfg.routeKey, size);
+  logSync_('INFO', cfg.key, '', 'Tamanho de página do detalhe ajustado para ' + size + ' (' + why + ').');
+}
+function detailMaxOffset_() {
+  const v = getProp_('JMS_DETAIL_MAX_OFFSET', '');
+  return v === '' ? APP_CONFIG.DETAIL_MAX_OFFSET : Math.max(0, Number(v) || 0);
+}
+/** Diferença aceita entre o total do JMS e o que foi baixado (o dia corrente muda durante o download). */
+function countTolerance_(total) { return Math.max(3, Math.ceil(Number(total || 0) * 0.005)); }
+function nextPow2_(n) { let p = 1; while (p < n) p *= 2; return p; }
+
+/** Divide a janela em n partes contíguas (segundos inteiros, sem sobreposição nem buracos). */
+function splitWindow_(win, n) {
+  const toSec = s => {
+    const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+    return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000;
+  };
+  const fmt = sec => new Date(sec * 1000).toISOString().replace('T', ' ').slice(0, 19);
+  const a = toSec(win.start), b = toSec(win.end) + 1;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({start: fmt(a + Math.floor((b - a) * i / n)), end: fmt(a + Math.floor((b - a) * (i + 1) / n) - 1)});
+  }
+  return out;
+}
+
+/**
+ * Página 1 do dia inteiro, descobrindo o tamanho de página aceito:
+ *  - erro com página grande → tenta menor (1000 → 500 → 200 → 100 → 50 → 20);
+ *  - o JMS entregou menos que o pedido (e existe mais) → esse é o limite dele.
+ */
+function probeDetail_(indicatorKey, isoDate) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  let size = detailPageSize_(cfg);
+  let refused = false;
+  for (;;) {
+    let got;
+    try { got = fetchDetailPage_(indicatorKey, isoDate, 1, size); }
+    catch (e) {
+      const next = PAGE_SIZE_STEPS_.filter(s => s < size)[0];
+      if (errorKind_(e.message) !== 'OTHER' || !next || getProp_('JMS_PAGE_SIZE', '')) throw e;
+      logSync_('WARN', indicatorKey, isoDate, 'Página de ' + size + ' registros falhou (' + String(e.message).slice(0, 160) + '); tentando ' + next + '.');
+      size = next; refused = true;
+      continue;
+    }
+    const n = got.records.length;
+    if (n >= 10 && n < Math.min(size, got.total)) {
+      size = n;
+      learnPageSize_(cfg, size, 'o JMS devolve no máximo ' + n + ' registros por página');
+    } else if (refused) learnPageSize_(cfg, size, 'páginas maiores foram recusadas');
+    return {records: got.records, total: got.total, size: size};
+  }
+}
+
+/**
+ * Plano de download do dia: janelas (1 = dia inteiro; 2, 4... = fatias de horário) e a
+ * lista ordenada de pedaços {w: janela, page}. A página 1 de cada janela já vem baixada.
+ */
+function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const probe = probeDetail_(indicatorKey, isoDate);
+  // Confere o total ANTES de gastar requisições com fatias (ex.: payload sem filtro).
+  if (validateTotal) validateTotal(probe.total);
+  if (probe.total > APP_CONFIG.MAX_DETAIL_PER_DAY) {
+    throw new Error('Detalhe com ' + probe.total + ' registros em ' + indicatorKey + ' ' + isoDate +
+      ': acima do limite de segurança (' + APP_CONFIG.MAX_DETAIL_PER_DAY + '). Confira o filtro/payload do detalhe.');
+  }
+  const full = dayWindow_(isoDate, isOperational_(indicatorKey));
+  let windows = [{start: full.start, end: full.end, total: probe.total, first: probe.records}];
+  let sliced = false;
+  const limit = detailMaxOffset_();
+  if (limit > 0 && probe.total > limit && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
+    let n = Math.min(32, nextPow2_(Math.ceil(probe.total / (limit * 0.5))));
+    for (let round = 0; round < 3; round++) {
+      const parts = splitWindow_(full, n);
+      const firsts = fetchDetailBatch_(indicatorKey, isoDate, parts.map(w => ({page: 1, size: probe.size, win: w})));
+      const sum = firsts.reduce((s, f) => s + f.total, 0);
+      if (Math.abs(sum - probe.total) > Math.max(countTolerance_(probe.total), probe.total * 0.05)) {
+        // A soma das fatias não bate com o dia: o JMS ignora a hora (ou filtra outro campo).
+        setProp_('JMS_NO_SLICE_' + cfg.routeKey, '1');
+        logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': soma das fatias ' + sum +
+          ' ≠ total do dia ' + probe.total + '. Usando paginação normal.');
+        windows = [{start: full.start, end: full.end, total: probe.total, first: probe.records}];
+        sliced = false;
+        break;
+      }
+      windows = parts.map((w, i) => ({start: w.start, end: w.end, total: firsts[i].total, first: firsts[i].records}));
+      sliced = true;
+      const worst = firsts.reduce((m, f) => Math.max(m, f.total), 0);
+      if (worst <= limit || n >= 32) break;
+      n = Math.min(32, n * nextPow2_(Math.ceil(worst / (limit * 0.8))));
+    }
+  }
+  const chunks = [];
+  windows.forEach((w, wi) => {
+    const pages = Math.ceil(w.total / probe.size);
+    for (let p = 1; p <= pages; p++) chunks.push({w: wi, page: p});
+  });
+  return {size: probe.size, total: probe.total, windows: windows, chunks: chunks, sliced: sliced};
 }
 
 /** Testa somente a montagem da requisição e imprime NOMES de cabeçalhos. */
@@ -398,7 +571,7 @@ function diagnosticarConexaoJms() {
         const rec = recordsOf_(json)[0] || {};
         item.codigoAplicacao = json.code;
         item.registros = recordsOf_(json).length;
-        item.taxaEncontrada = parsePercent_(firstValue_(rec, cfg.summary.rateKeys, null));
+        item.taxaEncontrada = parsePercent_(fieldReader_(rec)(cfg.summary.rateKeys).value);
         if (item.taxaEncontrada === null && item.registros) item.camposRecebidos = Object.keys(rec).slice(0, 40);
       }
     } catch (e) { item.erro = publicJmsError_(e.message || e); }
@@ -412,10 +585,29 @@ function diagnosticarConexaoJms() {
 function diagnoseJmsConnection() { return diagnosticarConexaoJms(); }
 
 /**
+ * Quais campos configurados em Config.gs (fields) vieram preenchidos no detalhe.
+ * Campo "não encontrado" = gráfico/filtro daquela dimensão aparece vazio (N/A).
+ */
+function fieldMappingReport_(indicatorKey, records) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const f = cfg.fields || {};
+  const sample = (records || []).slice(0, 200);
+  const out = {};
+  Object.keys(f).forEach(dim => {
+    let filled = 0, key = null, example = null;
+    sample.forEach(r => {
+      const hit = fieldReader_(r)(f[dim]);
+      if (hit.value !== null) { filled++; if (!key) { key = hit.key; example = String(hit.value).slice(0, 40); } }
+    });
+    out[dim] = {configurado: f[dim].join(' | '), encontrado: key, preenchidos: sample.length ? Math.round(filled / sample.length * 100) + '%' : '—', exemplo: example};
+  });
+  return {campos: out, camposRecebidos: sample.length ? Object.keys(sample[0]).slice(0, 60) : []};
+}
+
+/**
  * Igual a diagnosticarConexaoJms, mas testa o endpoint de DETALHE (não o resumo) de
  * UM indicador — a página que os gráficos/filtros/tabela usam. Não grava nada no banco.
- * Uso: selecione esta função no editor, defina o indicador na propriedade JMS_TEST_INDICATOR
- * (ou edite a linha abaixo) e clique em ▶ Executar.
+ * Mostra também o mapeamento de campos (quais colunas do JMS alimentam cada gráfico).
  */
 function diagnosticarDetalheJms(indicatorKey, date) {
   const key = INDICATORS[indicatorKey] ? indicatorKey : getProp_('JMS_TEST_INDICATOR', 'wrong_send');
@@ -432,6 +624,9 @@ function diagnosticarDetalheJms(indicatorKey, date) {
     item.codigoAplicacao = json.code;
     item.registros = recordsOf_(json).length;
     item.total = pagingOf_(json).total;
+    const map = fieldMappingReport_(key, recordsOf_(json));
+    item.campos = map.campos;
+    item.camposRecebidos = map.camposRecebidos;
   } catch (e) { item.erro = publicJmsError_(e.message || e); item.erroBruto = String(e && e.message || e).slice(0, 300); }
   console.log(JSON.stringify(item, null, 2));
   return item;

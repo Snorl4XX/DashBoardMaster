@@ -69,7 +69,14 @@
       resultsNoteShift: 'Remessas com erro no turno {s}, a partir dos detalhes sincronizados. O JMS não publica taxa oficial por turno.',
       lastPeriod: 'Último período', shiftErrors: 'Erros {s}', shiftShareOf: '{p} do total', noAgg: 'Sem detalhes consolidados deste turno no período.',
       week: 'Sem {w}', quarterLabel: '{q}º tri/{y}', na: 'Sem informação', bootLoading: 'Carregando painel…',
-      spark: 'Últimos 14 dias', chartLabelsToggle: 'Rótulos', lastSeen: 'Última taxa'
+      spark: 'Últimos 14 dias', chartLabelsToggle: 'Rótulos', lastSeen: 'Última taxa',
+      presetToday: 'Hoje', slowLoading: 'Carregando um período grande… pode levar até 1 minuto.',
+      pauseAuthTitle: 'Sincronização pausada: o JMS recusou a credencial',
+      pauseAuthText: 'Desde {since} o JMS não aceita o token (normalmente ele expirou). Indicadores afetados: {list}. O responsável deve gerar um novo AuthToken no JMS e atualizar JMS_AUTHTOKEN nas Propriedades do script — a importação recomeça sozinha. Os dados já sincronizados continuam no painel.',
+      pauseQuotaTitle: 'Sincronização pausada: cota diária do Google atingida',
+      pauseQuotaText: 'O Google limita o uso diário do Apps Script. A importação recomeça sozinha por volta de {t}. Os dados já sincronizados continuam no painel.',
+      rowsCapBadge: 'Limite de {n} remessas: {d} dia(s) fora dos gráficos',
+      rowsCapHint: 'Reduza o período para ver todas as remessas nos gráficos e na tabela. Taxas e cartões oficiais continuam completos. Dias fora:'
     },
     zh: {
       panel: '运营看板', autoSync: '自动更新', refresh: '刷新', downloadReport: '下载报告',
@@ -122,7 +129,14 @@
       resultsNoteShift: '{s} 班异常票数（基于已同步明细）。JMS 不提供分班次官方指标率。',
       lastPeriod: '最近期间', shiftErrors: '{s} 异常', shiftShareOf: '占总数 {p}', noAgg: '该期间暂无该班次明细汇总。',
       week: '第{w}周', quarterLabel: '{y}年Q{q}', na: '无', bootLoading: '正在加载看板…',
-      spark: '近14天', chartLabelsToggle: '标签', lastSeen: '最新指标率'
+      spark: '近14天', chartLabelsToggle: '标签', lastSeen: '最新指标率',
+      presetToday: '今天', slowLoading: '正在加载较长期间… 可能需要 1 分钟。',
+      pauseAuthTitle: '同步已暂停：JMS 拒绝了凭证',
+      pauseAuthText: '自 {since} 起 JMS 不接受该令牌（通常已过期）。受影响的指标：{list}。请负责人在 JMS 中重新获取 AuthToken，并在脚本属性中更新 JMS_AUTHTOKEN，导入会自动恢复。已同步的数据仍会显示。',
+      pauseQuotaTitle: '同步已暂停：已达到 Google 每日配额',
+      pauseQuotaText: 'Google 限制 Apps Script 每日用量，约在 {t} 自动恢复导入。已同步的数据仍会显示。',
+      rowsCapBadge: '单次上限 {n} 票：{d} 天未计入图表',
+      rowsCapHint: '缩短期间即可在图表和表格中查看全部运单。官方指标率和卡片不受影响。未计入的日期：'
     }
   };
 
@@ -265,6 +279,26 @@
     }
   }
   function hideAlert() { $('#alertBox').className = 'alert hidden'; $('#alertBox').innerHTML = ''; }
+  /** Aviso fixo quando a sincronização está pausada (token expirado ou cota do Google), com o que fazer. */
+  function renderSyncBanner(pauses) {
+    var box = $('#syncBanner');
+    if (!box) return;
+    state.pauses = pauses || [];
+    if (!state.pauses.length) { box.className = 'alert warn hidden'; box.innerHTML = ''; return; }
+    var quota = state.pauses.filter(function (p) { return p.kind === 'QUOTA'; })[0];
+    var auth = state.pauses.filter(function (p) { return p.kind === 'AUTH'; });
+    var html = '';
+    if (quota) html += '<div><b>' + esc(t('pauseQuotaTitle')) + '</b>' + esc(t('pauseQuotaText', {t: fmtTs(quota.until)})) + '</div>';
+    if (auth.length) {
+      var keys = [];
+      auth.forEach(function (p) { (p.indicators || []).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); }); });
+      var names = keys.map(function (k) { var c = state.catalogMap[k]; return c ? L(c.name) : k; });
+      html += '<div><b>' + esc(t('pauseAuthTitle')) + '</b>' + esc(t('pauseAuthText', {since: fmtTs(auth[0].since), list: names.join(', ')})) +
+        '<small class="pause-reason">' + esc(auth[0].reason) + '</small></div>';
+    }
+    box.className = 'alert warn';
+    box.innerHTML = icon('warn') + '<div class="pause-body">' + html + '</div>';
+  }
   function bootDone() { var b = $('#bootScreen'); if (b) { b.classList.add('done'); setTimeout(function () { b.remove(); }, 400); } }
 
   // ------------------------------------------------------------------ inicialização
@@ -297,6 +331,7 @@
       $('#brandCenter').textContent = boot.center || 'SP GRU';
       $('#eyebrowCenter').textContent = boot.center || 'SP GRU';
       if (!boot.initialized) { $('#main').classList.add('no-data'); showAlert(t('setupText'), 'warn'); return; }
+      renderSyncBanner(boot.pauses);
       state.indicator = BOOT.indicator && state.catalogMap[BOOT.indicator] ? BOOT.indicator : (state.catalog[0] ? state.catalog[0].key : 'wrong_send');
       var anchor = anchorDate(state.indicator);
       state.from = anchor; state.to = anchor;
@@ -380,6 +415,7 @@
     applyStaticI18n();
     if (!state.boot || !state.boot.initialized) return;
     buildNav(); buildSelects(); buildPresets(); updateSidebarStatus(state.lastSync, state.lastSyncTs);
+    renderSyncBanner(state.pauses);
     if (state.view === 'results') renderResults();
     else if (state.data) { buildFilterGrid(); renderDashboard(); }
   }
@@ -419,11 +455,12 @@
   function presetList() {
     return state.view === 'results'
       ? [['preset30', 30], ['preset90', 90], ['preset180', 182], ['preset365', 365], ['presetAll', 'all']]
-      : [['presetLastDay', 1], ['preset7', 7], ['preset30', 30], ['presetMonth', 'month'], ['presetAll', 'all']];
+      : [['presetToday', 'today'], ['presetLastDay', 1], ['preset7', 7], ['preset30', 30], ['presetMonth', 'month'], ['presetAll', 'all']];
   }
   function presetRange(p) {
     var anchor = state.view === 'results' ? latestOverall() : anchorDate(state.indicator);
     var hs = state.boot && state.boot.historyStart && state.boot.historyStart <= anchor ? state.boot.historyStart : null;
+    if (p === 'today') { var td = (state.boot && state.boot.today) || anchor; return {from: td, to: td}; }
     if (p === 'month') return {from: anchor.slice(0, 8) + '01', to: anchor};
     if (p === 'all') return {from: hs ? maxIso(hs, Core.addDays(anchor, -365)) : Core.addDays(anchor, -365), to: anchor};
     return {from: Core.addDays(anchor, -(p - 1)), to: anchor};
@@ -502,8 +539,11 @@
     if (!opts.silent) setBusy(true);
     if (opts.resetFilters) { state.filters = {}; state.table = {sortKey: null, sortDir: 'desc', page: 1, query: ''}; $('#tableFind').value = ''; }
     renderHeader();
+    // Período longo: avisa que ainda está carregando (antes ficava só a barra, sem explicação).
+    var slow = setTimeout(function () { if (seq === state.seq && !opts.silent) toast(t('slowLoading')); }, 12000);
     return call('getDashboardData', state.indicator, {from: state.from, to: state.to}).then(function (res) {
       if (seq !== state.seq) return;
+      renderSyncBanner(res.meta.pauses);
       state.data = {meta: res.meta, rates: res.rates || [], rows: Core.decodeDataset(res.dataset)};
       state.from = res.meta.from; state.to = res.meta.to;
       setDateInputs(state.from, state.to); highlightPreset();
@@ -521,7 +561,7 @@
       if (!state.data || state.data.meta.indicator !== state.indicator) $('#main').classList.add('awaiting');
       showAlert(e.message, null, function () { hideAlert(); loadDashboard(opts); });
       console.error(e);
-    }).then(function () { if (seq === state.seq) setBusy(false); });
+    }).then(function () { clearTimeout(slow); if (seq === state.seq) setBusy(false); });
   }
 
   function renderHeader() {
@@ -719,10 +759,16 @@
     html += badge(missing ? 'warn' : 'ok', missing ? 'warn' : 'check',
       t('ratesBadge', {a: withRate, b: req}) + (missing ? ' · ' + t('ratesMissing', {n: missing}) : '') + (empty ? ' · ' + t('emptyDays', {n: empty}) : ''),
       missing ? (cov.missingSummary || []).map(function (d) { return fmtDate(d, true); }).join(', ') : '');
-    var pend = uniq([].concat(a.notDownloaded || [], a.notLoaded || [], a.partialDates || [], a.staleDates || []));
-    html += badge(pend.length ? 'warn' : 'ok', pend.length ? 'warn' : 'check',
-      pend.length ? t('detailsPartial', {n: pend.length}) : t('detailsOk', {n: fmtInt(meta.rowsLoaded)}),
-      pend.map(function (d) { return fmtDate(d, true); }).join(', '));
+    // "Pendente" = ainda não sincronizado; "fora dos gráficos" = acima do limite de remessas por consulta.
+    var pend = uniq([].concat(a.notDownloaded || [], a.partialDates || [], a.staleDates || []));
+    var capped = a.notLoaded || [];
+    if (pend.length || !capped.length) {
+      html += badge(pend.length ? 'warn' : 'ok', pend.length ? 'warn' : 'check',
+        pend.length ? t('detailsPartial', {n: pend.length}) : t('detailsOk', {n: fmtInt(meta.rowsLoaded)}),
+        pend.map(function (d) { return fmtDate(d, true); }).join(', '));
+    }
+    if (capped.length) html += badge('warn', 'info', t('rowsCapBadge', {n: fmtInt(a.maxRows || meta.rowsLoaded), d: capped.length}),
+      t('rowsCapHint') + ' ' + capped.map(function (d) { return fmtDate(d, true); }).join(', '));
     if (meta.lastError) html += badge('bad', 'warn', t('errorBadge', {r: meta.lastError.reason}),
       meta.lastError.reason + ' (' + fmtDate(meta.lastError.date, true) + ')');
     $('#coverageBadges').innerHTML = html;
@@ -1241,6 +1287,7 @@
     toast(t('refreshing'));
     call('refreshNow', state.indicator, state.from, state.to).then(function (r) {
       if (r.cooldown) { toast(t('refreshCooldown')); return; }
+      if (r.pauses) renderSyncBanner(r.pauses);
       if (r.failed && !r.updated) toast(t('refreshFailed', {r: (r.errors[0] && r.errors[0].reason) || '—'}), 'error');
       else toast(t('refreshDone', {u: r.updated, d: r.detailsQueued}) + (r.pendingDays ? ' ' + t('refreshPending', {n: r.pendingDays}) : ''), 'success');
       return loadDashboard({silent: false});
