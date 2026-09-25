@@ -469,4 +469,78 @@ cO.enqueueJobs_([['SUMMARY', 'wrong_send', '2026-09-16', 0]], {});
 const wake = cO.processSyncQueue();
 check(!wake.idle && wake.done >= 1, 'job novo acorda a fila na hora', wake);
 
+// ---------- 12. V3.7.1: resultado do diagnosticoCompleto em produção ----------
+// (a) Acumulador colunar dá o mesmo resultado que dedupeDetailRows_ (1º bipe por remessa).
+const accRows = [];
+for (let i = 0; i < 500; i++) accRows.push(ctx.rederiveRow_('wrong_send', {date: D19, shipment: 'S' + (i % 180), eventTime: D19 + ' ' + String(23 - (i % 24)).padStart(2, '0') + ':00:' + String(i % 60).padStart(2, '0'),
+  login: 'L' + (i % 7), segment: 'SP', destination: 'D' + (i % 5)}));
+accRows.push(ctx.rederiveRow_('wrong_send', {date: D19, shipment: 'S1', eventTime: '', login: 'SEM-HORA'}));
+const acc = ctx.DayAccumulator_();
+acc.addRows(accRows);
+const viaAcc = C.decodeDataset(acc.build()).sort((a, b) => a.shipment < b.shipment ? -1 : 1);
+const viaSort = ctx.dedupeDetailRows_(accRows).sort((a, b) => a.shipment < b.shipment ? -1 : 1);
+check(viaAcc.length === viaSort.length && viaAcc.every((r, i) => r.eventTime === viaSort[i].eventTime && r.login === viaSort[i].login),
+  'acumulador colunar = deduplicação original (mesmo 1º bipe)', [viaAcc.length, viaSort.length]);
+const accShift = acc.shiftCounts();
+check(accShift.T1 + accShift.T2 + accShift.T3 + accShift.NA === acc.count(), 'turnos do acumulador somam o total');
+
+// (b) 401 momentâneo do gateway (rajada): uma nova tentativa resolve, sem pausar a rota.
+let flaky = 0;
+const optsB2 = {};
+const cB2 = freshCtx({'2026-09-19': makeDay(D19, 3)}, optsB2);
+optsB2.onFetch = (url) => { if (/center_wrong_send_detail/.test(url) && flaky++ === 0) throw Object.assign(new Error('x'), {http401: true}); };
+// o simulado responde 401 quando onFetch marca a requisição
+const jmsB2 = cB2.UrlFetchApp.fetch;
+cB2.UrlFetchApp.fetch = (url, req) => { try { return jmsB2(url, req); } catch (e) { if (e.http401) return {getResponseCode: () => 401, getContentText: () => '{}'}; throw e; } };
+cB2.UrlFetchApp.fetchAll = reqs => reqs.map(r => cB2.UrlFetchApp.fetch(r.url, r));
+cB2.queueHistory(D19, D19, true);
+runAll(cB2);
+check(flaky >= 2 && cB2.publicPauses_().length === 0 && cB2.getDayStatus_('wrong_send', D19).details === 'COMPLETE', '401 isolado não pausa a rota', [flaky, cB2.publicPauses_()]);
+
+// (c) 401 persistente: pausa escalonada (15 min → 1 h) e sucesso depois zera o escalonamento.
+const opts401 = {status: 401};
+const cP = freshCtx({'2026-09-19': makeDay(D19, 3)}, opts401);
+cP.queueHistory(D19, D19, true);
+cP.processSyncQueue({budgetMs: 600000});
+const vmP = require('vm');
+const store1 = JSON.parse(cP.__state.props.SYNC_PAUSE_V37);
+const mins1 = Math.round((store1.WRONG_SEND.until - store1.WRONG_SEND.lastFail) / 60000);
+check(mins1 === 15, '1ª pausa por credencial: 15 min', mins1);
+store1.WRONG_SEND.until = Date.now() - 1000;
+Object.keys(store1).forEach(k => { store1[k].until = Date.now() - 1000; });
+cP.__state.props.SYNC_PAUSE_V37 = JSON.stringify(store1);
+cP.processSyncQueue({budgetMs: 600000, force: true});
+const store2 = JSON.parse(cP.__state.props.SYNC_PAUSE_V37);
+check(Math.round((store2.WRONG_SEND.until - store2.WRONG_SEND.lastFail) / 60000) === 60 && store2.WRONG_SEND.count === 1, '2ª pausa seguida: 1 h', store2.WRONG_SEND);
+delete opts401.status;
+Object.keys(store2).forEach(k => { store2[k].until = Date.now() - 1000; });
+cP.__state.props.SYNC_PAUSE_V37 = JSON.stringify(store2);
+runAll(cP);
+check(!cP.__state.props.SYNC_PAUSE_V37 && ALL.every(k => cP.getDayStatus_(k, D19).details === 'COMPLETE'), 'JMS voltou: pausas esquecidas e dia completo', cP.__state.props.SYNC_PAUSE_V37);
+
+// (d) Erros antigos em dias completos (de versões anteriores) somem do painel; os de dias com problema ficam.
+const cV = freshCtx({'2026-09-19': makeDay(D19, 3), '2026-09-18': makeDay('2026-09-18', 4)});
+cV.queueHistory('2026-09-18', D19, true);
+runAll(cV);
+cV.updateDayStatus_('wrong_send', D19, {error: 'Faltam os cabeçalhos de rota para "wrong_send". Abra a tela...'});
+cV.updateDayStatus_('sc_sc', '2026-09-18', {detailsStatus: 'ERROR', error: 'HTTP 401 em x'});
+check(/Faltam os cabeçalhos/.test(cV.lastErrorFor_('wrong_send', '2026-09-18', D19).reason), 'antes: erro antigo aparece no painel');
+delete cV.__state.props.MIGRATION_V371;
+cV.STORAGE_CACHE_ = null; cV.TAB_CACHE_ = {}; cV.TAB_INDEX_ = {};
+cV.processSyncQueue({force: true});
+cV.STORAGE_CACHE_ = null; cV.TAB_CACHE_ = {}; cV.TAB_INDEX_ = {};
+check(cV.lastErrorFor_('wrong_send', '2026-09-18', D19) === null, 'erro antigo de dia completo removido');
+check(/401/.test(cV.lastErrorFor_('sc_sc', '2026-09-18', D19).reason), 'erro de dia com problema continua visível');
+
+// (e) Relatório de campos: "vazio no JMS" ≠ "nome não encontrado"; campo não usado não alarma.
+const recs = [{billcode: 'A', unloadArriveTime: D19 + ' 10:00:00', unloadPackageEmp: 'OP', threeSegmentCode: 'GO,1', nextStop: '', arriveOrder: 'T1', customerName: 'C', lastStop: 'X'}];
+const repF = ctx.fieldMappingReport_('missing_dispatch', recs);
+check(repF.campos.destination.situacao === "vazio" && repF.campos.destination.usadoNoPainel === true && repF.campos.login.situacao === "ok", "campo vazio no JMS identificado", repF.campos.destination);
+const rep2 = ctx.fieldMappingReport_('missing_receipt', [{billcode: 'A', loadPackageTime: D19 + ' 10:00:00', arriveOrder: '', lastStop: ''}]);
+check(rep2.campos.tripId.situacao === 'vazio' && rep2.campos.tripId.usadoNoPainel === false, 'campo vazio e não usado no painel (não gera alarme)', rep2.campos.tripId);
+const diagV = cV.diagnosticoCompleto(D19);
+check(/Tempo médio de resposta do JMS/.test(diagV.texto) && /Fila: vazia/.test(diagV.texto) && /registrado em/.test(diagV.texto), 'diagnóstico mostra tempo do JMS, fila e data do último erro', diagV.texto.slice(-400));
+const qr = cO.queueReport_(2000);
+check(typeof qr.texto === 'string' && qr.pendentes === 0, 'relatório da fila', qr);
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

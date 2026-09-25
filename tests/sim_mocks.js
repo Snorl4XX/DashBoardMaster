@@ -112,7 +112,7 @@ function createSimContext(opts) {
 }
 
 /** JMS realista: volumes do SP GRU, limite de tamanho de página e dia corrente crescendo. */
-const VOLUME = {ws: 1600, se: 300, mr: 3000, md: 3000, sc: 34000, dc: 1400};
+const VOLUME = {ws: 1800, se: 150, mr: 3900, md: 4000, sc: 73000, dc: 200}; // volumes reais do SP GRU (diagnosticoCompleto, 24/09/2026)
 function realisticJms(opts) {
   opts = opts || {};
   const cap = opts.maxPageSize || 1000;

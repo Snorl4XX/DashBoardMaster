@@ -284,7 +284,7 @@ function saveDetailPage_(indicator, date, page, normalized, totalPages, expected
   const row = [indicator, date, page, file.getId(), Number(rawRecordCount), totalPages, expectedRecords, new Date()];
   if (rowNum > 0) writeRow_('PAGES', rowNum, row); else appendRow_('PAGES', row);
   if (prev && prev[3] && prev[3] !== file.getId()) trashQuietly_(prev[3], indicator, date);
-  return {fileId: file.getId(), page: page, records: normalized.length};
+  return {fileId: file.getId(), page: page, records: Array.isArray(normalized) ? normalized.length : normalized.n};
 }
 /**
  * COMPLETE: todos os pedaços gravados e a soma bate com o total (com tolerância —
@@ -316,10 +316,14 @@ function dayFilesMap_(indicator, from, to) {
   return out;
 }
 function saveDayFile_(indicator, date, rows, expectedPages, expectedRecords) {
-  const file = writeGzJson_(indicator + '__' + date + '__dia.json.gz', encodeDayFile_(rows));
+  return saveDayDataset_(indicator, date, encodeDayFile_(rows), expectedPages, expectedRecords);
+}
+/** Grava o arquivo diário já em formato colunar (DayAccumulator_.build ou encodeDayFile_). */
+function saveDayDataset_(indicator, date, ds, expectedPages, expectedRecords) {
+  const file = writeGzJson_(indicator + '__' + date + '__dia.json.gz', ds);
   const rowNum = findRowKey_('DAYFILES', indicator, date);
   const prev = rowNum > 0 ? allTabRows_('DAYFILES')[rowNum - 2] : null;
-  const row = [indicator, date, file.getId(), rows.length, expectedPages, expectedRecords, new Date()];
+  const row = [indicator, date, file.getId(), ds.n, expectedPages, expectedRecords, new Date()];
   if (rowNum > 0) writeRow_('DAYFILES', rowNum, row); else appendRow_('DAYFILES', row);
   if (prev && prev[2] && prev[2] !== file.getId()) trashQuietly_(prev[2], indicator, date);
   return file.getId();
@@ -329,7 +333,10 @@ function saveDayFile_(indicator, date, rows, expectedPages, expectedRecords) {
 function upsertAgg_(indicator, date, rows) {
   const c = {T1: 0, T2: 0, T3: 0, NA: 0};
   rows.forEach(r => { if (c[r.shift] !== undefined) c[r.shift]++; else c.NA++; });
-  const row = [indicator, date, c.T1, c.T2, c.T3, c.NA, rows.length, new Date()];
+  upsertAggCounts_(indicator, date, c, rows.length);
+}
+function upsertAggCounts_(indicator, date, c, total) {
+  const row = [indicator, date, c.T1, c.T2, c.T3, c.NA, total, new Date()];
   const rowNum = findRowKey_('AGG', indicator, date);
   if (rowNum > 0) writeRow_('AGG', rowNum, row); else appendRow_('AGG', row);
 }
@@ -357,15 +364,15 @@ function compactDay_(indicator, date, deadline) {
     }
     return {skipped: true, reason: 'sem páginas'};
   }
-  let rows = [];
+  // Um pedaço por vez no acumulador colunar: memória limitada mesmo com 70 mil+ remessas.
+  const acc = DayAccumulator_();
   for (const p of pages) {
     if (deadline && Date.now() > deadline - 15000) return {partial: true};
-    fileRows_(loadDetailFile_(p.fileId)).forEach(r => rows.push(r));
+    fileRows_(loadDetailFile_(p.fileId)).forEach(r => acc.addRow(rederiveRow_(indicator, r)));
   }
-  rows = dedupeDetailRows_(rows.map(r => rederiveRow_(indicator, r)));
-  const fileId = saveDayFile_(indicator, date, rows, st.expectedPages, st.expectedRecords);
-  upsertAgg_(indicator, date, rows);
-  return {fileId: fileId, rows: rows.length};
+  const fileId = saveDayDataset_(indicator, date, acc.build(), st.expectedPages, st.expectedRecords);
+  upsertAggCounts_(indicator, date, acc.shiftCounts(), acc.count());
+  return {fileId: fileId, rows: acc.count()};
 }
 
 /**
@@ -481,29 +488,50 @@ function lastJobErrorFor_(indicator, from, to) { return lastErrorFor_(indicator,
 const PAUSE_PROP_ = 'SYNC_PAUSE_V37';
 const HINT_PROP_ = 'QUEUE_HINT_V37';
 
-/** Pausas ativas por rota (ou '*' = tudo). Pausa de credencial cai sozinha quando o token é trocado. */
+function readPauseStore_() { const raw = getProp_(PAUSE_PROP_, ''); return raw ? (safeJsonParse_(raw, {}) || {}) : {}; }
+function writePauseStore_(all) { if (Object.keys(all).length) setProp_(PAUSE_PROP_, JSON.stringify(all)); else if (getProp_(PAUSE_PROP_, '')) deleteProp_(PAUSE_PROP_); }
+/**
+ * Pausas ATIVAS por rota (ou '*' = tudo). Pausa de credencial cai sozinha quando o token
+ * é trocado. Pausas vencidas ficam guardadas até 24 h só para escalonar a próxima.
+ */
 function activePauses_() {
-  const raw = getProp_(PAUSE_PROP_, '');
-  if (!raw) return {};
-  const all = safeJsonParse_(raw, {}) || {};
-  const now = Date.now(), sig = credentialSignature_(), out = {};
+  const all = readPauseStore_();
+  if (!Object.keys(all).length) return {};
+  const now = Date.now(), sig = credentialSignature_(), out = {}, keep = {};
   let changed = false;
   Object.keys(all).forEach(k => {
     const p = all[k];
-    if (!p || !(p.until > now) || (p.kind === 'AUTH' && p.sig !== sig)) { changed = true; return; }
-    out[k] = p;
+    if (!p || (p.kind === 'AUTH' && p.sig !== sig) || now - Number(p.lastFail || p.since || 0) > 24 * 3600000) { changed = true; return; }
+    keep[k] = p;
+    if (p.until > now) out[k] = p;
   });
-  if (changed) { if (Object.keys(out).length) setProp_(PAUSE_PROP_, JSON.stringify(out)); else deleteProp_(PAUSE_PROP_); }
+  if (changed) writePauseStore_(keep);
   return out;
 }
 function pauseFor_(routeKey, pauses) { const p = pauses || activePauses_(); return p['*'] || p[routeKey] || null; }
+/**
+ * Pausa escalonada: credencial recusada espera 15 min, depois 1 h, 3 h e 6 h (um 401
+ * momentâneo do gateway não trava a rota por horas; um token vencido não é martelado).
+ */
 function setPause_(routeKey, kind, message) {
-  const all = activePauses_();
-  const now = Date.now();
-  const ms = kind === 'QUOTA' ? APP_CONFIG.PAUSE_QUOTA_MINUTES * 60000 : APP_CONFIG.PAUSE_AUTH_HOURS * 3600000;
-  all[routeKey] = {kind: kind, reason: String(message || '').slice(0, 400), since: (all[routeKey] && all[routeKey].since) || now,
-    until: now + ms, sig: kind === 'AUTH' ? credentialSignature_() : ''};
-  setProp_(PAUSE_PROP_, JSON.stringify(all));
+  activePauses_();
+  const all = readPauseStore_();
+  const now = Date.now(), sig = credentialSignature_(), prev = all[routeKey];
+  const repeat = !!(prev && prev.kind === kind && (kind !== 'AUTH' || prev.sig === sig));
+  const count = repeat ? Number(prev.count || 0) + 1 : 0;
+  const steps = APP_CONFIG.PAUSE_AUTH_MINUTES;
+  const minutes = kind === 'QUOTA' ? APP_CONFIG.PAUSE_QUOTA_MINUTES : steps[Math.min(count, steps.length - 1)];
+  all[routeKey] = {kind: kind, reason: String(message || '').slice(0, 400), since: repeat ? prev.since : now,
+    until: now + minutes * 60000, sig: kind === 'AUTH' ? sig : '', count: count, lastFail: now};
+  writePauseStore_(all);
+}
+/** Depois de um job bem-sucedido: esquece a pausa vencida da rota (a próxima começa de 15 min de novo). */
+function forgetPause_(routeKey) {
+  if (!getProp_(PAUSE_PROP_, '')) return;
+  const all = readPauseStore_(), now = Date.now();
+  let changed = false;
+  [routeKey, '*'].forEach(k => { if (all[k] && !(all[k].until > now)) { delete all[k]; changed = true; } });
+  if (changed) writePauseStore_(all);
 }
 function clearPauses_() { if (getProp_(PAUSE_PROP_, '')) deleteProp_(PAUSE_PROP_); }
 /** Pausas em formato seguro para a tela (sem texto bruto). */
@@ -517,7 +545,17 @@ function publicPauses_() {
 }
 
 function setQueueHint_(state) {
-  try { setProp_(HINT_PROP_, JSON.stringify({s: state, at: Date.now(), sig: state === 'PAUSED' ? credentialSignature_() : ''})); } catch (e) {}
+  try {
+    const h = {s: state, at: Date.now(), sig: ''};
+    if (state === 'PAUSED') {
+      // Acorda assim que a primeira pausa vencer (não espera a verificação de 30 min).
+      const p = activePauses_();
+      h.sig = credentialSignature_();
+      h.until = Object.keys(p).reduce((m, k) => Math.min(m, Number(p[k].until) || 0), Infinity);
+      if (!isFinite(h.until)) h.until = 0;
+    }
+    setProp_(HINT_PROP_, JSON.stringify(h));
+  } catch (e) {}
 }
 /**
  * O gatilho de 5 min sai sem abrir a planilha quando a última execução deixou a fila
@@ -529,7 +567,10 @@ function queueLooksIdle_() {
   if (!h) return false;
   const age = Date.now() - Number(h.at || 0);
   if (h.s === 'IDLE') return age >= 0 && age < 60 * 60000;
-  if (h.s === 'PAUSED') return age >= 0 && age < 30 * 60000 && h.sig === credentialSignature_();
+  if (h.s === 'PAUSED') {
+    return age >= 0 && age < 30 * 60000 && Date.now() < Number(h.until || 0) && h.sig === credentialSignature_() &&
+      Object.keys(activePauses_()).length > 0;
+  }
   return false;
 }
 
@@ -659,6 +700,27 @@ function migrateToV37_() {
   return n + reopened;
 }
 
+/**
+ * V3.7.1: mensagens de erro antigas (de versões anteriores) em dias que já estão
+ * completos apareciam no painel como "último erro" e confundiam o diagnóstico
+ * (ex.: "Faltam os cabeçalhos de rota...", "Taxa JMS ausente..."). Limpa uma vez;
+ * o histórico continua na aba SYNC_LOG.
+ */
+function migrateToV371_() {
+  if (getProp_('MIGRATION_V371', '')) return 0;
+  const rows = allTabRows_('STATUS');
+  const ok = v => ['COMPLETE', 'NO_RECORD'].indexOf(String(v)) >= 0;
+  let n = 0;
+  const col = rows.map(r => { if (r[8] && ok(r[2]) && ok(r[3])) { n++; return ['']; } return [r[8]]; });
+  if (n) {
+    tab_('STATUS').getRange(2, 9, col.length, 1).setValues(col);
+    col.forEach((v, i) => { rows[i][8] = v[0]; });
+    logSync_('INFO', '', '', 'V3.7.1: ' + n + ' mensagem(ns) de erro antiga(s) removida(s) de dias já completos (o histórico continua nesta aba).');
+  }
+  setProp_('MIGRATION_V371', new Date().toISOString());
+  return n;
+}
+
 /** Trabalhador da fila (gatilho a cada 5 min). Uma execução por vez. */
 function processSyncQueue(opts) {
   opts = opts || {};
@@ -672,6 +734,7 @@ function processSyncQueue(opts) {
   try {
     recoverStaleRunning_();
     migrateToV37_();
+    migrateToV371_();
     // Várias passadas: jobs criados nesta execução (ex.: detalhe após o resumo) já entram.
     for (let pass = 0; pass < 6 && !stopped && Date.now() < deadline - 20000; pass++) {
       const queue = pendingJobs_().filter(j => !attempted[j.rowNum]);
@@ -743,6 +806,7 @@ function processJob_(job, deadline) {
       writeCells_('JOBS', job.rowNum, 6, ['DONE']);
       writeCells_('JOBS', job.rowNum, 9, [new Date(), '']);
     }
+    if (result !== 'skip' && job.type !== 'COMPACT') forgetPause_(INDICATORS[job.indicator].routeKey);
     return result;
   } catch (e) {
     const message = String(e && e.message || e).slice(0, 950);
@@ -854,14 +918,14 @@ function runDetailJob_(job, deadline) {
   const start = resume ? cursor : 1;
   const expected = resume ? st.expectedRecords : plan.total;
 
-  // Pedaços baixados (índice 1..n): {raw: registros do JMS, rows: linhas normalizadas}.
+  // Pedaços baixados (índice 1..n): {raw: registros do JMS, ds: linhas normalizadas em formato colunar}.
   const got = {};
   let sampleRaw = null;
   plan.chunks.forEach((c, i) => {
     const w = plan.windows[c.w];
     if (c.page === 1 && i + 1 >= start) {
       if (!sampleRaw && w.first.length) sampleRaw = w.first[0];
-      got[i + 1] = {raw: w.first.length, rows: normalizeRecords_(job.indicator, job.date, w.first)};
+      got[i + 1] = {raw: w.first.length, ds: chunkDataset_(normalizeRecords_(job.indicator, job.date, w.first))};
     }
   });
   plan.windows.forEach(w => { w.first = null; }); // libera memória
@@ -884,7 +948,7 @@ function runDetailJob_(job, deadline) {
     slowest = Math.max(slowest, Date.now() - t0);
     res.forEach((r, j) => {
       if (!sampleRaw && r.records.length) sampleRaw = r.records[0];
-      got[batch[j]] = {raw: r.records.length, rows: normalizeRecords_(job.indicator, job.date, r.records)};
+      got[batch[j]] = {raw: r.records.length, ds: chunkDataset_(normalizeRecords_(job.indicator, job.date, r.records))};
     });
   }
 
@@ -896,14 +960,13 @@ function runDetailJob_(job, deadline) {
       ' registros, mas entregou ' + rawTotal + '; a importação será refeita.');
   }
   if (!resume) {
-    // Caminho normal: o dia inteiro em memória → um único arquivo diário, direto.
-    let rows = [];
-    for (let i = 1; i <= n; i++) got[i].rows.forEach(r => rows.push(r));
-    rows = dedupeDetailRows_(rows);
-    warnEmptyFields_(job.indicator, job.date, rows, sampleRaw);
+    // Caminho normal: o dia inteiro em memória (colunar) → um único arquivo diário, direto.
+    const acc = DayAccumulator_();
+    for (let i = 1; i <= n; i++) { acc.addDataset(got[i].ds); got[i] = null; }
+    warnEmptyFields_(job.indicator, job.date, acc.emptyFields(Object.keys(cfg.fields || {})), sampleRaw, acc.count());
     const ok = Math.abs(rawTotal - plan.total) <= tol;
-    saveDayFile_(job.indicator, job.date, rows, n, plan.total);
-    upsertAgg_(job.indicator, job.date, rows);
+    saveDayDataset_(job.indicator, job.date, acc.build(), n, plan.total);
+    upsertAggCounts_(job.indicator, job.date, acc.shiftCounts(), acc.count());
     updateDayStatus_(job.indicator, job.date, {detailsStatus: ok ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: n, savedPages: n,
       expectedRecords: plan.total, savedRows: rawTotal, error: ''});
     if (!ok) {
@@ -913,7 +976,7 @@ function runDetailJob_(job, deadline) {
     return 'done';
   }
   // Retomada: grava os pedaços restantes e consolida o dia.
-  for (let i = start; i <= n; i++) saveDetailPage_(job.indicator, job.date, i, got[i].rows, n, expected, got[i].raw);
+  for (let i = start; i <= n; i++) saveDetailPage_(job.indicator, job.date, i, got[i].ds, n, expected, got[i].raw);
   writeCells_('JOBS', job.rowNum, 5, [n + 1]);
   const status = refreshDetailCoverage_(job.indicator, job.date, n, expected);
   if (DETAIL_USABLE_.indexOf(status) >= 0) {
@@ -930,7 +993,7 @@ function runDetailJob_(job, deadline) {
 function flushPartialDetail_(job, start, n, expected, got) {
   let last = start - 1;
   while (last < n && got[last + 1]) last++;
-  for (let i = start; i <= last; i++) saveDetailPage_(job.indicator, job.date, i, got[i].rows, n, expected, got[i].raw);
+  for (let i = start; i <= last; i++) saveDetailPage_(job.indicator, job.date, i, got[i].ds, n, expected, got[i].raw);
   writeCells_('JOBS', job.rowNum, 5, [last + 1]);
   updateDayStatus_(job.indicator, job.date, {detailsStatus: 'PARTIAL', expectedPages: n, expectedRecords: expected, savedPages: last, error: ''});
   return 'partial';

@@ -216,12 +216,15 @@ function isRetryable_(e) {
 function jmsPost_(url, payload, attempts) {
   validateJmsAuth_();
   const tries = Math.min(3, Math.max(1, Number(attempts) || 1));
-  let error;
+  let error, authRetried = false;
   for (let i = 0; i < tries; i++) {
     try { return parseJmsResponse_(urlFetch_(jmsRequestObject_(url, payload)), url); }
     catch (e) {
       error = e;
-      // Nunca repetir credencial recusada nem erro de regra do JMS: retentativas não consertam.
+      // HTTP 401/403 isolado pode ser recusa momentânea do gateway (rajada de requisições):
+      // UMA nova tentativa antes de tratar como credencial vencida. Token vencido explícito
+      // ("Sessão do JMS...") e erro de regra do JMS não se repetem.
+      if (/HTTP 40[13]/.test(String(e.message)) && !authRetried) { authRetried = true; Utilities.sleep(2500); i--; continue; }
       if (!isRetryable_(e) || i + 1 >= tries) throw e;
       Utilities.sleep(800 * Math.pow(2, i));
     }
@@ -412,7 +415,10 @@ function fetchDetailBatch_(indicatorKey, isoDate, items) {
       if (!responses[i]) throw new Error('sem resposta');
       json = parseJmsResponse_(responses[i], endpoint);
     } catch (e) {
-      if (errorKind_(e.message) !== 'OTHER') throw e;
+      // Cota do Google ou token vencido explícito: para na hora. HTTP 401/403 numa rajada
+      // paralela é refeito sozinho (jmsPost_ ainda tenta uma vez a mais antes de desistir).
+      const m = String(e && e.message || e);
+      if (errorKind_(m) === 'QUOTA' || /Sessão do JMS/.test(m)) throw e;
       json = jmsPost_(endpoint, buildPayload_(indicatorKey, isoDate, it.page, it.size, true, it.win), 3);
     }
     const pg = pagingOf_(json);
@@ -591,7 +597,10 @@ function diagnoseJmsConnection() { return diagnosticarConexaoJms(); }
 function fieldMappingReport_(indicatorKey, records) {
   const cfg = getIndicatorConfig_(indicatorKey);
   const f = cfg.fields || {};
+  const used = clientFields_(cfg);
   const sample = (records || []).slice(0, 200);
+  const present = {};
+  sample.forEach(r => Object.keys(r || {}).forEach(k => { present[normKey_(k)] = 1; }));
   const out = {};
   Object.keys(f).forEach(dim => {
     let filled = 0, key = null, example = null;
@@ -599,7 +608,10 @@ function fieldMappingReport_(indicatorKey, records) {
       const hit = fieldReader_(r)(f[dim]);
       if (hit.value !== null) { filled++; if (!key) { key = hit.key; example = String(hit.value).slice(0, 40); } }
     });
-    out[dim] = {configurado: f[dim].join(' | '), encontrado: key, preenchidos: sample.length ? Math.round(filled / sample.length * 100) + '%' : '—', exemplo: example};
+    // ok = veio preenchido · vazio = o JMS manda o campo, mas sem valor · inexistente = nome não encontrado
+    const situacao = key ? 'ok' : f[dim].some(k => present[normKey_(k)]) ? 'vazio' : 'inexistente';
+    out[dim] = {configurado: f[dim].join(' | '), encontrado: key, situacao: situacao, usadoNoPainel: used.indexOf(dim) >= 0,
+      preenchidos: sample.length ? Math.round(filled / sample.length * 100) + '%' : '—', exemplo: example};
   });
   return {campos: out, camposRecebidos: sample.length ? Object.keys(sample[0]).slice(0, 60) : []};
 }

@@ -1,6 +1,6 @@
 /*
  * Simulação de COTAS do Google Apps Script com os volumes reais do SP GRU
- * (SC→SC ≈ 34 mil remessas fora do prazo por dia, Falta de Bipagem ≈ 3 mil, ...).
+ * (SC→SC ≈ 73 mil remessas fora do prazo por dia, Falta de Bipagem ≈ 4 mil, ...).
  * Roda os gatilhos (5 min, hora em hora, 7h) num relógio virtual, com o custo de
  * cada serviço (UrlFetch, Drive, Planilhas) e a cota diária do plano.
  *

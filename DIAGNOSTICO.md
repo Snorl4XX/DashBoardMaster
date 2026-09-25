@@ -20,6 +20,34 @@ Havia mais **oito problemas**, que somados davam exatamente os sintomas relatado
 | Erros na fila | Ciclo de erro no dia corrente (SC→SC) | 0 |
 | SC→SC, período de 7 dias no painel | 1 de 7 dias carregado | 4 de 7 (até 150 mil remessas) |
 
+## Atualização V3.7.1: o que o `diagnosticoCompleto` mostrou no seu ambiente
+
+O diagnóstico rodado no JMS real (24/09/2026) confirmou o essencial:
+- **As 5 rotas respondem.**
+- **O JMS aceita páginas de 1000.**
+- **Os campos usados pelos gráficos chegam preenchidos.**
+
+Ele também mostrou quatro pontos que a V3.7.1 ajusta:
+
+| O que apareceu | O que era | Ajuste na V3.7.1 |
+|---|---|---|
+| SC→SC com **73.357 remessas/dia** (o dobro da minha estimativa) | O dia inteiro ficava em memória como objetos: pico de ~45 MB por execução | Download guardado em formato colunar: pico de ~14 MB para o mesmo dia |
+| "Último erro: Faltam os cabeçalhos de rota…" e "Taxa JMS ausente ou inválida" em dias sem nenhum problema | Textos antigos, gravados na planilha por uma versão anterior. Essas mensagens nem existem no código atual | Limpeza automática (uma vez) dos erros antigos em dias completos. O histórico continua no SYNC_LOG. O diagnóstico agora mostra **quando** cada erro foi registrado |
+| HTTP 401 (SC→SC) e 403 (Triagem) como último erro, com as rotas funcionando no teste | Token que venceu antes da troca, ou recusa momentânea do gateway numa rajada de consultas | 401/403 isolado ganha **uma nova tentativa** antes de pausar. A pausa agora é **escalonada** (15 min → 1 h → 3 h → 6 h) em vez de 6 h direto, e volta a 15 min depois de um sucesso |
+| "NÃO ENCONTRADOS": `tripId`/`route` (Recebimento) e `destination` (Expedição), com os campos presentes na lista recebida | O JMS **manda** esses campos, mas **vazios** nesses indicadores (ex.: remessa não expedida não tem próxima parada) | O diagnóstico separa "vazio no JMS" de "nome não encontrado" e ignora campos que o painel não usa. O filtro que só teria "Sem informação" é escondido |
+
+**Simulação com os volumes reais** (SC→SC 73 mil/dia, Falta de Bipagem ~4 mil, Envio Errado ~1,8 mil; 14 dias de histórico + 2 dias de operação):
+
+| | V3.6 (original) | V3.7.1 |
+|---|---|---|
+| Tempo de gatilho por dia (Workspace, cota 360 min) | **360 min**: 227 execuções bloqueadas por dia | 69 min no dia do histórico, depois **34 min/dia** |
+| Conta Gmail (cota 90 min) | Cota esgotada; só **6–7 de 15 dias** com detalhe após 2 dias | **15 de 15 dias**, sem bloqueio |
+| Consultas ao JMS por dia | 6.700–11.700 | 800–2.200 |
+| Arquivos no Drive por dia | 6.600–11.500 | 120–840 |
+| Erros na fila | Ciclo de erro no SC→SC do dia corrente | 0 |
+
+**Limite que continua:** com 73 mil remessas/dia, o SC→SC cabe no painel com **até 2 dias por consulta** (limite de 150 mil remessas, ~8 MB por resposta). A taxa, os cartões e a evolução diária valem para qualquer período, porque vêm das taxas oficiais; os gráficos de ofensores e a tabela mostram os 2 dias mais recentes do período, com aviso na tela. Os demais indicadores cabem com folga (Falta de Bipagem: ~1 mês por consulta).
+
 ## Como o diagnóstico foi feito
 
 1. **Leitura completa do código:** os 9 arquivos `.gs`, os 4 arquivos `.html` e os testes.
@@ -83,7 +111,7 @@ Havia mais **oito problemas**, que somados davam exatamente os sintomas relatado
 **Correção:**
 - Token recusado (qualquer uma das formas acima) **pausa a rota** após **uma** requisição, sem gastar tentativas.
 - O painel mostra um aviso fixo com o que fazer: gerar um novo AuthToken e atualizar `JMS_AUTHTOKEN`.
-- **Assim que o token é trocado, a importação recomeça sozinha**: o robô percebe a troca da credencial. Sem troca, ele tenta de novo a cada 6 h.
+- **Assim que o token é trocado, a importação recomeça sozinha**: o robô percebe a troca da credencial. Sem troca, ele tenta de novo em 15 min, depois 1 h, 3 h e 6 h (V3.7.1).
 - A cota do Google esgotada pausa tudo por 1 h, também sem marcar erro nos jobs.
 - As mensagens agora trazem o **código e a mensagem do JMS**.
 
@@ -119,7 +147,7 @@ Havia mais **oito problemas**, que somados davam exatamente os sintomas relatado
 
 ## Testes
 
-- `node tests/test_backend.js` → **133 verificações** (as 82 da versão anterior, 3 delas adaptadas ao novo comportamento, + 51 novas), incluindo:
+- `node tests/test_backend.js` → **146 verificações** (as 82 da versão anterior, 3 delas adaptadas ao novo comportamento, + 64 novas), incluindo:
   - JMS que corta ou recusa páginas grandes;
   - limite de paginação profunda com 25 mil remessas;
   - JMS que ignora a hora no filtro;

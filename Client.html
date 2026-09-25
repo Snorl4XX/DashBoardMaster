@@ -726,7 +726,15 @@
   function refreshFilterOptions(f) {
     var keys = Object.keys(state.dropdowns);
     var facets = Core.facets(state.data.rows, f, keys);
-    keys.forEach(function (k) { state.dropdowns[k].setOptions(facets[k]); });
+    keys.forEach(function (k) {
+      var d = state.dropdowns[k], opts = facets[k] || [];
+      d.setOptions(opts);
+      // Dimensão que o JMS manda sempre vazia (ex.: próxima parada na Falta de Bipagem na
+      // Expedição): um filtro só com "Sem informação" não ajuda — fica escondido.
+      var onlyNA = opts.length > 0 && opts.every(function (o) { return o.value === 'N/A'; });
+      var selected = state.filters[k] && state.filters[k].size;
+      d.el.classList.toggle('hidden', state.data.rows.length > 0 && onlyNA && !selected);
+    });
   }
   function renderChips() {
     var box = $('#activeChips'), f = filtersObj(), keys = Object.keys(f);

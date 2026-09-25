@@ -187,8 +187,9 @@ function atualizarParaV3() {
 function atualizarParaV37() {
   ensureStorage_();
   deleteProp_('MIGRATION_V37');
+  deleteProp_('MIGRATION_V371');
   clearPauses_();
-  const migrated = migrateToV37_();
+  const migrated = migrateToV37_() + migrateToV371_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};
@@ -321,33 +322,35 @@ function retomarImportacao() {
 }
 
 /**
- * DIAGNÓSTICO COMPLETO (V3.7) — rode no editor (▶ Executar) e leia o Registro de execução.
+ * DIAGNÓSTICO COMPLETO — rode no editor (▶ Executar) e leia o Registro de execução.
  * Para cada indicador: consulta a taxa do dia, testa o detalhe (tamanho de página aceito,
- * total de registros, quais campos do JMS alimentam cada gráfico) e mostra o estado do
- * banco/fila/pausas. Não grava remessas; só aprende o tamanho de página, se for o caso.
+ * total de registros, quais campos do JMS alimentam cada gráfico, tempo de resposta) e
+ * mostra o estado do banco, da fila (com estimativa de término) e das pausas.
+ * Não grava remessas; só aprende o tamanho de página, se for o caso.
  * Uso: diagnosticoCompleto() — último dia fechado; diagnosticoCompleto('2026-09-20') — dia específico.
  */
 function diagnosticoCompleto(date) {
   const lines = [];
+  const fmtTs = iso => iso ? Utilities.formatDate(new Date(iso), tz_(), 'dd/MM HH:mm') : '—';
   const out = {versao: APP_CONFIG.VERSION, credenciais: authConfigSafe_(), bancoConfigurado: !!getProp_('DB_SPREADSHEET_ID', ''),
     gatilhos: ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction()), indicadores: {}};
   try { out.pausas = publicPauses_(); } catch (e) { out.pausas = []; }
-  if (out.bancoConfigurado) { try { out.fila = computeSyncStatus_(); } catch (e) { out.fila = {erro: String(e.message || e)}; } }
   lines.push('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico completo');
   lines.push('Credenciais: modo ' + out.credenciais.modo + ' · AuthToken ' + (out.credenciais.authToken ? 'OK' : 'AUSENTE'));
   lines.push('Gatilhos: ' + (out.gatilhos.join(', ') || 'NENHUM — rode setupProject'));
-  if (out.fila) lines.push('Fila: ' + JSON.stringify(out.fila));
-  (out.pausas || []).forEach(p => lines.push('PAUSA ' + p.route + ' (' + p.kind + ') desde ' + p.since + ': ' + p.reason));
+  (out.pausas || []).forEach(p => lines.push('PAUSA ' + p.route + ' (' + p.kind + ') desde ' + fmtTs(p.since) + ' até ' + fmtTs(p.until) + ': ' + p.reason));
+  const latencies = [];
+  const timed = fn => { const t0 = Date.now(); const r = fn(); latencies.push(Date.now() - t0); return r; };
   Object.keys(INDICATORS).sort((a, b) => INDICATORS[a].order - INDICATORS[b].order).forEach(key => {
     const cfg = INDICATORS[key];
     const d = isIso_(date) ? date : lastClosedDate_(key);
     const item = {data: d};
     try {
-      const s = fetchSummaryDay_(key, d);
+      const s = timed(() => fetchSummaryDay_(key, d));
       item.resumo = s.empty ? 'sem registros' : {taxa: s.rate, erros: s.errorCount, base: s.totalCount};
     } catch (e) { item.resumo = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
     try {
-      const probe = probeDetail_(key, d);
+      const probe = timed(() => probeDetail_(key, d));
       const map = fieldMappingReport_(key, probe.records);
       item.detalhe = {total: probe.total, tamanhoDePagina: probe.size, paginasNecessarias: Math.ceil(probe.total / probe.size),
         fatiasDeHorario: probe.total > detailMaxOffset_() && detailMaxOffset_() > 0 && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')};
@@ -356,8 +359,11 @@ function diagnosticoCompleto(date) {
     } catch (e) { item.detalhe = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
     if (out.bancoConfigurado) {
       try {
-        const cov = getCoverage_(key, addDaysIso_(d, -6), d);
-        item.ultimos7dias = {semTaxa: cov.missingSummary.length, detalhesIncompletos: cov.incompleteDetails.length, ultimoErro: lastErrorFor_(key, addDaysIso_(d, -6), d)};
+        const from7 = addDaysIso_(d, -6);
+        const cov = getCoverage_(key, from7, d);
+        const err = lastErrorFor_(key, from7, d);
+        item.ultimos7dias = {semTaxa: cov.missingSummary.length, detalhesIncompletos: cov.incompleteDetails.length, ultimoErro: err,
+          ultimaSincronizacao: getLatestSyncedAt_(key)};
       } catch (e) { item.ultimos7dias = {erro: String(e.message || e)}; }
     }
     out.indicadores[key] = item;
@@ -368,16 +374,74 @@ function diagnosticoCompleto(date) {
     lines.push('  Detalhe: ' + (item.detalhe.erro ? 'ERRO — ' + item.detalhe.erro : item.detalhe.total + ' registros · página de ' +
       item.detalhe.tamanhoDePagina + ' · ' + item.detalhe.paginasNecessarias + ' requisição(ões)' + (item.detalhe.fatiasDeHorario ? ' · em fatias de horário' : '')));
     if (item.campos) {
-      const missing = Object.keys(item.campos).filter(k => !item.campos[k].encontrado);
-      lines.push('  Campos: ' + (missing.length ? 'NÃO ENCONTRADOS → ' + missing.map(k => k + ' (' + item.campos[k].configurado + ')').join(', ') : 'todos encontrados'));
-      if (missing.length) lines.push('  Campos recebidos do JMS: ' + item.camposRecebidos.join(', '));
+      const c = item.campos, ks = Object.keys(c);
+      const lost = ks.filter(k => c[k].usadoNoPainel && c[k].situacao === 'inexistente');
+      const blank = ks.filter(k => c[k].usadoNoPainel && c[k].situacao === 'vazio');
+      if (!lost.length && !blank.length) lines.push('  Campos usados no painel: todos preenchidos');
+      if (lost.length) {
+        lines.push('  Campos NÃO ENCONTRADOS (ajustar o nome em Config.gs): ' + lost.map(k => k + ' (' + c[k].configurado + ')').join(', '));
+        lines.push('  Campos recebidos do JMS: ' + item.camposRecebidos.join(', '));
+      }
+      if (blank.length) lines.push('  Campos que o JMS manda VAZIOS neste indicador (filtro/gráfico fica "Sem informação" e é escondido): ' +
+        blank.map(k => k + ' (' + c[k].configurado + ')').join(', '));
     }
-    if (item.ultimos7dias && !item.ultimos7dias.erro) {
-      lines.push('  Banco (7 dias): ' + item.ultimos7dias.semTaxa + ' dia(s) sem taxa · ' + item.ultimos7dias.detalhesIncompletos +
-        ' com detalhe incompleto' + (item.ultimos7dias.ultimoErro ? ' · último erro: ' + item.ultimos7dias.ultimoErro.reason : ''));
+    const u = item.ultimos7dias;
+    if (u && !u.erro) {
+      lines.push('  Banco (7 dias): ' + u.semTaxa + ' dia(s) sem taxa · ' + u.detalhesIncompletos + ' com detalhe incompleto · última sincronização ' + fmtTs(u.ultimaSincronizacao));
+      if (u.ultimoErro) lines.push('  Último erro: dia ' + humanDatePt_(u.ultimoErro.date) + ', registrado em ' + fmtTs(u.ultimoErro.at) + ' — ' + u.ultimoErro.reason);
     }
   });
+  const avgMs = latencies.length ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0;
+  out.tempoMedioJmsMs = avgMs;
+  lines.push('');
+  lines.push('Tempo médio de resposta do JMS: ' + (avgMs / 1000).toFixed(1) + ' s por consulta');
+  if (out.bancoConfigurado) {
+    try {
+      out.fila = queueReport_(avgMs);
+      lines.push('Fila: ' + out.fila.texto);
+    } catch (e) { out.fila = {erro: String(e.message || e)}; lines.push('Fila: erro ao ler — ' + out.fila.erro); }
+  }
   console.log(lines.join('\n'));
   out.texto = lines.join('\n');
   return out;
+}
+
+/**
+ * Situação da fila com estimativa de término. A estimativa usa o tempo de resposta
+ * medido do JMS e o tamanho recente de cada indicador; a cota diária de gatilhos é
+ * 90 min numa conta Gmail e 6 h no Google Workspace (≈40 min/dia ficam para a rotina).
+ */
+function queueReport_(latencyMs) {
+  const pend = pendingJobs_();
+  const stats = computeSyncStatus_();
+  const byType = {};
+  let minD = null, maxD = null;
+  pend.forEach(j => {
+    byType[j.type] = (byType[j.type] || 0) + 1;
+    if (!minD || j.date < minD) minD = j.date;
+    if (!maxD || j.date > maxD) maxD = j.date;
+  });
+  const recent = {};
+  allTabRows_('STATUS').forEach(r => { const v = Number(r[6]); if (INDICATORS[r[0]] && v > 0) recent[r[0]] = v; });
+  const lat = Math.max(500, Number(latencyMs) || 1500) / 1000;
+  const parallel = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
+  let seconds = 0;
+  pend.forEach(j => {
+    if (j.type === 'SUMMARY') seconds += lat + 1.5;
+    else if (j.type === 'DETAIL_INIT' || j.type === 'DETAIL_PAGE') {
+      const cfg = INDICATORS[j.indicator];
+      const size = detailPageSize_(cfg), total = recent[j.indicator] || 1000;
+      const slices = detailMaxOffset_() > 0 && total > detailMaxOffset_() ? Math.min(32, nextPow2_(Math.ceil(total / (detailMaxOffset_() * 0.5)))) : 0;
+      seconds += (Math.ceil(total / size) + slices) * lat / Math.min(parallel, 3) + 4;
+    } else seconds += 5;
+  });
+  const hours = seconds / 3600;
+  const perDay = mins => Math.max(1, Math.ceil(seconds / 60 / mins));
+  const tipos = Object.keys(byType).map(t => byType[t] + ' ' + ({SUMMARY: 'resumo(s)', DETAIL_INIT: 'detalhe(s)', DETAIL_PAGE: 'detalhe(s) V2', COMPACT: 'compactação(ões)'}[t] || t)).join(', ');
+  const texto = pend.length
+    ? pend.length + ' pendente(s) (' + tipos + ') de ' + humanDatePt_(minD) + ' a ' + humanDatePt_(maxD) + ' · ' + stats.ERROR + ' com erro · ' +
+      'estimativa ~' + (hours < 1 ? Math.max(1, Math.round(hours * 60)) + ' min' : hours.toFixed(1) + ' h') + ' de execução → ' +
+      'Workspace: ~' + perDay(320) + ' dia(s) · conta Gmail: ~' + perDay(50) + ' dia(s)'
+    : 'vazia (' + stats.DONE + ' concluído(s), ' + stats.ERROR + ' com erro)';
+  return {pendentes: pend.length, porTipo: byType, de: minD, ate: maxD, erros: stats.ERROR, horasEstimadas: Math.round(hours * 10) / 10, texto: texto};
 }

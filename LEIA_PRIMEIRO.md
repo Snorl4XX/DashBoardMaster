@@ -1,6 +1,17 @@
-# J&T DASHMASTER V3.7 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.7.1 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.7.1 (ajustes a partir do diagnosticoCompleto no JMS real)
+- **Menos memória em dias grandes.** O SC→SC tem ~73 mil remessas/dia; o download agora é guardado em formato colunar (pico ~3× menor).
+- **Erros antigos somem do painel.** Mensagens gravadas por versões anteriores em dias que já estão completos (ex.: "Faltam os cabeçalhos de rota…") são limpas uma vez; o histórico continua no SYNC_LOG.
+- **HTTP 401/403 isolado ganha uma nova tentativa** antes de pausar. A pausa é escalonada (15 min → 1 h → 3 h → 6 h).
+- **O `diagnosticoCompleto` ficou mais informativo:**
+  - mostra quando cada erro foi registrado e o tempo de resposta do JMS;
+  - dá uma estimativa de quando a fila termina;
+  - separa campos "vazios no JMS" de "não encontrados".
+- **Filtros sem informação são escondidos.** Um filtro em que o JMS manda o campo sempre vazio (ex.: próxima parada na Falta de Bipagem na Expedição) não aparece.
+- Para atualizar da V3.7.0: substitua os arquivos e crie uma **Nova versão** da implantação. A limpeza roda sozinha.
 
 ## O que mudou na V3.7: dados que não chegavam, gráficos vazios, "fica carregando e dá erro"
 
@@ -8,7 +19,7 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 
 1. **Sincronização até 10× mais leve.** O detalhe é pedido com 1000 registros por página (antes 100), e o dia inteiro vira **um único arquivo** (antes: 1 arquivo no Drive + 1 linha na planilha por página). A V3.6 estourava a cota diária de gatilhos do Google (90 min no Gmail, 6 h no Workspace) e a importação parava no meio do dia.
 2. **O dia corrente não entra mais em ciclo de erro.** Pequenas diferenças de contagem durante o download são aceitas. O detalhe de hoje/ontem é rebaixado no máximo a cada 3 h; a taxa continua de hora em hora, e o botão **Atualizar** rebaixa na hora.
-3. **Token vencido é reconhecido** (HTTP 200 com código de erro, redirecionamento ou página HTML de login). A rota pausa sem gastar tentativas, o painel mostra um aviso com o que fazer e **a importação recomeça sozinha quando o token é trocado**. A cota do Google esgotada também pausa (1 h) em vez de gerar erros.
+3. **Token vencido é reconhecido** (HTTP 200 com código de erro, redirecionamento ou página HTML de login). A rota pausa sem gastar tentativas (15 min, depois 1 h, 3 h e 6 h), o painel mostra um aviso com o que fazer e **a importação recomeça sozinha quando o token é trocado**. A cota do Google esgotada também pausa (1 h) em vez de gerar erros.
 4. **Até 150 mil remessas por consulta** (antes 50 mil: SC→SC com 7 dias mostrava só 1 dia). Se o limite cortar dias, o painel diz isso claramente.
 5. **O painel abre no último dia fechado**, porque o dia corrente ainda está incompleto no JMS. Há um atalho novo, **"Hoje"**.
 6. **Robô mais resistente a mudanças do JMS:**
@@ -162,7 +173,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **133 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **146 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

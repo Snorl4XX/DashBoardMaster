@@ -45,17 +45,22 @@ function normalizeRecords_(indicatorKey, date, records) {
   return rows;
 }
 
-/** Avisa (SYNC_LOG) quando um campo configurado veio vazio em TODAS as remessas do dia. */
+/**
+ * Avisa (SYNC_LOG) quando um campo USADO no painel veio vazio em TODAS as remessas do dia
+ * (o gráfico/filtro daquela dimensão fica só com "Sem informação").
+ * `emptyDims` = dimensões vazias no dia (DayAccumulator_.emptyFields).
+ */
 var FIELD_WARNED_ = {};
-function warnEmptyFields_(indicatorKey, date, rows, sampleRaw) {
-  if (FIELD_WARNED_[indicatorKey] || rows.length < 20) return;
-  const f = getIndicatorConfig_(indicatorKey).fields || {};
-  const empty = Object.keys(f).filter(dim => dim !== 'date' && dim !== 'shipment' && rows.every(r => !r[dim]));
+function warnEmptyFields_(indicatorKey, date, emptyDims, sampleRaw, n) {
+  if (FIELD_WARNED_[indicatorKey] || n < 20) return;
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const used = clientFields_(cfg);
+  const empty = emptyDims.filter(d => used.indexOf(d) >= 0 && cfg.fields[d]);
   if (!empty.length) return;
   FIELD_WARNED_[indicatorKey] = 1;
   logSync_('WARN', indicatorKey, date, 'Campos sempre vazios no detalhe (gráficos/filtros dessas dimensões ficam "N/A"): ' +
-    empty.map(d => d + ' (' + f[d].join('/') + ')').join(', ') + '. Campos recebidos: ' +
-    Object.keys(sampleRaw || {}).slice(0, 40).join(', ') + '. Rode diagnosticarDetalheJms para conferir.');
+    empty.map(d => d + ' (' + cfg.fields[d].join('/') + ')').join(', ') + '. Campos recebidos: ' +
+    Object.keys(sampleRaw || {}).slice(0, 40).join(', ') + '. Rode diagnosticoCompleto para conferir.');
 }
 
 /**
@@ -100,6 +105,58 @@ function encodeDayFile_(rows) {
   return ds;
 }
 function isDayDataset_(x) { return !!(x && !Array.isArray(x) && x.kind === 'jt-day' && x.cols && x.dict); }
+/** Pedaço do download (até 1000 remessas) guardado em formato colunar: ~10× menos memória que objetos. */
+function chunkDataset_(rows) { return encodeDayFile_(rows); }
+
+/**
+ * Junta as remessas de um dia SEM manter um objeto por remessa (um dia de SC→SC
+ * passa de 70 mil: como objetos, ~150 MB — perto do limite de memória do Apps
+ * Script). Colunar + deduplicação por (data, remessa) mantendo o primeiro bipe,
+ * exatamente como dedupeDetailRows_.
+ */
+function DayAccumulator_() {
+  const fields = STORE_FIELDS_;
+  const dict = {}, idx = {}, cols = {};
+  fields.forEach(f => { dict[f] = []; idx[f] = new Map(); cols[f] = []; });
+  const byKey = new Map();
+  let n = 0;
+  function intern(f, v) {
+    const s = v === null || v === undefined ? '' : String(v);
+    const m = idx[f];
+    let j = m.get(s);
+    if (j === undefined) { j = dict[f].length; dict[f].push(s); m.set(s, j); }
+    return j;
+  }
+  function add(get) {
+    const key = get('date') + '|' + get('shipment');
+    const at = byKey.get(key);
+    if (at !== undefined) {
+      const ev = get('eventTime');
+      if (!(String(ev === null || ev === undefined ? '' : ev) < dict.eventTime[cols.eventTime[at]])) return;
+      fields.forEach(f => { cols[f][at] = intern(f, get(f)); });
+      return;
+    }
+    byKey.set(key, n);
+    fields.forEach(f => { cols[f].push(intern(f, get(f))); });
+    n++;
+  }
+  return {
+    count: function () { return n; },
+    addRow: function (r) { add(f => r[f]); },
+    addRows: function (rows) { rows.forEach(r => add(f => r[f])); },
+    addDataset: function (ds) {
+      for (let i = 0; i < ds.n; i++) add(f => (ds.dict[f] && ds.cols[f] ? ds.dict[f][ds.cols[f][i]] : ''));
+    },
+    shiftCounts: function () {
+      const c = {T1: 0, T2: 0, T3: 0, NA: 0};
+      cols.shift.forEach(j => { const s = dict.shift[j]; if (c[s] !== undefined) c[s]++; else c.NA++; });
+      return c;
+    },
+    /** Dimensões sem nenhum valor preenchido no dia. */
+    emptyFields: function (list) { return list.filter(f => dict[f] && !dict[f].some(v => v !== '')); },
+    build: function () { return {kind: 'jt-day', v: 2, dv: DERIVE_VERSION_, n: n, fields: fields, dict: dict, cols: cols}; }
+  };
+}
 /** Linhas (objetos) de um arquivo: aceita a lista antiga ou o formato colunar. */
 function fileRows_(x) { return isDayDataset_(x) ? JTCore_.decodeDataset(x) : x; }
 
