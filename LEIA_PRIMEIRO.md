@@ -1,6 +1,45 @@
-# J&T DASHMASTER V3.8.2 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.9 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.9 — Docas só em gráficos (padrão do modelo) e Maomao animado
+**Falta de Bipagem na Expedição — docas:**
+- As **tabelas** de docas saíram do painel, junto com os dois gráficos de docas da V3.8. No lugar entraram **3 gráficos**, no padrão das imagens enviadas:
+  1. **Distribuição geral por docas / 码头总体分布:** todas as docas, da maior para a menor, com quantidade e (% do total) em cada barra. Embaixo, os cartões *Total geral*, *Maior doca* e *Menor doca*.
+  2. **Docas por turno / 各班次码头分布:** as 5 docas mais ofensoras de cada turno (T1, T2, T3), com faixas de turno embaixo e cores pela posição (vermelho, rosa, laranja, amarelo, cinza). Embaixo, o *Total geral* e o total de cada turno com o anel de participação.
+  3. **Turno + segmento + doca / 班次、分段与码头:** os 5 destinos mais ofensores de cada turno, com a doca de cada um ("BRE 2 / Doca 21"). Embaixo, *Total geral*, *Maior combinação* e *Menor combinação*.
+- Nos gráficos 2 e 3, o percentual é sobre o total mostrado no gráfico, como no modelo.
+- Os gráficos seguem o filtro de docas e os demais filtros. No celular, rolam para o lado.
+- O **relatório (PDF/Excel)** continua com as tabelas no formato de tabela dinâmica.
+- **Docas conferidas com a lista do usuário:**
+
+  | Doca | Segmentos |
+  |---|---|
+  | DOCA 22 | BRE |
+  | DOCA 21 | AC, AM, BAU, BJE, BVB, CDG, JDF, LDB, SOD, SP, SP1, STM, TO, VCP, XAP, DC, NAT, MA, MIA, MRB, PA, RO, SJP (BRE 2) |
+  | DOCA 20 | MS |
+  | DOCA 19 | SE, BA, PI, AL, CE, SBA, IMP, MCZ, SNS, FEC |
+  | DOCA 18 | PR, PR1 |
+  | DOCA 17 | RS, RS1 |
+  | DOCA 16 | DF |
+  | DOCA 15 | PE, BYE |
+  | DOCA 14 | GRU |
+  | DOCA 10 | VDC, RJ, ES |
+  | DOCA 09 | CHV, MG, MG1 |
+  | DOCA 08 | SC, SC1 |
+  | DOCA 07 | GO |
+  | DOCA 06 | MT |
+  | DOCA 05 | NE, NE1 |
+
+  MS (DOCA 20) e FEC (DOCA 19) não vieram na lista da mensagem, mas foram mantidos: estão na fórmula da planilha e nos gráficos-modelo.
+
+**Maomao animado:**
+- Agora é uma **animação quadro a quadro** (WebP animado, o formato moderno de GIF), feita a partir dos desenhos enviados:
+  - **na meta**, ele dança: acena com o sabre, balança a cabeça e as orelhas, chuta e pula;
+  - **fora da meta**, pisa forte, golpeia com a espada e treme de raiva.
+- O corpo se mexe dentro da própria imagem. A imagem inteira não gira mais.
+- Quem ativou "reduzir movimento" no sistema vê o Maomao parado.
+- **Para usar o GIF original:** o chat converte GIFs colados como imagem em figura parada. Envie o arquivo `.gif` dentro de um `.zip` e ele entra no lugar desta animação.
 
 ## V3.8.2 — Docas corrigidas (segmentos do BRE 2)
 - **O problema:** o JMS manda os segmentos do BRE 2 **sem** o "BRE - " que aparece na planilha. Chega "SP,381-01,020" ou "BAU 484-00,200", e não "BRE - SP". Por isso:
@@ -31,6 +70,8 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
   As imagens recebidas eram estáticas, por isso a animação é feita em CSS. Quem ativou "reduzir movimento" no sistema vê o Maomao parado.
 
 ## V3.8 — Docas na Falta de Bipagem na Expedição
+> Na V3.9, as tabelas e os dois gráficos de docas desta versão foram trocados pelos 3 gráficos descritos acima. O filtro "Doca" e as colunas Destino/Doca continuam.
+
 Tudo o que já existia continua igual. Foram **acrescentados**:
 - **Filtro "Doca"** (depois dos filtros atuais).
 - **Gráfico "Docas mais ofensoras"** e **gráfico "Turno × docas mais ofensoras (top 3 por turno)"**, no fim da grade de gráficos. Os dois têm também a opção **Tabela**.
@@ -238,7 +279,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **182 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **184 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

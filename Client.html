@@ -77,9 +77,10 @@
       pauseQuotaText: 'O Google limita o uso diário do Apps Script. A importação recomeça sozinha por volta de {t}. Os dados já sincronizados continuam no painel.',
       rowsCapBadge: 'Limite de {n} remessas: {d} dia(s) fora dos gráficos',
       rowsCapHint: 'Reduza o período para ver todas as remessas nos gráficos e na tabela. Taxas e cartões oficiais continuam completos. Dias fora:',
-      groupTotal: '{g} Total', grandTotal: 'Total geral',
-      pivotNote: 'Formato de tabela dinâmica · percentual sobre o total da tabela.',
-      pivotTopNote: 'Top {n} por grupo (empates incluídos) · percentual sobre o total exibido, como na tabela dinâmica.'
+      rpSubAll: 'Quantidade de remessas por doca · percentual sobre o total',
+      rpSubShift: 'Top {n} por turno · percentual sobre o total exibido no gráfico',
+      rpSubCombo: 'Quantidade e porcentagem por combinação de turno, segmento e doca · top {n} por turno',
+      rpQty: 'Quantidade'
     },
     zh: {
       panel: '运营看板', autoSync: '自动更新', refresh: '刷新', downloadReport: '下载报告',
@@ -140,9 +141,10 @@
       pauseQuotaText: 'Google 限制 Apps Script 每日用量，约在 {t} 自动恢复导入。已同步的数据仍会显示。',
       rowsCapBadge: '单次上限 {n} 票：{d} 天未计入图表',
       rowsCapHint: '缩短期间即可在图表和表格中查看全部运单。官方指标率和卡片不受影响。未计入的日期：',
-      groupTotal: '{g} 合计', grandTotal: '总计',
-      pivotNote: '数据透视表格式 · 占比为占本表合计的比例。',
-      pivotTopNote: '每组前 {n} 名（含并列）· 占比按本表显示合计计算，与数据透视表一致。'
+      rpSubAll: '各码头运单数量 · 占比为占总数的比例',
+      rpSubShift: '每个班次前 {n} 名 · 占比按图中显示合计计算',
+      rpSubCombo: '按班次、分段与码头的数量及占比 · 每个班次前 {n} 名',
+      rpQty: '数量'
     }
   };
 
@@ -598,7 +600,7 @@
     renderTarget(c, cards);
     renderCharts(c);
     renderSummaryTable(c);
-    renderPivotTables(c);
+    renderRankPanels(c);
     renderDetailTable();
   }
   function onFiltersChanged() {
@@ -1238,39 +1240,194 @@
       (body || '<tr class="empty-row"><td colspan="' + (cols.length + 2) + '">' + esc(t('noRows')) + '</td></tr>') + '</tbody></table></div>';
   }
 
-  // ------------------------------------------------------------------ tabelas dinâmicas (ex.: docas da expedição)
-  /** Mesmo formato das tabelas dinâmicas da planilha: grupo → itens, subtotal por grupo e total geral. */
-  function renderPivotTables(c) {
-    var box = $('#pivotCards');
-    if (!box) return;
-    var defs = c.pivotTables || [];
-    if (!defs.length) { box.innerHTML = ''; return; }
-    var partial = detailIsPartial() ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '';
-    box.innerHTML = defs.map(function (def) {
-      var p = Core.pivot(state.filtered, def), k1 = def.groupBy[0], k2 = def.groupBy[1];
-      var l1 = dimLabel(k1), l2 = dimLabel(k2), max = 1;
-      p.groups.forEach(function (g) { g.items.forEach(function (it) { if (it.count > max) max = it.count; }); });
-      var pct = function (n) { return fmtPct(p.total ? n / p.total * 100 : null, 2); };
-      var body = '';
-      p.groups.forEach(function (g) {
-        g.items.forEach(function (it, i) {
-          body += '<tr><td>' + (i === 0 ? '<b>' + esc(vlabel(k1, g.value)) + '</b>' : '') + '</td><td>' + esc(vlabel(k2, it.value)) + '</td>' +
-            '<td class="num"><span class="mini-bar" style="width:' + Math.round(it.count / max * 70) + 'px"></span>' + fmtInt(it.count) + '</td>' +
-            '<td class="num">' + pct(it.count) + '</td></tr>';
-        });
-        body += '<tr class="subtotal"><td colspan="2">' + esc(t('groupTotal', {g: vlabel(k1, g.value)})) + '</td><td class="num">' + fmtInt(g.count) +
-          '</td><td class="num">' + pct(g.count) + '</td></tr>';
+  // ------------------------------------------------------------------ painéis de docas (padrão dos gráficos da planilha "Falta Expedição")
+  /** Cores pela posição dentro do turno (1º vermelho … 5º cinza), como no modelo enviado. */
+  var RANK_COLORS = ['#E60012', '#F46A77', '#F5A04E', '#F2C94C', '#A3A9B3'];
+  var RP_TEXT = {
+    total: {pt: 'Total geral', zh: '总计'},
+    shiftTotal: {pt: '{s} Total', zh: '{s} 总计'},
+    max: {pt: 'Maior', zh: '最多'}, min: {pt: 'Menor', zh: '最少'}
+  };
+  var RP_ICONS = {
+    total: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
+    max: '<path d="M4 20h16"/><path d="M7 17v-3M11 17v-6M15 17v-4"/><path d="M14 4h5v5M19 4l-6 6"/>',
+    min: '<path d="M4 20h16"/><path d="M7 17V9M11 17v-5M15 17v-2"/><path d="M14 13h5V8M19 13l-6-6"/>',
+    shift: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.5.3 4.5 2.5 4.5 5"/>'
+  };
+  function rpIcon(name) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + RP_ICONS[name] + '</svg>'; }
+  function titleCase(s) { return String(s).toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, b) { return a + b.toUpperCase(); }); }
+  function fill(s, vars) { return String(s).replace(/\{(\w+)\}/g, function (_, k) { return vars[k]; }); }
+  /** "PT / 中文" (o outro idioma menor), como nos títulos do modelo. */
+  function biLabel(obj, vars) {
+    var a = fill(L(obj), vars || {}), b = fill(Lo(obj), vars || {});
+    return esc(a) + (b && b !== a ? '<small>' + esc(b) + '</small>' : '');
+  }
+  function rpItemLabel(p, it) { return vlabel(p.dim, it.value) + (p.extra && it.extra ? ' - ' + vlabel(p.extra, it.extra) : ''); }
+  function rpStat(ic, labelHtml, valueHtml, subHtml, cls, side) {
+    return '<div class="rp-stat' + (cls ? ' ' + cls : '') + '"><span class="rp-ico">' + rpIcon(ic) + '</span><div class="rp-copy"><span class="rp-label">' + labelHtml + '</span>' +
+      '<b class="rp-value">' + valueHtml + '</b>' + (subHtml ? '<span class="rp-sub">' + subHtml + '</span>' : '') + '</div>' + (side || '') + '</div>';
+  }
+  function rpDonut(pct) {
+    var r = 17, c = 2 * Math.PI * r, len = Math.max(0, Math.min(100, pct)) / 100 * c;
+    return '<span class="rp-donut" aria-hidden="true"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="' + r + '" class="rp-ring"/>' +
+      '<circle cx="22" cy="22" r="' + r + '" class="rp-arc" stroke-dasharray="' + len.toFixed(2) + ' ' + c.toFixed(2) + '" transform="rotate(-90 22 22)"/></svg>' +
+      '<span>' + esc(fmtPct(pct, 2)) + '</span></span>';
+  }
+  function rpStats(def, p) {
+    var both = function (n, pct) { return '<em>' + esc(fmtInt(n)) + '</em> <span class="rp-sep">|</span> ' + esc(fmtPct(pct, 2)); };
+    var out = [];
+    if (def.kind === 'byShift' && !def.stats) {
+      out.push(rpStat('total', biLabel(RP_TEXT.total), esc(fmtInt(p.total)), esc(fmtPct(100, 2)), 'solid'));
+      p.groups.slice().sort(function (a, b) { return b.count - a.count; }).forEach(function (g) {
+        out.push(rpStat('shift', biLabel(RP_TEXT.shiftTotal, {s: g.shift}), esc(fmtInt(g.count)), '<em>' + esc(fmtPct(g.pct, 2)) + '</em>', 'shift', rpDonut(g.pct)));
       });
-      if (p.groups.length) body += '<tr class="grand"><td colspan="2">' + esc(t('grandTotal')) + '</td><td class="num">' + fmtInt(p.total) + '</td><td class="num">' + pct(p.total) + '</td></tr>';
-      var head = '<th>' + esc(L(l1)) + '<small>' + esc(Lo(l1)) + '</small></th><th>' + esc(L(l2)) + '<small>' + esc(Lo(l2)) + '</small></th>' +
-        '<th class="num">' + esc(t('qty')) + '</th><th class="num">' + esc(t('share')) + '</th>';
-      return '<section class="card table-card pivot-card" data-key="' + esc(def.key) + '"><div class="section-head"><div><span class="kicker">' + esc(t('details')) + '</span>' +
-        '<h2>' + esc(L(def.title)) + ' <small class="muted" style="font-weight:600">' + esc(Lo(def.title)) + '</small>' + partial + '</h2>' +
-        '<p class="muted small">' + esc(def.topPerGroup ? t('pivotTopNote', {n: def.topPerGroup}) : t('pivotNote')) + '</p></div>' +
-        '<span class="count">' + esc(t('tableCount', {n: fmtInt(p.total)})) + '</span></div>' +
-        '<div class="table-scroll" style="max-height:680px"><table class="data-table pivot-table"><thead><tr>' + head + '</tr></thead><tbody>' +
-        (body || '<tr class="empty-row"><td colspan="4">' + esc(t('noRows')) + '</td></tr>') + '</tbody></table></div></section>';
-    }).join('');
+      return out.join('');
+    }
+    var st = def.stats || {max: RP_TEXT.max, min: RP_TEXT.min};
+    var name = function (it) { return esc(rpItemLabel(p, it)) + (it.shift ? ' <span class="rp-shift">(' + esc(it.shift) + ')</span>' : ''); };
+    out.push(rpStat('total', biLabel(RP_TEXT.total), esc(fmtInt(p.total)), esc(fmtPct(100, 2))));
+    out.push(rpStat('max', biLabel(st.max), '<span class="accent">' + name(p.max) + '</span>', both(p.max.count, p.max.pct), 'named'));
+    out.push(rpStat('min', biLabel(st.min), '<span class="accent">' + name(p.min) + '</span>', both(p.min.count, p.min.pct), 'named'));
+    return out.join('');
+  }
+  function roundRectPath(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  }
+  /** Faixas T1/T2/T3 (em cima ou embaixo das barras) e linhas tracejadas entre os turnos. */
+  var shiftBands = {
+    id: 'shiftBands',
+    afterDraw: function (chart, args, o) {
+      if (!o || !o.groups || !o.groups.length) return;
+      var x = chart.scales.x, a = chart.chartArea, ctx = chart.ctx, n = chart.data.labels.length;
+      var step = n > 1 ? x.getPixelForValue(1) - x.getPixelForValue(0) : a.right - a.left;
+      var h = 26, top = o.position === 'top';
+      var y = top ? 4 : chart.height - h - 4;
+      ctx.save();
+      o.groups.forEach(function (g, i) {
+        var left = x.getPixelForValue(g.from) - step / 2, right = x.getPixelForValue(g.to) + step / 2;
+        if (i > 0) {
+          ctx.setLineDash([4, 4]); ctx.strokeStyle = '#C9CDD4'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(left, top ? y : a.top); ctx.lineTo(left, top ? x.bottom : y + h); ctx.stroke(); ctx.setLineDash([]);
+        }
+        roundRectPath(ctx, left + 6, y, right - left - 12, h, 9);
+        ctx.fillStyle = top ? RED : '#FDECEE'; ctx.fill();
+        ctx.fillStyle = top ? '#fff' : INK; ctx.font = '800 14px ' + Chart.defaults.font.family;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(g.label, (left + right) / 2, y + h / 2 + 1);
+      });
+      ctx.restore();
+    }
+  };
+  function redGradient(ctx) {
+    var ch = ctx.chart, a = ch.chartArea;
+    if (!a) return RED;
+    var g = ch.ctx.createLinearGradient(0, a.top, 0, a.bottom);
+    g.addColorStop(0, '#F5222F'); g.addColorStop(1, '#C4000F');
+    return g;
+  }
+  function rankConfig(def, p) {
+    var items = p.items, bands = [];
+    if (p.kind === 'byShift') {
+      var at = 0;
+      p.groups.forEach(function (g) { bands.push({label: g.shift, from: at, to: at + g.items.length - 1}); at += g.items.length; });
+    }
+    var rankOf = [];
+    p.groups.forEach(function (g) { g.items.forEach(function (it, i) { rankOf.push(i); }); });
+    var labels = items.map(function (it) {
+      var main = vlabel(p.dim, it.value);
+      return p.extra && it.extra ? [main, titleCase(vlabel(p.extra, it.extra))] : main;
+    });
+    var colors = def.colors === 'rank' ? rankOf.map(function (r) { return RANK_COLORS[Math.min(r, RANK_COLORS.length - 1)]; }) : redGradient;
+    var countColor = def.accent === 'pct' ? INK : RED, pctColor = def.accent === 'pct' ? RED : INK;
+    var bandPos = p.kind === 'byShift' ? (def.bands || 'bottom') : null;
+    return {
+      $sig: 'rank-' + def.key + '-' + (bandPos || 'none'), type: 'bar',
+      data: {labels: labels, datasets: [{label: t('shipments'), data: items.map(function (it) { return it.count; }), backgroundColor: colors,
+        hoverBackgroundColor: def.colors === 'rank' ? colors : RED_DARK, borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start',
+        maxBarThickness: 64, categoryPercentage: .8, barPercentage: .84}]},
+      plugins: plugins([shiftBands]),
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: {duration: 650},
+        layout: {padding: {top: bandPos === 'top' ? 40 : 6, bottom: bandPos === 'bottom' ? 36 : 0, right: 6}},
+        plugins: {
+          legend: {display: false},
+          shiftBands: {groups: bands, position: bandPos},
+          tooltip: {callbacks: {
+            title: function (tt) { var it = items[tt[0].dataIndex]; return rpItemLabel(p, it) + (it.shift ? ' · ' + it.shift : ''); },
+            label: function (ctx) { return ' ' + fmtInt(ctx.raw) + ' ' + t('shipments') + ' · ' + fmtPct(items[ctx.dataIndex].pct, 2); }
+          }},
+          datalabels: {anchor: 'end', align: 'end', clip: false, padding: 0, display: function (ctx) { return dv(ctx) > 0; },
+            labels: {
+              count: {offset: 17, color: countColor, font: {weight: '800', size: 13}, formatter: function (v) { return fmtInt(v); }},
+              pct: {offset: 3, color: pctColor, font: {weight: '600', size: 10.5}, formatter: function (v, ctx) { return '(' + fmtPct(items[ctx.dataIndex].pct, 2) + ')'; }}
+            }}
+        },
+        scales: {
+          x: {grid: {display: false}, border: {color: '#D9DBE1'}, ticks: {color: INK, autoSkip: false, maxRotation: 0, font: {size: 11, weight: '700'}}},
+          y: {beginAtZero: true, grace: '24%', grid: {color: GRID}, border: {display: false},
+            title: {display: true, text: t('rpQty'), color: MUTED, font: {size: 11, weight: '700'}},
+            ticks: {color: MUTED, precision: 0, callback: function (v) { return fmtInt(v); }}}
+        }
+      }
+    };
+  }
+  function renderRankPanels(c) {
+    var box = $('#rankPanels');
+    if (!box) return;
+    var defs = c.rankPanels || [];
+    var sig = state.indicator + '|' + defs.map(function (d) { return d.key; }).join(',');
+    if (box.getAttribute('data-sig') !== sig) {
+      Object.keys(state.charts).forEach(function (k) { if (k.indexOf('rp_') === 0) destroyChart(k); });
+      box.innerHTML = defs.map(function (def) {
+        return '<section class="card rank-panel" data-key="' + esc(def.key) + '"><div class="chart-head"><span class="chart-ico">' + icon('dock') + '</span>' +
+          '<div class="chart-titles"><h3></h3><small></small></div></div><div class="rp-body"></div><div class="rp-stats"></div></section>';
+      }).join('');
+      box.setAttribute('data-sig', sig);
+    }
+    defs.forEach(function (def) { renderRankPanel($('.rank-panel[data-key="' + def.key + '"]', box), def); });
+  }
+  function renderRankPanel(card, def) {
+    if (!card) return;
+    var key = 'rp_' + def.key, p = Core.rankPanel(state.filtered, def);
+    $('h3', card).innerHTML = esc(L(def.title)) + (Lo(def.title) ? ' <span class="rp-zh">/ ' + esc(Lo(def.title)) + '</span>' : '') +
+      (detailIsPartial() ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
+    $('small', card).textContent = def.kind === 'byShift' ? t(def.extra ? 'rpSubCombo' : 'rpSubShift', {n: def.top}) : t('rpSubAll');
+    var body = $('.rp-body', card), stats = $('.rp-stats', card);
+    if (!p.total) {
+      destroyChart(key);
+      body.innerHTML = '<div class="chart-wrap"><div class="chart-empty"><div><b>' + esc(t('noData')) + '</b>' + esc(t('noDataHint')) + '</div></div></div>';
+      stats.innerHTML = '';
+      return;
+    }
+    stats.innerHTML = rpStats(def, p);
+    if (!window.Chart) { destroyChart(key); body.innerHTML = '<p class="muted small">' + esc(t('noChartLib')) + '</p>'; return; }
+    var minW = Math.max(520, p.items.length * (p.extra ? 64 : 62));
+    var host = $('.rp-wrap', body);
+    if (!host || !$('canvas', host)) {
+      destroyChart(key);
+      body.innerHTML = '<div class="rp-scroll"><div class="rp-wrap"><canvas role="img"></canvas></div></div>';
+      host = $('.rp-wrap', body);
+    }
+    host.style.minWidth = minW + 'px';
+    var canvas = $('canvas', host);
+    canvas.setAttribute('aria-label', L(def.title) + ': ' + p.items.slice(0, 20).map(function (it) {
+      return rpItemLabel(p, it) + (it.shift ? ' ' + it.shift : '') + ' ' + fmtInt(it.count) + ' (' + fmtPct(it.pct, 2) + ')';
+    }).join('; '));
+    var config = rankConfig(def, p), ch = state.charts[key];
+    if (ch && ch.$sig === config.$sig && ch.canvas === canvas) {
+      ch.data.labels = config.data.labels;
+      ch.data.datasets = config.data.datasets;
+      ch.options = config.options;
+      ch.update();
+    } else {
+      destroyChart(key);
+      ch = new Chart(canvas, config);
+      ch.$sig = config.$sig;
+      state.charts[key] = ch;
+    }
   }
 
   // ------------------------------------------------------------------ tabela de remessas

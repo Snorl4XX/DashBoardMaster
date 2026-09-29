@@ -709,18 +709,36 @@ check(ctx.dockSampleReport_('wrong_send', [{billcode: '1'}]) === null, 'amostra 
 
 // (b) Painel: filtro de docas, 2 gráficos novos, colunas Destino/Doca — sem tirar nada do que existia.
 check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,destination,dock', 'filtro de docas adicionado no fim, filtros antigos mantidos');
-check(catMD.charts.map(c => c.key).join() === 'shift,segmentByShift,segment,login,tripId,client,interval,dock,dockByShift', 'gráficos antigos mantidos + docas', catMD.charts.map(c => c.key));
+check(catMD.charts.map(c => c.key).join() === 'shift,segmentByShift,segment,login,tripId,client,interval', 'gráficos antigos mantidos', catMD.charts.map(c => c.key));
+check(catMD.rankPanels.map(p => p.key).join() === 'dockOverview,dockByShift,destDockByShift', 'V3.9: 3 painéis de docas (só gráficos) no lugar das tabelas', catMD.rankPanels.map(p => p.key));
 check(catMD.labels.dock.pt === 'Doca' && catMD.labels.dockDest.pt === 'Destino' && catMD.table.some(c => c[0] === 'dock'), 'rótulos e colunas novas');
 const cfMD = vm.runInContext('clientFields_(INDICATORS.missing_dispatch)', ctx);
 check(cfMD.indexOf('segmentRaw') >= 0 && cfMD.indexOf('dock') < 0 && cfMD.indexOf('dockDest') < 0, 'doca é calculada no navegador a partir do 1º segmento completo', cfMD);
-const chDock = C.buildChart(catMD.charts.find(c => c.key === 'dock'), fxRows, {});
-check(chDock.labels[0] === 'DOCA 21' && chDock.datasets[0].data[0] === 4024 && chDock.labels.length === 15 && chDock.labels.indexOf('SEM DOCA') >= 0, 'gráfico: docas mais ofensoras (as 15 do dia, com SEM DOCA)', chDock.labels);
-const chShift = C.buildChart(catMD.charts.find(c => c.key === 'dockByShift'), fxRows, {});
-check(chShift.grouped && chShift.dim === 'dock' && chShift.datasets.find(d => d.shift === 'T3').data[chShift.labels.indexOf('DOCA 21')] === 2085,
-  'gráfico: turno × docas mais ofensoras', {labels: chShift.labels});
+// Painéis (V3.9), conferidos contra uma contagem independente dos dados da planilha de 22/09.
+const RP = key => catMD.rankPanels.find(p => p.key === key);
+const cnt = (rows, f) => rows.reduce((m, r) => { const k = f(r); if (k !== null) m[k] = (m[k] || 0) + 1; return m; }, {});
+const desc = m => Object.keys(m).map(k => [k, m[k]]).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+const pOver = C.rankPanel(fxRows, RP('dockOverview'));
+const expOver = desc(cnt(fxRows, r => r.dock || null));
+check(pOver.total === 8473 && pOver.items.length === 15 && pOver.items.map(i => i.value + '=' + i.count).join() === expOver.map(e => e[0] + '=' + e[1]).join() &&
+  pOver.max.value === 'DOCA 21' && pOver.max.count === 4024 && Math.abs(pOver.max.pct - 47.4920) < 0.001 && pOver.min.value === 'DOCA 06' && pOver.min.count === 43,
+  'painel "Distribuição geral por docas": todas as docas, maior/menor e % do total (igual à planilha: DOCA 21 = 4024 = 47,49%)', pOver.items.slice(0, 4));
+const pShift = C.rankPanel(fxRows, RP('dockByShift'));
+const topOf = (rows, dim, s, n) => desc(cnt(rows.filter(r => r.shift === s), r => r[dim] || null)).slice(0, n);
+const expShift = ['T1', 'T2', 'T3'].map(s => topOf(fxRows, 'dock', s, 5));
+const shownShift = expShift.reduce((a, g) => a + g.reduce((b, e) => b + e[1], 0), 0);
+check(pShift.groups.map(g => g.shift).join() === 'T1,T2,T3' && pShift.groups.every((g, i) => g.items.map(x => x.value + '=' + x.count).join() === expShift[i].map(e => e[0] + '=' + e[1]).join()) &&
+  pShift.total === shownShift && pShift.groups[2].items[0].value === 'DOCA 21' && pShift.groups[2].items[0].count === 2085 && Math.abs(pShift.groups.reduce((a, g) => a + g.pct, 0) - 100) < 1e-9,
+  'painel "Docas por turno": exatamente 5 por turno (T1, T2, T3), % sobre o total exibido', pShift.groups.map(g => g.shift + ':' + g.items.map(x => x.value + '=' + x.count).join('/')));
+const pCombo = C.rankPanel(fxRows, RP('destDockByShift'));
+const t3 = pCombo.groups.find(g => g.shift === 'T3').items;
+check(t3.slice(0, 5).map(x => x.value + '|' + x.extra + '=' + x.count).join() === 'BRE 2|DOCA 21=2085,GRU|DOCA 14=654,RJ|DOCA 10=165,MS|DOCA 20=160,BA|DOCA 19=148' &&
+  pCombo.max.value === 'BRE 2' && pCombo.max.extra === 'DOCA 21' && pCombo.max.shift === 'T3' && pCombo.items.every(x => x.pct === x.count / pCombo.total * 100),
+  'painel "Turno + segmento + doca": top 5 destinos por turno com a doca (T3 igual à planilha), maior combinação', t3);
 const oldRows = [{date: FX.data, shipment: 'OLD1', segment: 'BRE', shift: 'T1'}];
 C.applyDocks(oldRows, catMD.docks);
-check(oldRows[0].dock === '' && C.buildChart(catMD.charts.find(c => c.key === 'dock'), oldRows, {}).labels.length === 0, 'dado antigo só com "BRE" (ambíguo): "Sem informação", fora do gráfico');
+check(oldRows[0].dock === '' && C.rankPanel(oldRows, RP('dockOverview')).total === 0 && C.rankPanel(oldRows, RP('dockByShift')).groups.length === 0,
+  'dado antigo só com "BRE" (ambíguo): "Sem informação", fora dos painéis');
 
 // (c) Pipeline completo: JMS → arquivo diário → painel e relatório com docas; filtro por doca.
 const dMD = {'2026-09-19': makeDay(D19, 8)};

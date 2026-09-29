@@ -222,15 +222,15 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .target-goal strong{font-size:28px;letter-spacing:-.8px}
 .maomao{height:168px;width:170px;display:grid;place-items:center;position:relative}
 .mascot-sprite{height:168px;width:170px;position:relative}
-/* Fundo branco do desenho some com multiply (o banner é claro). */
+/* Fundo branco do desenho some com multiply (o banner é claro). O movimento vem da própria animação (quadro a quadro). */
 .mao-img{position:absolute;left:0;right:0;top:0;bottom:0;margin:auto;height:100%;width:auto;max-width:100%;object-fit:contain;mix-blend-mode:multiply;
-  transform-origin:50% 92%;transition:opacity .3s,transform .5s;opacity:0}
+  transition:opacity .3s;opacity:0}
 /* Na meta: Maomao dançando (com estrelinhas). */
-.target.good .mao-img-happy{opacity:1;animation:maoDance 1.1s ease-in-out infinite}
-/* Fora da meta: Maomao bravo (tremendo, com símbolos de raiva). */
-.target.bad .mao-img-angry{opacity:1;animation:maoAngry 1.6s ease-in-out infinite}
+.target.good .mao-img-happy{opacity:1}
+/* Fora da meta: Maomao bravo, pisando forte com a espada (com símbolos de raiva). */
+.target.bad .mao-img-angry{opacity:1}
 /* Sem taxa oficial: Maomao parado e esmaecido (não é "fora da meta"). */
-.target.neutral .mao-img-happy{opacity:.45;filter:grayscale(1)}
+.target.neutral .mao-img-still{opacity:.45;filter:grayscale(1)}
 .mao-stars,.mao-anger{position:absolute;inset:-4px;pointer-events:none;opacity:0}
 .mao-stars span{position:absolute;color:var(--red);font-size:17px;animation:starPop 1.8s linear infinite}
 .mao-stars span:nth-child(1){left:10px;top:8px}.mao-stars span:nth-child(2){right:4px;top:20px;animation-delay:.4s}.mao-stars span:nth-child(3){left:16px;bottom:22px;animation-delay:.9s}.mao-stars span:nth-child(4){right:18px;bottom:12px;animation-delay:1.3s}
@@ -287,10 +287,38 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .data-table td.num,.data-table th.num{text-align:right;font-variant-numeric:tabular-nums}
 .data-table td .mini-bar{display:inline-block;height:6px;border-radius:99px;background:var(--red);vertical-align:middle;margin-right:8px;opacity:.85}
 .data-table mark{background:#FFE58F;border-radius:3px;padding:0 1px}
-.pivot-table thead th{cursor:default}
-.pivot-table tbody tr.subtotal td{font-weight:800;background:#FFF1F2;color:var(--ink);border-bottom:1px solid var(--line)}
-.pivot-table tbody tr.grand td{font-weight:900;background:#F3F4F6;color:var(--ink);border-top:2px solid var(--red)}
-.pivot-card .section-head p{margin:4px 0 0}
+/* Painéis de docas (padrão dos gráficos da planilha "Falta Expedição") */
+#rankPanels{display:grid;gap:12px;margin-top:12px}
+#rankPanels:empty{display:none}
+.rank-panel{padding:18px 20px 16px;min-width:0;border-top:3px solid var(--red)}
+.rank-panel .chart-titles h3{font-size:17px;letter-spacing:-.3px}
+.rp-zh{color:var(--red);font-weight:800}
+.rp-scroll{overflow-x:auto;overflow-y:hidden;margin:0 -6px;padding:0 6px}
+.rp-wrap{position:relative;height:370px}
+.rp-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-top:14px}
+.rp-stats:empty{display:none}
+.rp-stat{display:flex;align-items:center;gap:14px;min-width:0;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:linear-gradient(135deg,#fff 40%,#FFF3F4)}
+.rp-ico{width:48px;height:48px;border-radius:13px;background:var(--red);color:#fff;display:grid;place-items:center;flex:none;box-shadow:0 6px 14px rgba(230,0,18,.22)}
+.rp-ico svg{width:26px;height:26px;stroke-width:1.7}
+.rp-copy{min-width:0;flex:1;display:flex;flex-direction:column}
+.rp-label{font-size:12.5px;font-weight:800;color:var(--ink-2);line-height:1.2}
+.rp-label small{display:block;font-size:10.5px;font-weight:600;color:var(--muted)}
+.rp-value{font-size:28px;font-weight:900;letter-spacing:-.8px;line-height:1.1;margin-top:3px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.rp-stat.named .rp-value{font-size:22px;letter-spacing:-.4px}
+.rp-value .accent{color:var(--red)}
+.rp-shift{font-size:.72em;font-weight:800;color:var(--ink-2)}
+.rp-sub{font-size:12.5px;font-weight:700;color:var(--ink-2);margin-top:2px;font-variant-numeric:tabular-nums}
+.rp-sub em{font-style:normal;color:var(--red);font-weight:800}
+.rp-sep{color:var(--muted-2);margin:0 2px}
+.rp-stat.solid{background:linear-gradient(135deg,var(--red),#B8000E);border-color:transparent;color:#fff;box-shadow:0 10px 24px rgba(230,0,18,.22)}
+.rp-stat.solid .rp-ico{background:rgba(255,255,255,.16);box-shadow:none}
+.rp-stat.solid .rp-label,.rp-stat.solid .rp-sub{color:#fff}
+.rp-stat.solid .rp-label small{color:rgba(255,255,255,.8)}
+.rp-donut{position:relative;width:64px;height:64px;flex:none}
+.rp-donut svg{width:64px;height:64px;stroke:none}
+.rp-ring{fill:none;stroke:#EEF0F3;stroke-width:5}
+.rp-arc{fill:none;stroke:var(--red);stroke-width:5;stroke-linecap:round}
+.rp-donut>span{position:absolute;inset:0;display:grid;place-items:center;font-size:10.5px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
 .table-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px}
 .note{font-size:12px;color:var(--muted)}
 .pager{display:flex;gap:4px;align-items:center}
@@ -339,8 +367,6 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 @keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
 @keyframes shimmer{to{background-position:-200% 0}}
-@keyframes maoDance{0%,100%{transform:translateY(0) rotate(-7deg)}25%{transform:translateY(-12px) rotate(0) scale(1.03)}50%{transform:translateY(0) rotate(7deg)}75%{transform:translateY(-12px) rotate(0) scale(1.03)}}
-@keyframes maoAngry{0%,48%,100%{transform:translate(0,0) rotate(0)}6%{transform:translate(-4px,0) rotate(-3deg)}12%{transform:translate(4px,0) rotate(3deg)}18%{transform:translate(-4px,0) rotate(-3deg)}24%{transform:translate(4px,0) rotate(3deg)}30%{transform:translate(-2px,0) rotate(-1deg)}36%{transform:translate(0,-3px) scale(1.04)}}
 @keyframes angerPop{0%,100%{transform:scale(.6);opacity:0}20%{transform:scale(1.15);opacity:1}60%{transform:scale(1);opacity:1}}
 @keyframes starPop{0%{opacity:0;transform:scale(.2)}30%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.4) translateY(-12px)}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
@@ -385,6 +411,9 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
   .table-tools,.find{width:100%}
   .chart-wrap{height:260px}
   .chart-wrap.large{height:300px}
+  .rank-panel{padding:14px 12px}
+  .rp-wrap{height:330px}
+  .rp-stats{grid-template-columns:1fr}
   .dd-panel{position:fixed;left:0!important;right:0!important;bottom:0;top:auto;width:100%;max-width:none;border-radius:18px 18px 0 0;max-height:72vh;display:flex;flex-direction:column;animation:sheetUp .2s ease}
   .dd-list{max-height:none;flex:1}
   .dd-sheet-title{display:block}

@@ -142,6 +142,53 @@ function JTCoreFactory_() {
     return {key: def.key, groupBy: [k1, k2], groups: groups, total: groups.reduce(function (s, g) { return s + g.count; }, 0)};
   }
 
+  // ---------- painéis de ranking (docas da expedição, no padrão dos gráficos da planilha) ----------
+  /**
+   * kind 'overview': todas as categorias de def.dim, da maior para a menor, % sobre o total.
+   * kind 'byShift' : top def.top de cada turno (T1, T2, T3; exatamente N barras, empate desempata
+   *                  pelo nome), % sobre o total exibido no gráfico.
+   * Remessas sem valor ("Sem informação") ficam de fora. def.extra acrescenta um 2º rótulo
+   * por item (ex.: a doca do destino). max/min = maior e menor barra do gráfico.
+   */
+  function rankPanel(rows, def) {
+    var dim = def.dim, extra = def.extra, extraOf = {};
+    function sorted(map) {
+      return Object.keys(map).map(function (v) { return {value: v, count: map[v]}; })
+        .sort(function (a, b) { return b.count - a.count || compareText(a.value, b.value); });
+    }
+    function note(r) { if (extra && !blank(r[extra]) && extraOf[r[dim]] === undefined) extraOf[r[dim]] = String(r[extra]); }
+    var groups;
+    if (def.kind === 'byShift') {
+      var by = {};
+      (rows || []).forEach(function (r) {
+        if (blank(r[dim]) || SHIFTS.indexOf(r.shift) < 0) return;
+        var m = by[r.shift] || (by[r.shift] = {});
+        m[r[dim]] = (m[r[dim]] || 0) + 1;
+        note(r);
+      });
+      groups = SHIFTS.filter(function (s) { return by[s]; }).map(function (s) {
+        var items = sorted(by[s]);
+        return {shift: s, items: def.top ? items.slice(0, def.top) : items};
+      });
+    } else {
+      var all = {};
+      (rows || []).forEach(function (r) { if (blank(r[dim])) return; all[r[dim]] = (all[r[dim]] || 0) + 1; note(r); });
+      groups = [{shift: null, items: sorted(all)}];
+    }
+    var total = 0, flat = [];
+    groups.forEach(function (g) {
+      g.count = 0;
+      g.items.forEach(function (it) { it.shift = g.shift; if (extra) it.extra = extraOf[it.value] || ''; g.count += it.count; flat.push(it); });
+      total += g.count;
+    });
+    var pct = function (n) { return total ? n / total * 100 : 0; };
+    groups.forEach(function (g) { g.pct = pct(g.count); g.items.forEach(function (it) { it.pct = pct(it.count); }); });
+    var max = null, min = null;
+    flat.forEach(function (it) { if (!max || it.count > max.count) max = it; if (!min || it.count <= min.count) min = it; });
+    return {key: def.key, kind: def.kind === 'byShift' ? 'byShift' : 'overview', dim: dim, extra: extra || null,
+      groups: groups, items: flat, total: total, max: max, min: min};
+  }
+
   // ---------- datas ISO (AAAA-MM-DD) ----------
   function isIso(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')); }
   function addDays(iso, n) {
@@ -499,7 +546,7 @@ function JTCoreFactory_() {
   return {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
-    dockDestination: dockDestination, applyDocks: applyDocks, pivot: pivot,
+    dockDestination: dockDestination, applyDocks: applyDocks, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

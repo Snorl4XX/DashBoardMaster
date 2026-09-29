@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.8.2',
+  VERSION: '3.9.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -253,11 +253,21 @@ const INDICATORS = Object.freeze({
       {key: 'login', type: 'bar', horizontal: true, top: 10, title: {pt: 'Logins mais ofensores', zh: '高频卸车操作员'}},
       {key: 'tripId', type: 'bar', horizontal: true, top: 10, title: {pt: 'IDs de viagem de recebimento', zh: '高频到件车次号'}},
       {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
-      {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}},
-      {key: 'dock', type: 'bar', horizontal: true, top: 16, hideNA: true, title: {pt: 'Docas mais ofensoras', zh: '高频责任月台'}},
-      {key: 'dockByShift', byShift: 'dock', type: 'bar', top: 3, hideNA: true, title: {pt: 'Turno × docas mais ofensoras (top 3 por turno)', zh: '各班次前3责任月台'}}
+      {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
-    // Mesmo formato das tabelas dinâmicas da planilha "Falta Expedição" (aba Planilha2).
+    // Painéis de docas no painel web (padrão dos gráficos enviados pelo usuário; só gráficos, sem tabela).
+    // accent: qual rótulo da barra fica em vermelho (a quantidade ou o percentual); colors: 'rank' = cor pela posição no turno.
+    rankPanels: [
+      {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
+        title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
+        stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
+      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
+        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
+      {key: 'destDockByShift', kind: 'byShift', dim: 'dockDest', extra: 'dock', top: 5, accent: 'count', bands: 'top',
+        title: {pt: 'Turno + segmento + doca', zh: '班次、分段与码头'},
+        stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
+    ],
+    // Mesmo formato das tabelas dinâmicas da planilha "Falta Expedição" (aba Planilha2): só no relatório (PDF/Excel).
     pivotTables: [
       {key: 'dockDest', groupBy: ['dock', 'dockDest'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
       {key: 'shiftDock', groupBy: ['shift', 'dock'], topPerGroup: 3, skipNA: true, title: {pt: 'Turno × docas mais ofensoras', zh: '各班次责任月台'}},
@@ -380,6 +390,7 @@ function usedFields_(cfg) {
   (cfg.topCards || []).forEach(k => set[k] = 1);
   if (cfg.summaryTable) cfg.summaryTable.groupBy.forEach(k => set[k] = 1);
   (cfg.pivotTables || []).forEach(p => p.groupBy.forEach(k => set[k] = 1));
+  (cfg.rankPanels || []).forEach(p => { set[p.dim] = 1; if (p.extra) set[p.extra] = 1; });
   return Object.keys(set);
 }
 /** Calculadas na leitura (Core.applyDocks), a partir do 1º segmento completo: não vão no conjunto de dados. */
@@ -404,6 +415,7 @@ function getPublicCatalog_() {
       charts: cfg.charts, table: cfg.table, topCards: cfg.topCards || [],
       summaryTable: cfg.summaryTable || null,
       pivotTables: cfg.pivotTables || [],
+      rankPanels: cfg.rankPanels || [],
       docks: cfg.docks || null,
       emptyLotLabel: cfg.emptyLotLabel || null,
       hideShiftCards: !!cfg.hideShiftCards,
