@@ -1,6 +1,22 @@
-# J&T DASHMASTER V3.8.1 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.8.2 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.8.2 — Docas corrigidas (segmentos do BRE 2)
+- **O problema:** o JMS manda os segmentos do BRE 2 **sem** o "BRE - " que aparece na planilha. Chega "SP,381-01,020" ou "BAU 484-00,200", e não "BRE - SP". Por isso:
+  - quase metade das remessas (todo o BRE 2) caía em **SEM DOCA**, que virava a "doca mais ofensora";
+  - a DOCA 21 sumia dos gráficos e das tabelas;
+  - quando o código vinha com espaço, **tudo** caía em SEM DOCA.
+- **A correção:** os segmentos que pertencem ao **BRE 2** (DOCA 21) agora estão listados em `DOCKS_EXPEDICAO.destinationGroups` (`Config.gs`): AC, AM, BAU, BJE, BVB, CDG, JDF, LDB, SOD, SP, SP1, STM, TO, VCP, XAP, DC, NAT, MA, MIA, MRB, PA, RO, SJP.
+- **Qualquer formato do código dá o mesmo resultado:** "SP,381-01,020", "SP 381-01,020", "SP-381-01", "sp", "主:SP" e "BRE - SP" viram BRE 2 → DOCA 21. "BRE" sozinho continua BRE → DOCA 22.
+- **Conferido:** com os dados da planilha de 22/09, as três tabelas dinâmicas batem **número a número** em todos esses formatos (teste automático).
+- **Não precisa baixar nada de novo.** Destino e doca são calculados na hora de mostrar, então a correção vale na hora para todo o histórico.
+- **`diagnosticoCompleto` mostra as docas da Expedição:**
+  - como o código de três segmentos chega do JMS, com exemplos reais (`"SP,381-01,020" → BRE 2 → DOCA 21`);
+  - a divisão por doca;
+  - a lista de segmentos que ficaram **SEM DOCA**.
+
+  Se aparecer em SEM DOCA um segmento que tem doca, inclua-o em `DOCKS_EXPEDICAO` (em `map`, ou na lista do BRE 2).
 
 ## V3.8.1 — Sem espaços vazios e novo Maomao
 - **Sem buracos na grade.** O último cartão ou gráfico de cada linha estica até a borda.
@@ -27,7 +43,7 @@ Tudo o que já existia continua igual. Foram **acrescentados**:
 - **Colunas "Destino" e "Doca"** na tabela de remessas, no CSV e no relatório (PDF/Excel, que também traz as três tabelas).
 
 **Regra (a mesma da planilha):**
-- **DESTINO** = 1º segmento do código de três segmentos (texto antes da 1ª vírgula). A exceção é "BRE - xxx", que vira **BRE 2**.
+- **DESTINO** = código do 1º segmento do código de três segmentos. A exceção são os segmentos do BRE 2 (lista acima, ou "BRE - xxx"), que viram **BRE 2**. Veja a V3.8.2.
 - **DOCA** = tabela `DOCKS_EXPEDICAO` em `Config.gs`: BRE→22, BRE 2→21, MS→20, SE/BA/PI/AL/CE/SBA/IMP/MCZ/SNS/FEC→19, PR/PR1→18, RS/RS1→17, DF→16, PE/BYE→15, GRU→14, VDC/RJ/ES→10, CHV/MG/MG1→09, SC/SC1→08, GO→07, MT→06, NE/NE1→05.
 - O que não está na tabela vira **SEM DOCA**.
 - Se as docas mudarem, edite só essa tabela: a doca é calculada na hora de mostrar, então a mudança vale na hora para todo o histórico.
@@ -222,7 +238,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **171 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **182 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

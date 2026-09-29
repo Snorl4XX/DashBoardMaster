@@ -49,6 +49,40 @@ function normalizeRecords_(indicatorKey, date, records) {
 }
 
 /**
+ * Amostra das docas no detalhe do JMS (usada pelo diagnosticoCompleto): como o código de três
+ * segmentos chega, em que destino/doca cada formato cai e quais 1os segmentos ficaram SEM DOCA
+ * (para incluir em DOCKS_EXPEDICAO, Config.gs). Só códigos de roteamento; nada de remessa/cliente.
+ */
+function dockSampleReport_(indicatorKey, records) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  if (!cfg.docks || !records || !records.length) return null;
+  const rows = [], raws = [];
+  records.forEach(rec => {
+    const row = normalizeDetailRow_(indicatorKey, rec, '');
+    if (!row) return;
+    rows.push(row);
+    const v = fieldReader_(rec)(cfg.fields.segment || []).value;
+    raws.push(v === null || v === undefined ? '' : String(v).trim());
+  });
+  JTCore_.applyDocks(rows, cfg.docks);
+  const byDock = {}, noDock = {}, examples = {};
+  rows.forEach((r, i) => {
+    byDock[r.dock] = (byDock[r.dock] || 0) + 1;
+    const dest = r.dockDest || '(em branco)';
+    if (r.dock === cfg.docks.fallback) noDock[dest] = (noDock[dest] || 0) + 1;
+    if (raws[i] && !examples[dest]) examples[dest] = {codigo: raws[i].slice(0, 40), destino: dest, doca: r.dock, n: 0};
+    if (examples[dest]) examples[dest].n++;
+  });
+  const top = obj => Object.keys(obj).map(k => ({valor: k, n: obj[k]})).sort((a, b) => b.n - a.n);
+  return {
+    amostra: rows.length,
+    docas: top(byDock).map(x => ({doca: x.valor, n: x.n, pct: Math.round(x.n / rows.length * 1000) / 10})),
+    semDoca: top(noDock),
+    exemplos: Object.keys(examples).map(k => examples[k]).sort((a, b) => b.n - a.n).slice(0, 6)
+  };
+}
+
+/**
  * Avisa (SYNC_LOG) quando um campo USADO no painel veio vazio em TODAS as remessas do dia
  * (o gráfico/filtro daquela dimensão fica só com "Sem informação").
  * `emptyDims` = dimensões vazias no dia (DayAccumulator_.emptyFields).

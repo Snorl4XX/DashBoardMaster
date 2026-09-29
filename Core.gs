@@ -54,35 +54,59 @@ function JTCoreFactory_() {
   }
 
   // ---------- docas da expedição (Config.gs → DOCKS_EXPEDICAO) ----------
-  /** DESTINO: o 1º segmento, com as regras de agrupamento ("BRE - xxx" → "BRE 2"). */
-  function dockDestination(seg, docks) {
-    var s = String(seg || '').trim();
+  /** Só o código do 1º segmento, em maiúsculas: "SP,381-01,020" · "BAU 484-00,200" · "SP-381-01" · "主:MG CGE" → SP · BAU · SP · MG */
+  function segmentCode(v) {
+    var tok = firstSegment(v);
+    var m = tok.match(/^([A-Za-z]+\d?)-[A-Za-z]?\d/);
+    return (m ? m[1] : tok).toUpperCase();
+  }
+  function flatDash(s) { return String(s).toUpperCase().replace(/\s*[-\u2013\u2014]\s*/g, '-').trim(); }
+  /** Índices da configuração de docas (montados uma vez por chamada de applyDocks). */
+  function dockIndex(docks) {
+    var ix = {byDest: {}, bySegment: {}, rules: []};
+    Object.keys(docks.map || {}).forEach(function (d) { docks.map[d].forEach(function (x) { ix.byDest[String(x).toUpperCase()] = d; }); });
+    Object.keys(docks.destinationGroups || {}).forEach(function (dest) {
+      docks.destinationGroups[dest].forEach(function (x) { ix.bySegment[String(x).toUpperCase()] = dest; });
+    });
+    (docks.destinationRules || []).forEach(function (r) { if (r.prefix) ix.rules.push({prefix: flatDash(r.prefix), value: r.value}); });
+    return ix;
+  }
+  function destinationOf(seg, ix) {
+    var s = String(seg || '').trim().replace(/^主\s*[:：]\s*/, '');
     if (!s) return '';
-    var rules = (docks && docks.destinationRules) || [];
-    for (var i = 0; i < rules.length; i++) {
-      if (rules[i].prefix && s.toUpperCase().indexOf(String(rules[i].prefix).toUpperCase()) === 0) return rules[i].value;
+    var flat = flatDash(s);
+    for (var i = 0; i < ix.rules.length; i++) {
+      var p = ix.rules[i].prefix;
+      if (flat.indexOf(p) === 0 && /^[A-Z]/.test(flat.slice(p.length))) return ix.rules[i].value;
     }
-    return s;
+    var code = segmentCode(s);
+    return ix.bySegment[code] || code;
   }
   /**
-   * Acrescenta dockDest (destino) e dock (doca) em cada remessa. Igual ao PROCV/SE da planilha:
+   * DESTINO do 1º segmento, igual à coluna DESTINOS da planilha. Aceita os formatos que o JMS manda:
+   * "BRE - SP" → BRE 2 · "SP" / "BAU 484-00" → BRE 2 (lista destinationGroups) · "GRU" → GRU.
+   */
+  function dockDestination(seg, docks) { return docks ? destinationOf(seg, dockIndex(docks)) : ''; }
+  /**
+   * Acrescenta dockDest (destino) e dock (doca) em cada remessa. Igual ao SE da planilha:
    * comparação sem diferenciar maiúsculas; destino sem doca = SEM DOCA; 1º segmento em branco = SEM DOCA.
-   * Remessa gravada antes da V3.8 (sem o 1º segmento completo) fica "Sem informação" até ser baixada de novo.
+   * Remessa gravada antes da V3.8 (só com o código do 1º segmento) usa esse código; "BRE" sozinho é
+   * ambíguo nesse caso (pode ter sido "BRE - SP") e fica "Sem informação" até o dia ser baixado de novo.
    */
   function applyDocks(rows, docks) {
     if (!docks || !rows) return rows;
-    var byDest = {};
-    Object.keys(docks.map || {}).forEach(function (d) { docks.map[d].forEach(function (x) { byDest[String(x).toUpperCase()] = d; }); });
+    var ix = dockIndex(docks);
     var memo = {};
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i], raw = r.segmentRaw === undefined || r.segmentRaw === null ? '' : String(r.segmentRaw);
       var key = raw + '\u0001' + (r.segment || '');
       var m = memo[key];
       if (!m) {
-        if (!raw && !blank(r.segment)) m = ['', ''];
+        var legacy = !raw && !blank(r.segment);
+        if (legacy && String(r.segment).trim().toUpperCase() === 'BRE') m = ['', ''];
         else {
-          var dest = dockDestination(raw, docks);
-          m = [dest, dest ? (byDest[dest.toUpperCase()] || docks.fallback) : docks.fallback];
+          var dest = destinationOf(legacy ? r.segment : raw, ix);
+          m = [dest, dest ? (ix.byDest[dest.toUpperCase()] || docks.fallback) : docks.fallback];
         }
         memo[key] = m;
       }
@@ -474,7 +498,7 @@ function JTCoreFactory_() {
 
   return {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
-    intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, isIso: isIso, addDays: addDays,
+    intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, applyDocks: applyDocks, pivot: pivot,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, sumErrors: sumErrors, ratesBetween: ratesBetween,

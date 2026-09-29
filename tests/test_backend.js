@@ -667,6 +667,46 @@ catMD.pivotTables.forEach(def => {
   check(canon(got) === canon(exp), 'tabela dinâmica "' + def.title.pt + '" igual à planilha', {got: got.slice(0, 8), exp: exp.slice(0, 8)});
 });
 
+// (a2) V3.8.2: o JMS manda os segmentos do BRE 2 SEM o "BRE - " ("SP,381-01,020", "BAU 484-00,200"...).
+// Antes iam para SEM DOCA (ou tudo virava SEM DOCA com espaço no código). Todos os formatos = planilha.
+check(C.segmentCode('SP,381-01,020') === 'SP' && C.segmentCode('BAU 484-00,200') === 'BAU' && C.segmentCode('SP1-381-01-020') === 'SP1' &&
+  C.segmentCode('主:MG CGE') === 'MG' && C.segmentCode('gru,402-05') === 'GRU' && C.segmentCode('') === '', 'código do 1º segmento em qualquer formato');
+const BRE2_USER = 'Ac am bau bje bvb cdg jdf ldb sod sp sp1 stm to vcp xap dc nat ma mia mrb pa ro sjp'.split(' ');
+check(BRE2_USER.every(x => C.dockDestination(x + ',100-00,1', catMD.docks) === 'BRE 2' && C.dockDestination('BRE - ' + x.toUpperCase(), catMD.docks) === 'BRE 2'),
+  'os 23 segmentos da lista do BRE 2 (com ou sem "BRE - ") vão para BRE 2');
+check(C.dockDestination('BRE,100-00,1', catMD.docks) === 'BRE' && C.dockDestination('BRE-SP', catMD.docks) === 'BRE 2' && C.dockDestination('BRE – SP 1', catMD.docks) === 'BRE 2' &&
+  C.dockDestination('SBN,375-03,420', catMD.docks) === 'SBN' && C.dockDestination('MS 850-00,240', catMD.docks) === 'MS', 'BRE sozinho = BRE (DOCA 22); demais destinos pelo código');
+const FORMATS = {
+  'sem "BRE - "': c => c.replace(/^BRE - /, ''),
+  'com espaço': c => c.replace(/^BRE - /, '').replace(',', ' '),
+  'minúsculas e "主:"': c => '主:' + c.replace(/^BRE - /, '').toLowerCase(),
+  'hífen': c => c.replace(/^BRE - /, '').replace(',', '-')
+};
+Object.keys(FORMATS).forEach(name => {
+  let seqF = 0;
+  const rowsF = [];
+  FX.linhas.forEach(([code, turno, n]) => {
+    for (let i = 0; i < n; i++) rowsF.push(ctx.normalizeDetailRow_('missing_dispatch', {billcode: 'F' + (seqF++), threeSegmentCode: FORMATS[name](code), unloadArriveTime: FX.data + ' ' + HOUR[turno]}, FX.data));
+  });
+  C.applyDocks(rowsF, catMD.docks);
+  const okAll = catMD.pivotTables.every(def => canon(asExcel(C.pivot(rowsF, def))) === canon(FX.esperado[def.key]));
+  const p0 = C.pivot(rowsF, catMD.pivotTables[0]);
+  check(okAll, 'código ' + name + ': as 3 tabelas dinâmicas iguais à planilha', p0.groups.slice(0, 3).map(g => g.value + '=' + g.count));
+});
+// Dado gravado antes da V3.8 (só o código): usa o código; "BRE" sozinho é ambíguo e fica fora.
+const oldCodeRows = C.applyDocks([{segment: 'SP'}, {segment: 'GRU'}, {segment: 'SBN'}, {segment: 'BRE'}], catMD.docks);
+check(oldCodeRows.map(r => r.dock).join() === "DOCA 21,DOCA 14,SEM DOCA," && oldCodeRows[0].dockDest === "BRE 2", "histórico antigo também sai certo", oldCodeRows);
+// Diagnóstico: mostra como o código chega e o que ficou SEM DOCA.
+const smp = ctx.dockSampleReport_('missing_dispatch', [
+  {billcode: '1', threeSegmentCode: 'SP,381-01,020', unloadArriveTime: FX.data + ' 02:00:00'},
+  {billcode: '2', threeSegmentCode: 'SP,381-02,020', unloadArriveTime: FX.data + ' 02:00:00'},
+  {billcode: '3', threeSegmentCode: 'GRU,402-05,676', unloadArriveTime: FX.data + ' 10:00:00'},
+  {billcode: '4', threeSegmentCode: 'SBN,375-03,420', unloadArriveTime: FX.data + ' 18:00:00'},
+  {billcode: '5', threeSegmentCode: '', unloadArriveTime: FX.data + ' 18:00:00'}]);
+check(smp.amostra === 5 && smp.docas[0].doca === 'DOCA 21' && smp.docas[0].pct === 40 && smp.exemplos[0].codigo === 'SP,381-01,020' && smp.exemplos[0].destino === 'BRE 2' &&
+  smp.semDoca.map(x => x.valor).join() === 'SBN,(em branco)', 'diagnóstico: amostra de docas e SEM DOCA', smp);
+check(ctx.dockSampleReport_('wrong_send', [{billcode: '1'}]) === null, 'amostra de docas só onde há docas');
+
 // (b) Painel: filtro de docas, 2 gráficos novos, colunas Destino/Doca — sem tirar nada do que existia.
 check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,destination,dock', 'filtro de docas adicionado no fim, filtros antigos mantidos');
 check(catMD.charts.map(c => c.key).join() === 'shift,segmentByShift,segment,login,tripId,client,interval,dock,dockByShift', 'gráficos antigos mantidos + docas', catMD.charts.map(c => c.key));
@@ -680,7 +720,7 @@ check(chShift.grouped && chShift.dim === 'dock' && chShift.datasets.find(d => d.
   'gráfico: turno × docas mais ofensoras', {labels: chShift.labels});
 const oldRows = [{date: FX.data, shipment: 'OLD1', segment: 'BRE', shift: 'T1'}];
 C.applyDocks(oldRows, catMD.docks);
-check(oldRows[0].dock === '' && C.buildChart(catMD.charts.find(c => c.key === 'dock'), oldRows, {}).labels.length === 0, 'dado antigo sem 1º segmento completo: "Sem informação", fora do gráfico');
+check(oldRows[0].dock === '' && C.buildChart(catMD.charts.find(c => c.key === 'dock'), oldRows, {}).labels.length === 0, 'dado antigo só com "BRE" (ambíguo): "Sem informação", fora do gráfico');
 
 // (c) Pipeline completo: JMS → arquivo diário → painel e relatório com docas; filtro por doca.
 const dMD = {'2026-09-19': makeDay(D19, 8)};
@@ -695,6 +735,10 @@ check(dashMD.dataset.fields.indexOf('segmentRaw') >= 0 && rowsMD.every(r => r.do
 const compMD = cMD.computeDashboard_('missing_dispatch', {from: D19, to: D19, filters: {dock: ['DOCA 21']}});
 check(compMD.rows.length > 0 && compMD.rows.every(r => r.dock === 'DOCA 21') && compMD.pivots.length === 3 && compMD.pivots[0].groups[0].value === 'DOCA 21',
   'relatório: filtro por doca e tabelas dinâmicas', compMD.pivots.map(p => p.groups.length));
+const diagMD = cMD.diagnosticoCompleto(D19);
+check(/Docas \(1ª página do detalhe, \d+ remessas\): DOCA/.test(diagMD.texto) && /Código de três segmentos → destino → doca: "/.test(diagMD.texto) &&
+  diagMD.indicadores.missing_dispatch.docas && !diagMD.indicadores.wrong_send.docas, 'diagnosticoCompleto mostra a amostra de docas da Expedição',
+  diagMD.texto.split('\n').filter(l => /Docas|segmentos →|SEM DOCA/.test(l)));
 cMD.UrlFetchApp.fetch = () => ({getResponseCode: () => 200, getBlob: () => cMD.Utilities.newBlob('PDF', 'application/pdf', 'x')});
 const repMD = cMD.generateReport('missing_dispatch', {from: D19, to: D19}, 'xlsx');
 check(repMD.ok && repMD.rows > 0, 'relatório Excel com as tabelas de docas');

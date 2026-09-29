@@ -358,6 +358,7 @@ function diagnosticoCompleto(date) {
         fatiasDeHorario: probe.total > detailMaxOffset_() && detailMaxOffset_() > 0 && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')};
       item.campos = map.campos;
       item.camposRecebidos = map.camposRecebidos;
+      if (cfg.docks) item.docas = dockSampleReport_(key, probe.records);
     } catch (e) { item.detalhe = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
     if (out.bancoConfigurado) {
       try {
@@ -390,6 +391,13 @@ function diagnosticoCompleto(date) {
       }
       if (blank.length) lines.push('  Campos que o JMS manda VAZIOS neste indicador (filtro/gráfico fica "Sem informação" e é escondido): ' +
         blank.map(k => k + ' (' + c[k].configurado + ')').join(', '));
+    }
+    const dk = item.docas;
+    if (dk && dk.amostra) {
+      lines.push('  Docas (1ª página do detalhe, ' + dk.amostra + ' remessas): ' + dk.docas.slice(0, 6).map(x => x.doca + ' ' + x.pct + '%').join(' · '));
+      lines.push('  Código de três segmentos → destino → doca: ' + dk.exemplos.map(x => '"' + x.codigo + '" → ' + x.destino + ' → ' + x.doca).join(' · '));
+      if (dk.semDoca.length) lines.push('  SEM DOCA nesta amostra (inclua em DOCKS_EXPEDICAO, Config.gs, se tiverem doca): ' +
+        dk.semDoca.slice(0, 12).map(x => x.valor + ' (' + x.n + ')').join(' · '));
     }
     const u = item.ultimos7dias;
     if (u && !u.erro) {

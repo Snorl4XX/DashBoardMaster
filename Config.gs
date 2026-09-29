@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.8.1',
+  VERSION: '3.8.2',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -70,13 +70,18 @@ const FILTER_LABELS = Object.freeze({
 });
 
 /**
- * DOCAS da expedição (regra da planilha "Falta Expedição", abas DESTINOS/DOCAS).
- * DESTINO = 1º segmento do código de três segmentos (texto antes da 1ª vírgula), exceto
- *           "BRE - xxx", que vira "BRE 2". DOCA = pela tabela abaixo; o resto é SEM DOCA.
- * Para mudar a distribuição das docas, edite só esta tabela: vale na hora para todo o
- * histórico (a doca é calculada na leitura, não fica gravada).
+ * DOCAS da expedição (regra da planilha "Falta Expedição": colunas DESTINOS e DOCAS).
+ * DESTINO = código do 1º segmento do código de três segmentos, exceto os segmentos do BRE 2
+ *           (lista destinationGroups), que viram "BRE 2" — venham do JMS como "SP", "SP,381-01,020",
+ *           "BAU 484-00,200" ou "BRE - SP". DOCA = pela tabela map; destino fora dela é SEM DOCA.
+ * Para mudar a distribuição das docas ou incluir um segmento no BRE 2, edite só esta tabela:
+ * vale na hora para todo o histórico (destino e doca são calculados na leitura, não ficam gravados).
  */
 const DOCKS_EXPEDICAO = Object.freeze({
+  destinationGroups: {
+    'BRE 2': ['AC', 'AM', 'BAU', 'BJE', 'BVB', 'CDG', 'JDF', 'LDB', 'SOD', 'SP', 'SP1', 'STM', 'TO', 'VCP', 'XAP',
+      'DC', 'NAT', 'MA', 'MIA', 'MRB', 'PA', 'RO', 'SJP']
+  },
   destinationRules: [{prefix: 'BRE - ', value: 'BRE 2'}],
   map: {
     'DOCA 22': ['BRE'],
