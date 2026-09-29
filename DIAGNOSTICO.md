@@ -20,6 +20,26 @@ Havia mais **oito problemas**, que somados davam exatamente os sintomas relatado
 | Erros na fila | Ciclo de erro no dia corrente (SC→SC) | 0 |
 | SC→SC, período de 7 dias no painel | 1 de 7 dias carregado | 4 de 7 (até 150 mil remessas) |
 
+## Atualização V3.7.2: 2º diagnóstico (29/09/2026)
+
+O JMS respondeu bem: todas as rotas OK, **1,1 s por consulta**, todos os campos usados pelos gráficos preenchidos.
+
+O que ainda estava errado era a **fila**: 114 pendentes, 71 com erro, e os mesmos "últimos erros" antigos de 21–22/09. A causa é que nada recolocava na fila um dia que tinha ficado para trás:
+
+| Problema | Por que travava | Correção |
+|---|---|---|
+| Dias com detalhe incompleto (os de 21–22/09, com erros de uma versão anterior) | A tarefa desse dia estava encerrada (concluída ou com 4 falhas). Só o dia corrente, ontem e anteontem eram revistos | **Autocorreção diária** (7h) e uma vez ao instalar: todo dia incompleto sem tarefa ativa volta para a fila |
+| 71 tarefas com erro | Depois de 4 falhas, uma tarefa nunca mais era tentada, e o detalhe daquele dia ficava esperando uma taxa que nunca vinha | Tarefa com erro volta 12 h depois da última tentativa (limite de 300 por dia). As que já se resolveram por outro caminho são fechadas |
+| 36 compactações pendentes | Dias baixados em centenas de páginas de 100 (versões anteriores) levavam mais que uma execução para juntar. A compactação parava perto do limite e recomeçava do zero na seguinte, gastando tempo a cada 5 min | Esses dias são **baixados de novo** no formato atual (~1 min cada) |
+| Dia "taxa mudou, novo download agendado" | Se o dia saía da janela horária (hoje, ontem e anteontem) antes do novo download, ficava marcado para sempre | Entra na autocorreção |
+
+Além disso, o `diagnosticoCompleto` agora mostra:
+- a fila por situação (pronta / esperando a taxa do dia / pausada);
+- as tarefas com erro **agrupadas por causa**;
+- os dias com detalhe incompleto e o motivo de cada um.
+
+A estimativa de término conta só as tarefas prontas; antes ela dizia "9 min" contando tarefas que estavam travadas.
+
 ## Atualização V3.7.1: o que o `diagnosticoCompleto` mostrou no seu ambiente
 
 O diagnóstico rodado no JMS real (24/09/2026) confirmou o essencial:
@@ -147,7 +167,7 @@ Ele também mostrou quatro pontos que a V3.7.1 ajusta:
 
 ## Testes
 
-- `node tests/test_backend.js` → **146 verificações** (as 82 da versão anterior, 3 delas adaptadas ao novo comportamento, + 64 novas), incluindo:
+- `node tests/test_backend.js` → **154 verificações** (as 82 da versão anterior, 3 delas adaptadas ao novo comportamento, + 72 novas), incluindo:
   - JMS que corta ou recusa páginas grandes;
   - limite de paginação profunda com 25 mil remessas;
   - JMS que ignora a hora no filtro;

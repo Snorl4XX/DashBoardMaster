@@ -1,6 +1,21 @@
-# J&T DASHMASTER V3.7.1 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.7.2 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.7.2 (fila que não andava — 2º diagnóstico no JMS real)
+- **Autocorreção diária (7h).** Dias esquecidos voltam sozinhos para a fila:
+  - detalhe incompleto sem tarefa ativa;
+  - resumo com erro;
+  - dia marcado "novo download agendado" que saiu da janela horária;
+  - dia sem arquivo diário.
+
+  Tarefas com erro voltam 12 h depois da última tentativa. As que já se resolveram por outro caminho são fechadas, e "com erro" passa a mostrar só problemas reais.
+- **Dias antigos com centenas de páginas de 100** (baixados por versões anteriores) agora são **baixados de novo** no formato atual (~1 min). Antes, juntar esses arquivos passava do tempo de uma execução, recomeçava do zero na seguinte e gastava a cota para sempre.
+- **O `diagnosticoCompleto` detalha mais:**
+  - a fila por situação: pronta, esperando a taxa do dia, pausada;
+  - as tarefas com erro agrupadas por causa;
+  - a lista dos dias com detalhe incompleto e o motivo de cada um.
+- Para atualizar: substitua os arquivos e crie uma **Nova versão** da implantação. A autocorreção roda sozinha na primeira execução.
 
 ## V3.7.1 (ajustes a partir do diagnosticoCompleto no JMS real)
 - **Menos memória em dias grandes.** O SC→SC tem ~73 mil remessas/dia; o download agora é guardado em formato colunar (pico ~3× menor).
@@ -173,7 +188,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **146 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **154 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

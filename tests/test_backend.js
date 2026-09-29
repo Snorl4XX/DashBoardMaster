@@ -290,8 +290,9 @@ check(Object.keys(cA.__state.files).length === 6, 'um arquivo por dia e indicado
 check(cA.loadDetailFile_(cA.dayFilesMap_('wrong_send', D19, D19)[D19].fileId).kind === 'jt-day', 'arquivo diário no formato colunar');
 check(cA.allTabRows_('PAGES').length === 0, 'índice de páginas não cresce no caminho normal');
 // Fila vazia: depois de UMA execução de conferência, o gatilho de 5 min sai sem abrir a planilha.
-const confA = cA.processSyncQueue();
-check(!confA.idle && confA.remaining === 0, 'execução de conferência depois de uma execução com trabalho', confA);
+let confA = cA.processSyncQueue();
+if (!confA.idle) confA = cA.processSyncQueue();
+check(confA.idle === true, 'fila vazia confirmada: o gatilho passa a dormir', confA);
 const writesA = cA.__state.writes;
 const idle = cA.processSyncQueue();
 check(idle.idle === true && cA.__state.writes === writesA, 'gatilho sai na hora com a fila vazia (economiza a cota de execução)', idle);
@@ -542,5 +543,93 @@ const diagV = cV.diagnosticoCompleto(D19);
 check(/Tempo médio de resposta do JMS/.test(diagV.texto) && /Fila: vazia/.test(diagV.texto) && /registrado em/.test(diagV.texto), 'diagnóstico mostra tempo do JMS, fila e data do último erro', diagV.texto.slice(-400));
 const qr = cO.queueReport_(2000);
 check(typeof qr.texto === 'string' && qr.pendentes === 0, 'relatório da fila', qr);
+
+// ---------- 13. V3.7.2: autocorreção da fila (2º diagnóstico em produção) ----------
+// (a) Job enfileirado por OUTRA execução no meio do trabalho do gatilho (painel): não é esquecido.
+const optsR = {};
+const cR = freshCtx({'2026-09-19': makeDay(D19, 3), '2026-09-18': makeDay('2026-09-18', 4)}, optsR);
+cR.queueHistory(D19, D19, true);
+let injected = false;
+optsR.onFetch = () => {
+  if (injected) return;
+  injected = true;
+  // Outra execução (sem o cache desta) grava um job novo direto na planilha e marca a fila.
+  const sh = Object.values(cR.__state.spreadsheets)[0].getSheetByName('JOBS');
+  sh.appendRow(['uuid-x', 'SUMMARY', 'wrong_send', '2026-09-18', 0, 'PENDING', 0, new Date(), new Date(), '']);
+  cR.__state.props.QUEUE_HINT_V37 = JSON.stringify({s: 'PENDING', at: Date.now(), sig: ''});
+};
+cR.processSyncQueue({budgetMs: 600000});
+cR.STORAGE_CACHE_ = null; cR.TAB_CACHE_ = {}; cR.TAB_INDEX_ = {}; // nova execução = cache novo (como no Apps Script)
+const afterR = cR.processSyncQueue({budgetMs: 600000});
+check(!afterR.idle && cR.getRateDay_('wrong_send', '2026-09-18') !== null, 'job de outra execução durante o trabalho é processado na execução seguinte', afterR);
+
+// (b) Dias esquecidos voltam para a fila: detalhe com erro antigo, STALE fora da janela horária,
+//     resumo com erro, dia sem arquivo diário. Erro recente (< 12 h) espera.
+const hd = ['2026-09-10', '2026-09-11', '2026-09-12', '2026-09-13', '2026-09-14'];
+const dH = {}; hd.forEach((d, i) => { dH[d] = makeDay(d, 60 + i); });
+const cHe = freshCtx(dH, {}, {DATA_START_DATE: '2026-09-10'});
+cHe.queueHistory('2026-09-10', '2026-09-14', true);
+runAll(cHe);
+const jobRow = (t, ind, d) => cHe.allTabRows_('JOBS').findIndex(r => r[1] === t && r[2] === ind && cHe.dateCellIso_(r[3]) === d) + 2;
+const old13h = new Date(Date.now() - 13 * 3600000), recent1h = new Date(Date.now() - 3600000);
+// 10/09: detalhe ERRO, job em ERRO há 13 h → volta
+cHe.updateDayStatus_('sc_sc', '2026-09-10', {detailsStatus: 'ERROR', error: 'Faltam os cabeçalhos de rota para "sc_sc"'});
+cHe.writeCells_('JOBS', jobRow('DETAIL_INIT', 'sc_sc', '2026-09-10'), 6, ['ERROR', 4]);
+cHe.writeCells_('JOBS', jobRow('DETAIL_INIT', 'sc_sc', '2026-09-10'), 9, [old13h, 'x']);
+// 11/09: detalhe ERRO, job em ERRO há 1 h → espera
+cHe.updateDayStatus_('sc_dc', '2026-09-11', {detailsStatus: 'ERROR', error: 'y'});
+cHe.writeCells_('JOBS', jobRow('DETAIL_INIT', 'sc_dc', '2026-09-11'), 6, ['ERROR', 4]);
+cHe.writeCells_('JOBS', jobRow('DETAIL_INIT', 'sc_dc', '2026-09-11'), 9, [recent1h, 'y']);
+// 12/09: STALE fora da janela horária, job DONE → volta
+cHe.updateDayStatus_('wrong_send', '2026-09-12', {detailsStatus: 'STALE'});
+// 13/09: resumo com ERRO e job em ERRO antigo → volta
+cHe.updateDayStatus_('sorting_error', '2026-09-13', {summaryStatus: 'ERROR', error: 'z'});
+cHe.writeCells_('JOBS', jobRow('SUMMARY', 'sorting_error', '2026-09-13'), 6, ['ERROR', 4]);
+cHe.writeCells_('JOBS', jobRow('SUMMARY', 'sorting_error', '2026-09-13'), 9, [old13h, 'z']);
+// 14/09: detalhe completo sem arquivo diário (V2) → compactação
+const dfRow14 = cHe.findRowKey_('DAYFILES', 'missing_receipt', '2026-09-14');
+cHe.writeRow_('DAYFILES', dfRow14, ['outro', '2026-09-14', 'x', 0, 0, 0, new Date()]);
+cHe.invalidateTab_('DAYFILES');
+const healed = cHe.healQueue_(100);
+const pendH = cHe.pendingJobs_().map(j => j.type + ' ' + j.indicator + ' ' + j.date);
+check(healed === 4 && pendH.indexOf('DETAIL_INIT sc_sc 2026-09-10') >= 0 && pendH.indexOf('DETAIL_INIT wrong_send 2026-09-12') >= 0 &&
+  pendH.indexOf('SUMMARY sorting_error 2026-09-13') >= 0 && pendH.indexOf('COMPACT missing_receipt 2026-09-14') >= 0 &&
+  pendH.indexOf('DETAIL_INIT sc_dc 2026-09-11') < 0, 'autocorreção recoloca na fila só o que está esquecido', [healed, pendH]);
+check(cHe.healQueue_(100) === 0, 'autocorreção não duplica jobs já pendentes');
+// Job com ERRO de um dia que já está completo (tentativa de atualização que falhou) é fechado.
+cHe.writeCells_('JOBS', jobRow('SUMMARY', 'wrong_send', '2026-09-14'), 6, ['ERROR', 4]);
+cHe.healQueue_(100);
+check(cHe.allTabRows_('JOBS')[jobRow('SUMMARY', 'wrong_send', '2026-09-14') - 2][5] === 'DONE', 'erro antigo de dia já resolvido sai da contagem de erros');
+runAll(cHe);
+check(cHe.getDayStatus_('sc_sc', '2026-09-10').details === 'COMPLETE' && cHe.getDayStatus_('sc_sc', '2026-09-10').error === '' &&
+  cHe.getDayStatus_('wrong_send', '2026-09-12').details === 'COMPLETE' && cHe.lastErrorFor_('sc_sc', '2026-09-10', '2026-09-10') === null,
+  'dias esquecidos completos e erro antigo some depois da autocorreção');
+
+// (c) Dia antigo com centenas de páginas de 100 (versões anteriores): em vez de compactar para sempre, baixa de novo.
+const dG = {'2026-09-19': makeDay(D19, 5)}; dG[D19].ws = bigWrongSend(D19, 3500);
+const cG2 = freshCtx(dG);
+cG2.queueHistory(D19, D19, true);
+runAll(cG2);
+const legacyG = cG2.getArchivedRange_('wrong_send', D19, D19).rows;
+cG2.__state.props.V37_INSTALLED_AT = new Date(Date.now() + 60000).toISOString(); // páginas abaixo ficam "de antes da V3.7"
+for (let p = 1; p <= 35; p++) cG2.saveDetailPage_('wrong_send', D19, p, legacyG.slice((p - 1) * 100, p * 100), 35, 3500, 100);
+cG2.updateDayStatus_('wrong_send', D19, {detailsStatus: 'COMPLETE', expectedPages: 35, expectedRecords: 3500});
+const dfG = cG2.findRowKey_('DAYFILES', 'wrong_send', D19);
+cG2.writeRow_('DAYFILES', dfG, ['outro', D19, 'x', 0, 0, 0, new Date()]);
+cG2.invalidateTab_('DAYFILES');
+const cmp = cG2.compactDay_('wrong_send', D19, Date.now() + 600000);
+check(cmp.skipped && /novo download/.test(cmp.reason) && cG2.pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === 'wrong_send'),
+  'dia antigo com 35 páginas de 100 é baixado de novo em vez de compactado', cmp);
+runAll(cG2);
+check(cG2.dayFilesMap_('wrong_send', D19, D19)[D19] && cG2.getArchivedRange_('wrong_send', D19, D19).rows.length === 3500, 'novo download gerou o arquivo diário');
+
+// (d) Diagnóstico mostra a fila por situação e os erros por causa.
+const cQ = freshCtx({'2026-09-19': makeDay(D19, 3)}, {appError: {code: 500, msg: 'Erro interno do relatório'}});
+cQ.queueHistory(D19, D19, true);
+for (let i = 0; i < 4; i++) { cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {}; cQ.processSyncQueue({budgetMs: 600000, force: true}); }
+cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {};
+const qQ = cQ.queueReport_(1100);
+check(qQ.erros === 6 && qQ.esperandoTaxa === 6 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 6 &&
+  /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

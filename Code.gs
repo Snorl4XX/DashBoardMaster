@@ -186,10 +186,12 @@ function atualizarParaV3() {
  */
 function atualizarParaV37() {
   ensureStorage_();
+  v37InstalledAt_();
   deleteProp_('MIGRATION_V37');
   deleteProp_('MIGRATION_V371');
+  deleteProp_('MIGRATION_V372');
   clearPauses_();
-  const migrated = migrateToV37_() + migrateToV371_();
+  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};
@@ -362,8 +364,12 @@ function diagnosticoCompleto(date) {
         const from7 = addDaysIso_(d, -6);
         const cov = getCoverage_(key, from7, d);
         const err = lastErrorFor_(key, from7, d);
+        const sm = statusMap_(key, from7, d);
+        const meaning = {PARTIAL: 'baixando', ERROR: 'erro', STALE: 'taxa mudou, novo download agendado', CHECK_COUNTS: 'contagem diferente do JMS',
+          PENDING: 'na fila', NO_RECORD: 'sem detalhe'};
         item.ultimos7dias = {semTaxa: cov.missingSummary.length, detalhesIncompletos: cov.incompleteDetails.length, ultimoErro: err,
-          ultimaSincronizacao: getLatestSyncedAt_(key)};
+          ultimaSincronizacao: getLatestSyncedAt_(key),
+          diasIncompletos: cov.incompleteDetails.map(x => { const st = sm[key + '|' + x]; const v = st ? st.details : '?'; return humanDatePt_(x).slice(0, 5) + ' (' + (meaning[v] || v) + ')'; })};
       } catch (e) { item.ultimos7dias = {erro: String(e.message || e)}; }
     }
     out.indicadores[key] = item;
@@ -388,6 +394,7 @@ function diagnosticoCompleto(date) {
     const u = item.ultimos7dias;
     if (u && !u.erro) {
       lines.push('  Banco (7 dias): ' + u.semTaxa + ' dia(s) sem taxa · ' + u.detalhesIncompletos + ' com detalhe incompleto · última sincronização ' + fmtTs(u.ultimaSincronizacao));
+      if (u.diasIncompletos && u.diasIncompletos.length) lines.push('  Detalhe incompleto: ' + u.diasIncompletos.join(' · '));
       if (u.ultimoErro) lines.push('  Último erro: dia ' + humanDatePt_(u.ultimoErro.date) + ', registrado em ' + fmtTs(u.ultimoErro.at) + ' — ' + u.ultimoErro.reason);
     }
   });
@@ -408,25 +415,29 @@ function diagnosticoCompleto(date) {
 
 /**
  * Situação da fila com estimativa de término. A estimativa usa o tempo de resposta
- * medido do JMS e o tamanho recente de cada indicador; a cota diária de gatilhos é
- * 90 min numa conta Gmail e 6 h no Google Workspace (≈40 min/dia ficam para a rotina).
+ * medido do JMS e o tamanho recente de cada indicador, e conta só os jobs PRONTOS
+ * (detalhe esperando o resumo do dia, ou rota pausada, não anda sozinho).
+ * A cota diária de gatilhos é 90 min numa conta Gmail e 6 h no Google Workspace
+ * (≈40 min/dia ficam para a rotina).
  */
 function queueReport_(latencyMs) {
   const pend = pendingJobs_();
   const stats = computeSyncStatus_();
+  const pauses = activePauses_();
   const byType = {};
-  let minD = null, maxD = null;
-  pend.forEach(j => {
-    byType[j.type] = (byType[j.type] || 0) + 1;
-    if (!minD || j.date < minD) minD = j.date;
-    if (!maxD || j.date > maxD) maxD = j.date;
-  });
+  let minD = null, maxD = null, ready = 0, waiting = 0, paused = 0;
   const recent = {};
   allTabRows_('STATUS').forEach(r => { const v = Number(r[6]); if (INDICATORS[r[0]] && v > 0) recent[r[0]] = v; });
   const lat = Math.max(500, Number(latencyMs) || 1500) / 1000;
   const parallel = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
   let seconds = 0;
   pend.forEach(j => {
+    byType[j.type] = (byType[j.type] || 0) + 1;
+    if (!minD || j.date < minD) minD = j.date;
+    if (!maxD || j.date > maxD) maxD = j.date;
+    if (pauseFor_(INDICATORS[j.indicator].routeKey, pauses)) { paused++; return; }
+    if (!jobReady_(j)) { waiting++; return; }
+    ready++;
     if (j.type === 'SUMMARY') seconds += lat + 1.5;
     else if (j.type === 'DETAIL_INIT' || j.type === 'DETAIL_PAGE') {
       const cfg = INDICATORS[j.indicator];
@@ -435,13 +446,37 @@ function queueReport_(latencyMs) {
       seconds += (Math.ceil(total / size) + slices) * lat / Math.min(parallel, 3) + 4;
     } else seconds += 5;
   });
+  // Jobs com ERRO agrupados pela causa (texto amigável), para saber O QUE está falhando.
+  const causes = {};
+  allTabRows_('JOBS').forEach(r => {
+    if (String(r[5]) !== 'ERROR') return;
+    const d = dateCellIso_(r[3]);
+    const key = r[1] + ' · ' + publicJmsError_(r[9] || 'sem mensagem');
+    const c = causes[key] || (causes[key] = {tipo: String(r[1]), causa: publicJmsError_(r[9] || 'sem mensagem'), n: 0, de: d, ate: d, indicadores: []});
+    c.n++;
+    if (d < c.de) c.de = d;
+    if (d > c.ate) c.ate = d;
+    if (c.indicadores.indexOf(String(r[2])) < 0) c.indicadores.push(String(r[2]));
+  });
+  const erros = Object.keys(causes).map(k => causes[k]).sort((x, y) => y.n - x.n);
   const hours = seconds / 3600;
   const perDay = mins => Math.max(1, Math.ceil(seconds / 60 / mins));
-  const tipos = Object.keys(byType).map(t => byType[t] + ' ' + ({SUMMARY: 'resumo(s)', DETAIL_INIT: 'detalhe(s)', DETAIL_PAGE: 'detalhe(s) V2', COMPACT: 'compactação(ões)'}[t] || t)).join(', ');
-  const texto = pend.length
-    ? pend.length + ' pendente(s) (' + tipos + ') de ' + humanDatePt_(minD) + ' a ' + humanDatePt_(maxD) + ' · ' + stats.ERROR + ' com erro · ' +
-      'estimativa ~' + (hours < 1 ? Math.max(1, Math.round(hours * 60)) + ' min' : hours.toFixed(1) + ' h') + ' de execução → ' +
-      'Workspace: ~' + perDay(320) + ' dia(s) · conta Gmail: ~' + perDay(50) + ' dia(s)'
+  const nome = t => ({SUMMARY: 'resumo(s)', DETAIL_INIT: 'detalhe(s)', DETAIL_PAGE: 'detalhe(s) V2', COMPACT: 'compactação(ões)'}[t] || t);
+  const tipos = Object.keys(byType).map(t => byType[t] + ' ' + nome(t)).join(', ');
+  let texto = pend.length
+    ? pend.length + ' pendente(s) (' + tipos + ') de ' + humanDatePt_(minD) + ' a ' + humanDatePt_(maxD) + ': ' +
+      ready + ' pronto(s)' + (waiting ? ', ' + waiting + ' esperando a taxa do dia' : '') + (paused ? ', ' + paused + ' em rota pausada' : '') +
+      ' · ' + stats.ERROR + ' com erro' +
+      (ready ? ' · estimativa ~' + (hours < 1 ? Math.max(1, Math.round(hours * 60)) + ' min' : hours.toFixed(1) + ' h') + ' de execução → ' +
+        'Workspace: ~' + perDay(320) + ' dia(s) · conta Gmail: ~' + perDay(50) + ' dia(s)' : '')
     : 'vazia (' + stats.DONE + ' concluído(s), ' + stats.ERROR + ' com erro)';
-  return {pendentes: pend.length, porTipo: byType, de: minD, ate: maxD, erros: stats.ERROR, horasEstimadas: Math.round(hours * 10) / 10, texto: texto};
+  if (erros.length) {
+    texto += '\nJobs com erro, por causa (voltam sozinhos para a fila 12 h depois; retomarImportacao reabre na hora):';
+    erros.slice(0, 6).forEach(e => {
+      texto += '\n  · ' + e.n + '× ' + nome(e.tipo) + ' de ' + humanDatePt_(e.de) + (e.ate !== e.de ? ' a ' + humanDatePt_(e.ate) : '') +
+        ' [' + e.indicadores.join(', ') + ']: ' + e.causa;
+    });
+  }
+  return {pendentes: pend.length, prontos: ready, esperandoTaxa: waiting, pausados: paused, porTipo: byType, de: minD, ate: maxD,
+    erros: stats.ERROR, causasDeErro: erros, horasEstimadas: Math.round(hours * 10) / 10, texto: texto};
 }

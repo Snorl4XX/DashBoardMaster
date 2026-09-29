@@ -26,7 +26,7 @@ function syncHourly() {
   return {ok: true, queued: queued, worker: processSyncQueue({budgetMs: 240000})};
 }
 
-/** Todo dia às 7h: garante que ontem tem taxa e detalhes completos. */
+/** Todo dia às 7h: garante que ontem tem taxa e detalhes completos e recoloca na fila os dias esquecidos. */
 function auditYesterday() {
   const yesterday = addDaysIso_(isoToday_(), -1);
   const report = {};
@@ -38,5 +38,6 @@ function auditYesterday() {
     coverage.incompleteDetails.forEach(d => jobs.push(['DETAIL_INIT', k, d, 1]));
   });
   if (jobs.length) enqueueJobs_(jobs, {reset: true});
+  try { report.autocorrecao = healQueue_(300); } catch (e) { logSync_('WARN', '', '', 'Autocorreção não concluída: ' + e); }
   return report;
 }

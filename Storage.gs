@@ -356,6 +356,16 @@ function compactDay_(indicator, date, deadline) {
   const st = getDayStatus_(indicator, date);
   if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) return {skipped: true, reason: 'detalhes incompletos'};
   const pages = (archiveIndexMap_(indicator, date, date)[date] || []).filter(p => p.page >= 1 && p.page <= st.expectedPages);
+  // Dia baixado por versões anteriores em centenas de páginas de 100 (SC→SC: ~700 arquivos).
+  // Juntar tudo levava mais que o tempo de uma execução, parava perto do limite e recomeçava
+  // do zero na seguinte — para sempre, gastando a cota. Baixar de novo no formato atual é
+  // ~1 min e gera o arquivo diário direto.
+  const migratedAt = v37InstalledAt_();
+  const newest = pages.reduce((m, p) => p.syncedAt > m ? p.syncedAt : m, '');
+  if (pages.length > 30 && migratedAt && (!newest || Date.parse(newest) < migratedAt)) {
+    enqueueJobs_([['DETAIL_INIT', indicator, date, 1]], {reset: true});
+    return {skipped: true, reason: 'dia antigo com ' + pages.length + ' páginas: novo download agendado'};
+  }
   if (!pages.length) {
     // Marcado como completo, mas sem nenhum arquivo: baixa de novo em vez de repetir a compactação para sempre.
     if (!dayFilesMap_(indicator, date, date)[date]) {
@@ -688,8 +698,14 @@ function pendingJobs_() {
  * recomeçam do início no formato novo, e jobs que falharam pelos problemas corrigidos
  * voltam para a fila.
  */
+/** Quando a V3.7 começou a rodar (páginas de antes disso são do formato antigo, de 100 em 100). */
+function v37InstalledAt_() {
+  const v = getProp_('V37_INSTALLED_AT', '') || getProp_('MIGRATION_V37', '');
+  if (v && !getProp_('V37_INSTALLED_AT', '')) setProp_('V37_INSTALLED_AT', v);
+  return Date.parse(v) || 0;
+}
 function migrateToV37_() {
-  if (getProp_('MIGRATION_V37', '')) return 0;
+  if (getProp_('MIGRATION_V37', '')) { v37InstalledAt_(); return 0; }
   let n = 0;
   allTabRows_('JOBS').forEach((r, i) => {
     if (r[1] === 'DETAIL_INIT' && r[5] !== 'DONE' && Number(r[4]) > 1) { writeCells_('JOBS', i + 2, 5, [1]); n++; }
@@ -721,6 +737,82 @@ function migrateToV371_() {
   return n;
 }
 
+/**
+ * Autocorreção (diária, às 7h, e uma vez ao instalar a V3.7.2): nenhum dia fica
+ * esquecido. Volta para a fila:
+ *  - resumo com erro/pendente sem job ativo;
+ *  - detalhe incompleto (erro, parcial, pendente) sem job ativo;
+ *  - detalhe STALE que saiu da janela horária (hoje, ontem e anteontem);
+ *  - detalhe com contagem divergente (CHECK_COUNTS) na última semana, 1× por dia;
+ *  - dia com detalhe mas sem arquivo diário (compactação).
+ * Job com ERRO só volta 12 h depois da última tentativa, e no máximo `limit` por vez:
+ * um problema permanente não gasta a cota o dia inteiro.
+ */
+function healQueue_(limit) {
+  limit = limit || 300;
+  const today = isoToday_(), recentFrom = addDaysIso_(today, -2), weekFrom = addDaysIso_(today, -7);
+  const start = getProp_('DATA_START_DATE', '') || null;
+  const now = Date.now(), cool = 12 * 3600000;
+  const jobs = {};
+  allTabRows_('JOBS').forEach(r => {
+    const t = String(r[1]);
+    if (t !== 'SUMMARY' && t !== 'DETAIL_INIT' && t !== 'COMPACT') return;
+    const u = r[8] instanceof Date ? r[8].getTime() : Date.parse(r[8]);
+    jobs[t + '|' + r[2] + '|' + dateCellIso_(r[3])] = {status: String(r[5]), updatedAt: Number.isFinite(u) ? u : 0};
+  });
+  const files = {};
+  allTabRows_('DAYFILES').forEach(r => {
+    const k = r[0] + '|' + dateCellIso_(r[1]), t = toIsoTimestamp_(r[6]) || '';
+    if (!files[k] || t > files[k]) files[k] = t;
+  });
+  const todo = [];
+  const want = (type, ind, d) => {
+    if (todo.length >= limit) return;
+    const j = jobs[type + '|' + ind + '|' + d];
+    if (j && (j.status === 'PENDING' || j.status === 'RUNNING')) return;
+    if (j && j.status === 'ERROR' && now - j.updatedAt < cool) return;
+    todo.push([type, ind, d, type === 'DETAIL_INIT' ? 1 : 0]);
+  };
+  const statuses = statusMap_(null, start, addDaysIso_(today, -1));
+  Object.keys(statuses).forEach(k => {
+    const i = k.indexOf('|'), ind = k.slice(0, i), d = k.slice(i + 1), st = statuses[k];
+    if (!INDICATORS[ind] || !isIso_(d)) return;
+    if (st.summary === 'ERROR' || st.summary === 'PENDING' || !st.summary) { want('SUMMARY', ind, d); return; }
+    if (st.summary !== 'COMPLETE') return;
+    const fileAge = files[k] ? now - Date.parse(files[k]) : Infinity;
+    if (DETAIL_USABLE_.indexOf(st.details) < 0) want('DETAIL_INIT', ind, d);
+    else if (st.details === 'STALE' && d < recentFrom) want('DETAIL_INIT', ind, d);
+    else if (st.details === 'CHECK_COUNTS' && d >= weekFrom && fileAge > 24 * 3600000) want('DETAIL_INIT', ind, d);
+    else if (!files[k]) want('COMPACT', ind, d);
+  });
+  const n = todo.length ? enqueueJobs_(todo, {reset: true}) : 0;
+  // Jobs com ERRO cujo dia já se resolveu por outro caminho (ex.: tentativa de ATUALIZAR um
+  // dia que já estava completo): fecha, para "com erro" mostrar só problemas de verdade.
+  let closed = 0;
+  const allStatus = statusMap_(null, null, null);
+  allTabRows_('JOBS').forEach((r, i) => {
+    if (closed >= limit || String(r[5]) !== 'ERROR') return;
+    const k = r[2] + '|' + dateCellIso_(r[3]), st = allStatus[k];
+    if (!st) return;
+    const t = String(r[1]);
+    const ok = (t === 'SUMMARY' && (st.summary === 'COMPLETE' || st.summary === 'NO_RECORD')) ||
+      ((t === 'DETAIL_INIT' || t === 'DETAIL_PAGE') && (st.details === 'COMPLETE' || st.details === 'NO_RECORD')) ||
+      (t === 'COMPACT' && !!files[k]);
+    if (!ok) return;
+    writeCells_('JOBS', i + 2, 6, ['DONE']);
+    closed++;
+  });
+  if (n || closed) logSync_('INFO', '', '', 'Autocorreção: ' + n + ' job(s) de dias esquecidos/com erro voltaram para a fila; ' +
+    closed + ' job(s) com erro já resolvidos foram fechados.');
+  return n;
+}
+function migrateToV372_() {
+  if (getProp_('MIGRATION_V372', '')) return 0;
+  const n = healQueue_(1000);
+  setProp_('MIGRATION_V372', new Date().toISOString());
+  return n;
+}
+
 /** Trabalhador da fila (gatilho a cada 5 min). Uma execução por vez. */
 function processSyncQueue(opts) {
   opts = opts || {};
@@ -735,6 +827,7 @@ function processSyncQueue(opts) {
     recoverStaleRunning_();
     migrateToV37_();
     migrateToV371_();
+    migrateToV372_();
     // Várias passadas: jobs criados nesta execução (ex.: detalhe após o resumo) já entram.
     for (let pass = 0; pass < 6 && !stopped && Date.now() < deadline - 20000; pass++) {
       const queue = pendingJobs_().filter(j => !attempted[j.rowNum]);
