@@ -806,6 +806,30 @@ function healQueue_(limit) {
     closed + ' job(s) com erro já resolvidos foram fechados.');
   return n;
 }
+/**
+ * V3.8: indicadores com docas precisam do 1º segmento COMPLETO ("BRE - SP"), que as versões
+ * anteriores não guardavam. Uma vez: o histórico desses indicadores é baixado de novo no
+ * formato atual (mais recente primeiro). Enquanto não chega, os dias antigos mostram a doca
+ * como "Sem informação" — o resto do painel continua igual.
+ */
+function migrateToV38_() {
+  if (getProp_('MIGRATION_V38', '')) return 0;
+  const keys = Object.keys(INDICATORS).filter(k => INDICATORS[k].docks);
+  const start = getProp_('DATA_START_DATE', '') || null, end = addDaysIso_(isoToday_(), -1);
+  const jobs = [];
+  keys.forEach(k => {
+    const sm = statusMap_(k, start, end);
+    Object.keys(sm).forEach(key => {
+      const st = sm[key], d = key.slice(k.length + 1);
+      if (st.summary === 'COMPLETE' && st.details !== 'NO_RECORD') jobs.push(['DETAIL_INIT', k, d, 1]);
+    });
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V38', new Date().toISOString());
+  if (n) logSync_('INFO', keys.join(','), '', 'V3.8: ' + n + ' dia(s) baixados de novo para calcular as docas (1º segmento completo).');
+  return n;
+}
+
 function migrateToV372_() {
   if (getProp_('MIGRATION_V372', '')) return 0;
   const n = healQueue_(1000);
@@ -828,6 +852,7 @@ function processSyncQueue(opts) {
     migrateToV37_();
     migrateToV371_();
     migrateToV372_();
+    migrateToV38_();
     // Várias passadas: jobs criados nesta execução (ex.: detalhe após o resumo) já entram.
     for (let pass = 0; pass < 6 && !stopped && Date.now() < deadline - 20000; pass++) {
       const queue = pendingJobs_().filter(j => !attempted[j.rowNum]);

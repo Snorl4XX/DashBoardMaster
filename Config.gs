@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.7.2',
+  VERSION: '3.8.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -64,7 +64,38 @@ const FILTER_LABELS = Object.freeze({
   eventTime:       {pt: 'Horário do bipe', zh: '扫描时间'},
   receiptTime:     {pt: 'Horário do recebimento', zh: '到件时间'},
   expeditionTime:  {pt: 'Horário da expedição', zh: '发件时间'},
-  idealTimeFull:   {pt: 'Horário ideal de expedição', zh: '理想发车时间'}
+  idealTimeFull:   {pt: 'Horário ideal de expedição', zh: '理想发车时间'},
+  dock:            {pt: 'Doca', zh: '月台'},
+  dockDest:        {pt: 'Destino', zh: '目的地'}
+});
+
+/**
+ * DOCAS da expedição (regra da planilha "Falta Expedição", abas DESTINOS/DOCAS).
+ * DESTINO = 1º segmento do código de três segmentos (texto antes da 1ª vírgula), exceto
+ *           "BRE - xxx", que vira "BRE 2". DOCA = pela tabela abaixo; o resto é SEM DOCA.
+ * Para mudar a distribuição das docas, edite só esta tabela: vale na hora para todo o
+ * histórico (a doca é calculada na leitura, não fica gravada).
+ */
+const DOCKS_EXPEDICAO = Object.freeze({
+  destinationRules: [{prefix: 'BRE - ', value: 'BRE 2'}],
+  map: {
+    'DOCA 22': ['BRE'],
+    'DOCA 21': ['BRE 2'],
+    'DOCA 20': ['MS'],
+    'DOCA 19': ['SE', 'BA', 'PI', 'AL', 'CE', 'SBA', 'IMP', 'MCZ', 'SNS', 'FEC'],
+    'DOCA 18': ['PR', 'PR1'],
+    'DOCA 17': ['RS', 'RS1'],
+    'DOCA 16': ['DF'],
+    'DOCA 15': ['PE', 'BYE'],
+    'DOCA 14': ['GRU'],
+    'DOCA 10': ['VDC', 'RJ', 'ES'],
+    'DOCA 09': ['CHV', 'MG', 'MG1'],
+    'DOCA 08': ['SC', 'SC1'],
+    'DOCA 07': ['GO'],
+    'DOCA 06': ['MT'],
+    'DOCA 05': ['NE', 'NE1']
+  },
+  fallback: 'SEM DOCA'
 });
 
 /** Cores fixas por turno (validadas para daltonismo). A cor segue o turno em todos os gráficos. */
@@ -207,7 +238,8 @@ const INDICATORS = Object.freeze({
       tripId: ['arriveOrder'], route: ['lastStop']
     },
     labels: {login: {pt: 'Login (descarga)', zh: '卸车操作员'}, tripId: {pt: 'ID viagem recebimento', zh: '到件车次号'}},
-    filters: ['shift', 'login', 'interval', 'client', 'tripId', 'segment', 'destination'],
+    docks: DOCKS_EXPEDICAO,
+    filters: ['shift', 'login', 'interval', 'client', 'tripId', 'segment', 'destination', 'dock'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
@@ -216,11 +248,20 @@ const INDICATORS = Object.freeze({
       {key: 'login', type: 'bar', horizontal: true, top: 10, title: {pt: 'Logins mais ofensores', zh: '高频卸车操作员'}},
       {key: 'tripId', type: 'bar', horizontal: true, top: 10, title: {pt: 'IDs de viagem de recebimento', zh: '高频到件车次号'}},
       {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
-      {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
+      {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}},
+      {key: 'dock', type: 'bar', horizontal: true, top: 16, hideNA: true, title: {pt: 'Docas mais ofensoras', zh: '高频责任月台'}},
+      {key: 'dockByShift', byShift: 'dock', type: 'bar', top: 3, hideNA: true, title: {pt: 'Turno × docas mais ofensoras (top 3 por turno)', zh: '各班次前3责任月台'}}
+    ],
+    // Mesmo formato das tabelas dinâmicas da planilha "Falta Expedição" (aba Planilha2).
+    pivotTables: [
+      {key: 'dockDest', groupBy: ['dock', 'dockDest'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
+      {key: 'shiftDock', groupBy: ['shift', 'dock'], topPerGroup: 3, skipNA: true, title: {pt: 'Turno × docas mais ofensoras', zh: '各班次责任月台'}},
+      {key: 'shiftDest', groupBy: ['shift', 'dockDest'], topPerGroup: 6, skipNA: true, title: {pt: 'Top 6 destinos mais ofensores por turno', zh: '各班次前6目的地'}}
     ],
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Remessa', '运单号'], ['login', 'Operador da descarga', '卸车操作员'],
-      ['shift', 'Turno', '班次'], ['segment', '1º segmento', '一段码'], ['tripId', 'ID viagem recebimento', '到件车次号'],
+      ['shift', 'Turno', '班次'], ['segment', '1º segmento', '一段码'], ['dockDest', 'Destino', '目的地'], ['dock', 'Doca', '月台'],
+      ['tripId', 'ID viagem recebimento', '到件车次号'],
       ['client', 'Cliente', '客户'], ['eventTime', 'Horário da descarga recebida', '到件卸车时间']
     ]
   },
@@ -322,14 +363,28 @@ function dimLabel_(cfg, key) {
   return (cfg && cfg.labels && cfg.labels[key]) || FILTER_LABELS[key] || {pt: key, zh: key};
 }
 
-/** Campos da linha normalizada que o navegador precisa para este indicador. */
-function clientFields_(cfg) {
+/** Dimensão agrupada por turno de um gráfico ("Top N ... por turno"), ou null. */
+function chartShiftDim_(c) { return c.key === 'segmentByShift' ? 'segment' : (c.byShift || null); }
+
+/** Todas as dimensões que o painel mostra para este indicador (inclui as calculadas no navegador). */
+function usedFields_(cfg) {
   const set = {date: 1, shipment: 1, shift: 1};
   (cfg.filters || []).forEach(k => set[k] = 1);
-  (cfg.charts || []).forEach(c => { if (c.key === 'segmentByShift') { set.segment = 1; } else set[c.key] = 1; });
+  (cfg.charts || []).forEach(c => { set[chartShiftDim_(c) || c.key] = 1; });
   (cfg.table || []).forEach(c => set[c[0]] = 1);
   (cfg.topCards || []).forEach(k => set[k] = 1);
   if (cfg.summaryTable) cfg.summaryTable.groupBy.forEach(k => set[k] = 1);
+  (cfg.pivotTables || []).forEach(p => p.groupBy.forEach(k => set[k] = 1));
+  return Object.keys(set);
+}
+/** Calculadas na leitura (Core.applyDocks), a partir do 1º segmento completo: não vão no conjunto de dados. */
+const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1};
+
+/** Campos da linha normalizada que o navegador precisa receber para este indicador. */
+function clientFields_(cfg) {
+  const set = {};
+  usedFields_(cfg).forEach(k => { if (!DERIVED_CLIENT_FIELDS_[k]) set[k] = 1; });
+  if (cfg.docks) { set.segmentRaw = 1; set.segment = 1; }
   return Object.keys(set);
 }
 
@@ -340,9 +395,11 @@ function getPublicCatalog_() {
     .map(cfg => ({
       key: cfg.key, order: cfg.order, name: cfg.name, subtitle: cfg.subtitle, goal: cfg.goal,
       filters: cfg.filters.map(k => ({key: k, label: dimLabel_(cfg, k)})),
-      labels: clientFields_(cfg).reduce((o, k) => { o[k] = dimLabel_(cfg, k); return o; }, {}),
+      labels: usedFields_(cfg).reduce((o, k) => { o[k] = dimLabel_(cfg, k); return o; }, {}),
       charts: cfg.charts, table: cfg.table, topCards: cfg.topCards || [],
       summaryTable: cfg.summaryTable || null,
+      pivotTables: cfg.pivotTables || [],
+      docks: cfg.docks || null,
       emptyLotLabel: cfg.emptyLotLabel || null,
       hideShiftCards: !!cfg.hideShiftCards,
       operationalWindow: cfg.key === 'sc_sc' || cfg.key === 'sc_dc'

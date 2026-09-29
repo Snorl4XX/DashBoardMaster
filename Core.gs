@@ -47,6 +47,76 @@ function JTCoreFactory_() {
     var tok = s.split(/[,，;\s]+/).filter(function (x) { return x; })[0];
     return tok || '';
   }
+  /** 1º segmento completo, como na planilha: texto antes da 1ª vírgula ("BRE - SP,352-19,810" → "BRE - SP"). */
+  function segmentHead(v) {
+    if (blank(v)) return '';
+    return String(v).trim().replace(/^主\s*[:：]\s*/, '').split(/[,，;]/)[0].trim();
+  }
+
+  // ---------- docas da expedição (Config.gs → DOCKS_EXPEDICAO) ----------
+  /** DESTINO: o 1º segmento, com as regras de agrupamento ("BRE - xxx" → "BRE 2"). */
+  function dockDestination(seg, docks) {
+    var s = String(seg || '').trim();
+    if (!s) return '';
+    var rules = (docks && docks.destinationRules) || [];
+    for (var i = 0; i < rules.length; i++) {
+      if (rules[i].prefix && s.toUpperCase().indexOf(String(rules[i].prefix).toUpperCase()) === 0) return rules[i].value;
+    }
+    return s;
+  }
+  /**
+   * Acrescenta dockDest (destino) e dock (doca) em cada remessa. Igual ao PROCV/SE da planilha:
+   * comparação sem diferenciar maiúsculas; destino sem doca = SEM DOCA; 1º segmento em branco = SEM DOCA.
+   * Remessa gravada antes da V3.8 (sem o 1º segmento completo) fica "Sem informação" até ser baixada de novo.
+   */
+  function applyDocks(rows, docks) {
+    if (!docks || !rows) return rows;
+    var byDest = {};
+    Object.keys(docks.map || {}).forEach(function (d) { docks.map[d].forEach(function (x) { byDest[String(x).toUpperCase()] = d; }); });
+    var memo = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i], raw = r.segmentRaw === undefined || r.segmentRaw === null ? '' : String(r.segmentRaw);
+      var key = raw + '\u0001' + (r.segment || '');
+      var m = memo[key];
+      if (!m) {
+        if (!raw && !blank(r.segment)) m = ['', ''];
+        else {
+          var dest = dockDestination(raw, docks);
+          m = [dest, dest ? (byDest[dest.toUpperCase()] || docks.fallback) : docks.fallback];
+        }
+        memo[key] = m;
+      }
+      r.dockDest = m[0];
+      r.dock = m[1];
+    }
+    return rows;
+  }
+
+  // ---------- tabelas dinâmicas (2 níveis, subtotal por grupo) ----------
+  /**
+   * Mesmo resultado de uma tabela dinâmica do Excel com linhas [nível 1, nível 2] e contagem:
+   * grupos e itens em ordem decrescente; topPerGroup = "10 primeiros" do Excel (inclui empates);
+   * skipNA = esconde o grupo "(em branco)" do nível 1. O total é o total EXIBIDO na tabela.
+   */
+  function pivot(rows, def) {
+    var k1 = def.groupBy[0], k2 = def.groupBy[1], map = {};
+    (rows || []).forEach(function (r) {
+      var a = norm(r[k1]), b = norm(r[k2]);
+      if (def.skipNA && a === 'N/A') return;
+      var g = map[a] || (map[a] = {});
+      g[b] = (g[b] || 0) + 1;
+    });
+    var groups = Object.keys(map).map(function (a) {
+      var items = Object.keys(map[a]).map(function (b) { return {value: b, count: map[a][b]}; })
+        .sort(function (x, y) { return y.count - x.count || compareText(x.value, y.value); });
+      if (def.topPerGroup && items.length > def.topPerGroup) {
+        var cut = items[def.topPerGroup - 1].count;
+        items = items.filter(function (x, i) { return i < def.topPerGroup || x.count === cut; });
+      }
+      return {value: a, items: items, count: items.reduce(function (s, x) { return s + x.count; }, 0)};
+    }).sort(function (x, y) { return y.count - x.count || compareText(x.value, y.value); });
+    return {key: def.key, groupBy: [k1, k2], groups: groups, total: groups.reduce(function (s, g) { return s + g.count; }, 0)};
+  }
 
   // ---------- datas ISO (AAAA-MM-DD) ----------
   function isIso(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')); }
@@ -201,13 +271,15 @@ function JTCoreFactory_() {
     var base = {key: def.key, type: def.type || 'bar', title: def.title, horizontal: !!def.horizontal, ranking: !!def.ranking};
     var total = distinctCount(rows);
     base.total = total;
-    if (def.key === 'segmentByShift') {
+    var shiftDim = def.key === 'segmentByShift' ? 'segment' : def.byShift;
+    if (shiftDim) {
       var cats = [], per = {};
       SHIFTS.forEach(function (s) {
-        per[s] = countBy(rows.filter(function (r) { return r.shift === s; }), 'segment').slice(0, def.top || 4);
+        per[s] = countBy(rows.filter(function (r) { return r.shift === s; }), shiftDim)
+          .filter(function (x) { return !(def.hideNA && x.label === 'N/A'); }).slice(0, def.top || 4);
         per[s].forEach(function (x) { if (cats.indexOf(x.label) < 0) cats.push(x.label); });
       });
-      base.type = 'bar'; base.grouped = true; base.labels = cats;
+      base.type = 'bar'; base.grouped = true; base.labels = cats; base.dim = shiftDim;
       base.datasets = SHIFTS.map(function (s) {
         return {label: s, shift: s, data: cats.map(function (c) {
           var f = per[s].filter(function (v) { return v.label === c; })[0]; return f ? f.value : 0;
@@ -231,7 +303,7 @@ function JTCoreFactory_() {
       base.datasets = [{label: 'qty', data: hours.map(function (l) { return byLabel[l] || 0; })}];
       return base;
     }
-    var top = groups.filter(function (g) { return !(def.key === 'interval' && g.label === 'N/A'); }).slice(0, def.top || 10);
+    var top = groups.filter(function (g) { return !((def.key === 'interval' || def.hideNA) && g.label === 'N/A'); }).slice(0, def.top || 10);
     base.labels = top.map(function (g) { return g.label; });
     base.datasets = [{label: 'qty', data: top.map(function (g) { return g.value; })}];
     base.others = groups.length - top.length;
@@ -385,7 +457,7 @@ function JTCoreFactory_() {
     '上环节建包异常': 'Erro de ensacamento na etapa anterior', '一段码异常': 'Erro no 1º segmento', '人为因素': 'Fator humano',
     '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição'
   };
-  var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无'};
+  var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台'};
   function hasCjk(s) { return /[㐀-鿿]/.test(s); }
   function localizeValue(value, lang) {
     var s = String(value === null || value === undefined ? '' : value);
@@ -402,7 +474,8 @@ function JTCoreFactory_() {
 
   return {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
-    intervalLabel: intervalLabel, firstSegment: firstSegment, isIso: isIso, addDays: addDays,
+    intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, isIso: isIso, addDays: addDays,
+    dockDestination: dockDestination, applyDocks: applyDocks, pivot: pivot,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

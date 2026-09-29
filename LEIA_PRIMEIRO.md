@@ -1,6 +1,28 @@
-# J&T DASHMASTER V3.7.2 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.8 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.8 — Docas na Falta de Bipagem na Expedição
+Tudo o que já existia continua igual. Foram **acrescentados**:
+- **Filtro "Doca"** (depois dos filtros atuais).
+- **Gráfico "Docas mais ofensoras"** e **gráfico "Turno × docas mais ofensoras (top 3 por turno)"**, no fim da grade de gráficos. Os dois têm também a opção **Tabela**.
+- **Três tabelas no formato das tabelas dinâmicas** da planilha "Falta Expedição" (aba Planilha2), com subtotal por grupo e total geral:
+  - *Docas mais afetadas* (doca → destinos);
+  - *Turno × docas mais ofensoras* (top 3 por turno);
+  - *Top 6 destinos mais ofensores por turno*.
+
+  Nas tabelas de top N, empates entram e o percentual é sobre o total exibido, igual ao Excel.
+- **Colunas "Destino" e "Doca"** na tabela de remessas, no CSV e no relatório (PDF/Excel, que também traz as três tabelas).
+
+**Regra (a mesma da planilha):**
+- **DESTINO** = 1º segmento do código de três segmentos (texto antes da 1ª vírgula). A exceção é "BRE - xxx", que vira **BRE 2**.
+- **DOCA** = tabela `DOCKS_EXPEDICAO` em `Config.gs`: BRE→22, BRE 2→21, MS→20, SE/BA/PI/AL/CE/SBA/IMP/MCZ/SNS/FEC→19, PR/PR1→18, RS/RS1→17, DF→16, PE/BYE→15, GRU→14, VDC/RJ/ES→10, CHV/MG/MG1→09, SC/SC1→08, GO→07, MT→06, NE/NE1→05.
+- O que não está na tabela vira **SEM DOCA**.
+- Se as docas mudarem, edite só essa tabela: a doca é calculada na hora de mostrar, então a mudança vale na hora para todo o histórico.
+- O **turno** é o mesmo da planilha (horário do bipe de descarga: T1 06–14h, T2 14–22h, T3 22–06h).
+- Conferido: com os dados da planilha de 22/09, as três tabelas batem **número a número** (teste automático).
+
+**Histórico:** as versões anteriores guardavam o 1º segmento cortado ("BRE - SP" virava "BRE"), e sem o texto completo não dá para separar BRE (DOCA 22) de BRE 2 (DOCA 21). Por isso, na primeira execução da V3.8, o histórico da Expedição é **baixado de novo automaticamente**, do mais recente para o mais antigo (cerca de 10 consultas por dia de histórico). Até cada dia chegar, a doca desse dia aparece como "Sem informação" e fica fora do gráfico de docas; o resto do painel não muda.
 
 ## V3.7.2 (fila que não andava — 2º diagnóstico no JMS real)
 - **Autocorreção diária (7h).** Dias esquecidos voltam sozinhos para a fila:
@@ -188,7 +210,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **154 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **171 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

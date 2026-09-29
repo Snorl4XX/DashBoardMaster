@@ -121,7 +121,7 @@ function buildSummaryReportSheet_(sh, dash) {
 
   // Principais ofensores (1º cartão de destaque do indicador)
   let n = shiftStart + 18;
-  (cfg.charts || []).filter(def => def.type === 'bar' && def.key !== 'segmentByShift').forEach((def, i) => {
+  (cfg.charts || []).filter(def => def.type === 'bar' && !chartShiftDim_(def)).forEach((def, i) => {
     const ch = dash.charts.filter(x => x.key === def.key)[0];
     if (!ch || !ch.labels.length) return;
     const lab = dimLabel_(cfg, def.key);
@@ -143,7 +143,30 @@ function buildSummaryReportSheet_(sh, dash) {
     const vals = dash.summary.rows.map(r => r.slice(0, -1).concat([r[r.length - 1] / 100]));
     sh.getRange(n + 2, 1, vals.length, heads.length).setValues(vals);
     sh.getRange(n + 2, heads.length, vals.length, 1).setNumberFormat('0.0%');
+    n += vals.length + 4;
   }
+
+  // Tabelas dinâmicas (ex.: docas da Falta de Bipagem na Expedição), no formato da planilha.
+  (dash.pivots || []).forEach((pv, i) => {
+    const def = cfg.pivotTables[i];
+    if (!pv.groups.length) return;
+    const l1 = dimLabel_(cfg, pv.groupBy[0]), l2 = dimLabel_(cfg, pv.groupBy[1]);
+    sh.getRange(n, 1).setValue(def.title.pt.toUpperCase() + ' ' + def.title.zh).setFontWeight('bold').setFontSize(12);
+    headerRow_(sh.getRange(n + 1, 1, 1, 4).setValues([[bilingual_(l1.pt, l1.zh), bilingual_(l2.pt, l2.zh), bilingual_('Quantidade', '运单量'), bilingual_('% do total', '占比')]]));
+    const vals = [], bold = [];
+    const lbl = v => v === 'N/A' ? '(em branco)' : JTCore_.localizeValue(v, 'pt');
+    pv.groups.forEach(g => {
+      g.items.forEach((it, j) => vals.push([j === 0 ? lbl(g.value) : '', lbl(it.value), it.count, pv.total ? it.count / pv.total : 0]));
+      bold.push(vals.length);
+      vals.push([lbl(g.value) + ' Total', '', g.count, pv.total ? g.count / pv.total : 0]);
+    });
+    bold.push(vals.length);
+    vals.push(['Total geral', '', pv.total, pv.total ? 1 : 0]);
+    sh.getRange(n + 2, 1, vals.length, 4).setValues(vals);
+    sh.getRange(n + 2, 4, vals.length, 1).setNumberFormat('0.00%');
+    bold.forEach(k => sh.getRange(n + 2 + k, 1, 1, 4).setFontWeight('bold').setBackground('#FDEBEC'));
+    n += vals.length + 4;
+  });
 }
 
 function buildDataReportSheet_(sh, cfg, rows, limit) {

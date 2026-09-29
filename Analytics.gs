@@ -5,7 +5,7 @@ const SEGMENT_FIRST_CODE_ = {wrong_send: 1, sorting_error: 1, missing_receipt: 1
 /** Campos guardados nos arquivos diários (formato colunar da V3.7). */
 const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expeditionTime', 'login', 'segment', 'destination',
   'lot', 'client', 'offenderBase', 'errorType', 'tripId', 'route', 'reason', 'idealTime', 'idealTimeFull', 'correctDest',
-  'shift', 'receiptShift', 'expeditionShift', 'interval'];
+  'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 
@@ -25,6 +25,9 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
     client: str(f.client), offenderBase: str(f.offenderBase), errorType: str(f.errorType), tripId: str(f.tripId),
     route: str(f.route), reason: str(f.reason), idealTime: str(f.idealTime), correctDest: str(f.correctDest)
   };
+  // Indicadores com docas guardam o 1º segmento COMPLETO ("BRE - SP"); o campo segment continua
+  // só com o código ("BRE"), como nos gráficos de sempre. Destino e doca saem daqui (Core.applyDocks).
+  if (cfg.docks) row.segmentRaw = JTCore_.segmentHead(row.segment);
   return rederiveRow_(indicatorKey, row);
 }
 
@@ -312,12 +315,14 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   const p = resolvePeriod_(params, allRates, indicatorKey);
   const filters = normalizeFilters_(params && params.filters);
   const archive = getArchivedRange_(indicatorKey, p.from, p.to, archiveOpts);
+  if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   const rows = JTCore_.applyFilters(archive.rows, filters);
   return {
     cfg: cfg, from: p.from, to: p.to, filters: filters, archive: archive, rows: rows, allRates: allRates,
     coverage: getCoverage_(indicatorKey, p.from, p.to),
     cards: JTCore_.computeCards(cfg, allRates, rows, filters, p.from, p.to),
     charts: cfg.charts.map(def => JTCore_.buildChart(def, rows, {})),
-    summary: JTCore_.summaryTable(cfg, rows)
+    summary: JTCore_.summaryTable(cfg, rows),
+    pivots: (cfg.pivotTables || []).map(def => JTCore_.pivot(rows, def))
   };
 }

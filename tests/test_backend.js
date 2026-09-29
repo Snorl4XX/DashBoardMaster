@@ -632,4 +632,81 @@ const qQ = cQ.queueReport_(1100);
 check(qQ.erros === 6 && qQ.esperandoTaxa === 6 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 6 &&
   /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
+// ---------- 14. V3.8: docas na Falta de Bipagem na Expedição (planilha do usuário) ----------
+const vm = require('vm');
+// (a) Reproduz as 3 tabelas dinâmicas da planilha, número a número, a partir dos dados do JMS.
+const FX = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'fixtures', 'falta_expedicao_2026-09-22.json'), 'utf8'));
+const catMD = ctx.getPublicCatalog_().find(c => c.key === 'missing_dispatch');
+const HOUR = {T1: '10:00:00', T2: '18:00:00', T3: '02:00:00'};
+let seqFx = 0;
+const fxRows = [];
+FX.linhas.forEach(([code, turno, n]) => {
+  for (let i = 0; i < n; i++) fxRows.push(ctx.normalizeDetailRow_('missing_dispatch', {billcode: 'FX' + (seqFx++), threeSegmentCode: code, unloadArriveTime: FX.data + ' ' + HOUR[turno]}, FX.data));
+});
+C.applyDocks(fxRows, catMD.docks);
+check(fxRows.length === 8473 && fxRows.filter(r => r.segmentRaw === 'BRE - SOD')[0].dockDest === 'BRE 2' && fxRows.filter(r => r.segmentRaw === 'BRE - SOD')[0].dock === 'DOCA 21' &&
+  fxRows.filter(r => r.segmentRaw === 'BRE - SOD')[0].segment === 'BRE', 'destino/doca como na planilha, 1º segmento dos gráficos antigos inalterado');
+function asExcel(p) {
+  const out = [], lbl = v => v === 'N/A' ? '(em branco)' : v;
+  p.groups.forEach(g => {
+    g.items.forEach((it, i) => out.push([i === 0 ? lbl(g.value) : null, lbl(it.value), it.count, Math.round(it.count / p.total * 1e6) / 1e6]));
+    out.push([lbl(g.value) + ' Total', null, g.count, Math.round(g.count / p.total * 1e6) / 1e6]);
+  });
+  out.push(['Total geral', null, p.total, 1]);
+  return out;
+}
+// Empates dentro do grupo podem vir em outra ordem (o Excel não ordena empates por nome).
+function canon(rows) {
+  const blocks = [];
+  let cur = null;
+  rows.forEach(r => { if (r[0] !== null && !/ Total$|^Total geral$/.test(r[0])) { cur = {head: r[0], items: []}; blocks.push(cur); } if (/ Total$|^Total geral$/.test(r[0] || '')) blocks.push({total: r}); else cur.items.push([r[1], r[2], r[3]]); });
+  return JSON.stringify(blocks.map(b => b.total ? b.total : [b.head, b.items.sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))]));
+}
+catMD.pivotTables.forEach(def => {
+  const got = asExcel(C.pivot(fxRows, def)), exp = FX.esperado[def.key];
+  check(canon(got) === canon(exp), 'tabela dinâmica "' + def.title.pt + '" igual à planilha', {got: got.slice(0, 8), exp: exp.slice(0, 8)});
+});
+
+// (b) Painel: filtro de docas, 2 gráficos novos, colunas Destino/Doca — sem tirar nada do que existia.
+check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,destination,dock', 'filtro de docas adicionado no fim, filtros antigos mantidos');
+check(catMD.charts.map(c => c.key).join() === 'shift,segmentByShift,segment,login,tripId,client,interval,dock,dockByShift', 'gráficos antigos mantidos + docas', catMD.charts.map(c => c.key));
+check(catMD.labels.dock.pt === 'Doca' && catMD.labels.dockDest.pt === 'Destino' && catMD.table.some(c => c[0] === 'dock'), 'rótulos e colunas novas');
+const cfMD = vm.runInContext('clientFields_(INDICATORS.missing_dispatch)', ctx);
+check(cfMD.indexOf('segmentRaw') >= 0 && cfMD.indexOf('dock') < 0 && cfMD.indexOf('dockDest') < 0, 'doca é calculada no navegador a partir do 1º segmento completo', cfMD);
+const chDock = C.buildChart(catMD.charts.find(c => c.key === 'dock'), fxRows, {});
+check(chDock.labels[0] === 'DOCA 21' && chDock.datasets[0].data[0] === 4024 && chDock.labels.length === 15 && chDock.labels.indexOf('SEM DOCA') >= 0, 'gráfico: docas mais ofensoras (as 15 do dia, com SEM DOCA)', chDock.labels);
+const chShift = C.buildChart(catMD.charts.find(c => c.key === 'dockByShift'), fxRows, {});
+check(chShift.grouped && chShift.dim === 'dock' && chShift.datasets.find(d => d.shift === 'T3').data[chShift.labels.indexOf('DOCA 21')] === 2085,
+  'gráfico: turno × docas mais ofensoras', {labels: chShift.labels});
+const oldRows = [{date: FX.data, shipment: 'OLD1', segment: 'BRE', shift: 'T1'}];
+C.applyDocks(oldRows, catMD.docks);
+check(oldRows[0].dock === '' && C.buildChart(catMD.charts.find(c => c.key === 'dock'), oldRows, {}).labels.length === 0, 'dado antigo sem 1º segmento completo: "Sem informação", fora do gráfico');
+
+// (c) Pipeline completo: JMS → arquivo diário → painel e relatório com docas; filtro por doca.
+const dMD = {'2026-09-19': makeDay(D19, 8)};
+const codes = FX.linhas.map(l => l[0]).filter(Boolean);
+dMD[D19].md = dMD[D19].md.map((r, i) => Object.assign({}, r, {threeSegmentCode: codes[(i * 37) % codes.length]}));
+const cMD = freshCtx(dMD);
+cMD.queueHistory(D19, D19, true);
+runAll(cMD);
+const dashMD = cMD.getDashboardData('missing_dispatch', {from: D19, to: D19});
+const rowsMD = C.applyDocks(C.decodeDataset(dashMD.dataset), catMD.docks);
+check(dashMD.dataset.fields.indexOf('segmentRaw') >= 0 && rowsMD.every(r => r.dock && r.dockDest) && rowsMD.some(r => r.dock === 'DOCA 21'), 'painel recebe o 1º segmento completo e calcula as docas');
+const compMD = cMD.computeDashboard_('missing_dispatch', {from: D19, to: D19, filters: {dock: ['DOCA 21']}});
+check(compMD.rows.length > 0 && compMD.rows.every(r => r.dock === 'DOCA 21') && compMD.pivots.length === 3 && compMD.pivots[0].groups[0].value === 'DOCA 21',
+  'relatório: filtro por doca e tabelas dinâmicas', compMD.pivots.map(p => p.groups.length));
+cMD.UrlFetchApp.fetch = () => ({getResponseCode: () => 200, getBlob: () => cMD.Utilities.newBlob('PDF', 'application/pdf', 'x')});
+const repMD = cMD.generateReport('missing_dispatch', {from: D19, to: D19}, 'xlsx');
+check(repMD.ok && repMD.rows > 0, 'relatório Excel com as tabelas de docas');
+// Outros indicadores não mudam.
+check(!cMD.getPublicCatalog_().find(c => c.key === 'missing_receipt').docks && vm.runInContext('clientFields_(INDICATORS.missing_receipt)', cMD).indexOf('segmentRaw') < 0, 'outros indicadores intactos');
+
+// (d) Histórico baixado antes da V3.8 é baixado de novo uma vez (para ter o 1º segmento completo).
+delete cMD.__state.props.MIGRATION_V38;
+cMD.STORAGE_CACHE_ = null; cMD.TAB_CACHE_ = {}; cMD.TAB_INDEX_ = {};
+const nV38 = cMD.migrateToV38_();
+const pendV38 = cMD.pendingJobs_();
+check(nV38 === 1 && pendV38.length === 1 && pendV38[0].indicator === 'missing_dispatch' && pendV38[0].type === 'DETAIL_INIT', 'V3.8 rebaixa só o histórico da Expedição', pendV38);
+check(cMD.migrateToV38_() === 0, 'migração roda uma vez só');
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

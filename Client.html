@@ -76,7 +76,10 @@
       pauseQuotaTitle: 'Sincronização pausada: cota diária do Google atingida',
       pauseQuotaText: 'O Google limita o uso diário do Apps Script. A importação recomeça sozinha por volta de {t}. Os dados já sincronizados continuam no painel.',
       rowsCapBadge: 'Limite de {n} remessas: {d} dia(s) fora dos gráficos',
-      rowsCapHint: 'Reduza o período para ver todas as remessas nos gráficos e na tabela. Taxas e cartões oficiais continuam completos. Dias fora:'
+      rowsCapHint: 'Reduza o período para ver todas as remessas nos gráficos e na tabela. Taxas e cartões oficiais continuam completos. Dias fora:',
+      groupTotal: '{g} Total', grandTotal: 'Total geral',
+      pivotNote: 'Formato de tabela dinâmica · percentual sobre o total da tabela.',
+      pivotTopNote: 'Top {n} por grupo (empates incluídos) · percentual sobre o total exibido, como na tabela dinâmica.'
     },
     zh: {
       panel: '运营看板', autoSync: '自动更新', refresh: '刷新', downloadReport: '下载报告',
@@ -136,7 +139,10 @@
       pauseQuotaTitle: '同步已暂停：已达到 Google 每日配额',
       pauseQuotaText: 'Google 限制 Apps Script 每日用量，约在 {t} 自动恢复导入。已同步的数据仍会显示。',
       rowsCapBadge: '单次上限 {n} 票：{d} 天未计入图表',
-      rowsCapHint: '缩短期间即可在图表和表格中查看全部运单。官方指标率和卡片不受影响。未计入的日期：'
+      rowsCapHint: '缩短期间即可在图表和表格中查看全部运单。官方指标率和卡片不受影响。未计入的日期：',
+      groupTotal: '{g} 合计', grandTotal: '总计',
+      pivotNote: '数据透视表格式 · 占比为占本表合计的比例。',
+      pivotTopNote: '每组前 {n} 名（含并列）· 占比按本表显示合计计算，与数据透视表一致。'
     }
   };
 
@@ -159,6 +165,8 @@
     interval: '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5h5"/>',
     client: '<path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/>',
     offenderBase: '<path d="M3 21V8l9-5 9 5v13"/><path d="M8 11h2m4 0h2M8 15h2m4 0h2"/>',
+    dock: '<path d="M3 21V9l9-5 9 5v12"/><path d="M7 21v-8h10v8M7 17h10"/>',
+    dockDest: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     errorType: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5m0 3v.5"/>',
     tripId: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
     route: '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h4c5 0 1-12 6-12"/>',
@@ -544,7 +552,7 @@
     return call('getDashboardData', state.indicator, {from: state.from, to: state.to}).then(function (res) {
       if (seq !== state.seq) return;
       renderSyncBanner(res.meta.pauses);
-      state.data = {meta: res.meta, rates: res.rates || [], rows: Core.decodeDataset(res.dataset)};
+      state.data = {meta: res.meta, rates: res.rates || [], rows: Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks)};
       state.from = res.meta.from; state.to = res.meta.to;
       setDateInputs(state.from, state.to); highlightPreset();
       var allowed = {};
@@ -590,6 +598,7 @@
     renderTarget(c, cards);
     renderCharts(c);
     renderSummaryTable(c);
+    renderPivotTables(c);
     renderDetailTable();
   }
   function onFiltersChanged() {
@@ -951,7 +960,7 @@
         var card = document.createElement('article');
         card.className = 'card chart-card' + (s.key === 'evolution' ? ' full' : '');
         card.setAttribute('data-key', s.key);
-        card.innerHTML = '<div class="chart-head"><span class="chart-ico">' + icon(s.key === 'segmentByShift' ? 'segment' : s.key) + '</span>' +
+        card.innerHTML = '<div class="chart-head"><span class="chart-ico">' + icon(s.grouped ? (s.dim || 'segment') : s.key) + '</span>' +
           '<div class="chart-titles"><h3></h3><small></small></div><div class="chart-tools"></div></div><div class="chart-body"></div><div class="chart-legend"></div>';
         grid.appendChild(card);
       });
@@ -1042,8 +1051,9 @@
           (p.met ? '<span style="color:var(--good);font-weight:700">✓ ' + esc(t('inGoal')) + '</span>' : '<span style="color:var(--bad);font-weight:700">✗ ' + esc(t('outGoal')) + '</span>') + '</td></tr>';
       });
     } else if (spec.grouped) {
-      h += '<th>' + esc(L(dimLabel('segment'))) + '</th>' + spec.datasets.map(function (d) { return '<th class="num">' + d.label + '</th>'; }).join('');
-      spec.labels.forEach(function (l, i) { b += '<tr><td>' + esc(vlabel('segment', l)) + '</td>' + spec.datasets.map(function (d) { return '<td class="num">' + fmtInt(d.data[i]) + '</td>'; }).join('') + '</tr>'; });
+      var gdim = spec.dim || 'segment';
+      h += '<th>' + esc(L(dimLabel(gdim))) + '</th>' + spec.datasets.map(function (d) { return '<th class="num">' + d.label + '</th>'; }).join('');
+      spec.labels.forEach(function (l, i) { b += '<tr><td>' + esc(vlabel(gdim, l)) + '</td>' + spec.datasets.map(function (d) { return '<td class="num">' + fmtInt(d.data[i]) + '</td>'; }).join('') + '</tr>'; });
     } else {
       h += '<th>' + esc(L(dimLabel(spec.key))) + '</th><th class="num">' + esc(t('qty')) + '</th><th class="num">' + esc(t('share')) + '</th>';
       var max = Math.max.apply(null, spec.datasets[0].data.concat([1]));
@@ -1135,7 +1145,7 @@
   }
   function barConfig(spec) {
     var horizontal = !!spec.horizontal && !spec.grouped;
-    var labels = spec.labels.map(function (l) { return vlabel(spec.key === 'segmentByShift' ? 'segment' : spec.key, l); });
+    var labels = spec.labels.map(function (l) { return vlabel(spec.grouped ? (spec.dim || 'segment') : spec.key, l); });
     var total = spec.total || 0;
     var datasets = spec.grouped
       ? spec.datasets.map(function (d) { return {label: d.label, data: d.data, backgroundColor: SHIFT_COLORS[d.shift], borderRadius: 4, borderSkipped: 'start', maxBarThickness: 26, categoryPercentage: .74, barPercentage: .92}; })
@@ -1186,6 +1196,41 @@
       '</h2></div><span class="count">' + esc(t('topOf', {n: st.rows.length, m: fmtInt(st.groups)})) + '</span></div>' +
       '<div class="table-scroll" style="max-height:420px"><table class="data-table"><thead><tr>' + head + '</tr></thead><tbody>' +
       (body || '<tr class="empty-row"><td colspan="' + (cols.length + 2) + '">' + esc(t('noRows')) + '</td></tr>') + '</tbody></table></div>';
+  }
+
+  // ------------------------------------------------------------------ tabelas dinâmicas (ex.: docas da expedição)
+  /** Mesmo formato das tabelas dinâmicas da planilha: grupo → itens, subtotal por grupo e total geral. */
+  function renderPivotTables(c) {
+    var box = $('#pivotCards');
+    if (!box) return;
+    var defs = c.pivotTables || [];
+    if (!defs.length) { box.innerHTML = ''; return; }
+    var partial = detailIsPartial() ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '';
+    box.innerHTML = defs.map(function (def) {
+      var p = Core.pivot(state.filtered, def), k1 = def.groupBy[0], k2 = def.groupBy[1];
+      var l1 = dimLabel(k1), l2 = dimLabel(k2), max = 1;
+      p.groups.forEach(function (g) { g.items.forEach(function (it) { if (it.count > max) max = it.count; }); });
+      var pct = function (n) { return fmtPct(p.total ? n / p.total * 100 : null, 2); };
+      var body = '';
+      p.groups.forEach(function (g) {
+        g.items.forEach(function (it, i) {
+          body += '<tr><td>' + (i === 0 ? '<b>' + esc(vlabel(k1, g.value)) + '</b>' : '') + '</td><td>' + esc(vlabel(k2, it.value)) + '</td>' +
+            '<td class="num"><span class="mini-bar" style="width:' + Math.round(it.count / max * 70) + 'px"></span>' + fmtInt(it.count) + '</td>' +
+            '<td class="num">' + pct(it.count) + '</td></tr>';
+        });
+        body += '<tr class="subtotal"><td colspan="2">' + esc(t('groupTotal', {g: vlabel(k1, g.value)})) + '</td><td class="num">' + fmtInt(g.count) +
+          '</td><td class="num">' + pct(g.count) + '</td></tr>';
+      });
+      if (p.groups.length) body += '<tr class="grand"><td colspan="2">' + esc(t('grandTotal')) + '</td><td class="num">' + fmtInt(p.total) + '</td><td class="num">' + pct(p.total) + '</td></tr>';
+      var head = '<th>' + esc(L(l1)) + '<small>' + esc(Lo(l1)) + '</small></th><th>' + esc(L(l2)) + '<small>' + esc(Lo(l2)) + '</small></th>' +
+        '<th class="num">' + esc(t('qty')) + '</th><th class="num">' + esc(t('share')) + '</th>';
+      return '<section class="card table-card pivot-card" data-key="' + esc(def.key) + '"><div class="section-head"><div><span class="kicker">' + esc(t('details')) + '</span>' +
+        '<h2>' + esc(L(def.title)) + ' <small class="muted" style="font-weight:600">' + esc(Lo(def.title)) + '</small>' + partial + '</h2>' +
+        '<p class="muted small">' + esc(def.topPerGroup ? t('pivotTopNote', {n: def.topPerGroup}) : t('pivotNote')) + '</p></div>' +
+        '<span class="count">' + esc(t('tableCount', {n: fmtInt(p.total)})) + '</span></div>' +
+        '<div class="table-scroll" style="max-height:680px"><table class="data-table pivot-table"><thead><tr>' + head + '</tr></thead><tbody>' +
+        (body || '<tr class="empty-row"><td colspan="4">' + esc(t('noRows')) + '</td></tr>') + '</tbody></table></div></section>';
+    }).join('');
   }
 
   // ------------------------------------------------------------------ tabela de remessas
