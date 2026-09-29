@@ -66,8 +66,9 @@
       queueErrors: '{n} com erro', queueIdle: 'Fila em dia',
       footer: 'Fonte: JMS (taxas oficiais) · detalhes arquivados no Google Drive',
       resultsNoteRate: 'Taxa do período = Σ erros ÷ Σ base oficial de cada dia (sem contagem de erros, usa a média das taxas diárias).',
-      resultsNoteShift: 'Remessas com erro no turno {s}, a partir dos detalhes sincronizados. O JMS não publica taxa oficial por turno.',
+      resultsNoteShift: 'Taxa do turno {s} = remessas com erro no {s} ÷ volume total do dia (base oficial do JMS). O JMS não publica volume por turno; somando T1, T2 e T3 dá a taxa de erros do dia. Nos indicadores de prazo (SC → SC, SC → DC), é a taxa fora do prazo.',
       lastPeriod: 'Último período', shiftErrors: 'Erros {s}', shiftShareOf: '{p} do total', noAgg: 'Sem detalhes consolidados deste turno no período.',
+      shiftRate: 'Taxa {s}', shiftRatePeriod: 'Taxa {s} no período', shareOfErrors: '{p} dos erros', totalVolume: 'Volume total',
       week: 'Sem {w}', quarterLabel: '{q}º tri/{y}', na: 'Sem informação', bootLoading: 'Carregando painel…',
       spark: 'Últimos 14 dias', chartLabelsToggle: 'Rótulos', lastSeen: 'Última taxa',
       presetToday: 'Hoje', slowLoading: 'Carregando um período grande… pode levar até 1 minuto.',
@@ -130,8 +131,9 @@
       queueErrors: '{n} 项出错', queueIdle: '队列已清空',
       footer: '数据来源：JMS（官方指标率）· 明细存档于 Google Drive',
       resultsNoteRate: '期间指标率 = 各日异常合计 ÷ 各日官方基数合计（缺少异常计数时使用每日指标率平均值）。',
-      resultsNoteShift: '{s} 班异常票数（基于已同步明细）。JMS 不提供分班次官方指标率。',
+      resultsNoteShift: '{s} 班指标率 = {s} 班异常票数 ÷ 当日总票量（JMS 官方基数）。JMS 不提供分班次票量；T1、T2、T3 相加即为当日异常率。时效类指标（SC → SC、SC → DC）为超时率。',
       lastPeriod: '最近期间', shiftErrors: '{s} 异常', shiftShareOf: '占总数 {p}', noAgg: '该期间暂无该班次明细汇总。',
+      shiftRate: '{s} 指标率', shiftRatePeriod: '{s} 期间指标率', shareOfErrors: '占异常 {p}', totalVolume: '总票量',
       week: '第{w}周', quarterLabel: '{y}年Q{q}', na: '无', bootLoading: '正在加载看板…',
       spark: '近14天', chartLabelsToggle: '标签', lastSeen: '最新指标率',
       presetToday: '今天', slowLoading: '正在加载较长期间… 可能需要 1 分钟。',
@@ -1180,21 +1182,34 @@
       pcts: values.map(function (v) { return total ? v / total * 100 : 0; }), titles: names, accent: 'count'
     });
   }
-  /** Pizza no mesmo padrão: quantidade e (%) dentro de cada fatia; cores fixas por turno. */
+  /** Total no meio da rosca ("109.141 remessas"). */
+  var centerText = {
+    id: 'centerText',
+    afterDraw: function (chart, args, opts) {
+      if (!opts || !opts.text) return;
+      var a = chart.chartArea, x = (a.left + a.right) / 2, y = (a.top + a.bottom) / 2, ctx = chart.ctx;
+      ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = INK; ctx.font = '800 28px ' + Chart.defaults.font.family; ctx.fillText(opts.text, x, y - 8);
+      ctx.fillStyle = MUTED; ctx.font = '600 12px ' + Chart.defaults.font.family; ctx.fillText(opts.sub || '', x, y + 17);
+      ctx.restore();
+    }
+  };
+  /** Participação por turno em rosca: % em cada fatia e o total no meio; cores fixas por turno. */
   function pieConfig(spec) {
     var data = spec.datasets[0].data, total = data.reduce(function (a, v) { return a + v; }, 0);
     return {
-      $sig: 'pie', type: 'pie',
+      $sig: 'doughnut', type: 'doughnut',
       data: {labels: spec.labels.map(function (l) { return vlabel(spec.key, l); }), datasets: [{data: data,
-        backgroundColor: spec.labels.map(function (l) { return SHIFT_COLORS[l] || '#9CA3AF'; }), borderColor: '#fff', borderWidth: 3, hoverOffset: 10}]},
-      plugins: plugins(),
+        backgroundColor: spec.labels.map(function (l) { return SHIFT_COLORS[l] || '#9CA3AF'; }), borderColor: '#fff', borderWidth: 3, hoverOffset: 8}]},
+      plugins: plugins([centerText]),
       options: {
-        responsive: true, maintainAspectRatio: false, animation: {duration: 650}, layout: {padding: 12},
+        responsive: true, maintainAspectRatio: false, cutout: '60%', animation: {duration: 650}, layout: {padding: 10},
         plugins: {
           legend: {display: false},
+          centerText: {text: fmtInt(total), sub: t('shipments')},
           tooltip: {callbacks: {label: function (ctx) { return ' ' + ctx.label + ': ' + fmtInt(ctx.raw) + ' ' + t('shipments') + ' · ' + fmtPct(total ? ctx.raw / total * 100 : 0, 2); }}},
-          datalabels: {color: '#fff', textAlign: 'center', font: {weight: '800', size: 15}, display: function (ctx) { return total && dv(ctx) / total >= 0.05; },
-            formatter: function (v) { return [fmtInt(v), '(' + fmtPct(total ? v / total * 100 : 0, 2) + ')']; }}
+          datalabels: {color: '#fff', font: {weight: '800', size: 14}, display: function (ctx) { return total && dv(ctx) / total >= 0.05; },
+            formatter: function (v) { return fmtPct(total ? v / total * 100 : 0, 0); }}
         }
       }
     };
@@ -1670,11 +1685,13 @@
         top = last ? '<div class="res-value"><strong class="' + (last.met ? 'good' : 'bad') + '">' + fmtPct(last.rate) + '</strong><small class="muted">' +
           esc(t('lastPeriod')) + ' · ' + esc(fmtPeriodKey(last.key, r.periodicity)) + ' · ' + (last.met ? '✓ ' + esc(t('inGoal')) : '✗ ' + esc(t('outGoal'))) + '</small></div>' : '';
       } else {
-        points = Core.aggregateShiftResults(s.agg, r.periodicity, r.shift, data.from, data.to);
+        points = Core.aggregateShiftResults(s.agg, r.periodicity, r.shift, data.from, data.to, s.rates);
         var sumC = points.reduce(function (a, p) { return a + (p.count || 0); }, 0), sumT = points.reduce(function (a, p) { return a + (p.total || 0); }, 0);
-        hasData = points.some(function (p) { return p.count !== null; });
-        top = hasData ? '<div class="res-value"><strong>' + fmtInt(sumC) + '</strong><small class="muted">' + esc(t('shiftErrors', {s: r.shift})) + ' · ' +
-          esc(t('shiftShareOf', {p: fmtPct(sumT ? sumC / sumT * 100 : null, 1)})) + '</small></div>' : '';
+        var sumR = points.reduce(function (a, p) { return a + (p.rateCount || 0); }, 0), sumB = points.reduce(function (a, p) { return a + (p.base || 0); }, 0);
+        hasData = points.some(function (p) { return p.rate !== null; });
+        var rd = rateDigits(points);
+        top = hasData ? '<div class="res-value"><strong>' + fmtPct(sumB ? sumR / sumB * 100 : null, rd) + '</strong><small class="muted">' + esc(t('shiftRatePeriod', {s: r.shift})) + ' · ' +
+          esc(t('shareOfErrors', {p: fmtPct(sumT ? sumC / sumT * 100 : null, 1)})) + '</small></div>' : '';
       }
       card.innerHTML = '<div class="res-top"><span class="chart-ico">' + icon(s.key) + '</span><div><h3>' + esc(L(c.name)) +
         (Lo(c.name) ? ' <span class="rp-zh">/ ' + esc(Lo(c.name)) + '</span>' : '') + '</h3><small>' + esc(t('goal')) + ' ' + esc(goalText(c.goal)) + '</small></div>' + top + '</div><div class="chart-wrap' + (single ? ' large' : '') + '"></div>' + (single ? '<div class="res-table"></div>' : '');
@@ -1713,23 +1730,29 @@
           y: {grid: {color: GRID}, border: {display: false}, grace: '12%', ticks: {callback: function (v) { return fmtPct(v, yDigits); }}}}}
     };
   }
+  /** Casas decimais da taxa do turno: 3 quando ela é menor que 0,1% (senão tudo vira "0,01%"). */
+  function rateDigits(points) {
+    var mx = Math.max.apply(null, [0].concat(points.map(function (p) { return p.rate; }).filter(isNum)));
+    return mx > 0 && mx < 0.1 ? 3 : 2;
+  }
+  /** Taxa do turno (%) por período, em colunas na cor do turno, com a taxa em cima de cada coluna. */
   function resultShiftConfig(points, shift, per) {
+    var vals = points.map(function (p) { return p.rate; }), rd = rateDigits(points), yDigits = rd === 3 ? 3 : pctDigits(vals.concat([0]));
     return {
       type: 'bar',
-      data: {labels: points.map(function (p) { return fmtPeriodKey(p.key, per); }), datasets: [{label: shift, data: points.map(function (p) { return p.count; }),
+      data: {labels: points.map(function (p) { return fmtPeriodKey(p.key, per); }), datasets: [{label: t('shiftRate', {s: shift}), data: vals,
         backgroundColor: SHIFT_COLORS[shift], borderRadius: 4, borderSkipped: 'start', maxBarThickness: 30}]},
       plugins: plugins(),
       options: {responsive: true, maintainAspectRatio: false, animation: {duration: 600}, layout: {padding: {top: 18}},
         plugins: {legend: {display: false}, tooltip: {callbacks: {label: function (ctx) {
-          var p = points[ctx.dataIndex]; return p.count === null ? ' —' : ' ' + fmtInt(p.count) + ' ' + t('shipments') + ' · ' + t('shiftShareOf', {p: fmtPct(p.pct, 1)});
-        }}}, datalabels: {anchor: 'end', align: 'end', clip: false, padding: 0, labels: {
-          count: {offset: function (ctx) { return points.length <= 8 ? 15 : 2; }, color: INK, font: {size: 11.5, weight: '800'}, formatter: function (v) { return fmtInt(v); },
-            display: function (ctx) { return dv(ctx) > 0 && points.length <= 16; }},
-          pct: {offset: 2, color: RED, font: {size: 9.5, weight: '700'}, formatter: function (v, ctx) { return '(' + fmtPct(points[ctx.dataIndex].pct, 1) + ')'; },
-            display: function (ctx) { return dv(ctx) > 0 && points.length <= 8 && isNum(points[ctx.dataIndex].pct); }}
+          var p = points[ctx.dataIndex];
+          return p.rate === null ? ' —' : [' ' + t('shiftRate', {s: shift}) + ': ' + fmtPct(p.rate, rd), ' ' + t('shiftErrors', {s: shift}) + ': ' + fmtInt(p.rateCount) + ' · ' +
+            t('totalVolume') + ': ' + fmtInt(p.base), ' ' + t('shareOfErrors', {p: fmtPct(p.pct, 1)})];
         }}},
+          datalabels: {anchor: 'end', align: 'end', offset: 2, clip: false, color: INK, font: {size: 11, weight: '800'},
+            formatter: function (v) { return fmtPct(v, rd); }, display: function (ctx) { return dv(ctx) !== null && dv(ctx) > 0 && points.length <= 16; }}},
         scales: {x: {grid: {display: false}, border: {color: '#D9DBE1'}, ticks: {autoSkip: true, maxTicksLimit: 14, maxRotation: 0, color: INK, font: {weight: '700'}}},
-          y: {beginAtZero: true, grace: '22%', grid: {color: GRID}, border: {display: false}, ticks: {precision: 0, callback: function (v) { return fmtInt(v); }}}}}
+          y: {beginAtZero: true, grace: '22%', grid: {color: GRID}, border: {display: false}, ticks: {callback: function (v) { return fmtPct(v, yDigits); }}}}}
     };
   }
   function resultsTable(points, c, r) {
@@ -1742,9 +1765,12 @@
           '</td><td class="num">' + fmtInt(p.errors) + '</td><td class="num">' + p.days + '</td></tr>';
       });
     } else {
-      h = '<th>' + esc(t('period')) + '</th><th class="num">' + esc(t('shiftErrors', {s: r.shift})) + '</th><th class="num">' + esc(t('errors')) + ' (T1+T2+T3)</th><th class="num">' + esc(t('share')) + '</th><th class="num">' + esc(t('days')) + '</th>';
+      h = '<th>' + esc(t('period')) + '</th><th class="num">' + esc(t('shiftRate', {s: r.shift})) + '</th><th class="num">' + esc(t('shiftErrors', {s: r.shift})) + '</th><th class="num">' +
+        esc(t('totalVolume')) + '</th><th class="num">' + esc(t('share')) + '</th><th class="num">' + esc(t('days')) + '</th>';
+      var rd = rateDigits(points);
       rows = points.slice().reverse().filter(function (p) { return p.count !== null; }).map(function (p) {
-        return '<tr><td>' + esc(fmtPeriodKey(p.key, r.periodicity)) + '</td><td class="num"><b>' + fmtInt(p.count) + '</b></td><td class="num">' + fmtInt(p.total) + '</td><td class="num">' + fmtPct(p.pct, 1) + '</td><td class="num">' + p.days + '</td></tr>';
+        return '<tr><td>' + esc(fmtPeriodKey(p.key, r.periodicity)) + '</td><td class="num"><b>' + fmtPct(p.rate, rd) + '</b></td><td class="num">' + fmtInt(p.count) + '</td><td class="num">' +
+          fmtInt(p.base) + '</td><td class="num">' + fmtPct(p.pct, 1) + '</td><td class="num">' + p.days + '</td></tr>';
       });
     }
     return '<table class="data-table"><thead><tr>' + h + '</tr></thead><tbody>' + (rows.join('') || '<tr class="empty-row"><td colspan="6">' + esc(t('noData')) + '</td></tr>') + '</tbody></table>';

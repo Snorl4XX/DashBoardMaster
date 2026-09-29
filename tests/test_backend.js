@@ -771,4 +771,16 @@ const pendV38 = cMD.pendingJobs_();
 check(nV38 === 1 && pendV38.length === 1 && pendV38[0].indicator === 'missing_dispatch' && pendV38[0].type === 'DETAIL_INIT', 'V3.8 rebaixa só o histórico da Expedição', pendV38);
 check(cMD.migrateToV38_() === 0, 'migração roda uma vez só');
 
+// ---------- 15. V3.10.1: Resultados por turno usam a taxa (%) ----------
+const aggR = [{date: '2026-09-18', T1: 30, T2: 50, T3: 20, total: 100}, {date: '2026-09-19', T1: 10, T2: 20, T3: 70, total: 100}, {date: '2026-09-20', T1: 5, T2: 5, T3: 5, total: 15}];
+const ratesR = [{date: '2026-09-18', totalCount: 20000}, {date: '2026-09-19', totalCount: 30000}];
+const shR = s => C.aggregateShiftResults(aggR, 'day', s, '2026-09-18', '2026-09-20', ratesR);
+check(Math.abs(shR('T1')[0].rate - 0.15) < 1e-9 && Math.abs(shR('T3')[1].rate - 70 / 30000 * 100) < 1e-9 && shR('T1')[2].rate === null && shR('T1')[2].count === 5,
+  'taxa do turno = erros do turno ÷ volume total do dia (dia sem volume fica sem taxa)', shR('T1'));
+const sumDay = ['T1', 'T2', 'T3'].reduce((a, sft) => a + shR(sft)[0].rate, 0);
+check(Math.abs(sumDay - 100 / 20000 * 100) < 1e-9, 'T1 + T2 + T3 = taxa de erros do dia', sumDay);
+const wk = C.aggregateShiftResults(aggR, 'week', 'T2', '2026-09-18', '2026-09-20', ratesR);
+check(wk.length >= 1 && Math.abs(wk.reduce((a, p) => a + (p.rateCount || 0), 0) / wk.reduce((a, p) => a + (p.base || 0), 0) * 100 - 70 / 50000 * 100) < 1e-9,
+  'no período, a taxa soma só os dias que têm volume', wk);
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

@@ -115,7 +115,7 @@ function buildSummaryReportSheet_(sh, dash) {
   if (shiftRows.some(r => Number(r[1]) > 0)) {
     sh.insertChart(sh.newChart().asPieChart().addRange(sh.getRange(shiftStart, 1, 4, 2))
       .setPosition(shiftStart, 6, 0, 0).setOption('title', 'Participação por turno / 班次占比' + (dash.archive.fullyLoaded ? '' : ' · PARCIAL'))
-      .setOption('pieHole', 0).setOption('colors', [SHIFT_COLORS.T1, SHIFT_COLORS.T2, SHIFT_COLORS.T3])
+      .setOption('pieHole', 0.5).setOption('colors', [SHIFT_COLORS.T1, SHIFT_COLORS.T2, SHIFT_COLORS.T3])
       .setOption('legend', {position: 'right'}).setOption('width', 640).setOption('height', 300).build());
   }
 

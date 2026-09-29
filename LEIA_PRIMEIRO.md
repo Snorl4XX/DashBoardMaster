@@ -1,6 +1,16 @@
-# J&T DASHMASTER V3.10 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.10.1 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.10.1 — Rosca de turnos e taxa (%) nos Resultados
+- **Participação por turno** voltou ao formato de **rosca**, com o total de remessas no meio e o % em cada fatia. Continuam a legenda ao lado e os cartões embaixo; o relatório também usa rosca.
+- **Resultados por turno (T1, T2, T3) agora usam a taxa em %**, e não mais a quantidade de erros:
+  - **Taxa do turno** = remessas com erro no turno ÷ volume total do dia (a base oficial do JMS). O JMS não publica volume por turno. Por isso a conta usa o volume total, e **T1 + T2 + T3 = taxa de erros do dia**.
+  - Nos indicadores de prazo (SC → SC, SC → DC), é a taxa **fora do prazo** do turno.
+  - O número grande do cartão mostra a taxa do turno no período. As colunas mostram a taxa de cada dia, semana ou mês.
+  - A tabela traz Taxa, Erros do turno, Volume total, % dos erros e dias.
+  - Taxas abaixo de 0,1% aparecem com 3 casas decimais.
+- "Todos os turnos" continua com a taxa oficial do JMS e a meta.
 
 ## V3.10 — Todos os gráficos no padrão das docas + gráfico de pizza
 Todos os gráficos de todos os indicadores seguem o padrão dos gráficos de docas da V3.9:
@@ -304,7 +314,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **184 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **187 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

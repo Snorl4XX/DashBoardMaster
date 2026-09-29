@@ -475,22 +475,32 @@ function JTCoreFactory_() {
       return {key: k, rate: pr.rate, method: pr.method, days: pr.days, errors: sumErrors(buckets[k] || []), met: goalMet(pr.rate, goal)};
     });
   }
-  function aggregateShiftResults(aggRows, periodicity, shift, from, to) {
+  /**
+   * Resultado de UM turno por período. rate = taxa do turno em %: erros do turno ÷ volume total
+   * (base oficial do JMS) dos dias que têm os dois. O JMS não publica volume por turno; assim as
+   * taxas de T1+T2+T3 somam a taxa de erros do período. pct = participação do turno nos erros.
+   */
+  function aggregateShiftResults(aggRows, periodicity, shift, from, to, rates) {
+    var base = {};
+    (rates || []).forEach(function (r) { if (isNum(r.totalCount) && Number(r.totalCount) > 0) base[r.date] = Number(r.totalCount); });
     var buckets = {};
     (aggRows || []).forEach(function (a) {
       if (a.date < from || a.date > to) return;
       var k = bucketKey(a.date, periodicity);
-      if (!buckets[k]) buckets[k] = {count: 0, total: 0, days: 0};
-      buckets[k].count += Number(a[shift] || 0);
-      buckets[k].total += Number(a.total || 0);
-      buckets[k].days += 1;
+      if (!buckets[k]) buckets[k] = {count: 0, total: 0, days: 0, rateCount: 0, base: 0};
+      var b = buckets[k], n = Number(a[shift] || 0);
+      b.count += n;
+      b.total += Number(a.total || 0);
+      b.days += 1;
+      if (base[a.date]) { b.rateCount += n; b.base += base[a.date]; }
     });
     var keys = [];
     dateRange(from, to).forEach(function (d) { var k = bucketKey(d, periodicity); if (keys.indexOf(k) < 0) keys.push(k); });
     return keys.map(function (k) {
       var b = buckets[k];
-      return b ? {key: k, count: b.count, total: b.total, pct: b.total ? b.count / b.total * 100 : null, days: b.days}
-               : {key: k, count: null, total: null, pct: null, days: 0};
+      return b ? {key: k, count: b.count, total: b.total, pct: b.total ? b.count / b.total * 100 : null, days: b.days,
+        base: b.base || null, rate: b.base ? b.rateCount / b.base * 100 : null, rateCount: b.rateCount}
+        : {key: k, count: null, total: null, pct: null, days: 0, base: null, rate: null, rateCount: 0};
     });
   }
 
