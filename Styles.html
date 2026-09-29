@@ -240,15 +240,14 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .target.bad .mao-anger{opacity:1}
 
 /* ---------- gráficos ---------- */
-.charts-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
-.chart-card{padding:16px 18px 14px;min-width:0;display:flex;flex-direction:column}
-.chart-card.full{grid-column:1/-1;border-top:3px solid var(--red)}
-/* Número ímpar de gráficos: o último ocupa a linha inteira (sem espaço vazio ao lado). */
-.chart-card.wide{grid-column:1/-1}
+/* Todos os gráficos no padrão dos painéis de docas: largura total, título PT / 中文, cartões embaixo. */
+.charts-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:12px}
+.chart-card{padding:18px 20px 16px;min-width:0;display:flex;flex-direction:column;border-top:3px solid var(--red)}
+.chart-card.full{grid-column:1/-1}
 .chart-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .chart-ico{width:34px;height:34px;border-radius:10px;background:var(--red-50);color:var(--red);display:grid;place-items:center;flex:none}
 .chart-titles{flex:1 1 180px;min-width:0}
-.chart-titles h3{margin:0;font-size:14px;letter-spacing:-.1px}
+.chart-titles h3{margin:0;font-size:17px;letter-spacing:-.3px}
 .chart-titles small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
 .chart-tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .seg{display:inline-flex;background:#F2F2F4;border-radius:10px;padding:3px;gap:2px}
@@ -257,6 +256,21 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .chart-wrap{position:relative;height:290px}
 .chart-wrap.large{height:360px}
 .chart-wrap.tall{height:330px}
+.chart-wrap.pattern{height:370px}
+.chart-wrap.pie{height:330px}
+.chart-card .rp-stats{margin-top:12px}
+.pie-layout{display:grid;grid-template-columns:minmax(260px,420px) minmax(0,1fr);gap:28px;align-items:center}
+.pie-legend{display:grid;gap:10px;max-width:560px}
+.pl-row{display:grid;grid-template-columns:14px minmax(0,1fr) auto 72px;grid-template-rows:auto 6px;column-gap:12px;row-gap:6px;align-items:center}
+.pl-row>i{width:14px;height:14px;border-radius:4px}
+.pl-name{font-weight:800;color:var(--ink);font-size:14px}
+.pl-name small{margin-left:6px;font-weight:600;color:var(--muted);font-size:11.5px}
+.pl-row>b{font-size:20px;font-weight:900;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+.pl-row>em{font-style:normal;color:var(--red);font-weight:800;font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+.pl-bar{grid-column:2/-1;height:6px;border-radius:99px;background:#F1F2F4;overflow:hidden}
+.pl-bar span{display:block;height:100%;border-radius:99px}
+.pl-total{display:flex;justify-content:space-between;align-items:baseline;border-top:1px dashed var(--line);padding-top:8px;color:var(--muted);font-size:12px;font-weight:700}
+.pl-total b{color:var(--ink);font-size:15px}
 .chart-empty{height:100%;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:13px;background:repeating-linear-gradient(135deg,#FAFAFB 0 10px,#F6F6F8 10px 20px);border-radius:12px;padding:16px}
 .chart-empty b{display:block;color:var(--ink-2);margin-bottom:4px}
 .chart-table{max-height:330px;overflow:auto;border:1px solid var(--line);border-radius:12px}
@@ -411,7 +425,10 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
   .table-tools,.find{width:100%}
   .chart-wrap{height:260px}
   .chart-wrap.large{height:300px}
-  .rank-panel{padding:14px 12px}
+  .rank-panel,.chart-card{padding:14px 12px}
+  .chart-wrap.pattern{height:330px}
+  .pie-layout{grid-template-columns:1fr;gap:14px}
+  .chart-wrap.pie{height:260px}
   .rp-wrap{height:330px}
   .rp-stats{grid-template-columns:1fr}
   .dd-panel{position:fixed;left:0!important;right:0!important;bottom:0;top:auto;width:100%;max-width:none;border-radius:18px 18px 0 0;max-height:72vh;display:flex;flex-direction:column;animation:sheetUp .2s ease}

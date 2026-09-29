@@ -1,6 +1,31 @@
-# J&T DASHMASTER V3.9 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.10 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.10 — Todos os gráficos no padrão das docas + gráfico de pizza
+Todos os gráficos de todos os indicadores seguem o padrão dos gráficos de docas da V3.9:
+- **Cada gráfico ocupa a largura toda**, com o título em "PT / 中文" (o chinês em vermelho).
+- **Colunas vermelhas em degradê**, com a quantidade e o (% do total) em cima de cada coluna.
+- **Cartões embaixo de cada gráfico:**
+  - *Total geral*;
+  - *Maior* (ex.: "Maior login");
+  - *Menor*, quando o gráfico mostra todas as categorias. Nos gráficos "top 10", este cartão vira *Top 10 somados*, com a quantidade e o % do total.
+- **Participação por turno virou gráfico de pizza** (em todos os indicadores; no SC → DC, os dois de turno):
+  - fatias com as cores fixas de cada turno, e a quantidade e o (%) dentro da fatia;
+  - legenda ao lado, com horário, quantidade, % e barrinha;
+  - cartões *Total geral*, *Maior turno* e *Menor turno*.
+- **"Top 4 segmentos por turno"** (Expedição) agora segue o padrão "Docas por turno":
+  - os 4 maiores de cada turno, com faixas T1/T2/T3 e cor pela posição;
+  - cartões com o total de cada turno.
+- **Evolução diária:** ganhou os cartões *Dias na meta*, *Maior taxa* e *Menor taxa* do período.
+- **Tela Resultados:** título no mesmo padrão. Nas barras por turno aparecem a quantidade e o (%).
+- **Relatório PDF/Excel:** o gráfico de turno também virou pizza.
+- **Mantido:**
+  - o botão Gráfico/Tabela de cada gráfico;
+  - Ranking/24 h nos intervalos;
+  - os filtros.
+
+  Nomes longos (logins, clientes) quebram em até 3 linhas embaixo da coluna; o nome completo aparece ao passar o mouse. No celular, os gráficos rolam para o lado.
 
 ## V3.9 — Docas só em gráficos (padrão do modelo) e Maomao animado
 **Falta de Bipagem na Expedição — docas:**

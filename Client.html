@@ -80,7 +80,7 @@
       rpSubAll: 'Quantidade de remessas por doca · percentual sobre o total',
       rpSubShift: 'Top {n} por turno · percentual sobre o total exibido no gráfico',
       rpSubCombo: 'Quantidade e porcentagem por combinação de turno, segmento e doca · top {n} por turno',
-      rpQty: 'Quantidade'
+      rpQty: 'Quantidade', ofTotalShort: 'do total'
     },
     zh: {
       panel: '运营看板', autoSync: '自动更新', refresh: '刷新', downloadReport: '下载报告',
@@ -144,7 +144,7 @@
       rpSubAll: '各码头运单数量 · 占比为占总数的比例',
       rpSubShift: '每个班次前 {n} 名 · 占比按图中显示合计计算',
       rpSubCombo: '按班次、分段与码头的数量及占比 · 每个班次前 {n} 名',
-      rpQty: '数量'
+      rpQty: '数量', ofTotalShort: '占总数'
     }
   };
 
@@ -939,17 +939,6 @@
     Chart.defaults.plugins.tooltip.boxPadding = 4;
   }
   function destroyChart(key) { if (state.charts[key]) { try { state.charts[key].destroy(); } catch (e) {} delete state.charts[key]; } }
-  var centerText = {
-    id: 'centerText',
-    afterDraw: function (chart, args, opts) {
-      if (!opts || !opts.text) return;
-      var a = chart.chartArea, x = (a.left + a.right) / 2, y = (a.top + a.bottom) / 2, ctx = chart.ctx;
-      ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = INK; ctx.font = '800 22px ' + Chart.defaults.font.family; ctx.fillText(opts.text, x, y - 6);
-      ctx.fillStyle = MUTED; ctx.font = '600 11px ' + Chart.defaults.font.family; ctx.fillText(opts.sub || '', x, y + 14);
-      ctx.restore();
-    }
-  };
   /** Valor do ponto no contexto do chartjs-plugin-datalabels (que não tem ctx.raw). */
   function dv(ctx) { return ctx && ctx.dataset && ctx.dataset.data ? ctx.dataset.data[ctx.dataIndex] : null; }
   function plugins(extra) { var p = window.ChartDataLabels ? [window.ChartDataLabels] : []; return extra ? p.concat(extra) : p; }
@@ -960,16 +949,7 @@
     var range = Math.max.apply(null, v) - Math.min.apply(null, v);
     return range < 0.3 ? 2 : range < 3 ? 1 : 0;
   }
-  function trunc(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
-  /** Rótulo em até 2 linhas (ex.: "02h - 03h" → ["02h -", "03h"], como no modelo). */
-  function wrap2(s, n) {
-    s = String(s);
-    if (/^\d{2}h - \d{2}h$/.test(s)) return [s.slice(0, 5), s.slice(6)];
-    if (s.length <= n) return s;
-    var cut = s.lastIndexOf(' ', n);
-    if (cut < 3) return trunc(s, n);
-    return [s.slice(0, cut), trunc(s.slice(cut + 1), n)];
-  }
+
 
   function chartSpecs(c) {
     var rows = state.filtered;
@@ -986,7 +966,12 @@
     var evo = Core.buildEvolution(state.data.rates, c.goal, evoFrom, state.to);
     evo.title = {pt: 'Evolução diária', zh: '每日趋势'};
     evo.selFrom = state.from; evo.selTo = state.to; evo.extended = evoFrom < state.from;
-    return [evo].concat((c.charts || []).map(function (def) { return Core.buildChart(def, rows, {intervalMode: state.intervalMode}); }));
+    return [evo].concat((c.charts || []).map(function (def) {
+      var spec = Core.buildChart(def, rows, {intervalMode: state.intervalMode});
+      // "Top N por turno" no padrão das docas: top N de cada turno, faixas T1/T2/T3.
+      if (spec.grouped) spec.panel = Core.rankPanel(rows, {key: def.key, kind: 'byShift', dim: spec.dim, top: def.top || 4});
+      return spec;
+    }));
   }
 
   function renderCharts(c) {
@@ -1000,13 +985,11 @@
         card.className = 'card chart-card' + (s.key === 'evolution' ? ' full' : '');
         card.setAttribute('data-key', s.key);
         card.innerHTML = '<div class="chart-head"><span class="chart-ico">' + icon(s.grouped ? (s.dim || 'segment') : s.key) + '</span>' +
-          '<div class="chart-titles"><h3></h3><small></small></div><div class="chart-tools"></div></div><div class="chart-body"></div><div class="chart-legend"></div>';
+          '<div class="chart-titles"><h3></h3><small></small></div><div class="chart-tools"></div></div><div class="chart-body"></div><div class="chart-legend"></div>' +
+          '<div class="rp-stats"></div>';
         grid.appendChild(card);
       });
       grid.setAttribute('data-sig', sig);
-      // Número ímpar de gráficos (além da evolução): o último ocupa a linha inteira.
-      var halves = $$('.chart-card:not(.full)', grid);
-      if (halves.length % 2 === 1) halves[halves.length - 1].classList.add('wide');
     }
     specs.forEach(function (s) { renderChartCard($('.chart-card[data-key="' + s.key + '"]', grid), s, c); });
   }
@@ -1014,7 +997,8 @@
   function renderChartCard(card, spec, c) {
     if (!card) return;
     var key = spec.key, partial = key !== 'evolution' && detailIsPartial();
-    $('h3', card).innerHTML = esc(L(spec.title)) + (partial ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
+    $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '') +
+      (partial ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
     var sub;
     if (key === 'evolution') sub = (spec.extended && state.evoMode !== 'history' ? t('evolution30', {date: fmtDate(state.to, true)}) + ' · ' : '') + t('evolutionSub');
     else if (spec.others > 0) sub = t('distinctShipments') + ' · ' + t('topOf', {n: spec.labels.length, m: fmtInt(spec.labels.length + spec.others)});
@@ -1041,6 +1025,8 @@
     legend.innerHTML = '';
     var hasData = key === 'evolution' ? spec.points.some(function (p) { return p.rate !== null; })
       : (spec.labels || []).length && (spec.datasets || []).some(function (d) { return d.data.some(function (v) { return v > 0; }); });
+    var stats = $('.rp-stats', card);
+    stats.innerHTML = hasData ? chartStats(spec, c) : '';
     if (!hasData) {
       destroyChart(key);
       body.innerHTML = '<div class="chart-wrap' + (key === 'evolution' ? ' large' : '') + '"><div class="chart-empty"><div><b>' + esc(t('noData')) + '</b>' +
@@ -1052,16 +1038,24 @@
       body.innerHTML = (!window.Chart ? '<p class="muted small">' + esc(t('noChartLib')) + '</p>' : '') + '<div class="chart-table">' + chartTable(spec, c) + '</div>';
       return;
     }
-    var wrapCls = key === 'evolution' ? 'chart-wrap large' : (spec.horizontal && spec.labels.length > 8 ? 'chart-wrap tall' : 'chart-wrap');
+    var isPie = spec.type === 'doughnut' || spec.type === 'pie';
+    var wrapCls = key === 'evolution' ? 'chart-wrap large' : isPie ? 'chart-wrap pie' : 'chart-wrap pattern';
     var host = $('.chart-wrap', body);
     if (!host || host.className !== wrapCls || !$('canvas', host)) {
       destroyChart(key);
-      body.innerHTML = '<div class="' + wrapCls + '"><canvas role="img"></canvas></div>';
+      body.innerHTML = key === 'evolution' ? '<div class="' + wrapCls + '"><canvas role="img"></canvas></div>'
+        : isPie ? '<div class="pie-layout"><div class="' + wrapCls + '"><canvas role="img"></canvas></div><div class="pie-legend"></div></div>'
+        : '<div class="rp-scroll"><div class="' + wrapCls + '"><canvas role="img"></canvas></div></div>';
       host = $('.chart-wrap', body);
     }
     var canvas = $('canvas', host);
     canvas.setAttribute('aria-label', L(spec.title));
-    var config = key === 'evolution' ? evolutionConfig(spec, c) : spec.type === 'doughnut' ? doughnutConfig(spec) : barConfig(spec);
+    var nBars = spec.grouped ? spec.panel.items.length : (spec.labels || []).length, minW = Math.max(480, nBars * 64);
+    if (!isPie && key !== 'evolution') host.style.minWidth = minW + 'px';
+    if (isPie) $('.pie-legend', body).innerHTML = pieLegend(spec);
+    var config = key === 'evolution' ? evolutionConfig(spec, c) : isPie ? pieConfig(spec)
+      : spec.grouped ? rankConfig({key: key, colors: 'rank', accent: 'pct', bands: 'bottom'}, spec.panel)
+      : columnChartConfig(spec, Math.max(body.clientWidth, minW));
     var ch = state.charts[key];
     if (ch && ch.config.type === config.type && ch.$sig === config.$sig && ch.canvas === canvas) {
       ch.data.labels = config.data.labels;
@@ -1094,8 +1088,10 @@
       });
     } else if (spec.grouped) {
       var gdim = spec.dim || 'segment';
-      h += '<th>' + esc(L(dimLabel(gdim))) + '</th>' + spec.datasets.map(function (d) { return '<th class="num">' + d.label + '</th>'; }).join('');
-      spec.labels.forEach(function (l, i) { b += '<tr><td>' + esc(vlabel(gdim, l)) + '</td>' + spec.datasets.map(function (d) { return '<td class="num">' + fmtInt(d.data[i]) + '</td>'; }).join('') + '</tr>'; });
+      h += '<th>' + esc(L(dimLabel('shift'))) + '</th><th>' + esc(L(dimLabel(gdim))) + '</th><th class="num">' + esc(t('qty')) + '</th><th class="num">' + esc(t('share')) + '</th>';
+      spec.panel.items.forEach(function (it) {
+        b += '<tr><td>' + esc(it.shift) + '</td><td>' + esc(vlabel(gdim, it.value)) + '</td><td class="num">' + fmtInt(it.count) + '</td><td class="num">' + fmtPct(it.pct, 2) + '</td></tr>';
+      });
     } else {
       h += '<th>' + esc(L(dimLabel(spec.key))) + '</th><th class="num">' + esc(t('qty')) + '</th><th class="num">' + esc(t('share')) + '</th>';
       var max = Math.max.apply(null, spec.datasets[0].data.concat([1]));
@@ -1158,64 +1154,96 @@
       }
     };
   }
-  function doughnutConfig(spec) {
+  /** Rótulo em até 3 linhas de até `max` caracteres (nomes longos embaixo das colunas). */
+  function wrapLines(s, max, maxLines) {
+    s = String(s);
+    if (s.length <= max) return s;
+    var out = [], cur = '';
+    s.split(/\s+/).forEach(function (w) {
+      if (w.length > max) w = w.slice(0, max - 1) + '…';
+      if (!cur) cur = w;
+      else if ((cur + ' ' + w).length <= max) cur += ' ' + w;
+      else { out.push(cur); cur = w; }
+    });
+    if (cur) out.push(cur);
+    if (out.length > maxLines) { out = out.slice(0, maxLines); var last = out[maxLines - 1]; out[maxLines - 1] = (last.length >= max ? last.slice(0, max - 1) : last) + '…'; }
+    return out.length === 1 ? out[0] : out;
+  }
+  /** Colunas do gráfico comum (1 série) no padrão: quantidade e (% do total de remessas) em cada coluna. */
+  function columnChartConfig(spec, width) {
+    var n = spec.labels.length, total = spec.total || 0;
+    var maxChars = Math.max(6, Math.min(18, Math.floor(Math.max(40, (width - 70) / Math.max(1, n)) / 6.2)));
+    var names = spec.labels.map(function (l) { return vlabel(spec.key, l); });
+    var values = spec.datasets[0].data;
+    return columnsConfig({
+      sig: 'cols', labels: names.map(function (x) { return wrapLines(x, maxChars, 3); }), values: values,
+      pcts: values.map(function (v) { return total ? v / total * 100 : 0; }), titles: names, accent: 'count'
+    });
+  }
+  /** Pizza no mesmo padrão: quantidade e (%) dentro de cada fatia; cores fixas por turno. */
+  function pieConfig(spec) {
     var data = spec.datasets[0].data, total = data.reduce(function (a, v) { return a + v; }, 0);
     return {
-      $sig: 'dough', type: 'doughnut',
-      data: {labels: spec.labels, datasets: [{data: data, backgroundColor: spec.labels.map(function (l) { return SHIFT_COLORS[l] || '#9CA3AF'; }),
-        borderColor: '#fff', borderWidth: 3, hoverOffset: 8}]},
-      plugins: plugins([centerText]),
+      $sig: 'pie', type: 'pie',
+      data: {labels: spec.labels.map(function (l) { return vlabel(spec.key, l); }), datasets: [{data: data,
+        backgroundColor: spec.labels.map(function (l) { return SHIFT_COLORS[l] || '#9CA3AF'; }), borderColor: '#fff', borderWidth: 3, hoverOffset: 10}]},
+      plugins: plugins(),
       options: {
-        responsive: true, maintainAspectRatio: false, cutout: '62%', animation: {duration: 700},
-        layout: {padding: 6},
+        responsive: true, maintainAspectRatio: false, animation: {duration: 650}, layout: {padding: 12},
         plugins: {
-          centerText: {text: fmtInt(total), sub: t('shipments')},
-          legend: {position: 'bottom', labels: {usePointStyle: true, pointStyle: 'rectRounded', padding: 14, color: INK,
-            generateLabels: function (chart) {
-              return chart.data.labels.map(function (l, i) {
-                var v = data[i];
-                return {text: (l === 'N/A' ? t('na') : l) + ' · ' + fmtInt(v) + ' (' + fmtPct(total ? v / total * 100 : 0, 1) + ')', fillStyle: SHIFT_COLORS[l] || '#9CA3AF',
-                  strokeStyle: '#fff', lineWidth: 0, hidden: !chart.getDataVisibility(i), index: i, fontColor: INK};
-              });
-            }}},
-          tooltip: {callbacks: {label: function (ctx) { return ' ' + ctx.label + ': ' + fmtInt(ctx.raw) + ' · ' + fmtPct(total ? ctx.raw / total * 100 : 0, 1); }}},
-          datalabels: {color: '#fff', font: {weight: '800', size: 12}, display: function (ctx) { return total && dv(ctx) / total >= 0.06; },
-            formatter: function (v) { return fmtPct(total ? v / total * 100 : 0, 0); }}
+          legend: {display: false},
+          tooltip: {callbacks: {label: function (ctx) { return ' ' + ctx.label + ': ' + fmtInt(ctx.raw) + ' ' + t('shipments') + ' · ' + fmtPct(total ? ctx.raw / total * 100 : 0, 2); }}},
+          datalabels: {color: '#fff', textAlign: 'center', font: {weight: '800', size: 15}, display: function (ctx) { return total && dv(ctx) / total >= 0.05; },
+            formatter: function (v) { return [fmtInt(v), '(' + fmtPct(total ? v / total * 100 : 0, 2) + ')']; }}
         }
       }
     };
   }
-  function barConfig(spec) {
-    var horizontal = !!spec.horizontal && !spec.grouped;
-    var labels = spec.labels.map(function (l) { return vlabel(spec.grouped ? (spec.dim || 'segment') : spec.key, l); });
-    var total = spec.total || 0;
-    var datasets = spec.grouped
-      ? spec.datasets.map(function (d) { return {label: d.label, data: d.data, backgroundColor: SHIFT_COLORS[d.shift], borderRadius: 4, borderSkipped: 'start', maxBarThickness: 26, categoryPercentage: .74, barPercentage: .92}; })
-      : [{label: t('shipments'), data: spec.datasets[0].data, backgroundColor: RED, hoverBackgroundColor: RED_DARK, borderRadius: 4, borderSkipped: 'start',
-          maxBarThickness: horizontal ? 22 : 34, categoryPercentage: .78, barPercentage: .9}];
-    var valueAxis = {beginAtZero: true, grace: '14%', grid: {color: GRID}, border: {display: false}, ticks: {color: MUTED, precision: 0, callback: function (v) { return fmtInt(v); }}};
-    var catAxis = {grid: {display: false}, border: {display: false}, ticks: {color: INK, autoSkip: !horizontal && labels.length > 14, maxRotation: horizontal ? 0 : 40, font: {size: 11},
-      callback: function (v) { var l = labels[v] !== undefined ? labels[v] : this.getLabelForValue(v); return horizontal ? trunc(l, 26) : wrap2(l, 12); }}};
-    return {
-      $sig: 'bar' + (horizontal ? 'h' : 'v') + (spec.grouped ? 'g' : ''), type: 'bar',
-      data: {labels: labels, datasets: datasets},
-      plugins: plugins(),
-      options: {
-        indexAxis: horizontal ? 'y' : 'x', responsive: true, maintainAspectRatio: false, animation: {duration: 650},
-        layout: {padding: {top: horizontal ? 0 : 18, right: horizontal ? 42 : 6}},
-        plugins: {
-          legend: {display: !!spec.grouped, position: 'top', align: 'end', labels: {usePointStyle: true, pointStyle: 'rectRounded', color: INK}},
-          tooltip: {callbacks: {
-            title: function (items) { return labels[items[0].dataIndex]; },
-            label: function (ctx) { return ' ' + (spec.grouped ? ctx.dataset.label + ': ' : '') + fmtInt(ctx.raw) + ' ' + t('shipments') + (!spec.grouped && total ? ' · ' + fmtPct(ctx.raw / total * 100, 1) : ''); }
-          }},
-          datalabels: {anchor: 'end', align: 'end', offset: 2, color: INK, font: {weight: '700', size: 10.5}, clip: false,
-            display: function (ctx) { return dv(ctx) > 0 && (!spec.grouped || ctx.chart.data.labels.length <= 4); },
-            formatter: function (v) { return fmtInt(v); }}
-        },
-        scales: horizontal ? {x: valueAxis, y: catAxis} : {x: catAxis, y: valueAxis}
-      }
-    };
+  var SHIFT_HOURS = {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'};
+  /** Legenda ao lado da pizza: cor, turno, quantidade e % com barrinha. */
+  function pieLegend(spec) {
+    var data = spec.datasets[0].data, total = data.reduce(function (a, v) { return a + v; }, 0);
+    return spec.labels.map(function (l, i) {
+      var pct = total ? data[i] / total * 100 : 0, color = SHIFT_COLORS[l] || '#9CA3AF';
+      return '<div class="pl-row"><i style="background:' + color + '"></i><span class="pl-name">' + esc(vlabel(spec.key, l)) +
+        (SHIFT_HOURS[l] ? '<small>' + SHIFT_HOURS[l] + '</small>' : '') + '</span><b>' + esc(fmtInt(data[i])) + '</b><em>' + esc(fmtPct(pct, 2)) + '</em>' +
+        '<span class="pl-bar"><span style="width:' + pct.toFixed(2) + '%;background:' + color + '"></span></span></div>';
+    }).join('') + '<div class="pl-total"><span>' + esc(t('shipments')) + '</span><b>' + esc(fmtInt(total)) + '</b></div>';
+  }
+  function lcFirst(x) { x = String(x || ''); return x.charAt(0).toLowerCase() + x.slice(1); }
+  /** Cartões embaixo de cada gráfico: Total geral · Maior · Menor (ou "Top N somados"), como no modelo. */
+  function chartStats(spec, c) {
+    if (spec.key === 'evolution') return evolutionStats(spec, c);
+    if (spec.grouped) return rpStats({kind: 'byShift'}, spec.panel);
+    var isPie = spec.type === 'doughnut' || spec.type === 'pie';
+    var data = spec.datasets[0].data;
+    var total = isPie ? data.reduce(function (a, v) { return a + v; }, 0) : (spec.total || 0);
+    var idx = data.map(function (v, i) { return i; }).filter(function (i) { return data[i] > 0 && spec.labels[i] !== 'N/A'; });
+    if (!idx.length || !total) return '';
+    var maxI = idx.reduce(function (m, i) { return data[i] > data[m] ? i : m; }, idx[0]);
+    var minI = idx.reduce(function (m, i) { return data[i] <= data[m] ? i : m; }, idx[0]);
+    var dl = dimLabel(spec.key);
+    var pct = function (n) { return total ? n / total * 100 : 0; };
+    var both = function (n) { return '<em>' + esc(fmtInt(n)) + '</em> <span class="rp-sep">|</span> ' + esc(fmtPct(pct(n), 2)); };
+    var name = function (i) { return '<span class="accent">' + esc(vlabel(spec.key, spec.labels[i])) + '</span>'; };
+    var out = [rpStat('total', biLabel(RP_TEXT.total), esc(fmtInt(total)), esc(fmtPct(100, 2)))];
+    out.push(rpStat('max', biLabel({pt: 'Maior ' + lcFirst(dl.pt), zh: '最多' + (dl.zh || '')}), name(maxI), both(data[maxI]), 'named'));
+    if (spec.others > 0) {
+      var shown = data.reduce(function (a, v) { return a + v; }, 0);
+      out.push(rpStat('top', biLabel(RP_TEXT.topN, {n: data.length}), esc(fmtInt(shown)), '<em>' + esc(fmtPct(pct(shown), 2)) + '</em> ' + esc(t('ofTotalShort'))));
+    } else out.push(rpStat('min', biLabel({pt: 'Menor ' + lcFirst(dl.pt), zh: '最少' + (dl.zh || '')}), name(minI), both(data[minI]), 'named'));
+    return out.join('');
+  }
+  /** Cartões da evolução: dias na meta, maior e menor taxa do período selecionado. */
+  function evolutionStats(spec, c) {
+    var pts = spec.points.filter(function (p) { return p.rate !== null && p.date >= spec.selFrom && p.date <= spec.selTo; });
+    if (!pts.length) return '';
+    var met = pts.filter(function (p) { return p.met === true; }).length;
+    var hi = pts.reduce(function (m, p) { return p.rate > m.rate ? p : m; }, pts[0]);
+    var lo = pts.reduce(function (m, p) { return p.rate < m.rate ? p : m; }, pts[0]);
+    return rpStat('goal', biLabel(RP_TEXT.daysInGoal), esc(met + ' / ' + pts.length), '<em>' + esc(fmtPct(met / pts.length * 100, 0)) + '</em> · ' + esc(t('goal')) + ' ' + esc(goalText(c.goal))) +
+      rpStat('max', biLabel(RP_TEXT.maxRate), '<span class="accent">' + esc(fmtPct(hi.rate)) + '</span>', esc(fmtDate(hi.date, true)), 'named') +
+      rpStat('min', biLabel(RP_TEXT.minRate), '<span class="accent">' + esc(fmtPct(lo.rate)) + '</span>', esc(fmtDate(lo.date, true)), 'named');
   }
 
   // ------------------------------------------------------------------ tabela resumo (Envio Errado: segmentos ofensores)
@@ -1246,13 +1274,18 @@
   var RP_TEXT = {
     total: {pt: 'Total geral', zh: '总计'},
     shiftTotal: {pt: '{s} Total', zh: '{s} 总计'},
-    max: {pt: 'Maior', zh: '最多'}, min: {pt: 'Menor', zh: '最少'}
+    max: {pt: 'Maior', zh: '最多'}, min: {pt: 'Menor', zh: '最少'},
+    topN: {pt: 'Top {n} somados', zh: '前{n}名合计'},
+    daysInGoal: {pt: 'Dias na meta', zh: '达标天数'},
+    maxRate: {pt: 'Maior taxa', zh: '最高指标率'}, minRate: {pt: 'Menor taxa', zh: '最低指标率'}
   };
   var RP_ICONS = {
     total: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
     max: '<path d="M4 20h16"/><path d="M7 17v-3M11 17v-6M15 17v-4"/><path d="M14 4h5v5M19 4l-6 6"/>',
     min: '<path d="M4 20h16"/><path d="M7 17V9M11 17v-5M15 17v-2"/><path d="M14 13h5V8M19 13l-6-6"/>',
-    shift: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.5.3 4.5 2.5 4.5 5"/>'
+    shift: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.5.3 4.5 2.5 4.5 5"/>',
+    top: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h1M4 12h1M4 18h1"/>',
+    goal: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>'
   };
   function rpIcon(name) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + RP_ICONS[name] + '</svg>'; }
   function titleCase(s) { return String(s).toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, b) { return a + b.toUpperCase(); }); }
@@ -1328,41 +1361,34 @@
     g.addColorStop(0, '#F5222F'); g.addColorStop(1, '#C4000F');
     return g;
   }
-  function rankConfig(def, p) {
-    var items = p.items, bands = [];
-    if (p.kind === 'byShift') {
-      var at = 0;
-      p.groups.forEach(function (g) { bands.push({label: g.shift, from: at, to: at + g.items.length - 1}); at += g.items.length; });
-    }
-    var rankOf = [];
-    p.groups.forEach(function (g) { g.items.forEach(function (it, i) { rankOf.push(i); }); });
-    var labels = items.map(function (it) {
-      var main = vlabel(p.dim, it.value);
-      return p.extra && it.extra ? [main, titleCase(vlabel(p.extra, it.extra))] : main;
-    });
-    var colors = def.colors === 'rank' ? rankOf.map(function (r) { return RANK_COLORS[Math.min(r, RANK_COLORS.length - 1)]; }) : redGradient;
-    var countColor = def.accent === 'pct' ? INK : RED, pctColor = def.accent === 'pct' ? RED : INK;
-    var bandPos = p.kind === 'byShift' ? (def.bands || 'bottom') : null;
+  /** Colunas no padrão do modelo: gradiente vermelho (ou cor pela posição), quantidade e (%) em cima de cada coluna. */
+  function columnsConfig(o) {
+    var n = o.values.length;
+    var slot = function (ch) { var x = ch.scales && ch.scales.x; return x && n ? x.width / n : 100; };
+    var countColor = o.accent === 'pct' ? INK : RED, pctColor = o.accent === 'pct' ? RED : INK;
     return {
-      $sig: 'rank-' + def.key + '-' + (bandPos || 'none'), type: 'bar',
-      data: {labels: labels, datasets: [{label: t('shipments'), data: items.map(function (it) { return it.count; }), backgroundColor: colors,
-        hoverBackgroundColor: def.colors === 'rank' ? colors : RED_DARK, borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start',
+      $sig: o.sig + '-' + (o.bandPos || 'none'), type: 'bar',
+      data: {labels: o.labels, datasets: [{label: t('shipments'), data: o.values, backgroundColor: o.colors || redGradient,
+        hoverBackgroundColor: o.colors || RED_DARK, borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start',
         maxBarThickness: 64, categoryPercentage: .8, barPercentage: .84}]},
       plugins: plugins([shiftBands]),
       options: {
         responsive: true, maintainAspectRatio: false, animation: {duration: 650},
-        layout: {padding: {top: bandPos === 'top' ? 40 : 6, bottom: bandPos === 'bottom' ? 36 : 0, right: 6}},
+        layout: {padding: {top: o.bandPos === 'top' ? 40 : 6, bottom: o.bandPos === 'bottom' ? 36 : 0, right: 6}},
         plugins: {
           legend: {display: false},
-          shiftBands: {groups: bands, position: bandPos},
+          shiftBands: {groups: o.bands || [], position: o.bandPos || null},
           tooltip: {callbacks: {
-            title: function (tt) { var it = items[tt[0].dataIndex]; return rpItemLabel(p, it) + (it.shift ? ' · ' + it.shift : ''); },
-            label: function (ctx) { return ' ' + fmtInt(ctx.raw) + ' ' + t('shipments') + ' · ' + fmtPct(items[ctx.dataIndex].pct, 2); }
+            title: function (tt) { return o.titles[tt[0].dataIndex]; },
+            label: function (ctx) { return ' ' + fmtInt(ctx.raw) + ' ' + t('shipments') + ' · ' + fmtPct(o.pcts[ctx.dataIndex], 2); }
           }},
-          datalabels: {anchor: 'end', align: 'end', clip: false, padding: 0, display: function (ctx) { return dv(ctx) > 0; },
+          datalabels: {anchor: 'end', align: 'end', clip: false, padding: 0,
             labels: {
-              count: {offset: 17, color: countColor, font: {weight: '800', size: 13}, formatter: function (v) { return fmtInt(v); }},
-              pct: {offset: 3, color: pctColor, font: {weight: '600', size: 10.5}, formatter: function (v, ctx) { return '(' + fmtPct(items[ctx.dataIndex].pct, 2) + ')'; }}
+              count: {color: countColor, font: {weight: '800', size: 13}, formatter: function (v) { return fmtInt(v); },
+                offset: function (ctx) { return slot(ctx.chart) >= 50 ? 17 : 3; }, display: function (ctx) { return dv(ctx) > 0 && slot(ctx.chart) >= 24; }},
+              pct: {offset: 3, color: pctColor, font: {weight: '600', size: 10.5},
+                formatter: function (v, ctx) { return '(' + fmtPct(o.pcts[ctx.dataIndex], 2) + ')'; },
+                display: function (ctx) { return dv(ctx) > 0 && slot(ctx.chart) >= 50; }}
             }}
         },
         scales: {
@@ -1373,6 +1399,20 @@
         }
       }
     };
+  }
+  function rankConfig(def, p) {
+    var items = p.items, bands = [], rankOf = [], at = 0;
+    if (p.kind === 'byShift') p.groups.forEach(function (g) { bands.push({label: g.shift, from: at, to: at + g.items.length - 1}); at += g.items.length; });
+    p.groups.forEach(function (g) { g.items.forEach(function (it, i) { rankOf.push(i); }); });
+    return columnsConfig({
+      sig: 'rank-' + def.key,
+      labels: items.map(function (it) { var main = vlabel(p.dim, it.value); return p.extra && it.extra ? [main, titleCase(vlabel(p.extra, it.extra))] : main; }),
+      values: items.map(function (it) { return it.count; }),
+      pcts: items.map(function (it) { return it.pct; }),
+      titles: items.map(function (it) { return rpItemLabel(p, it) + (it.shift ? ' · ' + it.shift : ''); }),
+      colors: def.colors === 'rank' ? rankOf.map(function (r) { return RANK_COLORS[Math.min(r, RANK_COLORS.length - 1)]; }) : null,
+      accent: def.accent, bands: bands, bandPos: p.kind === 'byShift' ? (def.bands || 'bottom') : null
+    });
   }
   function renderRankPanels(c) {
     var box = $('#rankPanels');
@@ -1636,8 +1676,8 @@
         top = hasData ? '<div class="res-value"><strong>' + fmtInt(sumC) + '</strong><small class="muted">' + esc(t('shiftErrors', {s: r.shift})) + ' · ' +
           esc(t('shiftShareOf', {p: fmtPct(sumT ? sumC / sumT * 100 : null, 1)})) + '</small></div>' : '';
       }
-      card.innerHTML = '<div class="res-top"><span class="chart-ico">' + icon(s.key) + '</span><div><h3>' + esc(L(c.name)) + '</h3><small>' + esc(Lo(c.name)) + ' · ' +
-        esc(t('goal')) + ' ' + esc(goalText(c.goal)) + '</small></div>' + top + '</div><div class="chart-wrap' + (single ? ' large' : '') + '"></div>' + (single ? '<div class="res-table"></div>' : '');
+      card.innerHTML = '<div class="res-top"><span class="chart-ico">' + icon(s.key) + '</span><div><h3>' + esc(L(c.name)) +
+        (Lo(c.name) ? ' <span class="rp-zh">/ ' + esc(Lo(c.name)) + '</span>' : '') + '</h3><small>' + esc(t('goal')) + ' ' + esc(goalText(c.goal)) + '</small></div>' + top + '</div><div class="chart-wrap' + (single ? ' large' : '') + '"></div>' + (single ? '<div class="res-table"></div>' : '');
       grid.appendChild(card);
       var wrap = $('.chart-wrap', card);
       if (!hasData) { wrap.innerHTML = '<div class="chart-empty"><div><b>' + esc(t('noData')) + '</b>' + esc(r.shift === 'all' ? t('noRateHint') : t('noAgg')) + '</div></div>'; return; }
@@ -1682,9 +1722,14 @@
       options: {responsive: true, maintainAspectRatio: false, animation: {duration: 600}, layout: {padding: {top: 18}},
         plugins: {legend: {display: false}, tooltip: {callbacks: {label: function (ctx) {
           var p = points[ctx.dataIndex]; return p.count === null ? ' —' : ' ' + fmtInt(p.count) + ' ' + t('shipments') + ' · ' + t('shiftShareOf', {p: fmtPct(p.pct, 1)});
-        }}}, datalabels: {display: function (ctx) { return dv(ctx) > 0 && points.length <= 16; }, anchor: 'end', align: 'end', offset: 2, color: INK, font: {size: 10, weight: '700'}, formatter: function (v) { return fmtInt(v); }}},
-        scales: {x: {grid: {display: false}, border: {display: false}, ticks: {autoSkip: true, maxTicksLimit: 14, maxRotation: 0}},
-          y: {beginAtZero: true, grace: '12%', grid: {color: GRID}, border: {display: false}, ticks: {precision: 0, callback: function (v) { return fmtInt(v); }}}}}
+        }}}, datalabels: {anchor: 'end', align: 'end', clip: false, padding: 0, labels: {
+          count: {offset: function (ctx) { return points.length <= 8 ? 15 : 2; }, color: INK, font: {size: 11.5, weight: '800'}, formatter: function (v) { return fmtInt(v); },
+            display: function (ctx) { return dv(ctx) > 0 && points.length <= 16; }},
+          pct: {offset: 2, color: RED, font: {size: 9.5, weight: '700'}, formatter: function (v, ctx) { return '(' + fmtPct(points[ctx.dataIndex].pct, 1) + ')'; },
+            display: function (ctx) { return dv(ctx) > 0 && points.length <= 8 && isNum(points[ctx.dataIndex].pct); }}
+        }}},
+        scales: {x: {grid: {display: false}, border: {color: '#D9DBE1'}, ticks: {autoSkip: true, maxTicksLimit: 14, maxRotation: 0, color: INK, font: {weight: '700'}}},
+          y: {beginAtZero: true, grace: '22%', grid: {color: GRID}, border: {display: false}, ticks: {precision: 0, callback: function (v) { return fmtInt(v); }}}}}
     };
   }
   function resultsTable(points, c, r) {
