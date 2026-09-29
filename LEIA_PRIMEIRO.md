@@ -1,6 +1,18 @@
-# J&T DASHMASTER V3.8 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.8.1 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.8.1 — Sem espaços vazios e novo Maomao
+- **Sem buracos na grade.** O último cartão ou gráfico de cada linha estica até a borda.
+  - **SC→SC e SC→DC** (que não têm os cartões de turno) ficavam com espaços em branco nos cartões do topo e ao lado do último gráfico.
+  - Quando o número de gráficos é ímpar, o último ocupa a linha inteira.
+  - Os demais indicadores continuam com o mesmo visual.
+- **Maomao novo** (desenhos enviados pelo usuário):
+  - **dançando** com estrelinhas quando o indicador está **na meta**;
+  - **bravo**, tremendo com 💢, quando está **fora da meta**;
+  - parado e cinza quando ainda não há taxa.
+
+  As imagens recebidas eram estáticas, por isso a animação é feita em CSS. Quem ativou "reduzir movimento" no sistema vê o Maomao parado.
 
 ## V3.8 — Docas na Falta de Bipagem na Expedição
 Tudo o que já existia continua igual. Foram **acrescentados**:
@@ -91,7 +103,7 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 - Filtros em **lista suspensa com os dados** (multi-seleção com caixas de marcação e a quantidade de remessas ao lado de cada valor). Não há mais campo de pesquisa nos filtros.
 - Filtros aplicados **na hora** (sem ir ao servidor): cartões, gráficos e tabelas recalculam instantaneamente. Os filtros ativos aparecem como etiquetas removíveis.
 - Atalhos de período: Último dia, 7 dias, 30 dias, Mês atual, Tudo.
-- **Maomao** anima conforme a meta: pula comemorando (com estrelinhas) quando está na meta, fica triste no pufe (com lágrima) quando está fora, e fica parado e cinza quando ainda não há taxa. Quem ativou "reduzir movimento" no sistema vê o Maomao sem animação.
+- **Maomao** anima conforme a meta (na V3.8.1: dança quando está na meta, fica bravo quando está fora e fica parado e cinza quando ainda não há taxa). Quem ativou "reduzir movimento" no sistema vê o Maomao sem animação.
 - Cartão de **Taxa** em destaque, com minigráfico dos últimos 14 dias; Variação verde quando na meta e vermelha fora da meta.
 - **Evolução diária** com pontos verdes/vermelhos e linha da meta (mínimo de 30 dias de contexto, ou histórico completo).
 - **Intervalos ofensores** em ranking (como no modelo) ou em 24 h; rótulos "02h - 03h" em duas linhas.

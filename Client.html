@@ -40,8 +40,8 @@
       variation: 'Variação da taxa', vsPrevDay: 'vs. dia anterior', vsPrevPeriod: 'vs. período anterior', pp: 'p.p.',
       participation: 'participação', topOffender: '{dim} ofensor', shipments: 'remessas',
       targetGoodTitle: 'Meta atingida! 🎉', targetBadTitle: 'Fora da meta', targetNoneTitle: 'Taxa oficial indisponível',
-      targetGoodText: 'Maomao está comemorando: {name} está dentro da meta ({goal}). Continue assim!',
-      targetBadText: 'Maomao ficou triste: {name} está fora da meta ({goal}). Veja abaixo os maiores ofensores.',
+      targetGoodText: 'Maomao está dançando: {name} está dentro da meta ({goal}). Continue assim!',
+      targetBadText: 'Maomao ficou bravo: {name} está fora da meta ({goal}). Veja abaixo os maiores ofensores.',
       targetNoneText: 'Ainda não há taxa sincronizada do JMS para este período. Confira a cobertura nos selos acima.',
       goalBelow: 'abaixo de {v}', goalAbove: 'acima de {v}',
       evolution: 'Evolução diária', evolutionSub: 'Taxa oficial do JMS por dia · pontos verdes na meta, vermelhos fora',
@@ -103,8 +103,8 @@
       variation: '指标率环比', vsPrevDay: '较前一日', vsPrevPeriod: '较上一期间', pp: '个百分点',
       participation: '占比', topOffender: '主要{dim}', shipments: '票',
       targetGoodTitle: '目标达成！🎉', targetBadTitle: '未达目标', targetNoneTitle: '暂无官方指标率',
-      targetGoodText: 'Maomao 正在庆祝：{name} 已达标（目标 {goal}），继续保持！',
-      targetBadText: 'Maomao 有点难过：{name} 未达标（目标 {goal}）。请查看下方主要问题。',
+      targetGoodText: 'Maomao 正在跳舞庆祝：{name} 已达标（目标 {goal}），继续保持！',
+      targetBadText: 'Maomao 生气了：{name} 未达标（目标 {goal}）。请查看下方主要问题。',
       targetNoneText: '该期间尚无已同步的JMS指标率，请查看上方的覆盖情况。',
       goalBelow: '低于 {v}', goalAbove: '高于 {v}',
       evolution: '每日趋势', evolutionSub: 'JMS官方每日指标率 · 绿点达标，红点未达标',
@@ -840,14 +840,51 @@
     var tops = k.tops.map(function (tp, i, arr) {
       var dim = L(dimLabel(tp.key));
       var sub = tp.label ? fmtInt(tp.qty) + ' ' + esc(t('shipments')) + ' · <b>' + fmtPct(tp.pct, 1) + '</b> ' + esc(t('participation')) : esc(t('noDataHint'));
-      return '<article class="kpi' + (arr.length === 1 ? ' span2' : '') + '"><div class="kpi-label">' + icon(tp.key) + esc(t('topOffender', {dim: dim})) + '</div>' +
+      return '<article class="kpi"><div class="kpi-label">' + icon(tp.key) + esc(t('topOffender', {dim: dim})) + '</div>' +
         '<div class="kpi-value text" title="' + esc(vlabel(tp.key, tp.label)) + '">' + (tp.label ? esc(vlabel(tp.key, tp.label)) : '—') + '</div><div class="kpi-sub">' + sub + '</div>' +
         '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(tp.pct) ? tp.pct : 0) + '" style="background:' + RED + '"></i></div></div></article>';
     }).join('');
     grid.innerHTML = hero + errors + prev + variation + shifts + tops;
+    fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
   }
+  /**
+   * Estica o último cartão de cada linha até a borda da grade: nenhuma linha fica com
+   * espaço vazio, qualquer que seja o número de cartões (SC→SC e SC→DC não têm os cartões
+   * de turno) e a largura da tela. Recalculado quando a janela muda de tamanho.
+   */
+  function fillGridGaps(grid) {
+    if (!grid) return;
+    var cards = Array.prototype.slice.call(grid.children);
+    cards.forEach(function (el) { if (el.getAttribute('data-autospan')) { el.style.gridColumn = ''; el.removeAttribute('data-autospan'); } });
+    var cs = getComputedStyle(grid);
+    var cols = cs.gridTemplateColumns.split(' ').filter(function (x) { return x && x !== '0px'; }).length;
+    if (cols < 2) return;
+    var g = grid.getBoundingClientRect(), gap = parseFloat(cs.columnGap) || 0;
+    var colW = (g.width - (cols - 1) * gap) / cols;
+    if (!(colW > 0)) return;
+    var colOf = function (x) { return Math.max(0, Math.min(cols - 1, Math.round((x - g.left) / (colW + gap)))); };
+    var boxes = cards.map(function (el) {
+      var r = el.getBoundingClientRect();
+      return {el: el, top: Math.round(r.top), bottom: Math.round(r.bottom), c0: colOf(r.left), c1: colOf(r.right - colW / 2), ok: r.width > 0};
+    }).filter(function (b) { return b.ok; });
+    var tops = [];
+    boxes.forEach(function (b) { if (tops.indexOf(b.top) < 0) tops.push(b.top); });
+    tops.forEach(function (top) {
+      var used = -1, last = null;
+      boxes.forEach(function (b) {
+        if (b.top <= top && b.bottom > top + 1) used = Math.max(used, b.c1);
+        if (b.top === top && (!last || b.c1 > last.c1)) last = b;
+      });
+      // O cartão grande da taxa (2 linhas) não é esticado; só o último cartão da linha, se sobrar espaço à direita dele.
+      if (!last || last.el.classList.contains('kpi-hero') || used !== last.c1 || used >= cols - 1) return;
+      last.el.style.gridColumn = 'span ' + (last.c1 - last.c0 + 1 + (cols - 1 - used));
+      last.el.setAttribute('data-autospan', '1');
+    });
+  }
+  window.addEventListener('resize', debounce(function () { fillGridGaps($('#kpiGrid')); }, 150));
+
   function kpiCard(ic, label, valueHtml, subHtml, cls) {
     return '<article class="kpi' + (cls ? ' ' + cls : '') + '"><div class="kpi-label">' + icon(ic) + esc(label) + '</div>' +
       '<div class="kpi-value">' + valueHtml + '</div><div class="kpi-sub">' + subHtml + '</div></article>';
@@ -965,6 +1002,9 @@
         grid.appendChild(card);
       });
       grid.setAttribute('data-sig', sig);
+      // Número ímpar de gráficos (além da evolução): o último ocupa a linha inteira.
+      var halves = $$('.chart-card:not(.full)', grid);
+      if (halves.length % 2 === 1) halves[halves.length - 1].classList.add('wide');
     }
     specs.forEach(function (s) { renderChartCard($('.chart-card[data-key="' + s.key + '"]', grid), s, c); });
   }
