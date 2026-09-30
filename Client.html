@@ -33,7 +33,7 @@
       rateOfDay: 'Taxa do dia {date}', rateOfPeriod: 'Taxa do período', prevDayRate: 'Dia anterior', prevPeriodRate: 'Período anterior',
       lastDay: 'Último dia', weighted: 'Σ erros ÷ Σ base oficial', meanNote: 'média das taxas diárias',
       officialNotFiltered: 'Taxa oficial do JMS · não muda com filtros', daysWithRate: '{a} de {b} dias com taxa',
-      inGoal: 'Na meta', outGoal: 'Fora da meta', noRate: 'Sem taxa oficial', noGoal: 'Meta não definida',
+      inGoal: 'Na meta', outGoal: 'Fora da meta', noRate: 'Sem taxa oficial', noGoal: 'Meta não definida', goalOffScale: 'fora da escala do gráfico',
       targetNoGoalTitle: 'Meta não definida', targetNoGoalText: 'A taxa de {name} está sendo acompanhada, mas este indicador ainda não tem meta. Com a meta cadastrada, o Maomao passa a avaliar.',
       errorsDay: 'Erros no dia', errorsPeriod: 'Erros no período', errorsFiltered: 'Erros (com filtro)',
       prevErrorsDay: 'Erros dia anterior', prevErrorsPeriod: 'Erros período anterior', officialJms: 'Oficial JMS',
@@ -100,7 +100,7 @@
       rateOfDay: '{date} 指标率', rateOfPeriod: '期间指标率', prevDayRate: '前一日', prevPeriodRate: '上一期间',
       lastDay: '最近一天', weighted: '异常合计 ÷ 官方基数合计', meanNote: '每日指标率平均值',
       officialNotFiltered: 'JMS官方指标率 · 不随筛选变化', daysWithRate: '{b} 天中 {a} 天有指标率',
-      inGoal: '达标', outGoal: '未达标', noRate: '暂无官方指标率', noGoal: '未设定目标',
+      inGoal: '达标', outGoal: '未达标', noRate: '暂无官方指标率', noGoal: '未设定目标', goalOffScale: '超出图表范围',
       targetNoGoalTitle: '未设定目标', targetNoGoalText: '{name} 的指标率正在跟踪，但尚未设定目标。设定目标后 Maomao 会进行评价。',
       errorsDay: '当日异常', errorsPeriod: '期间异常', errorsFiltered: '异常（已筛选）',
       prevErrorsDay: '前一日异常', prevErrorsPeriod: '上一期间异常', officialJms: 'JMS官方',
@@ -272,19 +272,41 @@
     try { return new Intl.NumberFormat(locale(), {style: 'currency', currency: 'BRL'}).format(Number(n)); }
     catch (e) { return 'R$ ' + fmtNum(n, 2); }
   }
-  /** Taxa oficial no formato do indicador: % (padrão) ou ppm (por milhão, ex.: Avaria). `goal` traz a unidade. */
+  /**
+   * Taxa oficial no formato do indicador. `goal` traz a unidade (% padrão, ou 'ppm') e as casas
+   * decimais (goal.digits; a Avaria usa 3: 0,029%).
+   */
   function fmtRate(v, goal, d) {
-    if (goal && goal.unit === 'ppm') return isNum(v) ? fmtNum(v, d === undefined ? 2 : d) + ' ppm' : '—';
+    if (d === undefined) d = goal && goal.digits ? goal.digits : 2;
+    if (goal && goal.unit === 'ppm') return isNum(v) ? fmtNum(v, d) + ' ppm' : '—';
     return fmtPct(v, d);
   }
   function hasGoal(goal) { return !!goal && isNum(goal.value); }
+  /**
+   * Valor da linha de meta nos gráficos, ou null quando a meta está muito longe dos dados
+   * (ex.: meta 90% com taxa de 0,03%): a linha achataria o gráfico inteiro. A meta continua
+   * no título, na legenda e na avaliação dos pontos.
+   */
+  function goalLine(goal, vals) {
+    if (!hasGoal(goal)) return null;
+    var v = (vals || []).filter(isNum).map(Number), g = Number(goal.value);
+    if (!v.length) return g;
+    var mx = Math.max.apply(null, v), mn = Math.min.apply(null, v);
+    return (mx > 0 && g > mx * 20) || (g > 0 && mn > g * 20) ? null : g;
+  }
   function goalText(goal) {
     if (!hasGoal(goal)) return t('noGoal');
-    return (goal.direction === 'min' ? (goal.strict ? '> ' : '≥ ') : (goal.strict ? '< ' : '≤ ')) + fmtRate(goal.value, goal);
+    return (goal.direction === 'min' ? (goal.strict ? '> ' : '≥ ') : (goal.strict ? '< ' : '≤ ')) + fmtRate(goal.value, goal, goalDigits(goal));
   }
   /** "Meta < 1,00%" ou, sem meta, "Meta não definida". */
   function goalLabel(goal) { return hasGoal(goal) ? t('goal') + ' ' + goalText(goal) : t('noGoal'); }
-  function goalSentence(goal) { return hasGoal(goal) ? t(goal.direction === 'min' ? 'goalAbove' : 'goalBelow', {v: fmtRate(goal.value, goal)}) : t('noGoal'); }
+  function goalSentence(goal) { return hasGoal(goal) ? t(goal.direction === 'min' ? 'goalAbove' : 'goalBelow', {v: fmtRate(goal.value, goal, goalDigits(goal))}) : t('noGoal'); }
+  /** Casas da meta: as do indicador (2), ou, com goal.digits, só as que o valor tem (90 → "90%"; 0,025 → "0,025%"). */
+  function goalDigits(goal) {
+    if (!goal.digits) return undefined;
+    var dec = (String(goal.value).split('.')[1] || '').length;
+    return Math.min(goal.digits, dec);
+  }
   function cfg() { return state.catalogMap[state.indicator]; }
   function dimLabel(key) { var c = cfg(); return (c && c.labels && c.labels[key]) || {pt: key, zh: key}; }
   function filtersObj() { var o = {}; Object.keys(state.filters).forEach(function (k) { if (state.filters[k] && state.filters[k].size) o[k] = Array.from(state.filters[k]); }); return o; }
@@ -877,7 +899,7 @@
       (!day && k.prevDaysWithRate < k.days ? ' · ' + t('daysWithRate', {a: k.prevDaysWithRate, b: k.days}) : ''));
     var prev = kpiCard('history', day ? tx(c, 'prevErrorsDay') : tx(c, 'prevErrorsPeriod'), fmtInt(k.previousErrors), prevSub);
     var varVal = isNum(k.variation) ? deltaHtml(k.variation, 2) : '—';
-    var varSub = isNum(k.variationPp) ? esc(fmtSigned(k.variationPp, 2, ' ' + (c.goal.unit === 'ppm' ? 'ppm' : t('pp'))) + ' ' + (day ? t('vsPrevDay') : t('vsPrevPeriod'))) : esc(day ? t('vsPrevDay') : t('vsPrevPeriod'));
+    var varSub = isNum(k.variationPp) ? esc(fmtSigned(k.variationPp, c.goal.digits || 2, ' ' + (c.goal.unit === 'ppm' ? 'ppm' : t('pp'))) + ' ' + (day ? t('vsPrevDay') : t('vsPrevPeriod'))) : esc(day ? t('vsPrevDay') : t('vsPrevPeriod'));
     var variation = kpiCard('trend', t('variation'), varVal, varSub, status === 'none' ? '' : status);
 
     var shifts = c.hideShiftCards ? '' : k.shifts.map(function (s) {
@@ -980,11 +1002,12 @@
     var to = state.to, from = Core.addDays(to, -13);
     var evo = Core.buildEvolution(state.data.rates, c.goal, from, to);
     if (!evo.points.some(function (p) { return p.rate !== null; })) return;
+    var gSpark = goalLine(c.goal, evo.points.map(function (p) { return p.rate; }));
     state.charts.spark = new Chart(canvas, {
       type: 'line',
       data: {labels: evo.labels.map(function (d) { return fmtDate(d); }), datasets: [
         {data: evo.points.map(function (p) { return p.rate; }), borderColor: '#fff', borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 2.5, pointBackgroundColor: '#fff', spanGaps: true, fill: true, backgroundColor: 'rgba(255,255,255,.12)'},
-        {data: evo.points.map(function () { return c.goal.value; }), borderColor: 'rgba(255,255,255,.6)', borderDash: [4, 4], borderWidth: 1.2, pointRadius: 0}
+        {data: evo.points.map(function () { return gSpark; }), borderColor: 'rgba(255,255,255,.6)', borderDash: [4, 4], borderWidth: 1.2, pointRadius: 0}
       ]},
       options: {responsive: true, maintainAspectRatio: false, animation: {duration: 700}, layout: {padding: {top: 6, bottom: 2}},
         plugins: {legend: {display: false}, datalabels: {display: false}, tooltip: {displayColors: false, filter: function (i) { return i.datasetIndex === 0; },
@@ -1027,7 +1050,7 @@
     var v = values.filter(isNum).map(Number);
     if (!v.length) return 1;
     var range = Math.max.apply(null, v) - Math.min.apply(null, v);
-    return range < 0.3 ? 2 : range < 3 ? 1 : 0;
+    return range < 0.03 ? 3 : range < 0.3 ? 2 : range < 3 ? 1 : 0;
   }
 
 
@@ -1150,7 +1173,8 @@
     }
     if (key === 'evolution') legend.innerHTML = '<div class="legend"><span><i class="line" style="background:' + RED + '"></i>' + esc(t('rate')) + '</span>' +
       (hasGoal(c.goal) ? '<span><i style="background:' + GOOD + ';border-radius:50%"></i>' + esc(t('inGoal')) + '</span><span><i style="background:' + BAD + ';border-radius:50%"></i>' + esc(t('outGoal')) + '</span>' +
-      '<span><i class="dash"></i>' + esc(goalLabel(c.goal)) + '</span>' : '<span>' + esc(t('noGoal')) + '</span>') + '</div>';
+      (spec.points && goalLine(c.goal, spec.points.map(function (p) { return p.rate; })) === null ? '<span>' + esc(goalLabel(c.goal) + ' · ' + t('goalOffScale')) + '</span>'
+        : '<span><i class="dash"></i>' + esc(goalLabel(c.goal)) + '</span>') : '<span>' + esc(t('noGoal')) + '</span>') + '</div>';
   }
   function seg(group, items, current) {
     return '<div class="seg" role="tablist" data-g="' + group + '">' + items.map(function (it) {
@@ -1192,7 +1216,8 @@
     var maxI = valid.reduce(function (m, i) { return m === null || vals[i] > vals[m] ? i : m; }, null);
     var lastI = valid.length ? valid[valid.length - 1] : null;
     var showAll = valid.length <= 14;
-    var yDigits = pctDigits(vals.concat([c.goal.value]));
+    var gLine = goalLine(c.goal, vals);
+    var yDigits = pctDigits(vals.concat([gLine]));
     return {
       $sig: 'evo', type: 'line',
       data: {labels: pts.map(function (p) { return fmtDate(p.date); }), datasets: [
@@ -1204,7 +1229,7 @@
           pointRadius: pts.map(function (p) { var inSel = p.date >= spec.selFrom && p.date <= spec.selTo; return n > 90 ? (inSel ? 3 : 1.5) : (inSel ? 4.5 : 2.5); }),
           pointHoverRadius: 6, pointBorderColor: '#fff', pointBorderWidth: 1.5,
           pointBackgroundColor: pts.map(function (p) { return p.met === true ? GOOD : p.met === false ? BAD : MUTED; })},
-        {label: t('goal'), data: pts.map(function () { return c.goal.value; }), borderColor: GOAL, borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, fill: false}
+        {label: t('goal'), data: pts.map(function () { return gLine; }), borderColor: GOAL, borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, fill: false}
       ]},
       plugins: plugins(),
       options: {
@@ -1794,14 +1819,15 @@
   }
   function resultRateConfig(points, c, per) {
     var vals = points.map(function (p) { return p.rate; }), n = vals.filter(isNum).length;
-    var yDigits = pctDigits(vals.concat([c.goal.value]));
+    var gLine = goalLine(c.goal, vals);
+    var yDigits = pctDigits(vals.concat([gLine]));
     return {
       type: 'line',
       data: {labels: points.map(function (p) { return fmtPeriodKey(p.key, per); }), datasets: [
         {label: t('rate'), data: vals, borderColor: RED, borderWidth: 2.2, cubicInterpolationMode: 'monotone', spanGaps: per !== 'day', fill: false,
           pointRadius: points.length > 90 ? 1.5 : 4, pointHoverRadius: 6, pointBorderColor: '#fff', pointBorderWidth: 1.5,
           pointBackgroundColor: points.map(function (p) { return p.met === true ? GOOD : p.met === false ? BAD : MUTED; })},
-        {label: t('goal'), data: points.map(function () { return c.goal.value; }), borderColor: GOAL, borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0, fill: false}
+        {label: t('goal'), data: points.map(function () { return gLine; }), borderColor: GOAL, borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0, fill: false}
       ]},
       plugins: plugins(),
       options: {responsive: true, maintainAspectRatio: false, animation: {duration: 600}, interaction: {mode: 'index', intersect: false}, layout: {padding: {top: 34, right: 36}},
@@ -1834,14 +1860,14 @@
     if (v === Math.max.apply(null, valid) || v === Math.min.apply(null, valid)) return true;
     return i % Math.ceil(40 / slot) === 0;
   }
-  /** Casas decimais da taxa do turno: 3 quando ela é menor que 0,1% (senão tudo vira "0,01%"). */
+  /** Casas decimais da taxa do turno: 3 abaixo de 0,1% e 4 abaixo de 0,01% (Avaria), senão tudo vira "0,01%". */
   function rateDigits(points) {
     var mx = Math.max.apply(null, [0].concat(points.map(function (p) { return p.rate; }).filter(isNum)));
-    return mx > 0 && mx < 0.1 ? 3 : 2;
+    return mx > 0 && mx < 0.01 ? 4 : mx > 0 && mx < 0.1 ? 3 : 2;
   }
   /** Taxa do turno (%) por período, em colunas na cor do turno, com a taxa em cima de cada coluna. */
   function resultShiftConfig(points, shift, per, c) {
-    var vals = points.map(function (p) { return p.rate; }), rd = rateDigits(points), yDigits = rd === 3 ? 3 : pctDigits(vals.concat([0]));
+    var vals = points.map(function (p) { return p.rate; }), rd = rateDigits(points), yDigits = rd >= 3 ? rd : pctDigits(vals.concat([0]));
     return {
       type: 'bar',
       data: {labels: points.map(function (p) { return fmtPeriodKey(p.key, per); }), datasets: [{label: t('shiftRate', {s: shift}), data: vals,

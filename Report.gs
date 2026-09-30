@@ -47,9 +47,12 @@ function generateReport(indicatorKey, params, format) {
 
 function bilingual_(pt, zh) { return String(pt || '') + '\n' + String(zh || ''); }
 function pctCell_(v) { return v === null || v === undefined ? '' : v / 100; }
-/** Taxa oficial na planilha: em % vira fração (formato 0,00%); em ppm fica o número (formato "ppm"). */
+/** Taxa oficial na planilha: em % vira fração (formato 0,00%, ou 0,000% na Avaria); em ppm fica o número (formato "ppm"). */
 function rateCell_(v, cfg) { return v === null || v === undefined || v === '' ? '' : cfg.goal.unit === 'ppm' ? Number(v) : v / 100; }
-function rateFormat_(cfg) { return cfg.goal.unit === 'ppm' ? '0.00 "ppm"' : '0.00%'; }
+function rateFormat_(cfg) {
+  const d = cfg.goal.digits || 2, dec = '0.' + new Array(d + 1).join('0');
+  return cfg.goal.unit === 'ppm' ? dec + ' "ppm"' : dec + '%';
+}
 
 function headerRow_(range) {
   return range.setBackground(APP_CONFIG.RED).setFontColor('#FFFFFF').setFontWeight('bold')

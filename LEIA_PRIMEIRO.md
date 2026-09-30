@@ -1,6 +1,18 @@
-# J&T DASHMASTER V3.11 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.11.1 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.11.1 — Avaria em porcentagem, com meta
+- **Taxa da Avaria em %**, como nos outros indicadores:
+  - o JMS manda a taxa por milhão (292,78) e o painel converte: 292,78 ÷ 10.000 = **0,029%**;
+  - por ser pequena, a taxa aparece com **3 casas** (0,029%). Nos Resultados por turno, abaixo de 0,01%, aparecem 4 casas (0,0074%);
+  - vale para cartões, evolução, Resultados, relatório e barra lateral;
+  - as taxas que a V3.11 gravou por milhão são convertidas na leitura. Não precisa baixar nada de novo.
+- **Meta da Avaria: abaixo de 90%**, como informado. Ela aparece:
+  - no painel da Avaria: título, cartão da taxa, Maomao e evolução;
+  - em Resultados: título do cartão, coluna Meta e situação de cada período.
+- **Gráficos com meta muito longe dos dados:** se a linha da meta achataria o gráfico (ex.: meta 90% com taxa de 0,03%), ela não é desenhada. A legenda mostra "Meta ≤ 90% · fora da escala do gráfico" e os pontos continuam verdes/vermelhos pela meta.
+- **Para mudar a meta:** `Config.gs` → `damage` → `goal: {value: 90, ...}`. O valor é em %: 0,03% se escreve `0.03`.
 
 ## V3.11 — Novo indicador: Avaria / 破损
 A Avaria entrou como 7º indicador no menu, no mesmo padrão dos outros (gráficos, filtros, cartões, tabela, Resultados, relatório PDF/Excel e Maomao).
@@ -15,11 +27,8 @@ A Avaria entrou como 7º indicador no menu, no mesmo padrão dos outros (gráfic
    - Remessas filhas (`…-001`) contam como a remessa principal.
    - Remessa sem registro na tabela 2 aparece como "Sem informação" no turno, na estação e em quem registrou.
 
-**Taxa em ppm (por milhão).** A taxa de avaria do JMS é por milhão de remessas: 152 avarias em 519.159 remessas = **292,78 ppm**. O painel mostra a taxa em ppm (cartão, evolução, Resultados e relatório), com a variação em ppm e não em p.p.
-
-**Meta: ainda não definida.** Enquanto não houver meta, o painel mostra **"Meta não definida"**: não há "na meta" ou "fora da meta", e o Maomao fica neutro.
-- Para cadastrar a meta, troque `value: null` pelo valor em ppm em `Config.gs` → `damage` → `goal` (ex.: `value: 300`).
-- `direction: 'max'` quer dizer que a taxa deve ficar **abaixo** da meta.
+**Taxa e meta:** na V3.11 a taxa saía por milhão (292,78 ppm) e sem meta. Desde a V3.11.1 ela sai em % e com meta (veja acima).
+- Sem valor de meta (`value: null`), o painel mostra **"Meta não definida"**: não há "na meta" ou "fora da meta", e o Maomao fica neutro.
 
 **Painel da Avaria:**
 - **Filtros:** Turno, Estação de registro e Intervalo de horas.
@@ -379,7 +388,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **211 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **215 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

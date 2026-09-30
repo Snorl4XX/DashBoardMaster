@@ -211,9 +211,19 @@ function upsertRate_(s) {
   updateDayStatus_(s.indicator, s.date, {summaryStatus: 'COMPLETE', error: ''});
 }
 function rateFromRow_(r) {
-  return {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : num_(r[2], null),
+  return {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : legacyRate_(r[0], num_(r[2], null)),
     errorCount: r[3] === '' ? null : num_(r[3], null), totalCount: r[4] === '' ? null : num_(r[4], null),
     syncedAt: toIsoTimestamp_(r[6])};
+}
+/**
+ * A V3.11.0 gravou a Avaria por milhão (ex.: 292,78); da V3.11.1 em diante ela é gravada em % (0,029278).
+ * Uma taxa de avaria em % nunca passa de 1 (seriam 10.000 por milhão), então valor acima de 1 é do
+ * formato antigo e é convertido na leitura. Sem regravar a planilha e sem baixar nada de novo.
+ */
+function legacyRate_(indicator, rate) {
+  const cfg = INDICATORS[indicator];
+  const f = cfg && cfg.summary && cfg.summary.rateFactor;
+  return f && rate !== null && rate > 1 ? rate * f : rate;
 }
 /** Taxas oficiais (uma por dia; em duplicidade vale a sincronização mais recente). */
 function getRates_(indicator, from, to) {

@@ -369,7 +369,9 @@ function fetchSummaryDay_(indicatorKey, isoDate) {
   if (!sameDate.length) return {indicator: indicatorKey, date: isoDate, empty: true};
   const parsed = sameDate.map(r => {
     const rd = fieldReader_(r);
-    const rate = parsePercent_(rd(cfg.summary.rateKeys).value);
+    let rate = parsePercent_(rd(cfg.summary.rateKeys).value);
+    // Avaria: o JMS manda por milhão; rateFactor converte para % (292,78 × 0,0001 = 0,029278%).
+    if (rate !== null && cfg.summary.rateFactor) rate *= cfg.summary.rateFactor;
     const errorRaw = rd(cfg.summary.errorKeys).value;
     const totalRaw = rd(cfg.summary.totalKeys).value;
     return {rate: rate, errors: errorRaw === null ? null : num_(errorRaw, null), total: totalRaw === null ? null : num_(totalRaw, null), raw: r};
