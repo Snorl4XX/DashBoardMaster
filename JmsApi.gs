@@ -71,9 +71,12 @@ const JMS_ROUTES_ = [
   {key: 'SC_SC', pattern: /\/departure_transport_timely_(?:total_verification|rate_verification|sum_verification)(?:\?|$)/, name: 'OutboundTransshipmentNew', list: '经营指标>时效>出港转运及时率(新)'},
   {key: 'SC_DC', pattern: /\/inward_transport_timely_rate_(?:total|detailed|sum)(?:\?|$)/, name: 'TimelinessRatio', list: '经营指标>时效>进港转运及时率'},
   // Avaria: tela Qualidade de serviço > Gerenciamento de relatórios > Relatório de Taxa de Avaria (/serviceQualityIndex/damageRate).
-  // Routename = nome da página (mesma regra das outras telas). Se o JMS recusar, capture os dois no DevTools e
-  // grave JMS_ROUTENAME_DAMAGE / JMS_ROUTENAMELIST_DAMAGE.
-  {key: 'DAMAGE', pattern: /\/servicequality\/breakage\/rate\/(?:getBreakageRateData|detailBreakageRateData)(?:\?|$)/, name: 'damageRate', list: '服务质量>报表管理>破损率报表'},
+  // Routename = nome da página (mesma regra das outras telas: a Consulta de Pacote Problemático, capturada,
+  // segue ela). O Routernamelist NÃO foi capturado: se o JMS recusar, `alt` tem as variantes que o
+  // jmsPost_ tenta sozinho (a que funcionar fica em JMS_ROUTE_AUTO_DAMAGE). Captura manual no DevTools:
+  // JMS_ROUTENAME_DAMAGE / JMS_ROUTENAMELIST_DAMAGE (sobrepõem tudo).
+  {key: 'DAMAGE', pattern: /\/servicequality\/breakage\/rate\/(?:getBreakageRateData|detailBreakageRateData)(?:\?|$)/, name: 'damageRate', list: '服务质量>报表管理>破损率报表',
+    alt: [{name: 'damageRate', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -85,14 +88,24 @@ function headerSafe_(value) {
   return /[^\x20-\x7E]/.test(s) ? encodeURIComponent(s) : s;
 }
 
+function routeOf_(url) { return JMS_ROUTES_.filter(r => r.pattern.test(String(url || '')))[0] || null; }
+/** Variante de cabeçalho em teste agora (jmsPost_) — {key, v} — ou null. */
+var ROUTE_TRY_ = null;
+/** Cabeçalhos de rota: propriedade do usuário > variante em teste > variante aprendida (JMS_ROUTE_AUTO_) > padrão. */
+function routeVariant_(route, p) {
+  if (ROUTE_TRY_ && ROUTE_TRY_.key === route.key) return ROUTE_TRY_.v;
+  const auto = Number(p['JMS_ROUTE_AUTO_' + route.key] || 0);
+  return auto > 0 && route.alt && route.alt[auto - 1] ? route.alt[auto - 1] : {name: route.name, list: route.list};
+}
 function jmsRouteHeaders_(url, p) {
   const h = {};
-  const route = JMS_ROUTES_.filter(r => r.pattern.test(String(url || '')))[0];
+  const route = routeOf_(url);
   if (!route) return h;
   const nameProp = p['JMS_ROUTENAME_' + route.key];
   const listProp = p['JMS_ROUTENAMELIST_' + route.key];
-  const name = String(nameProp !== undefined && nameProp !== '' ? nameProp : route.name).trim();
-  const list = String(listProp !== undefined && listProp !== '' ? listProp : route.list).trim();
+  const v = routeVariant_(route, p);
+  const name = String(nameProp !== undefined && nameProp !== '' ? nameProp : v.name).trim();
+  const list = String(listProp !== undefined && listProp !== '' ? listProp : v.list).trim();
   if (name && name.toUpperCase() !== 'NONE') h.Routename = headerSafe_(name);
   if (list && list.toUpperCase() !== 'NONE') h.Routernamelist = headerSafe_(list);
   return h;
@@ -219,7 +232,51 @@ function isRetryable_(e) {
   return errorKind_(s) === 'OTHER' && /HTTP 429|HTTP 5\d\d|Falha de rede|não é JSON|timeout|timed out/i.test(s);
 }
 
+/**
+ * Rota com cabeçalho não capturado (ex.: Avaria): quando o JMS recusa (HTTP 401/403, "sem permissão"
+ * ou recusa da aplicação), tenta UMA vez cada variante de `alt`. A que funcionar fica gravada em
+ * JMS_ROUTE_AUTO_<ROTA> e passa a ser usada em todas as consultas (inclusive as em paralelo).
+ * Uma tentativa por rota a cada execução; com propriedade do usuário (JMS_ROUTENAME_/LIST_) não mexe.
+ */
+const ROUTE_FALLBACK_TRIED_ = {};
+function routeFallback_(url, payload, error) {
+  const route = routeOf_(url);
+  if (!route || !route.alt || ROUTE_FALLBACK_TRIED_[route.key]) return null;
+  const p = jmsReadProperties_();
+  if (p['JMS_ROUTENAME_' + route.key] || p['JMS_ROUTENAMELIST_' + route.key]) return null;
+  const m = String(error && error.message || error);
+  if (errorKind_(m) === 'QUOTA' || /Falha de rede|HTTP 5\d\d|HTTP 429|não é JSON|página HTML/.test(m)) return null;
+  // Token vencido ("token失效，请重新登录") não é problema de cabeçalho: nada de requisições extras.
+  const jmsMsg = (m.match(/\(código ([^)]*)\)/) || [])[1] || '';
+  if (/token|登录|登陆|login|expired|expirad|过期|失效|会话|session|sess[aã]o/i.test(jmsMsg)) return null;
+  ROUTE_FALLBACK_TRIED_[route.key] = true;
+  const current = routeVariant_(route, p);
+  const variants = [{name: route.name, list: route.list}].concat(route.alt);
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    if (v.name === current.name && v.list === current.list) continue;
+    ROUTE_TRY_ = {key: route.key, v: v};
+    try {
+      const json = parseJmsResponse_(urlFetch_(jmsRequestObject_(url, payload)), url);
+      if (i === 0) deleteProp_('JMS_ROUTE_AUTO_' + route.key); else setProp_('JMS_ROUTE_AUTO_' + route.key, String(i));
+      logSync_('INFO', '', '', 'Rota ' + route.key + ': o JMS aceitou Routename "' + v.name + '" / Routernamelist "' + v.list +
+        '" (a combinação anterior foi recusada: ' + m.slice(0, 160) + ').');
+      return json;
+    } catch (e) { /* próxima variante */ }
+    finally { ROUTE_TRY_ = null; }
+  }
+  return null;
+}
+
 function jmsPost_(url, payload, attempts) {
+  try { return jmsPostOnce_(url, payload, attempts); }
+  catch (e) {
+    const json = routeFallback_(url, payload, e);
+    if (json) return json;
+    throw e;
+  }
+}
+function jmsPostOnce_(url, payload, attempts) {
   validateJmsAuth_();
   const tries = Math.min(3, Math.max(1, Number(attempts) || 1));
   let error, authRetried = false;
@@ -624,13 +681,29 @@ function pickRegistrations_(regs, centerName) {
  * registrationBy, registrationNetwork e registrationCode. Remessa sem registro de avaria fica sem esses
  * campos ("Sem informação" nos gráficos de turno/estação/quem registrou).
  */
+/** Último erro da tabela 2 nesta execução (mostrado no diagnosticoCompleto). */
+var REGISTRATION_ERROR_ = '';
 function enrichRegistrations_(indicatorKey, records) {
   const cfg = getIndicatorConfig_(indicatorKey);
   if (!cfg.registration || !records || !records.length) return records;
+  // Consulta como na tela do JMS: a remessa como veio na tabela 1 ("…-003") e também a remessa-mãe.
   const seen = {}, waybills = [];
-  records.forEach(r => { const k = baseWaybill_(firstValue_(r, cfg.fields.shipment || ['waybillNo'], '')); if (k && !seen[k]) { seen[k] = 1; waybills.push(k); } });
+  const add = k => { if (k && !seen[k]) { seen[k] = 1; waybills.push(k); } };
+  records.forEach(r => { const w = String(firstValue_(r, cfg.fields.shipment || ['waybillNo'], '') || '').trim(); add(w); add(baseWaybill_(w)); });
   if (!waybills.length) return records;
-  const chosen = pickRegistrations_(fetchRegistrations_(cfg, waybills), centerName_());
+  let regs;
+  try { regs = fetchRegistrations_(cfg, waybills); }
+  catch (e) {
+    // Oscilação (rede, 5xx, cota): o job tenta de novo depois. Recusa da tabela 2 (rota, permissão, regra):
+    // a tabela 1 é gravada mesmo assim — taxa, cliente, produto, tipo e valor aparecem; turno, estação e
+    // quem registrou ficam "Sem informação" até corrigir (reimportarDetalhes('damage', de, até)).
+    const m = String(e && e.message || e);
+    if (errorKind_(m) === 'QUOTA' || isRetryable_(e)) throw e;
+    REGISTRATION_ERROR_ = m.slice(0, 300);
+    logSync_('WARN', indicatorKey, '', 'Consulta de Pacote Problemático recusada; avarias gravadas sem turno/estação/quem registrou: ' + REGISTRATION_ERROR_);
+    return records;
+  }
+  const chosen = pickRegistrations_(regs, centerName_());
   records.forEach(r => {
     const reg = chosen[baseWaybill_(firstValue_(r, cfg.fields.shipment || ['waybillNo'], ''))];
     if (!reg) return;

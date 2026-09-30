@@ -22,7 +22,10 @@ function syncHourly() {
     logSync_('ERROR', '', '', 'Sincronização horária bloqueada: ' + String(e.message || e));
     return {ok: false, blocked: true, message: 'Autenticação JMS não configurada. Verifique JMS_AUTH_MODE.'};
   }
-  const queued = queueRecentRefresh_();
+  // Antes da revalidação: com os 3 últimos dias já no DAY_STATUS, o indicador novo ainda é reconhecido como novo.
+  let history = 0;
+  try { migrateToV3112_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
+  const queued = queueRecentRefresh_() + history;
   return {ok: true, queued: queued, worker: processSyncQueue({budgetMs: 240000})};
 }
 

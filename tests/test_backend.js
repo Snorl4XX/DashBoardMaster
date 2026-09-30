@@ -889,4 +889,70 @@ const diagDm = cDm.diagnosticoCompleto(D19);
 check(/■ Avaria \(damage\)/.test(diagDm.texto) && /Consulta de Pacote Problemático: \d+ de \d+ avarias/.test(diagDm.texto) && /taxa [\d.]+%? · erros/.test(diagDm.texto),
   'diagnosticoCompleto inclui a Avaria e a junção com a tabela 2', diagDm.texto.split('\n').filter(l => /Avaria|Pacote|damage/.test(l)));
 
+// ---------- 18. V3.11.2: "não está pegando os dados da avaria" ----------
+// (a) Instalação que já existia (6 indicadores com histórico) recebe a Avaria: o histórico dela entra na fila sozinho.
+const dNi = {}; ['2026-09-17', '2026-09-18', '2026-09-19'].forEach((d, i) => { dNi[d] = makeDay(d, 60 + i); });
+const cNi = freshCtx(dNi);
+cNi.queueHistory('2026-09-17', '2026-09-19', true);
+runAll(cNi);
+['STATUS', 'RATES', 'JOBS', 'DAYFILES', 'AGG'].forEach(key => {
+  const col = key === 'JOBS' ? 2 : 0, sh = cNi.tab_(key);
+  sh.data = sh.data.filter((r, i) => i === 0 || r[col] !== 'damage');
+  cNi.invalidateTab_(key);
+});
+Object.keys(cNi.__state.props).filter(k => /^HISTORY_QUEUED_/.test(k)).forEach(k => { delete cNi.__state.props[k]; });
+check(!cNi.getRates_('damage', '2026-09-17', '2026-09-19').length, 'cenário: instalação antiga, Avaria sem histórico');
+cNi.syncHourly();
+runAll(cNi);
+const ratesN = cNi.getRates_('damage', '2026-09-17', '2026-09-19');
+check(ratesN.length === 3 && cNi.getDayStatus_('damage', '2026-09-19').details === 'COMPLETE' && !!cNi.__state.props.HISTORY_QUEUED_DAMAGE,
+  'indicador novo: histórico desde DATA_START_DATE baixado sozinho (antes só os 3 últimos dias)', ratesN.length);
+const recentN = cNi.addDaysIso_(cNi.isoToday_(), -2);
+const extraN = cNi.allTabRows_('JOBS').filter(r => r[2] === 'wrong_send' && cNi.dateCellIso_(r[3]) > '2026-09-19' && cNi.dateCellIso_(r[3]) < recentN);
+check(extraN.length === 0 && !!cNi.__state.props.HISTORY_QUEUED_WRONG_SEND, 'indicadores que já tinham histórico não baixam nada a mais', extraN.length);
+const nJobsN = cNi.allTabRows_('JOBS').length;
+cNi.syncHourly();
+check(cNi.allTabRows_('JOBS').length === nJobsN, 'o histórico do indicador novo entra na fila uma vez só');
+
+// Pausa e tarefas com erro deixadas pela V3.11: a atualização libera a Avaria uma vez.
+cNi.setPause_('DAMAGE', 'AUTH', 'HTTP 401 em getBreakageRateData');
+cNi.appendRow_('JOBS', ['j-x', 'SUMMARY', 'damage', '2026-09-10', 0, 'ERROR', 3, new Date(), new Date(), 'HTTP 401']);
+delete cNi.__state.props.MIGRATION_V3112;
+const migN = cNi.migrateToV3112_();
+check(migN === 1 && !cNi.activePauses_().DAMAGE && cNi.allTabRows_('JOBS').some(r => r[0] === 'j-x' && r[5] === 'PENDING') && cNi.migrateToV3112_() === 0,
+  'atualização: pausa da Avaria removida e tarefas com erro de volta à fila (uma vez só)', migN);
+
+// (b) Consulta de Pacote Problemático recusada: a tabela 1 é gravada mesmo assim.
+const dT2 = {}; dT2[D19] = makeDay(D19, 71);
+const cT2 = freshCtx(dT2, {intercept: route => route === 'registrationPage' ? [200, {code: 500, msg: '无权限访问', data: null, fail: true}] : null});
+cT2.queueHistory(D19, D19, true);
+runAll(cT2);
+const rowsT2 = cT2.getArchivedRange_('damage', D19, D19).rows;
+check(cT2.getDayStatus_('damage', D19).details === 'COMPLETE' && rowsT2.length === dT2[D19].dm.length && rowsT2.every(r => !r.eventTime) &&
+  rowsT2.some(r => r.client && r.amount) && cT2.allTabRows_('LOG').some(r => r[1] === 'WARN' && /Pacote Problemático recusada/.test(r[4])),
+  'tabela 2 recusada: avarias da tabela 1 gravadas, turno/estação "Sem informação" e aviso no SYNC_LOG', cT2.getDayStatus_('damage', D19));
+const diagT2 = cT2.diagnosticoCompleto(D19);
+check(/Consulta de Pacote Problemático: ERRO/.test(diagT2.texto), 'diagnosticoCompleto mostra o erro da tabela 2');
+
+// (c) Routernamelist da Avaria recusado: o sistema acha sozinho a variante aceita e passa a usá-la.
+const dRt = {}; dRt[D19] = makeDay(D19, 72);
+const cRt = freshCtx(dRt, {intercept: (route, h) => /BreakageRate/.test(route) && h.Routernamelist ? [401, {}] : null});
+cRt.queueHistory(D19, D19, true);
+runAll(cRt);
+const fRt = cRt.__state.fetches.filter(f => /BreakageRate/.test(f.url));
+const lastRt = fRt.slice(-3);
+check(cRt.getRates_('damage', D19, D19).length === 1 && cRt.getDayStatus_('damage', D19).details === 'COMPLETE' &&
+  cRt.__state.props.JMS_ROUTE_AUTO_DAMAGE === '1' && lastRt.every(f => !f.headers.Routernamelist && f.headers.Routename === 'damageRate'),
+  'rota da Avaria recusada: variante sem Routernamelist aprendida (JMS_ROUTE_AUTO_DAMAGE) e usada nas consultas seguintes', cRt.__state.props.JMS_ROUTE_AUTO_DAMAGE);
+check(cRt.publicPauses_().length === 0 && cRt.getDayStatus_('wrong_send', D19).details === 'COMPLETE', 'nenhuma rota pausada; os outros indicadores seguem normais');
+const diagRt = cRt.diagnosticoCompleto(D19);
+check(/Cabeçalho de rota: Routename "damageRate" · Routernamelist "NONE" \(variante aprendida automaticamente\)/.test(diagRt.texto), 'diagnosticoCompleto mostra o cabeçalho usado na Avaria',
+  diagRt.texto.split('\n').filter(l => /Cabeçalho de rota/.test(l)));
+// Propriedade do usuário manda: sem tentativas automáticas.
+const cRu = freshCtx(dRt, {intercept: (route, h) => /BreakageRate/.test(route) && h.Routernamelist ? [401, {}] : null}, {JMS_ROUTENAMELIST_DAMAGE: 'X>Y'});
+cRu.queueHistory(D19, D19, false);
+runAll(cRu, 2);
+check(!cRu.__state.props.JMS_ROUTE_AUTO_DAMAGE && cRu.__state.fetches.filter(f => /BreakageRate/.test(f.url)).every(f => f.headers.Routernamelist === 'X>Y'),
+  'com JMS_ROUTENAMELIST_DAMAGE cadastrada, o sistema não troca o cabeçalho');
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

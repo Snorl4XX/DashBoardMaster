@@ -847,6 +847,67 @@ function migrateToV372_() {
   return n;
 }
 
+/**
+ * V3.11.2: a Avaria da V3.11 pode ter sido recusada pelo JMS (cabeçalho de rota ou tabela 2) e ficado
+ * pausada por até 6 h, com tarefas marcadas com erro. Uma vez: tira a pausa da rota e devolve as
+ * tarefas com erro da Avaria à fila, para a nova versão (que se ajusta sozinha) tentar na hora.
+ */
+function migrateToV3112_() {
+  if (getProp_('MIGRATION_V3112', '')) return 0;
+  const routes = Object.keys(INDICATORS).filter(k => INDICATORS[k].registration).map(k => INDICATORS[k].routeKey);
+  const all = readPauseStore_();
+  routes.forEach(r => { delete all[r]; });
+  writePauseStore_(all);
+  let n = 0;
+  allTabRows_('JOBS').forEach((r, i) => {
+    if (r[5] === 'ERROR' && INDICATORS[r[2]] && INDICATORS[r[2]].registration) {
+      writeCells_('JOBS', i + 2, 6, ['PENDING', 0]); writeCells_('JOBS', i + 2, 9, [new Date(), '']); n++;
+    }
+  });
+  if (n) setQueueHint_('PENDING');
+  setProp_('MIGRATION_V3112', new Date().toISOString());
+  if (n) logSync_('INFO', '', '', 'V3.11.2: ' + n + ' tarefa(s) da Avaria com erro voltaram para a fila.');
+  return n;
+}
+
+/**
+ * Indicador novo numa instalação que já existia (ex.: Avaria, V3.11). O startFullHistory roda uma vez
+ * só, então o histórico do indicador novo nunca entrava na fila: só chegavam os 3 últimos dias, pela
+ * sincronização de hora em hora. Uma vez por indicador (propriedade HISTORY_QUEUED_<INDICADOR>):
+ *  - se ele já tem dias com mais de 3 dias no DAY_STATUS, o histórico já existe e nada muda;
+ *  - se não tem, e os outros indicadores já têm histórico, os dias de DATA_START_DATE até ontem que
+ *    faltam entram na fila (resumo + detalhe, mais recentes primeiro);
+ *  - instalação nova (ninguém com histórico): espera o startFullHistory, como sempre.
+ */
+function queueNewIndicatorsHistory_() {
+  const keys = Object.keys(INDICATORS).filter(k => !getProp_('HISTORY_QUEUED_' + k.toUpperCase(), ''));
+  if (!keys.length) return 0;
+  const start = getProp_('DATA_START_DATE', ''), end = addDaysIso_(isoToday_(), -1), recent = addDaysIso_(isoToday_(), -3);
+  if (!isIso_(start) || start > end) return 0;
+  const seen = {}, old = {};
+  let installed = false;
+  allTabRows_('STATUS').forEach(r => {
+    const k = String(r[0]), d = dateCellIso_(r[1]);
+    if (!isIso_(d)) return;
+    if (d < recent) { old[k] = true; installed = true; }
+    (seen[k] = seen[k] || {})[d] = true;
+  });
+  if (!installed) return 0;
+  const dates = dateRangeIso_(start, end).reverse();
+  let queued = 0;
+  keys.forEach(k => {
+    if (!old[k]) {
+      const jobs = [];
+      dates.forEach(d => { if (!(seen[k] && seen[k][d])) jobs.push(['SUMMARY', k, d, 0], ['DETAIL_INIT', k, d, 1]); });
+      const n = jobs.length ? enqueueJobs_(jobs, {}) : 0;
+      queued += n;
+      if (n) logSync_('INFO', k, '', 'Indicador novo: ' + (jobs.length / 2) + ' dia(s) de histórico (' + start + ' a ' + end + ') entraram na fila.');
+    }
+    setProp_('HISTORY_QUEUED_' + k.toUpperCase(), new Date().toISOString());
+  });
+  return queued;
+}
+
 /** Trabalhador da fila (gatilho a cada 5 min). Uma execução por vez. */
 function processSyncQueue(opts) {
   opts = opts || {};
@@ -863,6 +924,8 @@ function processSyncQueue(opts) {
     migrateToV371_();
     migrateToV372_();
     migrateToV38_();
+    migrateToV3112_();
+    queueNewIndicatorsHistory_();
     // Várias passadas: jobs criados nesta execução (ex.: detalhe após o resumo) já entram.
     for (let pass = 0; pass < 6 && !stopped && Date.now() < deadline - 20000; pass++) {
       const queue = pendingJobs_().filter(j => !attempted[j.rowNum]);

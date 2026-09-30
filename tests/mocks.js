@@ -193,6 +193,8 @@ function fakeJms(dayData, options) {
     const body = JSON.parse(req.payload);
     const route = url.split('/').pop();
     if (options.onFetch) options.onFetch(url, body);
+    // intercept(rota, cabeçalhos, corpo) → [httpStatus, resposta] para simular recusas específicas do JMS.
+    if (options.intercept) { const x = options.intercept(route, req.headers || {}, body); if (x) return {getResponseCode: () => x[0], getContentText: () => JSON.stringify(x[1])}; }
     const respond = (code, obj) => ({getResponseCode: () => code, getContentText: () => typeof obj === 'string' ? obj : JSON.stringify(obj)});
     if (options.status) return respond(options.status, {});
     if (options.html) return respond(200, '<!DOCTYPE html><html><head><title>JMS Login</title></head><body>login</body></html>');

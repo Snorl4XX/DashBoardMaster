@@ -191,7 +191,7 @@ function atualizarParaV37() {
   deleteProp_('MIGRATION_V371');
   deleteProp_('MIGRATION_V372');
   clearPauses_();
-  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_();
+  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + queueNewIndicatorsHistory_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};
@@ -353,12 +353,21 @@ function diagnosticoCompleto(date) {
     } catch (e) { item.resumo = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
     try {
       const probe = timed(() => probeDetail_(key, d));
+      const rt = JMS_ROUTES_.filter(r => r.key === cfg.routeKey && r.alt)[0];
+      if (rt) {
+        const pp = jmsReadProperties_(), v = routeVariant_(rt, pp);
+        const own = pp['JMS_ROUTENAME_' + rt.key] || pp['JMS_ROUTENAMELIST_' + rt.key];
+        item.rota = {routename: pp['JMS_ROUTENAME_' + rt.key] || v.name, routernamelist: pp['JMS_ROUTENAMELIST_' + rt.key] || v.list,
+          origem: own ? 'propriedade do script' : pp['JMS_ROUTE_AUTO_' + rt.key] ? 'variante aprendida automaticamente' : 'padrão'};
+      }
       if (cfg.registration && probe.records.length) {
         // Avaria: a tabela 2 (Consulta de Pacote Problemático) completa a 1ª página antes do mapeamento.
         try {
+          REGISTRATION_ERROR_ = '';
           timed(() => enrichRegistrations_(key, probe.records));
-          item.registros = {remessas: probe.records.length, comRegistro: probe.records.filter(r => r.registrationTime).length};
-        } catch (e) { item.registros = {erro: publicJmsError_(e.message)}; }
+          item.registros = REGISTRATION_ERROR_ ? {erro: publicJmsError_(REGISTRATION_ERROR_), erroBruto: REGISTRATION_ERROR_} :
+            {remessas: probe.records.length, comRegistro: probe.records.filter(r => r.registrationTime).length};
+        } catch (e) { item.registros = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
       }
       const map = fieldMappingReport_(key, probe.records);
       item.detalhe = {total: probe.total, tamanhoDePagina: probe.size, paginasNecessarias: Math.ceil(probe.total / probe.size),
@@ -400,8 +409,10 @@ function diagnosticoCompleto(date) {
         blank.map(k => k + ' (' + c[k].configurado + ')').join(', '));
     }
     const rg = item.registros;
-    if (rg) lines.push('  Consulta de Pacote Problemático: ' + (rg.erro ? 'ERRO — ' + rg.erro :
+    if (rg) lines.push('  Consulta de Pacote Problemático: ' + (rg.erro ? 'ERRO — ' + rg.erro + (rg.erroBruto ? ' [' + rg.erroBruto + ']' : '') +
+      ' (a tabela 1 é gravada mesmo assim; turno, estação e quem registrou ficam "Sem informação")' :
       rg.comRegistro + ' de ' + rg.remessas + ' avarias da 1ª página com registro (turno, estação e quem registrou)'));
+    if (item.rota) lines.push('  Cabeçalho de rota: Routename "' + item.rota.routename + '" · Routernamelist "' + item.rota.routernamelist + '" (' + item.rota.origem + ')');
     const dk = item.docas;
     if (dk && dk.amostra) {
       lines.push('  Docas (1ª página do detalhe, ' + dk.amostra + ' remessas): ' + dk.docas.slice(0, 6).map(x => x.doca + ' ' + x.pct + '%').join(' · '));

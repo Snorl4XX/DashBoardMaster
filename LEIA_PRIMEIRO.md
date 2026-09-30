@@ -1,6 +1,29 @@
-# J&T DASHMASTER V3.11.1 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.11.2 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.11.2 — Avaria não chegava: histórico, rota e tabela 2
+**Por que a Avaria não aparecia:**
+- **O histórico de um indicador novo nunca entrava na fila.** O `startFullHistory` roda uma vez só, na instalação. Numa planilha que já existia, a Avaria só recebia os 3 últimos dias, pela sincronização de hora em hora.
+  - Agora, na 1ª execução da fila, todo indicador sem histórico recebe os dias de `DATA_START_DATE` até ontem (resumo + detalhe, mais recentes primeiro).
+  - Acontece uma vez por indicador (propriedade `HISTORY_QUEUED_<INDICADOR>`). Os indicadores que já tinham histórico não baixam nada a mais.
+- **O cabeçalho de rota da Avaria (`Routernamelist`) não foi capturado ao vivo.** Se o JMS recusar:
+  - o sistema tenta sozinho, uma vez, as variantes (só `Routename`, e sem cabeçalho de rota);
+  - a que funcionar fica gravada em `JMS_ROUTE_AUTO_DAMAGE` e vale para todas as consultas;
+  - token vencido não dispara essas tentativas;
+  - se você cadastrar `JMS_ROUTENAME_DAMAGE` / `JMS_ROUTENAMELIST_DAMAGE` (captura do DevTools), elas mandam e nada é trocado.
+- **Tabela 2 recusada derrubava a Avaria inteira.** Se a Consulta de Pacote Problemático for recusada (rota, permissão, regra do JMS):
+  - a tabela 1 é gravada mesmo assim: taxa, cliente, produto, tipo, conteúdo e valor aparecem;
+  - turno, estação e quem registrou ficam "Sem informação";
+  - o aviso vai para o SYNC_LOG e para o `diagnosticoCompleto`;
+  - depois de corrigir, rode `reimportarDetalhes('damage', 'AAAA-MM-DD', 'AAAA-MM-DD')`.
+  - Queda de rede, erro 5xx e cota continuam repetindo a tarefa mais tarde, como antes.
+- A tabela 2 agora é consultada como na tela do JMS: com a remessa como veio na tabela 1 (`…-003`) e também com a remessa-mãe.
+- **Ao atualizar:** a pausa da Avaria (se a V3.11 foi recusada) é removida e as tarefas com erro dela voltam para a fila, uma vez.
+
+**Se ainda não aparecer em ~30 min:**
+1. Rode `diagnosticoCompleto()`.
+2. Me mande as linhas do bloco **■ Avaria (damage)**: resumo, detalhe, "Consulta de Pacote Problemático" e "Cabeçalho de rota". Elas não têm senha nem token.
 
 ## V3.11.1 — Avaria em porcentagem, com meta
 - **Taxa da Avaria em %**, como nos outros indicadores:
@@ -51,7 +74,7 @@ A Avaria entrou como 7º indicador no menu, no mesmo padrão dos outros (gráfic
 - **Tabela de remessas:** data estatística, remessa, tipo secundário, cliente, conteúdo, produto, valor da arbitragem (R$), estação, data do registro, turno e quem registrou.
 - Os textos do JMS que vêm em dois idiomas ("Prod. interno extraviado embal.avariada 内件遗失外包装破损") aparecem só no idioma escolhido.
 
-**Primeira vez:** depois de publicar a nova versão, o histórico da Avaria é baixado sozinho a partir de `DATA_START_DATE`, como nos outros indicadores. Para conferir antes, rode **`diagnosticoCompleto()`**. A Avaria aparece com a linha *"Consulta de Pacote Problemático: X de Y avarias da 1ª página com registro"*.
+**Primeira vez:** depois de publicar a nova versão, o histórico da Avaria é baixado sozinho a partir de `DATA_START_DATE`. Isso só passou a valer de verdade para planilhas que já existiam na V3.11.2. Para conferir antes, rode **`diagnosticoCompleto()`**. A Avaria aparece com a linha *"Consulta de Pacote Problemático: X de Y avarias da 1ª página com registro"*.
 
 **Se o JMS recusar a Avaria (Routename):**
 - O `Routename` da tela de Avaria segue a regra das outras telas (`damageRate`, `服务质量>报表管理>破损率报表`), mas não foi capturado ao vivo.
@@ -388,7 +411,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **215 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **226 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
