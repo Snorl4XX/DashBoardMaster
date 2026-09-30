@@ -211,19 +211,23 @@ function upsertRate_(s) {
   updateDayStatus_(s.indicator, s.date, {summaryStatus: 'COMPLETE', error: ''});
 }
 function rateFromRow_(r) {
-  return {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : legacyRate_(r[0], num_(r[2], null)),
-    errorCount: r[3] === '' ? null : num_(r[3], null), totalCount: r[4] === '' ? null : num_(r[4], null),
-    syncedAt: toIsoTimestamp_(r[6])};
+  const errors = r[3] === '' ? null : num_(r[3], null), total = r[4] === '' ? null : num_(r[4], null);
+  return {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : legacyRate_(r[0], num_(r[2], null), errors, total),
+    errorCount: errors, totalCount: total, syncedAt: toIsoTimestamp_(r[6])};
 }
 /**
- * A V3.11.0 gravou a Avaria por milhão (ex.: 292,78); da V3.11.1 em diante ela é gravada em % (0,029278).
- * Uma taxa de avaria em % nunca passa de 1 (seriam 10.000 por milhão), então valor acima de 1 é do
- * formato antigo e é convertido na leitura. Sem regravar a planilha e sem baixar nada de novo.
+ * Avaria: a V3.11.1 e a V3.11.2 gravaram a taxa dividida por 10.000 (0,029278); a V3.11.0 e a atual
+ * gravam o número do JMS (292,78). Na leitura, a taxa antiga volta para a escala do JMS — conferida
+ * com avarias ÷ volume × 1.000.000 do mesmo dia. Sem regravar a planilha e sem baixar nada de novo.
  */
-function legacyRate_(indicator, rate) {
+function legacyRate_(indicator, rate, errors, total) {
   const cfg = INDICATORS[indicator];
-  const f = cfg && cfg.summary && cfg.summary.rateFactor;
-  return f && rate !== null && rate > 1 ? rate * f : rate;
+  if (!cfg || !cfg.goal || Number(cfg.goal.scale) !== 1000000 || rate === null || !(rate > 0)) return rate;
+  if (errors > 0 && total > 0) {
+    const jms = errors / total * 1000000;
+    return Math.abs(rate * 10000 - jms) < Math.abs(rate - jms) ? rate * 10000 : rate;
+  }
+  return rate < 1 ? rate * 10000 : rate;
 }
 /** Taxas oficiais (uma por dia; em duplicidade vale a sincronização mais recente). */
 function getRates_(indicator, from, to) {

@@ -1,6 +1,15 @@
-# J&T DASHMASTER V3.11.2 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.11.3 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.11.3 — Taxa da Avaria igual à tela do JMS
+- A taxa da Avaria agora é **o mesmo número da coluna "Taxa de Avaria" do JMS** (ex.: 292,78), mostrado com "%". Vale para painel, evolução, Resultados, relatório e barra lateral.
+  - Na V3.11.1 e na V3.11.2 esse número aparecia dividido por 10.000 (0,029%).
+- **Meta ≤ 90**, na mesma escala: 292,78 fica **fora da meta**, 85 fica na meta.
+- **Contas iguais às do JMS:**
+  - a taxa de vários dias (semana, mês, período) = Σ avarias ÷ Σ volume × 1.000.000;
+  - a taxa de cada turno nos Resultados = avarias do turno ÷ volume total do dia × 1.000.000. T1 + T2 + T3 = taxa do dia.
+- As taxas gravadas pela V3.11.1/V3.11.2 voltam sozinhas para a escala do JMS na leitura, conferidas com avarias ÷ volume do mesmo dia. Não precisa baixar nada de novo.
 
 ## V3.11.2 — Avaria não chegava: histórico, rota e tabela 2
 **Por que a Avaria não aparecia:**
@@ -25,7 +34,7 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 1. Rode `diagnosticoCompleto()`.
 2. Me mande as linhas do bloco **■ Avaria (damage)**: resumo, detalhe, "Consulta de Pacote Problemático" e "Cabeçalho de rota". Elas não têm senha nem token.
 
-## V3.11.1 — Avaria em porcentagem, com meta
+## V3.11.1 — Avaria em porcentagem, com meta (a escala foi trocada na V3.11.3)
 - **Taxa da Avaria em %**, como nos outros indicadores:
   - o JMS manda a taxa por milhão (292,78) e o painel converte: 292,78 ÷ 10.000 = **0,029%**;
   - por ser pequena, a taxa aparece com **3 casas** (0,029%). Nos Resultados por turno, abaixo de 0,01%, aparecem 4 casas (0,0074%);
@@ -411,7 +420,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **226 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **225 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

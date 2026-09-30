@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.11.2',
+  VERSION: '3.11.3',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -367,19 +367,19 @@ const INDICATORS = Object.freeze({
    * Tabela 1 = lista de avarias do dia estatístico (detailBreakageRateData, máx. 100 por página).
    * Tabela 2 = Consulta de Pacote Problemático (registrationPage), buscada pelas remessas da tabela 1:
    *            dá quem registrou, quando (turno/intervalo) e a estação de registro. Junção pela remessa.
-   * O JMS manda a taxa POR MILHÃO (breakageRate 292,78 = 152 ÷ 519.159 × 1.000.000). O painel usa PORCENTAGEM,
-   * como os outros indicadores: rateFactor 0,0001 converte (292,78 → 0,029278%). Por ser pequena, 3 casas (goal.digits).
+   * Taxa = o número do JMS, igual à coluna "Taxa de Avaria" da tela (292,78), mostrado com "%" como a operação usa.
+   * O JMS calcula por milhão (152 ÷ 519.159 × 1.000.000), então as contas do período e dos turnos usam a mesma
+   * escala (goal.scale 1.000.000): taxa do período = Σavarias ÷ Σvolume × 1.000.000, como o JMS.
    */
   damage: {
     key: 'damage', order: 7, routeKey: 'DAMAGE',
     name: {pt: 'Avaria', zh: '破损'},
-    subtitle: {pt: 'Taxa de avaria (avarias ÷ remessas operadas)', zh: '破损率（破损票数 ÷ 操作票量）'},
-    // Meta: taxa ABAIXO de 90% (direction 'max'; valor informado pela operação). null = "Meta não definida".
-    goal: {value: 90, direction: 'max', strict: false, digits: 3},
+    subtitle: {pt: 'Taxa de avaria do JMS (Relatório de Taxa de Avaria)', zh: 'JMS 破损率（破损率报表）'},
+    // Meta: taxa ABAIXO de 90 (direction 'max'; na escala do JMS, informada pela operação). null = "Meta não definida".
+    goal: {value: 90, direction: 'max', strict: false, scale: 1000000},
     apiProfile: 'damage', detailMatchesErrors: true,
     summary: {
       endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/getBreakageRateData',
-      rateFactor: 0.0001,
       rateKeys: ['breakageRate', 'breakageRateTotal'], errorKeys: ['breakageTicketNumber', 'breakageNumberTotal'], totalKeys: ['operaNumber']
     },
     detail: {endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/detailBreakageRateData', maxPageSize: 100},

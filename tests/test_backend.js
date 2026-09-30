@@ -801,12 +801,13 @@ seRC.addEncoded(seOld);
 check(seRC.rows.filter(r => r.offenderBase === 'SP GRU').length === 3, 'relatório também soma no SP GRU');
 check(Object.keys(vm.runInContext('fillEmpty_(INDICATORS.wrong_send)', ctx)).length === 0, 'outros indicadores não mudam');
 
-// ---------- 17. V3.11: Avaria (tabela 1 + tabela 2; o JMS manda por milhão, o painel usa %) ----------
-// (a) Números do documento: 152 avarias ÷ 519.159 operados × 1.000.000 = 292,78 (JMS) = 0,029278%.
+// ---------- 17. V3.11: Avaria (tabela 1 + tabela 2; taxa = o número do JMS, mostrado com "%") ----------
+// (a) Números do documento: 152 avarias ÷ 519.159 operados × 1.000.000 = 292,78, a "Taxa de Avaria" da tela do JMS.
 check(Math.round(152 / 519159 * 1e6 * 100) / 100 === 292.78, 'taxa de avaria do JMS é por milhão');
 const cfgDm = ctx.getIndicatorConfig_('damage');
-check(!cfgDm.goal.unit && cfgDm.goal.direction === 'max' && cfgDm.goal.digits === 3 && cfgDm.summary.rateFactor === 0.0001 &&
-  C.rateScale(cfgDm.goal) === 100 && C.rateScale({unit: 'ppm'}) === 1e6, 'Avaria em %, meta abaixo, 3 casas; JMS por milhão convertido');
+check(!cfgDm.goal.unit && cfgDm.goal.direction === 'max' && cfgDm.goal.scale === 1e6 && !cfgDm.summary.rateFactor &&
+  C.rateScale(cfgDm.goal) === 1e6 && C.rateScale({unit: 'ppm'}) === 1e6 && C.rateScale(ctx.getIndicatorConfig_('wrong_send').goal) === 100,
+  'Avaria: número do JMS com "%", meta abaixo, contas na escala do JMS (por milhão)');
 // (b) Consultas iguais às do documento.
 const pS = ctx.buildPayload_('damage', '2026-09-29', 1, 20, false), pD = ctx.buildPayload_('damage', '2026-09-29', 1, 100, true);
 check(JSON.stringify(pS) === JSON.stringify({current: 1, size: 20, organizationCode: '30001', organizationType: 3, dateType: 1, countryId: '1', startDate: '2026-09-29', endDate: '2026-09-29'}),
@@ -840,13 +841,14 @@ runAll(cDm);
 const stDm = cDm.getDayStatus_('damage', D19);
 const rateDm = cDm.getRates_('damage', D19, D19)[0];
 check(stDm.summary === 'COMPLETE' && stDm.details === 'COMPLETE' && rateDm.errorCount === dDm[D19].dm.length && rateDm.totalCount === dDm[D19].dmBase &&
-  Math.abs(rateDm.rate - rateDm.errorCount / rateDm.totalCount * 100) < 1e-6 && rateDm.rate < 1,
-  'taxa gravada em % (por milhão do JMS × 0,0001) com avarias e volume oficiais', {st: stDm, rate: rateDm});
-// Taxa gravada pela V3.11.0 (por milhão) é convertida na leitura; as outras taxas não mudam.
-check(Math.abs(cDm.legacyRate_('damage', 292.78) - 0.029278) < 1e-9 && cDm.legacyRate_('damage', 0.029278) === 0.029278 &&
-  cDm.legacyRate_('wrong_send', 12.5) === 12.5 && cDm.legacyRate_('damage', null) === null, 'taxa antiga da Avaria (por milhão) lida em %');
-cDm.appendRow_('RATES', ['damage', '2026-09-10', 292.78, 152, 519159, '{}', new Date(Date.parse('2026-09-11T03:00:00Z'))]);
-check(Math.abs(cDm.getRates_('damage', '2026-09-10', '2026-09-10')[0].rate - 0.029278) < 1e-9, 'linha antiga da planilha RATES convertida');
+  Math.abs(rateDm.rate - rateDm.errorCount / rateDm.totalCount * 1e6) < 0.01 && rateDm.rate > 100,
+  'taxa gravada como o JMS manda (ex.: 292,78) com avarias e volume oficiais', {st: stDm, rate: rateDm});
+// Taxa gravada pela V3.11.1/V3.11.2 (÷ 10.000) volta para a escala do JMS na leitura; as outras taxas não mudam.
+check(Math.abs(cDm.legacyRate_('damage', 0.029278, 152, 519159) - 292.78) < 1e-6 && cDm.legacyRate_('damage', 292.78, 152, 519159) === 292.78 &&
+  Math.abs(cDm.legacyRate_('damage', 0.029278, null, null) - 292.78) < 1e-6 && cDm.legacyRate_('damage', 0, 0, 519159) === 0 &&
+  cDm.legacyRate_('wrong_send', 0.5, 5, 1000) === 0.5 && cDm.legacyRate_('damage', null) === null, 'taxa antiga da Avaria (÷ 10.000) lida na escala do JMS');
+cDm.appendRow_('RATES', ['damage', '2026-09-10', 0.029278, 152, 519159, '{}', new Date(Date.parse('2026-09-11T03:00:00Z'))]);
+check(Math.abs(cDm.getRates_('damage', '2026-09-10', '2026-09-10')[0].rate - 292.78) < 1e-6, 'linha antiga da planilha RATES convertida');
 const fDm = cDm.__state.fetches.filter(f => /detailBreakageRateData/.test(f.url));
 const fReg = cDm.__state.fetches.filter(f => /registrationPage/.test(f.url));
 check(fDm.length === Math.ceil(dDm[D19].dm.length / 100) && fDm.every(f => f.payload.size === 100) &&
@@ -867,20 +869,17 @@ const semReg = rowsDm.filter(r => !r.eventTime);
 check(semReg.length > 0 && semReg.every(r => r.shift === 'N/A' && !r.station), 'avaria sem registro na tabela 2 fica "Sem informação" no turno/estação');
 check(Object.keys(dashDm.dataset.dict).indexOf('amount') >= 0 && Object.keys(dashDm.dataset.dict).indexOf('station') >= 0 && Object.keys(dashDm.dataset.dict).indexOf('regDay') >= 0,
   'painel recebe valor, estação e dia do registro');
-// (e) Meta: a taxa precisa ficar ABAIXO. Sem valor = "Meta não definida". Taxa do período em %.
+// (e) Meta 90: a taxa precisa ficar ABAIXO (292,78 = fora da meta). Sem valor = "Meta não definida".
 const cardsDm = C.computeCards(cfgDm, dashDm.rates, rowsDm, {}, D19, D19);
-const goalDm = Object.assign({}, cfgDm.goal, {value: 0.03});
-check(cfgDm.goal.value === 90 && cardsDm.rate === rateDm.rate && cardsDm.targetMet === true && C.goalMet(90.5, cfgDm.goal) === false &&
-  C.goalMet(0.029278, goalDm) === true && C.goalMet(0.031, goalDm) === false && C.goalMet(0.03, Object.assign({}, cfgDm.goal, {value: null})) === null,
-  'meta da Avaria (90%): abaixo da meta = na meta; sem valor = sem avaliação', cardsDm.targetMet);
-const prDm = C.periodRate([{rate: 0.029278, errorCount: 152, totalCount: 519159}, {rate: 0.025, errorCount: 100, totalCount: 400000}], cfgDm.goal);
-check(prDm.method === 'weighted' && Math.abs(prDm.rate - 252 / 919159 * 100) < 1e-9, 'taxa de vários dias em % = Σavarias ÷ Σvolume × 100', prDm);
+check(cfgDm.goal.value === 90 && cardsDm.rate === rateDm.rate && cardsDm.targetMet === false && C.goalMet(292.78, cfgDm.goal) === false &&
+  C.goalMet(85, cfgDm.goal) === true && C.goalMet(90, cfgDm.goal) === true && C.goalMet(85, Object.assign({}, cfgDm.goal, {value: null})) === null,
+  'meta da Avaria (≤ 90): 292,78 fora da meta, 85 na meta; sem valor = sem avaliação', cardsDm.targetMet);
+const prDm = C.periodRate([{rate: 292.78, errorCount: 152, totalCount: 519159}, {rate: 250, errorCount: 100, totalCount: 400000}], cfgDm.goal);
+check(prDm.method === 'weighted' && Math.abs(prDm.rate - 252 / 919159 * 1e6) < 1e-6, 'taxa de vários dias como o JMS = Σavarias ÷ Σvolume × 1.000.000', prDm);
 const shDm = C.aggregateShiftResults([{date: D19, T1: 10, T2: 20, T3: 30, total: 60}], 'day', 'T2', D19, D19, [{date: D19, totalCount: 500000}], C.rateScale(cfgDm.goal));
-check(Math.abs(shDm[0].rate - 0.004) < 1e-12, 'Resultados por turno em % (20 ÷ 500.000 × 100 = 0,004%)', shDm[0]);
-const shPpm = C.aggregateShiftResults([{date: D19, T1: 10, T2: 20, T3: 30, total: 60}], 'day', 'T2', D19, D19, [{date: D19, totalCount: 500000}], 1e6);
-check(shPpm[0].rate === 40, 'escala por milhão continua disponível (20 ÷ 500.000 × 1.000.000 = 40)', shPpm[0]);
-check(ctx.rateFormat_(cfgDm) === '0.000%' && ctx.rateFormat_(ctx.getIndicatorConfig_('wrong_send')) === '0.00%' && Math.abs(ctx.rateCell_(0.029278, cfgDm) - 0.00029278) < 1e-12,
-  'relatório: taxa da Avaria com 3 casas');
+check(shDm[0].rate === 40, 'Resultados por turno na escala do JMS (20 ÷ 500.000 × 1.000.000 = 40)', shDm[0]);
+check(ctx.rateFormat_(cfgDm) === '0.00%' && Math.abs(ctx.rateCell_(292.78, cfgDm) - 2.9278) < 1e-12,
+  'relatório: taxa da Avaria igual à tela do JMS (292,78%)');
 // (f) Relatório e diagnóstico.
 cDm.UrlFetchApp.fetch = (() => { const f = cDm.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cDm.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
 const repDm = cDm.generateReport('damage', {from: D19, to: D19}, 'xlsx');

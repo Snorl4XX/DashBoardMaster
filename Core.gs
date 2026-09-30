@@ -223,7 +223,7 @@ function JTCoreFactory_() {
 
   // ---------- metas e taxas ----------
   /** Escala da taxa: '%' (padrão) = por cem · 'ppm' = por milhão (ex.: taxa de avaria do JMS). */
-  function rateScale(goal) { return goal && goal.unit === 'ppm' ? 1000000 : 100; }
+  function rateScale(goal) { return goal && goal.scale ? Number(goal.scale) : goal && goal.unit === 'ppm' ? 1000000 : 100; }
   /** Meta sem valor (value null) = indicador sem meta definida: nada fica "na meta" nem "fora". */
   function goalMet(rate, goal) {
     if (!isNum(rate) || !goal || !isNum(goal.value)) return null;

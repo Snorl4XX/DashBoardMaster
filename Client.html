@@ -274,7 +274,7 @@
   }
   /**
    * Taxa oficial no formato do indicador. `goal` traz a unidade (% padrão, ou 'ppm') e as casas
-   * decimais (goal.digits; a Avaria usa 3: 0,029%).
+   * decimais (goal.digits, padrão 2).
    */
   function fmtRate(v, goal, d) {
     if (d === undefined) d = goal && goal.digits ? goal.digits : 2;
@@ -301,7 +301,7 @@
   /** "Meta < 1,00%" ou, sem meta, "Meta não definida". */
   function goalLabel(goal) { return hasGoal(goal) ? t('goal') + ' ' + goalText(goal) : t('noGoal'); }
   function goalSentence(goal) { return hasGoal(goal) ? t(goal.direction === 'min' ? 'goalAbove' : 'goalBelow', {v: fmtRate(goal.value, goal, goalDigits(goal))}) : t('noGoal'); }
-  /** Casas da meta: as do indicador (2), ou, com goal.digits, só as que o valor tem (90 → "90%"; 0,025 → "0,025%"). */
+  /** Casas da meta: as do indicador (2), ou, com goal.digits, só as que o valor tem (0,025 → "0,025%"). */
   function goalDigits(goal) {
     if (!goal.digits) return undefined;
     var dec = (String(goal.value).split('.')[1] || '').length;
