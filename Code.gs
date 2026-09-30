@@ -146,6 +146,27 @@ function startFullHistory() {
 }
 
 /**
+ * Avaria: baixa AGORA o histórico inteiro (DATA_START_DATE até ontem) e processa a fila na hora.
+ * Pode ser executada direto pelo botão ▶ Executar do editor (não precisa de parâmetro). Dias já
+ * baixados são baixados de novo (poucas páginas por dia); o resto a fila termina sozinha a cada 5 min.
+ */
+function baixarHistoricoAvaria() {
+  const from = getProp_('DATA_START_DATE', '');
+  if (!isIso_(from)) throw new Error('Configure DATA_START_DATE em AAAA-MM-DD nas Propriedades do script.');
+  validateJmsAuth_();
+  const to = addDaysIso_(isoToday_(), -1);
+  const days = dateRangeIso_(from, to).reverse();
+  const jobs = [];
+  days.forEach(d => jobs.push(['SUMMARY', 'damage', d, 0], ['DETAIL_INIT', 'damage', d, 1]));
+  const queued = enqueueJobs_(jobs, {reset: true});
+  setProp_('HISTORY_FILL_DAMAGE', new Date().toISOString());
+  const worker = processSyncQueue({budgetMs: 240000, force: true});
+  const report = {indicador: 'damage', de: from, ate: to, dias: days.length, tarefasNaFila: queued, trabalhador: worker};
+  console.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+/**
  * Execute UMA vez após instalar a V3 sobre um banco da V2:
  *  - cria as abas novas (DAY_FILES e DAILY_AGG);
  *  - reimporta detalhes do Envio Errado baixados sem o filtro isWrong (payload antigo);
@@ -191,7 +212,7 @@ function atualizarParaV37() {
   deleteProp_('MIGRATION_V371');
   deleteProp_('MIGRATION_V372');
   clearPauses_();
-  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + queueNewIndicatorsHistory_();
+  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + queueNewIndicatorsHistory_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};

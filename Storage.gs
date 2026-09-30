@@ -876,45 +876,67 @@ function migrateToV3112_() {
 
 /**
  * Indicador novo numa instalação que já existia (ex.: Avaria, V3.11). O startFullHistory roda uma vez
- * só, então o histórico do indicador novo nunca entrava na fila: só chegavam os 3 últimos dias, pela
- * sincronização de hora em hora. Uma vez por indicador (propriedade HISTORY_QUEUED_<INDICADOR>):
- *  - se ele já tem dias com mais de 3 dias no DAY_STATUS, o histórico já existe e nada muda;
- *  - se não tem, e os outros indicadores já têm histórico, os dias de DATA_START_DATE até ontem que
- *    faltam entram na fila (resumo + detalhe, mais recentes primeiro);
- *  - instalação nova (ninguém com histórico): espera o startFullHistory, como sempre.
+ * só, então o histórico do indicador novo nunca entrava na fila: só chegavam os últimos dias, pela
+ * sincronização de hora em hora. Uma vez por indicador (propriedade HISTORY_FILL_<INDICADOR>):
+ * os dias de DATA_START_DATE até ontem que os OUTROS indicadores já têm e ele não tem entram na fila
+ * (resumo + detalhe, mais recentes primeiro). Indicador com histórico completo não baixa nada a mais.
+ * Instalação nova (menos de 4 dias no DAY_STATUS): espera o startFullHistory, como sempre.
+ * V3.11.4: a regra da V3.11.2 ("tem dia com mais de 3 dias = já tem histórico") falhava quando a Avaria
+ * já estava instalada havia alguns dias só com a revalidação horária — por isso a propriedade nova.
  */
 function queueNewIndicatorsHistory_() {
-  const keys = Object.keys(INDICATORS).filter(k => !getProp_('HISTORY_QUEUED_' + k.toUpperCase(), ''));
+  const flag = k => 'HISTORY_FILL_' + k.toUpperCase();
+  const keys = Object.keys(INDICATORS).filter(k => !getProp_(flag(k), ''));
   if (!keys.length) return 0;
-  const start = getProp_('DATA_START_DATE', ''), end = addDaysIso_(isoToday_(), -1), recent = addDaysIso_(isoToday_(), -3);
+  const start = getProp_('DATA_START_DATE', ''), end = addDaysIso_(isoToday_(), -1);
   if (!isIso_(start) || start > end) return 0;
-  const seen = {}, old = {};
-  let installed = false;
+  const seen = {}, covered = {};
   allTabRows_('STATUS').forEach(r => {
     const k = String(r[0]), d = dateCellIso_(r[1]);
-    if (!isIso_(d)) return;
-    if (d < recent) { old[k] = true; installed = true; }
+    if (!isIso_(d) || d < start || d > end || !INDICATORS[k]) return;
     (seen[k] = seen[k] || {})[d] = true;
+    covered[d] = true;
   });
-  if (!installed) return 0;
-  const dates = dateRangeIso_(start, end).reverse();
+  const days = Object.keys(covered).sort().reverse();
+  if (days.length < 4) return 0;
   let queued = 0;
   keys.forEach(k => {
-    if (!old[k]) {
+    const missing = days.filter(d => !(seen[k] && seen[k][d]));
+    if (missing.length >= 3) {
       const jobs = [];
-      dates.forEach(d => { if (!(seen[k] && seen[k][d])) jobs.push(['SUMMARY', k, d, 0], ['DETAIL_INIT', k, d, 1]); });
-      const n = jobs.length ? enqueueJobs_(jobs, {}) : 0;
-      queued += n;
-      if (n) logSync_('INFO', k, '', 'Indicador novo: ' + (jobs.length / 2) + ' dia(s) de histórico (' + start + ' a ' + end + ') entraram na fila.');
+      missing.forEach(d => jobs.push(['SUMMARY', k, d, 0], ['DETAIL_INIT', k, d, 1]));
+      queued += enqueueJobs_(jobs, {reset: true});
+      logSync_('INFO', k, '', 'Histórico do indicador: ' + missing.length + ' dia(s) que faltavam (' + missing[missing.length - 1] + ' a ' + missing[0] + ') entraram na fila.');
     }
-    setProp_('HISTORY_QUEUED_' + k.toUpperCase(), new Date().toISOString());
+    setProp_(flag(k), new Date().toISOString());
   });
   return queued;
+}
+
+/**
+ * V3.11.4: a Avaria passou a guardar o local da avaria (principal/secundário, tabela 1). Os dias já
+ * baixados não têm esses campos: uma vez, o detalhe desses dias é baixado de novo (poucas páginas por dia).
+ */
+function migrateToV3114_() {
+  if (getProp_('MIGRATION_V3114', '')) return 0;
+  const keys = Object.keys(INDICATORS).filter(k => INDICATORS[k].registration);
+  const jobs = [];
+  allTabRows_('STATUS').forEach(r => {
+    const k = String(r[0]), d = dateCellIso_(r[1]);
+    if (keys.indexOf(k) >= 0 && isIso_(d) && r[2] === 'COMPLETE' && DETAIL_USABLE_.indexOf(String(r[3])) >= 0) jobs.push(['DETAIL_INIT', k, d, 1]);
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V3114', new Date().toISOString());
+  if (n) logSync_('INFO', keys.join(','), '', 'V3.11.4: ' + n + ' dia(s) da Avaria baixados de novo para trazer o local da avaria.');
+  return n;
 }
 
 /** Trabalhador da fila (gatilho a cada 5 min). Uma execução por vez. */
 function processSyncQueue(opts) {
   opts = opts || {};
+  // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
+  try { migrateToV3112_(); migrateToV3114_(); queueNewIndicatorsHistory_(); }
+  catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return {ok: false, busy: true};
@@ -928,8 +950,6 @@ function processSyncQueue(opts) {
     migrateToV371_();
     migrateToV372_();
     migrateToV38_();
-    migrateToV3112_();
-    queueNewIndicatorsHistory_();
     // Várias passadas: jobs criados nesta execução (ex.: detalhe após o resumo) já entram.
     for (let pass = 0; pass < 6 && !stopped && Date.now() < deadline - 20000; pass++) {
       const queue = pendingJobs_().filter(j => !attempted[j.rowNum]);

@@ -47,6 +47,12 @@ function generateReport(indicatorKey, params, format) {
 
 function bilingual_(pt, zh) { return String(pt || '') + '\n' + String(zh || ''); }
 function pctCell_(v) { return v === null || v === undefined ? '' : v / 100; }
+/** Valor na planilha: "N/A" dos campos que vêm da tabela 2 da Avaria vira "OUTRAS BASES" (Config.gs → naLabel). */
+function reportValue_(cfg, key, v) {
+  const na = cfg.naLabel;
+  if ((v === 'N/A' || v === '' || v === null || v === undefined) && na && na.fields.indexOf(key) >= 0) return na.text.pt;
+  return JTCore_.localizeValue(v, 'pt');
+}
 /** Taxa oficial na planilha: em % vira fração (formato 0,00%, ou 0,000% na Avaria); em ppm fica o número (formato "ppm"). */
 function rateCell_(v, cfg) { return v === null || v === undefined || v === '' ? '' : cfg.goal.unit === 'ppm' ? Number(v) : v / 100; }
 function rateFormat_(cfg) {
@@ -102,7 +108,8 @@ function buildSummaryReportSheet_(sh, dash) {
   // Evolução diária (taxa oficial JMS)
   const rates = JTCore_.ratesBetween(dash.allRates, dash.from, dash.to);
   const evoStart = 8;
-  headerRow_(sh.getRange(evoStart, 1, 1, 4).setValues([[bilingual_('Data', '日期'), bilingual_('Taxa', '指标率'), bilingual_('Meta', '目标'), bilingual_('Erros', '异常量')]]));
+  headerRow_(sh.getRange(evoStart, 1, 1, 4).setValues([[bilingual_('Data', '日期'), bilingual_('Taxa', '指标率'), bilingual_('Meta', '目标'),
+    cfg.texts && cfg.texts.errors ? bilingual_(cfg.texts.errors.pt, cfg.texts.errors.zh) : bilingual_('Erros', '异常量')]]));
   if (rates.length) {
     sh.getRange(evoStart + 1, 1, rates.length, 1).setNumberFormat('@');
     sh.getRange(evoStart + 1, 1, rates.length, 4).setValues(rates.map(r => [humanDatePt_(r.date), rateCell_(r.rate, cfg), rateCell_(cfg.goal.value, cfg), r.errorCount === null ? '' : r.errorCount]));
@@ -132,7 +139,7 @@ function buildSummaryReportSheet_(sh, dash) {
     if (!ch || !ch.labels.length) return;
     const lab = dimLabel_(cfg, def.key);
     headerRow_(sh.getRange(n, 1, 1, 2).setValues([[bilingual_(def.title.pt, def.title.zh), bilingual_('Remessas', '运单量')]]));
-    sh.getRange(n + 1, 1, ch.labels.length, 2).setValues(ch.labels.map((l, j) => [JTCore_.localizeValue(l, 'pt'), ch.datasets[0].data[j]]));
+    sh.getRange(n + 1, 1, ch.labels.length, 2).setValues(ch.labels.map((l, j) => [reportValue_(cfg, def.key, l), ch.datasets[0].data[j]]));
     if (i < 3) {
       sh.insertChart(sh.newChart().asBarChart().addRange(sh.getRange(n, 1, ch.labels.length + 1, 2))
         .setPosition(n, 6, 0, 0).setOption('title', lab.pt + ' / ' + lab.zh).setOption('legend', {position: 'none'})
@@ -187,7 +194,7 @@ function buildDataReportSheet_(sh, cfg, rows, limit) {
   const list = limit ? rows.slice(0, limit) : rows;
   const values = list.map(r => cols.map(c => {
     const v = r[c[0]] === undefined || r[c[0]] === null ? '' : r[c[0]];
-    return c[0] === 'shipment' || c[0] === 'tripId' || c[0] === 'lot' ? String(v) : JTCore_.localizeValue(v, 'pt');
+    return c[0] === 'shipment' || c[0] === 'tripId' || c[0] === 'lot' ? String(v) : reportValue_(cfg, c[0], v);
   }));
   if (values.length) {
     sh.getRange(2, 1, values.length, headers.length).setNumberFormat('@').setValues(values);

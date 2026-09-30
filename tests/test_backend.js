@@ -869,6 +869,25 @@ const semReg = rowsDm.filter(r => !r.eventTime);
 check(semReg.length > 0 && semReg.every(r => r.shift === 'N/A' && !r.station), 'avaria sem registro na tabela 2 fica "Sem informação" no turno/estação');
 check(Object.keys(dashDm.dataset.dict).indexOf('amount') >= 0 && Object.keys(dashDm.dataset.dict).indexOf('station') >= 0 && Object.keys(dashDm.dataset.dict).indexOf('regDay') >= 0,
   'painel recebe valor, estação e dia do registro');
+// Local da avaria (tabela 1): principal e secundário, agrupados no painel "Local que ocorre mais Avaria".
+check(sampleDm.locationMain === src.damageLocationFirstName && sampleDm.locationSub === src.damageLocationSecondName &&
+  ['locationMain', 'locationSub'].every(k => Object.keys(dashDm.dataset.dict).indexOf(k) >= 0), 'local principal e secundário da avaria chegam ao painel', sampleDm);
+const locP = C.rankPanel(rowsDm, cfgDm.rankPanels[0]);
+const recebe = dDm[D19].dm.filter(r => r.damageLocationFirstName === 'Recebimento').length;
+check(locP.kind === 'byGroup' && locP.total === rowsDm.length && locP.groups[0].count >= locP.groups[locP.groups.length - 1].count &&
+  locP.groups.filter(g => g.group === 'Recebimento')[0].count === recebe &&
+  locP.groups.every(g => g.items.every(it => it.group === g.group)) && Math.abs(locP.groups.reduce((a, g) => a + g.pct, 0) - 100) < 1e-9,
+  'painel agrupado: local principal (faixas, maior primeiro) → local secundário (colunas), % sobre o total', locP.groups.map(g => g.group + ' ' + g.count));
+check(cfgDm.filters.indexOf('product') >= 0 && ctx.getPublicCatalog_().filter(x => x.key === 'damage')[0].naLabel.text.pt === 'OUTRAS BASES',
+  'filtro Especificação do produto e rótulo "OUTRAS BASES" no catálogo do painel');
+check(ctx.reportValue_(cfgDm, 'shift', 'N/A') === 'OUTRAS BASES' && ctx.reportValue_(cfgDm, 'station', '') === 'OUTRAS BASES' &&
+  ctx.reportValue_(cfgDm, 'client', 'N/A') !== 'OUTRAS BASES' && ctx.reportValue_(ctx.getIndicatorConfig_('wrong_send'), 'shift', 'N/A') !== 'OUTRAS BASES',
+  'relatório: avaria sem registro aparece como "OUTRAS BASES" (só nos campos da tabela 2 da Avaria)');
+// Dias baixados antes da V3.11.4 (sem o local): baixados de novo uma vez.
+delete cDm.__state.props.MIGRATION_V3114;
+const migLoc = cDm.migrateToV3114_();
+check(migLoc === 1 && cDm.migrateToV3114_() === 0 && cDm.allTabRows_('JOBS').some(r => r[1] === 'DETAIL_INIT' && r[2] === 'damage' && r[5] === 'PENDING'),
+  'atualização: detalhe da Avaria baixado de novo uma vez para trazer o local', migLoc);
 // (e) Meta 90: a taxa precisa ficar ABAIXO (292,78 = fora da meta). Sem valor = "Meta não definida".
 const cardsDm = C.computeCards(cfgDm, dashDm.rates, rowsDm, {}, D19, D19);
 check(cfgDm.goal.value === 90 && cardsDm.rate === rateDm.rate && cardsDm.targetMet === false && C.goalMet(292.78, cfgDm.goal) === false &&
@@ -890,28 +909,46 @@ check(/■ Avaria \(damage\)/.test(diagDm.texto) && /Consulta de Pacote Problem�
 
 // ---------- 18. V3.11.2: "não está pegando os dados da avaria" ----------
 // (a) Instalação que já existia (6 indicadores com histórico) recebe a Avaria: o histórico dela entra na fila sozinho.
-const dNi = {}; ['2026-09-17', '2026-09-18', '2026-09-19'].forEach((d, i) => { dNi[d] = makeDay(d, 60 + i); });
-const cNi = freshCtx(dNi);
-cNi.queueHistory('2026-09-17', '2026-09-19', true);
-runAll(cNi);
-['STATUS', 'RATES', 'JOBS', 'DAYFILES', 'AGG'].forEach(key => {
-  const col = key === 'JOBS' ? 2 : 0, sh = cNi.tab_(key);
-  sh.data = sh.data.filter((r, i) => i === 0 || r[col] !== 'damage');
+//     Caso real: a Avaria já rodava havia dias só com a revalidação horária (tinha 18 e 19, faltavam 13 a 17).
+const daysNi = ['2026-09-13', '2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19'];
+const dNi = {}; daysNi.forEach((d, i) => { dNi[d] = makeDay(d, 60 + i); });
+const cNi = freshCtx(dNi, null, {DATA_START_DATE: '2026-09-13'});
+cNi.queueHistory('2026-09-13', '2026-09-19', true);
+runAll(cNi, 12);
+const keepNi = r => r[0] !== 'damage' || cNi.dateCellIso_(r[1]) >= '2026-09-18';
+['STATUS', 'RATES', 'DAYFILES', 'AGG'].forEach(key => {
+  const sh = cNi.tab_(key);
+  sh.data = sh.data.filter((r, i) => i === 0 || keepNi(r));
   cNi.invalidateTab_(key);
 });
-Object.keys(cNi.__state.props).filter(k => /^HISTORY_QUEUED_/.test(k)).forEach(k => { delete cNi.__state.props[k]; });
-check(!cNi.getRates_('damage', '2026-09-17', '2026-09-19').length, 'cenário: instalação antiga, Avaria sem histórico');
+const shJ = cNi.tab_('JOBS');
+shJ.data = shJ.data.filter((r, i) => i === 0 || r[2] !== 'damage' || cNi.dateCellIso_(r[3]) >= '2026-09-18');
+cNi.invalidateTab_('JOBS');
+Object.keys(cNi.__state.props).filter(k => /^HISTORY_/.test(k)).forEach(k => { delete cNi.__state.props[k]; });
+check(cNi.getRates_('damage', '2026-09-13', '2026-09-19').length === 2, 'cenário: Avaria só com 18 e 19 (antes a regra dos 3 dias achava que já tinha histórico)');
 cNi.syncHourly();
-runAll(cNi);
-const ratesN = cNi.getRates_('damage', '2026-09-17', '2026-09-19');
-check(ratesN.length === 3 && cNi.getDayStatus_('damage', '2026-09-19').details === 'COMPLETE' && !!cNi.__state.props.HISTORY_QUEUED_DAMAGE,
-  'indicador novo: histórico desde DATA_START_DATE baixado sozinho (antes só os 3 últimos dias)', ratesN.length);
+runAll(cNi, 12);
+const ratesN = cNi.getRates_('damage', '2026-09-13', '2026-09-19');
+check(ratesN.length === 7 && cNi.getDayStatus_('damage', '2026-09-13').details === 'COMPLETE' && !!cNi.__state.props.HISTORY_FILL_DAMAGE,
+  'indicador novo: os dias que os outros indicadores têm e ele não tem são baixados sozinhos', ratesN.length);
 const recentN = cNi.addDaysIso_(cNi.isoToday_(), -2);
 const extraN = cNi.allTabRows_('JOBS').filter(r => r[2] === 'wrong_send' && cNi.dateCellIso_(r[3]) > '2026-09-19' && cNi.dateCellIso_(r[3]) < recentN);
-check(extraN.length === 0 && !!cNi.__state.props.HISTORY_QUEUED_WRONG_SEND, 'indicadores que já tinham histórico não baixam nada a mais', extraN.length);
+check(extraN.length === 0 && !!cNi.__state.props.HISTORY_FILL_WRONG_SEND, 'indicadores que já tinham histórico não baixam nada a mais', extraN.length);
 const nJobsN = cNi.allTabRows_('JOBS').length;
 cNi.syncHourly();
 check(cNi.allTabRows_('JOBS').length === nJobsN, 'o histórico do indicador novo entra na fila uma vez só');
+// Fila ociosa não impede: a verificação roda antes da checagem de "fila vazia".
+delete cNi.__state.props.HISTORY_FILL_DAMAGE;
+const shS = cNi.tab_('STATUS');
+shS.data = shS.data.filter((r, i) => i === 0 || r[0] !== 'damage' || cNi.dateCellIso_(r[1]) !== '2026-09-14');
+cNi.invalidateTab_('STATUS');
+cNi.setQueueHint_('IDLE');
+cNi.processSyncQueue({budgetMs: 600000});
+check(!!cNi.__state.props.HISTORY_FILL_DAMAGE, 'verificação do histórico roda mesmo com a fila ociosa');
+// Botão manual: baixarHistoricoAvaria() (sem parâmetro, pelo ▶ Executar).
+const manN = cNi.baixarHistoricoAvaria();
+check(manN.dias === cNi.dateRangeIso_('2026-09-13', cNi.addDaysIso_(cNi.isoToday_(), -1)).length && manN.tarefasNaFila > 0 && manN.trabalhador.ok,
+  'baixarHistoricoAvaria enfileira e processa o histórico da Avaria na hora', manN);
 
 // Pausa e tarefas com erro deixadas pela V3.11: a atualização libera a Avaria uma vez.
 cNi.setPause_('DAMAGE', 'AUTH', 'HTTP 401 em getBreakageRateData');

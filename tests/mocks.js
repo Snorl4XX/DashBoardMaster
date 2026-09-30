@@ -359,7 +359,12 @@ function makeDamage(date, seed) {
       firstTypeCode: '003', firstTypeName: 'AVARIA 破损', secondTypeCode: 'Z41d', secondTypeName: pick(types),
       adjudicationAmount: Math.round(rnd() * 15000) / 100, declareTime: prev(5) + ' 02:0' + (i % 10) + ':00', closingTime: date + ' 02:05:02',
       responsibilityNetworkCode: '30001', responsibilityNetworkName: 'SP GRU', customerName: pick(clients), goodsName: 'Produto ' + (i % 17),
-      productSpecificationName: pick(specs), damageLocationFirstName: pick(['Recebimento', 'Triagem', 'Expedição']), orderTypeStr: 'arbitrate'});
+      productSpecificationName: pick(specs), orderTypeStr: 'arbitrate'});
+    // Local da avaria (principal → secundário), como na tela do JMS.
+    const loc = pick([['Recebimento', 'Transporte(Caminhão)'], ['Recebimento', 'Transporte(Caminhão)'], ['Recebimento', 'Operação(colaborador)'],
+      ['Triagem', 'Esteira/Bancada'], ['Triagem', 'Operação(colaborador)'], ['Expedição', 'Carregamento']]);
+    dm[dm.length - 1].damageLocationFirstName = loc[0];
+    dm[dm.length - 1].damageLocationSecondName = loc[1];
     const u = rnd();
     if (u < 0.08) continue; // sem registro na tabela 2
     const regDay = prev(1 + Math.floor(rnd() * 6));

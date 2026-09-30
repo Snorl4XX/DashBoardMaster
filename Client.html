@@ -83,6 +83,7 @@
       rpSubShift: 'Top {n} por turno · percentual sobre o total exibido no gráfico',
       rpSubCombo: 'Quantidade e porcentagem por combinação de turno, segmento e doca · top {n} por turno',
       rpQty: 'Quantidade', ofTotalShort: 'do total',
+      rpSubGroup: 'Local principal nas faixas, local secundário nas colunas · quantidade e percentual sobre o total',
       amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total'
     },
     zh: {
@@ -150,6 +151,7 @@
       rpSubShift: '每个班次前 {n} 名 · 占比按图中显示合计计算',
       rpSubCombo: '按班次、分段与码头的数量及占比 · 每个班次前 {n} 名',
       rpQty: '数量', ofTotalShort: '占总数',
+      rpSubGroup: '色带为一级环节，柱为二级环节 · 数量及占总数比例',
       amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额'
     }
   };
@@ -170,6 +172,9 @@
     money: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6.5 9.5v.01M17.5 14.5v.01"/>',
     moneyTop: '<path d="M12 21V9m-5 5l5-5 5 5"/><path d="M5 4h14"/>',
     regDay: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    location: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><path d="M9.5 8.5l5 3M14.5 8.5l-5 3"/>',
+    locationMain: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+    locationSub: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     results: '<path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/>',
     evolution: '<path d="M3 17l5-5 4 3 8-9M16 6h4v4"/>',
     shift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', receiptShift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -253,7 +258,10 @@
     return fmtDate(key);
   }
   function vlabel(key, value) {
-    if (value === null || value === undefined || value === '' || value === 'N/A') return t('na');
+    if (value === null || value === undefined || value === '' || value === 'N/A') {
+      var nc = cfg(), na = nc && nc.naLabel;
+      return na && na.fields.indexOf(key) >= 0 ? L(na.text) : t('na');
+    }
     if (key === 'shipment' || key === 'tripId') return String(value);
     if (key === 'regDay') return fmtDate(value, true);
     if (key === 'amount') return isNum(parseAmount(value)) ? fmtMoney(parseAmount(value)) : String(value);
@@ -1409,6 +1417,7 @@
     max: '<path d="M4 20h16"/><path d="M7 17v-3M11 17v-6M15 17v-4"/><path d="M14 4h5v5M19 4l-6 6"/>',
     min: '<path d="M4 20h16"/><path d="M7 17V9M11 17v-5M15 17v-2"/><path d="M14 13h5V8M19 13l-6-6"/>',
     shift: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.5.3 4.5 2.5 4.5 5"/>',
+    place: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     top: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h1M4 12h1M4 18h1"/>',
     goal: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>'
   };
@@ -1438,6 +1447,13 @@
       out.push(rpStat('total', biLabel(RP_TEXT.total), esc(fmtInt(p.total)), esc(fmtPct(100, 2)), 'solid'));
       p.groups.slice().sort(function (a, b) { return b.count - a.count; }).forEach(function (g) {
         out.push(rpStat('shift', biLabel(RP_TEXT.shiftTotal, {s: g.shift}), esc(fmtInt(g.count)), '<em>' + esc(fmtPct(g.pct, 2)) + '</em>', 'shift', rpDonut(g.pct)));
+      });
+      return out.join('');
+    }
+    if (def.kind === 'byGroup' && !def.stats) {
+      out.push(rpStat('total', biLabel(RP_TEXT.total), esc(fmtInt(p.total)), esc(fmtPct(100, 2)), 'solid'));
+      p.groups.forEach(function (g) {
+        out.push(rpStat('place', esc(vlabel(p.groupBy, g.group)), esc(fmtInt(g.count)), '<em>' + esc(fmtPct(g.pct, 2)) + '</em>', 'shift', rpDonut(g.pct)));
       });
       return out.join('');
     }
@@ -1473,8 +1489,13 @@
         }
         roundRectPath(ctx, left + 6, y, right - left - 12, h, 9);
         ctx.fillStyle = top ? RED : '#FDECEE'; ctx.fill();
-        ctx.fillStyle = top ? '#fff' : INK; ctx.font = '800 14px ' + Chart.defaults.font.family;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(g.label, (left + right) / 2, y + h / 2 + 1);
+        ctx.fillStyle = top ? '#fff' : INK;
+        // Nome longo (ex.: local da avaria) diminui até caber na faixa; se ainda não couber, termina em "…".
+        var room = right - left - 24, size = 14, text = String(g.label);
+        ctx.font = '800 ' + size + 'px ' + Chart.defaults.font.family;
+        while (size > 10 && ctx.measureText(text).width > room) { size--; ctx.font = '800 ' + size + 'px ' + Chart.defaults.font.family; }
+        while (text.length > 2 && ctx.measureText(text).width > room) text = text.slice(0, -2) + '…';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, (left + right) / 2, y + h / 2 + 1);
       });
       ctx.restore();
     }
@@ -1527,16 +1548,25 @@
   }
   function rankConfig(def, p) {
     var items = p.items, bands = [], rankOf = [], at = 0;
-    if (p.kind === 'byShift') p.groups.forEach(function (g) { bands.push({label: g.shift, from: at, to: at + g.items.length - 1}); at += g.items.length; });
+    var grouped = p.kind === 'byShift' || p.kind === 'byGroup';
+    var groupName = function (g) { return p.kind === 'byGroup' ? vlabel(p.groupBy, g.group) : g.shift; };
+    if (grouped) p.groups.forEach(function (g) { bands.push({label: groupName(g), from: at, to: at + g.items.length - 1}); at += g.items.length; });
     p.groups.forEach(function (g) { g.items.forEach(function (it, i) { rankOf.push(i); }); });
     return columnsConfig({
       sig: 'rank-' + def.key,
-      labels: items.map(function (it) { var main = vlabel(p.dim, it.value); return p.extra && it.extra ? [main, titleCase(vlabel(p.extra, it.extra))] : main; }),
+      labels: items.map(function (it) {
+        var main = vlabel(p.dim, it.value);
+        // Quebra também antes de "(" e depois de "/" ("Transporte (Caminhão)", "Esteira/ Bancada").
+        if (p.kind === 'byGroup') return wrapLines(main.replace(/\s*\(/g, ' (').replace(/\/(?=\S)/g, '/ '), 14, 3);
+        return p.extra && it.extra ? [main, titleCase(vlabel(p.extra, it.extra))] : main;
+      }),
       values: items.map(function (it) { return it.count; }),
       pcts: items.map(function (it) { return it.pct; }),
-      titles: items.map(function (it) { return rpItemLabel(p, it) + (it.shift ? ' · ' + it.shift : ''); }),
+      titles: items.map(function (it) {
+        return p.kind === 'byGroup' ? vlabel(p.groupBy, it.group) + ' › ' + vlabel(p.dim, it.value) : rpItemLabel(p, it) + (it.shift ? ' · ' + it.shift : '');
+      }),
       colors: def.colors === 'rank' ? rankOf.map(function (r) { return RANK_COLORS[Math.min(r, RANK_COLORS.length - 1)]; }) : null,
-      accent: def.accent, bands: bands, bandPos: p.kind === 'byShift' ? (def.bands || 'bottom') : null
+      accent: def.accent, bands: bands, bandPos: grouped ? (def.bands || 'bottom') : null
     });
   }
   function renderRankPanels(c) {
@@ -1547,7 +1577,7 @@
     if (box.getAttribute('data-sig') !== sig) {
       Object.keys(state.charts).forEach(function (k) { if (k.indexOf('rp_') === 0) destroyChart(k); });
       box.innerHTML = defs.map(function (def) {
-        return '<section class="card rank-panel" data-key="' + esc(def.key) + '"><div class="chart-head"><span class="chart-ico">' + icon('dock') + '</span>' +
+        return '<section class="card rank-panel" data-key="' + esc(def.key) + '"><div class="chart-head"><span class="chart-ico">' + icon(def.icon || 'dock') + '</span>' +
           '<div class="chart-titles"><h3></h3><small></small></div></div><div class="rp-body"></div><div class="rp-stats"></div></section>';
       }).join('');
       box.setAttribute('data-sig', sig);
@@ -1559,7 +1589,7 @@
     var key = 'rp_' + def.key, p = Core.rankPanel(state.filtered, def);
     $('h3', card).innerHTML = esc(L(def.title)) + (Lo(def.title) ? ' <span class="rp-zh">/ ' + esc(Lo(def.title)) + '</span>' : '') +
       (detailIsPartial() ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
-    $('small', card).textContent = def.kind === 'byShift' ? t(def.extra ? 'rpSubCombo' : 'rpSubShift', {n: def.top}) : t('rpSubAll');
+    $('small', card).textContent = def.kind === 'byGroup' ? t('rpSubGroup') : def.kind === 'byShift' ? t(def.extra ? 'rpSubCombo' : 'rpSubShift', {n: def.top}) : t('rpSubAll');
     var body = $('.rp-body', card), stats = $('.rp-stats', card);
     if (!p.total) {
       destroyChart(key);
@@ -1569,7 +1599,7 @@
     }
     stats.innerHTML = rpStats(def, p);
     if (!window.Chart) { destroyChart(key); body.innerHTML = '<p class="muted small">' + esc(t('noChartLib')) + '</p>'; return; }
-    var minW = Math.max(520, p.items.length * (p.extra ? 64 : 62));
+    var minW = Math.max(520, p.items.length * (p.kind === 'byGroup' ? 104 : p.extra ? 64 : 62));
     var host = $('.rp-wrap', body);
     if (!host || !$('canvas', host)) {
       destroyChart(key);
@@ -1579,7 +1609,7 @@
     host.style.minWidth = minW + 'px';
     var canvas = $('canvas', host);
     canvas.setAttribute('aria-label', L(def.title) + ': ' + p.items.slice(0, 20).map(function (it) {
-      return rpItemLabel(p, it) + (it.shift ? ' ' + it.shift : '') + ' ' + fmtInt(it.count) + ' (' + fmtPct(it.pct, 2) + ')';
+      return (p.kind === 'byGroup' ? vlabel(p.groupBy, it.group) + ' › ' : '') + rpItemLabel(p, it) + (it.shift ? ' ' + it.shift : '') + ' ' + fmtInt(it.count) + ' (' + fmtPct(it.pct, 2) + ')';
     }).join('; '));
     var config = rankConfig(def, p), ch = state.charts[key];
     if (ch && ch.$sig === config.$sig && ch.canvas === canvas) {

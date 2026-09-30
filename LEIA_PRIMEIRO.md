@@ -1,6 +1,19 @@
-# J&T DASHMASTER V3.11.3 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.11.4 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.11.4 — Avaria: outros dias, local da avaria, filtro de produto e "OUTRAS BASES"
+- **Outros dias da Avaria não apareciam.** A regra da V3.11.2 considerava que um indicador já tinha histórico se tivesse algum dia com mais de 3 dias. A Avaria, instalada havia alguns dias só com a revalidação de hora em hora, caía nessa regra e o histórico nunca era baixado.
+  - Agora a regra compara com os dias que os **outros indicadores** têm. Os dias que faltam na Avaria entram na fila sozinhos, uma vez (propriedade `HISTORY_FILL_<INDICADOR>`).
+  - Essa verificação roda a cada 5 min, mesmo com a fila parada. Antes ela esperava a sincronização de hora em hora.
+  - **Para baixar tudo na hora:** no editor do Apps Script, escolha `baixarHistoricoAvaria` e clique em ▶ Executar (não precisa de parâmetro). Ela enfileira o histórico inteiro da Avaria (`DATA_START_DATE` até ontem) e já processa o que der; o resto a fila termina a cada 5 min.
+- **Novo gráfico "Local que ocorre mais Avaria / 破损发生最多的环节"**, com as colunas "O dano ocorre no local do nome principal" e "…secundário" da tabela 1:
+  - as colunas são o local secundário (ex.: Transporte (Caminhão), Operação (colaborador)), agrupadas pelo local principal nas faixas embaixo (ex.: Recebimento, Triagem), no mesmo padrão do "Docas por turno";
+  - cada coluna mostra a quantidade e o (% do total); os cartões embaixo mostram o total geral e o total de cada local principal com o anel de participação;
+  - no relatório (PDF/Excel) o mesmo agrupamento vira tabela dinâmica; na tabela de remessas entram as colunas Local principal e Local secundário.
+  - Os dias já baixados não tinham esses campos: o detalhe da Avaria é baixado de novo uma vez, sozinho (poucas páginas por dia).
+- **Filtro "Especificação do produto"** na Avaria (junto com Turno, Estação de registro e Intervalo).
+- **"OUTRAS BASES"** no lugar de "Sem informação" na Avaria: avaria sem registro na Consulta de Pacote Problemático é de outra base. Vale para turno, estação de registro, quem registrou, intervalo e data do registro — no painel, nos filtros e no relatório.
 
 ## V3.11.3 — Taxa da Avaria igual à tela do JMS
 - A taxa da Avaria agora é **o mesmo número da coluna "Taxa de Avaria" do JMS** (ex.: 292,78), mostrado com "%". Vale para painel, evolução, Resultados, relatório e barra lateral.
@@ -420,7 +433,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **225 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **232 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.11.3',
+  VERSION: '3.11.4',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -71,7 +71,9 @@ const FILTER_LABELS = Object.freeze({
   product:         {pt: 'Especificação do produto', zh: '产品规格'},
   content:         {pt: 'Conteúdo do pacote', zh: '物品名称'},
   amount:          {pt: 'Valor da arbitragem', zh: '判责金额'},
-  regDay:          {pt: 'Data do registro', zh: '登记日期'}
+  regDay:          {pt: 'Data do registro', zh: '登记日期'},
+  locationMain:    {pt: 'Local principal da avaria', zh: '破损发生一级环节'},
+  locationSub:     {pt: 'Local secundário da avaria', zh: '破损发生二级环节'}
 });
 
 /**
@@ -387,7 +389,9 @@ const INDICATORS = Object.freeze({
     fields: {
       shipment: ['waybillNo'], eventTime: ['registrationTime'], login: ['registrationBy'], station: ['registrationNetwork'],
       client: ['customerName'], errorType: ['secondTypeName'], product: ['productSpecificationName'],
-      content: ['goodsName'], amount: ['adjudicationAmount']
+      content: ['goodsName'], amount: ['adjudicationAmount'],
+      // "O dano ocorre no local do nome principal / secundário" (tabela 1).
+      locationMain: ['damageLocationFirstName'], locationSub: ['damageLocationSecondName']
     },
     eventDay: true,
     labels: {
@@ -396,8 +400,11 @@ const INDICATORS = Object.freeze({
       eventTime: {pt: 'Data do registro', zh: '登记时间'},
       client: {pt: 'Nome do cliente', zh: '客户名称'}
     },
-    filters: ['shift', 'station', 'interval'],
+    filters: ['shift', 'station', 'product', 'interval'],
     topCards: [],
+    // Avaria sem registro na Consulta de Pacote Problemático = registrada por outra base: no lugar de
+    // "Sem informação", os campos que vêm da tabela 2 mostram "OUTRAS BASES" (tela, filtros e relatório).
+    naLabel: {text: {pt: 'OUTRAS BASES', zh: '其他网点'}, fields: ['shift', 'station', 'login', 'interval', 'regDay']},
     // Nos cartões, gráficos e Resultados: "Avarias no dia" em vez de "Erros no dia".
     texts: {
       errors: {pt: 'Avarias', zh: '破损'},
@@ -421,12 +428,23 @@ const INDICATORS = Object.freeze({
       {key: 'regDay', type: 'bar', top: 10, title: {pt: 'Datas de registro mais ofensoras', zh: '破损登记最多的日期'}},
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalo de horas do registro', zh: '登记时间段'}}
     ],
+    // Local da avaria: colunas = local secundário, agrupadas por local principal (faixas embaixo), com o
+    // total de cada local principal nos cartões — mesmo padrão do "Docas por turno".
+    rankPanels: [
+      {key: 'damageLocation', kind: 'byGroup', groupBy: 'locationMain', dim: 'locationSub', accent: 'count', colors: 'rank', bands: 'bottom',
+        icon: 'location', title: {pt: 'Local que ocorre mais Avaria', zh: '破损发生最多的环节'}}
+    ],
+    // No relatório (PDF/Excel), o mesmo agrupamento em tabela dinâmica.
+    pivotTables: [
+      {key: 'damageLocation', groupBy: ['locationMain', 'locationSub'], title: {pt: 'Local que ocorre mais Avaria', zh: '破损发生最多的环节'}}
+    ],
     table: [
       ['date', 'Data estatística', '统计日期'], ['shipment', 'Número da remessa', '运单号'],
       ['errorType', 'Tipo secundário', '二级类型'], ['client', 'Nome do cliente', '客户名称'],
       ['content', 'Conteúdo do pacote', '物品名称'], ['product', 'Especificação do produto', '产品规格'],
       ['amount', 'Valor da arbitragem (R$)', '判责金额'], ['station', 'Estação de registro', '登记网点'],
-      ['eventTime', 'Data do registro', '登记时间'], ['shift', 'Turno', '班次'], ['login', 'Quem registrou', '登记人']
+      ['eventTime', 'Data do registro', '登记时间'], ['shift', 'Turno', '班次'], ['login', 'Quem registrou', '登记人'],
+      ['locationMain', 'Local principal', '一级环节'], ['locationSub', 'Local secundário', '二级环节']
     ]
   }
 });
@@ -466,7 +484,7 @@ function usedFields_(cfg) {
   (cfg.topCards || []).forEach(k => set[k] = 1);
   if (cfg.summaryTable) cfg.summaryTable.groupBy.forEach(k => set[k] = 1);
   (cfg.pivotTables || []).forEach(p => p.groupBy.forEach(k => set[k] = 1));
-  (cfg.rankPanels || []).forEach(p => { set[p.dim] = 1; if (p.extra) set[p.extra] = 1; });
+  (cfg.rankPanels || []).forEach(p => { set[p.dim] = 1; if (p.extra) set[p.extra] = 1; if (p.groupBy) set[p.groupBy] = 1; });
   (cfg.valueCards || []).forEach(v => { set[v.field] = 1; });
   return Object.keys(set);
 }
@@ -498,6 +516,7 @@ function getPublicCatalog_() {
       hideShiftCards: !!cfg.hideShiftCards,
       valueCards: cfg.valueCards || [],
       texts: cfg.texts || null,
+      naLabel: cfg.naLabel || null,
       operationalWindow: cfg.key === 'sc_sc' || cfg.key === 'sc_dc'
     }));
 }

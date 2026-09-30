@@ -5,7 +5,8 @@ const SEGMENT_FIRST_CODE_ = {wrong_send: 1, sorting_error: 1, missing_receipt: 1
 /** Campos guardados nos arquivos diários (formato colunar da V3.7). */
 const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expeditionTime', 'login', 'segment', 'destination',
   'lot', 'client', 'offenderBase', 'errorType', 'tripId', 'route', 'reason', 'idealTime', 'idealTimeFull', 'correctDest',
-  'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw', 'station', 'product', 'content', 'amount', 'regDay'];
+  'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw', 'station', 'product', 'content', 'amount', 'regDay',
+  'locationMain', 'locationSub'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 
@@ -30,6 +31,8 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   if (f.product) row.product = str(f.product);
   if (f.content) row.content = str(f.content);
   if (f.amount) row.amount = str(f.amount);
+  if (f.locationMain) row.locationMain = str(f.locationMain);
+  if (f.locationSub) row.locationSub = str(f.locationSub);
   // Indicadores com docas guardam o 1º segmento COMPLETO ("BRE - SP"); o campo segment continua
   // só com o código ("BRE"), como nos gráficos de sempre. Destino e doca saem daqui (Core.applyDocks).
   if (cfg.docks) row.segmentRaw = JTCore_.segmentHead(row.segment);

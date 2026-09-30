@@ -158,7 +158,25 @@ function JTCoreFactory_() {
     }
     function note(r) { if (extra && !blank(r[extra]) && extraOf[r[dim]] === undefined) extraOf[r[dim]] = String(r[extra]); }
     var groups;
-    if (def.kind === 'byShift') {
+    if (def.kind === 'byGroup') {
+      // Agrupado por outro campo (ex.: local principal da avaria → colunas do local secundário).
+      var byG = {}, gTot = {};
+      (rows || []).forEach(function (r) {
+        if (blank(r[def.groupBy]) && blank(r[dim])) return;
+        var g = blank(r[def.groupBy]) ? 'N/A' : String(r[def.groupBy]), v = blank(r[dim]) ? 'N/A' : String(r[dim]);
+        var m = byG[g] || (byG[g] = {});
+        m[v] = (m[v] || 0) + 1;
+        gTot[g] = (gTot[g] || 0) + 1;
+        note(r);
+      });
+      groups = Object.keys(byG).sort(function (a, b) {
+        if (a === 'N/A' || b === 'N/A') return a === 'N/A' ? 1 : b === 'N/A' ? -1 : 0;
+        return gTot[b] - gTot[a] || compareText(a, b);
+      }).map(function (g) {
+        var items = sorted(byG[g]);
+        return {shift: null, group: g, items: def.top ? items.slice(0, def.top) : items};
+      });
+    } else if (def.kind === 'byShift') {
       var by = {};
       (rows || []).forEach(function (r) {
         if (blank(r[dim]) || SHIFTS.indexOf(r.shift) < 0) return;
@@ -178,14 +196,15 @@ function JTCoreFactory_() {
     var total = 0, flat = [];
     groups.forEach(function (g) {
       g.count = 0;
-      g.items.forEach(function (it) { it.shift = g.shift; if (extra) it.extra = extraOf[it.value] || ''; g.count += it.count; flat.push(it); });
+      g.items.forEach(function (it) { it.shift = g.shift; if (g.group !== undefined) it.group = g.group; if (extra) it.extra = extraOf[it.value] || ''; g.count += it.count; flat.push(it); });
       total += g.count;
     });
     var pct = function (n) { return total ? n / total * 100 : 0; };
     groups.forEach(function (g) { g.pct = pct(g.count); g.items.forEach(function (it) { it.pct = pct(it.count); }); });
     var max = null, min = null;
     flat.forEach(function (it) { if (!max || it.count > max.count) max = it; if (!min || it.count <= min.count) min = it; });
-    return {key: def.key, kind: def.kind === 'byShift' ? 'byShift' : 'overview', dim: dim, extra: extra || null,
+    return {key: def.key, kind: def.kind === 'byShift' || def.kind === 'byGroup' ? def.kind : 'overview', dim: dim, extra: extra || null,
+      groupBy: def.kind === 'byGroup' ? def.groupBy : null,
       groups: groups, items: flat, total: total, max: max, min: min};
   }
 
