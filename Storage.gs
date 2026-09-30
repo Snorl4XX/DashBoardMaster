@@ -459,7 +459,7 @@ function dayPayload_(indicator, parts) {
 }
 /** Linhas do período (relatórios e testes). Mesmo retorno da V3: {rows, loadedDates, ...}. */
 function getArchivedRange_(indicator, from, to, opts) {
-  const sink = RowsCollector_();
+  const sink = RowsCollector_(fillEmpty_(getIndicatorConfig_(indicator)));
   const meta = scanArchive_(indicator, from, to, opts, sink);
   meta.rows = sink.rows;
   return meta;

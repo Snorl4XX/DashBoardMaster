@@ -108,6 +108,8 @@ function warnEmptyFields_(indicatorKey, date, emptyDims, sampleRaw, n) {
 function rederiveRow_(indicatorKey, row) {
   const cfg = INDICATORS[indicatorKey] || {};
   const r = row;
+  const fill = fillEmpty_(cfg);
+  Object.keys(fill).forEach(k => { if (r[k] === null || r[k] === undefined || String(r[k]).trim() === '') r[k] = fill[k]; });
   if (SEGMENT_FIRST_CODE_[indicatorKey]) r.segment = JTCore_.firstSegment(r.segment);
   if ((!r.lot || !String(r.lot).trim()) && cfg.emptyLotLabel) r.lot = cfg.emptyLotLabel.pt;
   if (indicatorKey === 'wrong_send' && !r.correctDest && r.route) r.correctDest = r.route; // arquivos da V2
@@ -121,6 +123,16 @@ function rederiveRow_(indicatorKey, row) {
   r.expeditionShift = JTCore_.shiftOf(r.expeditionTime || r.eventTime);
   r.interval = JTCore_.intervalOf(main);
   return r;
+}
+
+/**
+ * Campos que o JMS manda vazios com significado conhecido (Config.gs → fillEmpty).
+ * '@center' = nome da base (JMS_CENTER_NAME). Vale na leitura, então corrige também o histórico.
+ */
+function fillEmpty_(cfg) {
+  const out = {};
+  Object.keys((cfg && cfg.fillEmpty) || {}).forEach(k => { const v = cfg.fillEmpty[k]; out[k] = v === '@center' ? centerName_() : v; });
+  return out;
 }
 
 /** Uma linha por (data, remessa): mantém o primeiro bipe do dia. */
@@ -201,11 +213,12 @@ function fileRows_(x) { return isDayDataset_(x) ? JTCore_.decodeDataset(x) : x; 
  * Junta dias sem criar um objeto por remessa (o servidor do Apps Script tem pouca
  * memória). Saída idêntica ao encodeDataset que o navegador já decodifica.
  */
-function DatasetBuilder_(fields) {
+function DatasetBuilder_(fields, fill) {
   const dict = {}, idx = {}, cols = {};
   fields.forEach(f => { dict[f] = []; idx[f] = new Map(); cols[f] = []; });
   let n = 0;
   function intern(f, v) {
+    if (fill && fill[f] && String(v).trim() === '') v = fill[f];
     const m = idx[f];
     let j = m.get(v);
     if (j === undefined) { j = dict[f].length; dict[f].push(v); m.set(v, j); }
@@ -237,13 +250,17 @@ function DatasetBuilder_(fields) {
   };
 }
 /** Coletor de linhas (relatórios): mesmo contrato do DatasetBuilder_. */
-function RowsCollector_() {
-  const rows = [];
+function RowsCollector_(fill) {
+  const rows = [], keys = Object.keys(fill || {});
+  const push = r => {
+    keys.forEach(k => { if (r[k] === null || r[k] === undefined || String(r[k]).trim() === '') r[k] = fill[k]; });
+    rows.push(r);
+  };
   return {
     rows: rows,
     count: function () { return rows.length; },
-    addRows: function (list) { list.forEach(r => rows.push(r)); },
-    addEncoded: function (ds) { JTCore_.decodeDataset(ds).forEach(r => rows.push(r)); }
+    addRows: function (list) { list.forEach(push); },
+    addEncoded: function (ds) { JTCore_.decodeDataset(ds).forEach(push); }
   };
 }
 
@@ -298,7 +315,7 @@ function getDashboardData(indicatorKey, params) {
   const allRates = getRates_(indicatorKey, null, null);
   const p = resolvePeriod_(params, allRates, indicatorKey);
   const coverage = getCoverage_(indicatorKey, p.from, p.to);
-  const builder = DatasetBuilder_(clientFields_(cfg));
+  const builder = DatasetBuilder_(clientFields_(cfg), fillEmpty_(cfg));
   const maxRows = maxClientRows_();
   const archive = scanArchive_(indicatorKey, p.from, p.to, {maxRows: maxRows}, builder);
   const out = safeReturn_({

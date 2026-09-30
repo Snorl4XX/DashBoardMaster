@@ -783,4 +783,18 @@ const wk = C.aggregateShiftResults(aggR, 'week', 'T2', '2026-09-18', '2026-09-20
 check(wk.length >= 1 && Math.abs(wk.reduce((a, p) => a + (p.rateCount || 0), 0) / wk.reduce((a, p) => a + (p.base || 0), 0) * 100 - 70 / 50000 * 100) < 1e-9,
   'no período, a taxa soma só os dias que têm volume', wk);
 
+// ---------- 16. V3.10.2: Triagem Errada — base ofensora vazia = SP GRU ----------
+const seNew = ctx.normalizeDetailRow_('sorting_error', {billcode: 'S1', dt: D19, transferCenterSendTime: D19 + ' 10:00:00', baggingNetworkName: '', wrongType: 'X'}, D19);
+check(seNew.offenderBase === 'SP GRU', 'remessa nova: base ofensora vazia vira SP GRU', seNew.offenderBase);
+const seOld = C.encodeDataset(['', 'SP GRU', 'DC BAU-SP', ''].map((b, i) => ({date: D19, shipment: 'S' + i, offenderBase: b})), ['date', 'shipment', 'offenderBase']);
+const seB = ctx.DatasetBuilder_(['date', 'shipment', 'offenderBase'], vm.runInContext('fillEmpty_(INDICATORS.sorting_error)', ctx));
+seB.addEncoded(seOld);
+const seRows = C.decodeDataset(seB.build());
+check(seRows.filter(r => r.offenderBase === 'SP GRU').length === 3 && !seRows.some(r => !r.offenderBase) && seB.build().dict.offenderBase.indexOf('') < 0,
+  'histórico já gravado: "Sem informação" somado ao SP GRU na leitura', seRows);
+const seRC = ctx.RowsCollector_(vm.runInContext('fillEmpty_(INDICATORS.sorting_error)', ctx));
+seRC.addEncoded(seOld);
+check(seRC.rows.filter(r => r.offenderBase === 'SP GRU').length === 3, 'relatório também soma no SP GRU');
+check(Object.keys(vm.runInContext('fillEmpty_(INDICATORS.wrong_send)', ctx)).length === 0, 'outros indicadores não mudam');
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

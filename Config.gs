@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.10.1',
+  VERSION: '3.10.2',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -175,6 +175,9 @@ const INDICATORS = Object.freeze({
       client: ['orderSourceName'], offenderBase: ['baggingNetworkName'], errorType: ['wrongType']
     },
     labels: {destination: {pt: 'Base destino', zh: '目的网点'}, lot: {pt: 'Número do lote', zh: '包号'}},
+    // O JMS manda a base ofensora (baggingNetworkName) VAZIA quando a própria base é a responsável:
+    // vazio = SP GRU (nome da base em JMS_CENTER_NAME), somado ao SP GRU que já vem preenchido.
+    fillEmpty: {offenderBase: '@center'},
     filters: ['shift', 'offenderBase', 'lot', 'destination', 'interval', 'errorType'],
     topCards: ['offenderBase'],
     charts: [
