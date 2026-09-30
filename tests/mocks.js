@@ -205,8 +205,9 @@ function fakeJms(dayData, options) {
       size: sz, current: current, pages: Math.ceil(total / sz) || 0, other: null, heads: null}, fail: false, succ: true});
     const start = String(body.startTime || body.startTime1 || ''), end = String(body.endTime || body.endTime1 || '');
     const op = /departure_transport|inward_transport/.test(route);
-    // Dia a que a janela pertence (janela 14h: antes das 14h é do dia anterior).
-    const date = op && start.slice(11) < '14:00:00' ? addDay(start.slice(0, 10), -1) : start.slice(0, 10);
+    // Dia a que a janela pertence (janela 14h: antes das 14h é do dia anterior). Avaria: dia estatístico.
+    const date = body.statisticalStartDate || (route === 'getBreakageRateData' ? body.startDate : null) ||
+      (op && start.slice(11) < '14:00:00' ? addDay(start.slice(0, 10), -1) : start.slice(0, 10));
     const d = dayData[date];
     if (d && options.grow && options.grow.date === date && isDetail) {
       for (let i = 0; i < options.grow.perRequest; i++) d.ws.push({billcode: 'LIVE' + d.ws.length, sendTime: date + ' 23:30:00', scanUser: 'X', dateTime: date});
@@ -260,6 +261,28 @@ function fakeJms(dayData, options) {
       case 'inward_transport_timely_rate_detailed':
         if (!d) return ok([], 0, 1, body.size);
         return page(d.dc, body);
+      // ----- Avaria (formato das respostas do documento do usuário) -----
+      case 'getBreakageRateData': {
+        if (!d || !d.dm) return ok([], 0, 1, body.size);
+        const rate = Math.round(d.dm.length / d.dmBase * 1e6 * 100) / 100;
+        return ok([{id: '97308731485720' + date.slice(8), serialNum: '1', statisticalDate: date, agentAreaCode: '370000', agentAreaName: 'SPE',
+          networkCode: '30001', networkName: 'SP GRU', operaNumber: d.dmBase, breakageTicketNumber: d.dm.length, breakageRate: rate,
+          breakageAmount: d.dm.reduce((a, r) => a + r.adjudicationAmount, 0), breakageNumberTotal: d.dm.length, breakageRateTotal: rate,
+          monthBreakageRate: 180.46, pickUpDayTotal: null}], 1, 1, body.size);
+      }
+      case 'detailBreakageRateData': {
+        if (!d || !d.dm) return ok([], 0, 1, body.size);
+        const sz = Math.min(100, body.size); // a tela do JMS mostra no máximo 100 linhas por página
+        return ok(d.dm.slice((body.current - 1) * sz, body.current * sz), d.dm.length, body.current, sz);
+      }
+      case 'registrationPage': {
+        const want = {};
+        String(body.waybillNo || '').split(',').forEach(w => { want[w.trim().replace(/-\d+$/, '')] = 1; });
+        const all = [];
+        Object.keys(dayData).forEach(k => (dayData[k].dmReg || []).forEach(r => { if (want[r.waybillNo]) all.push(r); }));
+        const sz = Math.min(100, body.size);
+        return ok(all.slice((body.current - 1) * sz, body.current * sz), all.length, body.current, sz);
+      }
     }
     return respond(404, {});
   };
@@ -307,8 +330,46 @@ function makeDay(date, seed) {
   for (let i = 0; i < n(180); i++) dc.push({scanTime: date, waybillNo: '4440' + date.replace(/-/g, '') + i, arrivalShipmentName: pick(['D107-GRU-2210-99', 'D201-BRE-0800-01', null]),
     lastCenterName: 'GRU-SP', arrivalShipmentNo: 'SETR2260' + Math.floor(rnd() * 15), arrivalScanTime: time(), dispatchTime: time(), sendNextStation: 'DC GRU-SP', isTimely: 'Fora do prazo'});
   const pct = v => v.toFixed(2) + '%';
-  return {ws: ws, wsRate: pct(0.2 + rnd() * 1.1), se: se, seRate: pct(0.3 + rnd() * 0.6), mr: mr, mrRate: pct(0.5 + rnd() * 0.8),
+  const day = {ws: ws, wsRate: pct(0.2 + rnd() * 1.1), se: se, seRate: pct(0.3 + rnd() * 0.6), mr: mr, mrRate: pct(0.5 + rnd() * 0.8),
     md: md, mdRate: pct(0.4 + rnd() * 0.9), sc: sc, scRate: pct(88 + rnd() * 9), dc: dc, dcRate: pct(89 + rnd() * 8)};
+  return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5));
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+/**
+ * Avarias do dia estatístico no formato do Relatório de Taxa de Avaria (tabela 1) e os registros da
+ * Consulta de Pacote Problemático (tabela 2). Operadores fictícios; campos iguais aos do JMS.
+ */
+function makeDamage(date, seed) {
+  let s = seed;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const pick = arr => arr[Math.floor(rnd() * arr.length)];
+  const types = ['Prod. interno extraviado embal.avariada 内件遗失外包装破损', 'Embalagem e produto interno avariados 内件破损外包装破损'];
+  const clients = ['BYTEDANCE BRASIL TECNOLOGIA LTDA.', 'FLOGISTICS BRASIL LOGISTICA E TRANSPORTE LTDA', 'EBAZAR.COM.BR. LTDA', 'WHALECO BRASIL INTERMEDIACAO LTDA', 'JOYO TECNOLOGIA BRASIL LTDA.'];
+  const specs = ['Itens Pessoal', 'Outros', 'Alimentos', 'Roupa', 'Produto Eletronico', 'Liquído'];
+  const ops = ['OPERADOR AVARIA 01', 'OPERADOR AVARIA 02', 'OPERADOR AVARIA 03', 'OPERADOR AVARIA 04'];
+  const prev = n => addDay(date, -n);
+  const clock = () => String(Math.floor(rnd() * 24)).padStart(2, '0') + ':' + String(Math.floor(rnd() * 60)).padStart(2, '0') + ':' + String(Math.floor(rnd() * 60)).padStart(2, '0');
+  const dm = [], dmReg = [];
+  const n = 120 + Math.floor(rnd() * 60);
+  for (let i = 0; i < n; i++) {
+    const wb = (i % 3 ? '9998821' : '8880026') + date.replace(/-/g, '').slice(2) + String(i).padStart(3, '0');
+    dm.push({id: 'D' + date + i, serialNum: String(i + 1), workOrderNum: 'ZC' + date.replace(/-/g, '') + String(i).padStart(6, '0'), waybillNo: wb,
+      firstTypeCode: '003', firstTypeName: 'AVARIA 破损', secondTypeCode: 'Z41d', secondTypeName: pick(types),
+      adjudicationAmount: Math.round(rnd() * 15000) / 100, declareTime: prev(5) + ' 02:0' + (i % 10) + ':00', closingTime: date + ' 02:05:02',
+      responsibilityNetworkCode: '30001', responsibilityNetworkName: 'SP GRU', customerName: pick(clients), goodsName: 'Produto ' + (i % 17),
+      productSpecificationName: pick(specs), damageLocationFirstName: pick(['Recebimento', 'Triagem', 'Expedição']), orderTypeStr: 'arbitrate'});
+    const u = rnd();
+    if (u < 0.08) continue; // sem registro na tabela 2
+    const regDay = prev(1 + Math.floor(rnd() * 6));
+    const own = u < 0.9;
+    // Registro de outro assunto ("Pedidos salvados") mais antigo: não pode ser escolhido.
+    if (u > 0.5 && u < 0.6) dmReg.push({waybillNo: wb, code: 'PPCX' + i, probleTypeSubjectId: '815', probleTypeSubjectName: 'Pedidos.salvados.作废件',
+      secondLevelTypeName: 'Descarte.total.全部弃置件', createByName: 'OUTRO REGISTRO', createTime: prev(9) + ' 01:00:00', registrationNetworkName: 'SP GRU'});
+    dmReg.push({waybillNo: wb, code: 'PPC' + i, probleTypeSubjectId: '727', probleTypeSubjectName: 'Avaria.破损问题件',
+      secondLevelTypeName: 'Produto.interno.extraviado.e.embalagem.avariada.外包装破损,内件遗失', createByName: pick(ops),
+      createTime: regDay + ' ' + clock(), registrationNetworkName: own ? 'SP GRU' : 'PA SHEIN-GRU-SP'});
+  }
+  return {dm: dm, dmBase: 450000 + Math.floor(rnd() * 150000), dmReg: dmReg};
+}
+
+module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};

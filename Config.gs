@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.10.2',
+  VERSION: '3.11.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -66,7 +66,12 @@ const FILTER_LABELS = Object.freeze({
   expeditionTime:  {pt: 'Horário da expedição', zh: '发件时间'},
   idealTimeFull:   {pt: 'Horário ideal de expedição', zh: '理想发车时间'},
   dock:            {pt: 'Doca', zh: '月台'},
-  dockDest:        {pt: 'Destino', zh: '目的地'}
+  dockDest:        {pt: 'Destino', zh: '目的地'},
+  station:         {pt: 'Estação de registro', zh: '登记网点'},
+  product:         {pt: 'Especificação do produto', zh: '产品规格'},
+  content:         {pt: 'Conteúdo do pacote', zh: '物品名称'},
+  amount:          {pt: 'Valor da arbitragem', zh: '判责金额'},
+  regDay:          {pt: 'Data do registro', zh: '登记日期'}
 });
 
 /**
@@ -355,6 +360,72 @@ const INDICATORS = Object.freeze({
       ['receiptTime', 'Horário descarregamento veículo de chegada', '到件车辆卸车时间'],
       ['expeditionTime', 'Horário de expedição', '发件时间']
     ]
+  },
+
+  /**
+   * AVARIA (Qualidade de serviço > Gerenciamento de relatórios > Relatório de Taxa de Avaria).
+   * Tabela 1 = lista de avarias do dia estatístico (detailBreakageRateData, máx. 100 por página).
+   * Tabela 2 = Consulta de Pacote Problemático (registrationPage), buscada pelas remessas da tabela 1:
+   *            dá quem registrou, quando (turno/intervalo) e a estação de registro. Junção pela remessa.
+   * A taxa do JMS é POR MILHÃO (ppm): breakageTicketNumber ÷ operaNumber × 1.000.000 (152 ÷ 519.159 = 292,78).
+   */
+  damage: {
+    key: 'damage', order: 7, routeKey: 'DAMAGE',
+    name: {pt: 'Avaria', zh: '破损'},
+    subtitle: {pt: 'Taxa de avaria por milhão de remessas operadas', zh: '破损率（每百万票）'},
+    // Meta ainda não informada: value null = painel mostra "Meta não definida" (sem na meta / fora da meta).
+    goal: {value: null, direction: 'max', strict: false, unit: 'ppm'},
+    apiProfile: 'damage', detailMatchesErrors: true,
+    summary: {
+      endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/getBreakageRateData',
+      rateKeys: ['breakageRate', 'breakageRateTotal'], errorKeys: ['breakageTicketNumber', 'breakageNumberTotal'], totalKeys: ['operaNumber']
+    },
+    detail: {endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/detailBreakageRateData', maxPageSize: 100},
+    registration: {endpoint: 'https://gw.jtjms-br.com/servicequality/problemPiece/registrationPage', batch: 100},
+    fields: {
+      shipment: ['waybillNo'], eventTime: ['registrationTime'], login: ['registrationBy'], station: ['registrationNetwork'],
+      client: ['customerName'], errorType: ['secondTypeName'], product: ['productSpecificationName'],
+      content: ['goodsName'], amount: ['adjudicationAmount']
+    },
+    eventDay: true,
+    labels: {
+      errorType: {pt: 'Tipo secundário (tipo de bipe)', zh: '二级类型'},
+      login: {pt: 'Quem registrou', zh: '登记人'},
+      eventTime: {pt: 'Data do registro', zh: '登记时间'},
+      client: {pt: 'Nome do cliente', zh: '客户名称'}
+    },
+    filters: ['shift', 'station', 'interval'],
+    topCards: [],
+    // Nos cartões, gráficos e Resultados: "Avarias no dia" em vez de "Erros no dia".
+    texts: {
+      errors: {pt: 'Avarias', zh: '破损'},
+      errorsDay: {pt: 'Avarias no dia', zh: '当日破损'}, errorsPeriod: {pt: 'Avarias no período', zh: '期间破损'},
+      errorsFiltered: {pt: 'Avarias (com filtro)', zh: '破损（已筛选）'},
+      prevErrorsDay: {pt: 'Avarias dia anterior', zh: '前一日破损'}, prevErrorsPeriod: {pt: 'Avarias período anterior', zh: '上一期间破损'},
+      shiftErrors: {pt: 'Avarias {s}', zh: '{s} 破损'}, shareOfErrors: {pt: '{p} das avarias', zh: '占破损 {p}'}
+    },
+    // Cartões de valor (R$), calculados sobre as remessas filtradas.
+    valueCards: [
+      {key: 'amountSum', field: 'amount', agg: 'sum', icon: 'money', label: {pt: 'Valor total de perda', zh: '损失总金额'}},
+      {key: 'amountMax', field: 'amount', agg: 'max', icon: 'money', label: {pt: 'Remessa mais cara', zh: '金额最高运单'}}
+    ],
+    charts: [
+      {key: 'shift', type: 'doughnut', title: {pt: 'Turno que registrou a avaria', zh: '登记破损的班次'}},
+      {key: 'client', type: 'bar', top: 10, title: {pt: 'Clientes com mais avarias', zh: '破损最多的客户'}},
+      {key: 'product', type: 'bar', top: 10, title: {pt: 'Especificação do produto', zh: '产品规格'}},
+      {key: 'errorType', type: 'bar', top: 10, title: {pt: 'Tipo secundário (tipo de bipe)', zh: '二级类型'}},
+      {key: 'station', type: 'bar', top: 10, title: {pt: 'Estação de registro', zh: '登记网点'}},
+      {key: 'login', type: 'bar', top: 10, title: {pt: 'Quem registrou mais avarias', zh: '登记破损最多的人员'}},
+      {key: 'regDay', type: 'bar', top: 10, title: {pt: 'Datas de registro mais ofensoras', zh: '破损登记最多的日期'}},
+      {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalo de horas do registro', zh: '登记时间段'}}
+    ],
+    table: [
+      ['date', 'Data estatística', '统计日期'], ['shipment', 'Número da remessa', '运单号'],
+      ['errorType', 'Tipo secundário', '二级类型'], ['client', 'Nome do cliente', '客户名称'],
+      ['content', 'Conteúdo do pacote', '物品名称'], ['product', 'Especificação do produto', '产品规格'],
+      ['amount', 'Valor da arbitragem (R$)', '判责金额'], ['station', 'Estação de registro', '登记网点'],
+      ['eventTime', 'Data do registro', '登记时间'], ['shift', 'Turno', '班次'], ['login', 'Quem registrou', '登记人']
+    ]
   }
 });
 
@@ -368,7 +439,7 @@ function getIndicatorConfig_(key) {
     // é para clicar em Executar sem preencher nada antes. Veja "Manutenção" em LEIA_PRIMEIRO.md.
     if (key === undefined || key === null || key === '') {
       throw new Error('Esta função exige um indicador como parâmetro (ex.: "wrong_send", "sorting_error", ' +
-        '"missing_receipt", "missing_dispatch", "sc_sc" ou "sc_dc"). Ela não é para ser executada direto pelo ' +
+        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc" ou "damage"). Ela não é para ser executada direto pelo ' +
         'botão ▶ Executar sem argumentos — chame-a com o parâmetro preenchido (veja "Manutenção" em LEIA_PRIMEIRO.md) ' +
         'ou teste pelo próprio painel (Implantar → App da Web).');
     }
@@ -394,6 +465,7 @@ function usedFields_(cfg) {
   if (cfg.summaryTable) cfg.summaryTable.groupBy.forEach(k => set[k] = 1);
   (cfg.pivotTables || []).forEach(p => p.groupBy.forEach(k => set[k] = 1));
   (cfg.rankPanels || []).forEach(p => { set[p.dim] = 1; if (p.extra) set[p.extra] = 1; });
+  (cfg.valueCards || []).forEach(v => { set[v.field] = 1; });
   return Object.keys(set);
 }
 /** Calculadas na leitura (Core.applyDocks), a partir do 1º segmento completo: não vão no conjunto de dados. */
@@ -422,6 +494,8 @@ function getPublicCatalog_() {
       docks: cfg.docks || null,
       emptyLotLabel: cfg.emptyLotLabel || null,
       hideShiftCards: !!cfg.hideShiftCards,
+      valueCards: cfg.valueCards || [],
+      texts: cfg.texts || null,
       operationalWindow: cfg.key === 'sc_sc' || cfg.key === 'sc_dc'
     }));
 }

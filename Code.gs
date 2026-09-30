@@ -353,6 +353,13 @@ function diagnosticoCompleto(date) {
     } catch (e) { item.resumo = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
     try {
       const probe = timed(() => probeDetail_(key, d));
+      if (cfg.registration && probe.records.length) {
+        // Avaria: a tabela 2 (Consulta de Pacote Problemático) completa a 1ª página antes do mapeamento.
+        try {
+          timed(() => enrichRegistrations_(key, probe.records));
+          item.registros = {remessas: probe.records.length, comRegistro: probe.records.filter(r => r.registrationTime).length};
+        } catch (e) { item.registros = {erro: publicJmsError_(e.message)}; }
+      }
       const map = fieldMappingReport_(key, probe.records);
       item.detalhe = {total: probe.total, tamanhoDePagina: probe.size, paginasNecessarias: Math.ceil(probe.total / probe.size),
         fatiasDeHorario: probe.total > detailMaxOffset_() && detailMaxOffset_() > 0 && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')};
@@ -392,6 +399,9 @@ function diagnosticoCompleto(date) {
       if (blank.length) lines.push('  Campos que o JMS manda VAZIOS neste indicador (filtro/gráfico fica "Sem informação" e é escondido): ' +
         blank.map(k => k + ' (' + c[k].configurado + ')').join(', '));
     }
+    const rg = item.registros;
+    if (rg) lines.push('  Consulta de Pacote Problemático: ' + (rg.erro ? 'ERRO — ' + rg.erro :
+      rg.comRegistro + ' de ' + rg.remessas + ' avarias da 1ª página com registro (turno, estação e quem registrou)'));
     const dk = item.docas;
     if (dk && dk.amostra) {
       lines.push('  Docas (1ª página do detalhe, ' + dk.amostra + ' remessas): ' + dk.docas.slice(0, 6).map(x => x.doca + ' ' + x.pct + '%').join(' · '));

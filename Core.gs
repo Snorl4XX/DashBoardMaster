@@ -222,8 +222,11 @@ function JTCoreFactory_() {
   }
 
   // ---------- metas e taxas ----------
+  /** Escala da taxa: '%' (padrão) = por cem · 'ppm' = por milhão (ex.: taxa de avaria do JMS). */
+  function rateScale(goal) { return goal && goal.unit === 'ppm' ? 1000000 : 100; }
+  /** Meta sem valor (value null) = indicador sem meta definida: nada fica "na meta" nem "fora". */
   function goalMet(rate, goal) {
-    if (!isNum(rate) || !goal) return null;
+    if (!isNum(rate) || !goal || !isNum(goal.value)) return null;
     rate = Number(rate);
     var v = Number(goal.value);
     if (goal.direction === 'min') return goal.strict ? rate > v : rate >= v;
@@ -238,21 +241,22 @@ function JTCoreFactory_() {
     var valid = (rates || []).filter(function (r) { return r && isNum(r.rate); });
     if (!valid.length) return {rate: null, method: null, days: 0};
     if (valid.length === 1) return {rate: Number(valid[0].rate), method: 'single', days: 1};
+    var S = rateScale(goal);
     var sumE = 0, sumD = 0, ok = true;
     for (var i = 0; i < valid.length && ok; i++) {
       var r = valid[i];
-      var bad = goal && goal.direction === 'min' ? 100 - Number(r.rate) : Number(r.rate);
+      var bad = goal && goal.direction === 'min' ? S - Number(r.rate) : Number(r.rate);
       if (!isNum(r.errorCount)) { ok = false; break; }
       var e = Number(r.errorCount), t = isNum(r.totalCount) ? Number(r.totalCount) : 0, d = null;
-      if (t > 0 && Math.abs(e / t * 100 - bad) <= 0.006 + bad * 0.002) d = t;
-      else if (bad > 0) d = e / (bad / 100);
+      if (t > 0 && Math.abs(e / t * S - bad) <= 0.006 + bad * 0.002) d = t;
+      else if (bad > 0) d = e / (bad / S);
       else if (e === 0 && t > 0) d = t;
       if (d === null || !(d > 0)) { ok = false; break; }
       sumE += e; sumD += d;
     }
     if (ok && sumD > 0) {
-      var badPct = sumE / sumD * 100;
-      return {rate: goal && goal.direction === 'min' ? 100 - badPct : badPct, method: 'weighted', days: valid.length};
+      var badPct = sumE / sumD * S;
+      return {rate: goal && goal.direction === 'min' ? S - badPct : badPct, method: 'weighted', days: valid.length};
     }
     var mean = valid.reduce(function (a, r) { return a + Number(r.rate); }, 0) / valid.length;
     return {rate: mean, method: 'mean', days: valid.length};
@@ -476,11 +480,12 @@ function JTCoreFactory_() {
     });
   }
   /**
-   * Resultado de UM turno por período. rate = taxa do turno em %: erros do turno ÷ volume total
+   * Resultado de UM turno por período. rate = taxa do turno (em % ou ppm, conforme `scale`): erros do turno ÷ volume total
    * (base oficial do JMS) dos dias que têm os dois. O JMS não publica volume por turno; assim as
    * taxas de T1+T2+T3 somam a taxa de erros do período. pct = participação do turno nos erros.
    */
-  function aggregateShiftResults(aggRows, periodicity, shift, from, to, rates) {
+  function aggregateShiftResults(aggRows, periodicity, shift, from, to, rates, scale) {
+    var S = scale || 100;
     var base = {};
     (rates || []).forEach(function (r) { if (isNum(r.totalCount) && Number(r.totalCount) > 0) base[r.date] = Number(r.totalCount); });
     var buckets = {};
@@ -499,7 +504,7 @@ function JTCoreFactory_() {
     return keys.map(function (k) {
       var b = buckets[k];
       return b ? {key: k, count: b.count, total: b.total, pct: b.total ? b.count / b.total * 100 : null, days: b.days,
-        base: b.base || null, rate: b.base ? b.rateCount / b.base * 100 : null, rateCount: b.rateCount}
+        base: b.base || null, rate: b.base ? b.rateCount / b.base * S : null, rateCount: b.rateCount}
         : {key: k, count: null, total: null, pct: null, days: 0, base: null, rate: null, rateCount: 0};
     });
   }
@@ -549,6 +554,10 @@ function JTCoreFactory_() {
       var zh = hasCjk(a) ? a : b, pt = hasCjk(a) ? b : a;
       return lang === 'zh' ? zh : pt;
     }
+    // "Prod. interno extraviado embal.avariada 内件遗失外包装破损" / "Avaria.破损问题件" (Avaria):
+    // português primeiro e chinês no fim, separados por espaço ou ponto.
+    var m = s.match(/^([^㐀-鿿]*[A-Za-zÀ-ÿ][^㐀-鿿]*?)[\s.]+([㐀-鿿][^A-Za-zÀ-ÿ]*)$/);
+    if (m) return lang === 'zh' ? m[2].trim() : m[1].trim();
     if (lang === 'zh') return VALUE_PT_ZH[s] || s;
     return VALUE_ZH_PT[s] || s;
   }
@@ -558,7 +567,7 @@ function JTCoreFactory_() {
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, applyDocks: applyDocks, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
-    goalMet: goalMet, periodRate: periodRate, sumErrors: sumErrors, ratesBetween: ratesBetween,
+    goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
     computeCards: computeCards, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,

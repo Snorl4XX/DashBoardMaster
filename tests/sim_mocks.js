@@ -112,7 +112,7 @@ function createSimContext(opts) {
 }
 
 /** JMS realista: volumes do SP GRU, limite de tamanho de página e dia corrente crescendo. */
-const VOLUME = {ws: 1800, se: 150, mr: 3900, md: 4000, sc: 73000, dc: 200}; // volumes reais do SP GRU (diagnosticoCompleto, 24/09/2026)
+const VOLUME = {ws: 1800, se: 150, mr: 3900, md: 4000, sc: 73000, dc: 200, dm: 152}; // volumes reais do SP GRU (diagnosticoCompleto 24/09/2026; avaria: documento 29/09/2026)
 function realisticJms(opts) {
   opts = opts || {};
   const cap = opts.maxPageSize || 1000;
@@ -134,6 +134,7 @@ function realisticJms(opts) {
       if (kind === 'md') Object.assign(base, {billcode: id, unloadArriveTime: t, unloadPackageEmp: 'OP' + Math.floor(rnd() * 40), threeSegmentCode: 'MG,1-00,1', arriveOrder: 'SETR' + Math.floor(rnd() * 60), nextStop: 'ST' + Math.floor(rnd() * 20), customerName: 'C' + Math.floor(rnd() * 10)});
       if (kind === 'sc') Object.assign(base, {billCode: id, sendDate: date, actualDispatchTime: t, arrivalScanTime: t, nextStation: 'ST' + Math.floor(rnd() * 20), sendShipmentNo: 'JB' + Math.floor(rnd() * 120), packageCode: 'BR' + Math.floor(rnd() * 900), untimelycause: 'Fora do prazo', startTime: date + ' 10:00:00', lastName: 'PA'});
       if (kind === 'dc') Object.assign(base, {waybillNo: id, scanTime: date, dispatchTime: t, arrivalScanTime: t, sendNextStation: 'DC', arrivalShipmentNo: 'SETR' + Math.floor(rnd() * 30), arrivalShipmentName: 'R' + Math.floor(rnd() * 8), isTimely: 'Fora do prazo'});
+      if (kind === 'dm') Object.assign(base, {waybillNo: id, secondTypeName: 'Z' + Math.floor(rnd() * 3), customerName: 'C' + Math.floor(rnd() * 10), goodsName: 'G', productSpecificationName: 'P' + Math.floor(rnd() * 6), adjudicationAmount: Math.floor(rnd() * 20000) / 100});
       out[i] = base;
     }
     out.sort((a, b) => a.hour - b.hour);
@@ -155,6 +156,23 @@ function realisticJms(opts) {
     const size = Math.min(cap, body.size), cur = body.current;
     const page = l0 => { const list = inWin(l0); return ok(list.slice((cur - 1) * size, cur * size).map(r => { const o = Object.assign({}, r); delete o.hour; delete o._t; return o; }), list.length, cur, size); };
     const kindOf = {center_wrong_send_: 'ws', center_error_rate_new_: 'se', inward_transport_timely_rate_: 'dc', departure_transport_timely_: 'sc'};
+    // Avaria: dia estatístico no payload; tabela 1 de no máximo 100 por página; tabela 2 pelas remessas.
+    if (route === 'getBreakageRateData' || route === 'detailBreakageRateData') {
+      const dd = body.startDate || body.statisticalStartDate;
+      const list = dd > nowIso ? [] : dd < nowIso ? dayList(dd, 'dm') : dayList(dd, 'dm').slice(0, Math.floor(VOLUME.dm * nowH / 24));
+      if (route === 'getBreakageRateData') {
+        if (!list.length) return ok([], 0, 1, size);
+        return ok([{statisticalDate: dd, networkCode: '30001', operaNumber: 519159, breakageTicketNumber: list.length, breakageRate: Math.round(list.length / 519159 * 1e8) / 100}], 1, 1, size);
+      }
+      const sz = Math.min(100, body.size);
+      return ok(list.slice((cur - 1) * sz, cur * sz).map(r => { const o = Object.assign({}, r); delete o.hour; delete o._t; return o; }), list.length, cur, sz);
+    }
+    if (route === 'registrationPage') {
+      const ws = String(body.waybillNo || '').split(',').filter(Boolean);
+      const regs = ws.map((w, i) => ({waybillNo: w, probleTypeSubjectName: 'Avaria.破损问题件', createByName: 'OP' + (i % 9), createTime: '2026-08-20 ' + String(i % 24).padStart(2, '0') + ':10:00', registrationNetworkName: 'SP GRU'}));
+      const sz = Math.min(100, body.size);
+      return ok(regs.slice((cur - 1) * sz, cur * sz), regs.length, cur, sz);
+    }
     if (/center_missscan_next_total/.test(route)) {
       const mr = visible(dayList(date, 'mr')).length, md = visible(dayList(date, 'md')).length;
       if (!mr && !md) return ok([], 0, 1, size);

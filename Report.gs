@@ -47,6 +47,9 @@ function generateReport(indicatorKey, params, format) {
 
 function bilingual_(pt, zh) { return String(pt || '') + '\n' + String(zh || ''); }
 function pctCell_(v) { return v === null || v === undefined ? '' : v / 100; }
+/** Taxa oficial na planilha: em % vira fração (formato 0,00%); em ppm fica o número (formato "ppm"). */
+function rateCell_(v, cfg) { return v === null || v === undefined || v === '' ? '' : cfg.goal.unit === 'ppm' ? Number(v) : v / 100; }
+function rateFormat_(cfg) { return cfg.goal.unit === 'ppm' ? '0.00 "ppm"' : '0.00%'; }
 
 function headerRow_(range) {
   return range.setBackground(APP_CONFIG.RED).setFontColor('#FFFFFF').setFontWeight('bold')
@@ -77,21 +80,21 @@ function buildSummaryReportSheet_(sh, dash) {
     bilingual_('T3 · 22–06h', 'T3班'), bilingual_(top ? dimLabel_(cfg, top.key).pt + ' ofensor' : 'Top ofensor', top ? dimLabel_(cfg, top.key).zh : '主要异常项')
   ];
   const values = [
-    pctCell_(c.rate), pctCell_(c.goal.value), c.currentErrors === null ? '' : c.currentErrors,
+    rateCell_(c.rate, cfg), rateCell_(c.goal.value, cfg), c.currentErrors === null ? '' : c.currentErrors,
     c.previousErrors === null ? '' : c.previousErrors, pctCell_(c.variation),
     shift.T1 && shift.T1.qty !== null ? shift.T1.qty : '', shift.T2 && shift.T2.qty !== null ? shift.T2.qty : '',
     shift.T3 && shift.T3.qty !== null ? shift.T3.qty : '', top && top.label ? top.label + ' (' + top.qty + ')' : ''
   ];
   headerRow_(sh.getRange(4, 1, 1, headers.length).setValues([headers]));
   sh.getRange(5, 1, 1, values.length).setValues([values]).setFontWeight('bold').setFontSize(13).setHorizontalAlignment('center');
-  sh.getRange(5, 1, 1, 2).setNumberFormat('0.00%');
+  sh.getRange(5, 1, 1, 2).setNumberFormat(rateFormat_(cfg));
   sh.getRange(5, 5).setNumberFormat('+0.00%;-0.00%;0.00%');
   sh.getRange(4, 1, 2, headers.length).setBorder(true, true, true, true, true, true, '#D9D9D9', SpreadsheetApp.BorderStyle.SOLID);
   sh.setRowHeight(4, 46);
   const status = sh.getRange('J4:L5').merge()
-    .setValue(c.targetMet === null ? 'SEM TAXA\n暂无数据' : (c.targetMet ? '✓ META ATINGIDA\n目标达成' : '✗ FORA DA META\n未达目标'))
+    .setValue(c.targetMet === null ? (c.rate !== null && c.goal.value === null ? 'SEM META DEFINIDA\n未设目标' : 'SEM TAXA\n暂无数据') : (c.targetMet ? '✓ META ATINGIDA\n目标达成' : '✗ FORA DA META\n未达目标'))
     .setFontWeight('bold').setFontSize(14).setHorizontalAlignment('center').setVerticalAlignment('middle');
-  status.setBackground(c.targetMet ? '#EAF7EE' : '#FDEBEC').setFontColor(c.targetMet ? '#15803D' : '#B42318');
+  status.setBackground(c.targetMet === null ? '#F3F4F6' : c.targetMet ? '#EAF7EE' : '#FDEBEC').setFontColor(c.targetMet === null ? '#434A5B' : c.targetMet ? '#15803D' : '#B42318');
 
   // Evolução diária (taxa oficial JMS)
   const rates = JTCore_.ratesBetween(dash.allRates, dash.from, dash.to);
@@ -99,8 +102,8 @@ function buildSummaryReportSheet_(sh, dash) {
   headerRow_(sh.getRange(evoStart, 1, 1, 4).setValues([[bilingual_('Data', '日期'), bilingual_('Taxa', '指标率'), bilingual_('Meta', '目标'), bilingual_('Erros', '异常量')]]));
   if (rates.length) {
     sh.getRange(evoStart + 1, 1, rates.length, 1).setNumberFormat('@');
-    sh.getRange(evoStart + 1, 1, rates.length, 4).setValues(rates.map(r => [humanDatePt_(r.date), pctCell_(r.rate), cfg.goal.value / 100, r.errorCount === null ? '' : r.errorCount]));
-    sh.getRange(evoStart + 1, 2, rates.length, 2).setNumberFormat('0.00%');
+    sh.getRange(evoStart + 1, 1, rates.length, 4).setValues(rates.map(r => [humanDatePt_(r.date), rateCell_(r.rate, cfg), rateCell_(cfg.goal.value, cfg), r.errorCount === null ? '' : r.errorCount]));
+    sh.getRange(evoStart + 1, 2, rates.length, 2).setNumberFormat(rateFormat_(cfg));
     sh.insertChart(sh.newChart().asLineChart().addRange(sh.getRange(evoStart, 1, rates.length + 1, 3))
       .setPosition(evoStart, 6, 0, 0).setOption('title', 'Evolução diária / 每日趋势')
       .setOption('legend', {position: 'bottom'}).setOption('pointSize', 5)

@@ -5,7 +5,7 @@ const SEGMENT_FIRST_CODE_ = {wrong_send: 1, sorting_error: 1, missing_receipt: 1
 /** Campos guardados nos arquivos diários (formato colunar da V3.7). */
 const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expeditionTime', 'login', 'segment', 'destination',
   'lot', 'client', 'offenderBase', 'errorType', 'tripId', 'route', 'reason', 'idealTime', 'idealTimeFull', 'correctDest',
-  'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw'];
+  'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw', 'station', 'product', 'content', 'amount', 'regDay'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 
@@ -25,6 +25,11 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
     client: str(f.client), offenderBase: str(f.offenderBase), errorType: str(f.errorType), tripId: str(f.tripId),
     route: str(f.route), reason: str(f.reason), idealTime: str(f.idealTime), correctDest: str(f.correctDest)
   };
+  // Campos da Avaria (e de indicadores futuros que os configurarem).
+  if (f.station) row.station = str(f.station);
+  if (f.product) row.product = str(f.product);
+  if (f.content) row.content = str(f.content);
+  if (f.amount) row.amount = str(f.amount);
   // Indicadores com docas guardam o 1º segmento COMPLETO ("BRE - SP"); o campo segment continua
   // só com o código ("BRE"), como nos gráficos de sempre. Destino e doca saem daqui (Core.applyDocks).
   if (cfg.docks) row.segmentRaw = JTCore_.segmentHead(row.segment);
@@ -37,6 +42,8 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
  * gráficos ficavam "sem dados" sem nenhum aviso.
  */
 function normalizeRecords_(indicatorKey, date, records) {
+  // Avaria: antes de normalizar, junta os dados da Consulta de Pacote Problemático (tabela 2).
+  if (getIndicatorConfig_(indicatorKey).registration && records.length) enrichRegistrations_(indicatorKey, records);
   const rows = [];
   for (let i = 0; i < records.length; i++) { const x = normalizeDetailRow_(indicatorKey, records[i], date); if (x) rows.push(x); }
   if (records.length && !rows.length) {
@@ -122,6 +129,8 @@ function rederiveRow_(indicatorKey, row) {
   r.receiptShift = JTCore_.shiftOf(r.receiptTime);
   r.expeditionShift = JTCore_.shiftOf(r.expeditionTime || r.eventTime);
   r.interval = JTCore_.intervalOf(main);
+  // Dia do bipe/registro (ex.: Avaria: "data do registro mais ofensora"), quando o indicador pede.
+  if (cfg.eventDay) r.regDay = normalizeDateFromValue_(r.eventTime, '');
   return r;
 }
 

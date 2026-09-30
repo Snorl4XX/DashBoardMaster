@@ -75,6 +75,10 @@ check(fac.shift.map(o => o.value).join() === 'T1,T2,T3' && fac.login.find(o => o
 const enc = C.encodeDataset(rows, ['date', 'shipment', 'shift', 'login']);
 check(JSON.stringify(C.decodeDataset(JSON.parse(JSON.stringify(enc)))) === JSON.stringify(rows.map(r => ({date: r.date, shipment: r.shipment, shift: r.shift, login: r.login}))), 'codificação compacta ida e volta');
 check(C.localizeValue('交叉带/翻板机错用包牌|Uso incorreto da etiqueta', 'pt') === 'Uso incorreto da etiqueta' && C.localizeValue('交叉带/翻板机错用包牌|Uso incorreto da etiqueta', 'zh') === '交叉带/翻板机错用包牌', 'valores bilíngues');
+check(C.localizeValue('Prod. interno extraviado embal.avariada 内件遗失外包装破损', 'pt') === 'Prod. interno extraviado embal.avariada' &&
+  C.localizeValue('Prod. interno extraviado embal.avariada 内件遗失外包装破损', 'zh') === '内件遗失外包装破损' &&
+  C.localizeValue('Avaria.破损问题件', 'pt') === 'Avaria' && C.localizeValue('Avaria.破损问题件', 'zh') === '破损问题件' &&
+  C.localizeValue('SP GRU', 'zh') === 'SP GRU' && C.localizeValue('分拣错误', 'pt') === (C.localizeValue('分拣错误', 'pt')), 'valores bilíngues da Avaria (português + chinês no fim)');
 check(ctx.coreSource_().indexOf('</script') < 0 && ctx.coreSource_().startsWith('window.JTCore=('), 'núcleo injetável no HTML');
 
 // ---------- 4. Pipeline completo ----------
@@ -126,7 +130,7 @@ check(ctx.getDashboardData('wrong_send', {}).meta.to === '2026-09-19', 'período
 
 // ---------- 6. Resultados ----------
 const results = ctx.getResultsData({from: '2026-09-17', to: '2026-09-19'});
-check(results.series.length === 6 && results.series.every(s => s.rates.length === 3 && s.agg.length === 3) && !hasDate(results), 'resultados de todos os indicadores');
+check(results.series.length === 7 && results.series.every(s => s.rates.length === 3 && s.agg.length === 3) && !hasDate(results), 'resultados de todos os indicadores');
 const weekly = C.aggregateResults(results.series[0].rates, cfgWs.goal, 'week', '2026-09-17', '2026-09-19');
 check(weekly.length === 1 && weekly[0].key === '2026-W38' && weekly[0].method === 'weighted', 'agregação semanal', weekly);
 
@@ -275,7 +279,7 @@ function freshCtx(dayData, jmsOpts, props) {
   return c;
 }
 function withBig(date, n, seed) { const o = {}; o[date] = makeDay(date, seed || 5); o[date].ws = bigWrongSend(date, n); return o; }
-const ALL = ['wrong_send', 'sorting_error', 'missing_receipt', 'missing_dispatch', 'sc_sc', 'sc_dc'];
+const ALL = ['wrong_send', 'sorting_error', 'missing_receipt', 'missing_dispatch', 'sc_sc', 'sc_dc', 'damage'];
 const isDetailUrl = u => /_detail$|_verification$|_detailed$/.test(u) && !/total/.test(u);
 const D19 = '2026-09-19';
 
@@ -286,7 +290,7 @@ runAll(cA);
 const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url));
 check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 1000 registros por página (antes 100)', detA.map(f => f.payload.size));
 check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
-check(Object.keys(cA.__state.files).length === 6, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
+check(Object.keys(cA.__state.files).length === 7, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
 check(cA.loadDetailFile_(cA.dayFilesMap_('wrong_send', D19, D19)[D19].fileId).kind === 'jt-day', 'arquivo diário no formato colunar');
 check(cA.allTabRows_('PAGES').length === 0, 'índice de páginas não cresce no caminho normal');
 // Fila vazia: depois de UMA execução de conferência, o gatilho de 5 min sai sem abrir a planilha.
@@ -349,13 +353,13 @@ const cG = freshCtx({'2026-09-19': makeDay(D19, 3)}, optsG);
 cG.queueHistory(D19, D19, true);
 cG.processSyncQueue({budgetMs: 600000});
 const pausesG = cG.publicPauses_();
-check(pausesG.length === 5 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
-  'token expirado pausa as 5 rotas com aviso claro', pausesG);
-check(cG.__state.fetches.length === 5, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
-check(cG.pendingJobs_().length === 12 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
+check(pausesG.length === 6 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
+  'token expirado pausa as 6 rotas com aviso claro', pausesG);
+check(cG.__state.fetches.length === 6, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
+check(cG.pendingJobs_().length === 14 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
 cG.processSyncQueue({budgetMs: 600000});
-check(cG.__state.fetches.length === 5, 'fila pausada não insiste no JMS');
-check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 5 && cG.getAppBootstrap().pauses.length === 5, 'pausa chega ao painel');
+check(cG.__state.fetches.length === 6, 'fila pausada não insiste no JMS');
+check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 6 && cG.getAppBootstrap().pauses.length === 6, 'pausa chega ao painel');
 delete optsG.appError;
 cG.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO';
 runAll(cG);
@@ -365,7 +369,7 @@ check(cG.publicPauses_().length === 0 && ALL.every(k => cG.getDayStatus_(k, D19)
 const cH = freshCtx({'2026-09-19': makeDay(D19, 3)}, {html: true});
 cH.queueHistory(D19, D19, true);
 cH.processSyncQueue({budgetMs: 600000});
-check(cH.publicPauses_().length === 5 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
+check(cH.publicPauses_().length === 6 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
 
 // (i) Cota diária do Google esgotada: pausa geral por 1 h, sem marcar erro nos jobs.
 const cI = freshCtx({'2026-09-19': makeDay(D19, 3)}, {onFetch: () => { throw new Error('Service invoked too many times for one day: urlfetch.'); }});
@@ -629,7 +633,7 @@ cQ.queueHistory(D19, D19, true);
 for (let i = 0; i < 4; i++) { cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {}; cQ.processSyncQueue({budgetMs: 600000, force: true}); }
 cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {};
 const qQ = cQ.queueReport_(1100);
-check(qQ.erros === 6 && qQ.esperandoTaxa === 6 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 6 &&
+check(qQ.erros === 7 && qQ.esperandoTaxa === 7 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 7 &&
   /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
 // ---------- 14. V3.8: docas na Falta de Bipagem na Expedição (planilha do usuário) ----------
@@ -796,5 +800,79 @@ const seRC = ctx.RowsCollector_(vm.runInContext('fillEmpty_(INDICATORS.sorting_e
 seRC.addEncoded(seOld);
 check(seRC.rows.filter(r => r.offenderBase === 'SP GRU').length === 3, 'relatório também soma no SP GRU');
 check(Object.keys(vm.runInContext('fillEmpty_(INDICATORS.wrong_send)', ctx)).length === 0, 'outros indicadores não mudam');
+
+// ---------- 17. V3.11: Avaria (tabela 1 + tabela 2, taxa por milhão) ----------
+// (a) Números do documento: 152 avarias ÷ 519.159 operados × 1.000.000 = 292,78 ppm.
+check(Math.round(152 / 519159 * 1e6 * 100) / 100 === 292.78, 'taxa de avaria do JMS é por milhão (ppm)');
+const cfgDm = ctx.getIndicatorConfig_('damage');
+check(cfgDm.goal.unit === 'ppm' && C.rateScale(cfgDm.goal) === 1e6 && C.rateScale(ctx.getIndicatorConfig_('wrong_send').goal) === 100, 'escala da taxa por indicador');
+// (b) Consultas iguais às do documento.
+const pS = ctx.buildPayload_('damage', '2026-09-29', 1, 20, false), pD = ctx.buildPayload_('damage', '2026-09-29', 1, 100, true);
+check(JSON.stringify(pS) === JSON.stringify({current: 1, size: 20, organizationCode: '30001', organizationType: 3, dateType: 1, countryId: '1', startDate: '2026-09-29', endDate: '2026-09-29'}),
+  'payload do resumo = documento', pS);
+check(JSON.stringify(pD) === JSON.stringify({current: 1, size: 100, agentAreaCode: '30001', type: 1, organizationType: 3, countryId: '1', statisticalStartDate: '2026-09-29', statisticalEndDate: '2026-09-29'}),
+  'payload do detalhe (tabela 1) = documento', pD);
+check(ctx.detailPageSize_(cfgDm) === 100, 'detalhe da avaria pede no máximo 100 por página (limite da tela)');
+const hdrReg = ctx.jmsRouteHeaders_('https://gw.jtjms-br.com/servicequality/problemPiece/registrationPage', {});
+check(hdrReg.Routename === 'problemPieceQuery' && decodeURIComponent(hdrReg.Routernamelist) === '服务质量>异常管理>问题件管理>问题件查询', 'cabeçalhos da tabela 2 = capturados no documento', hdrReg);
+const hdrDm = ctx.jmsRouteHeaders_('https://gw.jtjms-br.com/servicequality/breakage/rate/detailBreakageRateData', {JMS_ROUTENAME_DAMAGE: 'OutroNome'});
+check(hdrDm.Routename === 'OutroNome' && ctx.jmsRouteHeaders_('https://gw.jtjms-br.com/servicequality/breakage/rate/getBreakageRateData', {}).Routename === 'damageRate',
+  'cabeçalhos da avaria com padrão e ajuste por propriedade');
+// (c) Escolha do registro na tabela 2 (registros do documento, simplificados).
+const regs = [
+  {waybillNo: '888000000000101', probleTypeSubjectName: 'Pedidos.salvados.作废件', createTime: '2026-09-23 23:14:39', createByName: 'A', registrationNetworkName: 'SP GRU'},
+  {waybillNo: '888000000000101', probleTypeSubjectName: 'Avaria.破损问题件', createTime: '2026-09-23 23:14:06', createByName: 'B', registrationNetworkName: 'SP GRU'},
+  {waybillNo: '999000000000102', probleTypeSubjectName: 'Pedidos.salvados.作废件', createTime: '2026-09-23 23:02:18', createByName: 'C', registrationNetworkName: 'SP GRU'},
+  {waybillNo: '999000000000102', probleTypeSubjectName: 'Avaria.破损问题件', createTime: '2026-09-23 23:01:48', createByName: 'D', registrationNetworkName: 'SP GRU'},
+  {waybillNo: '888000000000103-003', probleTypeSubjectName: 'Avaria.破损问题件', createTime: '2026-09-24 10:00:00', createByName: 'E', registrationNetworkName: 'PA SHEIN-GRU-SP'},
+  {waybillNo: '888000000000103', probleTypeSubjectName: 'Avaria.破损问题件', createTime: '2026-09-25 09:00:00', createByName: 'F', registrationNetworkName: 'SP GRU'},
+  {waybillNo: '777', probleTypeSubjectName: 'Pedidos.salvados.作废件', createTime: '2026-09-25 09:00:00', createByName: 'G', registrationNetworkName: 'SP GRU'}
+];
+const picked = ctx.pickRegistrations_(regs, 'SP GRU');
+check(picked['888000000000101'].createByName === 'B' && picked['999000000000102'].createByName === 'D' && picked['888000000000103'].createByName === 'F' && !picked['777'],
+  'tabela 2: só registro de avaria, da própria base e o mais antigo; volume "-003" junta na remessa-mãe', Object.keys(picked).map(k => k + '=' + picked[k].createByName));
+// (d) Sincronização completa: resumo em ppm, detalhe paginado de 100 em 100, junção com a tabela 2.
+const dDm = {}; dDm[D19] = makeDay(D19, 41);
+const cDm = freshCtx(dDm);
+cDm.queueHistory(D19, D19, true);
+runAll(cDm);
+const stDm = cDm.getDayStatus_('damage', D19);
+const rateDm = cDm.getRates_('damage', D19, D19)[0];
+check(stDm.summary === 'COMPLETE' && stDm.details === 'COMPLETE' && rateDm.rate > 100 && rateDm.errorCount === dDm[D19].dm.length && rateDm.totalCount === dDm[D19].dmBase,
+  'taxa em ppm aceita (acima de 100) com avarias e volume oficiais', {st: stDm, rate: rateDm});
+const fDm = cDm.__state.fetches.filter(f => /detailBreakageRateData/.test(f.url));
+const fReg = cDm.__state.fetches.filter(f => /registrationPage/.test(f.url));
+check(fDm.length === Math.ceil(dDm[D19].dm.length / 100) && fDm.every(f => f.payload.size === 100) &&
+  fReg.length >= 2 && fReg.every(f => f.payload.searchType === 1 && f.payload.size === 100 && f.payload.waybillNo.split(',').length <= 100),
+  'tabela 1 de 100 em 100; tabela 2 consultada pelas remessas (até 100 por consulta)', {t1: fDm.length, t2: fReg.length});
+const dashDm = cDm.getDashboardData('damage', {from: D19, to: D19});
+const rowsDm = C.decodeDataset(dashDm.dataset);
+const byWb = {}; dDm[D19].dmReg.forEach(r => { if (/Avaria/.test(r.probleTypeSubjectName)) byWb[r.waybillNo] = byWb[r.waybillNo] || r; });
+const sampleDm = rowsDm.find(r => byWb[r.shipment] && byWb[r.shipment].registrationNetworkName === 'SP GRU');
+const regOf = byWb[sampleDm.shipment];
+check(rowsDm.length === dDm[D19].dm.length && sampleDm.eventTime === regOf.createTime && sampleDm.login === regOf.createByName && sampleDm.station === 'SP GRU' &&
+  sampleDm.shift === C.shiftOf(regOf.createTime) && sampleDm.interval === C.intervalOf(regOf.createTime) && sampleDm.regDay === regOf.createTime.slice(0, 10),
+  'remessa com os dados da tabela 2: data do registro → turno, intervalo e dia; quem registrou; estação', sampleDm);
+const src = dDm[D19].dm.find(r => r.waybillNo === sampleDm.shipment);
+check(sampleDm.client === src.customerName && sampleDm.product === src.productSpecificationName && sampleDm.errorType === src.secondTypeName &&
+  sampleDm.content === src.goodsName && Number(sampleDm.amount) === src.adjudicationAmount, 'colunas da tabela 1: cliente, especificação, tipo secundário, conteúdo, valor');
+const semReg = rowsDm.filter(r => !r.eventTime);
+check(semReg.length > 0 && semReg.every(r => r.shift === 'N/A' && !r.station), 'avaria sem registro na tabela 2 fica "Sem informação" no turno/estação');
+check(Object.keys(dashDm.dataset.dict).indexOf('amount') >= 0 && Object.keys(dashDm.dataset.dict).indexOf('station') >= 0 && Object.keys(dashDm.dataset.dict).indexOf('regDay') >= 0,
+  'painel recebe valor, estação e dia do registro');
+// (e) Meta ainda não definida: nada de "na meta" / "fora da meta"; taxa do período em ppm.
+const cardsDm = C.computeCards(cfgDm, dashDm.rates, rowsDm, {}, D19, D19);
+check(cardsDm.rate === rateDm.rate && cardsDm.targetMet === null && C.goalMet(500, cfgDm.goal) === null, 'sem meta: taxa aparece, sem avaliação', cardsDm.targetMet);
+const prDm = C.periodRate([{rate: 292.78, errorCount: 152, totalCount: 519159}, {rate: 250, errorCount: 100, totalCount: 400000}], cfgDm.goal);
+check(prDm.method === 'weighted' && Math.abs(prDm.rate - 252 / 919159 * 1e6) < 1e-6, 'taxa de vários dias em ppm = Σavarias ÷ Σvolume × 1.000.000', prDm);
+const shDm = C.aggregateShiftResults([{date: D19, T1: 10, T2: 20, T3: 30, total: 60}], 'day', 'T2', D19, D19, [{date: D19, totalCount: 500000}], 1e6);
+check(shDm[0].rate === 40, 'Resultados por turno em ppm (20 ÷ 500.000 × 1.000.000 = 40)', shDm[0]);
+// (f) Relatório e diagnóstico.
+cDm.UrlFetchApp.fetch = (() => { const f = cDm.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cDm.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
+const repDm = cDm.generateReport('damage', {from: D19, to: D19}, 'xlsx');
+check(repDm.ok && repDm.rows === dDm[D19].dm.length, 'relatório da avaria', repDm);
+const diagDm = cDm.diagnosticoCompleto(D19);
+check(/■ Avaria \(damage\)/.test(diagDm.texto) && /Consulta de Pacote Problemático: \d+ de \d+ avarias/.test(diagDm.texto) && /taxa [\d.]+%? · erros/.test(diagDm.texto),
+  'diagnosticoCompleto inclui a Avaria e a junção com a tabela 2', diagDm.texto.split('\n').filter(l => /Avaria|Pacote|damage/.test(l)));
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

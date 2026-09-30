@@ -1,6 +1,59 @@
-# J&T DASHMASTER V3.10.2 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.11 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.11 — Novo indicador: Avaria / 破损
+A Avaria entrou como 7º indicador no menu, no mesmo padrão dos outros (gráficos, filtros, cartões, tabela, Resultados, relatório PDF/Excel e Maomao).
+
+**De onde vêm os dados (duas telas do JMS, unidas pelo número da remessa):**
+1. **Relatório de Taxa de Avaria** (Qualidade de serviço › Gerenciamento de relatórios):
+   - `getBreakageRateData` dá a **taxa oficial do dia**: avarias (`breakageTicketNumber`) ÷ remessas operadas (`operaNumber`);
+   - `detailBreakageRateData` dá a **tabela 1**: remessa, tipo secundário, nome do cliente, conteúdo do pacote, especificação do produto e valor da arbitragem. O JMS aceita no máximo **100 linhas por página**, e o painel respeita esse limite.
+2. **Consulta de Pacote Problemático** (`registrationPage`, tabela 2): o painel envia as remessas da tabela 1 em lotes de 100 e traz a **estação de registro**, a **data do registro** e **quem registrou**.
+   - Quando a remessa tem mais de um registro, vale o registro de **Avaria (破损问题件)**. Entre esses, o da própria base (SP GRU) tem preferência e, depois, o **mais antigo**.
+   - Um registro de outro tipo (ex.: "Pedidos salvados / 作废件") só entra quando não há nenhum de avaria e o tipo de 2º nível dele fala de avaria (ex.: "embalagem avariada").
+   - Remessas filhas (`…-001`) contam como a remessa principal.
+   - Remessa sem registro na tabela 2 aparece como "Sem informação" no turno, na estação e em quem registrou.
+
+**Taxa em ppm (por milhão).** A taxa de avaria do JMS é por milhão de remessas: 152 avarias em 519.159 remessas = **292,78 ppm**. O painel mostra a taxa em ppm (cartão, evolução, Resultados e relatório), com a variação em ppm e não em p.p.
+
+**Meta: ainda não definida.** Enquanto não houver meta, o painel mostra **"Meta não definida"**: não há "na meta" ou "fora da meta", e o Maomao fica neutro.
+- Para cadastrar a meta, troque `value: null` pelo valor em ppm em `Config.gs` → `damage` → `goal` (ex.: `value: 300`).
+- `direction: 'max'` quer dizer que a taxa deve ficar **abaixo** da meta.
+
+**Painel da Avaria:**
+- **Filtros:** Turno, Estação de registro e Intervalo de horas.
+- **Cartões:**
+  - taxa do dia/período, avarias, dia anterior e variação;
+  - **T1, T2 e T3**: quantidade de avarias pelo horário do registro;
+  - **Valor total de perda**: soma do valor da arbitragem, em R$;
+  - **Remessa mais cara**: o maior valor da arbitragem, com a remessa e o cliente.
+  - Os dois cartões em R$ seguem os filtros.
+- **Gráficos**, todos no padrão das colunas vermelhas com cartões embaixo:
+  - **Turno que registrou a avaria** (rosca);
+  - **Clientes com mais avarias**;
+  - **Especificação do produto**;
+  - **Tipo secundário (tipo de bipe)**;
+  - **Estação de registro** (quem fez o bipe de avaria);
+  - **Quem registrou mais avarias**;
+  - **Datas de registro mais ofensoras**;
+  - **Intervalo de horas do registro** (Ranking/24 h).
+  - O turno, as datas e os intervalos usam a **data do registro** (tabela 2), como pedido.
+- **Tabela de remessas:** data estatística, remessa, tipo secundário, cliente, conteúdo, produto, valor da arbitragem (R$), estação, data do registro, turno e quem registrou.
+- Os textos do JMS que vêm em dois idiomas ("Prod. interno extraviado embal.avariada 内件遗失外包装破损") aparecem só no idioma escolhido.
+
+**Primeira vez:** depois de publicar a nova versão, o histórico da Avaria é baixado sozinho a partir de `DATA_START_DATE`, como nos outros indicadores. Para conferir antes, rode **`diagnosticoCompleto()`**. A Avaria aparece com a linha *"Consulta de Pacote Problemático: X de Y avarias da 1ª página com registro"*.
+
+**Se o JMS recusar a Avaria (Routename):**
+- O `Routename` da tela de Avaria segue a regra das outras telas (`damageRate`, `服务质量>报表管理>破损率报表`), mas não foi capturado ao vivo.
+- Se o `diagnosticoCompleto` mostrar recusa de rota na Avaria:
+  1. abra a tela Relatório de Taxa de Avaria com o DevTools (Network);
+  2. copie `routename` e `routernamelist` de `getBreakageRateData`;
+  3. grave as propriedades `JMS_ROUTENAME_DAMAGE` e `JMS_ROUTENAMELIST_DAMAGE`.
+- Na Consulta de Pacote Problemático, os valores capturados (`problemPieceQuery`) já estão no código. A rota dela é `PROBLEM_PIECE`.
+
+**Outros ajustes:**
+- Na evolução diária, os rótulos que ficariam uns sobre os outros (celular, muitos dias) são escondidos. O maior, o menor e o último continuam sempre visíveis.
 
 ## V3.10.2 — Correções na evolução, etiquetas nos Resultados e "Sem informação" da Triagem Errada
 - **Evolução diária:**
@@ -302,7 +355,7 @@ O que fazer:
 - Espere o próximo ciclo da fila (a cada 5 min) ou rode `retomarImportacao` para tentar de novo na hora.
 - Para testar o endpoint de **detalhe** de UM indicador na hora, sem esperar a fila nem gravar nada: rode `diagnosticarDetalheJms('wrong_send')` (troque o indicador) e veja o resultado no Registro de execução. Ele mostra HTTP, cabeçalhos de rota enviados e o total de registros — ou o erro exato, no mesmo texto amigável que o painel mostraria.
 - Se o erro persistir, copie o texto da coluna `error`/`SYNC_LOG` (ou do resultado de `diagnosticarDetalheJms`) e ajuste o payload/endpoint do detalhe daquele indicador em `JmsApi.gs` (`buildPayload_`) — o problema quase sempre é um parâmetro do **detalhe** divergente do **resumo** (o resumo já validado não usa o mesmo payload).
-- Se o erro mencionar `Routename`/`Routernamelist` ausente/incorreto: desde esta versão os 5 indicadores já usam o **valor real capturado no DevTools** de cada tela do JMS (antes só Envio Errado tinha captura real; os outros usavam um nome de tela "chutado" que o resumo aceitava mas o detalhe rejeitava). Se ainda assim algum indicador específico continuar recusando, é porque a captura mudou no JMS ou é diferente na sua instalação — capture de novo em Network do DevTools naquela tela e configure `JMS_ROUTENAME_<ROTA>`/`JMS_ROUTENAMELIST_<ROTA>` (ROTA = WRONG_SEND, SORTING_ERROR, MISSING_SCAN, SC_SC, SC_DC) nas Propriedades do script — isso sobrepõe o valor padrão sem precisar editar código. Rode `diagnosticarDetalheJms('<indicador>')` para confirmar.
+- Se o erro mencionar `Routename`/`Routernamelist` ausente/incorreto: desde esta versão os 5 indicadores já usam o **valor real capturado no DevTools** de cada tela do JMS (antes só Envio Errado tinha captura real; os outros usavam um nome de tela "chutado" que o resumo aceitava mas o detalhe rejeitava). Se ainda assim algum indicador específico continuar recusando, é porque a captura mudou no JMS ou é diferente na sua instalação — capture de novo em Network do DevTools naquela tela e configure `JMS_ROUTENAME_<ROTA>`/`JMS_ROUTENAMELIST_<ROTA>` (ROTA = WRONG_SEND, SORTING_ERROR, MISSING_SCAN, SC_SC, SC_DC, DAMAGE, PROBLEM_PIECE) nas Propriedades do script — isso sobrepõe o valor padrão sem precisar editar código. Rode `diagnosticarDetalheJms('<indicador>')` para confirmar.
 
 ## Se aparecer o aviso amarelo "Sincronização pausada" (V3.7)
 
@@ -313,7 +366,7 @@ O que fazer:
 
 O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho, sem inventar taxa.
 - Rode `diagnosticarConexaoJms` para ver quais rotas respondem 200 e quais respondem 401.
-- Cada rota envia `Routename` com o nome da tela do JMS: ErrorSendRate, ErrorRateStandard|biIndex, BuildSideLeakageNewNew, OutboundTransshipmentNew e TimelinessRatio. Para alterar, crie a propriedade `JMS_ROUTENAME_<ROTA>` (ROTA = WRONG_SEND, SORTING_ERROR, MISSING_SCAN, SC_SC, SC_DC); use `NONE` para não enviar. O mesmo vale para `JMS_ROUTENAMELIST_<ROTA>`.
+- Cada rota envia `Routename` com o nome da tela do JMS: ErrorSendRate, ErrorRateStandard|biIndex, BuildSideLeakageNewNew, OutboundTransshipmentNew, TimelinessRatio, damageRate (Avaria) e problemPieceQuery (Consulta de Pacote Problemático). Para alterar, crie a propriedade `JMS_ROUTENAME_<ROTA>` (ROTA = WRONG_SEND, SORTING_ERROR, MISSING_SCAN, SC_SC, SC_DC, DAMAGE, PROBLEM_PIECE); use `NONE` para não enviar. O mesmo vale para `JMS_ROUTENAMELIST_<ROTA>`.
 - Se continuar em 401, peça à TI um método autorizado de integração a partir dos servidores do Google.
 
 ## Manutenção
@@ -326,7 +379,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **191 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **211 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

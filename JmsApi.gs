@@ -60,7 +60,7 @@ function credentialSignature_() {
  * Cabeçalhos de rota do gateway JMS. O padrão de "Routename" é o nome da página
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
- * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC
+ * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -69,7 +69,13 @@ const JMS_ROUTES_ = [
   {key: 'SORTING_ERROR', pattern: /\/center_error_rate_new_(?:total|detail|sum|update)(?:\?|$)/, name: 'ErrorRateStandard|biIndex', list: '经营指标>操作>错分率'},
   {key: 'MISSING_SCAN', pattern: /\/center_missscan_next_(?:total|detail|sum)(?:\?|$)/, name: 'BuildSideLeakageNewNew', list: '经营指标>操作>漏扫报表>中心到发漏扫报表new'},
   {key: 'SC_SC', pattern: /\/departure_transport_timely_(?:total_verification|rate_verification|sum_verification)(?:\?|$)/, name: 'OutboundTransshipmentNew', list: '经营指标>时效>出港转运及时率(新)'},
-  {key: 'SC_DC', pattern: /\/inward_transport_timely_rate_(?:total|detailed|sum)(?:\?|$)/, name: 'TimelinessRatio', list: '经营指标>时效>进港转运及时率'}
+  {key: 'SC_DC', pattern: /\/inward_transport_timely_rate_(?:total|detailed|sum)(?:\?|$)/, name: 'TimelinessRatio', list: '经营指标>时效>进港转运及时率'},
+  // Avaria: tela Qualidade de serviço > Gerenciamento de relatórios > Relatório de Taxa de Avaria (/serviceQualityIndex/damageRate).
+  // Routename = nome da página (mesma regra das outras telas). Se o JMS recusar, capture os dois no DevTools e
+  // grave JMS_ROUTENAME_DAMAGE / JMS_ROUTENAMELIST_DAMAGE.
+  {key: 'DAMAGE', pattern: /\/servicequality\/breakage\/rate\/(?:getBreakageRateData|detailBreakageRateData)(?:\?|$)/, name: 'damageRate', list: '服务质量>报表管理>破损率报表'},
+  // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
+  {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
 
 /** Cabeçalho HTTP precisa ser ASCII: codifica como o navegador faz (idempotente). */
@@ -301,6 +307,15 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       return {current: pageNo, size: pageSize, distributeId: distributeId_(), distributeName: centerName_(),
         distributeCode: centerCode, countryId: countryId_(), dateType: 'day', startTime: w.start, endTime: w.end};
 
+    case 'damage':
+      // Relatório de Taxa de Avaria: por dia estatístico, filtrado pela base (código 30001).
+      if (detail) {
+        return {current: pageNo, size: pageSize, agentAreaCode: centerCode, type: 1, organizationType: 3,
+          countryId: countryId_(), statisticalStartDate: isoDate, statisticalEndDate: isoDate};
+      }
+      return {current: pageNo, size: pageSize, organizationCode: centerCode, organizationType: 3, dateType: 1,
+        countryId: countryId_(), startDate: isoDate, endDate: isoDate};
+
     case 'sc_dc':
       if (detail) {
         return {current: pageNo, size: pageSize, startTime1: w.start, endTime1: w.end,
@@ -348,7 +363,7 @@ function fetchSummaryDay_(indicatorKey, isoDate) {
   if (!records.length && json && json.data && !Array.isArray(json.data) && summaryHasMetric_(json.data, cfg)) records = [json.data];
   if (!records.length) return {indicator: indicatorKey, date: isoDate, empty: true};
   const sameDate = records.filter(r => {
-    const dateValue = firstValue_(r, ['dateTime', 'dt', 'sendDate', 'scanTime', 'countTime'], null);
+    const dateValue = firstValue_(r, ['dateTime', 'dt', 'sendDate', 'scanTime', 'countTime', 'statisticalDate'], null);
     return !dateValue || normalizeDateFromValue_(dateValue, isoDate) === isoDate;
   });
   if (!sameDate.length) return {indicator: indicatorKey, date: isoDate, empty: true};
@@ -377,7 +392,8 @@ function fetchSummaryDay_(indicatorKey, isoDate) {
     throw new Error('Taxa oficial ausente na resposta do JMS: ' + cfg.key + ' ' + isoDate +
       '. Campos recebidos: ' + keys + '. Ajuste rateKeys em Config.gs.');
   }
-  if (rate < 0 || rate > 100) throw new Error('Taxa oficial inválida de ' + rate + '% para ' + cfg.key + ' ' + isoDate);
+  const scale = JTCore_.rateScale(cfg.goal);
+  if (rate < 0 || rate > scale) throw new Error('Taxa oficial inválida de ' + rate + (scale === 100 ? '%' : ' ppm') + ' para ' + cfg.key + ' ' + isoDate);
   return {
     indicator: indicatorKey, date: isoDate, rate: rate, errorCount: errors, totalCount: total, empty: false,
     raw: parsed.length === 1 ? parsed[0].raw : {aggregatedRows: parsed.length, source: 'JMS', date: isoDate}
@@ -435,13 +451,14 @@ function fetchDetailPagesParallel_(indicatorKey, isoDate, pages, size) {
 // ------------------------------------------------------------------ tamanho de página e fatias de horário
 const PAGE_SIZE_STEPS_ = [1000, 500, 200, 100, 50, 20];
 
-/** JMS_PAGE_SIZE (forçado) > limite aprendido da rota > padrão. */
+/** JMS_PAGE_SIZE (forçado) > limite aprendido da rota > padrão; nunca acima do máximo da tela (ex.: Avaria = 100). */
 function detailPageSize_(cfg) {
+  const cap = cfg.detail && cfg.detail.maxPageSize ? cfg.detail.maxPageSize : 2000;
   const forced = Number(getProp_('JMS_PAGE_SIZE', ''));
-  if (forced >= 1) return Math.min(2000, Math.floor(forced));
+  if (forced >= 1) return Math.min(cap, Math.floor(forced));
   const learned = Number(getProp_('JMS_PAGE_SIZE_' + cfg.routeKey, ''));
-  if (learned >= 1) return Math.min(2000, Math.floor(learned));
-  return APP_CONFIG.DETAIL_PAGE_SIZE;
+  if (learned >= 1) return Math.min(cap, Math.floor(learned));
+  return Math.min(cap, APP_CONFIG.DETAIL_PAGE_SIZE);
 }
 function learnPageSize_(cfg, size, why) {
   if (getProp_('JMS_PAGE_SIZE', '')) return;
@@ -545,6 +562,82 @@ function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
     for (let p = 1; p <= pages; p++) chunks.push({w: wi, page: p});
   });
   return {size: probe.size, total: probe.total, windows: windows, chunks: chunks, sliced: sliced};
+}
+
+// ------------------------------------------------------------------ Avaria: tabela 2 (Consulta de Pacote Problemático)
+/** Remessa-mãe: "888000000000103-007" → "888000000000103" (volumes filhos entram na mesma remessa). */
+function baseWaybill_(w) { return String(w === null || w === undefined ? '' : w).trim().replace(/-\d{1,4}$/, ''); }
+
+const DAMAGE_SUBJECT_RE_ = /avaria|破损|damage|breakage/i;
+
+/**
+ * Registros de pacote problemático das remessas informadas, como na tela: o número das remessas
+ * separado por vírgula (até `batch` por consulta, 100 linhas por página). Com as remessas
+ * preenchidas o JMS ignora o período; mandamos o dia de hoje, igual à tela.
+ */
+function fetchRegistrations_(cfg, waybills) {
+  const endpoint = endpointFor_(cfg, 'registration');
+  const batch = Math.max(1, Math.min(200, (cfg.registration && cfg.registration.batch) || 100));
+  const today = isoToday_();
+  const out = [];
+  for (let i = 0; i < waybills.length; i += batch) {
+    const list = waybills.slice(i, i + batch).join(',');
+    const payload = page => ({current: page, size: 100, searchType: 1, countryId: countryId_(),
+      startTime: today + ' 00:00:00', endTime: today + ' 23:59:59', waybillNo: list});
+    const first = jmsPost_(endpoint, payload(1), 3);
+    recordsOf_(first).forEach(r => out.push(r));
+    const pages = Math.min(pagingOf_(first).pages, 50);
+    for (let p = 2; p <= pages; p++) recordsOf_(jmsPost_(endpoint, payload(p), 3)).forEach(r => out.push(r));
+  }
+  return out;
+}
+
+/**
+ * Escolhe, por remessa, o registro que conta para a avaria: só registros de avaria
+ * (assunto "Avaria.破损问题件"; na falta, o tipo secundário com avaria/破损), preferindo os
+ * feitos pela própria base (JMS_CENTER_NAME) e, entre eles, o mais antigo (primeiro bipe).
+ */
+function pickRegistrations_(regs, centerName) {
+  const byWaybill = {};
+  (regs || []).forEach(r => {
+    const k = baseWaybill_(r.waybillNo);
+    if (k) (byWaybill[k] = byWaybill[k] || []).push(r);
+  });
+  const out = {};
+  Object.keys(byWaybill).forEach(k => {
+    const list = byWaybill[k];
+    let dmg = list.filter(r => DAMAGE_SUBJECT_RE_.test(String(r.probleTypeSubjectName || '')));
+    if (!dmg.length) dmg = list.filter(r => DAMAGE_SUBJECT_RE_.test(String(r.secondLevelTypeName || '')) || /avariad/i.test(String(r.secondLevelTypeName || '')));
+    if (!dmg.length) return;
+    const own = dmg.filter(r => String(r.registrationNetworkName || '').trim().toUpperCase() === String(centerName || '').trim().toUpperCase());
+    const pool = own.length ? own : dmg;
+    const when = r => String(r.createTime || r.scanTime || '9999');
+    out[k] = pool.slice().sort((a, b) => when(a) < when(b) ? -1 : when(a) > when(b) ? 1 : 0)[0];
+  });
+  return out;
+}
+
+/**
+ * Junta a tabela 2 às remessas da tabela 1 (pela remessa) acrescentando registrationTime,
+ * registrationBy, registrationNetwork e registrationCode. Remessa sem registro de avaria fica sem esses
+ * campos ("Sem informação" nos gráficos de turno/estação/quem registrou).
+ */
+function enrichRegistrations_(indicatorKey, records) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  if (!cfg.registration || !records || !records.length) return records;
+  const seen = {}, waybills = [];
+  records.forEach(r => { const k = baseWaybill_(firstValue_(r, cfg.fields.shipment || ['waybillNo'], '')); if (k && !seen[k]) { seen[k] = 1; waybills.push(k); } });
+  if (!waybills.length) return records;
+  const chosen = pickRegistrations_(fetchRegistrations_(cfg, waybills), centerName_());
+  records.forEach(r => {
+    const reg = chosen[baseWaybill_(firstValue_(r, cfg.fields.shipment || ['waybillNo'], ''))];
+    if (!reg) return;
+    r.registrationTime = reg.createTime || reg.scanTime || '';
+    r.registrationBy = reg.createByName || '';
+    r.registrationNetwork = reg.registrationNetworkName || '';
+    r.registrationCode = reg.code || '';
+  });
+  return records;
 }
 
 /** Testa somente a montagem da requisição e imprime NOMES de cabeçalhos. */
