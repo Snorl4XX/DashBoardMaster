@@ -8,7 +8,8 @@
  *       consumer  = conta Gmail comum (gatilhos 90 min/dia, UrlFetch 20 mil/dia)
  *       workspace = Google Workspace (gatilhos 6 h/dia, UrlFetch 100 mil/dia)
  * DASH=1 no ambiente também mede a abertura do painel (tempo e tamanho da resposta).
- * JMS_CAP=100 simula o JMS entregando no máximo 100 registros por página (padrão: 1000).
+ * JMS_CAP=100 simula o JMS entregando no máximo 100 registros por página (padrão: 1000);
+ * ARRIVAL_CAP=100 limita só o detalhe do Recebimento.
  */
 const path = require('path');
 const {makeClock, createSimContext, realisticJms, fmtDate} = require('./sim_mocks');
@@ -19,7 +20,7 @@ const QUOTA = plan === 'consumer' ? {runtimeMin: 90, urlfetch: 20000} : {runtime
 const clock = makeClock('2026-09-01T03:00:00Z'); // 00:00 em São Paulo
 const addDays = (iso, n) => new Date(Date.parse(iso + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
 const start = addDays('2026-09-01', -histDays);
-const ctx = createSimContext({root, clock, props: {JMS_AUTHTOKEN: 'X', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: start}, jms: realisticJms({maxPageSize: Number(process.env.JMS_CAP) || 1000}), urlfetchQuota: QUOTA.urlfetch});
+const ctx = createSimContext({root, clock, props: {JMS_AUTHTOKEN: 'X', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: start}, jms: realisticJms({maxPageSize: Number(process.env.JMS_CAP) || 1000, arrivalCap: Number(process.env.ARRIVAL_CAP) || 0}), urlfetchQuota: QUOTA.urlfetch});
 const st = clock.stats;
 const fresh = () => { ctx.STORAGE_CACHE_ = null; ctx.TAB_CACHE_ = {}; ctx.TAB_INDEX_ = {}; if (ctx.resetExecutionCaches_) ctx.resetExecutionCaches_(); };
 fresh(); ctx.setupProject(); fresh(); ctx.startFullHistory();

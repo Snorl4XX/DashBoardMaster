@@ -201,12 +201,13 @@ function realisticJms(opts) {
           noSendNum: count('noSendNum'), noSignNum: t, deliverNum: t}], 1, 1, size);
       }
       const type = body.detailType, n = Math.floor(ARRIVAL[type] * frac), N = ARRIVAL[type];
+      const aSize = Math.min(opts.arrivalCap || cap, body.size); // ARRIVAL_CAP: só o Recebimento limitado (ex.: 100 por página)
       // Fatia de horário → trecho de índices (registro i tem o horário i·86400/N).
       const secOf = x => { const t = x.slice(11).split(':').map(Number); return t[0] * 3600 + t[1] * 60 + t[2]; };
       const lo = Math.ceil(secOf(start) * N / 86400), hi = Math.min(n, Math.ceil((secOf(end) + 1) * N / 86400));
       const total = Math.max(0, hi - lo), out = [];
-      for (let i = lo + (cur - 1) * size; i < Math.min(hi, lo + cur * size); i++) out.push(arrivalRecord(dd, type, i, N));
-      return ok(out, total, cur, size);
+      for (let i = lo + (cur - 1) * aSize; i < Math.min(hi, lo + cur * aSize); i++) out.push(arrivalRecord(dd, type, i, N));
+      return ok(out, total, cur, aSize);
     }
     if (/center_missscan_next_total/.test(route)) {
       const mr = visible(dayList(date, 'mr')).length, md = visible(dayList(date, 'md')).length;
