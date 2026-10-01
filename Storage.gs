@@ -824,10 +824,12 @@ function recoverStaleRunning_() {
 }
 function pendingJobs_() {
   const prio = {SUMMARY: 0, DETAIL_INIT: 1, DETAIL_PAGE: 1, COMPACT: 2};
+  // Detalhe agrupado (Recebimento: ~500 mil remessas por dia) por último: nunca atrasa os outros painéis.
+  const rank = j => j.type === 'DETAIL_INIT' && INDICATORS[j.indicator].grouped ? 2.5 : prio[j.type] === undefined ? 3 : prio[j.type];
   return allTabRows_('JOBS').map((r, i) => ({rowNum: i + 2, type: String(r[1]), indicator: String(r[2]), date: dateCellIso_(r[3]),
       page: num_(r[4], 0), status: String(r[5]), attempts: num_(r[6], 0), createdAt: r[7]}))
     .filter(j => j.status === 'PENDING' && INDICATORS[j.indicator] && isIso_(j.date))
-    .sort((a, b) => (prio[a.type] === undefined ? 3 : prio[a.type]) - (prio[b.type] === undefined ? 3 : prio[b.type]) ||
+    .sort((a, b) => rank(a) - rank(b) ||
       (a.date < b.date ? 1 : a.date > b.date ? -1 : 0) || a.page - b.page || a.attempts - b.attempts);
 }
 
@@ -1203,7 +1205,17 @@ function processJob_(job, deadline) {
 /** Dias com detalhe (Config.gs → detail.days; propriedade DETAIL_DAYS_<INDICADOR> muda). 0 = todos. */
 function detailDays_(cfg) {
   const v = Number(getProp_('DETAIL_DAYS_' + cfg.key.toUpperCase(), ''));
-  return v > 0 ? v : (cfg.detail && cfg.detail.days) || 0;
+  if (v > 0) return v;
+  const days = (cfg.detail && cfg.detail.days) || 0;
+  return days && heavyDetailLimited_(cfg) ? Math.min(days, 3) : days;
+}
+/**
+ * Detalhe pesado (Recebimento) com o JMS entregando só 100 por página: ~5.700 consultas por dia baixado
+ * (com 1.000 por página são ~570). Para caber na cota do Google sem atrasar os outros painéis, o detalhe
+ * fica com os últimos 3 dias e hoje é rebaixado no máximo a cada 12 h (a propriedade DETAIL_DAYS_ manda).
+ */
+function heavyDetailLimited_(cfg) {
+  return !!(cfg.grouped && cfg.detail && cfg.detail.maxPerDay > APP_CONFIG.MAX_DETAIL_PER_DAY && detailPageSize_(cfg) < 500);
 }
 function detailRefreshHours_() {
   const v = Number(getProp_('DETAIL_REFRESH_HOURS', ''));
@@ -1216,7 +1228,7 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   if (!changed && st.details === 'COMPLETE') return false;
   if (manual) return true;
   const cfgR = INDICATORS[indicator] || {};
-  const minH = cfgR.detail && cfgR.detail.refreshHours ? cfgR.detail.refreshHours : 0;
+  const minH = cfgR.detail && cfgR.detail.refreshHours ? Math.max(cfgR.detail.refreshHours, heavyDetailLimited_(cfgR) ? 12 : 0) : 0;
   // Dia antigo cuja contagem mudou de verdade: rebaixa já (no Recebimento, que muda o dia todo, respeita o intervalo).
   if (changed && date < addDaysIso_(isoToday_(), -1) && !minH) return true;
   // Hoje/ontem mudando (ou já STALE), ou contagem divergente (CHECK_COUNTS): respeita o intervalo.

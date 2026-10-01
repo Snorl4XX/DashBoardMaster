@@ -1236,6 +1236,30 @@ cGs.STORAGE_CACHE_ = null; cGs.TAB_CACHE_ = {}; cGs.TAB_INDEX_ = {};
 const pagesAfter = cGs.archiveIndexMap_('arrival_flow', D19, D19)[D19].filter(p => p.page >= 1);
 check(pagesBefore > 2 && pagesAfter.length === 2 && pagesAfter.every(p => p.page <= 2), 'recomeço tira do índice as unidades antigas além das regravadas', {antes: pagesBefore, depois: pagesAfter.length});
 
+// (g3) Recebimento pesado: detalhe por último na fila; com o JMS limitado a 100 por página, 3 dias e hoje a cada 12 h.
+const cOrd = freshCtx(dAF);
+cOrd.queueHistory(D19, D19, true);
+cOrd.pendingJobs_().filter(j => j.type === 'SUMMARY').forEach(j => cOrd.processJob_(j, Date.now() + 600000));
+cOrd.STORAGE_CACHE_ = null; cOrd.TAB_CACHE_ = {}; cOrd.TAB_INDEX_ = {};
+const ordJobs = cOrd.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
+const afPos = ordJobs.findIndex(j => j.indicator === 'arrival_flow');
+check(ordJobs.length > 3 && afPos === ordJobs.length - 1, 'detalhe do Recebimento por último na fila (não atrasa os outros painéis)', ordJobs.map(j => j.indicator));
+const cLim = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: '', JMS_PAGE_SIZE_ARRIVAL: '100'});
+const cFull = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: ''});
+const stLim = {details: 'COMPLETE'};
+const today0 = cLim.isoToday_();
+// Arquivo do dia de hoje baixado há 8 h nos dois cenários.
+[cLim, cFull].forEach(c => {
+  c.saveDayDataset_('arrival_flow', today0, c.GroupAccumulator_(cfgAF).build(), 1, 1);
+  const rn = c.findRowKey_('DAYFILES', 'arrival_flow', today0);
+  c.writeCells_('DAYFILES', rn, 7, [new Date(Date.now() - 8 * 3600e3)]);
+  c.STORAGE_CACHE_ = null; c.TAB_CACHE_ = {}; c.TAB_INDEX_ = {};
+});
+check(cLim.detailDays_(cfgAF) === 3 && cFull.detailDays_(cfgAF) === 7 && cLim.heavyDetailLimited_(cfgAF) && !cFull.heavyDetailLimited_(cfgAF) &&
+  cLim.detailNeedsRefresh_('arrival_flow', today0, {errorCount: 1, totalCount: 2}, {errorCount: 5, totalCount: 2}, stLim, false) === false &&
+  cFull.detailNeedsRefresh_('arrival_flow', today0, {errorCount: 1, totalCount: 2}, {errorCount: 5, totalCount: 2}, Object.assign({}, stLim), false) === true,
+  'JMS com 100 por página: detalhe dos últimos 3 dias e hoje no máximo a cada 12 h (com 1.000: 7 dias e 6 h)');
+
 // (h) Período grande (SP GRU: ~150 mil combinações por dia): totais por campo prontos no servidor,
 //     com os filtros aplicados lá. Tudo tem que bater com a conta feita nas combinações.
 const sameChart = (a, b) => JSON.stringify([a.labels, a.datasets[0].data, a.total]) === JSON.stringify([b.labels, b.datasets[0].data, b.total]);

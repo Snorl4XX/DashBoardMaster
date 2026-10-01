@@ -28,6 +28,11 @@ São duas colunas principais, como na tela:
   - Os dias mais antigos ficam só com os números do resumo, que continuam na evolução e nos "Dados gerais" de todos os dias.
   - Para mudar a quantidade de dias, use a propriedade `DETAIL_DAYS_ARRIVAL_FLOW`. Cuidado: cada dia são ~570 consultas ao JMS.
 - **Hoje.** O resumo é atualizado de hora em hora. O detalhe é baixado de novo no máximo **a cada 6 h**.
+- **Sem atrasar os outros painéis.** O detalhe do Recebimento é sempre o último da fila.
+- **JMS limitado a 100 por página.** A captura usava `size: 100`. Se o JMS recusar páginas de 1.000, o sistema aprende o limite sozinho, mas cada dia passa a custar ~5.700 consultas em vez de ~570. Nesse caso:
+  - o detalhe fica com os **últimos 3 dias**;
+  - hoje é rebaixado no máximo **a cada 12 h**.
+  - A propriedade `DETAIL_DAYS_ARRIVAL_FLOW`, se preenchida, continua mandando.
 - **Download em partes.**
   - Cada lote baixado já é somado e descartado, para não estourar a memória.
   - Se o tempo de uma execução acabar, o que foi baixado fica gravado por faixa de horário e a próxima execução continua de onde parou. Isso vale também para o dia de hoje, cujo total cresce durante o download.
@@ -544,7 +549,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **274 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **276 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
