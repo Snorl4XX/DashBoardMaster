@@ -32,6 +32,16 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 **Correções no Recebimento (download do detalhe), vistas na simulação com o JMS entregando 100 por página:**
 - O detalhe só começa quando sobram **2,5 min** na execução. Antes, ele começava no fim de execuções já ocupadas por outros painéis, só replanejava as fatias e parava sem avançar. Agora espera a próxima execução (5 min depois).
 - **Hoje** o detalhe não é mais comparado com o resumo de horas antes: o dia cresce entre as duas consultas, e isso dava o erro falso "payload do detalhe sem filtro". Dias fechados continuam sendo conferidos.
+- **Simulação com o volume real do SP GRU** (`node tests/simulacao_cotas.js`; `ARRIVAL_CAP=100` limita só o Recebimento):
+
+  | Cenário | Tempo de execução por dia | Outros 7 painéis | Recebimento |
+  |---|---|---|---|
+  | Recebimento com 1.000 por página, Workspace | ~63 min | completos | 7 dias de detalhe |
+  | Recebimento com 100 por página, Workspace | ~125 min | completos | últimos 3 dias de detalhe |
+  | Recebimento com 100 por página, Gmail | usa os 90 min do dia | completos | últimos 3 dias de detalhe |
+
+  - Em nenhum cenário uma execução passou de 6 min.
+  - Se o JMS limitar o Recebimento a 100 por página, prefira uma conta **Google Workspace**.
 
 ## V3.14 — Novo painel: Recebimento: fluxo operacional / 到件运营流程
 Dados da tela do JMS **Operação > Monitoramento de dados > Monitoramento de tipagem de recebimento (novo)** (`/app/crisbiIndex/ArriveMonitor`).
