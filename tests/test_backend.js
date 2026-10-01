@@ -1118,7 +1118,7 @@ check(cAF.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' && rowsAF.le
 check(rowsAF.filter(r => r.column === 'Deve chegar').every(r => !r.destination && !r.login) && rowsAF.filter(r => r.column === 'Chegou').every(r => !r.station),
   'cada lista só com os campos dela (Deve chegar: estação de remessa; Chegou: última parada e digitalizador)');
 const expC = afD.should.filter(r => r.endCenterName === 'BA FEC').length;
-const chExp = C.buildChart(cfgAF.charts[0], rowsAF, {});
+const chExp = C.buildChart(cfgAF.charts.filter(d => d.key === 'expCenter')[0], rowsAF, {});
 check(chExp.key === 'expCenter' && chExp.dim === 'destCenter' && chExp.datasets[0].data[chExp.labels.indexOf('BA FEC')] === expC && chExp.total === afD.should.length,
   'gráfico "Deve chegar · DC destino" conta pela quantidade, só da lista dele', {labels: chExp.labels, total: chExp.total});
 const cardsAF = C.computeCards(cfgAF, dashAF.rates, rowsAF, {}, D19, D19);
@@ -1129,7 +1129,7 @@ check(dashAF.rates[0].metrics && dashAF.rates[0].metrics.uploadNoSendNum === afD
   'painel recebe os números do resumo (gráficos das subcolunas) e a contagem pondera a quantidade');
 const catAF = cAF.getPublicCatalog_().filter(x => x.key === 'arrival_flow')[0];
 check(catAF.grouped && catAF.metricPanels.length === 2 && catAF.metricPanels[1].metrics.length === 5 && catAF.filters[0].key === 'column' &&
-  catAF.filters.map(f => f.key).join() === 'column,destCenter,destBase,tripId,station,destination,login' && dashAF.dataset.fields.indexOf('qty') >= 0,
+  catAF.filters.map(f => f.key).join() === 'column,shift,destCenter,destBase,tripId,station,destination,login' && dashAF.dataset.fields.indexOf('qty') >= 0,
   'catálogo: filtro de coluna principal + um por gráfico; painéis das subcolunas');
 cAF.UrlFetchApp.fetch = (() => { const f = cAF.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cAF.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
 const repAF = cAF.generateReport('arrival_flow', {from: D19, to: D19}, 'xlsx');
@@ -1392,5 +1392,40 @@ if (dDMt.rateVariants && dDMt.rateVariants.main && dDMt.rateVariants.main.length
   check(Math.abs(kDM.rate - vMain.rate * mainRows.filter(r => r.shift === 'T1').length / mainRows.length) < 1e-9 && !shDM[D18],
     'Avaria: Pedido principal + T1 = taxa oficial da opção × participação do T1 (dia anterior sem agregado por opção)');
 } else check(false, 'Avaria sem taxa por opção no teste');
+
+// ---------- 23. V3.16: Recebimento por quantidade, turno pelo horário, pizzas e cartões dos turnos ----------
+const byShiftList = list => list.reduce((o, r) => { const s = C.shiftOf(r.sendTime); o[s] = (o[s] || 0) + 1; return o; }, {});
+const expS = byShiftList(afD.should), recS = byShiftList(afD.total);
+const pieExp = C.buildChart(cfgAF.charts.filter(d => d.key === 'expShift')[0], rowsAF), pieRec = C.buildChart(cfgAF.charts.filter(d => d.key === 'recShift')[0], rowsAF);
+const pieOf = ch => ch.labels.reduce((o, l, i) => { o[l] = ch.datasets[0].data[i]; return o; }, {});
+check(rowsAF.every(r => /^T[123]$/.test(r.shift)) && JSON.stringify(pieOf(pieExp)) === JSON.stringify({T1: expS.T1, T2: expS.T2, T3: expS.T3}) &&
+  JSON.stringify(pieOf(pieRec)) === JSON.stringify({T1: recS.T1, T2: recS.T2, T3: recS.T3}) && pieExp.type === 'doughnut',
+  'turno pelo horário (sendTime) de cada remessa; pizzas "Deve chegar · Turno" e "Chegou · Turno" = contagem das listas', {exp: pieOf(pieExp), esperado: expS});
+const fT1 = {column: ['Chegou'], shift: ['T1']};
+check(C.distinctCount(C.applyFilters(rowsAF, fT1)) === recS.T1, 'filtro de turno no Recebimento: Chegou no T1 = remessas da lista com horário do T1');
+check(catAF.heroMetric.key === 'shouldArriverNum' && catAF.heroMetric.sub === 'noArriverNum' && catAF.metricCards &&
+  catAF.shiftCardsByColumn.main === 'Chegou' && catAF.filters[1].key === 'shift' && cfgAF.table.some(c => c[0] === 'shift'),
+  'catálogo: cartão principal = Deve chegar (quantidade) com as não chegadas; cartões das subcolunas e dos turnos');
+const smS = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true, filters: {column: ['Chegou']}});
+const bySm = C.marginalsByDim(smS.summary.marginals).shift || [];
+check(['T1', 'T2', 'T3'].every(sh => bySm.filter(r => r.shift === sh && r.column === 'Chegou').reduce((a, r) => a + Number(r.qty), 0) === recS[sh]),
+  'modo de totais (período grande): totais por turno para os cartões e a pizza');
+// Migração: dias do Recebimento baixados sem turno (V3.14/V3.15) baixam de novo, uma vez, só na janela de detalhe.
+const cMig = freshCtx(dAF);
+cMig.queueHistory(D19, D19, true);
+runAll(cMig);
+delete cMig.__state.props.MIGRATION_V316;
+cMig.STORAGE_CACHE_ = null; cMig.TAB_CACHE_ = {}; cMig.TAB_INDEX_ = {};
+const mig1 = cMig.migrateToV316_(), mig2 = cMig.migrateToV316_();
+cMig.STORAGE_CACHE_ = null; cMig.TAB_CACHE_ = {}; cMig.TAB_INDEX_ = {};
+const migJobs = cMig.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
+check(mig1 === 1 && mig2 === 0 && migJobs.length === 1 && migJobs[0].indicator === 'arrival_flow' && migJobs[0].date === D19,
+  'V3.16: dias do Recebimento na janela de detalhe baixados de novo uma vez (para separar por turno)', {mig1, mig2, jobs: migJobs.map(j => j.indicator + ' ' + j.date)});
+const cMig2 = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: ''});
+cMig2.queueHistory(D19, D19, true);
+runAll(cMig2);
+delete cMig2.__state.props.MIGRATION_V316;
+cMig2.STORAGE_CACHE_ = null; cMig2.TAB_CACHE_ = {}; cMig2.TAB_INDEX_ = {};
+check(cMig2.migrateToV316_() === 0, 'dias fora da janela de detalhe (só resumo) não são baixados de novo');
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.15.0',
+  VERSION: '3.16.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -548,17 +548,24 @@ const INDICATORS = Object.freeze({
       destBase: ['endArrivalSitename'], station: ['inputsite'], destination: ['nextstation'], login: ['scanuser']
     },
     // Linha agrupada: uma por combinação destes campos, com a quantidade de remessas.
-    // (sem turno: não foi pedido neste painel e triplicaria as combinações)
-    groupFields: ['column', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login'],
+    // V3.16: com o turno (pelo horário sendTime). Cada viagem chega numa faixa de horário, então o turno quase
+    // não aumenta as combinações (simulação: 149.527 → 149.877 por dia; pior caso ~274 mil).
+    groupFields: ['column', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login', 'shift'],
     labels: {
       station: {pt: 'Estação de remessa', zh: '发件网点'}, destination: {pt: 'Última parada', zh: '上一站'},
       login: {pt: 'Digitalizador', zh: '扫描员'}, tripId: {pt: 'ID de viagem', zh: '车次号'}
     },
-    filters: ['column', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login'],
+    filters: ['column', 'shift', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login'],
     topCards: [],
     hideShiftCards: true,
-    // Cartão da taxa: quantidade recebida no dia (Chegou · Total de pedidos que chegaram) e a do dia anterior.
-    heroMetric: {key: 'totalNum', label: {pt: 'Recebimento do dia', zh: '当日到件量'}, prev: {pt: 'Dia anterior', zh: '前一日'}},
+    // V3.16: cartões por quantidade, não por taxa. Cartão principal = quantidade que deve chegar no dia, com as
+    // não chegadas e o dia anterior embaixo; um cartão para cada outra subcoluna de "Deve chegar" e "Chegou"
+    // (metricPanels); cartões T1/T2/T3 com a quantidade de cada coluna principal no turno.
+    heroMetric: {key: 'shouldArriverNum', column: 'Deve chegar', sub: 'noArriverNum',
+      label: {pt: 'Deve chegar · Quantidade total de pedidos', zh: '应到总票数'}, labelPeriod: {pt: 'Deve chegar no período', zh: '期间应到总票数'},
+      subLabel: {pt: 'Não chegadas', zh: '未到件'}},
+    metricCards: true,
+    shiftCardsByColumn: {main: 'Chegou', columns: ['Chegou', 'Deve chegar']},
     texts: {
       errors: {pt: 'Não chegadas', zh: '未到件'},
       errorsDay: {pt: 'Não chegadas no dia', zh: '当日未到件'}, errorsPeriod: {pt: 'Não chegadas no período', zh: '期间未到件'},
@@ -582,10 +589,12 @@ const INDICATORS = Object.freeze({
       ]}
     ],
     charts: [
+      {key: 'expShift', dim: 'shift', where: {column: 'Deve chegar'}, type: 'doughnut', title: {pt: 'Deve chegar · Turno', zh: '应到 · 班次'}},
       {key: 'expCenter', dim: 'destCenter', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · DC destino', zh: '应到 · 目的中心'}},
       {key: 'expBase', dim: 'destBase', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · Base destino', zh: '应到 · 目的网点'}},
       {key: 'expTrip', dim: 'tripId', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · ID de viagem', zh: '应到 · 车次号'}},
       {key: 'expStation', dim: 'station', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · Estação de remessa', zh: '应到 · 发件网点'}},
+      {key: 'recShift', dim: 'shift', where: {column: 'Chegou'}, type: 'doughnut', title: {pt: 'Chegou · Turno', zh: '已到 · 班次'}},
       {key: 'recCenter', dim: 'destCenter', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · DC destino', zh: '已到 · 目的中心'}},
       {key: 'recBase', dim: 'destBase', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · Base destino', zh: '已到 · 目的网点'}},
       {key: 'recTrip', dim: 'tripId', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · ID de viagem', zh: '已到 · 车次号'}},
@@ -593,7 +602,7 @@ const INDICATORS = Object.freeze({
       {key: 'recScanner', dim: 'login', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · Digitalizador', zh: '已到 · 扫描员'}}
     ],
     table: [
-      ['date', 'Data', '日期'], ['column', 'Coluna', '主列'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
+      ['date', 'Data', '日期'], ['column', 'Coluna', '主列'], ['shift', 'Turno', '班次'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
       ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação de remessa', '发件网点'], ['destination', 'Última parada', '上一站'],
       ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']
     ]
@@ -671,7 +680,8 @@ function getPublicCatalog_() {
       hideShiftCards: !!cfg.hideShiftCards,
       valueCards: cfg.valueCards || [],
       texts: cfg.texts || null,
-      metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null,
+      metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, metricCards: !!cfg.metricCards,
+      shiftCardsByColumn: cfg.shiftCardsByColumn || null,
       grouped: !!cfg.grouped,
       detailDays: cfg.detail && cfg.detail.days || null,
       naLabel: cfg.naLabel || null,

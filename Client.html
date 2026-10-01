@@ -71,7 +71,7 @@
       setupTitle: 'Painel ainda não configurado', setupText: 'O responsável deve abrir o Apps Script, executar setupProject e iniciar a importação com startFullHistory.',
       updatedJms: 'Atualizado no JMS: {t}', waitingJms: 'Aguardando dados confirmados do JMS', queuePending: 'Fila: {n} pendente(s)',
       queueErrors: '{n} com erro', queueIdle: 'Fila em dia',
-      footer: 'Fonte: JMS (taxas oficiais) · detalhes arquivados no Google Drive', madeBy: 'Feito por Caike Oliveira',
+      footer: 'Fonte: JMS (taxas oficiais) · detalhes arquivados no Google Drive',
       resultsNoteRate: 'Taxa do período = Σ erros ÷ Σ base oficial de cada dia (sem contagem de erros, usa a média das taxas diárias).',
       resultsNoteShift: 'Taxa do turno {s} = remessas com erro no {s} ÷ volume total do dia (base oficial do JMS). O JMS não publica volume por turno; somando T1, T2 e T3 dá a taxa de erros do dia. Nos indicadores de prazo (SC → SC, SC → DC), é a taxa fora do prazo.',
       lastPeriod: 'Último período', shiftErrors: 'Erros {s}', shiftShareOf: '{p} do total', noAgg: 'Sem detalhes consolidados deste turno no período.',
@@ -95,6 +95,10 @@
       summaryHint: 'Combinações demais para o navegador: os gráficos e as listas dos filtros usam os totais de cada campo calculados no servidor, e cada filtro é aplicado lá (leva alguns segundos). A tabela mostra as maiores combinações.',
       topRowsNote: 'Mostrando as {n} maiores combinações (quantidade). Filtre para ver outras.',
       mpSub: 'Números oficiais do JMS · {n} dias até a data escolhida (coluna vermelha) para comparar', mpAvg: 'Média de {n} dias',
+      hmFiltered: '{label} (com filtro)', hmOfficial: 'Oficial do JMS (sem filtros)', hmOfDay: 'do previsto',
+      hmPrev: 'Dia anterior', hmPrevPeriod: 'Período anterior', hmShare: 'do {col} · {s}', hmNoDetail: 'Sem detalhe para o filtro neste período',
+      mcOfTotal: '{p} de "{of}"', mcPrevShort: 'Dia anterior: {n}', mcPrevPeriodShort: 'Período anterior: {n}',
+      scOf: 'do {col}', scNoDetail: 'Sem detalhe neste período', madeBy: 'Feito por Caike Oliveira', daysWithData: '{a} de {b} dias com dados',
       mpMax: 'Maior', mpMin: 'Menor', noPrevDay: 'sem dia anterior', mpTable: 'Dados gerais / 总体数据',
       mpTableSub: 'Os números de cada dia, como na primeira tabela da tela do JMS',
       detailsWindowHint: 'Para não estourar a cota do Google (~500 mil remessas por dia), os gráficos por DC/base/viagem usam só os últimos dias. Os números do resumo valem para todos os dias:',
@@ -154,7 +158,7 @@
       setupTitle: '看板尚未配置', setupText: '请管理员在 Apps Script 中运行 setupProject，并用 startFullHistory 开始导入。',
       updatedJms: 'JMS 更新：{t}', waitingJms: '等待 JMS 确认数据', queuePending: '队列：{n} 项待处理',
       queueErrors: '{n} 项出错', queueIdle: '队列已清空',
-      footer: '数据来源：JMS（官方指标率）· 明细存档于 Google Drive', madeBy: '由 Caike Oliveira 制作',
+      footer: '数据来源：JMS（官方指标率）· 明细存档于 Google Drive',
       resultsNoteRate: '期间指标率 = 各日异常合计 ÷ 各日官方基数合计（缺少异常计数时使用每日指标率平均值）。',
       resultsNoteShift: '{s} 班指标率 = {s} 班异常票数 ÷ 当日总票量（JMS 官方基数）。JMS 不提供分班次票量；T1、T2、T3 相加即为当日异常率。时效类指标（SC → SC、SC → DC）为超时率。',
       lastPeriod: '最近期间', shiftErrors: '{s} 异常', shiftShareOf: '占总数 {p}', noAgg: '该期间暂无该班次明细汇总。',
@@ -178,6 +182,10 @@
       summaryHint: '组合太多，浏览器无法加载：图表和筛选列表使用服务器计算的各字段汇总，筛选在服务器执行（需几秒）。表格显示数量最多的组合。',
       topRowsNote: '显示数量最多的 {n} 个组合。筛选可查看其他组合。',
       mpSub: 'JMS官方数字 · 截至所选日期的 {n} 天（红色柱）用于对比', mpAvg: '{n} 天平均',
+      hmFiltered: '{label}（已筛选）', hmOfficial: 'JMS官方（未筛选）', hmOfDay: '占应到',
+      hmPrev: '前一日', hmPrevPeriod: '上一期间', hmShare: '占{col} · {s}', hmNoDetail: '该期间没有符合筛选的明细',
+      mcOfTotal: '占“{of}” {p}', mcPrevShort: '前一日：{n}', mcPrevPeriodShort: '上一期间：{n}',
+      scOf: '占{col}', scNoDetail: '该期间无明细', madeBy: '由 Caike Oliveira 制作', daysWithData: '{b} 天中 {a} 天有数据',
       mpMax: '最高', mpMin: '最低', noPrevDay: '无前一日', mpTable: '总体数据 / Dados gerais',
       mpTableSub: '每天的数字，与JMS页面第一张表一致',
       detailsWindowHint: '为避免超出 Google 配额（每天约50万票），按中心/网点/车次的图表只使用最近几天的数据。汇总数字涵盖所有日期：',
@@ -391,6 +399,13 @@
   function setBusy(on) {
     $('#progress').classList.toggle('on', !!on);
     $('#main').classList.toggle('is-loading', !!on);
+    // Enquanto carrega: aviso no rodapé da tela com o crédito.
+    var lc = $('#loadingCredit');
+    if (lc) {
+      var c = state.view === 'dashboard' ? cfg() : null;
+      $('#loadingText').textContent = c ? t('loadingData', {name: L(c.name)}) : t('loading');
+      lc.classList.toggle('on', !!on);
+    }
   }
   function showAlert(message, kind, retry) {
     var box = $('#alertBox');
@@ -718,7 +733,7 @@
     renderCoverage(state.data.meta);
     var view = state.rateView = rateView(c, f);
     // Filtro de turno: parte do turno na taxa oficial (participação do turno nas ocorrências de cada dia).
-    var sel = state.data.summary ? null : Core.shiftSelection(view.filters), only = null;
+    var sel = state.data.summary || c.heroMetric ? null : Core.shiftSelection(view.filters), only = null;
     if (sel && view.kind) { only = {}; only[c.orderKinds.field] = [view.label]; }
     state.shiftInfo = sel ? {sel: sel, name: shiftName(sel), shares: Core.shiftShares(state.data.rows, state.data.agg, sel, only)} : null;
     var cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to,
@@ -969,6 +984,7 @@
 
   // ------------------------------------------------------------------ cartões
   function renderKpis(c, k) {
+    if (c.heroMetric && c.metricCards) return renderMetricKpis(c, k);
     var grid = $('#kpiGrid'), day = k.mode === 'day', sv = k.shiftView, sName = sv ? shiftName(sv) : '';
     var status = k.targetMet === true ? 'good' : k.targetMet === false ? 'bad' : 'none';
     var pill = status === 'good' ? icon('check') + esc(t('inGoal')) : status === 'bad' ? icon('x') + esc(t('outGoal')) : esc(isNum(k.rate) && !hasGoal(c.goal) ? t('noGoal') : t('noRate'));
@@ -996,7 +1012,7 @@
     var hero = '<article class="kpi kpi-hero"><div class="kpi-body">' +
       '<div class="kpi-label">' + icon('gauge') + esc(heroLabel +
         (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) + (state.rateView.estimated ? ' (' + t('estimated') + ')' : '') : '')) + '</div>' +
-      shareChip + '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroMetricHtml(c, k) + heroSubs +
+      shareChip + '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroSubs +
       '<div class="hero-row"><span class="status-pill ' + status + '">' + pill + '</span>' + (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '') + '</div>' +
       '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
 
@@ -1030,26 +1046,133 @@
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
   }
+  // ------------------------------------------------------------------ Recebimento: cartões por quantidade (V3.16)
+  /** Soma de um número do resumo do JMS (rates[].metrics) entre duas datas; null se nenhum dia tem o número. */
+  function metricSum(key, from, to) {
+    var n = 0, any = false;
+    activeRates().forEach(function (r) {
+      var v = r.metrics ? r.metrics[key] : null;
+      if (r.date >= from && r.date <= to && isNum(v)) { n += Number(v); any = true; }
+    });
+    return any ? n : null;
+  }
+  /** Dias com o número no intervalo (variação só entre períodos com a mesma quantidade de dias). */
+  function metricDayCount(key, from, to) {
+    return activeRates().filter(function (r) { return r.metrics && isNum(r.metrics[key]) && r.date >= from && r.date <= to; }).length;
+  }
+  function metricDef(c, key) {
+    var out = null;
+    (c.metricPanels || []).forEach(function (p) { p.metrics.forEach(function (m) { if (m.key === key) out = {m: m, panel: p}; }); });
+    return out;
+  }
+  /** Variação em %; "bad" = número que é ruim quando sobe (vermelho na alta). */
+  function qtyDelta(cur, prev, bad) {
+    if (!isNum(cur) || !isNum(prev) || !prev) return '';
+    var d = (cur - prev) / prev * 100, dir = d > 0 ? 'up' : d < 0 ? 'down' : '';
+    return '<span class="mp-delta ' + dir + (bad ? '' : ' good') + '">' + (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '') + fmtPct(Math.abs(d), 1) + '</span>';
+  }
+  /** Quantidade da coluna principal nas linhas (pondera a quantidade das linhas agrupadas). */
+  function colQty(rows, col) {
+    var n = 0;
+    (rows || []).forEach(function (r) { if (!col || r.column === col) n += Core.weight(r); });
+    return n;
+  }
   /**
-   * Recebimento: no cartão da taxa, a quantidade recebida no dia (número do resumo do JMS) e a do dia
-   * anterior, com a variação. Período: soma dos dias do período e do período anterior.
+   * Cartão principal = quantidade que deve chegar (número oficial do JMS), com as não chegadas e o dia
+   * anterior embaixo. Com filtros (DC, base, turno…), o número grande vira a quantidade do detalhe com o
+   * filtro e o oficial do dia fica embaixo. Depois: um cartão por subcoluna e os cartões dos três turnos.
    */
-  function heroMetricHtml(c, k) {
-    var hm = c.heroMetric;
-    if (!hm) return '';
-    var sum = function (from, to) {
-      var n = 0, any = false;
-      activeRates().forEach(function (r) {
-        var v = r.metrics ? r.metrics[hm.key] : null;
-        if (r.date >= from && r.date <= to && isNum(v)) { n += Number(v); any = true; }
+  function renderMetricKpis(c, k) {
+    var grid = $('#kpiGrid'), hm = c.heroMetric, day = k.mode === 'day', f = filtersObj(), sm = state.data.summary;
+    var cur = metricSum(hm.key, state.from, state.to), prev = metricSum(hm.key, k.prevFrom, k.prevTo);
+    var sub = metricSum(hm.sub, state.from, state.to), prevSub = metricSum(hm.sub, k.prevFrom, k.prevTo);
+    var filtered = Object.keys(f).some(function (x) { return x !== 'column'; });
+    // Período: variação só quando os dois períodos têm a mesma quantidade de dias com número.
+    var comparable = day || metricDayCount(hm.key, state.from, state.to) === metricDayCount(hm.key, k.prevFrom, k.prevTo);
+    var dlt = function (a, b, bad) { return comparable ? qtyDelta(a, b, bad) : ''; };
+    var prevWord = day ? t('hmPrev') : t('hmPrevPeriod'), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
+    var label = day ? L(hm.label) + ' · ' + fmtDate(state.to, true) : L(hm.labelPeriod) + ' · ' + fmtRange(state.from, state.to);
+    var big = cur, chip = '', lines = '';
+    if (filtered) {
+      // Quantidade do detalhe com os filtros (modo de totais: já filtrada no servidor).
+      var fq = colQty(state.filtered, hm.column);
+      big = fq || null;
+      label = t('hmFiltered', {label: label});
+      var shiftSel = Core.shiftSelection(f);
+      if (shiftSel && shiftSel.by.shift && fq) {
+        var base = sm ? colQty((sm.byDim.shift || []), hm.column) : colQty(Core.applyFilters(state.data.rows, f, 'shift'), hm.column);
+        chip = '<div class="shift-share">' + shiftSel.by.shift.map(function (s) { return '<i style="background:' + SHIFT_COLORS[s] + '"></i>'; }).join('') +
+          '<b>' + fmtPct(base ? fq / base * 100 : null, 1) + '</b> ' + esc(t('hmShare', {col: vlabel('column', hm.column), s: shiftSel.by.shift.join(' + ')})) + '</div>';
+      }
+      if (!fq) lines += '<div class="kpi-sub">' + esc(t('hmNoDetail')) + '</div>';
+      lines += '<div class="hero-metric"><span>' + esc(t('hmOfficial')) + '</span><b>' + fmtInt(cur) + '</b>' +
+        '<small>' + esc(L(hm.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + ')' : '') + '</small></div>';
+    } else {
+      lines += '<div class="hero-metric"><span>' + esc(L(hm.subLabel)) + '</span><b>' + fmtInt(sub) + '</b>' +
+        (isNum(sub) && cur ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + '</em>' : '') + '</div>';
+    }
+    lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
+      ' · ' + esc(L(hm.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) +
+      (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(hm.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>';
+    var hero = '<article class="kpi kpi-hero hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon('arrival_flow') + esc(label) + '</div>' + chip +
+      '<div class="kpi-value">' + fmtInt(big) + '</div>' + lines +
+      '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
+    // Um cartão por subcoluna (menos a do cartão principal), com o dia anterior e a parte do total da coluna.
+    var cards = '';
+    (c.metricPanels || []).forEach(function (p) {
+      var totalKey = p.metrics[0].key, total = metricSum(totalKey, state.from, state.to);
+      p.metrics.forEach(function (m) {
+        if (m.key === hm.key) return;
+        var v = metricSum(m.key, state.from, state.to), pv = metricSum(m.key, k.prevFrom, k.prevTo);
+        var share = m.key !== totalKey && isNum(v) && total ? v / total * 100 : null;
+        cards += '<article class="kpi metric-kpi' + (m.bad ? ' bad-metric' : '') + '"><div class="kpi-label">' + icon(p.column === 'Chegou' ? 'check' : 'arrival_flow') +
+          '<span class="mc-tag">' + esc(L(p.title)) + '</span></div><div class="mc-name">' + esc(L(m.label)) + '</div>' +
+          '<div class="kpi-value">' + fmtInt(v) + '</div>' +
+          '<div class="kpi-sub">' + esc(day ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, m.bad) +
+          (isNum(share) ? '<br>' + esc(t('mcOfTotal', {p: fmtPct(share, 1), of: L(p.metrics[0].label)})) : '') + '</div>' +
+          (isNum(share) ? '<div class="kpi-foot"><div class="bar"><i data-w="' + share + '" style="background:' + (m.bad ? RED : GOOD) + '"></i></div></div>' : '') + '</article>';
       });
-      return any ? n : null;
-    };
-    var cur = sum(state.from, state.to), prev = sum(k.prevFrom, k.prevTo);
-    var delta = isNum(cur) && isNum(prev) && prev ? (cur - prev) / prev * 100 : null;
-    return '<div class="hero-metric"><span>' + esc(L(hm.label)) + (k.mode === 'day' ? '' : ' · ' + esc(t('rateOfPeriod'))) + '</span><b>' + fmtInt(cur) + '</b>' +
-      '<small>' + esc(L(hm.prev)) + (k.mode === 'day' ? ' (' + esc(fmtDate(k.prevTo, true)) + ')' : '') + ': <b>' + fmtInt(prev) + '</b>' +
-      (isNum(delta) ? ' · ' + (delta >= 0 ? '▲ ' : '▼ ') + fmtPct(Math.abs(delta), 1) : '') + '</small></div>';
+    });
+    var shifts = shiftColumnCards(c, f);
+    grid.innerHTML = hero + cards + (shifts ? '<div class="shift-row">' + shifts + '</div>' : '');
+    fillGridGaps(grid);
+    requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
+    drawSpark(c);
+  }
+  /**
+   * Cartões T1 / T2 / T3 do Recebimento: quantidade de cada coluna principal no turno (turno pelo horário
+   * da remessa). Número grande = coluna principal escolhida no filtro (ou "Chegou"); embaixo, a outra.
+   * Com filtro de turno, os três continuam visíveis e o escolhido fica destacado.
+   */
+  function shiftColumnCards(c, f) {
+    var sc = c.shiftCardsByColumn;
+    if (!sc) return '';
+    var sm = state.data.summary, rows = sm ? (sm.byDim.shift || []) : Core.applyFilters(state.data.rows, f, 'shift');
+    var cols = f.column && f.column.length ? sc.columns.filter(function (x) { return f.column.indexOf(x) >= 0; }) : sc.columns.slice();
+    if (!cols.length) cols = sc.columns.slice();
+    var main = cols.indexOf(sc.main) >= 0 ? sc.main : cols[0];
+    var q = {}, tot = {};
+    rows.forEach(function (r) {
+      var s = r.shift ? String(r.shift) : 'N/A', w = Core.weight(r);
+      if (cols.indexOf(r.column) < 0) return;
+      q[s + '|' + r.column] = (q[s + '|' + r.column] || 0) + w;
+      tot[r.column] = (tot[r.column] || 0) + w;
+    });
+    var sel = f.shift && f.shift.length ? f.shift : null;
+    return ['T1', 'T2', 'T3'].map(function (s) {
+      var v = q[s + '|' + main] || 0, pct = tot[main] ? v / tot[main] * 100 : null;
+      var label = '<i style="background:' + SHIFT_COLORS[s] + '"></i>' + s + ' · ' + SHIFT_HOURS[s] + ' · ' + esc(vlabel('column', main));
+      var subHtml = !tot[main] ? esc(t('scNoDetail')) : '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('scOf', {col: vlabel('column', main)}));
+      cols.forEach(function (col) {
+        if (col === main) return;
+        var o = q[s + '|' + col] || 0;
+        subHtml += '<br>' + esc(vlabel('column', col)) + ': <b>' + fmtInt(o) + '</b>' + (tot[col] ? ' · ' + fmtPct(o / tot[col] * 100, 1) : '');
+      });
+      var on = sel && sel.indexOf(s) >= 0;
+      return '<article class="kpi shift-kpi' + (sel && !on ? ' faded' : '') + (on ? ' selected' : '') + '"><div class="kpi-label">' + label + '</div>' +
+        '<div class="kpi-value">' + (tot[main] ? fmtInt(v) : '—') + '</div><div class="kpi-sub">' + subHtml + '</div>' +
+        '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(pct) ? pct : 0) + '" style="background:' + SHIFT_COLORS[s] + '"></i></div></div></article>';
+    }).join('');
   }
   /**
    * Cartões de valor (Avaria): soma e maior valor de um campo em R$ (valor da arbitragem),
@@ -1131,6 +1254,7 @@
     var canvas = $('#sparkCanvas');
     if (!canvas || !window.Chart) return;
     var to = state.to, from = Core.addDays(to, -13);
+    if (c.heroMetric && c.metricCards) return drawQtySpark(canvas, c.heroMetric.key, from, to);
     var evo = Core.buildEvolution(activeRates(), c.goal, from, to);
     // Filtro de turno: a minilinha segue o número do cartão (parte do turno), sem a linha da meta.
     if (state.shiftInfo) {
@@ -1152,6 +1276,21 @@
     });
   }
 
+  /** Minilinha do cartão principal do Recebimento: a quantidade oficial dos 14 dias até a data escolhida. */
+  function drawQtySpark(canvas, key, from, to) {
+    var byDate = {};
+    activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[key])) byDate[r.date] = Number(r.metrics[key]); });
+    var days = Core.dateRange(from, to), vals = days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; });
+    if (!vals.some(isNum)) return;
+    state.charts.spark = new Chart(canvas, {
+      type: 'line',
+      data: {labels: days.map(function (d) { return fmtDate(d); }), datasets: [
+        {data: vals, borderColor: '#fff', borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 2.5, pointBackgroundColor: '#fff', spanGaps: true, fill: true, backgroundColor: 'rgba(255,255,255,.12)'}]},
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 700}, layout: {padding: {top: 6, bottom: 2}},
+        plugins: {legend: {display: false}, datalabels: {display: false}, tooltip: {displayColors: false, callbacks: {label: function (ctx) { return fmtInt(ctx.raw); }}}},
+        scales: {x: {display: false}, y: {display: false, grace: '15%'}}}
+    });
+  }
   function renderTarget(c, k) {
     var b = $('#targetBanner'), st = k.targetMet === true ? 'good' : k.targetMet === false ? 'bad' : 'neutral';
     var noGoal = st === 'neutral' && isNum(k.rate) && !hasGoal(c.goal);

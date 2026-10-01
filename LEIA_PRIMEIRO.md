@@ -1,8 +1,35 @@
-# J&T DASHMASTER V3.15 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.16 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.16 — Recebimento por quantidade e por turno
+**Cartões do Recebimento: fluxo operacional (no lugar da taxa):**
+- **Cartão principal = quantidade que deve chegar** (Deve chegar · Quantidade total de pedidos, número oficial do JMS).
+  - Embaixo: as **não chegadas**, com a porcentagem do previsto.
+  - Depois, o **dia anterior** dos dois números, com a variação. A minilinha mostra a quantidade dos últimos 14 dias.
+  - **Com filtros** (DC, base, turno…): o número grande vira a quantidade do detalhe com o filtro, e o oficial do dia fica embaixo. Com filtro de turno aparece em cima a participação do turno (ex.: "33,7% do Deve chegar · T1").
+- **Um cartão para cada subcoluna**, com o dia anterior, a variação e a parte do total da coluna:
+  - *Deve chegar*: encomendas não chegadas;
+  - *Chegou*: total que chegou, sem bipar expedição na etapa anterior, sem bipagem de expedição nesta base, baixas não realizadas e não há armazém de saída.
+- Em períodos com mais de um dia, os números são somados. A variação só aparece quando o período anterior tem a mesma quantidade de dias com dados.
+- O **% não chegou** continua na evolução diária, nos Resultados e no relatório.
+
+**Turnos no Recebimento (pelo horário de cada remessa, coluna `sendTime`):** T1 06h–14h, T2 14h–22h, T3 22h–06h.
+- **Filtro de Turno** nos filtros do painel.
+- **Pizzas** "Deve chegar · Turno" e "Chegou · Turno".
+- **Cartões T1 / T2 / T3**:
+  - número grande = quantidade que **chegou** no turno (ou a coluna escolhida no filtro de coluna principal);
+  - embaixo, a quantidade que **deve chegar** no turno e a participação de cada uma.
+  - Com o filtro de turno, os outros dois turnos ficam apagados.
+- **Na tabela**, a coluna Turno.
+- **Ao atualizar**, os dias do Recebimento já baixados (últimos 7) baixam de novo **uma vez**, sozinhos, para ganhar o turno. Enquanto isso, os cartões de turno mostram "sem detalhe".
+- **Volume**: na simulação com o volume real, o turno quase não aumentou as linhas gravadas (149.527 → 149.877 combinações por dia), porque cada viagem chega numa faixa de horário.
+
+**"Feito por Caike Oliveira"** também aparece na **tela de abertura** e no aviso **"Carregando…"** que surge ao trocar de painel, de período ou de filtro.
+
+**Correção:** com filtro de turno, os cartões dos turnos não escolhidos agora ficam apagados de verdade (desde a V3.15 a animação de entrada desfazia o efeito).
 
 ## V3.15 — Taxa por turno, recebimento do dia no Recebimento e ajustes no SC → SC
 **Filtro de turno muda a taxa (todos os indicadores com turno).** Escolhendo um turno (ex.: T1):
@@ -590,7 +617,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **290 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **296 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

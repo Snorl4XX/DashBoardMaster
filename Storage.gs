@@ -1020,6 +1020,26 @@ function migrateToV313_() {
 }
 
 /**
+ * V3.16: o Recebimento passou a agrupar também pelo turno (horário sendTime). Uma vez: os dias com detalhe
+ * baixado pela V3.14/V3.15 (sem turno) entram na fila para baixar de novo — só os da janela de detalhe.
+ */
+function migrateToV316_() {
+  if (getProp_('MIGRATION_V316', '')) return 0;
+  const jobs = [];
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].grouped && (INDICATORS[k].groupFields || []).indexOf('shift') >= 0).forEach(k => {
+    const days = detailDays_(INDICATORS[k]), from = days ? addDaysIso_(isoToday_(), -days) : '';
+    allTabRows_('STATUS').forEach(r => {
+      const d = dateCellIso_(r[1]);
+      if (String(r[0]) === k && isIso_(d) && d >= from && DETAIL_USABLE_.concat(['PARTIAL']).indexOf(String(r[3])) >= 0) jobs.push(['DETAIL_INIT', k, d, 1]);
+    });
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V316', new Date().toISOString());
+  if (n) logSync_('INFO', 'arrival_flow', '', 'V3.16: ' + n + ' dia(s) do Recebimento baixados de novo para separar por turno.');
+  return n;
+}
+
+/**
  * Indicador novo numa instalação que já existia (ex.: Avaria, V3.11). O startFullHistory roda uma vez
  * só, então o histórico do indicador novo nunca entrava na fila: só chegavam os últimos dias, pela
  * sincronização de hora em hora. Uma vez por indicador (propriedade HISTORY_FILL_<INDICADOR>):
@@ -1080,7 +1100,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateToV316_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
