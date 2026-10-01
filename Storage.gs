@@ -212,8 +212,113 @@ function upsertRate_(s) {
 }
 function rateFromRow_(r) {
   const errors = r[3] === '' ? null : num_(r[3], null), total = r[4] === '' ? null : num_(r[4], null);
-  return {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : legacyRate_(r[0], num_(r[2], null), errors, total),
+  const x = {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : legacyRate_(r[0], num_(r[2], null), errors, total),
     errorCount: errors, totalCount: total, syncedAt: toIsoTimestamp_(r[6])};
+  // Taxa de uma opção do indicador ("damage:main"): estimada enquanto o JMS não confirmar os códigos do filtro.
+  if (String(r[0]).indexOf(':') > 0) x.estimated = /"estimated":true/.test(String(r[5] || ''));
+  return x;
+}
+/** Taxa de uma opção do indicador (ex.: "damage:main"): fica na aba RATES, sem mexer no DAY_STATUS do dia. */
+function upsertVariantRate_(s) {
+  const rowNum = findRowKey_('RATES', s.indicator, s.date);
+  const row = [s.indicator, s.date, s.rate === null || s.rate === undefined ? '' : s.rate,
+    s.errorCount === null || s.errorCount === undefined ? '' : s.errorCount,
+    s.totalCount === null || s.totalCount === undefined ? '' : s.totalCount, JSON.stringify(s.raw || {}).slice(0, 4000), new Date()];
+  if (rowNum > 0) writeRow_('RATES', rowNum, row); else appendRow_('RATES', row);
+}
+
+// ------------------------------------------------------------------ Avaria: "Pedidos principais/filhos"
+/** Códigos do filtro no JMS (propriedade JMS_ORDERKIND_<INDICADOR>, cadastrada ou descoberta), ou null. */
+function orderKindParams_(indicatorKey) {
+  const v = safeJsonParse_(getProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), '') || 'null', null);
+  return v && (v.unsupported || (v.param && v.main !== undefined && v.sub !== undefined && v.main !== v.sub)) ? v : null;
+}
+function orderKindPayload_(map, kind) { const o = {}; o[map.param] = map[kind]; return o; }
+/** Pedidos principais e filhos de um dia, contados nas remessas gravadas (remessas distintas). */
+function orderKindCounts_(indicatorKey, date) {
+  const seen = {}, n = {main: 0, sub: 0};
+  getArchivedRange_(indicatorKey, date, date).rows.forEach(r => {
+    if (!r.shipment || seen[r.shipment]) return;
+    seen[r.shipment] = 1;
+    n[orderKindOf_(r.shipment)]++;
+  });
+  return n;
+}
+/**
+ * Descobre os códigos do filtro "Pedidos principais/filhos" num dia que tem os dois tipos de pedido:
+ * consulta o resumo com cada candidato (Config.gs → orderKinds.candidates) e vê qual devolve a quantidade
+ * de pedidos principais e qual a de filhos. Candidato que devolve o total do dia = parâmetro ignorado.
+ * Sem acerto: {unsupported} — a taxa de cada opção fica ESTIMADA (avarias da opção ÷ volume total).
+ * Dia que não serve para distinguir (sem filhos, ou quantidades parecidas): tenta no próximo.
+ */
+function detectOrderKindParams_(indicatorKey, date, counts, all) {
+  const ok = getIndicatorConfig_(indicatorKey).orderKinds;
+  const tol = x => Math.max(1, Math.round(x * 0.03));
+  if (!(counts.main > 0 && counts.sub > 0) || Math.abs(counts.main - counts.sub) <= tol(Math.max(counts.main, counts.sub))) return null;
+  const found = {};
+  for (let i = 0; i < ok.candidates.length; i++) {
+    const v = ok.candidates[i], extra = {};
+    extra[ok.param] = v;
+    let s;
+    try { s = fetchSummaryDay_(indicatorKey, date, extra); }
+    catch (e) { if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e; continue; }
+    const t = s.empty ? 0 : s.errorCount;
+    if (t === null || t === undefined || (all.errorCount !== null && t === all.errorCount)) continue;
+    ['main', 'sub'].forEach(k => { if (found[k] === undefined && Math.abs(t - counts[k]) <= tol(counts[k])) found[k] = v; });
+    if (found.main !== undefined && found.sub !== undefined) break;
+  }
+  const learned = found.main !== undefined && found.sub !== undefined && found.main !== found.sub;
+  const map = learned ? {param: ok.param, main: found.main, sub: found.sub, learnedAt: new Date().toISOString(), date: date}
+    : {unsupported: true, at: new Date().toISOString(), date: date, counts: counts};
+  setProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), JSON.stringify(map));
+  logSync_(learned ? 'INFO' : 'WARN', indicatorKey, date, learned
+    ? 'Pedidos principais/filhos: o JMS usa ' + ok.param + '=' + found.main + ' (principal) e ' + ok.param + '=' + found.sub + ' (filho). As taxas de cada opção serão consultadas.'
+    : 'Pedidos principais/filhos: o JMS não respondeu aos códigos ' + ok.param + '=' + ok.candidates.join('/') + ' (principais ' + counts.main + ', filhos ' + counts.sub +
+      '). A taxa de cada opção fica ESTIMADA. Capture o payload do getBreakageRateData com a opção escolhida e cadastre JMS_ORDERKIND_' + indicatorKey.toUpperCase() + '.');
+  if (learned) {
+    // Dias já baixados passam a ter a taxa oficial de cada opção (o resumo consulta as duas).
+    const days = getRates_(indicatorKey, null, null).map(r => r.date);
+    if (days.length) enqueueJobs_(days.map(d => ['SUMMARY', indicatorKey, d, 0]), {reset: true});
+  }
+  return map;
+}
+/**
+ * Grava a taxa de cada opção do dia ("damage:main" / "damage:sub").
+ *  - Códigos conhecidos: taxa OFICIAL do JMS (resumo com o parâmetro da opção).
+ *  - Ainda não conhecidos/sem suporte e `counts` disponíveis: taxa ESTIMADA (avarias da opção ÷ volume total).
+ */
+function syncOrderKindRates_(indicatorKey, date, counts) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  if (!cfg.orderKinds) return 0;
+  const all = getRateDay_(indicatorKey, date);
+  if (!all) return 0;
+  let map = orderKindParams_(indicatorKey);
+  if (!map && counts) map = detectOrderKindParams_(indicatorKey, date, counts, all);
+  let n = 0;
+  ['main', 'sub'].forEach(kind => {
+    let s = null;
+    if (map && !map.unsupported) {
+      const r = fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, kind));
+      s = r.empty ? {rate: 0, errorCount: 0, totalCount: null, raw: {empty: true}} : {rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, raw: {official: true}};
+    } else if (counts && all.totalCount) {
+      s = {rate: counts[kind] / all.totalCount * JTCore_.rateScale(cfg.goal), errorCount: counts[kind], totalCount: all.totalCount, raw: {estimated: true}};
+    }
+    if (!s) return;
+    upsertVariantRate_({indicator: indicatorKey + ':' + kind, date: date, rate: s.rate, errorCount: s.errorCount, totalCount: s.totalCount, raw: s.raw});
+    n++;
+  });
+  return n;
+}
+/** Depois do detalhe gravado: taxas de cada opção (estimadas, ou descobre os códigos do JMS). Nunca derruba o job. */
+function afterDetailSaved_(indicatorKey, date) {
+  if (!getIndicatorConfig_(indicatorKey).orderKinds) return;
+  try {
+    const map = orderKindParams_(indicatorKey);
+    if (map && !map.unsupported) return; // oficiais: o job de resumo consulta
+    syncOrderKindRates_(indicatorKey, date, orderKindCounts_(indicatorKey, date));
+  } catch (e) {
+    logSync_('WARN', indicatorKey, date, 'Taxas de pedidos principais/filhos não atualizadas: ' + String(e && e.message || e).slice(0, 300));
+  }
 }
 /**
  * Avaria: a V3.11.1 e a V3.11.2 gravaram a taxa dividida por 10.000 (0,029278); a V3.11.0 e a atual
@@ -876,6 +981,24 @@ function migrateToV3112_() {
 }
 
 /**
+ * V3.13: filtro "Pedidos principais/filhos" da Avaria. Os dias já baixados ainda não têm a taxa de cada
+ * opção: uma vez, o detalhe desses dias é baixado de novo (o gancho do detalhe calcula/consulta as taxas).
+ */
+function migrateToV313_() {
+  if (getProp_('MIGRATION_V313', '')) return 0;
+  const keys = Object.keys(INDICATORS).filter(k => INDICATORS[k].orderKinds);
+  const jobs = [];
+  allTabRows_('STATUS').forEach(r => {
+    const k = String(r[0]), d = dateCellIso_(r[1]);
+    if (keys.indexOf(k) >= 0 && isIso_(d) && r[2] === 'COMPLETE' && DETAIL_USABLE_.indexOf(String(r[3])) >= 0) jobs.push(['DETAIL_INIT', k, d, 1]);
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V313', new Date().toISOString());
+  if (n) logSync_('INFO', keys.join(','), '', 'V3.13: ' + n + ' dia(s) da Avaria baixados de novo para as taxas de pedidos principais/filhos.');
+  return n;
+}
+
+/**
  * Indicador novo numa instalação que já existia (ex.: Avaria, V3.11). O startFullHistory roda uma vez
  * só, então o histórico do indicador novo nunca entrava na fila: só chegavam os últimos dias, pela
  * sincronização de hora em hora. Uma vez por indicador (propriedade HISTORY_FILL_<INDICADOR>):
@@ -936,7 +1059,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
@@ -1091,6 +1214,15 @@ function runSummaryJob_(job) {
   if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, false)) {
     enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
   }
+  // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (quando os códigos já são conhecidos).
+  const okMap = getIndicatorConfig_(job.indicator).orderKinds && orderKindParams_(job.indicator);
+  if (okMap && !okMap.unsupported) {
+    try { syncOrderKindRates_(job.indicator, job.date, null); }
+    catch (e) {
+      if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e;
+      logSync_('WARN', job.indicator, job.date, 'Taxas de pedidos principais/filhos não consultadas: ' + String(e && e.message || e).slice(0, 300));
+    }
+  }
   return 'done';
 }
 
@@ -1185,6 +1317,7 @@ function runDetailJob_(job, deadline) {
     upsertAggCounts_(job.indicator, job.date, acc.shiftCounts(), acc.count());
     updateDayStatus_(job.indicator, job.date, {detailsStatus: ok ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: n, savedPages: n,
       expectedRecords: plan.total, savedRows: rawTotal, error: ''});
+    afterDetailSaved_(job.indicator, job.date);
     if (!ok) {
       logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + plan.total + ' registros no detalhe, mas entregou ' + rawTotal +
         (plan.sliced ? ' (download em ' + plan.windows.length + ' fatias de horário)' : '') + '. Dados gravados; o dia será conferido de novo mais tarde.');
@@ -1198,6 +1331,7 @@ function runDetailJob_(job, deadline) {
   if (DETAIL_USABLE_.indexOf(status) >= 0) {
     const c = Date.now() < deadline - 60000 ? compactDay_(job.indicator, job.date, deadline) : {partial: true};
     if (c.partial) enqueueJobs_([['COMPACT', job.indicator, job.date, 0]], {reset: true});
+    afterDetailSaved_(job.indicator, job.date);
     return 'done';
   }
   // Algum pedaço de uma execução anterior sumiu do índice: recomeça do início.

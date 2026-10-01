@@ -403,15 +403,17 @@ function summaryHasMetric_(row, cfg) {
  * Consulta a taxa OFICIAL do JMS. Nunca preenche lacuna com zero.
  * Sem registro → empty=true (ausência real ≠ erro).
  */
-function fetchSummaryDay_(indicatorKey, isoDate) {
+/** `extra` (opcional): parâmetros a mais no resumo, ex.: Avaria {mainSubCode: 1} = só pedidos principais. */
+function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   const cfg = getIndicatorConfig_(indicatorKey);
   const endpoint = endpointFor_(cfg, 'summary');
-  const json = jmsPost_(endpoint, buildPayload_(indicatorKey, isoDate, 1, APP_CONFIG.PAGE_SIZE, false), 2);
+  const payloadOf = page => Object.assign(buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, false), extra || {});
+  const json = jmsPost_(endpoint, payloadOf(1), 2);
   let records = recordsOf_(json);
   const pg = pagingOf_(json);
   if (pg.pages > 100) throw new Error('O resumo retornou mais de 100 páginas para um único dia: ' + cfg.key + ' ' + isoDate);
   for (let page = 2; page <= pg.pages; page++) {
-    const next = jmsPost_(endpoint, buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, false), 2);
+    const next = jmsPost_(endpoint, payloadOf(page), 2);
     records = records.concat(recordsOf_(next));
   }
   if (pg.total > 0 && records.length !== pg.total) {

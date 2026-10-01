@@ -266,11 +266,22 @@ function fakeJms(dayData, options) {
       // ----- Avaria (formato das respostas do documento do usuário) -----
       case 'getBreakageRateData': {
         if (!d || !d.dm) return ok([], 0, 1, body.size);
-        const rate = Math.round(d.dm.length / d.dmBase * 1e6 * 100) / 100;
+        // "Pedidos principais/filhos": mainSubCode (códigos simulados: principal 1, filho 2; options.orderKindCodes troca).
+        // Filho = remessa com sufixo "-001"; o volume (operaNumber) também muda com a opção. Código desconhecido = vazio.
+        let list = d.dm, base = d.dmBase;
+        const codes = options.orderKindCodes || {main: 1, sub: 2};
+        if (!options.ignoreMainSub && body.mainSubCode !== undefined && body.mainSubCode !== null && body.mainSubCode !== '') {
+          const kind = body.mainSubCode === codes.main ? 'main' : body.mainSubCode === codes.sub ? 'sub' : null;
+          if (!kind) return ok([], 0, 1, body.size);
+          const subBase = Math.round(d.dmBase * 0.12);
+          list = d.dm.filter(r => /-\d{3}$/.test(r.waybillNo) === (kind === 'sub'));
+          base = kind === 'sub' ? subBase : d.dmBase - subBase;
+        }
+        const rate = Math.round(list.length / base * 1e6 * 100) / 100;
         return ok([{id: '97308731485720' + date.slice(8), serialNum: '1', statisticalDate: date, agentAreaCode: '370000', agentAreaName: 'SPE',
-          networkCode: '30001', networkName: 'SP GRU', operaNumber: d.dmBase, breakageTicketNumber: d.dm.length, breakageRate: rate,
-          breakageAmount: d.dm.reduce((a, r) => a + r.adjudicationAmount, 0), breakageNumberTotal: d.dm.length, breakageRateTotal: rate,
-          monthBreakageRate: 180.46, pickUpDayTotal: null}], 1, 1, body.size);
+          networkCode: '30001', networkName: 'SP GRU', operaNumber: base, breakageTicketNumber: list.length, breakageRate: rate,
+          breakageAmount: list.reduce((a, r) => a + r.adjudicationAmount, 0), breakageNumberTotal: list.length, breakageRateTotal: rate,
+          monthBreakageRate: 180.46, pickUpDayTotal: null, mainSubCode: body.mainSubCode === undefined ? null : body.mainSubCode}], 1, 1, body.size);
       }
       case 'detailBreakageRateData': {
         if (!d || !d.dm) return ok([], 0, 1, body.size);
@@ -279,7 +290,7 @@ function fakeJms(dayData, options) {
       }
       case 'registrationPage': {
         const want = {};
-        String(body.waybillNo || '').split(',').forEach(w => { want[w.trim().replace(/-\d+$/, '')] = 1; });
+        String(body.waybillNo || '').split(',').forEach(w => { want[w.trim()] = 1; }); // como o JMS: remessa exata (com ou sem "-001")
         const all = [];
         Object.keys(dayData).forEach(k => (dayData[k].dmReg || []).forEach(r => { if (want[r.waybillNo]) all.push(r); }));
         const sz = Math.min(100, body.size);
@@ -354,7 +365,8 @@ function makeDamage(date, seed) {
   const dm = [], dmReg = [];
   const n = 120 + Math.floor(rnd() * 60);
   for (let i = 0; i < n; i++) {
-    const wb = (i % 3 ? '9998821' : '8880026') + date.replace(/-/g, '').slice(2) + String(i).padStart(3, '0');
+    // ~1 em 4 é pedido filho (volume de uma remessa com vários volumes: "…-001", "…-002").
+    const wb = (i % 3 ? '9998821' : '8880026') + date.replace(/-/g, '').slice(2) + String(i).padStart(3, '0') + (i % 4 === 1 ? '-00' + (1 + i % 3) : '');
     dm.push({id: 'D' + date + i, serialNum: String(i + 1), workOrderNum: 'ZC' + date.replace(/-/g, '') + String(i).padStart(6, '0'), waybillNo: wb,
       firstTypeCode: '003', firstTypeName: 'AVARIA 破损', secondTypeCode: 'Z41d', secondTypeName: pick(types),
       adjudicationAmount: Math.round(rnd() * 15000) / 100, declareTime: prev(5) + ' 02:0' + (i % 10) + ':00', closingTime: date + ' 02:05:02',

@@ -147,6 +147,19 @@ function JTCoreFactory_() {
     return rows;
   }
 
+  /**
+   * Avaria: "Pedidos principais/filhos" (Config.gs → orderKinds). Pedido filho = remessa com sufixo "-001",
+   * "-002"… Calculado na leitura, como as docas: vale para todo o histórico sem baixar nada.
+   */
+  function applyOrderKinds(rows, ok) {
+    if (!ok || !rows) return rows;
+    for (var i = 0; i < rows.length; i++) {
+      var w = rows[i].shipment === null || rows[i].shipment === undefined ? '' : String(rows[i].shipment).trim();
+      rows[i][ok.field] = /-\d{1,4}$/.test(w) ? ok.values.sub : ok.values.main;
+    }
+    return rows;
+  }
+
   // ---------- tabelas dinâmicas (2 níveis, subtotal por grupo) ----------
   /**
    * Mesmo resultado de uma tabela dinâmica do Excel com linhas [nível 1, nível 2] e contagem:
@@ -593,7 +606,8 @@ function JTCoreFactory_() {
     '上环节建包异常': 'Erro de ensacamento na etapa anterior', '一段码异常': 'Erro no 1º segmento', '人为因素': 'Fator humano',
     '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição'
   };
-  var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台'};
+  var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
+    'Pedido principal': '主单', 'Pedido secundário': '子单'};
   function hasCjk(s) { return /[㐀-鿿]/.test(s); }
   function localizeValue(value, lang) {
     var s = String(value === null || value === undefined ? '' : value);
@@ -615,7 +629,7 @@ function JTCoreFactory_() {
   return {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
-    dockDestination: dockDestination, stopDestination: function (v, docks) { return docks ? stopDestination(v, dockIndex(docks)) : ''; }, applyDocks: applyDocks, pivot: pivot, rankPanel: rankPanel,
+    dockDestination: dockDestination, stopDestination: function (v, docks) { return docks ? stopDestination(v, dockIndex(docks)) : ''; }, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

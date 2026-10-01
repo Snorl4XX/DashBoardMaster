@@ -212,7 +212,7 @@ function atualizarParaV37() {
   deleteProp_('MIGRATION_V371');
   deleteProp_('MIGRATION_V372');
   clearPauses_();
-  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + queueNewIndicatorsHistory_();
+  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + migrateToV313_() + queueNewIndicatorsHistory_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};
@@ -433,6 +433,12 @@ function diagnosticoCompleto(date) {
     if (rg) lines.push('  Consulta de Pacote Problemático: ' + (rg.erro ? 'ERRO — ' + rg.erro + (rg.erroBruto ? ' [' + rg.erroBruto + ']' : '') +
       ' (a tabela 1 é gravada mesmo assim; turno, estação e quem registrou ficam "Sem informação")' :
       rg.comRegistro + ' de ' + rg.remessas + ' avarias da 1ª página com registro (turno, estação e quem registrou)'));
+    if (cfg.orderKinds) {
+      const om = orderKindParams_(key);
+      lines.push('  Pedidos principais/filhos: ' + (!om ? 'códigos do JMS ainda não descobertos (falta um dia com pedidos principais e filhos baixado); taxa de cada opção estimada' :
+        om.unsupported ? 'o JMS não respondeu a ' + cfg.orderKinds.param + '=' + cfg.orderKinds.candidates.join('/') + ' — taxa de cada opção ESTIMADA. Capture o payload do getBreakageRateData com "Pedido principal" e cadastre JMS_ORDERKIND_' + key.toUpperCase() :
+        om.param + '=' + om.main + ' (principal) · ' + om.param + '=' + om.sub + ' (filho) — taxa oficial do JMS para cada opção'));
+    }
     if (item.rota) lines.push('  Cabeçalho de rota: Routename "' + item.rota.routename + '" · Routernamelist "' + item.rota.routernamelist + '" (' + item.rota.origem + ')');
     const dk = item.docas;
     if (dk && dk.amostra) {

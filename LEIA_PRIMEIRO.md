@@ -1,6 +1,29 @@
-# J&T DASHMASTER V3.12.1 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.13 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.13 — Avaria: filtro "Pedidos principais/filhos"
+Novo filtro na Avaria, igual ao da tela do JMS: **Todos / Pedido principal / Pedido secundário**.
+- **Pedido secundário (filho)** = volume de uma remessa com vários volumes, ou seja, remessa com sufixo "-001", "-002"…
+- Escolhendo **uma** opção:
+  - a **taxa do dia** e a **quantidade de avarias** passam a ser as do JMS para essa opção. O JMS muda também o volume (Qtd processada), como na tela;
+  - a evolução diária e o mini-gráfico usam a mesma taxa;
+  - gráficos, cartões em R$ e tabela mostram só as remessas da opção;
+  - o cartão da taxa mostra a opção (ex.: "Taxa do dia · Pedido principal").
+- "Todos", ou as duas opções marcadas, = a taxa de sempre. Vale também no relatório PDF/Excel.
+
+**Como o painel sabe o código de cada opção:**
+- A resposta do JMS traz o campo `mainSubCode` (vazio em "Todos"): é o parâmetro do filtro. O código de cada opção não estava na captura.
+- O sistema **descobre sozinho**, num dia que tenha pedidos principais e filhos:
+  - consulta o resumo com `mainSubCode` = 1, 2, 0 e 3;
+  - vê qual código devolve a quantidade de pedidos principais e qual devolve a de filhos (contados nas remessas do dia);
+  - grava o resultado na propriedade `JMS_ORDERKIND_DAMAGE`.
+- A partir daí, cada dia consulta a taxa oficial das duas opções (2 consultas a mais por dia).
+- **Se o JMS não responder a esses códigos**, a taxa de cada opção fica **estimada** (avarias da opção ÷ volume total), com o aviso no cartão. Para corrigir:
+  1. capture no DevTools o payload do `getBreakageRateData` com "Pedido principal" escolhido;
+  2. cadastre a propriedade `JMS_ORDERKIND_DAMAGE` = `{"param":"mainSubCode","main":<código>,"sub":<código>}`.
+- O `diagnosticoCompleto()` mostra a linha *"Pedidos principais/filhos: …"* com os códigos descobertos ou o que falta.
+- **Ao atualizar:** os dias da Avaria já baixados são baixados de novo uma vez, sozinhos, para ganhar a taxa de cada opção.
 
 ## V3.12.1 — Envio Errado: doca pela Próxima Parada
 - No Envio Errado, a doca agora sai da coluna **Próxima Parada**: o destino para onde a saca foi enviada errada. Assim os gráficos mostram em que doca estão colocando mais sacas erradas.
@@ -476,7 +499,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **238 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **250 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

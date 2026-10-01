@@ -137,6 +137,9 @@ function rederiveRow_(indicatorKey, row) {
   return r;
 }
 
+/** Pedido principal ('main') ou filho ('sub' = remessa com sufixo "-001", "-002"…, como na remessa-mãe). */
+function orderKindOf_(shipment) { return /-\d{1,4}$/.test(String(shipment === null || shipment === undefined ? '' : shipment).trim()) ? 'sub' : 'main'; }
+
 /**
  * Campos que o JMS manda vazios com significado conhecido (Config.gs → fillEmpty).
  * '@center' = nome da base (JMS_CENTER_NAME). Vale na leitura, então corrige também o histórico.
@@ -343,7 +346,12 @@ function getDashboardData(indicatorKey, params) {
         readFiles: archive.readFiles, fullyLoaded: archive.fullyLoaded, maxRows: maxRows},
       rowsLoaded: builder.count()
     },
-    rates: allRates.map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount}))
+    rates: allRates.map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount})),
+    // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (o painel troca a taxa pelo filtro).
+    rateVariants: cfg.orderKinds ? ['main', 'sub'].reduce((o, k) => {
+      o[k] = getRates_(indicatorKey + ':' + k, null, null).map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, estimated: r.estimated}));
+      return o;
+    }, {}) : null
   });
   // O conjunto de remessas só tem textos e números (sem Date): vai direto, sem cópia extra.
   out.dataset = builder.build();
@@ -371,6 +379,22 @@ function getResultsData(params) {
 /** Compatibilidade com a V2. */
 function buildResultsData(params) { return getResultsData(params); }
 
+/**
+ * Avaria com UMA opção de "Pedidos principais/filhos" no filtro: taxas oficiais dessa opção e os filtros
+ * sem ela (a taxa já é a da opção; o cartão não fica "com filtro" só por isso). Mesma regra do navegador.
+ */
+function rateVariantFor_(cfg, indicatorKey, filters) {
+  const ok = cfg.orderKinds, sel = ok && filters && filters[ok.field];
+  if (!sel || sel.length !== 1) return null;
+  const kind = Object.keys(ok.values).filter(k => ok.values[k] === sel[0])[0];
+  if (!kind) return null;
+  const rates = getRates_(indicatorKey + ':' + kind, null, null);
+  if (!rates.length) return null;
+  const rest = Object.assign({}, filters);
+  delete rest[ok.field];
+  return {kind: kind, rates: rates, filters: rest};
+}
+
 /** Visão consolidada do servidor (relatórios) — mesma regra do navegador. */
 function computeDashboard_(indicatorKey, params, archiveOpts) {
   const cfg = getIndicatorConfig_(indicatorKey);
@@ -379,11 +403,13 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   const filters = normalizeFilters_(params && params.filters);
   const archive = getArchivedRange_(indicatorKey, p.from, p.to, archiveOpts);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
+  if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds);
   const rows = JTCore_.applyFilters(archive.rows, filters);
+  const rv = rateVariantFor_(cfg, indicatorKey, filters);
   return {
-    cfg: cfg, from: p.from, to: p.to, filters: filters, archive: archive, rows: rows, allRates: allRates,
+    cfg: cfg, from: p.from, to: p.to, filters: filters, archive: archive, rows: rows, allRates: rv ? rv.rates : allRates,
     coverage: getCoverage_(indicatorKey, p.from, p.to),
-    cards: JTCore_.computeCards(cfg, allRates, rows, filters, p.from, p.to),
+    cards: JTCore_.computeCards(cfg, rv ? rv.rates : allRates, rows, rv ? rv.filters : filters, p.from, p.to),
     charts: cfg.charts.map(def => JTCore_.buildChart(def, rows, {})),
     summary: JTCore_.summaryTable(cfg, rows),
     pivots: (cfg.pivotTables || []).map(def => JTCore_.pivot(rows, def))

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.12.1',
+  VERSION: '3.13.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -73,7 +73,8 @@ const FILTER_LABELS = Object.freeze({
   amount:          {pt: 'Valor da arbitragem', zh: '判责金额'},
   regDay:          {pt: 'Data do registro', zh: '登记日期'},
   locationMain:    {pt: 'Local principal da avaria', zh: '破损发生一级环节'},
-  locationSub:     {pt: 'Local secundário da avaria', zh: '破损发生二级环节'}
+  locationSub:     {pt: 'Local secundário da avaria', zh: '破损发生二级环节'},
+  orderKind:       {pt: 'Pedidos principais/filhos', zh: '主子单'}
 });
 
 /**
@@ -441,7 +442,12 @@ const INDICATORS = Object.freeze({
       eventTime: {pt: 'Data do registro', zh: '登记时间'},
       client: {pt: 'Nome do cliente', zh: '客户名称'}
     },
-    filters: ['shift', 'station', 'product', 'interval'],
+    filters: ['orderKind', 'shift', 'station', 'product', 'interval'],
+    // "Pedidos principais/filhos" (como na tela do JMS): pedido filho = remessa com sufixo "-001", "-002"…
+    // Escolhendo UMA opção, a taxa e a quantidade do dia passam a ser as do JMS para ela (o JMS muda também
+    // o volume): resumo consultado com `param`. Os códigos de cada opção são descobertos sozinhos, conferindo
+    // com as remessas do dia (ou cadastrados em JMS_ORDERKIND_DAMAGE, ex.: {"param":"mainSubCode","main":1,"sub":2}).
+    orderKinds: {field: 'orderKind', values: {main: 'Pedido principal', sub: 'Pedido secundário'}, param: 'mainSubCode', candidates: [1, 2, 0, 3]},
     topCards: [],
     // Avaria sem registro na Consulta de Pacote Problemático = registrada por outra base: no lugar de
     // "Sem informação", os campos que vêm da tabela 2 mostram "OUTRAS BASES" (tela, filtros e relatório).
@@ -529,8 +535,8 @@ function usedFields_(cfg) {
   (cfg.valueCards || []).forEach(v => { set[v.field] = 1; });
   return Object.keys(set);
 }
-/** Calculadas na leitura (Core.applyDocks), a partir do 1º segmento completo: não vão no conjunto de dados. */
-const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1};
+/** Calculadas na leitura (Core.applyDocks / Core.applyOrderKinds): não vão no conjunto de dados. */
+const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1, orderKind: 1};
 
 /** Campos da linha normalizada que o navegador precisa receber para este indicador. */
 function clientFields_(cfg) {
@@ -561,6 +567,7 @@ function getPublicCatalog_() {
       valueCards: cfg.valueCards || [],
       texts: cfg.texts || null,
       naLabel: cfg.naLabel || null,
+      orderKinds: cfg.orderKinds ? {field: cfg.orderKinds.field, values: cfg.orderKinds.values} : null,
       operationalWindow: cfg.key === 'sc_sc' || cfg.key === 'sc_dc'
     }));
 }

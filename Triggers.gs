@@ -24,7 +24,7 @@ function syncHourly() {
   }
   // Antes da revalidação: com os 3 últimos dias já no DAY_STATUS, o indicador novo ainda é reconhecido como novo.
   let history = 0;
-  try { migrateToV3112_(); migrateToV3114_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
   const queued = queueRecentRefresh_() + history;
   return {ok: true, queued: queued, worker: processSyncQueue({budgetMs: 240000})};
 }

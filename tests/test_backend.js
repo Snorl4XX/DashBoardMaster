@@ -1026,4 +1026,66 @@ delete cSC.__state.props.MIGRATION_V38;
 const n38 = cSC.migrateToV38_();
 check(cSC.pendingJobs_().every(j => j.indicator === 'missing_dispatch') && n38 === 1, 'docas pela próxima parada não baixam o histórico de novo', n38);
 
+// ---------- 20. V3.13: Avaria — filtro "Pedidos principais/filhos" troca a taxa e a quantidade do dia ----------
+check(ctx.orderKindOf_('888002582811885') === 'main' && ctx.orderKindOf_('888002582811885-003') === 'sub' && ctx.orderKindOf_('') === 'main',
+  'pedido filho = remessa com sufixo "-001"');
+const catOK = ctx.getPublicCatalog_().filter(x => x.key === 'damage')[0];
+check(catOK.filters[0].key === 'orderKind' && catOK.filters[0].label.pt === 'Pedidos principais/filhos' && catOK.orderKinds.values.main === 'Pedido principal' &&
+  C.localizeValue('Pedido secundário', 'zh') === '子单', 'filtro "Pedidos principais/filhos" (Todos / Pedido principal / Pedido secundário)');
+function okCounts(day) { const n = {main: 0, sub: 0}; day.dm.forEach(r => { n[/-\d{3}$/.test(r.waybillNo) ? 'sub' : 'main']++; }); return n; }
+// (a) Códigos descobertos sozinhos (simulado: principal 1, filho 2) e taxas OFICIAIS de cada opção.
+const dOK = {}; dOK[D19] = makeDay(D19, 91); dOK['2026-09-18'] = makeDay('2026-09-18', 92);
+const cOK = freshCtx(dOK);
+cOK.queueHistory('2026-09-18', D19, true);
+runAll(cOK, 12);
+const mapOK = JSON.parse(cOK.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+const nOK = okCounts(dOK[D19]), subBase = Math.round(dOK[D19].dmBase * 0.12);
+const mainR = cOK.getRates_('damage:main', D19, D19)[0], subR = cOK.getRates_('damage:sub', D19, D19)[0];
+check(mapOK.param === 'mainSubCode' && mapOK.main === 1 && mapOK.sub === 2 && mainR && subR && !mainR.estimated && !subR.estimated &&
+  mainR.errorCount === nOK.main && subR.errorCount === nOK.sub && mainR.totalCount === dOK[D19].dmBase - subBase && subR.totalCount === subBase &&
+  Math.abs(mainR.rate - nOK.main / (dOK[D19].dmBase - subBase) * 1e6) < 0.01,
+  'códigos do filtro descobertos (mainSubCode 1 = principal, 2 = filho) e taxa oficial de cada opção, com o volume da opção', {map: mapOK, main: mainR, sub: subR});
+check(cOK.getRates_('damage:main', '2026-09-18', '2026-09-18').length === 1 && !cOK.getRates_('damage:main', '2026-09-18', '2026-09-18')[0].estimated &&
+  cOK.getDayStatus_('damage:main', D19) === null, 'todos os dias com a taxa oficial de cada opção; nada de DAY_STATUS para as opções');
+// (b) Painel: com UMA opção, a taxa e a quantidade do dia são as da opção; Todos = taxa de sempre.
+const dashOK = cOK.getDashboardData('damage', {from: D19, to: D19});
+const rowsOK = C.applyOrderKinds(C.decodeDataset(dashOK.dataset), catOK.orderKinds);
+check(dashOK.rateVariants.main.length === 2 && dashOK.rateVariants.sub.length === 2 && rowsOK.filter(r => r.orderKind === 'Pedido secundário').length === nOK.sub,
+  'painel recebe as taxas de cada opção e o tipo do pedido de cada remessa');
+const cardsMain = cOK.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal']}}).cards;
+const cardsAll = cOK.computeDashboard_('damage', {from: D19, to: D19}).cards;
+check(cardsMain.rate === mainR.rate && cardsMain.currentErrors === nOK.main && cardsMain.filtered === false &&
+  cardsAll.rate === cOK.getRates_('damage', D19, D19)[0].rate && cardsAll.currentErrors === dOK[D19].dm.length,
+  'Pedido principal: taxa e quantidade do dia trocam (como no JMS); Todos: as de sempre', {main: [cardsMain.rate, cardsMain.currentErrors], all: [cardsAll.rate, cardsAll.currentErrors]});
+const cardsBoth = cOK.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal', 'Pedido secundário']}}).cards;
+check(cardsBoth.rate === cardsAll.rate, 'as duas opções marcadas = Todos');
+// (c) Códigos invertidos no JMS: descobertos do mesmo jeito.
+const cInv = freshCtx(dOK, {orderKindCodes: {main: 2, sub: 1}});
+cInv.queueHistory(D19, D19, true);
+runAll(cInv, 12);
+const mapInv = JSON.parse(cInv.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+check(mapInv.main === 2 && mapInv.sub === 1 && cInv.getRates_('damage:sub', D19, D19)[0].errorCount === nOK.sub, 'códigos invertidos descobertos', mapInv);
+// (d) JMS que ignora o parâmetro: taxa de cada opção ESTIMADA (avarias da opção ÷ volume total) e aviso no SYNC_LOG.
+const cIgn = freshCtx(dOK, {ignoreMainSub: true});
+cIgn.queueHistory(D19, D19, true);
+runAll(cIgn, 12);
+const mapIgn = JSON.parse(cIgn.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+const estR = cIgn.getRates_('damage:main', D19, D19)[0];
+const fIgn = cIgn.__state.fetches.filter(f => /getBreakageRateData/.test(f.url) && f.payload.mainSubCode !== undefined);
+check(mapIgn.unsupported === true && estR.estimated === true && estR.errorCount === nOK.main &&
+  Math.abs(estR.rate - nOK.main / dOK[D19].dmBase * 1e6) < 1e-6 && fIgn.length <= 4 &&
+  cIgn.allTabRows_('LOG').some(r => r[1] === 'WARN' && /JMS_ORDERKIND_DAMAGE/.test(r[4])),
+  'JMS sem o filtro: taxa estimada, poucas consultas de teste e aviso com o que cadastrar', {map: mapIgn, est: estR, testes: fIgn.length});
+// (e) Códigos cadastrados à mão (JMS_ORDERKIND_DAMAGE) valem sem teste.
+const cMan = freshCtx(dOK, {orderKindCodes: {main: 'P', sub: 'F'}}, {JMS_ORDERKIND_DAMAGE: JSON.stringify({param: 'mainSubCode', main: 'P', sub: 'F'})});
+cMan.queueHistory(D19, D19, true);
+runAll(cMan, 12);
+check(cMan.getRates_('damage:sub', D19, D19)[0].errorCount === nOK.sub && !cMan.getRates_('damage:sub', D19, D19)[0].estimated, 'códigos cadastrados à mão');
+check(/Pedidos principais\/filhos: mainSubCode=1 \(principal\) · mainSubCode=2 \(filho\)/.test(cOK.diagnosticoCompleto(D19).texto) &&
+  /Pedidos principais\/filhos: o JMS não respondeu/.test(cIgn.diagnosticoCompleto(D19).texto), 'diagnosticoCompleto mostra os códigos do filtro (ou o que cadastrar)');
+// (f) Atualização: dias já baixados ganham as taxas de cada opção (detalhe baixado de novo uma vez).
+delete cOK.__state.props.MIGRATION_V313;
+const m313 = cOK.migrateToV313_();
+check(m313 === 2 && cOK.migrateToV313_() === 0, 'atualização: Avaria baixada de novo uma vez para as taxas de cada opção', m313);
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

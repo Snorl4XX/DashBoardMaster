@@ -84,6 +84,7 @@
       rpSubCombo: 'Quantidade e porcentagem por combinação de turno, segmento e doca · top {n} por turno',
       rpQty: 'Quantidade', ofTotalShort: 'do total',
       rpSubGroup: 'Local principal nas faixas, local secundário nas colunas · quantidade e percentual sobre o total',
+      estimated: 'estimada', estimatedHint: 'O JMS não confirmou o filtro de pedidos principais/filhos: taxa estimada = avarias da opção ÷ volume total.',
       amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total'
     },
     zh: {
@@ -152,6 +153,7 @@
       rpSubCombo: '按班次、分段与码头的数量及占比 · 每个班次前 {n} 名',
       rpQty: '数量', ofTotalShort: '占总数',
       rpSubGroup: '色带为一级环节，柱为二级环节 · 数量及占总数比例',
+      estimated: '估算', estimatedHint: 'JMS 未确认主子单筛选：估算指标率 = 该选项破损票数 ÷ 总票量。',
       amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额'
     }
   };
@@ -172,6 +174,7 @@
     money: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6.5 9.5v.01M17.5 14.5v.01"/>',
     moneyTop: '<path d="M12 21V9m-5 5l5-5 5 5"/><path d="M5 4h14"/>',
     regDay: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    orderKind: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/>',
     location: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><path d="M9.5 8.5l5 3M14.5 8.5l-5 3"/>',
     locationMain: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     locationSub: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
@@ -631,7 +634,8 @@
     return call('getDashboardData', state.indicator, {from: state.from, to: state.to}).then(function (res) {
       if (seq !== state.seq) return;
       renderSyncBanner(res.meta.pauses);
-      state.data = {meta: res.meta, rates: res.rates || [], rows: Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks)};
+      state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null,
+        rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds)};
       state.from = res.meta.from; state.to = res.meta.to;
       setDateInputs(state.from, state.to); highlightPreset();
       var allowed = {};
@@ -672,7 +676,8 @@
     refreshFilterOptions(f);
     renderChips();
     renderCoverage(state.data.meta);
-    var cards = Core.computeCards(c, state.data.rates, state.filtered, f, state.from, state.to);
+    var view = state.rateView = rateView(c, f);
+    var cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to);
     renderKpis(c, cards);
     renderTarget(c, cards);
     renderCharts(c);
@@ -680,6 +685,24 @@
     renderRankPanels(c);
     renderDetailTable();
   }
+  /**
+   * Avaria com UMA opção de "Pedidos principais/filhos" (Config.gs → orderKinds): a taxa e a quantidade
+   * oficiais passam a ser as do JMS para essa opção (o volume também muda), como na tela do JMS. Essa opção
+   * não conta como "filtro" no cartão: a taxa já é a dela. Todos (ou as duas opções) = taxa de sempre.
+   */
+  function rateView(c, f) {
+    var ok = c && c.orderKinds, sel = ok && f[ok.field], rv = state.data && state.data.rateVariants;
+    if (sel && sel.length === 1 && rv) {
+      var kind = sel[0] === ok.values.main ? 'main' : sel[0] === ok.values.sub ? 'sub' : null;
+      if (kind && rv[kind] && rv[kind].length) {
+        var rest = {};
+        Object.keys(f).forEach(function (k) { if (k !== ok.field) rest[k] = f[k]; });
+        return {rates: rv[kind], filters: rest, kind: kind, label: sel[0], estimated: rv[kind].some(function (r) { return r.estimated; })};
+      }
+    }
+    return {rates: state.data ? state.data.rates : [], filters: f, kind: null};
+  }
+  function activeRates() { return state.rateView && state.rateView.rates ? state.rateView.rates : state.data.rates; }
   function onFiltersChanged() {
     state.table.page = 1;
     renderDashboard();
@@ -892,8 +915,10 @@
         (k.rateMethod === 'weighted' ? ' · ' + esc(t('weighted')) : k.rateMethod === 'mean' ? ' · ' + esc(t('meanNote')) : '') + '</div>';
     }
     if (k.filtered) heroSubs += '<div class="kpi-sub">' + esc(t('officialNotFiltered')) + '</div>';
+    if (state.rateView && state.rateView.estimated) heroSubs += '<div class="kpi-sub">' + esc(t('estimatedHint')) + '</div>';
     var hero = '<article class="kpi kpi-hero"><div class="kpi-body">' +
-      '<div class="kpi-label">' + icon('gauge') + esc(day ? t('rateOfDay', {date: fmtDate(state.to, true)}) : t('rateOfPeriod') + ' · ' + fmtRange(state.from, state.to)) + '</div>' +
+      '<div class="kpi-label">' + icon('gauge') + esc((day ? t('rateOfDay', {date: fmtDate(state.to, true)}) : t('rateOfPeriod') + ' · ' + fmtRange(state.from, state.to)) +
+        (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) + (state.rateView.estimated ? ' (' + t('estimated') + ')' : '') : '')) + '</div>' +
       '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroSubs +
       '<div class="hero-row"><span class="status-pill ' + status + '">' + pill + '</span>' + (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '') + '</div>' +
       '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
@@ -1008,7 +1033,7 @@
     var canvas = $('#sparkCanvas');
     if (!canvas || !window.Chart) return;
     var to = state.to, from = Core.addDays(to, -13);
-    var evo = Core.buildEvolution(state.data.rates, c.goal, from, to);
+    var evo = Core.buildEvolution(activeRates(), c.goal, from, to);
     if (!evo.points.some(function (p) { return p.rate !== null; })) return;
     var gSpark = goalLine(c.goal, evo.points.map(function (p) { return p.rate; }));
     state.charts.spark = new Chart(canvas, {
@@ -1066,7 +1091,7 @@
     var rows = state.filtered;
     var evoFrom = state.from;
     if (state.evoMode === 'history') {
-      var first = state.data.rates.length ? state.data.rates[0].date : state.from;
+      var first = activeRates().length ? activeRates()[0].date : state.from;
       evoFrom = first < state.from ? first : state.from;
       if (Core.daysBetween(evoFrom, state.to) > 400) evoFrom = Core.addDays(state.to, -400);
     } else {
@@ -1074,7 +1099,7 @@
       var min30 = Core.addDays(state.to, -29);
       if (min30 < evoFrom) evoFrom = min30;
     }
-    var evo = Core.buildEvolution(state.data.rates, c.goal, evoFrom, state.to);
+    var evo = Core.buildEvolution(activeRates(), c.goal, evoFrom, state.to);
     evo.title = {pt: 'Evolução diária', zh: '每日趋势'};
     evo.selFrom = state.from; evo.selTo = state.to; evo.extended = evoFrom < state.from;
     return [evo].concat((c.charts || []).map(function (def) {
