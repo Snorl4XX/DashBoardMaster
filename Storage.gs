@@ -828,7 +828,8 @@ function healQueue_(limit) {
  */
 function migrateToV38_() {
   if (getProp_('MIGRATION_V38', '')) return 0;
-  const keys = Object.keys(INDICATORS).filter(k => INDICATORS[k].docks);
+  // Só a Falta de Bipagem na Expedição (as docas dos outros indicadores vieram na V3.12: migrateDocksSegments_).
+  const keys = Object.keys(INDICATORS).filter(k => INDICATORS[k].docks && k === 'missing_dispatch');
   const start = getProp_('DATA_START_DATE', '') || null, end = addDaysIso_(isoToday_(), -1);
   const jobs = [];
   keys.forEach(k => {
@@ -841,6 +842,34 @@ function migrateToV38_() {
   const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
   setProp_('MIGRATION_V38', new Date().toISOString());
   if (n) logSync_('INFO', keys.join(','), '', 'V3.8: ' + n + ' dia(s) baixados de novo para calcular as docas (1º segmento completo).');
+  return n;
+}
+
+/**
+ * V3.12: indicadores que ganharam docas pelo 1º segmento depois da V3.8 (Envio Errado). Como na V3.8,
+ * os dias já baixados não têm o 1º segmento completo (segmentRaw, necessário para separar BRE de BRE 2):
+ * uma vez por indicador (DOCKS_RAW_<INDICADOR>), o detalhe é baixado de novo, mais recentes primeiro.
+ * Enquanto não chega, a doca sai do código do 1º segmento ("BRE" sozinho fica "Sem informação").
+ * Docas pela próxima parada (SC → SC) não precisam: a coluna já está gravada.
+ */
+function migrateDocksSegments_() {
+  const keys = Object.keys(INDICATORS).filter(k => INDICATORS[k].docks && (INDICATORS[k].docks.source || 'segment') === 'segment' &&
+    !getProp_('DOCKS_RAW_' + k.toUpperCase(), ''));
+  if (!keys.length) return 0;
+  const start = getProp_('DATA_START_DATE', '') || null, end = addDaysIso_(isoToday_(), -1);
+  const jobs = [];
+  keys.forEach(k => {
+    // A Falta de Bipagem na Expedição já foi baixada de novo pela migração da V3.8.
+    if (k === 'missing_dispatch' && getProp_('MIGRATION_V38', '')) return;
+    const sm = statusMap_(k, start, end);
+    Object.keys(sm).forEach(key => {
+      const st = sm[key], d = key.slice(k.length + 1);
+      if (st.summary === 'COMPLETE' && st.details !== 'NO_RECORD') jobs.push(['DETAIL_INIT', k, d, 1]);
+    });
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  keys.forEach(k => setProp_('DOCKS_RAW_' + k.toUpperCase(), new Date().toISOString()));
+  if (n) logSync_('INFO', keys.join(','), '', 'V3.12: ' + n + ' dia(s) baixados de novo para calcular as docas (1º segmento completo).');
   return n;
 }
 
@@ -950,6 +979,7 @@ function processSyncQueue(opts) {
     migrateToV371_();
     migrateToV372_();
     migrateToV38_();
+    migrateDocksSegments_();
     // Várias passadas: jobs criados nesta execução (ex.: detalhe após o resumo) já entram.
     for (let pass = 0; pass < 6 && !stopped && Date.now() < deadline - 20000; pass++) {
       const queue = pendingJobs_().filter(j => !attempted[j.rowNum]);

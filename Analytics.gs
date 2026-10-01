@@ -35,7 +35,7 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   if (f.locationSub) row.locationSub = str(f.locationSub);
   // Indicadores com docas guardam o 1º segmento COMPLETO ("BRE - SP"); o campo segment continua
   // só com o código ("BRE"), como nos gráficos de sempre. Destino e doca saem daqui (Core.applyDocks).
-  if (cfg.docks) row.segmentRaw = JTCore_.segmentHead(row.segment);
+  if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') row.segmentRaw = JTCore_.segmentHead(row.segment);
   return rederiveRow_(indicatorKey, row);
 }
 
@@ -71,7 +71,7 @@ function dockSampleReport_(indicatorKey, records) {
     const row = normalizeDetailRow_(indicatorKey, rec, '');
     if (!row) return;
     rows.push(row);
-    const v = fieldReader_(rec)(cfg.fields.segment || []).value;
+    const v = fieldReader_(rec)(cfg.fields[cfg.docks.source || 'segment'] || []).value;
     raws.push(v === null || v === undefined ? '' : String(v).trim());
   });
   JTCore_.applyDocks(rows, cfg.docks);

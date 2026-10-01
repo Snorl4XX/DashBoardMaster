@@ -88,6 +88,23 @@ function JTCoreFactory_() {
    */
   function dockDestination(seg, docks) { return docks ? destinationOf(seg, dockIndex(docks)) : ''; }
   /**
+   * DESTINO a partir da PRÓXIMA PARADA (Expedição SC → SC: "BA FEC", "SP BRE", "MG CGE"), formato
+   * "UF CÓDIGO": vale primeiro o código da base (FEC → doca 19 · BRE → doca 22 · BAU → BRE 2) e, se ele
+   * não estiver na lista de docas, a UF (MG CGE → MG · DF BSB → DF · SP CPQ → SP → BRE 2).
+   */
+  function stopDestination(v, ix) {
+    var s = String(v || '').trim().toUpperCase();
+    if (!s) return '';
+    var tok = s.split(/[\s,;\/_\-\u2013\u2014]+/).filter(Boolean);
+    var order = tok.slice(1).concat(tok.slice(0, 1));
+    for (var i = 0; i < order.length; i++) {
+      var t = order[i];
+      if (ix.bySegment[t]) return ix.bySegment[t];
+      if (ix.byDest[t]) return t;
+    }
+    return tok[0] || '';
+  }
+  /**
    * Acrescenta dockDest (destino) e dock (doca) em cada remessa. Igual ao SE da planilha:
    * comparação sem diferenciar maiúsculas; destino sem doca = SEM DOCA; 1º segmento em branco = SEM DOCA.
    * Remessa gravada antes da V3.8 (só com o código do 1º segmento) usa esse código; "BRE" sozinho é
@@ -97,6 +114,20 @@ function JTCoreFactory_() {
     if (!docks || !rows) return rows;
     var ix = dockIndex(docks);
     var memo = {};
+    // Base da doca em outra coluna (ex.: SC → SC: docks.source = 'destination', a próxima parada do veículo).
+    if (docks.source && docks.source !== 'segment') {
+      for (var j = 0; j < rows.length; j++) {
+        var row = rows[j], v = blank(row[docks.source]) ? '' : String(row[docks.source]);
+        var mm = memo[v];
+        if (!mm) {
+          var d = stopDestination(v, ix);
+          mm = memo[v] = [d, d ? (ix.byDest[d.toUpperCase()] || docks.fallback) : docks.fallback];
+        }
+        row.dockDest = mm[0];
+        row.dock = mm[1];
+      }
+      return rows;
+    }
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i], raw = r.segmentRaw === undefined || r.segmentRaw === null ? '' : String(r.segmentRaw);
       var key = raw + '\u0001' + (r.segment || '');
@@ -584,7 +615,7 @@ function JTCoreFactory_() {
   return {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
-    dockDestination: dockDestination, applyDocks: applyDocks, pivot: pivot, rankPanel: rankPanel,
+    dockDestination: dockDestination, stopDestination: function (v, docks) { return docks ? stopDestination(v, dockIndex(docks)) : ''; }, applyDocks: applyDocks, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

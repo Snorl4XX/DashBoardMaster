@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.11.4',
+  VERSION: '3.12.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -109,6 +109,11 @@ const DOCKS_EXPEDICAO = Object.freeze({
   },
   fallback: 'SEM DOCA'
 });
+/**
+ * Mesma tabela de docas, com a PRÓXIMA PARADA DO VEÍCULO como base (Expedição SC → SC): "BA FEC" → FEC →
+ * DOCA 19 · "SP BRE" → BRE → DOCA 22 · "SP BAU" → BRE 2 → DOCA 21 · "MG CGE" (CGE fora da lista) → MG → DOCA 09.
+ */
+const DOCKS_PROXIMA_PARADA = Object.freeze(Object.assign({}, DOCKS_EXPEDICAO, {source: 'destination'}));
 
 /** Cores fixas por turno (validadas para daltonismo). A cor segue o turno em todos os gráficos. */
 const SHIFT_COLORS = Object.freeze({T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7', 'N/A': '#9CA3AF'});
@@ -140,7 +145,9 @@ const INDICATORS = Object.freeze({
     },
     labels: {destination: {pt: 'Destino incorreto', zh: '错发下一站'}, segment: {pt: '1º segmento', zh: '一段码'}},
     emptyLotLabel: {pt: 'Volumosos', zh: '大件'},
-    filters: ['shift', 'login', 'segment', 'destination', 'interval', 'lot', 'client'],
+    // Docas pelo 1º segmento do pedido (mesma regra da Falta de Bipagem na Expedição).
+    docks: DOCKS_EXPEDICAO,
+    filters: ['shift', 'login', 'segment', 'destination', 'interval', 'lot', 'client', 'dock'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
@@ -149,6 +156,20 @@ const INDICATORS = Object.freeze({
       {key: 'segment', type: 'bar', top: 10, title: {pt: 'Primeiro segmento afetado', zh: '受影响一段码'}},
       {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Destinos incorretos ofensores', zh: '高频错发下一站'}},
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
+    ],
+    rankPanels: [
+      {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
+        title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
+        stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
+      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
+        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
+      {key: 'destDockByShift', kind: 'byShift', dim: 'dockDest', extra: 'dock', top: 5, accent: 'count', bands: 'top',
+        title: {pt: 'Turno + segmento + doca', zh: '班次、分段与码头'},
+        stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
+    ],
+    pivotTables: [
+      {key: 'dockDest', groupBy: ['dock', 'dockDest'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
+      {key: 'shiftDock', groupBy: ['shift', 'dock'], topPerGroup: 3, skipNA: true, title: {pt: 'Turno × docas mais ofensoras', zh: '各班次责任月台'}}
     ],
     summaryTable: {
       title: {pt: 'Segmentos ofensores', zh: '主要问题分段'},
@@ -159,8 +180,8 @@ const INDICATORS = Object.freeze({
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Remessa', '运单号'], ['login', 'Login', '操作员'],
       ['shift', 'Turno', '班次'], ['segment', '1º segmento', '一段码'], ['correctDest', 'Destino correto', '应发下一站'],
-      ['destination', 'Destino incorreto', '错发下一站'], ['lot', 'Saca / Lote', '包号'],
-      ['eventTime', 'Horário de bipagem', '扫描时间'], ['client', 'Cliente', '客户']
+      ['destination', 'Destino incorreto', '错发下一站'], ['dockDest', 'Destino (doca)', '目的地'], ['dock', 'Doca', '月台'],
+      ['lot', 'Saca / Lote', '包号'], ['eventTime', 'Horário de bipagem', '扫描时间'], ['client', 'Cliente', '客户']
     ]
   },
 
@@ -310,7 +331,9 @@ const INDICATORS = Object.freeze({
     },
     labels: {destination: {pt: 'Próxima parada do veículo', zh: '车辆下一站'}, tripId: {pt: 'ID viagem expedição', zh: '发件车次号'}, lot: {pt: 'ID lote expedido', zh: '发件包号'},
       idealTime: {pt: 'Horário ideal de expedição', zh: '理想发车时间'}, expeditionTime: {pt: 'Hora de partida', zh: '发车时间'}},
-    filters: ['shift', 'tripId', 'lot', 'destination', 'reason', 'idealTime'],
+    // Docas pela próxima parada do veículo (coluna nova "Doca", calculada na leitura).
+    docks: DOCKS_PROXIMA_PARADA,
+    filters: ['shift', 'tripId', 'lot', 'destination', 'reason', 'idealTime', 'dock'],
     topCards: ['idealTime', 'expeditionTime'],
     hideShiftCards: true,
     charts: [
@@ -320,10 +343,25 @@ const INDICATORS = Object.freeze({
       {key: 'reason', type: 'bar', horizontal: true, top: 10, title: {pt: 'Motivos fora do prazo', zh: '超时原因'}},
       {key: 'idealTime', type: 'bar', top: 12, title: {pt: 'Horário ideal com mais fora do prazo', zh: '超时最多的理想发车时间'}}
     ],
+    rankPanels: [
+      {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
+        title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
+        stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
+      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
+        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
+      {key: 'stopDockByShift', kind: 'byShift', dim: 'destination', extra: 'dock', top: 5, accent: 'count', bands: 'top',
+        title: {pt: 'Turno + próxima parada + doca', zh: '班次、车辆下一站与码头'},
+        sub: {pt: 'Quantidade e porcentagem por combinação de turno, próxima parada e doca · top {n} por turno', zh: '按班次、车辆下一站与码头的数量及占比 · 每个班次前 {n} 名'},
+        stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
+    ],
+    pivotTables: [
+      {key: 'dockStop', groupBy: ['dock', 'destination'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
+      {key: 'shiftDock', groupBy: ['shift', 'dock'], topPerGroup: 3, skipNA: true, title: {pt: 'Turno × docas mais ofensoras', zh: '各班次责任月台'}}
+    ],
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Remessa', '运单号'], ['reason', 'Motivo fora do prazo', '超时原因'],
       ['receiptTime', 'Horário descarregamento veículo de chegada', '到件车辆卸车时间'],
-      ['expeditionTime', 'Hora de partida', '发车时间'], ['destination', 'Próxima parada do veículo', '车辆下一站'],
+      ['expeditionTime', 'Hora de partida', '发车时间'], ['destination', 'Próxima parada do veículo', '车辆下一站'], ['dock', 'Doca', '月台'],
       ['tripId', 'ID viagem do veículo de expedição', '发件车次号'], ['lot', 'ID lote expedido', '发件包号'],
       ['idealTimeFull', 'Horário ideal de expedição', '理想发车时间']
     ]
@@ -495,7 +533,10 @@ const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1};
 function clientFields_(cfg) {
   const set = {};
   usedFields_(cfg).forEach(k => { if (!DERIVED_CLIENT_FIELDS_[k]) set[k] = 1; });
-  if (cfg.docks) { set.segmentRaw = 1; set.segment = 1; }
+  if (cfg.docks) {
+    const src = cfg.docks.source || 'segment';
+    if (src === 'segment') { set.segmentRaw = 1; set.segment = 1; } else set[src] = 1;
+  }
   return Object.keys(set);
 }
 

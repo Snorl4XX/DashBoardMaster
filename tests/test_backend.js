@@ -709,7 +709,7 @@ const smp = ctx.dockSampleReport_('missing_dispatch', [
   {billcode: '5', threeSegmentCode: '', unloadArriveTime: FX.data + ' 18:00:00'}]);
 check(smp.amostra === 5 && smp.docas[0].doca === 'DOCA 21' && smp.docas[0].pct === 40 && smp.exemplos[0].codigo === 'SP,381-01,020' && smp.exemplos[0].destino === 'BRE 2' &&
   smp.semDoca.map(x => x.valor).join() === 'SBN,(em branco)', 'diagnóstico: amostra de docas e SEM DOCA', smp);
-check(ctx.dockSampleReport_('wrong_send', [{billcode: '1'}]) === null, 'amostra de docas só onde há docas');
+check(ctx.dockSampleReport_('sorting_error', [{billcode: '1'}]) === null, 'amostra de docas só onde há docas');
 
 // (b) Painel: filtro de docas, 2 gráficos novos, colunas Destino/Doca — sem tirar nada do que existia.
 check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,destination,dock', 'filtro de docas adicionado no fim, filtros antigos mantidos');
@@ -759,7 +759,8 @@ check(compMD.rows.length > 0 && compMD.rows.every(r => r.dock === 'DOCA 21') && 
   'relatório: filtro por doca e tabelas dinâmicas', compMD.pivots.map(p => p.groups.length));
 const diagMD = cMD.diagnosticoCompleto(D19);
 check(/Docas \(1ª página do detalhe, \d+ remessas\): DOCA/.test(diagMD.texto) && /Código de três segmentos → destino → doca: "/.test(diagMD.texto) &&
-  diagMD.indicadores.missing_dispatch.docas && !diagMD.indicadores.wrong_send.docas, 'diagnosticoCompleto mostra a amostra de docas da Expedição',
+  diagMD.indicadores.missing_dispatch.docas && !diagMD.indicadores.sorting_error.docas && /Próxima parada do veículo → destino → doca: "/.test(diagMD.texto),
+  'diagnosticoCompleto mostra a amostra de docas (1º segmento e próxima parada)',
   diagMD.texto.split('\n').filter(l => /Docas|segmentos →|SEM DOCA/.test(l)));
 cMD.UrlFetchApp.fetch = () => ({getResponseCode: () => 200, getBlob: () => cMD.Utilities.newBlob('PDF', 'application/pdf', 'x')});
 const repMD = cMD.generateReport('missing_dispatch', {from: D19, to: D19}, 'xlsx');
@@ -990,5 +991,38 @@ cRu.queueHistory(D19, D19, false);
 runAll(cRu, 2);
 check(!cRu.__state.props.JMS_ROUTE_AUTO_DAMAGE && cRu.__state.fetches.filter(f => /BreakageRate/.test(f.url)).every(f => f.headers.Routernamelist === 'X>Y'),
   'com JMS_ROUTENAMELIST_DAMAGE cadastrada, o sistema não troca o cabeçalho');
+
+// ---------- 19. V3.12: docas na Expedição SC → SC (próxima parada) e no Envio Errado (1º segmento) ----------
+const DPP = vm.runInContext('DOCKS_PROXIMA_PARADA', ctx), DEXP = vm.runInContext('DOCKS_EXPEDICAO', ctx);
+const stopCases = {'BA FEC': ['FEC', 'DOCA 19'], 'SP BRE': ['BRE', 'DOCA 22'], 'MG CGE': ['MG', 'DOCA 09'], 'DF BSB': ['DF', 'DOCA 16'],
+  'RJ SJM': ['RJ', 'DOCA 10'], 'PE JGS': ['PE', 'DOCA 15'], 'SP BAU': ['BRE 2', 'DOCA 21'], 'SP GRU': ['GRU', 'DOCA 14'], 'AM MAO': ['BRE 2', 'DOCA 21'],
+  'MS CGR': ['MS', 'DOCA 20'], 'SC JOI': ['SC', 'DOCA 08'], 'GO GYN': ['GO', 'DOCA 07'], 'XX YYY': ['XX', 'SEM DOCA'], '': ['', 'SEM DOCA']};
+const stopRows = C.applyDocks(Object.keys(stopCases).map(v => ({destination: v})), DPP);
+check(stopRows.every(r => r.dockDest === stopCases[r.destination][0] && r.dock === stopCases[r.destination][1]) && DPP.source === 'destination' && DPP.map === DEXP.map,
+  'SC → SC: doca pela próxima parada (código da base; se não estiver na lista, a UF) com a mesma tabela de docas', stopRows.map(r => r.destination + '→' + r.dock));
+const cSC = freshCtx({'2026-09-19': makeDay(D19, 81)});
+cSC.queueHistory(D19, D19, true);
+runAll(cSC);
+const catSC = cSC.getPublicCatalog_().filter(x => x.key === 'sc_sc')[0], catWS = cSC.getPublicCatalog_().filter(x => x.key === 'wrong_send')[0];
+const dashSC = cSC.getDashboardData('sc_sc', {from: D19, to: D19});
+const rowsSC = C.applyDocks(C.decodeDataset(dashSC.dataset), catSC.docks);
+check(catSC.filters.some(f => f.key === 'dock') && catSC.rankPanels.length === 3 && rowsSC.length > 0 &&
+  rowsSC.every(r => r.dock === stopCases[r.destination][1]) && dashSC.dataset.fields.indexOf('segmentRaw') < 0,
+  'SC → SC: filtro e gráficos de docas; a doca sai da próxima parada já gravada (sem baixar de novo)', catSC.rankPanels.map(p => p.key));
+const compSC = cSC.computeDashboard_('sc_sc', {from: D19, to: D19, filters: {dock: ['DOCA 19']}});
+check(compSC.rows.length > 0 && compSC.rows.every(r => r.dock === 'DOCA 19' && /FEC|^BA /.test(r.destination)) && compSC.pivots[0].groups.length === 1,
+  'SC → SC: relatório com filtro de doca e tabela dinâmica doca × próxima parada', compSC.rows.length);
+const dashWS = cSC.getDashboardData('wrong_send', {from: D19, to: D19});
+const rowsWS = C.applyDocks(C.decodeDataset(dashWS.dataset), catWS.docks);
+check(catWS.filters.some(f => f.key === 'dock') && catWS.rankPanels.length === 3 && dashWS.dataset.fields.indexOf('segmentRaw') >= 0 &&
+  rowsWS.every(r => r.dock && r.dock === C.applyDocks([{segmentRaw: r.segmentRaw, segment: r.segment}], DEXP)[0].dock),
+  'Envio Errado: docas pelo 1º segmento, igual à Falta de Bipagem na Expedição', rowsWS.slice(0, 3).map(r => r.segmentRaw + '→' + r.dock));
+// Envio Errado já baixado sem o 1º segmento completo: baixado de novo uma vez (a Expedição já foi pela V3.8).
+delete cSC.__state.props.DOCKS_RAW_WRONG_SEND; delete cSC.__state.props.DOCKS_RAW_MISSING_DISPATCH;
+cSC.__state.props.MIGRATION_V38 = '2026-09-25T00:00:00Z';
+const migWS = cSC.migrateDocksSegments_();
+const reWS = cSC.allTabRows_('JOBS').filter(r => r[1] === 'DETAIL_INIT' && r[5] === 'PENDING');
+check(migWS === 1 && reWS.length === 1 && reWS[0][2] === 'wrong_send' && cSC.migrateDocksSegments_() === 0 && !!cSC.__state.props.DOCKS_RAW_MISSING_DISPATCH,
+  'atualização: Envio Errado baixado de novo uma vez para as docas; Expedição e SC → SC não', reWS.map(r => r[2]));
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

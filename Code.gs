@@ -212,7 +212,7 @@ function atualizarParaV37() {
   deleteProp_('MIGRATION_V371');
   deleteProp_('MIGRATION_V372');
   clearPauses_();
-  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + queueNewIndicatorsHistory_();
+  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateDocksSegments_() + migrateToV3112_() + migrateToV3114_() + queueNewIndicatorsHistory_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};
@@ -437,7 +437,7 @@ function diagnosticoCompleto(date) {
     const dk = item.docas;
     if (dk && dk.amostra) {
       lines.push('  Docas (1ª página do detalhe, ' + dk.amostra + ' remessas): ' + dk.docas.slice(0, 6).map(x => x.doca + ' ' + x.pct + '%').join(' · '));
-      lines.push('  Código de três segmentos → destino → doca: ' + dk.exemplos.map(x => '"' + x.codigo + '" → ' + x.destino + ' → ' + x.doca).join(' · '));
+      lines.push('  ' + (cfg.docks && cfg.docks.source === 'destination' ? 'Próxima parada do veículo' : 'Código de três segmentos') + ' → destino → doca: ' + dk.exemplos.map(x => '"' + x.codigo + '" → ' + x.destino + ' → ' + x.doca).join(' · '));
       if (dk.semDoca.length) lines.push('  SEM DOCA nesta amostra (inclua em DOCKS_EXPEDICAO, Config.gs, se tiverem doca): ' +
         dk.semDoca.slice(0, 12).map(x => x.valor + ' (' + x.n + ')').join(' · '));
     }

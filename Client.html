@@ -1589,7 +1589,7 @@
     var key = 'rp_' + def.key, p = Core.rankPanel(state.filtered, def);
     $('h3', card).innerHTML = esc(L(def.title)) + (Lo(def.title) ? ' <span class="rp-zh">/ ' + esc(Lo(def.title)) + '</span>' : '') +
       (detailIsPartial() ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
-    $('small', card).textContent = def.kind === 'byGroup' ? t('rpSubGroup') : def.kind === 'byShift' ? t(def.extra ? 'rpSubCombo' : 'rpSubShift', {n: def.top}) : t('rpSubAll');
+    $('small', card).textContent = def.sub ? fill(L(def.sub), {n: def.top}) : def.kind === 'byGroup' ? t('rpSubGroup') : def.kind === 'byShift' ? t(def.extra ? 'rpSubCombo' : 'rpSubShift', {n: def.top}) : t('rpSubAll');
     var body = $('.rp-body', card), stats = $('.rp-stats', card);
     if (!p.total) {
       destroyChart(key);

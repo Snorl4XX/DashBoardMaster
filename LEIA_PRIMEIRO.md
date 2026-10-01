@@ -1,6 +1,47 @@
-# J&T DASHMASTER V3.11.4 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.12 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.12 — Docas na Expedição SC → SC e no Envio Errado
+Os dois painéis ganharam o **filtro DOCA** e os **3 gráficos de docas**, no padrão da Falta de Bipagem na Expedição:
+- *Distribuição geral por docas*;
+- *Docas por turno*;
+- *Turno + … + doca*.
+
+No relatório (PDF/Excel), as docas saem em tabelas dinâmicas. Na tabela de remessas entra a coluna **Doca**. A distribuição das docas é a mesma tabela (`DOCKS_EXPEDICAO`, Config.gs):
+
+| Doca | Segmentos |
+|---|---|
+| 22 | BRE |
+| 21 | BRE 2 = AC, AM, BAU, BJE, BVB, CDG, JDF, LDB, SOD, SP, SP1, STM, TO, VCP, XAP, DC, NAT, MA, MIA, MRB, PA, RO, SJP |
+| 20 | MS |
+| 19 | SE, BA, PI, AL, CE, SBA, IMP, MCZ, SNS, FEC |
+| 18 | PR, PR1 |
+| 17 | RS, RS1 |
+| 16 | DF |
+| 15 | PE, BYE |
+| 14 | GRU |
+| 10 | VDC, RJ, ES |
+| 09 | CHV, MG, MG1 |
+| 08 | SC, SC1 |
+| 07 | GO |
+| 06 | MT |
+| 05 | NE, NE1 |
+
+**Expedição SC → SC: doca pela "Próxima parada do veículo"**, no formato "UF + código da base":
+- vale primeiro o código da base: "BA FEC" → FEC → **DOCA 19**; "SP BRE" → BRE → **DOCA 22**; "SP BAU" → BRE 2 → **DOCA 21**; "SP GRU" → **DOCA 14**;
+- se o código não estiver na lista, vale a UF: "MG CGE" → MG → **DOCA 09**; "DF BSB" → **DOCA 16**; "RJ SJM" → **DOCA 10**;
+- próxima parada fora da lista = **SEM DOCA**;
+- o 3º gráfico é *Turno + próxima parada + doca* (ex.: "PE JGS - Doca 15");
+- a coluna já está gravada: o histórico inteiro ganha docas na hora, sem baixar nada.
+
+**Envio Errado: doca pelo 1º segmento do pedido**, como na Falta de Bipagem na Expedição:
+- "SP", "BAU", "BRE - SP"… → BRE 2 → DOCA 21; "BRE" → DOCA 22;
+- o 3º gráfico é *Turno + segmento + doca*;
+- os dias já baixados não tinham o 1º segmento completo, necessário para separar BRE de BRE 2. O detalhe desses dias é baixado de novo uma vez, sozinho, mais recentes primeiro;
+- enquanto não chega, a doca sai do código do 1º segmento, e "BRE" sozinho fica "Sem informação".
+
+**Para incluir um segmento ou trocar uma doca:** edite só a tabela `DOCKS_EXPEDICAO` em Config.gs. Vale para os 3 indicadores e para todo o histórico. O `diagnosticoCompleto()` mostra exemplos de "próxima parada → destino → doca" e a lista do que ficou SEM DOCA.
 
 ## V3.11.4 — Avaria: outros dias, local da avaria, filtro de produto e "OUTRAS BASES"
 - **Outros dias da Avaria não apareciam.** A regra da V3.11.2 considerava que um indicador já tinha histórico se tivesse algum dia com mais de 3 dias. A Avaria, instalada havia alguns dias só com a revalidação de hora em hora, caía nessa regra e o histórico nunca era baixado.
@@ -433,7 +474,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **232 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **237 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
