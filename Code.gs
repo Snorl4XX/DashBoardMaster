@@ -212,7 +212,7 @@ function atualizarParaV37() {
   deleteProp_('MIGRATION_V371');
   deleteProp_('MIGRATION_V372');
   clearPauses_();
-  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateDocksSegments_() + migrateToV3112_() + migrateToV3114_() + queueNewIndicatorsHistory_();
+  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + queueNewIndicatorsHistory_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};

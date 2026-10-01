@@ -1014,15 +1014,16 @@ check(compSC.rows.length > 0 && compSC.rows.every(r => r.dock === 'DOCA 19' && /
   'SC → SC: relatório com filtro de doca e tabela dinâmica doca × próxima parada', compSC.rows.length);
 const dashWS = cSC.getDashboardData('wrong_send', {from: D19, to: D19});
 const rowsWS = C.applyDocks(C.decodeDataset(dashWS.dataset), catWS.docks);
-check(catWS.filters.some(f => f.key === 'dock') && catWS.rankPanels.length === 3 && dashWS.dataset.fields.indexOf('segmentRaw') >= 0 &&
-  rowsWS.every(r => r.dock && r.dock === C.applyDocks([{segmentRaw: r.segmentRaw, segment: r.segment}], DEXP)[0].dock),
-  'Envio Errado: docas pelo 1º segmento, igual à Falta de Bipagem na Expedição', rowsWS.slice(0, 3).map(r => r.segmentRaw + '→' + r.dock));
-// Envio Errado já baixado sem o 1º segmento completo: baixado de novo uma vez (a Expedição já foi pela V3.8).
-delete cSC.__state.props.DOCKS_RAW_WRONG_SEND; delete cSC.__state.props.DOCKS_RAW_MISSING_DISPATCH;
-cSC.__state.props.MIGRATION_V38 = '2026-09-25T00:00:00Z';
-const migWS = cSC.migrateDocksSegments_();
-const reWS = cSC.allTabRows_('JOBS').filter(r => r[1] === 'DETAIL_INIT' && r[5] === 'PENDING');
-check(migWS === 1 && reWS.length === 1 && reWS[0][2] === 'wrong_send' && cSC.migrateDocksSegments_() === 0 && !!cSC.__state.props.DOCKS_RAW_MISSING_DISPATCH,
-  'atualização: Envio Errado baixado de novo uma vez para as docas; Expedição e SC → SC não', reWS.map(r => r[2]));
+check(catWS.docks.source === 'destination' && catWS.filters.some(f => f.key === 'dock') && catWS.rankPanels.length === 3 &&
+  catWS.rankPanels[2].dim === 'destination' && dashWS.dataset.fields.indexOf('segmentRaw') < 0 && rowsWS.length > 0 &&
+  rowsWS.every(r => r.dock === stopCases[r.destination][1]),
+  'Envio Errado: doca pela próxima parada (para onde a saca foi enviada), mesma regra do SC → SC', rowsWS.slice(0, 3).map(r => r.destination + '→' + r.dock));
+const compWS = cSC.computeDashboard_('wrong_send', {from: D19, to: D19, filters: {dock: ['DOCA 22']}});
+check(compWS.rows.length > 0 && compWS.rows.every(r => r.dock === 'DOCA 22' && r.destination === 'SP BRE') && compWS.pivots[0].groups[0].value === 'DOCA 22',
+  'Envio Errado: filtro de doca e tabela dinâmica doca × próxima parada no relatório', compWS.rows.length);
+// Próxima parada já é gravada: nenhum dia precisa ser baixado de novo; a migração da V3.8 continua só na Expedição.
+delete cSC.__state.props.MIGRATION_V38;
+const n38 = cSC.migrateToV38_();
+check(cSC.pendingJobs_().every(j => j.indicator === 'missing_dispatch') && n38 === 1, 'docas pela próxima parada não baixam o histórico de novo', n38);
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

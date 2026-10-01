@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.12.0',
+  VERSION: '3.12.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -110,8 +110,9 @@ const DOCKS_EXPEDICAO = Object.freeze({
   fallback: 'SEM DOCA'
 });
 /**
- * Mesma tabela de docas, com a PRÓXIMA PARADA DO VEÍCULO como base (Expedição SC → SC): "BA FEC" → FEC →
- * DOCA 19 · "SP BRE" → BRE → DOCA 22 · "SP BAU" → BRE 2 → DOCA 21 · "MG CGE" (CGE fora da lista) → MG → DOCA 09.
+ * Mesma tabela de docas, com a PRÓXIMA PARADA como base (Expedição SC → SC: próxima parada do veículo;
+ * Envio Errado: próxima parada para onde a saca foi enviada): "BA FEC" → FEC → DOCA 19 · "SP BRE" → BRE →
+ * DOCA 22 · "SP BAU" → BRE 2 → DOCA 21 · "MG CGE" (CGE fora da lista) → MG → DOCA 09.
  */
 const DOCKS_PROXIMA_PARADA = Object.freeze(Object.assign({}, DOCKS_EXPEDICAO, {source: 'destination'}));
 
@@ -145,8 +146,9 @@ const INDICATORS = Object.freeze({
     },
     labels: {destination: {pt: 'Destino incorreto', zh: '错发下一站'}, segment: {pt: '1º segmento', zh: '一段码'}},
     emptyLotLabel: {pt: 'Volumosos', zh: '大件'},
-    // Docas pelo 1º segmento do pedido (mesma regra da Falta de Bipagem na Expedição).
-    docks: DOCKS_EXPEDICAO,
+    // Docas pela PRÓXIMA PARADA (destino para onde a saca foi enviada): mostra em que doca estão
+    // colocando mais sacas erradas.
+    docks: DOCKS_PROXIMA_PARADA,
     filters: ['shift', 'login', 'segment', 'destination', 'interval', 'lot', 'client', 'dock'],
     topCards: ['segment'],
     charts: [
@@ -163,12 +165,13 @@ const INDICATORS = Object.freeze({
         stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
       {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
         title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
-      {key: 'destDockByShift', kind: 'byShift', dim: 'dockDest', extra: 'dock', top: 5, accent: 'count', bands: 'top',
-        title: {pt: 'Turno + segmento + doca', zh: '班次、分段与码头'},
+      {key: 'stopDockByShift', kind: 'byShift', dim: 'destination', extra: 'dock', top: 5, accent: 'count', bands: 'top',
+        title: {pt: 'Turno + próxima parada + doca', zh: '班次、下一站与码头'},
+        sub: {pt: 'Quantidade e porcentagem por combinação de turno, próxima parada e doca · top {n} por turno', zh: '按班次、下一站与码头的数量及占比 · 每个班次前 {n} 名'},
         stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
     ],
     pivotTables: [
-      {key: 'dockDest', groupBy: ['dock', 'dockDest'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
+      {key: 'dockStop', groupBy: ['dock', 'destination'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
       {key: 'shiftDock', groupBy: ['shift', 'dock'], topPerGroup: 3, skipNA: true, title: {pt: 'Turno × docas mais ofensoras', zh: '各班次责任月台'}}
     ],
     summaryTable: {
@@ -180,7 +183,7 @@ const INDICATORS = Object.freeze({
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Remessa', '运单号'], ['login', 'Login', '操作员'],
       ['shift', 'Turno', '班次'], ['segment', '1º segmento', '一段码'], ['correctDest', 'Destino correto', '应发下一站'],
-      ['destination', 'Destino incorreto', '错发下一站'], ['dockDest', 'Destino (doca)', '目的地'], ['dock', 'Doca', '月台'],
+      ['destination', 'Destino incorreto', '错发下一站'], ['dock', 'Doca', '月台'],
       ['lot', 'Saca / Lote', '包号'], ['eventTime', 'Horário de bipagem', '扫描时间'], ['client', 'Cliente', '客户']
     ]
   },

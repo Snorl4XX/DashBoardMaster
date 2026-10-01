@@ -1,6 +1,12 @@
-# J&T DASHMASTER V3.12 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.12.1 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.12.1 — Envio Errado: doca pela Próxima Parada
+- No Envio Errado, a doca agora sai da coluna **Próxima Parada**: o destino para onde a saca foi enviada errada. Assim os gráficos mostram em que doca estão colocando mais sacas erradas.
+  - A regra é a mesma do SC → SC: "BA FEC" → **DOCA 19**, "SP BRE" → **DOCA 22**, "MG CGE" → **DOCA 09**.
+- O 3º gráfico virou *Turno + próxima parada + doca*. No relatório, a tabela dinâmica é doca × próxima parada.
+- A próxima parada já é gravada: o histórico inteiro ganha docas na hora. O novo download do Envio Errado previsto na V3.12 não é mais necessário e foi retirado.
 
 ## V3.12 — Docas na Expedição SC → SC e no Envio Errado
 Os dois painéis ganharam o **filtro DOCA** e os **3 gráficos de docas**, no padrão da Falta de Bipagem na Expedição:
@@ -35,11 +41,7 @@ No relatório (PDF/Excel), as docas saem em tabelas dinâmicas. Na tabela de rem
 - o 3º gráfico é *Turno + próxima parada + doca* (ex.: "PE JGS - Doca 15");
 - a coluna já está gravada: o histórico inteiro ganha docas na hora, sem baixar nada.
 
-**Envio Errado: doca pelo 1º segmento do pedido**, como na Falta de Bipagem na Expedição:
-- "SP", "BAU", "BRE - SP"… → BRE 2 → DOCA 21; "BRE" → DOCA 22;
-- o 3º gráfico é *Turno + segmento + doca*;
-- os dias já baixados não tinham o 1º segmento completo, necessário para separar BRE de BRE 2. O detalhe desses dias é baixado de novo uma vez, sozinho, mais recentes primeiro;
-- enquanto não chega, a doca sai do código do 1º segmento, e "BRE" sozinho fica "Sem informação".
+**Envio Errado:** na V3.12 a doca saía do 1º segmento do pedido. Desde a V3.12.1 ela sai da Próxima Parada (veja acima).
 
 **Para incluir um segmento ou trocar uma doca:** edite só a tabela `DOCKS_EXPEDICAO` em Config.gs. Vale para os 3 indicadores e para todo o histórico. O `diagnosticoCompleto()` mostra exemplos de "próxima parada → destino → doca" e a lista do que ficou SEM DOCA.
 
@@ -474,7 +476,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **237 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **238 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
