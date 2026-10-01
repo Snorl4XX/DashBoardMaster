@@ -84,6 +84,14 @@
       rpSubCombo: 'Quantidade e porcentagem por combinação de turno, segmento e doca · top {n} por turno',
       rpQty: 'Quantidade', ofTotalShort: 'do total',
       rpSubGroup: 'Local principal nas faixas, local secundário nas colunas · quantidade e percentual sobre o total',
+      detailsWindow: 'Detalhe só dos últimos {n} dias · {d} dia(s) só com o resumo',
+      summaryBadge: 'Totais por campo · {n} combinações no período',
+      summaryHint: 'Combinações demais para o navegador: os gráficos e as listas dos filtros usam os totais de cada campo calculados no servidor, e cada filtro é aplicado lá (leva alguns segundos). A tabela mostra as maiores combinações.',
+      topRowsNote: 'Mostrando as {n} maiores combinações (quantidade). Filtre para ver outras.',
+      mpSub: 'Números oficiais do JMS · {n} dias até a data escolhida (coluna vermelha) para comparar', mpAvg: 'Média de {n} dias',
+      mpMax: 'Maior', mpMin: 'Menor', noPrevDay: 'sem dia anterior', mpTable: 'Dados gerais / 总体数据',
+      mpTableSub: 'Os números de cada dia, como na primeira tabela da tela do JMS',
+      detailsWindowHint: 'Para não estourar a cota do Google (~500 mil remessas por dia), os gráficos por DC/base/viagem usam só os últimos dias. Os números do resumo valem para todos os dias:',
       estimated: 'estimada', estimatedHint: 'O JMS não confirmou o filtro de pedidos principais/filhos: taxa estimada = avarias da opção ÷ volume total.',
       amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total'
     },
@@ -153,6 +161,14 @@
       rpSubCombo: '按班次、分段与码头的数量及占比 · 每个班次前 {n} 名',
       rpQty: '数量', ofTotalShort: '占总数',
       rpSubGroup: '色带为一级环节，柱为二级环节 · 数量及占总数比例',
+      detailsWindow: '仅最近 {n} 天有明细 · {d} 天仅有汇总',
+      summaryBadge: '按字段汇总 · 期间共 {n} 个组合',
+      summaryHint: '组合太多，浏览器无法加载：图表和筛选列表使用服务器计算的各字段汇总，筛选在服务器执行（需几秒）。表格显示数量最多的组合。',
+      topRowsNote: '显示数量最多的 {n} 个组合。筛选可查看其他组合。',
+      mpSub: 'JMS官方数字 · 截至所选日期的 {n} 天（红色柱）用于对比', mpAvg: '{n} 天平均',
+      mpMax: '最高', mpMin: '最低', noPrevDay: '无前一日', mpTable: '总体数据 / Dados gerais',
+      mpTableSub: '每天的数字，与JMS页面第一张表一致',
+      detailsWindowHint: '为避免超出 Google 配额（每天约50万票），按中心/网点/车次的图表只使用最近几天的数据。汇总数字涵盖所有日期：',
       estimated: '估算', estimatedHint: 'JMS 未确认主子单筛选：估算指标率 = 该选项破损票数 ÷ 总票量。',
       amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额'
     }
@@ -174,6 +190,11 @@
     money: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6.5 9.5v.01M17.5 14.5v.01"/>',
     moneyTop: '<path d="M12 21V9m-5 5l5-5 5 5"/><path d="M5 4h14"/>',
     regDay: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    column: '<path d="M4 5h7v14H4zM13 5h7v14h-7z"/>',
+    destCenter: '<path d="M3 21V8l9-5 9 5v13"/><path d="M9 21v-6h6v6"/>',
+    destBase: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><path d="M9 9h6"/>',
+    qty: '<path d="M4 7h16M4 12h16M4 17h10"/>',
+    arrival_flow: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M8 3v4m-2-2l2 2 2-2"/>',
     orderKind: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/>',
     location: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><path d="M9.5 8.5l5 3M14.5 8.5l-5 3"/>',
     locationMain: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
@@ -631,11 +652,17 @@
     renderHeader();
     // Período longo: avisa que ainda está carregando (antes ficava só a barra, sem explicação).
     var slow = setTimeout(function () { if (seq === state.seq && !opts.silent) toast(t('slowLoading')); }, 12000);
-    return call('getDashboardData', state.indicator, {from: state.from, to: state.to}).then(function (res) {
+    var req = {from: state.from, to: state.to};
+    if (c && c.grouped) req.filters = filtersObj();
+    return call('getDashboardData', state.indicator, req).then(function (res) {
       if (seq !== state.seq) return;
       renderSyncBanner(res.meta.pauses);
+      var sm = res.summary;
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null,
-        rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds)};
+        rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds),
+        // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
+        summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
+          totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};
       state.from = res.meta.from; state.to = res.meta.to;
       setDateInputs(state.from, state.to); highlightPreset();
       var allowed = {};
@@ -672,7 +699,8 @@
     if (!state.data) return;
     var c = cfg(), f = filtersObj();
     renderHeader();
-    state.filtered = Core.applyFilters(state.data.rows, f);
+    // Modo de totais: as linhas (totais por dia e coluna) já vêm filtradas do servidor.
+    state.filtered = state.data.summary ? state.data.rows : Core.applyFilters(state.data.rows, f);
     refreshFilterOptions(f);
     renderChips();
     renderCoverage(state.data.meta);
@@ -683,6 +711,7 @@
     renderCharts(c);
     renderSummaryTable(c);
     renderRankPanels(c);
+    renderMetricPanels(c);
     renderDetailTable();
   }
   /**
@@ -705,6 +734,15 @@
   function activeRates() { return state.rateView && state.rateView.rates ? state.rateView.rates : state.data.rates; }
   function onFiltersChanged() {
     state.table.page = 1;
+    if (state.data && state.data.summary) {
+      // Recebimento com período grande: o filtro é aplicado no servidor. Marca a escolha na hora e espera
+      // um instante (vários cliques seguidos viram uma consulta só).
+      refreshFilterOptions(filtersObj());
+      renderChips();
+      clearTimeout(state.refilterTimer);
+      state.refilterTimer = setTimeout(function () { loadDashboard(); }, 450);
+      return;
+    }
     renderDashboard();
   }
 
@@ -835,8 +873,10 @@
     state.builtFor = state.indicator;
   }
   function refreshFilterOptions(f) {
-    var keys = Object.keys(state.dropdowns);
-    var facets = Core.facets(state.data.rows, f, keys);
+    var keys = Object.keys(state.dropdowns), sm = state.data.summary, facets = {};
+    // Modo de totais: a lista de cada filtro vem dos totais daquele campo (já com os outros filtros).
+    if (sm) keys.forEach(function (k) { var o = {}; if (f[k]) o[k] = f[k]; facets[k] = Core.facets(sm.byDim[k] || [], o, [k])[k]; });
+    else facets = Core.facets(state.data.rows, f, keys);
     keys.forEach(function (k) {
       var d = state.dropdowns[k], opts = facets[k] || [];
       d.setOptions(opts);
@@ -883,9 +923,14 @@
     var capped = a.notLoaded || [];
     if (pend.length || !capped.length) {
       html += badge(pend.length ? 'warn' : 'ok', pend.length ? 'warn' : 'check',
-        pend.length ? t('detailsPartial', {n: pend.length}) : t('detailsOk', {n: fmtInt(meta.rowsLoaded)}),
+        pend.length ? t('detailsPartial', {n: pend.length}) : t('detailsOk', {n: fmtInt(cfg() && cfg().grouped && state.data ?
+          (state.data.summary ? state.data.summary.totalQty : Core.distinctCount(state.data.rows)) : meta.rowsLoaded)}),
         pend.map(function (d) { return fmtDate(d, true); }).join(', '));
     }
+    if (state.data && state.data.summary) html += badge('ok', 'info', t('summaryBadge', {n: fmtInt(state.data.summary.cubeRows)}), t('summaryHint'));
+    var skipped = cov.skippedDetails || [];
+    if (skipped.length) html += badge('warn', 'info', t('detailsWindow', {n: (cfg() && cfg().detailDays) || '', d: skipped.length}),
+      t('detailsWindowHint') + ' ' + skipped.map(function (d) { return fmtDate(d, true); }).join(', '));
     if (capped.length) html += badge('warn', 'info', t('rowsCapBadge', {n: fmtInt(a.maxRows || meta.rowsLoaded), d: capped.length}),
       t('rowsCapHint') + ' ' + capped.map(function (d) { return fmtDate(d, true); }).join(', '));
     if (meta.lastError) html += badge('bad', 'warn', t('errorBadge', {r: meta.lastError.reason}),
@@ -917,7 +962,7 @@
     if (k.filtered) heroSubs += '<div class="kpi-sub">' + esc(t('officialNotFiltered')) + '</div>';
     if (state.rateView && state.rateView.estimated) heroSubs += '<div class="kpi-sub">' + esc(t('estimatedHint')) + '</div>';
     var hero = '<article class="kpi kpi-hero"><div class="kpi-body">' +
-      '<div class="kpi-label">' + icon('gauge') + esc((day ? t('rateOfDay', {date: fmtDate(state.to, true)}) : t('rateOfPeriod') + ' · ' + fmtRange(state.from, state.to)) +
+      '<div class="kpi-label">' + icon('gauge') + esc((day ? tx(c, 'rateOfDay', {date: fmtDate(state.to, true)}) : tx(c, 'rateOfPeriod') + ' · ' + fmtRange(state.from, state.to)) +
         (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) + (state.rateView.estimated ? ' (' + t('estimated') + ')' : '') : '')) + '</div>' +
       '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroSubs +
       '<div class="hero-row"><span class="status-pill ' + status + '">' + pill + '</span>' + (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '') + '</div>' +
@@ -1102,8 +1147,11 @@
     var evo = Core.buildEvolution(activeRates(), c.goal, evoFrom, state.to);
     evo.title = {pt: 'Evolução diária', zh: '每日趋势'};
     evo.selFrom = state.from; evo.selTo = state.to; evo.extended = evoFrom < state.from;
-    return [evo].concat((c.charts || []).map(function (def) {
-      var spec = Core.buildChart(def, rows, {intervalMode: state.intervalMode});
+    // Recebimento: com o filtro "Coluna principal", só os gráficos da(s) coluna(s) escolhida(s).
+    var cols = state.filters.column && state.filters.column.size ? state.filters.column : null;
+    var sm = state.data.summary, fo = sm ? filtersObj() : null;
+    return [evo].concat((c.charts || []).filter(function (def) { return !cols || !def.where || !def.where.column || cols.has(def.where.column); }).map(function (def) {
+      var spec = Core.buildChart(def, sm ? Core.summaryChartRows(def, sm.byDim, fo) : rows, {intervalMode: state.intervalMode});
       // "Top N por turno" no padrão das docas: top N de cada turno, faixas T1/T2/T3.
       if (spec.grouped) spec.panel = Core.rankPanel(rows, {key: def.key, kind: 'byShift', dim: spec.dim, top: def.top || 4});
       return spec;
@@ -1120,7 +1168,7 @@
         var card = document.createElement('article');
         card.className = 'card chart-card' + (s.key === 'evolution' ? ' full' : '');
         card.setAttribute('data-key', s.key);
-        card.innerHTML = '<div class="chart-head"><span class="chart-ico">' + icon(s.grouped ? (s.dim || 'segment') : s.key) + '</span>' +
+        card.innerHTML = '<div class="chart-head"><span class="chart-ico">' + icon(s.grouped ? (s.dim || 'segment') : (s.dim || s.key)) + '</span>' +
           '<div class="chart-titles"><h3></h3><small></small></div><div class="chart-tools"></div></div><div class="chart-body"></div><div class="chart-legend"></div>' +
           '<div class="rp-stats"></div>';
         grid.appendChild(card);
@@ -1230,11 +1278,11 @@
         b += '<tr><td>' + esc(it.shift) + '</td><td>' + esc(vlabel(gdim, it.value)) + '</td><td class="num">' + fmtInt(it.count) + '</td><td class="num">' + fmtPct(it.pct, 2) + '</td></tr>';
       });
     } else {
-      h += '<th>' + esc(L(dimLabel(spec.key))) + '</th><th class="num">' + esc(t('qty')) + '</th><th class="num">' + esc(t('share')) + '</th>';
+      h += '<th>' + esc(L(dimLabel(spec.dim || spec.key))) + '</th><th class="num">' + esc(t('qty')) + '</th><th class="num">' + esc(t('share')) + '</th>';
       var max = Math.max.apply(null, spec.datasets[0].data.concat([1]));
       spec.labels.forEach(function (l, i) {
         var v = spec.datasets[0].data[i];
-        b += '<tr><td>' + esc(vlabel(spec.key, l)) + '</td><td class="num"><span class="mini-bar" style="width:' + Math.round(v / max * 60) + 'px"></span>' + fmtInt(v) +
+        b += '<tr><td>' + esc(vlabel(spec.dim || spec.key, l)) + '</td><td class="num"><span class="mini-bar" style="width:' + Math.round(v / max * 60) + 'px"></span>' + fmtInt(v) +
           '</td><td class="num">' + fmtPct(spec.total ? v / spec.total * 100 : null, 1) + '</td></tr>';
       });
     }
@@ -1316,7 +1364,7 @@
   function columnChartConfig(spec, width) {
     var n = spec.labels.length, total = spec.total || 0;
     var maxChars = Math.max(6, Math.min(18, Math.floor(Math.max(40, (width - 70) / Math.max(1, n)) / 6.2)));
-    var names = spec.labels.map(function (l) { return vlabel(spec.key, l); });
+    var names = spec.labels.map(function (l) { return vlabel(spec.dim || spec.key, l); });
     var values = spec.datasets[0].data;
     return columnsConfig({
       sig: 'cols', labels: names.map(function (x) { return wrapLines(x, maxChars, 3); }), values: values,
@@ -1340,7 +1388,7 @@
     var data = spec.datasets[0].data, total = data.reduce(function (a, v) { return a + v; }, 0);
     return {
       $sig: 'doughnut', type: 'doughnut',
-      data: {labels: spec.labels.map(function (l) { return vlabel(spec.key, l); }), datasets: [{data: data,
+      data: {labels: spec.labels.map(function (l) { return vlabel(spec.dim || spec.key, l); }), datasets: [{data: data,
         backgroundColor: spec.labels.map(function (l) { return SHIFT_COLORS[l] || '#9CA3AF'; }), borderColor: '#fff', borderWidth: 3, hoverOffset: 8}]},
       plugins: plugins([centerText]),
       options: {
@@ -1361,7 +1409,7 @@
     var data = spec.datasets[0].data, total = data.reduce(function (a, v) { return a + v; }, 0);
     return spec.labels.map(function (l, i) {
       var pct = total ? data[i] / total * 100 : 0, color = SHIFT_COLORS[l] || '#9CA3AF';
-      return '<div class="pl-row"><i style="background:' + color + '"></i><span class="pl-name">' + esc(vlabel(spec.key, l)) +
+      return '<div class="pl-row"><i style="background:' + color + '"></i><span class="pl-name">' + esc(vlabel(spec.dim || spec.key, l)) +
         (SHIFT_HOURS[l] ? '<small>' + SHIFT_HOURS[l] + '</small>' : '') + '</span><b>' + esc(fmtInt(data[i])) + '</b><em>' + esc(fmtPct(pct, 2)) + '</em>' +
         '<span class="pl-bar"><span style="width:' + pct.toFixed(2) + '%;background:' + color + '"></span></span></div>';
     }).join('') + '<div class="pl-total"><span>' + esc(t('shipments')) + '</span><b>' + esc(fmtInt(total)) + '</b></div>';
@@ -1378,10 +1426,10 @@
     if (!idx.length || !total) return '';
     var maxI = idx.reduce(function (m, i) { return data[i] > data[m] ? i : m; }, idx[0]);
     var minI = idx.reduce(function (m, i) { return data[i] <= data[m] ? i : m; }, idx[0]);
-    var dl = dimLabel(spec.key);
+    var dl = dimLabel(spec.dim || spec.key);
     var pct = function (n) { return total ? n / total * 100 : 0; };
     var both = function (n) { return '<em>' + esc(fmtInt(n)) + '</em> <span class="rp-sep">|</span> ' + esc(fmtPct(pct(n), 2)); };
-    var name = function (i) { return '<span class="accent">' + esc(vlabel(spec.key, spec.labels[i])) + '</span>'; };
+    var name = function (i) { return '<span class="accent">' + esc(vlabel(spec.dim || spec.key, spec.labels[i])) + '</span>'; };
     var out = [rpStat('total', biLabel(RP_TEXT.total), esc(fmtInt(total)), esc(fmtPct(100, 2)))];
     out.push(rpStat('max', biLabel({pt: 'Maior ' + lcFirst(dl.pt), zh: '最多' + (dl.zh || '')}), name(maxI), both(data[maxI]), 'named'));
     if (spec.others > 0) {
@@ -1650,18 +1698,127 @@
     }
   }
 
+  // ------------------------------------------------------------------ Recebimento: subcolunas com os dias anteriores
+  /**
+   * Um gráfico por subcoluna de cada coluna principal ("Deve chegar": total de pedidos, não chegadas; "Chegou":
+   * chegaram, sem bipar expedição na etapa anterior, sem bipagem de expedição nesta base, baixas não realizadas,
+   * sem armazém de saída), com os 14 dias até a data escolhida para comparar (ou o período, se maior). Números
+   * oficiais do resumo do JMS: não mudam com os filtros de DC/base/viagem, só com o de Coluna principal.
+   * Embaixo, a tabela "Dados gerais" com os 7 números de cada dia, como a primeira tabela da tela do JMS.
+   */
+  var MP_DAYS = 14;
+  function metricDays() {
+    var from = Core.addDays(state.to, -(MP_DAYS - 1));
+    if (state.from < from) from = state.from;
+    if (Core.daysBetween(from, state.to) > 60) from = Core.addDays(state.to, -60);
+    return Core.dateRange(from, state.to);
+  }
+  function renderMetricPanels(c) {
+    var box = $('#metricPanels');
+    if (!box) return;
+    var panels = c.metricPanels || [];
+    Object.keys(state.charts).forEach(function (k) { if (k.indexOf('mp_') === 0) destroyChart(k); });
+    if (!panels.length || !state.data) { box.innerHTML = ''; return; }
+    var cols = state.filters.column && state.filters.column.size ? state.filters.column : null;
+    var byDate = {};
+    (state.data.rates || []).forEach(function (r) { if (r.metrics) byDate[r.date] = r.metrics; });
+    var days = metricDays(), html = '';
+    panels.forEach(function (pn, pi) {
+      if (cols && !cols.has(pn.column)) return;
+      html += '<section class="card mp-section"><div class="chart-head"><span class="chart-ico">' + icon(pi ? 'arrival_flow' : 'destBase') + '</span>' +
+        '<div class="chart-titles"><h3>' + esc(L(pn.title)) + (Lo(pn.title) ? ' <span class="rp-zh">/ ' + esc(Lo(pn.title)) + '</span>' : '') + '</h3>' +
+        '<small>' + esc(t('mpSub', {n: days.length})) + '</small></div></div><div class="mp-grid">' +
+        pn.metrics.map(function (m, mi) {
+          return '<article class="mp-card' + (pn.metrics.length % 2 && mi === pn.metrics.length - 1 ? ' wide' : '') + '" data-mp="' + esc(m.key) + '">' +
+            '<div class="mp-head"><div><div class="mp-title">' + esc(L(m.label)) + '<small>' + esc(Lo(m.label)) + '</small></div>' +
+            '<div class="mp-value"></div></div><span class="mp-delta"></span></div>' +
+            '<div class="mp-chart"><canvas role="img" aria-label="' + esc(L(m.label)) + '"></canvas></div><div class="mp-stats"></div></article>';
+        }).join('') + '</div></section>';
+    });
+    html += metricTableHtml(panels, cols, byDate, days);
+    box.innerHTML = html;
+    panels.forEach(function (pn) {
+      if (cols && !cols.has(pn.column)) return;
+      pn.metrics.forEach(function (m) { drawMetric($('.mp-card[data-mp="' + m.key + '"]', box), m, byDate, days); });
+    });
+  }
+  function drawMetric(card, m, byDate, days) {
+    if (!card) return;
+    var vals = days.map(function (d) { return byDate[d] && isNum(byDate[d][m.key]) ? Number(byDate[d][m.key]) : null; });
+    var cur = vals[vals.length - 1], prev = vals.length > 1 ? vals[vals.length - 2] : null;
+    $('.mp-value', card).textContent = fmtInt(cur);
+    var delta = $('.mp-delta', card);
+    if (isNum(cur) && isNum(prev)) {
+      var d = cur - prev, pct = prev ? d / prev * 100 : null;
+      delta.className = 'mp-delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '') + (m.bad ? '' : ' good');
+      delta.textContent = (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '') + fmtInt(Math.abs(d)) + (isNum(pct) ? ' (' + fmtSigned(pct, 1, '%') + ')' : '') + ' ' + t('vsPrevDay');
+    } else { delta.className = 'mp-delta'; delta.textContent = t('noPrevDay'); }
+    var have = vals.filter(isNum);
+    var avg = have.length ? have.reduce(function (a, v) { return a + v; }, 0) / have.length : null;
+    var mx = null, mn = null;
+    vals.forEach(function (v, i) { if (!isNum(v)) return; if (mx === null || v > vals[mx]) mx = i; if (mn === null || v < vals[mn]) mn = i; });
+    $('.mp-stats', card).innerHTML = have.length ? '<span>' + esc(t('mpAvg', {n: have.length})) + ': <b>' + fmtInt(avg) + '</b></span>' +
+      '<span>' + esc(t('mpMax')) + ': <b>' + fmtInt(vals[mx]) + '</b> · ' + esc(fmtDate(days[mx])) + '</span>' +
+      '<span>' + esc(t('mpMin')) + ': <b>' + fmtInt(vals[mn]) + '</b> · ' + esc(fmtDate(days[mn])) + '</span>' : esc(t('noDataHint'));
+    if (!window.Chart) return;
+    var last = days.length - 1;
+    var key = 'mp_' + m.key;
+    state.charts[key] = new Chart($('canvas', card), {
+      type: 'bar',
+      data: {labels: days.map(function (d) { return fmtDate(d); }), datasets: [{data: vals,
+        backgroundColor: vals.map(function (v, i) { return i === last ? RED : '#F5A3AA'; }), hoverBackgroundColor: RED_DARK,
+        borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start', maxBarThickness: 44, categoryPercentage: .8, barPercentage: .86}]},
+      plugins: plugins([]),
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 500}, layout: {padding: {top: 18}},
+        plugins: {legend: {display: false},
+          tooltip: {callbacks: {title: function (tt) { return fmtDate(days[tt[0].dataIndex], true); }, label: function (ctx) { return ' ' + fmtInt(ctx.raw); }}},
+          datalabels: {anchor: 'end', align: 'end', offset: 1, clip: false, color: function (ctx) { return ctx.dataIndex === last ? RED : INK; },
+            font: function (ctx) { return {weight: ctx.dataIndex === last ? '800' : '600', size: 10}; },
+            formatter: function (v) { return isNum(v) ? compactInt(v) : ''; },
+            display: function (ctx) { var w = ctx.chart.scales && ctx.chart.scales.x ? ctx.chart.scales.x.width / days.length : 40; return isNum(dv(ctx)) && (w >= 30 || ctx.dataIndex === last); }}},
+        scales: {x: {grid: {display: false}, border: {color: '#D9DBE1'}, ticks: {color: MUTED, autoSkip: true, maxRotation: 0, font: {size: 10.5}}},
+          y: {beginAtZero: true, grace: '18%', grid: {color: GRID}, border: {display: false}, ticks: {color: MUTED, callback: function (v) { return compactInt(v); }}}}}
+    });
+  }
+  /** 172.842 → "172,8 mil" (rótulos curtos nas colunas). */
+  function compactInt(v) {
+    if (!isNum(v)) return '';
+    var n = Number(v);
+    if (Math.abs(n) >= 1e6) return fmtNum(n / 1e6, 1) + (state.lang === 'zh' ? '百万' : ' mi');
+    if (Math.abs(n) >= 1e4) return fmtNum(n / 1e3, 1) + (state.lang === 'zh' ? '千' : ' mil');
+    return fmtInt(n);
+  }
+  function metricTableHtml(panels, cols, byDate, days) {
+    var shown = panels.filter(function (pn) { return !cols || cols.has(pn.column); });
+    if (!shown.length) return '';
+    var head1 = '<tr><th rowspan="2">' + esc(t('date')) + '</th>' + shown.map(function (pn) {
+      return '<th class="grp" colspan="' + pn.metrics.length + '">' + esc(L(pn.title)) + '</th>';
+    }).join('') + '</tr>';
+    var head2 = '<tr>' + shown.map(function (pn) { return pn.metrics.map(function (m) { return '<th>' + esc(L(m.label)) + '</th>'; }).join(''); }).join('') + '</tr>';
+    var body = days.slice().reverse().map(function (d) {
+      return '<tr' + (d === state.to ? ' class="sel"' : '') + '><td>' + esc(fmtDate(d, true)) + '</td>' + shown.map(function (pn) {
+        return pn.metrics.map(function (m) { var v = byDate[d] && byDate[d][m.key]; return '<td>' + (isNum(v) ? fmtInt(v) : '—') + '</td>'; }).join('');
+      }).join('') + '</tr>';
+    }).join('');
+    return '<section class="card mp-section"><div class="chart-head"><span class="chart-ico">' + icon('table') + '</span><div class="chart-titles"><h3>' +
+      esc(t('mpTable')) + '</h3><small>' + esc(t('mpTableSub')) + '</small></div></div>' +
+      '<div class="mp-table"><table><thead>' + head1 + head2 + '</thead><tbody>' + body + '</tbody></table></div></section>';
+  }
+
   // ------------------------------------------------------------------ tabela de remessas
   var collator = (function () { try { return new Intl.Collator('pt-BR', {numeric: true, sensitivity: 'base'}); } catch (e) { return null; } })();
   function cmpText(a, b) { a = String(a); b = String(b); return collator ? collator.compare(a, b) : (a < b ? -1 : a > b ? 1 : 0); }
   function tableRows() {
     var memo = state.table.memo, key0 = state.table.sortKey + '|' + state.table.sortDir + '|' + state.table.query + '|' + state.lang;
-    if (memo && memo.src === state.filtered && memo.key === key0) return memo.rows;
+    if (memo && memo.src === tableSource() && memo.key === key0) return memo.rows;
     var out = computeTableRows();
-    state.table.memo = {src: state.filtered, key: key0, rows: out};
+    state.table.memo = {src: tableSource(), key: key0, rows: out};
     return out;
   }
+  /** Modo de totais (Recebimento, período grande): a tabela mostra as maiores combinações vindas do servidor. */
+  function tableSource() { return state.data && state.data.summary ? state.data.summary.top : state.filtered; }
   function computeTableRows() {
-    var c = cfg(), cols = c.table || [], rows = state.filtered;
+    var c = cfg(), cols = c.table || [], rows = tableSource();
     var q = state.table.query.toLocaleLowerCase(locale());
     if (q) rows = rows.filter(function (r) { return cols.some(function (col) { return cellText(col[0], r[col[0]]).toLocaleLowerCase(locale()).indexOf(q) >= 0; }); });
     var key = state.table.sortKey, dir = state.table.sortDir === 'asc' ? 1 : -1;
@@ -1673,6 +1830,9 @@
         if (isNum(x) && isNum(y) && key !== 'shipment') return (Number(x) - Number(y)) * dir;
         return cmpText(x || '', y || '') * dir;
       });
+    } else if (c.grouped) {
+      // Linhas agrupadas (Recebimento): as combinações com mais remessas primeiro.
+      sorted.sort(function (a, b) { return (Number(b.qty) || 0) - (Number(a.qty) || 0) || (a.date < b.date ? 1 : a.date > b.date ? -1 : 0); });
     } else {
       sorted.sort(function (a, b) {
         if (a.date !== b.date) return a.date < b.date ? 1 : -1;
@@ -1690,6 +1850,7 @@
   function cellText(key, v) {
     if (v === null || v === undefined || v === '') return '';
     if (key === 'shipment' || key === 'tripId' || key === 'lot') return key === 'lot' ? vlabel(key, v) : String(v);
+    if (key === 'qty') return fmtInt(v);
     if (/Time/.test(key)) return fmtStamp(v);
     return key === 'date' ? fmtDate(v, true) : vlabel(key, v);
   }
@@ -1701,7 +1862,7 @@
   }
   function renderDetailTable() {
     var c = cfg(), cols = c.table || [];
-    var rows = tableRows(), total = state.filtered.length;
+    var rows = tableRows(), total = Core.distinctCount(state.filtered);
     var pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     if (state.table.page > pages) state.table.page = pages;
     var start = (state.table.page - 1) * PAGE_SIZE, slice = rows.slice(start, start + PAGE_SIZE);
@@ -1728,8 +1889,9 @@
       th.addEventListener('click', sortBy);
       th.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(); } });
     });
-    $('#tableCount').textContent = q ? t('tableCountOf', {n: fmtInt(rows.length), m: fmtInt(total)}) : t('tableCount', {n: fmtInt(total)});
-    $('#tableNote').textContent = detailIsPartial() ? t('tablePartial') : t('tableComplete');
+    $('#tableCount').textContent = q ? t('tableCountOf', {n: fmtInt(Core.distinctCount(rows)), m: fmtInt(total)}) : t('tableCount', {n: fmtInt(total)});
+    var smT = state.data && state.data.summary;
+    $('#tableNote').textContent = smT && smT.top.length >= smT.topLimit ? t('topRowsNote', {n: fmtInt(smT.topLimit)}) : detailIsPartial() ? t('tablePartial') : t('tableComplete');
     renderPager(pages);
   }
   function renderPager(pages) {

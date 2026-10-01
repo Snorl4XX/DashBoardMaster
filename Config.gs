@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.13.0',
+  VERSION: '3.14.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -28,6 +28,11 @@ const APP_CONFIG = Object.freeze({
   MAX_DETAIL_FILES_PER_DASHBOARD: 150,
   MAX_CLIENT_ROWS: 150000,     // remessas enviadas ao navegador por consulta (formato colunar)
   DASHBOARD_LOAD_BUDGET_MS: 22000,
+  // Indicador agrupado (Recebimento) acima disso no período: o painel recebe totais prontos por campo
+  // (filtros aplicados no servidor) em vez das combinações. Propriedade GROUPED_CLIENT_ROWS ajusta.
+  MAX_GROUPED_CLIENT_ROWS: 60000,
+  GROUPED_TOP_ROWS: 2000,      // maiores combinações enviadas para a tabela nesse modo
+  GROUPED_SUMMARY_BUDGET_MS: 75000,
   MAX_REPORT_DETAIL_ROWS: 60000,
   MAX_PDF_DETAIL_ROWS: 1500,
   DEFAULT_CENTER_CODE: '30001',
@@ -74,7 +79,11 @@ const FILTER_LABELS = Object.freeze({
   regDay:          {pt: 'Data do registro', zh: '登记日期'},
   locationMain:    {pt: 'Local principal da avaria', zh: '破损发生一级环节'},
   locationSub:     {pt: 'Local secundário da avaria', zh: '破损发生二级环节'},
-  orderKind:       {pt: 'Pedidos principais/filhos', zh: '主子单'}
+  orderKind:       {pt: 'Pedidos principais/filhos', zh: '主子单'},
+  column:          {pt: 'Coluna principal', zh: '主列'},
+  destCenter:      {pt: 'DC destino', zh: '目的中心'},
+  destBase:        {pt: 'Base destino', zh: '目的网点'},
+  qty:             {pt: 'Quantidade', zh: '数量'}
 });
 
 /**
@@ -493,6 +502,98 @@ const INDICATORS = Object.freeze({
       ['eventTime', 'Data do registro', '登记时间'], ['shift', 'Turno', '班次'], ['login', 'Quem registrou', '登记人'],
       ['locationMain', 'Local principal', '一级环节'], ['locationSub', 'Local secundário', '二级环节']
     ]
+  },
+
+  /**
+   * RECEBIMENTO: FLUXO OPERACIONAL (Operação > Monitoramento de dados > Monitoramento de tipagem de recebimento
+   * (novo), /crisbiIndex/ArriveMonitor). Duas colunas principais:
+   *  - DEVE CHEGAR: pedidos previstos para chegar (shouldArriverNum) e os que ainda não chegaram (noArriverNum);
+   *  - CHEGOU: pedidos que chegaram (totalNum) e os pontos de atenção do recebimento (sem bipar expedição na
+   *    etapa anterior, sem bipagem de expedição nesta base, baixas não realizadas, sem armazém de saída).
+   * Resumo (arrivalbyday_total): 1 consulta por dia, os 7 números (gráficos de comparação com os dias anteriores).
+   * Taxa do painel = não chegadas ÷ deve chegar (% do previsto que ainda não chegou); sem meta definida.
+   * Detalhe: as listas de "Deve chegar" e "Chegou" (detailType). São ~170 mil + ~330 mil remessas POR DIA:
+   * ficam AGRUPADAS por combinação de DC destino/base destino/viagem/estação/última parada/digitalizador/turno,
+   * com a quantidade (qty) — os gráficos, filtros e a tabela usam essa quantidade. Só os últimos `days` dias
+   * têm detalhe (os mais antigos ficam só com o resumo) e o detalhe de hoje é atualizado no máximo a cada
+   * `refreshHours` horas. Download agrupado lote a lote (runGroupedDetailJob_): memória limitada e retomada
+   * na execução seguinte se o tempo acabar.
+   */
+  arrival_flow: {
+    key: 'arrival_flow', order: 8, routeKey: 'ARRIVAL',
+    name: {pt: 'Recebimento: fluxo operacional', zh: '到件运营流程'},
+    subtitle: {pt: 'Deve chegar × Chegou (monitoramento de tipagem de recebimento)', zh: '应到 × 已到（到件扫描监控）'},
+    goal: {value: null, direction: 'max', strict: false},
+    apiProfile: 'arrival_flow', detailMatchesErrors: false, grouped: true,
+    summary: {
+      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_total',
+      rateFromCounts: true, rateKeys: [], errorKeys: ['noArriverNum'], totalKeys: ['shouldArriverNum'],
+      metrics: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum', 'noSignNum', 'deliverNum']
+    },
+    detail: {
+      // O endereço do detalhe não estava na captura: o mesmo nome do resumo com "_detail" (padrão das outras telas).
+      // Se o JMS responder 404, as variantes de `candidates` são testadas e a que funcionar fica em
+      // JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL (pode ser cadastrada à mão também).
+      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_detail',
+      candidates: ['arrivalbyday_detail', 'arrivalbyday_detailed', 'arrivalbyday_details', 'arrivalbyday_list'],
+      days: 7, refreshHours: 6, maxPerDay: 900000,
+      types: [
+        {type: 'shouldArriverNum', column: 'Deve chegar', blank: ['destination', 'login']},
+        {type: 'totalNum', column: 'Chegou', blank: ['station']}
+      ]
+    },
+    fields: {
+      shipment: ['billcode'], eventTime: ['sendTime'], tripId: ['shipmentNo'], destCenter: ['endCenterName'],
+      destBase: ['endArrivalSitename'], station: ['inputsite'], destination: ['nextstation'], login: ['scanuser']
+    },
+    // Linha agrupada: uma por combinação destes campos, com a quantidade de remessas.
+    // (sem turno: não foi pedido neste painel e triplicaria as combinações)
+    groupFields: ['column', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login'],
+    labels: {
+      station: {pt: 'Estação de remessa', zh: '发件网点'}, destination: {pt: 'Última parada', zh: '上一站'},
+      login: {pt: 'Digitalizador', zh: '扫描员'}, tripId: {pt: 'ID de viagem', zh: '车次号'}
+    },
+    filters: ['column', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login'],
+    topCards: [],
+    hideShiftCards: true,
+    texts: {
+      errors: {pt: 'Não chegadas', zh: '未到件'},
+      errorsDay: {pt: 'Não chegadas no dia', zh: '当日未到件'}, errorsPeriod: {pt: 'Não chegadas no período', zh: '期间未到件'},
+      errorsFiltered: {pt: 'Remessas (com filtro)', zh: '票数（已筛选）'},
+      prevErrorsDay: {pt: 'Não chegadas dia anterior', zh: '前一日未到件'}, prevErrorsPeriod: {pt: 'Não chegadas período anterior', zh: '上一期间未到件'},
+      shiftErrors: {pt: 'Não chegadas {s}', zh: '{s} 未到件'}, shareOfErrors: {pt: '{p} das não chegadas', zh: '占未到件 {p}'},
+      rateOfDay: {pt: '% não chegou · {date}', zh: '{date} 未到件率'}, rateOfPeriod: {pt: '% não chegou no período', zh: '期间未到件率'}
+    },
+    // Subcolunas de cada coluna principal: um gráfico por número, com os dias anteriores para comparar.
+    metricPanels: [
+      {column: 'Deve chegar', title: {pt: 'Deve chegar', zh: '应到'}, metrics: [
+        {key: 'shouldArriverNum', label: {pt: 'Quantidade total de pedidos', zh: '应到总票数'}},
+        {key: 'noArriverNum', label: {pt: 'Encomendas não chegadas', zh: '未到件总票数'}, bad: true}
+      ]},
+      {column: 'Chegou', title: {pt: 'Chegou', zh: '已到'}, metrics: [
+        {key: 'totalNum', label: {pt: 'Total de pedidos que chegaram', zh: '已到总票数'}},
+        {key: 'uploadNoSendNum', label: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}, bad: true},
+        {key: 'noSendNum', label: {pt: 'Sem bipagem de expedição nesta base', zh: '本网点未发件扫描'}, bad: true},
+        {key: 'noSignNum', label: {pt: 'Baixas não realizadas', zh: '未签收'}, bad: true},
+        {key: 'deliverNum', label: {pt: 'Não há armazém de saída nesse local', zh: '本网点无出仓'}, bad: true}
+      ]}
+    ],
+    charts: [
+      {key: 'expCenter', dim: 'destCenter', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · DC destino', zh: '应到 · 目的中心'}},
+      {key: 'expBase', dim: 'destBase', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · Base destino', zh: '应到 · 目的网点'}},
+      {key: 'expTrip', dim: 'tripId', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · ID de viagem', zh: '应到 · 车次号'}},
+      {key: 'expStation', dim: 'station', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · Estação de remessa', zh: '应到 · 发件网点'}},
+      {key: 'recCenter', dim: 'destCenter', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · DC destino', zh: '已到 · 目的中心'}},
+      {key: 'recBase', dim: 'destBase', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · Base destino', zh: '已到 · 目的网点'}},
+      {key: 'recTrip', dim: 'tripId', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · ID de viagem', zh: '已到 · 车次号'}},
+      {key: 'recLastStop', dim: 'destination', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · Última parada', zh: '已到 · 上一站'}},
+      {key: 'recScanner', dim: 'login', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · Digitalizador', zh: '已到 · 扫描员'}}
+    ],
+    table: [
+      ['date', 'Data', '日期'], ['column', 'Coluna', '主列'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
+      ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação de remessa', '发件网点'], ['destination', 'Última parada', '上一站'],
+      ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']
+    ]
   }
 });
 
@@ -506,7 +607,7 @@ function getIndicatorConfig_(key) {
     // é para clicar em Executar sem preencher nada antes. Veja "Manutenção" em LEIA_PRIMEIRO.md.
     if (key === undefined || key === null || key === '') {
       throw new Error('Esta função exige um indicador como parâmetro (ex.: "wrong_send", "sorting_error", ' +
-        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc" ou "damage"). Ela não é para ser executada direto pelo ' +
+        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage" ou "arrival_flow"). Ela não é para ser executada direto pelo ' +
         'botão ▶ Executar sem argumentos — chame-a com o parâmetro preenchido (veja "Manutenção" em LEIA_PRIMEIRO.md) ' +
         'ou teste pelo próprio painel (Implantar → App da Web).');
     }
@@ -526,7 +627,8 @@ function chartShiftDim_(c) { return c.key === 'segmentByShift' ? 'segment' : (c.
 function usedFields_(cfg) {
   const set = {date: 1, shipment: 1, shift: 1};
   (cfg.filters || []).forEach(k => set[k] = 1);
-  (cfg.charts || []).forEach(c => { set[chartShiftDim_(c) || c.key] = 1; });
+  (cfg.charts || []).forEach(c => { set[chartShiftDim_(c) || c.dim || c.key] = 1; if (c.where) Object.keys(c.where).forEach(k => { set[k] = 1; }); });
+  if (cfg.grouped) set.qty = 1;
   (cfg.table || []).forEach(c => set[c[0]] = 1);
   (cfg.topCards || []).forEach(k => set[k] = 1);
   if (cfg.summaryTable) cfg.summaryTable.groupBy.forEach(k => set[k] = 1);
@@ -566,6 +668,9 @@ function getPublicCatalog_() {
       hideShiftCards: !!cfg.hideShiftCards,
       valueCards: cfg.valueCards || [],
       texts: cfg.texts || null,
+      metricPanels: cfg.metricPanels || [],
+      grouped: !!cfg.grouped,
+      detailDays: cfg.detail && cfg.detail.days || null,
       naLabel: cfg.naLabel || null,
       orderKinds: cfg.orderKinds ? {field: cfg.orderKinds.field, values: cfg.orderKinds.values} : null,
       operationalWindow: cfg.key === 'sc_sc' || cfg.key === 'sc_dc'

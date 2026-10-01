@@ -223,6 +223,9 @@ function fakeJms(dayData, options) {
       const pos = r => { const t = String(r[tf] || '').slice(11); return (op && t < '14:00:00' ? addDay(date, 1) : date) + ' ' + t; };
       return list.filter(r => { const p = pos(r); return p >= start && p <= end; });
     };
+    // Janela de horário num campo informado (Recebimento: sendTime), como o JMS faz com startTime/endTime.
+    const inWindowBy = (list, field) => (options.ignoreTime || (start === full.start && end === full.end)) ? list
+      : list.filter(r => { const t = String(r[field] || ''); return t >= start && t <= end; });
     const shape = r => {
       if (options.keyCase !== 'upper') return r;
       const o = {}; Object.keys(r).forEach(k => { o[k.toUpperCase()] = r[k]; }); return o;
@@ -288,6 +291,23 @@ function fakeJms(dayData, options) {
         const sz = Math.min(100, body.size); // a tela do JMS mostra no máximo 100 linhas por página
         return ok(d.dm.slice((body.current - 1) * sz, body.current * sz), d.dm.length, body.current, sz);
       }
+      case 'arrivalbyday_total': {
+        if (!d || !d.af) return ok([], 0, 1, body.size);
+        const a = d.af;
+        return ok([{sendTime: date, proxyAreaCode: '370000', proxyAreaName: 'SPE', nextstation: 'SP GRU', nextstationcode: '30001',
+          shouldArriverNum: a.should.length, noArriverNum: a.noArriverNum, totalNum: a.total.length, uploadNoSendNum: a.uploadNoSendNum,
+          noSendNum: a.noSendNum, noSignNum: a.total.length, deliverNum: a.total.length, PAGEHELPER_ROW_ID: 1, ROW_ID: 1}], 1, 1, body.size);
+      }
+      case 'arrivalbyday_detail':
+      case 'arrivalbyday_detailed':
+      case 'arrivalbyday_details': {
+        // options.arrivalDetailRoute: o endereço real do detalhe (os outros respondem 404).
+        if (route !== (options.arrivalDetailRoute || 'arrivalbyday_detail')) return respond(404, {});
+        if (!d || !d.af) return ok([], 0, 1, body.size);
+        const list = inWindowBy(body.detailType === 'totalNum' ? d.af.total : body.detailType === 'shouldArriverNum' ? d.af.should : [], 'sendTime');
+        const sz = Math.min(options.maxPageSize || 1000, body.size);
+        return ok(list.slice((body.current - 1) * sz, body.current * sz).map((r, i) => Object.assign({PAGEHELPER_ROW_ID: i + 1}, r)), list.length, body.current, sz);
+      }
       case 'registrationPage': {
         const want = {};
         String(body.waybillNo || '').split(',').forEach(w => { want[w.trim()] = 1; }); // como o JMS: remessa exata (com ou sem "-001")
@@ -345,7 +365,7 @@ function makeDay(date, seed) {
   const pct = v => v.toFixed(2) + '%';
   const day = {ws: ws, wsRate: pct(0.2 + rnd() * 1.1), se: se, seRate: pct(0.3 + rnd() * 0.6), mr: mr, mrRate: pct(0.5 + rnd() * 0.8),
     md: md, mdRate: pct(0.4 + rnd() * 0.9), sc: sc, scRate: pct(88 + rnd() * 9), dc: dc, dcRate: pct(89 + rnd() * 8)};
-  return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5));
+  return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5), makeArrival(date, (seed || 7) * 17 + 3));
 }
 
 /**
@@ -391,4 +411,37 @@ function makeDamage(date, seed) {
   return {dm: dm, dmBase: 450000 + Math.floor(rnd() * 150000), dmReg: dmReg};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+/**
+ * Recebimento: fluxo operacional (Monitoramento de tipagem de recebimento). Duas listas por dia, no formato da
+ * captura: "Deve chegar" (shouldArriverNum) e "Chegou" (totalNum), com DC/base de destino, viagem, estação,
+ * última parada e digitalizador. Volumes reduzidos (o real é ~170 mil + ~330 mil por dia); remessas fictícias.
+ */
+function makeArrival(date, seed, scale) {
+  let s = seed || 11;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const pick = arr => arr[Math.floor(rnd() * arr.length)];
+  const k = scale || 1;
+  const time = () => date + ' ' + String(Math.floor(rnd() * 24)).padStart(2, '0') + ':' + String(Math.floor(rnd() * 60)).padStart(2, '0') + ':' + String(Math.floor(rnd() * 60)).padStart(2, '0');
+  const centers = ['BA FEC', 'SP BRE', 'MG CGE', 'PE JGS', 'SC FEC 01', 'CE FOR', 'MS CGR', 'DF BSB'];
+  const bases = {'BA FEC': ['F JUA-BA', 'ITAP-BA'], 'SP BRE': ['F TPA-SP', 'SOD 02-SP'], 'MG CGE': ['PDE-MG', 'F NSR-MG'], 'PE JGS': ['PLT-PE', 'CPV 02-PB'],
+    'SC FEC 01': ['CANA -BA', 'PER -BA'], 'CE FOR': ['TAU-CE'], 'MS CGR': ['F CGR 02-MS'], 'DF BSB': ['F SBN-DF']};
+  const stations = ['PA AEROGRU-SP', 'PA SHEIN-GRU-SP', 'PA MELI-GRU 02-SP', 'GRU-SP', 'F S-VLGUI 02-SP'];
+  const trips = ['SRTR22605739071', 'SETR22605829951', 'SRTR22605737431', null];
+  const scanners = ['Equipamento SP GRU 009', 'Equipamento SP GRU 006', 'Temporário SP GRU 01'];
+  const should = [], total = [];
+  const nS = Math.round((500 + Math.floor(rnd() * 200)) * k), nT = Math.round((1000 + Math.floor(rnd() * 300)) * k);
+  const tag = date.replace(/-/g, '').slice(2);
+  for (let i = 0; i < nS; i++) {
+    const c = pick(centers);
+    should.push({billcode: '8880027' + tag + String(i).padStart(6, '0') + (i % 9 === 4 ? '-002' : ''), inputsite: pick(stations), sendTime: time(),
+      nextstation: 'SP GRU', shipmentNo: pick(trips), endCenterName: i % 97 === 5 ? null : c, endArrivalSitename: i % 97 === 5 ? null : pick(bases[c])});
+  }
+  for (let i = 0; i < nT; i++) {
+    const c = pick(centers);
+    total.push({billcode: '9998827' + tag + String(i).padStart(6, '0'), inputsite: 'SP GRU', sendTime: time(), nextstation: rnd() < 0.2 ? 'PA SHEIN-GRU-SP' : null,
+      scanuser: pick(scanners), shipmentNo: pick(trips), endCenterName: c, endArrivalSitename: pick(bases[c])});
+  }
+  return {af: {should: should, total: total, noArriverNum: Math.round(nS * 0.43), uploadNoSendNum: Math.round(nT * 0.068), noSendNum: Math.round(nT * 0.056)}};
+}
+
+module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};

@@ -1,6 +1,51 @@
-# J&T DASHMASTER V3.13 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.14 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+## V3.14 — Novo painel: Recebimento: fluxo operacional / 到件运营流程
+Dados da tela do JMS **Operação > Monitoramento de dados > Monitoramento de tipagem de recebimento (novo)** (`/app/crisbiIndex/ArriveMonitor`).
+São duas colunas principais, como na tela:
+- **Deve chegar**: Quantidade total de pedidos · Número total de encomendas não chegadas.
+- **Chegou**: Total de pedidos que chegaram · Sem bipar expedição na etapa anterior · Sem bipagem de expedição nesta base · Baixas não realizadas · Não há armazém de saída.
+
+**O que o painel mostra:**
+- **Taxa do dia = % não chegou** (encomendas não chegadas ÷ quantidade total de pedidos de "Deve chegar"). Por enquanto **sem meta** — se houver uma, é só informar.
+- **Dados gerais / 总体数据**: tabela com os 7 números de cada dia, igual à primeira tabela do JMS.
+- **Um gráfico para cada subcoluna**, separado em "Deve chegar" e "Chegou":
+  - mostra os **14 dias** até a data escolhida (coluna vermelha = dia escolhido), para comparar;
+  - traz a variação contra o dia anterior, a média, o maior e o menor.
+- **9 gráficos de barras** (10 maiores, contando a quantidade):
+  - *Deve chegar*: DC destino, Base destino, ID de viagem e Estação de remessa;
+  - *Chegou*: DC destino, Base destino, ID de viagem, Última parada e Digitalizador.
+- **Filtros**:
+  - **Coluna principal** (Deve chegar / Chegou), que mostra só os gráficos da coluna escolhida;
+  - um filtro para cada campo que tem gráfico.
+- **Tabela**: as combinações (DC, base, viagem, estação, parada, digitalizador) com a **Quantidade** de remessas.
+
+**Volume (SP GRU: ~173 mil + ~333 mil remessas por dia) — como foi resolvido:**
+- **Gravação agrupada.** As remessas iguais em todos os campos dos gráficos viram uma linha com a quantidade. Na simulação com o volume real, ficaram ~150 mil linhas por dia.
+- **Detalhe só dos últimos 7 dias.**
+  - Os dias mais antigos ficam só com os números do resumo, que continuam na evolução e nos "Dados gerais" de todos os dias.
+  - Para mudar a quantidade de dias, use a propriedade `DETAIL_DAYS_ARRIVAL_FLOW`. Cuidado: cada dia são ~570 consultas ao JMS.
+- **Hoje.** O resumo é atualizado de hora em hora. O detalhe é baixado de novo no máximo **a cada 6 h**.
+- **Download em partes.**
+  - Cada lote baixado já é somado e descartado, para não estourar a memória.
+  - Se o tempo de uma execução acabar, o que foi baixado fica gravado por faixa de horário e a próxima execução continua de onde parou. Isso vale também para o dia de hoje, cujo total cresce durante o download.
+- **Período grande no painel.** Uma semana tem ~1 milhão de combinações, que não cabem no navegador. Nesse caso o painel passa sozinho para **"Totais por campo"** (aparece o selo):
+  - os gráficos e as listas dos filtros usam os totais de cada campo, calculados no servidor;
+  - cada filtro é aplicado no servidor e leva alguns segundos;
+  - a tabela mostra as **2.000 maiores combinações**.
+  - Os números são os mesmos do cálculo completo (conferido nos testes). O limite pode ser ajustado na propriedade `GROUPED_CLIENT_ROWS`, que vale 60000 por padrão.
+
+**O que não estava nas capturas (e o sistema resolve sozinho):**
+1. **Endereço do detalhe** (a lista que abre ao clicar num número). O sistema tenta `.../bigdataReport/detail/arrivalbyday_detail` e variações. Se o JMS responder 404, ele procura o endereço certo e grava na propriedade `JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL`.
+   - Se nada funcionar: abra o DevTools (F12 → Rede), clique num número da tela e copie a **URL** da requisição para essa propriedade.
+2. **Cabeçalhos de rota.**
+   - O `Routename` usado é `ArriveMonitor`, tirado do link da tela.
+   - O `Routernamelist` não apareceu na captura. Se o JMS recusar, o sistema tenta variações sozinho.
+   - Se ainda assim falhar, copie o cabeçalho `routernamelist` de uma requisição da tela para a propriedade `JMS_ROUTENAMELIST_ARRIVAL`.
+
+**Ao atualizar:** o histórico do novo painel entra sozinho na fila. Os dias desde `DATA_START_DATE` recebem só o resumo; os 7 últimos dias recebem também o detalhe.
 
 ## V3.13 — Avaria: filtro "Pedidos principais/filhos"
 Novo filtro na Avaria, igual ao da tela do JMS: **Todos / Pedido principal / Pedido secundário**.
@@ -499,7 +544,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **250 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **274 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

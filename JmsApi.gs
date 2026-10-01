@@ -77,6 +77,10 @@ const JMS_ROUTES_ = [
   // JMS_ROUTENAME_DAMAGE / JMS_ROUTENAMELIST_DAMAGE (sobrepõem tudo).
   {key: 'DAMAGE', pattern: /\/servicequality\/breakage\/rate\/(?:getBreakageRateData|detailBreakageRateData)(?:\?|$)/, name: 'damageRate', list: '服务质量>报表管理>破损率报表',
     alt: [{name: 'damageRate', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
+  // Recebimento: fluxo operacional (Operação > Monitoramento de dados > Monitoramento de tipagem de recebimento (novo),
+  // /crisbiIndex/ArriveMonitor). Routename = nome da página; Routernamelist não capturado: variantes em `alt`.
+  {key: 'ARRIVAL', pattern: /\/bigdataReport\/detail\/arrivalbyday_\w+(?:\?|$)/, name: 'ArriveMonitor', list: '运营>数据监控>到件扫描监控(新)',
+    alt: [{name: 'ArriveMonitor', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -373,6 +377,17 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       return {current: pageNo, size: pageSize, organizationCode: centerCode, organizationType: 3, dateType: 1,
         countryId: countryId_(), startDate: isoDate, endDate: isoDate};
 
+    case 'arrival_flow': {
+      // Monitoramento de tipagem de recebimento: resumo pela base (siteCode); detalhe por lista (detailType:
+      // shouldArriverNum = "Deve chegar", totalNum = "Chegou"), pela próxima parada = a base (nextstationcode).
+      if (detail) {
+        const types = cfg.detail.types || [];
+        return {current: pageNo, size: pageSize, detailType: (win && win.type) || (types[0] && types[0].type),
+          startTime: w.start, endTime: w.end, nextstationcode: centerCode, countryId: countryId_()};
+      }
+      return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, siteCode: centerCode, countryId: countryId_()};
+    }
+
     case 'sc_dc':
       if (detail) {
         return {current: pageNo, size: pageSize, startTime1: w.start, endTime1: w.end,
@@ -428,10 +443,13 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   if (!sameDate.length) return {indicator: indicatorKey, date: isoDate, empty: true};
   const parsed = sameDate.map(r => {
     const rd = fieldReader_(r);
-    const rate = parsePercent_(rd(cfg.summary.rateKeys).value);
     const errorRaw = rd(cfg.summary.errorKeys).value;
     const totalRaw = rd(cfg.summary.totalKeys).value;
-    return {rate: rate, errors: errorRaw === null ? null : num_(errorRaw, null), total: totalRaw === null ? null : num_(totalRaw, null), raw: r};
+    const errors = errorRaw === null ? null : num_(errorRaw, null), total = totalRaw === null ? null : num_(totalRaw, null);
+    // Tela sem taxa pronta (Recebimento): taxa = erros ÷ total (não chegadas ÷ deve chegar), em %.
+    const rate = cfg.summary.rateFromCounts ? (total > 0 && errors !== null ? errors / total * 100 : (total === 0 ? 0 : null))
+      : parsePercent_(rd(cfg.summary.rateKeys).value);
+    return {rate: rate, errors: errors, total: total, raw: r};
   });
   let rate, errors, total;
   if (parsed.length === 1) {
@@ -553,14 +571,16 @@ function splitWindow_(win, n) {
  *  - erro com página grande → tenta menor (1000 → 500 → 200 → 100 → 50 → 20);
  *  - o JMS entregou menos que o pedido (e existe mais) → esse é o limite dele.
  */
-function probeDetail_(indicatorKey, isoDate) {
+function probeDetail_(indicatorKey, isoDate, type) {
   const cfg = getIndicatorConfig_(indicatorKey);
   let size = detailPageSize_(cfg);
   let refused = false;
+  const win = type ? Object.assign({type: type}, dayWindow_(isoDate, isOperational_(indicatorKey))) : undefined;
   for (;;) {
     let got;
-    try { got = fetchDetailPage_(indicatorKey, isoDate, 1, size); }
+    try { got = fetchDetailPage_(indicatorKey, isoDate, 1, size, win); }
     catch (e) {
+      if (/HTTP 404/.test(String(e.message)) && discoverDetailEndpoint_(cfg, isoDate, size, win)) continue;
       const next = PAGE_SIZE_STEPS_.filter(s => s < size)[0];
       if (errorKind_(e.message) !== 'OTHER' || !next || getProp_('JMS_PAGE_SIZE', '')) throw e;
       logSync_('WARN', indicatorKey, isoDate, 'Página de ' + size + ' registros falhou (' + String(e.message).slice(0, 160) + '); tentando ' + next + '.');
@@ -577,26 +597,70 @@ function probeDetail_(indicatorKey, isoDate) {
 }
 
 /**
+ * Endereço do detalhe não capturado (Recebimento): com HTTP 404, testa as variantes de detail.candidates
+ * no mesmo caminho e guarda a que responder em JMS_ENDPOINT_<INDICADOR>_DETAIL. Uma vez por execução.
+ */
+const DETAIL_DISCOVERY_TRIED_ = {};
+function discoverDetailEndpoint_(cfg, isoDate, size, win) {
+  const cands = cfg.detail && cfg.detail.candidates;
+  const prop = 'JMS_ENDPOINT_' + cfg.key.toUpperCase() + '_DETAIL';
+  if (!cands || !cands.length || DETAIL_DISCOVERY_TRIED_[cfg.key] || getProp_(prop, '')) return false;
+  DETAIL_DISCOVERY_TRIED_[cfg.key] = true;
+  const basePath = String(cfg.detail.endpoint).replace(/[^\/]+$/, '');
+  for (let i = 0; i < cands.length; i++) {
+    const url = basePath + cands[i];
+    if (url === cfg.detail.endpoint) continue;
+    try {
+      parseJmsResponse_(urlFetch_(jmsRequestObject_(url, buildPayload_(cfg.key, isoDate, 1, size, true, win))), url);
+      setProp_(prop, url);
+      logSync_('INFO', cfg.key, isoDate, 'Endereço do detalhe encontrado: ' + cands[i] + ' (o padrão respondeu 404).');
+      return true;
+    } catch (e) { /* próxima variante */ }
+  }
+  logSync_('WARN', cfg.key, isoDate, 'Nenhum endereço de detalhe respondeu (' + cands.join(', ') + '). Capture no DevTools a chamada ' +
+    'ao clicar num número da tela e cadastre a URL em ' + prop + '.');
+  return false;
+}
+
+/**
  * Plano de download do dia: janelas (1 = dia inteiro; 2, 4... = fatias de horário) e a
  * lista ordenada de pedaços {w: janela, page}. A página 1 de cada janela já vem baixada.
+ * Indicador com várias listas no detalhe (detail.types, ex.: Recebimento "Deve chegar" e "Chegou"):
+ * um plano por lista, juntos — cada janela leva o `type` e os pedaços dizem de que lista são.
  */
 function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
   const cfg = getIndicatorConfig_(indicatorKey);
-  const probe = probeDetail_(indicatorKey, isoDate);
+  const types = cfg.detail.types && cfg.detail.types.length ? cfg.detail.types.map(t => t.type) : [null];
+  if (types.length === 1 && types[0] === null) return planDetailType_(indicatorKey, isoDate, validateTotal, null);
+  const plans = types.map(t => planDetailType_(indicatorKey, isoDate, validateTotal, t));
+  const windows = [], chunks = [];
+  plans.forEach(p => {
+    const off = windows.length;
+    p.windows.forEach(w => windows.push(w));
+    p.chunks.forEach(c => chunks.push({w: c.w + off, page: c.page}));
+  });
+  // Tamanho de página: o menor aceito (todas as listas usam o mesmo endereço).
+  return {size: Math.min.apply(null, plans.map(p => p.size)), total: plans.reduce((a, p) => a + p.total, 0), windows: windows, chunks: chunks,
+    sliced: plans.some(p => p.sliced), types: types};
+}
+function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const probe = probeDetail_(indicatorKey, isoDate, type);
   // Confere o total ANTES de gastar requisições com fatias (ex.: payload sem filtro).
-  if (validateTotal) validateTotal(probe.total);
-  if (probe.total > APP_CONFIG.MAX_DETAIL_PER_DAY) {
-    throw new Error('Detalhe com ' + probe.total + ' registros em ' + indicatorKey + ' ' + isoDate +
-      ': acima do limite de segurança (' + APP_CONFIG.MAX_DETAIL_PER_DAY + '). Confira o filtro/payload do detalhe.');
+  if (validateTotal) validateTotal(probe.total, type);
+  const maxPerDay = (cfg.detail && cfg.detail.maxPerDay) || APP_CONFIG.MAX_DETAIL_PER_DAY;
+  if (probe.total > maxPerDay) {
+    throw new Error('Detalhe com ' + probe.total + ' registros em ' + indicatorKey + ' ' + isoDate + (type ? ' (' + type + ')' : '') +
+      ': acima do limite de segurança (' + maxPerDay + '). Confira o filtro/payload do detalhe.');
   }
-  const full = dayWindow_(isoDate, isOperational_(indicatorKey));
-  let windows = [{start: full.start, end: full.end, total: probe.total, first: probe.records}];
+  const full = Object.assign(type ? {type: type} : {}, dayWindow_(isoDate, isOperational_(indicatorKey)));
+  let windows = [{start: full.start, end: full.end, type: type, total: probe.total, first: probe.records}];
   let sliced = false;
   const limit = detailMaxOffset_();
   if (limit > 0 && probe.total > limit && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
     let n = Math.min(32, nextPow2_(Math.ceil(probe.total / (limit * 0.5))));
     for (let round = 0; round < 3; round++) {
-      const parts = splitWindow_(full, n);
+      const parts = splitWindow_(full, n).map(w => Object.assign(w, type ? {type: type} : {}));
       const firsts = fetchDetailBatch_(indicatorKey, isoDate, parts.map(w => ({page: 1, size: probe.size, win: w})));
       const sum = firsts.reduce((s, f) => s + f.total, 0);
       if (Math.abs(sum - probe.total) > Math.max(countTolerance_(probe.total), probe.total * 0.05)) {
@@ -604,11 +668,11 @@ function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
         setProp_('JMS_NO_SLICE_' + cfg.routeKey, '1');
         logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': soma das fatias ' + sum +
           ' ≠ total do dia ' + probe.total + '. Usando paginação normal.');
-        windows = [{start: full.start, end: full.end, total: probe.total, first: probe.records}];
+        windows = [{start: full.start, end: full.end, type: type, total: probe.total, first: probe.records}];
         sliced = false;
         break;
       }
-      windows = parts.map((w, i) => ({start: w.start, end: w.end, total: firsts[i].total, first: firsts[i].records}));
+      windows = parts.map((w, i) => ({start: w.start, end: w.end, type: type, total: firsts[i].total, first: firsts[i].records}));
       sliced = true;
       const worst = firsts.reduce((m, f) => Math.max(m, f.total), 0);
       if (worst <= limit || n >= 32) break;

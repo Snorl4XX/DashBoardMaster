@@ -6,7 +6,7 @@ const SEGMENT_FIRST_CODE_ = {wrong_send: 1, sorting_error: 1, missing_receipt: 1
 const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expeditionTime', 'login', 'segment', 'destination',
   'lot', 'client', 'offenderBase', 'errorType', 'tripId', 'route', 'reason', 'idealTime', 'idealTimeFull', 'correctDest',
   'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw', 'station', 'product', 'content', 'amount', 'regDay',
-  'locationMain', 'locationSub'];
+  'locationMain', 'locationSub', 'column', 'destCenter', 'destBase', 'qty'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 
@@ -31,6 +31,8 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   if (f.product) row.product = str(f.product);
   if (f.content) row.content = str(f.content);
   if (f.amount) row.amount = str(f.amount);
+  if (f.destCenter) row.destCenter = str(f.destCenter);
+  if (f.destBase) row.destBase = str(f.destBase);
   if (f.locationMain) row.locationMain = str(f.locationMain);
   if (f.locationSub) row.locationSub = str(f.locationSub);
   // Indicadores com docas guardam o 1º segmento COMPLETO ("BRE - SP"); o campo segment continua
@@ -44,11 +46,18 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
  * campo da remessa, é erro de mapeamento: antes o dia era gravado vazio e os
  * gráficos ficavam "sem dados" sem nenhum aviso.
  */
-function normalizeRecords_(indicatorKey, date, records) {
+function normalizeRecords_(indicatorKey, date, records, type) {
   // Avaria: antes de normalizar, junta os dados da Consulta de Pacote Problemático (tabela 2).
   if (getIndicatorConfig_(indicatorKey).registration && records.length) enrichRegistrations_(indicatorKey, records);
+  // Detalhe com várias listas (Recebimento): a coluna principal de cada remessa e os campos que não valem nela.
+  const td = type ? (getIndicatorConfig_(indicatorKey).detail.types || []).filter(t => t.type === type)[0] : null;
   const rows = [];
-  for (let i = 0; i < records.length; i++) { const x = normalizeDetailRow_(indicatorKey, records[i], date); if (x) rows.push(x); }
+  for (let i = 0; i < records.length; i++) {
+    const x = normalizeDetailRow_(indicatorKey, records[i], date);
+    if (!x) continue;
+    if (td) { x.column = td.column; (td.blank || []).forEach(k => { x[k] = ''; }); }
+    rows.push(x);
+  }
   if (records.length && !rows.length) {
     const cfg = getIndicatorConfig_(indicatorKey);
     throw new Error('Nenhuma remessa reconhecida no detalhe de ' + indicatorKey + ' ' + date + ': o campo da remessa (' +
@@ -128,6 +137,8 @@ function rederiveRow_(indicatorKey, row) {
     r.idealTime = JTCore_.timePart(r.idealTime) || r.idealTime;
   } else if (r.idealTime && !r.idealTimeFull) r.idealTimeFull = r.idealTime;
   const main = r.eventTime || r.expeditionTime || r.receiptTime;
+  // Linha agrupada (Recebimento: qty, sem horário): o turno já vem gravado na combinação.
+  if (cfg.grouped && !main && r.qty !== undefined && r.qty !== '') return r;
   r.shift = JTCore_.shiftOf(main);
   r.receiptShift = JTCore_.shiftOf(r.receiptTime);
   r.expeditionShift = JTCore_.shiftOf(r.expeditionTime || r.eventTime);
@@ -163,8 +174,8 @@ function dedupeDetailRows_(rows) {
 
 // ------------------------------------------------------------------ formato colunar
 /** Arquivo diário V3.7: {kind:'jt-day', v:2, dv, n, fields, dict, cols} (bem menor que uma lista de objetos). */
-function encodeDayFile_(rows) {
-  const ds = JTCore_.encodeDataset(rows, STORE_FIELDS_);
+function encodeDayFile_(rows, fields) {
+  const ds = JTCore_.encodeDataset(rows, fields || STORE_FIELDS_);
   ds.kind = 'jt-day'; ds.v = 2; ds.dv = DERIVE_VERSION_;
   return ds;
 }
@@ -221,6 +232,62 @@ function DayAccumulator_() {
     build: function () { return {kind: 'jt-day', v: 2, dv: DERIVE_VERSION_, n: n, fields: fields, dict: dict, cols: cols}; }
   };
 }
+/**
+ * Dia AGRUPADO (Recebimento: centenas de milhares de remessas por dia): soma as remessas por combinação dos
+ * campos de cfg.groupFields, guardando a quantidade em qty. Mesma interface do DayAccumulator_. Aceita
+ * remessas (qty vazio = 1) e linhas já agrupadas (soma qty). A "remessa" de cada linha é um código da
+ * combinação (G1, G2…), para a linha não ser confundida com outra na leitura.
+ */
+function GroupAccumulator_(cfg) {
+  const keys = cfg.groupFields;
+  const fields = ['date', 'shipment'].concat(keys).concat(['qty']);
+  const groups = new Map();
+  let total = 0;
+  function add(get) {
+    const date = String(get('date') || '');
+    const vals = keys.map(k => { const v = get(k); return v === null || v === undefined ? '' : String(v); });
+    const key = date + '\u0001' + vals.join('\u0001');
+    const q = get('qty'), n = q === undefined || q === null || q === '' ? 1 : (Number(q) || 0);
+    total += n;
+    const g = groups.get(key);
+    if (g) { g.qty += n; return; }
+    groups.set(key, {date: date, vals: vals, qty: n});
+  }
+  return {
+    count: function () { return groups.size; },
+    total: function () { return total; },
+    addRow: function (r) { add(f => r[f]); },
+    addRows: function (rows) { rows.forEach(r => add(f => r[f])); },
+    addDataset: function (ds) {
+      for (let i = 0; i < ds.n; i++) add(f => (ds.dict[f] && ds.cols[f] ? ds.dict[f][ds.cols[f][i]] : ''));
+    },
+    shiftCounts: function () {
+      const c = {T1: 0, T2: 0, T3: 0, NA: 0}, si = keys.indexOf('shift');
+      groups.forEach(g => { const s = si >= 0 ? g.vals[si] : ''; if (c[s] !== undefined) c[s] += g.qty; else c.NA += g.qty; });
+      return c;
+    },
+    emptyFields: function (list) {
+      return list.filter(f => { const i = keys.indexOf(f); if (i < 0) return false; for (const g of groups.values()) if (g.vals[i] !== '') return false; return true; });
+    },
+    build: function () {
+      const rows = [];
+      let i = 0;
+      groups.forEach(g => {
+        const r = {date: g.date, shipment: 'G' + (++i), qty: String(g.qty)};
+        keys.forEach((k, j) => { r[k] = g.vals[j]; });
+        rows.push(r);
+      });
+      const ds = encodeDayFile_(rows, fields);
+      return ds;
+    }
+  };
+}
+/** Acumulador do dia conforme o indicador: remessa a remessa ou agrupado. */
+function dayAccumulatorFor_(indicatorKey) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  return cfg.grouped ? GroupAccumulator_(cfg) : DayAccumulator_();
+}
+
 /** Linhas (objetos) de um arquivo: aceita a lista antiga ou o formato colunar. */
 function fileRows_(x) { return isDayDataset_(x) ? JTCore_.decodeDataset(x) : x; }
 
@@ -280,6 +347,123 @@ function RowsCollector_(fill) {
 }
 
 /** Mantido para relatórios e testes: filtros no formato {chave: [valores]} ou {chave: 'valor'}. */
+/**
+ * Indicador agrupado com muitas combinações no período (Recebimento no SP GRU: ~150 mil por dia — uma
+ * semana não cabe no navegador). Em vez das combinações, totais prontos:
+ *  - por campo de filtro/gráfico, a quantidade por (dia, coluna, valor) com os OUTROS filtros aplicados
+ *    (cada gráfico e a lista de cada filtro ficam certos, inclusive com o próprio filtro marcado);
+ *  - por (dia, coluna) com todos os filtros (cartões);
+ *  - as maiores combinações com todos os filtros (tabela).
+ * Lê cada dia colunar pelos índices do dicionário, sem criar um objeto por linha.
+ */
+function groupSummaryDims_(cfg) {
+  const set = {column: 1};
+  (cfg.filters || []).forEach(k => { set[k] = 1; });
+  (cfg.charts || []).forEach(d => { set[d.dim || d.key] = 1; });
+  return Object.keys(set).filter(k => (cfg.groupFields || []).indexOf(k) >= 0);
+}
+function GroupSummarySink_(cfg, filters, topLimit) {
+  const dims = groupSummaryDims_(cfg), fill = fillEmpty_(cfg), fields = clientFields_(cfg);
+  const active = dims.filter(k => filters && filters[k] && filters[k].length);
+  const sets = {};
+  active.forEach(k => { sets[k] = {}; filters[k].forEach(v => { sets[k][String(v)] = 1; }); });
+  const norm = (f, v) => {
+    v = v === null || v === undefined ? '' : String(v);
+    if (fill[f] && v.trim() === '') v = fill[f];
+    return v.trim() === '' ? 'N/A' : v;
+  };
+  const marg = {}, totals = new Map();
+  dims.forEach(k => { marg[k] = new Map(); });
+  let top = [], floor = 0, cubeRows = 0, totalQty = 0, outCount = 0;
+  const bump = (m, key, q) => { const v = m.get(key); if (v === undefined) { m.set(key, q); outCount++; } else m.set(key, v + q); };
+  function addEncoded(ds) {
+    const n = ds.n;
+    if (!n) return;
+    const idxOf = f => ds.cols[f] || null;
+    const vals = {}, ok = {}, cols = {};
+    dims.forEach(f => { vals[f] = ds.dict[f] ? ds.dict[f].map(v => norm(f, v)) : [norm(f, '')]; cols[f] = idxOf(f); });
+    active.forEach(f => { ok[f] = vals[f].map(v => !!sets[f][v]); });
+    const dDate = ds.dict.date || [''], cDate = idxOf('date'), cCol = cols.column, nCol = vals.column.length;
+    const qd = (ds.dict.qty || []).map(v => v === '' || v === null || v === undefined ? 1 : (Number(v) || 0)), cQty = idxOf('qty');
+    // Soma do dia por índices (data × coluna × valor) e só no fim vira texto.
+    const acc = {}, tot = new Float64Array(dDate.length * nCol);
+    dims.forEach(k => { acc[k] = new Float64Array(dDate.length * nCol * vals[k].length); });
+    for (let i = 0; i < n; i++) {
+      const q = cQty ? qd[cQty[i]] : 1;
+      cubeRows++; totalQty += q;
+      let fails = 0, failK = null;
+      for (let a = 0; a < active.length; a++) {
+        const k = active[a], c = cols[k];
+        if (!ok[k][c ? c[i] : 0]) { fails++; failK = k; if (fails > 1) break; }
+      }
+      if (fails > 1) continue;
+      const base = (cDate ? cDate[i] : 0) * nCol + (cCol ? cCol[i] : 0);
+      if (fails === 1) { const c = cols[failK]; acc[failK][base * vals[failK].length + (c ? c[i] : 0)] += q; continue; }
+      tot[base] += q;
+      for (let a = 0; a < dims.length; a++) { const k = dims[a], c = cols[k]; acc[k][base * vals[k].length + (c ? c[i] : 0)] += q; }
+      if (topLimit && (q > floor || top.length < topLimit)) {
+        const r = {};
+        fields.forEach(f => { const c = ds.cols[f]; r[f] = c ? ds.dict[f][c[i]] : ''; });
+        r.qty = q;
+        top.push(r);
+        if (top.length >= topLimit * 2) { top.sort((x, y) => y.qty - x.qty); top = top.slice(0, topLimit); floor = top[top.length - 1].qty; }
+      }
+    }
+    for (let d = 0; d < dDate.length; d++) {
+      for (let c = 0; c < nCol; c++) {
+        const b = d * nCol + c, key = dDate[d] + '\u0001' + vals.column[c];
+        if (tot[b]) bump(totals, key, tot[b]);
+        dims.forEach(k => {
+          const a = acc[k], m = vals[k].length;
+          for (let v = 0; v < m; v++) if (a[b * m + v]) bump(marg[k], key + '\u0001' + vals[k][v], a[b * m + v]);
+        });
+      }
+    }
+  }
+  return {
+    count: function () { return outCount; },
+    addEncoded: addEncoded,
+    addRows: function (rows) { const b = DatasetBuilder_(fields, null); b.addRows(rows); addEncoded(b.build()); },
+    stats: function () { return {cubeRows: cubeRows, totalQty: totalQty}; },
+    build: function () {
+      let seq = 0;
+      const tb = DatasetBuilder_(['date', 'column', 'shipment', 'qty'], null);
+      totals.forEach((q, key) => { const p = key.split('\u0001'); tb.addRows([{date: p[0], column: p[1], shipment: 'T' + (++seq), qty: String(q)}]); });
+      const mb = DatasetBuilder_(['date', 'column', 'shipment', '_m', 'value', 'qty'], null);
+      dims.forEach(k => marg[k].forEach((q, key) => {
+        const p = key.split('\u0001');
+        mb.addRows([{date: p[0], column: p[1], shipment: 'M' + (++seq), _m: k, value: p[2], qty: String(q)}]);
+      }));
+      top.sort((x, y) => y.qty - x.qty);
+      const best = top.slice(0, topLimit || 0);
+      const gb = DatasetBuilder_(fields, fill);
+      best.forEach(r => { r.shipment = 'G' + (++seq); r.qty = String(r.qty); });
+      gb.addRows(best);
+      return {totals: tb.build(), marginals: mb.build(), top: gb.build(), cubeRows: cubeRows, totalQty: totalQty, topLimit: topLimit || 0};
+    }
+  };
+}
+/** Combinações estimadas do período (arquivos diários + dias ainda em pedaços) acima do limite do navegador? */
+function groupedNeedsSummary_(indicatorKey, from, to, params) {
+  if (params && params.summary !== undefined && params.summary !== null) return !!params.summary;
+  const v = Number(getProp_('GROUPED_CLIENT_ROWS', ''));
+  const limit = v >= 1 ? v : APP_CONFIG.MAX_GROUPED_CLIENT_ROWS;
+  const files = dayFilesMap_(indicatorKey, from, to), st = statusMap_(indicatorKey, from, to);
+  let est = 0;
+  dateRangeIso_(from, to).forEach(d => {
+    if (files[d]) est += files[d].rows;
+    else { const s = st[indicatorKey + '|' + d]; if (s && DETAIL_USABLE_.concat(['PARTIAL']).indexOf(s.details) >= 0) est += Math.round((s.expectedRecords || 0) * 0.3); }
+  });
+  return est > limit;
+}
+/** Visão "totais por campo": linhas por campo (gráficos), totais filtrados (cartões) e maiores combinações (tabela). */
+function groupSummaryView_(cfg, built, filters) {
+  const byDim = JTCore_.marginalsByDim(built.marginals);
+  const totals = JTCore_.decodeDataset(built.totals);
+  return {byDim: byDim, totals: totals, top: JTCore_.decodeDataset(built.top),
+    charts: (cfg.charts || []).map(def => JTCore_.buildChart(def, JTCore_.summaryChartRows(def, byDim, filters), {}))};
+}
+
 function normalizeFilters_(filters) {
   const out = {};
   Object.keys(filters || {}).forEach(k => {
@@ -330,9 +514,13 @@ function getDashboardData(indicatorKey, params) {
   const allRates = getRates_(indicatorKey, null, null);
   const p = resolvePeriod_(params, allRates, indicatorKey);
   const coverage = getCoverage_(indicatorKey, p.from, p.to);
-  const builder = DatasetBuilder_(clientFields_(cfg), fillEmpty_(cfg));
-  const maxRows = maxClientRows_();
-  const archive = scanArchive_(indicatorKey, p.from, p.to, {maxRows: maxRows}, builder);
+  // Recebimento com período grande: totais prontos por campo, filtros aplicados aqui (groupSummaryView_).
+  const summaryMode = !!cfg.grouped && groupedNeedsSummary_(indicatorKey, p.from, p.to, params);
+  const filters = summaryMode ? normalizeFilters_(params && params.filters) : null;
+  const builder = summaryMode ? GroupSummarySink_(cfg, filters, APP_CONFIG.GROUPED_TOP_ROWS) : DatasetBuilder_(clientFields_(cfg), fillEmpty_(cfg));
+  const maxRows = summaryMode ? Infinity : maxClientRows_();
+  const archive = scanArchive_(indicatorKey, p.from, p.to, summaryMode ? {maxRows: maxRows, deadline: Date.now() + APP_CONFIG.GROUPED_SUMMARY_BUDGET_MS} : {maxRows: maxRows}, builder);
+  const built = summaryMode ? builder.build() : null;
   const out = safeReturn_({
     meta: {
       indicator: indicatorKey, from: p.from, to: p.to, today: p.today, generatedAt: new Date().toISOString(),
@@ -343,10 +531,12 @@ function getDashboardData(indicatorKey, params) {
       coverage: coverage,
       archive: {loadedDates: archive.loadedDates, partialDates: archive.partialDates, staleDates: archive.staleDates,
         notDownloaded: archive.notDownloaded, notLoaded: archive.notLoaded, emptyDates: archive.emptyDates,
-        readFiles: archive.readFiles, fullyLoaded: archive.fullyLoaded, maxRows: maxRows},
-      rowsLoaded: builder.count()
+        readFiles: archive.readFiles, fullyLoaded: archive.fullyLoaded, maxRows: summaryMode ? null : maxRows},
+      rowsLoaded: summaryMode ? built.cubeRows : builder.count()
     },
-    rates: allRates.map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount})),
+    // metrics: números do resumo do dia (Recebimento: as subcolunas de "Deve chegar" e "Chegou").
+    rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics}
+      : {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount}),
     // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (o painel troca a taxa pelo filtro).
     rateVariants: cfg.orderKinds ? ['main', 'sub'].reduce((o, k) => {
       o[k] = getRates_(indicatorKey + ':' + k, null, null).map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, estimated: r.estimated}));
@@ -354,7 +544,11 @@ function getDashboardData(indicatorKey, params) {
     }, {}) : null
   });
   // O conjunto de remessas só tem textos e números (sem Date): vai direto, sem cópia extra.
-  out.dataset = builder.build();
+  if (summaryMode) {
+    out.dataset = built.totals;
+    out.summary = {marginals: built.marginals, top: built.top, topLimit: built.topLimit, totalQty: built.totalQty,
+      cubeRows: built.cubeRows, filters: filters};
+  } else out.dataset = builder.build();
   return out;
 }
 
@@ -401,6 +595,19 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   const allRates = getRates_(indicatorKey, null, null);
   const p = resolvePeriod_(params, allRates, indicatorKey);
   const filters = normalizeFilters_(params && params.filters);
+  if (cfg.grouped && groupedNeedsSummary_(indicatorKey, p.from, p.to, params)) {
+    // Recebimento com período grande: mesma visão do painel (totais por campo), sem carregar as combinações.
+    const sink = GroupSummarySink_(cfg, filters, APP_CONFIG.GROUPED_TOP_ROWS);
+    const meta = scanArchive_(indicatorKey, p.from, p.to, Object.assign({maxRows: Infinity, deadline: Date.now() + APP_CONFIG.GROUPED_SUMMARY_BUDGET_MS}, archiveOpts || {}), sink);
+    const view = groupSummaryView_(cfg, sink.build(), filters);
+    meta.rows = view.top;
+    return {
+      cfg: cfg, from: p.from, to: p.to, filters: filters, archive: meta, rows: view.top, allRates: allRates, summaryMode: true,
+      coverage: getCoverage_(indicatorKey, p.from, p.to),
+      cards: JTCore_.computeCards(cfg, allRates, view.totals, filters, p.from, p.to),
+      charts: view.charts, summary: JTCore_.summaryTable(cfg, view.totals), pivots: []
+    };
+  }
   const archive = getArchivedRange_(indicatorKey, p.from, p.to, archiveOpts);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds);

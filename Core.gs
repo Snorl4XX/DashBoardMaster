@@ -172,7 +172,7 @@ function JTCoreFactory_() {
       var a = norm(r[k1]), b = norm(r[k2]);
       if (def.skipNA && a === 'N/A') return;
       var g = map[a] || (map[a] = {});
-      g[b] = (g[b] || 0) + 1;
+      g[b] = (g[b] || 0) + weight(r);
     });
     var groups = Object.keys(map).map(function (a) {
       var items = Object.keys(map[a]).map(function (b) { return {value: b, count: map[a][b]}; })
@@ -209,8 +209,8 @@ function JTCoreFactory_() {
         if (blank(r[def.groupBy]) && blank(r[dim])) return;
         var g = blank(r[def.groupBy]) ? 'N/A' : String(r[def.groupBy]), v = blank(r[dim]) ? 'N/A' : String(r[dim]);
         var m = byG[g] || (byG[g] = {});
-        m[v] = (m[v] || 0) + 1;
-        gTot[g] = (gTot[g] || 0) + 1;
+        m[v] = (m[v] || 0) + weight(r);
+        gTot[g] = (gTot[g] || 0) + weight(r);
         note(r);
       });
       groups = Object.keys(byG).sort(function (a, b) {
@@ -225,7 +225,7 @@ function JTCoreFactory_() {
       (rows || []).forEach(function (r) {
         if (blank(r[dim]) || SHIFTS.indexOf(r.shift) < 0) return;
         var m = by[r.shift] || (by[r.shift] = {});
-        m[r[dim]] = (m[r[dim]] || 0) + 1;
+        m[r[dim]] = (m[r[dim]] || 0) + weight(r);
         note(r);
       });
       groups = SHIFTS.filter(function (s) { return by[s]; }).map(function (s) {
@@ -234,7 +234,7 @@ function JTCoreFactory_() {
       });
     } else {
       var all = {};
-      (rows || []).forEach(function (r) { if (blank(r[dim])) return; all[r[dim]] = (all[r[dim]] || 0) + 1; note(r); });
+      (rows || []).forEach(function (r) { if (blank(r[dim])) return; all[r[dim]] = (all[r[dim]] || 0) + weight(r); note(r); });
       groups = [{shift: null, items: sorted(all)}];
     }
     var total = 0, flat = [];
@@ -355,19 +355,24 @@ function JTCoreFactory_() {
    * Contagem de remessas por valor da dimensão. As linhas já chegam únicas por
    * (data, remessa): dedupeDetailRows_ no servidor e decodeDataset no navegador.
    */
+  /**
+   * Peso da linha: 1 remessa, ou a quantidade de uma linha AGRUPADA (Recebimento: fluxo operacional guarda
+   * as remessas somadas por combinação de DC/base/viagem/estação/digitalizador/turno, campo qty).
+   */
+  function weight(r) { var q = r && r.qty; return q === undefined || q === null || q === '' ? 1 : (Number(q) || 0); }
   function countBy(rows, key) {
     var map = {};
     var list = rows || [];
     for (var i = 0; i < list.length; i++) {
       var label = norm(list[i][key]);
-      map[label] = (map[label] || 0) + 1;
+      map[label] = (map[label] || 0) + weight(list[i]);
     }
     return Object.keys(map).map(function (l) { return {label: l, value: map[l]}; })
       .sort(function (a, b) { return b.value - a.value || compareText(a.label, b.label); });
   }
   function distinctCount(rows) {
     var seen = {}, n = 0;
-    (rows || []).forEach(function (r) { var id = r.date + '|' + r.shipment; if (!seen[id]) { seen[id] = 1; n++; } });
+    (rows || []).forEach(function (r) { var id = r.date + '|' + r.shipment; if (!seen[id]) { seen[id] = 1; n += weight(r); } });
     return n;
   }
   function compareText(a, b) {
@@ -404,9 +409,36 @@ function JTCoreFactory_() {
   }
 
   // ---------- gráficos ----------
+  /** Linhas do recorte do gráfico (def.where, ex.: {column: 'Chegou'}): um painel com duas colunas principais. */
+  function chartRows(def, rows) {
+    if (!def.where) return rows || [];
+    var keys = Object.keys(def.where);
+    return (rows || []).filter(function (r) { return keys.every(function (k) { return r[k] === def.where[k]; }); });
+  }
+  /**
+   * Recebimento com período grande (servidor manda totais por campo): {campo: [{date, column, campo: valor, qty}]}.
+   * Os totais de cada campo já vêm com os OUTROS filtros aplicados; o filtro do próprio campo é aplicado aqui.
+   */
+  function marginalsByDim(ds) {
+    var out = {};
+    decodeDataset(ds).forEach(function (r) {
+      var o = {date: r.date, column: r.column, shipment: r.shipment, qty: r.qty};
+      o[r._m] = r.value;
+      (out[r._m] || (out[r._m] = [])).push(o);
+    });
+    return out;
+  }
+  function summaryChartRows(def, byDim, filters) {
+    var k = def.dim || def.key, f = {};
+    if (filters && filters[k]) f[k] = filters[k];
+    return applyFilters((byDim && byDim[k]) || [], f);
+  }
   function buildChart(def, rows, opts) {
     opts = opts || {};
-    var base = {key: def.key, type: def.type || 'bar', title: def.title, horizontal: !!def.horizontal, ranking: !!def.ranking};
+    rows = chartRows(def, rows);
+    if (def.dim) def = Object.assign({}, def, {key: def.dim, chartKey: def.key});
+    var base = {key: def.chartKey || def.key, dim: def.chartKey ? def.key : undefined, type: def.type || 'bar', title: def.title,
+      horizontal: !!def.horizontal, ranking: !!def.ranking, where: def.where || null};
     var total = distinctCount(rows);
     base.total = total;
     var shiftDim = def.key === 'segmentByShift' ? 'segment' : def.byShift;
@@ -469,7 +501,7 @@ function JTCoreFactory_() {
       var parts = st.groupBy.map(function (k) { return norm(r[k]); });
       var key = parts.join('\u0001');
       if (!map[key]) map[key] = {parts: parts, count: 0};
-      map[key].count++;
+      map[key].count += weight(r);
     });
     var list = Object.keys(map).map(function (k) { return map[k]; })
       .sort(function (a, b) { return b.count - a.count || compareText(a.parts.join(' '), b.parts.join(' ')); });
@@ -607,7 +639,7 @@ function JTCoreFactory_() {
     '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição'
   };
   var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
-    'Pedido principal': '主单', 'Pedido secundário': '子单'};
+    'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Chegou': '已到'};
   function hasCjk(s) { return /[㐀-鿿]/.test(s); }
   function localizeValue(value, lang) {
     var s = String(value === null || value === undefined ? '' : value);
@@ -634,7 +666,7 @@ function JTCoreFactory_() {
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
-    computeCards: computeCards, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
+    computeCards: computeCards, weight: weight, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
     encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText
   };
 }

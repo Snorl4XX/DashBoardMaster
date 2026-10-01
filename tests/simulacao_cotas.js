@@ -8,6 +8,7 @@
  *       consumer  = conta Gmail comum (gatilhos 90 min/dia, UrlFetch 20 mil/dia)
  *       workspace = Google Workspace (gatilhos 6 h/dia, UrlFetch 100 mil/dia)
  * DASH=1 no ambiente também mede a abertura do painel (tempo e tamanho da resposta).
+ * JMS_CAP=100 simula o JMS entregando no máximo 100 registros por página (padrão: 1000).
  */
 const path = require('path');
 const {makeClock, createSimContext, realisticJms, fmtDate} = require('./sim_mocks');
@@ -18,7 +19,7 @@ const QUOTA = plan === 'consumer' ? {runtimeMin: 90, urlfetch: 20000} : {runtime
 const clock = makeClock('2026-09-01T03:00:00Z'); // 00:00 em São Paulo
 const addDays = (iso, n) => new Date(Date.parse(iso + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
 const start = addDays('2026-09-01', -histDays);
-const ctx = createSimContext({root, clock, props: {JMS_AUTHTOKEN: 'X', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: start}, jms: realisticJms({maxPageSize: 1000}), urlfetchQuota: QUOTA.urlfetch});
+const ctx = createSimContext({root, clock, props: {JMS_AUTHTOKEN: 'X', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: start}, jms: realisticJms({maxPageSize: Number(process.env.JMS_CAP) || 1000}), urlfetchQuota: QUOTA.urlfetch});
 const st = clock.stats;
 const fresh = () => { ctx.STORAGE_CACHE_ = null; ctx.TAB_CACHE_ = {}; ctx.TAB_INDEX_ = {}; if (ctx.resetExecutionCaches_) ctx.resetExecutionCaches_(); };
 fresh(); ctx.setupProject(); fresh(); ctx.startFullHistory();
@@ -58,15 +59,20 @@ console.log('Cobertura ' + from + ' → ' + to + ':\n  ' + rows.join('\n  '));
 const s = ctx.computeSyncStatus_(); console.log('Fila:', JSON.stringify({PENDING: s.PENDING, RUNNING: s.RUNNING, DONE: s.DONE, ERROR: s.ERROR}));
 const errs = ctx.allTabRows_('STATUS').filter(r => r[8]).map(r => r[0] + ' ' + ctx.dateCellIso_(r[1]) + ': ' + String(r[8]).slice(0, 110));
 console.log('Erros em DAY_STATUS (' + errs.length + '):\n  ' + errs.slice(0, 8).join('\n  '));
+// Recebimento: ~500 mil remessas por dia gravadas agrupadas (combinações × quantidade).
+const afDays = ctx.allTabRows_('DAYFILES').filter(r => r[0] === 'arrival_flow').map(r => ctx.dateCellIso_(r[1]) + ' ' + r[3] + ' combinações (' + r[5] + ' remessas)');
+const afSt = ctx.allTabRows_('STATUS').filter(r => r[0] === 'arrival_flow').map(r => r[3]).reduce((m, x) => { m[x] = (m[x] || 0) + 1; return m; }, {});
+console.log('Recebimento — situação do detalhe por dia: ' + JSON.stringify(afSt) + '\n  ' + afDays.slice(-8).join('\n  '));
 if (process.env.DASH) {
   const t1 = addDays(today, -1);
-  [['sc_sc', 1], ['sc_sc', 7], ['sc_sc', 14], ['missing_receipt', 14], ['wrong_send', 14]].forEach(([k, n]) => {
-    fresh(); const t0 = clock.now;
+  const fDC = {column: ['Chegou'], destCenter: ['DC 3']};
+  [['sc_sc', 1], ['sc_sc', 7], ['sc_sc', 14], ['missing_receipt', 14], ['wrong_send', 14], ['arrival_flow', 1], ['arrival_flow', 7], ['arrival_flow', 7, fDC]].forEach(([k, n, filters]) => {
+    fresh(); const t0 = clock.now, c0 = Date.now();
     let res, err = '';
-    try { res = ctx.getDashboardData(k, {from: addDays(t1, -(n - 1)), to: t1}); } catch (e) { err = e.message; }
-    const ms = clock.now - t0;
+    try { res = ctx.getDashboardData(k, {from: addDays(t1, -(n - 1)), to: t1, filters: filters}); } catch (e) { err = e.message; }
+    const ms = clock.now - t0, cpu = Date.now() - c0;
     if (!res) { console.log('getDashboardData', k, n + 'd → ERRO', err); return; }
     const json = JSON.stringify(res);
-    console.log('getDashboardData', k, n + ' dia(s): ' + (ms / 1000).toFixed(1) + ' s (virtual) | ' + (json.length / 1e6).toFixed(2) + ' MB | remessas ' + res.meta.rowsLoaded + ' | dias carregados ' + res.meta.archive.loadedDates.length + '/' + n + ' | completo ' + res.meta.archive.fullyLoaded);
+    console.log('getDashboardData', k, n + ' dia(s)' + (filters ? ' com filtro' : '') + ': ' + (ms / 1000).toFixed(1) + ' s (virtual) + CPU ' + (cpu / 1000).toFixed(1) + ' s (Node) | ' + (json.length / 1e6).toFixed(2) + ' MB | remessas ' + res.meta.rowsLoaded + ' | dias carregados ' + res.meta.archive.loadedDates.length + '/' + n + ' | completo ' + res.meta.archive.fullyLoaded + (res.summary ? ' | totais por campo (' + res.summary.marginals.n + ' linhas, ' + res.summary.top.n + ' maiores)' : ''));
   });
 }

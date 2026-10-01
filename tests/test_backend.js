@@ -5,7 +5,8 @@ function check(cond, name, extra) { if (!cond) { console.error('FALHOU: ' + name
 function hasDate(o) { if (o instanceof Date) return true; if (o && typeof o === 'object') return Object.keys(o).some(k => hasDate(o[k])); return false; }
 
 const days = {'2026-09-17': makeDay('2026-09-17', 11), '2026-09-18': makeDay('2026-09-18', 23), '2026-09-19': makeDay('2026-09-19', 37)};
-const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17'};
+// DETAIL_DAYS_ARRIVAL_FLOW: os dias dos testes (setembro) ficam dentro da janela de detalhe do Recebimento.
+const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120'};
 const ctx = createContext({props: baseProps, jms: fakeJms(days), quiet: true});
 const S = ctx.__state;
 
@@ -130,7 +131,8 @@ check(ctx.getDashboardData('wrong_send', {}).meta.to === '2026-09-19', 'período
 
 // ---------- 6. Resultados ----------
 const results = ctx.getResultsData({from: '2026-09-17', to: '2026-09-19'});
-check(results.series.length === 7 && results.series.every(s => s.rates.length === 3 && s.agg.length === 3) && !hasDate(results), 'resultados de todos os indicadores');
+check(results.series.length === 8 && results.series.every(s => s.rates.length === 3 && s.agg.length === (s.key === 'arrival_flow' ? 0 : 3)) && !hasDate(results),
+  'resultados de todos os indicadores (o Recebimento, agrupado, não tem contagem por turno)');
 const weekly = C.aggregateResults(results.series[0].rates, cfgWs.goal, 'week', '2026-09-17', '2026-09-19');
 check(weekly.length === 1 && weekly[0].key === '2026-W38' && weekly[0].method === 'weighted', 'agregação semanal', weekly);
 
@@ -290,7 +292,7 @@ runAll(cA);
 const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url));
 check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 1000 registros por página (antes 100)', detA.map(f => f.payload.size));
 check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
-check(Object.keys(cA.__state.files).length === 7, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
+check(Object.keys(cA.__state.files).length === 8, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
 check(cA.loadDetailFile_(cA.dayFilesMap_('wrong_send', D19, D19)[D19].fileId).kind === 'jt-day', 'arquivo diário no formato colunar');
 check(cA.allTabRows_('PAGES').length === 0, 'índice de páginas não cresce no caminho normal');
 // Fila vazia: depois de UMA execução de conferência, o gatilho de 5 min sai sem abrir a planilha.
@@ -353,13 +355,13 @@ const cG = freshCtx({'2026-09-19': makeDay(D19, 3)}, optsG);
 cG.queueHistory(D19, D19, true);
 cG.processSyncQueue({budgetMs: 600000});
 const pausesG = cG.publicPauses_();
-check(pausesG.length === 6 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
-  'token expirado pausa as 6 rotas com aviso claro', pausesG);
-check(cG.__state.fetches.length === 6, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
-check(cG.pendingJobs_().length === 14 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
+check(pausesG.length === 7 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
+  'token expirado pausa as 7 rotas com aviso claro', pausesG);
+check(cG.__state.fetches.length === 7, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
+check(cG.pendingJobs_().length === 16 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
 cG.processSyncQueue({budgetMs: 600000});
-check(cG.__state.fetches.length === 6, 'fila pausada não insiste no JMS');
-check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 6 && cG.getAppBootstrap().pauses.length === 6, 'pausa chega ao painel');
+check(cG.__state.fetches.length === 7, 'fila pausada não insiste no JMS');
+check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 7 && cG.getAppBootstrap().pauses.length === 7, 'pausa chega ao painel');
 delete optsG.appError;
 cG.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO';
 runAll(cG);
@@ -369,7 +371,7 @@ check(cG.publicPauses_().length === 0 && ALL.every(k => cG.getDayStatus_(k, D19)
 const cH = freshCtx({'2026-09-19': makeDay(D19, 3)}, {html: true});
 cH.queueHistory(D19, D19, true);
 cH.processSyncQueue({budgetMs: 600000});
-check(cH.publicPauses_().length === 6 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
+check(cH.publicPauses_().length === 7 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
 
 // (i) Cota diária do Google esgotada: pausa geral por 1 h, sem marcar erro nos jobs.
 const cI = freshCtx({'2026-09-19': makeDay(D19, 3)}, {onFetch: () => { throw new Error('Service invoked too many times for one day: urlfetch.'); }});
@@ -633,7 +635,7 @@ cQ.queueHistory(D19, D19, true);
 for (let i = 0; i < 4; i++) { cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {}; cQ.processSyncQueue({budgetMs: 600000, force: true}); }
 cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {};
 const qQ = cQ.queueReport_(1100);
-check(qQ.erros === 7 && qQ.esperandoTaxa === 7 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 7 &&
+check(qQ.erros === 8 && qQ.esperandoTaxa === 8 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 8 &&
   /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
 // ---------- 14. V3.8: docas na Falta de Bipagem na Expedição (planilha do usuário) ----------
@@ -1087,5 +1089,189 @@ check(/Pedidos principais\/filhos: mainSubCode=1 \(principal\) · mainSubCode=2 
 delete cOK.__state.props.MIGRATION_V313;
 const m313 = cOK.migrateToV313_();
 check(m313 === 2 && cOK.migrateToV313_() === 0, 'atualização: Avaria baixada de novo uma vez para as taxas de cada opção', m313);
+
+// ---------- 21. V3.14: RECEBIMENTO: FLUXO OPERACIONAL (Deve chegar × Chegou) ----------
+const cfgAF = ctx.getIndicatorConfig_('arrival_flow');
+const pAS = ctx.buildPayload_('arrival_flow', '2026-10-01', 1, 20, false);
+const pAD = ctx.buildPayload_('arrival_flow', '2026-10-01', 1, 100, true, {start: '2026-10-01 00:00:00', end: '2026-10-01 23:59:59', type: 'shouldArriverNum'});
+check(JSON.stringify(pAS) === JSON.stringify({current: 1, size: 20, startTime: '2026-10-01 00:00:00', endTime: '2026-10-01 23:59:59', siteCode: '30001', countryId: '1'}) &&
+  JSON.stringify(pAD) === JSON.stringify({current: 1, size: 100, detailType: 'shouldArriverNum', startTime: '2026-10-01 00:00:00', endTime: '2026-10-01 23:59:59', nextstationcode: '30001', countryId: '1'}),
+  'payloads do resumo e do detalhe = captura', {pAS: pAS, pAD: pAD});
+check(ctx.jmsRouteHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_total', {}).Routename === 'ArriveMonitor', 'Routename da tela');
+// (a) Sincronização: resumo com os 7 números; detalhe das duas listas AGRUPADO.
+const dAF = {}; dAF[D19] = makeDay(D19, 101);
+const cAF = freshCtx(dAF);
+cAF.queueHistory(D19, D19, true);
+runAll(cAF);
+const afD = dAF[D19].af, rAF = cAF.getRates_('arrival_flow', D19, D19)[0];
+check(rAF && rAF.errorCount === afD.noArriverNum && rAF.totalCount === afD.should.length && Math.abs(rAF.rate - afD.noArriverNum / afD.should.length * 100) < 1e-9 &&
+  rAF.metrics.totalNum === afD.total.length && rAF.metrics.noSendNum === afD.noSendNum && rAF.metrics.deliverNum === afD.total.length,
+  'resumo: taxa = não chegadas ÷ deve chegar; os 7 números guardados', rAF);
+const dashAF = cAF.getDashboardData('arrival_flow', {from: D19, to: D19});
+const rowsAF = C.decodeDataset(dashAF.dataset);
+const sumQ = (rows, col) => rows.filter(r => !col || r.column === col).reduce((a, r) => a + Number(r.qty), 0);
+check(cAF.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' && rowsAF.length < afD.should.length + afD.total.length &&
+  sumQ(rowsAF, 'Deve chegar') === afD.should.length && sumQ(rowsAF, 'Chegou') === afD.total.length && rowsAF.every(r => r.shipment && /^G\d+$/.test(r.shipment)),
+  'detalhe das duas listas gravado AGRUPADO (combinações com a quantidade); somas = listas do JMS', {linhas: rowsAF.length, deve: sumQ(rowsAF, 'Deve chegar'), chegou: sumQ(rowsAF, 'Chegou')});
+check(rowsAF.filter(r => r.column === 'Deve chegar').every(r => !r.destination && !r.login) && rowsAF.filter(r => r.column === 'Chegou').every(r => !r.station),
+  'cada lista só com os campos dela (Deve chegar: estação de remessa; Chegou: última parada e digitalizador)');
+const expC = afD.should.filter(r => r.endCenterName === 'BA FEC').length;
+const chExp = C.buildChart(cfgAF.charts[0], rowsAF, {});
+check(chExp.key === 'expCenter' && chExp.dim === 'destCenter' && chExp.datasets[0].data[chExp.labels.indexOf('BA FEC')] === expC && chExp.total === afD.should.length,
+  'gráfico "Deve chegar · DC destino" conta pela quantidade, só da lista dele', {labels: chExp.labels, total: chExp.total});
+const cardsAF = C.computeCards(cfgAF, dashAF.rates, rowsAF, {}, D19, D19);
+const cardsAFf = C.computeCards(cfgAF, dashAF.rates, C.applyFilters(rowsAF, {destCenter: ['BA FEC']}), {destCenter: ['BA FEC']}, D19, D19);
+check(cardsAF.currentErrors === afD.noArriverNum && cardsAFf.filtered && cardsAFf.currentErrors === afD.should.filter(r => r.endCenterName === 'BA FEC').length + afD.total.filter(r => r.endCenterName === 'BA FEC').length,
+  'cartões: oficial do JMS sem filtro; com filtro, soma das quantidades', [cardsAF.currentErrors, cardsAFf.currentErrors]);
+check(dashAF.rates[0].metrics && dashAF.rates[0].metrics.uploadNoSendNum === afD.uploadNoSendNum && C.distinctCount(rowsAF) === afD.should.length + afD.total.length,
+  'painel recebe os números do resumo (gráficos das subcolunas) e a contagem pondera a quantidade');
+const catAF = cAF.getPublicCatalog_().filter(x => x.key === 'arrival_flow')[0];
+check(catAF.grouped && catAF.metricPanels.length === 2 && catAF.metricPanels[1].metrics.length === 5 && catAF.filters[0].key === 'column' &&
+  catAF.filters.map(f => f.key).join() === 'column,destCenter,destBase,tripId,station,destination,login' && dashAF.dataset.fields.indexOf('qty') >= 0,
+  'catálogo: filtro de coluna principal + um por gráfico; painéis das subcolunas');
+cAF.UrlFetchApp.fetch = (() => { const f = cAF.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cAF.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
+const repAF = cAF.generateReport('arrival_flow', {from: D19, to: D19}, 'xlsx');
+check(repAF.ok, 'relatório do Recebimento', repAF);
+// (b) Janela de detalhe: dias antigos ficam só com o resumo (SKIPPED), sem voltar para a fila.
+const cWin = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: ''});
+cWin.queueHistory(D19, D19, true);
+runAll(cWin);
+const stWin = cWin.getDayStatus_('arrival_flow', D19);
+const fWin = cWin.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url));
+check(stWin.summary === 'COMPLETE' && stWin.details === 'SKIPPED' && fWin.length === 0 && cWin.getCoverage_('arrival_flow', D19, D19).skippedDetails.length === 1 &&
+  cWin.getCoverage_('arrival_flow', D19, D19).incompleteDetails.length === 0 && cWin.healQueue_(50) === 0,
+  'dia fora da janela (7 dias): só o resumo, nenhuma consulta ao detalhe e nada volta para a fila', stWin);
+// (c) Endereço do detalhe diferente do padrão: descoberto e guardado.
+const cEp = freshCtx(dAF, {arrivalDetailRoute: 'arrivalbyday_detailed'});
+cEp.queueHistory(D19, D19, true);
+runAll(cEp);
+check(/arrivalbyday_detailed$/.test(cEp.__state.props.JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL || '') && cEp.getDayStatus_('arrival_flow', D19).details === 'COMPLETE',
+  'endereço do detalhe descoberto sozinho (404 no padrão) e guardado', cEp.__state.props.JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL);
+// (d) Dia grande: fatias de horário por lista (cada fatia leva a lista certa).
+const cBig = freshCtx(dAF, null, {JMS_DETAIL_MAX_OFFSET: '300'});
+cBig.queueHistory(D19, D19, true);
+runAll(cBig);
+const rowsBig = C.decodeDataset(cBig.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
+const sliceF = cBig.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.startTime !== D19 + ' 00:00:00');
+check(sumQ(rowsBig, 'Deve chegar') === afD.should.length && sumQ(rowsBig, 'Chegou') === afD.total.length && sliceF.length > 0 &&
+  sliceF.every(f => f.payload.detailType === 'shouldArriverNum' || f.payload.detailType === 'totalNum'),
+  'dia grande baixado em fatias de horário, cada uma com a lista dela', {fatias: sliceF.length});
+// (e) Hoje muda o tempo todo: novo download do detalhe no máximo a cada 3 h.
+const stNow = {details: 'COMPLETE'};
+check(cAF.detailNeedsRefresh_('arrival_flow', D19, {errorCount: 1, totalCount: 2}, {errorCount: 5, totalCount: 2}, stNow, false) === false,
+  'contagem mudou num dia recém-baixado: espera o intervalo (6 h) em vez de baixar 500 mil linhas de novo');
+// (f) Dia em pedaços (download que não coube numa execução): leitura soma as combinações.
+const accG = cAF.GroupAccumulator_(cfgAF);
+[{date: D19, column: 'Chegou', destCenter: 'BA FEC', shift: 'T1'}, {date: D19, column: 'Chegou', destCenter: 'BA FEC', shift: 'T1', qty: '4'},
+  {date: D19, column: 'Chegou', destCenter: 'SP BRE', shift: 'T2'}].forEach(r => accG.addRow(r));
+const grp = C.decodeDataset(accG.build());
+check(grp.length === 2 && grp.filter(r => r.destCenter === 'BA FEC')[0].qty === '5' && accG.total() === 6, 'agrupamento soma remessas e linhas já agrupadas');
+
+// (g) Download agrupado que não cabe numa execução: cada lote já entra no agrupamento; com o tempo
+//     acabando, grava um arquivo para os pedaços já somados e a execução seguinte continua do próximo.
+const cGp = freshCtx(dAF, {maxPageSize: 100}, {JMS_PARALLEL: '2'});
+cGp.queueHistory(D19, D19, true);
+cGp.processJob_(cGp.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
+const realNowG = vm.runInContext('Date.now', cGp);
+let fakeTG = realNowG();
+vm.runInContext('Date', cGp).now = () => fakeTG;
+const origBatchG = cGp.fetchDetailBatch_;
+let batchesG = 0;
+cGp.fetchDetailBatch_ = function () { batchesG++; fakeTG += 10000; return origBatchG.apply(null, arguments); };
+const rGp1 = cGp.processJob_(cGp.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0], fakeTG + 40000);
+vm.runInContext('Date', cGp).now = realNowG;
+const stGp1 = cGp.getDayStatus_('arrival_flow', D19), jobGp1 = cGp.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
+const pagesGp1 = cGp.archiveIndexMap_('arrival_flow', D19, D19)[D19] || [];
+const filesGp1 = pagesGp1.map(p => p.fileId).filter((f, k, a) => a.indexOf(f) === k);
+check(rGp1 === 'partial' && stGp1.details === 'PARTIAL' && stGp1.expectedPages > 10 && jobGp1 && jobGp1.page > 2 && jobGp1.page <= stGp1.expectedPages &&
+  pagesGp1.length === jobGp1.page - 1 && filesGp1.length === 1 && batchesG < stGp1.expectedPages,
+  'tempo acabando: um arquivo para os pedaços já somados e o cursor no próximo', {r: rGp1, st: stGp1, cursor: jobGp1 && jobGp1.page, pages: pagesGp1.length, files: filesGp1.length});
+const fGp = cGp.__state.fetches.length;
+const keyGp = f => f.payload.detailType + '|' + f.payload.startTime + '|' + f.payload.current;
+const firstRunGp = cGp.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.current > 1).map(keyGp);
+cGp.fetchDetailBatch_ = origBatchG;
+const rGp2 = cGp.processJob_(jobGp1, Date.now() + 600000);
+const againGp = cGp.__state.fetches.slice(fGp).filter(f => /arrivalbyday_detail/.test(f.url));
+cGp.STORAGE_CACHE_ = null; cGp.TAB_CACHE_ = {}; cGp.TAB_INDEX_ = {};
+const rowsGp = C.decodeDataset(cGp.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
+check(rGp2 === 'done' && cGp.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' && againGp.length > 0 && againGp.every(f => f.payload.current === 1 || firstRunGp.indexOf(keyGp(f)) < 0) &&
+  sumQ(rowsGp, 'Deve chegar') === afD.should.length && sumQ(rowsGp, 'Chegou') === afD.total.length && rowsGp.length === rowsAF.length,
+  'retomada baixa só o restante e o dia fecha igual ao download de uma vez', {r: rGp2, again: againGp.map(keyGp), antes: firstRunGp, linhas: rowsGp.length, esperado: rowsAF.length});
+
+// (g2) Dia em andamento fatiado por horário: o total cresce entre as execuções e mesmo assim a retomada
+//      continua das fatias que faltam (antes recomeçava da 1ª página a cada execução e o dia nunca fechava).
+const dGs = {}; dGs[D19] = makeDay(D19, 101);
+const cGs = freshCtx(dGs, {maxPageSize: 100}, {JMS_DETAIL_MAX_OFFSET: '300', JMS_PARALLEL: '2'});
+cGs.queueHistory(D19, D19, true);
+cGs.processJob_(cGs.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
+const realNowS = vm.runInContext('Date.now', cGs);
+let fakeTS = realNowS();
+vm.runInContext('Date', cGs).now = () => fakeTS;
+const origBatchS = cGs.fetchDetailBatch_;
+cGs.fetchDetailBatch_ = function () { fakeTS += 10000; return origBatchS.apply(null, arguments); };
+const rGs1 = cGs.processJob_(cGs.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0], fakeTS + 70000);
+vm.runInContext('Date', cGs).now = realNowS;
+cGs.fetchDetailBatch_ = origBatchS;
+const stGs1 = cGs.getDayStatus_('arrival_flow', D19), jobGs1 = cGs.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
+const keyGs = f => f.payload.detailType + '|' + f.payload.startTime + '|' + f.payload.current;
+const firstRunGs = cGs.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.current > 1).map(keyGs);
+for (let i = 0; i < 30; i++) dGs[D19].af.total.push(Object.assign({}, dGs[D19].af.total[i], {billcode: '7770000' + String(i).padStart(6, '0'), sendTime: D19 + ' 23:58:' + String(i).padStart(2, '0')}));
+const fGs = cGs.__state.fetches.length;
+cGs.STORAGE_CACHE_ = null; cGs.TAB_CACHE_ = {}; cGs.TAB_INDEX_ = {};
+const rGs2 = cGs.processJob_(jobGs1, Date.now() + 600000);
+const againGs = cGs.__state.fetches.slice(fGs).filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.current > 1).map(keyGs);
+cGs.STORAGE_CACHE_ = null; cGs.TAB_CACHE_ = {}; cGs.TAB_INDEX_ = {};
+const rowsGs = C.decodeDataset(cGs.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
+const stGs2 = cGs.getDayStatus_('arrival_flow', D19);
+check(rGs1 === 'partial' && stGs1.details === 'PARTIAL' && jobGs1.page > 1 && jobGs1.page <= stGs1.expectedPages && rGs2 === 'done' &&
+  stGs2.details === 'COMPLETE' && stGs2.expectedPages === stGs1.expectedPages && againGs.every(k => firstRunGs.indexOf(k) < 0) &&
+  sumQ(rowsGs, 'Chegou') === dGs[D19].af.total.length && sumQ(rowsGs, 'Deve chegar') === dGs[D19].af.should.length &&
+  !cGs.__state.props.GROUPED_PLAN_ARRIVAL_FLOW_2026_09_19 && !Object.keys(cGs.__state.props).some(k => /^GROUPED_PLAN_/.test(k)),
+  'dia crescendo: retomada pelas fatias que faltam (não recomeça) e fecha com o total novo',
+  {r1: rGs1, cursor: jobGs1 && jobGs1.page, unidades: stGs1.expectedPages, r2: rGs2, st: stGs2.details, chegou: sumQ(rowsGs, 'Chegou'), esperado: dGs[D19].af.total.length});
+// Recomeço (formato do plano mudou): linhas de uma tentativa anterior saem do índice, sem somar duas vezes.
+const pagesBefore = cGs.archiveIndexMap_('arrival_flow', D19, D19)[D19].filter(p => p.page >= 1).length;
+cGs.saveDetailRange_('arrival_flow', D19, 1, 2, cGs.GroupAccumulator_(cfgAF).build(), 2, 10, [5, 5]);
+cGs.STORAGE_CACHE_ = null; cGs.TAB_CACHE_ = {}; cGs.TAB_INDEX_ = {};
+const pagesAfter = cGs.archiveIndexMap_('arrival_flow', D19, D19)[D19].filter(p => p.page >= 1);
+check(pagesBefore > 2 && pagesAfter.length === 2 && pagesAfter.every(p => p.page <= 2), 'recomeço tira do índice as unidades antigas além das regravadas', {antes: pagesBefore, depois: pagesAfter.length});
+
+// (h) Período grande (SP GRU: ~150 mil combinações por dia): totais por campo prontos no servidor,
+//     com os filtros aplicados lá. Tudo tem que bater com a conta feita nas combinações.
+const sameChart = (a, b) => JSON.stringify([a.labels, a.datasets[0].data, a.total]) === JSON.stringify([b.labels, b.datasets[0].data, b.total]);
+const smAll = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true});
+const byAll = C.marginalsByDim(smAll.summary.marginals), totAll = C.decodeDataset(smAll.dataset);
+check(smAll.summary && sumQ(totAll, 'Deve chegar') === afD.should.length && sumQ(totAll, 'Chegou') === afD.total.length &&
+  smAll.summary.totalQty === afD.should.length + afD.total.length && smAll.summary.cubeRows === rowsAF.length &&
+  cfgAF.charts.every(def => sameChart(C.buildChart(def, C.summaryChartRows(def, byAll, {})), C.buildChart(def, rowsAF))),
+  'totais por campo: os 9 gráficos iguais aos das combinações; totais por dia e coluna = listas do JMS',
+  {tot: totAll.length, marg: smAll.summary.marginals.n});
+const fSm = {column: ['Chegou'], destCenter: ['BA FEC']};
+const smF = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true, filters: fSm});
+const byF = C.marginalsByDim(smF.summary.marginals), totF = C.decodeDataset(smF.dataset), topF = C.decodeDataset(smF.summary.top);
+const cubeF = C.applyFilters(rowsAF, fSm);
+const facetCube = C.facets(rowsAF, fSm, ['destCenter', 'tripId']);
+const facetSm = k => { const o = {}; if (fSm[k]) o[k] = fSm[k]; return C.facets(byF[k] || [], o, [k])[k]; };
+const facetEq = k => JSON.stringify(facetCube[k].filter(o => o.count).map(o => [o.value, o.count]).sort()) === JSON.stringify(facetSm(k).filter(o => o.count).map(o => [o.value, o.count]).sort());
+check(cfgAF.charts.filter(def => def.where.column === 'Chegou').every(def => sameChart(C.buildChart(def, C.summaryChartRows(def, byF, fSm)), C.buildChart(def, cubeF))) &&
+  facetEq('destCenter') && facetEq('tripId') && facetSm('destCenter').length > 1 &&
+  C.distinctCount(totF) === C.distinctCount(cubeF) && C.computeCards(cfgAF, smF.rates, totF, fSm, D19, D19).currentErrors === C.computeCards(cfgAF, smF.rates, cubeF, fSm, D19, D19).currentErrors,
+  'com filtros (aplicados no servidor): gráficos, listas dos filtros (outras opções continuam na lista) e cartões iguais às combinações',
+  {f: facetSm('destCenter').slice(0, 3)});
+check(topF.length > 0 && topF.length <= smF.summary.topLimit && topF.every(r => r.column === 'Chegou' && r.destCenter === 'BA FEC') &&
+  topF.every((r, i) => !i || Number(topF[i - 1].qty) >= Number(r.qty)) && Number(topF[0].qty) === Math.max.apply(null, cubeF.map(r => Number(r.qty))),
+  'tabela: as maiores combinações do filtro, da maior para a menor');
+const cAuto = freshCtx(dAF, null, {GROUPED_CLIENT_ROWS: '100'});
+cAuto.queueHistory(D19, D19, true);
+runAll(cAuto);
+const dAuto = cAuto.getDashboardData('arrival_flow', {from: D19, to: D19});
+const repSm = cAuto.computeDashboard_('arrival_flow', {from: D19, to: D19, filters: fSm});
+check(dAuto.summary && dAuto.meta.rowsLoaded === rowsAF.length && repSm.summaryMode && repSm.rows.length === topF.length &&
+  repSm.charts.filter(ch => ch.where && ch.where.column === 'Chegou').every((ch, i) => sameChart(ch, C.buildChart(cfgAF.charts.filter(d => d.where.column === 'Chegou')[i], cubeF))) &&
+  repSm.cards.currentErrors === C.distinctCount(cubeF),
+  'acima do limite o painel e o relatório passam sozinhos para os totais por campo');
+cAuto.UrlFetchApp.fetch = (() => { const f = cAuto.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cAuto.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
+const repSmX = cAuto.generateReport('arrival_flow', {from: D19, to: D19, filters: fSm}, 'xlsx');
+check(repSmX.ok && repSmX.rows === topF.length, 'relatório Excel no modo de totais', repSmX);
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

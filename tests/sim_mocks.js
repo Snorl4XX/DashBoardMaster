@@ -113,6 +113,24 @@ function createSimContext(opts) {
 
 /** JMS realista: volumes do SP GRU, limite de tamanho de página e dia corrente crescendo. */
 const VOLUME = {ws: 1800, se: 150, mr: 3900, md: 4000, sc: 73000, dc: 200, dm: 152}; // volumes reais do SP GRU (diagnosticoCompleto 24/09/2026; avaria: documento 29/09/2026)
+// Recebimento (captura de 01/10/2026): deve chegar 172.842 / chegou 332.990 por dia.
+const ARRIVAL = {shouldArriverNum: 172842, noArriverNum: 74190, totalNum: 332990, uploadNoSendNum: 22709, noSendNum: 18632,
+  trips: 380, sites: 120, bases: 320, centers: 26, stops: 40, scanners: 140};
+/**
+ * Registros do Recebimento gerados por conta (sem guardar listas de 500 mil objetos): o registro i
+ * tem horário proporcional ao índice, viagem pelo trecho do dia (caminhões chegam ao longo do dia),
+ * base de destino concentrada nas primeiras (poucas bases recebem muito) e 3 digitalizadores por viagem.
+ */
+function arrivalRecord(date, type, i, n) {
+  const h = (x, salt) => { let v = (x * 2654435761 + salt * 40503 + date.length * 97) >>> 0; v ^= v >>> 15; v = Math.imul(v, 2246822519) >>> 0; v ^= v >>> 13; return v; };
+  const A = ARRIVAL, sec = Math.floor(i * 86400 / n), two = x => String(x).padStart(2, '0');
+  const trip = Math.floor(i * A.trips / n) + (type === 'totalNum' ? 1000 : 0);
+  const base = Math.floor(A.bases * Math.pow(h(i, 3) / 4294967296, 2));
+  return {billcode: (type === 'totalNum' ? '7' : '8') + date.replace(/-/g, '') + String(i).padStart(7, '0'),
+    inputsite: 'SITE ' + (h(trip, 1) % A.sites), sendTime: date + ' ' + two(Math.floor(sec / 3600)) + ':' + two(Math.floor(sec / 60) % 60) + ':' + two(sec % 60),
+    nextstation: 'PARADA ' + (h(trip, 2) % A.stops), shipmentNo: 'TRIP' + date.slice(5).replace('-', '') + String(trip).padStart(5, '0'),
+    endCenterName: 'DC ' + (base % A.centers), endArrivalSitename: 'BASE ' + base, scanuser: 'DIG ' + ((h(trip, 4) + h(i, 5) % 3) % A.scanners)};
+}
 function realisticJms(opts) {
   opts = opts || {};
   const cap = opts.maxPageSize || 1000;
@@ -173,6 +191,23 @@ function realisticJms(opts) {
       const sz = Math.min(100, body.size);
       return ok(regs.slice((cur - 1) * sz, cur * sz), regs.length, cur, sz);
     }
+    if (route === 'arrivalbyday_total' || route === 'arrivalbyday_detail') {
+      const dd = start.slice(0, 10), frac = dd > nowIso ? 0 : dd < nowIso ? 1 : nowH / 24;
+      const count = k => Math.floor(ARRIVAL[k] * frac);
+      if (route === 'arrivalbyday_total') {
+        if (!count('totalNum')) return ok([], 0, 1, size);
+        const t = count('totalNum');
+        return ok([{shouldArriverNum: count('shouldArriverNum'), noArriverNum: count('noArriverNum'), totalNum: t, uploadNoSendNum: count('uploadNoSendNum'),
+          noSendNum: count('noSendNum'), noSignNum: t, deliverNum: t}], 1, 1, size);
+      }
+      const type = body.detailType, n = Math.floor(ARRIVAL[type] * frac), N = ARRIVAL[type];
+      // Fatia de horário → trecho de índices (registro i tem o horário i·86400/N).
+      const secOf = x => { const t = x.slice(11).split(':').map(Number); return t[0] * 3600 + t[1] * 60 + t[2]; };
+      const lo = Math.ceil(secOf(start) * N / 86400), hi = Math.min(n, Math.ceil((secOf(end) + 1) * N / 86400));
+      const total = Math.max(0, hi - lo), out = [];
+      for (let i = lo + (cur - 1) * size; i < Math.min(hi, lo + cur * size); i++) out.push(arrivalRecord(dd, type, i, N));
+      return ok(out, total, cur, size);
+    }
     if (/center_missscan_next_total/.test(route)) {
       const mr = visible(dayList(date, 'mr')).length, md = visible(dayList(date, 'md')).length;
       if (!mr && !md) return ok([], 0, 1, size);
@@ -193,4 +228,4 @@ function realisticJms(opts) {
   };
 }
 
-module.exports = {makeClock, createSimContext, realisticJms, fmtDate, VOLUME};
+module.exports = {makeClock, createSimContext, realisticJms, fmtDate, VOLUME, ARRIVAL, arrivalRecord};
