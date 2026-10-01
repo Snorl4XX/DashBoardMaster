@@ -1327,6 +1327,13 @@ check(sT1.selected && !sT2.selected && Math.abs(sT1.pct - nT1 / rowsT.length * 1
   'cartões por turno mantêm a participação real de cada turno, com o filtrado marcado (antes: 100% / 0 / 0)');
 check(!plainT.shiftView && plainT.rate === r19.rate && !C.computeCards(cfgWS, dT.rates, rowsT, {shift: ['T1', 'T2', 'T3']}, D19, D19, {shares: {}}).shiftView,
   'sem filtro de turno (ou os três marcados): taxa oficial de sempre');
+// SC → DC: turno da expedição / do recebimento também mudam a taxa.
+const cfgDC = cT.getIndicatorConfig_('sc_dc'), dDC = cT.getDashboardData('sc_dc', {from: D19, to: D19});
+const rowsDC = C.decodeDataset(dDC.dataset), rDC = dDC.rates.filter(r => r.date === D19)[0], fDC = {receiptShift: ['T2']};
+const selDC = C.shiftSelection(fDC), kDC = C.computeCards(cfgDC, dDC.rates, C.applyFilters(rowsDC, fDC), fDC, D19, D19, {shares: C.shiftShares(rowsDC, dDC.agg, selDC)});
+const nDC = rowsDC.filter(r => r.receiptShift === 'T2').length;
+check(selDC.keys.join() === 'receiptShift' && kDC.shiftView && Math.abs(kDC.rate - (100 - rDC.rate) * nDC / rowsDC.length) < 1e-9 && kDC.prevRate === null,
+  'SC → DC: "Turno do recebimento" T2 = parte do T2 no fora do prazo (dia anterior sem agregado desse turno)', {rate: kDC.rate});
 // No prazo (SC→SC): a parte do turno é a do fora do prazo.
 const cfgSCt = cT.getIndicatorConfig_('sc_sc'), dSCt = cT.getDashboardData('sc_sc', {from: D19, to: D19});
 const rowsSCt = C.decodeDataset(dSCt.dataset), rSCt = dSCt.rates.filter(r => r.date === D19)[0];

@@ -81,7 +81,7 @@ function buildSummaryReportSheet_(sh, dash) {
     .setHorizontalAlignment('left').setVerticalAlignment('middle');
   const filterText = Object.keys(dash.filters).map(k => dimLabel_(cfg, k).pt + ': ' + dash.filters[k].join(', ')).join(' · ');
   // Filtro de turno: a taxa é a parte do(s) turno(s) na taxa oficial (mesma regra do painel).
-  const sv = c.shiftView, sName = sv ? sv.shifts.join('+') : '';
+  const sv = c.shiftView, sName = sv ? sv.keys.map(k => (k === 'shift' ? '' : dimLabel_(cfg, k).pt + ' ') + sv.by[k].join('+')).join(' · ') : '';
   const shiftText = sv ? '   |   ' + sName + ': ' + (sv.share === null ? '—' : sv.share.toFixed(1).replace('.', ',') + '%') +
     ' das ocorrências · taxa do dia (todos os turnos) / 当日总指标率: ' + rateText_(sv.dayRate, cfg) : '';
   sh.getRange('A2:L2').merge().setValue('Período / 日期范围: ' + humanDatePt_(dash.from) + ' — ' + humanDatePt_(dash.to) +

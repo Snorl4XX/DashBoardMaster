@@ -16,6 +16,7 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 - A **meta continua avaliada na taxa do dia**: a parte de um turno é sempre menor que a do dia, então o selo mostra "… · taxa do dia".
 - **SC → SC e SC → DC** (taxa "no prazo"): a parte do turno é a do **fora do prazo**, igual aos Resultados.
   - Exemplo: no prazo 90,10%, ou seja, 9,90% fora; com o T1 tendo 35,9% dos atrasos → **3,55% fora do prazo vindos do T1**.
+  - No SC → DC valem os filtros **Turno do recebimento** e **Turno da expedição**. O dia anterior desses turnos só aparece quando o dia está carregado no período, porque o resumo por turno guarda só o turno principal.
 - **Avaria**: com "Pedido principal" ou "Pedido secundário" escolhido, a taxa é a **oficial do JMS para essa opção** (como na V3.13). Com um turno também, vale a parte do turno nas avarias dessa opção.
   - O dia anterior por turno só aparece quando o dia está carregado no período, porque o resumo por turno não separa as opções.
 - O relatório PDF/Excel segue a mesma regra.
@@ -575,7 +576,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **286 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **287 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

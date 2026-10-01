@@ -330,12 +330,22 @@ function JTCoreFactory_() {
   }
 
   // ---------- filtro de turno: parte do turno na taxa oficial ----------
-  /** Turnos escolhidos no filtro (null = sem filtro de turno, ou os três). */
+  var SHIFT_FILTER_KEYS = ['shift', 'expeditionShift', 'receiptShift'];
+  /**
+   * Turnos escolhidos nos filtros de turno ("Turno"; no SC → DC, turno da expedição e do recebimento):
+   * {by: {campo: [T1..]}, keys, shifts}. null = sem filtro de turno (ou com os três marcados).
+   */
   function shiftSelection(filters) {
-    var f = filters && filters.shift;
-    if (!f || !f.length) return null;
-    var sel = SHIFTS.filter(function (s) { return f.indexOf(s) >= 0; });
-    return sel.length && sel.length < SHIFTS.length ? sel : null;
+    var by = null, all = [];
+    SHIFT_FILTER_KEYS.forEach(function (k) {
+      var f = filters && filters[k];
+      if (!f || !f.length) return;
+      var sel = SHIFTS.filter(function (s) { return f.indexOf(s) >= 0; });
+      if (!sel.length || sel.length === SHIFTS.length) return;
+      (by || (by = {}))[k] = sel;
+      sel.forEach(function (s) { if (all.indexOf(s) < 0) all.push(s); });
+    });
+    return by ? {by: by, keys: Object.keys(by), shifts: all.sort()} : null;
   }
   /**
    * Participação do(s) turno(s) nas ocorrências de cada dia: {data: {part, total}}. Agregados por turno
@@ -343,20 +353,21 @@ function JTCoreFactory_() {
    * só a opção de "Pedidos principais/filhos" escolhida — `only`).
    */
   function shiftShares(rows, agg, sel, only) {
-    var out = {}, set = {};
-    (sel || []).forEach(function (s) { set[s] = 1; });
-    // Os agregados não separam pedidos principais/filhos: com essa opção, só as remessas carregadas.
-    if (!(only && Object.keys(only).length)) (agg || []).forEach(function (a) {
+    if (Array.isArray(sel)) sel = {by: {shift: sel}, keys: ['shift'], shifts: sel};
+    var out = {}, keys = sel ? sel.keys : [], sets = {};
+    keys.forEach(function (k) { sets[k] = {}; sel.by[k].forEach(function (s) { sets[k][s] = 1; }); });
+    // Os agregados (aba AGG) contam só o turno principal e não separam pedidos principais/filhos.
+    if (keys.length === 1 && keys[0] === 'shift' && !(only && Object.keys(only).length)) (agg || []).forEach(function (a) {
       var total = Number(a.total) || 0;
       if (!(total > 0)) return;
-      out[a.date] = {part: (sel || []).reduce(function (n, s) { return n + (Number(a[s]) || 0); }, 0), total: total};
+      out[a.date] = {part: sel.by.shift.reduce(function (n, s) { return n + (Number(a[s]) || 0); }, 0), total: total};
     });
-    if (rows && rows.length) {
+    if (rows && rows.length && keys.length) {
       var fromRows = {};
       applyFilters(rows, only || {}).forEach(function (r) {
         var x = fromRows[r.date] || (fromRows[r.date] = {part: 0, total: 0}), w = weight(r);
         x.total += w;
-        if (set[norm(r.shift)]) x.part += w;
+        if (keys.every(function (k) { return sets[k][norm(r[k])]; })) x.part += w;
       });
       Object.keys(fromRows).forEach(function (d) { if (fromRows[d].total > 0) out[d] = fromRows[d]; });
     }
@@ -597,7 +608,8 @@ function JTCoreFactory_() {
     var errVariation = isNum(currentErrors) && isNum(previousErrors) && previousErrors !== 0 && !filtered ? (currentErrors - previousErrors) / previousErrors * 100 : null;
     // Cartões por turno: com filtro de turno, a participação de cada turno sai das remessas sem esse filtro
     // (opts.shiftRows) e o(s) turno(s) escolhido(s) ficam marcados — antes o turno filtrado aparecia com 100%.
-    var selShifts = shiftSelection(filters), sRows = selShifts && opts.shiftRows ? opts.shiftRows : rows;
+    var selAll = shiftSelection(filters), selShifts = selAll && selAll.by.shift ? selAll.by.shift : null;
+    var sRows = selShifts && opts.shiftRows ? opts.shiftRows : rows;
     var sTotal = sRows === rows ? detailTotal : distinctCount(sRows);
     var shiftGroups = countBy(sRows, 'shift'), sm = {};
     shiftGroups.forEach(function (g) { sm[g.label] = g.value; });
@@ -610,10 +622,10 @@ function JTCoreFactory_() {
       return {key: k, label: g ? g.label : null, qty: g ? g.value : null, pct: g && detailTotal ? g.value / detailTotal * 100 : null};
     });
     // Filtro de turno: a taxa vira a parte do(s) turno(s) na taxa oficial; a meta continua avaliada no dia.
-    var sel = shiftSelection(filters), shiftView = null;
+    var sel = selAll, shiftView = null;
     if (sel && opts.shares) {
       var sp = shiftPart(inRange, goal, opts.shares), pp = shiftPart(prevRange, goal, opts.shares);
-      shiftView = {shifts: sel, rate: sp.rate, share: sp.share, part: sp.part, total: sp.total, days: sp.days,
+      shiftView = {shifts: sel.shifts, by: sel.by, keys: sel.keys, rate: sp.rate, share: sp.share, part: sp.part, total: sp.total, days: sp.days,
         dayRate: isNum(rate) ? Number(rate) : null, prevRate: pp.rate, prevShare: pp.share, prevDayRate: isNum(prevRate) ? Number(prevRate) : null,
         late: !!(goal && goal.direction === 'min')};
       variation = isNum(sp.rate) && isNum(pp.rate) && pp.rate !== 0 ? (sp.rate - pp.rate) / Math.abs(pp.rate) * 100 : null;

@@ -720,9 +720,9 @@
     // Filtro de turno: parte do turno na taxa oficial (participação do turno nas ocorrências de cada dia).
     var sel = state.data.summary ? null : Core.shiftSelection(view.filters), only = null;
     if (sel && view.kind) { only = {}; only[c.orderKinds.field] = [view.label]; }
-    state.shiftInfo = sel ? {sel: sel, shares: Core.shiftShares(state.data.rows, state.data.agg, sel, only)} : null;
+    state.shiftInfo = sel ? {sel: sel, name: shiftName(sel), shares: Core.shiftShares(state.data.rows, state.data.agg, sel, only)} : null;
     var cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to,
-      {shares: state.shiftInfo && state.shiftInfo.shares, shiftRows: sel ? Core.applyFilters(state.data.rows, f, 'shift') : null});
+      {shares: state.shiftInfo && state.shiftInfo.shares, shiftRows: sel && sel.by.shift ? Core.applyFilters(state.data.rows, f, 'shift') : null});
     renderKpis(c, cards);
     renderTarget(c, cards);
     renderCharts(c);
@@ -749,6 +749,10 @@
     return {rates: state.data ? state.data.rates : [], filters: f, kind: null};
   }
   function activeRates() { return state.rateView && state.rateView.rates ? state.rateView.rates : state.data.rates; }
+  /** Nome do recorte de turno: "T1", "T1 + T2"; no SC → DC, "Turno da expedição T1". */
+  function shiftName(sel) {
+    return sel.keys.map(function (k) { return (k === 'shift' ? '' : L(dimLabel(k)) + ' ') + sel.by[k].join(' + '); }).join(' · ');
+  }
   function onFiltersChanged() {
     state.table.page = 1;
     if (state.data && state.data.summary) {
@@ -965,7 +969,7 @@
 
   // ------------------------------------------------------------------ cartões
   function renderKpis(c, k) {
-    var grid = $('#kpiGrid'), day = k.mode === 'day', sv = k.shiftView, sName = sv ? sv.shifts.join(' + ') : '';
+    var grid = $('#kpiGrid'), day = k.mode === 'day', sv = k.shiftView, sName = sv ? shiftName(sv) : '';
     var status = k.targetMet === true ? 'good' : k.targetMet === false ? 'bad' : 'none';
     var pill = status === 'good' ? icon('check') + esc(t('inGoal')) : status === 'bad' ? icon('x') + esc(t('outGoal')) : esc(isNum(k.rate) && !hasGoal(c.goal) ? t('noGoal') : t('noRate'));
     // Com filtro de turno a meta continua avaliada na taxa do dia (a parte de um turno é sempre menor).
@@ -1203,7 +1207,7 @@
     // Filtro de turno: linha com a parte do turno em cada dia (indicadores de erro; no prazo fica na escala de ~95%).
     if (state.shiftInfo && c.goal.direction !== 'min') {
       var ser = Core.shiftSeries(activeRates(), c.goal, state.shiftInfo.shares);
-      evo.shift = {name: state.shiftInfo.sel.join(' + '), color: INK,
+      evo.shift = {name: state.shiftInfo.name, color: INK,
         values: evo.points.map(function (p) { return ser[p.date] === undefined ? null : ser[p.date]; })};
     }
     evo.selFrom = state.from; evo.selTo = state.to; evo.extended = evoFrom < state.from;
