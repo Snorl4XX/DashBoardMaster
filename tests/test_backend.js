@@ -1262,6 +1262,33 @@ check(cLim.detailDays_(cfgAF) === 3 && cFull.detailDays_(cfgAF) === 7 && cLim.he
   cFull.detailNeedsRefresh_('arrival_flow', today0, {errorCount: 1, totalCount: 2}, {errorCount: 5, totalCount: 2}, Object.assign({}, stLim), false) === true,
   'JMS com 100 por página: detalhe dos últimos 3 dias e hoje no máximo a cada 12 h (com 1.000: 7 dias e 6 h)');
 
+// (g4) Pouco tempo na execução: o detalhe do Recebimento espera a próxima (antes começava só para replanejar e parava).
+const cW = freshCtx(dAF);
+cW.queueHistory(D19, D19, true);
+cW.pendingJobs_().filter(j => j.type === 'SUMMARY').forEach(j => cW.processJob_(j, Date.now() + 600000));
+cW.STORAGE_CACHE_ = null; cW.TAB_CACHE_ = {}; cW.TAB_INDEX_ = {};
+cW.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator !== 'arrival_flow').forEach(j => cW.processJob_(j, Date.now() + 600000));
+cW.STORAGE_CACHE_ = null; cW.TAB_CACHE_ = {}; cW.TAB_INDEX_ = {};
+const fW = cW.__state.fetches.length;
+cW.processSyncQueue({budgetMs: 120000});
+cW.STORAGE_CACHE_ = null; cW.TAB_CACHE_ = {}; cW.TAB_INDEX_ = {};
+check(!cW.__state.fetches.slice(fW).some(f => /arrivalbyday_detail/.test(f.url)) && cW.pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow'),
+  'execução com menos de 2,5 min livres: o detalhe do Recebimento fica para a próxima');
+// (g5) Hoje: o detalhe cresce entre o resumo e o download — não é "payload sem filtro".
+const todayT = cW.isoToday_(), dTd = {}; dTd[todayT] = makeDay(todayT, 77);
+const cTd = freshCtx(dTd);
+cTd.queueHistory(todayT, todayT, true);
+cTd.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow').forEach(j => cTd.processJob_(j, Date.now() + 600000));
+const extra = dTd[todayT].af.should.length * 4;
+for (let i = 0; i < extra; i++) dTd[todayT].af.should.push(Object.assign({}, dTd[todayT].af.should[i % 50], {billcode: '8889' + String(i).padStart(9, '0')}));
+cTd.STORAGE_CACHE_ = null; cTd.TAB_CACHE_ = {}; cTd.TAB_INDEX_ = {};
+const rTd = cTd.processJob_(cTd.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
+check(rTd === 'done' && /COMPLETE|CHECK_COUNTS/.test(cTd.getDayStatus_('arrival_flow', todayT).details),
+  'hoje: detalhe 5× maior que o resumo de mais cedo é aceito (o dia cresce)', [rTd, cTd.getDayStatus_('arrival_flow', todayT)]);
+cAF.STORAGE_CACHE_ = null; cAF.TAB_CACHE_ = {}; cAF.TAB_INDEX_ = {};
+check(cAF.getRateDay_('arrival_flow', D19) && /sem filtro/.test((() => { try { cAF.validateDetailTotal_(cfgAF, 'arrival_flow', D19, 999999, 'shouldArriverNum'); return ''; } catch (e) { return e.message; } })()),
+  'dia fechado continua conferindo contra o resumo (payload sem filtro bloqueado)');
+
 // (h) Período grande (SP GRU: ~150 mil combinações por dia): totais por campo prontos no servidor,
 //     com os filtros aplicados lá. Tudo tem que bater com a conta feita nas combinações.
 const sameChart = (a, b) => JSON.stringify([a.labels, a.datasets[0].data, a.total]) === JSON.stringify([b.labels, b.datasets[0].data, b.total]);

@@ -29,6 +29,10 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 **Crédito:** "Feito por Caike Oliveira" no menu lateral e no rodapé do painel.
 
+**Correções no Recebimento (download do detalhe), vistas na simulação com o JMS entregando 100 por página:**
+- O detalhe só começa quando sobram **2,5 min** na execução. Antes, ele começava no fim de execuções já ocupadas por outros painéis, só replanejava as fatias e parava sem avançar. Agora espera a próxima execução (5 min depois).
+- **Hoje** o detalhe não é mais comparado com o resumo de horas antes: o dia cresce entre as duas consultas, e isso dava o erro falso "payload do detalhe sem filtro". Dias fechados continuam sendo conferidos.
+
 ## V3.14 — Novo painel: Recebimento: fluxo operacional / 到件运营流程
 Dados da tela do JMS **Operação > Monitoramento de dados > Monitoramento de tipagem de recebimento (novo)** (`/app/crisbiIndex/ArriveMonitor`).
 São duas colunas principais, como na tela:
@@ -576,7 +580,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **287 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **290 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

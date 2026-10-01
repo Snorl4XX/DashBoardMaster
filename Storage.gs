@@ -1108,6 +1108,9 @@ function processSyncQueue(opts) {
         if (!jobReady_(job)) { waiting++; continue; }
         if (job.type === 'COMPACT' && Date.now() > deadline - 90000) { waiting++; continue; }
         if (job.type === 'DETAIL_INIT' && Date.now() > deadline - APP_CONFIG.DETAIL_MIN_START_MS) { waiting++; continue; }
+        // Detalhe agrupado (Recebimento): só começa com tempo para fechar ao menos uma fatia de horário — com
+        // pouco tempo ele só replanejava e parava (com o JMS em 100 por página, nunca avançava).
+        if (job.type === 'DETAIL_INIT' && INDICATORS[job.indicator].grouped && Date.now() > deadline - APP_CONFIG.GROUPED_DETAIL_MIN_START_MS) { waiting++; continue; }
         const r = processJob_(job, deadline);
         progressed = true;
         if (r === 'done') done++;
@@ -1271,7 +1274,9 @@ function validateDetailTotal_(cfg, indicator, date, total, type) {
     // Detalhe com várias listas (Recebimento): cada lista confere com o número dela no resumo.
     const exp = rate && rate.metrics ? rate.metrics[type] : null;
     if (total === 0 && exp > 0) throw new Error('Detalhe zerado em ' + type + ' apesar do resumo ter ' + exp + ' para ' + indicator + ' ' + date);
-    if (exp !== null && exp !== undefined && total > exp * 3 + 1000) {
+    // Hoje o número cresce entre o resumo (de hora em hora) e o detalhe: só confere dias fechados
+    // (contra payload sem filtro, hoje vale o limite de segurança detail.maxPerDay).
+    if (date < isoToday_() && exp !== null && exp !== undefined && total > exp * 3 + 1000) {
       throw new Error('Detalhe retornou ' + total + ' registros em ' + type + ', mas o resumo tem ' + exp +
         ': payload do detalhe sem filtro. Importação bloqueada para não gravar dados errados.');
     }

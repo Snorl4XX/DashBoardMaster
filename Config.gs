@@ -33,6 +33,7 @@ const APP_CONFIG = Object.freeze({
   MAX_GROUPED_CLIENT_ROWS: 60000,
   GROUPED_TOP_ROWS: 2000,      // maiores combinações enviadas para a tabela nesse modo
   GROUPED_SUMMARY_BUDGET_MS: 75000,
+  GROUPED_DETAIL_MIN_START_MS: 150000, // detalhe agrupado só começa com 2,5 min livres na execução
   MAX_REPORT_DETAIL_ROWS: 60000,
   MAX_PDF_DETAIL_ROWS: 1500,
   DEFAULT_CENTER_CODE: '30001',
