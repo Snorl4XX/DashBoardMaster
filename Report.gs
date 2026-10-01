@@ -53,6 +53,11 @@ function reportValue_(cfg, key, v) {
   if ((v === 'N/A' || v === '' || v === null || v === undefined) && na && na.fields.indexOf(key) >= 0) return na.text.pt;
   return JTCore_.localizeValue(v, 'pt');
 }
+/** Taxa em texto (notas do relatório): "0,15%" ou "120 ppm". */
+function rateText_(v, cfg) {
+  if (v === null || v === undefined || v === '') return '—';
+  return Number(v).toFixed(cfg.goal.digits || 2).replace('.', ',') + (cfg.goal.unit === 'ppm' ? ' ppm' : '%');
+}
 /** Taxa oficial na planilha: em % vira fração (formato 0,00%, ou 0,000% na Avaria); em ppm fica o número (formato "ppm"). */
 function rateCell_(v, cfg) { return v === null || v === undefined || v === '' ? '' : cfg.goal.unit === 'ppm' ? Number(v) : v / 100; }
 function rateFormat_(cfg) {
@@ -75,14 +80,19 @@ function buildSummaryReportSheet_(sh, dash) {
     .setBackground(APP_CONFIG.RED).setFontColor('#FFFFFF').setFontWeight('bold').setFontSize(18)
     .setHorizontalAlignment('left').setVerticalAlignment('middle');
   const filterText = Object.keys(dash.filters).map(k => dimLabel_(cfg, k).pt + ': ' + dash.filters[k].join(', ')).join(' · ');
+  // Filtro de turno: a taxa é a parte do(s) turno(s) na taxa oficial (mesma regra do painel).
+  const sv = c.shiftView, sName = sv ? sv.shifts.join('+') : '';
+  const shiftText = sv ? '   |   ' + sName + ': ' + (sv.share === null ? '—' : sv.share.toFixed(1).replace('.', ',') + '%') +
+    ' das ocorrências · taxa do dia (todos os turnos) / 当日总指标率: ' + rateText_(sv.dayRate, cfg) : '';
   sh.getRange('A2:L2').merge().setValue('Período / 日期范围: ' + humanDatePt_(dash.from) + ' — ' + humanDatePt_(dash.to) +
-    (filterText ? '   |   Filtros / 筛选: ' + filterText : '')).setFontColor('#555555').setFontSize(10).setWrap(true);
+    (filterText ? '   |   Filtros / 筛选: ' + filterText : '') + shiftText).setFontColor('#555555').setFontSize(10).setWrap(true);
 
   const shift = {};
   (c.shifts || []).forEach(x => shift[x.shift] = x);
   const top = (c.tops || [])[0];
   const headers = [
-    bilingual_(c.mode === 'day' ? 'Taxa do dia' : 'Taxa do período', c.mode === 'day' ? '当日指标率' : '期间指标率'),
+    sv ? bilingual_((sv.late ? 'Fora do prazo · ' : 'Taxa do ') + sName, sName + (sv.late ? ' 超时占比' : ' 指标率'))
+      : bilingual_(c.mode === 'day' ? 'Taxa do dia' : 'Taxa do período', c.mode === 'day' ? '当日指标率' : '期间指标率'),
     bilingual_('Meta', '目标'), bilingual_(c.filtered ? 'Erros (filtrado)' : 'Erros', c.filtered ? '异常量（筛选）' : '异常量'),
     bilingual_(c.mode === 'day' ? 'Erros dia anterior' : 'Erros período anterior', c.mode === 'day' ? '前一日异常量' : '上期异常量'),
     bilingual_('Variação da taxa', '环比'), bilingual_('T1 · 06–14h', 'T1班'), bilingual_('T2 · 14–22h', 'T2班'),

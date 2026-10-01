@@ -33,6 +33,12 @@
       rateOfDay: 'Taxa do dia {date}', rateOfPeriod: 'Taxa do período', prevDayRate: 'Dia anterior', prevPeriodRate: 'Período anterior',
       lastDay: 'Último dia', weighted: 'Σ erros ÷ Σ base oficial', meanNote: 'média das taxas diárias',
       officialNotFiltered: 'Taxa oficial do JMS · não muda com filtros', daysWithRate: '{a} de {b} dias com taxa',
+      shiftRateOf: 'Taxa do {s} · {date}', shiftRateOfPeriod: 'Taxa do {s} no período', shiftLateOf: 'Fora do prazo · {s} · {date}',
+      shiftLateOfPeriod: 'Fora do prazo · {s} no período', shiftShare: 'de participação do {s}', dayRateAll: 'Taxa do dia (todos os turnos)',
+      periodRateAll: 'Taxa do período (todos os turnos)', prevShift: 'Dia anterior ({s})', prevShiftPeriod: 'Período anterior ({s})',
+      shiftRateHint: 'Parte do turno na taxa oficial: ocorrências do turno ÷ volume do dia (T1 + T2 + T3 = taxa do dia).',
+      shiftLateHint: 'Parte do turno no fora do prazo: atrasos do turno ÷ volume do dia (T1 + T2 + T3 = 100% − taxa do dia).',
+      dayGoal: 'taxa do dia', shiftLine: 'Parte do {s}',
       inGoal: 'Na meta', outGoal: 'Fora da meta', noRate: 'Sem taxa oficial', noGoal: 'Meta não definida', goalOffScale: 'fora da escala do gráfico',
       targetNoGoalTitle: 'Meta não definida', targetNoGoalText: 'A taxa de {name} está sendo acompanhada, mas este indicador ainda não tem meta. Com a meta cadastrada, o Maomao passa a avaliar.',
       errorsDay: 'Erros no dia', errorsPeriod: 'Erros no período', errorsFiltered: 'Erros (com filtro)',
@@ -65,7 +71,7 @@
       setupTitle: 'Painel ainda não configurado', setupText: 'O responsável deve abrir o Apps Script, executar setupProject e iniciar a importação com startFullHistory.',
       updatedJms: 'Atualizado no JMS: {t}', waitingJms: 'Aguardando dados confirmados do JMS', queuePending: 'Fila: {n} pendente(s)',
       queueErrors: '{n} com erro', queueIdle: 'Fila em dia',
-      footer: 'Fonte: JMS (taxas oficiais) · detalhes arquivados no Google Drive',
+      footer: 'Fonte: JMS (taxas oficiais) · detalhes arquivados no Google Drive', madeBy: 'Feito por Caike Oliveira',
       resultsNoteRate: 'Taxa do período = Σ erros ÷ Σ base oficial de cada dia (sem contagem de erros, usa a média das taxas diárias).',
       resultsNoteShift: 'Taxa do turno {s} = remessas com erro no {s} ÷ volume total do dia (base oficial do JMS). O JMS não publica volume por turno; somando T1, T2 e T3 dá a taxa de erros do dia. Nos indicadores de prazo (SC → SC, SC → DC), é a taxa fora do prazo.',
       lastPeriod: 'Último período', shiftErrors: 'Erros {s}', shiftShareOf: '{p} do total', noAgg: 'Sem detalhes consolidados deste turno no período.',
@@ -110,6 +116,12 @@
       rateOfDay: '{date} 指标率', rateOfPeriod: '期间指标率', prevDayRate: '前一日', prevPeriodRate: '上一期间',
       lastDay: '最近一天', weighted: '异常合计 ÷ 官方基数合计', meanNote: '每日指标率平均值',
       officialNotFiltered: 'JMS官方指标率 · 不随筛选变化', daysWithRate: '{b} 天中 {a} 天有指标率',
+      shiftRateOf: '{s} 指标率 · {date}', shiftRateOfPeriod: '{s} 期间指标率', shiftLateOf: '{s} 超时占比 · {date}',
+      shiftLateOfPeriod: '{s} 期间超时占比', shiftShare: '{s} 异常占比', dayRateAll: '当日指标率（全部班次）',
+      periodRateAll: '期间指标率（全部班次）', prevShift: '前一日（{s}）', prevShiftPeriod: '上一期间（{s}）',
+      shiftRateHint: '班次在官方指标率中的占比：该班次异常量 ÷ 当日总量（T1 + T2 + T3 = 当日指标率）。',
+      shiftLateHint: '班次在超时中的占比：该班次超时量 ÷ 当日总量（T1 + T2 + T3 = 100% − 当日指标率）。',
+      dayGoal: '当日指标率', shiftLine: '{s} 占比',
       inGoal: '达标', outGoal: '未达标', noRate: '暂无官方指标率', noGoal: '未设定目标', goalOffScale: '超出图表范围',
       targetNoGoalTitle: '未设定目标', targetNoGoalText: '{name} 的指标率正在跟踪，但尚未设定目标。设定目标后 Maomao 会进行评价。',
       errorsDay: '当日异常', errorsPeriod: '期间异常', errorsFiltered: '异常（已筛选）',
@@ -142,7 +154,7 @@
       setupTitle: '看板尚未配置', setupText: '请管理员在 Apps Script 中运行 setupProject，并用 startFullHistory 开始导入。',
       updatedJms: 'JMS 更新：{t}', waitingJms: '等待 JMS 确认数据', queuePending: '队列：{n} 项待处理',
       queueErrors: '{n} 项出错', queueIdle: '队列已清空',
-      footer: '数据来源：JMS（官方指标率）· 明细存档于 Google Drive',
+      footer: '数据来源：JMS（官方指标率）· 明细存档于 Google Drive', madeBy: '由 Caike Oliveira 制作',
       resultsNoteRate: '期间指标率 = 各日异常合计 ÷ 各日官方基数合计（缺少异常计数时使用每日指标率平均值）。',
       resultsNoteShift: '{s} 班指标率 = {s} 班异常票数 ÷ 当日总票量（JMS 官方基数）。JMS 不提供分班次票量；T1、T2、T3 相加即为当日异常率。时效类指标（SC → SC、SC → DC）为超时率。',
       lastPeriod: '最近期间', shiftErrors: '{s} 异常', shiftShareOf: '占总数 {p}', noAgg: '该期间暂无该班次明细汇总。',
@@ -474,7 +486,7 @@
     $$('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
     $$('[data-i18n-placeholder]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-placeholder')); });
     $$('.lang-btn').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-lang') === state.lang)); });
-    $('#footNote').textContent = t('footer');
+    $('#footNote').innerHTML = esc(t('footer')) + '<span class="made-by">' + esc(t('madeBy')) + '</span>';
     var bt = $('#bootText'); if (bt) bt.textContent = t('bootLoading');
   }
 
@@ -658,7 +670,7 @@
       if (seq !== state.seq) return;
       renderSyncBanner(res.meta.pauses);
       var sm = res.summary;
-      state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null,
+      state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [],
         rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
@@ -705,7 +717,12 @@
     renderChips();
     renderCoverage(state.data.meta);
     var view = state.rateView = rateView(c, f);
-    var cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to);
+    // Filtro de turno: parte do turno na taxa oficial (participação do turno nas ocorrências de cada dia).
+    var sel = state.data.summary ? null : Core.shiftSelection(view.filters), only = null;
+    if (sel && view.kind) { only = {}; only[c.orderKinds.field] = [view.label]; }
+    state.shiftInfo = sel ? {sel: sel, shares: Core.shiftShares(state.data.rows, state.data.agg, sel, only)} : null;
+    var cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to,
+      {shares: state.shiftInfo && state.shiftInfo.shares, shiftRows: sel ? Core.applyFilters(state.data.rows, f, 'shift') : null});
     renderKpis(c, cards);
     renderTarget(c, cards);
     renderCharts(c);
@@ -948,10 +965,12 @@
 
   // ------------------------------------------------------------------ cartões
   function renderKpis(c, k) {
-    var grid = $('#kpiGrid'), day = k.mode === 'day';
+    var grid = $('#kpiGrid'), day = k.mode === 'day', sv = k.shiftView, sName = sv ? sv.shifts.join(' + ') : '';
     var status = k.targetMet === true ? 'good' : k.targetMet === false ? 'bad' : 'none';
     var pill = status === 'good' ? icon('check') + esc(t('inGoal')) : status === 'bad' ? icon('x') + esc(t('outGoal')) : esc(isNum(k.rate) && !hasGoal(c.goal) ? t('noGoal') : t('noRate'));
-    var prevLabel = day ? t('prevDayRate') : t('prevPeriodRate');
+    // Com filtro de turno a meta continua avaliada na taxa do dia (a parte de um turno é sempre menor).
+    if (sv && status !== 'none') pill += ' · ' + esc(t('dayGoal'));
+    var prevLabel = sv ? t(day ? 'prevShift' : 'prevShiftPeriod', {s: sName}) : day ? t('prevDayRate') : t('prevPeriodRate');
     var heroSubs = '<div class="kpi-sub">' + esc(prevLabel) + ': <b>' + fmtRate(k.prevRate, c.goal) + '</b>' +
       (day ? ' · ' + esc(fmtDate(k.prevTo, true)) : ' · ' + esc(fmtRange(k.prevFrom, k.prevTo))) + '</div>';
     if (!day) {
@@ -959,12 +978,21 @@
         (k.latestDay ? ' · ' + esc(t('lastDay')) + ' ' + esc(fmtDate(k.latestDay.date)) + ': <b>' + fmtRate(k.latestDay.rate, c.goal) + '</b>' : '') +
         (k.rateMethod === 'weighted' ? ' · ' + esc(t('weighted')) : k.rateMethod === 'mean' ? ' · ' + esc(t('meanNote')) : '') + '</div>';
     }
-    if (k.filtered) heroSubs += '<div class="kpi-sub">' + esc(t('officialNotFiltered')) + '</div>';
+    if (sv) {
+      // Parte do turno: a taxa do dia (todos os turnos) logo abaixo, para comparar.
+      heroSubs = '<div class="kpi-sub">' + esc(t(day ? 'dayRateAll' : 'periodRateAll')) + ': <b>' + fmtRate(sv.dayRate, c.goal) + '</b></div>' + heroSubs +
+        '<div class="kpi-sub">' + esc(t(sv.late ? 'shiftLateHint' : 'shiftRateHint')) + '</div>';
+    } else if (k.filtered) heroSubs += '<div class="kpi-sub">' + esc(t('officialNotFiltered')) + '</div>';
     if (state.rateView && state.rateView.estimated) heroSubs += '<div class="kpi-sub">' + esc(t('estimatedHint')) + '</div>';
+    var heroLabel = sv ? t(sv.late ? (day ? 'shiftLateOf' : 'shiftLateOfPeriod') : (day ? 'shiftRateOf' : 'shiftRateOfPeriod'), {s: sName, date: fmtDate(state.to, true)}) +
+        (day ? '' : ' · ' + fmtRange(state.from, state.to))
+      : day ? tx(c, 'rateOfDay', {date: fmtDate(state.to, true)}) : tx(c, 'rateOfPeriod') + ' · ' + fmtRange(state.from, state.to);
+    var shareChip = sv ? '<div class="shift-share">' + sv.shifts.map(function (s) { return '<i style="background:' + SHIFT_COLORS[s] + '"></i>'; }).join('') +
+      '<b>' + fmtPct(sv.share, 1) + '</b> ' + esc(t('shiftShare', {s: sName})) + '</div>' : '';
     var hero = '<article class="kpi kpi-hero"><div class="kpi-body">' +
-      '<div class="kpi-label">' + icon('gauge') + esc((day ? tx(c, 'rateOfDay', {date: fmtDate(state.to, true)}) : tx(c, 'rateOfPeriod') + ' · ' + fmtRange(state.from, state.to)) +
+      '<div class="kpi-label">' + icon('gauge') + esc(heroLabel +
         (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) + (state.rateView.estimated ? ' (' + t('estimated') + ')' : '') : '')) + '</div>' +
-      '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroSubs +
+      shareChip + '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroMetricHtml(c, k) + heroSubs +
       '<div class="hero-row"><span class="status-pill ' + status + '">' + pill + '</span>' + (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '') + '</div>' +
       '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
 
@@ -983,7 +1011,7 @@
     var shifts = c.hideShiftCards ? '' : k.shifts.map(function (s) {
       var label = '<i style="background:' + SHIFT_COLORS[s.shift] + '"></i>' + s.shift + ' · ' + {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'}[s.shift];
       var sub = s.qty === null ? esc(t('noDataHint')) : '<b>' + fmtPct(s.pct, 1) + '</b> ' + esc(t('participation'));
-      return '<article class="kpi shift-kpi"><div class="kpi-label">' + label + '</div><div class="kpi-value">' + fmtInt(s.qty) + '</div>' +
+      return '<article class="kpi shift-kpi' + (sv && !s.selected ? ' faded' : '') + (s.selected ? ' selected' : '') + '"><div class="kpi-label">' + label + '</div><div class="kpi-value">' + fmtInt(s.qty) + '</div>' +
         '<div class="kpi-sub">' + sub + '</div><div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(s.pct) ? s.pct : 0) + '" style="background:' + SHIFT_COLORS[s.shift] + '"></i></div></div></article>';
     }).join('');
     var tops = k.tops.map(function (tp, i, arr) {
@@ -997,6 +1025,27 @@
     fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
+  }
+  /**
+   * Recebimento: no cartão da taxa, a quantidade recebida no dia (número do resumo do JMS) e a do dia
+   * anterior, com a variação. Período: soma dos dias do período e do período anterior.
+   */
+  function heroMetricHtml(c, k) {
+    var hm = c.heroMetric;
+    if (!hm) return '';
+    var sum = function (from, to) {
+      var n = 0, any = false;
+      activeRates().forEach(function (r) {
+        var v = r.metrics ? r.metrics[hm.key] : null;
+        if (r.date >= from && r.date <= to && isNum(v)) { n += Number(v); any = true; }
+      });
+      return any ? n : null;
+    };
+    var cur = sum(state.from, state.to), prev = sum(k.prevFrom, k.prevTo);
+    var delta = isNum(cur) && isNum(prev) && prev ? (cur - prev) / prev * 100 : null;
+    return '<div class="hero-metric"><span>' + esc(L(hm.label)) + (k.mode === 'day' ? '' : ' · ' + esc(t('rateOfPeriod'))) + '</span><b>' + fmtInt(cur) + '</b>' +
+      '<small>' + esc(L(hm.prev)) + (k.mode === 'day' ? ' (' + esc(fmtDate(k.prevTo, true)) + ')' : '') + ': <b>' + fmtInt(prev) + '</b>' +
+      (isNum(delta) ? ' · ' + (delta >= 0 ? '▲ ' : '▼ ') + fmtPct(Math.abs(delta), 1) : '') + '</small></div>';
   }
   /**
    * Cartões de valor (Avaria): soma e maior valor de um campo em R$ (valor da arbitragem),
@@ -1079,8 +1128,13 @@
     if (!canvas || !window.Chart) return;
     var to = state.to, from = Core.addDays(to, -13);
     var evo = Core.buildEvolution(activeRates(), c.goal, from, to);
+    // Filtro de turno: a minilinha segue o número do cartão (parte do turno), sem a linha da meta.
+    if (state.shiftInfo) {
+      var ser = Core.shiftSeries(activeRates(), c.goal, state.shiftInfo.shares);
+      evo.points.forEach(function (p) { p.rate = ser[p.date] === undefined ? null : ser[p.date]; });
+    }
     if (!evo.points.some(function (p) { return p.rate !== null; })) return;
-    var gSpark = goalLine(c.goal, evo.points.map(function (p) { return p.rate; }));
+    var gSpark = state.shiftInfo ? null : goalLine(c.goal, evo.points.map(function (p) { return p.rate; }));
     state.charts.spark = new Chart(canvas, {
       type: 'line',
       data: {labels: evo.labels.map(function (d) { return fmtDate(d); }), datasets: [
@@ -1146,6 +1200,12 @@
     }
     var evo = Core.buildEvolution(activeRates(), c.goal, evoFrom, state.to);
     evo.title = {pt: 'Evolução diária', zh: '每日趋势'};
+    // Filtro de turno: linha com a parte do turno em cada dia (indicadores de erro; no prazo fica na escala de ~95%).
+    if (state.shiftInfo && c.goal.direction !== 'min') {
+      var ser = Core.shiftSeries(activeRates(), c.goal, state.shiftInfo.shares);
+      evo.shift = {name: state.shiftInfo.sel.join(' + '), color: INK,
+        values: evo.points.map(function (p) { return ser[p.date] === undefined ? null : ser[p.date]; })};
+    }
     evo.selFrom = state.from; evo.selTo = state.to; evo.extended = evoFrom < state.from;
     // Recebimento: com o filtro "Coluna principal", só os gráficos da(s) coluna(s) escolhida(s).
     var cols = state.filters.column && state.filters.column.size ? state.filters.column : null;
@@ -1253,6 +1313,7 @@
       state.charts[key] = ch;
     }
     if (key === 'evolution') legend.innerHTML = '<div class="legend"><span><i class="line" style="background:' + RED + '"></i>' + esc(t('rate')) + '</span>' +
+      (spec.shift ? '<span><i class="line" style="background:' + spec.shift.color + '"></i>' + esc(t('shiftLine', {s: spec.shift.name})) + '</span>' : '') +
       (hasGoal(c.goal) ? '<span><i style="background:' + GOOD + ';border-radius:50%"></i>' + esc(t('inGoal')) + '</span><span><i style="background:' + BAD + ';border-radius:50%"></i>' + esc(t('outGoal')) + '</span>' +
       (spec.points && goalLine(c.goal, spec.points.map(function (p) { return p.rate; })) === null ? '<span>' + esc(goalLabel(c.goal) + ' · ' + t('goalOffScale')) + '</span>'
         : '<span><i class="dash"></i>' + esc(goalLabel(c.goal)) + '</span>') : '<span>' + esc(t('noGoal')) + '</span>') + '</div>';
@@ -1300,7 +1361,7 @@
     var gLine = goalLine(c.goal, vals);
     var yDigits = pctDigits(vals.concat([gLine]));
     return {
-      $sig: 'evo', type: 'line',
+      $sig: 'evo' + (spec.shift ? '+' + spec.shift.name : ''), type: 'line',
       data: {labels: pts.map(function (p) { return fmtDate(p.date); }), datasets: [
         {label: t('rate'), data: vals, borderColor: RED, borderWidth: 2.2, cubicInterpolationMode: 'monotone', spanGaps: false, fill: true,
           backgroundColor: function (ctx) {
@@ -1311,7 +1372,8 @@
           pointHoverRadius: 6, pointBorderColor: '#fff', pointBorderWidth: 1.5,
           pointBackgroundColor: pts.map(function (p) { return p.met === true ? GOOD : p.met === false ? BAD : MUTED; })},
         {label: t('goal'), data: pts.map(function () { return gLine; }), borderColor: GOAL, borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, fill: false}
-      ]},
+      ].concat(spec.shift ? [{label: t('shiftLine', {s: spec.shift.name}), data: spec.shift.values, borderColor: spec.shift.color, borderWidth: 2,
+        cubicInterpolationMode: 'monotone', spanGaps: false, fill: false, pointRadius: 3, pointBackgroundColor: spec.shift.color, pointBorderColor: '#fff', pointBorderWidth: 1}] : [])},
       plugins: plugins(),
       options: {
         responsive: true, maintainAspectRatio: false, animation: {duration: 650}, interaction: {mode: 'index', intersect: false},
@@ -1322,6 +1384,7 @@
             title: function (items) { return fmtDate(pts[items[0].dataIndex].date, true); },
             label: function (ctx) {
               if (ctx.datasetIndex === 1) return ' ' + t('goal') + ': ' + goalText(c.goal);
+              if (ctx.datasetIndex === 2) return ctx.raw === null ? '' : ' ' + t('shiftLine', {s: spec.shift.name}) + ': ' + fmtRate(ctx.raw, c.goal);
               var p = pts[ctx.dataIndex]; if (p.rate === null) return ' —';
               return ' ' + t('rate') + ': ' + fmtRate(p.rate, c.goal) + (p.met === null ? '' : '  ' + (p.met ? '✓ ' + t('inGoal') : '✗ ' + t('outGoal')));
             },

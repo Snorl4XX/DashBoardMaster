@@ -1008,7 +1008,9 @@ runAll(cSC);
 const catSC = cSC.getPublicCatalog_().filter(x => x.key === 'sc_sc')[0], catWS = cSC.getPublicCatalog_().filter(x => x.key === 'wrong_send')[0];
 const dashSC = cSC.getDashboardData('sc_sc', {from: D19, to: D19});
 const rowsSC = C.applyDocks(C.decodeDataset(dashSC.dataset), catSC.docks);
-check(catSC.filters.some(f => f.key === 'dock') && catSC.rankPanels.length === 3 && rowsSC.length > 0 &&
+// V3.15: SC → SC sem "Docas por turno"; turno + próxima parada + doca = "Horário de saída do Motorista".
+check(catSC.filters.some(f => f.key === 'dock') && catSC.rankPanels.map(p => p.key).join() === 'dockOverview,stopDockByShift' &&
+  catSC.rankPanels[1].title.pt === 'Horário de saída do Motorista' && catWS.rankPanels.some(p => p.key === 'dockByShift') && rowsSC.length > 0 &&
   rowsSC.every(r => r.dock === stopCases[r.destination][1]) && dashSC.dataset.fields.indexOf('segmentRaw') < 0,
   'SC → SC: filtro e gráficos de docas; a doca sai da próxima parada já gravada (sem baixar de novo)', catSC.rankPanels.map(p => p.key));
 const compSC = cSC.computeDashboard_('sc_sc', {from: D19, to: D19, filters: {dock: ['DOCA 19']}});
@@ -1297,5 +1299,64 @@ check(dAuto.summary && dAuto.meta.rowsLoaded === rowsAF.length && repSm.summaryM
 cAuto.UrlFetchApp.fetch = (() => { const f = cAuto.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cAuto.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
 const repSmX = cAuto.generateReport('arrival_flow', {from: D19, to: D19, filters: fSm}, 'xlsx');
 check(repSmX.ok && repSmX.rows === topF.length, 'relatório Excel no modo de totais', repSmX);
+
+// ---------- 22. V3.15: filtro de turno — a taxa vira a parte do turno na taxa oficial ----------
+const D18 = '2026-09-18';
+const cT = freshCtx(days);
+cT.queueHistory('2026-09-17', D19, true);
+runAll(cT);
+const cfgWS = cT.getIndicatorConfig_('wrong_send');
+const dT = cT.getDashboardData('wrong_send', {from: D19, to: D19});
+const rowsT = C.decodeDataset(dT.dataset), r19 = dT.rates.filter(r => r.date === D19)[0], r18 = dT.rates.filter(r => r.date === D18)[0];
+const a18 = dT.agg.filter(a => a.date === D18)[0];
+const cardsFor = (sel, rows, rates, agg, cfg) => C.computeCards(cfg || cfgWS, rates || dT.rates, C.applyFilters(rows || rowsT, {shift: sel}), {shift: sel}, D19, D19,
+  {shares: C.shiftShares(rows || rowsT, agg || dT.agg, sel), shiftRows: rows || rowsT});
+const kT1 = cardsFor(['T1']), nT1 = rowsT.filter(r => r.shift === 'T1').length;
+const plainT = C.computeCards(cfgWS, dT.rates, rowsT, {}, D19, D19);
+check(kT1.shiftView && Math.abs(kT1.rate - r19.rate * nT1 / rowsT.length) < 1e-9 && kT1.shiftView.dayRate === r19.rate &&
+  Math.abs(kT1.shiftView.share - nT1 / rowsT.length * 100) < 1e-9 && kT1.targetMet === plainT.targetMet,
+  'turno T1: taxa = taxa do dia × participação do T1; meta continua avaliada no dia', {rate: kT1.rate, dia: r19.rate, share: kT1.shiftView.share});
+const sum3t = ['T1', 'T2', 'T3'].reduce((a, sh) => a + cardsFor([sh]).rate, 0);
+const naT = rowsT.filter(r => ['T1', 'T2', 'T3'].indexOf(r.shift) < 0).length;
+check(Math.abs(sum3t - r19.rate * (rowsT.length - naT) / rowsT.length) < 1e-9 && Math.abs(cardsFor(['T1', 'T2']).rate - cardsFor(['T1']).rate - cardsFor(['T2']).rate) < 1e-9,
+  'T1 + T2 + T3 = taxa do dia (remessas sem turno à parte); dois turnos = soma das partes');
+check(a18 && Math.abs(kT1.prevRate - r18.rate * a18.T1 / a18.total) < 1e-9 && Math.abs(kT1.variationPp - (kT1.rate - kT1.prevRate)) < 1e-9,
+  'dia anterior do turno pelos agregados por turno (o detalhe carregado é só do dia escolhido)', {prev: kT1.prevRate});
+const sT1 = kT1.shifts.filter(x => x.shift === 'T1')[0], sT2 = kT1.shifts.filter(x => x.shift === 'T2')[0];
+check(sT1.selected && !sT2.selected && Math.abs(sT1.pct - nT1 / rowsT.length * 100) < 1e-9 && sT2.qty === rowsT.filter(r => r.shift === 'T2').length,
+  'cartões por turno mantêm a participação real de cada turno, com o filtrado marcado (antes: 100% / 0 / 0)');
+check(!plainT.shiftView && plainT.rate === r19.rate && !C.computeCards(cfgWS, dT.rates, rowsT, {shift: ['T1', 'T2', 'T3']}, D19, D19, {shares: {}}).shiftView,
+  'sem filtro de turno (ou os três marcados): taxa oficial de sempre');
+// No prazo (SC→SC): a parte do turno é a do fora do prazo.
+const cfgSCt = cT.getIndicatorConfig_('sc_sc'), dSCt = cT.getDashboardData('sc_sc', {from: D19, to: D19});
+const rowsSCt = C.decodeDataset(dSCt.dataset), rSCt = dSCt.rates.filter(r => r.date === D19)[0];
+const kSCt = cardsFor(['T1'], rowsSCt, dSCt.rates, dSCt.agg, cfgSCt), nSCt = rowsSCt.filter(r => r.shift === 'T1').length;
+check(kSCt.shiftView.late && Math.abs(kSCt.rate - (100 - rSCt.rate) * nSCt / rowsSCt.length) < 1e-9,
+  'SC→SC (no prazo): parte do T1 = (100% − taxa do dia) × participação do T1 nos atrasos', {rate: kSCt.rate, dia: rSCt.rate});
+// Período: soma das partes ÷ soma das bases.
+const dTp = cT.getDashboardData('wrong_send', {from: '2026-09-17', to: D19}), rowsTp = C.decodeDataset(dTp.dataset);
+const kTp = C.computeCards(cfgWS, dTp.rates, C.applyFilters(rowsTp, {shift: ['T1']}), {shift: ['T1']}, '2026-09-17', D19, {shares: C.shiftShares(rowsTp, dTp.agg, ['T1'])});
+const expP = ['2026-09-17', D18, D19].reduce((o, d) => { const r = dTp.rates.filter(x => x.date === d)[0], rs = rowsTp.filter(x => x.date === d);
+  // Base do dia: volume oficial quando bate com a taxa; senão, deduzida da taxa (como a taxa do período).
+  const base = Math.abs(r.errorCount / r.totalCount * 100 - r.rate) <= 0.006 + r.rate * 0.002 ? r.totalCount : r.errorCount / (r.rate / 100);
+  o.p += r.errorCount * rs.filter(x => x.shift === 'T1').length / rs.length; o.b += base; return o; }, {p: 0, b: 0});
+check(Math.abs(kTp.rate - expP.p / expP.b * 100) < 1e-9 && kTp.shiftView.days === 3, 'período: ocorrências do turno ÷ volume oficial dos dias', {rate: kTp.rate, esperado: expP.p / expP.b * 100});
+// Relatório: mesma regra.
+const repTt = cT.computeDashboard_('wrong_send', {from: D19, to: D19, filters: {shift: ['T1']}});
+check(repTt.cards.shiftView && Math.abs(repTt.cards.rate - kT1.rate) < 1e-9 && repTt.cards.shifts.filter(x => x.shift === 'T1')[0].selected,
+  'relatório com filtro de turno: mesma taxa do turno do painel');
+cT.UrlFetchApp.fetch = (() => { const f = cT.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cT.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
+check(cT.generateReport('wrong_send', {from: D19, to: D19, filters: {shift: ['T1']}}, 'xlsx').ok, 'relatório Excel com filtro de turno');
+// Avaria: opção de pedidos + turno = taxa oficial da opção × participação do turno nas remessas da opção.
+const cfgDMt = cT.getIndicatorConfig_('damage'), dDMt = cT.getDashboardData('damage', {from: D19, to: D19});
+const rowsDMt = C.applyOrderKinds(C.decodeDataset(dDMt.dataset), cfgDMt.orderKinds);
+if (dDMt.rateVariants && dDMt.rateVariants.main && dDMt.rateVariants.main.length) {
+  const onlyMain = {orderKind: ['Pedido principal']}, mainRows = C.applyFilters(rowsDMt, onlyMain);
+  const shDM = C.shiftShares(rowsDMt, dDMt.agg, ['T1'], onlyMain);
+  const kDM = C.computeCards(cfgDMt, dDMt.rateVariants.main, C.applyFilters(mainRows, {shift: ['T1']}), {shift: ['T1']}, D19, D19, {shares: shDM});
+  const vMain = dDMt.rateVariants.main.filter(r => r.date === D19)[0];
+  check(Math.abs(kDM.rate - vMain.rate * mainRows.filter(r => r.shift === 'T1').length / mainRows.length) < 1e-9 && !shDM[D18],
+    'Avaria: Pedido principal + T1 = taxa oficial da opção × participação do T1 (dia anterior sem agregado por opção)');
+} else check(false, 'Avaria sem taxa por opção no teste');
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

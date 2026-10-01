@@ -307,15 +307,9 @@ function JTCoreFactory_() {
     var S = rateScale(goal);
     var sumE = 0, sumD = 0, ok = true;
     for (var i = 0; i < valid.length && ok; i++) {
-      var r = valid[i];
-      var bad = goal && goal.direction === 'min' ? S - Number(r.rate) : Number(r.rate);
-      if (!isNum(r.errorCount)) { ok = false; break; }
-      var e = Number(r.errorCount), t = isNum(r.totalCount) ? Number(r.totalCount) : 0, d = null;
-      if (t > 0 && Math.abs(e / t * S - bad) <= 0.006 + bad * 0.002) d = t;
-      else if (bad > 0) d = e / (bad / S);
-      else if (e === 0 && t > 0) d = t;
-      if (d === null || !(d > 0)) { ok = false; break; }
-      sumE += e; sumD += d;
+      var r = valid[i], d = dayBase(r, goal, S);
+      if (d === null) { ok = false; break; }
+      sumE += Number(r.errorCount); sumD += d;
     }
     if (ok && sumD > 0) {
       var badPct = sumE / sumD * S;
@@ -323,6 +317,77 @@ function JTCoreFactory_() {
     }
     var mean = valid.reduce(function (a, r) { return a + Number(r.rate); }, 0) / valid.length;
     return {rate: mean, method: 'mean', days: valid.length};
+  }
+  /** Parte "ruim" da taxa (erros; no prazo = 100 − taxa) e base do dia (volume oficial, ou deduzida da taxa). */
+  function badOf(rate, goal, S) { return goal && goal.direction === 'min' ? S - Number(rate) : Number(rate); }
+  function dayBase(r, goal, S) {
+    if (!r || !isNum(r.rate) || !isNum(r.errorCount)) return null;
+    var bad = badOf(r.rate, goal, S), e = Number(r.errorCount), t = isNum(r.totalCount) ? Number(r.totalCount) : 0, d = null;
+    if (t > 0 && Math.abs(e / t * S - bad) <= 0.006 + bad * 0.002) d = t;
+    else if (bad > 0) d = e / (bad / S);
+    else if (e === 0 && t > 0) d = t;
+    return d !== null && d > 0 ? d : null;
+  }
+
+  // ---------- filtro de turno: parte do turno na taxa oficial ----------
+  /** Turnos escolhidos no filtro (null = sem filtro de turno, ou os três). */
+  function shiftSelection(filters) {
+    var f = filters && filters.shift;
+    if (!f || !f.length) return null;
+    var sel = SHIFTS.filter(function (s) { return f.indexOf(s) >= 0; });
+    return sel.length && sel.length < SHIFTS.length ? sel : null;
+  }
+  /**
+   * Participação do(s) turno(s) nas ocorrências de cada dia: {data: {part, total}}. Agregados por turno
+   * (aba AGG, todos os dias) e, por cima, as remessas carregadas (mesmo recorte dos gráficos; na Avaria,
+   * só a opção de "Pedidos principais/filhos" escolhida — `only`).
+   */
+  function shiftShares(rows, agg, sel, only) {
+    var out = {}, set = {};
+    (sel || []).forEach(function (s) { set[s] = 1; });
+    // Os agregados não separam pedidos principais/filhos: com essa opção, só as remessas carregadas.
+    if (!(only && Object.keys(only).length)) (agg || []).forEach(function (a) {
+      var total = Number(a.total) || 0;
+      if (!(total > 0)) return;
+      out[a.date] = {part: (sel || []).reduce(function (n, s) { return n + (Number(a[s]) || 0); }, 0), total: total};
+    });
+    if (rows && rows.length) {
+      var fromRows = {};
+      applyFilters(rows, only || {}).forEach(function (r) {
+        var x = fromRows[r.date] || (fromRows[r.date] = {part: 0, total: 0}), w = weight(r);
+        x.total += w;
+        if (set[norm(r.shift)]) x.part += w;
+      });
+      Object.keys(fromRows).forEach(function (d) { if (fromRows[d].total > 0) out[d] = fromRows[d]; });
+    }
+    return out;
+  }
+  /**
+   * Taxa do(s) turno(s) no período = ocorrências do turno ÷ base oficial (mesma regra dos Resultados):
+   * no dia, taxa do dia × participação do turno; T1 + T2 + T3 = taxa do dia. "No prazo" (direção min):
+   * a parte é a do fora do prazo. Período: soma das partes ÷ soma das bases (dias com participação).
+   */
+  function shiftPart(rates, goal, shares) {
+    var S = rateScale(goal), sumP = 0, sumD = 0, part = 0, total = 0, days = 0, weighted = true, plain = [];
+    (rates || []).forEach(function (r) {
+      var sh = r && isNum(r.rate) ? shares[r.date] : null;
+      if (!sh || !(sh.total > 0)) return;
+      var share = sh.part / sh.total, piece = badOf(r.rate, goal, S) * share, d = dayBase(r, goal, S);
+      days++; part += sh.part; total += sh.total; plain.push(piece);
+      if (d === null) weighted = false; else { sumP += piece / S * d; sumD += d; }
+    });
+    if (!days) return {rate: null, share: null, part: 0, total: 0, days: 0};
+    var rate = weighted && sumD > 0 ? sumP / sumD * S : plain.reduce(function (a, b) { return a + b; }, 0) / plain.length;
+    return {rate: rate, share: total ? part / total * 100 : null, part: part, total: total, days: days};
+  }
+  /** Série diária da parte do turno (evolução). */
+  function shiftSeries(rates, goal, shares) {
+    var S = rateScale(goal), out = {};
+    (rates || []).forEach(function (r) {
+      var sh = r && isNum(r.rate) ? shares[r.date] : null;
+      if (sh && sh.total > 0) out[r.date] = badOf(r.rate, goal, S) * sh.part / sh.total;
+    });
+    return out;
   }
   function sumErrors(rates) {
     var list = (rates || []).filter(function (r) { return r && isNum(r.rate); });
@@ -512,8 +577,9 @@ function JTCoreFactory_() {
   }
 
   // ---------- cartões ----------
-  function computeCards(cfg, allRates, rows, filters, from, to) {
+  function computeCards(cfg, allRates, rows, filters, from, to, opts) {
     var goal = cfg.goal;
+    opts = opts || {};
     var len = Math.max(1, daysBetween(from, to) + 1);
     var inRange = ratesBetween(allRates, from, to);
     var prevTo = addDays(from, -1), prevFrom = addDays(from, -len);
@@ -529,30 +595,45 @@ function JTCoreFactory_() {
     var rate = cur.rate, prevRate = prev.rate;
     var variation = isNum(rate) && isNum(prevRate) && Number(prevRate) !== 0 ? (rate - prevRate) / Math.abs(prevRate) * 100 : null;
     var errVariation = isNum(currentErrors) && isNum(previousErrors) && previousErrors !== 0 && !filtered ? (currentErrors - previousErrors) / previousErrors * 100 : null;
-    var shiftGroups = countBy(rows, 'shift'), sm = {};
+    // Cartões por turno: com filtro de turno, a participação de cada turno sai das remessas sem esse filtro
+    // (opts.shiftRows) e o(s) turno(s) escolhido(s) ficam marcados — antes o turno filtrado aparecia com 100%.
+    var selShifts = shiftSelection(filters), sRows = selShifts && opts.shiftRows ? opts.shiftRows : rows;
+    var sTotal = sRows === rows ? detailTotal : distinctCount(sRows);
+    var shiftGroups = countBy(sRows, 'shift'), sm = {};
     shiftGroups.forEach(function (g) { sm[g.label] = g.value; });
     var shifts = SHIFTS.map(function (s) {
-      var q = detailTotal ? (sm[s] || 0) : null;
-      return {shift: s, qty: q, pct: detailTotal ? q / detailTotal * 100 : null};
+      var q = sTotal ? (sm[s] || 0) : null;
+      return {shift: s, qty: q, pct: sTotal ? q / sTotal * 100 : null, selected: !!(selShifts && selShifts.indexOf(s) >= 0)};
     });
     var tops = (cfg.topCards || []).map(function (k) {
       var g = countBy(rows, k).filter(function (x) { return x.label !== 'N/A'; })[0];
       return {key: k, label: g ? g.label : null, qty: g ? g.value : null, pct: g && detailTotal ? g.value / detailTotal * 100 : null};
     });
+    // Filtro de turno: a taxa vira a parte do(s) turno(s) na taxa oficial; a meta continua avaliada no dia.
+    var sel = shiftSelection(filters), shiftView = null;
+    if (sel && opts.shares) {
+      var sp = shiftPart(inRange, goal, opts.shares), pp = shiftPart(prevRange, goal, opts.shares);
+      shiftView = {shifts: sel, rate: sp.rate, share: sp.share, part: sp.part, total: sp.total, days: sp.days,
+        dayRate: isNum(rate) ? Number(rate) : null, prevRate: pp.rate, prevShare: pp.share, prevDayRate: isNum(prevRate) ? Number(prevRate) : null,
+        late: !!(goal && goal.direction === 'min')};
+      variation = isNum(sp.rate) && isNum(pp.rate) && pp.rate !== 0 ? (sp.rate - pp.rate) / Math.abs(pp.rate) * 100 : null;
+    }
     return {
       mode: single ? 'day' : 'period', from: from, to: to, days: len,
       daysWithRate: inRange.filter(function (r) { return isNum(r.rate); }).length,
-      rate: isNum(rate) ? Number(rate) : null, rateMethod: cur.method,
-      prevRate: isNum(prevRate) ? Number(prevRate) : null, prevFrom: prevFrom, prevTo: prevTo,
+      rate: shiftView ? shiftView.rate : isNum(rate) ? Number(rate) : null, rateMethod: cur.method,
+      prevRate: shiftView ? shiftView.prevRate : isNum(prevRate) ? Number(prevRate) : null, prevFrom: prevFrom, prevTo: prevTo,
       prevDaysWithRate: prev.days,
       latestDay: latest ? {date: latest.date, rate: Number(latest.rate), met: goalMet(latest.rate, goal)} : null,
-      variation: variation, variationPp: isNum(rate) && isNum(prevRate) ? rate - prevRate : null,
+      variation: variation,
+      variationPp: shiftView ? (isNum(shiftView.rate) && isNum(shiftView.prevRate) ? shiftView.rate - shiftView.prevRate : null)
+        : isNum(rate) && isNum(prevRate) ? rate - prevRate : null,
       errVariation: errVariation,
       currentErrors: isNum(currentErrors) ? Number(currentErrors) : null,
       officialErrors: officialErrors, previousErrors: previousErrors,
       filtered: filtered, detailTotal: detailTotal,
       targetMet: goalMet(rate, goal), prevTargetMet: goalMet(prevRate, goal), goal: goal,
-      shifts: shifts, shiftNA: detailTotal ? (sm['N/A'] || 0) : 0, tops: tops
+      shifts: shifts, shiftNA: sTotal ? (sm['N/A'] || 0) : 0, tops: tops, shiftView: shiftView
     };
   }
 
@@ -666,7 +747,7 @@ function JTCoreFactory_() {
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
-    computeCards: computeCards, weight: weight, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
+    computeCards: computeCards, weight: weight, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
     encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText
   };
 }

@@ -537,6 +537,8 @@ function getDashboardData(indicatorKey, params) {
     // metrics: números do resumo do dia (Recebimento: as subcolunas de "Deve chegar" e "Chegou").
     rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics}
       : {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount}),
+    // Ocorrências por turno de cada dia (filtro de turno: parte do turno na taxa, também no dia anterior).
+    agg: (cfg.filters || []).indexOf('shift') >= 0 ? getAgg_(indicatorKey, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total})) : [],
     // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (o painel troca a taxa pelo filtro).
     rateVariants: cfg.orderKinds ? ['main', 'sub'].reduce((o, k) => {
       o[k] = getRates_(indicatorKey + ':' + k, null, null).map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, estimated: r.estimated}));
@@ -613,10 +615,15 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds);
   const rows = JTCore_.applyFilters(archive.rows, filters);
   const rv = rateVariantFor_(cfg, indicatorKey, filters);
+  // Filtro de turno: parte do turno na taxa (mesma regra do painel).
+  const sel = JTCore_.shiftSelection(rv ? rv.filters : filters);
+  const only = rv && cfg.orderKinds ? {[cfg.orderKinds.field]: [cfg.orderKinds.values[rv.kind]]} : null;
+  const shares = sel ? JTCore_.shiftShares(archive.rows, getAgg_(indicatorKey, null, null), sel, only) : null;
   return {
     cfg: cfg, from: p.from, to: p.to, filters: filters, archive: archive, rows: rows, allRates: rv ? rv.rates : allRates,
     coverage: getCoverage_(indicatorKey, p.from, p.to),
-    cards: JTCore_.computeCards(cfg, rv ? rv.rates : allRates, rows, rv ? rv.filters : filters, p.from, p.to),
+    cards: JTCore_.computeCards(cfg, rv ? rv.rates : allRates, rows, rv ? rv.filters : filters, p.from, p.to,
+      {shares: shares, shiftRows: sel ? JTCore_.applyFilters(archive.rows, filters, 'shift') : null}),
     charts: cfg.charts.map(def => JTCore_.buildChart(def, rows, {})),
     summary: JTCore_.summaryTable(cfg, rows),
     pivots: (cfg.pivotTables || []).map(def => JTCore_.pivot(rows, def))

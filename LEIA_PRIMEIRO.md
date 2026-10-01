@@ -1,6 +1,32 @@
-# J&T DASHMASTER V3.14 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.15 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
+
+*Feito por Caike Oliveira.*
+
+## V3.15 — Taxa por turno, recebimento do dia no Recebimento e ajustes no SC → SC
+**Filtro de turno muda a taxa (todos os indicadores com turno).** Escolhendo um turno (ex.: T1):
+- O cartão da taxa passa a mostrar a **parte do turno na taxa do dia**: taxa do dia × participação do turno nas ocorrências.
+  - Exemplo: taxa do dia 0,15% e o T1 com 40% das ocorrências → **0,06%**.
+  - T1 + T2 + T3 somam a taxa do dia. É a mesma regra da página Resultados.
+- **Em cima da taxa** aparece a participação do turno (ex.: "40,0% de participação do T1"). Logo abaixo vem a **taxa do dia (todos os turnos)**, para comparar.
+- **Dia anterior** e **variação** usam a mesma regra para o mesmo turno. O dia anterior vem do resumo por turno que o sistema já grava.
+- A **evolução diária** ganha uma linha "Parte do T1". A minilinha do cartão acompanha o número do turno.
+- Os cartões **T1 / T2 / T3** continuam com a participação real de cada turno, com o turno escolhido destacado. Antes, o turno filtrado aparecia com 100% e os outros com 0.
+- A **meta continua avaliada na taxa do dia**: a parte de um turno é sempre menor que a do dia, então o selo mostra "… · taxa do dia".
+- **SC → SC e SC → DC** (taxa "no prazo"): a parte do turno é a do **fora do prazo**, igual aos Resultados.
+  - Exemplo: no prazo 90,10%, ou seja, 9,90% fora; com o T1 tendo 35,9% dos atrasos → **3,55% fora do prazo vindos do T1**.
+- **Avaria**: com "Pedido principal" ou "Pedido secundário" escolhido, a taxa é a **oficial do JMS para essa opção** (como na V3.13). Com um turno também, vale a parte do turno nas avarias dessa opção.
+  - O dia anterior por turno só aparece quando o dia está carregado no período, porque o resumo por turno não separa as opções.
+- O relatório PDF/Excel segue a mesma regra.
+
+**Recebimento: fluxo operacional:** o cartão da taxa mostra o **Recebimento do dia** (Chegou · Total de pedidos que chegaram) e o **valor do dia anterior**, com a variação.
+
+**Expedição SC → SC:**
+- O painel "Turno + próxima parada + doca" passou a se chamar **"Horário de saída do Motorista / 司机发车时间"**. O turno vem do horário de saída do motorista.
+- O gráfico **"Docas por turno / 各班次码头分布"** saiu.
+
+**Crédito:** "Feito por Caike Oliveira" no menu lateral e no rodapé do painel.
 
 ## V3.14 — Novo painel: Recebimento: fluxo operacional / 到件运营流程
 Dados da tela do JMS **Operação > Monitoramento de dados > Monitoramento de tipagem de recebimento (novo)** (`/app/crisbiIndex/ArriveMonitor`).
@@ -549,7 +575,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **276 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **286 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.14.0',
+  VERSION: '3.15.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -360,11 +360,11 @@ const INDICATORS = Object.freeze({
       {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
         title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
         stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
-      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
-        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
+      // V3.15: "Docas por turno" saiu do SC → SC; o painel de turno + próxima parada + doca virou "Horário de saída do Motorista".
       {key: 'stopDockByShift', kind: 'byShift', dim: 'destination', extra: 'dock', top: 5, accent: 'count', bands: 'top',
-        title: {pt: 'Turno + próxima parada + doca', zh: '班次、车辆下一站与码头'},
-        sub: {pt: 'Quantidade e porcentagem por combinação de turno, próxima parada e doca · top {n} por turno', zh: '按班次、车辆下一站与码头的数量及占比 · 每个班次前 {n} 名'},
+        title: {pt: 'Horário de saída do Motorista', zh: '司机发车时间'},
+        sub: {pt: 'Turno pelo horário de saída do motorista · quantidade e porcentagem por próxima parada e doca · top {n} por turno',
+          zh: '按司机发车时间划分班次 · 各车辆下一站与码头的数量及占比 · 每个班次前 {n} 名'},
         stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
     ],
     pivotTables: [
@@ -556,6 +556,8 @@ const INDICATORS = Object.freeze({
     filters: ['column', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login'],
     topCards: [],
     hideShiftCards: true,
+    // Cartão da taxa: quantidade recebida no dia (Chegou · Total de pedidos que chegaram) e a do dia anterior.
+    heroMetric: {key: 'totalNum', label: {pt: 'Recebimento do dia', zh: '当日到件量'}, prev: {pt: 'Dia anterior', zh: '前一日'}},
     texts: {
       errors: {pt: 'Não chegadas', zh: '未到件'},
       errorsDay: {pt: 'Não chegadas no dia', zh: '当日未到件'}, errorsPeriod: {pt: 'Não chegadas no período', zh: '期间未到件'},
@@ -668,7 +670,7 @@ function getPublicCatalog_() {
       hideShiftCards: !!cfg.hideShiftCards,
       valueCards: cfg.valueCards || [],
       texts: cfg.texts || null,
-      metricPanels: cfg.metricPanels || [],
+      metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null,
       grouped: !!cfg.grouped,
       detailDays: cfg.detail && cfg.detail.days || null,
       naLabel: cfg.naLabel || null,
