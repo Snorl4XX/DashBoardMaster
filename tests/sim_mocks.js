@@ -196,10 +196,9 @@ function realisticJms(opts) {
       const count = k => Math.floor(ARRIVAL[k] * frac);
       if (route === 'arrivalbyday_total') {
         if (!count('totalNum')) return ok([], 0, 1, size);
-        // Janela de horário (turnos pelo resumo): registros do trecho, como no detalhe (registro i no horário i·86400/N).
-        const sec = x => { const t = x.slice(11).split(':').map(Number); return t[0] * 3600 + t[1] * 60 + t[2]; };
-        const inW = k => { const N = ARRIVAL[k], vis = count(k); const lo = Math.ceil(sec(start) * N / 86400), hi = Math.min(vis, Math.ceil((sec(end) + 1) * N / 86400)); return Math.max(0, hi - lo); };
-        const c = k => (start.slice(11) === '00:00:00' && end.slice(11) === '23:59:59') ? count(k) : inW(k);
+        // Como o JMS real: o resumo é diário (consultado por horário, o dia inteiro fica na janela da 00h).
+        if (start.slice(11) !== '00:00:00') return ok([], 0, 1, size);
+        const c = k => count(k);
         const t = c('totalNum');
         return ok([{shouldArriverNum: c('shouldArriverNum'), noArriverNum: c('noArriverNum'), totalNum: t, uploadNoSendNum: c('uploadNoSendNum'),
           noSendNum: c('noSendNum'), noSignNum: t, deliverNum: t}], 1, 1, size);

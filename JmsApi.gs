@@ -733,8 +733,10 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
     for (let round = 0; round < 3; round++) {
       const parts = splitWindow_(full, n).map(w => Object.assign(w, type ? {type: type} : {}));
       const firsts = fetchDetailBatch_(indicatorKey, isoDate, parts.map(w => ({page: 1, size: probe.size, win: w})));
-      const sum = firsts.reduce((s, f) => s + f.total, 0);
-      if (Math.abs(sum - probe.total) > Math.max(countTolerance_(probe.total), probe.total * 0.05)) {
+      const sum = firsts.reduce((s, f) => s + f.total, 0), top = firsts.reduce((m, f) => Math.max(m, f.total), 0);
+      // Dia fechado com quase tudo numa fatia: o JMS também ignora a hora (devolve o dia na janela da 00h).
+      const oneSlice = isoDate < isoToday_() && probe.total >= 1000 && top >= probe.total * 0.95;
+      if (oneSlice || Math.abs(sum - probe.total) > Math.max(countTolerance_(probe.total), probe.total * 0.05)) {
         // A soma das fatias não bate com o dia: o JMS ignora a hora (ou filtra outro campo).
         setProp_('JMS_NO_SLICE_' + cfg.routeKey, '1');
         logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': soma das fatias ' + sum +

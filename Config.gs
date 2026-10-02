@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.20.1',
+  VERSION: '3.21.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -538,12 +538,7 @@ const INDICATORS = Object.freeze({
     summary: {
       endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_total',
       rateFromCounts: true, rateKeys: [], errorKeys: ['noArriverNum'], totalKeys: ['shouldArriverNum'],
-      metrics: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum', 'noSignNum', 'deliverNum'],
-      // V3.19: o mesmo resumo consultado por horário (T1 06h–14h, T2 14h–22h, T3 22h–06h) dá a quantidade de cada
-      // turno com 4 consultas, sem esperar o detalhe (~5 mil consultas por dia). Usado nos cartões T1/T2/T3 e nas
-      // pizzas enquanto o detalhe do dia não chegou. Cada número é conferido sozinho: se a soma dos horários não
-      // fechar com o dia, só ele desliga (propriedade JMS_SUMMARY_SHIFTS_OFF_ARRIVAL); os outros continuam.
-      shiftWindows: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum']
+      metrics: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum', 'noSignNum', 'deliverNum']
     },
     detail: {
       // O endereço do detalhe não estava na captura: o mesmo nome do resumo com "_detail" (padrão das outras telas).
@@ -555,6 +550,10 @@ const INDICATORS = Object.freeze({
       // Ordem do download (V3.19): as listas pequenas primeiro (tabelas e IDs sem bipe aparecem em minutos), depois
       // "Deve chegar" e por último "Chegou" (~330 mil remessas por dia). Não muda o formato dos arquivos.
       order: ['uploadNoSendNum', 'noSendNum', 'shouldArriverNum', 'totalNum'],
+      // V3.21: turnos sem esperar o download inteiro — a LISTA de cada número consultada em cada horário de turno
+      // (T1 06h–14h, T2 14h–22h, T3 22h–06h) devolve o total de cada turno: 10 consultas (página 1). O RESUMO do JMS
+      // é diário (consultado por horário, devolve o dia inteiro às 00h) e não serve para isso.
+      shiftProbe: ['shouldArriverNum', 'totalNum'],
       // Uma lista por número clicado na tela (detailType = nome do número no resumo). Cada lista guarda só os
       // campos dela (keep) e copia o ID de viagem para o campo do filtro dela (copy).
       //  - Deve chegar: turno pelo "Horário de expedição" na origem (shiftExp → pizza "O que deve chegar").
@@ -594,11 +593,16 @@ const INDICATORS = Object.freeze({
     topCards: [],
     hideShiftCards: true,
     hideEvolution: true, hideTarget: true,
-    // Cartão principal = quantidade que deve chegar no dia (oficial do JMS), com as não chegadas e o dia anterior
-    // embaixo; um cartão por subcoluna (metricPanels, menos as com card: false); cartões T1/T2/T3 do recebido.
-    heroMetric: {key: 'shouldArriverNum', column: 'Deve chegar', sub: 'noArriverNum',
-      label: {pt: 'Deve chegar · Quantidade total de pedidos', zh: '应到总票数'}, labelPeriod: {pt: 'Deve chegar no período', zh: '期间应到总票数'},
-      subLabel: {pt: 'Encomendas que não chegou', zh: '未到件'}, nav: {pt: 'Deve chegar hoje', zh: '今日应到'}},
+    // V3.21: cartão vermelho = quantidade RECEBIDA no dia (Chegou, oficial do JMS) com o dia anterior; ao lado, o cartão
+    // grande "Deve chegar no dia" com as encomendas que não chegaram. Depois, um cartão por subcoluna (metricPanels,
+    // menos as dos dois grandes e as com card: false) e os cartões T1/T2/T3 do recebido.
+    heroMetric: {key: 'totalNum', column: 'Chegou',
+      label: {pt: 'Recebido · Total de pedidos que chegaram', zh: '已到总票数'}, labelPeriod: {pt: 'Recebido no período', zh: '期间已到总票数'}},
+    bigMetric: {key: 'shouldArriverNum', column: 'Deve chegar', sub: 'noArriverNum',
+      label: {pt: 'Deve chegar no dia · Quantidade total de pedidos', zh: '当日应到总票数'}, labelPeriod: {pt: 'Deve chegar no período', zh: '期间应到总票数'},
+      subLabel: {pt: 'Encomendas que não chegou', zh: '未到件'}},
+    // Menu lateral: a quantidade que deve chegar HOJE.
+    navMetric: 'shouldArriverNum',
     metricCards: true,
     shiftCardsByColumn: {main: 'Chegou', columns: ['Chegou'], summaryMetric: 'totalNum'},
     // Turnos de cada lista gravados por dia (aba AGG, chave "arrival_flow:<lista>"): dia anterior dos turnos.
@@ -634,8 +638,6 @@ const INDICATORS = Object.freeze({
         sub: {pt: 'Turno pelo horário de expedição na base de origem', zh: '按始发网点发件时间划分班次'}},
       {key: 'mNoArr', metric: 'noArriverNum', type: 'bar', bad: true, title: {pt: 'Encomendas não chegadas', zh: '未到件'}},
       {key: 'mRec', metric: 'totalNum', type: 'bar', title: {pt: 'Chegou', zh: '已到'}},
-      {key: 'recShift', dim: 'shift', where: {column: 'Chegou'}, type: 'doughnut', summaryShift: 'totalNum', title: {pt: 'Turno que recebeu mais', zh: '到件最多的班次'},
-        sub: {pt: 'Turno pelo horário de descarregamento do veículo de chegada', zh: '按到件车辆卸车时间划分班次'}},
       {key: 'mPrev', metric: 'uploadNoSendNum', type: 'bar', bad: true, title: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}},
       {key: 'prevTrip', dim: 'tripPrev', where: {column: 'Sem bipe na etapa anterior'}, type: 'bar', top: 10,
         title: {pt: 'IDs de viagens que não tiveram bipe de expedição no anterior', zh: '上一环节未发件扫描的车次号'}},
@@ -738,7 +740,7 @@ function getPublicCatalog_() {
       hideShiftCards: !!cfg.hideShiftCards,
       valueCards: cfg.valueCards || [],
       texts: cfg.texts || null,
-      metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, metricCards: !!cfg.metricCards,
+      metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
       shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
       hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
       grouped: !!cfg.grouped, routeKey: cfg.routeKey,

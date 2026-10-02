@@ -47,11 +47,11 @@ function getAppBootstrap() {
       const last = r.filter(x => x.date === anchor)[0] || null;
       latest[k] = last ? {date: last.date, rate: last.rate, met: JTCore_.goalMet(last.rate, INDICATORS[k].goal)} : null;
       // Recebimento: no menu, a quantidade que deve chegar HOJE (número do resumo), em vez da taxa.
-      const hm = INDICATORS[k].heroMetric;
-      if (hm) {
+      const hm = INDICATORS[k].heroMetric, nk = INDICATORS[k].navMetric || (hm && hm.key);
+      if (nk) {
         const today = r.filter(x => x.date === isoToday_())[0] || last;
-        if (today && today.metrics && today.metrics[hm.key] !== undefined) {
-          latest[k] = Object.assign(latest[k] || {date: today.date, rate: today.rate, met: null}, {qty: Number(today.metrics[hm.key]), qtyDate: today.date});
+        if (today && today.metrics && today.metrics[nk] !== undefined) {
+          latest[k] = Object.assign(latest[k] || {date: today.date, rate: today.rate, met: null}, {qty: Number(today.metrics[nk]), qtyDate: today.date});
         }
       }
     });
@@ -507,26 +507,34 @@ function diagnosticarRecebimento(date) {
     day = s.empty ? null : s.raw;
     add('Resumo: ' + (s.empty ? 'SEM REGISTROS neste dia' : (cfg.summary.metrics || []).map(m => m + ' ' + fmt(s.raw[m])).join(' · ')));
   } catch (e) { add('Resumo: ERRO — ' + err(e)); }
-  if (day) {
-    try {
-      const per = timed(() => fetchSummaryMetricsBatch_(key, d, SHIFT_WINDOWS_.map(w => ({start: d + ' ' + w[1], end: d + ' ' + w[2]}))));
-      const off = summaryShiftsOff_(cfg);
-      add('Resumo por horário (turnos sem o detalhe):');
-      out.turnosPeloResumo = {};
-      detailTypeOrder_(cfg).forEach(m => {
-        const td = (cfg.detail.types || []).filter(x => x.type === m)[0] || {};
-        const sh = {T1: 0, T2: 0, T3: 0};
-        per.forEach((x, i) => { sh[SHIFT_WINDOWS_[i][0]] += Number(x[m]) || 0; });
-        const tot = sh.T1 + sh.T2 + sh.T3, dayTot = Number(day[m]) || 0;
-        const ok = Math.abs(tot - dayTot) <= Math.max(20, dayTot * 0.02);
-        out.turnosPeloResumo[m] = {ok: ok, turnos: sh, dia: dayTot};
-        add('  · "' + td.column + '": T1 ' + fmt(sh.T1) + ' · T2 ' + fmt(sh.T2) + ' · T3 ' + fmt(sh.T3) + ' = ' + fmt(tot) + ' × dia ' + fmt(dayTot) +
-          (ok ? ' ✓' : ' ✗ não fecha (o JMS conta esse número por outro horário; vem só do detalhe)') + (off[m] ? ' · desligado: ' + off[m] : ''));
+  try {
+    // Turnos sem esperar o download: a LISTA de cada número consultada em cada horário de turno.
+    const probe = (cfg.detail.shiftProbe || []), full = dayWindow_(d, false), off = summaryShiftsOff_(cfg);
+    if (probe.length) {
+      const items = [];
+      probe.forEach(t => { items.push({page: 1, size: 10, win: Object.assign({type: t}, full)});
+        SHIFT_WINDOWS_.forEach(w => items.push({page: 1, size: 10, win: {start: d + ' ' + w[1], end: d + ' ' + w[2], type: t}})); });
+      const res = timed(() => fetchDetailBatch_(key, d, items));
+      add('Turnos pela lista do JMS por horário (cartões T1/T2/T3 e pizza sem esperar o download):');
+      out.turnosPelaLista = {};
+      probe.forEach((t, k) => {
+        const td = (cfg.detail.types || []).filter(x => x.type === t)[0] || {};
+        const r = res.slice(k * 5, k * 5 + 5), wins = r.slice(1).map(x => Number(x.total) || 0), chk = shiftProbeCheck_(Number(r[0].total) || 0, wins);
+        const sh = {T1: wins[0], T2: wins[1], T3: wins[2] + wins[3]};
+        out.turnosPelaLista[t] = {ok: chk.ok, turnos: sh, dia: chk.day};
+        add('  · "' + td.column + '": T1 ' + fmt(sh.T1) + ' · T2 ' + fmt(sh.T2) + ' · T3 ' + fmt(sh.T3) + ' = ' + fmt(chk.sum) + ' × dia ' + fmt(chk.day) +
+          (chk.ok ? ' ✓' : !chk.spread ? ' ✗ um horário tem o dia inteiro (o JMS não separa por hora)' : ' ✗ não fecha com o dia') + (off[t] ? ' · desligado: ' + off[t] : ''));
       });
-      const rec = out.turnosPeloResumo.totalNum;
-      add('  → cartões T1/T2/T3 e pizza "Turno que recebeu mais" ' + (rec && rec.ok && !off.totalNum ? 'funcionam sem esperar o detalhe' : 'dependem da lista "Chegou" (baixada por último)'));
-    } catch (e) { add('Resumo por horário: ERRO — ' + err(e)); }
-  }
+      const rec = out.turnosPelaLista.totalNum;
+      add('  → cartões T1/T2/T3 ' + (rec && rec.ok && !off.totalNum ? 'funcionam sem esperar o detalhe' : 'dependem da lista "Chegou" baixada'));
+    }
+    if (day) {
+      // Referência: o RESUMO por horário (é diário no JMS; só para conferência).
+      const per = timed(() => fetchSummaryMetricsBatch_(key, d, SHIFT_WINDOWS_.map(w => ({start: d + ' ' + w[1], end: d + ' ' + w[2]}))));
+      const rs = per.map(x => Number(x.totalNum) || 0);
+      add('  (resumo por horário, "Chegou": ' + rs.map(fmt).join(' · ') + ' — ' + (shiftProbeCheck_(Number(day.totalNum) || 0, rs).ok ? 'separa por hora' : 'diário, não separa por hora') + ')');
+    }
+  } catch (e) { add('Turnos por horário: ERRO — ' + err(e)); }
   let url = '';
   try { url = endpointFor_(cfg, 'detail'); } catch (e) { add('Endereço do detalhe: ERRO — ' + err(e)); }
   const own = getProp_('JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL', '');
@@ -553,7 +561,7 @@ function diagnosticarRecebimento(date) {
       if (pr.total > pr.size * 2) {
         const half = splitWindow_(full, 2).map(w => Object.assign(w, {type: t}));
         const hs = half.map(w => timed(() => fetchDetailPage_(key, d, 1, pr.size, w)).total);
-        const okH = Math.abs(hs[0] + hs[1] - pr.total) <= Math.max(3, pr.total * 0.01);
+        const okH = Math.abs(hs[0] + hs[1] - pr.total) <= Math.max(3, pr.total * 0.01) && !(d < isoToday_() && pr.total >= 1000 && Math.max(hs[0], hs[1]) >= pr.total * 0.95);
         item.respeitaHorario = okH;
         add('      horário: manhã+tarde ' + fmt(hs[0]) + ' + ' + fmt(hs[1]) + ' = ' + fmt(hs[0] + hs[1]) + (okH ? ' → respeita a hora (download em fatias OK)' : ' → IGNORA a hora (sem fatias; paginação longa)'));
       }

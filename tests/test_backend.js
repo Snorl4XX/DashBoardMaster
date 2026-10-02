@@ -289,7 +289,8 @@ const D19 = '2026-09-19';
 const cA = freshCtx({'2026-09-19': makeDay(D19, 99)});
 cA.queueHistory(D19, D19, true);
 runAll(cA);
-const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url));
+// (consultas de turno do Recebimento pedem só a 1ª página de 10: não são download do detalhe)
+const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url) && !(/arrivalbyday/.test(f.url) && f.payload.size === 10));
 check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 1000 registros por página (antes 100)', detA.map(f => f.payload.size));
 check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
 check(Object.keys(cA.__state.files).length === 8, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
@@ -1459,20 +1460,20 @@ if (dDMt.rateVariants && dDMt.rateVariants.main && dDMt.rateVariants.main.length
 // ---------- 23. V3.16/V3.17: Recebimento por quantidade e por turno ----------
 const byShiftList = list => list.reduce((o, r) => { const sh = C.shiftOf(r.sendTime); o[sh] = (o[sh] || 0) + 1; return o; }, {});
 const expS = byShiftList(afD.should), recS = byShiftList(afD.total);
-const pieExp = C.buildChart(cfgAF.charts.filter(d => d.key === 'expShift')[0], rowsAF), pieRec = C.buildChart(cfgAF.charts.filter(d => d.key === 'recShift')[0], rowsAF);
+const pieExp = C.buildChart(cfgAF.charts.filter(d => d.key === 'expShift')[0], rowsAF);
 const pieOf = ch => ch.labels.reduce((o, l, i) => { o[l] = ch.datasets[0].data[i]; return o; }, {});
 const sameMap = (a, b) => ['T1', 'T2', 'T3'].every(k => (a[k] || 0) === (b[k] || 0));
-check(recRows.every(r => /^T[123]$/.test(r.shift)) && sameMap(pieOf(pieExp), expS) && sameMap(pieOf(pieRec), recS) && pieExp.type === 'doughnut' &&
-  pieRec.title.pt === 'Turno que recebeu mais' && pieExp.title.pt === 'O que deve chegar',
-  'turnos: "Turno que recebeu mais" pelo horário de descarregamento (Chegou) e "O que deve chegar" pelo horário de expedição (Deve chegar)', {exp: pieOf(pieExp), esperado: expS});
+check(recRows.every(r => /^T[123]$/.test(r.shift)) && sameMap(pieOf(pieExp), expS) && pieExp.type === 'doughnut' &&
+  pieExp.title.pt === 'O que deve chegar' && !cfgAF.charts.some(d => d.key === 'recShift'),
+  'turnos: "O que deve chegar" pelo horário de expedição (Deve chegar); "Turno que recebeu mais" excluído (V3.21)', {exp: pieOf(pieExp), esperado: expS});
 const fT1 = {shift: ['T1']}, rT1 = C.applyFilters(rowsAF, fT1);
 check(sumQ(rT1, 'Chegou') === recS.T1 && sumQ(rT1, 'Deve chegar') === afD.should.length && sumQ(rT1, COL_PREV) === byShiftList(afD.prev).T1,
   'filtro de turno vale nas listas do recebimento (Chegou e as listas pequenas); Deve chegar passa inteira');
-check(catAF.heroMetric.key === 'shouldArriverNum' && catAF.heroMetric.sub === 'noArriverNum' && catAF.metricCards &&
+check(catAF.heroMetric.key === 'totalNum' && catAF.bigMetric.key === 'shouldArriverNum' && catAF.bigMetric.sub === 'noArriverNum' && catAF.metricCards &&
   catAF.shiftCardsByColumn.main === 'Chegou' && catAF.filters[0].key === 'shift' && cfgAF.table.some(c => c[0] === 'shift') &&
   catAF.metricPanels[1].metrics.filter(m => m.card === false).map(m => m.key).join() === 'deliverNum' &&
   catAF.metricPanels[1].metrics.map(m => m.label.pt).join('|') === 'Total de pedidos que chegaram|Sem bipar expedição na etapa anterior|Não realizamos bipe de expedição|Que não foram registrados no Sistema|Não há armazém de saída nesse local',
-  'catálogo: cartão principal Deve chegar; nomes novos dos cartões; "Não há armazém" só na tabela Dados gerais');
+  'catálogo: cartão vermelho = recebido, cartão grande = deve chegar no dia; nomes dos cartões; "Não há armazém" só na tabela Dados gerais');
 const smS = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true});
 const bySm = C.marginalsByDim(smS.summary.marginals).shift || [];
 check(['T1', 'T2', 'T3'].every(sh => bySm.filter(r => r.shift === sh && r.column === 'Chegou').reduce((a, r) => a + Number(r.qty), 0) === recS[sh]),
@@ -1515,53 +1516,58 @@ check(cMig2.migrateGroupedLayout_() === 0, 'dias fora da janela de detalhe (só 
 const reset = c => { c.STORAGE_CACHE_ = null; c.TAB_CACHE_ = {}; c.TAB_INDEX_ = {}; };
 // (a) Turnos pelo resumo do JMS consultado por horário: os cartões T1/T2/T3 e as pizzas não dependem do detalhe.
 const ssRec = ((dashAF.shiftSum || {}).totalNum || [])[0], ssExp = ((dashAF.shiftSum || {}).shouldArriverNum || [])[0];
-const winReq = cAF.__state.fetches.filter(f => /arrivalbyday_total/.test(f.url) && !(f.payload.startTime.slice(11) === '00:00:00' && f.payload.endTime.slice(11) === '23:59:59'));
-check(ssRec && ssExp && sameMap(ssRec, recS) && sameMap(ssExp, expS) && ssRec.total === afD.total.length && winReq.length === 4 &&
-  ['06:00:00', '14:00:00', '00:00:00', '22:00:00'].every(h => winReq.some(f => f.payload.startTime.slice(11) === h)) &&
-  ((dashAF.shiftSum || {}).uploadNoSendNum || [])[0].total === afD.prev.length,
-  'turnos pelo resumo por horário (4 consultas): T1/T2/T3 de cada número iguais aos da lista e somando o dia', {ssRec, recS, req: winReq.length});
+const isWin = f => !(f.payload.startTime.slice(11) === '00:00:00' && f.payload.endTime.slice(11) === '23:59:59');
+const winReq = cAF.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.size === 10 && isWin(f));
+check(ssRec && ssExp && sameMap(ssRec, recS) && sameMap(ssExp, expS) && ssRec.total === afD.total.length && winReq.length === 8 &&
+  ['06:00:00', '14:00:00', '00:00:00', '22:00:00'].every(h => winReq.some(f => f.payload.startTime.slice(11) === h && f.payload.detailType === 'totalNum')) &&
+  !cAF.__state.fetches.some(f => /arrivalbyday_total/.test(f.url) && isWin(f)),
+  'turnos pela LISTA do JMS por horário (Chegou e Deve chegar, 10 consultas): iguais aos do detalhe e somando o dia; o resumo diário não é usado',
+  {ssRec, recS, req: winReq.length});
 // Dia fechado com o mesmo resumo: a atualização seguinte não consulta os horários de novo.
 const fWin19 = cAF.__state.fetches.length;
 cAF.enqueueJobs_([['SUMMARY', 'arrival_flow', D19, 0]], {reset: true});
 reset(cAF);
 cAF.processJob_(cAF.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
-const winAgain = cAF.__state.fetches.slice(fWin19).filter(f => /arrivalbyday_total/.test(f.url));
-check(winAgain.length === 1, 'dia fechado sem mudança no resumo: os 4 horários não são consultados de novo', winAgain.length);
-// (b) JMS que ignora a hora no resumo: o recurso desliga sozinho, avisa no log e o detalhe segue normal.
-const cIg = freshCtx(dAF, {summaryIgnoresTime: true});
+const winAgain = cAF.__state.fetches.slice(fWin19).filter(f => /arrivalbyday_/.test(f.url));
+check(winAgain.length === 1, 'dia fechado sem mudança no resumo: os horários não são consultados de novo', winAgain.length);
+// (b) Lista que também é diária (dia inteiro na janela da 00h): desliga só ela; o resto segue (e nunca T3 = 100%).
+const cIg = freshCtx(dAF, {detailDailyFor: ['shouldArriverNum']});
 cIg.queueHistory(D19, D19, true);
 runAll(cIg);
-const offIg = JSON.parse(cIg.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL || '{}');
-check(['shouldArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum'].every(m => /soma dos horários/.test(offIg[m] || '')) &&
-  !cIg.allTabRows_('AGG').some(r => /:resumo:(shouldArriverNum|totalNum|uploadNoSendNum|noSendNum)/.test(r[0])) &&
-  cIg.allTabRows_('LOG').some(r => /Turnos pelo resumo desligados/.test(String(r[4]))) && cIg.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' &&
-  JSON.stringify(cIg.getDashboardData('arrival_flow', {from: D19, to: D19}).meta.summaryShiftsOff) === JSON.stringify(offIg),
-  'JMS ignora a hora no resumo: turnos pelo resumo desligados (sem números errados) e o dia fecha pelo detalhe', offIg);
-// Só "Deve chegar" contado por outro horário: só ele desliga; "Chegou" (cartões T1/T2/T3) continua pelo resumo.
-const cIg2 = freshCtx(dAF, {summaryIgnoresTimeFor: ['shouldArriverNum']});
-cIg2.queueHistory(D19, D19, true);
-runAll(cIg2);
-const offIg2 = JSON.parse(cIg2.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL || '{}'), ss2 = cIg2.getDashboardData('arrival_flow', {from: D19, to: D19}).shiftSum;
-check(offIg2.shouldArriverNum && !offIg2.totalNum && !offIg2.uploadNoSendNum && (ss2.shouldArriverNum || []).length === 0 && sameMap((ss2.totalNum || [])[0] || {}, recS),
-  'um número fora do horário desliga só ele: os cartões do "Chegou" continuam pelo resumo', {offIg2});
-// Dias já baixados antes da V3.19.1: os turnos pelo resumo são consultados uma vez, sem esperar a atualização do dia.
+const offIg = JSON.parse(cIg.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL || '{}'), ssIg = cIg.getDashboardData('arrival_flow', {from: D19, to: D19});
+check(/um horário tem o dia inteiro/.test(offIg.shouldArriverNum || '') && !offIg.totalNum && (ssIg.shiftSum.shouldArriverNum || []).length === 0 &&
+  sameMap((ssIg.shiftSum.totalNum || [])[0] || {}, recS) && cIg.allTabRows_('LOG').some(r => /Turnos pela lista por horário desligados/.test(String(r[4]))) &&
+  JSON.stringify(ssIg.meta.summaryShiftsOff) === JSON.stringify(offIg),
+  'lista diária no JMS (dia inteiro às 00h): turnos por horário desligados só nela, sem T3 = 100%', offIg);
+// Hoje com tudo na madrugada é normal (não desliga nada).
+check(C && cIg.shiftProbeCheck_(5000, [0, 0, 5000, 0]).ok === false && cIg.shiftProbeCheck_(5000, [2000, 1500, 1000, 500]).ok === true &&
+  cIg.shiftProbeCheck_(100, [0, 0, 100, 0]).ok === true, 'conferência: dia inteiro num horário (dia grande) é rejeitado; dia pequeno passa');
+// Fatias do download: lista diária num dia fechado (tudo na fatia da 00h) desliga as fatias (paginação normal) e o dia fecha.
+const cDl = freshCtx(dAF, {detailDailyFor: ['totalNum'], maxPageSize: 1000}, {JMS_DETAIL_MAX_OFFSET: '300'});
+const bigAF = {}; bigAF[D19] = makeDay(D19, 101);
+cDl.queueHistory(D19, D19, true);
+runAll(cDl);
+const rowsDl = C.decodeDataset(cDl.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
+check(sumQ(rowsDl, 'Chegou') === afD.total.length && /COMPLETE|CHECK_COUNTS/.test(cDl.getDayStatus_('arrival_flow', D19).details) &&
+  (afD.total.length < 1000 || cDl.__state.props.JMS_NO_SLICE_ARRIVAL === '1'),
+  'lista diária no download: sem repetir remessas (o dia fecha com o total certo)', {chegou: sumQ(rowsDl, 'Chegou'), esperado: afD.total.length});
+// Atualização para a V3.21: decisões antigas (resumo) esquecidas e os dias recentes consultam os turnos pela lista.
 const cMgV = freshCtx(dAF);
 cMgV.queueHistory(D19, D19, true);
 runAll(cMgV);
-const aggRowsV = cMgV.allTabRows_('AGG').filter(r => /:resumo:/.test(r[0])).length;
 const shAggV = cMgV.tab_('AGG');
-shAggV.data = shAggV.data.filter(r => !/:resumo:/.test(String((r || [])[0])));
-delete cMgV.__state.props.MIGRATION_V3191;
-reset(cMgV);
-const noAggV = cMgV.allTabRows_('AGG').filter(r => /:resumo:/.test(r[0])).length;
-const migNV = cMgV.migrateToV3191_(), migN2V = cMgV.migrateToV3191_();
+shAggV.data = shAggV.data.filter(r => !/:turnos:/.test(String((r || [])[0])));
+cMgV.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL = JSON.stringify({totalNum: 'decidido pelo resumo'});
+delete cMgV.__state.props.MIGRATION_V321;
+reset(cMgV); cMgV.invalidateProps_();
+const migNV = cMgV.migrateToV321_(), migN2V = cMgV.migrateToV321_();
 runAll(cMgV);
 reset(cMgV);
-check(aggRowsV > 0 && noAggV === 0 && migNV === 1 && migN2V === 0 && cMgV.allTabRows_('AGG').filter(r => /:resumo:totalNum/.test(r[0])).length === 1,
-  'V3.19.1: dias da janela do Recebimento ganham os turnos pelo resumo uma vez, já na instalação', {aggRowsV, noAggV, migNV, migN2V});
+check(migNV === 1 && migN2V === 0 && !cMgV.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL && cMgV.allTabRows_('AGG').filter(r => /:turnos:totalNum/.test(r[0])).length === 1,
+  'V3.21: turnos pela lista consultados nos dias recentes e o "desligado" do resumo esquecido', {migNV, migN2V});
 // (c) Ordem do download: as listas pequenas primeiro, "Chegou" (a maior) por último.
 reset(cAF);
-const firstDetAF = cAF.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url))[0];
+const firstDetAF = cAF.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.size !== 10)[0];
 check(cAF.detailTypeOrder_(cfgAF).join() === 'uploadNoSendNum,noSendNum,shouldArriverNum,totalNum' && firstDetAF.payload.detailType === 'uploadNoSendNum' &&
   cAF.detailTypeOrder_(ctx.getIndicatorConfig_('wrong_send')).join() === '',
   'ordem do download: sem bipe anterior → sem bipe nesta base → deve chegar → chegou', firstDetAF.payload.detailType);
@@ -1641,10 +1647,10 @@ const orderQ19 = cQ19.pendingJobs_().map(j => j.type === 'SUMMARY' ? 'S' : j.dat
 check(orderQ19.join() === ['S', yQ19, tQ19, oQ19].join(), 'fila do Recebimento: ontem (o dia em que o painel abre) antes de hoje e dos antigos', orderQ19);
 // (i) diagnosticarRecebimento(): as 4 listas, os turnos pelo resumo e o download, sem segredos no texto.
 const dgR = cAF.diagnosticarRecebimento(D19);
-check(dgR.listas.length === 4 && dgR.listas.every(x => x.total === x.resumo && x.pagina > 0 && !x.erro) && dgR.turnosPeloResumo &&
-  ['shouldArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum'].every(m => dgR.turnosPeloResumo[m] && dgR.turnosPeloResumo[m].ok) &&
-  /funcionam sem esperar o detalhe/.test(dgR.texto) &&
-  [COL_PREV, COL_NOSEND, 'Deve chegar', 'Chegou', 'Resumo por horário', 'Download dos últimos dias', 'consultas por dia'].every(x => dgR.texto.indexOf(x) >= 0) &&
+check(dgR.listas.length === 4 && dgR.listas.every(x => x.total === x.resumo && x.pagina > 0 && !x.erro) && dgR.turnosPelaLista &&
+  ['shouldArriverNum', 'totalNum'].every(m => dgR.turnosPelaLista[m] && dgR.turnosPelaLista[m].ok) &&
+  /funcionam sem esperar o detalhe/.test(dgR.texto) && /diário, não separa por hora/.test(dgR.texto) &&
+  [COL_PREV, COL_NOSEND, 'Deve chegar', 'Chegou', 'Turnos pela lista do JMS por horário', 'Download dos últimos dias', 'consultas por dia'].every(x => dgR.texto.indexOf(x) >= 0) &&
   dgR.texto.indexOf('FAKE') < 0 && /todos os usados preenchidos/.test(dgR.texto),
   'diagnosticarRecebimento: cada lista × resumo, turnos pelo resumo, volume e situação do download (sem AuthToken)', dgR.texto);
 const dgBad = freshCtx(dAF, {arrivalDetailRoute: 'nao_existe'}).diagnosticarRecebimento(D19);
@@ -1652,8 +1658,8 @@ check(dgBad.listas.every(x => x.erro) && /Payload/.test(dgBad.texto), 'endereço
 // (j) Catálogo: pizzas e cartões de turno sabem qual número do resumo usar.
 const catAF2 = ctx.getPublicCatalog_().filter(x => x.key === 'arrival_flow')[0];
 check(catAF2.routeKey === 'ARRIVAL' && catAF2.shiftCardsByColumn.summaryMetric === 'totalNum' &&
-  catAF2.charts.filter(d => d.summaryShift).map(d => d.key + ':' + d.summaryShift).join() === 'expShift:shouldArriverNum,recShift:totalNum',
-  'catálogo: pizzas e cartões de turno com o número do resumo correspondente');
+  catAF2.charts.filter(d => d.summaryShift).map(d => d.key + ':' + d.summaryShift).join() === 'expShift:shouldArriverNum',
+  'catálogo: pizza e cartões de turno com a lista correspondente');
 
 // ---------- 25. V3.20: Recebimento mostra dados mais cedo ----------
 // (a) Fatias de horário em ordem espalhada (0h, 12h, 6h, 18h...): com parte do dia baixada, a prévia cobre o dia todo.

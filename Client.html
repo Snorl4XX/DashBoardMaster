@@ -100,14 +100,14 @@
       hmPrev: 'Dia anterior', hmPrevPeriod: 'Período anterior', hmShare: 'do {col} · {s}', hmNoDetail: 'Sem detalhe para o filtro neste período',
       mcOfTotal: '{p} de "{of}"', mcPrevShort: 'Dia anterior: {n}', mcPrevPeriodShort: 'Período anterior: {n}',
       scOf: 'do {col}', scNoDetail: 'Sem detalhe neste período', madeBy: 'Feito por Caike Oliveira', daysWithData: '{a} de {b} dias com dados',
-      scFromSummary: 'pelo resumo do JMS por horário', pieFromSummary: 'Pelo resumo do JMS por horário (o detalhe deste período ainda não está completo)',
+      scFromSummary: 'contagem do JMS por horário do turno', pieFromSummary: 'Contagem do JMS por horário do turno (o download do detalhe deste período ainda não terminou)',
       noRowsHint: 'Nenhuma remessa com estes filtros neste período.', dsTitle: 'Download do detalhe',
       partialSample: 'prévia: {p}% desta lista baixada, espalhada pelo dia todo', dsOutside: 'fora dos últimos {n} dias com detalhe (só o resumo)', dsNoSummary: 'aguardando o resumo do dia no JMS',
       dsSkipped: 'o JMS não entregou a lista "{l}": {r}', dsListDone: 'lista baixada; não há registros com estes filtros',
       dsDownloading: 'baixando: {p}% desta lista ({a} de {b} partes), atualizado às {at}', dsDayDownloading: 'baixando: {p}% do dia ({a} de {b} partes), atualizado às {at}',
       dsListWaiting: '"{l}" ainda não começou: as listas menores vêm antes ({p}% do dia baixado)',
-      scSumWait: 'Os turnos pelo resumo do JMS chegam na próxima atualização (de hora em hora); depois, com a lista "{l}".',
-      scSumOff: 'O JMS não separa "{l}" por horário no resumo: os turnos vêm da lista, baixada por último.', dsError: 'erro no download: {r}. Nova tentativa automática',
+      scSumWait: 'A contagem do JMS por turno chega na próxima atualização (de hora em hora); depois, com a lista "{l}" baixada.',
+      scSumOff: 'O JMS não separa "{l}" por horário: os turnos vêm da lista baixada.', dsError: 'erro no download: {r}. Nova tentativa automática',
       dsLastError: 'último erro: {r}', dsQueued: 'na fila do download ({n} tarefa(s) antes; o Recebimento roda depois dos outros painéis)',
       dsWaiting: 'aguardando a sincronização (fila a cada 5 min)', dsBudget: 'limite diário do Recebimento atingido ({m} min, conta Gmail): continua amanhã',
       dsPaused: 'rota pausada: {r}', dsDone: 'completo', dsHelp: 'Para saber o motivo em detalhe, rode diagnosticarRecebimento() no editor do Apps Script.',
@@ -203,14 +203,14 @@
       hmPrev: '前一日', hmPrevPeriod: '上一期间', hmShare: '占{col} · {s}', hmNoDetail: '该期间没有符合筛选的明细',
       mcOfTotal: '占“{of}” {p}', mcPrevShort: '前一日：{n}', mcPrevPeriodShort: '上一期间：{n}',
       scOf: '占{col}', scNoDetail: '该期间无明细', madeBy: '由 Caike Oliveira 制作', daysWithData: '{b} 天中 {a} 天有数据',
-      scFromSummary: '按时段查询的JMS汇总', pieFromSummary: '按时段查询的JMS汇总（本期间明细尚未完整）',
+      scFromSummary: 'JMS按班次时段计数', pieFromSummary: 'JMS按班次时段计数（本期间明细尚未下载完）',
       noRowsHint: '本期间在当前筛选下没有记录。', dsTitle: '明细下载',
       partialSample: '预览：本列表已下载 {p}%（均匀分布于全天）', dsOutside: '超出明细保留天数（{n} 天），仅有汇总', dsNoSummary: '等待JMS当日汇总',
       dsSkipped: 'JMS 未返回列表「{l}」：{r}', dsListDone: '列表已下载；当前筛选下无记录',
       dsDownloading: '下载中：本列表 {p}%（{a}/{b} 段），更新于 {at}', dsDayDownloading: '下载中：当日 {p}%（{a}/{b} 段），更新于 {at}',
       dsListWaiting: '「{l}」尚未开始：先下载较小的列表（当日已下载 {p}%）',
-      scSumWait: '按时段的JMS汇总将在下次更新（每小时）时获取；之后以「{l}」列表为准。',
-      scSumOff: 'JMS汇总无法按时段拆分「{l}」：班次来自该列表（最后下载）。', dsError: '下载出错：{r}。将自动重试',
+      scSumWait: 'JMS按班次计数将在下次更新（每小时）时获取；之后以下载的「{l}」列表为准。',
+      scSumOff: 'JMS无法按时段拆分「{l}」：班次来自下载的列表。', dsError: '下载出错：{r}。将自动重试',
       dsLastError: '最近错误：{r}', dsQueued: '排队中（前面还有 {n} 个任务；到件明细排在其他看板之后）',
       dsWaiting: '等待同步（每 5 分钟一次）', dsBudget: '今日到件明细下载时长已达上限（{m} 分钟，Gmail 账号），明天继续',
       dsPaused: '接口已暂停：{r}', dsDone: '完成', dsHelp: '如需详细原因，请在 Apps Script 编辑器中运行 diagnosticarRecebimento()。',
@@ -1155,8 +1155,8 @@
   function shiftDays(col, from, to, metric) {
     var det = {}, sum = {}, out = {q: {T1: 0, T2: 0, T3: 0, NA: 0}, tot: 0, any: false, complete: true, summary: false};
     ((state.data.colAgg || {})[col] || []).forEach(function (a) { det[a.date] = a; });
-    var mk = metric || listMetric(col);
-    if (mk) ((state.data.shiftSum || {})[mk] || []).forEach(function (a) { sum[a.date] = a; });
+    var mk = metric || listMetric(col), off = (state.data.meta && state.data.meta.summaryShiftsOff) || {};
+    if (mk && !off[mk]) ((state.data.shiftSum || {})[mk] || []).forEach(function (a) { sum[a.date] = a; });
     activeRates().forEach(function (r) {
       if (r.date < from || r.date > to) return;
       var a = det[r.date] || sum[r.date];
@@ -1259,37 +1259,18 @@
    * o dia anterior do turno vem dos agregados do dia. Depois, os cartões T1/T2/T3 do que foi recebido.
    */
   function renderMetricKpis(c, k) {
-    var grid = $('#kpiGrid'), hm = c.heroMetric, day = k.mode === 'day', f = filtersObj();
+    var grid = $('#kpiGrid'), hm = c.heroMetric, bm = c.bigMetric, day = k.mode === 'day', f = filtersObj();
     var comparable = day || metricDayCount(hm.key, state.from, state.to) === metricDayCount(hm.key, k.prevFrom, k.prevTo);
     var dlt = function (a, b, bad) { return comparable ? qtyDelta(a, b, bad) : ''; };
-    var cur = metricSum(hm.key, state.from, state.to), prev = metricSum(hm.key, k.prevFrom, k.prevTo);
-    var sub = metricSum(hm.sub, state.from, state.to), prevSub = metricSum(hm.sub, k.prevFrom, k.prevTo);
-    var prevWord = day ? t('hmPrev') : t('hmPrevPeriod'), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
-    var label = day ? L(hm.label) + ' · ' + fmtDate(state.to, true) : L(hm.labelPeriod) + ' · ' + fmtRange(state.from, state.to);
-    var heroF = filtersFor(f, hm.column).length > 0, big = cur, lines = '';
-    if (heroF) {
-      var fq = listQty(hm.column);
-      big = fq || null;
-      label = t('hmFiltered', {label: label});
-      if (!fq) lines += '<div class="kpi-sub">' + esc(t('hmNoDetail')) + '</div>';
-      lines += '<div class="hero-metric"><span>' + esc(t('hmOfficial')) + '</span><b>' + fmtInt(cur) + '</b>' +
-        '<small>' + esc(L(hm.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + ')' : '') + '</small></div>';
-    } else {
-      lines += '<div class="hero-metric"><span>' + esc(L(hm.subLabel)) + '</span><b>' + fmtInt(sub) + '</b>' +
-        (isNum(sub) && cur ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + '</em>' : '') + '</div>';
-    }
-    lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
-      ' · ' + esc(L(hm.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) +
-      (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(hm.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>';
-    var hero = '<article class="kpi kpi-hero hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon('arrival_flow') + esc(label) + '</div>' +
-      '<div class="kpi-value">' + fmtInt(big) + '</div>' + lines +
-      '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
-    // Um cartão por subcoluna (menos a do cartão principal e as com card: false).
+    // V3.21: cartão vermelho = recebido (Chegou); cartão grande ao lado = deve chegar no dia, com as não chegadas.
+    var hero = qtyCard(hm, k, f, 'kpi-hero', 'sparkCanvas', comparable) + (bm ? qtyCard(bm, k, f, 'kpi-big', 'sparkCanvas2', comparable) : '');
+    // Um cartão por subcoluna (menos as dos cartões grandes e as com card: false).
     var sel = f.shift && f.shift.length ? f.shift : null, cards = '';
+    var inBig = function (key) { return key === hm.key || (bm && (key === bm.key || key === bm.sub)); };
     (c.metricPanels || []).forEach(function (p) {
       var totalKey = p.metrics[0].key, total = metricSum(totalKey, state.from, state.to);
       p.metrics.forEach(function (m) {
-        if (m.key === hm.key || m.card === false) return;
+        if (inBig(m.key) || m.card === false) return;
         var off = metricSum(m.key, state.from, state.to), offPrev = metricSum(m.key, k.prevFrom, k.prevTo);
         var fk = m.detail ? filtersFor(f, m.detail) : [], v = off, pv = offPrev, name = L(m.label), extra = '';
         if (m.detail && fk.length) {
@@ -1315,6 +1296,35 @@
     fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
+  }
+  /**
+   * Cartão grande de um número do resumo (Recebimento): o número do dia/período (oficial do JMS), o número de baixo
+   * (`sub`, ex.: não chegadas) e o dia anterior; com filtro da lista dele, a quantidade filtrada e o oficial embaixo.
+   */
+  function qtyCard(def, k, f, cls, sparkId, comparable) {
+    var day = k.mode === 'day', dlt = function (a, b, bad) { return comparable ? qtyDelta(a, b, bad) : ''; };
+    var cur = metricSum(def.key, state.from, state.to), prev = metricSum(def.key, k.prevFrom, k.prevTo);
+    var sub = def.sub ? metricSum(def.sub, state.from, state.to) : null, prevSub = def.sub ? metricSum(def.sub, k.prevFrom, k.prevTo) : null;
+    var prevWord = day ? t('hmPrev') : t('hmPrevPeriod'), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
+    var label = day ? L(def.label) + ' · ' + fmtDate(state.to, true) : L(def.labelPeriod) + ' · ' + fmtRange(state.from, state.to);
+    var big = cur, lines = '';
+    if (filtersFor(f, def.column).length) {
+      var fq = listQty(def.column);
+      big = fq || null;
+      label = t('hmFiltered', {label: label});
+      if (!fq) lines += '<div class="kpi-sub">' + esc(t('hmNoDetail')) + '</div>';
+      lines += '<div class="hero-metric"><span>' + esc(t('hmOfficial')) + '</span><b>' + fmtInt(cur) + '</b>' + (def.sub ?
+        '<small>' + esc(L(def.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + ')' : '') + '</small>' : '') + '</div>';
+    } else if (def.sub) {
+      lines += '<div class="hero-metric"><span>' + esc(L(def.subLabel)) + '</span><b>' + fmtInt(sub) + '</b>' +
+        (isNum(sub) && cur ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + '</em>' : '') + '</div>';
+    }
+    lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
+      (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +
+      (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>';
+    return '<article class="kpi ' + cls + ' hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon(def.column === 'Chegou' ? 'check' : 'arrival_flow') + esc(label) + '</div>' +
+      '<div class="kpi-value">' + fmtInt(big) + '</div>' + lines +
+      '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="' + sparkId + '" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
   }
   /**
    * Cartões T1 / T2 / T3: quantidade recebida em cada turno (horário de descarregamento do veículo de chegada)
@@ -1577,7 +1587,12 @@
     var canvas = $('#sparkCanvas');
     if (!canvas || !window.Chart) return;
     var to = state.to, from = Core.addDays(to, -13);
-    if (c.heroMetric && c.metricCards) return drawQtySpark(canvas, c.heroMetric.key, from, to);
+    if (c.heroMetric && c.metricCards) {
+      drawQtySpark(canvas, c.heroMetric.key, from, to, '#fff', 'spark');
+      var c2 = $('#sparkCanvas2');
+      if (c.bigMetric && c2) { destroyChart('spark2'); drawQtySpark(c2, c.bigMetric.key, from, to, RED, 'spark2'); }
+      return;
+    }
     var evo = Core.buildEvolution(activeRates(), c.goal, from, to);
     // Filtro de turno: a minilinha segue o número do cartão (parte do turno), sem a linha da meta.
     if (state.shiftInfo) {
@@ -1600,15 +1615,17 @@
   }
 
   /** Minilinha do cartão principal do Recebimento: a quantidade oficial dos 14 dias até a data escolhida. */
-  function drawQtySpark(canvas, key, from, to) {
+  function drawQtySpark(canvas, key, from, to, color, slot) {
     var byDate = {};
     activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[key])) byDate[r.date] = Number(r.metrics[key]); });
     var days = Core.dateRange(from, to), vals = days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; });
     if (!vals.some(isNum)) return;
-    state.charts.spark = new Chart(canvas, {
+    var col = color || '#fff', white = col === '#fff';
+    state.charts[slot || 'spark'] = new Chart(canvas, {
       type: 'line',
       data: {labels: days.map(function (d) { return fmtDate(d); }), datasets: [
-        {data: vals, borderColor: '#fff', borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 2.5, pointBackgroundColor: '#fff', spanGaps: true, fill: true, backgroundColor: 'rgba(255,255,255,.12)'}]},
+        {data: vals, borderColor: col, borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 2.5, pointBackgroundColor: col, spanGaps: true, fill: true,
+          backgroundColor: white ? 'rgba(255,255,255,.12)' : 'rgba(230,0,18,.08)'}]},
       options: {responsive: true, maintainAspectRatio: false, animation: {duration: 700}, layout: {padding: {top: 6, bottom: 2}},
         plugins: {legend: {display: false}, datalabels: {display: false}, tooltip: {displayColors: false, callbacks: {label: function (ctx) { return fmtInt(ctx.raw); }}}},
         scales: {x: {display: false}, y: {display: false, grace: '15%'}}}
@@ -1709,7 +1726,7 @@
     var grid = $('#chartsGrid'), specs = chartSpecs(c);
     var sig = state.indicator + '|' + specs.map(function (s) { return s.key; }).join(',');
     if (grid.getAttribute('data-sig') !== sig) {
-      Object.keys(state.charts).forEach(function (k) { if (k !== 'spark') destroyChart(k); });
+      Object.keys(state.charts).forEach(function (k) { if (k !== 'spark' && k !== 'spark2') destroyChart(k); });
       grid.innerHTML = '';
       specs.forEach(function (s) {
         var card = document.createElement('article');

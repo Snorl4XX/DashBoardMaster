@@ -555,7 +555,7 @@ function getDashboardData(indicatorKey, params) {
       // Por que falta detalhe (fila, partes baixadas de cada lista, erro): o painel mostra no lugar de "sem dados".
       detailProgress: archive.fullyLoaded ? null : safeCall_(() => detailProgress_(indicatorKey, p.from, p.to)),
       // Recebimento: números que o JMS não separa por horário no resumo (turnos só pelo detalhe).
-      summaryShiftsOff: ((cfg.summary || {}).shiftWindows || []).length ? summaryShiftsOff_(cfg) : null
+      summaryShiftsOff: ((cfg.detail || {}).shiftProbe || []).length ? summaryShiftsOff_(cfg) : null
     },
     // metrics: números do resumo do dia (Recebimento: as subcolunas de "Deve chegar" e "Chegou").
     rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics}
@@ -567,8 +567,8 @@ function getDashboardData(indicatorKey, params) {
       o[col] = getAgg_(indicatorKey + ':' + col, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total}));
       return o;
     }, {}),
-    // Recebimento: quantidade de cada turno pelo resumo do JMS consultado por horário (sem depender do detalhe).
-    shiftSum: ((cfg.summary || {}).shiftWindows || []).reduce((o, m) => {
+    // Recebimento: quantidade de cada turno pela lista do JMS consultada em cada horário (sem esperar o download).
+    shiftSum: ((cfg.detail || {}).shiftProbe || []).reduce((o, m) => {
       o[m] = getAgg_(summaryShiftKey_(indicatorKey, m), null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, total: a.total}));
       return o;
     }, {}),

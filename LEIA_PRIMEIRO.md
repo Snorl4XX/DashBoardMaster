@@ -1,8 +1,27 @@
-# J&T DASHMASTER V3.20.1 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.21 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.21 — Recebimento: turnos certos, cartão do recebido e cartão grande "Deve chegar"
+**Turnos (cartões T1/T2/T3 e pizza "O que deve chegar")**
+- **O problema:** na V3.19/3.20, eles mostravam T1 = 0, T2 = 0 e T3 = 100%. O **resumo** do Recebimento no JMS é **diário**: consultado por horário, devolve o dia inteiro na janela que começa à 00h. A soma batia com o dia, por isso a conferência deixou passar.
+- **Agora os turnos vêm da LISTA do JMS** ("Chegou" e "Deve chegar") consultada em cada horário de turno: T1 06h–14h, T2 14h–22h, T3 22h–06h.
+  - A lista separa por horário. São 10 consultas, só a 1ª página.
+  - Os valores aparecem na hora, sem esperar o download inteiro.
+  - Quando o detalhe do dia termina, valem os turnos do detalhe.
+- **Conferência nova:** além de fechar com o dia, nenhum horário sozinho pode ter o dia inteiro. Se tiver (lista diária), aquela lista desliga e os turnos vêm do detalhe baixado. A mesma conferência vale para as fatias do download.
+- Os números errados gravados antes não são mais lidos. Na instalação, os dias recentes consultam os turnos pela lista.
+
+**Cartões**
+- **Cartão vermelho = quantidade RECEBIDA no dia** ("Total de pedidos que chegaram"), com o dia anterior e o minigráfico.
+- **Cartão grande "Deve chegar no dia"** ao lado: a quantidade total de pedidos, as encomendas que não chegaram (% do previsto) e o dia anterior.
+- O menu lateral continua mostrando o que deve chegar hoje.
+
+**Gráficos:** excluído "Turno que recebeu mais" (os cartões T1/T2/T3 já mostram o recebido por turno).
+
+**Testes:** 333 verificações.
 
 ## V3.20.1 — Avaria: taxa de "Pedido principal/secundário" = coluna 总破损率 do JMS
 **O que estava errado:** com "Pedido principal" ou "Pedido secundário", o painel não mostrava a taxa da tabela principal do JMS. Na tela de 01/10: principal = **658,07** (328 avarias ÷ 498.429 × 1.000.000); secundário = **2.688,05** (177 avarias).
@@ -817,7 +836,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **332 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **333 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

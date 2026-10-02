@@ -311,17 +311,12 @@ function fakeJms(dayData, options) {
       case 'arrivalbyday_total': {
         if (!d || !d.af) return ok([], 0, 1, body.size);
         const a = d.af;
-        // Janela de horário (turnos pelo resumo, V3.19): conta só os registros do horário. options.summaryIgnoresTime:
-        // o JMS devolve o dia inteiro em qualquer horário (o recurso tem de desligar sozinho).
-        // options.summaryIgnoresTimeFor: só esses números ignoram a hora (ex.: "Deve chegar" contado por outro horário).
-        const fullDay = options.summaryIgnoresTime || (start === full.start && end === full.end);
-        const ign = m => fullDay || (options.summaryIgnoresTimeFor || []).indexOf(m) >= 0;
-        const win = (l, m) => ign(m) ? l : l.filter(r => { const t = String(r.sendTime || ''); return t >= start && t <= end; });
-        const sh = win(a.should, 'shouldArriverNum'), tt = win(a.total, 'totalNum');
-        const noArr = fullDay ? a.noArriverNum : Math.round(sh.length * a.noArriverNum / Math.max(1, a.should.length));
+        // Como o JMS real (V3.21): o resumo é DIÁRIO — consultado por horário, devolve o dia inteiro na janela que
+        // começa à 00h e nada nas outras (os turnos não podem vir daqui).
+        if (!(start === full.start && end === full.end) && start.slice(11) !== '00:00:00') return ok([], 0, 1, body.size);
         return ok([{sendTime: date, proxyAreaCode: '370000', proxyAreaName: 'SPE', nextstation: 'SP GRU', nextstationcode: '30001',
-          shouldArriverNum: sh.length, noArriverNum: noArr, totalNum: tt.length, uploadNoSendNum: win(a.prev, 'uploadNoSendNum').length,
-          noSendNum: win(a.noSend, 'noSendNum').length, noSignNum: tt.length, deliverNum: tt.length, PAGEHELPER_ROW_ID: 1, ROW_ID: 1}], 1, 1, body.size);
+          shouldArriverNum: a.should.length, noArriverNum: a.noArriverNum, totalNum: a.total.length, uploadNoSendNum: a.prev.length,
+          noSendNum: a.noSend.length, noSignNum: a.total.length, deliverNum: a.total.length, PAGEHELPER_ROW_ID: 1, ROW_ID: 1}], 1, 1, body.size);
       }
       case 'arrivalbyday_detail':
       case 'arrivalbyday_detailed':
@@ -332,7 +327,9 @@ function fakeJms(dayData, options) {
         // options.arrivalNoSmallLists: o JMS recusa os detailType das listas pequenas (testa a lista opcional).
         if (options.arrivalNoSmallLists && (body.detailType === 'uploadNoSendNum' || body.detailType === 'noSendNum')) return ok([], 0, 1, body.size);
         const lists = {totalNum: d.af.total, shouldArriverNum: d.af.should, uploadNoSendNum: d.af.prev, noSendNum: d.af.noSend};
-        const list = inWindowBy(lists[body.detailType] || [], 'sendTime');
+        // options.detailDailyFor: essas listas também são diárias (dia inteiro na janela da 00h, nada nas outras).
+        const daily = (options.detailDailyFor || []).indexOf(body.detailType) >= 0 && !(start === full.start && end === full.end);
+        const list = daily ? (start.slice(11) === '00:00:00' ? lists[body.detailType] : []) : inWindowBy(lists[body.detailType] || [], 'sendTime');
         const sz = Math.min(options.maxPageSize || 1000, body.size);
         return ok(list.slice((body.current - 1) * sz, body.current * sz).map((r, i) => Object.assign({PAGEHELPER_ROW_ID: i + 1}, r)), list.length, body.current, sz);
       }
