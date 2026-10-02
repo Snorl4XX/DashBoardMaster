@@ -101,7 +101,8 @@
       mcOfTotal: '{p} de "{of}"', mcPrevShort: 'Dia anterior: {n}', mcPrevPeriodShort: 'Período anterior: {n}',
       scOf: 'do {col}', scNoDetail: 'Sem detalhe neste período', madeBy: 'Feito por Caike Oliveira', daysWithData: '{a} de {b} dias com dados',
       scFromSummary: 'pelo resumo do JMS por horário', pieFromSummary: 'Pelo resumo do JMS por horário (o detalhe deste período ainda não está completo)',
-      noRowsHint: 'Nenhuma remessa com estes filtros neste período.', dsTitle: 'Download do detalhe', dsOutside: 'fora dos últimos {n} dias com detalhe (só o resumo)', dsNoSummary: 'aguardando o resumo do dia no JMS',
+      noRowsHint: 'Nenhuma remessa com estes filtros neste período.', dsTitle: 'Download do detalhe',
+      partialSample: 'prévia: {p}% desta lista baixada, espalhada pelo dia todo', dsOutside: 'fora dos últimos {n} dias com detalhe (só o resumo)', dsNoSummary: 'aguardando o resumo do dia no JMS',
       dsSkipped: 'o JMS não entregou a lista "{l}": {r}', dsListDone: 'lista baixada; não há registros com estes filtros',
       dsDownloading: 'baixando: {p}% desta lista ({a} de {b} partes), atualizado às {at}', dsDayDownloading: 'baixando: {p}% do dia ({a} de {b} partes), atualizado às {at}',
       dsListWaiting: '"{l}" ainda não começou: as listas menores vêm antes ({p}% do dia baixado)',
@@ -203,7 +204,8 @@
       mcOfTotal: '占“{of}” {p}', mcPrevShort: '前一日：{n}', mcPrevPeriodShort: '上一期间：{n}',
       scOf: '占{col}', scNoDetail: '该期间无明细', madeBy: '由 Caike Oliveira 制作', daysWithData: '{b} 天中 {a} 天有数据',
       scFromSummary: '按时段查询的JMS汇总', pieFromSummary: '按时段查询的JMS汇总（本期间明细尚未完整）',
-      noRowsHint: '本期间在当前筛选下没有记录。', dsTitle: '明细下载', dsOutside: '超出明细保留天数（{n} 天），仅有汇总', dsNoSummary: '等待JMS当日汇总',
+      noRowsHint: '本期间在当前筛选下没有记录。', dsTitle: '明细下载',
+      partialSample: '预览：本列表已下载 {p}%（均匀分布于全天）', dsOutside: '超出明细保留天数（{n} 天），仅有汇总', dsNoSummary: '等待JMS当日汇总',
       dsSkipped: 'JMS 未返回列表「{l}」：{r}', dsListDone: '列表已下载；当前筛选下无记录',
       dsDownloading: '下载中：本列表 {p}%（{a}/{b} 段），更新于 {at}', dsDayDownloading: '下载中：当日 {p}%（{a}/{b} 段），更新于 {at}',
       dsListWaiting: '「{l}」尚未开始：先下载较小的列表（当日已下载 {p}%）',
@@ -1216,6 +1218,14 @@
     if (dp.budget && dp.budget.exhausted && DETAIL_DONE.indexOf(d.details) < 0) text += ' · ' + t('dsBudget', {m: dp.budget.minPerDay});
     return text;
   }
+  /** % baixado da lista `col` no dia escolhido (período de um dia, download em andamento); null sem a informação. */
+  function listProgressPct(col) {
+    var dp = state.data && state.data.meta && state.data.meta.detailProgress;
+    if (!dp || !col || state.from !== state.to) return null;
+    var d = dp.days.filter(function (x) { return x.date === state.to; })[0];
+    var l = d && d.lists ? d.lists.filter(function (x) { return x.column === col; })[0] : null;
+    return l && l.units && DETAIL_DONE.indexOf(d.details) < 0 ? Math.round(l.done / l.units * 100) : null;
+  }
   /** Cartões de turno sem número: os turnos pelo resumo ainda não vieram (próxima atualização) ou o JMS não separa por horário. */
   function shiftSourceHint(c, col) {
     var sc = c.shiftCardsByColumn, m = sc && sc.summaryMetric;
@@ -1476,7 +1486,8 @@
     });
     $('.count', card).textContent = t('listRows', {n: fmtInt(q ? colQty(rows) : total)});
     var limit = sm && sm.topLimit, capped = limit && (sm.top || []).filter(function (r) { return r.column === tb.column; }).length >= limit;
-    $('.note', card).textContent = capped ? t('listTopNote', {n: fmtInt(limit)}) : detailIsPartial() ? t('tablePartial') : t('tableComplete');
+    var lpT = detailIsPartial() ? listProgressPct(tb.column) : null;
+    $('.note', card).textContent = capped ? t('listTopNote', {n: fmtInt(limit)}) : detailIsPartial() ? (lpT !== null && lpT > 0 && lpT < 100 ? t('partialSample', {p: lpT}) : t('tablePartial')) : t('tableComplete');
     var p = st.page, pager = $('.pager', card);
     if (pages <= 1) { pager.innerHTML = ''; return; }
     var nums = [], last = 0, html = '<button type="button" data-p="' + (p - 1) + '"' + (p === 1 ? ' disabled' : '') + ' aria-label="‹">‹</button>';
@@ -1726,6 +1737,8 @@
     else sub = t('distinctShipments') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
     if (spec.sub) sub = L(spec.sub) + ' · ' + sub;
     if (spec.fromSummary) sub = t('pieFromSummary') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
+    var lp = partial ? listProgressPct(spec.where && spec.where.column) : null;
+    if (lp !== null && lp > 0 && lp < 100) sub += ' · ' + t('partialSample', {p: lp});
     $('small', card).textContent = sub;
 
     var view = state.chartViews[key] || (window.Chart ? 'chart' : 'table');

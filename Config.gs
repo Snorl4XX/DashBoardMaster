@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.19.1',
+  VERSION: '3.20.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -16,6 +16,7 @@ const APP_CONFIG = Object.freeze({
   DETAIL_MAX_OFFSET: 10000,    // acima disso o dia é baixado em fatias de horário (paginação profunda costuma falhar)
   MAX_DETAIL_PER_DAY: 200000,  // trava contra detalhe sem filtro (evita estourar a memória)
   FETCH_ALL_BATCH: 4,          // páginas de detalhe baixadas em paralelo
+  GROUPED_FETCH_BATCH: 8,      // Recebimento: 8 em paralelo (volta sozinho a 4 no dia se o JMS recusar consultas)
   WORKER_BUDGET_MS: 270000,    // gatilho a cada 5 min; execução máxima de 6 min
   DETAIL_MIN_START_MS: 60000,  // não começa um detalhe com menos de 1 min de execução restante
   DETAIL_REFRESH_HOURS: 3,     // hoje/ontem: detalhe rebaixado no máximo a cada 3 h (a taxa continua de hora em hora)

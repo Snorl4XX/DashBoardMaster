@@ -1,8 +1,32 @@
-# J&T DASHMASTER V3.19.1 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.20 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.20 — Recebimento: dados aparecem mais cedo
+**O que define a demora:** o Recebimento tem ~1 milhão de remessas por dia nas 4 listas (só o "Chegou" teve 689.688 em 01/10). Elas são baixadas página a página do JMS. Pesam três coisas:
+- quantos registros o JMS entrega por página (1.000 ou 100 — o `diagnosticarRecebimento()` mostra);
+- quantas consultas vão juntas;
+- a cota de execução do Google (conta Gmail: 90 min/dia para todos os painéis; o Recebimento usa até 35).
+
+**O que mudou:**
+- **8 consultas em paralelo no Recebimento** (antes 4). Se o JMS recusar consultas da rajada, volta sozinho para 4 até o dia seguinte (registrado no LOG). `JMS_PARALLEL` continua mandando.
+- **Partes do dia baixadas espalhadas** (0h, 12h, 6h, 18h, 3h…), não mais das 00h em diante. Com parte da lista baixada, gráficos e tabelas já mostram uma **prévia do dia todo**, não só da madrugada. Aviso no subtítulo: "prévia: 30% desta lista baixada, espalhada pelo dia todo".
+- Download que já estava pela metade continua na ordem antiga, sem perder o que foi baixado.
+
+**Simulação (conta Gmail, volume do SP GRU), a partir da instalação:**
+
+| JMS | Listas pequenas e "Deve chegar" | "Chegou" |
+|---|---|---|
+| 1.000 por página | ~5 min (ontem completo) | ~5 min; os 4 últimos dias em ~20 min |
+| 100 por página | ~15 min (antes ~25) | 94% no 1º dia (antes 59%) |
+
+**Para ficar ainda mais rápido** (decisão sua):
+- `RECEBIMENTO_MIN_POR_DIA` maior que 35. Numa conta Gmail, os outros painéis podem parar no fim do dia.
+- Rodar o projeto numa conta **Google Workspace** (6 h/dia de execução, sem teto para o Recebimento).
+
+**Testes:** 328 verificações.
 
 ## V3.19.1 — Recebimento: cartões T1/T2/T3 sem esperar a lista "Chegou"
 **O que aparecia:** cartões T1/T2/T3 com "—" e a mensagem "na fila deste dia: as listas menores vêm antes".
@@ -775,7 +799,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **323 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **328 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

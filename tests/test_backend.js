@@ -1655,4 +1655,56 @@ check(catAF2.routeKey === 'ARRIVAL' && catAF2.shiftCardsByColumn.summaryMetric =
   catAF2.charts.filter(d => d.summaryShift).map(d => d.key + ':' + d.summaryShift).join() === 'expShift:shouldArriverNum,recShift:totalNum',
   'catálogo: pizzas e cartões de turno com o número do resumo correspondente');
 
+// ---------- 25. V3.20: Recebimento mostra dados mais cedo ----------
+// (a) Fatias de horário em ordem espalhada (0h, 12h, 6h, 18h...): com parte do dia baixada, a prévia cobre o dia todo.
+check(ctx.spreadOrder_(8).join() === '0,4,2,6,1,5,3,7' && ctx.spreadOrder_(5).join() === '0,4,2,1,3' && ctx.spreadOrder_(1).join() === '0',
+  'ordem espalhada das fatias (inverso dos bits)', ctx.spreadOrder_(8));
+const cSp = freshCtx(dAF, {maxPageSize: 100}, {JMS_DETAIL_MAX_OFFSET: '300', JMS_PARALLEL: '2'});
+cSp.queueHistory(D19, D19, true);
+cSp.processJob_(cSp.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
+const origSp = cSp.fetchDetailBatch_;
+let recSp = 0;
+cSp.fetchDetailBatch_ = function (ind, d, items) {
+  if (items.some(it => it.page > 1 && it.win && it.win.type === 'totalNum') && ++recSp === 4) throw new Error('Falha simulada no Chegou');
+  return origSp.apply(null, arguments);
+};
+const jobSp = cSp.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
+cSp.processJob_(jobSp, Date.now() + 600000);
+cSp.fetchDetailBatch_ = origSp;
+reset(cSp);
+const rowsSp = C.decodeDataset(cSp.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset).filter(r => r.column === 'Chegou');
+const shSp = {}; rowsSp.forEach(r => { shSp[r.shift] = (shSp[r.shift] || 0) + Number(r.qty); });
+const sigSp = JSON.parse(cSp.__state.props['GROUPED_PLAN_ARRIVAL_FLOW_' + D19] || '{}');
+check(sigSp.o === 'spread' && rowsSp.length > 0 && sumQ(rowsSp) < afD.total.length && ['T1', 'T2', 'T3'].filter(x => shSp[x] > 0).length >= 2,
+  'download parcial do "Chegou" já cobre turnos diferentes (não só a madrugada)', {shSp, total: afD.total.length});
+// Retomada: a 2ª execução usa o plano gravado (ordem espalhada) e o dia fecha igual ao download de uma vez.
+const jobSp2 = cSp.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
+cSp.processJob_(jobSp2, Date.now() + 600000);
+reset(cSp);
+const rowsSp2 = C.decodeDataset(cSp.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
+check(/COMPLETE/.test(cSp.getDayStatus_('arrival_flow', D19).details) && sumQ(rowsSp2, 'Chegou') === afD.total.length && sumQ(rowsSp2, 'Deve chegar') === afD.should.length &&
+  sumQ(rowsSp2, COL_PREV) === afD.prev.length && sumQ(rowsSp2, COL_NOSEND) === afD.noSend.length,
+  'ordem espalhada + plano gravado: o dia fecha com todas as remessas, sem repetir nem faltar');
+// Download que já estava pela metade na ordem antiga (V3.19) continua nela.
+check(cSp.groupedSpread_({indicator: 'arrival_flow', date: '2026-09-18', page: 1}, null) === true &&
+  (() => { cSp.__state.props['GROUPED_PLAN_ARRIVAL_FLOW_2026-09-18'] = JSON.stringify({totalNum: 32}); cSp.invalidateProps_();
+    return cSp.groupedSpread_({indicator: 'arrival_flow', date: '2026-09-18', page: 5}, {details: 'PARTIAL'}) === false; })(),
+  'download pela metade na ordem antiga continua nela (não perde o que já foi baixado)');
+// (b) Paralelismo: 8 por vez no Recebimento; se o JMS recusar consultas da rajada, 4 pelo resto do dia.
+const failedPar = {};
+const cPa = freshCtx(dAF, {maxPageSize: 100, intercept: (route, h, body) => {
+  const k = body.detailType + body.current + body.startTime;
+  if (route === 'arrivalbyday_detail' && body.detailType === 'shouldArriverNum' && body.current === 2 && !failedPar[k] && Object.keys(failedPar).length < 1) { failedPar[k] = 1; return [502, {}]; }
+  return null;
+}}, {JMS_DETAIL_MAX_OFFSET: '300'});
+const fa = cPa.UrlFetchApp.fetchAll, sizesPa = [];
+cPa.UrlFetchApp.fetchAll = reqs => { if (reqs.some(r => /arrivalbyday_detail/.test(r.url))) sizesPa.push(reqs.length); return fa(reqs); };
+cPa.queueHistory(D19, D19, true);
+runAll(cPa);
+const parAfter = cPa.__state.props['GROUPED_PARALLEL_' + cPa.isoToday_()];
+const firstBig = sizesPa.indexOf(8), afterFail = sizesPa.slice(sizesPa.lastIndexOf(8) + 1);
+check(firstBig >= 0 && parAfter === '4' && afterFail.length > 0 && afterFail.every(n => n <= 4 || n > 8) && /COMPLETE/.test(cPa.getDayStatus_('arrival_flow', D19).details) &&
+  cPa.allTabRows_('LOG').some(r => /baixa 4 por vez/.test(String(r[4]))),
+  'paralelismo: 8 por vez; com recusa do JMS, 4 pelo resto do dia (e o dia fecha)', {sizesPa: sizesPa.slice(0, 30), parAfter});
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

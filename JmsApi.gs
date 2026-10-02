@@ -530,6 +530,8 @@ function fetchDetailPage_(indicatorKey, isoDate, page, size, win) {
   return {records: recordsOf_(json), total: p.total, pages: p.pages, current: p.current, size: p.size};
 }
 
+/** Páginas de uma rajada que falharam e foram refeitas uma a uma (o Recebimento reduz o paralelismo com isso). */
+var DETAIL_BATCH_RETRIES_ = 0;
 /**
  * Baixa várias páginas em paralelo (UrlFetchApp.fetchAll). Cada item: {page, size, win}.
  * Página com falha é refeita individualmente; credencial/cota recusada sobe na hora.
@@ -557,6 +559,7 @@ function fetchDetailBatch_(indicatorKey, isoDate, items) {
       // paralela é refeito sozinho (jmsPost_ ainda tenta uma vez a mais antes de desistir).
       const m = String(e && e.message || e);
       if (errorKind_(m) === 'QUOTA' || /Sessão do JMS/.test(m)) throw e;
+      DETAIL_BATCH_RETRIES_++;
       json = jmsPost_(endpoint, buildPayload_(indicatorKey, isoDate, it.page, it.size, true, it.win), 3);
     }
     const pg = pagingOf_(json);

@@ -1491,7 +1491,10 @@ function runDetailJob_(job, deadline) {
   // Recebimento retomando um dia já fechado: o plano gravado (fatias e totais) dispensa ~80 consultas por execução.
   const plan = (cfg.grouped && storedGroupedPlan_(job, st)) ||
     planDetailDownload_(job.indicator, job.date, (total, type) => validateDetailTotal_(cfg, job.indicator, job.date, total, type));
-  if (cfg.grouped) return runGroupedDetailJob_(job, deadline, cfg, st, plan);
+  if (cfg.grouped) {
+    if (plan.sliced && !plan.stored && groupedSpread_(job, st)) spreadPlan_(plan);
+    return runGroupedDetailJob_(job, deadline, cfg, st, plan);
+  }
   const n = plan.chunks.length;
   const tol = countTolerance_(plan.total);
   const cursor = Math.max(1, Number(job.page) || 1);
@@ -1592,7 +1595,7 @@ function runGroupedDetailJob_(job, deadline, cfg, st, plan) {
   const n = units.length;
   const tol = countTolerance_(plan.total);
   // Formato do plano (fatias por lista): o mesmo formato = as mesmas fatias de horário (splitWindow_).
-  const sig = plan.sliced ? plan.windows.reduce((o, w) => { o[w.type || ''] = (o[w.type || ''] || 0) + 1; return o; }, {}) : {pages: n};
+  const sig = plan.sliced ? plan.windows.reduce((o, w) => { o[w.type || ''] = (o[w.type || ''] || 0) + 1; return o; }, plan.spread ? {o: 'spread'} : {}) : {pages: n};
   const sigText = JSON.stringify(sig), sigKey = 'GROUPED_PLAN_' + job.indicator.toUpperCase() + '_' + job.date;
   const cursor = Math.max(1, Number(job.page) || 1);
   const resume = cursor > 1 && cursor <= n + 1 && st.details === 'PARTIAL' && st.expectedPages === n && getProp_(sigKey, '') === sigText &&
@@ -1607,7 +1610,9 @@ function runGroupedDetailJob_(job, deadline, cfg, st, plan) {
   const left = units.map(l => l.length), raw = units.map(() => 0), pend = {};
   const typeOf = i => plan.windows[plan.chunks[i].w].type;
   const winOf = i => { const w = plan.windows[plan.chunks[i].w]; return {start: w.start, end: w.end, type: w.type}; };
-  const parallel = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
+  // Paralelismo: JMS_PARALLEL manda; sem ela, 8 por vez — e 4 pelo resto do dia se o JMS recusar consultas da rajada.
+  const forcedPar = Number(getProp_('JMS_PARALLEL', '')), parKey = 'GROUPED_PARALLEL_' + isoToday_();
+  let parallel = forcedPar > 0 ? Math.min(8, forcedPar) : Math.max(1, Math.min(8, Number(getProp_(parKey, '')) || APP_CONFIG.GROUPED_FETCH_BATCH));
   let done = start - 1, slowest = 8000;
   // Progresso por lista (painel e diagnosticarRecebimento): quantas unidades cada lista tem, na ordem do download.
   const lists = [];
@@ -1647,11 +1652,17 @@ function runGroupedDetailJob_(job, deadline, cfg, st, plan) {
       const batch = [];
       for (let j = k; j < todo.length && batch.length < parallel && !firsts[todo[j]]; j++) batch.push(todo[j]);
       if (Date.now() + slowest + 25000 > deadline) { saveSoFar(''); return 'partial'; }
-      const t0 = Date.now();
+      const t0 = Date.now(), retries0 = DETAIL_BATCH_RETRIES_;
       const res = fetchDetailBatch_(job.indicator, job.date, batch.map(i => ({page: plan.chunks[i].page, size: plan.size, win: winOf(i)})));
       slowest = Math.max(slowest, Date.now() - t0);
       res.forEach((r, x) => take(batch[x], r.records));
       k += batch.length;
+      if (!(forcedPar > 0) && parallel > APP_CONFIG.FETCH_ALL_BATCH && DETAIL_BATCH_RETRIES_ > retries0) {
+        parallel = APP_CONFIG.FETCH_ALL_BATCH;
+        setProp_(parKey, parallel);
+        Object.keys(scriptProps_()).forEach(key => { if (key.indexOf('GROUPED_PARALLEL_') === 0 && key !== parKey) deleteProp_(key); });
+        logSync_('INFO', job.indicator, job.date, 'O JMS recusou consultas da rajada de ' + batch.length + '; o Recebimento baixa ' + parallel + ' por vez até amanhã.');
+      }
     }
   } catch (e) {
     // Erro no meio (página recusada, rede, sessão): o que já fechou nesta execução não se perde.
@@ -1768,6 +1779,36 @@ function cleanGroupedProgress_(indicator) {
 }
 
 /**
+ * Ordem "espalhada" das fatias de horário de cada lista (V3.20): 0h, 12h, 6h, 18h, 3h... (inverso dos bits). Com
+ * 20–30% do dia baixado, os gráficos já mostram uma prévia do dia inteiro, não só da madrugada. Download que já
+ * estava pela metade na ordem antiga (das 00h em diante) continua nela.
+ */
+function spreadOrder_(k) {
+  const p = nextPow2_(Math.max(1, k)), bits = Math.round(Math.log(p) / Math.LN2), out = [];
+  for (let i = 0; i < p; i++) {
+    let r = 0;
+    for (let b = 0; b < bits; b++) if (i & (1 << b)) r |= 1 << (bits - 1 - b);
+    if (r < k) out.push(r);
+  }
+  return out;
+}
+function groupedSpread_(job, st) {
+  if (!(Number(job.page) > 1) || !st || st.details !== 'PARTIAL') return true;
+  const old = safeJsonParse_(getProp_('GROUPED_PLAN_' + job.indicator.toUpperCase() + '_' + job.date, ''), null);
+  return !old || old.o === 'spread';
+}
+function spreadPlan_(plan) {
+  const groups = [];
+  plan.windows.forEach((w, i) => { const g = groups[groups.length - 1]; if (g && g.t === w.type) g.idx.push(i); else groups.push({t: w.type, idx: [i]}); });
+  const windows = [];
+  groups.forEach(g => spreadOrder_(g.idx.length).forEach(j => windows.push(plan.windows[g.idx[j]])));
+  const chunks = [];
+  windows.forEach((w, wi) => { const pages = Math.ceil(w.total / plan.size); for (let pg = 1; pg <= pages; pg++) chunks.push({w: wi, page: pg}); });
+  plan.windows = windows; plan.chunks = chunks; plan.spread = true;
+  return plan;
+}
+
+/**
  * Plano do download de um dia JÁ FECHADO (as fatias e os totais não mudam mais): tamanho de página, listas
  * puladas e, por lista, quantas fatias e o total de cada uma. As fatias são refeitas com splitWindow_ (iguais).
  * Plano feito enquanto o dia ainda corria (hoje) não é guardado: os totais dele cresceram depois.
@@ -1780,7 +1821,7 @@ function saveGroupedPlan_(indicator, date, plan) {
     const last = lists[lists.length - 1];
     if (last && last.t === (w.type || null)) last.tot.push(w.total); else lists.push({t: w.type || null, tot: [w.total]});
   });
-  const txt = JSON.stringify({v: 1, size: plan.size, sliced: !!plan.sliced, skip: plan.skipped || {}, lists: lists});
+  const txt = JSON.stringify({v: 1, size: plan.size, sliced: !!plan.sliced, spread: !!plan.spread, skip: plan.skipped || {}, lists: lists});
   if (txt.length < 8500) { try { setProp_(groupedPlanKey_(indicator, date), txt); } catch (e) { /* só otimização */ } }
 }
 function storedGroupedPlan_(job, st) {
@@ -1790,7 +1831,9 @@ function storedGroupedPlan_(job, st) {
   const full = dayWindow_(job.date, isOperational_(job.indicator));
   const windows = [];
   p.lists.forEach(l => {
-    const parts = l.tot.length > 1 ? splitWindow_(full, l.tot.length) : [{start: full.start, end: full.end}];
+    let parts = l.tot.length > 1 ? splitWindow_(full, l.tot.length) : [{start: full.start, end: full.end}];
+    // Totais gravados na ordem do download: com a ordem espalhada, as fatias são permutadas igual.
+    if (p.spread && parts.length > 1) parts = spreadOrder_(parts.length).map(j => parts[j]);
     parts.forEach((w, i) => windows.push({start: w.start, end: w.end, type: l.t, total: Number(l.tot[i]) || 0, first: null}));
   });
   // Confere o total de cada lista (1 consulta por lista): registro atrasado no JMS → plano novo.
@@ -1801,7 +1844,7 @@ function storedGroupedPlan_(job, st) {
   const chunks = [];
   windows.forEach((w, wi) => { const pages = Math.ceil(w.total / p.size); for (let pg = 1; pg <= pages; pg++) chunks.push({w: wi, page: pg}); });
   return {size: p.size, total: windows.reduce((a, w) => a + w.total, 0), windows: windows, chunks: chunks, sliced: p.sliced,
-    types: p.lists.map(l => l.t), skipped: p.skip || {}, stored: true};
+    types: p.lists.map(l => l.t), skipped: p.skip || {}, stored: true, spread: !!p.spread};
 }
 
 /**
