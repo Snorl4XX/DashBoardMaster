@@ -38,6 +38,7 @@
       periodRateAll: 'Taxa do período (todos os turnos)', prevShift: 'Dia anterior ({s})', prevShiftPeriod: 'Período anterior ({s})',
       shiftRateHint: 'Parte do turno na taxa oficial: ocorrências do turno ÷ volume do dia (T1 + T2 + T3 = taxa do dia).',
       shiftLateHint: 'Parte do turno no fora do prazo: atrasos do turno ÷ volume do dia (T1 + T2 + T3 = 100% − taxa do dia).',
+      shiftPartLbl: 'Parte na taxa do dia', shiftLatePartLbl: 'Parte no fora do prazo', partsLine: 'Por turno', latePartsLine: 'Fora do prazo por turno',
       dayGoal: 'taxa do dia', shiftLine: 'Parte do {s}',
       inGoal: 'Na meta', outGoal: 'Fora da meta', noRate: 'Sem taxa oficial', noGoal: 'Meta não definida', goalOffScale: 'fora da escala do gráfico',
       targetNoGoalTitle: 'Meta não definida', targetNoGoalText: 'A taxa de {name} está sendo acompanhada, mas este indicador ainda não tem meta. Com a meta cadastrada, o Maomao passa a avaliar.',
@@ -129,6 +130,7 @@
       periodRateAll: '期间指标率（全部班次）', prevShift: '前一日（{s}）', prevShiftPeriod: '上一期间（{s}）',
       shiftRateHint: '班次在官方指标率中的占比：该班次异常量 ÷ 当日总量（T1 + T2 + T3 = 当日指标率）。',
       shiftLateHint: '班次在超时中的占比：该班次超时量 ÷ 当日总量（T1 + T2 + T3 = 100% − 当日指标率）。',
+      shiftPartLbl: '占当日指标率', shiftLatePartLbl: '占超时', partsLine: '各班次', latePartsLine: '各班次超时',
       dayGoal: '当日指标率', shiftLine: '{s} 占比',
       inGoal: '达标', outGoal: '未达标', noRate: '暂无官方指标率', noGoal: '未设定目标', goalOffScale: '超出图表范围',
       targetNoGoalTitle: '未设定目标', targetNoGoalText: '{name} 的指标率正在跟踪，但尚未设定目标。设定目标后 Maomao 会进行评价。',
@@ -695,7 +697,7 @@
       renderSyncBanner(res.meta.pauses);
       var sm = res.summary;
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
-        rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds),
+        rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds, res.orderKindTags),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
           totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};
@@ -744,10 +746,13 @@
     var view = state.rateView = rateView(c, f);
     // Filtro de turno: parte do turno na taxa oficial (participação do turno nas ocorrências de cada dia).
     var sel = state.data.summary || c.heroMetric ? null : Core.shiftSelection(view.filters), only = null;
-    if (sel && view.kind) { only = {}; only[c.orderKinds.field] = [view.label]; }
+    if (view.kind) { only = {}; only[c.orderKinds.field] = [view.label]; }
     state.shiftInfo = sel ? {sel: sel, name: shiftName(sel), shares: Core.shiftShares(state.data.rows, state.data.agg, sel, only)} : null;
     var cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to,
-      {shares: state.shiftInfo && state.shiftInfo.shares, shiftRows: sel && sel.by.shift ? Core.applyFilters(state.data.rows, f, 'shift') : null});
+      {shares: state.shiftInfo && state.shiftInfo.shares, shiftRows: sel && sel.by.shift ? Core.applyFilters(state.data.rows, f, 'shift') : null,
+        // Parte de cada turno na taxa (cartões T1/T2/T3): mesma regra do filtro de turno.
+        partRows: state.data.summary || c.heroMetric || !(c.filters || []).some(function (x) { return x.key === 'shift'; }) ? null : state.data.rows,
+        agg: state.data.agg, only: only});
     renderKpis(c, cards);
     $('#targetBanner').classList.toggle('hidden', !!c.hideTarget);
     if (!c.hideTarget) renderTarget(c, cards);
@@ -1011,6 +1016,20 @@
         (k.latestDay ? ' · ' + esc(t('lastDay')) + ' ' + esc(fmtDate(k.latestDay.date)) + ': <b>' + fmtRate(k.latestDay.rate, c.goal) + '</b>' : '') +
         (k.rateMethod === 'weighted' ? ' · ' + esc(t('weighted')) : k.rateMethod === 'mean' ? ' · ' + esc(t('meanNote')) : '') + '</div>';
     }
+    var late = c.goal && c.goal.direction === 'min';
+    if (!sv && k.shifts && k.shifts.every(function (x) { return isNum(x.part); })) {
+      // Taxa do dia por turno: T1 + T2 + T3 = taxa do dia (no prazo: parte do fora do prazo).
+      // Remessas sem turno (Avaria: registradas em outras bases, sem horário) entram como uma parte própria:
+      // a soma das partes fecha com a taxa do dia (no prazo: com o fora do prazo).
+      var whole = isNum(k.rate) ? (late ? Core.rateScale(c.goal) - k.rate : k.rate) : null;
+      var sumP = k.shifts.reduce(function (a, x) { return a + x.part; }, 0), naP = isNum(whole) ? whole - sumP : 0;
+      var items = k.shifts.map(function (x) {
+        return '<span><i style="background:' + SHIFT_COLORS[x.shift] + '"></i>' + x.shift + ' <b>' + fmtRate(x.part, c.goal) + '</b></span>';
+      });
+      if (isNum(whole) && naP > Math.max(whole * 0.002, 1e-9)) items.push('<span><i style="background:#9CA3AF"></i>' + esc(vlabel('shift', 'N/A')) + ' <b>' + fmtRate(naP, c.goal) + '</b></span>');
+      heroSubs += '<div class="kpi-sub hero-parts">' + esc(t(late ? 'latePartsLine' : 'partsLine')) + ': ' + items.join(' + ') +
+        (isNum(whole) ? ' = <b>' + fmtRate(whole, c.goal) + '</b>' : '') + '</div>';
+    }
     if (sv) {
       // Parte do turno: a taxa do dia (todos os turnos) logo abaixo, para comparar.
       heroSubs = '<div class="kpi-sub">' + esc(t(day ? 'dayRateAll' : 'periodRateAll')) + ': <b>' + fmtRate(sv.dayRate, c.goal) + '</b></div>' + heroSubs +
@@ -1043,7 +1062,8 @@
 
     var shifts = c.hideShiftCards ? '' : k.shifts.map(function (s) {
       var label = '<i style="background:' + SHIFT_COLORS[s.shift] + '"></i>' + s.shift + ' · ' + {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'}[s.shift];
-      var sub = s.qty === null ? esc(t('noDataHint')) : '<b>' + fmtPct(s.pct, 1) + '</b> ' + esc(t('participation'));
+      var sub = s.qty === null ? esc(t('noDataHint')) : '<b>' + fmtPct(s.pct, 1) + '</b> ' + esc(t('participation')) +
+        (isNum(s.part) ? '<br>' + esc(t(c.goal && c.goal.direction === 'min' ? 'shiftLatePartLbl' : 'shiftPartLbl')) + ': <b class="part">' + fmtRate(s.part, c.goal) + '</b>' : '');
       return '<article class="kpi shift-kpi' + (sv && !s.selected ? ' faded' : '') + (s.selected ? ' selected' : '') + '"><div class="kpi-label">' + label + '</div><div class="kpi-value">' + fmtInt(s.qty) + '</div>' +
         '<div class="kpi-sub">' + sub + '</div><div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(s.pct) ? s.pct : 0) + '" style="background:' + SHIFT_COLORS[s.shift] + '"></i></div></div></article>';
     }).join('');

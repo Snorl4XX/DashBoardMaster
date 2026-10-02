@@ -151,11 +151,21 @@ function JTCoreFactory_() {
    * Avaria: "Pedidos principais/filhos" (Config.gs → orderKinds). Pedido filho = remessa com sufixo "-001",
    * "-002"… Calculado na leitura, como as docas: vale para todo o histórico sem baixar nada.
    */
-  function applyOrderKinds(rows, ok) {
+  /**
+   * Avaria: "Pedido principal" / "Pedido secundário" de cada remessa. Com `tags` ({data: {kind, w: [remessas]}},
+   * listas do JMS de uma opção), igual à tela; dia sem lista: remessa com sufixo "-001" = pedido filho.
+   */
+  function applyOrderKinds(rows, ok, tags) {
     if (!ok || !rows) return rows;
+    var sets = {};
+    Object.keys(tags || {}).forEach(function (d) {
+      var s = {}; (tags[d].w || []).forEach(function (w) { s[String(w).trim()] = 1; }); sets[d] = {kind: tags[d].kind, s: s};
+    });
     for (var i = 0; i < rows.length; i++) {
       var w = rows[i].shipment === null || rows[i].shipment === undefined ? '' : String(rows[i].shipment).trim();
-      rows[i][ok.field] = /-\d{1,4}$/.test(w) ? ok.values.sub : ok.values.main;
+      var t = sets[rows[i].date];
+      if (t) rows[i][ok.field] = t.s[w] ? (t.kind === 'sub' ? ok.values.sub : ok.values.main) : (t.kind === 'sub' ? ok.values.main : ok.values.sub);
+      else rows[i][ok.field] = /-\d{1,4}$/.test(w) ? ok.values.sub : ok.values.main;
     }
     return rows;
   }
@@ -629,6 +639,10 @@ function JTCoreFactory_() {
     var shifts = SHIFTS.map(function (s) {
       var q = sTotal ? (sm[s] || 0) : null;
       return {shift: s, qty: q, pct: sTotal ? q / sTotal * 100 : null, selected: !!(selShifts && selShifts.indexOf(s) >= 0)};
+    });
+    // Parte de cada turno na taxa do período (T1 + T2 + T3 = taxa do dia; no prazo: parte do fora do prazo).
+    if (opts.partRows) shifts.forEach(function (x) {
+      x.part = shiftPart(inRange, goal, shiftShares(opts.partRows, opts.agg, [x.shift], opts.only)).rate;
     });
     var tops = (cfg.topCards || []).map(function (k) {
       var g = countBy(rows, k).filter(function (x) { return x.label !== 'N/A'; })[0];

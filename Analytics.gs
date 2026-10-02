@@ -563,6 +563,8 @@ function getDashboardData(indicatorKey, params) {
       o[col] = getAgg_(indicatorKey + ':' + col, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total}));
       return o;
     }, {}),
+    // Avaria: remessas de cada opção pela lista do JMS (o filtro separa como a tela).
+    orderKindTags: cfg.orderKinds ? orderKindTags_(indicatorKey, p.from, p.to) : null,
     // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (o painel troca a taxa pelo filtro).
     rateVariants: cfg.orderKinds ? ['main', 'sub'].reduce((o, k) => {
       o[k] = getRates_(indicatorKey + ':' + k, null, null).map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, estimated: r.estimated}));
@@ -637,7 +639,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   }
   const archive = getArchivedRange_(indicatorKey, p.from, p.to, archiveOpts);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
-  if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds);
+  if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);
   const rv = rateVariantFor_(cfg, indicatorKey, filters);
   // Filtro de turno: parte do turno na taxa (mesma regra do painel).
@@ -648,7 +650,8 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
     cfg: cfg, from: p.from, to: p.to, filters: filters, archive: archive, rows: rows, allRates: rv ? rv.rates : allRates,
     coverage: getCoverage_(indicatorKey, p.from, p.to),
     cards: JTCore_.computeCards(cfg, rv ? rv.rates : allRates, rows, rv ? rv.filters : filters, p.from, p.to,
-      {shares: shares, shiftRows: sel ? JTCore_.applyFilters(archive.rows, filters, 'shift') : null}),
+      {shares: shares, shiftRows: sel ? JTCore_.applyFilters(archive.rows, filters, 'shift') : null,
+        partRows: (cfg.filters || []).indexOf('shift') >= 0 && !cfg.grouped ? archive.rows : null, agg: getAgg_(indicatorKey, null, null), only: only}),
     charts: cfg.charts.filter(def => !def.metric).map(def => JTCore_.buildChart(def, rows, {})),
     summary: JTCore_.summaryTable(cfg, rows),
     pivots: (cfg.pivotTables || []).map(def => JTCore_.pivot(rows, def))

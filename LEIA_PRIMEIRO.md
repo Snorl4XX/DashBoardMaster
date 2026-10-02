@@ -1,8 +1,36 @@
-# J&T DASHMASTER V3.17 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.18 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.18 — Avaria: "Pedidos principais/filhos" igual ao JMS e parte de cada turno na taxa
+**Avaria: escolhendo "Pedido principal" ou "Pedido secundário"**
+- **Taxa** = coluna **总破损率** do JMS para a opção escolhida, mesmo quando o JMS mostra **0**.
+  - Exemplo da tela de 01/10 com "Pedido principal": 328 avarias, "Qtd processada" 0, 总破损率 0. O painel mostra o mesmo.
+- **Quantidade de avarias** = 总破损票数 da opção (no exemplo, 328).
+- **Gráficos, cartões em R$, cartões de turno e tabela** mostram só as remessas da opção. Quais remessas são de cada opção vem da **lista do próprio JMS** com a opção escolhida, não mais só do sufixo "-001".
+- Com outros filtros, a quantidade passa a ser a das remessas filtradas, como nos outros painéis.
+
+**Por que antes não trocava:**
+- A descoberta do código de cada opção (`mainSubCode`) achava que o JMS tinha ignorado o filtro quando a quantidade com a opção era igual à de Todos — o caso da tela de 01/10.
+- Ela também dependia do sufixo "-001" nas remessas.
+- Quando falhava, gravava "sem suporte" para sempre e a taxa ficava estimada.
+
+**Agora:**
+- O filtro "valeu" quando muda a quantidade, a **Qtd processada** ou o **valor**.
+- Quem é filho sai da lista do JMS com o código.
+- Dá para aprender uma opção de cada vez.
+- O "sem suporte" gravado pela versão antiga é refeito sozinho, na próxima vez que o detalhe da Avaria for baixado.
+- Se mesmo assim não descobrir, cadastre `JMS_ORDERKIND_DAMAGE` = `{"param":"mainSubCode","main":<código>,"sub":<código>}`, com os códigos do payload do getBreakageRateData capturado com a opção escolhida.
+
+**Parte de cada turno na taxa do dia (todos os indicadores com filtro de Turno)**
+- No **cartão da taxa**: "Por turno: T1 0,20% + T2 0,05% + T3 0,25% = 0,50%".
+  - As remessas sem turno entram como parte própria, para a soma fechar com a taxa do dia. Na Avaria são as registradas em outras bases ("OUTRAS BASES").
+  - Nos indicadores "no prazo" (SC → SC) aparece a parte de cada turno no **fora do prazo**.
+- Em **cada cartão T1/T2/T3**: "Parte na taxa do dia: 0,20%".
+- **Escolhendo um turno no filtro**, a taxa do cartão vira a parte do turno, como na V3.15.
+- Com "Pedido principal/secundário", tudo usa a taxa da opção.
 
 ## V3.17 — Recebimento: gráficos separados, listas novas e três tabelas
 **Menu lateral:** o Recebimento mostra a **quantidade que deve chegar hoje**, em vez da porcentagem.
@@ -668,7 +696,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **301 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **306 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

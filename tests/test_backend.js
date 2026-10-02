@@ -852,7 +852,8 @@ check(Math.abs(cDm.legacyRate_('damage', 0.029278, 152, 519159) - 292.78) < 1e-6
   cDm.legacyRate_('wrong_send', 0.5, 5, 1000) === 0.5 && cDm.legacyRate_('damage', null) === null, 'taxa antiga da Avaria (÷ 10.000) lida na escala do JMS');
 cDm.appendRow_('RATES', ['damage', '2026-09-10', 0.029278, 152, 519159, '{}', new Date(Date.parse('2026-09-11T03:00:00Z'))]);
 check(Math.abs(cDm.getRates_('damage', '2026-09-10', '2026-09-10')[0].rate - 292.78) < 1e-6, 'linha antiga da planilha RATES convertida');
-const fDm = cDm.__state.fetches.filter(f => /detailBreakageRateData/.test(f.url));
+// (as listas de cada opção de pedidos principais/filhos vão com mainSubCode e entram à parte)
+const fDm = cDm.__state.fetches.filter(f => /detailBreakageRateData/.test(f.url) && f.payload.mainSubCode === undefined);
 const fReg = cDm.__state.fetches.filter(f => /registrationPage/.test(f.url));
 check(fDm.length === Math.ceil(dDm[D19].dm.length / 100) && fDm.every(f => f.payload.size === 100) &&
   fReg.length >= 2 && fReg.every(f => f.payload.searchType === 1 && f.payload.size === 100 && f.payload.waybillNo.split(',').length <= 100),
@@ -1091,6 +1092,43 @@ check(/Pedidos principais\/filhos: mainSubCode=1 \(principal\) · mainSubCode=2 
 delete cOK.__state.props.MIGRATION_V313;
 const m313 = cOK.migrateToV313_();
 check(m313 === 2 && cOK.migrateToV313_() === 0, 'atualização: Avaria baixada de novo uma vez para as taxas de cada opção', m313);
+
+// (g) V3.18 — como na tela de 01/10: com "Pedido principal" o JMS devolve a MESMA quantidade de Todos (dia sem
+//     filhos), "Qtd processada" 0 e 总破损率 0. Antes: "parâmetro ignorado" → taxa estimada para sempre.
+const dNoKid = {}; dNoKid[D19] = makeDay(D19, 91);
+dNoKid[D19].dm = dNoKid[D19].dm.filter(r => !/-\d{3}$/.test(r.waybillNo));
+const cNoKid = freshCtx(dNoKid, {optionNoVolume: true});
+cNoKid.queueHistory(D19, D19, true);
+runAll(cNoKid, 12);
+const mapNoKid = JSON.parse(cNoKid.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+const mainNoKid = cNoKid.getRates_('damage:main', D19, D19)[0];
+const cardsNoKid = cNoKid.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal']}}).cards;
+check(mapNoKid.main === 1 && mapNoKid.sub === undefined && !mapNoKid.unsupported && mainNoKid && !mainNoKid.estimated &&
+  mainNoKid.rate === 0 && mainNoKid.errorCount === dNoKid[D19].dm.length && cardsNoKid.rate === 0 && cardsNoKid.currentErrors === dNoKid[D19].dm.length,
+  'Pedido principal com a mesma quantidade de Todos e Qtd processada 0: código aprendido e taxa = 总破损率 do JMS (0), quantidade 328 da tela',
+  {map: mapNoKid, main: mainNoKid});
+// (h) Filhos sem sufixo "-001" no JMS: códigos pela soma (principal + filho = Todos) e remessas separadas pela lista do JMS.
+const cPlain = freshCtx(dOK, {plainChildren: true});
+cPlain.queueHistory(D19, D19, true);
+runAll(cPlain, 12);
+const mapPlain = JSON.parse(cPlain.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+const dashPlain = cPlain.getDashboardData('damage', {from: D19, to: D19});
+const rowsPlain = C.applyOrderKinds(C.decodeDataset(dashPlain.dataset), catOK.orderKinds, dashPlain.orderKindTags);
+check(mapPlain.main === 1 && mapPlain.sub === 2 && rowsPlain.every(r => !/-\d{3}$/.test(r.shipment)) &&
+  rowsPlain.filter(r => r.orderKind === 'Pedido secundário').length === nOK.sub && rowsPlain.filter(r => r.orderKind === 'Pedido principal').length === nOK.main,
+  'filhos sem sufixo: códigos descobertos e cada remessa marcada pela lista do JMS da opção', {map: mapPlain, tags: Object.keys(dashPlain.orderKindTags || {})});
+// (i) Gráficos, cartões e tabelas mudam com a opção (remessas da lista do JMS).
+const repSub = cPlain.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido secundário']}});
+const subRate = cPlain.getRates_('damage:sub', D19, D19)[0];
+check(repSub.rows.length === nOK.sub && repSub.cards.currentErrors === subRate.errorCount && repSub.cards.rate === subRate.rate &&
+  repSub.charts.filter(ch => ch.datasets && ch.datasets[0]).every(ch => (ch.total || ch.datasets[0].data.reduce((a, v) => a + v, 0)) <= nOK.sub),
+  'Pedido secundário: remessas, gráficos, quantidade e taxa (总破损率) da opção');
+// (j) "Sem suporte" gravado pela regra antiga (V3.13) é refeito com a regra nova.
+const cOld = freshCtx(dOK, null, {JMS_ORDERKIND_DAMAGE: JSON.stringify({unsupported: true, at: '2026-09-20T10:00:00Z'})});
+cOld.queueHistory(D19, D19, true);
+runAll(cOld, 12);
+const mapOld = JSON.parse(cOld.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+check(mapOld.main === 1 && mapOld.sub === 2 && !cOld.getRates_('damage:main', D19, D19)[0].estimated, '"sem suporte" antigo refeito com a regra nova', mapOld);
 
 // ---------- 21. V3.14: RECEBIMENTO: FLUXO OPERACIONAL (Deve chegar × Chegou) ----------
 const cfgAF = ctx.getIndicatorConfig_('arrival_flow');
@@ -1380,6 +1418,12 @@ const selDC = C.shiftSelection(fDC), kDC = C.computeCards(cfgDC, dDC.rates, C.ap
 const nDC = rowsDC.filter(r => r.receiptShift === 'T2').length;
 check(selDC.keys.join() === 'receiptShift' && kDC.shiftView && Math.abs(kDC.rate - (100 - rDC.rate) * nDC / rowsDC.length) < 1e-9 && kDC.prevRate === null,
   'SC → DC: "Turno do recebimento" T2 = parte do T2 no fora do prazo (dia anterior sem agregado desse turno)', {rate: kDC.rate});
+// V3.18: cartões T1/T2/T3 com a parte de cada turno na taxa; as partes (mais as remessas sem turno) somam a taxa do dia.
+const kParts = C.computeCards(cfgWS, dT.rates, rowsT, {}, D19, D19, {partRows: rowsT, agg: dT.agg});
+const sumParts = kParts.shifts.reduce((a, x) => a + x.part, 0), naShare = naT / rowsT.length;
+check(kParts.shifts.every(x => Math.abs(x.part - r19.rate * rowsT.filter(r => r.shift === x.shift).length / rowsT.length) < 1e-9) &&
+  Math.abs(sumParts + r19.rate * naShare - r19.rate) < 1e-9 && kParts.rate === r19.rate,
+  'cartões por turno: parte de cada turno na taxa do dia (T1 + T2 + T3 + sem turno = taxa do dia)', kParts.shifts.map(x => x.part));
 // No prazo (SC→SC): a parte do turno é a do fora do prazo.
 const cfgSCt = cT.getIndicatorConfig_('sc_sc'), dSCt = cT.getDashboardData('sc_sc', {from: D19, to: D19});
 const rowsSCt = C.decodeDataset(dSCt.dataset), rSCt = dSCt.rates.filter(r => r.date === D19)[0];

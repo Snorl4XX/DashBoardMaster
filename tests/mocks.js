@@ -224,6 +224,17 @@ function fakeJms(dayData, options) {
       return list.filter(r => { const p = pos(r); return p >= start && p <= end; });
     };
     // Janela de horário num campo informado (Recebimento: sendTime), como o JMS faz com startTime/endTime.
+    // Avaria: opção de "Pedidos principais/filhos" pedida (main/sub), 'none' = código que o JMS não conhece, null = Todos.
+    const dmKind = b => {
+      if (options.ignoreMainSub || b.mainSubCode === undefined || b.mainSubCode === null || b.mainSubCode === '') return null;
+      const codes = options.orderKindCodes || {main: 1, sub: 2};
+      return b.mainSubCode === codes.main ? 'main' : b.mainSubCode === codes.sub ? 'sub' : 'none';
+    };
+    // options.plainChildren: o JMS mostra os pedidos filhos sem o sufixo "-001" (número próprio).
+    const dmList = dd => dd.dm.map(r => {
+      const child = /-\d{3}$/.test(r.waybillNo);
+      return Object.assign({}, r, {_child: child, waybillNo: options.plainChildren && child ? r.waybillNo.replace('-', '') : r.waybillNo});
+    });
     const inWindowBy = (list, field) => (options.ignoreTime || (start === full.start && end === full.end)) ? list
       : list.filter(r => { const t = String(r[field] || ''); return t >= start && t <= end; });
     const shape = r => {
@@ -271,16 +282,16 @@ function fakeJms(dayData, options) {
         if (!d || !d.dm) return ok([], 0, 1, body.size);
         // "Pedidos principais/filhos": mainSubCode (códigos simulados: principal 1, filho 2; options.orderKindCodes troca).
         // Filho = remessa com sufixo "-001"; o volume (operaNumber) também muda com a opção. Código desconhecido = vazio.
-        let list = d.dm, base = d.dmBase;
-        const codes = options.orderKindCodes || {main: 1, sub: 2};
-        if (!options.ignoreMainSub && body.mainSubCode !== undefined && body.mainSubCode !== null && body.mainSubCode !== '') {
-          const kind = body.mainSubCode === codes.main ? 'main' : body.mainSubCode === codes.sub ? 'sub' : null;
-          if (!kind) return ok([], 0, 1, body.size);
+        let list = dmList(d), base = d.dmBase;
+        const kind = dmKind(body);
+        if (kind === 'none') return ok([], 0, 1, body.size);
+        if (kind) {
           const subBase = Math.round(d.dmBase * 0.12);
-          list = d.dm.filter(r => /-\d{3}$/.test(r.waybillNo) === (kind === 'sub'));
-          base = kind === 'sub' ? subBase : d.dmBase - subBase;
+          list = list.filter(r => r._child === (kind === 'sub'));
+          // options.optionNoVolume: como na tela do JMS em 01/10 — com a opção escolhida, "Qtd processada" 0 e taxa 0.
+          base = options.optionNoVolume ? 0 : kind === 'sub' ? subBase : d.dmBase - subBase;
         }
-        const rate = Math.round(list.length / base * 1e6 * 100) / 100;
+        const rate = base ? Math.round(list.length / base * 1e6 * 100) / 100 : 0;
         return ok([{id: '97308731485720' + date.slice(8), serialNum: '1', statisticalDate: date, agentAreaCode: '370000', agentAreaName: 'SPE',
           networkCode: '30001', networkName: 'SP GRU', operaNumber: base, breakageTicketNumber: list.length, breakageRate: rate,
           breakageAmount: list.reduce((a, r) => a + r.adjudicationAmount, 0), breakageNumberTotal: list.length, breakageRateTotal: rate,
@@ -289,7 +300,10 @@ function fakeJms(dayData, options) {
       case 'detailBreakageRateData': {
         if (!d || !d.dm) return ok([], 0, 1, body.size);
         const sz = Math.min(100, body.size); // a tela do JMS mostra no máximo 100 linhas por página
-        return ok(d.dm.slice((body.current - 1) * sz, body.current * sz), d.dm.length, body.current, sz);
+        const kind = dmKind(body);
+        if (kind === 'none') return ok([], 0, 1, body.size);
+        const list = dmList(d).filter(r => !kind || r._child === (kind === 'sub'));
+        return ok(list.slice((body.current - 1) * sz, body.current * sz).map(r => { const o = Object.assign({}, r); delete o._child; return o; }), list.length, body.current, sz);
       }
       case 'arrivalbyday_total': {
         if (!d || !d.af) return ok([], 0, 1, body.size);
@@ -380,7 +394,8 @@ function makeDamage(date, seed) {
   const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
   const pick = arr => arr[Math.floor(rnd() * arr.length)];
   const types = ['Prod. interno extraviado embal.avariada 内件遗失外包装破损', 'Embalagem e produto interno avariados 内件破损外包装破损'];
-  const clients = ['BYTEDANCE BRASIL TECNOLOGIA LTDA.', 'FLOGISTICS BRASIL LOGISTICA E TRANSPORTE LTDA', 'EBAZAR.COM.BR. LTDA', 'WHALECO BRASIL INTERMEDIACAO LTDA', 'JOYO TECNOLOGIA BRASIL LTDA.'];
+  // Nomes fictícios (nada de cliente real nos testes).
+  const clients = ['CLIENTE ALFA COMERCIO LTDA', 'CLIENTE BETA LOGISTICA LTDA', 'CLIENTE GAMA MARKETPLACE LTDA', 'CLIENTE DELTA INTERMEDIACAO LTDA', 'CLIENTE EPSILON TECNOLOGIA LTDA'];
   const specs = ['Itens Pessoal', 'Outros', 'Alimentos', 'Roupa', 'Produto Eletronico', 'Liquído'];
   const ops = ['OPERADOR AVARIA 01', 'OPERADOR AVARIA 02', 'OPERADOR AVARIA 03', 'OPERADOR AVARIA 04'];
   const prev = n => addDay(date, -n);
