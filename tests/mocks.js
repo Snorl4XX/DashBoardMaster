@@ -292,15 +292,18 @@ function fakeJms(dayData, options) {
           base = options.optionNoVolume ? 0 : kind === 'sub' ? subBase : d.dmBase - subBase;
         }
         const rate = base ? Math.round(list.length / base * 1e6 * 100) / 100 : 0;
+        // Com a opção, a coluna "Taxa…" (breakageRate) usa o volume de Todos; a 总破损率 (breakageRateTotal), o da opção.
+        const rateOther = kind ? Math.round(list.length / d.dmBase * 1e6 * 100) / 100 : rate;
         return ok([{id: '97308731485720' + date.slice(8), serialNum: '1', statisticalDate: date, agentAreaCode: '370000', agentAreaName: 'SPE',
-          networkCode: '30001', networkName: 'SP GRU', operaNumber: base, breakageTicketNumber: list.length, breakageRate: rate,
+          networkCode: '30001', networkName: 'SP GRU', operaNumber: base, breakageTicketNumber: list.length, breakageRate: rateOther,
           breakageAmount: list.reduce((a, r) => a + r.adjudicationAmount, 0), breakageNumberTotal: list.length, breakageRateTotal: rate,
           monthBreakageRate: 180.46, pickUpDayTotal: null, mainSubCode: body.mainSubCode === undefined ? null : body.mainSubCode}], 1, 1, body.size);
       }
       case 'detailBreakageRateData': {
         if (!d || !d.dm) return ok([], 0, 1, body.size);
         const sz = Math.min(100, body.size); // a tela do JMS mostra no máximo 100 linhas por página
-        const kind = dmKind(body);
+        // options.detailIgnoresOrderKind: a lista do detalhe devolve Todos mesmo com a opção.
+        const kind = options.detailIgnoresOrderKind ? null : dmKind(body);
         if (kind === 'none') return ok([], 0, 1, body.size);
         const list = dmList(d).filter(r => !kind || r._child === (kind === 'sub'));
         return ok(list.slice((body.current - 1) * sz, body.current * sz).map(r => { const o = Object.assign({}, r); delete o._child; return o; }), list.length, body.current, sz);

@@ -287,8 +287,7 @@ function fetchOrderKindWaybills_(indicatorKey, date, map, kind, maxPages) {
 function detectOrderKindParams_(indicatorKey, date, counts, all, known) {
   const ok = getIndicatorConfig_(indicatorKey).orderKinds;
   if (!all || !(all.errorCount > 0)) return null;
-  const tol = x => Math.max(1, Math.round(x * 0.03));
-  const amountOf = raw => { const v = raw && (raw.breakageAmount !== undefined ? raw.breakageAmount : raw.amount); return v === undefined || v === null ? null : Number(v); };
+  const amountOf = raw => { const v = raw && [raw.breakageAmountTotal, raw.breakageAmount, raw.amount].filter(x => x !== undefined && x !== null && x !== '')[0]; return v === undefined ? null : Number(v); };
   const res = [];
   for (let i = 0; i < ok.candidates.length; i++) {
     const v = ok.candidates[i], extra = {};
@@ -300,7 +299,7 @@ function detectOrderKindParams_(indicatorKey, date, counts, all, known) {
     const errors = sm.empty ? 0 : (sm.errorCount || 0), total = sm.empty ? 0 : sm.totalCount, amount = sm.empty ? 0 : amountOf(sm.raw);
     const applied = sm.empty || errors !== all.errorCount || (total !== null && total !== all.totalCount) ||
       (amount !== null && amountOf(all.raw) !== null && Math.abs(amount - amountOf(all.raw)) > 0.01);
-    res.push({v: v, errors: errors, applied: applied});
+    res.push({v: v, errors: errors, total: total, applied: applied});
   }
   const appliedList = res.filter(x => x.applied);
   const base = known && !known.unsupported ? Object.assign({}, known) : {param: ok.param};
@@ -321,10 +320,14 @@ function detectOrderKindParams_(indicatorKey, date, counts, all, known) {
   });
   let sub = withErr.filter(x => x.ratio >= 0.5).sort((a, b) => b.ratio - a.ratio)[0];
   let main = withErr.filter(x => x !== sub && x.ratio !== null && x.ratio < 0.5).sort((a, b) => b.errors - a.errors)[0];
-  if (!sub && withErr.length >= 2) {
-    // Filhos sem sufixo: dois códigos que somam Todos — o maior é o principal.
-    const pair = withErr.slice().sort((a, b) => b.errors - a.errors);
-    if (Math.abs(pair[0].errors + pair[1].errors - all.errorCount) <= tol(all.errorCount)) { main = pair[0]; sub = pair[1]; }
+  // Dois códigos que valeram e respondem diferente entre si = as duas opções da tela (a tela só tem Todos, principal e
+  // secundário). Vale também quando a lista do JMS não traz o sufixo "-001" ou ignora a opção (V3.20.1). O principal é
+  // o de maior "Qtd processada" (pedidos principais são a maior parte do volume); sem volume, o de mais avarias.
+  const distinct = withErr.filter((x, i) => withErr.findIndex(y => y.errors === x.errors && y.total === x.total) === i);
+  if (!sub && distinct.length >= 2) {
+    const byVol = distinct.every(x => x.total > 0);
+    const pair = distinct.slice().sort((a, b) => byVol ? b.total - a.total || b.errors - a.errors : b.errors - a.errors);
+    main = pair[0]; sub = pair[1];
   }
   if (main && base.main === undefined) base.main = main.v;
   if (sub && base.sub === undefined) base.sub = sub.v;
@@ -363,13 +366,28 @@ function syncOrderKindRates_(indicatorKey, date, counts, opts) {
       if (det) map = det;
     } catch (e) { if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e; }
   }
+  // Códigos gravados trocados (versões anteriores): o principal tem a maior "Qtd processada". Confere e corrige.
+  const got = {};
+  if (orderKindComplete_(map)) {
+    ['main', 'sub'].forEach(kind => { got[kind] = fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, kind)); });
+    const vol = r => r && !r.empty && r.totalCount > 0 ? r.totalCount : 0;
+    if (vol(got.main) > 0 && vol(got.sub) > vol(got.main)) {
+      map = Object.assign({}, map, {main: map.sub, sub: map.main, fixedAt: new Date().toISOString()});
+      setProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), JSON.stringify(map));
+      const t = got.main; got.main = got.sub; got.sub = t;
+      logSync_('INFO', indicatorKey, date, 'Pedidos principais/filhos: códigos estavam trocados; agora ' + cfg.orderKinds.param + '=' + map.main +
+        ' (principal) e ' + cfg.orderKinds.param + '=' + map.sub + ' (filho). Os dias gravados são consultados de novo.');
+      const days = getRates_(indicatorKey, null, null).map(r => r.date).filter(d => d !== date);
+      if (days.length) enqueueJobs_(days.map(d => ['SUMMARY', indicatorKey, d, 0]), {reset: true});
+    }
+  }
   // Remessas de UMA opção bastam para separar as duas: a de filhos (menor) quando conhecida.
   const listKind = map && !map.unsupported ? (map.sub !== undefined ? 'sub' : map.main !== undefined ? 'main' : null) : null;
   let n = 0;
   ['main', 'sub'].forEach(kind => {
     let s = null;
     if (map && !map.unsupported && map[kind] !== undefined) {
-      const r = fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, kind));
+      const r = got[kind] || fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, kind));
       const raw = {official: true};
       if (kind === listKind) {
         const cnt = r.empty ? 0 : (r.errorCount || 0);
@@ -1231,7 +1249,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
@@ -1427,10 +1445,15 @@ function runSummaryJob_(job) {
       logSync_('WARN', job.indicator, job.date, 'Turnos pelo resumo não consultados: ' + String(e && e.message || e).slice(0, 300));
     }
   }
-  // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (quando os códigos já são conhecidos).
-  const okMap = getIndicatorConfig_(job.indicator).orderKinds && orderKindParams_(job.indicator);
-  if (okMap && !okMap.unsupported) {
-    try { syncOrderKindRates_(job.indicator, job.date, null, {detect: false}); }
+  // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (总破损率 do JMS com a opção). Códigos ainda
+  // incompletos: a descoberta também roda aqui, no máximo a cada 6 h (antes só depois do detalhe baixado).
+  const okCfg = getIndicatorConfig_(job.indicator).orderKinds, okMap = okCfg && orderKindParams_(job.indicator);
+  const detKey = 'ORDERKIND_DETECT_AT_' + job.indicator.toUpperCase();
+  const tryDetect = !!okCfg && !orderKindComplete_(okMap) && !(okMap && okMap.unsupported) && summary.errorCount > 0 &&
+    Date.now() - (Number(getProp_(detKey, '')) || 0) > 6 * 3600000;
+  if (tryDetect) setProp_(detKey, Date.now());
+  if ((okMap && !okMap.unsupported) || tryDetect) {
+    try { syncOrderKindRates_(job.indicator, job.date, null, {detect: tryDetect}); }
     catch (e) {
       if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e;
       logSync_('WARN', job.indicator, job.date, 'Taxas de pedidos principais/filhos não consultadas: ' + String(e && e.message || e).slice(0, 300));
@@ -1935,6 +1958,26 @@ function syncSummaryShifts_(indicator, date, dayMetrics) {
       'pela hora; eles vêm só do detalhe.' + (Object.keys(out).length ? ' Continuam pelo resumo: ' + Object.keys(out).join(', ') + '.' : ''));
   }
   return out;
+}
+
+/**
+ * V3.20.1: a taxa de cada opção de "Pedidos principais/filhos" passa a ser a coluna 总破损率 (breakageRateTotal) e a
+ * descoberta dos códigos não depende mais do sufixo "-001". Uma vez: "sem suporte" é refeito e todos os dias da
+ * Avaria consultam de novo a taxa de cada opção.
+ */
+function migrateToV3201_() {
+  if (getProp_('MIGRATION_V3201', '')) return 0;
+  const jobs = [];
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].orderKinds).forEach(k => {
+    const m = orderKindParams_(k);
+    if (m && m.unsupported) deleteProp_('JMS_ORDERKIND_' + k.toUpperCase());
+    deleteProp_('ORDERKIND_DETECT_AT_' + k.toUpperCase());
+    getRates_(k, null, null).forEach(r => jobs.push(['SUMMARY', k, r.date, 0]));
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V3201', new Date().toISOString());
+  if (n) logSync_('INFO', '', '', 'V3.20.1: ' + n + ' dia(s) da Avaria com a taxa de cada opção (总破损率) consultada de novo.');
+  return n;
 }
 
 /**

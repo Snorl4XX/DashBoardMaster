@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.20.0',
+  VERSION: '3.20.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -441,7 +441,9 @@ const INDICATORS = Object.freeze({
     apiProfile: 'damage', detailMatchesErrors: true,
     summary: {
       endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/getBreakageRateData',
-      rateKeys: ['breakageRate', 'breakageRateTotal'], errorKeys: ['breakageTicketNumber', 'breakageNumberTotal'], totalKeys: ['operaNumber']
+      // Colunas da tabela principal do JMS: 总破损率 (breakageRateTotal), 总破损票数 (breakageNumberTotal), Qtd processada
+      // total (operaNumber). Com "Todos" o breakageRate é igual; com "Pedido principal/secundário" pode não ser (V3.20.1).
+      rateKeys: ['breakageRateTotal', 'breakageRate'], errorKeys: ['breakageNumberTotal', 'breakageTicketNumber'], totalKeys: ['operaNumber']
     },
     detail: {endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/detailBreakageRateData', maxPageSize: 100},
     registration: {endpoint: 'https://gw.jtjms-br.com/servicequality/problemPiece/registrationPage', batch: 100},

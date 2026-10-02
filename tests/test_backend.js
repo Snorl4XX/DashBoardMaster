@@ -1707,4 +1707,41 @@ check(firstBig >= 0 && parAfter === '4' && afterFail.length > 0 && afterFail.eve
   cPa.allTabRows_('LOG').some(r => /baixa 4 por vez/.test(String(r[4]))),
   'paralelismo: 8 por vez; com recusa do JMS, 4 pelo resto do dia (e o dia fecha)', {sizesPa: sizesPa.slice(0, 30), parAfter});
 
+// ---------- 26. V3.20.1: Avaria — taxa de cada opção = 总破损率 da tabela principal do JMS ----------
+const rawMain = cOK.fetchSummaryDay_('damage', D19, {mainSubCode: 1}).raw, rawSub = cOK.fetchSummaryDay_('damage', D19, {mainSubCode: 2}).raw;
+check(rawMain.breakageRate !== rawMain.breakageRateTotal && mainR.rate === rawMain.breakageRateTotal && subR.rate === rawSub.breakageRateTotal &&
+  mainR.errorCount === rawMain.breakageNumberTotal && mainR.totalCount === rawMain.operaNumber,
+  'Pedido principal/secundário: taxa = 总破损率 (breakageRateTotal), quantidade = 总破损票数, volume = Qtd processada total (não a coluna "Taxa…")',
+  {gravada: mainR.rate, total: rawMain.breakageRateTotal, outra: rawMain.breakageRate});
+// Filhos sem sufixo "-001" E lista do JMS que ignora a opção: os dois códigos que valeram são as duas opções; principal = maior volume.
+const cNs = freshCtx(dOK, {plainChildren: true, detailIgnoresOrderKind: true});
+cNs.queueHistory('2026-09-18', D19, true);
+runAll(cNs, 12);
+const mapNs = JSON.parse(cNs.__state.props.JMS_ORDERKIND_DAMAGE || '{}'), subNs = cNs.getRates_('damage:sub', D19, D19)[0];
+check(mapNs.main === 1 && mapNs.sub === 2 && subNs && !subNs.estimated && subNs.rate === rawSub.breakageRateTotal,
+  'sem sufixo e com a lista ignorando a opção: principal e secundário descobertos pelo volume (taxa do secundário oficial)', {mapNs, subNs});
+// Códigos gravados trocados por versão anterior: corrigidos sozinhos (o principal tem a maior Qtd processada).
+const cSw = freshCtx(dOK, null, {JMS_ORDERKIND_DAMAGE: JSON.stringify({param: 'mainSubCode', main: 2, sub: 1, v: 2})});
+cSw.queueHistory('2026-09-18', D19, true);
+runAll(cSw, 12);
+const mapSw = JSON.parse(cSw.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+check(mapSw.main === 1 && mapSw.sub === 2 && cSw.getRates_('damage:main', D19, D19)[0].rate === rawMain.breakageRateTotal &&
+  cSw.getRates_('damage:sub', '2026-09-18', '2026-09-18')[0].totalCount < cSw.getRates_('damage:main', '2026-09-18', '2026-09-18')[0].totalCount &&
+  cSw.allTabRows_('LOG').some(r => /códigos estavam trocados/.test(String(r[4]))),
+  'códigos trocados: corrigidos e todos os dias consultados de novo', mapSw);
+// Atualização: "sem suporte" refeito e todos os dias da Avaria consultam a taxa de cada opção de novo (uma vez).
+const cUp = freshCtx(dOK, null, {JMS_ORDERKIND_DAMAGE: JSON.stringify({unsupported: true, v: 2, date: D19})});
+cUp.queueHistory('2026-09-18', D19, true);
+runAll(cUp, 12);
+const estUp = cUp.getRates_('damage:sub', D19, D19)[0];
+delete cUp.__state.props.MIGRATION_V3201;
+reset(cUp); cUp.invalidateProps_();
+const nUp = cUp.migrateToV3201_(), nUp2 = cUp.migrateToV3201_();
+runAll(cUp, 12);
+reset(cUp);
+const mapUp = JSON.parse(cUp.__state.props.JMS_ORDERKIND_DAMAGE || '{}'), subUp = cUp.getRates_('damage:sub', D19, D19)[0];
+check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp && !subUp.estimated && subUp.rate === rawSub.breakageRateTotal &&
+  estUp && !estUp.estimated,
+  'atualização: "sem suporte" refeito no resumo (sem esperar o detalhe) e a taxa oficial de cada opção em todos os dias', {nUp, mapUp, subUp});
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

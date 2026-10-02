@@ -1,8 +1,26 @@
-# J&T DASHMASTER V3.20 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.20.1 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.20.1 — Avaria: taxa de "Pedido principal/secundário" = coluna 总破损率 do JMS
+**O que estava errado:** com "Pedido principal" ou "Pedido secundário", o painel não mostrava a taxa da tabela principal do JMS. Na tela de 01/10: principal = **658,07** (328 avarias ÷ 498.429 × 1.000.000); secundário = **2.688,05** (177 avarias).
+
+**Causas:**
+- O JMS manda duas taxas: `breakageRate` (a coluna "Taxa…", no fim da tabela) e `breakageRateTotal` (a coluna **总破损率**). Com "Todos" elas são iguais; com uma opção, não. O painel lia a primeira.
+- O mesmo valia para a quantidade (总破损票数 = `breakageNumberTotal`) e para o valor (总破损金额 = `breakageAmountTotal`).
+- A descoberta dos códigos das opções dependia do sufixo "-001" nas remessas. Sem ele (ou com a lista do JMS ignorando a opção), o "secundário" não era identificado e a taxa dele ficava **estimada**.
+
+**Correções:**
+- Taxa, quantidade e valor de cada opção = **总破损率, 总破损票数 e 总破损金额** do JMS, como na tabela principal da tela. "Todos" não muda: lá as colunas são iguais.
+- **Descoberta dos códigos:**
+  - Os dois códigos que o JMS aceita são as duas opções; o **principal é o de maior "Qtd processada"**.
+  - Roda também na atualização do resumo, no máximo a cada 6 h, sem esperar o detalhe.
+- **Códigos gravados trocados** por versão anterior são corrigidos sozinhos.
+- **Na instalação:** "sem suporte" é refeito e todos os dias da Avaria consultam de novo a taxa de cada opção (uma vez).
+
+**Testes:** 332 verificações.
 
 ## V3.20 — Recebimento: dados aparecem mais cedo
 **O que define a demora:** o Recebimento tem ~1 milhão de remessas por dia nas 4 listas (só o "Chegou" teve 689.688 em 01/10). Elas são baixadas página a página do JMS. Pesam três coisas:
@@ -799,7 +817,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **328 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **332 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
