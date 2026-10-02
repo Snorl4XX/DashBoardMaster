@@ -46,6 +46,14 @@ function getAppBootstrap() {
       const anchor = anchorDate_(k, r);
       const last = r.filter(x => x.date === anchor)[0] || null;
       latest[k] = last ? {date: last.date, rate: last.rate, met: JTCore_.goalMet(last.rate, INDICATORS[k].goal)} : null;
+      // Recebimento: no menu, a quantidade que deve chegar HOJE (número do resumo), em vez da taxa.
+      const hm = INDICATORS[k].heroMetric;
+      if (hm) {
+        const today = r.filter(x => x.date === isoToday_())[0] || last;
+        if (today && today.metrics && today.metrics[hm.key] !== undefined) {
+          latest[k] = Object.assign(latest[k] || {date: today.date, rate: today.rate, met: null}, {qty: Number(today.metrics[hm.key]), qtyDate: today.date});
+        }
+      }
     });
     lastUpdated = getLatestSyncedAt_();
     earliest = getEarliestRateDate_();
@@ -212,7 +220,7 @@ function atualizarParaV37() {
   deleteProp_('MIGRATION_V371');
   deleteProp_('MIGRATION_V372');
   clearPauses_();
-  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + migrateToV313_() + migrateToV316_() + queueNewIndicatorsHistory_();
+  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + migrateToV313_() + migrateGroupedLayout_() + queueNewIndicatorsHistory_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};

@@ -99,6 +99,10 @@
       hmPrev: 'Dia anterior', hmPrevPeriod: 'Período anterior', hmShare: 'do {col} · {s}', hmNoDetail: 'Sem detalhe para o filtro neste período',
       mcOfTotal: '{p} de "{of}"', mcPrevShort: 'Dia anterior: {n}', mcPrevPeriodShort: 'Período anterior: {n}',
       scOf: 'do {col}', scNoDetail: 'Sem detalhe neste período', madeBy: 'Feito por Caike Oliveira', daysWithData: '{a} de {b} dias com dados',
+      mcFiltered: '{label} (com filtro)', mcOfficial: 'Oficial do JMS (sem filtros): {n}', mcWholeDay: 'Número do dia todo: o JMS não separa este número por turno nem por viagem',
+      scReceived: 'recebido', scShare: 'de participação', metricSub: 'Número oficial do JMS · {n} dias até {date} (coluna vermelha = dia escolhido)',
+      metricLineSub: 'Número oficial do JMS · evolução diária até {date}', mAvg: 'Média', mMax: 'Maior', mMin: 'Menor', mDay: 'Dia escolhido',
+      listRows: '{n} remessas', listTopNote: 'Mostrando as {n} maiores combinações. Filtre para ver outras.', navQty: 'Deve chegar · {date}',
       mpMax: 'Maior', mpMin: 'Menor', noPrevDay: 'sem dia anterior', mpTable: 'Dados gerais / 总体数据',
       mpTableSub: 'Os números de cada dia, como na primeira tabela da tela do JMS',
       detailsWindowHint: 'Para não estourar a cota do Google (~500 mil remessas por dia), os gráficos por DC/base/viagem usam só os últimos dias. Os números do resumo valem para todos os dias:',
@@ -186,6 +190,10 @@
       hmPrev: '前一日', hmPrevPeriod: '上一期间', hmShare: '占{col} · {s}', hmNoDetail: '该期间没有符合筛选的明细',
       mcOfTotal: '占“{of}” {p}', mcPrevShort: '前一日：{n}', mcPrevPeriodShort: '上一期间：{n}',
       scOf: '占{col}', scNoDetail: '该期间无明细', madeBy: '由 Caike Oliveira 制作', daysWithData: '{b} 天中 {a} 天有数据',
+      mcFiltered: '{label}（已筛选）', mcOfficial: 'JMS官方（未筛选）：{n}', mcWholeDay: '全天数字：JMS 未按班次或车次拆分该数字',
+      scReceived: '已到', scShare: '占比', metricSub: 'JMS官方数字 · 截至 {date} 的 {n} 天（红色柱 = 所选日期）',
+      metricLineSub: 'JMS官方数字 · 截至 {date} 的每日趋势', mAvg: '平均', mMax: '最高', mMin: '最低', mDay: '所选日期',
+      listRows: '{n} 票', listTopNote: '显示数量最多的 {n} 个组合。筛选可查看其他组合。', navQty: '应到 · {date}',
       mpMax: '最高', mpMin: '最低', noPrevDay: '无前一日', mpTable: '总体数据 / Dados gerais',
       mpTableSub: '每天的数字，与JMS页面第一张表一致',
       detailsWindowHint: '为避免超出 Google 配额（每天约50万票），按中心/网点/车次的图表只使用最近几天的数据。汇总数字涵盖所有日期：',
@@ -567,7 +575,8 @@
       var active = state.view === 'dashboard' && state.indicator === c.key;
       html += '<button type="button" class="nav-item' + (active ? ' active' : '') + '" data-ind="' + c.key + '"' + (active ? ' aria-current="page"' : '') + '>' +
         '<span class="nav-ico">' + icon(c.key) + '</span><span class="nav-copy"><b>' + esc(L(c.name)) + '</b><small>' + esc(Lo(c.name)) + '</small></span>' +
-        (l ? '<span class="nav-rate ' + cls + '" title="' + esc(t('lastSeen') + ': ' + fmtDate(l.date, true)) + '"><i></i>' + fmtRate(l.rate, c.goal) + '</span>' : '') + '</button>';
+        (l && c.heroMetric && isNum(l.qty) ? '<span class="nav-rate nav-qty" title="' + esc(t('navQty', {date: fmtDate(l.qtyDate, true)})) + '"><i></i>' + fmtInt(l.qty) + '</span>'
+          : l ? '<span class="nav-rate ' + cls + '" title="' + esc(t('lastSeen') + ': ' + fmtDate(l.date, true)) + '"><i></i>' + fmtRate(l.rate, c.goal) + '</span>' : '') + '</button>';
     });
     html += '<div class="nav-label">' + esc(t('analyses')) + '</div>' +
       '<button type="button" class="nav-item' + (state.view === 'results' ? ' active' : '') + '" data-view="results">' +
@@ -685,7 +694,7 @@
       if (seq !== state.seq) return;
       renderSyncBanner(res.meta.pauses);
       var sm = res.summary;
-      state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [],
+      state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
         rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
@@ -718,13 +727,14 @@
     }
     if (!c) return;
     $('#pageTitle').textContent = L(c.name);
-    $('#pageSubtitle').textContent = Lo(c.name) + ' · ' + L(c.subtitle) + ' · ' + goalLabel(c.goal);
+    $('#pageSubtitle').textContent = Lo(c.name) + ' · ' + L(c.subtitle) + (c.hideTarget ? '' : ' · ' + goalLabel(c.goal));
     document.title = 'J&T · ' + L(c.name);
   }
 
   function renderDashboard() {
     if (!state.data) return;
     var c = cfg(), f = filtersObj();
+    Core.setFilterScopes(c.filterScopes || {});
     renderHeader();
     // Modo de totais: as linhas (totais por dia e coluna) já vêm filtradas do servidor.
     state.filtered = state.data.summary ? state.data.rows : Core.applyFilters(state.data.rows, f);
@@ -739,12 +749,15 @@
     var cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to,
       {shares: state.shiftInfo && state.shiftInfo.shares, shiftRows: sel && sel.by.shift ? Core.applyFilters(state.data.rows, f, 'shift') : null});
     renderKpis(c, cards);
-    renderTarget(c, cards);
+    $('#targetBanner').classList.toggle('hidden', !!c.hideTarget);
+    if (!c.hideTarget) renderTarget(c, cards);
     renderCharts(c);
     renderSummaryTable(c);
     renderRankPanels(c);
     renderMetricPanels(c);
-    renderDetailTable();
+    // Recebimento: uma tabela por lista no lugar da tabela de remessas.
+    $('#detailCard').classList.toggle('hidden', !!c.tables);
+    if (c.tables) renderListTables(c); else { $('#listTables').innerHTML = ''; renderDetailTable(); }
   }
   /**
    * Avaria com UMA opção de "Pedidos principais/filhos" (Config.gs → orderKinds): a taxa e a quantidade
@@ -1077,33 +1090,42 @@
     (rows || []).forEach(function (r) { if (!col || r.column === col) n += Core.weight(r); });
     return n;
   }
+  /** Filtros ativos que valem para a lista `col` (os com escopo de outra lista não contam). */
+  function filtersFor(f, col) {
+    var sc = (cfg() && cfg().filterScopes) || {};
+    return Object.keys(f).filter(function (k) { return !sc[k] || sc[k].indexOf(col) >= 0; });
+  }
+  /** Linhas da lista com os filtros (modo de totais: totais por dia e lista, já filtrados no servidor). */
+  function listQty(col) { return colQty(state.filtered, col); }
+  /** Soma dos turnos escolhidos de uma lista nos agregados do dia (aba AGG), entre duas datas. */
+  function aggShiftSum(col, shifts, from, to) {
+    var list = (state.data.colAgg || {})[col] || [], n = 0, any = false;
+    list.forEach(function (a) {
+      if (a.date < from || a.date > to) return;
+      any = true;
+      (shifts || ['T1', 'T2', 'T3', 'NA']).forEach(function (s) { n += Number(a[s]) || 0; });
+    });
+    return any ? n : null;
+  }
   /**
-   * Cartão principal = quantidade que deve chegar (número oficial do JMS), com as não chegadas e o dia
-   * anterior embaixo. Com filtros (DC, base, turno…), o número grande vira a quantidade do detalhe com o
-   * filtro e o oficial do dia fica embaixo. Depois: um cartão por subcoluna e os cartões dos três turnos.
+   * Recebimento (V3.17): cartão principal = quantidade que deve chegar (oficial do JMS), com as encomendas que
+   * não chegaram e o dia anterior embaixo. Um cartão por subcoluna (nomes da tela). Os que têm a lista remessa
+   * a remessa (Chegou, sem bipe anterior, sem bipe nesta base) mudam com os filtros dela — com o filtro de turno,
+   * o dia anterior do turno vem dos agregados do dia. Depois, os cartões T1/T2/T3 do que foi recebido.
    */
   function renderMetricKpis(c, k) {
-    var grid = $('#kpiGrid'), hm = c.heroMetric, day = k.mode === 'day', f = filtersObj(), sm = state.data.summary;
-    var cur = metricSum(hm.key, state.from, state.to), prev = metricSum(hm.key, k.prevFrom, k.prevTo);
-    var sub = metricSum(hm.sub, state.from, state.to), prevSub = metricSum(hm.sub, k.prevFrom, k.prevTo);
-    var filtered = Object.keys(f).some(function (x) { return x !== 'column'; });
-    // Período: variação só quando os dois períodos têm a mesma quantidade de dias com número.
+    var grid = $('#kpiGrid'), hm = c.heroMetric, day = k.mode === 'day', f = filtersObj();
     var comparable = day || metricDayCount(hm.key, state.from, state.to) === metricDayCount(hm.key, k.prevFrom, k.prevTo);
     var dlt = function (a, b, bad) { return comparable ? qtyDelta(a, b, bad) : ''; };
+    var cur = metricSum(hm.key, state.from, state.to), prev = metricSum(hm.key, k.prevFrom, k.prevTo);
+    var sub = metricSum(hm.sub, state.from, state.to), prevSub = metricSum(hm.sub, k.prevFrom, k.prevTo);
     var prevWord = day ? t('hmPrev') : t('hmPrevPeriod'), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
     var label = day ? L(hm.label) + ' · ' + fmtDate(state.to, true) : L(hm.labelPeriod) + ' · ' + fmtRange(state.from, state.to);
-    var big = cur, chip = '', lines = '';
-    if (filtered) {
-      // Quantidade do detalhe com os filtros (modo de totais: já filtrada no servidor).
-      var fq = colQty(state.filtered, hm.column);
+    var heroF = filtersFor(f, hm.column).length > 0, big = cur, lines = '';
+    if (heroF) {
+      var fq = listQty(hm.column);
       big = fq || null;
       label = t('hmFiltered', {label: label});
-      var shiftSel = Core.shiftSelection(f);
-      if (shiftSel && shiftSel.by.shift && fq) {
-        var base = sm ? colQty((sm.byDim.shift || []), hm.column) : colQty(Core.applyFilters(state.data.rows, f, 'shift'), hm.column);
-        chip = '<div class="shift-share">' + shiftSel.by.shift.map(function (s) { return '<i style="background:' + SHIFT_COLORS[s] + '"></i>'; }).join('') +
-          '<b>' + fmtPct(base ? fq / base * 100 : null, 1) + '</b> ' + esc(t('hmShare', {col: vlabel('column', hm.column), s: shiftSel.by.shift.join(' + ')})) + '</div>';
-      }
       if (!fq) lines += '<div class="kpi-sub">' + esc(t('hmNoDetail')) + '</div>';
       lines += '<div class="hero-metric"><span>' + esc(t('hmOfficial')) + '</span><b>' + fmtInt(cur) + '</b>' +
         '<small>' + esc(L(hm.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + ')' : '') + '</small></div>';
@@ -1114,65 +1136,217 @@
     lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
       ' · ' + esc(L(hm.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) +
       (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(hm.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>';
-    var hero = '<article class="kpi kpi-hero hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon('arrival_flow') + esc(label) + '</div>' + chip +
+    var hero = '<article class="kpi kpi-hero hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon('arrival_flow') + esc(label) + '</div>' +
       '<div class="kpi-value">' + fmtInt(big) + '</div>' + lines +
       '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
-    // Um cartão por subcoluna (menos a do cartão principal), com o dia anterior e a parte do total da coluna.
-    var cards = '';
+    // Um cartão por subcoluna (menos a do cartão principal e as com card: false).
+    var sel = f.shift && f.shift.length ? f.shift : null, cards = '';
     (c.metricPanels || []).forEach(function (p) {
       var totalKey = p.metrics[0].key, total = metricSum(totalKey, state.from, state.to);
       p.metrics.forEach(function (m) {
-        if (m.key === hm.key) return;
-        var v = metricSum(m.key, state.from, state.to), pv = metricSum(m.key, k.prevFrom, k.prevTo);
-        var share = m.key !== totalKey && isNum(v) && total ? v / total * 100 : null;
-        cards += '<article class="kpi metric-kpi' + (m.bad ? ' bad-metric' : '') + '"><div class="kpi-label">' + icon(p.column === 'Chegou' ? 'check' : 'arrival_flow') +
-          '<span class="mc-tag">' + esc(L(p.title)) + '</span></div><div class="mc-name">' + esc(L(m.label)) + '</div>' +
+        if (m.key === hm.key || m.card === false) return;
+        var off = metricSum(m.key, state.from, state.to), offPrev = metricSum(m.key, k.prevFrom, k.prevTo);
+        var fk = m.detail ? filtersFor(f, m.detail) : [], v = off, pv = offPrev, name = L(m.label), extra = '';
+        if (m.detail && fk.length) {
+          // Lista remessa a remessa com filtro: a quantidade dela; com só o filtro de turno, o dia anterior do turno.
+          v = listQty(m.detail);
+          name = t('mcFiltered', {label: name});
+          pv = fk.length === 1 && fk[0] === 'shift' ? aggShiftSum(m.detail, sel, k.prevFrom, k.prevTo) : null;
+          extra = '<br>' + esc(t('mcOfficial', {n: fmtInt(off)}));
+        } else if (Object.keys(f).length && !m.detail) extra = '<br><span class="mc-note">' + esc(t('mcWholeDay')) + '</span>';
+        var share = !fk.length && m.key !== totalKey && isNum(v) && total ? v / total * 100 : null;
+        cards += '<article class="kpi metric-kpi' + (m.bad ? ' bad-metric' : '') + '"><div class="kpi-label">' + icon(m.bad ? 'errors' : 'check') +
+          '<span class="mc-name">' + esc(name) + '</span></div>' +
           '<div class="kpi-value">' + fmtInt(v) + '</div>' +
           '<div class="kpi-sub">' + esc(day ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, m.bad) +
-          (isNum(share) ? '<br>' + esc(t('mcOfTotal', {p: fmtPct(share, 1), of: L(p.metrics[0].label)})) : '') + '</div>' +
+          (isNum(share) ? '<br>' + esc(t('mcOfTotal', {p: fmtPct(share, 1), of: L(p.metrics[0].label)})) : '') + extra + '</div>' +
           (isNum(share) ? '<div class="kpi-foot"><div class="bar"><i data-w="' + share + '" style="background:' + (m.bad ? RED : GOOD) + '"></i></div></div>' : '') + '</article>';
       });
     });
-    var shifts = shiftColumnCards(c, f);
-    grid.innerHTML = hero + cards + (shifts ? '<div class="shift-row">' + shifts + '</div>' : '');
+    grid.innerHTML = hero + cards + shiftColumnCards(c, f, k, dlt);
     fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
   }
   /**
-   * Cartões T1 / T2 / T3 do Recebimento: quantidade de cada coluna principal no turno (turno pelo horário
-   * da remessa). Número grande = coluna principal escolhida no filtro (ou "Chegou"); embaixo, a outra.
-   * Com filtro de turno, os três continuam visíveis e o escolhido fica destacado.
+   * Cartões T1 / T2 / T3: quantidade recebida em cada turno (horário de descarregamento do veículo de chegada)
+   * e a participação no total recebido, com o dia anterior. Com filtro de turno, o(s) escolhido(s) em destaque.
    */
-  function shiftColumnCards(c, f) {
+  function shiftColumnCards(c, f, k, dlt) {
     var sc = c.shiftCardsByColumn;
     if (!sc) return '';
-    var sm = state.data.summary, rows = sm ? (sm.byDim.shift || []) : Core.applyFilters(state.data.rows, f, 'shift');
-    var cols = f.column && f.column.length ? sc.columns.filter(function (x) { return f.column.indexOf(x) >= 0; }) : sc.columns.slice();
-    if (!cols.length) cols = sc.columns.slice();
-    var main = cols.indexOf(sc.main) >= 0 ? sc.main : cols[0];
-    var q = {}, tot = {};
-    rows.forEach(function (r) {
-      var s = r.shift ? String(r.shift) : 'N/A', w = Core.weight(r);
-      if (cols.indexOf(r.column) < 0) return;
-      q[s + '|' + r.column] = (q[s + '|' + r.column] || 0) + w;
-      tot[r.column] = (tot[r.column] || 0) + w;
-    });
+    var col = sc.main, sm = state.data.summary;
+    var rows = (sm ? (sm.byDim.shift || []) : Core.applyFilters(state.data.rows, f, 'shift')).filter(function (r) { return r.column === col; });
+    var q = {}, tot = 0;
+    rows.forEach(function (r) { var s = r.shift ? String(r.shift) : 'N/A', w = Core.weight(r); q[s] = (q[s] || 0) + w; tot += w; });
+    // Sem detalhe carregado (ou sem outros filtros): agregados do dia gravados no servidor.
+    var others = filtersFor(f, col).filter(function (x) { return x !== 'shift'; });
+    if (!tot && !others.length) {
+      (state.data.colAgg && state.data.colAgg[col] || []).forEach(function (a) {
+        if (a.date < state.from || a.date > state.to) return;
+        ['T1', 'T2', 'T3'].forEach(function (s) { q[s] = (q[s] || 0) + (Number(a[s]) || 0); });
+        tot += Number(a.total) || 0;
+      });
+    }
     var sel = f.shift && f.shift.length ? f.shift : null;
     return ['T1', 'T2', 'T3'].map(function (s) {
-      var v = q[s + '|' + main] || 0, pct = tot[main] ? v / tot[main] * 100 : null;
-      var label = '<i style="background:' + SHIFT_COLORS[s] + '"></i>' + s + ' · ' + SHIFT_HOURS[s] + ' · ' + esc(vlabel('column', main));
-      var subHtml = !tot[main] ? esc(t('scNoDetail')) : '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('scOf', {col: vlabel('column', main)}));
-      cols.forEach(function (col) {
-        if (col === main) return;
-        var o = q[s + '|' + col] || 0;
-        subHtml += '<br>' + esc(vlabel('column', col)) + ': <b>' + fmtInt(o) + '</b>' + (tot[col] ? ' · ' + fmtPct(o / tot[col] * 100, 1) : '');
-      });
+      var v = q[s] || 0, pct = tot ? v / tot * 100 : null;
+      var pv = others.length ? null : aggShiftSum(col, [s], k.prevFrom, k.prevTo);
+      var label = '<i style="background:' + SHIFT_COLORS[s] + '"></i>' + s + ' · ' + SHIFT_HOURS[s];
+      var subHtml = !tot ? esc(t('scNoDetail')) : '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('scShare')) +
+        '<br>' + esc(k.mode === 'day' ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, false);
       var on = sel && sel.indexOf(s) >= 0;
       return '<article class="kpi shift-kpi' + (sel && !on ? ' faded' : '') + (on ? ' selected' : '') + '"><div class="kpi-label">' + label + '</div>' +
-        '<div class="kpi-value">' + (tot[main] ? fmtInt(v) : '—') + '</div><div class="kpi-sub">' + subHtml + '</div>' +
+        '<div class="kpi-value">' + (tot ? fmtInt(v) : '—') + '<small class="sc-unit"> ' + esc(t('scReceived')) + '</small></div><div class="kpi-sub">' + subHtml + '</div>' +
         '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(pct) ? pct : 0) + '" style="background:' + SHIFT_COLORS[s] + '"></i></div></div></article>';
     }).join('');
+  }
+
+  // ------------------------------------------------------------------ Recebimento: gráficos dos números do resumo
+  /** Série diária de um número do resumo (rates[].metrics) até a data escolhida. */
+  function metricSpec(def) {
+    var n = def.days || MP_DAYS, from = Core.addDays(state.to, -(n - 1));
+    if (state.from < from) from = state.from;
+    if (Core.daysBetween(from, state.to) > 90) from = Core.addDays(state.to, -90);
+    var byDate = {};
+    activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[def.metric])) byDate[r.date] = Number(r.metrics[def.metric]); });
+    var days = Core.dateRange(from, state.to);
+    return {key: def.key, metric: def.metric, type: def.type || 'bar', bad: !!def.bad, title: def.title,
+      days: days, values: days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; })};
+  }
+  function renderMetricChart(card, spec) {
+    var key = spec.key, vals = spec.values, days = spec.days, last = days.length - 1;
+    $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '');
+    $('small', card).textContent = spec.type === 'line' ? t('metricLineSub', {date: fmtDate(state.to, true)}) : t('metricSub', {n: days.length, date: fmtDate(state.to, true)});
+    var view = state.chartViews[key] || (window.Chart ? 'chart' : 'table'), tools = $('.chart-tools', card);
+    tools.innerHTML = seg('view', [['chart', t('chartView')], ['table', t('tableView')]], view);
+    $$('.seg button', tools).forEach(function (b) { b.addEventListener('click', function () { state.chartViews[key] = b.getAttribute('data-v'); renderCharts(cfg()); }); });
+    var body = $('.chart-body', card), have = vals.filter(isNum);
+    $('.chart-legend', card).innerHTML = '';
+    var stats = $('.rp-stats', card);
+    if (!have.length) {
+      destroyChart(key); stats.innerHTML = '';
+      body.innerHTML = '<div class="chart-wrap"><div class="chart-empty"><div><b>' + esc(t('noData')) + '</b>' + esc(t('noRateHint')) + '</div></div></div>';
+      return;
+    }
+    var mx = null, mn = null;
+    vals.forEach(function (v, i) { if (!isNum(v)) return; if (mx === null || v > vals[mx]) mx = i; if (mn === null || v < vals[mn]) mn = i; });
+    var avg = have.reduce(function (a, v) { return a + v; }, 0) / have.length, prevV = last > 0 ? vals[last - 1] : null;
+    stats.innerHTML = rpStat('total', biLabel({pt: t('mDay'), zh: ''}), esc(fmtInt(vals[last])), esc(fmtDate(days[last], true)) + (isNum(prevV) ? ' ' + qtyDelta(vals[last], prevV, spec.bad) : '')) +
+      rpStat('max', biLabel({pt: t('mMax'), zh: ''}), '<span class="accent">' + esc(fmtInt(vals[mx])) + '</span>', esc(fmtDate(days[mx], true)), 'named') +
+      rpStat('min', biLabel({pt: t('mMin'), zh: ''}), '<span class="accent">' + esc(fmtInt(vals[mn])) + '</span>', esc(fmtDate(days[mn], true)) + ' · ' + esc(t('mAvg')) + ': ' + esc(fmtInt(avg)), 'named');
+    if (view === 'table' || !window.Chart) {
+      destroyChart(key);
+      var rowsH = days.map(function (d, i) { return [d, vals[i], i ? vals[i - 1] : null]; }).reverse().filter(function (x) { return isNum(x[1]); }).map(function (x) {
+        return '<tr' + (x[0] === state.to ? ' class="sel"' : '') + '><td>' + esc(fmtDate(x[0], true)) + '</td><td class="num">' + fmtInt(x[1]) + '</td><td class="num">' + qtyDelta(x[1], x[2], spec.bad) + '</td></tr>';
+      }).join('');
+      body.innerHTML = '<div class="chart-table"><table class="data-table"><thead><tr><th>' + esc(t('date')) + '</th><th class="num">' + esc(t('qty')) +
+        '</th><th class="num">' + esc(t('vsPrevDay')) + '</th></tr></thead><tbody>' + rowsH + '</tbody></table></div>';
+      return;
+    }
+    var host = $('.chart-wrap', body);
+    if (!host || !$('canvas', host)) { destroyChart(key); body.innerHTML = '<div class="chart-wrap' + (spec.type === 'line' ? ' large' : '') + '"><canvas role="img"></canvas></div>'; host = $('.chart-wrap', body); }
+    var canvas = $('canvas', host);
+    canvas.setAttribute('aria-label', L(spec.title));
+    var labels = days.map(function (d) { return fmtDate(d); });
+    var dataset = spec.type === 'line'
+      ? {data: vals, borderColor: RED, borderWidth: 2.4, cubicInterpolationMode: 'monotone', spanGaps: true, fill: true,
+          backgroundColor: function (ctx) { var a = ctx.chart.chartArea; if (!a) return 'rgba(230,0,18,.08)';
+            var g = ctx.chart.ctx.createLinearGradient(0, a.top, 0, a.bottom); g.addColorStop(0, 'rgba(230,0,18,.18)'); g.addColorStop(1, 'rgba(230,0,18,0)'); return g; },
+          pointRadius: vals.map(function (v, i) { return i === last ? 5 : 3; }), pointBackgroundColor: vals.map(function (v, i) { return i === last ? RED : '#fff'; }),
+          pointBorderColor: RED, pointBorderWidth: 1.6}
+      : {data: vals, backgroundColor: vals.map(function (v, i) { return i === last ? RED : '#F5A3AA'; }), hoverBackgroundColor: RED_DARK,
+          borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start', maxBarThickness: 46, categoryPercentage: .8, barPercentage: .86};
+    var config = {
+      $sig: 'metric-' + spec.type, type: spec.type === 'line' ? 'line' : 'bar',
+      data: {labels: labels, datasets: [dataset]},
+      plugins: plugins([]),
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 550}, layout: {padding: {top: 22, right: 18}},
+        plugins: {legend: {display: false},
+          tooltip: {callbacks: {title: function (tt) { return fmtDate(days[tt[0].dataIndex], true); }, label: function (ctx) { return ' ' + fmtInt(ctx.raw); }}},
+          datalabels: {anchor: 'end', align: spec.type === 'line' ? 'top' : 'end', offset: spec.type === 'line' ? 6 : 1, clip: false,
+            color: function (ctx) { return ctx.dataIndex === last ? RED : INK; },
+            font: function (ctx) { return {weight: ctx.dataIndex === last ? '800' : '600', size: 10.5}; },
+            formatter: function (v) { return isNum(v) ? compactInt(v) : ''; },
+            display: function (ctx) { var w = ctx.chart.scales && ctx.chart.scales.x ? ctx.chart.scales.x.width / days.length : 40;
+              var i = ctx.dataIndex; return isNum(dv(ctx)) && (w >= 34 || i === last || i === mx || i === mn); }}},
+        scales: {x: {grid: {display: false}, border: {color: '#D9DBE1'}, ticks: {color: MUTED, autoSkip: true, maxRotation: 0, font: {size: 10.5}}},
+          y: {beginAtZero: spec.type !== 'line', grace: '18%', grid: {color: GRID}, border: {display: false},
+            ticks: {color: MUTED, precision: 0, maxTicksLimit: 7, callback: function (v) { return compactInt(v); }}}}}
+    };
+    var ch = state.charts[key];
+    if (ch && ch.$sig === config.$sig && ch.canvas === canvas) { ch.data = config.data; ch.options = config.options; ch.update(); }
+    else { destroyChart(key); ch = new Chart(canvas, config); ch.$sig = config.$sig; state.charts[key] = ch; }
+  }
+
+  // ------------------------------------------------------------------ Recebimento: uma tabela por lista
+  function renderListTables(c) {
+    var box = $('#listTables');
+    if (!box) return;
+    state.ltables = state.ltables || {};
+    var sig = state.indicator + '|' + c.tables.map(function (tb) { return tb.key; }).join(',');
+    if (box.getAttribute('data-sig') !== sig) {
+      box.innerHTML = c.tables.map(function (tb) {
+        return '<section class="card table-card list-table" data-t="' + esc(tb.key) + '"><div class="section-head"><div><span class="kicker">' + esc(t('details')) + '</span>' +
+          '<h2>' + esc(L(tb.title)) + (Lo(tb.title) ? ' <span class="rp-zh">/ ' + esc(Lo(tb.title)) + '</span>' : '') + '</h2></div>' +
+          '<div class="table-tools"><label class="find"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>' +
+          '<input type="text" autocomplete="off" placeholder="' + esc(t('tableFind')) + '"></label><span class="count">—</span></div></div>' +
+          '<div class="table-scroll"><table class="data-table"><thead></thead><tbody></tbody></table></div>' +
+          '<div class="table-foot"><span class="note"></span><div class="pager"></div></div></section>';
+      }).join('');
+      box.setAttribute('data-sig', sig);
+      c.tables.forEach(function (tb) {
+        var card = $('.list-table[data-t="' + tb.key + '"]', box);
+        $('input', card).addEventListener('input', debounce(function (e) { var st = ltState(tb.key); st.query = e.target.value.trim(); st.page = 1; renderListTable(card, tb); }, 160));
+      });
+    }
+    c.tables.forEach(function (tb) { renderListTable($('.list-table[data-t="' + tb.key + '"]', box), tb); });
+  }
+  function ltState(key) { return state.ltables[key] || (state.ltables[key] = {sortKey: null, sortDir: 'desc', page: 1, query: ''}); }
+  function renderListTable(card, tb) {
+    if (!card) return;
+    var st = ltState(tb.key), cols = tb.cols, sm = state.data.summary;
+    var rows = (sm ? sm.top : state.filtered).filter(function (r) { return r.column === tb.column; });
+    var total = colQty(rows);
+    var q = st.query.toLocaleLowerCase(locale());
+    if (q) rows = rows.filter(function (r) { return cols.some(function (col) { return cellText(col[0], r[col[0]]).toLocaleLowerCase(locale()).indexOf(q) >= 0; }); });
+    var key = st.sortKey, dir = st.sortDir === 'asc' ? 1 : -1;
+    rows = rows.slice().sort(function (a, b) {
+      if (!key) return (Number(b.qty) || 0) - (Number(a.qty) || 0) || cmpText(b.eventTime || '', a.eventTime || '');
+      var x = a[key], y = b[key];
+      if (key === 'qty') return ((Number(x) || 0) - (Number(y) || 0)) * dir;
+      return cmpText(x || '', y || '') * dir;
+    });
+    var pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    if (st.page > pages) st.page = pages;
+    var slice = rows.slice((st.page - 1) * PAGE_SIZE, st.page * PAGE_SIZE);
+    $('thead', card).innerHTML = '<tr>' + cols.map(function (col) {
+      var s = st.sortKey === col[0] ? (st.sortDir === 'asc' ? '▲' : '▼') : '↕', main = state.lang === 'zh' ? col[2] : col[1], other = state.lang === 'zh' ? col[1] : col[2];
+      return '<th scope="col" data-k="' + col[0] + '" tabindex="0">' + esc(main) + '<span class="sort">' + s + '</span><small>' + esc(other) + '</small></th>';
+    }).join('') + '</tr>';
+    $('tbody', card).innerHTML = slice.map(function (r) {
+      return '<tr>' + cols.map(function (col) { var tx = cellText(col[0], r[col[0]]); return '<td title="' + esc(tx) + '">' + highlight(tx || '—', st.query) + '</td>'; }).join('') + '</tr>';
+    }).join('') || '<tr class="empty-row"><td colspan="' + cols.length + '">' + esc(t('noRows')) + '</td></tr>';
+    $$('thead th', card).forEach(function (th) {
+      var sortBy = function () {
+        var k = th.getAttribute('data-k');
+        if (st.sortKey === k) st.sortDir = st.sortDir === 'asc' ? 'desc' : 'asc'; else { st.sortKey = k; st.sortDir = 'asc'; }
+        st.page = 1; renderListTable(card, tb);
+      };
+      th.addEventListener('click', sortBy);
+      th.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(); } });
+    });
+    $('.count', card).textContent = t('listRows', {n: fmtInt(q ? colQty(rows) : total)});
+    var limit = sm && sm.topLimit, capped = limit && (sm.top || []).filter(function (r) { return r.column === tb.column; }).length >= limit;
+    $('.note', card).textContent = capped ? t('listTopNote', {n: fmtInt(limit)}) : detailIsPartial() ? t('tablePartial') : t('tableComplete');
+    var p = st.page, pager = $('.pager', card);
+    if (pages <= 1) { pager.innerHTML = ''; return; }
+    var nums = [], last = 0, html = '<button type="button" data-p="' + (p - 1) + '"' + (p === 1 ? ' disabled' : '') + ' aria-label="‹">‹</button>';
+    for (var i = 1; i <= pages; i++) if (i === 1 || i === pages || Math.abs(i - p) <= 1) nums.push(i);
+    nums.forEach(function (n) { if (n - last > 1) html += '<span>…</span>'; html += '<button type="button" data-p="' + n + '"' + (n === p ? ' class="active" aria-current="page"' : '') + '>' + n + '</button>'; last = n; });
+    html += '<button type="button" data-p="' + (p + 1) + '"' + (p === pages ? ' disabled' : '') + ' aria-label="›">›</button>';
+    pager.innerHTML = html;
+    $$('button', pager).forEach(function (b) { b.addEventListener('click', function () { st.page = Math.max(1, Math.min(pages, Number(b.getAttribute('data-p')))); renderListTable(card, tb); }); });
   }
   /**
    * Cartões de valor (Avaria): soma e maior valor de um campo em R$ (valor da arbitragem),
@@ -1353,8 +1527,10 @@
     // Recebimento: com o filtro "Coluna principal", só os gráficos da(s) coluna(s) escolhida(s).
     var cols = state.filters.column && state.filters.column.size ? state.filters.column : null;
     var sm = state.data.summary, fo = sm ? filtersObj() : null;
-    return [evo].concat((c.charts || []).filter(function (def) { return !cols || !def.where || !def.where.column || cols.has(def.where.column); }).map(function (def) {
+    return (c.hideEvolution ? [] : [evo]).concat((c.charts || []).filter(function (def) { return !cols || !def.where || !def.where.column || cols.has(def.where.column); }).map(function (def) {
+      if (def.metric) return metricSpec(def);
       var spec = Core.buildChart(def, sm ? Core.summaryChartRows(def, sm.byDim, fo) : rows, {intervalMode: state.intervalMode});
+      if (def.sub) spec.sub = def.sub;
       // "Top N por turno" no padrão das docas: top N de cada turno, faixas T1/T2/T3.
       if (spec.grouped) spec.panel = Core.rankPanel(rows, {key: def.key, kind: 'byShift', dim: spec.dim, top: def.top || 4});
       return spec;
@@ -1369,9 +1545,9 @@
       grid.innerHTML = '';
       specs.forEach(function (s) {
         var card = document.createElement('article');
-        card.className = 'card chart-card' + (s.key === 'evolution' ? ' full' : '');
+        card.className = 'card chart-card' + (s.key === 'evolution' || (s.metric && s.type === 'line') ? ' full' : '');
         card.setAttribute('data-key', s.key);
-        card.innerHTML = '<div class="chart-head"><span class="chart-ico">' + icon(s.grouped ? (s.dim || 'segment') : (s.dim || s.key)) + '</span>' +
+        card.innerHTML = '<div class="chart-head"><span class="chart-ico">' + icon(s.metric ? (s.type === 'line' ? 'trend' : s.bad ? 'errors' : 'check') : s.grouped ? (s.dim || 'segment') : (s.dim || s.key)) + '</span>' +
           '<div class="chart-titles"><h3></h3><small></small></div><div class="chart-tools"></div></div><div class="chart-body"></div><div class="chart-legend"></div>' +
           '<div class="rp-stats"></div>';
         grid.appendChild(card);
@@ -1383,6 +1559,7 @@
 
   function renderChartCard(card, spec, c) {
     if (!card) return;
+    if (spec.metric) return renderMetricChart(card, spec);
     var key = spec.key, partial = key !== 'evolution' && detailIsPartial();
     $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '') +
       (partial ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
@@ -1390,6 +1567,7 @@
     if (key === 'evolution') sub = (spec.extended && state.evoMode !== 'history' ? t('evolution30', {date: fmtDate(state.to, true)}) + ' · ' : '') + t(hasGoal(c.goal) ? 'evolutionSub' : 'evolutionSubNoGoal');
     else if (spec.others > 0) sub = t('distinctShipments') + ' · ' + t('topOf', {n: spec.labels.length, m: fmtInt(spec.labels.length + spec.others)});
     else sub = t('distinctShipments') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
+    if (spec.sub) sub = L(spec.sub) + ' · ' + sub;
     $('small', card).textContent = sub;
 
     var view = state.chartViews[key] || (window.Chart ? 'chart' : 'table');
@@ -1920,11 +2098,20 @@
     return Core.dateRange(from, state.to);
   }
   function renderMetricPanels(c) {
-    var box = $('#metricPanels');
+    var box = $('#metricPanels'), tbl = $('#metricTable');
     if (!box) return;
     var panels = c.metricPanels || [];
     Object.keys(state.charts).forEach(function (k) { if (k.indexOf('mp_') === 0) destroyChart(k); });
+    if (tbl) tbl.innerHTML = '';
     if (!panels.length || !state.data) { box.innerHTML = ''; return; }
+    if (c.metricCards && tbl) {
+      // V3.17: os números viraram gráficos separados (chartsGrid); aqui fica só a tabela "Dados gerais", por último.
+      var bd = {};
+      (state.data.rates || []).forEach(function (r) { if (r.metrics) bd[r.date] = r.metrics; });
+      box.innerHTML = '';
+      tbl.innerHTML = metricTableHtml(panels, null, bd, metricDays());
+      return;
+    }
     var cols = state.filters.column && state.filters.column.size ? state.filters.column : null;
     var byDate = {};
     (state.data.rates || []).forEach(function (r) { if (r.metrics) byDate[r.date] = r.metrics; });
@@ -2055,7 +2242,7 @@
   }
   function cellText(key, v) {
     if (v === null || v === undefined || v === '') return '';
-    if (key === 'shipment' || key === 'tripId' || key === 'lot') return key === 'lot' ? vlabel(key, v) : String(v);
+    if (key === 'shipment' || key === 'waybill' || /^trip/.test(key) || key === 'lot') return key === 'lot' ? vlabel(key, v) : String(v);
     if (key === 'qty') return fmtInt(v);
     if (/Time/.test(key)) return fmtStamp(v);
     return key === 'date' ? fmtDate(v, true) : vlabel(key, v);

@@ -632,7 +632,19 @@ function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
   const cfg = getIndicatorConfig_(indicatorKey);
   const types = cfg.detail.types && cfg.detail.types.length ? cfg.detail.types.map(t => t.type) : [null];
   if (types.length === 1 && types[0] === null) return planDetailType_(indicatorKey, isoDate, validateTotal, null);
-  const plans = types.map(t => planDetailType_(indicatorKey, isoDate, validateTotal, t));
+  // Lista opcional (Recebimento: sem bipe na etapa anterior / nesta base): se o JMS recusar o detailType ou
+  // devolver outra coisa, o dia segue com as outras listas. Sessão expirada e cota continuam parando tudo.
+  const plans = [];
+  types.forEach(t => {
+    const td = (cfg.detail.types || []).filter(x => x.type === t)[0] || {};
+    try { plans.push(planDetailType_(indicatorKey, isoDate, validateTotal, t)); }
+    catch (e) {
+      const msg = String(e && e.message || e);
+      if (!td.optional || errorKind_(msg) !== 'OTHER') throw e;
+      logSync_('WARN', indicatorKey, isoDate, 'Lista "' + (td.column || t) + '" (' + t + ') não baixada: ' + msg.slice(0, 300));
+    }
+  });
+  if (!plans.length) throw new Error('Nenhuma lista do detalhe pôde ser baixada para ' + indicatorKey + ' ' + isoDate);
   const windows = [], chunks = [];
   plans.forEach(p => {
     const off = windows.length;
@@ -641,7 +653,7 @@ function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
   });
   // Tamanho de página: o menor aceito (todas as listas usam o mesmo endereço).
   return {size: Math.min.apply(null, plans.map(p => p.size)), total: plans.reduce((a, p) => a + p.total, 0), windows: windows, chunks: chunks,
-    sliced: plans.some(p => p.sliced), types: types};
+    sliced: plans.some(p => p.sliced), types: plans.map(p => p.windows[0] ? p.windows[0].type : null)};
 }
 function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
   const cfg = getIndicatorConfig_(indicatorKey);

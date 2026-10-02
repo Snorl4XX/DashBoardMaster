@@ -1,8 +1,59 @@
-# J&T DASHMASTER V3.16 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.17 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.17 — Recebimento: gráficos separados, listas novas e três tabelas
+**Menu lateral:** o Recebimento mostra a **quantidade que deve chegar hoje**, em vez da porcentagem.
+
+**Sem o quadro da meta** (Maomao "Meta não definida") e sem "Meta não definida" no cabeçalho do Recebimento.
+
+**Cartões**
+- **Cartão principal**: quantidade que deve chegar, com as encomendas que não chegaram e o dia anterior (como na V3.16).
+- **Um cartão por subcoluna**, com os nomes novos e sem as etiquetas vermelhas da coluna principal:
+  - Encomendas que não chegou;
+  - Total de pedidos que chegaram;
+  - Sem bipar expedição na etapa anterior;
+  - Não realizamos bipe de expedição;
+  - Que não foram registrados no Sistema.
+- "Não há armazém de saída nesse local" saiu dos cartões e fica só na tabela **Dados gerais**.
+- **Cartões T1 / T2 / T3** = quantidade **recebida** no turno, a participação em % e a variação contra o dia anterior.
+- **Filtro de turno** (e os filtros de viagem):
+  - os cartões que têm a lista remessa a remessa (chegou, sem bipe anterior, não bipamos) passam a mostrar o número com o filtro e o dia anterior desse turno;
+  - os que o JMS não separa por turno (não chegadas, não registrados) continuam com o número do dia todo e um aviso.
+
+**Turnos**
+- **"Turno que recebeu mais"**: pela coluna **Horário descarregamento veículo de chegada** da lista "Total de pedidos que chegaram". Na API é o `sendTime` dessa lista, o único horário que ela traz.
+- **"O que deve chegar"** (pizza): pelo **Horário de expedição** na base de origem, da lista "Quantidade total de pedidos".
+
+**Gráficos separados** (no padrão dos outros painéis, cada um com Gráfico/Tabela e os três cartões de resumo):
+1. Deve chegar (linha, evolução diária)
+2. O que deve chegar (pizza por turno)
+3. Encomendas não chegadas
+4. Chegou
+5. Turno que recebeu mais (pizza)
+6. Sem bipar expedição na etapa anterior
+7. IDs de viagens que não tiveram bipe de expedição no anterior
+8. Não realizamos bipe de expedição
+9. IDs de viagens que vamos receber
+10. Bases que enviaram
+11. IDs que já recebemos
+
+Saíram os gráficos de DC destino, base destino, última parada e digitalizador, e a evolução do % não chegou.
+
+**Filtros**: Turno, IDs de viagem que devem chegar, IDs de viagem que chegou, Bases que enviaram, IDs sem bipe de expedição no anterior.
+- **Cada filtro vale só na lista dele.** Por exemplo, escolher uma viagem em "IDs de viagem que devem chegar" filtra os gráficos de "Deve chegar" e não esvazia os de "Chegou".
+
+**Tabelas**, nesta ordem, com os "Dados gerais" por último:
+1. Total que não tiveram o bipe de expedição anterior (todas as informações, remessa a remessa);
+2. Total que foi recebido por nós;
+3. Total de quantos nós não demos bipe de expedição (remessa a remessa).
+
+**Duas listas novas no download**: o detalhe de "Sem bipar expedição na etapa anterior" (`detailType` = `uploadNoSendNum`) e de "Sem bipagem de expedição nesta base" (`noSendNum`).
+- São pequenas (~20 a 40 mil remessas por dia, contra ~500 mil das outras duas).
+- O `detailType` delas não estava nas capturas; segui o padrão das outras duas (o nome do número no resumo). **Se o JMS recusar**, o dia fecha normalmente com as duas listas grandes, os gráficos e as tabelas dessas listas ficam vazios, e o motivo fica na aba de log como "Lista ... não baixada". Nesse caso, me mande o **payload** do clique nesses números.
+- **Ao atualizar**, os últimos 7 dias do Recebimento baixam de novo **uma vez**, sozinhos, no formato novo.
 
 ## V3.16 — Recebimento por quantidade e por turno
 **Cartões do Recebimento: fluxo operacional (no lugar da taxa):**
@@ -617,7 +668,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **296 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **301 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

@@ -466,6 +466,26 @@ function upsertAggCounts_(indicator, date, c, total) {
   const rowNum = findRowKey_('AGG', indicator, date);
   if (rowNum > 0) writeRow_('AGG', rowNum, row); else appendRow_('AGG', row);
 }
+/**
+ * Recebimento: turnos de cada lista no dia (aba AGG, chave "arrival_flow:<lista>"), lidos do arquivo colunar
+ * pelos índices (sem criar objetos). Dá o dia anterior dos cartões de turno sem carregar o detalhe dele.
+ */
+function groupedShiftAgg_(indicator, date, ds) {
+  const cols = getIndicatorConfig_(indicator).shiftAggColumns || [];
+  if (!cols.length || !ds || !ds.n || !ds.cols || !ds.cols.column || !ds.cols.shift) return;
+  const acc = {};
+  cols.forEach(c => { acc[c] = {T1: 0, T2: 0, T3: 0, NA: 0, total: 0}; });
+  const dCol = ds.dict.column, dShift = ds.dict.shift, dQty = ds.dict.qty || [], cq = ds.cols.qty;
+  for (let i = 0; i < ds.n; i++) {
+    const a = acc[dCol[ds.cols.column[i]]];
+    if (!a) continue;
+    const qv = cq ? dQty[cq[i]] : '', q = qv === '' || qv === undefined || qv === null ? 1 : (Number(qv) || 0);
+    const sh = dShift[ds.cols.shift[i]];
+    if (sh === 'T1' || sh === 'T2' || sh === 'T3') a[sh] += q; else a.NA += q;
+    a.total += q;
+  }
+  cols.forEach(c => upsertAggCounts_(indicator + ':' + c, date, acc[c], acc[c].total));
+}
 function getAgg_(indicator, from, to) {
   const byDate = {};
   allTabRows_('AGG').forEach(r => {
@@ -509,8 +529,10 @@ function compactDay_(indicator, date, deadline) {
     if (deadline && Date.now() > deadline - 15000) return {partial: true};
     fileRows_(loadDetailFile_(p.fileId)).forEach(r => acc.addRow(rederiveRow_(indicator, r)));
   }
-  const fileId = saveDayDataset_(indicator, date, acc.build(), st.expectedPages, st.expectedRecords);
+  const dsDay = acc.build();
+  const fileId = saveDayDataset_(indicator, date, dsDay, st.expectedPages, st.expectedRecords);
   if (!getIndicatorConfig_(indicator).grouped) upsertAggCounts_(indicator, date, acc.shiftCounts(), acc.count());
+  else groupedShiftAgg_(indicator, date, dsDay);
   return {fileId: fileId, rows: acc.count()};
 }
 
@@ -1020,23 +1042,33 @@ function migrateToV313_() {
 }
 
 /**
- * V3.16: o Recebimento passou a agrupar também pelo turno (horário sendTime). Uma vez: os dias com detalhe
- * baixado pela V3.14/V3.15 (sem turno) entram na fila para baixar de novo — só os da janela de detalhe.
+ * Indicador agrupado (Recebimento) cujo formato de gravação mudou (campos agrupados ou listas do detalhe — V3.16:
+ * turno; V3.17: campos por lista e listas novas): uma vez por formato (propriedade GROUPED_LAYOUT_<INDICADOR>),
+ * os dias com detalhe na janela de detalhe baixam de novo. Instalação nova: ainda não há dias, só grava o formato.
  */
-function migrateToV316_() {
-  if (getProp_('MIGRATION_V316', '')) return 0;
-  const jobs = [];
-  Object.keys(INDICATORS).filter(k => INDICATORS[k].grouped && (INDICATORS[k].groupFields || []).indexOf('shift') >= 0).forEach(k => {
-    const days = detailDays_(INDICATORS[k]), from = days ? addDaysIso_(isoToday_(), -days) : '';
+function groupedLayoutSig_(cfg) {
+  const txt = JSON.stringify([cfg.groupFields, ((cfg.detail || {}).types || []).map(t => [t.type, t.column, t.keep || t.blank || [], t.copy || {}])]);
+  let h = 5381;
+  for (let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0;
+  return 'v' + h.toString(36);
+}
+function migrateGroupedLayout_() {
+  let total = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].grouped).forEach(k => {
+    const cfg = INDICATORS[k], prop = 'GROUPED_LAYOUT_' + k.toUpperCase(), sig = groupedLayoutSig_(cfg);
+    if (getProp_(prop, '') === sig) return;
+    const days = detailDays_(cfg), from = days ? addDaysIso_(isoToday_(), -days) : '';
+    const jobs = [];
     allTabRows_('STATUS').forEach(r => {
       const d = dateCellIso_(r[1]);
       if (String(r[0]) === k && isIso_(d) && d >= from && DETAIL_USABLE_.concat(['PARTIAL']).indexOf(String(r[3])) >= 0) jobs.push(['DETAIL_INIT', k, d, 1]);
     });
+    const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+    setProp_(prop, sig);
+    if (n) logSync_('INFO', k, '', 'Formato novo do detalhe: ' + n + ' dia(s) baixados de novo.');
+    total += n;
   });
-  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
-  setProp_('MIGRATION_V316', new Date().toISOString());
-  if (n) logSync_('INFO', 'arrival_flow', '', 'V3.16: ' + n + ' dia(s) do Recebimento baixados de novo para separar por turno.');
-  return n;
+  return total;
 }
 
 /**
@@ -1100,7 +1132,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateToV316_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
@@ -1493,7 +1525,9 @@ function runGroupedDetailJob_(job, deadline, cfg, st, plan) {
         ' registros, mas entregou ' + rawTotal + '; a importação será refeita.');
     }
     const ok = Math.abs(rawTotal - plan.total) <= tol;
-    saveDayDataset_(job.indicator, job.date, acc.build(), n, plan.total);
+    const dsDay = acc.build();
+    saveDayDataset_(job.indicator, job.date, dsDay, n, plan.total);
+    groupedShiftAgg_(job.indicator, job.date, dsDay);
     deleteProp_(sigKey);
     updateDayStatus_(job.indicator, job.date, {detailsStatus: ok ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: n, savedPages: n,
       expectedRecords: plan.total, savedRows: rawTotal, error: ''});

@@ -50,12 +50,21 @@ function normalizeRecords_(indicatorKey, date, records, type) {
   // Avaria: antes de normalizar, junta os dados da Consulta de Pacote Problemático (tabela 2).
   if (getIndicatorConfig_(indicatorKey).registration && records.length) enrichRegistrations_(indicatorKey, records);
   // Detalhe com várias listas (Recebimento): a coluna principal de cada remessa e os campos que não valem nela.
-  const td = type ? (getIndicatorConfig_(indicatorKey).detail.types || []).filter(t => t.type === type)[0] : null;
+  const cfgN = getIndicatorConfig_(indicatorKey);
+  const td = type ? (cfgN.detail.types || []).filter(t => t.type === type)[0] : null;
+  // Campos agrupados que esta lista não usa ficam vazios (keep); copy: ID de viagem/turno no campo da lista.
+  const drop = td && td.keep ? (cfgN.groupFields || []).filter(k => k !== 'column' && td.keep.indexOf(k) < 0) : [];
+  const copy = td && td.copy ? Object.keys(td.copy) : [];
   const rows = [];
   for (let i = 0; i < records.length; i++) {
     const x = normalizeDetailRow_(indicatorKey, records[i], date);
     if (!x) continue;
-    if (td) { x.column = td.column; (td.blank || []).forEach(k => { x[k] = ''; }); }
+    if (td) {
+      x.column = td.column;
+      copy.forEach(k => { x[k] = x[td.copy[k]]; });
+      drop.forEach(k => { x[k] = ''; });
+      (td.blank || []).forEach(k => { x[k] = ''; });
+    }
     rows.push(x);
   }
   if (records.length && !rows.length) {
@@ -359,13 +368,13 @@ function RowsCollector_(fill) {
 function groupSummaryDims_(cfg) {
   const set = {column: 1};
   (cfg.filters || []).forEach(k => { set[k] = 1; });
-  (cfg.charts || []).forEach(d => { set[d.dim || d.key] = 1; });
+  (cfg.charts || []).forEach(d => { if (!d.metric) set[d.dim || d.key] = 1; });
   return Object.keys(set).filter(k => (cfg.groupFields || []).indexOf(k) >= 0);
 }
 function GroupSummarySink_(cfg, filters, topLimit) {
   const dims = groupSummaryDims_(cfg), fill = fillEmpty_(cfg), fields = clientFields_(cfg);
   const active = dims.filter(k => filters && filters[k] && filters[k].length);
-  const sets = {};
+  const sets = {}, scopes = cfg.filterScopes || {};
   active.forEach(k => { sets[k] = {}; filters[k].forEach(v => { sets[k][String(v)] = 1; }); });
   const norm = (f, v) => {
     v = v === null || v === undefined ? '' : String(v);
@@ -374,7 +383,9 @@ function GroupSummarySink_(cfg, filters, topLimit) {
   };
   const marg = {}, totals = new Map();
   dims.forEach(k => { marg[k] = new Map(); });
-  let top = [], floor = 0, cubeRows = 0, totalQty = 0, outCount = 0;
+  // Maiores combinações POR LISTA (tabelas do painel: uma por lista; as listas pequenas têm quantidade 1).
+  const tops = {}, floors = {};
+  let cubeRows = 0, totalQty = 0, outCount = 0;
   const bump = (m, key, q) => { const v = m.get(key); if (v === undefined) { m.set(key, q); outCount++; } else m.set(key, v + q); };
   function addEncoded(ds) {
     const n = ds.n;
@@ -383,6 +394,9 @@ function GroupSummarySink_(cfg, filters, topLimit) {
     const vals = {}, ok = {}, cols = {};
     dims.forEach(f => { vals[f] = ds.dict[f] ? ds.dict[f].map(v => norm(f, v)) : [norm(f, '')]; cols[f] = idxOf(f); });
     active.forEach(f => { ok[f] = vals[f].map(v => !!sets[f][v]); });
+    // Filtro com escopo: só vale nas linhas da(s) lista(s) dele (por índice da coluna principal).
+    const inSc = {};
+    active.forEach(f => { if (scopes[f]) inSc[f] = vals.column.map(v => scopes[f].indexOf(v) >= 0); });
     const dDate = ds.dict.date || [''], cDate = idxOf('date'), cCol = cols.column, nCol = vals.column.length;
     const qd = (ds.dict.qty || []).map(v => v === '' || v === null || v === undefined ? 1 : (Number(v) || 0)), cQty = idxOf('qty');
     // Soma do dia por índices (data × coluna × valor) e só no fim vira texto.
@@ -392,8 +406,10 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       const q = cQty ? qd[cQty[i]] : 1;
       cubeRows++; totalQty += q;
       let fails = 0, failK = null;
+      const ci = cCol ? cCol[i] : 0;
       for (let a = 0; a < active.length; a++) {
         const k = active[a], c = cols[k];
+        if (inSc[k] && !inSc[k][ci]) continue;
         if (!ok[k][c ? c[i] : 0]) { fails++; failK = k; if (fails > 1) break; }
       }
       if (fails > 1) continue;
@@ -401,12 +417,13 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       if (fails === 1) { const c = cols[failK]; acc[failK][base * vals[failK].length + (c ? c[i] : 0)] += q; continue; }
       tot[base] += q;
       for (let a = 0; a < dims.length; a++) { const k = dims[a], c = cols[k]; acc[k][base * vals[k].length + (c ? c[i] : 0)] += q; }
-      if (topLimit && (q > floor || top.length < topLimit)) {
+      const colV = vals.column[ci], tl = tops[colV] || (tops[colV] = []), fl = floors[colV] || 0;
+      if (topLimit && (q > fl || tl.length < topLimit)) {
         const r = {};
         fields.forEach(f => { const c = ds.cols[f]; r[f] = c ? ds.dict[f][c[i]] : ''; });
         r.qty = q;
-        top.push(r);
-        if (top.length >= topLimit * 2) { top.sort((x, y) => y.qty - x.qty); top = top.slice(0, topLimit); floor = top[top.length - 1].qty; }
+        tl.push(r);
+        if (tl.length >= topLimit * 2) { tl.sort((x, y) => y.qty - x.qty); tops[colV] = tl.slice(0, topLimit); floors[colV] = tops[colV][topLimit - 1].qty; }
       }
     }
     for (let d = 0; d < dDate.length; d++) {
@@ -434,8 +451,9 @@ function GroupSummarySink_(cfg, filters, topLimit) {
         const p = key.split('\u0001');
         mb.addRows([{date: p[0], column: p[1], shipment: 'M' + (++seq), _m: k, value: p[2], qty: String(q)}]);
       }));
-      top.sort((x, y) => y.qty - x.qty);
-      const best = top.slice(0, topLimit || 0);
+      let best = [];
+      Object.keys(tops).forEach(k => { tops[k].sort((x, y) => y.qty - x.qty); best = best.concat(tops[k].slice(0, topLimit || 0)); });
+      best.sort((x, y) => y.qty - x.qty);
       const gb = DatasetBuilder_(fields, fill);
       best.forEach(r => { r.shipment = 'G' + (++seq); r.qty = String(r.qty); });
       gb.addRows(best);
@@ -461,7 +479,7 @@ function groupSummaryView_(cfg, built, filters) {
   const byDim = JTCore_.marginalsByDim(built.marginals);
   const totals = JTCore_.decodeDataset(built.totals);
   return {byDim: byDim, totals: totals, top: JTCore_.decodeDataset(built.top),
-    charts: (cfg.charts || []).map(def => JTCore_.buildChart(def, JTCore_.summaryChartRows(def, byDim, filters), {}))};
+    charts: (cfg.charts || []).filter(def => !def.metric).map(def => JTCore_.buildChart(def, JTCore_.summaryChartRows(def, byDim, filters), {}))};
 }
 
 function normalizeFilters_(filters) {
@@ -511,6 +529,7 @@ function maxClientRows_() {
  */
 function getDashboardData(indicatorKey, params) {
   const cfg = getIndicatorConfig_(indicatorKey);
+  JTCore_.setFilterScopes(cfg.filterScopes || {});
   const allRates = getRates_(indicatorKey, null, null);
   const p = resolvePeriod_(params, allRates, indicatorKey);
   const coverage = getCoverage_(indicatorKey, p.from, p.to);
@@ -538,7 +557,12 @@ function getDashboardData(indicatorKey, params) {
     rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics}
       : {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount}),
     // Ocorrências por turno de cada dia (filtro de turno: parte do turno na taxa, também no dia anterior).
-    agg: (cfg.filters || []).indexOf('shift') >= 0 ? getAgg_(indicatorKey, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total})) : [],
+    agg: (cfg.filters || []).indexOf('shift') >= 0 && !cfg.grouped ? getAgg_(indicatorKey, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total})) : [],
+    // Recebimento: turnos de cada lista por dia (cartões dos turnos e dia anterior com o filtro de turno).
+    colAgg: (cfg.shiftAggColumns || []).reduce((o, col) => {
+      o[col] = getAgg_(indicatorKey + ':' + col, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total}));
+      return o;
+    }, {}),
     // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (o painel troca a taxa pelo filtro).
     rateVariants: cfg.orderKinds ? ['main', 'sub'].reduce((o, k) => {
       o[k] = getRates_(indicatorKey + ':' + k, null, null).map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, estimated: r.estimated}));
@@ -594,6 +618,7 @@ function rateVariantFor_(cfg, indicatorKey, filters) {
 /** Visão consolidada do servidor (relatórios) — mesma regra do navegador. */
 function computeDashboard_(indicatorKey, params, archiveOpts) {
   const cfg = getIndicatorConfig_(indicatorKey);
+  JTCore_.setFilterScopes(cfg.filterScopes || {});
   const allRates = getRates_(indicatorKey, null, null);
   const p = resolvePeriod_(params, allRates, indicatorKey);
   const filters = normalizeFilters_(params && params.filters);
@@ -624,7 +649,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
     coverage: getCoverage_(indicatorKey, p.from, p.to),
     cards: JTCore_.computeCards(cfg, rv ? rv.rates : allRates, rows, rv ? rv.filters : filters, p.from, p.to,
       {shares: shares, shiftRows: sel ? JTCore_.applyFilters(archive.rows, filters, 'shift') : null}),
-    charts: cfg.charts.map(def => JTCore_.buildChart(def, rows, {})),
+    charts: cfg.charts.filter(def => !def.metric).map(def => JTCore_.buildChart(def, rows, {})),
     summary: JTCore_.summaryTable(cfg, rows),
     pivots: (cfg.pivotTables || []).map(def => JTCore_.pivot(rows, def))
   };

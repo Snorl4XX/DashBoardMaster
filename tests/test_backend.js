@@ -1112,25 +1112,41 @@ check(rAF && rAF.errorCount === afD.noArriverNum && rAF.totalCount === afD.shoul
 const dashAF = cAF.getDashboardData('arrival_flow', {from: D19, to: D19});
 const rowsAF = C.decodeDataset(dashAF.dataset);
 const sumQ = (rows, col) => rows.filter(r => !col || r.column === col).reduce((a, r) => a + Number(r.qty), 0);
+const COL_PREV = 'Sem bipe na etapa anterior', COL_NOSEND = 'Sem bipe de expedição nesta base';
 check(cAF.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' && rowsAF.length < afD.should.length + afD.total.length &&
-  sumQ(rowsAF, 'Deve chegar') === afD.should.length && sumQ(rowsAF, 'Chegou') === afD.total.length && rowsAF.every(r => r.shipment && /^G\d+$/.test(r.shipment)),
-  'detalhe das duas listas gravado AGRUPADO (combinações com a quantidade); somas = listas do JMS', {linhas: rowsAF.length, deve: sumQ(rowsAF, 'Deve chegar'), chegou: sumQ(rowsAF, 'Chegou')});
-check(rowsAF.filter(r => r.column === 'Deve chegar').every(r => !r.destination && !r.login) && rowsAF.filter(r => r.column === 'Chegou').every(r => !r.station),
-  'cada lista só com os campos dela (Deve chegar: estação de remessa; Chegou: última parada e digitalizador)');
-const expC = afD.should.filter(r => r.endCenterName === 'BA FEC').length;
-const chExp = C.buildChart(cfgAF.charts.filter(d => d.key === 'expCenter')[0], rowsAF, {});
-check(chExp.key === 'expCenter' && chExp.dim === 'destCenter' && chExp.datasets[0].data[chExp.labels.indexOf('BA FEC')] === expC && chExp.total === afD.should.length,
-  'gráfico "Deve chegar · DC destino" conta pela quantidade, só da lista dele', {labels: chExp.labels, total: chExp.total});
-const cardsAF = C.computeCards(cfgAF, dashAF.rates, rowsAF, {}, D19, D19);
-const cardsAFf = C.computeCards(cfgAF, dashAF.rates, C.applyFilters(rowsAF, {destCenter: ['BA FEC']}), {destCenter: ['BA FEC']}, D19, D19);
-check(cardsAF.currentErrors === afD.noArriverNum && cardsAFf.filtered && cardsAFf.currentErrors === afD.should.filter(r => r.endCenterName === 'BA FEC').length + afD.total.filter(r => r.endCenterName === 'BA FEC').length,
-  'cartões: oficial do JMS sem filtro; com filtro, soma das quantidades', [cardsAF.currentErrors, cardsAFf.currentErrors]);
-check(dashAF.rates[0].metrics && dashAF.rates[0].metrics.uploadNoSendNum === afD.uploadNoSendNum && C.distinctCount(rowsAF) === afD.should.length + afD.total.length,
-  'painel recebe os números do resumo (gráficos das subcolunas) e a contagem pondera a quantidade');
+  sumQ(rowsAF, 'Deve chegar') === afD.should.length && sumQ(rowsAF, 'Chegou') === afD.total.length &&
+  sumQ(rowsAF, COL_PREV) === afD.prev.length && sumQ(rowsAF, COL_NOSEND) === afD.noSend.length && rowsAF.every(r => r.shipment && /^G\d+$/.test(r.shipment)),
+  'detalhe das quatro listas (deve chegar, chegou, sem bipe anterior, sem bipe nesta base); somas = listas do JMS',
+  {linhas: rowsAF.length, deve: sumQ(rowsAF, 'Deve chegar'), chegou: sumQ(rowsAF, 'Chegou'), prev: sumQ(rowsAF, COL_PREV)});
+const exRows = rowsAF.filter(r => r.column === 'Deve chegar'), recRows = rowsAF.filter(r => r.column === 'Chegou'), prevRows = rowsAF.filter(r => r.column === COL_PREV);
+check(exRows.every(r => r.tripExp === r.tripId && !r.tripRec && !r.shift && /^T[123]$/.test(r.shiftExp) && !r.destCenter && !r.waybill) &&
+  recRows.every(r => r.tripRec === r.tripId && !r.tripExp && /^T[123]$/.test(r.shift) && !r.station && !r.waybill && !r.eventTime) &&
+  prevRows.every(r => r.tripPrev === r.tripId && r.waybill && r.eventTime && Number(r.qty) === 1) && prevRows.length === afD.prev.length &&
+  JSON.stringify(prevRows.map(r => r.waybill).sort()) === JSON.stringify(afD.prev.map(r => r.billcode).sort()),
+  'cada lista só com os campos dela; listas pequenas remessa a remessa (remessa e horário); ID de viagem no campo do filtro de cada lista');
+const tripsOf = list => list.reduce((o, r) => { const k = r.shipmentNo || 'N/A'; o[k] = (o[k] || 0) + 1; return o; }, {});
+const chTrip = C.buildChart(cfgAF.charts.filter(d => d.key === 'expTrip')[0], rowsAF, {}), tExp = tripsOf(afD.should);
+check(chTrip.dim === 'tripExp' && chTrip.labels.every((l, i) => chTrip.datasets[0].data[i] === tExp[l]) && chTrip.total === afD.should.length,
+  'gráfico "IDs de viagens que vamos receber" conta a lista Deve chegar pela quantidade', {labels: chTrip.labels});
+const chPrev = C.buildChart(cfgAF.charts.filter(d => d.key === 'prevTrip')[0], rowsAF, {}), tPrev = tripsOf(afD.prev);
+check(chPrev.total === afD.prev.length && chPrev.labels.every((l, i) => chPrev.datasets[0].data[i] === tPrev[l]),
+  'gráfico "IDs de viagens que não tiveram bipe de expedição no anterior" = lista do JMS desse número');
+// Filtros com escopo: o filtro de uma lista não mexe nas outras.
+C.setFilterScopes(cfgAF.filterScopes);
+const tX = chTrip.labels.filter(l => l !== 'N/A')[0], fTrip = C.applyFilters(rowsAF, {tripExp: [tX]});
+check(sumQ(fTrip, 'Deve chegar') === tExp[tX] && sumQ(fTrip, 'Chegou') === afD.total.length && sumQ(fTrip, COL_PREV) === afD.prev.length,
+  'filtro "IDs de viagem que devem chegar" só filtra a lista Deve chegar (as outras listas passam inteiras)');
+const facT = C.facets(rowsAF, {}, ['tripRec', 'station']);
+check(facT.tripRec.reduce((a, o) => a + o.total, 0) === afD.total.length && facT.station.reduce((a, o) => a + o.total, 0) === afD.should.length,
+  'opções de cada filtro saem só da lista dele (sem "Sem informação" das outras listas)');
+check(dashAF.rates[0].metrics && dashAF.rates[0].metrics.uploadNoSendNum === afD.uploadNoSendNum &&
+  C.distinctCount(rowsAF) === afD.should.length + afD.total.length + afD.prev.length + afD.noSend.length,
+  'painel recebe os números do resumo e a contagem pondera a quantidade');
 const catAF = cAF.getPublicCatalog_().filter(x => x.key === 'arrival_flow')[0];
-check(catAF.grouped && catAF.metricPanels.length === 2 && catAF.metricPanels[1].metrics.length === 5 && catAF.filters[0].key === 'column' &&
-  catAF.filters.map(f => f.key).join() === 'column,shift,destCenter,destBase,tripId,station,destination,login' && dashAF.dataset.fields.indexOf('qty') >= 0,
-  'catálogo: filtro de coluna principal + um por gráfico; painéis das subcolunas');
+check(catAF.grouped && catAF.metricPanels.length === 2 && catAF.metricPanels[1].metrics.length === 5 && catAF.tables.length === 3 &&
+  catAF.filters.map(f => f.key).join() === 'shift,tripExp,tripRec,station,tripPrev' && catAF.hideTarget && catAF.hideEvolution &&
+  catAF.filterScopes.tripExp[0] === 'Deve chegar' && dashAF.dataset.fields.indexOf('qty') >= 0 && dashAF.dataset.fields.indexOf('waybill') >= 0,
+  'catálogo: filtros por lista, 3 tabelas, sem quadro de meta e sem evolução da taxa');
 cAF.UrlFetchApp.fetch = (() => { const f = cAF.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cAF.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
 const repAF = cAF.generateReport('arrival_flow', {from: D19, to: D19}, 'xlsx');
 check(repAF.ok, 'relatório do Recebimento', repAF);
@@ -1290,38 +1306,41 @@ check(cAF.getRateDay_('arrival_flow', D19) && /sem filtro/.test((() => { try { c
   'dia fechado continua conferindo contra o resumo (payload sem filtro bloqueado)');
 
 // (h) Período grande (SP GRU: ~150 mil combinações por dia): totais por campo prontos no servidor,
-//     com os filtros aplicados lá. Tudo tem que bater com a conta feita nas combinações.
+//     com os filtros aplicados lá (com o escopo de cada filtro). Tudo tem que bater com a conta nas combinações.
 const sameChart = (a, b) => JSON.stringify([a.labels, a.datasets[0].data, a.total]) === JSON.stringify([b.labels, b.datasets[0].data, b.total]);
+const dimCharts = cfgAF.charts.filter(d => !d.metric);
 const smAll = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true});
 const byAll = C.marginalsByDim(smAll.summary.marginals), totAll = C.decodeDataset(smAll.dataset);
-check(smAll.summary && sumQ(totAll, 'Deve chegar') === afD.should.length && sumQ(totAll, 'Chegou') === afD.total.length &&
-  smAll.summary.totalQty === afD.should.length + afD.total.length && smAll.summary.cubeRows === rowsAF.length &&
-  cfgAF.charts.every(def => sameChart(C.buildChart(def, C.summaryChartRows(def, byAll, {})), C.buildChart(def, rowsAF))),
-  'totais por campo: os 9 gráficos iguais aos das combinações; totais por dia e coluna = listas do JMS',
+C.setFilterScopes(cfgAF.filterScopes);
+check(smAll.summary && sumQ(totAll, 'Deve chegar') === afD.should.length && sumQ(totAll, 'Chegou') === afD.total.length && sumQ(totAll, COL_PREV) === afD.prev.length &&
+  smAll.summary.totalQty === C.distinctCount(rowsAF) && smAll.summary.cubeRows === rowsAF.length &&
+  dimCharts.every(def => sameChart(C.buildChart(def, C.summaryChartRows(def, byAll, {})), C.buildChart(def, rowsAF))),
+  'totais por campo: gráficos iguais aos das combinações; totais por dia e lista = listas do JMS',
   {tot: totAll.length, marg: smAll.summary.marginals.n});
-const fSm = {column: ['Chegou'], destCenter: ['BA FEC']};
+const recTripX = C.buildChart(cfgAF.charts.filter(d => d.key === 'recTrip')[0], rowsAF).labels.filter(l => l !== 'N/A')[0];
+const fSm = {shift: ['T1'], tripRec: [recTripX]};
 const smF = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true, filters: fSm});
 const byF = C.marginalsByDim(smF.summary.marginals), totF = C.decodeDataset(smF.dataset), topF = C.decodeDataset(smF.summary.top);
 const cubeF = C.applyFilters(rowsAF, fSm);
-const facetCube = C.facets(rowsAF, fSm, ['destCenter', 'tripId']);
+const facetCube = C.facets(rowsAF, fSm, ['tripRec', 'shift', 'tripExp']);
 const facetSm = k => { const o = {}; if (fSm[k]) o[k] = fSm[k]; return C.facets(byF[k] || [], o, [k])[k]; };
 const facetEq = k => JSON.stringify(facetCube[k].filter(o => o.count).map(o => [o.value, o.count]).sort()) === JSON.stringify(facetSm(k).filter(o => o.count).map(o => [o.value, o.count]).sort());
-check(cfgAF.charts.filter(def => def.where.column === 'Chegou').every(def => sameChart(C.buildChart(def, C.summaryChartRows(def, byF, fSm)), C.buildChart(def, cubeF))) &&
-  facetEq('destCenter') && facetEq('tripId') && facetSm('destCenter').length > 1 &&
-  C.distinctCount(totF) === C.distinctCount(cubeF) && C.computeCards(cfgAF, smF.rates, totF, fSm, D19, D19).currentErrors === C.computeCards(cfgAF, smF.rates, cubeF, fSm, D19, D19).currentErrors,
-  'com filtros (aplicados no servidor): gráficos, listas dos filtros (outras opções continuam na lista) e cartões iguais às combinações',
-  {f: facetSm('destCenter').slice(0, 3)});
-check(topF.length > 0 && topF.length <= smF.summary.topLimit && topF.every(r => r.column === 'Chegou' && r.destCenter === 'BA FEC') &&
-  topF.every((r, i) => !i || Number(topF[i - 1].qty) >= Number(r.qty)) && Number(topF[0].qty) === Math.max.apply(null, cubeF.map(r => Number(r.qty))),
-  'tabela: as maiores combinações do filtro, da maior para a menor');
+check(dimCharts.every(def => sameChart(C.buildChart(def, C.summaryChartRows(def, byF, fSm)), C.buildChart(def, cubeF))) &&
+  facetEq('tripRec') && facetEq('shift') && facetEq('tripExp') && facetSm('tripRec').length > 1 &&
+  ['Deve chegar', 'Chegou', COL_PREV, COL_NOSEND].every(col => sumQ(totF, col) === sumQ(cubeF, col)) && sumQ(totF, 'Deve chegar') === afD.should.length,
+  'com filtros (aplicados no servidor, cada um na sua lista): gráficos, listas dos filtros e totais iguais às combinações',
+  {f: facetSm('tripRec').slice(0, 3)});
+check(topF.length > 0 && ['Chegou', COL_PREV, COL_NOSEND].every(col => topF.filter(r => r.column === col).length === Math.min(smF.summary.topLimit, cubeF.filter(r => r.column === col).length)) &&
+  topF.filter(r => r.column === 'Chegou').every(r => r.shift === 'T1' && r.tripRec === recTripX),
+  'tabelas: as maiores combinações de CADA lista com o filtro (as listas pequenas também aparecem)');
 const cAuto = freshCtx(dAF, null, {GROUPED_CLIENT_ROWS: '100'});
 cAuto.queueHistory(D19, D19, true);
 runAll(cAuto);
 const dAuto = cAuto.getDashboardData('arrival_flow', {from: D19, to: D19});
 const repSm = cAuto.computeDashboard_('arrival_flow', {from: D19, to: D19, filters: fSm});
+C.setFilterScopes(cfgAF.filterScopes);
 check(dAuto.summary && dAuto.meta.rowsLoaded === rowsAF.length && repSm.summaryMode && repSm.rows.length === topF.length &&
-  repSm.charts.filter(ch => ch.where && ch.where.column === 'Chegou').every((ch, i) => sameChart(ch, C.buildChart(cfgAF.charts.filter(d => d.where.column === 'Chegou')[i], cubeF))) &&
-  repSm.cards.currentErrors === C.distinctCount(cubeF),
+  repSm.charts.length === dimCharts.length && repSm.charts.every((ch, i) => sameChart(ch, C.buildChart(dimCharts[i], cubeF))),
   'acima do limite o painel e o relatório passam sozinhos para os totais por campo');
 cAuto.UrlFetchApp.fetch = (() => { const f = cAuto.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cAuto.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
 const repSmX = cAuto.generateReport('arrival_flow', {from: D19, to: D19, filters: fSm}, 'xlsx');
@@ -1393,39 +1412,59 @@ if (dDMt.rateVariants && dDMt.rateVariants.main && dDMt.rateVariants.main.length
     'Avaria: Pedido principal + T1 = taxa oficial da opção × participação do T1 (dia anterior sem agregado por opção)');
 } else check(false, 'Avaria sem taxa por opção no teste');
 
-// ---------- 23. V3.16: Recebimento por quantidade, turno pelo horário, pizzas e cartões dos turnos ----------
-const byShiftList = list => list.reduce((o, r) => { const s = C.shiftOf(r.sendTime); o[s] = (o[s] || 0) + 1; return o; }, {});
+// ---------- 23. V3.16/V3.17: Recebimento por quantidade e por turno ----------
+const byShiftList = list => list.reduce((o, r) => { const sh = C.shiftOf(r.sendTime); o[sh] = (o[sh] || 0) + 1; return o; }, {});
 const expS = byShiftList(afD.should), recS = byShiftList(afD.total);
 const pieExp = C.buildChart(cfgAF.charts.filter(d => d.key === 'expShift')[0], rowsAF), pieRec = C.buildChart(cfgAF.charts.filter(d => d.key === 'recShift')[0], rowsAF);
 const pieOf = ch => ch.labels.reduce((o, l, i) => { o[l] = ch.datasets[0].data[i]; return o; }, {});
-check(rowsAF.every(r => /^T[123]$/.test(r.shift)) && JSON.stringify(pieOf(pieExp)) === JSON.stringify({T1: expS.T1, T2: expS.T2, T3: expS.T3}) &&
-  JSON.stringify(pieOf(pieRec)) === JSON.stringify({T1: recS.T1, T2: recS.T2, T3: recS.T3}) && pieExp.type === 'doughnut',
-  'turno pelo horário (sendTime) de cada remessa; pizzas "Deve chegar · Turno" e "Chegou · Turno" = contagem das listas', {exp: pieOf(pieExp), esperado: expS});
-const fT1 = {column: ['Chegou'], shift: ['T1']};
-check(C.distinctCount(C.applyFilters(rowsAF, fT1)) === recS.T1, 'filtro de turno no Recebimento: Chegou no T1 = remessas da lista com horário do T1');
+const sameMap = (a, b) => ['T1', 'T2', 'T3'].every(k => (a[k] || 0) === (b[k] || 0));
+check(recRows.every(r => /^T[123]$/.test(r.shift)) && sameMap(pieOf(pieExp), expS) && sameMap(pieOf(pieRec), recS) && pieExp.type === 'doughnut' &&
+  pieRec.title.pt === 'Turno que recebeu mais' && pieExp.title.pt === 'O que deve chegar',
+  'turnos: "Turno que recebeu mais" pelo horário de descarregamento (Chegou) e "O que deve chegar" pelo horário de expedição (Deve chegar)', {exp: pieOf(pieExp), esperado: expS});
+const fT1 = {shift: ['T1']}, rT1 = C.applyFilters(rowsAF, fT1);
+check(sumQ(rT1, 'Chegou') === recS.T1 && sumQ(rT1, 'Deve chegar') === afD.should.length && sumQ(rT1, COL_PREV) === byShiftList(afD.prev).T1,
+  'filtro de turno vale nas listas do recebimento (Chegou e as listas pequenas); Deve chegar passa inteira');
 check(catAF.heroMetric.key === 'shouldArriverNum' && catAF.heroMetric.sub === 'noArriverNum' && catAF.metricCards &&
-  catAF.shiftCardsByColumn.main === 'Chegou' && catAF.filters[1].key === 'shift' && cfgAF.table.some(c => c[0] === 'shift'),
-  'catálogo: cartão principal = Deve chegar (quantidade) com as não chegadas; cartões das subcolunas e dos turnos');
-const smS = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true, filters: {column: ['Chegou']}});
+  catAF.shiftCardsByColumn.main === 'Chegou' && catAF.filters[0].key === 'shift' && cfgAF.table.some(c => c[0] === 'shift') &&
+  catAF.metricPanels[1].metrics.filter(m => m.card === false).map(m => m.key).join() === 'deliverNum' &&
+  catAF.metricPanels[1].metrics.map(m => m.label.pt).join('|') === 'Total de pedidos que chegaram|Sem bipar expedição na etapa anterior|Não realizamos bipe de expedição|Que não foram registrados no Sistema|Não há armazém de saída nesse local',
+  'catálogo: cartão principal Deve chegar; nomes novos dos cartões; "Não há armazém" só na tabela Dados gerais');
+const smS = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true});
 const bySm = C.marginalsByDim(smS.summary.marginals).shift || [];
 check(['T1', 'T2', 'T3'].every(sh => bySm.filter(r => r.shift === sh && r.column === 'Chegou').reduce((a, r) => a + Number(r.qty), 0) === recS[sh]),
   'modo de totais (período grande): totais por turno para os cartões e a pizza');
-// Migração: dias do Recebimento baixados sem turno (V3.14/V3.15) baixam de novo, uma vez, só na janela de detalhe.
+// Turnos de cada lista gravados por dia (dia anterior dos cartões de turno).
+const aggRec = (dashAF.colAgg || {}).Chegou || [], aggPrev = (dashAF.colAgg || {})[COL_PREV] || [];
+check(aggRec.length === 1 && aggRec[0].date === D19 && sameMap(aggRec[0], recS) && aggRec[0].total === afD.total.length &&
+  aggPrev.length === 1 && aggPrev[0].total === afD.prev.length && cAF.getResultsData({from: D19, to: D19}).series.filter(x => x.key === 'arrival_flow')[0].agg.length === 0,
+  'turnos de cada lista do dia gravados (aba AGG) e enviados ao painel; Resultados sem mistura', aggRec);
+// Menu lateral: a quantidade que deve chegar no lugar da taxa.
+const bootAF = cAF.getAppBootstrap().latestByIndicator.arrival_flow;
+check(bootAF && bootAF.qty === afD.should.length && bootAF.qtyDate === D19, 'menu lateral: quantidade que deve chegar (no lugar da taxa)', bootAF);
+// Listas pequenas opcionais: se o JMS recusar o detailType delas, o dia fecha com as duas listas grandes.
+const cOpt = freshCtx(dAF, {arrivalNoSmallLists: true});
+cOpt.queueHistory(D19, D19, true);
+runAll(cOpt);
+const rowsOpt = C.decodeDataset(cOpt.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
+check(/COMPLETE|CHECK_COUNTS/.test(cOpt.getDayStatus_('arrival_flow', D19).details) && sumQ(rowsOpt, 'Chegou') === afD.total.length && sumQ(rowsOpt, COL_PREV) === 0 &&
+  cOpt.allTabRows_('LOG').some(r => /Sem bipe na etapa anterior/.test(String(r[4]))),
+  'JMS recusa as listas pequenas: o dia fecha com Deve chegar e Chegou e o aviso fica no log', cOpt.getDayStatus_('arrival_flow', D19));
+// Migração por formato: dias baixados no formato antigo baixam de novo uma vez, só na janela de detalhe.
 const cMig = freshCtx(dAF);
 cMig.queueHistory(D19, D19, true);
 runAll(cMig);
-delete cMig.__state.props.MIGRATION_V316;
+cMig.__state.props.GROUPED_LAYOUT_ARRIVAL_FLOW = 'formato-antigo';
 cMig.STORAGE_CACHE_ = null; cMig.TAB_CACHE_ = {}; cMig.TAB_INDEX_ = {};
-const mig1 = cMig.migrateToV316_(), mig2 = cMig.migrateToV316_();
+const mig1 = cMig.migrateGroupedLayout_(), mig2 = cMig.migrateGroupedLayout_();
 cMig.STORAGE_CACHE_ = null; cMig.TAB_CACHE_ = {}; cMig.TAB_INDEX_ = {};
 const migJobs = cMig.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
 check(mig1 === 1 && mig2 === 0 && migJobs.length === 1 && migJobs[0].indicator === 'arrival_flow' && migJobs[0].date === D19,
-  'V3.16: dias do Recebimento na janela de detalhe baixados de novo uma vez (para separar por turno)', {mig1, mig2, jobs: migJobs.map(j => j.indicator + ' ' + j.date)});
+  'formato novo do detalhe: dias do Recebimento na janela baixados de novo uma vez', {mig1, mig2, jobs: migJobs.map(j => j.indicator + ' ' + j.date)});
 const cMig2 = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: ''});
 cMig2.queueHistory(D19, D19, true);
 runAll(cMig2);
-delete cMig2.__state.props.MIGRATION_V316;
+cMig2.__state.props.GROUPED_LAYOUT_ARRIVAL_FLOW = 'formato-antigo';
 cMig2.STORAGE_CACHE_ = null; cMig2.TAB_CACHE_ = {}; cMig2.TAB_INDEX_ = {};
-check(cMig2.migrateToV316_() === 0, 'dias fora da janela de detalhe (só resumo) não são baixados de novo');
+check(cMig2.migrateGroupedLayout_() === 0, 'dias fora da janela de detalhe (só resumo) não são baixados de novo');
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

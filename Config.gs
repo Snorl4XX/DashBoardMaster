@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.16.0',
+  VERSION: '3.17.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -84,7 +84,12 @@ const FILTER_LABELS = Object.freeze({
   column:          {pt: 'Coluna principal', zh: '主列'},
   destCenter:      {pt: 'DC destino', zh: '目的中心'},
   destBase:        {pt: 'Base destino', zh: '目的网点'},
-  qty:             {pt: 'Quantidade', zh: '数量'}
+  qty:             {pt: 'Quantidade', zh: '数量'},
+  tripExp:         {pt: 'IDs de viagem que devem chegar', zh: '应到车次号'},
+  tripRec:         {pt: 'IDs de viagem que chegou', zh: '已到车次号'},
+  tripPrev:        {pt: 'IDs sem bipe de expedição no anterior', zh: '上一环节未发件扫描车次号'},
+  shiftExp:        {pt: 'Turno da expedição (origem)', zh: '发件班次'},
+  waybill:         {pt: 'Remessa', zh: '运单号'}
 });
 
 /**
@@ -538,34 +543,54 @@ const INDICATORS = Object.freeze({
       endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_detail',
       candidates: ['arrivalbyday_detail', 'arrivalbyday_detailed', 'arrivalbyday_details', 'arrivalbyday_list'],
       days: 7, refreshHours: 6, maxPerDay: 900000,
+      // Uma lista por número clicado na tela (detailType = nome do número no resumo). Cada lista guarda só os
+      // campos dela (keep) e copia o ID de viagem para o campo do filtro dela (copy).
+      //  - Deve chegar: turno pelo "Horário de expedição" na origem (shiftExp → pizza "O que deve chegar").
+      //  - Chegou: turno pelo "Horário descarregamento veículo de chegada" (shift → "Turno que recebeu mais").
+      //  - Sem bipe na etapa anterior / sem bipe nesta base (V3.17): listas pequenas, remessa a remessa, para as
+      //    tabelas com todas as informações. `optional`: se o JMS recusar o detailType, o dia segue sem elas.
       types: [
-        {type: 'shouldArriverNum', column: 'Deve chegar', blank: ['destination', 'login']},
-        {type: 'totalNum', column: 'Chegou', blank: ['station']}
+        {type: 'shouldArriverNum', column: 'Deve chegar', copy: {tripExp: 'tripId', shiftExp: 'shift'},
+          keep: ['tripId', 'tripExp', 'station', 'shiftExp']},
+        {type: 'totalNum', column: 'Chegou', copy: {tripRec: 'tripId'},
+          keep: ['tripId', 'tripRec', 'shift', 'destCenter', 'destBase', 'destination', 'login']},
+        {type: 'uploadNoSendNum', column: 'Sem bipe na etapa anterior', optional: true, copy: {tripPrev: 'tripId', waybill: 'shipment'},
+          keep: ['waybill', 'eventTime', 'tripId', 'tripPrev', 'shift', 'station', 'destCenter', 'destBase', 'destination', 'login']},
+        {type: 'noSendNum', column: 'Sem bipe de expedição nesta base', optional: true, copy: {waybill: 'shipment'},
+          keep: ['waybill', 'eventTime', 'tripId', 'shift', 'station', 'destCenter', 'destBase', 'destination', 'login']}
       ]
     },
     fields: {
       shipment: ['billcode'], eventTime: ['sendTime'], tripId: ['shipmentNo'], destCenter: ['endCenterName'],
       destBase: ['endArrivalSitename'], station: ['inputsite'], destination: ['nextstation'], login: ['scanuser']
     },
-    // Linha agrupada: uma por combinação destes campos, com a quantidade de remessas.
-    // V3.16: com o turno (pelo horário sendTime). Cada viagem chega numa faixa de horário, então o turno quase
-    // não aumenta as combinações (simulação: 149.527 → 149.877 por dia; pior caso ~274 mil).
-    groupFields: ['column', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login', 'shift'],
+    // Linha agrupada: uma por combinação destes campos, com a quantidade de remessas. As listas pequenas guardam
+    // a remessa e o horário (uma linha por remessa); as grandes, só as combinações dos gráficos e da tabela.
+    groupFields: ['column', 'tripId', 'tripExp', 'tripRec', 'tripPrev', 'station', 'shiftExp', 'shift',
+      'destCenter', 'destBase', 'destination', 'login', 'waybill', 'eventTime'],
     labels: {
-      station: {pt: 'Estação de remessa', zh: '发件网点'}, destination: {pt: 'Última parada', zh: '上一站'},
-      login: {pt: 'Digitalizador', zh: '扫描员'}, tripId: {pt: 'ID de viagem', zh: '车次号'}
+      station: {pt: 'Bases que enviaram', zh: '发件网点'}, destination: {pt: 'Última parada', zh: '上一站'},
+      login: {pt: 'Digitalizador', zh: '扫描员'}, tripId: {pt: 'ID de viagem', zh: '车次号'},
+      shift: {pt: 'Turno (recebimento)', zh: '班次（到件）'}
     },
-    filters: ['column', 'shift', 'destCenter', 'destBase', 'tripId', 'station', 'destination', 'login'],
+    // Cada filtro vale só para a(s) lista(s) dele; as outras listas passam direto (Core.setFilterScopes).
+    filterScopes: {
+      tripExp: ['Deve chegar'], station: ['Deve chegar'], tripRec: ['Chegou'], tripPrev: ['Sem bipe na etapa anterior'],
+      shift: ['Chegou', 'Sem bipe na etapa anterior', 'Sem bipe de expedição nesta base']
+    },
+    filters: ['shift', 'tripExp', 'tripRec', 'station', 'tripPrev'],
     topCards: [],
     hideShiftCards: true,
-    // V3.16: cartões por quantidade, não por taxa. Cartão principal = quantidade que deve chegar no dia, com as
-    // não chegadas e o dia anterior embaixo; um cartão para cada outra subcoluna de "Deve chegar" e "Chegou"
-    // (metricPanels); cartões T1/T2/T3 com a quantidade de cada coluna principal no turno.
+    hideEvolution: true, hideTarget: true,
+    // Cartão principal = quantidade que deve chegar no dia (oficial do JMS), com as não chegadas e o dia anterior
+    // embaixo; um cartão por subcoluna (metricPanels, menos as com card: false); cartões T1/T2/T3 do recebido.
     heroMetric: {key: 'shouldArriverNum', column: 'Deve chegar', sub: 'noArriverNum',
       label: {pt: 'Deve chegar · Quantidade total de pedidos', zh: '应到总票数'}, labelPeriod: {pt: 'Deve chegar no período', zh: '期间应到总票数'},
-      subLabel: {pt: 'Não chegadas', zh: '未到件'}},
+      subLabel: {pt: 'Encomendas que não chegou', zh: '未到件'}, nav: {pt: 'Deve chegar hoje', zh: '今日应到'}},
     metricCards: true,
-    shiftCardsByColumn: {main: 'Chegou', columns: ['Chegou', 'Deve chegar']},
+    shiftCardsByColumn: {main: 'Chegou', columns: ['Chegou']},
+    // Turnos de cada lista gravados por dia (aba AGG, chave "arrival_flow:<lista>"): dia anterior dos turnos.
+    shiftAggColumns: ['Chegou', 'Sem bipe na etapa anterior', 'Sem bipe de expedição nesta base'],
     texts: {
       errors: {pt: 'Não chegadas', zh: '未到件'},
       errorsDay: {pt: 'Não chegadas no dia', zh: '当日未到件'}, errorsPeriod: {pt: 'Não chegadas no período', zh: '期间未到件'},
@@ -574,36 +599,57 @@ const INDICATORS = Object.freeze({
       shiftErrors: {pt: 'Não chegadas {s}', zh: '{s} 未到件'}, shareOfErrors: {pt: '{p} das não chegadas', zh: '占未到件 {p}'},
       rateOfDay: {pt: '% não chegou · {date}', zh: '{date} 未到件率'}, rateOfPeriod: {pt: '% não chegou no período', zh: '期间未到件率'}
     },
-    // Subcolunas de cada coluna principal: um gráfico por número, com os dias anteriores para comparar.
+    // Números do resumo (primeira tabela da tela). `detail`: lista que tem a remessa a remessa desse número (o
+    // cartão muda com os filtros). card: false = só na tabela "Dados gerais".
     metricPanels: [
       {column: 'Deve chegar', title: {pt: 'Deve chegar', zh: '应到'}, metrics: [
-        {key: 'shouldArriverNum', label: {pt: 'Quantidade total de pedidos', zh: '应到总票数'}},
-        {key: 'noArriverNum', label: {pt: 'Encomendas não chegadas', zh: '未到件总票数'}, bad: true}
+        {key: 'shouldArriverNum', label: {pt: 'Quantidade total de pedidos', zh: '应到总票数'}, detail: 'Deve chegar'},
+        {key: 'noArriverNum', label: {pt: 'Encomendas que não chegou', zh: '未到件总票数'}, bad: true}
       ]},
       {column: 'Chegou', title: {pt: 'Chegou', zh: '已到'}, metrics: [
-        {key: 'totalNum', label: {pt: 'Total de pedidos que chegaram', zh: '已到总票数'}},
-        {key: 'uploadNoSendNum', label: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}, bad: true},
-        {key: 'noSendNum', label: {pt: 'Sem bipagem de expedição nesta base', zh: '本网点未发件扫描'}, bad: true},
-        {key: 'noSignNum', label: {pt: 'Baixas não realizadas', zh: '未签收'}, bad: true},
-        {key: 'deliverNum', label: {pt: 'Não há armazém de saída nesse local', zh: '本网点无出仓'}, bad: true}
+        {key: 'totalNum', label: {pt: 'Total de pedidos que chegaram', zh: '已到总票数'}, detail: 'Chegou'},
+        {key: 'uploadNoSendNum', label: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}, bad: true, detail: 'Sem bipe na etapa anterior'},
+        {key: 'noSendNum', label: {pt: 'Não realizamos bipe de expedição', zh: '本网点未发件扫描'}, bad: true, detail: 'Sem bipe de expedição nesta base'},
+        {key: 'noSignNum', label: {pt: 'Que não foram registrados no Sistema', zh: '未签收'}, bad: true},
+        {key: 'deliverNum', label: {pt: 'Não há armazém de saída nesse local', zh: '本网点无出仓'}, bad: true, card: false}
       ]}
     ],
+    // Gráficos separados, no padrão dos outros painéis. `metric`: número do resumo dia a dia (linha ou colunas);
+    // `dim`: contagem da lista indicada em `where`.
     charts: [
-      {key: 'expShift', dim: 'shift', where: {column: 'Deve chegar'}, type: 'doughnut', title: {pt: 'Deve chegar · Turno', zh: '应到 · 班次'}},
-      {key: 'expCenter', dim: 'destCenter', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · DC destino', zh: '应到 · 目的中心'}},
-      {key: 'expBase', dim: 'destBase', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · Base destino', zh: '应到 · 目的网点'}},
-      {key: 'expTrip', dim: 'tripId', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · ID de viagem', zh: '应到 · 车次号'}},
-      {key: 'expStation', dim: 'station', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Deve chegar · Estação de remessa', zh: '应到 · 发件网点'}},
-      {key: 'recShift', dim: 'shift', where: {column: 'Chegou'}, type: 'doughnut', title: {pt: 'Chegou · Turno', zh: '已到 · 班次'}},
-      {key: 'recCenter', dim: 'destCenter', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · DC destino', zh: '已到 · 目的中心'}},
-      {key: 'recBase', dim: 'destBase', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · Base destino', zh: '已到 · 目的网点'}},
-      {key: 'recTrip', dim: 'tripId', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · ID de viagem', zh: '已到 · 车次号'}},
-      {key: 'recLastStop', dim: 'destination', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · Última parada', zh: '已到 · 上一站'}},
-      {key: 'recScanner', dim: 'login', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'Chegou · Digitalizador', zh: '已到 · 扫描员'}}
+      {key: 'mShould', metric: 'shouldArriverNum', type: 'line', days: 30, title: {pt: 'Deve chegar', zh: '应到'}},
+      {key: 'expShift', dim: 'shiftExp', where: {column: 'Deve chegar'}, type: 'doughnut', title: {pt: 'O que deve chegar', zh: '应到（按发件班次）'},
+        sub: {pt: 'Turno pelo horário de expedição na base de origem', zh: '按始发网点发件时间划分班次'}},
+      {key: 'mNoArr', metric: 'noArriverNum', type: 'bar', bad: true, title: {pt: 'Encomendas não chegadas', zh: '未到件'}},
+      {key: 'mRec', metric: 'totalNum', type: 'bar', title: {pt: 'Chegou', zh: '已到'}},
+      {key: 'recShift', dim: 'shift', where: {column: 'Chegou'}, type: 'doughnut', title: {pt: 'Turno que recebeu mais', zh: '到件最多的班次'},
+        sub: {pt: 'Turno pelo horário de descarregamento do veículo de chegada', zh: '按到件车辆卸车时间划分班次'}},
+      {key: 'mPrev', metric: 'uploadNoSendNum', type: 'bar', bad: true, title: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}},
+      {key: 'prevTrip', dim: 'tripPrev', where: {column: 'Sem bipe na etapa anterior'}, type: 'bar', top: 10,
+        title: {pt: 'IDs de viagens que não tiveram bipe de expedição no anterior', zh: '上一环节未发件扫描的车次号'}},
+      {key: 'mNoSend', metric: 'noSendNum', type: 'bar', bad: true, title: {pt: 'Não realizamos bipe de expedição', zh: '本网点未发件扫描'}},
+      {key: 'expTrip', dim: 'tripExp', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'IDs de viagens que vamos receber', zh: '将到车次号'}},
+      {key: 'expStation', dim: 'station', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Bases que enviaram', zh: '发件网点'}},
+      {key: 'recTrip', dim: 'tripRec', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'IDs que já recebemos', zh: '已到车次号'}}
+    ],
+    // Tabelas do painel (uma por lista). `table` (abaixo) = todas as colunas, para o relatório e o CSV.
+    tables: [
+      {key: 'tPrev', column: 'Sem bipe na etapa anterior', title: {pt: 'Total que não tiveram o bipe de expedição anterior', zh: '上一环节未发件扫描明细'},
+        cols: [['date', 'Data', '日期'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
+          ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação', '网点'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
+          ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员']]},
+      {key: 'tRec', column: 'Chegou', title: {pt: 'Total que foi recebido por nós', zh: '已到明细'},
+        cols: [['date', 'Data', '日期'], ['shift', 'Turno', '班次'], ['tripId', 'ID de viagem', '车次号'], ['destCenter', 'DC destino', '目的中心'],
+          ['destBase', 'Base destino', '目的网点'], ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']]},
+      {key: 'tNoSend', column: 'Sem bipe de expedição nesta base', title: {pt: 'Total de quantos nós não demos bipe de expedição', zh: '本网点未发件扫描明细'},
+        cols: [['date', 'Data', '日期'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
+          ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação', '网点'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
+          ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员']]}
     ],
     table: [
-      ['date', 'Data', '日期'], ['column', 'Coluna', '主列'], ['shift', 'Turno', '班次'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
-      ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação de remessa', '发件网点'], ['destination', 'Última parada', '上一站'],
+      ['date', 'Data', '日期'], ['column', 'Lista', '列表'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
+      ['shiftExp', 'Turno da expedição', '发件班次'], ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação de remessa', '发件网点'],
+      ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'], ['destination', 'Última parada', '上一站'],
       ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']
     ]
   }
@@ -639,7 +685,7 @@ function chartShiftDim_(c) { return c.key === 'segmentByShift' ? 'segment' : (c.
 function usedFields_(cfg) {
   const set = {date: 1, shipment: 1, shift: 1};
   (cfg.filters || []).forEach(k => set[k] = 1);
-  (cfg.charts || []).forEach(c => { set[chartShiftDim_(c) || c.dim || c.key] = 1; if (c.where) Object.keys(c.where).forEach(k => { set[k] = 1; }); });
+  (cfg.charts || []).forEach(c => { if (c.metric) return; set[chartShiftDim_(c) || c.dim || c.key] = 1; if (c.where) Object.keys(c.where).forEach(k => { set[k] = 1; }); });
   if (cfg.grouped) set.qty = 1;
   (cfg.table || []).forEach(c => set[c[0]] = 1);
   (cfg.topCards || []).forEach(k => set[k] = 1);
@@ -681,7 +727,8 @@ function getPublicCatalog_() {
       valueCards: cfg.valueCards || [],
       texts: cfg.texts || null,
       metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, metricCards: !!cfg.metricCards,
-      shiftCardsByColumn: cfg.shiftCardsByColumn || null,
+      shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
+      hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
       grouped: !!cfg.grouped,
       detailDays: cfg.detail && cfg.detail.days || null,
       naLabel: cfg.naLabel || null,

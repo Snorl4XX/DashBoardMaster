@@ -414,16 +414,27 @@ function JTCoreFactory_() {
   function hasFilters(filters) {
     return Object.keys(filters || {}).some(function (k) { return Array.isArray(filters[k]) && filters[k].length > 0; });
   }
+  /**
+   * Filtros que valem só para algumas listas (Recebimento: "IDs de viagem que devem chegar" só na lista Deve
+   * chegar): {chave: [valores de "column"]}. As linhas das outras listas passam direto por esse filtro.
+   * Definido por indicador (servidor: getDashboardData/computeDashboard_; navegador: ao carregar o painel).
+   */
+  var FILTER_SCOPES = {};
+  function setFilterScopes(scopes) { FILTER_SCOPES = scopes || {}; }
+  function inScope(k, r) { var sc = FILTER_SCOPES[k]; return !sc || sc.indexOf(r.column) >= 0; }
   function applyFilters(rows, filters, exceptKey) {
     var active = Object.keys(filters || {}).filter(function (k) {
       return k !== exceptKey && Array.isArray(filters[k]) && filters[k].length > 0;
     });
     if (!active.length) return rows || [];
     var sets = active.map(function (k) {
-      var s = {}; filters[k].forEach(function (v) { s[String(v)] = 1; }); return [k, s];
+      var s = {}; filters[k].forEach(function (v) { s[String(v)] = 1; }); return [k, s, FILTER_SCOPES[k] || null];
     });
     return (rows || []).filter(function (r) {
-      for (var i = 0; i < sets.length; i++) { if (!sets[i][1][norm(r[sets[i][0]])]) return false; }
+      for (var i = 0; i < sets.length; i++) {
+        if (sets[i][2] && sets[i][2].indexOf(r.column) < 0) continue;
+        if (!sets[i][1][norm(r[sets[i][0]])]) return false;
+      }
       return true;
     });
   }
@@ -473,8 +484,10 @@ function JTCoreFactory_() {
     var out = {};
     (keys || []).forEach(function (k) {
       var all = {}, cnt = {};
-      countBy(rows, k).forEach(function (x) { all[x.label] = x.value; });
-      countBy(applyFilters(rows, filters, k), k).forEach(function (x) { cnt[x.label] = x.value; });
+      // Filtro com escopo: as opções e as contagens saem só das linhas da(s) lista(s) dele.
+      var own = FILTER_SCOPES[k] ? (rows || []).filter(function (r) { return inScope(k, r); }) : rows;
+      countBy(own, k).forEach(function (x) { all[x.label] = x.value; });
+      countBy(applyFilters(own, filters, k), k).forEach(function (x) { cnt[x.label] = x.value; });
       if (SHIFT_KEYS[k]) SHIFTS.forEach(function (s) { if (all[s] === undefined) all[s] = 0; });
       (filters && filters[k] || []).forEach(function (v) { if (all[v] === undefined) all[v] = 0; });
       out[k] = orderOptions(k, Object.keys(all).map(function (v) {
@@ -759,7 +772,7 @@ function JTCoreFactory_() {
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
-    computeCards: computeCards, weight: weight, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
+    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
     encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText
   };
 }

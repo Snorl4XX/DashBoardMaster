@@ -295,8 +295,8 @@ function fakeJms(dayData, options) {
         if (!d || !d.af) return ok([], 0, 1, body.size);
         const a = d.af;
         return ok([{sendTime: date, proxyAreaCode: '370000', proxyAreaName: 'SPE', nextstation: 'SP GRU', nextstationcode: '30001',
-          shouldArriverNum: a.should.length, noArriverNum: a.noArriverNum, totalNum: a.total.length, uploadNoSendNum: a.uploadNoSendNum,
-          noSendNum: a.noSendNum, noSignNum: a.total.length, deliverNum: a.total.length, PAGEHELPER_ROW_ID: 1, ROW_ID: 1}], 1, 1, body.size);
+          shouldArriverNum: a.should.length, noArriverNum: a.noArriverNum, totalNum: a.total.length, uploadNoSendNum: a.prev.length,
+          noSendNum: a.noSend.length, noSignNum: a.total.length, deliverNum: a.total.length, PAGEHELPER_ROW_ID: 1, ROW_ID: 1}], 1, 1, body.size);
       }
       case 'arrivalbyday_detail':
       case 'arrivalbyday_detailed':
@@ -304,7 +304,10 @@ function fakeJms(dayData, options) {
         // options.arrivalDetailRoute: o endereço real do detalhe (os outros respondem 404).
         if (route !== (options.arrivalDetailRoute || 'arrivalbyday_detail')) return respond(404, {});
         if (!d || !d.af) return ok([], 0, 1, body.size);
-        const list = inWindowBy(body.detailType === 'totalNum' ? d.af.total : body.detailType === 'shouldArriverNum' ? d.af.should : [], 'sendTime');
+        // options.arrivalNoSmallLists: o JMS recusa os detailType das listas pequenas (testa a lista opcional).
+        if (options.arrivalNoSmallLists && (body.detailType === 'uploadNoSendNum' || body.detailType === 'noSendNum')) return ok([], 0, 1, body.size);
+        const lists = {totalNum: d.af.total, shouldArriverNum: d.af.should, uploadNoSendNum: d.af.prev, noSendNum: d.af.noSend};
+        const list = inWindowBy(lists[body.detailType] || [], 'sendTime');
         const sz = Math.min(options.maxPageSize || 1000, body.size);
         return ok(list.slice((body.current - 1) * sz, body.current * sz).map((r, i) => Object.assign({PAGEHELPER_ROW_ID: i + 1}, r)), list.length, body.current, sz);
       }
@@ -441,7 +444,11 @@ function makeArrival(date, seed, scale) {
     total.push({billcode: '9998827' + tag + String(i).padStart(6, '0'), inputsite: 'SP GRU', sendTime: time(), nextstation: rnd() < 0.2 ? 'PA SHEIN-GRU-SP' : null,
       scanuser: pick(scanners), shipmentNo: pick(trips), endCenterName: c, endArrivalSitename: pick(bases[c])});
   }
-  return {af: {should: should, total: total, noArriverNum: Math.round(nS * 0.43), uploadNoSendNum: Math.round(nT * 0.068), noSendNum: Math.round(nT * 0.056)}};
+  // Listas pequenas (V3.17): remessas do "Chegou" sem bipe de expedição na etapa anterior / nesta base.
+  const prev = total.filter((r, i) => i % 15 === 3).map(r => Object.assign({}, r));
+  const noSend = total.filter((r, i) => i % 18 === 7).map(r => Object.assign({}, r));
+  return {af: {should: should, total: total, prev: prev, noSend: noSend, noArriverNum: Math.round(nS * 0.43),
+    uploadNoSendNum: prev.length, noSendNum: noSend.length}};
 }
 
 module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
