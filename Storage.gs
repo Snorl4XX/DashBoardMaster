@@ -1231,7 +1231,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
@@ -1851,41 +1851,67 @@ function groupedBudgetLeftMs_() {
 /**
  * Recebimento: o resumo do dia consultado por horário de turno (T1 06–14h, T2 14–22h, T3 00–06h + 22–24h).
  * Quatro consultas dão a quantidade de cada turno de cada número (summary.shiftWindows) — os cartões T1/T2/T3 e
- * as pizzas funcionam sem o detalhe. Gravado na aba AGG ("arrival_flow:resumo:<número>"). A soma dos horários
- * tem de fechar com o dia: se não fechar, o JMS ignora a hora e o recurso desliga (JMS_NO_SUMMARY_SHIFTS_<ROTA>).
+ * as pizzas funcionam sem o detalhe. Gravado na aba AGG ("arrival_flow:resumo:<número>").
+ * Cada número é conferido sozinho: a soma dos horários tem de fechar com o dia. O que não fecha num dia já
+ * fechado (o JMS conta esse número por outro horário) fica desligado só para ele (JMS_SUMMARY_SHIFTS_OFF_<ROTA>,
+ * JSON {número: motivo}); os outros continuam. Hoje, uma diferença só pula a gravação (o dia cresce).
  */
 const SHIFT_WINDOWS_ = [['T1', '06:00:00', '13:59:59'], ['T2', '14:00:00', '21:59:59'], ['T3', '00:00:00', '05:59:59'], ['T3', '22:00:00', '23:59:59']];
 function summaryShiftKey_(indicator, metric) { return indicator + ':resumo:' + metric; }
+function summaryShiftsOff_(cfg) { return safeJsonParse_(getProp_('JMS_SUMMARY_SHIFTS_OFF_' + cfg.routeKey, ''), {}) || {}; }
 function syncSummaryShifts_(indicator, date, dayMetrics) {
-  const cfg = getIndicatorConfig_(indicator), metrics = cfg.summary && cfg.summary.shiftWindows;
-  if (!metrics || !metrics.length || getProp_('JMS_NO_SUMMARY_SHIFTS_' + cfg.routeKey, '')) return null;
+  const cfg = getIndicatorConfig_(indicator), all = cfg.summary && cfg.summary.shiftWindows;
+  if (!all || !all.length) return null;
+  const off = summaryShiftsOff_(cfg);
+  // Números das listas (os que aparecem nos cartões e pizzas); os outros só acompanham.
+  const lists = (cfg.metricPanels || []).reduce((a, p) => a.concat(p.metrics.filter(m => m.detail).map(m => m.key)), []);
+  const metrics = all.filter(m => !off[m]);
+  if (!metrics.some(m => !lists.length || lists.indexOf(m) >= 0)) return null;
   // Números do dia inteiro: os do resumo já baixado; resumo em várias linhas (sem os números) → uma consulta a mais.
   if (!dayMetrics || !metrics.some(m => dayMetrics[m] !== undefined && dayMetrics[m] !== null && dayMetrics[m] !== '')) {
     dayMetrics = fetchSummaryMetrics_(indicator, date, null);
   }
   // As 4 janelas de uma vez (fetchAll): numa conta Gmail, uma por uma custavam ~9 min/dia de gatilho.
   const per = fetchSummaryMetricsBatch_(indicator, date, SHIFT_WINDOWS_.map(w => ({start: date + ' ' + w[1], end: date + ' ' + w[2]})));
-  // Confere os números que aparecem nos cartões e pizzas (os das listas); hoje o número cresce entre as
-  // consultas: folga de 2% (mín. 20).
-  const lists = ((cfg.metricPanels || []).reduce((a, p) => a.concat(p.metrics.filter(m => m.detail).map(m => m.key)), []));
-  const checks = metrics.filter(m => Number(dayMetrics[m]) > 0 && (!lists.length || lists.indexOf(m) >= 0));
-  for (const ck of checks) {
-    const day = Number(dayMetrics[ck]), sum = per.reduce((a, x) => a + (Number(x[ck]) || 0), 0);
-    if (Math.abs(sum - day) > Math.max(20, day * 0.02)) {
-      setProp_('JMS_NO_SUMMARY_SHIFTS_' + cfg.routeKey, 'soma dos horários ' + sum + ' ≠ dia ' + day + ' (' + ck + ', ' + date + ')');
-      logSync_('WARN', indicator, date, 'Turnos pelo resumo desativados: a soma dos horários (' + sum + ') não fecha com o dia (' + day +
-        ') em ' + ck + ' — o JMS não filtra o resumo pela hora. Os turnos vêm só do detalhe.');
-      return null;
-    }
-  }
-  const out = {};
+  const closed = date < isoToday_(), out = {}, bad = [];
   metrics.forEach(m => {
     const c = {T1: 0, T2: 0, T3: 0, NA: 0};
     per.forEach((x, i) => { c[SHIFT_WINDOWS_[i][0]] += Number(x[m]) || 0; });
-    upsertAggCounts_(summaryShiftKey_(indicator, m), date, c, c.T1 + c.T2 + c.T3);
+    const sum = c.T1 + c.T2 + c.T3, day = Number(dayMetrics[m]) || 0;
+    // Hoje o número cresce entre as consultas: folga de 2% (mín. 20).
+    if (Math.abs(sum - day) > Math.max(20, day * 0.02)) {
+      if (closed) { off[m] = 'soma dos horários ' + sum + ' ≠ dia ' + day + ' (' + date + ')'; bad.push(m + ' (' + sum + ' ≠ ' + day + ')'); }
+      return;
+    }
+    upsertAggCounts_(summaryShiftKey_(indicator, m), date, c, sum);
     out[m] = c;
   });
+  if (bad.length) {
+    setProp_('JMS_SUMMARY_SHIFTS_OFF_' + cfg.routeKey, JSON.stringify(off));
+    logSync_('WARN', indicator, date, 'Turnos pelo resumo desligados para: ' + bad.join(', ') + ' — nesses números o JMS não filtra o resumo ' +
+      'pela hora; eles vêm só do detalhe.' + (Object.keys(out).length ? ' Continuam pelo resumo: ' + Object.keys(out).join(', ') + '.' : ''));
+  }
   return out;
+}
+
+/**
+ * V3.19.1: os turnos pelo resumo só eram consultados quando o resumo do dia era atualizado (hoje, ontem e
+ * anteontem, de hora em hora). Uma vez, os dias da janela de detalhe do Recebimento ganham a consulta já.
+ */
+function migrateToV3191_() {
+  if (getProp_('MIGRATION_V3191', '')) return 0;
+  const jobs = [];
+  Object.keys(INDICATORS).filter(k => ((INDICATORS[k].summary || {}).shiftWindows || []).length).forEach(k => {
+    const n = Math.max(7, detailDays_(INDICATORS[k]) || 0);
+    allTabRows_('STATUS').forEach(r => {
+      const d = dateCellIso_(r[1]);
+      if (String(r[0]) === k && isIso_(d) && d >= addDaysIso_(isoToday_(), -n) && r[2] === 'COMPLETE') jobs.push(['SUMMARY', k, d, 0]);
+    });
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V3191', new Date().toISOString());
+  if (n) logSync_('INFO', '', '', 'V3.19.1: ' + n + ' dia(s) do Recebimento com os turnos pelo resumo consultados agora.');
+  return n;
 }
 
 /**

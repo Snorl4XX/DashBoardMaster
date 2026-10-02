@@ -553,7 +553,9 @@ function getDashboardData(indicatorKey, params) {
         readFiles: archive.readFiles, fullyLoaded: archive.fullyLoaded, maxRows: summaryMode ? null : maxRows},
       rowsLoaded: summaryMode ? built.cubeRows : builder.count(),
       // Por que falta detalhe (fila, partes baixadas de cada lista, erro): o painel mostra no lugar de "sem dados".
-      detailProgress: archive.fullyLoaded ? null : safeCall_(() => detailProgress_(indicatorKey, p.from, p.to))
+      detailProgress: archive.fullyLoaded ? null : safeCall_(() => detailProgress_(indicatorKey, p.from, p.to)),
+      // Recebimento: números que o JMS não separa por horário no resumo (turnos só pelo detalhe).
+      summaryShiftsOff: ((cfg.summary || {}).shiftWindows || []).length ? summaryShiftsOff_(cfg) : null
     },
     // metrics: números do resumo do dia (Recebimento: as subcolunas de "Deve chegar" e "Chegou").
     rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics}

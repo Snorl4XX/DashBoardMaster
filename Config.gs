@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.19.0',
+  VERSION: '3.19.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -538,8 +538,8 @@ const INDICATORS = Object.freeze({
       metrics: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum', 'noSignNum', 'deliverNum'],
       // V3.19: o mesmo resumo consultado por horário (T1 06h–14h, T2 14h–22h, T3 22h–06h) dá a quantidade de cada
       // turno com 4 consultas, sem esperar o detalhe (~5 mil consultas por dia). Usado nos cartões T1/T2/T3 e nas
-      // pizzas enquanto o detalhe do dia não chegou. Se a soma dos horários não fechar com o dia, o JMS ignora a
-      // hora: o recurso desliga sozinho (propriedade JMS_NO_SUMMARY_SHIFTS_ARRIVAL).
+      // pizzas enquanto o detalhe do dia não chegou. Cada número é conferido sozinho: se a soma dos horários não
+      // fechar com o dia, só ele desliga (propriedade JMS_SUMMARY_SHIFTS_OFF_ARRIVAL); os outros continuam.
       shiftWindows: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum']
     },
     detail: {

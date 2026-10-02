@@ -104,7 +104,9 @@
       noRowsHint: 'Nenhuma remessa com estes filtros neste período.', dsTitle: 'Download do detalhe', dsOutside: 'fora dos últimos {n} dias com detalhe (só o resumo)', dsNoSummary: 'aguardando o resumo do dia no JMS',
       dsSkipped: 'o JMS não entregou a lista "{l}": {r}', dsListDone: 'lista baixada; não há registros com estes filtros',
       dsDownloading: 'baixando: {p}% desta lista ({a} de {b} partes), atualizado às {at}', dsDayDownloading: 'baixando: {p}% do dia ({a} de {b} partes), atualizado às {at}',
-      dsListWaiting: 'na fila deste dia: as listas menores vêm antes ({p}% do dia baixado)', dsError: 'erro no download: {r}. Nova tentativa automática',
+      dsListWaiting: '"{l}" ainda não começou: as listas menores vêm antes ({p}% do dia baixado)',
+      scSumWait: 'Os turnos pelo resumo do JMS chegam na próxima atualização (de hora em hora); depois, com a lista "{l}".',
+      scSumOff: 'O JMS não separa "{l}" por horário no resumo: os turnos vêm da lista, baixada por último.', dsError: 'erro no download: {r}. Nova tentativa automática',
       dsLastError: 'último erro: {r}', dsQueued: 'na fila do download ({n} tarefa(s) antes; o Recebimento roda depois dos outros painéis)',
       dsWaiting: 'aguardando a sincronização (fila a cada 5 min)', dsBudget: 'limite diário do Recebimento atingido ({m} min, conta Gmail): continua amanhã',
       dsPaused: 'rota pausada: {r}', dsDone: 'completo', dsHelp: 'Para saber o motivo em detalhe, rode diagnosticarRecebimento() no editor do Apps Script.',
@@ -204,7 +206,9 @@
       noRowsHint: '本期间在当前筛选下没有记录。', dsTitle: '明细下载', dsOutside: '超出明细保留天数（{n} 天），仅有汇总', dsNoSummary: '等待JMS当日汇总',
       dsSkipped: 'JMS 未返回列表「{l}」：{r}', dsListDone: '列表已下载；当前筛选下无记录',
       dsDownloading: '下载中：本列表 {p}%（{a}/{b} 段），更新于 {at}', dsDayDownloading: '下载中：当日 {p}%（{a}/{b} 段），更新于 {at}',
-      dsListWaiting: '当日排队中：先下载较小的列表（当日已下载 {p}%）', dsError: '下载出错：{r}。将自动重试',
+      dsListWaiting: '「{l}」尚未开始：先下载较小的列表（当日已下载 {p}%）',
+      scSumWait: '按时段的JMS汇总将在下次更新（每小时）时获取；之后以「{l}」列表为准。',
+      scSumOff: 'JMS汇总无法按时段拆分「{l}」：班次来自该列表（最后下载）。', dsError: '下载出错：{r}。将自动重试',
       dsLastError: '最近错误：{r}', dsQueued: '排队中（前面还有 {n} 个任务；到件明细排在其他看板之后）',
       dsWaiting: '等待同步（每 5 分钟一次）', dsBudget: '今日到件明细下载时长已达上限（{m} 分钟，Gmail 账号），明天继续',
       dsPaused: '接口已暂停：{r}', dsDone: '完成', dsHelp: '如需详细原因，请在 Apps Script 编辑器中运行 diagnosticarRecebimento()。',
@@ -1200,7 +1204,7 @@
     var text;
     if (DETAIL_DONE.indexOf(d.details) >= 0 && !l) text = t('dsDone');
     else if (l && l.done >= l.units && units) text = t('dsListDone');
-    else if (l && !l.done && done) text = t('dsListWaiting', {p: Math.round(done / units * 100)});
+    else if (l && !l.done && done) text = t('dsListWaiting', {l: vlabel('column', l.column), p: Math.round(done / units * 100)});
     else if (l && l.done) text = t('dsDownloading', {p: Math.round(l.done / l.units * 100), a: l.done, b: l.units, at: fmtClock(d.progressAt)});
     else if (d.details === 'PARTIAL' && units && done) text = t('dsDayDownloading', {p: Math.round(done / units * 100), a: done, b: units, at: fmtClock(d.progressAt)});
     else if (d.details === 'PARTIAL' && d.expected) text = t('dsDayDownloading', {p: Math.round(d.saved / d.expected * 100), a: d.saved, b: d.expected, at: fmtClock(d.updatedAt)});
@@ -1211,6 +1215,13 @@
     if (pause) text += ' · ' + t('dsPaused', {r: pause.reason || pause.kind || ''});
     if (dp.budget && dp.budget.exhausted && DETAIL_DONE.indexOf(d.details) < 0) text += ' · ' + t('dsBudget', {m: dp.budget.minPerDay});
     return text;
+  }
+  /** Cartões de turno sem número: os turnos pelo resumo ainda não vieram (próxima atualização) ou o JMS não separa por horário. */
+  function shiftSourceHint(c, col) {
+    var sc = c.shiftCardsByColumn, m = sc && sc.summaryMetric;
+    if (!m) return '';
+    var off = (state.data.meta && state.data.meta.summaryShiftsOff) || {};
+    return t(off[m] ? 'scSumOff' : 'scSumWait', {l: vlabel('column', col)});
   }
   /** Quadro "Download do detalhe" (Recebimento): cada dia do período sem detalhe completo, com as partes de cada lista. */
   function renderDetailStatus(c) {
@@ -1319,7 +1330,7 @@
       var v = q[s] || 0, pct = tot ? v / tot * 100 : null;
       var pv = others.length ? null : aggShiftSum(col, [s], k.prevFrom, k.prevTo);
       var label = '<i style="background:' + SHIFT_COLORS[s] + '"></i>' + s + ' · ' + SHIFT_HOURS[s];
-      var subHtml = !tot ? '<span class="ds-hint">' + esc(detailHint(col)) + '</span>' : '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('scShare')) +
+      var subHtml = !tot ? '<span class="ds-hint">' + esc(shiftSourceHint(c, col) + ' ' + detailHint(col)) + '</span>' : '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('scShare')) +
         '<br>' + esc(k.mode === 'day' ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, false) +
         (fromSum ? '<br><span class="mc-note">' + esc(t('scFromSummary')) + '</span>' : '');
       var on = sel && sel.indexOf(s) >= 0;

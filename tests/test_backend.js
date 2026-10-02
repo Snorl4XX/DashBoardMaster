@@ -1531,9 +1531,34 @@ check(winAgain.length === 1, 'dia fechado sem mudança no resumo: os 4 horários
 const cIg = freshCtx(dAF, {summaryIgnoresTime: true});
 cIg.queueHistory(D19, D19, true);
 runAll(cIg);
-check(/soma dos horários/.test(cIg.__state.props.JMS_NO_SUMMARY_SHIFTS_ARRIVAL || '') && !cIg.allTabRows_('AGG').some(r => /:resumo:/.test(r[0])) &&
-  cIg.allTabRows_('LOG').some(r => /Turnos pelo resumo desativados/.test(String(r[4]))) && cIg.getDayStatus_('arrival_flow', D19).details === 'COMPLETE',
-  'JMS ignora a hora no resumo: turnos pelo resumo desligados (sem números errados) e o dia fecha pelo detalhe');
+const offIg = JSON.parse(cIg.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL || '{}');
+check(['shouldArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum'].every(m => /soma dos horários/.test(offIg[m] || '')) &&
+  !cIg.allTabRows_('AGG').some(r => /:resumo:(shouldArriverNum|totalNum|uploadNoSendNum|noSendNum)/.test(r[0])) &&
+  cIg.allTabRows_('LOG').some(r => /Turnos pelo resumo desligados/.test(String(r[4]))) && cIg.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' &&
+  JSON.stringify(cIg.getDashboardData('arrival_flow', {from: D19, to: D19}).meta.summaryShiftsOff) === JSON.stringify(offIg),
+  'JMS ignora a hora no resumo: turnos pelo resumo desligados (sem números errados) e o dia fecha pelo detalhe', offIg);
+// Só "Deve chegar" contado por outro horário: só ele desliga; "Chegou" (cartões T1/T2/T3) continua pelo resumo.
+const cIg2 = freshCtx(dAF, {summaryIgnoresTimeFor: ['shouldArriverNum']});
+cIg2.queueHistory(D19, D19, true);
+runAll(cIg2);
+const offIg2 = JSON.parse(cIg2.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL || '{}'), ss2 = cIg2.getDashboardData('arrival_flow', {from: D19, to: D19}).shiftSum;
+check(offIg2.shouldArriverNum && !offIg2.totalNum && !offIg2.uploadNoSendNum && (ss2.shouldArriverNum || []).length === 0 && sameMap((ss2.totalNum || [])[0] || {}, recS),
+  'um número fora do horário desliga só ele: os cartões do "Chegou" continuam pelo resumo', {offIg2});
+// Dias já baixados antes da V3.19.1: os turnos pelo resumo são consultados uma vez, sem esperar a atualização do dia.
+const cMgV = freshCtx(dAF);
+cMgV.queueHistory(D19, D19, true);
+runAll(cMgV);
+const aggRowsV = cMgV.allTabRows_('AGG').filter(r => /:resumo:/.test(r[0])).length;
+const shAggV = cMgV.tab_('AGG');
+shAggV.data = shAggV.data.filter(r => !/:resumo:/.test(String((r || [])[0])));
+delete cMgV.__state.props.MIGRATION_V3191;
+reset(cMgV);
+const noAggV = cMgV.allTabRows_('AGG').filter(r => /:resumo:/.test(r[0])).length;
+const migNV = cMgV.migrateToV3191_(), migN2V = cMgV.migrateToV3191_();
+runAll(cMgV);
+reset(cMgV);
+check(aggRowsV > 0 && noAggV === 0 && migNV === 1 && migN2V === 0 && cMgV.allTabRows_('AGG').filter(r => /:resumo:totalNum/.test(r[0])).length === 1,
+  'V3.19.1: dias da janela do Recebimento ganham os turnos pelo resumo uma vez, já na instalação', {aggRowsV, noAggV, migNV, migN2V});
 // (c) Ordem do download: as listas pequenas primeiro, "Chegou" (a maior) por último.
 reset(cAF);
 const firstDetAF = cAF.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url))[0];
@@ -1616,7 +1641,9 @@ const orderQ19 = cQ19.pendingJobs_().map(j => j.type === 'SUMMARY' ? 'S' : j.dat
 check(orderQ19.join() === ['S', yQ19, tQ19, oQ19].join(), 'fila do Recebimento: ontem (o dia em que o painel abre) antes de hoje e dos antigos', orderQ19);
 // (i) diagnosticarRecebimento(): as 4 listas, os turnos pelo resumo e o download, sem segredos no texto.
 const dgR = cAF.diagnosticarRecebimento(D19);
-check(dgR.listas.length === 4 && dgR.listas.every(x => x.total === x.resumo && x.pagina > 0 && !x.erro) && dgR.turnosPeloResumo && dgR.turnosPeloResumo.ok &&
+check(dgR.listas.length === 4 && dgR.listas.every(x => x.total === x.resumo && x.pagina > 0 && !x.erro) && dgR.turnosPeloResumo &&
+  ['shouldArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum'].every(m => dgR.turnosPeloResumo[m] && dgR.turnosPeloResumo[m].ok) &&
+  /funcionam sem esperar o detalhe/.test(dgR.texto) &&
   [COL_PREV, COL_NOSEND, 'Deve chegar', 'Chegou', 'Resumo por horário', 'Download dos últimos dias', 'consultas por dia'].every(x => dgR.texto.indexOf(x) >= 0) &&
   dgR.texto.indexOf('FAKE') < 0 && /todos os usados preenchidos/.test(dgR.texto),
   'diagnosticarRecebimento: cada lista × resumo, turnos pelo resumo, volume e situação do download (sem AuthToken)', dgR.texto);

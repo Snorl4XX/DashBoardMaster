@@ -1,8 +1,25 @@
-# J&T DASHMASTER V3.19 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.19.1 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.19.1 — Recebimento: cartões T1/T2/T3 sem esperar a lista "Chegou"
+**O que aparecia:** cartões T1/T2/T3 com "—" e a mensagem "na fila deste dia: as listas menores vêm antes".
+- Os cartões contam a lista **"Chegou"**, a maior (689.688 remessas em 01/10), que é baixada por último.
+- Eles deveriam vir do resumo do JMS por horário, mas não vinham, por dois motivos:
+  1. Bastava **um** número do resumo não fechar por horário (ex.: "Deve chegar", que o JMS pode contar por outro horário) para o recurso desligar **inteiro**, inclusive para o "Chegou".
+  2. Os dias anteriores só ganhavam os turnos quando o resumo deles era atualizado de novo.
+
+**Correções:**
+- **Cada número é conferido sozinho.** O que não fecha por horário num dia já fechado desliga só ele (propriedade `JMS_SUMMARY_SHIFTS_OFF_ARRIVAL`). Os outros continuam, e os cartões do "Chegou" funcionam.
+- **Na instalação**, os dias da janela do Recebimento ganham a consulta por horário uma vez, sem esperar.
+- O cartão sem número agora diz de onde ele vai vir:
+  - "os turnos pelo resumo chegam na próxima atualização (de hora em hora)"; ou
+  - "o JMS não separa o Chegou por horário: os turnos vêm da lista, baixada por último".
+- `diagnosticarRecebimento()` mostra a conferência por horário de **cada** lista (✓ ou ✗) e se os cartões funcionam sem o detalhe.
+
+**Testes:** 323 verificações.
 
 ## V3.19 — Recebimento: valores nos gráficos, tabelas e cartões
 **Sintoma:** no Recebimento, os gráficos de IDs de viagem, "Bases que enviaram", as pizzas de turno, as três tabelas e os cartões T1/T2/T3 ficavam em "Sem dados no período".
@@ -20,7 +37,7 @@ Todos eles dependem do **detalhe** (a lista remessa a remessa, ~500 mil remessas
 - **Cartões T1/T2/T3 e pizzas de turno sem esperar o detalhe.**
   - O resumo do JMS é consultado também por horário: T1 06–14h, T2 14–22h, T3 22–06h. São 4 consultas por atualização do resumo.
   - Assim que o detalhe do dia está completo, volta a valer o turno pelo horário de descarregamento.
-  - Se a soma dos horários não fechar com o dia (o JMS ignorando a hora), o recurso desliga sozinho. Ele avisa no LOG e não mostra número errado.
+  - Se a soma dos horários não fechar com o dia (o JMS ignorando a hora), o recurso desliga sozinho para aquele número (V3.19.1). Ele avisa no LOG e não mostra número errado.
 - **Ordem do download:**
   1. as listas pequenas (sem bipe anterior e sem bipe nesta base): as tabelas e os IDs sem bipe aparecem em minutos;
   2. depois "Deve chegar";
@@ -758,7 +775,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **321 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **323 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

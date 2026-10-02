@@ -220,7 +220,7 @@ function atualizarParaV37() {
   deleteProp_('MIGRATION_V371');
   deleteProp_('MIGRATION_V372');
   clearPauses_();
-  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + migrateToV313_() + migrateGroupedLayout_() + queueNewIndicatorsHistory_();
+  const migrated = migrateToV37_() + migrateToV371_() + migrateToV372_() + migrateToV38_() + migrateToV3112_() + migrateToV3114_() + migrateToV313_() + migrateGroupedLayout_() + migrateToV3191_() + queueNewIndicatorsHistory_();
   installTriggers();
   const worker = processSyncQueue({budgetMs: 240000, force: true});
   const report = {versao: APP_CONFIG.VERSION, jobsAjustados: migrated, trabalhador: worker};
@@ -509,15 +509,22 @@ function diagnosticarRecebimento(date) {
   } catch (e) { add('Resumo: ERRO — ' + err(e)); }
   if (day) {
     try {
-      const per = SHIFT_WINDOWS_.map(w => timed(() => fetchSummaryMetrics_(key, d, {start: d + ' ' + w[1], end: d + ' ' + w[2]})));
-      const sh = {T1: 0, T2: 0, T3: 0};
-      per.forEach((x, i) => { sh[SHIFT_WINDOWS_[i][0]] += Number(x.totalNum) || 0; });
-      const tot = sh.T1 + sh.T2 + sh.T3, dayTot = Number(day.totalNum) || 0;
-      const ok = Math.abs(tot - dayTot) <= Math.max(20, dayTot * 0.02);
-      add('Resumo por horário (Chegou): T1 ' + fmt(sh.T1) + ' · T2 ' + fmt(sh.T2) + ' · T3 ' + fmt(sh.T3) + ' = ' + fmt(tot) + ' × dia ' + fmt(dayTot) +
-        (ok ? ' → OK, cartões e pizzas de turno funcionam sem o detalhe' : ' → NÃO FECHA: o JMS ignora a hora no resumo (turnos só pelo detalhe)') +
-        (getProp_('JMS_NO_SUMMARY_SHIFTS_' + cfg.routeKey, '') ? ' · desligado em ' + getProp_('JMS_NO_SUMMARY_SHIFTS_' + cfg.routeKey, '') : ''));
-      out.turnosPeloResumo = {ok: ok, turnos: sh, dia: dayTot};
+      const per = timed(() => fetchSummaryMetricsBatch_(key, d, SHIFT_WINDOWS_.map(w => ({start: d + ' ' + w[1], end: d + ' ' + w[2]}))));
+      const off = summaryShiftsOff_(cfg);
+      add('Resumo por horário (turnos sem o detalhe):');
+      out.turnosPeloResumo = {};
+      detailTypeOrder_(cfg).forEach(m => {
+        const td = (cfg.detail.types || []).filter(x => x.type === m)[0] || {};
+        const sh = {T1: 0, T2: 0, T3: 0};
+        per.forEach((x, i) => { sh[SHIFT_WINDOWS_[i][0]] += Number(x[m]) || 0; });
+        const tot = sh.T1 + sh.T2 + sh.T3, dayTot = Number(day[m]) || 0;
+        const ok = Math.abs(tot - dayTot) <= Math.max(20, dayTot * 0.02);
+        out.turnosPeloResumo[m] = {ok: ok, turnos: sh, dia: dayTot};
+        add('  · "' + td.column + '": T1 ' + fmt(sh.T1) + ' · T2 ' + fmt(sh.T2) + ' · T3 ' + fmt(sh.T3) + ' = ' + fmt(tot) + ' × dia ' + fmt(dayTot) +
+          (ok ? ' ✓' : ' ✗ não fecha (o JMS conta esse número por outro horário; vem só do detalhe)') + (off[m] ? ' · desligado: ' + off[m] : ''));
+      });
+      const rec = out.turnosPeloResumo.totalNum;
+      add('  → cartões T1/T2/T3 e pizza "Turno que recebeu mais" ' + (rec && rec.ok && !off.totalNum ? 'funcionam sem esperar o detalhe' : 'dependem da lista "Chegou" (baixada por último)'));
     } catch (e) { add('Resumo por horário: ERRO — ' + err(e)); }
   }
   let url = '';
