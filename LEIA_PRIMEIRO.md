@@ -52,7 +52,18 @@ Todos eles dependem do **detalhe** (a lista remessa a remessa, ~500 mil remessas
   - os campos que chegam;
 - a situação do download dos últimos dias, a fila, o teto diário e os últimos avisos do LOG.
 
-**Testes:** 320 verificações (14 novas para o Recebimento), contra o JMS simulado.
+**Simulação com o volume real do SP GRU** (7 dias de histórico + 2 dias de operação, `node tests/simulacao_cotas.js`):
+
+| Cenário | Gatilho no 2º dia | Outros 7 painéis | Recebimento |
+|---|---|---|---|
+| Gmail, JMS com 1.000 por página | ~77 min de 90 | completos | 8 de 8 dias completos |
+| Gmail, JMS com 100 por página | ~80 min de 90, nenhuma execução bloqueada | completos | listas pequenas e "Deve chegar" completas; "Chegou" ~metade por dia (teto de 35 min) |
+| Google Workspace | ~74 min de 360 | completos | 8 de 8 dias completos |
+
+- Se o `diagnosticarRecebimento()` mostrar "página de 100" numa conta Gmail, o "Chegou" (gráfico "IDs que já recebemos" e a tabela "recebido por nós") fica parcial. Os cartões e as pizzas de turno continuam completos, porque vêm do resumo por horário.
+- Para ter tudo completo: conta Google Workspace, ou `RECEBIMENTO_MIN_POR_DIA` maior. Com teto maior, os outros painéis podem parar no fim do dia.
+
+**Testes:** 321 verificações (15 novas para o Recebimento), contra o JMS simulado.
 
 ## V3.18 — Avaria: "Pedidos principais/filhos" igual ao JMS e parte de cada turno na taxa
 **Avaria: escolhendo "Pedido principal" ou "Pedido secundário"**
@@ -747,7 +758,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **320 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **321 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

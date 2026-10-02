@@ -1416,8 +1416,11 @@ function runSummaryJob_(job) {
     enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
   }
   // Recebimento: quantidade de cada turno pelo resumo (4 consultas), para os cartões e pizzas sem esperar o detalhe.
+  // Dia fechado já consultado e com o mesmo resumo: nada mudou, não consulta de novo.
   const sw = getIndicatorConfig_(job.indicator).summary.shiftWindows;
-  if (sw && sw.length) {
+  const same = prev && prev.errorCount === summary.errorCount && prev.totalCount === summary.totalCount &&
+    prev.metrics && (sw || []).every(m => Number(prev.metrics[m]) === Number(summary.raw && summary.raw[m]));
+  if (sw && sw.length && !(same && job.date < isoToday_() && getAgg_(summaryShiftKey_(job.indicator, sw[0]), job.date, job.date).length)) {
     try { syncSummaryShifts_(job.indicator, job.date, summary.raw); }
     catch (e) {
       if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e;
@@ -1860,7 +1863,8 @@ function syncSummaryShifts_(indicator, date, dayMetrics) {
   if (!dayMetrics || !metrics.some(m => dayMetrics[m] !== undefined && dayMetrics[m] !== null && dayMetrics[m] !== '')) {
     dayMetrics = fetchSummaryMetrics_(indicator, date, null);
   }
-  const per = SHIFT_WINDOWS_.map(w => fetchSummaryMetrics_(indicator, date, {start: date + ' ' + w[1], end: date + ' ' + w[2]}));
+  // As 4 janelas de uma vez (fetchAll): numa conta Gmail, uma por uma custavam ~9 min/dia de gatilho.
+  const per = fetchSummaryMetricsBatch_(indicator, date, SHIFT_WINDOWS_.map(w => ({start: date + ' ' + w[1], end: date + ' ' + w[2]})));
   // Confere os números que aparecem nos cartões e pizzas (os das listas); hoje o número cresce entre as
   // consultas: folga de 2% (mín. 20).
   const lists = ((cfg.metricPanels || []).reduce((a, p) => a.concat(p.metrics.filter(m => m.detail).map(m => m.key)), []));

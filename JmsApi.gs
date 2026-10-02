@@ -493,6 +493,35 @@ function fetchSummaryMetrics_(indicatorKey, isoDate, win) {
   return out;
 }
 
+/** Várias janelas do resumo de uma vez (UrlFetchApp.fetchAll); janela com falha é refeita sozinha. */
+function fetchSummaryMetricsBatch_(indicatorKey, isoDate, wins) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const endpoint = endpointFor_(cfg, 'summary');
+  const payload = w => buildPayload_(indicatorKey, isoDate, 1, APP_CONFIG.PAGE_SIZE, false, w);
+  let responses;
+  try { responses = UrlFetchApp.fetchAll(wins.map(w => jmsRequestObject_(endpoint, payload(w)))); }
+  catch (e) {
+    if (errorKind_(String(e && e.message || e)) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + String(e && e.message || e).slice(0, 200));
+    responses = wins.map(() => null);
+  }
+  return wins.map((w, i) => {
+    let json;
+    try { if (!responses[i]) throw new Error('sem resposta'); json = parseJmsResponse_(responses[i], endpoint); }
+    catch (e) {
+      const m = String(e && e.message || e);
+      if (errorKind_(m) === 'QUOTA' || /Sessão do JMS/.test(m)) throw e;
+      return fetchSummaryMetrics_(indicatorKey, isoDate, w);
+    }
+    let recs = recordsOf_(json);
+    if (!recs.length && json && json.data && !Array.isArray(json.data) && typeof json.data === 'object' && !json.data.records) recs = [json.data];
+    const out = {};
+    (cfg.summary.metrics || []).forEach(k => {
+      out[k] = recs.reduce((a, r) => { const v = fieldReader_(r)([k]).value; return a + (v === null ? 0 : num_(v, 0)); }, 0);
+    });
+    return out;
+  });
+}
+
 function fetchDetailPage_(indicatorKey, isoDate, page, size, win) {
   const cfg = getIndicatorConfig_(indicatorKey);
   const endpoint = endpointFor_(cfg, 'detail');

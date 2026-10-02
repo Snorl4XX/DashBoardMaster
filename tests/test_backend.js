@@ -1520,6 +1520,13 @@ check(ssRec && ssExp && sameMap(ssRec, recS) && sameMap(ssExp, expS) && ssRec.to
   ['06:00:00', '14:00:00', '00:00:00', '22:00:00'].every(h => winReq.some(f => f.payload.startTime.slice(11) === h)) &&
   ((dashAF.shiftSum || {}).uploadNoSendNum || [])[0].total === afD.prev.length,
   'turnos pelo resumo por horário (4 consultas): T1/T2/T3 de cada número iguais aos da lista e somando o dia', {ssRec, recS, req: winReq.length});
+// Dia fechado com o mesmo resumo: a atualização seguinte não consulta os horários de novo.
+const fWin19 = cAF.__state.fetches.length;
+cAF.enqueueJobs_([['SUMMARY', 'arrival_flow', D19, 0]], {reset: true});
+reset(cAF);
+cAF.processJob_(cAF.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
+const winAgain = cAF.__state.fetches.slice(fWin19).filter(f => /arrivalbyday_total/.test(f.url));
+check(winAgain.length === 1, 'dia fechado sem mudança no resumo: os 4 horários não são consultados de novo', winAgain.length);
 // (b) JMS que ignora a hora no resumo: o recurso desliga sozinho, avisa no log e o detalhe segue normal.
 const cIg = freshCtx(dAF, {summaryIgnoresTime: true});
 cIg.queueHistory(D19, D19, true);
@@ -1528,6 +1535,7 @@ check(/soma dos horários/.test(cIg.__state.props.JMS_NO_SUMMARY_SHIFTS_ARRIVAL 
   cIg.allTabRows_('LOG').some(r => /Turnos pelo resumo desativados/.test(String(r[4]))) && cIg.getDayStatus_('arrival_flow', D19).details === 'COMPLETE',
   'JMS ignora a hora no resumo: turnos pelo resumo desligados (sem números errados) e o dia fecha pelo detalhe');
 // (c) Ordem do download: as listas pequenas primeiro, "Chegou" (a maior) por último.
+reset(cAF);
 const firstDetAF = cAF.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url))[0];
 check(cAF.detailTypeOrder_(cfgAF).join() === 'uploadNoSendNum,noSendNum,shouldArriverNum,totalNum' && firstDetAF.payload.detailType === 'uploadNoSendNum' &&
   cAF.detailTypeOrder_(ctx.getIndicatorConfig_('wrong_send')).join() === '',
