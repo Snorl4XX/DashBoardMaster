@@ -477,6 +477,22 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   };
 }
 
+/**
+ * Números do resumo (summary.metrics) numa janela de horário do dia (Recebimento: turnos pelo resumo).
+ * Várias linhas na resposta (ex.: por rota) são somadas.
+ */
+function fetchSummaryMetrics_(indicatorKey, isoDate, win) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const json = jmsPost_(endpointFor_(cfg, 'summary'), buildPayload_(indicatorKey, isoDate, 1, APP_CONFIG.PAGE_SIZE, false, win), 2);
+  let recs = recordsOf_(json);
+  if (!recs.length && json && json.data && !Array.isArray(json.data) && typeof json.data === 'object' && !json.data.records) recs = [json.data];
+  const out = {};
+  (cfg.summary.metrics || []).forEach(k => {
+    out[k] = recs.reduce((a, r) => { const v = fieldReader_(r)([k]).value; return a + (v === null ? 0 : num_(v, 0)); }, 0);
+  });
+  return out;
+}
+
 function fetchDetailPage_(indicatorKey, isoDate, page, size, win) {
   const cfg = getIndicatorConfig_(indicatorKey);
   const endpoint = endpointFor_(cfg, 'detail');
@@ -630,17 +646,18 @@ function discoverDetailEndpoint_(cfg, isoDate, size, win) {
  */
 function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
   const cfg = getIndicatorConfig_(indicatorKey);
-  const types = cfg.detail.types && cfg.detail.types.length ? cfg.detail.types.map(t => t.type) : [null];
+  const types = detailTypeOrder_(cfg);
   if (types.length === 1 && types[0] === null) return planDetailType_(indicatorKey, isoDate, validateTotal, null);
   // Lista opcional (Recebimento: sem bipe na etapa anterior / nesta base): se o JMS recusar o detailType ou
   // devolver outra coisa, o dia segue com as outras listas. Sessão expirada e cota continuam parando tudo.
-  const plans = [];
+  const plans = [], skipped = {};
   types.forEach(t => {
     const td = (cfg.detail.types || []).filter(x => x.type === t)[0] || {};
     try { plans.push(planDetailType_(indicatorKey, isoDate, validateTotal, t)); }
     catch (e) {
       const msg = String(e && e.message || e);
       if (!td.optional || errorKind_(msg) !== 'OTHER') throw e;
+      skipped[t] = publicJmsError_(msg).slice(0, 300);
       logSync_('WARN', indicatorKey, isoDate, 'Lista "' + (td.column || t) + '" (' + t + ') não baixada: ' + msg.slice(0, 300));
     }
   });
@@ -653,7 +670,17 @@ function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
   });
   // Tamanho de página: o menor aceito (todas as listas usam o mesmo endereço).
   return {size: Math.min.apply(null, plans.map(p => p.size)), total: plans.reduce((a, p) => a + p.total, 0), windows: windows, chunks: chunks,
-    sliced: plans.some(p => p.sliced), types: plans.map(p => p.windows[0] ? p.windows[0].type : null)};
+    sliced: plans.some(p => p.sliced), types: plans.map(p => p.windows[0] ? p.windows[0].type : null), skipped: skipped};
+}
+/**
+ * Ordem de download das listas do detalhe: `detail.order` (Recebimento: as listas pequenas primeiro, para as
+ * tabelas aparecerem em minutos; "Chegou", a maior, por último). Sem `order`, a ordem de `detail.types`.
+ */
+function detailTypeOrder_(cfg) {
+  const types = cfg.detail.types && cfg.detail.types.length ? cfg.detail.types.map(t => t.type) : [null];
+  const order = cfg.detail.order || [];
+  const rank = t => { const i = order.indexOf(t); return i < 0 ? order.length + types.indexOf(t) : i; };
+  return types.slice().sort((a, b) => rank(a) - rank(b));
 }
 function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
   const cfg = getIndicatorConfig_(indicatorKey);

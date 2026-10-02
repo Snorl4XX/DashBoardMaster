@@ -448,6 +448,7 @@ function diagnosticoCompleto(date) {
         om.param + '=' + om.main + ' (principal) · ' + om.param + '=' + om.sub + ' (filho) — taxa oficial do JMS para cada opção'));
     }
     if (item.rota) lines.push('  Cabeçalho de rota: Routename "' + item.rota.routename + '" · Routernamelist "' + item.rota.routernamelist + '" (' + item.rota.origem + ')');
+    if (cfg.grouped) lines.push('  (Recebimento: o teste acima é só da 1ª lista. Para as 4 listas, os turnos e o download, rode diagnosticarRecebimento().)');
     const dk = item.docas;
     if (dk && dk.amostra) {
       lines.push('  Docas (1ª página do detalhe, ' + dk.amostra + ' remessas): ' + dk.docas.slice(0, 6).map(x => x.doca + ' ' + x.pct + '%').join(' · '));
@@ -472,6 +473,131 @@ function diagnosticoCompleto(date) {
       lines.push('Fila: ' + out.fila.texto);
     } catch (e) { out.fila = {erro: String(e.message || e)}; lines.push('Fila: erro ao ler — ' + out.fila.erro); }
   }
+  console.log(lines.join('\n'));
+  out.texto = lines.join('\n');
+  return out;
+}
+
+/**
+ * Diagnóstico só do Recebimento: fluxo operacional (V3.19). Rode no editor (▶ Executar) e copie o texto do
+ * "Registro de execução" — ele não mostra AuthToken nem Cookie. Testa no JMS, sem gravar nada no banco:
+ *  - o resumo do dia e o resumo por horário (turnos T1/T2/T3 sem o detalhe);
+ *  - cada uma das 4 listas do detalhe: endereço, total × número do resumo, tamanho de página aceito,
+ *    se o JMS respeita o horário (fatias) e a paginação longa, e os campos que chegam;
+ * e mostra a situação do download dos últimos dias, a fila, o teto diário (conta Gmail) e os últimos avisos.
+ * `date` (opcional, AAAA-MM-DD): padrão = ontem.
+ */
+function diagnosticarRecebimento(date) {
+  const key = 'arrival_flow', cfg = INDICATORS[key];
+  const d = isIso_(date) ? date : lastClosedDate_(key);
+  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, listas: []};
+  const add = x => lines.push(x);
+  const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
+  const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
+  const cred = authConfigSafe_();
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico do Recebimento: fluxo operacional — dia ' + humanDatePt_(d));
+  add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · conta Google: ' + googlePlan_() +
+    ' (teto diário do detalhe: ' + (groupedBudgetMin_() ? groupedBudgetMin_() + ' min; usado hoje ' + (Math.round(groupedUsedMs_() / 6000) / 10) + ' min' : 'sem teto') + ')');
+  (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
+  let day = null;
+  const latencies = [];
+  const timed = fn => { const t0 = Date.now(); try { return fn(); } finally { latencies.push(Date.now() - t0); } };
+  try {
+    const s = timed(() => fetchSummaryDay_(key, d));
+    day = s.empty ? null : s.raw;
+    add('Resumo: ' + (s.empty ? 'SEM REGISTROS neste dia' : (cfg.summary.metrics || []).map(m => m + ' ' + fmt(s.raw[m])).join(' · ')));
+  } catch (e) { add('Resumo: ERRO — ' + err(e)); }
+  if (day) {
+    try {
+      const per = SHIFT_WINDOWS_.map(w => timed(() => fetchSummaryMetrics_(key, d, {start: d + ' ' + w[1], end: d + ' ' + w[2]})));
+      const sh = {T1: 0, T2: 0, T3: 0};
+      per.forEach((x, i) => { sh[SHIFT_WINDOWS_[i][0]] += Number(x.totalNum) || 0; });
+      const tot = sh.T1 + sh.T2 + sh.T3, dayTot = Number(day.totalNum) || 0;
+      const ok = Math.abs(tot - dayTot) <= Math.max(20, dayTot * 0.02);
+      add('Resumo por horário (Chegou): T1 ' + fmt(sh.T1) + ' · T2 ' + fmt(sh.T2) + ' · T3 ' + fmt(sh.T3) + ' = ' + fmt(tot) + ' × dia ' + fmt(dayTot) +
+        (ok ? ' → OK, cartões e pizzas de turno funcionam sem o detalhe' : ' → NÃO FECHA: o JMS ignora a hora no resumo (turnos só pelo detalhe)') +
+        (getProp_('JMS_NO_SUMMARY_SHIFTS_' + cfg.routeKey, '') ? ' · desligado em ' + getProp_('JMS_NO_SUMMARY_SHIFTS_' + cfg.routeKey, '') : ''));
+      out.turnosPeloResumo = {ok: ok, turnos: sh, dia: dayTot};
+    } catch (e) { add('Resumo por horário: ERRO — ' + err(e)); }
+  }
+  let url = '';
+  try { url = endpointFor_(cfg, 'detail'); } catch (e) { add('Endereço do detalhe: ERRO — ' + err(e)); }
+  const own = getProp_('JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL', '');
+  add('Endereço do detalhe: ' + (url.split('/').slice(-3).join('/') || '—') + (own ? ' (propriedade JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL)' : ' (padrão, não capturado)'));
+  try {
+    const rt = JMS_ROUTES_.filter(r => r.key === cfg.routeKey)[0], pp = jmsReadProperties_(), v = routeVariant_(rt, pp);
+    add('Cabeçalho de rota: Routename "' + (pp['JMS_ROUTENAME_' + rt.key] || v.name) + '" · Routernamelist "' + (pp['JMS_ROUTENAMELIST_' + rt.key] || v.list) + '"');
+  } catch (e) { /* sem rota */ }
+  const full = dayWindow_(d, false), maxOff = detailMaxOffset_();
+  let requests = 0;
+  add('Listas do detalhe (ordem do download):');
+  detailTypeOrder_(cfg).forEach(t => {
+    const td = (cfg.detail.types || []).filter(x => x.type === t)[0] || {};
+    const item = {lista: td.column, detailType: t};
+    try {
+      const pr = timed(() => probeDetail_(key, d, t));
+      const exp = day ? Number(day[t]) : null;
+      item.total = pr.total; item.resumo = exp; item.pagina = pr.size;
+      const pages = Math.ceil(pr.total / pr.size);
+      requests += pages;
+      const match = exp === null || isNaN(exp) ? '' : pr.total === exp ? ' (resumo ' + fmt(exp) + ' ✓)' :
+        pr.total > exp * 3 + 1000 ? ' (resumo ' + fmt(exp) + ' ✗ MUITO MAIOR: o filtro da base não pegou)' : pr.total === 0 && exp > 0 ? ' (resumo ' + fmt(exp) + ' ✗ ZERADO: detailType ou filtro errado)' : ' (resumo ' + fmt(exp) + ')';
+      add('  · "' + td.column + '" (' + t + '): ' + fmt(pr.total) + ' registros' + match + ' · página de ' + pr.size + ' · ' + fmt(pages) + ' consulta(s) por dia');
+      if (pr.total > pr.size * 2) {
+        const half = splitWindow_(full, 2).map(w => Object.assign(w, {type: t}));
+        const hs = half.map(w => timed(() => fetchDetailPage_(key, d, 1, pr.size, w)).total);
+        const okH = Math.abs(hs[0] + hs[1] - pr.total) <= Math.max(3, pr.total * 0.01);
+        item.respeitaHorario = okH;
+        add('      horário: manhã+tarde ' + fmt(hs[0]) + ' + ' + fmt(hs[1]) + ' = ' + fmt(hs[0] + hs[1]) + (okH ? ' → respeita a hora (download em fatias OK)' : ' → IGNORA a hora (sem fatias; paginação longa)'));
+      }
+      if (maxOff > 0 && pr.total > maxOff) {
+        const deep = Math.floor(maxOff / pr.size) + 2;
+        try {
+          const dp = timed(() => fetchDetailPage_(key, d, deep, pr.size, Object.assign({type: t}, full)));
+          item.paginaLonga = dp.records.length > 0;
+          add('      página ' + deep + ' (além de ' + fmt(maxOff) + ' registros): ' + (dp.records.length ? dp.records.length + ' registros → paginação longa OK' : 'VAZIA → o JMS limita a paginação (as fatias de horário resolvem)'));
+        } catch (e) { item.paginaLonga = false; add('      página ' + deep + ': ERRO — ' + err(e) + ' (o JMS limita a paginação; as fatias de horário resolvem)'); }
+      }
+      if (pr.records.length) {
+        const map = fieldMappingReport_(key, pr.records), keep = td.keep || [];
+        const want = Object.keys(map.campos).filter(k => keep.indexOf(k) >= 0 || (td.copy && Object.keys(td.copy).some(c => td.copy[c] === k && keep.indexOf(c) >= 0)) || (k === 'eventTime' && keep.indexOf('shift') >= 0) || (k === 'shipment' && keep.indexOf('waybill') >= 0));
+        const bad = want.filter(k => map.campos[k].situacao !== 'ok');
+        add('      campos: ' + (bad.length ? 'FALTAM ' + bad.map(k => k + ' (' + map.campos[k].configurado + ': ' + map.campos[k].situacao + ')').join(', ') : 'todos os usados preenchidos') +
+          ' · recebidos: ' + map.camposRecebidos.slice(0, 30).join(', '));
+        item.campos = map.campos;
+      } else if (pr.total > 0) add('      a 1ª página veio sem registros apesar do total ' + fmt(pr.total));
+    } catch (e) { item.erro = err(e); add('  · "' + td.column + '" (' + t + '): ERRO — ' + item.erro); }
+    out.listas.push(item);
+  });
+  const avg = latencies.length ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0;
+  out.tempoMedioJmsMs = Math.round(avg);
+  if (requests) {
+    const par = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
+    add('Volume: ~' + fmt(requests) + ' consultas por dia de detalhe · JMS ' + (avg / 1000).toFixed(1) + ' s por consulta · ~' +
+      Math.max(1, Math.round(requests * avg / 1000 / Math.min(par, 3) / 60)) + ' min de execução por dia (' + par + ' em paralelo)');
+  }
+  try {
+    const back = addDaysIso_(isoToday_(), -3);
+    const dp = detailProgress_(key, back, isoToday_());
+    if (d < back) dp.days = dp.days.concat(detailProgress_(key, d, d).days);
+    add('Download dos últimos dias' + (d < back ? ' e do dia ' + humanDatePt_(d) : '') + ':');
+    dp.days.forEach(x => {
+      const lists = (x.lists || []).map(l => l.column + ' ' + (l.units ? Math.round(l.done / l.units * 100) : 0) + '%').join(' · ');
+      const job = x.job ? ' · tarefa ' + x.job.status + (x.job.ahead !== null && x.job.ahead !== undefined ? ' (' + x.job.ahead + ' antes na fila)' : '') + (x.job.attempts ? ', ' + x.job.attempts + ' falha(s)' : '') : ' · sem tarefa';
+      add('  ' + humanDatePt_(x.date) + ': resumo ' + x.summary + ' · detalhe ' + x.details + (x.expected ? ' ' + x.saved + '/' + x.expected : '') + job +
+        (lists ? ' · ' + lists : '') + ((x.skipped || []).length ? ' · NÃO BAIXADAS: ' + x.skipped.map(k => k.column + ' (' + k.reason + ')').join('; ') : '') +
+        (x.error || x.progressError ? ' · erro: ' + (x.progressError || x.error) : ''));
+    });
+    out.dias = dp.days;
+  } catch (e) { add('Download dos últimos dias: ERRO ao ler — ' + err(e)); }
+  try {
+    const logs = allTabRows_('LOG').filter(r => String(r[2]) === key && (r[1] === 'WARN' || r[1] === 'ERROR')).slice(-8);
+    if (logs.length) {
+      add('Últimos avisos do LOG (' + key + '):');
+      logs.forEach(r => add('  ' + (toIsoTimestamp_(r[0]) || '').slice(0, 16).replace('T', ' ') + ' ' + r[1] + ' ' + humanDatePt_(dateCellIso_(r[3])) + ': ' + String(r[4]).slice(0, 260)));
+    } else add('LOG: nenhum aviso ou erro do Recebimento.');
+  } catch (e) { /* sem banco */ }
+  add('Dica: se uma lista der ERRO ou "ZERADO", abra a tela no JMS, F12 → Rede, clique no número dessa coluna e mande a URL e o "Payload" da requisição (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));
   out.texto = lines.join('\n');
   return out;

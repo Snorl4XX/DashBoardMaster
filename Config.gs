@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.18.0',
+  VERSION: '3.19.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -34,6 +34,7 @@ const APP_CONFIG = Object.freeze({
   GROUPED_TOP_ROWS: 2000,      // maiores combinações enviadas para a tabela nesse modo
   GROUPED_SUMMARY_BUDGET_MS: 75000,
   GROUPED_DETAIL_MIN_START_MS: 150000, // detalhe agrupado só começa com 2,5 min livres na execução
+  GROUPED_GMAIL_MIN_PER_DAY: 35,       // conta Gmail (90 min/dia de gatilhos; os outros painéis usam ~50): teto diário do detalhe do Recebimento
   MAX_REPORT_DETAIL_ROWS: 60000,
   MAX_PDF_DETAIL_ROWS: 1500,
   DEFAULT_CENTER_CODE: '30001',
@@ -534,7 +535,12 @@ const INDICATORS = Object.freeze({
     summary: {
       endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_total',
       rateFromCounts: true, rateKeys: [], errorKeys: ['noArriverNum'], totalKeys: ['shouldArriverNum'],
-      metrics: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum', 'noSignNum', 'deliverNum']
+      metrics: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum', 'noSignNum', 'deliverNum'],
+      // V3.19: o mesmo resumo consultado por horário (T1 06h–14h, T2 14h–22h, T3 22h–06h) dá a quantidade de cada
+      // turno com 4 consultas, sem esperar o detalhe (~5 mil consultas por dia). Usado nos cartões T1/T2/T3 e nas
+      // pizzas enquanto o detalhe do dia não chegou. Se a soma dos horários não fechar com o dia, o JMS ignora a
+      // hora: o recurso desliga sozinho (propriedade JMS_NO_SUMMARY_SHIFTS_ARRIVAL).
+      shiftWindows: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum']
     },
     detail: {
       // O endereço do detalhe não estava na captura: o mesmo nome do resumo com "_detail" (padrão das outras telas).
@@ -543,6 +549,9 @@ const INDICATORS = Object.freeze({
       endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_detail',
       candidates: ['arrivalbyday_detail', 'arrivalbyday_detailed', 'arrivalbyday_details', 'arrivalbyday_list'],
       days: 7, refreshHours: 6, maxPerDay: 900000,
+      // Ordem do download (V3.19): as listas pequenas primeiro (tabelas e IDs sem bipe aparecem em minutos), depois
+      // "Deve chegar" e por último "Chegou" (~330 mil remessas por dia). Não muda o formato dos arquivos.
+      order: ['uploadNoSendNum', 'noSendNum', 'shouldArriverNum', 'totalNum'],
       // Uma lista por número clicado na tela (detailType = nome do número no resumo). Cada lista guarda só os
       // campos dela (keep) e copia o ID de viagem para o campo do filtro dela (copy).
       //  - Deve chegar: turno pelo "Horário de expedição" na origem (shiftExp → pizza "O que deve chegar").
@@ -588,7 +597,7 @@ const INDICATORS = Object.freeze({
       label: {pt: 'Deve chegar · Quantidade total de pedidos', zh: '应到总票数'}, labelPeriod: {pt: 'Deve chegar no período', zh: '期间应到总票数'},
       subLabel: {pt: 'Encomendas que não chegou', zh: '未到件'}, nav: {pt: 'Deve chegar hoje', zh: '今日应到'}},
     metricCards: true,
-    shiftCardsByColumn: {main: 'Chegou', columns: ['Chegou']},
+    shiftCardsByColumn: {main: 'Chegou', columns: ['Chegou'], summaryMetric: 'totalNum'},
     // Turnos de cada lista gravados por dia (aba AGG, chave "arrival_flow:<lista>"): dia anterior dos turnos.
     shiftAggColumns: ['Chegou', 'Sem bipe na etapa anterior', 'Sem bipe de expedição nesta base'],
     texts: {
@@ -618,11 +627,11 @@ const INDICATORS = Object.freeze({
     // `dim`: contagem da lista indicada em `where`.
     charts: [
       {key: 'mShould', metric: 'shouldArriverNum', type: 'line', days: 30, title: {pt: 'Deve chegar', zh: '应到'}},
-      {key: 'expShift', dim: 'shiftExp', where: {column: 'Deve chegar'}, type: 'doughnut', title: {pt: 'O que deve chegar', zh: '应到（按发件班次）'},
+      {key: 'expShift', dim: 'shiftExp', where: {column: 'Deve chegar'}, type: 'doughnut', summaryShift: 'shouldArriverNum', title: {pt: 'O que deve chegar', zh: '应到（按发件班次）'},
         sub: {pt: 'Turno pelo horário de expedição na base de origem', zh: '按始发网点发件时间划分班次'}},
       {key: 'mNoArr', metric: 'noArriverNum', type: 'bar', bad: true, title: {pt: 'Encomendas não chegadas', zh: '未到件'}},
       {key: 'mRec', metric: 'totalNum', type: 'bar', title: {pt: 'Chegou', zh: '已到'}},
-      {key: 'recShift', dim: 'shift', where: {column: 'Chegou'}, type: 'doughnut', title: {pt: 'Turno que recebeu mais', zh: '到件最多的班次'},
+      {key: 'recShift', dim: 'shift', where: {column: 'Chegou'}, type: 'doughnut', summaryShift: 'totalNum', title: {pt: 'Turno que recebeu mais', zh: '到件最多的班次'},
         sub: {pt: 'Turno pelo horário de descarregamento do veículo de chegada', zh: '按到件车辆卸车时间划分班次'}},
       {key: 'mPrev', metric: 'uploadNoSendNum', type: 'bar', bad: true, title: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}},
       {key: 'prevTrip', dim: 'tripPrev', where: {column: 'Sem bipe na etapa anterior'}, type: 'bar', top: 10,
@@ -729,7 +738,7 @@ function getPublicCatalog_() {
       metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, metricCards: !!cfg.metricCards,
       shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
       hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
-      grouped: !!cfg.grouped,
+      grouped: !!cfg.grouped, routeKey: cfg.routeKey,
       detailDays: cfg.detail && cfg.detail.days || null,
       naLabel: cfg.naLabel || null,
       orderKinds: cfg.orderKinds ? {field: cfg.orderKinds.field, values: cfg.orderKinds.values} : null,

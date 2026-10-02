@@ -1511,4 +1511,113 @@ cMig2.__state.props.GROUPED_LAYOUT_ARRIVAL_FLOW = 'formato-antigo';
 cMig2.STORAGE_CACHE_ = null; cMig2.TAB_CACHE_ = {}; cMig2.TAB_INDEX_ = {};
 check(cMig2.migrateGroupedLayout_() === 0, 'dias fora da janela de detalhe (só resumo) não são baixados de novo');
 
+// ---------- 24. V3.19: Recebimento sem valores no painel — download robusto, turnos pelo resumo, situação na tela ----------
+const reset = c => { c.STORAGE_CACHE_ = null; c.TAB_CACHE_ = {}; c.TAB_INDEX_ = {}; };
+// (a) Turnos pelo resumo do JMS consultado por horário: os cartões T1/T2/T3 e as pizzas não dependem do detalhe.
+const ssRec = ((dashAF.shiftSum || {}).totalNum || [])[0], ssExp = ((dashAF.shiftSum || {}).shouldArriverNum || [])[0];
+const winReq = cAF.__state.fetches.filter(f => /arrivalbyday_total/.test(f.url) && !(f.payload.startTime.slice(11) === '00:00:00' && f.payload.endTime.slice(11) === '23:59:59'));
+check(ssRec && ssExp && sameMap(ssRec, recS) && sameMap(ssExp, expS) && ssRec.total === afD.total.length && winReq.length === 4 &&
+  ['06:00:00', '14:00:00', '00:00:00', '22:00:00'].every(h => winReq.some(f => f.payload.startTime.slice(11) === h)) &&
+  ((dashAF.shiftSum || {}).uploadNoSendNum || [])[0].total === afD.prev.length,
+  'turnos pelo resumo por horário (4 consultas): T1/T2/T3 de cada número iguais aos da lista e somando o dia', {ssRec, recS, req: winReq.length});
+// (b) JMS que ignora a hora no resumo: o recurso desliga sozinho, avisa no log e o detalhe segue normal.
+const cIg = freshCtx(dAF, {summaryIgnoresTime: true});
+cIg.queueHistory(D19, D19, true);
+runAll(cIg);
+check(/soma dos horários/.test(cIg.__state.props.JMS_NO_SUMMARY_SHIFTS_ARRIVAL || '') && !cIg.allTabRows_('AGG').some(r => /:resumo:/.test(r[0])) &&
+  cIg.allTabRows_('LOG').some(r => /Turnos pelo resumo desativados/.test(String(r[4]))) && cIg.getDayStatus_('arrival_flow', D19).details === 'COMPLETE',
+  'JMS ignora a hora no resumo: turnos pelo resumo desligados (sem números errados) e o dia fecha pelo detalhe');
+// (c) Ordem do download: as listas pequenas primeiro, "Chegou" (a maior) por último.
+const firstDetAF = cAF.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url))[0];
+check(cAF.detailTypeOrder_(cfgAF).join() === 'uploadNoSendNum,noSendNum,shouldArriverNum,totalNum' && firstDetAF.payload.detailType === 'uploadNoSendNum' &&
+  cAF.detailTypeOrder_(ctx.getIndicatorConfig_('wrong_send')).join() === '',
+  'ordem do download: sem bipe anterior → sem bipe nesta base → deve chegar → chegou', firstDetAF.payload.detailType);
+// (d) Erro no meio do download: as partes já fechadas ficam gravadas (PARCIAL, com o erro) e a nova tentativa continua dali.
+const cEr = freshCtx(dAF, {maxPageSize: 100}, {JMS_DETAIL_MAX_OFFSET: '300', JMS_PARALLEL: '2'});
+cEr.queueHistory(D19, D19, true);
+cEr.processJob_(cEr.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
+const origEr = cEr.fetchDetailBatch_;
+let callsEr = 0;
+cEr.fetchDetailBatch_ = function (ind, d, items) {
+  if (ind === 'arrival_flow' && items.some(it => it.page > 1) && ++callsEr === 6) throw new Error('Falha simulada no meio do download');
+  return origEr.apply(null, arguments);
+};
+const jobEr = cEr.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
+const rEr1 = cEr.processJob_(jobEr, Date.now() + 600000);
+cEr.fetchDetailBatch_ = origEr;
+reset(cEr);
+const stEr1 = cEr.getDayStatus_('arrival_flow', D19), jobEr2 = cEr.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
+const planKeyEr = 'GROUPED_PLANDATA_ARRIVAL_FLOW_' + D19;
+const savedPlanEr = !!cEr.__state.props[planKeyEr];
+check(rEr1 === 'error' && stEr1.details === 'PARTIAL' && stEr1.savedPages > 0 && /Falha simulada/.test(stEr1.error) && jobEr2 && jobEr2.page === stEr1.savedPages + 1 &&
+  jobEr2.attempts === 1 && cEr.allTabRows_('PAGES').filter(r => r[0] === 'arrival_flow' && Number(r[2]) >= 1).length === stEr1.savedPages && savedPlanEr,
+  'erro no meio: as partes fechadas ficam gravadas, o dia fica PARCIAL com o erro e o cursor na parte seguinte', {r: rEr1, st: stEr1, job: jobEr2 && jobEr2.page});
+// Painel durante o erro: o que já veio aparece e a situação diz o progresso de cada lista e o erro.
+const dashEr = cEr.getDashboardData('arrival_flow', {from: D19, to: D19});
+const dpEr = dashEr.meta.detailProgress, dEr = dpEr && dpEr.days[0];
+check(dEr && dEr.date === D19 && dEr.details === 'PARTIAL' && dEr.lists.map(l => l.column).join('|') === [COL_PREV, COL_NOSEND, 'Deve chegar', 'Chegou'].join('|') &&
+  dEr.lists[0].done === dEr.lists[0].units && dEr.lists[3].done < dEr.lists[3].units && /Falha simulada/.test(dEr.progressError || dEr.error) &&
+  dEr.job && dEr.job.status === 'PENDING' && dashEr.dataset.n > 0 && dpEr.budget && dpEr.budget.minPerDay === 35,
+  'painel: situação do download do dia (partes de cada lista, erro, fila) e o que já foi baixado', dEr);
+// (e) Nova tentativa num dia fechado: usa o plano gravado (sem refazer a 1ª página de todas as fatias) e fecha igual.
+const fEr = cEr.__state.fetches.length;
+const rEr2 = cEr.processJob_(jobEr2, Date.now() + 600000);
+reset(cEr);
+const againEr = cEr.__state.fetches.slice(fEr).filter(f => /arrivalbyday_detail/.test(f.url));
+const sliceP1 = againEr.filter(f => f.payload.current === 1 && !(f.payload.startTime.slice(11) === '00:00:00' && f.payload.endTime.slice(11) === '23:59:59'));
+const rowsEr = C.decodeDataset(cEr.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
+check(rEr2 === 'done' && /COMPLETE/.test(cEr.getDayStatus_('arrival_flow', D19).details) && sumQ(rowsEr, 'Chegou') === afD.total.length &&
+  sumQ(rowsEr, 'Deve chegar') === afD.should.length && sumQ(rowsEr, COL_PREV) === afD.prev.length && sliceP1.length < stEr1.expectedPages - stEr1.savedPages + 1 &&
+  againEr.filter(f => f.payload.current === 1 && f.payload.startTime.slice(11) === '00:00:00' && f.payload.endTime.slice(11) === '23:59:59').length === 4 &&
+  !cEr.__state.props[planKeyEr] && !cEr.__state.props.GROUPED_PLAN_ARRIVAL_FLOW_2026_09_19,
+  'retomada com o plano gravado: 1 conferência por lista, só as fatias que faltam, dia completo', {r: rEr2, fatias: sliceP1.length, faltavam: stEr1.expectedPages - stEr1.savedPages});
+// (f) JMS entrega bem menos que o informado (paginação limitada): grava o que veio em vez de recomeçar para sempre.
+const cSh = freshCtx(dAF, {maxPageSize: 100}, {JMS_DETAIL_MAX_OFFSET: '0'});
+const origSh = cSh.fetchDetailBatch_;
+cSh.fetchDetailBatch_ = function (ind, d, items) { const r = origSh.apply(null, arguments); return ind === 'arrival_flow' ? r.map((x, i) => items[i].page > 3 ? Object.assign({}, x, {records: []}) : x) : r; };
+cSh.queueHistory(D19, D19, true);
+runAll(cSh);
+const rowsSh = C.decodeDataset(cSh.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
+check(cSh.getDayStatus_('arrival_flow', D19).details === 'CHECK_COUNTS' && sumQ(rowsSh, 'Chegou') === 300 && sumQ(rowsSh, COL_PREV) === afD.prev.length &&
+  cSh.allTabRows_('LOG').some(r => /paginação limitada/.test(String(r[4]))),
+  'JMS para de paginar: o que veio fica gravado ("contagem diferente", conferido de novo depois) e o motivo vai para o log', cSh.getDayStatus_('arrival_flow', D19));
+// (g) Teto diário do Recebimento numa conta Gmail: os outros painéis seguem; com RECEBIMENTO_MIN_POR_DIA = 0, sem teto.
+const cBu = freshCtx(dAF, null, {COTA_GOOGLE: 'gmail'});
+cBu.__state.props['GROUPED_USED_MS_' + cBu.isoToday_()] = String(35 * 60000);
+cBu.queueHistory(D19, D19, true);
+runAll(cBu);
+const afterBu = cBu.getDayStatus_('arrival_flow', D19).details, otherBu = cBu.getDayStatus_('wrong_send', D19).details;
+// Só sobrou o Recebimento acima do teto: o gatilho de 5 min dorme (não gasta a cota acordando à toa).
+reset(cBu); cBu.invalidateProps_();
+const hintBu = JSON.parse(cBu.__state.props.QUEUE_HINT_V37 || '{}'), idleBu = cBu.processSyncQueue();
+check(hintBu.s === 'BUDGET' && idleBu.idle === true && cBu.queueLooksIdle_(), 'teto atingido: a fila dorme até o dia seguinte ou até entrar job novo', {hintBu, idleBu});
+cBu.enqueueJobs_([['SUMMARY', 'wrong_send', D19, 0]], {reset: true});
+check(!cBu.queueLooksIdle_(), 'job novo (atualização horária) acorda a fila mesmo com o teto atingido');
+cBu.__state.props.RECEBIMENTO_MIN_POR_DIA = '0';
+reset(cBu); cBu.invalidateProps_();
+runAll(cBu);
+check(afterBu === 'PENDING' && otherBu === 'COMPLETE' && cBu.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' &&
+  freshCtx({}, null, {COTA_GOOGLE: 'workspace'}).groupedBudgetMin_() === 0 && cBu.getDashboardData('arrival_flow', {from: D19, to: D19}).meta.detailProgress === null,
+  'teto diário (Gmail, 35 min): o Recebimento espera e os outros painéis seguem; RECEBIMENTO_MIN_POR_DIA=0 libera; Workspace sem teto', {afterBu, otherBu});
+// (h) Fila: no detalhe do Recebimento, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
+const cQ19 = freshCtx({});
+const tQ19 = cQ19.isoToday_(), yQ19 = cQ19.addDaysIso_(tQ19, -1), oQ19 = cQ19.addDaysIso_(tQ19, -3);
+cQ19.enqueueJobs_([['DETAIL_INIT', 'arrival_flow', tQ19, 1], ['DETAIL_INIT', 'arrival_flow', oQ19, 1], ['DETAIL_INIT', 'arrival_flow', yQ19, 1], ['SUMMARY', 'wrong_send', oQ19, 0]], {});
+reset(cQ19);
+const orderQ19 = cQ19.pendingJobs_().map(j => j.type === 'SUMMARY' ? 'S' : j.date);
+check(orderQ19.join() === ['S', yQ19, tQ19, oQ19].join(), 'fila do Recebimento: ontem (o dia em que o painel abre) antes de hoje e dos antigos', orderQ19);
+// (i) diagnosticarRecebimento(): as 4 listas, os turnos pelo resumo e o download, sem segredos no texto.
+const dgR = cAF.diagnosticarRecebimento(D19);
+check(dgR.listas.length === 4 && dgR.listas.every(x => x.total === x.resumo && x.pagina > 0 && !x.erro) && dgR.turnosPeloResumo && dgR.turnosPeloResumo.ok &&
+  [COL_PREV, COL_NOSEND, 'Deve chegar', 'Chegou', 'Resumo por horário', 'Download dos últimos dias', 'consultas por dia'].every(x => dgR.texto.indexOf(x) >= 0) &&
+  dgR.texto.indexOf('FAKE') < 0 && /todos os usados preenchidos/.test(dgR.texto),
+  'diagnosticarRecebimento: cada lista × resumo, turnos pelo resumo, volume e situação do download (sem AuthToken)', dgR.texto);
+const dgBad = freshCtx(dAF, {arrivalDetailRoute: 'nao_existe'}).diagnosticarRecebimento(D19);
+check(dgBad.listas.every(x => x.erro) && /Payload/.test(dgBad.texto), 'endereço do detalhe errado: cada lista mostra o erro e o texto pede a captura', dgBad.listas.map(x => x.erro));
+// (j) Catálogo: pizzas e cartões de turno sabem qual número do resumo usar.
+const catAF2 = ctx.getPublicCatalog_().filter(x => x.key === 'arrival_flow')[0];
+check(catAF2.routeKey === 'ARRIVAL' && catAF2.shiftCardsByColumn.summaryMetric === 'totalNum' &&
+  catAF2.charts.filter(d => d.summaryShift).map(d => d.key + ':' + d.summaryShift).join() === 'expShift:shouldArriverNum,recShift:totalNum',
+  'catálogo: pizzas e cartões de turno com o número do resumo correspondente');
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

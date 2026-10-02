@@ -1,8 +1,58 @@
-# J&T DASHMASTER V3.18 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.19 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.19 — Recebimento: valores nos gráficos, tabelas e cartões
+**Sintoma:** no Recebimento, os gráficos de IDs de viagem, "Bases que enviaram", as pizzas de turno, as três tabelas e os cartões T1/T2/T3 ficavam em "Sem dados no período".
+Todos eles dependem do **detalhe** (a lista remessa a remessa, ~500 mil remessas por dia em 4 listas), que ainda não tinha chegado.
+
+**O que a simulação com o volume real do SP GRU mostrou (conta Gmail):**
+- Com o JMS entregando 100 por página, o Recebimento **gastava sozinho os 90 min diários de gatilho** até as 11h. Daí até a meia-noite, **nenhum painel** atualizava.
+- As listas grandes ("Deve chegar" e "Chegou") vinham antes das pequenas, então as tabelas demoravam mais.
+- A fila começava pelo dia de hoje, mas o painel abre em **ontem**.
+- Um erro numa página jogava fora tudo o que a execução já tinha baixado.
+- Se o JMS entregasse bem menos registros que o informado, o dia era refeito do zero para sempre.
+- Cada execução refazia o plano do dia: ~80 consultas e ~20 s a mais.
+
+**Correções:**
+- **Cartões T1/T2/T3 e pizzas de turno sem esperar o detalhe.**
+  - O resumo do JMS é consultado também por horário: T1 06–14h, T2 14–22h, T3 22–06h. São 4 consultas por atualização do resumo.
+  - Assim que o detalhe do dia está completo, volta a valer o turno pelo horário de descarregamento.
+  - Se a soma dos horários não fechar com o dia (o JMS ignorando a hora), o recurso desliga sozinho. Ele avisa no LOG e não mostra número errado.
+- **Ordem do download:**
+  1. as listas pequenas (sem bipe anterior e sem bipe nesta base): as tabelas e os IDs sem bipe aparecem em minutos;
+  2. depois "Deve chegar";
+  3. por último "Chegou".
+  - Entre os dias, primeiro **ontem** (o dia em que o painel abre), depois hoje.
+- **Teto diário do Recebimento numa conta Gmail: 35 min.** Os outros painéis nunca mais ficam parados.
+  - Conta Google Workspace: sem teto.
+  - A propriedade `RECEBIMENTO_MIN_POR_DIA` muda o teto (0 = sem teto). `COTA_GOOGLE` (`gmail`/`workspace`) força o tipo de conta.
+- **Erro no meio do download:** o que já foi baixado fica gravado e aparece no painel (selo PARCIAL). A nova tentativa continua da parte seguinte.
+- **JMS entregando menos que o informado** (paginação limitada): grava o que veio. O dia fica "contagem diferente" e é baixado de novo mais tarde.
+- **Dia já fechado retomando:** usa o plano gravado. Antes confere o total de cada lista (4 consultas); se mudou, refaz o plano.
+
+**O painel diz o motivo quando falta detalhe:**
+- Quadro **"Download do detalhe"** acima dos gráficos, com cada dia incompleto e a barra de cada lista (ex.: "Deve chegar 100% · Chegou 50%").
+- No lugar de "Sem dados no período", gráficos, tabelas e cartões dizem a situação daquele dia e daquela lista:
+  - "na fila (n tarefas antes)";
+  - "baixando: 40% desta lista, atualizado às 09:40";
+  - "erro no download: …";
+  - "limite diário do Recebimento atingido, continua amanhã";
+  - "o JMS não entregou a lista …".
+
+**Nova função `diagnosticarRecebimento()`** (rode no editor do Apps Script e copie o texto do registro de execução; não mostra AuthToken nem Cookie). Ela mostra:
+- o resumo do dia e o resumo por horário (se os turnos sem detalhe funcionam no seu JMS);
+- para **cada uma das 4 listas**:
+  - o endereço usado;
+  - o total da lista × o número do resumo (✓ ou ✗);
+  - o tamanho de página aceito e quantas consultas por dia;
+  - se o JMS respeita a hora (fatias) e a paginação longa;
+  - os campos que chegam;
+- a situação do download dos últimos dias, a fila, o teto diário e os últimos avisos do LOG.
+
+**Testes:** 320 verificações (14 novas para o Recebimento), contra o JMS simulado.
 
 ## V3.18 — Avaria: "Pedidos principais/filhos" igual ao JMS e parte de cada turno na taxa
 **Avaria: escolhendo "Pedido principal" ou "Pedido secundário"**
@@ -690,13 +740,14 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 - `reimportarDetalhes('wrong_send','2026-09-01','2026-09-20')` baixa de novo os detalhes de um período.
 - `retomarImportacao` reabre os jobs com erro depois de corrigir a autenticação.
 - **`diagnosticoCompleto()`** (V3.7): o ponto de partida quando algo não bate. Mostra o resumo, o detalhe, o tamanho de página, os campos não encontrados e o banco dos últimos 7 dias de cada indicador. Use `diagnosticoCompleto('2026-09-20')` para um dia específico.
+- **`diagnosticarRecebimento()`** (V3.19): só o Recebimento. Testa as 4 listas no JMS (total × resumo, página, horário, paginação, campos), o resumo por horário (turnos) e mostra o download dos últimos dias, a fila, o teto diário e os últimos avisos. Use `diagnosticarRecebimento('2026-10-01')` para um dia específico.
 - `diagnosticarDashboard` mostra o estado do banco, da fila, dos gatilhos e o último erro de cada indicador.
 - `diagnosticarDetalheJms('sc_sc')` testa o endpoint de **detalhe** de um indicador na hora (não grava nada); use para achar por que gráficos/filtros ficam vazios mesmo com a Taxa ok.
 - `diagnosticarTodosOsErros()` — diagnóstico completo: lista **todos** os dias com erro no período (não só o mais recente de cada indicador, como `diagnosticarDashboard`), agrupados pela causa **técnica bruta** (o texto real gravado no SYNC_LOG, sem passar pela versão amigável do painel, que resume/oculta detalhes como "Campos recebidos"). Use `diagnosticarTodosOsErros('2026-08-01','2026-08-31')` para um período específico. É o ponto de partida quando existe mais de um erro diferente acontecendo ao mesmo tempo.
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **306 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **320 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

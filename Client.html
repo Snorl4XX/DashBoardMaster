@@ -100,6 +100,14 @@
       hmPrev: 'Dia anterior', hmPrevPeriod: 'Período anterior', hmShare: 'do {col} · {s}', hmNoDetail: 'Sem detalhe para o filtro neste período',
       mcOfTotal: '{p} de "{of}"', mcPrevShort: 'Dia anterior: {n}', mcPrevPeriodShort: 'Período anterior: {n}',
       scOf: 'do {col}', scNoDetail: 'Sem detalhe neste período', madeBy: 'Feito por Caike Oliveira', daysWithData: '{a} de {b} dias com dados',
+      scFromSummary: 'pelo resumo do JMS por horário', pieFromSummary: 'Pelo resumo do JMS por horário (o detalhe deste período ainda não está completo)',
+      noRowsHint: 'Nenhuma remessa com estes filtros neste período.', dsTitle: 'Download do detalhe', dsOutside: 'fora dos últimos {n} dias com detalhe (só o resumo)', dsNoSummary: 'aguardando o resumo do dia no JMS',
+      dsSkipped: 'o JMS não entregou a lista "{l}": {r}', dsListDone: 'lista baixada; não há registros com estes filtros',
+      dsDownloading: 'baixando: {p}% desta lista ({a} de {b} partes), atualizado às {at}', dsDayDownloading: 'baixando: {p}% do dia ({a} de {b} partes), atualizado às {at}',
+      dsListWaiting: 'na fila deste dia: as listas menores vêm antes ({p}% do dia baixado)', dsError: 'erro no download: {r}. Nova tentativa automática',
+      dsLastError: 'último erro: {r}', dsQueued: 'na fila do download ({n} tarefa(s) antes; o Recebimento roda depois dos outros painéis)',
+      dsWaiting: 'aguardando a sincronização (fila a cada 5 min)', dsBudget: 'limite diário do Recebimento atingido ({m} min, conta Gmail): continua amanhã',
+      dsPaused: 'rota pausada: {r}', dsDone: 'completo', dsHelp: 'Para saber o motivo em detalhe, rode diagnosticarRecebimento() no editor do Apps Script.',
       mcFiltered: '{label} (com filtro)', mcOfficial: 'Oficial do JMS (sem filtros): {n}', mcWholeDay: 'Número do dia todo: o JMS não separa este número por turno nem por viagem',
       scReceived: 'recebido', scShare: 'de participação', metricSub: 'Número oficial do JMS · {n} dias até {date} (coluna vermelha = dia escolhido)',
       metricLineSub: 'Número oficial do JMS · evolução diária até {date}', mAvg: 'Média', mMax: 'Maior', mMin: 'Menor', mDay: 'Dia escolhido',
@@ -192,6 +200,14 @@
       hmPrev: '前一日', hmPrevPeriod: '上一期间', hmShare: '占{col} · {s}', hmNoDetail: '该期间没有符合筛选的明细',
       mcOfTotal: '占“{of}” {p}', mcPrevShort: '前一日：{n}', mcPrevPeriodShort: '上一期间：{n}',
       scOf: '占{col}', scNoDetail: '该期间无明细', madeBy: '由 Caike Oliveira 制作', daysWithData: '{b} 天中 {a} 天有数据',
+      scFromSummary: '按时段查询的JMS汇总', pieFromSummary: '按时段查询的JMS汇总（本期间明细尚未完整）',
+      noRowsHint: '本期间在当前筛选下没有记录。', dsTitle: '明细下载', dsOutside: '超出明细保留天数（{n} 天），仅有汇总', dsNoSummary: '等待JMS当日汇总',
+      dsSkipped: 'JMS 未返回列表「{l}」：{r}', dsListDone: '列表已下载；当前筛选下无记录',
+      dsDownloading: '下载中：本列表 {p}%（{a}/{b} 段），更新于 {at}', dsDayDownloading: '下载中：当日 {p}%（{a}/{b} 段），更新于 {at}',
+      dsListWaiting: '当日排队中：先下载较小的列表（当日已下载 {p}%）', dsError: '下载出错：{r}。将自动重试',
+      dsLastError: '最近错误：{r}', dsQueued: '排队中（前面还有 {n} 个任务；到件明细排在其他看板之后）',
+      dsWaiting: '等待同步（每 5 分钟一次）', dsBudget: '今日到件明细下载时长已达上限（{m} 分钟，Gmail 账号），明天继续',
+      dsPaused: '接口已暂停：{r}', dsDone: '完成', dsHelp: '如需详细原因，请在 Apps Script 编辑器中运行 diagnosticarRecebimento()。',
       mcFiltered: '{label}（已筛选）', mcOfficial: 'JMS官方（未筛选）：{n}', mcWholeDay: '全天数字：JMS 未按班次或车次拆分该数字',
       scReceived: '已到', scShare: '占比', metricSub: 'JMS官方数字 · 截至 {date} 的 {n} 天（红色柱 = 所选日期）',
       metricLineSub: 'JMS官方数字 · 截至 {date} 的每日趋势', mAvg: '平均', mMax: '最高', mMin: '最低', mDay: '所选日期',
@@ -697,6 +713,7 @@
       renderSyncBanner(res.meta.pauses);
       var sm = res.summary;
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
+        shiftSum: res.shiftSum || {},
         rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds, res.orderKindTags),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
@@ -754,6 +771,7 @@
         partRows: state.data.summary || c.heroMetric || !(c.filters || []).some(function (x) { return x.key === 'shift'; }) ? null : state.data.rows,
         agg: state.data.agg, only: only});
     renderKpis(c, cards);
+    renderDetailStatus(c);
     $('#targetBanner').classList.toggle('hidden', !!c.hideTarget);
     if (!c.hideTarget) renderTarget(c, cards);
     renderCharts(c);
@@ -1117,15 +1135,101 @@
   }
   /** Linhas da lista com os filtros (modo de totais: totais por dia e lista, já filtrados no servidor). */
   function listQty(col) { return colQty(state.filtered, col); }
-  /** Soma dos turnos escolhidos de uma lista nos agregados do dia (aba AGG), entre duas datas. */
-  function aggShiftSum(col, shifts, from, to) {
-    var list = (state.data.colAgg || {})[col] || [], n = 0, any = false;
-    list.forEach(function (a) {
-      if (a.date < from || a.date > to) return;
-      any = true;
-      (shifts || ['T1', 'T2', 'T3', 'NA']).forEach(function (s) { n += Number(a[s]) || 0; });
+  /** Número do resumo que corresponde a uma lista (metricPanels: metrics[].detail = lista). */
+  function listMetric(col) {
+    var key = null;
+    ((cfg() && cfg().metricPanels) || []).forEach(function (p) { p.metrics.forEach(function (m) { if (m.detail === col) key = m.key; }); });
+    return key;
+  }
+  /**
+   * Turnos de uma lista dia a dia entre duas datas: o agregado do detalhe completo do dia (aba AGG) ou, sem ele,
+   * o resumo do JMS consultado por horário (V3.19, não depende do detalhe). complete = todo dia com taxa tem um
+   * dos dois; summary = algum dia veio do resumo.
+   */
+  function shiftDays(col, from, to, metric) {
+    var det = {}, sum = {}, out = {q: {T1: 0, T2: 0, T3: 0, NA: 0}, tot: 0, any: false, complete: true, summary: false};
+    ((state.data.colAgg || {})[col] || []).forEach(function (a) { det[a.date] = a; });
+    var mk = metric || listMetric(col);
+    if (mk) ((state.data.shiftSum || {})[mk] || []).forEach(function (a) { sum[a.date] = a; });
+    activeRates().forEach(function (r) {
+      if (r.date < from || r.date > to) return;
+      var a = det[r.date] || sum[r.date];
+      if (!a) { out.complete = false; return; }
+      if (!det[r.date]) out.summary = true;
+      out.any = true;
+      ['T1', 'T2', 'T3', 'NA'].forEach(function (s) { out.q[s] += Number(a[s]) || 0; });
+      out.tot += Number(a.total) || 0;
     });
-    return any ? n : null;
+    if (!out.any) out.complete = false;
+    return out;
+  }
+  /** Soma dos turnos escolhidos de uma lista nos agregados do dia (detalhe ou resumo por horário), entre duas datas. */
+  function aggShiftSum(col, shifts, from, to) {
+    var d = shiftDays(col, from, to);
+    if (!d.any) return null;
+    var n = 0;
+    (shifts || ['T1', 'T2', 'T3', 'NA']).forEach(function (s) { n += d.q[s] || 0; });
+    return n;
+  }
+  function fmtClock(iso) {
+    if (!iso) return '—';
+    try { return new Intl.DateTimeFormat(locale(), {hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo'}).format(new Date(iso)); }
+    catch (e) { return String(iso).slice(11, 16); }
+  }
+  var DETAIL_DONE = ['COMPLETE', 'CHECK_COUNTS', 'STALE', 'NO_RECORD'];
+  /**
+   * Por que falta detalhe (V3.19): situação do download do dia mais recente do período sem detalhe completo,
+   * para a lista `col` quando informada (Recebimento: partes baixadas de cada lista). Sem a informação, o texto
+   * genérico de antes.
+   */
+  function detailHint(col) {
+    var dp = state.data && state.data.meta && state.data.meta.detailProgress;
+    if (!dp || !dp.days || !dp.days.length) return state.data && !detailIsPartial() ? t('noRowsHint') : t('noDataHint');
+    var d = dp.days.filter(function (x) { return DETAIL_DONE.indexOf(x.details) < 0; })[0] || dp.days[0];
+    return fmtDate(d.date, true) + ': ' + dayStatusText(d, col, dp);
+  }
+  function dayStatusText(d, col, dp) {
+    if (d.outside) return t('dsOutside', {n: dp.detailDays});
+    if (d.summary !== 'COMPLETE' && d.summary !== 'NO_RECORD') return t('dsNoSummary');
+    var sk = (d.skipped || []).filter(function (x) { return !col || x.column === col; })[0];
+    if (sk && col) return t('dsSkipped', {l: vlabel('column', sk.column), r: sk.reason});
+    var pause = ((state.data.meta && state.data.meta.pauses) || []).filter(function (p) { return p.route === (cfg() && cfg().routeKey) || p.route === '*'; })[0];
+    var err = d.progressError || d.error || (d.job && d.job.msg) || '';
+    var lists = d.lists || [], l = col ? lists.filter(function (x) { return x.column === col; })[0] : null;
+    var units = lists.reduce(function (a, x) { return a + x.units; }, 0), done = lists.reduce(function (a, x) { return a + x.done; }, 0);
+    var text;
+    if (DETAIL_DONE.indexOf(d.details) >= 0 && !l) text = t('dsDone');
+    else if (l && l.done >= l.units && units) text = t('dsListDone');
+    else if (l && !l.done && done) text = t('dsListWaiting', {p: Math.round(done / units * 100)});
+    else if (l && l.done) text = t('dsDownloading', {p: Math.round(l.done / l.units * 100), a: l.done, b: l.units, at: fmtClock(d.progressAt)});
+    else if (d.details === 'PARTIAL' && units && done) text = t('dsDayDownloading', {p: Math.round(done / units * 100), a: done, b: units, at: fmtClock(d.progressAt)});
+    else if (d.details === 'PARTIAL' && d.expected) text = t('dsDayDownloading', {p: Math.round(d.saved / d.expected * 100), a: d.saved, b: d.expected, at: fmtClock(d.updatedAt)});
+    else if (d.details === 'ERROR' || (d.job && d.job.status === 'ERROR')) text = t('dsError', {r: err || '—'});
+    else if (d.job && d.job.status === 'PENDING' && d.job.ahead !== null && d.job.ahead !== undefined) text = t('dsQueued', {n: d.job.ahead});
+    else text = t('dsWaiting');
+    if (err && text.indexOf(err) < 0 && d.details !== 'ERROR' && DETAIL_DONE.indexOf(d.details) < 0) text += ' · ' + t('dsLastError', {r: err});
+    if (pause) text += ' · ' + t('dsPaused', {r: pause.reason || pause.kind || ''});
+    if (dp.budget && dp.budget.exhausted && DETAIL_DONE.indexOf(d.details) < 0) text += ' · ' + t('dsBudget', {m: dp.budget.minPerDay});
+    return text;
+  }
+  /** Quadro "Download do detalhe" (Recebimento): cada dia do período sem detalhe completo, com as partes de cada lista. */
+  function renderDetailStatus(c) {
+    var box = $('#detailStatus');
+    if (!box) return;
+    var dp = c.grouped && state.data.meta && state.data.meta.detailProgress;
+    var days = dp ? dp.days.filter(function (x) { return DETAIL_DONE.indexOf(x.details) < 0 && !x.outside; }).slice(0, 3) : [];
+    if (!days.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = '<div class="ds-head">' + icon('history') + '<b>' + esc(t('dsTitle')) + '</b><small>' + esc(t('dsHelp')) + '</small></div>' + days.map(function (d) {
+      var lists = (d.lists || []).map(function (l) {
+        var pct = l.units ? Math.round(l.done / l.units * 100) : 0;
+        var sk = (d.skipped || []).filter(function (x) { return x.column === l.column; })[0];
+        return '<span class="ds-list" title="' + esc(vlabel('column', l.column) + ': ' + l.done + '/' + l.units) + '"><span>' + esc(vlabel('column', l.column)) + '</span>' +
+          '<i class="ds-bar"><i style="width:' + pct + '%"></i></i><b>' + (sk ? '—' : pct + '%') + '</b></span>';
+      }).join('');
+      return '<div class="ds-day"><span class="ds-date">' + esc(fmtDate(d.date, true)) + '</span><span class="ds-text">' + esc(dayStatusText(d, null, dp)) + '</span>' +
+        (lists ? '<span class="ds-lists">' + lists + '</span>' : '') + '</div>';
+    }).join('');
   }
   /**
    * Recebimento (V3.17): cartão principal = quantidade que deve chegar (oficial do JMS), com as encomendas que
@@ -1170,6 +1274,9 @@
         if (m.detail && fk.length) {
           // Lista remessa a remessa com filtro: a quantidade dela; com só o filtro de turno, o dia anterior do turno.
           v = listQty(m.detail);
+          // Só o filtro de turno: o dia inteiro pelo agregado/resumo por horário (o detalhe pode estar pela metade).
+          var sd = fk.length === 1 && fk[0] === 'shift' ? shiftDays(m.detail, state.from, state.to, m.key) : null;
+          if (sd && sd.complete) v = sel.reduce(function (a, x) { return a + (sd.q[x] || 0); }, 0);
           name = t('mcFiltered', {label: name});
           pv = fk.length === 1 && fk[0] === 'shift' ? aggShiftSum(m.detail, sel, k.prevFrom, k.prevTo) : null;
           extra = '<br>' + esc(t('mcOfficial', {n: fmtInt(off)}));
@@ -1196,25 +1303,25 @@
     var sc = c.shiftCardsByColumn;
     if (!sc) return '';
     var col = sc.main, sm = state.data.summary;
-    var rows = (sm ? (sm.byDim.shift || []) : Core.applyFilters(state.data.rows, f, 'shift')).filter(function (r) { return r.column === col; });
-    var q = {}, tot = 0;
-    rows.forEach(function (r) { var s = r.shift ? String(r.shift) : 'N/A', w = Core.weight(r); q[s] = (q[s] || 0) + w; tot += w; });
-    // Sem detalhe carregado (ou sem outros filtros): agregados do dia gravados no servidor.
     var others = filtersFor(f, col).filter(function (x) { return x !== 'shift'; });
-    if (!tot && !others.length) {
-      (state.data.colAgg && state.data.colAgg[col] || []).forEach(function (a) {
-        if (a.date < state.from || a.date > state.to) return;
-        ['T1', 'T2', 'T3'].forEach(function (s) { q[s] = (q[s] || 0) + (Number(a[s]) || 0); });
-        tot += Number(a.total) || 0;
-      });
+    var q = {}, tot = 0, fromSum = false;
+    // Sem outros filtros: o dia inteiro pelo agregado do detalhe completo ou pelo resumo do JMS por horário. Um dia
+    // com o detalhe pela metade distorce os turnos (as fatias de horário chegam em ordem), então ele não entra.
+    var days = others.length ? null : shiftDays(col, state.from, state.to, sc.summaryMetric);
+    if (days && days.complete) { q = days.q; tot = days.tot; fromSum = days.summary; }
+    else {
+      var rows = (sm ? (sm.byDim.shift || []) : Core.applyFilters(state.data.rows, f, 'shift')).filter(function (r) { return r.column === col; });
+      rows.forEach(function (r) { var s = r.shift ? String(r.shift) : 'N/A', w = Core.weight(r); q[s] = (q[s] || 0) + w; tot += w; });
+      if (!tot && days && days.any) { q = days.q; tot = days.tot; fromSum = days.summary; }
     }
     var sel = f.shift && f.shift.length ? f.shift : null;
     return ['T1', 'T2', 'T3'].map(function (s) {
       var v = q[s] || 0, pct = tot ? v / tot * 100 : null;
       var pv = others.length ? null : aggShiftSum(col, [s], k.prevFrom, k.prevTo);
       var label = '<i style="background:' + SHIFT_COLORS[s] + '"></i>' + s + ' · ' + SHIFT_HOURS[s];
-      var subHtml = !tot ? esc(t('scNoDetail')) : '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('scShare')) +
-        '<br>' + esc(k.mode === 'day' ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, false);
+      var subHtml = !tot ? '<span class="ds-hint">' + esc(detailHint(col)) + '</span>' : '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('scShare')) +
+        '<br>' + esc(k.mode === 'day' ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, false) +
+        (fromSum ? '<br><span class="mc-note">' + esc(t('scFromSummary')) + '</span>' : '');
       var on = sel && sel.indexOf(s) >= 0;
       return '<article class="kpi shift-kpi' + (sel && !on ? ' faded' : '') + (on ? ' selected' : '') + '"><div class="kpi-label">' + label + '</div>' +
         '<div class="kpi-value">' + (tot ? fmtInt(v) : '—') + '<small class="sc-unit"> ' + esc(t('scReceived')) + '</small></div><div class="kpi-sub">' + subHtml + '</div>' +
@@ -1346,7 +1453,7 @@
     }).join('') + '</tr>';
     $('tbody', card).innerHTML = slice.map(function (r) {
       return '<tr>' + cols.map(function (col) { var tx = cellText(col[0], r[col[0]]); return '<td title="' + esc(tx) + '">' + highlight(tx || '—', st.query) + '</td>'; }).join('') + '</tr>';
-    }).join('') || '<tr class="empty-row"><td colspan="' + cols.length + '">' + esc(t('noRows')) + '</td></tr>';
+    }).join('') || '<tr class="empty-row"><td colspan="' + cols.length + '">' + esc(q ? t('noRows') : t('noRows') + ' — ' + detailHint(tb.column)) + '</td></tr>';
     $$('thead th', card).forEach(function (th) {
       var sortBy = function () {
         var k = th.getAttribute('data-k');
@@ -1551,10 +1658,29 @@
       if (def.metric) return metricSpec(def);
       var spec = Core.buildChart(def, sm ? Core.summaryChartRows(def, sm.byDim, fo) : rows, {intervalMode: state.intervalMode});
       if (def.sub) spec.sub = def.sub;
+      if (def.summaryShift) shiftPieFromSummary(def, spec);
       // "Top N por turno" no padrão das docas: top N de cada turno, faixas T1/T2/T3.
       if (spec.grouped) spec.panel = Core.rankPanel(rows, {key: def.key, kind: 'byShift', dim: spec.dim, top: def.top || 4});
       return spec;
     }));
+  }
+
+  /**
+   * Pizza de turnos (Recebimento) pelo resumo do JMS por horário quando o detalhe do período não está completo
+   * (um dia pela metade distorce os turnos) ou não chegou. Só sem filtros da lista além do turno.
+   */
+  function shiftPieFromSummary(def, spec) {
+    var lc = def.where && def.where.column, f = filtersObj(), own = filtersFor(f, lc);
+    if (own.filter(function (x) { return x !== 'shift'; }).length) return;
+    var has = ((spec.datasets || [])[0] || {data: []}).data.some(function (v) { return v > 0; });
+    if (has && !detailIsPartial()) return;
+    var dd = shiftDays(lc, state.from, state.to, def.summaryShift);
+    if (!(dd.complete || (!has && dd.any))) return;
+    var sel = own.indexOf('shift') >= 0 ? f.shift : null;
+    spec.labels = ['T1', 'T2', 'T3'];
+    spec.datasets = [{label: 'qty', data: spec.labels.map(function (x) { return !sel || sel.indexOf(x) >= 0 ? dd.q[x] || 0 : 0; })}];
+    spec.total = spec.datasets[0].data.reduce(function (a, v) { return a + v; }, 0);
+    spec.fromSummary = dd.summary;
   }
 
   function renderCharts(c) {
@@ -1580,7 +1706,7 @@
   function renderChartCard(card, spec, c) {
     if (!card) return;
     if (spec.metric) return renderMetricChart(card, spec);
-    var key = spec.key, partial = key !== 'evolution' && detailIsPartial();
+    var key = spec.key, partial = key !== 'evolution' && !spec.fromSummary && detailIsPartial();
     $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '') +
       (partial ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
     var sub;
@@ -1588,6 +1714,7 @@
     else if (spec.others > 0) sub = t('distinctShipments') + ' · ' + t('topOf', {n: spec.labels.length, m: fmtInt(spec.labels.length + spec.others)});
     else sub = t('distinctShipments') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
     if (spec.sub) sub = L(spec.sub) + ' · ' + sub;
+    if (spec.fromSummary) sub = t('pieFromSummary') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
     $('small', card).textContent = sub;
 
     var view = state.chartViews[key] || (window.Chart ? 'chart' : 'table');
@@ -1615,7 +1742,7 @@
     if (!hasData) {
       destroyChart(key);
       body.innerHTML = '<div class="chart-wrap' + (key === 'evolution' ? ' large' : '') + '"><div class="chart-empty"><div><b>' + esc(t('noData')) + '</b>' +
-        esc(key === 'evolution' ? t('noRateHint') : t('noDataHint')) + '</div></div></div>';
+        esc(key === 'evolution' ? t('noRateHint') : detailHint(spec.where && spec.where.column)) + '</div></div></div>';
       return;
     }
     if (view === 'table' || !window.Chart) {

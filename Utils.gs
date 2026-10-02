@@ -124,6 +124,8 @@ function normalizeDateFromValue_(v, fallbackDate) {
 
 function uuid_() { return Utilities.getUuid(); }
 function safeJsonParse_(s, fallback) { try { return JSON.parse(s); } catch (e) { return fallback; } }
+/** Informação extra que não pode derrubar a resposta principal (ex.: situação do detalhe no painel). */
+function safeCall_(fn) { try { return fn(); } catch (e) { console.warn('safeCall_: ' + (e && e.message || e)); return null; } }
 function goalMet_(rate, goal) { return JTCore_.goalMet(rate, goal) === true; }
 
 /** Hash curto (32 bits) só para detectar TROCA de credencial; não guarda nem expõe o token. */

@@ -455,6 +455,24 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 @keyframes shimmer{to{background-position:-200% 0}}
 @keyframes angerPop{0%,100%{transform:scale(.6);opacity:0}20%{transform:scale(1.15);opacity:1}60%{transform:scale(1);opacity:1}}
 @keyframes starPop{0%{opacity:0;transform:scale(.2)}30%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.4) translateY(-12px)}}
+.detail-status{padding:14px 18px;margin-bottom:18px;border-color:var(--warn-line);background:var(--warn-bg)}
+.detail-status[hidden]{display:none}
+.ds-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--warn);margin-bottom:6px}
+.ds-head svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+.ds-head b{font-size:13px;color:var(--ink)}
+.ds-head small{color:var(--muted);font-size:11.5px}
+.ds-day{display:grid;grid-template-columns:96px minmax(0,1fr);gap:4px 12px;padding:7px 0;border-top:1px dashed var(--warn-line);font-size:12.5px;align-items:start}
+.ds-day:first-of-type{border-top:0}
+.ds-date{font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.ds-text{color:var(--ink-2);overflow-wrap:anywhere}
+.ds-lists{grid-column:2;display:flex;flex-wrap:wrap;gap:6px 14px}
+.ds-list{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+.ds-list b{color:var(--ink);font-variant-numeric:tabular-nums;min-width:32px}
+.ds-bar{display:inline-block;width:64px;height:6px;border-radius:4px;background:#fff;border:1px solid var(--warn-line);overflow:hidden}
+.ds-bar i{display:block;height:100%;background:var(--warn);border-radius:4px}
+.ds-hint{display:block;color:var(--muted);font-size:11.5px;line-height:1.35;overflow-wrap:anywhere}
+.chart-empty div{overflow-wrap:anywhere}
+@media (max-width:560px){.ds-day{grid-template-columns:1fr}.ds-lists{grid-column:1}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
 
 /* ---------- responsivo ---------- */

@@ -805,6 +805,8 @@ function publicPauses_() {
 function setQueueHint_(state) {
   try {
     const h = {s: state, at: Date.now(), sig: ''};
+    // Só sobrou o detalhe do Recebimento acima do teto diário: dorme até o dia seguinte (ou até entrar job novo).
+    if (state === 'BUDGET') h.day = isoToday_();
     if (state === 'PAUSED') {
       // Acorda assim que a primeira pausa vencer (não espera a verificação de 30 min).
       const p = activePauses_();
@@ -825,6 +827,7 @@ function queueLooksIdle_() {
   if (!h) return false;
   const age = Date.now() - Number(h.at || 0);
   if (h.s === 'IDLE') return age >= 0 && age < 60 * 60000;
+  if (h.s === 'BUDGET') return age >= 0 && age < 60 * 60000 && h.day === isoToday_();
   if (h.s === 'PAUSED') {
     return age >= 0 && age < 30 * 60000 && Date.now() < Number(h.until || 0) && h.sig === credentialSignature_() &&
       Object.keys(activePauses_()).length > 0;
@@ -934,8 +937,16 @@ function recoverStaleRunning_() {
 }
 function pendingJobs_() {
   const prio = {SUMMARY: 0, DETAIL_INIT: 1, DETAIL_PAGE: 1, COMPACT: 2};
-  // Detalhe agrupado (Recebimento: ~500 mil remessas por dia) por último: nunca atrasa os outros painéis.
-  const rank = j => j.type === 'DETAIL_INIT' && INDICATORS[j.indicator].grouped ? 2.5 : prio[j.type] === undefined ? 3 : prio[j.type];
+  // Detalhe agrupado (Recebimento: ~500 mil remessas por dia) por último: nunca atrasa os outros painéis. Entre os
+  // dias dele, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
+  const anchor = {};
+  const rank = j => {
+    if (j.type === 'DETAIL_INIT' && INDICATORS[j.indicator].grouped) {
+      const a = anchor[j.indicator] || (anchor[j.indicator] = lastClosedDate_(j.indicator));
+      return j.date === a ? 2.5 : 2.6;
+    }
+    return prio[j.type] === undefined ? 3 : prio[j.type];
+  };
   return allTabRows_('JOBS').map((r, i) => ({rowNum: i + 2, type: String(r[1]), indicator: String(r[2]), date: dateCellIso_(r[3]),
       page: num_(r[4], 0), status: String(r[5]), attempts: num_(r[6], 0), createdAt: r[7]}))
     .filter(j => j.status === 'PENDING' && INDICATORS[j.indicator] && isIso_(j.date))
@@ -1250,8 +1261,14 @@ function processSyncQueue(opts) {
         if (job.type === 'DETAIL_INIT' && Date.now() > deadline - APP_CONFIG.DETAIL_MIN_START_MS) { waiting++; continue; }
         // Detalhe agrupado (Recebimento): só começa com tempo para fechar ao menos uma fatia de horário — com
         // pouco tempo ele só replanejava e parava (com o JMS em 100 por página, nunca avançava).
-        if (job.type === 'DETAIL_INIT' && INDICATORS[job.indicator].grouped && Date.now() > deadline - APP_CONFIG.GROUPED_DETAIL_MIN_START_MS) { waiting++; continue; }
-        const r = processJob_(job, deadline);
+        const grouped = job.type === 'DETAIL_INIT' && INDICATORS[job.indicator].grouped;
+        if (grouped && Date.now() > deadline - APP_CONFIG.GROUPED_DETAIL_MIN_START_MS) { waiting++; continue; }
+        // Teto diário do Recebimento (conta Gmail): o resto do dia fica para os outros painéis.
+        const budget = grouped ? groupedBudgetLeftMs_() : Infinity;
+        if (grouped && budget < 90000) { waiting++; continue; }
+        const t0 = Date.now();
+        const r = processJob_(job, grouped ? Math.min(deadline, t0 + budget) : deadline);
+        if (grouped && budget !== Infinity) addGroupedUsedMs_(Date.now() - t0);
         progressed = true;
         if (r === 'done') done++;
         else if (r === 'skip') waiting++;
@@ -1277,8 +1294,10 @@ function processSyncQueue(opts) {
     const hint = safeJsonParse_(getProp_(HINT_PROP_, ''), null);
     const touched = hint && hint.s === 'PENDING' && Number(hint.at) >= startedAt;
     if (!touched) {
+      const overBudget = j => j.type === 'DETAIL_INIT' && INDICATORS[j.indicator].grouped && groupedBudgetLeftMs_() < 90000;
       if (!remaining.length) setQueueHint_('IDLE');
       else if (remaining.every(j => pauseFor_(INDICATORS[j.indicator].routeKey, pausesNow))) setQueueHint_('PAUSED');
+      else if (remaining.every(j => overBudget(j) || pauseFor_(INDICATORS[j.indicator].routeKey, pausesNow))) setQueueHint_('BUDGET');
     }
     writeSyncStatusCache_();
     return {ok: true, done: done, failed: failed, waiting: waiting, partial: partial, paused: paused, remaining: remaining.length};
@@ -1331,8 +1350,9 @@ function processJob_(job, deadline) {
       // Falha ao ATUALIZAR uma taxa já gravada não apaga o dia: só registra o erro.
       updateDayStatus_(job.indicator, job.date, st && st.summary === 'COMPLETE' ? {error: message} : {summaryStatus: 'ERROR', error: message});
     } else if (job.type !== 'COMPACT') {
-      // Idem para detalhe: o dia completo anterior continua valendo até o novo download dar certo.
-      updateDayStatus_(job.indicator, job.date, st && DETAIL_USABLE_.indexOf(st.details) >= 0 ? {error: message} : {detailsStatus: 'ERROR', error: message});
+      // Idem para detalhe: o dia completo anterior continua valendo até o novo download dar certo. Download em
+      // partes (PARTIAL) continua PARTIAL: a nova tentativa segue da parte seguinte, sem recomeçar o dia.
+      updateDayStatus_(job.indicator, job.date, st && (DETAIL_USABLE_.indexOf(st.details) >= 0 || st.details === 'PARTIAL') ? {error: message} : {detailsStatus: 'ERROR', error: message});
     }
     logSync_('ERROR', job.indicator, job.date, message);
     return 'error';
@@ -1395,6 +1415,15 @@ function runSummaryJob_(job) {
   if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, false)) {
     enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
   }
+  // Recebimento: quantidade de cada turno pelo resumo (4 consultas), para os cartões e pizzas sem esperar o detalhe.
+  const sw = getIndicatorConfig_(job.indicator).summary.shiftWindows;
+  if (sw && sw.length) {
+    try { syncSummaryShifts_(job.indicator, job.date, summary.raw); }
+    catch (e) {
+      if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e;
+      logSync_('WARN', job.indicator, job.date, 'Turnos pelo resumo não consultados: ' + String(e && e.message || e).slice(0, 300));
+    }
+  }
   // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (quando os códigos já são conhecidos).
   const okMap = getIndicatorConfig_(job.indicator).orderKinds && orderKindParams_(job.indicator);
   if (okMap && !okMap.unsupported) {
@@ -1456,7 +1485,9 @@ function runDetailJob_(job, deadline) {
     updateDayStatus_(job.indicator, job.date, {detailsStatus: 'SKIPPED', error: ''});
     return 'done';
   }
-  const plan = planDetailDownload_(job.indicator, job.date, (total, type) => validateDetailTotal_(cfg, job.indicator, job.date, total, type));
+  // Recebimento retomando um dia já fechado: o plano gravado (fatias e totais) dispensa ~80 consultas por execução.
+  const plan = (cfg.grouped && storedGroupedPlan_(job, st)) ||
+    planDetailDownload_(job.indicator, job.date, (total, type) => validateDetailTotal_(cfg, job.indicator, job.date, total, type));
   if (cfg.grouped) return runGroupedDetailJob_(job, deadline, cfg, st, plan);
   const n = plan.chunks.length;
   const tol = countTolerance_(plan.total);
@@ -1575,6 +1606,27 @@ function runGroupedDetailJob_(job, deadline, cfg, st, plan) {
   const winOf = i => { const w = plan.windows[plan.chunks[i].w]; return {start: w.start, end: w.end, type: w.type}; };
   const parallel = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
   let done = start - 1, slowest = 8000;
+  // Progresso por lista (painel e diagnosticarRecebimento): quantas unidades cada lista tem, na ordem do download.
+  const lists = [];
+  // (fatia sem registros = unidade sem páginas: o tipo vem da janela)
+  units.forEach((list, u) => {
+    const t = plan.sliced ? plan.windows[u].type : typeOf(list[0]), last = lists[lists.length - 1];
+    if (last && last.t === t) last.u++; else lists.push({t: t, u: 1});
+  });
+  const progress = (d, extra) => setGroupedProgress_(job.indicator, job.date,
+    Object.assign({units: n, done: d, lists: lists, skip: plan.skipped || {}, resumed: start > 1}, extra || {}));
+  progress(start - 1);
+  // Grava as unidades completas desta execução; a próxima continua da seguinte.
+  const saveSoFar = error => {
+    if (done >= start) {
+      saveDetailRange_(job.indicator, job.date, start, done, acc.build(), n, plan.total, raw.slice(start - 1, done));
+      setProp_(sigKey, sigText);
+      if (!plan.stored) saveGroupedPlan_(job.indicator, job.date, plan);
+    }
+    writeCells_('JOBS', job.rowNum, 5, [done + 1]);
+    updateDayStatus_(job.indicator, job.date, {detailsStatus: 'PARTIAL', expectedPages: n, expectedRecords: plan.total, savedPages: done, error: error || ''});
+    progress(done, error ? {error: publicJmsError_(error).slice(0, 300)} : null);
+  };
   // Unidade só entra no agrupamento quando todas as páginas dela chegaram (as unidades fecham em ordem).
   const take = (i, records) => {
     const u = unitOf[i];
@@ -1586,46 +1638,53 @@ function runGroupedDetailJob_(job, deadline, cfg, st, plan) {
   const todo = [];
   for (let u = start - 1; u < n; u++) units[u].forEach(i => todo.push(i));
   let k = 0;
-  while (k < todo.length) {
-    if (firsts[todo[k]]) { take(todo[k], firsts[todo[k]]); firsts[todo[k]] = null; k++; continue; }
-    const batch = [];
-    for (let j = k; j < todo.length && batch.length < parallel && !firsts[todo[j]]; j++) batch.push(todo[j]);
-    if (Date.now() + slowest + 25000 > deadline) {
-      // Tempo acabando: grava as unidades completas; a próxima execução continua da seguinte.
-      if (done >= start) {
-        saveDetailRange_(job.indicator, job.date, start, done, acc.build(), n, plan.total, raw.slice(start - 1, done));
-        setProp_(sigKey, sigText);
-      }
-      writeCells_('JOBS', job.rowNum, 5, [done + 1]);
-      updateDayStatus_(job.indicator, job.date, {detailsStatus: 'PARTIAL', expectedPages: n, expectedRecords: plan.total, savedPages: done, error: ''});
-      return 'partial';
+  try {
+    while (k < todo.length) {
+      if (firsts[todo[k]]) { take(todo[k], firsts[todo[k]]); firsts[todo[k]] = null; k++; continue; }
+      const batch = [];
+      for (let j = k; j < todo.length && batch.length < parallel && !firsts[todo[j]]; j++) batch.push(todo[j]);
+      if (Date.now() + slowest + 25000 > deadline) { saveSoFar(''); return 'partial'; }
+      const t0 = Date.now();
+      const res = fetchDetailBatch_(job.indicator, job.date, batch.map(i => ({page: plan.chunks[i].page, size: plan.size, win: winOf(i)})));
+      slowest = Math.max(slowest, Date.now() - t0);
+      res.forEach((r, x) => take(batch[x], r.records));
+      k += batch.length;
     }
-    const t0 = Date.now();
-    const res = fetchDetailBatch_(job.indicator, job.date, batch.map(i => ({page: plan.chunks[i].page, size: plan.size, win: winOf(i)})));
-    slowest = Math.max(slowest, Date.now() - t0);
-    res.forEach((r, x) => take(batch[x], r.records));
-    k += batch.length;
+  } catch (e) {
+    // Erro no meio (página recusada, rede, sessão): o que já fechou nesta execução não se perde.
+    // O dia fica PARCIAL com o erro; a nova tentativa continua da unidade seguinte.
+    if (done >= start) {
+      try { saveSoFar(String(e && e.message || e).slice(0, 900)); }
+      catch (e2) { logSync_('WARN', job.indicator, job.date, 'Parte baixada não gravada após erro: ' + String(e2 && e2.message || e2).slice(0, 300)); }
+    }
+    throw e;
   }
   const rawTotal = raw.reduce((a, b) => a + b, 0);
   if (start === 1) {
-    if (rawTotal < plan.total * 0.9 - tol) {
-      throw new Error('Detalhes incompletos para ' + job.indicator + ' ' + job.date + ': o JMS informou ' + plan.total +
-        ' registros, mas entregou ' + rawTotal + '; a importação será refeita.');
-    }
     const ok = Math.abs(rawTotal - plan.total) <= tol;
+    // Muito menos que o informado (ex.: o JMS para de paginar): grava o que veio em vez de jogar tudo fora e
+    // recomeçar para sempre; o dia fica "contagem diferente" e é conferido de novo mais tarde.
+    if (rawTotal < plan.total * 0.9 - tol) {
+      logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + plan.total + ' registros no detalhe, mas entregou ' + rawTotal +
+        ' (páginas vazias ou paginação limitada). Gravado o que veio; o dia será baixado de novo mais tarde.');
+    }
     const dsDay = acc.build();
     saveDayDataset_(job.indicator, job.date, dsDay, n, plan.total);
     groupedShiftAgg_(job.indicator, job.date, dsDay);
     deleteProp_(sigKey);
+    deleteProp_(groupedPlanKey_(job.indicator, job.date));
     updateDayStatus_(job.indicator, job.date, {detailsStatus: ok ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: n, savedPages: n,
       expectedRecords: plan.total, savedRows: rawTotal, error: ''});
-    if (!ok) logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + plan.total + ' registros no detalhe, mas entregou ' + rawTotal + '. Dados gravados; o dia será conferido de novo mais tarde.');
+    progress(n);
+    if (!ok && rawTotal >= plan.total * 0.9 - tol) logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + plan.total + ' registros no detalhe, mas entregou ' + rawTotal + '. Dados gravados; o dia será conferido de novo mais tarde.');
     return 'done';
   }
   // Retomada: grava o restante e consolida o dia (a compactação soma os arquivos).
   saveDetailRange_(job.indicator, job.date, start, n, acc.build(), n, plan.total, raw.slice(start - 1, n));
   deleteProp_(sigKey);
+  deleteProp_(groupedPlanKey_(job.indicator, job.date));
   writeCells_('JOBS', job.rowNum, 5, [n + 1]);
+  progress(n);
   const status = refreshDetailCoverage_(job.indicator, job.date, n, plan.total);
   if (DETAIL_USABLE_.indexOf(status) >= 0) {
     const c = Date.now() < deadline - 60000 ? compactDay_(job.indicator, job.date, deadline) : {partial: true};
@@ -1635,6 +1694,196 @@ function runGroupedDetailJob_(job, deadline, cfg, st, plan) {
   writeCells_('JOBS', job.rowNum, 5, [1]);
   return 'partial';
 }
+
+/**
+ * Situação do detalhe de cada dia do período (até 7, mais recentes primeiro), para o painel explicar gráfico
+ * vazio: na fila (quantas tarefas antes), baixando (partes de cada lista), erro (motivo), fora da janela,
+ * aguardando o resumo ou o teto diário do Recebimento. Só lê abas já em cache (STATUS, JOBS) e propriedades.
+ */
+function detailProgress_(indicator, from, to) {
+  const cfg = getIndicatorConfig_(indicator);
+  const sm = statusMap_(indicator, from, to);
+  const jobs = {};
+  allTabRows_('JOBS').forEach(r => {
+    const d = dateCellIso_(r[3]);
+    if (String(r[1]) !== 'DETAIL_INIT' || String(r[2]) !== indicator || d < from || d > to) return;
+    const x = {status: String(r[5] || ''), attempts: num_(r[6], 0), at: toIsoTimestamp_(r[8]) || '', msg: r[9] ? publicJmsError_(String(r[9])).slice(0, 300) : ''};
+    if (!jobs[d] || x.status === 'PENDING' || x.status === 'RUNNING') jobs[d] = x;
+  });
+  const ahead = {};
+  pendingJobs_().forEach((j, i) => { if (j.type === 'DETAIL_INIT' && j.indicator === indicator && ahead[j.date] === undefined) ahead[j.date] = i; });
+  const colOf = t => { const td = ((cfg.detail || {}).types || []).filter(x => x.type === t)[0]; return td ? td.column : t; };
+  const win = detailDays_(cfg);
+  const days = dateRangeIso_(from, to).reverse().slice(0, 7).map(d => {
+    const s = sm[indicator + '|' + d] || null;
+    const x = {date: d, summary: s ? s.summary : 'PENDING', details: s ? s.details : 'PENDING', saved: s ? s.savedPages : 0,
+      expected: s ? s.expectedPages : 0, error: s && s.error ? publicJmsError_(s.error).slice(0, 300) : '', updatedAt: s ? s.updatedAt || '' : ''};
+    const j = jobs[d];
+    if (j) x.job = {status: j.status, attempts: j.attempts, at: j.at, msg: j.msg, ahead: ahead[d] === undefined ? null : ahead[d]};
+    if (win && d < addDaysIso_(isoToday_(), -win)) x.outside = true;
+    if (cfg.grouped) {
+      const p = getGroupedProgress_(indicator, d);
+      if (p && p.lists) {
+        let first = 0;
+        x.lists = p.lists.map(l => {
+          const done = Math.max(0, Math.min(l.u, (Number(p.done) || 0) - first));
+          first += l.u;
+          return {column: colOf(l.t), units: l.u, done: done};
+        });
+        x.progressAt = p.at || '';
+        if (p.error) x.progressError = p.error;
+      }
+      if (p && p.skip) x.skipped = Object.keys(p.skip).map(t => ({column: colOf(t), reason: p.skip[t]}));
+    }
+    return x;
+  });
+  const out = {days: days, detailDays: win || 0};
+  if (cfg.grouped) {
+    const min = groupedBudgetMin_();
+    out.budget = {minPerDay: min, usedMin: Math.round(groupedUsedMs_() / 6000) / 10, exhausted: min > 0 && groupedBudgetLeftMs_() < 90000};
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ Recebimento: progresso, cota e turnos pelo resumo
+/** Progresso do download agrupado de um dia (propriedade pequena; o painel mostra "baixando x de y" por lista). */
+function groupedProgressKey_(indicator, date) { return 'GROUPED_PROG_' + indicator.toUpperCase() + '_' + date; }
+function setGroupedProgress_(indicator, date, p) {
+  try {
+    setProp_(groupedProgressKey_(indicator, date), JSON.stringify(Object.assign({at: new Date().toISOString()}, p)).slice(0, 8000));
+    cleanGroupedProgress_(indicator);
+  } catch (e) { /* progresso é só informativo */ }
+}
+function getGroupedProgress_(indicator, date) { return safeJsonParse_(getProp_(groupedProgressKey_(indicator, date), ''), null); }
+/** Apaga progresso e planos de dias que já saíram da janela de detalhe (+3 dias de folga). */
+function cleanGroupedProgress_(indicator) {
+  const cut = addDaysIso_(isoToday_(), -((detailDays_(INDICATORS[indicator] || {}) || 7) + 3));
+  ['GROUPED_PROG_', 'GROUPED_PLANDATA_'].forEach(p => {
+    const prefix = p + indicator.toUpperCase() + '_';
+    Object.keys(scriptProps_()).forEach(k => { if (k.indexOf(prefix) === 0 && k.slice(prefix.length) < cut) deleteProp_(k); });
+  });
+}
+
+/**
+ * Plano do download de um dia JÁ FECHADO (as fatias e os totais não mudam mais): tamanho de página, listas
+ * puladas e, por lista, quantas fatias e o total de cada uma. As fatias são refeitas com splitWindow_ (iguais).
+ * Plano feito enquanto o dia ainda corria (hoje) não é guardado: os totais dele cresceram depois.
+ */
+function groupedPlanKey_(indicator, date) { return 'GROUPED_PLANDATA_' + indicator.toUpperCase() + '_' + date; }
+function saveGroupedPlan_(indicator, date, plan) {
+  if (date >= isoToday_()) return;
+  const lists = [];
+  plan.windows.forEach(w => {
+    const last = lists[lists.length - 1];
+    if (last && last.t === (w.type || null)) last.tot.push(w.total); else lists.push({t: w.type || null, tot: [w.total]});
+  });
+  const txt = JSON.stringify({v: 1, size: plan.size, sliced: !!plan.sliced, skip: plan.skipped || {}, lists: lists});
+  if (txt.length < 8500) { try { setProp_(groupedPlanKey_(indicator, date), txt); } catch (e) { /* só otimização */ } }
+}
+function storedGroupedPlan_(job, st) {
+  if (!(Number(job.page) > 1) || !st || st.details !== 'PARTIAL' || job.date >= isoToday_()) return null;
+  const p = safeJsonParse_(getProp_(groupedPlanKey_(job.indicator, job.date), ''), null);
+  if (!p || p.v !== 1 || !p.lists || !p.lists.length || !(p.size > 0)) return null;
+  const full = dayWindow_(job.date, isOperational_(job.indicator));
+  const windows = [];
+  p.lists.forEach(l => {
+    const parts = l.tot.length > 1 ? splitWindow_(full, l.tot.length) : [{start: full.start, end: full.end}];
+    parts.forEach((w, i) => windows.push({start: w.start, end: w.end, type: l.t, total: Number(l.tot[i]) || 0, first: null}));
+  });
+  // Confere o total de cada lista (1 consulta por lista): registro atrasado no JMS → plano novo.
+  for (const l of p.lists) {
+    const got = fetchDetailPage_(job.indicator, job.date, 1, p.size, Object.assign({type: l.t}, full));
+    if (Number(got.total) !== l.tot.reduce((a, x) => a + (Number(x) || 0), 0)) return null;
+  }
+  const chunks = [];
+  windows.forEach((w, wi) => { const pages = Math.ceil(w.total / p.size); for (let pg = 1; pg <= pages; pg++) chunks.push({w: wi, page: pg}); });
+  return {size: p.size, total: windows.reduce((a, w) => a + w.total, 0), windows: windows, chunks: chunks, sliced: p.sliced,
+    types: p.lists.map(l => l.t), skipped: p.skip || {}, stored: true};
+}
+
+/**
+ * Teto diário do detalhe agrupado (minutos). Conta Gmail: 90 min/dia de gatilhos para TODOS os painéis; sem teto,
+ * o Recebimento com o JMS em 100 por página gastava tudo até as 11h e os outros painéis paravam até a meia-noite.
+ * Propriedade RECEBIMENTO_MIN_POR_DIA manda (0 = sem teto). Sem ela: Gmail = 35 min; Google Workspace = sem teto.
+ */
+function groupedBudgetMin_() {
+  const v = getProp_('RECEBIMENTO_MIN_POR_DIA', '');
+  if (v !== '' && Number(v) >= 0) return Number(v);
+  return googlePlan_() === 'gmail' ? APP_CONFIG.GROUPED_GMAIL_MIN_PER_DAY : 0;
+}
+/** "gmail" | "workspace": dono da planilha do banco (escopo do Drive, já autorizado). COTA_GOOGLE manda. */
+function googlePlan_() {
+  const forced = String(getProp_('COTA_GOOGLE', '')).toLowerCase();
+  if (forced === 'gmail' || forced === 'workspace') return forced;
+  const cached = getProp_('GOOGLE_PLAN_AUTO', '');
+  if (cached === 'gmail' || cached === 'workspace') return cached;
+  // Falha na detecção vale como Gmail (o mais restrito) e é tentada de novo no dia seguinte.
+  if (cached === 'falha:' + isoToday_()) return 'gmail';
+  let plan = '';
+  try {
+    const id = getProp_('DB_SPREADSHEET_ID', '');
+    if (id) {
+      const owner = DriveApp.getFileById(id).getOwner();
+      const email = owner && owner.getEmail ? String(owner.getEmail() || '') : '';
+      // Sem dono = Drive compartilhado, que só existe no Google Workspace.
+      plan = !owner ? 'workspace' : email ? (/@(gmail|googlemail)\.com$/i.test(email) ? 'gmail' : 'workspace') : '';
+    }
+  } catch (e) { /* sem como saber */ }
+  try { setProp_('GOOGLE_PLAN_AUTO', plan || 'falha:' + isoToday_()); } catch (e) { /* só cache */ }
+  return plan || 'gmail';
+}
+function groupedUsedKey_() { return 'GROUPED_USED_MS_' + isoToday_(); }
+function groupedUsedMs_() { return Number(getProp_(groupedUsedKey_(), '')) || 0; }
+function addGroupedUsedMs_(ms) {
+  const key = groupedUsedKey_();
+  setProp_(key, Math.round(groupedUsedMs_() + Math.max(0, ms)));
+  Object.keys(scriptProps_()).forEach(k => { if (k.indexOf('GROUPED_USED_MS_') === 0 && k !== key) deleteProp_(k); });
+}
+/** Milissegundos que o detalhe agrupado ainda pode usar hoje (Infinity = sem teto). */
+function groupedBudgetLeftMs_() {
+  const min = groupedBudgetMin_();
+  return min > 0 ? Math.max(0, min * 60000 - groupedUsedMs_()) : Infinity;
+}
+
+/**
+ * Recebimento: o resumo do dia consultado por horário de turno (T1 06–14h, T2 14–22h, T3 00–06h + 22–24h).
+ * Quatro consultas dão a quantidade de cada turno de cada número (summary.shiftWindows) — os cartões T1/T2/T3 e
+ * as pizzas funcionam sem o detalhe. Gravado na aba AGG ("arrival_flow:resumo:<número>"). A soma dos horários
+ * tem de fechar com o dia: se não fechar, o JMS ignora a hora e o recurso desliga (JMS_NO_SUMMARY_SHIFTS_<ROTA>).
+ */
+const SHIFT_WINDOWS_ = [['T1', '06:00:00', '13:59:59'], ['T2', '14:00:00', '21:59:59'], ['T3', '00:00:00', '05:59:59'], ['T3', '22:00:00', '23:59:59']];
+function summaryShiftKey_(indicator, metric) { return indicator + ':resumo:' + metric; }
+function syncSummaryShifts_(indicator, date, dayMetrics) {
+  const cfg = getIndicatorConfig_(indicator), metrics = cfg.summary && cfg.summary.shiftWindows;
+  if (!metrics || !metrics.length || getProp_('JMS_NO_SUMMARY_SHIFTS_' + cfg.routeKey, '')) return null;
+  // Números do dia inteiro: os do resumo já baixado; resumo em várias linhas (sem os números) → uma consulta a mais.
+  if (!dayMetrics || !metrics.some(m => dayMetrics[m] !== undefined && dayMetrics[m] !== null && dayMetrics[m] !== '')) {
+    dayMetrics = fetchSummaryMetrics_(indicator, date, null);
+  }
+  const per = SHIFT_WINDOWS_.map(w => fetchSummaryMetrics_(indicator, date, {start: date + ' ' + w[1], end: date + ' ' + w[2]}));
+  // Confere os números que aparecem nos cartões e pizzas (os das listas); hoje o número cresce entre as
+  // consultas: folga de 2% (mín. 20).
+  const lists = ((cfg.metricPanels || []).reduce((a, p) => a.concat(p.metrics.filter(m => m.detail).map(m => m.key)), []));
+  const checks = metrics.filter(m => Number(dayMetrics[m]) > 0 && (!lists.length || lists.indexOf(m) >= 0));
+  for (const ck of checks) {
+    const day = Number(dayMetrics[ck]), sum = per.reduce((a, x) => a + (Number(x[ck]) || 0), 0);
+    if (Math.abs(sum - day) > Math.max(20, day * 0.02)) {
+      setProp_('JMS_NO_SUMMARY_SHIFTS_' + cfg.routeKey, 'soma dos horários ' + sum + ' ≠ dia ' + day + ' (' + ck + ', ' + date + ')');
+      logSync_('WARN', indicator, date, 'Turnos pelo resumo desativados: a soma dos horários (' + sum + ') não fecha com o dia (' + day +
+        ') em ' + ck + ' — o JMS não filtra o resumo pela hora. Os turnos vêm só do detalhe.');
+      return null;
+    }
+  }
+  const out = {};
+  metrics.forEach(m => {
+    const c = {T1: 0, T2: 0, T3: 0, NA: 0};
+    per.forEach((x, i) => { c[SHIFT_WINDOWS_[i][0]] += Number(x[m]) || 0; });
+    upsertAggCounts_(summaryShiftKey_(indicator, m), date, c, c.T1 + c.T2 + c.T3);
+    out[m] = c;
+  });
+  return out;
+}
+
 /**
  * Um arquivo para as unidades from..to (detalhe agrupado): o índice de cada unidade aponta para ele, com
  * a quantidade de registros do JMS daquela unidade (`rawCounts`). Recomeço (from = 1): linhas de uma

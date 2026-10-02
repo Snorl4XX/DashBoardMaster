@@ -12,7 +12,7 @@ function JTCoreFactory_() {
   'use strict';
 
   var SHIFTS = ['T1', 'T2', 'T3'];
-  var SHIFT_KEYS = {shift: 1, receiptShift: 1, expeditionShift: 1};
+  var SHIFT_KEYS = {shift: 1, receiptShift: 1, expeditionShift: 1, shiftExp: 1};
   var CHRONO_KEYS = {interval: 1, idealTime: 1, date: 1};
   var COLLATOR = (function () { try { return new Intl.Collator('pt-BR', {numeric: true, sensitivity: 'base'}); } catch (e) { return null; } })();
 
@@ -759,7 +759,7 @@ function JTCoreFactory_() {
     '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição'
   };
   var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
-    'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Chegou': '已到'};
+    'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Sem bipe na etapa anterior': '上一环节未发件扫描', 'Sem bipe de expedição nesta base': '本网点未发件扫描', 'Chegou': '已到'};
   function hasCjk(s) { return /[㐀-鿿]/.test(s); }
   function localizeValue(value, lang) {
     var s = String(value === null || value === undefined ? '' : value);

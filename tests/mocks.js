@@ -308,9 +308,15 @@ function fakeJms(dayData, options) {
       case 'arrivalbyday_total': {
         if (!d || !d.af) return ok([], 0, 1, body.size);
         const a = d.af;
+        // Janela de horário (turnos pelo resumo, V3.19): conta só os registros do horário. options.summaryIgnoresTime:
+        // o JMS devolve o dia inteiro em qualquer horário (o recurso tem de desligar sozinho).
+        const fullDay = options.summaryIgnoresTime || (start === full.start && end === full.end);
+        const win = l => fullDay ? l : l.filter(r => { const t = String(r.sendTime || ''); return t >= start && t <= end; });
+        const sh = win(a.should), tt = win(a.total);
+        const noArr = fullDay ? a.noArriverNum : Math.round(sh.length * a.noArriverNum / Math.max(1, a.should.length));
         return ok([{sendTime: date, proxyAreaCode: '370000', proxyAreaName: 'SPE', nextstation: 'SP GRU', nextstationcode: '30001',
-          shouldArriverNum: a.should.length, noArriverNum: a.noArriverNum, totalNum: a.total.length, uploadNoSendNum: a.prev.length,
-          noSendNum: a.noSend.length, noSignNum: a.total.length, deliverNum: a.total.length, PAGEHELPER_ROW_ID: 1, ROW_ID: 1}], 1, 1, body.size);
+          shouldArriverNum: sh.length, noArriverNum: noArr, totalNum: tt.length, uploadNoSendNum: win(a.prev).length,
+          noSendNum: win(a.noSend).length, noSignNum: tt.length, deliverNum: tt.length, PAGEHELPER_ROW_ID: 1, ROW_ID: 1}], 1, 1, body.size);
       }
       case 'arrivalbyday_detail':
       case 'arrivalbyday_detailed':
