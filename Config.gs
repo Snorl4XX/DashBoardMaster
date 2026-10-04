@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.21.0',
+  VERSION: '3.22.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -36,6 +36,9 @@ const APP_CONFIG = Object.freeze({
   GROUPED_SUMMARY_BUDGET_MS: 75000,
   GROUPED_DETAIL_MIN_START_MS: 150000, // detalhe agrupado só começa com 2,5 min livres na execução
   GROUPED_GMAIL_MIN_PER_DAY: 35,       // conta Gmail (90 min/dia de gatilhos; os outros painéis usam ~50): teto diário do detalhe do Recebimento
+  SEND_GMAIL_MIN_PER_DAY: 20,          // conta Gmail: teto diário da Expedição (detalhe por rota + IDs de viagem). EXPEDICAO_MIN_POR_DIA muda
+  TRIP_BATCH: 100,                     // remessas por consulta no Rastreamento do pacote (o robô aprende um limite menor sozinho)
+  TRIP_PARALLEL: 4,                    // consultas de rastreamento em paralelo
   MAX_REPORT_DETAIL_ROWS: 60000,
   MAX_PDF_DETAIL_ROWS: 1500,
   DEFAULT_CENTER_CODE: '30001',
@@ -91,6 +94,7 @@ const FILTER_LABELS = Object.freeze({
   tripRec:         {pt: 'IDs de viagem que chegou', zh: '已到车次号'},
   tripPrev:        {pt: 'IDs sem bipe de expedição no anterior', zh: '上一环节未发件扫描车次号'},
   shiftExp:        {pt: 'Turno da expedição (origem)', zh: '发件班次'},
+  situation:       {pt: 'Situação', zh: '状态'},
   waybill:         {pt: 'Remessa', zh: '运单号'}
 });
 
@@ -666,6 +670,147 @@ const INDICATORS = Object.freeze({
       ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'], ['destination', 'Última parada', '上一站'],
       ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']
     ]
+  },
+
+  /**
+   * EXPEDIÇÃO: FLUXO OPERACIONAL (Operação > Monitoramento de dados > Monitoramento de tipagem de expedição (novo),
+   * /crisbiIndex/SendOutMonitor). Quantidade que SAIU no dia, por rota (próxima parada).
+   * Resumo (sendbyday_total): uma linha por rota com "Número total de remessas" (sendcount), "Número de encomendas não
+   * chegadas na próxima parada" (noarrivalcount) e "Não entregue" (nosigncount). Os cartões SOMAM essas colunas; cada
+   * rota fica guardada (gráficos de rotas e "rota que mais enviou").
+   * Detalhe (sendbyday_detail): os números vermelhos de CADA rota (nextstation = código da próxima parada; detailType =
+   * coluna), no máximo 100 linhas por página. Cada remessa enviada é gravada UMA vez, com a situação dela em "column";
+   * as listas da tela juntam as situações (columnSets): "Enviados" = todas, "Em trânsito" = lista noarrivalcount,
+   * "Não entregues" = lista nosigncount. Lista com o mesmo total da rota (nenhuma chegou, por exemplo) não precisa ser
+   * baixada: todas as remessas da rota estão nela. Turno e intervalo pelo "Horário de expedição" (sendTime);
+   * login = Escrevente (scanuser). Download por rota e por horário de turno (Expedicao.gs → runSendDetailJob_).
+   * ID de viagem: Rastreamento do pacote (keywordList) de cada remessa — o "número do pedido" (remark2) do bipe
+   * "Encomenda carregada" na nossa base para a próxima parada da rota (Expedicao.gs → runTripJob_).
+   */
+  send_flow: {
+    key: 'send_flow', order: 9, routeKey: 'SEND',
+    name: {pt: 'Expedição: fluxo operacional', zh: '发件运营流程'},
+    subtitle: {pt: 'Quantidade que saiu no dia por rota (monitoramento de tipagem de expedição)', zh: '当日各线路发件量（发件扫描监控）'},
+    goal: {value: null, direction: 'max', strict: false},
+    apiProfile: 'send_flow', detailMatchesErrors: false, grouped: true, byRoute: true,
+    // Um dia inteiro (~120 mil remessas, ~9 MB) vai ao navegador: as três tabelas com todas as remessas. Mais dias: totais
+    // por campo calculados no servidor (tabelas com as 2.000 primeiras de cada situação).
+    clientRows: 150000,
+    summary: {
+      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sendbyday_total',
+      // Uma linha por rota: os números são SOMADOS (cartões) e cada rota fica guardada em raw.routes.
+      sumRecords: true, routeFields: {name: 'nextstation', code: 'nextstationcode'},
+      rateFromCounts: true, rateKeys: [], errorKeys: ['noarrivalcount'], totalKeys: ['sendcount'],
+      metrics: ['sendcount', 'noarrivalcount', 'nosigncount']
+    },
+    detail: {
+      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sendbyday_detail',
+      // "O LIMITE É 100 LINHAS" (a tela do JMS mostra 20 por padrão e no máximo 100).
+      // Hoje: detalhe rebaixado no máximo a cada 6 h (conta Gmail: 12 h); cartões, rotas e turnos seguem de hora em hora pelo
+      // resumo e pela lista por horário. Dia fechado: só a situação muda — atualizada a cada 12 h sem baixar "Enviados" de novo.
+      // Conta Gmail: os 3 últimos dias com detalhe; Google Workspace: 7 (DETAIL_DAYS_SEND_FLOW muda).
+      maxPageSize: 100, days: 7, refreshHours: 6, closedRefreshHours: 12, maxPerDay: 400000,
+      // Lista de cada número vermelho (detailType = nome da coluna no resumo). flag: marca que a lista dá à remessa.
+      types: [
+        {type: 'sendcount', column: 'Enviados'},
+        {type: 'noarrivalcount', column: 'Em trânsito', flag: 'transit'},
+        {type: 'nosigncount', column: 'Não entregues', flag: 'undelivered'}
+      ]
+    },
+    // Rastreamento do pacote: ID de viagem de cada remessa enviada. Bipe "Encomenda carregada" (código 1 / tipo
+    // original 50) na nossa base, para a próxima parada da rota; o ID é o "número do pedido" (remark2).
+    trips: {
+      endpoint: 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList',
+      loadCodes: [1], loadOriginalCodes: [50]
+    },
+    fields: {shipment: ['billcode'], eventTime: ['sendTime'], destination: ['nextstation'], login: ['scanuser']},
+    groupFields: ['column', 'waybill', 'eventTime', 'shift', 'interval', 'destination', 'login', 'tripId'],
+    // Situação de cada remessa (column) → listas da tela.
+    columnSets: {
+      'Enviados': ['Não chegou ao destino', 'Chegou ao destino · não entregue', 'Entregue', 'Entregue · sem bipe de chegada'],
+      'Em trânsito': ['Não chegou ao destino', 'Entregue · sem bipe de chegada'],
+      'Não entregues': ['Não chegou ao destino', 'Chegou ao destino · não entregue']
+    },
+    labels: {
+      destination: {pt: 'Rotas (próxima parada)', zh: '线路（下一站）'}, login: {pt: 'Login', zh: '操作员'},
+      tripId: {pt: 'ID de viagem', zh: '车次号'}, interval: {pt: 'Intervalo de horários', zh: '时间段'},
+      shift: {pt: 'Turno', zh: '班次'}, column: {pt: 'Situação', zh: '状态'}
+    },
+    // Singular para "Maior rota" / "Menor rota" nos quadros dos gráficos.
+    labelsOne: {destination: {pt: 'Rota', zh: '线路'}, login: {pt: 'Login', zh: '操作员'}, interval: {pt: 'Intervalo', zh: '时间段'}},
+    filters: ['destination', 'interval', 'shift'],
+    // Cartões "que mais mandou": login, rota e intervalo (lista Enviados).
+    topCards: ['login', 'destination', 'interval'],
+    topCardColumn: 'Enviados',
+    topCardLabels: {
+      login: {pt: 'Login que mais mandou', zh: '发件最多的操作员'}, destination: {pt: 'Rota que mais enviou', zh: '发件最多的线路'},
+      interval: {pt: 'Intervalo que teve mais envio', zh: '发件最多的时间段'}
+    },
+    hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    heroMetric: {key: 'sendcount', column: 'Enviados', icon: 'send_flow',
+      label: {pt: 'Total que está saindo no dia', zh: '当日发件总量'}, labelPeriod: {pt: 'Total que saiu no período', zh: '期间发件总量'}},
+    navMetric: 'sendcount',
+    metricCards: true,
+    // Cartões T1/T2/T3: quantidade que cada turno mandou (horário de expedição). Sem esperar o download inteiro: a lista
+    // de cada rota consultada em cada horário de turno (Expedicao.gs grava em "send_flow:turnos:sendcount").
+    shiftCardsByColumn: {main: 'Enviados', columns: ['Enviados'], summaryMetric: 'sendcount', unit: {pt: 'enviadas', zh: '票'}},
+    shiftAggColumns: ['Enviados', 'Em trânsito', 'Não entregues'],
+    texts: {
+      errors: {pt: 'Não chegaram ao destino', zh: '未到下一站'},
+      errorsDay: {pt: 'Não chegaram no dia', zh: '当日未到下一站'}, errorsPeriod: {pt: 'Não chegaram no período', zh: '期间未到下一站'},
+      errorsFiltered: {pt: 'Remessas (com filtro)', zh: '票数（已筛选）'},
+      prevErrorsDay: {pt: 'Não chegaram dia anterior', zh: '前一日未到下一站'}, prevErrorsPeriod: {pt: 'Não chegaram período anterior', zh: '上一期间未到下一站'},
+      shiftErrors: {pt: 'Enviadas {s}', zh: '{s} 发件'}, shareOfErrors: {pt: '{p} das enviadas', zh: '占发件 {p}'},
+      rateOfDay: {pt: '% não chegou ao destino · {date}', zh: '{date} 未到下一站率'}, rateOfPeriod: {pt: '% não chegou ao destino no período', zh: '期间未到下一站率'},
+      navQty: {pt: 'Saindo · {date}', zh: '发件 · {date}'},
+      listTopNote: {pt: 'Período com mais de um dia: mostrando {n} remessas de cada situação. Escolha um único dia para ver todas.', zh: '多日期间：每种状态显示 {n} 票。选择单日可查看全部。'},
+      dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes; a Expedição roda depois dos outros painéis)', zh: '排队下载中（前面还有 {n} 个任务；发件看板在其他看板之后运行）'},
+      dsBudget: {pt: 'limite diário da Expedição atingido ({m} min, conta Gmail): continua amanhã', zh: '已达发件看板每日上限（{m} 分钟，Gmail账号）：明天继续'},
+      dsHelp: {pt: 'Para saber o motivo em detalhe, rode diagnosticarExpedicao() no editor do Apps Script.', zh: '如需详细原因，请在 Apps Script 编辑器中运行 diagnosticarExpedicao()。'}
+    },
+    // Colunas da tabela principal da tela. Cartões: a soma de cada coluna (oficial do JMS); com filtro, a lista dela.
+    metricPanels: [
+      {column: 'Enviados', title: {pt: 'Expedição do dia', zh: '当日发件'}, metrics: [
+        {key: 'sendcount', label: {pt: 'Número total de remessas', zh: '发件总票数'}, detail: 'Enviados'},
+        {key: 'noarrivalcount', label: {pt: 'Quantidade que ainda não chegou no destino', zh: '未到下一站票数'}, bad: true, detail: 'Em trânsito'},
+        {key: 'nosigncount', label: {pt: 'Não entregue', zh: '未签收'}, bad: true, detail: 'Não entregues'}
+      ]}
+    ],
+    // Gráficos de coluna (na ordem do pedido) e a pizza de turno. routeMetric: sem filtro, o número OFICIAL de cada rota
+    // (tabela principal do JMS); com filtro, as remessas da lista baixada.
+    charts: [
+      {key: 'routes', dim: 'destination', where: {column: 'Enviados'}, type: 'bar', top: 80, routeMetric: 'sendcount',
+        title: {pt: 'Rotas mais enviados', zh: '发件最多的线路'}, sub: {pt: 'Todas as rotas, da que mais mandou para a que menos mandou', zh: '全部线路，按发件量排序'}},
+      {key: 'routesTransit', dim: 'destination', where: {column: 'Em trânsito'}, type: 'bar', top: 80, routeMetric: 'noarrivalcount', bad: true,
+        title: {pt: 'Rotas que ainda não chegou', zh: '未到下一站的线路'}, sub: {pt: 'Encomendas não chegadas na próxima parada, por rota', zh: '各线路未到下一站票数'}},
+      {key: 'routesUndelivered', dim: 'destination', where: {column: 'Não entregues'}, type: 'bar', top: 80, routeMetric: 'nosigncount', bad: true,
+        title: {pt: 'Não entregues', zh: '未签收'}, sub: {pt: 'Não entregue, por rota', zh: '各线路未签收票数'}},
+      {key: 'interval', dim: 'interval', where: {column: 'Enviados'}, type: 'bar', top: 24, ranking: true,
+        title: {pt: 'Intervalos de horários que teve mais entregas', zh: '发件最多的时间段'}},
+      {key: 'logins', dim: 'login', where: {column: 'Enviados'}, type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'Logins que mais mandou', zh: '发件最多的操作员'}},
+      {key: 'trips', dim: 'tripId', where: {column: 'Enviados'}, type: 'bar', horizontal: true, top: 10, hideNA: true, trips: true,
+        title: {pt: 'IDs de viagem', zh: '车次号'}, sub: {pt: 'ID que mais enviou (Rastreamento do pacote: bipe "Encomenda carregada")', zh: '发件最多的车次号（包裹轨迹：装车发件）'}},
+      {key: 'shiftPie', dim: 'shift', where: {column: 'Enviados'}, type: 'doughnut', summaryShift: 'sendcount',
+        title: {pt: 'Turno', zh: '班次'}, sub: {pt: 'Quantidade que cada turno mandou (horário de expedição)', zh: '各班次发件量（发件时间）'}}
+    ],
+    // Tabelas: as listas de TODAS as rotas juntas (como abrir cada número vermelho).
+    tables: [
+      {key: 'tSent', column: 'Enviados', title: {pt: 'Enviados', zh: '发件明细'},
+        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
+          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'], ['column', 'Situação', '状态']]},
+      {key: 'tUndelivered', column: 'Não entregues', title: {pt: 'Não entregues', zh: '未签收明细'},
+        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
+          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'], ['column', 'Situação', '状态']]},
+      {key: 'tTransit', column: 'Em trânsito', title: {pt: 'Em trânsito', zh: '在途明细'},
+        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
+          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号']]}
+    ],
+    table: [
+      ['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
+      ['interval', 'Intervalo', '时间段'], ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'],
+      ['column', 'Situação', '状态'], ['qty', 'Quantidade', '数量']
+    ]
   }
 });
 
@@ -679,7 +824,7 @@ function getIndicatorConfig_(key) {
     // é para clicar em Executar sem preencher nada antes. Veja "Manutenção" em LEIA_PRIMEIRO.md.
     if (key === undefined || key === null || key === '') {
       throw new Error('Esta função exige um indicador como parâmetro (ex.: "wrong_send", "sorting_error", ' +
-        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage" ou "arrival_flow"). Ela não é para ser executada direto pelo ' +
+        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage", "arrival_flow" ou "send_flow"). Ela não é para ser executada direto pelo ' +
         'botão ▶ Executar sem argumentos — chame-a com o parâmetro preenchido (veja "Manutenção" em LEIA_PRIMEIRO.md) ' +
         'ou teste pelo próprio painel (Implantar → App da Web).');
     }
@@ -742,6 +887,8 @@ function getPublicCatalog_() {
       texts: cfg.texts || null,
       metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
       shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
+      columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
+      labelsOne: cfg.labelsOne || null,
       hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
       grouped: !!cfg.grouped, routeKey: cfg.routeKey,
       detailDays: cfg.detail && cfg.detail.days || null,

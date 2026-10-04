@@ -131,8 +131,8 @@ check(ctx.getDashboardData('wrong_send', {}).meta.to === '2026-09-19', 'período
 
 // ---------- 6. Resultados ----------
 const results = ctx.getResultsData({from: '2026-09-17', to: '2026-09-19'});
-check(results.series.length === 8 && results.series.every(s => s.rates.length === 3 && s.agg.length === (s.key === 'arrival_flow' ? 0 : 3)) && !hasDate(results),
-  'resultados de todos os indicadores (o Recebimento, agrupado, não tem contagem por turno)');
+check(results.series.length === 9 && results.series.every(s => s.rates.length === 3 && s.agg.length === (s.key === 'arrival_flow' || s.key === 'send_flow' ? 0 : 3)) && !hasDate(results),
+  'resultados de todos os indicadores (Recebimento e Expedição, agrupados, não têm contagem por turno)');
 const weekly = C.aggregateResults(results.series[0].rates, cfgWs.goal, 'week', '2026-09-17', '2026-09-19');
 check(weekly.length === 1 && weekly[0].key === '2026-W38' && weekly[0].method === 'weighted', 'agregação semanal', weekly);
 
@@ -356,13 +356,13 @@ const cG = freshCtx({'2026-09-19': makeDay(D19, 3)}, optsG);
 cG.queueHistory(D19, D19, true);
 cG.processSyncQueue({budgetMs: 600000});
 const pausesG = cG.publicPauses_();
-check(pausesG.length === 7 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
-  'token expirado pausa as 7 rotas com aviso claro', pausesG);
-check(cG.__state.fetches.length === 7, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
-check(cG.pendingJobs_().length === 16 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
+check(pausesG.length === 8 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
+  'token expirado pausa as 8 rotas com aviso claro', pausesG);
+check(cG.__state.fetches.length === 8, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
+check(cG.pendingJobs_().length === 18 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
 cG.processSyncQueue({budgetMs: 600000});
-check(cG.__state.fetches.length === 7, 'fila pausada não insiste no JMS');
-check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 7 && cG.getAppBootstrap().pauses.length === 7, 'pausa chega ao painel');
+check(cG.__state.fetches.length === 8, 'fila pausada não insiste no JMS');
+check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 8 && cG.getAppBootstrap().pauses.length === 8, 'pausa chega ao painel');
 delete optsG.appError;
 cG.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO';
 runAll(cG);
@@ -372,7 +372,7 @@ check(cG.publicPauses_().length === 0 && ALL.every(k => cG.getDayStatus_(k, D19)
 const cH = freshCtx({'2026-09-19': makeDay(D19, 3)}, {html: true});
 cH.queueHistory(D19, D19, true);
 cH.processSyncQueue({budgetMs: 600000});
-check(cH.publicPauses_().length === 7 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
+check(cH.publicPauses_().length === 8 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
 
 // (i) Cota diária do Google esgotada: pausa geral por 1 h, sem marcar erro nos jobs.
 const cI = freshCtx({'2026-09-19': makeDay(D19, 3)}, {onFetch: () => { throw new Error('Service invoked too many times for one day: urlfetch.'); }});
@@ -636,7 +636,7 @@ cQ.queueHistory(D19, D19, true);
 for (let i = 0; i < 4; i++) { cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {}; cQ.processSyncQueue({budgetMs: 600000, force: true}); }
 cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {};
 const qQ = cQ.queueReport_(1100);
-check(qQ.erros === 8 && qQ.esperandoTaxa === 8 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 8 &&
+check(qQ.erros === 9 && qQ.esperandoTaxa === 9 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 9 &&
   /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
 // ---------- 14. V3.8: docas na Falta de Bipagem na Expedição (planilha do usuário) ----------
@@ -1299,8 +1299,9 @@ cOrd.queueHistory(D19, D19, true);
 cOrd.pendingJobs_().filter(j => j.type === 'SUMMARY').forEach(j => cOrd.processJob_(j, Date.now() + 600000));
 cOrd.STORAGE_CACHE_ = null; cOrd.TAB_CACHE_ = {}; cOrd.TAB_INDEX_ = {};
 const ordJobs = cOrd.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
-const afPos = ordJobs.findIndex(j => j.indicator === 'arrival_flow');
-check(ordJobs.length > 3 && afPos === ordJobs.length - 1, 'detalhe do Recebimento por último na fila (não atrasa os outros painéis)', ordJobs.map(j => j.indicator));
+const afPos = ordJobs.findIndex(j => j.indicator === 'arrival_flow'), sfPos = ordJobs.findIndex(j => j.indicator === 'send_flow');
+check(ordJobs.length > 3 && afPos >= ordJobs.length - 2 && sfPos >= ordJobs.length - 2,
+  'detalhe do Recebimento e da Expedição por último na fila (não atrasam os outros painéis)', ordJobs.map(j => j.indicator));
 const cLim = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: '', JMS_PAGE_SIZE_ARRIVAL: '100'});
 const cFull = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: ''});
 const stLim = {details: 'COMPLETE'};
@@ -1749,5 +1750,224 @@ const mapUp = JSON.parse(cUp.__state.props.JMS_ORDERKIND_DAMAGE || '{}'), subUp 
 check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp && !subUp.estimated && subUp.rate === rawSub.breakageRateTotal &&
   estUp && !estUp.estimated,
   'atualização: "sem suporte" refeito no resumo (sem esperar o detalhe) e a taxa oficial de cada opção em todos os dias', {nUp, mapUp, subUp});
+
+
+// ---------- V3.22: Expedição: fluxo operacional (rotas e remessas fictícias) ----------
+{
+  const SF = {DETAIL_DAYS_SEND_FLOW: '120'};
+  const sfDays = () => ({'2026-09-18': makeDay('2026-09-18', 23), [D19]: makeDay(D19, 37)});
+  // Verdade do simulado: situação e ID de viagem de cada remessa enviada.
+  const truthOf = day => {
+    const t = {}, n = {sent: 0, transit: 0, und: 0, T1: 0, T2: 0, T3: 0};
+    day.sf.routes.forEach(r => r.sent.forEach(x => {
+      t[x.billcode] = x; n.sent++; if (x.transit) n.transit++; if (x.undelivered) n.und++;
+      n[ctx.JTCore_.shiftOf(x.sendTime)]++;
+    }));
+    return {t: t, n: n};
+  };
+  const exact = (c, day, date) => {
+    const tr = truthOf(day), rows = c.getArchivedRange_('send_flow', date, date).rows;
+    let st = 0, trip = 0, extra = 0;
+    rows.forEach(r => {
+      const x = tr.t[r.waybill];
+      if (!x) { extra++; return; }
+      if (r.column !== c.sendState_(x.transit, x.undelivered)) st++;
+      if ((r.tripId === 'N/A' ? '' : r.tripId) !== (x.trip === null ? '' : x.trip)) trip++;
+    });
+    return {rows: rows.length, sent: tr.n.sent, st: st, trip: trip, extra: extra, n: tr.n};
+  };
+
+  // 1. Payloads e cabeçalhos iguais à captura.
+  const cP = freshCtx(sfDays(), null, SF);
+  const pSum = cP.buildPayload_('send_flow', D19, 1, 20, false);
+  check(Object.keys(pSum).sort().join() === 'countryId,current,endTime,scansitecode,size,startTime' && pSum.scansitecode === '30001' &&
+    pSum.countryId === '1' && pSum.startTime === D19 + ' 00:00:00' && pSum.endTime === D19 + ' 23:59:59', 'Expedição: payload do resumo igual à captura', pSum);
+  const pDet = cP.buildPayload_('send_flow', D19, 2, 100, true, {start: D19 + ' 00:00:00', end: D19 + ' 23:59:59', type: 'noarrivalcount', next: '86700'});
+  check(Object.keys(pDet).sort().join() === 'countryId,current,detailType,endTime,nextstation,size,startTime' && pDet.nextstation === '86700' &&
+    pDet.detailType === 'noarrivalcount' && pDet.current === 2, 'Expedição: payload do detalhe igual à captura (rota + coluna)', pDet);
+  let noRoute = '';
+  try { cP.buildPayload_('send_flow', D19, 1, 100, true); } catch (e) { noRoute = e.message; }
+  check(/sem a rota/.test(noRoute), 'Expedição: detalhe nunca sai sem a rota (payload sem filtro)');
+  const hS = cP.jmsHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sendbyday_detail');
+  const hT = cP.jmsHeaders_('https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList');
+  check(hS.Routename === 'SendOutMonitor' && !!hS.Routernamelist && !hT.Routename && !hT.Routernamelist && hT.AuthToken === 'FAKE',
+    'Expedição: Routename SendOutMonitor; Rastreamento sem cabeçalho de rota (variantes só se o JMS recusar)');
+  check(cP.detailPageSize_(cP.getIndicatorConfig_('send_flow')) === 100, 'Expedição: no máximo 100 linhas por página');
+
+  // 2. Dia completo: soma das colunas, rotas, situação e ID de viagem de cada remessa.
+  const dA = sfDays(), cA = freshCtx(dA, null, SF);
+  cA.queueHistory('2026-09-18', D19, true);
+  runAll(cA, 12);
+  const rA = cA.getRateDay_('send_flow', D19), tA = truthOf(dA[D19]);
+  check(rA.metrics.sendcount === tA.n.sent && rA.metrics.noarrivalcount === tA.n.transit && rA.metrics.nosigncount === tA.n.und &&
+    rA.routes.length === 5 && rA.routes.every(r => r.c && r.n && r.m.sendcount > 0) && Math.abs(rA.rate - tA.n.transit / tA.n.sent * 100) < 1e-9,
+    'Expedição: cartões = soma das colunas da tabela principal; cada rota guardada', rA.metrics);
+  const eA = exact(cA, dA[D19], D19);
+  check(eA.rows === eA.sent && eA.st === 0 && eA.trip === 0 && eA.extra === 0 && cA.getDayStatus_('send_flow', D19).details === 'COMPLETE',
+    'Expedição: uma linha por remessa enviada, situação e ID de viagem exatos', eA);
+  const fA = cA.__state.fetches.filter(f => /sendbyday_detail/.test(f.url));
+  const routeOf = code => dA[D19].sf.routes.filter(r => r.code === code)[0];
+  // Lista igual ao total da rota (nenhuma chegou) e lista zerada (dia fechado) não são baixadas.
+  const needless = fA.filter(f => f.payload.startTime.slice(0, 10) === D19 && f.payload.detailType !== 'sendcount' && (() => {
+    const r = routeOf(f.payload.nextstation), n = r.sent.filter(x => f.payload.detailType === 'noarrivalcount' ? x.transit : x.undelivered).length;
+    return n === 0 || n === r.sent.length;
+  })());
+  check(!needless.length && fA.every(f => f.payload.size <= 100) && fA.some(f => f.payload.detailType === 'noarrivalcount'),
+    'Expedição: só baixa "Em trânsito"/"Não entregues" quando a lista difere do total da rota; páginas de até 100', needless.length);
+  const aggP = cA.getAgg_('send_flow:turnos:sendcount', D19, D19)[0], aggE = cA.getAgg_('send_flow:Enviados', D19, D19)[0];
+  const aggT = cA.getAgg_('send_flow:Em trânsito', D19, D19)[0], aggU = cA.getAgg_('send_flow:Não entregues', D19, D19)[0];
+  check(aggP && aggE && aggP.T1 === tA.n.T1 && aggP.T2 === tA.n.T2 && aggP.T3 === tA.n.T3 && aggE.T1 === tA.n.T1 && aggE.total === tA.n.sent &&
+    aggT.total === tA.n.transit && aggU.total === tA.n.und,
+    'Expedição: turnos pela lista de cada rota por horário (sem esperar o download) = turnos do detalhe; listas pelas situações', {aggP, aggE});
+  const covA = cA.tripCoverage_('send_flow', D19, D19)[D19], miss = Object.keys(tA.t).filter(w => tA.t[w].trip === null).length;
+  check(covA && covA.total === tA.n.sent && covA.done === tA.n.sent - miss && covA.found === Object.keys(tA.t).filter(w => tA.t[w].trip).length,
+    'Expedição: IDs de viagem consultados (remessa sem bipe de carregamento na base fica para nova tentativa)', covA);
+  const dfA = cA.dayFilesMap_('send_flow', D19, D19)[D19], trips1 = cA.__state.tripCalls;
+  // Nova tarefa do dia: só as remessas sem bipe de carregamento são consultadas de novo (1 vez); o arquivo regravado
+  // com os IDs mantém a data do download (o intervalo de atualização do detalhe continua valendo).
+  cA.enqueueJobs_([['TRIPS', 'send_flow', D19, 0]], {reset: true});
+  runAll(cA, 4);
+  const dfA2 = cA.dayFilesMap_('send_flow', D19, D19)[D19];
+  check(cA.__state.tripCalls - trips1 === 1 && dfA2.createdAt === dfA.createdAt && exact(cA, dA[D19], D19).trip === 0,
+    'Expedição: nova consulta só das remessas sem ID; arquivo do dia mantém a data do download', {calls: cA.__state.tripCalls - trips1, a: dfA.createdAt, b: dfA2.createdAt});
+
+  // 2b. Dia fechado com remessas chegando: só a situação é atualizada (sem baixar "Enviados" de novo).
+  {
+    const dF = sfDays(), cF = freshCtx(dF, null, SF);
+    cF.queueHistory(D19, D19, true);
+    runAll(cF, 12);
+    dF[D19].sf.routes.forEach((r, k) => r.sent.forEach((x, i) => { if (x.transit && (k === 0 || k === 1) && i % 3 === 0) x.transit = false; }));
+    reset(cF);
+    cF.runSummaryJob_({type: 'SUMMARY', indicator: 'send_flow', date: D19});
+    reset(cF);
+    cF.enqueueJobs_([['DETAIL_INIT', 'send_flow', D19, 1]], {reset: true});
+    const f0 = cF.__state.fetches.length;
+    const jF = cF.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'send_flow')[0];
+    const rF = cF.processJob_(jF, Date.now() + 600000);
+    reset(cF);
+    const newF = cF.__state.fetches.slice(f0).filter(f => /sendbyday_detail/.test(f.url));
+    const eF = exact(cF, dF[D19], D19);
+    check(rF === 'done' && newF.length > 0 && newF.every(f => f.payload.detailType !== 'sendcount') && eF.st === 0 && eF.trip === 0 && eF.rows === eF.sent &&
+      cF.getAgg_('send_flow:Em trânsito', D19, D19)[0].total === eF.n.transit && cF.allTabRows_('LOG').some(r => /situação atualizada/.test(String(r[4]))),
+      'Expedição: dia fechado atualiza só a situação (sem "Enviados": só as listas de situação; IDs mantidos)', {r: rF, req: newF.length, eF});
+  }
+
+  // 3. Painel: rotas oficiais, cobertura dos IDs, turnos por horário, listas que juntam situações.
+  const dash = cA.getDashboardData('send_flow', {from: D19, to: D19});
+  const rowsD = cA.JTCore_.decodeDataset(dash.dataset);
+  cA.JTCore_.setColumnSets(cA.getIndicatorConfig_('send_flow').columnSets);
+  const qty = col => rowsD.filter(r => cA.JTCore_.colMatch(col, r.column)).reduce((a, r) => a + Number(r.qty || 1), 0);
+  check(dash.routes && dash.routes[D19].length === 5 && dash.routes['2026-09-18'] && dash.meta.tripCoverage[D19].total === tA.n.sent &&
+    dash.shiftSum.sendcount.some(a => a.date === D19 && a.T3 === tA.n.T3) && qty('Enviados') === tA.n.sent && qty('Em trânsito') === tA.n.transit &&
+    qty('Não entregues') === tA.n.und && !dash.summary && !hasDate(dash),
+    'Expedição: painel com rotas oficiais, IDs consultados, turnos e as três listas', {routes: Object.keys(dash.routes || {})});
+  const chTr = cA.JTCore_.buildChart(cA.getIndicatorConfig_('send_flow').charts[1], rowsD, {});
+  check(chTr.total === tA.n.transit && chTr.labels.indexOf('RT GAMA') < 0, 'Expedição: gráfico "Rotas que ainda não chegou" pela lista Em trânsito', chTr.labels);
+  const catSF = cA.getPublicCatalog_().filter(x => x.key === 'send_flow')[0];
+  check(catSF && catSF.columnSets && catSF.topCards.join() === 'login,destination,interval' && catSF.filters.map(f => f.key).join() === 'destination,interval,shift' &&
+    catSF.tables.map(tb => tb.column).join() === 'Enviados,Não entregues,Em trânsito' && catSF.charts.length === 7,
+    'Expedição: catálogo com filtros, cartões "que mais", 7 gráficos e 3 tabelas na ordem do pedido');
+  cA.UrlFetchApp.fetch = (() => { const f = cA.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cA.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
+  const repSF = cA.generateReport('send_flow', {from: D19, to: D19, filters: {shift: ['T1']}}, 'xlsx'), repSFp = cA.generateReport('send_flow', {from: D19, to: D19}, 'pdf');
+  check(repSF.ok && repSF.rows === tA.n.T1 && repSFp.ok, 'Expedição: relatório Excel (com filtro de turno) e PDF', repSF);
+  // Período grande (totais por campo no servidor): as tabelas e gráficos continuam com as situações.
+  cA.__state.props.GROUPED_CLIENT_ROWS = '50';
+  const dashS = cA.getDashboardData('send_flow', {from: '2026-09-18', to: D19, filters: {shift: ['T1']}});
+  const mS = cA.JTCore_.marginalsByDim(dashS.summary.marginals);
+  const destT1 = (mS.destination || []).filter(r => r.date === D19 && cA.JTCore_.colMatch('Enviados', r.column)).reduce((a, r) => a + Number(r.qty), 0);
+  check(dashS.summary && destT1 === tA.n.T1 && cA.JTCore_.decodeDataset(dashS.summary.top).length > 0,
+    'Expedição: período grande com totais por campo no servidor (filtro de turno aplicado)', destT1);
+  delete cA.__state.props.GROUPED_CLIENT_ROWS;
+
+  // 4. JMS que não separa por horário: cada rota baixada inteira; turnos do detalhe.
+  [['sendIgnoresTime', {sendIgnoresTime: true}], ['sendDailyAt00', {sendDailyAt00: true}]].forEach(([nm, o]) => {
+    const dI = sfDays(), cI = freshCtx(dI, o, SF);
+    cI.queueHistory(D19, D19, true);
+    runAll(cI, 12);
+    const eI = exact(cI, dI[D19], D19), aggI = cI.getAgg_('send_flow:Enviados', D19, D19)[0];
+    check(cI.__state.props.JMS_NO_SLICE_SEND === '1' && eI.rows === eI.sent && eI.st === 0 && eI.trip === 0 && aggI.T1 === eI.n.T1 &&
+      !cI.getAgg_('send_flow:turnos:sendcount', D19, D19).length && cI.getDashboardData('send_flow', {from: D19, to: D19}).meta.summaryShiftsOff.sendcount,
+      'Expedição: ' + nm + ' → sem horário, rota inteira, dados exatos e turnos do detalhe', eI);
+  });
+
+  // 5. Rastreamento com limite por consulta: aprende sozinho.
+  [['tripLimit', {tripLimit: 20}, 20], ['tripReject', {tripReject: 10}, 7]].forEach(([nm, o, want]) => {
+    const dL = sfDays(), cL = freshCtx(dL, o, SF);
+    cL.queueHistory(D19, D19, true);
+    runAll(cL, 12);
+    check(Number(cL.__state.props.JMS_TRIP_BATCH) === want && exact(cL, dL[D19], D19).trip === 0,
+      'Expedição: ' + nm + ' → ' + want + ' remessas por consulta, IDs exatos', cL.__state.props.JMS_TRIP_BATCH);
+  });
+
+  // 6. Tempo acabando: grava as unidades prontas e a execução seguinte continua da próxima.
+  const dT = sfDays(), cT = freshCtx(dT, null, Object.assign({JMS_PARALLEL: '1', JMS_DETAIL_MAX_OFFSET: '150'}, SF));
+  cT.queueHistory(D19, D19, true);
+  cT.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'send_flow').forEach(j => cT.processJob_(j, Date.now() + 600000));
+  reset(cT);
+  const realNow = vm.runInContext('Date.now', cT);
+  let fakeT = realNow();
+  vm.runInContext('Date', cT).now = () => fakeT;
+  const origB = cT.fetchDetailBatch_;
+  cT.fetchDetailBatch_ = function () { fakeT += 2500; return origB.apply(null, arguments); };
+  const jobT = cT.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'send_flow')[0];
+  const rT1 = cT.processJob_(jobT, fakeT + 90000);
+  vm.runInContext('Date', cT).now = realNow;
+  cT.fetchDetailBatch_ = origB;
+  reset(cT);
+  const stT1 = cT.getDayStatus_('send_flow', D19), jobT1 = cT.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'send_flow')[0];
+  const firstRun = cT.__state.fetches.filter(f => /sendbyday_detail/.test(f.url) && f.payload.current > 1).length;
+  check(rT1 === 'partial' && stT1.details === 'PARTIAL' && jobT1 && jobT1.page > 1 && jobT1.page <= stT1.expectedPages && stT1.expectedPages > 20,
+    'Expedição: tempo acabando grava as unidades prontas e guarda o cursor', {r: rT1, st: stT1, cursor: jobT1 && jobT1.page});
+  const before = cT.__state.fetches.length;
+  runAll(cT, 12);
+  const eT = exact(cT, dT[D19], D19);
+  const again = cT.__state.fetches.slice(before).filter(f => /sendbyday_detail/.test(f.url) && f.payload.current > 1).length;
+  check(eT.rows === eT.sent && eT.st === 0 && eT.trip === 0 && cT.getDayStatus_('send_flow', D19).details === 'COMPLETE' && again < firstRun + 40,
+    'Expedição: retomada fecha o dia exato (horário com muitas remessas dividido em partes)', {eT, again, firstRun});
+
+  // 7. Proteção: o JMS ignorando a rota (todas as remessas da base em cada rota) não é gravado.
+  const dX = sfDays(), cX = freshCtx(dX, {intercept: (route, h, body) => {
+    if (route !== 'sendbyday_detail' || !body.nextstation) return null;
+    let list = []; dX[D19].sf.routes.forEach(r => r.sent.forEach(x => list.push(x)));
+    return [200, {code: 1, data: {records: list.slice(0, body.size).map(x => ({billcode: x.billcode, sendTime: x.sendTime, nextstation: x.route})), total: list.length * 5,
+      size: body.size, current: body.current, pages: 99}, succ: true, fail: false}];
+  }}, SF);
+  cX.queueHistory(D19, D19, true);
+  runAll(cX, 6);
+  const stX = cX.getDayStatus_('send_flow', D19);
+  check(stX.details !== 'COMPLETE' && /sem filtro/.test(stX.error || '') && !cX.dayFilesMap_('send_flow', D19, D19)[D19],
+    'Expedição: detalhe sem filtro de rota bloqueado (nada gravado)', stX);
+
+  // 8. Turnos de hoje de hora em hora: só horários já começados; horário fechado não é consultado de novo.
+  const TODAY = ctx.isoToday_();
+  const dH = {[TODAY]: makeDay(TODAY, 41)};
+  // Hoje no simulado: remessas só até agora (as do futuro saem).
+  const nowTxt = ctx.Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'yyyy-MM-dd HH:mm:ss');
+  dH[TODAY].sf.routes.forEach(r => { r.sent = r.sent.filter(x => x.sendTime <= nowTxt); });
+  // (horário já aprovado num dia fechado: JMS_SLICE_OK_SEND)
+  const cH = freshCtx(dH, null, Object.assign({DATA_START_DATE: TODAY, JMS_SLICE_OK_SEND: D19}, SF));
+  cH.runSummaryJob_({type: 'SUMMARY', indicator: 'send_flow', date: TODAY});
+  const n1 = cH.__state.fetches.filter(f => /sendbyday_detail/.test(f.url)).length;
+  cH.syncSendShifts_('send_flow', TODAY);
+  const n2 = cH.__state.fetches.filter(f => /sendbyday_detail/.test(f.url)).length;
+  const routesH = cH.sendRoutes_('send_flow', TODAY).length, started = cH.sendWindows_(TODAY).filter(w => w.start <= nowTxt).length;
+  const st8 = cH.readSendShifts_(TODAY), fin = st8.fin.filter(Boolean).length;
+  check(routesH > 0 && n2 - n1 === routesH * (started - fin) && cH.getAgg_('send_flow:turnos:sendcount', TODAY, TODAY).length === 1,
+    'Expedição: turnos de hoje pela lista por horário; horário fechado não é consultado de novo', {n1, n2, routesH, started, fin});
+
+  // 9. Teto diário próprio da Expedição (conta Gmail) e diagnóstico sem número de remessa.
+  const cB = freshCtx(sfDays(), null, Object.assign({COTA_GOOGLE: 'gmail'}, SF));
+  cB.addGroupedUsedMs_(5 * 60000, 'send_flow');
+  check(cB.groupedBudgetMin_('send_flow') === 20 && cB.groupedBudgetMin_() === 35 && cB.groupedUsedMs_('send_flow') === 300000 && cB.groupedUsedMs_() === 0 &&
+    freshCtx({}, null, {COTA_GOOGLE: 'gmail', EXPEDICAO_MIN_POR_DIA: '0'}).groupedBudgetLeftMs_('send_flow') === Infinity,
+    'Expedição: teto diário próprio (20 min na conta Gmail; EXPEDICAO_MIN_POR_DIA muda), separado do Recebimento');
+  cB.queueHistory(D19, D19, true);
+  runAll(cB, 12);
+  const diag = cB.diagnosticarExpedicao(D19);
+  const wbs = Object.keys(truthOf(sfDays()[D19]).t);
+  check(/Expedição: fluxo operacional/.test(diag.texto) && diag.resumo.sendcount > 0 && diag.respeitaHorario === true && diag.rastreamento &&
+    /VIAGEM/.test(String(diag.rastreamento.idViagem)) && !wbs.some(w => diag.texto.indexOf(w) >= 0),
+    'diagnosticarExpedicao: resumo, rota, horário, listas e Rastreamento, sem número de remessa', diag.texto);
+}
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

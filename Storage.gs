@@ -222,6 +222,8 @@ function rateFromRow_(r) {
     const raw = safeJsonParse_(String(r[5] || '{}'), {}) || {};
     x.metrics = {};
     ic.summary.metrics.forEach(k => { x.metrics[k] = raw[k] === undefined || raw[k] === null || raw[k] === '' ? null : num_(raw[k], null); });
+    // Expedição: cada rota do dia (próxima parada, código e números) — gráficos de rotas e o download por rota.
+    if (ic.summary.sumRecords) x.routes = Array.isArray(raw.routes) ? raw.routes : [];
   }
   return x;
 }
@@ -550,12 +552,22 @@ function dayFilesMap_(indicator, from, to) {
 function saveDayFile_(indicator, date, rows, expectedPages, expectedRecords) {
   return saveDayDataset_(indicator, date, encodeDayFile_(rows), expectedPages, expectedRecords);
 }
-/** Grava o arquivo diário já em formato colunar (DayAccumulator_.build ou encodeDayFile_). */
-function saveDayDataset_(indicator, date, ds, expectedPages, expectedRecords) {
+/**
+ * Grava o arquivo diário já em formato colunar (DayAccumulator_.build ou encodeDayFile_). Expedição: os IDs de viagem
+ * já consultados no Rastreamento do pacote entram no arquivo (o detalhe rebaixado não perde os IDs).
+ */
+function saveDayDataset_(indicator, date, ds, expectedPages, expectedRecords, opts) {
+  const ic = INDICATORS[indicator];
+  if (ic && ic.trips && !(opts && opts.skipTrips)) {
+    try { applyTripMapToDs_(ds, loadTripMap_(indicator, date)); }
+    catch (e) { logSync_('WARN', indicator, date, 'IDs de viagem não aplicados ao dia: ' + String(e && e.message || e).slice(0, 200)); }
+  }
   const file = writeGzJson_(indicator + '__' + date + '__dia.json.gz', ds);
   const rowNum = findRowKey_('DAYFILES', indicator, date);
   const prev = rowNum > 0 ? allTabRows_('DAYFILES')[rowNum - 2] : null;
-  const row = [indicator, date, file.getId(), ds.n, expectedPages, expectedRecords, new Date()];
+  // keepCreatedAt: o mesmo download regravado (IDs de viagem) — a data do download não muda (intervalo de atualização).
+  const kept = opts && opts.keepCreatedAt ? new Date(opts.keepCreatedAt) : null;
+  const row = [indicator, date, file.getId(), ds.n, expectedPages, expectedRecords, kept && !isNaN(kept.getTime()) ? kept : new Date()];
   if (rowNum > 0) writeRow_('DAYFILES', rowNum, row); else appendRow_('DAYFILES', row);
   if (prev && prev[2] && prev[2] !== file.getId()) trashQuietly_(prev[2], indicator, date);
   return file.getId();
@@ -582,13 +594,15 @@ function groupedShiftAgg_(indicator, date, ds) {
   const acc = {};
   cols.forEach(c => { acc[c] = {T1: 0, T2: 0, T3: 0, NA: 0, total: 0}; });
   const dCol = ds.dict.column, dShift = ds.dict.shift, dQty = ds.dict.qty || [], cq = ds.cols.qty;
+  // Lista formada por várias situações (Expedição: columnSets): a remessa conta em todas as listas da situação dela.
+  const sets = getIndicatorConfig_(indicator).columnSets || {};
+  const listsOf = dCol.map(v => cols.filter(c => sets[c] ? sets[c].indexOf(v) >= 0 : c === v).map(c => acc[c]));
   for (let i = 0; i < ds.n; i++) {
-    const a = acc[dCol[ds.cols.column[i]]];
-    if (!a) continue;
+    const targets = listsOf[ds.cols.column[i]];
+    if (!targets || !targets.length) continue;
     const qv = cq ? dQty[cq[i]] : '', q = qv === '' || qv === undefined || qv === null ? 1 : (Number(qv) || 0);
     const sh = dShift[ds.cols.shift[i]];
-    if (sh === 'T1' || sh === 'T2' || sh === 'T3') a[sh] += q; else a.NA += q;
-    a.total += q;
+    targets.forEach(a => { if (sh === 'T1' || sh === 'T2' || sh === 'T3') a[sh] += q; else a.NA += q; a.total += q; });
   }
   cols.forEach(c => upsertAggCounts_(indicator + ':' + c, date, acc[c], acc[c].total));
 }
@@ -954,14 +968,14 @@ function recoverStaleRunning_() {
   });
 }
 function pendingJobs_() {
-  const prio = {SUMMARY: 0, DETAIL_INIT: 1, DETAIL_PAGE: 1, COMPACT: 2};
+  const prio = {SUMMARY: 0, DETAIL_INIT: 1, DETAIL_PAGE: 1, COMPACT: 2, TRIPS: 2.8};
   // Detalhe agrupado (Recebimento: ~500 mil remessas por dia) por último: nunca atrasa os outros painéis. Entre os
   // dias dele, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
   const anchor = {};
   const rank = j => {
-    if (j.type === 'DETAIL_INIT' && INDICATORS[j.indicator].grouped) {
+    if ((j.type === 'DETAIL_INIT' && INDICATORS[j.indicator].grouped) || j.type === 'TRIPS') {
       const a = anchor[j.indicator] || (anchor[j.indicator] = lastClosedDate_(j.indicator));
-      return j.date === a ? 2.5 : 2.6;
+      return (j.type === 'TRIPS' ? 2.8 : 2.5) + (j.date === a ? 0 : 0.1);
     }
     return prio[j.type] === undefined ? 3 : prio[j.type];
   };
@@ -1277,16 +1291,16 @@ function processSyncQueue(opts) {
         if (!jobReady_(job)) { waiting++; continue; }
         if (job.type === 'COMPACT' && Date.now() > deadline - 90000) { waiting++; continue; }
         if (job.type === 'DETAIL_INIT' && Date.now() > deadline - APP_CONFIG.DETAIL_MIN_START_MS) { waiting++; continue; }
-        // Detalhe agrupado (Recebimento): só começa com tempo para fechar ao menos uma fatia de horário — com
+        // Detalhe agrupado (Recebimento, Expedição): só começa com tempo para fechar ao menos uma fatia de horário — com
         // pouco tempo ele só replanejava e parava (com o JMS em 100 por página, nunca avançava).
-        const grouped = job.type === 'DETAIL_INIT' && INDICATORS[job.indicator].grouped;
-        if (grouped && Date.now() > deadline - APP_CONFIG.GROUPED_DETAIL_MIN_START_MS) { waiting++; continue; }
-        // Teto diário do Recebimento (conta Gmail): o resto do dia fica para os outros painéis.
-        const budget = grouped ? groupedBudgetLeftMs_() : Infinity;
+        const grouped = isHeavyJob_(job);
+        if (grouped && Date.now() > deadline - (job.type === 'TRIPS' ? 60000 : APP_CONFIG.GROUPED_DETAIL_MIN_START_MS)) { waiting++; continue; }
+        // Teto diário do Recebimento e da Expedição (conta Gmail): o resto do dia fica para os outros painéis.
+        const budget = grouped ? groupedBudgetLeftMs_(job.indicator) : Infinity;
         if (grouped && budget < 90000) { waiting++; continue; }
         const t0 = Date.now();
         const r = processJob_(job, grouped ? Math.min(deadline, t0 + budget) : deadline);
-        if (grouped && budget !== Infinity) addGroupedUsedMs_(Date.now() - t0);
+        if (grouped && budget !== Infinity) addGroupedUsedMs_(Date.now() - t0, job.indicator);
         progressed = true;
         if (r === 'done') done++;
         else if (r === 'skip') waiting++;
@@ -1312,7 +1326,7 @@ function processSyncQueue(opts) {
     const hint = safeJsonParse_(getProp_(HINT_PROP_, ''), null);
     const touched = hint && hint.s === 'PENDING' && Number(hint.at) >= startedAt;
     if (!touched) {
-      const overBudget = j => j.type === 'DETAIL_INIT' && INDICATORS[j.indicator].grouped && groupedBudgetLeftMs_() < 90000;
+      const overBudget = j => isHeavyJob_(j) && groupedBudgetLeftMs_(j.indicator) < 90000;
       if (!remaining.length) setQueueHint_('IDLE');
       else if (remaining.every(j => pauseFor_(INDICATORS[j.indicator].routeKey, pausesNow))) setQueueHint_('PAUSED');
       else if (remaining.every(j => overBudget(j) || pauseFor_(INDICATORS[j.indicator].routeKey, pausesNow))) setQueueHint_('BUDGET');
@@ -1326,7 +1340,13 @@ function processSyncQueue(opts) {
 function jobReady_(job) {
   if (job.type === 'SUMMARY' || job.type === 'COMPACT') return true;
   const st = getDayStatus_(job.indicator, job.date);
+  // IDs de viagem (Expedição): depois do detalhe do dia gravado.
+  if (job.type === 'TRIPS') return !!(st && (DETAIL_USABLE_.indexOf(st.details) >= 0 || st.details === 'NO_RECORD'));
   return !!(st && ['COMPLETE', 'NO_RECORD'].indexOf(st.summary) >= 0);
+}
+/** Tarefa pesada com teto diário (conta Gmail): detalhe agrupado (Recebimento, Expedição) e IDs de viagem. */
+function isHeavyJob_(job) {
+  return !!INDICATORS[job.indicator] && ((job.type === 'DETAIL_INIT' && INDICATORS[job.indicator].grouped) || job.type === 'TRIPS');
 }
 
 function processJob_(job, deadline) {
@@ -1339,6 +1359,7 @@ function processJob_(job, deadline) {
     else if (job.type === 'DETAIL_INIT') result = runDetailJob_(job, deadline);
     else if (job.type === 'DETAIL_PAGE') result = runLegacyDetailPageJob_(job);
     else if (job.type === 'COMPACT') result = compactDay_(job.indicator, job.date, deadline).partial ? 'partial' : 'done';
+    else if (job.type === 'TRIPS') result = runTripJob_(job, deadline);
     else throw new Error('Tipo de job não reconhecido: ' + job.type);
     if (result === 'skip' || result === 'partial') {
       writeCells_('JOBS', job.rowNum, 6, ['PENDING']);
@@ -1367,6 +1388,9 @@ function processJob_(job, deadline) {
     if (job.type === 'SUMMARY') {
       // Falha ao ATUALIZAR uma taxa já gravada não apaga o dia: só registra o erro.
       updateDayStatus_(job.indicator, job.date, st && st.summary === 'COMPLETE' ? {error: message} : {summaryStatus: 'ERROR', error: message});
+    } else if (job.type === 'TRIPS') {
+      // IDs de viagem: o detalhe do dia continua valendo; só registra o erro.
+      updateDayStatus_(job.indicator, job.date, {error: message});
     } else if (job.type !== 'COMPACT') {
       // Idem para detalhe: o dia completo anterior continua valendo até o novo download dar certo. Download em
       // partes (PARTIAL) continua PARTIAL: a nova tentativa segue da parte seguinte, sem recomeçar o dia.
@@ -1388,6 +1412,8 @@ function detailDays_(cfg) {
   const v = Number(getProp_('DETAIL_DAYS_' + cfg.key.toUpperCase(), ''));
   if (v > 0) return v;
   const days = (cfg.detail && cfg.detail.days) || 0;
+  // Expedição: ~117 mil remessas por dia em páginas de 100 — conta Gmail com os 3 últimos dias; Workspace, detail.days.
+  if (cfg.byRoute) return days && googlePlan_() === 'gmail' ? Math.min(days, 3) : days;
   return days && heavyDetailLimited_(cfg) ? Math.min(days, 3) : days;
 }
 /**
@@ -1396,7 +1422,7 @@ function detailDays_(cfg) {
  * fica com os últimos 3 dias e hoje é rebaixado no máximo a cada 12 h (a propriedade DETAIL_DAYS_ manda).
  */
 function heavyDetailLimited_(cfg) {
-  return !!(cfg.grouped && cfg.detail && cfg.detail.maxPerDay > APP_CONFIG.MAX_DETAIL_PER_DAY && detailPageSize_(cfg) < 500);
+  return !!(cfg.grouped && !cfg.byRoute && cfg.detail && cfg.detail.maxPerDay > APP_CONFIG.MAX_DETAIL_PER_DAY && detailPageSize_(cfg) < 500);
 }
 function detailRefreshHours_() {
   const v = Number(getProp_('DETAIL_REFRESH_HOURS', ''));
@@ -1409,7 +1435,11 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   if (!changed && st.details === 'COMPLETE') return false;
   if (manual) return true;
   const cfgR = INDICATORS[indicator] || {};
-  const minH = cfgR.detail && cfgR.detail.refreshHours ? Math.max(cfgR.detail.refreshHours, heavyDetailLimited_(cfgR) ? 12 : 0) : 0;
+  let minH = cfgR.detail && cfgR.detail.refreshHours ? Math.max(cfgR.detail.refreshHours, heavyDetailLimited_(cfgR) ? 12 : 0) : 0;
+  // Expedição: dia fechado só muda a situação (chegou/entregue) — atualizado no máximo a cada closedRefreshHours.
+  if (cfgR.detail && cfgR.detail.closedRefreshHours && date < isoToday_()) minH = Math.max(minH, cfgR.detail.closedRefreshHours);
+  // Expedição na conta Gmail: hoje também a cada 12 h — sobra tempo para os IDs de viagem (cartões e turnos seguem de hora em hora).
+  if (cfgR.byRoute && googlePlan_() === 'gmail') minH = Math.max(minH, 12);
   // Dia antigo cuja contagem mudou de verdade: rebaixa já (no Recebimento, que muda o dia todo, respeita o intervalo).
   if (changed && date < addDaysIso_(isoToday_(), -1) && !minH) return true;
   // Hoje/ontem mudando (ou já STALE), ou contagem divergente (CHECK_COUNTS): respeita o intervalo.
@@ -1435,6 +1465,18 @@ function runSummaryJob_(job) {
   }
   // Recebimento: quantidade de cada turno pelo resumo (4 consultas), para os cartões e pizzas sem esperar o detalhe.
   // Dia fechado já consultado e com o mesmo resumo: nada mudou, não consulta de novo.
+  // Expedição: quantidade de cada turno pela lista de cada rota em cada horário de turno (dias da janela de detalhe).
+  if (getIndicatorConfig_(job.indicator).byRoute) {
+    const days = detailDays_(getIndicatorConfig_(job.indicator));
+    if (!days || job.date >= addDaysIso_(isoToday_(), -days)) {
+      try { syncSendShifts_(job.indicator, job.date); }
+      catch (e) {
+        if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e;
+        logSync_('WARN', job.indicator, job.date, 'Turnos da Expedição pela lista por horário não consultados: ' + String(e && e.message || e).slice(0, 300));
+      }
+    }
+    return 'done';
+  }
   const sw = (getIndicatorConfig_(job.indicator).detail || {}).shiftProbe;
   const same = prev && prev.errorCount === summary.errorCount && prev.totalCount === summary.totalCount &&
     prev.metrics && (sw || []).every(m => Number(prev.metrics[m]) === Number(summary.raw && summary.raw[m]));
@@ -1513,6 +1555,8 @@ function runDetailJob_(job, deadline) {
     updateDayStatus_(job.indicator, job.date, {detailsStatus: 'SKIPPED', error: ''});
     return 'done';
   }
+  // Expedição: o detalhe é por rota (Expedicao.gs).
+  if (cfg.byRoute) return runSendDetailJob_(job, deadline, cfg, st);
   // Recebimento retomando um dia já fechado: o plano gravado (fatias e totais) dispensa ~80 consultas por execução.
   const plan = (cfg.grouped && storedGroupedPlan_(job, st)) ||
     planDetailDownload_(job.indicator, job.date, (total, type) => validateDetailTotal_(cfg, job.indicator, job.date, total, type));
@@ -1778,8 +1822,8 @@ function detailProgress_(indicator, from, to) {
   });
   const out = {days: days, detailDays: win || 0};
   if (cfg.grouped) {
-    const min = groupedBudgetMin_();
-    out.budget = {minPerDay: min, usedMin: Math.round(groupedUsedMs_() / 6000) / 10, exhausted: min > 0 && groupedBudgetLeftMs_() < 90000};
+    const min = groupedBudgetMin_(indicator);
+    out.budget = {minPerDay: min, usedMin: Math.round(groupedUsedMs_(indicator) / 6000) / 10, exhausted: min > 0 && groupedBudgetLeftMs_(indicator) < 90000};
   }
   return out;
 }
@@ -1877,11 +1921,15 @@ function storedGroupedPlan_(job, st) {
  * o Recebimento com o JMS em 100 por página gastava tudo até as 11h e os outros painéis paravam até a meia-noite.
  * Propriedade RECEBIMENTO_MIN_POR_DIA manda (0 = sem teto). Sem ela: Gmail = 35 min; Google Workspace = sem teto.
  */
-function groupedBudgetMin_() {
-  const v = getProp_('RECEBIMENTO_MIN_POR_DIA', '');
+function groupedBudgetMin_(indicator) {
+  // Expedição (V3.22): teto próprio (EXPEDICAO_MIN_POR_DIA; Gmail = 20 min), para não tirar tempo do Recebimento.
+  const send = sendBudgetKey_(indicator);
+  const v = getProp_(send ? 'EXPEDICAO_MIN_POR_DIA' : 'RECEBIMENTO_MIN_POR_DIA', '');
   if (v !== '' && Number(v) >= 0) return Number(v);
-  return googlePlan_() === 'gmail' ? APP_CONFIG.GROUPED_GMAIL_MIN_PER_DAY : 0;
+  return googlePlan_() === 'gmail' ? (send ? APP_CONFIG.SEND_GMAIL_MIN_PER_DAY : APP_CONFIG.GROUPED_GMAIL_MIN_PER_DAY) : 0;
 }
+/** Painel com teto diário próprio (Expedição: detalhe por rota + IDs de viagem). */
+function sendBudgetKey_(indicator) { return !!(indicator && INDICATORS[indicator] && INDICATORS[indicator].byRoute); }
 /** "gmail" | "workspace": dono da planilha do banco (escopo do Drive, já autorizado). COTA_GOOGLE manda. */
 function googlePlan_() {
   const forced = String(getProp_('COTA_GOOGLE', '')).toLowerCase();
@@ -1903,17 +1951,17 @@ function googlePlan_() {
   try { setProp_('GOOGLE_PLAN_AUTO', plan || 'falha:' + isoToday_()); } catch (e) { /* só cache */ }
   return plan || 'gmail';
 }
-function groupedUsedKey_() { return 'GROUPED_USED_MS_' + isoToday_(); }
-function groupedUsedMs_() { return Number(getProp_(groupedUsedKey_(), '')) || 0; }
-function addGroupedUsedMs_(ms) {
-  const key = groupedUsedKey_();
-  setProp_(key, Math.round(groupedUsedMs_() + Math.max(0, ms)));
-  Object.keys(scriptProps_()).forEach(k => { if (k.indexOf('GROUPED_USED_MS_') === 0 && k !== key) deleteProp_(k); });
+function groupedUsedKey_(indicator) { return (sendBudgetKey_(indicator) ? 'SEND_USED_MS_' : 'GROUPED_USED_MS_') + isoToday_(); }
+function groupedUsedMs_(indicator) { return Number(getProp_(groupedUsedKey_(indicator), '')) || 0; }
+function addGroupedUsedMs_(ms, indicator) {
+  const key = groupedUsedKey_(indicator), prefix = sendBudgetKey_(indicator) ? 'SEND_USED_MS_' : 'GROUPED_USED_MS_';
+  setProp_(key, Math.round(groupedUsedMs_(indicator) + Math.max(0, ms)));
+  Object.keys(scriptProps_()).forEach(k => { if (k.indexOf(prefix) === 0 && k !== key) deleteProp_(k); });
 }
-/** Milissegundos que o detalhe agrupado ainda pode usar hoje (Infinity = sem teto). */
-function groupedBudgetLeftMs_() {
-  const min = groupedBudgetMin_();
-  return min > 0 ? Math.max(0, min * 60000 - groupedUsedMs_()) : Infinity;
+/** Milissegundos que o detalhe agrupado ainda pode usar hoje (Infinity = sem teto). Sem indicador = Recebimento. */
+function groupedBudgetLeftMs_(indicator) {
+  const min = groupedBudgetMin_(indicator);
+  return min > 0 ? Math.max(0, min * 60000 - groupedUsedMs_(indicator)) : Infinity;
 }
 
 /**

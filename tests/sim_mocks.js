@@ -105,7 +105,7 @@ function createSimContext(opts) {
       deleteTrigger: () => {}, getOAuthToken: () => 't'}
   };
   vm.createContext(context);
-  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Analytics', 'Report', 'Triggers', 'Code'];
+  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
   vm.runInContext(files.map(f => fs.readFileSync(path.join(opts.root, f + '.gs'), 'utf8')).join('\n;\n'), context, {filename: 'projeto.gs'});
   context.__state = state;
   return context;
@@ -116,6 +116,14 @@ const VOLUME = {ws: 1800, se: 150, mr: 3900, md: 4000, sc: 73000, dc: 200, dm: 1
 // Recebimento (captura de 01/10/2026): deve chegar 172.842 / chegou 332.990 por dia.
 const ARRIVAL = {shouldArriverNum: 172842, noArriverNum: 74190, totalNum: 332990, uploadNoSendNum: 22709, noSendNum: 18632,
   trips: 380, sites: 120, bases: 320, centers: 26, stops: 40, scanners: 140};
+/**
+ * Expedição (captura de 04/10/2026): 15 rotas, 117.618 remessas enviadas no dia (nomes de rota FICTÍCIOS, volumes da
+ * captura). transit = parte que ainda não chegou na próxima parada (no dia de hoje, como na captura; nos dias anteriores
+ * cai pela metade a cada dia); não entregue = todas (dias recentes).
+ */
+const SEND = [[2697, 1], [5550, 1], [5424, 1], [5616, 1], [1996, 0.02], [1718, 1], [1048, 0.47], [17717, 0.99], [1592, 1], [804, 1],
+  [1096, 1], [15876, 1], [38672, 1], [14080, 0.9999], [3732, 1]].map((x, i) => ({name: 'ROTA ' + String.fromCharCode(65 + i), code: String(80001 + i), n: x[0], transit: x[1]}));
+const sendHash = (x, salt) => { let v = (x * 2654435761 + salt * 40503) >>> 0; v ^= v >>> 15; v = Math.imul(v, 2246822519) >>> 0; v ^= v >>> 13; return v; };
 /**
  * Registros do Recebimento gerados por conta (sem guardar listas de 500 mil objetos): o registro i
  * tem horário proporcional ao índice, viagem pelo trecho do dia (caminhões chegam ao longo do dia),
@@ -212,6 +220,48 @@ function realisticJms(opts) {
       for (let i = lo + (cur - 1) * aSize; i < Math.min(hi, lo + cur * aSize); i++) out.push(arrivalRecord(dd, type, i, N));
       return ok(out, total, cur, aSize);
     }
+    if (route === 'sendbyday_total' || route === 'sendbyday_detail' || route === 'keywordList') {
+      const dd = route === 'keywordList' ? nowIso : start.slice(0, 10), frac = dd > nowIso ? 0 : dd < nowIso ? 1 : nowH / 24;
+      const age = Math.max(0, Math.round((Date.parse(nowIso) - Date.parse(dd)) / 864e5));
+      const tf = r => r.transit >= 1 && age === 0 ? 1 : r.transit * Math.pow(0.5, age);
+      const isT = (r, i) => tf(r) >= 1 || (sendHash(i, r.n) % 10000) < tf(r) * 10000;
+      const two = x => String(x).padStart(2, '0');
+      const timeOf = (r, i) => { const sec = Math.floor(i * 86400 / r.n); return dd + ' ' + two(Math.floor(sec / 3600)) + ':' + two(Math.floor(sec / 60) % 60) + ':' + two(sec % 60); };
+      if (route === 'keywordList') {
+        const data = (body.keywordList || []).map(w => {
+          const m = String(w).match(/^SF(\d{8})R(\d+)I(\d+)$/);
+          if (!m) return null;
+          const r = SEND[Number(m[2])], i = Number(m[3]), d8 = m[1], d = d8.slice(0, 4) + '-' + d8.slice(4, 6) + '-' + d8.slice(6);
+          const sec = Math.floor(i * 86400 / r.n), t = d + ' ' + two(Math.floor(sec / 3600)) + ':' + two(Math.floor(sec / 60) % 60) + ':' + two(sec % 60);
+          return {keyword: w, details: [{scanTime: t, scanTypeName: 'Encomenda carregada', scanNetworkName: 'SP GRU', nextStopName: r.name, code: 1, originalScanTypeCode: 50,
+            remark2: 'VIAGEM' + d8 + 'R' + m[2] + 'H' + two(Math.floor(sec / 7200))}, {scanTime: d + ' 00:00:01', scanTypeName: 'Encomenda recebida', scanNetworkName: 'SP GRU', code: 2, remark2: 'CHEGADA'}]};
+        }).filter(Boolean);
+        return respond({code: 1, msg: 'ok', data: data, succ: true, fail: false});
+      }
+      if (route === 'sendbyday_total') {
+        if (!frac) return ok([], 0, 1, size);
+        return ok(SEND.map((r, k) => {
+          const n = Math.floor(r.n * frac);
+          let t = 0; for (let i = 0; i < n; i++) if (isT(r, i)) t++;
+          return {scantime: dd, nextstation: r.name, nextstationcode: r.code, sendcount: n, noarrivalcount: t, nosigncount: n, ROW_ID: k + 1};
+        }), SEND.length, 1, size);
+      }
+      const ri = SEND.findIndex(r => r.code === String(body.nextstation)), r = SEND[ri];
+      if (!r) return ok([], 0, 1, size);
+      const n = Math.floor(r.n * frac), sz = Math.min(100, body.size);
+      const secOf = x => { const t = x.slice(11).split(':').map(Number); return t[0] * 3600 + t[1] * 60 + t[2]; };
+      const lo = Math.ceil(secOf(start) * r.n / 86400), hi = Math.min(n, Math.ceil((secOf(end) + 1) * r.n / 86400));
+      const ck = dd + '|' + ri + '|' + body.detailType + '|' + lo + '|' + hi;
+      let idx = cache[ck];
+      if (!idx) {
+        idx = [];
+        for (let i = lo; i < hi; i++) if (body.detailType === 'sendcount' || body.detailType === 'nosigncount' || isT(r, i)) idx.push(i);
+        cache[ck] = idx;
+      }
+      const out = idx.slice((cur - 1) * sz, cur * sz).map(i => ({billcode: 'SF' + dd.replace(/-/g, '') + 'R' + ri + 'I' + i, inputsite: 'SP GRU', sendTime: timeOf(r, i),
+        nextstation: r.name, scanuser: 'OPERADOR ' + (sendHash(i, 7) % 60)}));
+      return ok(out, idx.length, cur, sz);
+    }
     if (/center_missscan_next_total/.test(route)) {
       const mr = visible(dayList(date, 'mr')).length, md = visible(dayList(date, 'md')).length;
       if (!mr && !md) return ok([], 0, 1, size);
@@ -232,4 +282,4 @@ function realisticJms(opts) {
   };
 }
 
-module.exports = {makeClock, createSimContext, realisticJms, fmtDate, VOLUME, ARRIVAL, arrivalRecord};
+module.exports = {makeClock, createSimContext, realisticJms, fmtDate, VOLUME, ARRIVAL, arrivalRecord, SEND};

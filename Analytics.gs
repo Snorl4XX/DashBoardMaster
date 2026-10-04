@@ -464,13 +464,14 @@ function GroupSummarySink_(cfg, filters, topLimit) {
 /** Combinações estimadas do período (arquivos diários + dias ainda em pedaços) acima do limite do navegador? */
 function groupedNeedsSummary_(indicatorKey, from, to, params) {
   if (params && params.summary !== undefined && params.summary !== null) return !!params.summary;
-  const v = Number(getProp_('GROUPED_CLIENT_ROWS', ''));
-  const limit = v >= 1 ? v : APP_CONFIG.MAX_GROUPED_CLIENT_ROWS;
+  const v = Number(getProp_('GROUPED_CLIENT_ROWS', '')), ic = INDICATORS[indicatorKey] || {};
+  // Expedição (uma linha por remessa): um dia inteiro (~120 mil) vai ao navegador — as tabelas mostram todas as remessas.
+  const limit = v >= 1 ? v : ic.clientRows || APP_CONFIG.MAX_GROUPED_CLIENT_ROWS;
   const files = dayFilesMap_(indicatorKey, from, to), st = statusMap_(indicatorKey, from, to);
   let est = 0;
   dateRangeIso_(from, to).forEach(d => {
     if (files[d]) est += files[d].rows;
-    else { const s = st[indicatorKey + '|' + d]; if (s && DETAIL_USABLE_.concat(['PARTIAL']).indexOf(s.details) >= 0) est += Math.round((s.expectedRecords || 0) * 0.3); }
+    else { const s = st[indicatorKey + '|' + d]; if (s && DETAIL_USABLE_.concat(['PARTIAL']).indexOf(s.details) >= 0) est += Math.round((s.expectedRecords || 0) * (ic.byRoute ? 1 : 0.3)); }
   });
   return est > limit;
 }
@@ -530,6 +531,7 @@ function maxClientRows_() {
 function getDashboardData(indicatorKey, params) {
   const cfg = getIndicatorConfig_(indicatorKey);
   JTCore_.setFilterScopes(cfg.filterScopes || {});
+  JTCore_.setColumnSets(cfg.columnSets || {});
   const allRates = getRates_(indicatorKey, null, null);
   const p = resolvePeriod_(params, allRates, indicatorKey);
   const coverage = getCoverage_(indicatorKey, p.from, p.to);
@@ -555,8 +557,13 @@ function getDashboardData(indicatorKey, params) {
       // Por que falta detalhe (fila, partes baixadas de cada lista, erro): o painel mostra no lugar de "sem dados".
       detailProgress: archive.fullyLoaded ? null : safeCall_(() => detailProgress_(indicatorKey, p.from, p.to)),
       // Recebimento: números que o JMS não separa por horário no resumo (turnos só pelo detalhe).
-      summaryShiftsOff: ((cfg.detail || {}).shiftProbe || []).length ? summaryShiftsOff_(cfg) : null
+      summaryShiftsOff: cfg.byRoute ? (getProp_('JMS_NO_SLICE_' + cfg.routeKey, '') ? {sendcount: 'a lista do JMS não separa por horário'} : {})
+        : ((cfg.detail || {}).shiftProbe || []).length ? summaryShiftsOff_(cfg) : null,
+      // Expedição: remessas já consultadas no Rastreamento do pacote (IDs de viagem) por dia.
+      tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null
     },
+    // Expedição: cada rota do dia (tabela principal do JMS) no período e no período anterior — gráficos de rotas sem filtro.
+    routes: cfg.byRoute ? sendRoutesByDate_(allRates, p.from, p.to) : null,
     // metrics: números do resumo do dia (Recebimento: as subcolunas de "Deve chegar" e "Chegou").
     rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics}
       : {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount}),
@@ -568,7 +575,7 @@ function getDashboardData(indicatorKey, params) {
       return o;
     }, {}),
     // Recebimento: quantidade de cada turno pela lista do JMS consultada em cada horário (sem esperar o download).
-    shiftSum: ((cfg.detail || {}).shiftProbe || []).reduce((o, m) => {
+    shiftSum: ((cfg.detail || {}).shiftProbe || []).concat(cfg.byRoute ? ['sendcount'] : []).reduce((o, m) => {
       o[m] = getAgg_(summaryShiftKey_(indicatorKey, m), null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, total: a.total}));
       return o;
     }, {}),
@@ -626,10 +633,21 @@ function rateVariantFor_(cfg, indicatorKey, filters) {
   return {kind: kind, rates: rates, filters: rest};
 }
 
+/**
+ * Rotas de cada dia (Expedição) entre o período anterior e o fim do período: {data: [{n, c, m}]}. Só o necessário
+ * para os gráficos de rotas e o cartão "rota que mais enviou" (o histórico inteiro ficaria grande).
+ */
+function sendRoutesByDate_(allRates, from, to) {
+  const len = Math.max(1, JTCore_.daysBetween(from, to) + 1), start = addDaysIso_(from, -len), out = {};
+  (allRates || []).forEach(r => { if (r.date >= start && r.date <= to && r.routes) out[r.date] = r.routes; });
+  return out;
+}
+
 /** Visão consolidada do servidor (relatórios) — mesma regra do navegador. */
 function computeDashboard_(indicatorKey, params, archiveOpts) {
   const cfg = getIndicatorConfig_(indicatorKey);
   JTCore_.setFilterScopes(cfg.filterScopes || {});
+  JTCore_.setColumnSets(cfg.columnSets || {});
   const allRates = getRates_(indicatorKey, null, null);
   const p = resolvePeriod_(params, allRates, indicatorKey);
   const filters = normalizeFilters_(params && params.filters);

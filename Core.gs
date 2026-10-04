@@ -431,7 +431,20 @@ function JTCoreFactory_() {
    */
   var FILTER_SCOPES = {};
   function setFilterScopes(scopes) { FILTER_SCOPES = scopes || {}; }
-  function inScope(k, r) { var sc = FILTER_SCOPES[k]; return !sc || sc.indexOf(r.column) >= 0; }
+  function inScope(k, r) { var sc = FILTER_SCOPES[k]; return !sc || sc.some(function (c) { return colMatch(c, r.column); }); }
+  /**
+   * Listas formadas por várias situações (Expedição: "Enviados" = todas as remessas; "Em trânsito" e "Não entregues"
+   * = as situações de cada lista do JMS): {lista: [valores de "column"]}. Cada remessa é gravada UMA vez, com a
+   * situação dela em "column"; a lista junta as situações. Sem conjunto, a lista é o próprio valor de "column".
+   */
+  var COLUMN_SETS = {};
+  function setColumnSets(sets) { COLUMN_SETS = sets || {}; }
+  function colMatch(list, value) {
+    if (list === null || list === undefined) return true;
+    if (Array.isArray(list)) return list.some(function (x) { return colMatch(x, value); });
+    var set = COLUMN_SETS[list];
+    return set ? set.indexOf(value) >= 0 : value === list;
+  }
   function applyFilters(rows, filters, exceptKey) {
     var active = Object.keys(filters || {}).filter(function (k) {
       return k !== exceptKey && Array.isArray(filters[k]) && filters[k].length > 0;
@@ -442,7 +455,7 @@ function JTCoreFactory_() {
     });
     return (rows || []).filter(function (r) {
       for (var i = 0; i < sets.length; i++) {
-        if (sets[i][2] && sets[i][2].indexOf(r.column) < 0) continue;
+        if (sets[i][2] && !colMatch(sets[i][2], r.column)) continue;
         if (!sets[i][1][norm(r[sets[i][0]])]) return false;
       }
       return true;
@@ -512,7 +525,9 @@ function JTCoreFactory_() {
   function chartRows(def, rows) {
     if (!def.where) return rows || [];
     var keys = Object.keys(def.where);
-    return (rows || []).filter(function (r) { return keys.every(function (k) { return r[k] === def.where[k]; }); });
+    return (rows || []).filter(function (r) {
+      return keys.every(function (k) { return k === 'column' ? colMatch(def.where[k], r[k]) : r[k] === def.where[k]; });
+    });
   }
   /**
    * Recebimento com período grande (servidor manda totais por campo): {campo: [{date, column, campo: valor, qty}]}.
@@ -759,7 +774,9 @@ function JTCoreFactory_() {
     '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição'
   };
   var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
-    'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Sem bipe na etapa anterior': '上一环节未发件扫描', 'Sem bipe de expedição nesta base': '本网点未发件扫描', 'Chegou': '已到'};
+    'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Sem bipe na etapa anterior': '上一环节未发件扫描', 'Sem bipe de expedição nesta base': '本网点未发件扫描', 'Chegou': '已到',
+    'Enviados': '已发件', 'Em trânsito': '在途（未到下一站）', 'Não entregues': '未签收', 'Não chegou ao destino': '未到下一站',
+    'Chegou ao destino · não entregue': '已到下一站·未签收', 'Entregue': '已签收', 'Entregue · sem bipe de chegada': '已签收·无到件扫描'};
   function hasCjk(s) { return /[㐀-鿿]/.test(s); }
   function localizeValue(value, lang) {
     var s = String(value === null || value === undefined ? '' : value);
@@ -786,7 +803,7 @@ function JTCoreFactory_() {
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
-    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
+    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
     encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText
   };
 }

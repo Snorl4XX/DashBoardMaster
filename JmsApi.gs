@@ -60,7 +60,7 @@ function credentialSignature_() {
  * Cabeçalhos de rota do gateway JMS. O padrão de "Routename" é o nome da página
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
- * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE
+ * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -81,6 +81,14 @@ const JMS_ROUTES_ = [
   // /crisbiIndex/ArriveMonitor). Routename = nome da página; Routernamelist não capturado: variantes em `alt`.
   {key: 'ARRIVAL', pattern: /\/bigdataReport\/detail\/arrivalbyday_\w+(?:\?|$)/, name: 'ArriveMonitor', list: '运营>数据监控>到件扫描监控(新)',
     alt: [{name: 'ArriveMonitor', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
+  // Expedição: fluxo operacional (Operação > Monitoramento de dados > Monitoramento de tipagem de expedição (novo),
+  // /crisbiIndex/SendOutMonitor). Routename = nome da página (da URL capturada); Routernamelist não capturado: variantes em `alt`.
+  {key: 'SEND', pattern: /\/bigdataReport\/detail\/sendbyday_\w+(?:\?|$)/, name: 'SendOutMonitor', list: '运营>数据监控>发件扫描监控(新)',
+    alt: [{name: 'SendOutMonitor', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
+  // Rastreamento do pacote (ID de viagem da Expedição). Cabeçalhos de rota não capturados: primeiro sem eles; se o JMS
+  // recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_TRACKING / JMS_ROUTENAMELIST_TRACKING mandam).
+  {key: 'TRACKING', pattern: /\/podTracking\/inner\/query\/keywordList(?:\?|$)/, name: 'NONE', list: 'NONE',
+    alt: [{name: 'trackingExpress', list: 'NONE'}, {name: 'waybillTracking', list: 'NONE'}, {name: 'packageTracking', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -388,6 +396,18 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, siteCode: centerCode, countryId: countryId_()};
     }
 
+    case 'send_flow': {
+      // Monitoramento de tipagem de expedição: resumo pela estação de remessa (scansitecode), uma linha por rota; detalhe =
+      // número vermelho de UMA rota (nextstation = código da próxima parada) e de uma coluna (detailType), como na captura.
+      if (detail) {
+        const types = cfg.detail.types || [];
+        if (!win || !win.next) throw new Error('Expedição: detalhe sem a rota (nextstation). Use a rota do resumo do dia.');
+        return {current: pageNo, size: pageSize, detailType: win.type || (types[0] && types[0].type),
+          startTime: w.start, endTime: w.end, nextstation: String(win.next), countryId: countryId_()};
+      }
+      return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, scansitecode: centerCode, countryId: countryId_()};
+    }
+
     case 'sc_dc':
       if (detail) {
         return {current: pageNo, size: pageSize, startTime1: w.start, endTime1: w.end,
@@ -441,6 +461,8 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
     return !dateValue || normalizeDateFromValue_(dateValue, isoDate) === isoDate;
   });
   if (!sameDate.length) return {indicator: indicatorKey, date: isoDate, empty: true};
+  // Uma linha por rota (Expedição): soma as colunas e guarda cada rota.
+  if (cfg.summary.sumRecords) return summedSummary_(cfg, indicatorKey, isoDate, sameDate);
   const parsed = sameDate.map(r => {
     const rd = fieldReader_(r);
     const errorRaw = rd(cfg.summary.errorKeys).value;
@@ -475,6 +497,26 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
     indicator: indicatorKey, date: isoDate, rate: rate, errorCount: errors, totalCount: total, empty: false,
     raw: parsed.length === 1 ? parsed[0].raw : {aggregatedRows: parsed.length, source: 'JMS', date: isoDate}
   };
+}
+
+/**
+ * Resumo com uma linha por rota (Expedição: sendbyday_total). Cada número do dia = SOMA da coluna (como os totais
+ * entre parênteses no cabeçalho da tela: "Número total de remessas(117618)"). raw.routes guarda cada rota:
+ * {n: próxima parada, c: código (nextstation do detalhe), m: {número: valor}}. Taxa = não chegadas ÷ total (%).
+ */
+function summedSummary_(cfg, indicatorKey, isoDate, records) {
+  const sm = cfg.summary, rf = sm.routeFields || {};
+  const metrics = sm.metrics || [], sums = {}, routes = [];
+  metrics.forEach(k => { sums[k] = 0; });
+  records.forEach(r => {
+    const rd = fieldReader_(r), m = {};
+    metrics.forEach(k => { const v = rd([k]).value; m[k] = v === null ? 0 : num_(v, 0); sums[k] += m[k]; });
+    const name = String(rd([rf.name || 'nextstation']).value || '').trim(), code = String(rd([rf.code || 'nextstationcode']).value || '').trim();
+    if (name || code) routes.push({n: name || code, c: code, m: m});
+  });
+  const total = sm.totalKeys.reduce((a, k) => a + (sums[k] || 0), 0), errors = sm.errorKeys.reduce((a, k) => a + (sums[k] || 0), 0);
+  const raw = Object.assign({date: isoDate, source: 'JMS', rows: records.length}, sums, {routes: routes});
+  return {indicator: indicatorKey, date: isoDate, rate: total > 0 ? errors / total * 100 : 0, errorCount: errors, totalCount: total, empty: false, raw: raw};
 }
 
 /**
@@ -934,7 +976,10 @@ function diagnosticarDetalheJms(indicatorKey, date) {
   const url = endpointFor_(cfg, 'detail');
   const item = {indicador: key, rota: url.split('/').pop(), data: d, cabecalhosDeRotaEnviados: jmsRouteHeaders_(url, jmsReadProperties_())};
   try {
-    const resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, buildPayload_(key, d, 1, 20, true)));
+    // Expedição: o detalhe é por rota — usa a maior rota do resumo do dia.
+    const win = cfg.byRoute ? sendProbeWindow_(key, d) : undefined;
+    if (win) item.rotaTestada = win.name;
+    const resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, buildPayload_(key, d, 1, 20, true, win)));
     item.httpStatus = resp.getResponseCode();
     // parseJmsResponse_ dá a MESMA mensagem amigável (401/403/timeout/etc.) que o painel mostraria.
     const json = parseJmsResponse_(resp, url);
@@ -947,6 +992,14 @@ function diagnosticarDetalheJms(indicatorKey, date) {
   } catch (e) { item.erro = publicJmsError_(e.message || e); item.erroBruto = String(e && e.message || e).slice(0, 300); }
   console.log(JSON.stringify(item, null, 2));
   return item;
+}
+
+/** Expedição: janela do dia inteiro na maior rota do resumo do JMS (diagnósticos que testam o detalhe). */
+function sendProbeWindow_(indicatorKey, date) {
+  const s = fetchSummaryDay_(indicatorKey, date);
+  const big = (s.empty ? [] : (s.raw.routes || [])).filter(r => r.c).sort((a, b) => Number(b.m.sendcount) - Number(a.m.sendcount))[0];
+  if (!big) throw new Error('Expedição: o resumo de ' + date + ' não tem rota com envio para testar o detalhe.');
+  return Object.assign({type: 'sendcount', next: big.c, name: big.n}, dayWindow_(date, false));
 }
 
 function testJmsConnection() {

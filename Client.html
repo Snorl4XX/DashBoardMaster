@@ -119,7 +119,10 @@
       mpTableSub: 'Os números de cada dia, como na primeira tabela da tela do JMS',
       detailsWindowHint: 'Para não estourar a cota do Google (~500 mil remessas por dia), os gráficos por DC/base/viagem usam só os últimos dias. Os números do resumo valem para todos os dias:',
       estimated: 'estimada', estimatedHint: 'O JMS não confirmou o filtro de pedidos principais/filhos: taxa estimada = avarias da opção ÷ volume total.',
-      amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total'
+      amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total',
+      routesOfficial: 'Número oficial de cada rota (tabela principal do JMS)', tripCov: 'IDs consultados no Rastreamento do pacote: {a} de {b} remessas ({c} com ID)',
+      tripCovNone: 'IDs de viagem: consulta no Rastreamento do pacote depois do download do dia', tcOfficial: 'número oficial do JMS',
+      tcPartial: 'prévia: o download do dia ainda não terminou', tcShare: '{p} de participação'
     },
     zh: {
       panel: '运营看板', autoSync: '自动更新', refresh: '刷新', downloadReport: '下载报告',
@@ -222,7 +225,10 @@
       mpTableSub: '每天的数字，与JMS页面第一张表一致',
       detailsWindowHint: '为避免超出 Google 配额（每天约50万票），按中心/网点/车次的图表只使用最近几天的数据。汇总数字涵盖所有日期：',
       estimated: '估算', estimatedHint: 'JMS 未确认主子单筛选：估算指标率 = 该选项破损票数 ÷ 总票量。',
-      amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额'
+      amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额',
+      routesOfficial: '各线路官方数字（JMS主表）', tripCov: '包裹轨迹已查询车次号：{a} / {b} 票（{c} 票有车次号）',
+      tripCovNone: '车次号：当日明细下载完成后在包裹轨迹查询', tcOfficial: 'JMS官方数字',
+      tcPartial: '预览：当日明细尚未下载完', tcShare: '占比 {p}'
     }
   };
 
@@ -247,6 +253,7 @@
     destBase: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><path d="M9 9h6"/>',
     qty: '<path d="M4 7h16M4 12h16M4 17h10"/>',
     arrival_flow: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M8 3v4m-2-2l2 2 2-2"/>',
+    send_flow: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M6 4h6m-2-2l2 2-2 2"/>',
     orderKind: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/>',
     location: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><path d="M9.5 8.5l5 3M14.5 8.5l-5 3"/>',
     locationMain: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
@@ -599,7 +606,7 @@
       var active = state.view === 'dashboard' && state.indicator === c.key;
       html += '<button type="button" class="nav-item' + (active ? ' active' : '') + '" data-ind="' + c.key + '"' + (active ? ' aria-current="page"' : '') + '>' +
         '<span class="nav-ico">' + icon(c.key) + '</span><span class="nav-copy"><b>' + esc(L(c.name)) + '</b><small>' + esc(Lo(c.name)) + '</small></span>' +
-        (l && c.heroMetric && isNum(l.qty) ? '<span class="nav-rate nav-qty" title="' + esc(t('navQty', {date: fmtDate(l.qtyDate, true)})) + '"><i></i>' + fmtInt(l.qty) + '</span>'
+        (l && c.heroMetric && isNum(l.qty) ? '<span class="nav-rate nav-qty" title="' + esc(tx(c, 'navQty', {date: fmtDate(l.qtyDate, true)})) + '"><i></i>' + fmtInt(l.qty) + '</span>'
           : l ? '<span class="nav-rate ' + cls + '" title="' + esc(t('lastSeen') + ': ' + fmtDate(l.date, true)) + '"><i></i>' + fmtRate(l.rate, c.goal) + '</span>' : '') + '</button>';
     });
     html += '<div class="nav-label">' + esc(t('analyses')) + '</div>' +
@@ -719,7 +726,7 @@
       renderSyncBanner(res.meta.pauses);
       var sm = res.summary;
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
-        shiftSum: res.shiftSum || {},
+        shiftSum: res.shiftSum || {}, routes: res.routes || null,
         rows: Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds, res.orderKindTags),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
@@ -760,6 +767,7 @@
     if (!state.data) return;
     var c = cfg(), f = filtersObj();
     Core.setFilterScopes(c.filterScopes || {});
+    Core.setColumnSets(c.columnSets || {});
     renderHeader();
     // Modo de totais: as linhas (totais por dia e coluna) já vêm filtradas do servidor.
     state.filtered = state.data.summary ? state.data.rows : Core.applyFilters(state.data.rows, f);
@@ -1131,7 +1139,7 @@
   /** Quantidade da coluna principal nas linhas (pondera a quantidade das linhas agrupadas). */
   function colQty(rows, col) {
     var n = 0;
-    (rows || []).forEach(function (r) { if (!col || r.column === col) n += Core.weight(r); });
+    (rows || []).forEach(function (r) { if (!col || Core.colMatch(col, r.column)) n += Core.weight(r); });
     return n;
   }
   /** Filtros ativos que valem para a lista `col` (os com escopo de outra lista não contam). */
@@ -1201,7 +1209,7 @@
     if (sk && col) return t('dsSkipped', {l: vlabel('column', sk.column), r: sk.reason});
     var pause = ((state.data.meta && state.data.meta.pauses) || []).filter(function (p) { return p.route === (cfg() && cfg().routeKey) || p.route === '*'; })[0];
     var err = d.progressError || d.error || (d.job && d.job.msg) || '';
-    var lists = d.lists || [], l = col ? lists.filter(function (x) { return x.column === col; })[0] : null;
+    var lists = d.lists || [], l = col ? lists.filter(function (x) { return x.column === col; })[0] || (lists.length === 1 ? lists[0] : null) : null;
     var units = lists.reduce(function (a, x) { return a + x.units; }, 0), done = lists.reduce(function (a, x) { return a + x.done; }, 0);
     var text;
     if (DETAIL_DONE.indexOf(d.details) >= 0 && !l) text = t('dsDone');
@@ -1211,11 +1219,11 @@
     else if (d.details === 'PARTIAL' && units && done) text = t('dsDayDownloading', {p: Math.round(done / units * 100), a: done, b: units, at: fmtClock(d.progressAt)});
     else if (d.details === 'PARTIAL' && d.expected) text = t('dsDayDownloading', {p: Math.round(d.saved / d.expected * 100), a: d.saved, b: d.expected, at: fmtClock(d.updatedAt)});
     else if (d.details === 'ERROR' || (d.job && d.job.status === 'ERROR')) text = t('dsError', {r: err || '—'});
-    else if (d.job && d.job.status === 'PENDING' && d.job.ahead !== null && d.job.ahead !== undefined) text = t('dsQueued', {n: d.job.ahead});
+    else if (d.job && d.job.status === 'PENDING' && d.job.ahead !== null && d.job.ahead !== undefined) text = tx(cfg(), 'dsQueued', {n: d.job.ahead});
     else text = t('dsWaiting');
     if (err && text.indexOf(err) < 0 && d.details !== 'ERROR' && DETAIL_DONE.indexOf(d.details) < 0) text += ' · ' + t('dsLastError', {r: err});
     if (pause) text += ' · ' + t('dsPaused', {r: pause.reason || pause.kind || ''});
-    if (dp.budget && dp.budget.exhausted && DETAIL_DONE.indexOf(d.details) < 0) text += ' · ' + t('dsBudget', {m: dp.budget.minPerDay});
+    if (dp.budget && dp.budget.exhausted && DETAIL_DONE.indexOf(d.details) < 0) text += ' · ' + tx(cfg(), 'dsBudget', {m: dp.budget.minPerDay});
     return text;
   }
   /** % baixado da lista `col` no dia escolhido (período de um dia, download em andamento); null sem a informação. */
@@ -1223,7 +1231,7 @@
     var dp = state.data && state.data.meta && state.data.meta.detailProgress;
     if (!dp || !col || state.from !== state.to) return null;
     var d = dp.days.filter(function (x) { return x.date === state.to; })[0];
-    var l = d && d.lists ? d.lists.filter(function (x) { return x.column === col; })[0] : null;
+    var l = d && d.lists ? d.lists.filter(function (x) { return x.column === col; })[0] || (d.lists.length === 1 ? d.lists[0] : null) : null;
     return l && l.units && DETAIL_DONE.indexOf(d.details) < 0 ? Math.round(l.done / l.units * 100) : null;
   }
   /** Cartões de turno sem número: os turnos pelo resumo ainda não vieram (próxima atualização) ou o JMS não separa por horário. */
@@ -1241,7 +1249,7 @@
     var days = dp ? dp.days.filter(function (x) { return DETAIL_DONE.indexOf(x.details) < 0 && !x.outside; }).slice(0, 3) : [];
     if (!days.length) { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false;
-    box.innerHTML = '<div class="ds-head">' + icon('history') + '<b>' + esc(t('dsTitle')) + '</b><small>' + esc(t('dsHelp')) + '</small></div>' + days.map(function (d) {
+    box.innerHTML = '<div class="ds-head">' + icon('history') + '<b>' + esc(t('dsTitle')) + '</b><small>' + esc(tx(c, 'dsHelp')) + '</small></div>' + days.map(function (d) {
       var lists = (d.lists || []).map(function (l) {
         var pct = l.units ? Math.round(l.done / l.units * 100) : 0;
         var sk = (d.skipped || []).filter(function (x) { return x.column === l.column; })[0];
@@ -1292,7 +1300,7 @@
           (isNum(share) ? '<div class="kpi-foot"><div class="bar"><i data-w="' + share + '" style="background:' + (m.bad ? RED : GOOD) + '"></i></div></div>' : '') + '</article>';
       });
     });
-    grid.innerHTML = hero + cards + shiftColumnCards(c, f, k, dlt);
+    grid.innerHTML = hero + cards + shiftColumnCards(c, f, k, dlt) + metricTopCards(c, f);
     fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
@@ -1322,9 +1330,77 @@
     lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
       (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +
       (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>';
-    return '<article class="kpi ' + cls + ' hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon(def.column === 'Chegou' ? 'check' : 'arrival_flow') + esc(label) + '</div>' +
+    return '<article class="kpi ' + cls + ' hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon(def.icon || (def.column === 'Chegou' ? 'check' : 'arrival_flow')) + esc(label) + '</div>' +
       '<div class="kpi-value">' + fmtInt(big) + '</div>' + lines +
       '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="' + sparkId + '" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
+  }
+  /**
+   * Expedição: quantidade oficial de cada rota no período (tabela principal do JMS, número `metric`), com o filtro de
+   * rota aplicado. null = o período não tem as rotas do resumo.
+   */
+  function routeTotals(metric, f) {
+    var byDate = (state.data && state.data.routes) || {}, map = {}, total = 0, any = false;
+    var sel = f && f.destination && f.destination.length ? f.destination : null;
+    Object.keys(byDate).forEach(function (d) {
+      if (d < state.from || d > state.to) return;
+      (byDate[d] || []).forEach(function (r) {
+        any = true;
+        if (sel && sel.indexOf(r.n) < 0) return;
+        var v = Number(r.m && r.m[metric]) || 0;
+        map[r.n] = (map[r.n] || 0) + v; total += v;
+      });
+    });
+    if (!any) return null;
+    var list = Object.keys(map).map(function (n) { return {label: n, value: map[n]}; })
+      .sort(function (a, b) { return b.value - a.value || Core.compareText(a.label, b.label); });
+    return {list: list, total: total};
+  }
+  /** Só o filtro de rota (ou nenhum): os gráficos e o cartão de rotas usam o número oficial de cada rota. */
+  function onlyRouteFilter(f) { return !Object.keys(f || {}).some(function (k) { return k !== 'destination'; }); }
+  /**
+   * Expedição: cartões "que mais mandou" (Config.gs → topCards) na lista Enviados: login, rota e intervalo, com a
+   * quantidade e a participação. Rota sem filtro de turno/intervalo = número oficial de cada rota; o resto, as remessas
+   * baixadas com os filtros (prévia enquanto o download do dia não termina).
+   */
+  function metricTopCards(c, f) {
+    var dims = c.topCards || [];
+    if (!dims.length) return '';
+    var col = c.topCardColumn, sm = state.data.summary, partial = detailIsPartial();
+    return dims.map(function (dim) {
+      var list, total, official = false;
+      var rt = dim === 'destination' && onlyRouteFilter(f) ? routeTotals((c.heroMetric && c.heroMetric.key) || 'sendcount', f) : null;
+      if (rt) { list = rt.list; total = rt.total; official = true; }
+      else {
+        var rows = (sm ? Core.summaryChartRows({dim: dim}, sm.byDim, f) : state.filtered).filter(function (r) { return !col || Core.colMatch(col, r.column); });
+        list = Core.countBy(rows, dim);
+        total = colQty(rows);
+      }
+      var g = list.filter(function (x) { return x.label !== 'N/A' && x.value > 0; })[0], pct = g && total ? g.value / total * 100 : null;
+      var label = c.topCardLabels && c.topCardLabels[dim] ? L(c.topCardLabels[dim]) : t('topOffender', {dim: L(dimLabel(dim))});
+      var sub = g ? fmtInt(g.value) + ' ' + esc(t('shipments')) + ' · <b>' + fmtPct(pct, 1) + '</b> ' + esc(t('participation')) +
+        '<br><span class="mc-note">' + esc(official ? t('tcOfficial') : partial ? t('tcPartial') : t('distinctShipments')) + '</span>'
+        : '<span class="ds-hint">' + esc(detailHint(col)) + '</span>';
+      return '<article class="kpi top-kpi"><div class="kpi-label">' + icon(dim) + esc(label) + '</div>' +
+        '<div class="kpi-value text" title="' + esc(g ? vlabel(dim, g.label) : '') + '">' + (g ? esc(vlabel(dim, g.label)) : '—') + '</div><div class="kpi-sub">' + sub + '</div>' +
+        '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(pct) ? pct : 0) + '" style="background:' + RED + '"></i></div></div></article>';
+    }).join('');
+  }
+  /** Gráfico de rotas pelo número oficial de cada rota (sem filtro de turno/intervalo): exato desde a primeira hora. */
+  function routeChartFromSummary(def, spec) {
+    var f = filtersObj();
+    if (!onlyRouteFilter(f)) return;
+    var rt = routeTotals(def.routeMetric, f);
+    if (!rt) return;
+    var all = rt.list.filter(function (x) { return x.value > 0; }), top = all.slice(0, def.top || 80);
+    spec.labels = top.map(function (x) { return x.label; });
+    spec.datasets = [{label: 'qty', data: top.map(function (x) { return x.value; })}];
+    spec.total = rt.total; spec.others = all.length - top.length; spec.fromRoutes = true;
+  }
+  /** IDs de viagem já consultados no período (Rastreamento do pacote). */
+  function tripCoverageText() {
+    var cov = (state.data.meta && state.data.meta.tripCoverage) || {}, a = 0, b = 0, f = 0, any = false;
+    Object.keys(cov).forEach(function (d) { if (d < state.from || d > state.to) return; any = true; a += Number(cov[d].done) || 0; b += Number(cov[d].total) || 0; f += Number(cov[d].found) || 0; });
+    return any ? t('tripCov', {a: fmtInt(Math.min(a, b)), b: fmtInt(b), c: fmtInt(f)}) : t('tripCovNone');
   }
   /**
    * Cartões T1 / T2 / T3: quantidade recebida em cada turno (horário de descarregamento do veículo de chegada)
@@ -1341,7 +1417,7 @@
     var days = others.length ? null : shiftDays(col, state.from, state.to, sc.summaryMetric);
     if (days && days.complete) { q = days.q; tot = days.tot; fromSum = days.summary; }
     else {
-      var rows = (sm ? (sm.byDim.shift || []) : Core.applyFilters(state.data.rows, f, 'shift')).filter(function (r) { return r.column === col; });
+      var rows = (sm ? (sm.byDim.shift || []) : Core.applyFilters(state.data.rows, f, 'shift')).filter(function (r) { return Core.colMatch(col, r.column); });
       rows.forEach(function (r) { var s = r.shift ? String(r.shift) : 'N/A', w = Core.weight(r); q[s] = (q[s] || 0) + w; tot += w; });
       if (!tot && days && days.any) { q = days.q; tot = days.tot; fromSum = days.summary; }
     }
@@ -1355,7 +1431,7 @@
         (fromSum ? '<br><span class="mc-note">' + esc(t('scFromSummary')) + '</span>' : '');
       var on = sel && sel.indexOf(s) >= 0;
       return '<article class="kpi shift-kpi' + (sel && !on ? ' faded' : '') + (on ? ' selected' : '') + '"><div class="kpi-label">' + label + '</div>' +
-        '<div class="kpi-value">' + (tot ? fmtInt(v) : '—') + '<small class="sc-unit"> ' + esc(t('scReceived')) + '</small></div><div class="kpi-sub">' + subHtml + '</div>' +
+        '<div class="kpi-value">' + (tot ? fmtInt(v) : '—') + '<small class="sc-unit"> ' + esc(sc.unit ? L(sc.unit) : t('scReceived')) + '</small></div><div class="kpi-sub">' + subHtml + '</div>' +
         '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(pct) ? pct : 0) + '" style="background:' + SHIFT_COLORS[s] + '"></i></div></div></article>';
     }).join('');
   }
@@ -1464,7 +1540,7 @@
   function renderListTable(card, tb) {
     if (!card) return;
     var st = ltState(tb.key), cols = tb.cols, sm = state.data.summary;
-    var rows = (sm ? sm.top : state.filtered).filter(function (r) { return r.column === tb.column; });
+    var rows = (sm ? sm.top : state.filtered).filter(function (r) { return Core.colMatch(tb.column, r.column); });
     var total = colQty(rows);
     var q = st.query.toLocaleLowerCase(locale());
     if (q) rows = rows.filter(function (r) { return cols.some(function (col) { return cellText(col[0], r[col[0]]).toLocaleLowerCase(locale()).indexOf(q) >= 0; }); });
@@ -1495,9 +1571,9 @@
       th.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(); } });
     });
     $('.count', card).textContent = t('listRows', {n: fmtInt(q ? colQty(rows) : total)});
-    var limit = sm && sm.topLimit, capped = limit && (sm.top || []).filter(function (r) { return r.column === tb.column; }).length >= limit;
+    var limit = sm && sm.topLimit, capped = limit && (sm.top || []).filter(function (r) { return Core.colMatch(tb.column, r.column); }).length >= limit;
     var lpT = detailIsPartial() ? listProgressPct(tb.column) : null;
-    $('.note', card).textContent = capped ? t('listTopNote', {n: fmtInt(limit)}) : detailIsPartial() ? (lpT !== null && lpT > 0 && lpT < 100 ? t('partialSample', {p: lpT}) : t('tablePartial')) : t('tableComplete');
+    $('.note', card).textContent = capped ? tx(cfg(), 'listTopNote', {n: fmtInt(limit)}) : detailIsPartial() ? (lpT !== null && lpT > 0 && lpT < 100 ? t('partialSample', {p: lpT}) : t('tablePartial')) : t('tableComplete');
     var p = st.page, pager = $('.pager', card);
     if (pages <= 1) { pager.innerHTML = ''; return; }
     var nums = [], last = 0, html = '<button type="button" data-p="' + (p - 1) + '"' + (p === 1 ? ' disabled' : '') + ' aria-label="‹">‹</button>';
@@ -1697,7 +1773,9 @@
       if (def.metric) return metricSpec(def);
       var spec = Core.buildChart(def, sm ? Core.summaryChartRows(def, sm.byDim, fo) : rows, {intervalMode: state.intervalMode});
       if (def.sub) spec.sub = def.sub;
+      if (def.trips) spec.trips = true;
       if (def.summaryShift) shiftPieFromSummary(def, spec);
+      if (def.routeMetric) routeChartFromSummary(def, spec);
       // "Top N por turno" no padrão das docas: top N de cada turno, faixas T1/T2/T3.
       if (spec.grouped) spec.panel = Core.rankPanel(rows, {key: def.key, kind: 'byShift', dim: spec.dim, top: def.top || 4});
       return spec;
@@ -1745,7 +1823,7 @@
   function renderChartCard(card, spec, c) {
     if (!card) return;
     if (spec.metric) return renderMetricChart(card, spec);
-    var key = spec.key, partial = key !== 'evolution' && !spec.fromSummary && detailIsPartial();
+    var key = spec.key, partial = key !== 'evolution' && !spec.fromSummary && !spec.fromRoutes && detailIsPartial();
     $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '') +
       (partial ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
     var sub;
@@ -1754,6 +1832,8 @@
     else sub = t('distinctShipments') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
     if (spec.sub) sub = L(spec.sub) + ' · ' + sub;
     if (spec.fromSummary) sub = t('pieFromSummary') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
+    if (spec.fromRoutes) sub = (spec.sub ? L(spec.sub) + ' · ' : '') + t('routesOfficial') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
+    if (spec.trips) sub += ' · ' + tripCoverageText();
     var lp = partial ? listProgressPct(spec.where && spec.where.column) : null;
     if (lp !== null && lp > 0 && lp < 100) sub += ' · ' + t('partialSample', {p: lp});
     $('small', card).textContent = sub;
@@ -1998,7 +2078,7 @@
     if (!idx.length || !total) return '';
     var maxI = idx.reduce(function (m, i) { return data[i] > data[m] ? i : m; }, idx[0]);
     var minI = idx.reduce(function (m, i) { return data[i] <= data[m] ? i : m; }, idx[0]);
-    var dl = dimLabel(spec.dim || spec.key);
+    var dl = ((c && c.labelsOne) || {})[spec.dim || spec.key] || dimLabel(spec.dim || spec.key);
     var pct = function (n) { return total ? n / total * 100 : 0; };
     var both = function (n) { return '<em>' + esc(fmtInt(n)) + '</em> <span class="rp-sep">|</span> ' + esc(fmtPct(pct(n), 2)); };
     var name = function (i) { return '<span class="accent">' + esc(vlabel(spec.dim || spec.key, spec.labels[i])) + '</span>'; };

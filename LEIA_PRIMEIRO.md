@@ -1,8 +1,68 @@
-# J&T DASHMASTER V3.21 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.22 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.22 — Novo painel: Expedição: fluxo operacional / 发件运营流程
+Mostra a quantidade que **saiu no dia**, rota por rota, como pedido no documento "DASHBOARD DE EXPEDIÇÃO: FLUXO OPERACIONAL". Tela do JMS: Operação > Monitoramento de dados > **Monitoramento de tipagem de expedição (novo)** (`/crisbiIndex/SendOutMonitor`).
+
+**Cartões**
+- **Total que está saindo no dia** (cartão vermelho): soma da coluna "Número total de remessas" da tabela principal do JMS, com o dia anterior.
+- **Quantidade que ainda não chegou no destino**: soma da coluna "Número de encomendas não chegadas na próxima parada".
+- **Não entregue**: soma da coluna "Não entregue".
+- **T1 / T2 / T3**: quantidade que cada turno mandou, pelo **Horário de expedição** da lista de cada rota (o número vermelho de cada próxima parada), somando todas as rotas.
+- **Login que mais mandou**, **Rota que mais enviou** e **Intervalo que teve mais envio**, com a quantidade e a participação.
+
+**Gráficos de coluna:** Rotas mais enviados (todas as rotas, da que mais mandou para a que menos mandou) · Rotas que ainda não chegou · Não entregues · Intervalos de horários que teve mais entregas · Logins que mais mandou · IDs de viagem (o ID que mais enviou). **Pizza:** Turno.
+
+**Filtros:** Rotas (próxima parada) · Intervalo de horários · Turno. Todos os cartões, gráficos e tabelas seguem os filtros. Com filtro, os cartões mostram o número filtrado e o oficial do JMS embaixo.
+
+**Tabelas:** **Enviados**, **Não entregues** e **Em trânsito** — as listas de TODAS as rotas juntas, como se cada número vermelho fosse aberto. Colunas: data, número de pedido JMS, horário de expedição, turno, próxima parada, login, ID de viagem e situação. Num período de um dia, as tabelas têm todas as remessas; em vários dias, as 2.000 primeiras de cada situação.
+
+**Como os dados são buscados**
+- **Resumo** (`sendbyday_total`, de hora em hora): uma linha por rota. Payload igual à captura (`scansitecode` 30001, dia inteiro). Os cartões somam as colunas; cada rota fica guardada.
+- **Detalhe** (`sendbyday_detail`): o número vermelho de **cada rota** (`nextstation` = código da próxima parada; `detailType` = coluna), no máximo **100 linhas por página**, como na tela.
+  - Baixado por rota **e por horário de turno** (00–06h, 06–14h, 14–22h, 22–24h). A página 1 de cada horário já dá a quantidade de cada turno: os cartões T1/T2/T3 e a pizza aparecem **antes** do download terminar e são atualizados de hora em hora.
+  - Cada remessa é gravada **uma vez**, com a situação dela (não chegou ao destino · chegou, não entregue · entregue). "Em trânsito" e "Não entregues" são as remessas nessas situações.
+  - Uma lista com o mesmo total da rota (ex.: nenhuma remessa da rota chegou ainda) **não é baixada**: todas as remessas da rota estão nela. Lista zerada também não. Isso corta a maior parte das consultas.
+  - Os **gráficos de rotas** e o cartão "Rota que mais enviou" usam o número **oficial** de cada rota (tabela principal) quando não há filtro de turno/intervalo: certos desde a primeira hora.
+  - **Dia fechado**: "Enviados" não muda mais, mas a situação muda (as remessas chegam e são entregues). A cada 12 h só as listas de situação são baixadas de novo e a situação de cada remessa é recalculada, sem baixar as ~1.200 páginas de "Enviados".
+  - Hoje: detalhe completo a cada 6 h; na conta Gmail, a cada 12 h (os cartões, os gráficos de rotas e os turnos continuam de hora em hora).
+- **ID de viagem** (Rastreamento do pacote, `podTracking/inner/query/keywordList`): depois do detalhe do dia, cada remessa enviada é consultada (até 100 por consulta). O ID é o **número do pedido** do bipe **"Encomenda carregada"** feito na nossa base (SP GRU) para a próxima parada da rota — a linha marcada no documento. Se o JMS aceitar menos remessas por consulta, o painel aprende o limite sozinho (registrado no LOG). O subtítulo do gráfico mostra quantas remessas já foram consultadas.
+- O campo "Escrevente" da tela do JMS aparece "—", mas a resposta do JMS traz o login (`scanuser`), como indicado no documento: é ele que aparece em "Login".
+
+**Volume e cota do Google** (SP GRU, ~117 mil remessas por dia em 15 rotas)
+Simulação (`node tests/simulacao_cotas.js`, volume da captura de 04/10):
+
+| | Google Workspace | Conta Gmail |
+|---|---|---|
+| Detalhe dos últimos dias | 7 dias, todos completos | 3 dias, completos (teto de 20 min/dia da Expedição) |
+| IDs de viagem | todas as remessas | ~40–55% das remessas de cada dia nos primeiros dias (amostra espalhada pelo dia; o subtítulo do gráfico mostra quantas) |
+| Consultas ao JMS (todos os painéis) | — | ~6,7 mil por dia (limite do Google: 20 mil) |
+| Abrir o painel (1 dia) | ~2 s · 9 MB (todas as remessas no navegador) | igual |
+| Abrir o painel (3 dias) | ~3 s · 0,4 MB (totais calculados no servidor) | igual |
+
+Na conta Gmail, `EXPEDICAO_MIN_POR_DIA` = 30 consulta mais IDs por dia, mas sobra menos tempo para os outros painéis (o Google dá 90 min/dia para todos).
+
+**Instalação:** além de atualizar os arquivos, **crie o arquivo de Script `Expedicao`** (+ → Script) e cole o conteúdo. Depois, Implantar → Gerenciar implantações → ✏️ → **Nova versão**. O histórico do resumo entra na fila sozinho; o detalhe vem dos últimos dias.
+
+**Propriedades novas (todas opcionais)**
+| Propriedade | Para quê |
+|---|---|
+| `EXPEDICAO_MIN_POR_DIA` | Teto diário da Expedição em minutos (conta Gmail: 20; Google Workspace: sem teto; `0` = sem teto) |
+| `DETAIL_DAYS_SEND_FLOW` | Dias com detalhe (conta Gmail: 3; Workspace: 7) |
+| `EXPEDICAO_IDS_LOTE` | Remessas por consulta no Rastreamento do pacote (padrão 100; o limite do JMS é aprendido sozinho) |
+| `EXPEDICAO_IDS_PARALELO` | Consultas de rastreamento em paralelo (padrão 4) |
+| `JMS_ROUTENAME_SEND` / `JMS_ROUTENAMELIST_SEND` | Cabeçalhos de rota da tela (padrão Routename `SendOutMonitor`) |
+| `JMS_ROUTENAME_TRACKING` / `JMS_ROUTENAMELIST_TRACKING` | Cabeçalhos do Rastreamento do pacote (padrão: nenhum) |
+
+**Não foi possível conferir no JMS real (rode `diagnosticarExpedicao()` depois de instalar):**
+- o **Routernamelist** da tela (não aparece na captura). Se o JMS recusar, o painel testa as variantes sozinho;
+- os **cabeçalhos de rota do Rastreamento do pacote** e **quantas remessas o keywordList aceita por consulta** (a tela consulta uma por vez);
+- se a lista de cada rota **respeita o horário** (`startTime`/`endTime`). O painel testa sozinho; se não respeitar, cada rota é baixada inteira e os turnos saem do detalhe baixado.
+
+**Testes:** 360 verificações (o JMS simulado usa rotas e remessas fictícias).
 
 ## V3.21 — Recebimento: turnos certos, cartão do recebido e cartão grande "Deve chegar"
 **Turnos (cartões T1/T2/T3 e pizza "O que deve chegar")**
@@ -757,6 +817,7 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 | `Mascot` | HTML | Imagens do Maomao (sem alteração) |
 | `Core` | Script (.gs) | **NOVO**: regras de filtros, cartões e gráficos (usado no servidor E no navegador) |
 | `Config` · `Utils` · `JmsApi` · `Storage` · `Analytics` · `Report` · `Triggers` · `Code` | Script (.gs) | Servidor |
+| `Expedicao` | Script (.gs) | **NOVO (V3.22)**: Expedição — download por rota, turnos por horário e IDs de viagem |
 | `appsscript.json` | Manifesto | Fuso, permissões e Web App |
 
 ## Instalação (passo a passo)
@@ -764,7 +825,7 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 > Faça uma cópia do projeto atual antes (Arquivo → Fazer uma cópia). **Não apague** a planilha-banco nem as pastas do Drive.
 
 1. Abra o projeto em **script.google.com**.
-2. Para cada arquivo da tabela acima, **substitua todo o conteúdo** pelo do ZIP. Crie `Core` como novo arquivo de Script (+ → Script). Os nomes precisam ser idênticos.
+2. Para cada arquivo da tabela acima, **substitua todo o conteúdo** pelo do ZIP. Crie `Core` e `Expedicao` como novos arquivos de Script (+ → Script), se ainda não existirem. Os nomes precisam ser idênticos.
 3. **Apague arquivos duplicados**, como `JmsApi (1)`. Dois arquivos com a mesma função quebram o projeto.
 4. Em *Configurações do projeto*, marque "Mostrar arquivo de manifesto" e cole o `appsscript.json`.
 5. Em *Configurações do projeto → Propriedades do script*, confira:
@@ -784,7 +845,7 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 
 ### Links úteis
 - `…/exec?lang=zh` abre em chinês · `…/exec?lang=pt` em português
-- `…/exec?ind=sorting_error` abre direto em um indicador (`wrong_send`, `sorting_error`, `missing_receipt`, `missing_dispatch`, `sc_sc`, `sc_dc`)
+- `…/exec?ind=sorting_error` abre direto em um indicador (`wrong_send`, `sorting_error`, `missing_receipt`, `missing_dispatch`, `sc_sc`, `sc_dc`, `damage`, `arrival_flow`, `send_flow`)
 - `…/exec?view=results` abre em Resultados
 
 ## O erro que aparece no painel não bate com nada deste código? Confirme a versão implantada
@@ -822,7 +883,7 @@ O que fazer:
 
 O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho, sem inventar taxa.
 - Rode `diagnosticarConexaoJms` para ver quais rotas respondem 200 e quais respondem 401.
-- Cada rota envia `Routename` com o nome da tela do JMS: ErrorSendRate, ErrorRateStandard|biIndex, BuildSideLeakageNewNew, OutboundTransshipmentNew, TimelinessRatio, damageRate (Avaria) e problemPieceQuery (Consulta de Pacote Problemático). Para alterar, crie a propriedade `JMS_ROUTENAME_<ROTA>` (ROTA = WRONG_SEND, SORTING_ERROR, MISSING_SCAN, SC_SC, SC_DC, DAMAGE, PROBLEM_PIECE); use `NONE` para não enviar. O mesmo vale para `JMS_ROUTENAMELIST_<ROTA>`.
+- Cada rota envia `Routename` com o nome da tela do JMS: ErrorSendRate, ErrorRateStandard|biIndex, BuildSideLeakageNewNew, OutboundTransshipmentNew, TimelinessRatio, damageRate (Avaria) e problemPieceQuery (Consulta de Pacote Problemático). Para alterar, crie a propriedade `JMS_ROUTENAME_<ROTA>` (ROTA = WRONG_SEND, SORTING_ERROR, MISSING_SCAN, SC_SC, SC_DC, DAMAGE, PROBLEM_PIECE, ARRIVAL, SEND, TRACKING); use `NONE` para não enviar. O mesmo vale para `JMS_ROUTENAMELIST_<ROTA>`.
 - Se continuar em 401, peça à TI um método autorizado de integração a partir dos servidores do Google.
 
 ## Manutenção
@@ -830,13 +891,14 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 - `retomarImportacao` reabre os jobs com erro depois de corrigir a autenticação.
 - **`diagnosticoCompleto()`** (V3.7): o ponto de partida quando algo não bate. Mostra o resumo, o detalhe, o tamanho de página, os campos não encontrados e o banco dos últimos 7 dias de cada indicador. Use `diagnosticoCompleto('2026-09-20')` para um dia específico.
 - **`diagnosticarRecebimento()`** (V3.19): só o Recebimento. Testa as 4 listas no JMS (total × resumo, página, horário, paginação, campos), o resumo por horário (turnos) e mostra o download dos últimos dias, a fila, o teto diário e os últimos avisos. Use `diagnosticarRecebimento('2026-10-01')` para um dia específico.
+- **`diagnosticarExpedicao()`** (V3.22): só a Expedição. Testa no JMS o resumo (rotas e as três colunas), a lista de uma rota (página de 100 e campos), se a lista separa por horário (turnos), as listas "Em trânsito" e "Não entregues" e o Rastreamento do pacote de 1 remessa (bipe "Encomenda carregada" e o ID de viagem). Mostra também o download dos últimos dias, os IDs já consultados e os avisos. Não mostra número de remessa nem nomes. Use `diagnosticarExpedicao('2026-10-03')` para um dia específico.
 - `diagnosticarDashboard` mostra o estado do banco, da fila, dos gatilhos e o último erro de cada indicador.
 - `diagnosticarDetalheJms('sc_sc')` testa o endpoint de **detalhe** de um indicador na hora (não grava nada); use para achar por que gráficos/filtros ficam vazios mesmo com a Taxa ok.
 - `diagnosticarTodosOsErros()` — diagnóstico completo: lista **todos** os dias com erro no período (não só o mais recente de cada indicador, como `diagnosticarDashboard`), agrupados pela causa **técnica bruta** (o texto real gravado no SYNC_LOG, sem passar pela versão amigável do painel, que resume/oculta detalhes como "Campos recebidos"). Use `diagnosticarTodosOsErros('2026-08-01','2026-08-31')` para um período específico. É o ponto de partida quando existe mais de um erro diferente acontecendo ao mesmo tempo.
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **333 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **360 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

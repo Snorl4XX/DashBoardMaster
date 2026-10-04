@@ -161,7 +161,7 @@ function createContext(opts) {
   }
   vm.createContext(context);
   const root = path.join(__dirname, '..');
-  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Analytics', 'Report', 'Triggers', 'Code'];
+  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
   const code = files.map(f => fs.readFileSync(path.join(root, f + '.gs'), 'utf8')).join('\n;\n');
   vm.runInContext(code, context, {filename: 'projeto.gs'});
   context.__state = state;
@@ -333,6 +333,57 @@ function fakeJms(dayData, options) {
         const sz = Math.min(options.maxPageSize || 1000, body.size);
         return ok(list.slice((body.current - 1) * sz, body.current * sz).map((r, i) => Object.assign({PAGEHELPER_ROW_ID: i + 1}, r)), list.length, body.current, sz);
       }
+      // ----- Expedição: fluxo operacional (formato das capturas do documento; rotas e remessas fictícias) -----
+      case 'sendbyday_total': {
+        if (!d || !d.sf) return ok([], 0, 1, body.size);
+        if (body.scansitecode !== '30001') return ok([], 0, 1, body.size);
+        // Como o JMS real: o resumo é do dia inteiro (sem janela por horário).
+        const recs = d.sf.routes.map((r, i) => ({scantime: date, proxyAreaCode: '370000', proxyAreaName: 'SPE', inputsite: 'SP GRU', scansitecode: '30001',
+          nextstation: r.name, nextstationcode: r.code, sendcount: r.sent.length, noarrivalcount: r.sent.filter(x => x.transit).length,
+          nosigncount: r.sent.filter(x => x.undelivered).length, PAGEHELPER_ROW_ID: i + 1, ROW_ID: i + 1}));
+        const sz = body.size;
+        return ok(recs.slice((body.current - 1) * sz, body.current * sz), recs.length, body.current, sz);
+      }
+      case 'sendbyday_detail': {
+        if (!d || !d.sf) return ok([], 0, 1, body.size);
+        const sz = Math.min(options.sendMaxPage || 100, body.size); // "O LIMITE É 100 LINHAS"
+        // Sem nextstation o JMS devolveria as remessas de TODAS as rotas (payload sem filtro).
+        const routes = body.nextstation ? d.sf.routes.filter(r => r.code === String(body.nextstation)) : d.sf.routes;
+        let list = [];
+        routes.forEach(r => r.sent.forEach(x => list.push(x)));
+        if (body.detailType === 'noarrivalcount') list = list.filter(x => x.transit);
+        else if (body.detailType === 'nosigncount') list = list.filter(x => x.undelivered);
+        else if (body.detailType !== 'sendcount') return respond(200, {code: 500, msg: 'detailType inválido', fail: true});
+        // options.sendIgnoresTime: devolve o dia inteiro em qualquer horário; options.sendDailyAt00: só na janela da 00h.
+        const whole = start === full.start && end === full.end;
+        if (options.sendDailyAt00 && !whole) list = start.slice(11) === '00:00:00' ? list : [];
+        else if (!options.sendIgnoresTime && !whole) list = list.filter(x => x.sendTime >= start && x.sendTime <= end);
+        const recs = list.slice((body.current - 1) * sz, body.current * sz).map((x, i) => ({billcode: x.billcode, inputsite: 'SP GRU', sendTime: x.sendTime,
+          nextstation: x.route, scanuser: x.scanuser, PAGEHELPER_ROW_ID: (body.current - 1) * sz + i + 1, ROW_ID: (body.current - 1) * sz + i + 1}));
+        return ok(recs, list.length, body.current, sz);
+      }
+      case 'keywordList': {
+        if (!Array.isArray(body.keywordList) || body.trackingTypeEnum !== 'WAYBILL') return respond(200, {code: 500, msg: 'parâmetro inválido', fail: true});
+        state.tripCalls = (state.tripCalls || 0) + 1;
+        // options.tripLimit: o JMS só devolve as primeiras N remessas da consulta; options.tripReject: recusa acima de N.
+        if (options.tripReject && body.keywordList.length > options.tripReject) return respond(200, {code: 500, msg: '单次查询最多' + options.tripReject + '条', fail: true});
+        const kws = options.tripLimit ? body.keywordList.slice(0, options.tripLimit) : body.keywordList;
+        const all = {};
+        Object.keys(dayData).forEach(k => ((dayData[k].sf || {}).routes || []).forEach(r => r.sent.forEach(x => { all[x.billcode] = x; })));
+        const data = kws.filter(w => all[w]).map(w => {
+          const x = all[w], det = [];
+          // Bipes como na tela: recebido na base (com o ID da viagem de CHEGADA), carregado na base para a rota (ID que vale).
+          det.push({billCode: w, waybillNo: w, scanTime: x.sendTime.slice(0, 11) + '00:00:01', scanTypeName: 'Encomenda recebida', scanNetworkName: 'SP GRU',
+            scanNetworkId: 2826, nextStopName: 'PA FICTICIO-SP', remark2: 'CHEGADA' + x.billcode.slice(-3), code: 2, originalScanTypeCode: 90});
+          if (x.trip !== null) det.push({billCode: w, waybillNo: w, scanTime: x.sendTime, scanTypeName: 'Encomenda carregada', scanNetworkName: 'SP GRU',
+            scanNetworkId: 2826, nextStopName: x.route, remark2: x.trip, code: 1, originalScanTypeCode: 50});
+          // Carregamento anterior em outra base (não é o nosso): não pode ser escolhido.
+          det.push({billCode: w, waybillNo: w, scanTime: x.sendTime.slice(0, 11) + '00:00:00', scanTypeName: 'Encomenda carregada', scanNetworkName: 'PA FICTICIO-SP',
+            scanNetworkId: 1732, nextStopName: 'SP GRU', remark2: 'OUTRA' + x.billcode.slice(-3), code: 1, originalScanTypeCode: 50});
+          return {keyword: w, details: det.reverse(), codes: null};
+        });
+        return respond(200, {code: 1, msg: '1:Solicitação concluída', data: data, succ: true, fail: false});
+      }
       case 'registrationPage': {
         const want = {};
         String(body.waybillNo || '').split(',').forEach(w => { want[w.trim()] = 1; }); // como o JMS: remessa exata (com ou sem "-001")
@@ -364,7 +415,7 @@ function makeDay(date, seed) {
   const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
   const pick = arr => arr[Math.floor(rnd() * arr.length)];
   const time = () => date + ' ' + String(Math.floor(rnd() * 24)).padStart(2, '0') + ':' + String(Math.floor(rnd() * 60)).padStart(2, '0') + ':07';
-  const logins = ['GIOVANNA FERREIRA DOS SANTOS', 'LEDA MARIA GONÇALVES', 'NATALIA COTA FIORINO', 'ROBERT DE PAULA FERREIRA', 'ANA PAULA LIMA'];
+  const logins = ['OPERADOR FICTICIO 01', 'OPERADORA FICTÍCIA GONÇALO 02', 'OPERADOR FICTICIO 03', 'OPERADORA FICTICIA 04', 'OPERADOR FICTICIO 05'];
   const segs = ['GO,795-00,002', 'CHV,A111-00,005', 'MIA,303-01,024', 'PE,639-00,578', 'BAU 484-00,200', 'MS,850-00,240', 'SP,977-00,000'];
   const stations = ['BA FEC', 'SP BRE', 'MG CGE', 'DF BSB', 'RJ SJM', 'PE JGS'];
   const clients = ['SHEIN', 'TikTok', 'sheinDIR', 'Kwai', 'DAFITI', 'intelipost'];
@@ -390,7 +441,47 @@ function makeDay(date, seed) {
   const pct = v => v.toFixed(2) + '%';
   const day = {ws: ws, wsRate: pct(0.2 + rnd() * 1.1), se: se, seRate: pct(0.3 + rnd() * 0.6), mr: mr, mrRate: pct(0.5 + rnd() * 0.8),
     md: md, mdRate: pct(0.4 + rnd() * 0.9), sc: sc, scRate: pct(88 + rnd() * 9), dc: dc, dcRate: pct(89 + rnd() * 8)};
-  return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5), makeArrival(date, (seed || 7) * 17 + 3));
+  return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5), makeArrival(date, (seed || 7) * 17 + 3), makeSend(date, (seed || 7) * 13 + 1));
+}
+
+/**
+ * Expedição: fluxo operacional. Rotas FICTÍCIAS (próxima parada e código), remessas sintéticas e operadores fictícios.
+ * Cada remessa: horário de expedição, rota, login, ID de viagem (null = sem bipe de carregamento na base; '' = sem número)
+ * e as marcas das listas (não chegou na próxima parada / não entregue). As rotas cobrem os casos da tela: todas as remessas
+ * sem chegar (lista igual ao total), nenhuma, parte; e uma rota concentrada na madrugada (T3).
+ */
+function makeSend(date, seed, scale) {
+  let s = seed || 5;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const k = scale || 1;
+  const ops = ['OPERADOR EXPEDICAO 01', 'OPERADOR EXPEDICAO 02', 'OPERADOR EXPEDICAO 03', 'OPERADOR EXPEDICAO 04', 'OPERADOR EXPEDICAO 05'];
+  const tag = date.replace(/-/g, '').slice(2);
+  const defs = [
+    {name: 'RT ALFA', code: '90101', n: 640, transit: 1, undelivered: 1, night: true},
+    {name: 'RT BETA', code: '90102', n: 410, transit: 0.4, undelivered: 1},
+    {name: 'RT GAMA', code: '90103', n: 260, transit: 0, undelivered: 0.7},
+    {name: 'DC FICTICIO-SP', code: '90104', n: 150, transit: 0.02, undelivered: 1},
+    {name: 'RT DELTA', code: '90105', n: 90, transit: 1, undelivered: 1}
+  ];
+  const clock = night => {
+    const h = night ? Math.floor(rnd() * 6) : Math.floor(rnd() * 24);
+    return date + ' ' + String(h).padStart(2, '0') + ':' + String(Math.floor(rnd() * 60)).padStart(2, '0') + ':' + String(Math.floor(rnd() * 60)).padStart(2, '0');
+  };
+  let seq = 0;
+  const routes = defs.map((d, ri) => {
+    const n = Math.round(d.n * k * (0.85 + rnd() * 0.3)), sent = [];
+    for (let i = 0; i < n; i++) {
+      const time = clock(d.night && rnd() < 0.9);
+      const u = rnd();
+      const trip = u < 0.03 ? null : u < 0.05 ? '' : 'VIAGEM' + tag + ri + (Number(time.slice(11, 13)) < 12 ? 'A' : 'B');
+      sent.push({billcode: '7770' + tag + String(++seq).padStart(6, '0') + (i % 11 === 3 ? '-001' : ''), sendTime: time, route: d.name, scanuser: ops[Math.floor(rnd() * ops.length)],
+        trip: trip, transit: rnd() < d.transit, undelivered: false});
+    }
+    // Quem não chegou também não foi entregue; os demais conforme a rota.
+    sent.forEach(x => { x.undelivered = x.transit || rnd() < d.undelivered; });
+    return {name: d.name, code: d.code, sent: sent};
+  });
+  return {sf: {routes: routes}};
 }
 
 /**
@@ -474,4 +565,4 @@ function makeArrival(date, seed, scale) {
     uploadNoSendNum: prev.length, noSendNum: noSend.length}};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};

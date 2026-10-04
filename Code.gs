@@ -381,7 +381,11 @@ function diagnosticoCompleto(date) {
       item.resumo = s.empty ? 'sem registros' : {taxa: s.rate, erros: s.errorCount, base: s.totalCount};
     } catch (e) { item.resumo = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
     try {
-      const probe = timed(() => probeDetail_(key, d));
+      // Expedição: o detalhe é por rota (a maior rota do dia); diagnosticarExpedicao() testa tudo em detalhe.
+      const probe = cfg.byRoute ? timed(() => {
+        const w = sendProbeWindow_(key, d), size = detailPageSize_(cfg), g = fetchDetailPage_(key, d, 1, size, w);
+        return {records: g.records, total: g.total, size: size};
+      }) : timed(() => probeDetail_(key, d));
       const rt = JMS_ROUTES_.filter(r => r.key === cfg.routeKey && r.alt)[0];
       if (rt) {
         const pp = jmsReadProperties_(), v = routeVariant_(rt, pp);
@@ -448,7 +452,8 @@ function diagnosticoCompleto(date) {
         om.param + '=' + om.main + ' (principal) · ' + om.param + '=' + om.sub + ' (filho) — taxa oficial do JMS para cada opção'));
     }
     if (item.rota) lines.push('  Cabeçalho de rota: Routename "' + item.rota.routename + '" · Routernamelist "' + item.rota.routernamelist + '" (' + item.rota.origem + ')');
-    if (cfg.grouped) lines.push('  (Recebimento: o teste acima é só da 1ª lista. Para as 4 listas, os turnos e o download, rode diagnosticarRecebimento().)');
+    if (cfg.byRoute) lines.push('  (Expedição: o teste acima é só da maior rota. Para as listas, os turnos, o Rastreamento do pacote e o download, rode diagnosticarExpedicao().)');
+    else if (cfg.grouped) lines.push('  (Recebimento: o teste acima é só da 1ª lista. Para as 4 listas, os turnos e o download, rode diagnosticarRecebimento().)');
     const dk = item.docas;
     if (dk && dk.amostra) {
       lines.push('  Docas (1ª página do detalhe, ' + dk.amostra + ' remessas): ' + dk.docas.slice(0, 6).map(x => x.doca + ' ' + x.pct + '%').join(' · '));
