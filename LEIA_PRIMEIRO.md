@@ -1,8 +1,28 @@
-# J&T DASHMASTER V3.26 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.27 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.27 — Avaria: "Pedido principal" com o código da tela do JMS
+**O que estava errado.** Para pedir ao JMS a taxa de "Pedido principal" ou "Pedido secundário", o painel precisa mandar o código da opção no campo `mainSubCode`. Esse código não estava nas capturas, então o painel testava os números **1, 2, 0 e 3**. A captura da tela de 03/10 mostra que o JMS usa **texto**: `mainSubCode: "MAIN"` para "Pedido principal". Nenhum número testado era o da tela, por isso a taxa das opções nunca vinha do JMS.
+
+**Agora**
+- **Pedido principal:** o painel manda exatamente o payload da tela (`mainSubCode: "MAIN"`, base 30001, `organizationType` 3, `dateType` 1). A taxa é o 总破损率 do JMS desde a primeira atualização, sem descoberta. Com os números da tela de 03/10: 23 avarias ÷ 435.804 de Qtd processada = **52,78**.
+- **Pedido secundário:** o código não apareceu na captura. O painel testa `"SUB"`, `"CHILD"`, `"SON"`, `"SECONDARY"` e `"SUBORDER"` e fica com o primeiro que o JMS responde como a opção: com Qtd processada ou avarias, diferente de Todos e diferente do principal. Código que o JMS não conhece (volta vazio, recusado ou igual a Todos) nunca é aceito.
+  - Enquanto o código não for achado, o cartão mostra **"—"** com o motivo e o painel tenta de novo a cada 6 h. Nunca uma estimativa, nunca a taxa de Todos.
+  - Para resolver na hora: capture o Payload do `getBreakageRateData` com **"Pedido secundário"** e grave a propriedade `JMS_ORDERKIND_DAMAGE` = `{"param":"mainSubCode","main":"MAIN","sub":"<código>"}`.
+- **Códigos numéricos** gravados por versões antigas são apagados. As taxas das opções gravadas com eles não valem mais.
+- **Cota:** as opções só são consultadas de novo quando o número de Todos do dia muda.
+- `diagnosticarAvaria('AAAA-MM-DD')` testa `"MAIN"` e cada código do secundário, ao lado do que o painel gravou.
+
+**Na instalação:** todos os dias da Avaria são consultados de novo no JMS (Todos, principal e, quando achado, secundário), uma vez.
+
+**Cota do Google (conta Gmail, `node tests/simulacao_cotas.js consumer 14 3`, 3º dia):** **87,6 min por dia de 90**, nenhuma execução bloqueada (V3.26: 85,6 min). A Avaria passa de ~2 para ~6 min por dia: cada atualização em que Todos mudou consulta também o principal, o secundário e a lista do secundário. Hoje continua sendo atualizado a cada 30 min em todos os painéis.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão). Os gatilhos continuam os mesmos.
+
+**Testes:** 411 verificações, com os números da tela do JMS de 03/10 (Pedido principal: 23 ÷ 435.804 = 52,78).
 
 ## V3.26 — Fluxo de Lotes: número igual ao JMS
 **De onde vem o número.** O cartão vermelho **"Quantidade de sacas criadas"** é a coluna **"Total de pacotes construídos"** da tela do JMS (Estatística de Criação Recorrente de Eco Bag → Resumo → Sumário por dia), campo `packageSum` do `sdploopbagBuildbagCount`. O painel não faz conta: mostra o número como o JMS manda.
@@ -1039,14 +1059,14 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 - **`diagnosticarRecebimento()`** (V3.19): só o Recebimento. Testa as 4 listas no JMS (total × resumo, página, horário, paginação, campos), o resumo por horário (turnos) e mostra o download dos últimos dias, a fila, o teto diário e os últimos avisos. Use `diagnosticarRecebimento('2026-10-01')` para um dia específico.
 - **`diagnosticarExpedicao()`** (V3.22): só a Expedição. Testa no JMS o resumo (rotas e as três colunas), a lista de uma rota (página de 100 e campos), se a lista separa por horário (turnos), as listas "Em trânsito" e "Não entregues" e o Rastreamento do pacote de 1 remessa (bipe "Encomenda carregada" e o ID de viagem). Mostra também o download dos últimos dias, os IDs já consultados e os avisos. Não mostra número de remessa nem nomes. Use `diagnosticarExpedicao('2026-10-03')` para um dia específico.
 - **`diagnosticarLotes()`** (V3.23): só o Fluxo de Lotes. Testa no JMS o resumo do dia, a lista "Total de pacotes construídos" (total × resumo, página de 100, campos) e baixa a lista inteira do dia para conferir as contas do painel com o resumo: ecológicas pelo campo `isLoopPag` × "Número do saco ecológico", pacotes somados × "Número total de conteúdo do pacote", Chegada/Partida e turnos. Mostra também o download dos últimos dias e os avisos. Não mostra número de saca. Use `diagnosticarLotes('2026-10-04')` para um dia específico. Desde a V3.26 mostra também o número do cartão (e quando foi consultado) ao lado do JMS de agora (✓ igual / ✗ diferente).
-- **`diagnosticarAvaria()`** (V3.25): só a Avaria. Mostra o que o JMS devolve para Todos e para cada código de "Pedidos principais/filhos" ao lado do que o painel gravou, para comparar com a tela do JMS. Não mostra número de remessa. Use `diagnosticarAvaria('2026-10-01')` para um dia específico.
+- **`diagnosticarAvaria()`** (V3.25): só a Avaria. Mostra o que o JMS devolve para Todos e para cada código de "Pedidos principais/filhos" (V3.27: `"MAIN"` da tela e os testados para o secundário) ao lado do que o painel gravou, para comparar com a tela do JMS. Não mostra número de remessa. Use `diagnosticarAvaria('2026-10-01')` para um dia específico.
 - `diagnosticarDashboard` mostra o estado do banco, da fila, dos gatilhos e o último erro de cada indicador.
 - `diagnosticarDetalheJms('sc_sc')` testa o endpoint de **detalhe** de um indicador na hora (não grava nada); use para achar por que gráficos/filtros ficam vazios mesmo com a Taxa ok.
 - `diagnosticarTodosOsErros()` — diagnóstico completo: lista **todos** os dias com erro no período (não só o mais recente de cada indicador, como `diagnosticarDashboard`), agrupados pela causa **técnica bruta** (o texto real gravado no SYNC_LOG, sem passar pela versão amigável do painel, que resume/oculta detalhes como "Campos recebidos"). Use `diagnosticarTodosOsErros('2026-08-01','2026-08-31')` para um período específico. É o ponto de partida quando existe mais de um erro diferente acontecendo ao mesmo tempo.
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **405 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **411 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
