@@ -60,7 +60,7 @@ function credentialSignature_() {
  * Cabeçalhos de rota do gateway JMS. O padrão de "Routename" é o nome da página
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
- * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS
+ * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS | NOMOVE
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -93,6 +93,11 @@ const JMS_ROUTES_ = [
   // rota não aparecem na captura: primeiro sem eles; se o JMS recusar, as variantes de `alt` são testadas sozinhas.
   {key: 'LOTS', pattern: /\/bigdataReport\/detail\/sdploopbagBuildbag\w+(?:\?|$)/, name: 'NONE', list: 'NONE',
     alt: [{name: 'sdploopbagBuildbag', list: 'NONE'}, {name: 'LoopBagBuildBag', list: 'NONE'}, {name: 'ecoBagStatistics', list: 'NONE'}]},
+  // Sem Movimentação (Indicadores de Negócios > Monitoramento de movimentação em tempo real (novo),
+  // /businessIndicatorIndex/TrackRealTimeMonitoringNew). Routename = nome da página (regra das outras telas); os cabeçalhos
+  // não aparecem na captura: se o JMS recusar, as variantes de `alt` são testadas sozinhas.
+  {key: 'NOMOVE', pattern: /\/bigdataReport\/detail\/trajectory_monitor_\w+(?:\?|$)/, name: 'TrackRealTimeMonitoringNew', list: 'NONE',
+    alt: [{name: 'NONE', list: 'NONE'}, {name: 'TrackRealTimeMonitoring', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -470,6 +475,19 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       }
       return {current: pageNo, size: pageSize, totalType: 'center', queryType: 'days', startTime: w.start, endTime: w.end, countryId: countryId_()};
 
+    case 'no_move': {
+      // Sem Movimentação: payloads da captura. O JMS não recebe data (foto do momento). Resumo: os 6 tipos de bipe da tela,
+      // pela nossa base (scanCode); lista: o "Total de pedidos sem movimentação" (queryType 2) de UM tipo, pela Unidade responsável.
+      const types = cfg.detail.types || [];
+      if (detail) {
+        const td = types.filter(t => t.type === (win && win.type))[0] || types[0];
+        return {current: pageNo, size: pageSize, dutyAgentCode: agentCode, dutyCode: centerCode, modleType: 'modern',
+          operateType: [td.op], queryType: 2, countryId: countryId_()};
+      }
+      return {current: pageNo, size: pageSize, groupType: 'center', modleType: 'modern', operateType: types.map(t => t.op),
+        scanAgentCode: agentCode, scanCode: centerCode, countryId: countryId_()};
+    }
+
     case 'sc_dc':
       if (detail) {
         return {current: pageNo, size: pageSize, startTime1: w.start, endTime1: w.end,
@@ -531,6 +549,8 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   }
   // Uma linha por rota (Expedição): soma as colunas e guarda cada rota.
   if (cfg.summary.sumRecords) return summedSummary_(cfg, indicatorKey, isoDate, sameDate);
+  // Uma linha por tipo de bipe (Sem Movimentação): soma as colunas e guarda o total de cada tipo.
+  if (cfg.summary.byType) return typedSummary_(cfg, indicatorKey, isoDate, sameDate);
   const parsed = sameDate.map(r => {
     const rd = fieldReader_(r);
     const errorRaw = rd(cfg.summary.errorKeys).value;
@@ -601,6 +621,33 @@ function summedSummary_(cfg, indicatorKey, isoDate, records) {
   const total = sm.totalKeys.reduce((a, k) => a + (sums[k] || 0), 0), errors = sm.errorKeys.reduce((a, k) => a + (sums[k] || 0), 0);
   const raw = Object.assign({date: isoDate, source: 'JMS', rows: records.length}, sums, {routes: routes});
   return {indicator: indicatorKey, date: isoDate, rate: total > 0 ? errors / total * 100 : 0, errorCount: errors, totalCount: total, empty: false, raw: raw};
+}
+
+/**
+ * Resumo com uma linha por tipo de bipe (Sem Movimentação: trajectory_monitor_total). Cada número = SOMA das linhas
+ * (total e dias sem movimentação day1…day30); o total de cada tipo vai no número do tipo (detail.types[].type).
+ * refTime = o "Horário da última operação" mais recente da tabela, como número AAAAMMDDhhmmss (sem fuso).
+ * Taxa guardada = Taxa de sem mov 14+ dias, a mesma conta da coluna do JMS (day14 ÷ total), sobre a soma.
+ */
+function typedSummary_(cfg, indicatorKey, isoDate, records) {
+  const bt = cfg.summary.byType, types = (cfg.detail && cfg.detail.types) || [], sums = {};
+  (bt.sums || []).forEach(k => { sums[k] = 0; });
+  types.forEach(t => { sums[t.type] = 0; });
+  let ref = '';
+  const rows = records.map(r => {
+    const rd = fieldReader_(r), op = String(rd([bt.field]).value || '').split('/')[0].trim(), m = {};
+    (bt.sums || []).forEach(k => { const v = rd([k]).value; m[k] = v === null ? 0 : num_(v, 0); sums[k] += m[k]; });
+    const td = types.filter(t => t.op === op)[0];
+    if (td) sums[td.type] += m.total || 0;
+    const tm = String(rd([bt.timeField]).value || '').trim();
+    if (tm > ref) ref = tm;
+    return Object.assign({op: op, time: tm}, m);
+  });
+  const total = sums.total || 0, digits = ref.replace(/\D/g, '').slice(0, 14);
+  const raw = Object.assign({date: isoDate, source: 'JMS', rows: records.length}, sums,
+    {refTime: digits.length === 14 ? Number(digits) : null, refTimeText: ref, types: rows});
+  return {indicator: indicatorKey, date: isoDate, rate: total > 0 ? Math.round((sums.day14 || 0) / total * 10000) / 100 : 0,
+    errorCount: total, totalCount: total, empty: false, raw: raw};
 }
 
 /**
@@ -854,7 +901,8 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
   let windows = [{start: full.start, end: full.end, type: type, total: probe.total, first: probe.records}];
   let sliced = false;
   const limit = detailMaxOffset_();
-  if (limit > 0 && probe.total > limit && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
+  // detail.noSlice (Sem Movimentação): a lista não tem horário — fatias de horário trariam a lista inteira em cada uma.
+  if (limit > 0 && probe.total > limit && !(cfg.detail && cfg.detail.noSlice) && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
     let n = Math.min(32, nextPow2_(Math.ceil(probe.total / (limit * 0.5))));
     for (let round = 0; round < 3; round++) {
       const parts = splitWindow_(full, n).map(w => Object.assign(w, type ? {type: type} : {}));

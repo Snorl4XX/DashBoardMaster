@@ -890,6 +890,11 @@ function jobIndex_() {
  * Enfileira jobs [tipo, indicador, data, página]. Com reset=true, jobs DONE/ERROR
  * voltam a PENDING (atualização manual/horária). Retorna quantos foram (re)enfileirados.
  */
+/**
+ * Indicador "foto do momento" (Config.gs → snapshot: Sem Movimentação) num dia que não é hoje: o JMS não recebe data,
+ * então consultar seria gravar a foto de hoje com a data de outro dia. O dia passado fica com a última foto dele.
+ */
+function snapshotPast_(indicator, date) { return !!(INDICATORS[indicator] && INDICATORS[indicator].snapshot && date !== isoToday_()); }
 function enqueueJobs_(jobs, opts) {
   opts = opts || {};
   const index = jobIndex_();
@@ -898,6 +903,8 @@ function enqueueJobs_(jobs, opts) {
   let count = 0;
   jobs.forEach(job => {
     const type = job[0], indicator = job[1], date = dateCellIso_(job[2]), page = Number(job[3] || 0);
+    // Foto do momento (Sem Movimentação): só hoje é consultado no JMS (histórico, ontem e auditoria ficam de fora).
+    if (snapshotPast_(indicator, date) && type !== 'COMPACT') return;
     const id = jobIdentity_(type, indicator, date, page);
     const found = index[id];
     if (found) {
@@ -1438,6 +1445,12 @@ function heavyGrouped_(cfg) { return !!(cfg && cfg.grouped && !cfg.light); }
 
 function processJob_(job, deadline) {
   const now = new Date();
+  // Tarefa de foto do momento que virou o dia na fila (ex.: criada às 23h50): não consulta, o dia fica com a última foto.
+  if (snapshotPast_(job.indicator, job.date) && job.type !== 'COMPACT') {
+    writeCells_('JOBS', job.rowNum, 6, ['DONE']);
+    writeCells_('JOBS', job.rowNum, 9, [now, 'foto do momento: só hoje é consultado']);
+    return 'done';
+  }
   writeCells_('JOBS', job.rowNum, 6, ['RUNNING']);
   writeCells_('JOBS', job.rowNum, 9, [now]);
   try {
@@ -1534,8 +1547,9 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   // Fluxo de Lotes (light): poucas páginas por dia — o intervalo dele (detail.refreshHours, 1 h) manda. Na conta Gmail
   // (90 min/dia de gatilhos para todos os painéis), a lista segue o intervalo dos outros (DETAIL_REFRESH_HOURS, 3 h);
   // os cartões do resumo continuam de hora em hora.
+  // Sem Movimentação: lista bem maior (~17 mil pedidos) — na conta Gmail, a cada detail.gmailRefreshHours (6 h).
   const lightH = cfgR.light && cfgR.detail && cfgR.detail.refreshHours ?
-    (googlePlan_() === 'gmail' ? Math.max(cfgR.detail.refreshHours, detailRefreshHours_()) : cfgR.detail.refreshHours) : 0;
+    (googlePlan_() === 'gmail' ? Math.max(cfgR.detail.refreshHours, cfgR.detail.gmailRefreshHours || detailRefreshHours_()) : cfgR.detail.refreshHours) : 0;
   const hours = lightH ? Math.max(lightH, st.details === 'CHECK_COUNTS' && !changed ? 6 : 0)
     : Math.max(minH, st.details === 'CHECK_COUNTS' && !changed ? Math.max(6, detailRefreshHours_()) : detailRefreshHours_());
   const df = dayFilesMap_(indicator, date, date)[date];

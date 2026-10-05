@@ -160,6 +160,7 @@ Mostra as **sacas criadas no dia**, ecológicas e normais, com as porcentagens d
 | Propriedade | Para quê |
 |---|---|
 | `JMS_ROUTENAME_LOTS` / `JMS_ROUTENAMELIST_LOTS` | Cabeçalhos de rota da tela (padrão: nenhum; a captura não mostra) |
+| `JMS_ROUTENAME_NOMOVE` / `JMS_ROUTENAMELIST_NOMOVE` | Sem Movimentação (V3.28): cabeçalhos de rota da tela (padrão: `TrackRealTimeMonitoringNew`; a captura não mostra) |
 
 **Não foi possível conferir no JMS real (rode `diagnosticarLotes()` depois de instalar):**
 - o **Routename** da tela (não aparece na captura). Se o JMS recusar, o painel testa as variantes sozinho;
@@ -1059,6 +1060,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 - **`diagnosticarRecebimento()`** (V3.19): só o Recebimento. Testa as 4 listas no JMS (total × resumo, página, horário, paginação, campos), o resumo por horário (turnos) e mostra o download dos últimos dias, a fila, o teto diário e os últimos avisos. Use `diagnosticarRecebimento('2026-10-01')` para um dia específico.
 - **`diagnosticarExpedicao()`** (V3.22): só a Expedição. Testa no JMS o resumo (rotas e as três colunas), a lista de uma rota (página de 100 e campos), se a lista separa por horário (turnos), as listas "Em trânsito" e "Não entregues" e o Rastreamento do pacote de 1 remessa (bipe "Encomenda carregada" e o ID de viagem). Mostra também o download dos últimos dias, os IDs já consultados e os avisos. Não mostra número de remessa nem nomes. Use `diagnosticarExpedicao('2026-10-03')` para um dia específico.
 - **`diagnosticarLotes()`** (V3.23): só o Fluxo de Lotes. Testa no JMS o resumo do dia, a lista "Total de pacotes construídos" (total × resumo, página de 100, campos) e baixa a lista inteira do dia para conferir as contas do painel com o resumo: ecológicas pelo campo `isLoopPag` × "Número do saco ecológico", pacotes somados × "Número total de conteúdo do pacote", Chegada/Partida e turnos. Mostra também o download dos últimos dias e os avisos. Não mostra número de saca. Use `diagnosticarLotes('2026-10-04')` para um dia específico. Desde a V3.26 mostra também o número do cartão (e quando foi consultado) ao lado do JMS de agora (✓ igual / ✗ diferente).
+- **`diagnosticarSemMovimentacao()`** (V3.28): só a Sem Movimentação. Consulta agora o resumo (cada tipo de bipe com o total e os dias sem movimentação), a lista de cada tipo × o resumo e o painel × o JMS (✓ / ✗). Não mostra número de remessa, nome de operador nem credencial.
 - **`diagnosticarAvaria()`** (V3.25): só a Avaria. Mostra o que o JMS devolve para Todos e para cada código de "Pedidos principais/filhos" (V3.27: `"MAIN"` da tela e os testados para o secundário) ao lado do que o painel gravou, para comparar com a tela do JMS. Não mostra número de remessa. Use `diagnosticarAvaria('2026-10-01')` para um dia específico.
 - `diagnosticarDashboard` mostra o estado do banco, da fila, dos gatilhos e o último erro de cada indicador.
 - `diagnosticarDetalheJms('sc_sc')` testa o endpoint de **detalhe** de um indicador na hora (não grava nada); use para achar por que gráficos/filtros ficam vazios mesmo com a Taxa ok.
@@ -1066,7 +1068,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **411 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **418 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

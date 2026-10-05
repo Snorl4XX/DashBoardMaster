@@ -60,6 +60,8 @@ function dayWindow_(iso, operational14h) {
  */
 function lastClosedDate_(indicatorKey) {
   const today = isoToday_();
+  // Foto do momento (Sem Movimentação): o dia que importa é hoje.
+  if (INDICATORS[indicatorKey] && INDICATORS[indicatorKey].snapshot) return today;
   if (isOperational_(indicatorKey) && hourNow_() < 14) return addDaysIso_(today, -2);
   return addDaysIso_(today, -1);
 }

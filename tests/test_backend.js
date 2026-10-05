@@ -2207,8 +2207,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // 1. Resumos da fila pedidos em paralelo (fetchAll) depois do 1º que deu certo; nenhuma consulta repetida.
   const cR = freshCtx(days24());
   const keys24 = cR.getPublicCatalog_().map(c => c.key);
+  // Dias passados: a Sem Movimentação (foto do momento) não é consultada (V3.28).
+  const keysPast = cR.getPublicCatalog_().filter(c => !c.snapshot).map(c => c.key);
   const sumUrls = {};
-  keys24.forEach(k => { sumUrls[cR.endpointFor_(cR.getIndicatorConfig_(k), 'summary')] = 1; });
+  keysPast.forEach(k => { sumUrls[cR.endpointFor_(cR.getIndicatorConfig_(k), 'summary')] = 1; });
   let batches = 0, inBatch = 0;
   const origFA = cR.UrlFetchApp.fetchAll;
   cR.UrlFetchApp.fetchAll = reqs => { if (reqs.length && reqs.every(r => sumUrls[r.url])) { batches++; inBatch += reqs.length; } return origFA(reqs); };
@@ -2224,7 +2226,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cnt = {};
   firstPages.forEach(f => { cnt[sig(f)] = (cnt[sig(f)] || 0) + 1; });
   const dup = Object.keys(cnt).filter(k => cnt[k] > 1 && !/organizationCode/.test(k)).length;
-  check(batches >= 1 && inBatch >= 10 && keys24.every(k => ['2026-09-18', D19].every(d => cR.getRateDay_(k, d))) && cR.pendingJobs_().filter(j => j.type === 'SUMMARY').length === 0,
+  check(batches >= 1 && inBatch >= 10 && keysPast.every(k => ['2026-09-18', D19].every(d => cR.getRateDay_(k, d))) && cR.pendingJobs_().filter(j => j.type === 'SUMMARY').length === 0 &&
+    !cR.getRateDay_('no_move', D19) && !cR.__state.fetches.some(f => /trajectory_monitor/.test(f.url)),
     'resumos da fila consultados em paralelo (rajadas do fetchAll) e todos gravados', {batches, inBatch});
   // Falta de Bipagem no Recebimento e na Expedição: o mesmo resumo, agora consultado uma vez por dia (antes, duas).
   const shared = Object.keys(cnt).filter(k => /groupKey/.test(k));
@@ -2395,6 +2398,77 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(c2.getRates_('damage:main', D19, D19)[0].rate === 52.78 && !c2.getRates_('damage:sub', D19, D19).length &&
     st2.kinds.main === 'ok' && st2.kinds.sub === 'unsupported' && st2.main === 'MAIN',
     'secundário sem código: principal com a taxa do JMS; secundário "—" com o motivo', st2);
+}
+
+// ---------- V3.28: Sem Movimentação (foto do momento: trajectory_monitor_total / trajectory_monitor_detail) ----------
+{
+  const T = ctx.isoToday_(), Y = ctx.addDaysIso_(T, -1);
+  const nmDays = () => ({[T]: makeDay(T, 61)});
+  // Payloads = captura (sem data: o JMS devolve a foto do momento).
+  const pS = ctx.buildPayload_('no_move', T, 1, 20, false), pD = ctx.buildPayload_('no_move', T, 1, 100, true, {type: 'bag'});
+  check(JSON.stringify(pS) === JSON.stringify({current: 1, size: 20, groupType: 'center', modleType: 'modern',
+      operateType: ['发件扫描', '问题件扫描', '中心到件', '建包扫描', '留仓件入仓', '拆包扫描'], scanAgentCode: '370000', scanCode: '30001', countryId: '1'}) &&
+    JSON.stringify(pD) === JSON.stringify({current: 1, size: 100, dutyAgentCode: '370000', dutyCode: '30001', modleType: 'modern', operateType: ['建包扫描'], queryType: 2, countryId: '1'}) &&
+    ctx.jmsRouteHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/trajectory_monitor_total', {}).Routename === 'TrackRealTimeMonitoringNew',
+    'Sem Movimentação: payloads do resumo e da lista = captura (6 tipos de bipe; lista com queryType 2 e um tipo)', {pS, pD});
+  const days = nmDays(), nm = days[T].nm;
+  const cN = freshCtx(days);
+  cN.queueHistory(ctx.addDaysIso_(T, -5), T, true);
+  const pend = cN.pendingJobs_().filter(j => j.indicator === 'no_move');
+  runAll(cN, 12);
+  const r = cN.getRateDay_('no_move', T), m = r && r.metrics;
+  const byOp = op => nm.filter(x => x.operateType.split('/')[0] === op).length;
+  const maxT = nm.map(x => x.operateTime).sort().pop();
+  const dayKeys = ['day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7', 'day10', 'day14', 'day30'];
+  check(pend.length && pend.every(j => j.date === T) && m && m.total === nm.length && m.send === byOp('发件扫描') && m.problem === byOp('问题件扫描') &&
+    m.arrival === byOp('中心到件') && m.bag === byOp('建包扫描') && m.stay === 0 && m.unbag === 0 &&
+    dayKeys.reduce((a, k) => a + m[k], 0) === nm.length && String(m.refTime) === maxT.replace(/\D/g, '') &&
+    Math.abs(r.rate - m.day14 / m.total * 100) < 0.01 && !cN.getRateDay_('no_move', Y),
+    'resumo: total, total de cada tipo, dias sem movimentação, horário da última operação mais recente; só hoje é consultado', {m, pend: pend.length});
+  // Lista: uma por tipo, todos os pedidos, campos da tela.
+  const st = cN.getDayStatus_('no_move', T);
+  const dash = cN.getDashboardData('no_move', {from: ctx.addDaysIso_(T, -6), to: T});
+  const rows = C.decodeDataset(dash.dataset), q = x => Number(x.qty) || 1;
+  const nRows = rows.reduce((a, x) => a + q(x), 0);
+  const one = rows.filter(x => x.waybill === nm[0].billcode)[0];
+  const age0 = String(nm[0]._age);
+  check(/COMPLETE/.test(st.details) && nRows === nm.length && one && one.aging === age0 && one.scanType === nm[0].operateType.split('/')[1] &&
+    one.column === one.scanType && one.shift === C.shiftOf(nm[0].operateTime) && one.eventTime === nm[0].operateTime && one.login === nm[0].operateUser &&
+    one.senderBase === nm[0].pickNetworkName && one.recentBase === 'SP GRU' && (one.tripId || '') === (nm[0].transfercode || '') &&
+    dash.meta.from === T && dash.meta.to === T,
+    'lista: todos os pedidos, Aging "Exceed N days" → N, tipo da última operação, turno pelo horário, login, ID, base; período = um dia (foto)',
+    {st: st.details, nRows, one, from: dash.meta.from});
+  // Cartões e gráficos: "com mais" (ID, base remetente, aging, problemático) e o Aging em ordem de dias.
+  const comp = cN.computeDashboard_('no_move', {from: T, to: T});
+  const topOf = k => comp.cards.tops.filter(x => x.key === k)[0];
+  const cnt = f => { const c = {}; nm.forEach(x => { const v = f(x); if (v) c[v] = (c[v] || 0) + 1; }); return Object.keys(c).sort((a, b) => c[b] - c[a])[0]; };
+  const ag = comp.charts.filter(ch => ch.key === 'agingBars')[0];
+  check(topOf('tripId').label === cnt(x => x.transfercode) && topOf('senderBase').label === cnt(x => x.pickNetworkName) &&
+    topOf('aging').label === cnt(x => String(x._age)) && topOf('problem').label === cnt(x => x.problemName) &&
+    ag && ag.labels.join(',') === ag.labels.slice().sort((a, b) => Number(a) - Number(b)).join(','),
+    'cartões "com mais" (Número do ID, Base Remetente, Aging, Problemático) e Aging em ordem de dias', {tops: comp.cards.tops, aging: ag && ag.labels});
+  // Foto do momento: dia passado nunca vai para a fila; Resultados não mostram a Sem Movimentação; o painel abre em hoje.
+  const nPast = cN.enqueueJobs_([['SUMMARY', 'no_move', Y, 0], ['DETAIL_INIT', 'no_move', Y, 1]], {reset: true});
+  const res = cN.getResultsData({});
+  check(nPast === 0 && !cN.pendingJobs_().some(j => j.indicator === 'no_move' && j.date === Y) && cN.lastClosedDate_('no_move') === T &&
+    cN.latestByIndicator_().no_move.date === T && cN.latestByIndicator_().no_move.qty === nm.length &&
+    !res.series.some(x => x.key === 'no_move') && cN.getPublicCatalog_().filter(c => c.key === 'no_move')[0].snapshot === true,
+    'foto do momento: dia passado não é consultado, o painel abre em hoje, menu com o total de hoje e fora dos Resultados', {nPast});
+  // Payload sem a Unidade responsável (JMS devolvendo outras bases): nada gravado.
+  const cB = freshCtx(nmDays(), {intercept: (route, h, body) => null});
+  const origBP = cB.buildPayload_;
+  cB.buildPayload_ = function (k, d, pg, sz, det, w) { const o = origBP(k, d, pg, sz, det, w); if (k === 'no_move' && det) o.dutyCode = '99999'; return o; };
+  cB.queueHistory(T, T, true);
+  runAll(cB, 12);
+  check(!/COMPLETE/.test(String((cB.getDayStatus_('no_move', T) || {}).details)) &&
+    cB.allTabRows_('LOG').some(x => /outra base/.test(String(x[4])) && x[2] === 'no_move'),
+    'lista com pedidos de outra base (payload sem filtro): importação bloqueada');
+  // diagnosticarSemMovimentacao(): JMS de cada tipo × o que o painel gravou, sem remessa nem operador.
+  const dg = cN.diagnosticarSemMovimentacao();
+  check(/Resumo \(trajectory_monitor_total\): /.test(dg.texto) && /✓ igual ao JMS agora/.test(dg.texto) &&
+    dg.tipos.filter(x => x.lista === x.resumo).length === 6 && !nm.some(x => dg.texto.indexOf(x.billcode) >= 0) &&
+    !/Operador Ficticio/.test(dg.texto) && !/FAKE/.test(dg.texto),
+    'diagnosticarSemMovimentacao: resumo por tipo, lista × resumo e painel × JMS (sem remessa, operador nem credencial)', dg.texto);
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

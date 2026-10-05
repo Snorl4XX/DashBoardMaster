@@ -184,6 +184,21 @@ function realisticJms(opts) {
     const size = Math.min(cap, body.size), cur = body.current;
     const page = l0 => { const list = inWin(l0); return ok(list.slice((cur - 1) * size, cur * size).map(r => { const o = Object.assign({}, r); delete o.hour; delete o._t; return o; }), list.length, cur, size); };
     const kindOf = {center_wrong_send_: 'ws', center_error_rate_new_: 'se', inward_transport_timely_rate_: 'dc', departure_transport_timely_: 'sc'};
+    // Sem Movimentação: foto do momento (sem data), volumes da captura de 04/10 (4 tipos com pedidos parados).
+    if (route === 'trajectory_monitor_total' || route === 'trajectory_monitor_detail') {
+      const NMV = {'发件扫描': 6251, '问题件扫描': 6180, '中心到件': 2238, '建包扫描': 2258};
+      if (route === 'trajectory_monitor_total') {
+        return ok(Object.keys(NMV).map(op => ({dutyCode: '30001', dutyName: 'SP GRU', operateType: op, total: NMV[op], day1: NMV[op], day2: 0, day3: 0, day4: 0,
+          day5: 0, day6: 0, day7: 0, day10: 0, day14: 0, day30: 0, operateTime: nowIso + ' 08:00:00'})), 4, 1, size);
+      }
+      const op0 = (body.operateType || [])[0], n = NMV[op0] || 0, sz = Math.min(100, body.size), recs = [];
+      for (let i = (cur - 1) * sz; i < Math.min(n, cur * sz); i++) {
+        recs.push({billcode: 'NM' + nowIso.replace(/-/g, '') + op0.length + String(i).padStart(6, '0'), packageNumber: 1, pickNetworkName: 'B' + (i % 50),
+          scanName: 'SP GRU', operateType: op0 + '/X', operateUser: 'OP' + (i % 40), operateTime: nowIso + ' 0' + (i % 10) + ':00:00',
+          overType: 'Exceed ' + (1 + i % 9) + ' days with no track', transfercode: 'ID' + (i % 120), problemName: i % 5 ? null : 'P' + (i % 3), dutyName: 'SP GRU'});
+      }
+      return ok(recs, n, cur, sz);
+    }
     // Avaria: dia estatístico no payload; tabela 1 de no máximo 100 por página; tabela 2 pelas remessas.
     if (route === 'getBreakageRateData' || route === 'detailBreakageRateData') {
       const dd = body.startDate || body.statisticalStartDate;

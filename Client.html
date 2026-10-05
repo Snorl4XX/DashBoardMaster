@@ -28,7 +28,7 @@
       indicators: 'Indicadores', analyses: 'Análises', resultsNavSub: 'Diário · semanal · mensal · trimestral',
       all: 'Todos', allIndicators: 'Todos os indicadores', allShifts: 'Todos os turnos', selectedN: '{n} selecionados',
       clear: 'Limpar', clearFilters: 'Limpar filtros', showMore: 'Mostrar mais {n}', noOptions: 'Sem valores no período', close: 'Fechar',
-      presetLastDay: 'Último dia', preset7: '7 dias', preset30: '30 dias', presetMonth: 'Mês atual', preset90: '90 dias',
+      presetLastDay: 'Último dia', presetPrevDay: 'Dia anterior', preset7: '7 dias', preset30: '30 dias', presetMonth: 'Mês atual', preset90: '90 dias',
       preset180: '6 meses', preset365: '12 meses', presetAll: 'Tudo',
       rateOfDay: 'Taxa do dia {date}', rateOfPeriod: 'Taxa do período', prevDayRate: 'Dia anterior', prevPeriodRate: 'Período anterior',
       lastDay: 'Último dia', weighted: 'Σ erros ÷ Σ base oficial', meanNote: 'média das taxas diárias',
@@ -132,6 +132,7 @@
       tcPartial: 'prévia: o download do dia ainda não terminou', tcShare: '{p} de participação',
       metricsOfficial: 'Números oficiais do JMS (tabela principal)', pctOf: 'Cálculo: {a} ÷ {b}', sumRows: 'Soma', sumCount: '{n}',
       hmSynced: 'Número do JMS consultado em {t}', hmSyncedPeriod: 'Números do JMS consultados até {t}',
+      hmRefTime: 'Horário da última operação mais recente: {t}', hmSnapshot: 'Foto do momento no JMS: um dia por vez',
       dcNoDetail: 'Contado na lista baixada: {h}'
     },
     zh: {
@@ -144,7 +145,7 @@
       indicators: '指标', analyses: '分析', resultsNavSub: '日 · 周 · 月 · 季度',
       all: '全部', allIndicators: '全部指标', allShifts: '全部班次', selectedN: '已选 {n} 项',
       clear: '清除', clearFilters: '清除筛选', showMore: '显示更多 {n} 项', noOptions: '该期间无数据', close: '关闭',
-      presetLastDay: '最近一天', preset7: '近7天', preset30: '近30天', presetMonth: '本月', preset90: '近90天',
+      presetLastDay: '最近一天', presetPrevDay: '前一天', preset7: '近7天', preset30: '近30天', presetMonth: '本月', preset90: '近90天',
       preset180: '近6个月', preset365: '近12个月', presetAll: '全部',
       rateOfDay: '{date} 指标率', rateOfPeriod: '期间指标率', prevDayRate: '前一日', prevPeriodRate: '上一期间',
       lastDay: '最近一天', weighted: '异常合计 ÷ 官方基数合计', meanNote: '每日指标率平均值',
@@ -248,6 +249,7 @@
       tcPartial: '预览：当日明细尚未下载完', tcShare: '占比 {p}',
       metricsOfficial: 'JMS官方数字（主表）', pctOf: '计算：{a} ÷ {b}', sumRows: '合计', sumCount: '{n}',
       hmSynced: 'JMS 数字获取时间：{t}', hmSyncedPeriod: 'JMS 数字最近获取：{t}',
+      hmRefTime: '最新操作时间（最近）：{t}', hmSnapshot: 'JMS 实时快照：每次显示一天',
       dcNoDetail: '按下载的列表计数：{h}'
     }
   };
@@ -285,6 +287,7 @@
     login: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
     lot: '<path d="M3 8l9-5 9 5-9 5-9-5zm0 0v8l9 5 9-5V8M12 13v8"/>',
     lot_flow: '<path d="M3 8l9-5 9 5-9 5-9-5zm0 0v8l9 5 9-5V8M12 13v8"/><path d="M7.5 5.5l9 5"/>',
+    no_move: '<path d="M3 9h12v11H3zM3 13h12"/><circle cx="18" cy="7" r="4"/><path d="M18 5v2.2l1.6 1"/>',
     arrival: '<path d="M3 21V9l9-5 9 5v12"/><path d="M12 8v8m-3.5-3.5L12 16l3.5-3.5"/>',
     departure: '<path d="M3 21V9l9-5 9 5v12"/><path d="M12 17V9m-3.5 3.5L12 9l3.5 3.5"/>',
     port: '<path d="M7 4v16m-3-3l3 3 3-3M17 20V4m-3 3l3-3 3 3"/>',
@@ -559,7 +562,11 @@
   }
   function latestOverall() {
     var best = null, b = state.boot;
-    Object.keys((b && b.latestByIndicator) || {}).forEach(function (k) { var l = b.latestByIndicator[k]; if (l && l.date && (!best || l.date > best)) best = l.date; });
+    Object.keys((b && b.latestByIndicator) || {}).forEach(function (k) {
+      var l = b.latestByIndicator[k], c = state.catalogMap[k];
+      if (c && c.snapshot) return; // Sem Movimentação (hoje) não puxa os Resultados para hoje
+      if (l && l.date && (!best || l.date > best)) best = l.date;
+    });
     return best || Core.addDays(b.today, -1);
   }
 
@@ -695,7 +702,9 @@
     var opts = state.catalog.map(function (c) { return '<option value="' + c.key + '">' + esc(L(c.name)) + '</option>'; }).join('');
     $('#indicatorSelect').innerHTML = opts;
     $('#indicatorSelect').value = state.indicator;
-    $('#resultsIndicator').innerHTML = '<option value="">' + esc(t('allIndicators')) + '</option>' + opts;
+    // Sem Movimentação (foto do momento) não entra nos Resultados: somar fotos por semana/mês não é uma quantidade.
+    var ropts = state.catalog.filter(function (c) { return !c.snapshot; }).map(function (c) { return '<option value="' + c.key + '">' + esc(L(c.name)) + '</option>'; }).join('');
+    $('#resultsIndicator').innerHTML = '<option value="">' + esc(t('allIndicators')) + '</option>' + ropts;
     $('#resultsIndicator').value = state.results.indicator || '';
     $('#resultsShift').innerHTML = '<option value="all">' + esc(t('allShifts')) + '</option>' +
       ['T1', 'T2', 'T3'].map(function (s) { return '<option value="' + s + '">' + s + ' · ' + {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'}[s] + '</option>'; }).join('');
@@ -704,12 +713,15 @@
   function presetList() {
     return state.view === 'results'
       ? [['preset30', 30], ['preset90', 90], ['preset180', 182], ['preset365', 365], ['presetAll', 'all']]
+      // Sem Movimentação (foto do momento): um dia por vez — hoje ou o dia anterior.
+      : cfg() && cfg().snapshot ? [['presetToday', 'today'], ['presetPrevDay', 'prev']]
       : [['presetToday', 'today'], ['presetLastDay', 1], ['preset7', 7], ['preset30', 30], ['presetMonth', 'month'], ['presetAll', 'all']];
   }
   function presetRange(p) {
     var anchor = state.view === 'results' ? latestOverall() : anchorDate(state.indicator);
     var hs = state.boot && state.boot.historyStart && state.boot.historyStart <= anchor ? state.boot.historyStart : null;
     if (p === 'today') { var td = (state.boot && state.boot.today) || anchor; return {from: td, to: td}; }
+    if (p === 'prev') { var pd = Core.addDays((state.boot && state.boot.today) || anchor, -1); return {from: pd, to: pd}; }
     if (p === 'month') return {from: anchor.slice(0, 8) + '01', to: anchor};
     if (p === 'all') return {from: hs ? maxIso(hs, Core.addDays(anchor, -365)) : Core.addDays(anchor, -365), to: anchor};
     return {from: Core.addDays(anchor, -(p - 1)), to: anchor};
@@ -774,6 +786,7 @@
     if (state.view !== 'dashboard') setView('dashboard');
     $('#indicatorSelect').value = key;
     buildNav();
+    if (changed) buildPresets(); // Sem Movimentação tem atalhos próprios (um dia por vez)
     if (changed || !state.data) {
       state.chartViews = {};
       loadDashboard({resetFilters: true});
@@ -1513,6 +1526,13 @@
     var syncs = activeRates().filter(function (r) { return r.date >= state.from && r.date <= state.to && r.syncedAt && r.metrics && isNum(r.metrics[def.key]); })
       .map(function (r) { return r.syncedAt; }).sort();
     var syncLine = syncs.length ? '<div class="kpi-sub hm-sync">' + esc(t(day ? 'hmSynced' : 'hmSyncedPeriod', {t: fmtTs(day ? syncs[syncs.length - 1] : syncs[0])})) + '</div>' : '';
+    // Sem Movimentação (V3.28): o "Horário da última operação" mais recente da tabela principal do JMS (AAAAMMDDhhmmss).
+    if (cfg() && cfg().snapshot) {
+      var rt = activeRates().filter(function (r) { return r.date === state.to && r.metrics && isNum(r.metrics.refTime); })[0];
+      var rs = rt ? String(Math.round(Number(rt.metrics.refTime))) : '';
+      if (rs.length === 14) syncLine += '<div class="kpi-sub hm-sync">' + esc(t('hmRefTime', {t: rs.slice(6, 8) + '/' + rs.slice(4, 6) + '/' + rs.slice(0, 4) + ' ' +
+        rs.slice(8, 10) + ':' + rs.slice(10, 12) + ':' + rs.slice(12, 14)})) + '</div>';
+    }
     lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
       (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +
       (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>' + syncLine;
@@ -1563,8 +1583,8 @@
       }
       var g = list.filter(function (x) { return x.label !== 'N/A' && x.value > 0; })[0], pct = g && total ? g.value / total * 100 : null;
       var label = c.topCardLabels && c.topCardLabels[dim] ? L(c.topCardLabels[dim]) : t('topOffender', {dim: L(dimLabel(dim))});
-      var sub = g ? fmtInt(g.value) + ' ' + esc(t('shipments')) + ' · <b>' + fmtPct(pct, 1) + '</b> ' + esc(t('participation')) +
-        '<br><span class="mc-note">' + esc(official ? t('tcOfficial') : partial ? t('tcPartial') : t('distinctShipments')) + '</span>'
+      var sub = g ? fmtInt(g.value) + ' ' + esc(tx(c, 'shipments')) + ' · <b>' + fmtPct(pct, 1) + '</b> ' + esc(t('participation')) +
+        '<br><span class="mc-note">' + esc(official ? t('tcOfficial') : partial ? t('tcPartial') : tx(c, 'distinctShipments')) + '</span>'
         : '<span class="ds-hint">' + esc(detailHint(col)) + '</span>';
       return '<article class="kpi top-kpi"><div class="kpi-label">' + icon(dim) + esc(label) + '</div>' +
         '<div class="kpi-value text" title="' + esc(g ? vlabel(dim, g.label) : '') + '">' + (g ? esc(vlabel(dim, g.label)) : '—') + '</div><div class="kpi-sub">' + sub + '</div>' +

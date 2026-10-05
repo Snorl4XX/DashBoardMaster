@@ -761,6 +761,98 @@ function diagnosticarLotes(date) {
 }
 
 /**
+ * Diagnóstico só da Sem Movimentação (V3.28). Rode no editor (▶ Executar) e copie o texto do "Registro de execução" — ele
+ * não mostra AuthToken, Cookie, número de remessa nem nome de operador. Consulta o JMS agora (foto do momento), sem gravar:
+ *  - o resumo (trajectory_monitor_total): cada tipo de bipe com o total e os dias sem movimentação, e o horário da última
+ *    operação mais recente;
+ *  - o que o painel gravou hoje ao lado do JMS de agora (✓ igual / ✗ diferente);
+ *  - a lista "Total de pedidos sem movimentação" de cada tipo (trajectory_monitor_detail): total × resumo, página, campos;
+ *  - a situação do download de hoje e dos últimos dias e os últimos avisos.
+ */
+function diagnosticarSemMovimentacao() {
+  const key = 'no_move', cfg = INDICATORS[key], d = isoToday_();
+  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, tipos: []};
+  const add = x => lines.push(x);
+  const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
+  const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
+  const types = cfg.detail.types, cred = authConfigSafe_();
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico da Sem Movimentação — foto de ' + humanDatePt_(d) + ' · base ' + centerName_() + ' (' + centerCode_() + ')');
+  add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · conta Google: ' + googlePlan_());
+  (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
+  try {
+    const rt = JMS_ROUTES_.filter(r => r.key === cfg.routeKey)[0], pp = jmsReadProperties_(), v = routeVariant_(rt, pp);
+    const nm = pp['JMS_ROUTENAME_' + rt.key] || v.name, ls = pp['JMS_ROUTENAMELIST_' + rt.key] || v.list;
+    add('Cabeçalho de rota: ' + (nm === 'NONE' ? 'nenhum' : 'Routename "' + nm + '"') + (ls && ls !== 'NONE' ? ' · Routernamelist "' + ls + '"' : '') +
+      ' (a captura não mostra; se o JMS recusar, o painel testa as variantes)');
+  } catch (e) { /* sem rota */ }
+  let sum = null;
+  try {
+    const s = fetchSummaryDay_(key, d);
+    sum = s.empty ? null : s.raw;
+    if (!sum) add('Resumo (trajectory_monitor_total): SEM REGISTROS — nenhum pedido sem movimentação nos 6 tipos de bipe');
+    else {
+      add('Resumo (trajectory_monitor_total): ' + fmt(sum.total) + ' pedidos sem movimentação · horário da última operação mais recente: ' + (sum.refTimeText || '—'));
+      (sum.types || []).forEach(r => {
+        const td = types.filter(t => t.op === r.op)[0];
+        add('  · ' + (td ? td.column : r.op) + ' (' + r.op + '): ' + fmt(r.total) + ' · dias 1–7: ' + ['day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7'].map(k => fmt(r[k])).join('/') +
+          ' · 10+: ' + fmt(r.day10) + ' · 14+: ' + fmt(r.day14) + ' · 30+: ' + fmt(r.day30) + ' · última operação ' + (r.time || '—'));
+      });
+      types.filter(t => !(sum.types || []).some(r => r.op === t.op)).forEach(t => add('  · ' + t.column + ' (' + t.op + '): 0 (o JMS não mostra a linha)'));
+      out.resumo = {total: sum.total, refTime: sum.refTimeText};
+    }
+  } catch (e) { add('Resumo: ERRO — ' + err(e)); }
+  try {
+    const sv = getRateDay_(key, d), saved = sv && sv.metrics ? sv.metrics.total : null;
+    out.painel = {total: saved, consultadoEm: sv ? sv.syncedAt : null};
+    add('Painel (cartão "Pedidos sem movimentação"): ' + (sv ? fmt(saved) + ', consultado no JMS em ' + String(sv.syncedAt || '').slice(0, 16).replace('T', ' ') +
+      (!sum ? '' : Number(saved) === Number(sum.total) ? ' ✓ igual ao JMS agora' : ' ✗ JMS agora: ' + fmt(sum.total) + ' — o painel consulta o resumo a cada ' + todayRefreshMin_() + ' min; o botão Atualizar consulta na hora')
+      : 'nada gravado hoje ainda'));
+  } catch (e) { add('Painel: ERRO ao ler — ' + err(e)); }
+  const full = dayWindow_(d, false), size = detailPageSize_(cfg);
+  let mapped = false;
+  types.forEach(t => {
+    try {
+      const r = fetchDetailPage_(key, d, 1, size, Object.assign({type: t.type}, full));
+      const exp = sum ? Number(sum[t.type]) || 0 : null;
+      out.tipos.push({tipo: t.column, lista: r.total, resumo: exp});
+      add('Lista "' + t.column + '" (' + t.op + '): ' + fmt(r.total) + (exp === null ? '' : ' (resumo ' + fmt(exp) + (r.total === exp ? ' ✓' : r.total > exp * 1.5 + 50 ? ' ✗ MUITO MAIOR: o filtro da base não pegou' : ' ✗ diferente (o JMS atualiza a foto de hora em hora)') + ')') +
+        ' · página com ' + r.records.length + ' de ' + size + ' pedidas · ' + fmt(Math.ceil(r.total / Math.max(1, r.records.length || size))) + ' consulta(s)');
+      if (r.records.length && !mapped) {
+        mapped = true;
+        const map = fieldMappingReport_(key, r.records);
+        const bad = ['shipment', 'eventTime', 'scanType', 'aging', 'login', 'tripId', 'senderBase'].filter(k => map.campos[k] && map.campos[k].situacao !== 'ok');
+        add('  campos: ' + (bad.length ? 'FALTAM ' + bad.map(k => k + ' (' + map.campos[k].configurado + ')').join(', ') :
+          'remessa, horário da última operação, tipo, aging, operador, Número do ID e base remetente OK') + ' · recebidos: ' + map.camposRecebidos.slice(0, 26).join(', '));
+        const rows = r.records.map(x => normalizeDetailRow_(key, x, d)).filter(Boolean);
+        const vals = f => { const c = {}; rows.forEach(x => { const v = x[f] || '—'; c[v] = (c[v] || 0) + 1; }); return Object.keys(c).slice(0, 8).map(k => k + ' ' + c[k]).join(', '); };
+        add('  1ª página: aging ' + vals('aging') + ' · turnos ' + vals('shift') + ' · tipo ' + vals('scanType'));
+      }
+    } catch (e) { add('Lista "' + t.column + '" (' + t.op + '): ERRO — ' + err(e)); }
+  });
+  try {
+    const dp = detailProgress_(key, addDaysIso_(d, -3), d);
+    add('Fotos guardadas (hoje é refeita a cada atualização; dia passado fica com a última foto dele):');
+    dp.days.forEach(x => {
+      const job = x.job ? ' · tarefa ' + x.job.status + (x.job.ahead !== null && x.job.ahead !== undefined ? ' (' + x.job.ahead + ' antes na fila)' : '') + (x.job.attempts ? ', ' + x.job.attempts + ' falha(s)' : '') : '';
+      add('  ' + humanDatePt_(x.date) + ': resumo ' + x.summary + ' · lista ' + x.details + (x.expected ? ' ' + x.saved + '/' + x.expected : '') + job +
+        (x.error || x.progressError ? ' · erro: ' + (x.progressError || x.error) : ''));
+    });
+    out.dias = dp.days;
+  } catch (e) { add('Fotos guardadas: ERRO ao ler — ' + err(e)); }
+  try {
+    const logs = allTabRows_('LOG').filter(r => String(r[2]) === key && (r[1] === 'WARN' || r[1] === 'ERROR')).slice(-8);
+    if (logs.length) {
+      add('Últimos avisos do LOG (' + key + '):');
+      logs.forEach(r => add('  ' + (toIsoTimestamp_(r[0]) || '').slice(0, 16).replace('T', ' ') + ' ' + r[1] + ': ' + String(r[4]).slice(0, 260)));
+    } else add('LOG: nenhum aviso ou erro da Sem Movimentação.');
+  } catch (e) { /* sem banco */ }
+  add('Dica: se algo der ERRO ou ✗, abra a tela no JMS, F12 → Rede, clique no número e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
+  console.log(lines.join('\n'));
+  out.texto = lines.join('\n');
+  return out;
+}
+
+/**
  * Diagnóstico só da Avaria (V3.25). Rode no editor (▶ Executar) e copie o texto do "Registro de execução" — ele não
  * mostra AuthToken, Cookie nem número de remessa. Consulta o JMS agora, sem gravar nada, e põe lado a lado:
  *  - o resumo de "Todos" (Qtd processada, 总破损票数, 总破损率 e a coluna "Taxa de Avaria");

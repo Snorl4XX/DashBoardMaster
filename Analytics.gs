@@ -6,9 +6,14 @@ const SEGMENT_FIRST_CODE_ = {wrong_send: 1, sorting_error: 1, missing_receipt: 1
 const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expeditionTime', 'login', 'segment', 'destination',
   'lot', 'client', 'offenderBase', 'errorType', 'tripId', 'route', 'reason', 'idealTime', 'idealTimeFull', 'correctDest',
   'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw', 'station', 'product', 'content', 'amount', 'regDay',
-  'locationMain', 'locationSub', 'column', 'destCenter', 'destBase', 'qty', 'port', 'sackType', 'items', 'packType', 'source', 'chip'];
-/** Campos extras lidos quando o indicador os configura (Fluxo de Lotes: entrada/saída, saca ecológica, itens, tipo, origem, chip). */
-const EXTRA_FIELDS_ = ['port', 'sackType', 'items', 'packType', 'source', 'chip'];
+  'locationMain', 'locationSub', 'column', 'destCenter', 'destBase', 'qty', 'port', 'sackType', 'items', 'packType', 'source', 'chip',
+  'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase'];
+/**
+ * Campos extras lidos quando o indicador os configura (Fluxo de Lotes: entrada/saída, saca ecológica, itens, tipo, origem, chip;
+ * Sem Movimentação: remessa, pedidos, tipo da última operação, aging, problemático, bases e destino).
+ */
+const EXTRA_FIELDS_ = ['port', 'sackType', 'items', 'packType', 'source', 'chip',
+  'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 
@@ -38,6 +43,11 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   if (f.locationMain) row.locationMain = str(f.locationMain);
   if (f.locationSub) row.locationSub = str(f.locationSub);
   EXTRA_FIELDS_.forEach(k => { if (f[k]) row[k] = str(f[k]); });
+  // Valores reescritos antes (Config.gs → valueTransforms; Sem Movimentação: "Exceed 4 days with no track" → 4).
+  Object.keys(cfg.valueTransforms || {}).forEach(k => {
+    const t = cfg.valueTransforms[k], v = row[k];
+    if (v) row[k] = String(v).replace(new RegExp(t.re, 'i'), t.to).trim();
+  });
   // Valores do JMS em chinês/código como a tela mostra (Config.gs → valueMaps; ex.: 出港 → Partida, Y → Ecológica).
   Object.keys(cfg.valueMaps || {}).forEach(k => { const m = cfg.valueMaps[k], v = row[k]; if (v !== undefined && m[v] !== undefined) row[k] = m[v]; });
   // Indicadores com docas guardam o 1º segmento COMPLETO ("BRE - SP"); o campo segment continua
@@ -556,7 +566,8 @@ function resolvePeriod_(params, allRates, indicatorKey) {
   const today = isoToday_();
   const latest = allRates.length ? allRates[allRates.length - 1].date : null;
   const to = isIso_(params.to) ? params.to : anchorDate_(indicatorKey, allRates);
-  const from = isIso_(params.from) ? params.from : to;
+  // Foto do momento (Sem Movimentação): um dia por vez — somar fotos de dias diferentes contaria o mesmo pedido várias vezes.
+  const from = INDICATORS[indicatorKey] && INDICATORS[indicatorKey].snapshot ? to : isIso_(params.from) ? params.from : to;
   if (from > to) throw new Error('A data inicial não pode ser maior que a final.');
   if (JTCore_.daysBetween(from, to) > 366) throw new Error('Selecione um período de no máximo 366 dias.');
   return {from: from, to: to, today: today, latest: latest};
@@ -657,8 +668,9 @@ function getResultsData(params) {
   const to = isIso_(params.to) ? params.to : addDaysIso_(today, -1);
   const from = isIso_(params.from) ? params.from : addDaysIso_(to, -29);
   if (from > to) throw new Error('A data inicial não pode ser maior que a final.');
-  const keys = params.indicator && INDICATORS[params.indicator] ? [params.indicator]
-    : Object.keys(INDICATORS).sort((a, b) => INDICATORS[a].order - INDICATORS[b].order);
+  // Sem Movimentação (foto do momento) fica fora: somar fotos por semana/mês não é uma quantidade real.
+  const keys = params.indicator && INDICATORS[params.indicator] && !INDICATORS[params.indicator].snapshot ? [params.indicator]
+    : Object.keys(INDICATORS).filter(k => !INDICATORS[k].snapshot).sort((a, b) => INDICATORS[a].order - INDICATORS[b].order);
   const stamps = dataStamps_();
   return safeReturn_({
     from: from, to: to,

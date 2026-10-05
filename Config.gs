@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.27.0',
+  VERSION: '3.28.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -976,6 +976,171 @@ const INDICATORS = Object.freeze({
       ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Saca', '袋类型'], ['items', 'Quantidade de itens na embalagem', '包内件数'],
       ['eventTime', 'Tempo de ensacamento', '建包时间'], ['shift', 'Turno', '班次'], ['interval', 'Intervalo', '时间段'], ['destination', 'Destino de desembalagem', '拆包网点']
     ]
+  },
+
+  /**
+   * Sem Movimentação (V3.28) — Indicadores de Negócios > Monitoramento de movimentação em tempo real (novo), capturas do
+   * PDF "sem movimentação". É uma FOTO do momento (o JMS não recebe data): o painel guarda a foto de hoje (refeita a cada
+   * atualização) e cada dia passado fica com a última foto daquele dia — o gráfico "Evolução diária" sai daí.
+   * Resumo (trajectory_monitor_total): uma linha por "Tipo da última operação" com o total de pedidos sem movimentação e
+   * os dias sem movimentação (day1…day30). Lista (trajectory_monitor_detail): o número vermelho "Total de pedidos sem
+   * movimentação" de cada tipo (queryType 2), da nossa base como Unidade responsável.
+   */
+  no_move: {
+    key: 'no_move', order: 11, routeKey: 'NOMOVE',
+    name: {pt: 'Sem Movimentação', zh: '断更'},
+    subtitle: {pt: 'Pedidos sem movimentação (Monitoramento de movimentação em tempo real)', zh: '断更件（实时动态监控）'},
+    // Sem meta. "Taxa" guardada = Taxa de sem mov 14+ dias, a mesma conta da coluna do JMS (dayRate14 = day14 ÷ total).
+    goal: {value: null, direction: 'max', strict: false},
+    apiProfile: 'no_move', detailMatchesErrors: false, grouped: true, light: true,
+    // Foto do momento: só HOJE é consultado; dia passado nunca é baixado de novo (seria a foto de hoje com outra data).
+    snapshot: true,
+    summary: {
+      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/trajectory_monitor_total',
+      // Linhas da nossa base (Unidade responsável = JMS_CENTER_CODE), se o JMS mandar outras.
+      siteField: 'dutyCode',
+      // Uma linha por tipo de bipe: cada número do dia = soma das linhas; o total de cada tipo vai no número do tipo.
+      byType: {field: 'operateType', timeField: 'operateTime',
+        sums: ['total', 'day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7', 'day10', 'day14', 'day30']},
+      rateKeys: [], errorKeys: ['total'], totalKeys: ['total'],
+      metrics: ['total', 'send', 'problem', 'arrival', 'bag', 'stay', 'unbag',
+        'day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7', 'day10', 'day14', 'day30', 'refTime']
+    },
+    detail: {
+      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/trajectory_monitor_detail',
+      // A tela mostra 20 por página; como nas outras listas do bigdataReport, até 100 (o painel aprende se o JMS aceitar menos).
+      maxPageSize: 100, days: 0, refreshHours: 1, gmailRefreshHours: 6, maxPerDay: 200000,
+      // A lista não tem horário: nunca é baixada em fatias de horário.
+      noSlice: true,
+      // Base de cada pedido na lista (Unidade responsável): outra base = payload sem filtro (importação bloqueada).
+      siteNameField: 'dutyName', maxRatio: 1.5,
+      // Uma lista por tipo de bipe (operateType do payload), na ordem da tela.
+      types: [
+        {type: 'send', op: '发件扫描', column: 'Bipe de expedição'},
+        {type: 'problem', op: '问题件扫描', column: 'Bipe de pacote problemático'},
+        {type: 'arrival', op: '中心到件', column: 'Chegadas ao centro'},
+        {type: 'bag', op: '建包扫描', column: 'Encomenda inserida em lote'},
+        {type: 'stay', op: '留仓件入仓', column: 'Entrada no galpão de pacote não expedido'},
+        {type: 'unbag', op: '拆包扫描', column: 'Encomenda retirada do lote'}
+      ]
+    },
+    fields: {
+      shipment: ['billcode'], waybill: ['billcode'], eventTime: ['operateTime'], login: ['operateUser'], tripId: ['transfercode'],
+      scanType: ['operateType'], aging: ['overType'], problem: ['problemName'], senderBase: ['pickNetworkName'], recentBase: ['scanName'],
+      station: ['stationName'], client: ['abbreviation'], orderSource: ['orderSourceName'], product: ['expressTypeName'],
+      deliveryBase: ['dispatchNetworkName'], destState: ['receiverProvinceName'], destRegional: ['dispatchFinanceName'],
+      senderRegional: ['pickAgentName'], pieces: ['packageNumber']
+    },
+    // "Exceed 4 days with no track" → 4 (como pedido); "建包扫描/Encomenda inserida em lote" → 建包扫描 → nome da tela.
+    valueTransforms: {aging: {re: '^\\s*Exceed\\s+(\\d+)\\s+days?\\b.*$', to: '$1'}, scanType: {re: '^([^/]+)/.*$', to: '$1'}},
+    valueMaps: {
+      scanType: {'发件扫描': 'Bipe de expedição', '问题件扫描': 'Bipe de pacote problemático', '中心到件': 'Chegadas ao centro',
+        '建包扫描': 'Encomenda inserida em lote', '留仓件入仓': 'Entrada no galpão de pacote não expedido', '拆包扫描': 'Encomenda retirada do lote'}
+    },
+    columnSets: {
+      'Sem movimentação': ['Bipe de expedição', 'Bipe de pacote problemático', 'Chegadas ao centro', 'Encomenda inserida em lote',
+        'Entrada no galpão de pacote não expedido', 'Encomenda retirada do lote', 'N/A']
+    },
+    groupFields: ['column', 'waybill', 'pieces', 'scanType', 'eventTime', 'shift', 'interval', 'login', 'aging', 'tripId', 'problem',
+      'senderRegional', 'senderBase', 'station', 'recentBase', 'client', 'product', 'orderSource', 'destRegional', 'destState', 'deliveryBase'],
+    labels: {
+      scanType: {pt: 'Tipo de bipagem', zh: '最新操作类型'}, login: {pt: 'Login', zh: '最新操作人'}, shift: {pt: 'Turno', zh: '班次'},
+      aging: {pt: 'Aging (dias sem movimentação)', zh: '断更天数'}, problem: {pt: 'Problemáticos', zh: '问题件名称'},
+      tripId: {pt: 'Número do ID', zh: '车次号'}, senderBase: {pt: 'Nome da Base Remetente', zh: '寄件网点名称'},
+      recentBase: {pt: 'Nome da base mais recente', zh: '最新操作机构名称'}, station: {pt: 'Nome da estação', zh: '驿站名称'},
+      client: {pt: 'Nome fantasia', zh: '客户简称'}, orderSource: {pt: 'Origem do Pedido', zh: '订单来源'}, product: {pt: 'Tipo de produto', zh: '产品类型'},
+      deliveryBase: {pt: 'Base de entrega', zh: '派件网点'}, destState: {pt: 'Estado de Destino', zh: '目的省份'}, destRegional: {pt: 'Regional Destino', zh: '目的代理区'},
+      senderRegional: {pt: 'Regional Remetente', zh: '寄件代理区'}, waybill: {pt: 'Número da Remessa', zh: '运单号'}, pieces: {pt: 'Pedidos', zh: '票数'},
+      eventTime: {pt: 'Horário da última operação', zh: '最新操作时间'}, column: {pt: 'Tipo da última operação', zh: '最新操作类型'}
+    },
+    labelsOne: {scanType: {pt: 'Tipo de bipe', zh: '操作类型'}, login: {pt: 'Login', zh: '操作员'}, aging: {pt: 'Aging', zh: '断更天数'},
+      problem: {pt: 'Problemático', zh: '问题件'}, tripId: {pt: 'ID', zh: '车次号'}, senderBase: {pt: 'Base remetente', zh: '寄件网点'},
+      recentBase: {pt: 'Base', zh: '网点'}, shift: {pt: 'Turno', zh: '班次'}},
+    filters: ['scanType', 'login', 'shift', 'aging', 'problem', 'tripId'],
+    // Cartões "com mais": Número do ID, Nome da Base Remetente, Aging e Problemático (o pedido; vazio não conta).
+    topCards: ['tripId', 'senderBase', 'aging', 'problem'],
+    topCardColumn: 'Sem movimentação',
+    topCardLabels: {
+      tripId: {pt: 'Número do ID com mais pedidos sem movimentação', zh: '断更件最多的车次号'},
+      senderBase: {pt: 'Base Remetente com mais pedidos sem movimentação', zh: '断更件最多的寄件网点'},
+      aging: {pt: 'Aging com mais produtos sem movimentação (dias)', zh: '断更件最多的天数'},
+      problem: {pt: 'Problemático com mais pedidos', zh: '最多的问题件名称'}
+    },
+    hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    heroMetric: {key: 'total', column: 'Sem movimentação', icon: 'no_move',
+      label: {pt: 'Pedidos sem movimentação', zh: '断更件总数'}, labelPeriod: {pt: 'Pedidos sem movimentação', zh: '断更件总数'}},
+    navMetric: 'total',
+    metricCards: true,
+    // Cartões T1/T2/T3: pedidos de cada turno pelo "Horário da última operação".
+    shiftCardsByColumn: {main: 'Sem movimentação', columns: ['Sem movimentação'], unit: {pt: 'pedidos', zh: '票'}},
+    shiftAggColumns: ['Sem movimentação'],
+    texts: {
+      navQty: {pt: 'Sem movimentação · {date}', zh: '断更 · {date}'},
+      errors: {pt: 'Pedidos sem movimentação', zh: '断更件'},
+      errorsDay: {pt: 'Sem movimentação no dia', zh: '当日断更件'}, errorsPeriod: {pt: 'Sem movimentação', zh: '断更件'},
+      errorsFiltered: {pt: 'Pedidos (com filtro)', zh: '票数（已筛选）'},
+      dsHelp: {pt: 'Para saber o motivo em detalhe, rode diagnosticarSemMovimentacao() no editor do Apps Script.', zh: '如需详细原因，请在 Apps Script 编辑器中运行 diagnosticarSemMovimentacao()。'},
+      dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes)', zh: '排队下载中（前面还有 {n} 个任务）'},
+      distinctShipments: {pt: 'Pedidos das listas "Total de pedidos sem movimentação"', zh: '断更件明细中的运单'},
+      tableCount: {pt: '{n} pedidos', zh: '{n} 票'}, listRows: {pt: '{n} pedidos', zh: '{n} 票'}, shipments: {pt: 'pedidos', zh: '票'},
+      detailsOk: {pt: 'Detalhes completos · {n} pedidos', zh: '明细完整 · {n} 票'}, tableFind: {pt: 'Localizar remessa na tabela', zh: '在表格中查找运单'}
+    },
+    // Colunas da tabela principal da tela: o total de cada tipo de bipe (oficial do JMS); com filtro, a lista baixada.
+    metricPanels: [
+      {column: 'Sem movimentação', title: {pt: 'Último bipe', zh: '最新操作类型'}, metrics: [
+        {key: 'total', label: {pt: 'Total de pedidos sem movimentação', zh: '断更件总数'}, detail: 'Sem movimentação'},
+        {key: 'send', label: {pt: 'Bipe de expedição', zh: '发件扫描'}, detail: 'Bipe de expedição', bad: true},
+        {key: 'problem', label: {pt: 'Bipe de pacote problemático', zh: '问题件扫描'}, detail: 'Bipe de pacote problemático', bad: true},
+        {key: 'arrival', label: {pt: 'Chegadas ao centro', zh: '中心到件'}, detail: 'Chegadas ao centro', bad: true},
+        {key: 'bag', label: {pt: 'Encomenda inserida em lote', zh: '建包扫描'}, detail: 'Encomenda inserida em lote', bad: true},
+        {key: 'stay', label: {pt: 'Entrada no galpão de pacote não expedido', zh: '留仓件入仓'}, detail: 'Entrada no galpão de pacote não expedido', bad: true},
+        {key: 'unbag', label: {pt: 'Encomenda retirada do lote', zh: '拆包扫描'}, detail: 'Encomenda retirada do lote', bad: true}
+      ]}
+    ],
+    charts: [
+      {key: 'mTotal', metric: 'total', type: 'line', days: 30, bad: true, title: {pt: 'Evolução diária — pedidos sem movimentação', zh: '断更件每日趋势'}},
+      {key: 'trips', dim: 'tripId', type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Número do ID com mais pedidos sem movimentação', zh: '断更件最多的车次号'}, sub: {pt: 'Coluna Número do ID', zh: '车次号'}},
+      {key: 'shiftPie', dim: 'shift', type: 'doughnut', title: {pt: 'Turnos', zh: '班次'},
+        sub: {pt: 'Turno pelo Horário da última operação', zh: '按最新操作时间划分班次'}},
+      {key: 'senderBases', dim: 'senderBase', type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'Nome da Base Remetente', zh: '寄件网点名称'}, sub: {pt: 'Bases remetentes com mais pedidos sem movimentação', zh: '断更件最多的寄件网点'}},
+      {key: 'agingBars', dim: 'aging', type: 'bar', top: 30, order: 'num', hideNA: true,
+        summaryBars: [{value: '1', metric: 'day1'}, {value: '2', metric: 'day2'}, {value: '3', metric: 'day3'}, {value: '4', metric: 'day4'},
+          {value: '5', metric: 'day5'}, {value: '6', metric: 'day6'}, {value: '7', metric: 'day7'}, {value: '10', metric: 'day10'},
+          {value: '14', metric: 'day14'}, {value: '30', metric: 'day30'}],
+        title: {pt: 'Aging (dias sem movimentação)', zh: '断更天数'}, sub: {pt: 'Pedidos em cada quantidade de dias sem movimentação', zh: '各断更天数的票数'}},
+      {key: 'scanTypes', dim: 'scanType', type: 'bar', top: 6,
+        summaryBars: [{value: 'Bipe de expedição', metric: 'send'}, {value: 'Bipe de pacote problemático', metric: 'problem'},
+          {value: 'Chegadas ao centro', metric: 'arrival'}, {value: 'Encomenda inserida em lote', metric: 'bag'},
+          {value: 'Entrada no galpão de pacote não expedido', metric: 'stay'}, {value: 'Encomenda retirada do lote', metric: 'unbag'}],
+        title: {pt: 'Tipo de bipe', zh: '最新操作类型'}, sub: {pt: 'Último bipe com mais pedidos sem movimentação', zh: '断更件最多的最新操作类型'}},
+      {key: 'logins', dim: 'login', type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Login', zh: '最新操作人'}, sub: {pt: 'Operador do bipe mais recente', zh: '最新操作人'}},
+      {key: 'recentBases', dim: 'recentBase', type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'Base', zh: '最新操作机构'}, sub: {pt: 'Nome da base mais recente', zh: '最新操作机构名称'}},
+      {key: 'problems', dim: 'problem', type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Problemáticos', zh: '问题件名称'}, sub: {pt: 'Nome de pacote problemático', zh: '问题件名称'}}
+    ],
+    tables: [
+      {key: 'tGeneral', column: 'Sem movimentação', title: {pt: 'Pedidos sem movimentação', zh: '断更件明细'},
+        cols: [['waybill', 'Número da Remessa', '运单号'], ['pieces', 'Pedidos', '票数'], ['senderRegional', 'Regional Remetente', '寄件代理区'],
+          ['senderBase', 'Nome da Base Remetente', '寄件网点名称'], ['station', 'Nome da estação', '驿站名称'], ['recentBase', 'Nome da base mais recente', '最新操作机构名称'],
+          ['scanType', 'Tipo da última operação', '最新操作类型'], ['login', 'Operador do bipe mais recente', '最新操作人'],
+          ['eventTime', 'Horário da última operação', '最新操作时间'], ['shift', 'Turno', '班次'], ['aging', 'Aging', '断更天数'], ['client', 'Nome fantasia', '客户简称'],
+          ['product', 'Tipo de produto', '产品类型'], ['orderSource', 'Origem do Pedido', '订单来源'], ['tripId', 'Número do ID', '车次号'],
+          ['problem', 'Nome de pacote problemático', '问题件名称'], ['destRegional', 'Regional Destino', '目的代理区'], ['destState', 'Estado de Destino', '目的省份'],
+          ['deliveryBase', 'Base de entrega', '派件网点']]}
+    ],
+    table: [
+      ['date', 'Data', '日期'], ['waybill', 'Número da Remessa', '运单号'], ['pieces', 'Pedidos', '票数'], ['senderRegional', 'Regional Remetente', '寄件代理区'],
+      ['senderBase', 'Nome da Base Remetente', '寄件网点名称'], ['station', 'Nome da estação', '驿站名称'], ['recentBase', 'Nome da base mais recente', '最新操作机构名称'],
+      ['scanType', 'Tipo da última operação', '最新操作类型'], ['login', 'Operador do bipe mais recente', '最新操作人'],
+      ['eventTime', 'Horário da última operação', '最新操作时间'], ['shift', 'Turno', '班次'], ['aging', 'Aging', '断更天数'], ['client', 'Nome fantasia', '客户简称'],
+      ['product', 'Tipo de produto', '产品类型'], ['orderSource', 'Origem do Pedido', '订单来源'], ['tripId', 'Número do ID', '车次号'],
+      ['problem', 'Nome de pacote problemático', '问题件名称'], ['destRegional', 'Regional Destino', '目的代理区'], ['destState', 'Estado de Destino', '目的省份'],
+      ['deliveryBase', 'Base de entrega', '派件网点']
+    ]
   }
 });
 
@@ -990,7 +1155,7 @@ function getIndicatorConfig_(key) {
     // é para clicar em Executar sem preencher nada antes. Veja "Manutenção" em LEIA_PRIMEIRO.md.
     if (key === undefined || key === null || key === '') {
       throw new Error('Esta função exige um indicador como parâmetro (ex.: "wrong_send", "sorting_error", ' +
-        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage", "arrival_flow", "send_flow" ou "lot_flow"). Ela não é para ser executada direto pelo ' +
+        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage", "arrival_flow", "send_flow", "lot_flow" ou "no_move"). Ela não é para ser executada direto pelo ' +
         'botão ▶ Executar sem argumentos — chame-a com o parâmetro preenchido (veja "Manutenção" em LEIA_PRIMEIRO.md) ' +
         'ou teste pelo próprio painel (Implantar → App da Web).');
     }
@@ -1012,6 +1177,8 @@ function usedFields_(cfg) {
   (cfg.filters || []).forEach(k => set[k] = 1);
   (cfg.charts || []).forEach(c => { if (c.metric) return; set[chartShiftDim_(c) || c.dim || c.key] = 1; if (c.where) Object.keys(c.where).forEach(k => { set[k] = 1; }); });
   if (cfg.grouped) set.qty = 1;
+  // Listas da tela (columnSets): a coluna de cada linha decide em que lista ela conta (cartões de turno, número com filtro).
+  if (cfg.columnSets) set.column = 1;
   (cfg.table || []).forEach(c => set[c[0]] = 1);
   (cfg.topCards || []).forEach(k => set[k] = 1);
   if (cfg.summaryTable) cfg.summaryTable.groupBy.forEach(k => set[k] = 1);
@@ -1054,6 +1221,7 @@ function getPublicCatalog_() {
       metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
       shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
       columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
+      snapshot: !!cfg.snapshot,
       labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null,
       hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
       grouped: !!cfg.grouped, routeKey: cfg.routeKey,

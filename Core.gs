@@ -594,6 +594,8 @@ function JTCoreFactory_() {
       return base;
     }
     var top = groups.filter(function (g) { return !((def.key === 'interval' || def.hideNA) && g.label === 'N/A'); }).slice(0, def.top || 10);
+    // order 'num' (Sem Movimentação: Aging 1, 2, 3… 30 dias): na ordem do número, não da quantidade.
+    if (def.order === 'num') top.sort(function (a, b) { return (Number(a.label) || 0) - (Number(b.label) || 0); });
     base.labels = top.map(function (g) { return g.label; });
     base.datasets = [{label: 'qty', data: top.map(function (g) { return g.value; })}];
     base.others = groups.length - top.length;
@@ -803,7 +805,9 @@ function JTCoreFactory_() {
     'Enviados': '已发件', 'Em trânsito': '在途（未到下一站）', 'Não entregues': '未签收', 'Não chegou ao destino': '未到下一站',
     'Chegou ao destino · não entregue': '已到下一站·未签收', 'Entregue': '已签收', 'Entregue · sem bipe de chegada': '已签收·无到件扫描',
     'Chegada': '进港', 'Partida': '出港', 'Ecológica': '环保袋', 'Não ecológica': '非环保袋', 'Saco normal': '普通包',
-    'Sacas criadas': '建包', 'Sacas ecológicas': '环保袋', 'Sacas não ecológicas': '非环保袋'};
+    'Sacas criadas': '建包', 'Sacas ecológicas': '环保袋', 'Sacas não ecológicas': '非环保袋',
+    'Sem movimentação': '断更件', 'Bipe de expedição': '发件扫描', 'Bipe de pacote problemático': '问题件扫描', 'Chegadas ao centro': '中心到件',
+    'Encomenda inserida em lote': '建包扫描', 'Entrada no galpão de pacote não expedido': '留仓件入仓', 'Encomenda retirada do lote': '拆包扫描'};
   function hasCjk(s) { return /[㐀-鿿]/.test(s); }
   function localizeValue(value, lang) {
     var s = String(value === null || value === undefined ? '' : value);

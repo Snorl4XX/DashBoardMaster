@@ -211,6 +211,8 @@ function fakeJms(dayData, options) {
     // Dia a que a janela pertence (janela 14h: antes das 14h é do dia anterior). Avaria: dia estatístico.
     const date = body.statisticalStartDate || (route === 'getBreakageRateData' ? body.startDate : null) ||
       (op && start.slice(11) < '14:00:00' ? addDay(start.slice(0, 10), -1) : start.slice(0, 10));
+    // Sem Movimentação: foto do momento — o JMS não recebe data; serve a foto do último dia com "nm" (options.noMoveDate muda).
+    if (route === 'trajectory_monitor_total' || route === 'trajectory_monitor_detail') return noMoveRoute(route, body, dayData, options, ok, respond, size);
     const d = dayData[date];
     if (d && options.grow && options.grow.date === date && isDetail) {
       for (let i = 0; i < options.grow.perRequest; i++) d.ws.push({billcode: 'LIVE' + d.ws.length, sendTime: date + ' 23:30:00', scanUser: 'X', dateTime: date});
@@ -475,7 +477,71 @@ function makeDay(date, seed) {
   const day = {ws: ws, wsRate: pct(0.2 + rnd() * 1.1), se: se, seRate: pct(0.3 + rnd() * 0.6), mr: mr, mrRate: pct(0.5 + rnd() * 0.8),
     md: md, mdRate: pct(0.4 + rnd() * 0.9), sc: sc, scRate: pct(88 + rnd() * 9), dc: dc, dcRate: pct(89 + rnd() * 8)};
   return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5), makeArrival(date, (seed || 7) * 17 + 3), makeSend(date, (seed || 7) * 13 + 1),
-    makeLots(date, (seed || 7) * 19 + 2));
+    makeLots(date, (seed || 7) * 19 + 2), makeNoMove(date, (seed || 7) * 23 + 4));
+}
+
+/** Tipos de bipe da tela "Monitoramento de movimentação em tempo real (novo)" (código → nome na lista). */
+const NM_TYPES = [['发件扫描', 'Bipe de expedição'], ['问题件扫描', 'Bipe de pacote problemático'], ['中心到件', 'Chegadas ao centro'],
+  ['建包扫描', 'Encomenda inserida em lote'], ['留仓件入仓', 'Entrada no galpão de pacote não expedido'], ['拆包扫描', 'Encomenda retirada do lote']];
+/** Coluna "dias sem movimentação" do resumo para um Aging (1–7, 10, 14, 30; 8–9 caem em 7). */
+function nmDayKey(n) { return n >= 30 ? 'day30' : n >= 14 ? 'day14' : n >= 10 ? 'day10' : n >= 7 ? 'day7' : 'day' + Math.max(1, n); }
+/**
+ * Sem Movimentação: pedidos parados no formato da lista "Total de pedidos sem movimentação" (trajectory_monitor_detail).
+ * Remessas, operadores, IDs, bases e clientes FICTÍCIOS. Os dois últimos tipos ficam vazios, como na captura.
+ */
+function makeNoMove(date, seed, scale) {
+  let s = seed || 5;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  const two = x => String(x).padStart(2, '0');
+  const n = Math.round((300 + Math.floor(rnd() * 80)) * (scale || 1)), tag = date.replace(/-/g, '').slice(2), nm = [];
+  const ages = [1, 1, 1, 1, 2, 2, 3, 4, 5, 6, 7, 8, 10, 14, 30];
+  const problems = [null, null, null, null, 'Erro.de.triagem.错分', 'Encomenda.expedida.mas.não.chegou.有发未到件', 'Envio.errado.错发'];
+  for (let i = 0; i < n; i++) {
+    const t = NM_TYPES[Math.floor(rnd() * 4)], age = pick(ages);
+    const day = new Date(Date.parse(date + 'T12:00:00Z') - (age + 1) * 86400000).toISOString().slice(0, 10);
+    nm.push({billcode: '7770' + tag + String(i).padStart(6, '0'), packageNumber: 1, stationName: rnd() < 0.15 ? 'ESTACAO FICTICIA ' + two(1 + Math.floor(rnd() * 9)) : null,
+      pickAgentName: pick(['SPS', 'SPE', 'MG', 'RJ']), pickNetworkCode: String(310000 + Math.floor(rnd() * 40)),
+      pickNetworkName: pick(['PA FICTICIA-SP', 'F ALFA-SP', 'PA BETA-SP', 'F GAMA-MG', 'PA DELTA-RJ', 'F EPSILON-SP']),
+      scanAgentName: 'SPE', scanCode: '30001', scanName: 'SP GRU', operateType: t[0] + '/' + t[1],
+      operateUser: pick(['Operador Ficticio 01', 'Operador Ficticio 02', 'Operador Ficticio 03', 'Operador Ficticio 04']),
+      operateTime: day + ' ' + two(Math.floor(rnd() * 24)) + ':' + two(Math.floor(rnd() * 60)) + ':' + two(Math.floor(rnd() * 60)),
+      nextStation: null, overType: 'Exceed ' + age + (age === 1 ? ' day' : ' days') + ' with no track',
+      abbreviation: pick(['CLIENTE ALFA', 'CLIENTE BETA', 'LOJA FICTICIA']), expressTypeName: 'EZ', orderSourceName: pick(['ORIGEM A', 'ORIGEM B', 'APIJMS']),
+      transfercode: pick(['XXGX' + tag + '00001', 'XXGX' + tag + '00002', 'YYTR' + tag + '00003', null]), problemName: pick(problems),
+      dutyName: 'SP GRU', dutyAgentName: 'SPE', senderProvinceName: 'SP', dispatchFinanceName: pick(['SPE', 'MG', 'PR']),
+      receiverProvinceName: pick(['SP', 'MG', 'PR']), dispatchNetworkName: pick(['DC FICTICIO-SP', 'F ZETA-MG', 'PA ETA-PR']), _age: age});
+  }
+  return {nm: nm};
+}
+/** Resumo (uma linha por tipo, como a tabela da tela) e lista (um tipo por vez) da foto do momento. */
+function noMoveRoute(route, body, dayData, options, ok, respond, size) {
+  const days = Object.keys(dayData).filter(k => dayData[k] && dayData[k].nm).sort();
+  const nm = (dayData[options.noMoveDate || days[days.length - 1]] || {}).nm || [];
+  const clean = r => { const o = Object.assign({}, r); delete o._age; return o; };
+  if (route === 'trajectory_monitor_total') {
+    if (body.groupType !== 'center' || !Array.isArray(body.operateType) || body.scanCode !== '30001') return ok([], 0, 1, body.size);
+    const recs = [];
+    NM_TYPES.forEach(([code]) => {
+      if (body.operateType.indexOf(code) < 0) return;
+      const l = nm.filter(r => r.operateType.split('/')[0] === code);
+      if (!l.length) return; // tipo sem pedido parado: a tabela do JMS não mostra a linha
+      const rec = {scanAgentName: 'SPE', scanAgentCode: '370000', dutyCode: '30001', dutyName: 'SP GRU', modleType: 'modern', operateType: code,
+        total: l.length, halfwayCount: l.length * 7, day1: 0, day2: 0, day3: 0, day4: 0, day5: 0, day6: 0, day7: 0, day10: 0, day14: 0, day30: 0,
+        operateTime: l.map(r => r.operateTime).sort().pop()};
+      l.forEach(r => { rec[nmDayKey(r._age)]++; });
+      rec.dayRate14 = (rec.day14 / l.length * 100).toFixed(2) + '%'; rec.dayRate30 = (rec.day30 / l.length * 100).toFixed(2) + '%';
+      recs.push(rec);
+    });
+    return ok(recs.map((r, i) => Object.assign(r, {PAGEHELPER_ROW_ID: i + 1, ROW_ID: i + 1})), recs.length, 1, body.size);
+  }
+  if (body.queryType !== 2 || !Array.isArray(body.operateType) || body.operateType.length !== 1) return respond(200, {code: 500, msg: '参数错误', fail: true});
+  // Sem a Unidade responsável no payload, o JMS devolveria os pedidos de todas as bases (payload sem filtro).
+  let list = nm.filter(r => r.operateType.split('/')[0] === body.operateType[0]);
+  if (body.dutyCode !== '30001') list = list.concat(list.map(r => Object.assign({}, r, {billcode: r.billcode + 'X', dutyName: 'OUTRA BASE FICTICIA'})));
+  const sz = Math.min(100, size);
+  const recs = list.slice((body.current - 1) * sz, body.current * sz).map((r, i) => Object.assign(clean(r), {PAGEHELPER_ROW_ID: (body.current - 1) * sz + i + 1, ROW_ID: (body.current - 1) * sz + i + 1}));
+  return ok(recs, list.length, body.current, sz);
 }
 
 /**
@@ -620,4 +686,4 @@ function makeArrival(date, seed, scale) {
     uploadNoSendNum: prev.length, noSendNum: noSend.length}};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
