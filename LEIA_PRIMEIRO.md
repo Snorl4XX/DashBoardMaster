@@ -1,8 +1,48 @@
-# J&T DASHMASTER V3.23 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.24 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.24 — Resultados em quantidade e atualização mais rápida
+**Resultados: Recebimento, Expedição e Fluxo de Lotes em quantidade.** Nesses três painéis, o gráfico, a etiqueta de cada ponto e a tabela mostram a **quantidade** (não mais a %), somada em cada período (dia, semana, mês, trimestre):
+- Recebimento: **Recebido** (Total de pedidos que chegaram);
+- Expedição: **Total que está saindo no dia**;
+- Fluxo de Lotes: **Quantidade de sacas criadas**.
+
+O número grande à direita é o do último período (com a média por dia, em semana/mês/trimestre). Com um turno escolhido (T1/T2/T3), as colunas mostram a quantidade do turno em cada período, e a tabela mostra também o total do período e a participação do turno (os mesmos turnos dos cartões T1/T2/T3 do painel). Os outros painéis continuam com a taxa.
+
+**Atualização dos dados mais rápida**
+- **Painel aberto:** a cada **2 min** o painel pergunta ao servidor se há dado novo (uma consulta leve, sem ler a planilha) e só recarrega quando o período que está na tela mudou — sem perder os filtros nem a página da tabela. Também confere ao voltar para a aba. Antes, recarregava tudo a cada 30 min, mesmo sem nada novo. A fila, os avisos e os números do menu lateral também se atualizam.
+- **Resumo de hoje (cartões e taxa) mais vezes:** a cada **15 min** no Google Workspace e a cada **30 min** na conta Gmail (antes: de hora em hora). A propriedade `ATUALIZACAO_MIN` muda (5 a 60; `60` = só de hora em hora).
+- **Resumos em paralelo:** os resumos da fila são pedidos ao JMS de uma vez (até 6 por rajada) em vez de um por um. O resumo da Falta de Bipagem (igual para o Recebimento e a Expedição) é consultado uma vez só. O botão **Atualizar** também consulta os dias do período de uma vez.
+- **Conta Gmail:** anteontem (já fechado em todos os painéis) é consultado a cada 3 h em vez de toda hora. Esse tempo e o dos resumos em paralelo pagam o resumo de hoje a cada 30 min, dentro dos 90 min/dia do Google.
+- **Google Workspace:** o download pesado agora tem teto diário — Recebimento **90 min**, Expedição **150 min** (`RECEBIMENTO_MIN_POR_DIA` / `EXPEDICAO_MIN_POR_DIA` mudam; `0` = sem teto). Sem teto, a Expedição usava as 6 h do Google no começo do dia e **todos os painéis ficavam sem atualizar até a meia-noite**.
+- **Expedição (as duas contas):** os IDs de viagem do dia em que o painel abre (ontem) passam na frente da reatualização dos dias antigos e da lista de hoje (na conta Gmail, a lista de hoje fica para quando sobrar tempo no teto de 20 min; os cartões e turnos de hoje vêm do resumo, a cada 30 min).
+
+**Simulação com o volume real do SP GRU** (`node tests/simulacao_cotas.js`, 3º dia depois da instalação; 06h–22h):
+
+| | V3.23 | V3.24 |
+|---|---|---|
+| Painel aberto mostra o dado novo | até 30 min depois | até 2 min depois |
+| Conta Gmail: resumo de hoje (cartões, taxa, turnos) | de hora em hora | a cada 30 min |
+| Conta Gmail: tempo de gatilhos por dia (limite 90 min) | 86,5 min | 85,4 min, nenhuma execução pulada |
+| Conta Gmail: IDs de viagem consultados (3 dias anteriores) | ~81 mil remessas | ~210 mil remessas |
+| Google Workspace: resumo de hoje | 1 vez entre 6h e 22h (as 6 h do Google acabavam de madrugada) | a cada 15 min |
+| Google Workspace: tempo de gatilhos por dia (limite 360 min) | 364 min, 223 execuções bloqueadas | 255 min, nenhuma bloqueada |
+| Google Workspace: detalhe e IDs de viagem (7 dias) | completos | completos |
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão). Os gatilhos continuam os mesmos.
+
+**Propriedades novas (opcionais)**
+| Propriedade | Para quê |
+|---|---|
+| `ATUALIZACAO_MIN` | Minutos entre as atualizações do resumo de hoje (padrão: Workspace 15, Gmail 30; `60` = só de hora em hora) |
+| `JMS_PARALELO_RESUMO` | Resumos pedidos ao JMS por rajada (padrão 6, máximo 10) |
+
+**Não foi possível conferir no JMS real:** se o JMS aceita 6 resumos de uma vez sem recusar. Se recusar, cada resumo é consultado sozinho, como antes, e nada se perde. Para diminuir, use `JMS_PARALELO_RESUMO`.
+
+**Testes:** 393 verificações.
 
 ## V3.23 — Novo painel: Fluxo de Lotes / 建包流程 · filtro "IDs Viagem" na Expedição
 Mostra as **sacas criadas no dia**, ecológicas e normais, com as porcentagens de cada uma, como pedido no documento "DASHBOARD: FLUXO DE LOTES". Tela do JMS: **Estatística de Criação Recorrente de Eco Bag** (resumo "Sumário por dia" da unidade SC; o número vermelho da coluna **Total de pacotes construídos** abre a lista).
@@ -813,6 +853,8 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 | `JMS_NO_SLICE_<ROTA>` | Criada automaticamente se o JMS ignorar a hora no filtro (fatias desligadas naquela rota). |
 | `JMS_PARALLEL` | Páginas baixadas em paralelo (padrão `4`, máximo `8`). |
 | `DETAIL_REFRESH_HOURS` | Intervalo mínimo para rebaixar o detalhe de hoje/ontem (padrão `3`). |
+| `ATUALIZACAO_MIN` | (V3.24) Minutos entre as atualizações do resumo de hoje (padrão: Workspace `15`, Gmail `30`; `60` = só de hora em hora). |
+| `JMS_PARALELO_RESUMO` | (V3.24) Resumos pedidos ao JMS por rajada (padrão `6`, máximo `10`). |
 | `DASHBOARD_MAX_ROWS` | Remessas por consulta no painel (padrão `150000`). Diminua se computadores fracos ficarem lentos. |
 
 ## O que mudou na V3 (histórico)
@@ -944,7 +986,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **381 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **393 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

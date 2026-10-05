@@ -75,6 +75,10 @@
       footer: 'Fonte: JMS (taxas oficiais) · detalhes arquivados no Google Drive',
       resultsNoteRate: 'Taxa do período = Σ erros ÷ Σ base oficial de cada dia (sem contagem de erros, usa a média das taxas diárias).',
       resultsNoteShift: 'Taxa do turno {s} = remessas com erro no {s} ÷ volume total do dia (base oficial do JMS). O JMS não publica volume por turno; somando T1, T2 e T3 dá a taxa de erros do dia. Nos indicadores de prazo (SC → SC, SC → DC), é a taxa fora do prazo.',
+      resultsNoteQty: 'Recebimento, Expedição e Fluxo de Lotes: quantidade do número principal (Recebido · Total que saiu · Sacas criadas) somada em cada período.',
+      resultsNoteShiftQty: 'Recebimento, Expedição e Fluxo de Lotes: quantidade do turno {s} somada em cada período e a participação dele no total.',
+      resQtySub: 'Quantidade · {l}', qty: 'Quantidade', qtyAvgDay: 'Média por dia', qtyShift: 'Quantidade {s}', qtyShiftPeriod: '{s} no período',
+      qtyPeriodTotal: 'Total do período',
       lastPeriod: 'Último período', shiftErrors: 'Erros {s}', shiftShareOf: '{p} do total', noAgg: 'Sem detalhes consolidados deste turno no período.',
       shiftRate: 'Taxa {s}', shiftRatePeriod: 'Taxa {s} no período', shareOfErrors: '{p} dos erros', totalVolume: 'Volume total',
       week: 'Sem {w}', quarterLabel: '{q}º tri/{y}', na: 'Sem informação', bootLoading: 'Carregando painel…',
@@ -183,6 +187,10 @@
       footer: '数据来源：JMS（官方指标率）· 明细存档于 Google Drive',
       resultsNoteRate: '期间指标率 = 各日异常合计 ÷ 各日官方基数合计（缺少异常计数时使用每日指标率平均值）。',
       resultsNoteShift: '{s} 班指标率 = {s} 班异常票数 ÷ 当日总票量（JMS 官方基数）。JMS 不提供分班次票量；T1、T2、T3 相加即为当日异常率。时效类指标（SC → SC、SC → DC）为超时率。',
+      resultsNoteQty: '到件、发件、建包：主数字（已到 · 发出总量 · 建包数）按期间合计。',
+      resultsNoteShiftQty: '到件、发件、建包：{s} 班数量按期间合计及其占比。',
+      resQtySub: '数量 · {l}', qty: '数量', qtyAvgDay: '日均', qtyShift: '{s} 数量', qtyShiftPeriod: '{s} 期间合计',
+      qtyPeriodTotal: '期间合计',
       lastPeriod: '最近期间', shiftErrors: '{s} 异常', shiftShareOf: '占总数 {p}', noAgg: '该期间暂无该班次明细汇总。',
       shiftRate: '{s} 指标率', shiftRatePeriod: '{s} 期间指标率', shareOfErrors: '占异常 {p}', totalVolume: '总票量',
       week: '第{w}周', quarterLabel: '{y}年Q{q}', na: '无', bootLoading: '正在加载看板…',
@@ -519,6 +527,8 @@
       $('#eyebrowCenter').textContent = boot.center || 'SP GRU';
       if (!boot.initialized) { $('#main').classList.add('no-data'); showAlert(t('setupText'), 'warn'); return; }
       renderSyncBanner(boot.pauses);
+      Object.keys(boot.stamps || {}).forEach(function (k) { state.stampKnown = Math.max(state.stampKnown || 0, Number(boot.stamps[k].t) || 0); });
+      state.lastReloadAt = Date.now();
       state.indicator = BOOT.indicator && state.catalogMap[BOOT.indicator] ? BOOT.indicator : (state.catalog[0] ? state.catalog[0].key : 'wrong_send');
       var anchor = anchorDate(state.indicator);
       state.from = anchor; state.to = anchor;
@@ -577,11 +587,54 @@
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') { toggleMenu(false); toggleSidebar(false); }
     });
-    // Atualiza sozinho a cada 30 min quando a aba está visível (sem perder os filtros).
+    // V3.24: a cada 2 min (aba visível) confere no servidor se há dado novo e só então recarrega, sem perder os filtros.
+    // Antes: recarregava tudo a cada 30 min, mesmo sem nada novo (o dado novo podia levar até 30 min para aparecer).
+    setInterval(function () { checkForUpdates(false); }, POLL_MS);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') checkForUpdates(false); });
+    // Rede de segurança: recarga completa a cada 30 min se nada recarregou nesse tempo.
     setInterval(function () {
-      if (document.visibilityState !== 'visible' || !state.boot || !state.boot.initialized) return;
-      if (state.view === 'results') loadResults(true); else loadDashboard({silent: true});
+      if (document.visibilityState !== 'visible' || !state.boot || !state.boot.initialized || Date.now() - (state.lastReloadAt || 0) < 25 * 60 * 1000) return;
+      reloadSilently();
     }, 30 * 60 * 1000);
+  }
+  var POLL_MS = 2 * 60 * 1000;
+  function reloadSilently() {
+    state.lastReloadAt = Date.now();
+    if (state.view === 'results') loadResults(true); else loadDashboard({silent: true});
+  }
+  /** Algum dia do período aberto (e do período anterior, usado nas comparações) foi gravado depois da leitura do painel? */
+  function stampChangedForView(st, loaded) {
+    if (!st || !st.d) return false;
+    var len = Core.daysBetween(state.from, state.to) + 1, lo = Core.addDays(state.from, -len), hi = state.to;
+    var old = (loaded && loaded.d) || {};
+    return Object.keys(st.d).some(function (d) { return d >= lo && d <= hi && Number(st.d[d]) > Number(old[d] || 0); });
+  }
+  /**
+   * Conferência leve (getUpdateStamp: só propriedades e cache no servidor): atualiza a fila, os avisos e os números do
+   * menu; recarrega o painel aberto quando um dia do período dele tem dado novo (Resultados: qualquer painel).
+   */
+  function checkForUpdates(force) {
+    if (!state.boot || !state.boot.initialized || state.checking) return;
+    if (!force && (document.visibilityState !== 'visible' || Date.now() - (state.lastCheckAt || 0) < 60000)) return;
+    state.checking = true; state.lastCheckAt = Date.now();
+    var known = Math.max(state.stampKnown || 0, 0);
+    call('getUpdateStamp', known).then(function (res) {
+      if (!res) return;
+      var stamps = res.stamps || {};
+      Object.keys(stamps).forEach(function (k) { state.stampKnown = Math.max(state.stampKnown || 0, Number(stamps[k].t) || 0); });
+      if (res.latestByIndicator) { state.boot.latestByIndicator = res.latestByIndicator; buildNav(); }
+      if (res.pauses) renderSyncBanner(res.pauses);
+      if (res.sync) updateSidebarStatus(res.sync, res.lastUpdated || state.lastSyncTs);
+      // Não recarrega com uma lista de filtro ou o menu de relatório abertos (tenta de novo na próxima conferência).
+      var busy = Object.keys(state.dropdowns).some(function (k) { return state.dropdowns[k].isOpen; }) || !$('#reportPop').hidden || $('#progress').classList.contains('on');
+      if (busy) return;
+      if (state.view === 'results') {
+        var maxT = Object.keys(stamps).reduce(function (m, k) { return Math.max(m, Number(stamps[k].t) || 0); }, 0);
+        if (state.results.data && maxT > Number(state.results.data.stampT || 0)) reloadSilently();
+      } else if (state.data && state.data.meta && state.data.meta.indicator === state.indicator && stampChangedForView(stamps[state.indicator], state.data.meta.stamp)) {
+        reloadSilently();
+      }
+    }).catch(function () { /* sem rede: tenta na próxima */ }).then(function () { state.checking = false; });
   }
   function toggleMenu(force) {
     var pop = $('#reportPop'), open = force === undefined ? pop.hidden : force;
@@ -746,12 +799,13 @@
       var allowed = {};
       (c.filters || []).forEach(function (f) { allowed[f.key] = 1; });
       Object.keys(state.filters).forEach(function (k) { if (!allowed[k]) delete state.filters[k]; });
-      state.table.page = 1;
+      if (!opts.silent) state.table.page = 1;
       hideAlert();
       $('#main').classList.remove('awaiting');
       if (opts.resetFilters || !Object.keys(state.dropdowns).length || state.builtFor !== state.indicator) buildFilterGrid();
       renderDashboard();
       updateSidebarStatus(res.meta.sync, res.meta.lastRateSyncedAt);
+      state.lastReloadAt = Date.now();
     }).catch(function (e) {
       if (seq !== state.seq) return;
       if (!state.data || state.data.meta.indicator !== state.indicator) $('#main').classList.add('awaiting');
@@ -2788,6 +2842,7 @@
     return call('getResultsData', {from: state.results.from, to: state.results.to, indicator: state.results.indicator || ''}).then(function (res) {
       if (seq !== state.seq) return;
       state.results.data = res;
+      state.lastReloadAt = Date.now();
       hideAlert();
       renderResults();
     }).catch(function (e) {
@@ -2801,7 +2856,12 @@
     $$('#periodTabs button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-period') === r.periodicity)); });
     if (!data) return;
     r.multiYear = data.from.slice(0, 4) !== data.to.slice(0, 4);
-    $('#resultsNote').textContent = r.shift === 'all' ? t('resultsNoteRate') : t('resultsNoteShift', {s: r.shift});
+    // Painéis por quantidade (Recebimento, Expedição, Fluxo de Lotes): os Resultados mostram a quantidade, não a taxa.
+    var anyQty = data.series.some(function (s) { return isQtyInd(state.catalogMap[s.key]); });
+    var allQty = data.series.length && data.series.every(function (s) { return isQtyInd(state.catalogMap[s.key]); });
+    var noteRate = r.shift === 'all' ? t('resultsNoteRate') : t('resultsNoteShift', {s: r.shift});
+    var noteQty = r.shift === 'all' ? t('resultsNoteQty') : t('resultsNoteShiftQty', {s: r.shift});
+    $('#resultsNote').textContent = allQty ? noteQty : anyQty ? noteRate + ' ' + noteQty : noteRate;
     Object.keys(state.charts).forEach(function (k) { if (k.indexOf('res_') === 0) destroyChart(k); });
     var single = data.series.length === 1;
     grid.className = 'results-grid' + (single ? ' single' : '');
@@ -2811,8 +2871,20 @@
       if (!c) return;
       var card = document.createElement('article');
       card.className = 'card res-card';
-      var points, top = '', hasData;
-      if (r.shift === 'all') {
+      var points, top = '', hasData, qty = isQtyInd(c);
+      if (qty && r.shift === 'all') {
+        points = Core.aggregateQtyResults(s.rates, r.periodicity, data.from, data.to);
+        var lastQ = points.filter(function (p) { return p.value !== null; }).slice(-1)[0];
+        hasData = !!lastQ;
+        top = lastQ ? '<div class="res-value"><strong>' + fmtInt(lastQ.value) + '</strong><small class="muted">' + esc(t('lastPeriod')) + ' · ' +
+          esc(fmtPeriodKey(lastQ.key, r.periodicity)) + (lastQ.days > 1 ? ' · ' + esc(t('qtyAvgDay')) + ': ' + fmtInt(lastQ.avg) : '') + '</small></div>' : '';
+      } else if (qty) {
+        points = Core.aggregateShiftResults(s.agg, r.periodicity, r.shift, data.from, data.to);
+        var sumQ = points.reduce(function (a, p) { return a + (p.count || 0); }, 0), sumQT = points.reduce(function (a, p) { return a + (p.total || 0); }, 0);
+        hasData = points.some(function (p) { return p.count !== null; });
+        top = hasData ? '<div class="res-value"><strong>' + fmtInt(sumQ) + '</strong><small class="muted">' + esc(t('qtyShiftPeriod', {s: r.shift})) + ' · ' +
+          esc(t('shiftShareOf', {p: fmtPct(sumQT ? sumQ / sumQT * 100 : null, 1)})) + '</small></div>' : '';
+      } else if (r.shift === 'all') {
         points = Core.aggregateResults(s.rates, c.goal, r.periodicity, data.from, data.to);
         var last = points.filter(function (p) { return p.rate !== null; }).slice(-1)[0];
         hasData = !!last;
@@ -2828,17 +2900,63 @@
           esc(tx(c, 'shareOfErrors', {p: fmtPct(sumT ? sumC / sumT * 100 : null, 1)})) + '</small></div>' : '';
       }
       card.innerHTML = '<div class="res-top"><span class="chart-ico">' + icon(s.key) + '</span><div><h3>' + esc(L(c.name)) +
-        (Lo(c.name) ? ' <span class="rp-zh">/ ' + esc(Lo(c.name)) + '</span>' : '') + '</h3><small>' + esc(goalLabel(c.goal)) + '</small></div>' + top + '</div><div class="chart-wrap' + (single ? ' large' : '') + '"></div>' + (single ? '<div class="res-table"></div>' : '');
+        (Lo(c.name) ? ' <span class="rp-zh">/ ' + esc(Lo(c.name)) + '</span>' : '') + '</h3><small>' + esc(qty ? t('resQtySub', {l: L(c.heroMetric.label)}) : goalLabel(c.goal)) + '</small></div>' + top + '</div><div class="chart-wrap' + (single ? ' large' : '') + '"></div>' + (single ? '<div class="res-table"></div>' : '');
       grid.appendChild(card);
       var wrap = $('.chart-wrap', card);
       if (!hasData) { wrap.innerHTML = '<div class="chart-empty"><div><b>' + esc(t('noData')) + '</b>' + esc(r.shift === 'all' ? t('noRateHint') : t('noAgg')) + '</div></div>'; return; }
       if (!window.Chart) wrap.innerHTML = '<div class="chart-empty">' + esc(t('noChartLib')) + '</div>';
       else {
         wrap.innerHTML = '<canvas role="img" aria-label="' + esc(L(c.name)) + '"></canvas>';
-        state.charts['res_' + s.key] = new Chart($('canvas', wrap), r.shift === 'all' ? resultRateConfig(points, c, r.periodicity) : resultShiftConfig(points, r.shift, r.periodicity, c));
+        state.charts['res_' + s.key] = new Chart($('canvas', wrap), qty ? (r.shift === 'all' ? resultQtyConfig(points, c, r.periodicity) : resultShiftQtyConfig(points, r.shift, r.periodicity, c))
+          : r.shift === 'all' ? resultRateConfig(points, c, r.periodicity) : resultShiftConfig(points, r.shift, r.periodicity, c));
       }
       if (single) $('.res-table', card).innerHTML = '<div class="table-scroll" style="max-height:420px">' + resultsTable(points, c, r) + '</div>';
     });
+  }
+  /** Painel por quantidade (Recebimento, Expedição, Fluxo de Lotes): cartão principal = número do JMS, não uma taxa. */
+  function isQtyInd(c) { return !!(c && c.heroMetric && c.metricCards); }
+  /** Quantidade do número principal por período (linha vermelha), com a quantidade na etiqueta de cada ponto. */
+  function resultQtyConfig(points, c, per) {
+    var vals = points.map(function (p) { return p.value; });
+    return {
+      type: 'line',
+      data: {labels: points.map(function (p) { return fmtPeriodKey(p.key, per); }), datasets: [
+        {label: t('qty'), data: vals, borderColor: RED, borderWidth: 2.2, cubicInterpolationMode: 'monotone', spanGaps: per !== 'day', fill: false,
+          pointRadius: points.length > 90 ? 1.5 : 4, pointHoverRadius: 6, pointBorderColor: '#fff', pointBorderWidth: 1.5, pointBackgroundColor: RED}
+      ]},
+      plugins: plugins(),
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 600}, interaction: {mode: 'index', intersect: false}, layout: {padding: {top: 26, right: 36}},
+        plugins: {legend: {display: false},
+          tooltip: {callbacks: {label: function (ctx) {
+            var p = points[ctx.dataIndex];
+            return p.value === null ? ' —' : ' ' + L(c.heroMetric.label) + ': ' + fmtInt(p.value) + ' · ' + p.days + ' ' + t('days') +
+              (p.days > 1 ? ' · ' + t('qtyAvgDay') + ': ' + fmtInt(p.avg) : '');
+          }}},
+          datalabels: {align: 'top', offset: 6, clip: false, padding: 0, color: INK, font: {size: 11, weight: '800'},
+            formatter: function (v) { return fmtInt(v); }, display: function (ctx) { return showResLabel(ctx, points, vals); }}},
+        scales: {x: {grid: {display: false}, border: {display: false}, ticks: {autoSkip: true, maxTicksLimit: 16, maxRotation: 0}},
+          y: {beginAtZero: true, grid: {color: GRID}, border: {display: false}, grace: '18%', ticks: {precision: 0, callback: function (v) { return compactInt(v); }}}}}
+    };
+  }
+  /** Quantidade de um turno por período (colunas na cor do turno), com a quantidade em cima de cada coluna. */
+  function resultShiftQtyConfig(points, shift, per, c) {
+    var vals = points.map(function (p) { return p.count; });
+    return {
+      type: 'bar',
+      data: {labels: points.map(function (p) { return fmtPeriodKey(p.key, per); }), datasets: [{label: t('qtyShift', {s: shift}), data: vals,
+        backgroundColor: SHIFT_COLORS[shift], borderRadius: 4, borderSkipped: 'start', maxBarThickness: 30}]},
+      plugins: plugins(),
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 600}, layout: {padding: {top: 22}},
+        plugins: {legend: {display: false}, tooltip: {callbacks: {label: function (ctx) {
+          var p = points[ctx.dataIndex];
+          return p.count === null ? ' —' : [' ' + t('qtyShift', {s: shift}) + ': ' + fmtInt(p.count) + ' · ' + t('qtyPeriodTotal') + ': ' + fmtInt(p.total),
+            ' ' + t('shiftShareOf', {p: fmtPct(p.pct, 1)}) + ' · ' + p.days + ' ' + t('days')];
+        }}},
+          datalabels: {anchor: 'end', align: 'end', offset: 3, clip: false, padding: 0, color: INK, font: {size: 11, weight: '800'},
+            formatter: function (v) { return fmtInt(v); }, display: function (ctx) { return dv(ctx) !== null && dv(ctx) > 0 && showResLabel(ctx, points, vals); }}},
+        scales: {x: {grid: {display: false}, border: {color: '#D9DBE1'}, ticks: {autoSkip: true, maxTicksLimit: 14, maxRotation: 0, color: INK, font: {weight: '700'}}},
+          y: {beginAtZero: true, grace: '18%', grid: {color: GRID}, border: {display: false}, ticks: {precision: 0, callback: function (v) { return compactInt(v); }}}}}
+    };
   }
   function resultRateConfig(points, c, per) {
     var vals = points.map(function (p) { return p.rate; }), n = vals.filter(isNum).length;
@@ -2914,7 +3032,20 @@
   }
   function resultsTable(points, c, r) {
     var h, rows;
-    if (r.shift === 'all') {
+    if (isQtyInd(c) && r.shift === 'all') {
+      h = '<th>' + esc(t('period')) + '</th><th class="num">' + esc(L(c.heroMetric.label)) + '</th><th class="num">' + esc(t('qtyAvgDay')) + '</th><th class="num">' + esc(t('days')) + '</th>';
+      rows = points.slice().reverse().filter(function (p) { return p.value !== null; }).map(function (p) {
+        return '<tr><td>' + esc(fmtPeriodKey(p.key, r.periodicity)) + '</td><td class="num"><b>' + fmtInt(p.value) + '</b></td><td class="num">' + fmtInt(p.avg) +
+          '</td><td class="num">' + p.days + '</td></tr>';
+      });
+    } else if (isQtyInd(c)) {
+      h = '<th>' + esc(t('period')) + '</th><th class="num">' + esc(t('qtyShift', {s: r.shift})) + '</th><th class="num">' + esc(t('qtyPeriodTotal')) + '</th><th class="num">' +
+        esc(t('share')) + '</th><th class="num">' + esc(t('days')) + '</th>';
+      rows = points.slice().reverse().filter(function (p) { return p.count !== null; }).map(function (p) {
+        return '<tr><td>' + esc(fmtPeriodKey(p.key, r.periodicity)) + '</td><td class="num"><b>' + fmtInt(p.count) + '</b></td><td class="num">' + fmtInt(p.total) +
+          '</td><td class="num">' + fmtPct(p.pct, 1) + '</td><td class="num">' + p.days + '</td></tr>';
+      });
+    } else if (r.shift === 'all') {
       h = '<th>' + esc(t('period')) + '</th><th class="num">' + esc(t('rate')) + '</th><th class="num">' + esc(t('goal')) + '</th><th>' + esc(t('status')) + '</th><th class="num">' + esc(tx(c, 'errors')) + '</th><th class="num">' + esc(t('days')) + '</th>';
       rows = points.slice().reverse().filter(function (p) { return p.rate !== null; }).map(function (p) {
         return '<tr><td>' + esc(fmtPeriodKey(p.key, r.periodicity)) + '</td><td class="num"><b>' + fmtRate(p.rate, c.goal) + '</b></td><td class="num">' + esc(goalText(c.goal)) + '</td><td>' +

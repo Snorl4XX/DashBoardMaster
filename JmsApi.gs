@@ -296,8 +296,14 @@ function jmsPostOnce_(url, payload, attempts) {
   validateJmsAuth_();
   const tries = Math.min(3, Math.max(1, Number(attempts) || 1));
   let error, authRetried = false;
+  // Resposta já pedida em paralelo (prefetchSummaries_) vale como a 1ª tentativa; as seguintes consultam de novo.
+  let pre = takePrefetched_(url, payload);
   for (let i = 0; i < tries; i++) {
-    try { return parseJmsResponse_(urlFetch_(jmsRequestObject_(url, payload)), url); }
+    try {
+      const resp = pre || urlFetch_(jmsRequestObject_(url, payload));
+      pre = null;
+      return parseJmsResponse_(resp, url);
+    }
     catch (e) {
       error = e;
       // HTTP 401/403 isolado pode ser recusa momentânea do gateway (rajada de requisições):
@@ -309,6 +315,48 @@ function jmsPostOnce_(url, payload, attempts) {
     }
   }
   throw error || new Error('Falha sem diagnóstico.');
+}
+
+/**
+ * Resumos em paralelo (V3.24): antes de rodar os resumos da fila (ou o botão "Atualizar"), a página 1 de cada um é
+ * pedida ao JMS de uma vez (UrlFetchApp.fetchAll) e guardada aqui. jmsPost_ usa a resposta guardada no lugar da 1ª
+ * consulta; resposta com erro segue o caminho normal (novas tentativas, variantes de rota, pausa por credencial).
+ * Antes, cada resumo esperava o anterior: ~10 consultas em sequência a cada atualização.
+ */
+var JMS_PREFETCH_ = {};
+function prefetchKey_(url, payload) { return url + '\n' + JSON.stringify(payload || {}); }
+function takePrefetched_(url, payload) {
+  const k = prefetchKey_(url, payload), e = JMS_PREFETCH_[k];
+  if (!e) return null;
+  // Resumo igual para dois painéis (Falta de Bipagem no Recebimento e na Expedição): a mesma resposta serve os dois.
+  if (--e.left <= 0) delete JMS_PREFETCH_[k];
+  return e.resp;
+}
+/** Consultas de resumo em paralelo por rajada (propriedade JMS_PARALELO_RESUMO; padrão 6). */
+function summaryParallel_() { return Math.max(1, Math.min(10, Number(getProp_('JMS_PARALELO_RESUMO', '')) || 6)); }
+/** items: [{indicator, date}]. Devolve quantas respostas ficaram guardadas. */
+function prefetchSummaries_(items) {
+  const reqs = [], keys = [], uses = {};
+  (items || []).forEach(it => {
+    try {
+      const cfg = getIndicatorConfig_(it.indicator), url = endpointFor_(cfg, 'summary');
+      const payload = buildPayload_(it.indicator, it.date, 1, APP_CONFIG.PAGE_SIZE, false), k = prefetchKey_(url, payload);
+      uses[k] = (uses[k] || 0) + 1;
+      if (JMS_PREFETCH_[k] || keys.indexOf(k) >= 0) return;
+      reqs.push(jmsRequestObject_(url, payload)); keys.push(k);
+    } catch (e) { /* o caminho normal mostra o erro deste resumo */ }
+  });
+  if (reqs.length < 2 && !keys.some(k => uses[k] > 1)) return 0;
+  validateJmsAuth_();
+  const par = summaryParallel_();
+  let n = 0;
+  for (let i = 0; i < reqs.length; i += par) {
+    let resp;
+    try { resp = UrlFetchApp.fetchAll(reqs.slice(i, i + par)); }
+    catch (e) { return n; } // cota/rede: cada resumo consulta sozinho e mostra o erro como antes
+    resp.forEach((r, j) => { if (r) { JMS_PREFETCH_[keys[i + j]] = {resp: r, left: uses[keys[i + j]] || 1}; n++; } });
+  }
+  return n;
 }
 
 function recordsOf_(json) {

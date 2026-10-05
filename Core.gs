@@ -716,6 +716,24 @@ function JTCoreFactory_() {
     });
   }
   /**
+   * Painéis por quantidade (Recebimento, Expedição, Fluxo de Lotes): soma do número principal (`value` de cada dia) por
+   * período, com os dias que têm o número e a média por dia.
+   */
+  function aggregateQtyResults(rows, periodicity, from, to) {
+    var buckets = {};
+    (rows || []).forEach(function (r) {
+      if (!r || r.date < from || r.date > to || !isNum(r.value)) return;
+      var k = bucketKey(r.date, periodicity), b = buckets[k] || (buckets[k] = {value: 0, days: 0});
+      b.value += Number(r.value); b.days++;
+    });
+    var keys = [];
+    dateRange(from, to).forEach(function (d) { var k = bucketKey(d, periodicity); if (keys.indexOf(k) < 0) keys.push(k); });
+    return keys.map(function (k) {
+      var b = buckets[k];
+      return b ? {key: k, value: b.value, days: b.days, avg: b.value / b.days} : {key: k, value: null, days: 0, avg: null};
+    });
+  }
+  /**
    * Resultado de UM turno por período. rate = taxa do turno (em % ou ppm, conforme `scale`): erros do turno ÷ volume total
    * (base oficial do JMS) dos dias que têm os dois. O JMS não publica volume por turno; assim as
    * taxas de T1+T2+T3 somam a taxa de erros do período. pct = participação do turno nos erros.
@@ -812,7 +830,7 @@ function JTCoreFactory_() {
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
-    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults,
+    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
     encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText
   };
 }

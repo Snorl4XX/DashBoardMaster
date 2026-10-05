@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.23.0',
+  VERSION: '3.24.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -37,6 +37,10 @@ const APP_CONFIG = Object.freeze({
   GROUPED_DETAIL_MIN_START_MS: 150000, // detalhe agrupado só começa com 2,5 min livres na execução
   GROUPED_GMAIL_MIN_PER_DAY: 35,       // conta Gmail (90 min/dia de gatilhos; os outros painéis usam ~50): teto diário do detalhe do Recebimento
   SEND_GMAIL_MIN_PER_DAY: 20,          // conta Gmail: teto diário da Expedição (detalhe por rota + IDs de viagem). EXPEDICAO_MIN_POR_DIA muda
+  // V3.24: Google Workspace (6 h/dia de gatilhos). Sem teto, a Expedição usava as 6 h e o resto do dia ficava sem
+  // atualização (nem os resumos rodavam). Com o teto, sobra tempo para atualizar todos os painéis o dia inteiro.
+  GROUPED_WORKSPACE_MIN_PER_DAY: 90,   // Recebimento (RECEBIMENTO_MIN_POR_DIA muda; 0 = sem teto)
+  SEND_WORKSPACE_MIN_PER_DAY: 150,     // Expedição (EXPEDICAO_MIN_POR_DIA muda; 0 = sem teto)
   TRIP_BATCH: 100,                     // remessas por consulta no Rastreamento do pacote (o robô aprende um limite menor sozinho)
   TRIP_PARALLEL: 4,                    // consultas de rastreamento em paralelo
   MAX_REPORT_DETAIL_ROWS: 60000,

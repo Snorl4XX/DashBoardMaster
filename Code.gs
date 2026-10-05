@@ -33,28 +33,48 @@ function requireDb_() {
   }
 }
 
+/**
+ * Número de cada painel no menu lateral. O painel abre no último dia FECHADO com taxa: o dia corrente ainda está
+ * incompleto no JMS (gráficos pareciam vazios/parciais ao abrir).
+ */
+function latestByIndicator_() {
+  const latest = {};
+  Object.keys(INDICATORS).forEach(k => {
+    const r = getRates_(k, null, isoToday_());
+    const anchor = anchorDate_(k, r);
+    const last = r.filter(x => x.date === anchor)[0] || null;
+    latest[k] = last ? {date: last.date, rate: last.rate, met: JTCore_.goalMet(last.rate, INDICATORS[k].goal)} : null;
+    // Recebimento: no menu, a quantidade que deve chegar HOJE (número do resumo), em vez da taxa.
+    const hm = INDICATORS[k].heroMetric, nk = INDICATORS[k].navMetric || (hm && hm.key);
+    if (nk) {
+      const today = r.filter(x => x.date === isoToday_())[0] || last;
+      if (today && today.metrics && today.metrics[nk] !== undefined) {
+        latest[k] = Object.assign(latest[k] || {date: today.date, rate: today.rate, met: null}, {qty: Number(today.metrics[nk]), qtyDate: today.date});
+      }
+    }
+  });
+  return latest;
+}
+
+/**
+ * Conferência leve do painel aberto (V3.24, a cada 2 min): carimbo de dados novos de cada painel, a fila e as pausas.
+ * `known` = maior carimbo que o navegador já tem; se algum painel tiver dado mais novo, manda também os números do menu.
+ * Lê só as propriedades e o cache (nada da planilha, a não ser os números do menu quando algo mudou).
+ */
+function getUpdateStamp(known) {
+  if (!getProp_('DB_SPREADSHEET_ID', '')) return safeReturn_({stamps: {}, sync: null, pauses: []});
+  const stamps = dataStamps_(), k = Number(known) || 0;
+  const newer = Object.keys(stamps).some(x => Number(stamps[x].t) > k);
+  return safeReturn_({stamps: stamps, sync: getSyncStatus(), pauses: publicPauses_(), now: Date.now(),
+    latestByIndicator: newer ? latestByIndicator_() : null, lastUpdated: newer ? getLatestSyncedAt_() : null});
+}
+
 function getAppBootstrap() {
   const initialized = !!getProp_('DB_SPREADSHEET_ID', '');
-  const latest = {};
-  let lastUpdated = null, earliest = null;
+  let lastUpdated = null, earliest = null, latest = {};
   let pauses = [];
   if (initialized) {
-    // O painel abre no último dia FECHADO com taxa: o dia corrente ainda está
-    // incompleto no JMS (gráficos pareciam vazios/parciais ao abrir).
-    Object.keys(INDICATORS).forEach(k => {
-      const r = getRates_(k, null, isoToday_());
-      const anchor = anchorDate_(k, r);
-      const last = r.filter(x => x.date === anchor)[0] || null;
-      latest[k] = last ? {date: last.date, rate: last.rate, met: JTCore_.goalMet(last.rate, INDICATORS[k].goal)} : null;
-      // Recebimento: no menu, a quantidade que deve chegar HOJE (número do resumo), em vez da taxa.
-      const hm = INDICATORS[k].heroMetric, nk = INDICATORS[k].navMetric || (hm && hm.key);
-      if (nk) {
-        const today = r.filter(x => x.date === isoToday_())[0] || last;
-        if (today && today.metrics && today.metrics[nk] !== undefined) {
-          latest[k] = Object.assign(latest[k] || {date: today.date, rate: today.rate, met: null}, {qty: Number(today.metrics[nk]), qtyDate: today.date});
-        }
-      }
-    });
+    latest = latestByIndicator_();
     lastUpdated = getLatestSyncedAt_();
     earliest = getEarliestRateDate_();
     pauses = publicPauses_();
@@ -64,7 +84,7 @@ function getAppBootstrap() {
     center: centerName_(), catalog: getPublicCatalog_(), shiftColors: SHIFT_COLORS,
     today: isoToday_(), historyStart: getProp_('DATA_START_DATE', '') || earliest || '',
     latestByIndicator: latest, lastUpdated: lastUpdated, initialized: initialized,
-    sync: initialized ? getSyncStatus() : null, pauses: pauses
+    sync: initialized ? getSyncStatus() : null, pauses: pauses, stamps: initialized ? dataStamps_() : {}
   });
 }
 
@@ -90,6 +110,8 @@ function refreshNow(indicatorKey, from, to) {
 
   const dates = dateRangeIso_(from, to).reverse();
   const deadline = Date.now() + APP_CONFIG.REFRESH_BUDGET_MS;
+  // V3.24: os dias do período pedidos ao JMS de uma vez (em paralelo), em vez de um por um.
+  try { prefetchSummaries_(dates.slice(0, APP_CONFIG.REFRESH_MAX_DAYS).map(d => ({indicator: indicatorKey, date: d}))); } catch (e) { /* um por um, como antes */ }
   const result = {ok: true, updated: 0, empty: 0, failed: 0, pendingDays: 0, detailsQueued: 0, errors: []};
   const later = [];
   let authError = false;
@@ -102,6 +124,7 @@ function refreshNow(indicatorKey, from, to) {
       if (s.empty) { updateDayStatus_(indicatorKey, d, {summaryStatus: 'NO_RECORD', detailsStatus: 'NO_RECORD', error: ''}); result.empty++; return; }
       upsertRate_(s);
       result.updated++;
+      bumpDataStamp_(indicatorKey, d);
       if (detailNeedsRefresh_(indicatorKey, d, prev, s, st, true)) result.detailsQueued += enqueueJobs_([['DETAIL_INIT', indicatorKey, d, 1]], {reset: true});
     } catch (e) {
       const msg = String(e && e.message || e).slice(0, 900);

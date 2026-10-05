@@ -957,16 +957,68 @@ function queueHistory(from, to, includeDetails) {
   return {ok: true, from: start, to: end, days: dates.length, indicators: keys.length, queued: queued, details: includeDetails !== false};
 }
 /** Hora a hora: revalida as taxas dos 3 últimos dias (rotas pausadas ficam de fora). Detalhes só se a taxa mudar. */
+/**
+ * Carimbo de dados novos por painel (V3.24): {t: hora da última gravação, d: {dia: hora}} dos 31 dias gravados por
+ * último. O painel aberto confere a cada 2 min (getUpdateStamp) e só recarrega quando o período dele mudou.
+ */
+function bumpDataStamp_(indicator, date) {
+  try {
+    const key = 'STAMP_' + String(indicator).toUpperCase(), now = Date.now();
+    const st = safeJsonParse_(getProp_(key, ''), null) || {t: 0, d: {}};
+    st.t = now; st.d = st.d || {};
+    if (isIso_(date)) st.d[date] = now;
+    const days = Object.keys(st.d).sort((a, b) => st.d[b] - st.d[a]);
+    days.slice(31).forEach(x => { delete st.d[x]; });
+    setProp_(key, JSON.stringify(st));
+  } catch (e) { /* o painel recarrega pelo intervalo de segurança */ }
+}
+function dataStamps_() {
+  const out = {};
+  Object.keys(INDICATORS).forEach(k => { const st = safeJsonParse_(getProp_('STAMP_' + k.toUpperCase(), ''), null); if (st) out[k] = st; });
+  return out;
+}
+/**
+ * Minutos entre as atualizações do resumo de HOJE (V3.24). Propriedade ATUALIZACAO_MIN; padrão: 15 no Google
+ * Workspace e 30 na conta Gmail (o resumo é consultado em paralelo e cabe na cota de 90 min/dia). 60 = só de hora em hora.
+ */
+function todayRefreshMin_() {
+  const v = Number(getProp_('ATUALIZACAO_MIN', ''));
+  if (v > 0) return Math.max(5, Math.min(60, v));
+  return googlePlan_() === 'gmail' ? 30 : 15;
+}
+/** Coloca o resumo de hoje de cada painel na fila quando chega a hora (chamado pelo trabalhador a cada 5 min). */
+function queueTodayRefresh_() {
+  const min = todayRefreshMin_();
+  if (min >= 60 || !getProp_('DB_SPREADSHEET_ID', '')) return 0;
+  const now = Date.now(), last = Number(getProp_('TODAY_REFRESH_AT', '')) || 0;
+  // 1 min de folga: o gatilho de 5 min não cai exatamente no mesmo segundo.
+  if (now - last < min * 60000 - 60000) return 0;
+  const pauses = activePauses_();
+  if (pauses['*']) return 0;
+  setProp_('TODAY_REFRESH_AT', String(now));
+  const today = isoToday_(), gmail = googlePlan_() === 'gmail', jobs = [];
+  Object.keys(INDICATORS).forEach(k => {
+    // Fluxo de Lotes na conta Gmail: a cada 3 h (sincronização de hora em hora).
+    if (INDICATORS[k].light && gmail) return;
+    if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, today, 0]);
+  });
+  return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+}
 function queueRecentRefresh_() {
   const pauses = activePauses_();
   if (pauses['*']) return 0;
   const days = [isoToday_(), addDaysIso_(isoToday_(), -1), addDaysIso_(isoToday_(), -2)];
   const jobs = [];
+  // Hoje já entrou agora: a atualização rápida (queueTodayRefresh_) conta o intervalo a partir daqui.
+  setProp_('TODAY_REFRESH_AT', String(Date.now()));
   // Fluxo de Lotes (light) na conta Gmail (90 min/dia de gatilhos para todos os painéis): hoje a cada 3 h e os dois
   // dias anteriores uma vez por dia, às 3h. No Google Workspace, de hora em hora como os outros.
   const gmail = googlePlan_() === 'gmail', h = gmail ? hourNow_() : 0;
   days.forEach((d, i) => Object.keys(INDICATORS).forEach(k => {
     if (INDICATORS[k].light && gmail && (i === 0 ? h % 3 !== 0 : h !== 3)) return;
+    // V3.24, conta Gmail: anteontem já está fechado em todos os painéis (SC→SC/SC→DC fecham às 13:59 do dia seguinte):
+    // a cada 3 h em vez de toda hora — o tempo economizado paga o resumo de hoje a cada 30 min.
+    if (gmail && i === 2 && h % 3 !== 0) return;
     if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, d, 0]);
   }));
   return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
@@ -993,7 +1045,10 @@ function pendingJobs_() {
   const rank = j => {
     if ((j.type === 'DETAIL_INIT' && heavyGrouped_(INDICATORS[j.indicator])) || j.type === 'TRIPS') {
       const a = anchor[j.indicator] || (anchor[j.indicator] = lastClosedDate_(j.indicator));
-      return (j.type === 'TRIPS' ? 2.8 : 2.5) + (j.date === a ? 0 : 0.1);
+      // V3.24: IDs de viagem do dia em que o painel abre logo depois do detalhe dele, antes de rebaixar a situação dos
+      // dias mais antigos (com o teto diário do Workspace, eles ficavam para trás).
+      if (j.type === 'TRIPS') return j.date === a ? 2.55 : 2.9;
+      return j.date === a ? 2.5 : 2.6;
     }
     return prio[j.type] === undefined ? 3 : prio[j.type];
   };
@@ -1283,13 +1338,17 @@ function processSyncQueue(opts) {
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
   try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
+  // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
+  try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return {ok: false, busy: true};
   const startedAt = Date.now();
   const deadline = startedAt + (opts.budgetMs || APP_CONFIG.WORKER_BUDGET_MS);
   let done = 0, failed = 0, waiting = 0, partial = 0, paused = 0, stopped = false;
-  const attempted = {};
+  const attempted = {}, prefetched = {};
+  // Resumos em paralelo só depois de um resumo desta execução dar certo: com o token vencido, continua uma consulta por rota.
+  let summaryOk = false;
   try {
     recoverStaleRunning_();
     migrateToV37_();
@@ -1316,9 +1375,19 @@ function processSyncQueue(opts) {
         // Teto diário do Recebimento e da Expedição (conta Gmail): o resto do dia fica para os outros painéis.
         const budget = grouped ? groupedBudgetLeftMs_(job.indicator) : Infinity;
         if (grouped && budget < 90000) { waiting++; continue; }
+        // Resumos: a página 1 deste e dos próximos da fila pedida ao JMS de uma vez (em paralelo).
+        if (job.type === 'SUMMARY' && summaryOk && !prefetched[job.rowNum] && Date.now() < deadline - 30000) {
+          const cand = [job].concat(queue.filter(j => j.type === 'SUMMARY' && j !== job && !attempted[j.rowNum] && !prefetched[j.rowNum] &&
+            !pauseFor_(INDICATORS[j.indicator].routeKey, pauses)));
+          // Até 12 por vez, completando o último dia (resumo igual para dois painéis vem na mesma rajada).
+          const last = cand.slice(0, 12).pop(), batch = cand.slice(0, 12).concat(cand.slice(12).filter(j => last && j.date === last.date));
+          batch.forEach(j => { prefetched[j.rowNum] = 1; });
+          try { prefetchSummaries_(batch.map(j => ({indicator: j.indicator, date: j.date}))); } catch (e) { /* cada resumo consulta sozinho */ }
+        }
         const t0 = Date.now();
         const r = processJob_(job, grouped ? Math.min(deadline, t0 + budget) : deadline);
         if (grouped && budget !== Infinity) addGroupedUsedMs_(Date.now() - t0, job.indicator);
+        if (job.type === 'SUMMARY' && r === 'done') summaryOk = true;
         progressed = true;
         if (r === 'done') done++;
         else if (r === 'skip') waiting++;
@@ -1388,6 +1457,7 @@ function processJob_(job, deadline) {
       writeCells_('JOBS', job.rowNum, 9, [new Date(), '']);
     }
     if (result !== 'skip' && job.type !== 'COMPACT') forgetPause_(INDICATORS[job.indicator].routeKey);
+    if ((result === 'done' || result === 'partial') && job.type !== 'COMPACT') bumpDataStamp_(job.indicator, job.date);
     return result;
   } catch (e) {
     const message = String(e && e.message || e).slice(0, 950);
@@ -1954,7 +2024,8 @@ function groupedBudgetMin_(indicator) {
   const send = sendBudgetKey_(indicator);
   const v = getProp_(send ? 'EXPEDICAO_MIN_POR_DIA' : 'RECEBIMENTO_MIN_POR_DIA', '');
   if (v !== '' && Number(v) >= 0) return Number(v);
-  return googlePlan_() === 'gmail' ? (send ? APP_CONFIG.SEND_GMAIL_MIN_PER_DAY : APP_CONFIG.GROUPED_GMAIL_MIN_PER_DAY) : 0;
+  return googlePlan_() === 'gmail' ? (send ? APP_CONFIG.SEND_GMAIL_MIN_PER_DAY : APP_CONFIG.GROUPED_GMAIL_MIN_PER_DAY)
+    : (send ? APP_CONFIG.SEND_WORKSPACE_MIN_PER_DAY : APP_CONFIG.GROUPED_WORKSPACE_MIN_PER_DAY);
 }
 /** Painel com teto diário próprio (Expedição: detalhe por rota + IDs de viagem). */
 function sendBudgetKey_(indicator) { return !!(indicator && INDICATORS[indicator] && INDICATORS[indicator].byRoute); }

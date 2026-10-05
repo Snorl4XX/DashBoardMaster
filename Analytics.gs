@@ -604,7 +604,9 @@ function getDashboardData(indicatorKey, params) {
       summaryShiftsOff: cfg.byRoute ? (getProp_('JMS_NO_SLICE_' + cfg.routeKey, '') ? {sendcount: 'a lista do JMS não separa por horário'} : {})
         : ((cfg.detail || {}).shiftProbe || []).length ? summaryShiftsOff_(cfg) : null,
       // Expedição: remessas já consultadas no Rastreamento do pacote (IDs de viagem) por dia.
-      tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null
+      tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null,
+      // V3.24: carimbo dos dados deste painel na hora da leitura (o navegador confere a cada 2 min se mudou).
+      stamp: dataStamps_()[indicatorKey] || null
     },
     // Expedição: cada rota do dia (tabela principal do JMS) no período e no período anterior — gráficos de rotas sem filtro.
     routes: cfg.byRoute ? sendRoutesByDate_(allRates, p.from, p.to) : null,
@@ -641,7 +643,11 @@ function getDashboardData(indicatorKey, params) {
   return out;
 }
 
-/** Resultados: taxas diárias (e agregados por turno) de um ou de todos os indicadores. */
+/**
+ * Resultados: taxas diárias (e agregados por turno) de um ou de todos os indicadores. Painéis por quantidade
+ * (Recebimento, Expedição, Fluxo de Lotes — heroMetric): `value` = número principal do dia (Recebido, Total que saiu,
+ * Sacas criadas) e `agg` = turnos desse número em cada dia.
+ */
 function getResultsData(params) {
   params = params || {};
   const today = isoToday_();
@@ -650,13 +656,41 @@ function getResultsData(params) {
   if (from > to) throw new Error('A data inicial não pode ser maior que a final.');
   const keys = params.indicator && INDICATORS[params.indicator] ? [params.indicator]
     : Object.keys(INDICATORS).sort((a, b) => INDICATORS[a].order - INDICATORS[b].order);
+  const stamps = dataStamps_();
   return safeReturn_({
     from: from, to: to,
-    series: keys.map(k => ({
-      key: k,
-      rates: getRates_(k, from, to).map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount})),
-      agg: getAgg_(k, from, to).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total}))
-    }))
+    // V3.24: maior carimbo de dados (o navegador recarrega os Resultados quando algum painel grava dado novo).
+    stampT: Object.keys(stamps).reduce((m, k) => Math.max(m, Number(stamps[k].t) || 0), 0),
+    series: keys.map(k => {
+      const qm = resultsQtyMetric_(INDICATORS[k]);
+      return {
+        key: k,
+        rates: getRates_(k, from, to).map(r => {
+          const o = {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount};
+          if (qm) o.value = r.metrics && isFinite(Number(r.metrics[qm])) && r.metrics[qm] !== null && r.metrics[qm] !== '' ? Number(r.metrics[qm]) : null;
+          return o;
+        }),
+        agg: qm ? resultsQtyShifts_(k, INDICATORS[k], from, to)
+          : getAgg_(k, from, to).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total}))
+      };
+    })
+  });
+}
+/** Número principal dos painéis por quantidade (cartão vermelho); null nos painéis por taxa. */
+function resultsQtyMetric_(cfg) { return cfg && cfg.heroMetric && cfg.metricCards ? cfg.heroMetric.key : null; }
+/**
+ * Turnos do número principal de cada dia (Resultados por turno dos painéis por quantidade): o agregado do detalhe
+ * completo da lista principal (aba AGG) ou, sem ele, a lista do JMS consultada em cada horário de turno — como os
+ * cartões T1/T2/T3 do painel.
+ */
+function resultsQtyShifts_(k, cfg, from, to) {
+  const sc = cfg.shiftCardsByColumn || {}, m = sc.summaryMetric, byDate = {};
+  const off = !m ? {} : cfg.byRoute ? (getProp_('JMS_NO_SLICE_' + cfg.routeKey, '') ? {[m]: 1} : {}) : summaryShiftsOff_(cfg);
+  if (m && !off[m]) getAgg_(summaryShiftKey_(k, m), from, to).forEach(a => { byDate[a.date] = a; });
+  if (sc.main) getAgg_(k + ':' + sc.main, from, to).forEach(a => { byDate[a.date] = a; });
+  return Object.keys(byDate).sort().map(d => {
+    const a = byDate[d];
+    return {date: d, T1: Number(a.T1) || 0, T2: Number(a.T2) || 0, T3: Number(a.T3) || 0, NA: Number(a.NA) || 0, total: Number(a.total) || 0};
   });
 }
 /** Compatibilidade com a V2. */

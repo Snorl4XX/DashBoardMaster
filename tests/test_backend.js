@@ -6,7 +6,8 @@ function hasDate(o) { if (o instanceof Date) return true; if (o && typeof o === 
 
 const days = {'2026-09-17': makeDay('2026-09-17', 11), '2026-09-18': makeDay('2026-09-18', 23), '2026-09-19': makeDay('2026-09-19', 37)};
 // DETAIL_DAYS_ARRIVAL_FLOW: os dias dos testes (setembro) ficam dentro da janela de detalhe do Recebimento.
-const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120'};
+// ATUALIZACAO_MIN 60: os testes antigos contam a fila sem a atualização rápida de hoje (V3.24 tem testes próprios).
+const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60'};
 const ctx = createContext({props: baseProps, jms: fakeJms(days), quiet: true});
 const S = ctx.__state;
 
@@ -131,8 +132,17 @@ check(ctx.getDashboardData('wrong_send', {}).meta.to === '2026-09-19', 'período
 
 // ---------- 6. Resultados ----------
 const results = ctx.getResultsData({from: '2026-09-17', to: '2026-09-19'});
-check(results.series.length === 10 && results.series.every(s => s.rates.length === 3 && s.agg.length === (['arrival_flow', 'send_flow', 'lot_flow'].indexOf(s.key) >= 0 ? 0 : 3)) && !hasDate(results),
-  'resultados de todos os indicadores (Recebimento, Expedição e Lotes, agrupados, não têm contagem por turno)');
+const QTY_R = {arrival_flow: 'totalNum', send_flow: 'sendcount', lot_flow: 'packageSum'};
+// (Expedição: dias fora da janela de detalhe não têm turnos — nem detalhe nem a lista por horário.)
+check(results.series.length === 10 && results.series.every(s => s.rates.length === 3 && s.agg.length === (s.key === 'send_flow' ? 0 : 3) &&
+    (QTY_R[s.key] ? s.rates.every(r => typeof r.value === 'number' && r.value === ctx.getRateDay_(s.key, r.date).metrics[QTY_R[s.key]]) &&
+      s.agg.every(a => a.T1 + a.T2 + a.T3 + a.NA === a.total && a.total === s.rates.filter(r => r.date === a.date)[0].value) : s.rates.every(r => r.value === undefined))) && !hasDate(results),
+  'resultados de todos os indicadores; Recebimento, Expedição e Lotes com a quantidade do dia e os turnos dela',
+  results.series.filter(s => QTY_R[s.key]).map(s => ({k: s.key, r: s.rates.map(r => r.value), a: s.agg.map(a => a.total)})));
+const qtyWeek = C.aggregateQtyResults(results.series.filter(s => s.key === 'send_flow')[0].rates, 'week', '2026-09-17', '2026-09-19');
+const sfVals = results.series.filter(s => s.key === 'send_flow')[0].rates.map(r => r.value);
+check(qtyWeek.length === 1 && qtyWeek[0].value === sfVals.reduce((a, b) => a + b, 0) && qtyWeek[0].days === 3 && Math.abs(qtyWeek[0].avg - qtyWeek[0].value / 3) < 1e-9,
+  'Resultados por quantidade: soma do período e média por dia', qtyWeek);
 const weekly = C.aggregateResults(results.series[0].rates, cfgWs.goal, 'week', '2026-09-17', '2026-09-19');
 check(weekly.length === 1 && weekly[0].key === '2026-W38' && weekly[0].method === 'weighted', 'agregação semanal', weekly);
 
@@ -359,7 +369,9 @@ const pausesG = cG.publicPauses_();
 check(pausesG.length === 9 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
   'token expirado pausa as 9 rotas com aviso claro', pausesG);
 check(cG.__state.fetches.length === 9, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
-check(cG.pendingJobs_().length === 20 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
+// (+ o resumo de hoje de cada painel, da atualização rápida de hoje — V3.24)
+check(cG.pendingJobs_().filter(j => j.date !== ctx.isoToday_()).length === 20 && cG.pendingJobs_().filter(j => j.date === ctx.isoToday_()).every(j => j.type === 'SUMMARY') &&
+  cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
 cG.processSyncQueue({budgetMs: 600000});
 check(cG.__state.fetches.length === 9, 'fila pausada não insiste no JMS');
 check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 9 && cG.getAppBootstrap().pauses.length === 9, 'pausa chega ao painel');
@@ -431,12 +443,15 @@ cN.queueHistory(yday, yday, true);
 runAll(cN);
 check(cN.getDayStatus_('wrong_send', yday).details === 'COMPLETE', 'ontem completo');
 dN[yday].ws.push(Object.assign({}, dN[yday].ws[1], {billcode: 'NOVO1'}));
-const detailBefore = cN.__state.fetches.filter(f => /center_wrong_send_detail/.test(f.url)).length;
+// (Hoje já pode ter o detalhe: a atualização rápida de hoje — V3.24 — coloca o resumo de hoje na fila. Conta só os de ontem.)
+const ydayDetail = () => cN.__state.fetches.filter(f => /center_wrong_send_detail/.test(f.url) && String(f.payload.startTime || '').slice(0, 10) === yday).length;
+const detailBefore = ydayDetail();
 cN.queueRecentRefresh_();
 runAll(cN);
-const detailAfter = cN.__state.fetches.filter(f => /center_wrong_send_detail/.test(f.url)).length;
+const detailAfter = ydayDetail();
 check(cN.getRateDay_('wrong_send', yday).errorCount === dN[yday].ws.length, 'taxa de ontem atualizada na hora');
-check(detailAfter === detailBefore + (dN[today] ? 1 : 0), 'detalhe de ontem NÃO é rebaixado antes de 3 h (só o de hoje, que ainda não existia)', [detailBefore, detailAfter]);
+check(detailBefore > 0 && detailAfter === detailBefore && cN.getDayStatus_('wrong_send', today).details === 'COMPLETE',
+  'detalhe de ontem NÃO é rebaixado antes de 3 h (o de hoje já baixado)', [detailBefore, detailAfter]);
 check(cN.getDayStatus_('wrong_send', yday).details === 'STALE' && cN.getCoverage_('wrong_send', yday, yday).incompleteDetails.length === 1,
   'dia com taxa nova e detalhe antigo fica marcado (painel mostra "parcial" e o download sai quando der 3 h)', cN.getDayStatus_('wrong_send', yday));
 // Passadas as 3 h, a próxima revalidação baixa de novo mesmo sem nova mudança na taxa.
@@ -1482,8 +1497,12 @@ check(['T1', 'T2', 'T3'].every(sh => bySm.filter(r => r.shift === sh && r.column
 // Turnos de cada lista gravados por dia (dia anterior dos cartões de turno).
 const aggRec = (dashAF.colAgg || {}).Chegou || [], aggPrev = (dashAF.colAgg || {})[COL_PREV] || [];
 check(aggRec.length === 1 && aggRec[0].date === D19 && sameMap(aggRec[0], recS) && aggRec[0].total === afD.total.length &&
-  aggPrev.length === 1 && aggPrev[0].total === afD.prev.length && cAF.getResultsData({from: D19, to: D19}).series.filter(x => x.key === 'arrival_flow')[0].agg.length === 0,
-  'turnos de cada lista do dia gravados (aba AGG) e enviados ao painel; Resultados sem mistura', aggRec);
+  aggPrev.length === 1 && aggPrev[0].total === afD.prev.length,
+  'turnos de cada lista do dia gravados (aba AGG) e enviados ao painel', aggRec);
+// Resultados (V3.24): turnos do RECEBIDO (lista "Chegou"), sem misturar as outras listas.
+const resAF = cAF.getResultsData({from: D19, to: D19}).series.filter(x => x.key === 'arrival_flow')[0];
+check(resAF.agg.length === 1 && sameMap(resAF.agg[0], recS) && resAF.agg[0].total === afD.total.length && resAF.rates[0].value === afD.total.length,
+  'Resultados do Recebimento: quantidade recebida e os turnos dela (só a lista "Chegou")', resAF);
 // Menu lateral: a quantidade que deve chegar no lugar da taxa.
 const bootAF = cAF.getAppBootstrap().latestByIndicator.arrival_flow;
 check(bootAF && bootAF.qty === afD.should.length && bootAF.qtyDate === D19, 'menu lateral: quantidade que deve chegar (no lugar da taxa)', bootAF);
@@ -1637,8 +1656,10 @@ cBu.__state.props.RECEBIMENTO_MIN_POR_DIA = '0';
 reset(cBu); cBu.invalidateProps_();
 runAll(cBu);
 check(afterBu === 'PENDING' && otherBu === 'COMPLETE' && cBu.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' &&
-  freshCtx({}, null, {COTA_GOOGLE: 'workspace'}).groupedBudgetMin_() === 0 && cBu.getDashboardData('arrival_flow', {from: D19, to: D19}).meta.detailProgress === null,
-  'teto diário (Gmail, 35 min): o Recebimento espera e os outros painéis seguem; RECEBIMENTO_MIN_POR_DIA=0 libera; Workspace sem teto', {afterBu, otherBu});
+  freshCtx({}, null, {COTA_GOOGLE: 'workspace'}).groupedBudgetMin_() === 90 && freshCtx({}, null, {COTA_GOOGLE: 'workspace'}).groupedBudgetMin_('send_flow') === 150 &&
+  freshCtx({}, null, {COTA_GOOGLE: 'workspace', RECEBIMENTO_MIN_POR_DIA: '0'}).groupedBudgetMin_() === 0 &&
+  cBu.getDashboardData('arrival_flow', {from: D19, to: D19}).meta.detailProgress === null,
+  'teto diário (Gmail, 35 min): o Recebimento espera e os outros painéis seguem; RECEBIMENTO_MIN_POR_DIA=0 libera; Workspace (V3.24): 90 min Recebimento e 150 min Expedição', {afterBu, otherBu});
 // (h) Fila: no detalhe do Recebimento, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
 const cQ19 = freshCtx({});
 const tQ19 = cQ19.isoToday_(), yQ19 = cQ19.addDaysIso_(tQ19, -1), oQ19 = cQ19.addDaysIso_(tQ19, -3);
@@ -2113,7 +2134,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   };
   const T0 = ctx.isoToday_(), T1 = ctx.addDaysIso_(T0, -1), T2 = ctx.addDaysIso_(T0, -2);
   const gm4 = lotJobsAt('gmail', 4), gm6 = lotJobsAt('gmail', 6), gm3 = lotJobsAt('gmail', 3), ws4 = lotJobsAt('workspace', 4);
-  check(gm4.lots === '' && gm4.send === 3 && gm6.lots === T0 && gm3.lots === [T2, T1, T0].join() && ws4.lots === [T2, T1, T0].join(),
+  // (V3.24: na conta Gmail, anteontem dos outros painéis também a cada 3 h — às 4h, só hoje e ontem.)
+  check(gm4.lots === '' && gm4.send === 2 && gm6.send === 3 && gm6.lots === T0 && gm3.lots === [T2, T1, T0].join() && ws4.lots === [T2, T1, T0].join() && ws4.send === 3,
     'Lotes na conta Gmail: resumo de hoje a cada 3 h e dos dias anteriores 1 vez por dia; Workspace e outros painéis de hora em hora', {gm4, gm6, gm3, ws4});
 
   // 7. diagnosticarLotes(): resumo, lista, contas da lista inteira × resumo, sem número de saca.
@@ -2121,6 +2143,93 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   check(/Fluxo de Lotes/.test(dg.texto) && dg.lista.total === tA.n && dg.listaInteira.ecologicas === tA.eco && dg.listaInteira.pacotes === tA.items &&
     dg.listaInteira.chegada === tA.arr && /isLoopPag: \d+ ✓/.test(dg.texto.replace(/\./g, '')) && !dA[D19].lt.some(b => dg.texto.indexOf(b.packageCode) >= 0) &&
     !/FAKE/.test(dg.texto), 'diagnosticarLotes: lista × resumo (ecológicas pelo isLoopPag, pacotes, Chegada/Partida), sem número de saca', dg.texto);
+}
+
+// ---------- V3.24: atualização mais rápida (resumos em paralelo, hoje mais vezes, carimbo para o navegador) ----------
+{
+  const days24 = () => ({'2026-09-18': makeDay('2026-09-18', 23), [D19]: makeDay(D19, 37)});
+  // 1. Resumos da fila pedidos em paralelo (fetchAll) depois do 1º que deu certo; nenhuma consulta repetida.
+  const cR = freshCtx(days24());
+  const keys24 = cR.getPublicCatalog_().map(c => c.key);
+  const sumUrls = {};
+  keys24.forEach(k => { sumUrls[cR.endpointFor_(cR.getIndicatorConfig_(k), 'summary')] = 1; });
+  let batches = 0, inBatch = 0;
+  const origFA = cR.UrlFetchApp.fetchAll;
+  cR.UrlFetchApp.fetchAll = reqs => { if (reqs.length && reqs.every(r => sumUrls[r.url])) { batches++; inBatch += reqs.length; } return origFA(reqs); };
+  cR.enqueueJobs_([].concat.apply([], ['2026-09-18', D19].map(d => keys24.map(k => ['SUMMARY', k, d, 0]))), {});
+  const f0 = cR.__state.fetches.length;
+  cR.processSyncQueue({budgetMs: 600000, force: true});
+  reset(cR);
+  const sumReq = cR.__state.fetches.slice(f0).filter(f => sumUrls[f.url]);
+  // Página 1 do resumo de cada dia (a Avaria consulta também as opções principal/filho: fora da conta).
+  const sig = f => f.url + JSON.stringify(f.payload);
+  const firstPages = sumReq.filter(f => (!f.payload.current || f.payload.current === 1) && !f.payload.mainSubCode && /00:00:00|^\d{4}-\d\d-\d\d$/.test(String(f.payload.startTime || f.payload.startDate || '')) &&
+    String(f.payload.endTime || f.payload.endDate || '').indexOf('23:59:59') >= 0 || (f.payload.endDate && !f.payload.mainSubCode));
+  const cnt = {};
+  firstPages.forEach(f => { cnt[sig(f)] = (cnt[sig(f)] || 0) + 1; });
+  const dup = Object.keys(cnt).filter(k => cnt[k] > 1 && !/organizationCode/.test(k)).length;
+  check(batches >= 1 && inBatch >= 10 && keys24.every(k => ['2026-09-18', D19].every(d => cR.getRateDay_(k, d))) && cR.pendingJobs_().filter(j => j.type === 'SUMMARY').length === 0,
+    'resumos da fila consultados em paralelo (rajadas do fetchAll) e todos gravados', {batches, inBatch});
+  // Falta de Bipagem no Recebimento e na Expedição: o mesmo resumo, agora consultado uma vez por dia (antes, duas).
+  const shared = Object.keys(cnt).filter(k => /groupKey/.test(k));
+  check(dup === 0 && shared.length === 2 && shared.every(k => cnt[k] === 1), 'resposta guardada usada no lugar da 1ª consulta (nenhum resumo consultado duas vezes; o resumo da Falta de Bipagem serve os dois painéis)', cnt);
+  // Taxas iguais às do caminho sem paralelo.
+  const cS = freshCtx(days24());
+  cS.enqueueJobs_([['SUMMARY', 'wrong_send', D19, 0], ['SUMMARY', 'sc_sc', D19, 0], ['SUMMARY', 'lot_flow', D19, 0]], {});
+  cS.processSyncQueue({budgetMs: 600000, force: true});
+  reset(cS);
+  check(['wrong_send', 'sc_sc', 'lot_flow'].every(k => JSON.stringify(cS.getRateDay_(k, D19).metrics || {}) === JSON.stringify(cR.getRateDay_(k, D19).metrics || {}) &&
+    cS.getRateDay_(k, D19).rate === cR.getRateDay_(k, D19).rate), 'mesmo resultado com e sem as consultas em paralelo');
+
+  // 2. Hoje mais vezes: 15 min (Workspace) / 30 min (Gmail); ATUALIZACAO_MIN muda; 60 = só de hora em hora.
+  const TODAY24 = ctx.isoToday_();
+  const todayJobs = c => c.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.date === TODAY24).map(j => j.indicator).sort();
+  const cW = freshCtx(days24(), null, {COTA_GOOGLE: 'workspace', ATUALIZACAO_MIN: ''}), cG24 = freshCtx(days24(), null, {COTA_GOOGLE: 'gmail', ATUALIZACAO_MIN: ''});
+  const nW = cW.queueTodayRefresh_(), nW2 = cW.queueTodayRefresh_(), nG = cG24.queueTodayRefresh_();
+  reset(cW); reset(cG24);
+  check(cW.todayRefreshMin_() === 15 && cG24.todayRefreshMin_() === 30 && nW === keys24.length && nW2 === 0 && todayJobs(cW).length === keys24.length &&
+    nG === keys24.length - 1 && todayJobs(cG24).indexOf('lot_flow') < 0,
+    'resumo de hoje a cada 15 min (Workspace) / 30 min (Gmail; Fluxo de Lotes segue a cada 3 h)', {nW, nW2, nG});
+  // Hora da última atualização rápida: 10 min atrás ainda não; 14 min atrás já (1 min de folga do gatilho de 5 min).
+  const setAt = m => { cW.__state.props.TODAY_REFRESH_AT = String(Date.now() - m * 60000); cW.invalidateProps_(); };
+  const ranAt = m => { setAt(m); cW.queueTodayRefresh_(); cW.invalidateProps_(); return Number(cW.__state.props.TODAY_REFRESH_AT) > Date.now() - 5000; };
+  const r10 = ranAt(10), r14 = ranAt(14);
+  const c60 = freshCtx(days24(), null, {ATUALIZACAO_MIN: '60'}), c10 = freshCtx(days24(), null, {ATUALIZACAO_MIN: '10'});
+  check(!r10 && r14 && c60.queueTodayRefresh_() === 0 && c10.todayRefreshMin_() === 10,
+    'intervalo respeitado (1 min de folga do gatilho); ATUALIZACAO_MIN = 60 desliga, 10 = a cada 10 min', {r10, r14});
+  cW.queueRecentRefresh_();
+  check(Number(cW.__state.props.TODAY_REFRESH_AT) > Date.now() - 5000, 'sincronização de hora em hora conta como atualização de hoje (sem consulta dobrada)');
+
+  // 3. Carimbo de dados: gravado pelo job, lido pelo painel e pela conferência de 2 min.
+  const cT = freshCtx(days24());
+  cT.enqueueJobs_([['SUMMARY', 'wrong_send', D19, 0]], {});
+  const tBefore = Date.now();
+  cT.processSyncQueue({budgetMs: 600000, force: true});
+  reset(cT);
+  const st24 = cT.dataStamps_().wrong_send, up0 = cT.getUpdateStamp(0), upK = cT.getUpdateStamp(st24 && st24.t);
+  const dsh = cT.getDashboardData('wrong_send', {from: D19, to: D19});
+  check(st24 && st24.t >= tBefore && st24.d[D19] === st24.t && up0.stamps.wrong_send.t === st24.t && up0.latestByIndicator && up0.latestByIndicator.wrong_send &&
+    upK.latestByIndicator === null && dsh.meta.stamp && dsh.meta.stamp.t === st24.t && !hasDate(up0) && cT.getAppBootstrap().stamps.wrong_send.t === st24.t,
+    'carimbo por painel e por dia: o navegador só recarrega quando o período aberto mudou', {st24, up0: Object.keys(up0)});
+  check(typeof cT.getResultsData({from: D19, to: D19}).stampT === 'number' && cT.getResultsData({from: D19, to: D19}).stampT >= st24.t, 'Resultados levam o carimbo');
+
+  // 3b. Fila: IDs de viagem do dia em que o painel abre logo depois do detalhe dele, antes dos dias antigos.
+  const cQ24 = freshCtx(days24());
+  const anc = cQ24.lastClosedDate_('send_flow'), old = cQ24.addDaysIso_(anc, -3);
+  cQ24.enqueueJobs_([['DETAIL_INIT', 'send_flow', old, 1], ['TRIPS', 'send_flow', anc, 0], ['TRIPS', 'send_flow', old, 0], ['DETAIL_INIT', 'send_flow', anc, 1]], {});
+  reset(cQ24);
+  const ord = cQ24.pendingJobs_().filter(j => j.indicator === 'send_flow').map(j => j.type + ':' + (j.date === anc ? 'abre' : 'antigo')).join();
+  check(ord === 'DETAIL_INIT:abre,TRIPS:abre,DETAIL_INIT:antigo,TRIPS:antigo', 'fila da Expedição: detalhe e IDs de viagem do dia que o painel abre primeiro', ord);
+
+  // 4. Botão "Atualizar": os dias do período consultados de uma vez.
+  const cB24 = freshCtx(days24());
+  cB24.queueHistory('2026-09-18', D19, true);
+  runAll(cB24);
+  let fa = 0; const oFA = cB24.UrlFetchApp.fetchAll; cB24.UrlFetchApp.fetchAll = reqs => { fa += reqs.length; return oFA(reqs); };
+  const fB = cB24.__state.fetches.length;
+  const rB = cB24.refreshNow('wrong_send', '2026-09-18', D19);
+  const reqB = cB24.__state.fetches.slice(fB).filter(f => /center_wrong_send_total/.test(f.url) || /wrong_send/.test(f.url) && !/detail/.test(f.url));
+  check(rB.updated === 2 && fa === 2 && reqB.length === 2, 'Atualizar: dias do período consultados em paralelo (sem consulta repetida)', {upd: rB.updated, fa, n: reqB.length});
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');
