@@ -1058,7 +1058,7 @@ const catOK = ctx.getPublicCatalog_().filter(x => x.key === 'damage')[0];
 check(catOK.filters[0].key === 'orderKind' && catOK.filters[0].label.pt === 'Pedidos principais/filhos' && catOK.orderKinds.values.main === 'Pedido principal' &&
   C.localizeValue('Pedido secundário', 'zh') === '子单', 'filtro "Pedidos principais/filhos" (Todos / Pedido principal / Pedido secundário)');
 function okCounts(day) { const n = {main: 0, sub: 0}; day.dm.forEach(r => { n[/-\d{3}$/.test(r.waybillNo) ? 'sub' : 'main']++; }); return n; }
-// (a) Códigos descobertos sozinhos (simulado: principal 1, filho 2) e taxas OFICIAIS de cada opção.
+// (a) V3.27: principal = mainSubCode "MAIN" (captura da tela); filho descoberto ("SUB" no simulado); taxas OFICIAIS de cada opção.
 const dOK = {}; dOK[D19] = makeDay(D19, 91); dOK['2026-09-18'] = makeDay('2026-09-18', 92);
 const cOK = freshCtx(dOK);
 cOK.queueHistory('2026-09-18', D19, true);
@@ -1066,10 +1066,18 @@ runAll(cOK, 12);
 const mapOK = JSON.parse(cOK.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
 const nOK = okCounts(dOK[D19]), subBase = Math.round(dOK[D19].dmBase * 0.12);
 const mainR = cOK.getRates_('damage:main', D19, D19)[0], subR = cOK.getRates_('damage:sub', D19, D19)[0];
-check(mapOK.param === 'mainSubCode' && mapOK.main === 1 && mapOK.sub === 2 && mainR && subR && !mainR.estimated && !subR.estimated &&
+check(mapOK.param === 'mainSubCode' && mapOK.main === 'MAIN' && mapOK.sub === 'SUB' && mainR && subR && !mainR.estimated && !subR.estimated &&
   mainR.errorCount === nOK.main && subR.errorCount === nOK.sub && mainR.totalCount === dOK[D19].dmBase - subBase && subR.totalCount === subBase &&
   Math.abs(mainR.rate - nOK.main / (dOK[D19].dmBase - subBase) * 1e6) < 0.01,
-  'códigos do filtro descobertos (mainSubCode 1 = principal, 2 = filho) e taxa oficial de cada opção, com o volume da opção', {map: mapOK, main: mainR, sub: subR});
+  'códigos do filtro: mainSubCode "MAIN" (tela) = principal, "SUB" descoberto = filho; taxa oficial de cada opção, com o volume da opção', {map: mapOK, main: mainR, sub: subR});
+// Payload do principal = captura da tela de 03/10 (mainSubCode "MAIN", texto); nenhum código numérico vai ao JMS.
+const capMain = cOK.__state.fetches.filter(f => /getBreakageRateData/.test(f.url) && f.payload.mainSubCode === 'MAIN')[0];
+const capKeys = capMain ? Object.keys(capMain.payload).sort().join(',') : '';
+check(capMain && capKeys === 'countryId,current,dateType,endDate,mainSubCode,organizationCode,organizationType,size,startDate' &&
+  capMain.payload.organizationCode === '30001' && capMain.payload.organizationType === 3 && capMain.payload.dateType === 1 && capMain.payload.countryId === '1' &&
+  capMain.payload.startDate === capMain.payload.endDate &&
+  cOK.__state.fetches.every(f => f.payload.mainSubCode === undefined || typeof f.payload.mainSubCode === 'string' && !/^\d+$/.test(f.payload.mainSubCode)),
+  'payload do "Pedido principal" = captura da tela (mainSubCode "MAIN"); nenhum código numérico enviado', capMain && capMain.payload);
 check(cOK.getRates_('damage:main', '2026-09-18', '2026-09-18').length === 1 && !cOK.getRates_('damage:main', '2026-09-18', '2026-09-18')[0].estimated &&
   cOK.getDayStatus_('damage:main', D19) === null, 'todos os dias com a taxa oficial de cada opção; nada de DAY_STATUS para as opções');
 // (b) Painel: com UMA opção, a taxa e a quantidade do dia são as da opção; Todos = taxa de sempre.
@@ -1084,43 +1092,60 @@ check(cardsMain.rate === mainR.rate && cardsMain.currentErrors === nOK.main && c
   'Pedido principal: taxa e quantidade do dia trocam (como no JMS); Todos: as de sempre', {main: [cardsMain.rate, cardsMain.currentErrors], all: [cardsAll.rate, cardsAll.currentErrors]});
 const cardsBoth = cOK.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal', 'Pedido secundário']}}).cards;
 check(cardsBoth.rate === cardsAll.rate, 'as duas opções marcadas = Todos');
-// (c) Códigos invertidos no JMS: descobertos do mesmo jeito.
-const cInv = freshCtx(dOK, {orderKindCodes: {main: 2, sub: 1}});
+// (c) Secundário com outro código no JMS ("CHILD"): o painel testa os candidatos e fica com o que responde como a opção.
+const cInv = freshCtx(dOK, {orderKindCodes: {main: 'MAIN', sub: 'CHILD'}});
 cInv.queueHistory(D19, D19, true);
 runAll(cInv, 12);
 const mapInv = JSON.parse(cInv.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
-check(mapInv.main === 2 && mapInv.sub === 1 && cInv.getRates_('damage:sub', D19, D19)[0].errorCount === nOK.sub, 'códigos invertidos descobertos', mapInv);
-// (d) JMS que ignora o parâmetro: NENHUMA taxa para a opção (V3.25: nunca estimada) e aviso no SYNC_LOG.
+check(mapInv.main === 'MAIN' && mapInv.sub === 'CHILD' && cInv.getRates_('damage:sub', D19, D19)[0].errorCount === nOK.sub, 'código do secundário diferente de "SUB" descoberto', mapInv);
+// Código desconhecido que o JMS responde com Todos (ignorado) nunca é aceito como o secundário.
+const cUnk = freshCtx(dOK, {orderKindCodes: {main: 'MAIN', sub: 'SECONDARY'}, unknownCodeIgnored: true});
+cUnk.queueHistory(D19, D19, true);
+runAll(cUnk, 12);
+const mapUnk = JSON.parse(cUnk.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+check(mapUnk.main === 'MAIN' && mapUnk.sub === 'SECONDARY' && cUnk.getRates_('damage:sub', D19, D19)[0].errorCount === nOK.sub,
+  'candidatos que o JMS ignora (respondem igual a Todos) são pulados', mapUnk);
+// (d) JMS que ignora o parâmetro: o principal é o que o JMS devolve para "MAIN" (o mesmo payload da tela); o secundário
+//     fica SEM taxa (nenhum candidato respondeu como a opção; V3.25: nunca estimada) e aviso no SYNC_LOG.
 const cIgn = freshCtx(dOK, {ignoreMainSub: true});
 cIgn.queueHistory(D19, D19, true);
 runAll(cIgn, 12);
 const mapIgn = JSON.parse(cIgn.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
 const fIgn = cIgn.__state.fetches.filter(f => /getBreakageRateData/.test(f.url) && f.payload.mainSubCode !== undefined);
 const dashIgn = cIgn.getDashboardData('damage', {from: D19, to: D19});
-const repIgn = cIgn.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal']}});
-check(mapIgn.unsupported === true && !cIgn.getRates_('damage:main', D19, D19).length && !cIgn.getRates_('damage:sub', D19, D19).length &&
-  !cIgn.allTabRows_('RATES').some(r => /^damage:/.test(r[0])) && fIgn.length <= 4 && dashIgn.rateVariants.main.length === 0 &&
-  dashIgn.meta.orderKind.state === 'unsupported' && repIgn.cards.rate === null && repIgn.cards.currentErrors === null &&
-  cIgn.allTabRows_('LOG').some(r => r[1] === 'WARN' && /JMS_ORDERKIND_DAMAGE/.test(r[4])),
-  'JMS sem o filtro: nenhuma taxa inventada para a opção (nem a de Todos), poucas consultas de teste e aviso com o que cadastrar',
-  {map: mapIgn, testes: fIgn.length, rate: repIgn.cards.rate});
-// Taxa estimada gravada por versão antiga nunca é usada.
-cIgn.appendRow_('RATES', ['damage:main', D19, 581.3, 328, 564276, JSON.stringify({estimated: true}), new Date()]);
+const repIgn = cIgn.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido secundário']}});
+const mainIgn = cIgn.getRates_('damage:main', D19, D19)[0], rawAllIgn = cIgn.fetchSummaryDay_('damage', D19);
+const candIgn = fIgn.filter(f => f.payload.mainSubCode !== 'MAIN');
+check(mapIgn.main === 'MAIN' && mapIgn.sub === undefined && mapIgn.subMissAt && mainIgn && mainIgn.errorCount === rawAllIgn.errorCount &&
+  !cIgn.getRates_('damage:sub', D19, D19).length && !cIgn.allTabRows_('RATES').some(r => r[0] === 'damage:sub') &&
+  candIgn.length === 5 && dashIgn.rateVariants.sub.length === 0 &&
+  dashIgn.meta.orderKind.kinds.main === 'ok' && dashIgn.meta.orderKind.kinds.sub === 'unsupported' && repIgn.cards.rate === null && repIgn.cards.currentErrors === null &&
+  cIgn.allTabRows_('LOG').filter(r => r[1] === 'WARN' && /JMS_ORDERKIND_DAMAGE/.test(r[4]) && /"main":"MAIN","sub":"<código>"/.test(r[4])).length === 1,
+  'JMS sem o filtro: secundário sem taxa (nada inventado, nem a de Todos), cada candidato testado uma vez e um aviso com o que cadastrar',
+  {map: mapIgn, testes: candIgn.length, rate: repIgn.cards.rate});
+// Taxa estimada (V3.24) ou gravada com códigos numéricos (até a V3.26, sem "cv":3) nunca é usada.
+cIgn.appendRow_('RATES', ['damage:sub', D19, 581.3, 328, 564276, JSON.stringify({estimated: true}), new Date()]);
+cIgn.appendRow_('RATES', ['damage:sub', D19, 355.12, 177, 65847, JSON.stringify({official: true}), new Date()]);
 cIgn.STORAGE_CACHE_ = null; cIgn.TAB_CACHE_ = {}; cIgn.TAB_INDEX_ = {};
-check(!cIgn.getRates_('damage:main', D19, D19).length && cIgn.getDashboardData('damage', {from: D19, to: D19}).rateVariants.main.length === 0,
-  'taxa estimada de versão antiga ignorada (o painel mostra só a do JMS)');
-// "Sem suporte" é refeito depois de 24 h (antes ficava para sempre).
-const ign = JSON.parse(cIgn.__state.props.JMS_ORDERKIND_DAMAGE);
-check(cIgn.orderKindNeedsDetect_(ign) === false && cIgn.orderKindNeedsDetect_(Object.assign({}, ign, {at: new Date(Date.now() - 25 * 3600000).toISOString()})) === true &&
-  cIgn.orderKindNeedsDetect_(null) === true && cIgn.orderKindNeedsDetect_({param: 'mainSubCode', main: 1, sub: 2}) === false,
-  '"sem suporte" refeito a cada 24 h; códigos completos não são testados de novo');
+check(!cIgn.getRates_('damage:sub', D19, D19).length && cIgn.getDashboardData('damage', {from: D19, to: D19}).rateVariants.sub.length === 0,
+  'taxa estimada ou gravada com os códigos antigos ignorada (o painel mostra só a do JMS)');
+// Secundário sem código: nova tentativa a cada 6 h; códigos completos não são testados de novo.
+const ign = cIgn.orderKindParams_('damage');
+check(cIgn.orderKindNeedsDetect_(ign) === false && cIgn.orderKindNeedsDetect_(Object.assign({}, ign, {subMissAt: new Date(Date.now() - 7 * 3600000).toISOString()})) === true &&
+  cIgn.orderKindNeedsDetect_(null) === true && cIgn.orderKindNeedsDetect_({param: 'mainSubCode', main: 'MAIN', sub: 'SUB'}) === false,
+  'secundário sem código: nova tentativa a cada 6 h; códigos completos não são testados de novo');
+// Códigos numéricos gravados por versões antigas não valem: o principal é "MAIN".
+const cNum = freshCtx(dOK, null, {JMS_ORDERKIND_DAMAGE: JSON.stringify({param: 'mainSubCode', main: 1, sub: 2, v: 2})});
+const pNum = cNum.orderKindParams_('damage');
+check(pNum.main === 'MAIN' && pNum.sub === undefined && cNum.orderKindParams_('damage') && cNum.orderKindNumeric_(1) && cNum.orderKindNumeric_('2') && !cNum.orderKindNumeric_('MAIN'),
+  'códigos numéricos antigos ignorados (principal = "MAIN" da tela)', pNum);
 // (e) Códigos cadastrados à mão (JMS_ORDERKIND_DAMAGE) valem sem teste.
 const cMan = freshCtx(dOK, {orderKindCodes: {main: 'P', sub: 'F'}}, {JMS_ORDERKIND_DAMAGE: JSON.stringify({param: 'mainSubCode', main: 'P', sub: 'F'})});
 cMan.queueHistory(D19, D19, true);
 runAll(cMan, 12);
 check(cMan.getRates_('damage:sub', D19, D19)[0].errorCount === nOK.sub && !cMan.getRates_('damage:sub', D19, D19)[0].estimated, 'códigos cadastrados à mão');
-check(/Pedidos principais\/filhos: mainSubCode=1 \(principal\) · mainSubCode=2 \(filho\)/.test(cOK.diagnosticoCompleto(D19).texto) &&
-  /Pedidos principais\/filhos: o JMS não respondeu/.test(cIgn.diagnosticoCompleto(D19).texto), 'diagnosticoCompleto mostra os códigos do filtro (ou o que cadastrar)');
+check(/Pedidos principais\/filhos: mainSubCode=MAIN \(principal\) · mainSubCode=SUB \(filho\)/.test(cOK.diagnosticoCompleto(D19).texto) &&
+  /Pedidos principais\/filhos: mainSubCode=MAIN \(principal\) · filho: o JMS não respondeu/.test(cIgn.diagnosticoCompleto(D19).texto), 'diagnosticoCompleto mostra os códigos do filtro (ou o que cadastrar)');
 // (f) Atualização: dias já baixados ganham as taxas de cada opção (detalhe baixado de novo uma vez).
 delete cOK.__state.props.MIGRATION_V313;
 const m313 = cOK.migrateToV313_();
@@ -1136,7 +1161,7 @@ runAll(cNoKid, 12);
 const mapNoKid = JSON.parse(cNoKid.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
 const mainNoKid = cNoKid.getRates_('damage:main', D19, D19)[0];
 const cardsNoKid = cNoKid.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal']}}).cards;
-check(mapNoKid.main === 1 && mapNoKid.sub === undefined && !mapNoKid.unsupported && mainNoKid && !mainNoKid.estimated &&
+check(mapNoKid.main === 'MAIN' && mapNoKid.sub === undefined && !mapNoKid.unsupported && mainNoKid && !mainNoKid.estimated &&
   mainNoKid.rate === 0 && mainNoKid.errorCount === dNoKid[D19].dm.length && cardsNoKid.rate === 0 && cardsNoKid.currentErrors === dNoKid[D19].dm.length,
   'Pedido principal com a mesma quantidade de Todos e Qtd processada 0: código aprendido e taxa = 总破损率 do JMS (0), quantidade 328 da tela',
   {map: mapNoKid, main: mainNoKid});
@@ -1147,7 +1172,7 @@ runAll(cPlain, 12);
 const mapPlain = JSON.parse(cPlain.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
 const dashPlain = cPlain.getDashboardData('damage', {from: D19, to: D19});
 const rowsPlain = C.applyOrderKinds(C.decodeDataset(dashPlain.dataset), catOK.orderKinds, dashPlain.orderKindTags);
-check(mapPlain.main === 1 && mapPlain.sub === 2 && rowsPlain.every(r => !/-\d{3}$/.test(r.shipment)) &&
+check(mapPlain.main === 'MAIN' && mapPlain.sub === 'SUB' && rowsPlain.every(r => !/-\d{3}$/.test(r.shipment)) &&
   rowsPlain.filter(r => r.orderKind === 'Pedido secundário').length === nOK.sub && rowsPlain.filter(r => r.orderKind === 'Pedido principal').length === nOK.main,
   'filhos sem sufixo: códigos descobertos e cada remessa marcada pela lista do JMS da opção', {map: mapPlain, tags: Object.keys(dashPlain.orderKindTags || {})});
 // (i) Gráficos, cartões e tabelas mudam com a opção (remessas da lista do JMS).
@@ -1161,7 +1186,7 @@ const cOld = freshCtx(dOK, null, {JMS_ORDERKIND_DAMAGE: JSON.stringify({unsuppor
 cOld.queueHistory(D19, D19, true);
 runAll(cOld, 12);
 const mapOld = JSON.parse(cOld.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
-check(mapOld.main === 1 && mapOld.sub === 2 && !cOld.getRates_('damage:main', D19, D19)[0].estimated, '"sem suporte" antigo refeito com a regra nova', mapOld);
+check(mapOld.main === 'MAIN' && mapOld.sub === 'SUB' && !cOld.getRates_('damage:main', D19, D19)[0].estimated, '"sem suporte" antigo refeito com a regra nova', mapOld);
 
 // ---------- 21. V3.14: RECEBIMENTO: FLUXO OPERACIONAL (Deve chegar × Chegou) ----------
 const cfgAF = ctx.getIndicatorConfig_('arrival_flow');
@@ -1753,7 +1778,7 @@ check(firstBig >= 0 && parAfter === '4' && afterFail.length > 0 && afterFail.eve
   'paralelismo: 8 por vez; com recusa do JMS, 4 pelo resto do dia (e o dia fecha)', {sizesPa: sizesPa.slice(0, 30), parAfter});
 
 // ---------- 26. V3.20.1: Avaria — taxa de cada opção = 总破损率 da tabela principal do JMS ----------
-const rawMain = cOK.fetchSummaryDay_('damage', D19, {mainSubCode: 1}).raw, rawSub = cOK.fetchSummaryDay_('damage', D19, {mainSubCode: 2}).raw;
+const rawMain = cOK.fetchSummaryDay_('damage', D19, {mainSubCode: 'MAIN'}).raw, rawSub = cOK.fetchSummaryDay_('damage', D19, {mainSubCode: 'SUB'}).raw;
 check(rawMain.breakageRate !== rawMain.breakageRateTotal && mainR.rate === rawMain.breakageRateTotal && subR.rate === rawSub.breakageRateTotal &&
   mainR.errorCount === rawMain.breakageNumberTotal && mainR.totalCount === rawMain.operaNumber,
   'Pedido principal/secundário: taxa = 总破损率 (breakageRateTotal), quantidade = 总破损票数, volume = Qtd processada total (não a coluna "Taxa…")',
@@ -1763,17 +1788,17 @@ const cNs = freshCtx(dOK, {plainChildren: true, detailIgnoresOrderKind: true});
 cNs.queueHistory('2026-09-18', D19, true);
 runAll(cNs, 12);
 const mapNs = JSON.parse(cNs.__state.props.JMS_ORDERKIND_DAMAGE || '{}'), subNs = cNs.getRates_('damage:sub', D19, D19)[0];
-check(mapNs.main === 1 && mapNs.sub === 2 && subNs && !subNs.estimated && subNs.rate === rawSub.breakageRateTotal,
+check(mapNs.main === 'MAIN' && mapNs.sub === 'SUB' && subNs && !subNs.estimated && subNs.rate === rawSub.breakageRateTotal,
   'sem sufixo e com a lista ignorando a opção: principal e secundário descobertos pelo volume (taxa do secundário oficial)', {mapNs, subNs});
-// Códigos gravados trocados por versão anterior: corrigidos sozinhos (o principal tem a maior Qtd processada).
+// Códigos numéricos gravados por versão anterior (1/2, trocados): ignorados — principal "MAIN" da tela, secundário descoberto.
 const cSw = freshCtx(dOK, null, {JMS_ORDERKIND_DAMAGE: JSON.stringify({param: 'mainSubCode', main: 2, sub: 1, v: 2})});
 cSw.queueHistory('2026-09-18', D19, true);
 runAll(cSw, 12);
 const mapSw = JSON.parse(cSw.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
-check(mapSw.main === 1 && mapSw.sub === 2 && cSw.getRates_('damage:main', D19, D19)[0].rate === rawMain.breakageRateTotal &&
+check(mapSw.main === 'MAIN' && mapSw.sub === 'SUB' && cSw.getRates_('damage:main', D19, D19)[0].rate === rawMain.breakageRateTotal &&
   cSw.getRates_('damage:sub', '2026-09-18', '2026-09-18')[0].totalCount < cSw.getRates_('damage:main', '2026-09-18', '2026-09-18')[0].totalCount &&
-  cSw.allTabRows_('LOG').some(r => /códigos estavam trocados/.test(String(r[4]))),
-  'códigos trocados: corrigidos e todos os dias consultados de novo', mapSw);
+  cSw.__state.fetches.every(f => f.payload.mainSubCode === undefined || typeof f.payload.mainSubCode === 'string'),
+  'códigos numéricos antigos: nunca enviados; principal da tela e secundário descoberto em todos os dias', mapSw);
 // Atualização: "sem suporte" refeito e todos os dias da Avaria consultam a taxa de cada opção de novo (uma vez).
 const cUp = freshCtx(dOK, null, {JMS_ORDERKIND_DAMAGE: JSON.stringify({unsupported: true, v: 2, date: D19})});
 cUp.queueHistory('2026-09-18', D19, true);
@@ -1785,7 +1810,7 @@ const nUp = cUp.migrateToV3201_(), nUp2 = cUp.migrateToV3201_();
 runAll(cUp, 12);
 reset(cUp);
 const mapUp = JSON.parse(cUp.__state.props.JMS_ORDERKIND_DAMAGE || '{}'), subUp = cUp.getRates_('damage:sub', D19, D19)[0];
-check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp && !subUp.estimated && subUp.rate === rawSub.breakageRateTotal &&
+check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' && subUp && !subUp.estimated && subUp.rate === rawSub.breakageRateTotal &&
   estUp && !estUp.estimated,
   'atualização: "sem suporte" refeito no resumo (sem esperar o detalhe) e a taxa oficial de cada opção em todos os dias', {nUp, mapUp, subUp});
 
@@ -2282,7 +2307,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   runAll(cS, 12);
   const mapS = JSON.parse(cS.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
   const rMain = cS.getRates_('damage:main', D19, D19)[0], rSub = cS.getRates_('damage:sub', D19, D19)[0], rAll = cS.getRateDay_('damage', D19);
-  check(mapS.main === 1 && mapS.sub === 2 && rMain.rate === 658.07 && rMain.errorCount === 328 && rMain.totalCount === 498429 &&
+  check(mapS.main === 'MAIN' && mapS.sub === 'SUB' && rMain.rate === 658.07 && rMain.errorCount === 328 && rMain.totalCount === 498429 &&
     rSub.rate === 2688.05 && rSub.errorCount === 177 && rSub.totalCount === 65847 && rAll.errorCount === 505 && rAll.totalCount === 564276,
     'Avaria: taxa de cada opção = 总破损率 do JMS (principal 658,07 · secundário 2.688,05), avarias e Qtd processada da tela', {rMain, rSub});
   // Painel (servidor e navegador usam a mesma regra): com a opção, a taxa e a quantidade são as do JMS para ela.
@@ -2299,32 +2324,77 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   const m18 = c2.getRates_('damage:main', '2026-09-18', '2026-09-18')[0], cards2 = c2.computeDashboard_('damage', {from: '2026-09-18', to: D19, filters: {orderKind: ['Pedido principal']}}).cards;
   check(m18 && Math.abs(cards2.rate - (328 + m18.errorCount) / (498429 + m18.totalCount) * 1e6) < 0.01 && cards2.currentErrors === 328 + m18.errorCount,
     'período: avarias somadas ÷ Qtd processada somada da opção (sem misturar com Todos)', {rate: cards2.rate});
-  // Remessas com sufixo "-001" NÃO decidem quem é o principal: vale a maior Qtd processada (como na tela).
+  // Remessas com sufixo "-001" NÃO decidem quem é o principal: vale o código da tela ("MAIN").
   const cX = freshCtx(scrDay(), Object.assign({suffixOnMain: true}, scrOpts));
   cX.queueHistory(D19, D19, true);
   runAll(cX, 12);
   const mapX = JSON.parse(cX.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
-  check(mapX.main === 1 && mapX.sub === 2 && cX.getRates_('damage:main', D19, D19)[0].totalCount === 498429,
-    'principal = opção com a maior Qtd processada, mesmo com o sufixo "-001" nas remessas dele', mapX);
-  // Migração V3.25: todos os dias da Avaria consultados de novo; "sem suporte" refeito.
+  check(mapX.main === 'MAIN' && mapX.sub === 'SUB' && cX.getRates_('damage:main', D19, D19)[0].totalCount === 498429,
+    'principal = código "MAIN" da tela, mesmo com o sufixo "-001" nas remessas dele', mapX);
+  // Migração V3.27: códigos numéricos / "sem suporte" apagados e todos os dias da Avaria consultados de novo (uma vez);
+  // linhas gravadas com os códigos antigos (sem "cv":3) deixam de valer até a nova consulta.
   const cM = freshCtx(scrDay(), scrOpts);
   cM.queueHistory(D19, D19, true);
   runAll(cM, 12);
-  cM.__state.props.JMS_ORDERKIND_DAMAGE = JSON.stringify({unsupported: true, v: 2, at: new Date().toISOString()});
-  delete cM.__state.props.MIGRATION_V325; cM.invalidateProps_();
-  const nM = cM.migrateToV325_(), nM2 = cM.migrateToV325_();
+  cM.__state.props.JMS_ORDERKIND_DAMAGE = JSON.stringify({param: 'mainSubCode', main: 2, sub: 1, v: 2});
+  cM.writeRow_('RATES', cM.findRowKey_('RATES', 'damage:main', D19), ['damage:main', D19, 355.12, 177, 65847, JSON.stringify({official: true}), new Date()]);
+  delete cM.__state.props.MIGRATION_V327; cM.invalidateProps_(); reset(cM);
+  const staleM = cM.getRates_('damage:main', D19, D19).length;
+  const nM = cM.migrateToV327_(), nM2 = cM.migrateToV327_();
   reset(cM);
-  check(nM >= 1 && nM2 === 0 && !cM.__state.props.JMS_ORDERKIND_DAMAGE && cM.pendingJobs_().some(j => j.type === 'SUMMARY' && j.indicator === 'damage' && j.date === D19),
-    'V3.25: todos os dias da Avaria consultados de novo no JMS (uma vez) e "sem suporte" refeito', {nM, nM2});
+  check(staleM === 0 && nM >= 1 && nM2 === 0 && !cM.__state.props.JMS_ORDERKIND_DAMAGE && cM.pendingJobs_().some(j => j.type === 'SUMMARY' && j.indicator === 'damage' && j.date === D19),
+    'V3.27: códigos numéricos apagados, linha antiga ignorada e todos os dias da Avaria consultados de novo (uma vez)', {staleM, nM, nM2});
   runAll(cM, 12);
-  check(cM.getRates_('damage:main', D19, D19)[0].rate === 658.07, 'depois da migração: taxa do principal = 658,07 do JMS');
+  check(cM.getRates_('damage:main', D19, D19)[0].rate === 658.07 && cM.getRates_('damage:sub', D19, D19)[0].rate === 2688.05,
+    'depois da migração: principal 658,07 e secundário 2.688,05 do JMS');
   // diagnosticarAvaria(): JMS (Todos e cada código) × o que o painel gravou, sem número de remessa.
   const dgA = cS.diagnosticarAvaria(D19);
   const wbA = scrDay()[D19].dm.map(r => r.waybillNo);
   check(/总破损率 658,07.*← painel: Pedido principal/.test(dgA.texto) && /总破损率 2\.688,05.*← painel: Pedido secundário/.test(dgA.texto) &&
-    /Painel gravou · Pedido principal: taxa 658,07/.test(dgA.texto) && dgA.codigos.some(x => x.codigo === 1 && x.taxa === 658.07) &&
+    /Painel gravou · Pedido principal: taxa 658,07/.test(dgA.texto) && dgA.codigos.some(x => x.codigo === 'MAIN' && x.taxa === 658.07) &&
     !wbA.some(w => dgA.texto.indexOf(w) >= 0) && !/FAKE/.test(dgA.texto),
     'diagnosticarAvaria: JMS de cada código ao lado do que o painel gravou (sem número de remessa)', dgA.texto);
+}
+
+// ---------- V3.27: Avaria — "Pedido principal" com o código da tela (mainSubCode "MAIN", captura de 03/10) ----------
+{
+  // Números da tela de 03/10 com "Pedido principal": Qtd processada total 435.804, 总破损票数 23 → 总破损率 52,78.
+  // Remessas e o volume do secundário são fictícios.
+  const day = () => {
+    const d = {[D19]: makeDay(D19, 57)}, src = d[D19].dm;
+    const mains = src.filter(r => !/-\d{3}$/.test(r.waybillNo)), kids = src.filter(r => /-\d{3}$/.test(r.waybillNo));
+    const mk = (from, n, child) => Array.from({length: n}, (_, i) => Object.assign({}, from[i % from.length],
+      {id: 'T' + (child ? 'F' : 'P') + i, serialNum: String(i + 1), waybillNo: (child ? '5550000' : '4440000') + String(i).padStart(6, '0') + (child ? '-001' : '')}));
+    d[D19].dm = mk(mains, 23, false).concat(mk(kids, 9, true));
+    d[D19].dmBase = 435804 + 40000;
+    return d;
+  };
+  const dd = day(), c = freshCtx(dd, {optionBases: {main: 435804, sub: 40000}});
+  c.queueHistory(D19, D19, true);
+  runAll(c, 12);
+  const r = c.getRates_('damage:main', D19, D19)[0];
+  const cards = c.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal']}}).cards;
+  check(r && r.rate === 52.78 && r.errorCount === 23 && r.totalCount === 435804 && cards.rate === 52.78 && cards.currentErrors === 23,
+    'tela de 03/10: Pedido principal = 总破损率 52,78 (23 avarias ÷ 435.804), como o JMS', {r, rate: cards.rate});
+  // Cota: resumo de novo com Todos igual → as opções não são consultadas de novo; Todos mudou → consultadas.
+  const optFetches = from => c.__state.fetches.slice(from).filter(f => f.payload.mainSubCode !== undefined).length;
+  let f0 = c.__state.fetches.length;
+  c.enqueueJobs_([['SUMMARY', 'damage', D19, 0]], {reset: true}); runAll(c, 4);
+  const sameN = optFetches(f0);
+  dd[D19].dm.push(Object.assign({}, dd[D19].dm[0], {id: 'TX1', waybillNo: '4449999000001'}));
+  f0 = c.__state.fetches.length;
+  c.enqueueJobs_([['SUMMARY', 'damage', D19, 0]], {reset: true}); runAll(c, 4);
+  const changedN = optFetches(f0), r24 = c.getRates_('damage:main', D19, D19)[0];
+  check(sameN === 0 && changedN >= 2 && r24.errorCount === 24,
+    'cota: com Todos igual, as opções não são consultadas de novo; com Todos diferente, sim', {sameN, changedN, main: r24.errorCount});
+  // Antes de achar o código do secundário, o principal já tem a taxa do JMS (código da tela) e o painel explica o secundário.
+  const c2 = freshCtx(day(), {optionBases: {main: 435804, sub: 40000}, orderKindCodes: {main: 'MAIN', sub: 'NAO_TESTADO'}});
+  c2.queueHistory(D19, D19, true);
+  runAll(c2, 12);
+  const st2 = c2.getDashboardData('damage', {from: D19, to: D19}).meta.orderKind;
+  check(c2.getRates_('damage:main', D19, D19)[0].rate === 52.78 && !c2.getRates_('damage:sub', D19, D19).length &&
+    st2.kinds.main === 'ok' && st2.kinds.sub === 'unsupported' && st2.main === 'MAIN',
+    'secundário sem código: principal com a taxa do JMS; secundário "—" com o motivo', st2);
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

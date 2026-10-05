@@ -187,10 +187,15 @@ function realisticJms(opts) {
     // Avaria: dia estatístico no payload; tabela 1 de no máximo 100 por página; tabela 2 pelas remessas.
     if (route === 'getBreakageRateData' || route === 'detailBreakageRateData') {
       const dd = body.startDate || body.statisticalStartDate;
-      const list = dd > nowIso ? [] : dd < nowIso ? dayList(dd, 'dm') : dayList(dd, 'dm').slice(0, Math.floor(VOLUME.dm * nowH / 24));
+      const all = dd > nowIso ? [] : dd < nowIso ? dayList(dd, 'dm') : dayList(dd, 'dm').slice(0, Math.floor(VOLUME.dm * nowH / 24));
+      // "Pedidos principais/filhos" como na tela: mainSubCode "MAIN" (principal) / "SUB" (filho); outro código = vazio.
+      const sub = body.mainSubCode === 'SUB', opt = body.mainSubCode !== undefined;
+      const list = !opt ? all : body.mainSubCode === 'MAIN' || sub ? all.filter((r, i) => (i % 8 === 0) === sub) : [];
+      const vol = !opt ? 519159 : sub ? 64159 : 455000;
       if (route === 'getBreakageRateData') {
         if (!list.length) return ok([], 0, 1, size);
-        return ok([{statisticalDate: dd, networkCode: '30001', operaNumber: 519159, breakageTicketNumber: list.length, breakageRate: Math.round(list.length / 519159 * 1e8) / 100}], 1, 1, size);
+        return ok([{statisticalDate: dd, networkCode: '30001', operaNumber: vol, breakageTicketNumber: list.length, breakageNumberTotal: list.length,
+          breakageRate: Math.round(list.length / vol * 1e8) / 100, breakageRateTotal: Math.round(list.length / vol * 1e8) / 100}], 1, 1, size);
       }
       const sz = Math.min(100, body.size);
       return ok(list.slice((cur - 1) * sz, cur * sz).map(r => { const o = Object.assign({}, r); delete o.hour; delete o._t; return o; }), list.length, cur, sz);

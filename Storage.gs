@@ -217,7 +217,13 @@ function rateFromRow_(r) {
   const x = {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : legacyRate_(r[0], num_(r[2], null), errors, total, synced),
     errorCount: errors, totalCount: total, syncedAt: synced};
   // Taxa de uma opção ("damage:main"): versões antigas gravavam uma ESTIMADA sem os códigos do JMS (getRates_ ignora).
-  if (String(r[0]).indexOf(':') > 0) x.estimated = /"estimated":true/.test(String(r[5] || ''));
+  // V3.27: e as gravadas antes dos códigos da tela (sem "cv":3 — códigos 1/2/0/3 que o JMS não usa) também não valem.
+  if (String(r[0]).indexOf(':') > 0) {
+    const txt = String(r[5] || ''), sig = /"allSig":"([^"]*)"/.exec(txt), code = /"code":("(?:[^"\\]|\\.)*"|[^,}]+)/.exec(txt);
+    x.estimated = /"estimated":true/.test(txt) || !/"cv":3/.test(txt);
+    x.allSig = sig ? sig[1] : null;
+    x.code = code ? String(safeJsonParse_(code[1], code[1])) : null;
+  }
   // Números do resumo do dia (Recebimento: deve chegar, não chegadas, chegou… — Config.gs → summary.metrics).
   const ic = INDICATORS[r[0]];
   if (ic && ic.summary && ic.summary.metrics) {
@@ -245,47 +251,44 @@ function variantRaw_(raw) {
 }
 
 // ------------------------------------------------------------------ Avaria: "Pedidos principais/filhos"
+/** Código numérico (1, 2, 0, 3 — os testados até a V3.26). O JMS usa texto (mainSubCode: "MAIN"): número nunca vale. */
+function orderKindNumeric_(v) { return typeof v === 'number' || /^\s*-?\d+\s*$/.test(String(v)); }
 /**
- * Códigos do filtro no JMS (propriedade JMS_ORDERKIND_<INDICADOR>, cadastrada ou descoberta), ou null.
- * V3.18: pode ter só uma das opções (a outra continua sendo procurada nos dias seguintes). "Sem suporte" gravado
- * pela regra antiga (V3.13, sem `v`) é ignorado: a descoberta roda de novo com a regra nova.
+ * Códigos do filtro no JMS, ou null. V3.27: o do "Pedido principal" é o da captura da tela (mainSubCode: "MAIN",
+ * Config.gs → orderKinds.known); o do "Pedido secundário" é cadastrado (JMS_ORDERKIND_<INDICADOR>) ou descoberto
+ * (orderKinds.candidates). Códigos numéricos e "sem suporte" gravados por versões antigas não valem.
  */
 function orderKindParams_(indicatorKey) {
-  const v = safeJsonParse_(getProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), '') || 'null', null);
-  if (!v) return null;
-  if (v.unsupported) return v.v >= 2 ? v : null;
-  return v.param && (v.main !== undefined || v.sub !== undefined) && v.main !== v.sub ? v : null;
+  const ok = (INDICATORS[indicatorKey] || {}).orderKinds;
+  if (!ok) return null;
+  const v = safeJsonParse_(getProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), '') || 'null', null) || {};
+  const valid = x => !v.unsupported && x !== undefined && x !== null && String(x).trim() !== '' && !orderKindNumeric_(x);
+  const known = ok.known || {}, map = {param: valid(v.main) || valid(v.sub) ? v.param || ok.param : ok.param};
+  if (valid(v.main)) map.main = v.main; else if (known.main !== undefined) map.main = known.main;
+  if (valid(v.sub) && v.sub !== map.main) map.sub = v.sub; else if (known.sub !== undefined) map.sub = known.sub;
+  ['learnedAt', 'subMissAt', 'tested', 'date'].forEach(k => { if (v[k] !== undefined) map[k] = v[k]; });
+  return map.main === undefined && map.sub === undefined ? null : map;
 }
-function orderKindComplete_(map) { return !!(map && !map.unsupported && map.main !== undefined && map.sub !== undefined); }
+function orderKindComplete_(map) { return !!(map && map.main !== undefined && map.sub !== undefined); }
 /**
- * Descobrir os códigos de novo? Sem códigos ou com só uma opção: sim. "Sem suporte" (o JMS ignorou todos os códigos
- * testados): nova tentativa a cada 24 h — antes ficava assim para sempre e a taxa da opção nunca vinha do JMS.
+ * Procurar o código do secundário? Sim enquanto faltar. Nenhum candidato respondeu como a opção: nova tentativa a cada
+ * 6 h (cada tentativa = 1 consulta do resumo por código testado).
  */
 function orderKindNeedsDetect_(map) {
-  if (!map) return true;
-  if (map.unsupported) return Date.now() - (Date.parse(map.at || '') || 0) > 24 * 3600000;
-  return !orderKindComplete_(map);
+  if (orderKindComplete_(map)) return false;
+  return !map || !map.subMissAt || Date.now() - (Date.parse(map.subMissAt) || 0) > 6 * 3600000;
 }
-/** Situação do filtro "Pedidos principais/filhos" para o painel explicar quando a taxa da opção ainda não veio do JMS. */
+/** Situação do filtro "Pedidos principais/filhos", por opção, para o painel explicar quando falta a taxa do JMS. */
 function orderKindStatus_(indicatorKey) {
   const cfg = INDICATORS[indicatorKey];
   if (!cfg || !cfg.orderKinds) return null;
-  const map = orderKindParams_(indicatorKey);
-  const state = !map ? 'learning' : map.unsupported ? 'unsupported' : orderKindComplete_(map) ? 'ok' : 'learning';
-  return {state: state, param: map && map.param || cfg.orderKinds.param, main: map ? map.main : undefined, sub: map ? map.sub : undefined,
-    at: map ? (map.at || map.learnedAt || null) : null};
+  const map = orderKindParams_(indicatorKey) || {};
+  const one = k => map[k] !== undefined ? 'ok' : map.subMissAt ? 'unsupported' : 'learning';
+  const kinds = {main: one('main'), sub: one('sub')};
+  const state = kinds.main === 'ok' && kinds.sub === 'ok' ? 'ok' : kinds.main === 'unsupported' || kinds.sub === 'unsupported' ? 'unsupported' : 'learning';
+  return {state: state, kinds: kinds, param: map.param || cfg.orderKinds.param, main: map.main, sub: map.sub, at: map.subMissAt || map.learnedAt || null};
 }
 function orderKindPayload_(map, kind) { const o = {}; o[map.param] = map[kind]; return o; }
-/** Pedidos principais e filhos de um dia, contados nas remessas gravadas (remessas distintas). */
-function orderKindCounts_(indicatorKey, date) {
-  const seen = {}, n = {main: 0, sub: 0};
-  getArchivedRange_(indicatorKey, date, date).rows.forEach(r => {
-    if (!r.shipment || seen[r.shipment]) return;
-    seen[r.shipment] = 1;
-    n[orderKindOf_(r.shipment)]++;
-  });
-  return n;
-}
 /** Remessas da lista do detalhe do JMS com a opção escolhida (para separar as remessas como a tela). */
 function fetchOrderKindWaybills_(indicatorKey, date, map, kind, maxPages) {
   const cfg = getIndicatorConfig_(indicatorKey), endpoint = endpointFor_(cfg, 'detail');
@@ -299,133 +302,97 @@ function fetchOrderKindWaybills_(indicatorKey, date, map, kind, maxPages) {
   return out;
 }
 /**
- * Descobre os códigos do filtro "Pedidos principais/filhos" (V3.18). Consulta o resumo com cada candidato
- * (Config.gs → orderKinds.candidates). O filtro "valeu" quando a resposta muda em relação a Todos — na
- * quantidade de avarias, na "Qtd processada" ou no valor (na tela, com "Pedido principal" a quantidade pode ser
- * a mesma de Todos e a Qtd processada vir 0). Nos que valeram, a 1ª página da lista do JMS com o código diz
- * quem é filho (remessas com sufixo "-001"). Sem sufixo nenhum: dois códigos que somam Todos = principal (maior)
- * e filho. Aprende uma opção de cada vez; só grava "sem suporte" quando o JMS ignora o parâmetro em todos.
+ * V3.27: descobre o código do "Pedido secundário" (o do principal é o da captura: "MAIN"). Cada candidato
+ * (Config.gs → orderKinds.candidates: "SUB", …) é consultado no resumo do dia; vale o 1º que o JMS responde como uma
+ * opção de verdade — com Qtd processada ou avarias, diferente de Todos (código ignorado) e diferente do principal.
+ * Código que o JMS não conhece volta vazio, recusado ou igual a Todos: nunca é aceito. Nenhum valeu: nova tentativa
+ * em 6 h, com aviso no SYNC_LOG (no máximo um por dia) dizendo o que cadastrar.
  */
-function detectOrderKindParams_(indicatorKey, date, counts, all, known) {
-  const ok = getIndicatorConfig_(indicatorKey).orderKinds;
-  if (!all || !(all.errorCount > 0)) return null;
-  const amountOf = raw => { const v = raw && [raw.breakageAmountTotal, raw.breakageAmount, raw.amount].filter(x => x !== undefined && x !== null && x !== '')[0]; return v === undefined ? null : Number(v); };
-  const res = [];
-  for (let i = 0; i < ok.candidates.length; i++) {
+function detectOrderKindParams_(indicatorKey, date, all, known) {
+  const ok = getIndicatorConfig_(indicatorKey).orderKinds, prop = 'JMS_ORDERKIND_' + indicatorKey.toUpperCase();
+  const map = known || orderKindParams_(indicatorKey);
+  if (!map || map.main === undefined || map.sub !== undefined || !all || all.empty || !(all.totalCount > 0 || all.errorCount > 0)) return map;
+  const sig = s => s.empty ? 'vazio' : 'avarias ' + s.errorCount + ' · Qtd processada ' + s.totalCount;
+  const main = fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, 'main'));
+  const tested = [];
+  let found;
+  for (let i = 0; i < ok.candidates.length && found === undefined; i++) {
     const v = ok.candidates[i], extra = {};
-    if (known && (known.main === v || known.sub === v)) continue;
-    extra[ok.param] = v;
+    if (v === map.main) continue;
+    extra[map.param] = v;
     let sm;
     try { sm = fetchSummaryDay_(indicatorKey, date, extra); }
-    catch (e) { if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e; continue; }
-    const errors = sm.empty ? 0 : (sm.errorCount || 0), total = sm.empty ? 0 : sm.totalCount, amount = sm.empty ? 0 : amountOf(sm.raw);
-    const applied = sm.empty || errors !== all.errorCount || (total !== null && total !== all.totalCount) ||
-      (amount !== null && amountOf(all.raw) !== null && Math.abs(amount - amountOf(all.raw)) > 0.01);
-    res.push({v: v, errors: errors, total: total, applied: applied});
+    catch (e) { if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e; tested.push(v + ': recusado'); continue; }
+    tested.push(v + ': ' + (sig(sm) === sig(all) ? 'igual a Todos' : sig(sm)));
+    if (!sm.empty && (sm.totalCount > 0 || sm.errorCount > 0) && sig(sm) !== sig(all) && sig(sm) !== sig(main)) found = v;
   }
-  const appliedList = res.filter(x => x.applied);
-  const base = known && !known.unsupported ? Object.assign({}, known) : {param: ok.param};
-  if (!appliedList.length && !(known && (known.main !== undefined || known.sub !== undefined))) {
-    const map = {unsupported: true, v: 2, at: new Date().toISOString(), date: date, counts: counts};
-    setProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), JSON.stringify(map));
-    logSync_('WARN', indicatorKey, date, 'Pedidos principais/filhos: o JMS ignorou os códigos ' + ok.param + '=' + ok.candidates.join('/') +
-      '. Sem a taxa do JMS, o painel não mostra taxa para a opção (nova tentativa em 24 h). Rode diagnosticarAvaria(), capture o payload do getBreakageRateData com a opção escolhida e cadastre JMS_ORDERKIND_' + indicatorKey.toUpperCase() + '.');
-    return map;
-  }
-  // Quem é filho: a lista do JMS com o código traz remessas com sufixo "-001".
-  const withErr = appliedList.filter(x => x.errors > 0);
-  withErr.forEach(x => {
-    try {
-      const ws = fetchOrderKindWaybills_(indicatorKey, date, Object.assign({param: ok.param}, {main: x.v}), 'main', 1);
-      x.ratio = ws.length ? ws.filter(w => orderKindOf_(w) === 'sub').length / ws.length : 0;
-    } catch (e) { if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e; x.ratio = null; }
-  });
-  let sub = withErr.filter(x => x.ratio >= 0.5).sort((a, b) => b.ratio - a.ratio)[0];
-  let main = withErr.filter(x => x !== sub && x.ratio !== null && x.ratio < 0.5).sort((a, b) => b.errors - a.errors)[0];
-  // V3.25: dois códigos que respondem diferente e com "Qtd processada": o principal é SEMPRE o de maior volume, como
-  // na tela do JMS (01/10: principal 498.429, secundário 65.847) — o sufixo "-001" das remessas só decide sem volume.
-  const withVol = withErr.filter((x, i) => x.total > 0 && withErr.findIndex(y => y.errors === x.errors && y.total === x.total) === i);
-  if (withVol.length >= 2) {
-    const byVol = withVol.slice().sort((a, b) => b.total - a.total || b.errors - a.errors);
-    main = byVol[0]; sub = byVol[1];
-  }
-  // Dois códigos que valeram e respondem diferente entre si = as duas opções da tela (a tela só tem Todos, principal e
-  // secundário). Vale também quando a lista do JMS não traz o sufixo "-001" ou ignora a opção (V3.20.1). O principal é
-  // o de maior "Qtd processada" (pedidos principais são a maior parte do volume); sem volume, o de mais avarias.
-  const distinct = withErr.filter((x, i) => withErr.findIndex(y => y.errors === x.errors && y.total === x.total) === i);
-  if (!sub && distinct.length >= 2) {
-    const byVol = distinct.every(x => x.total > 0);
-    const pair = distinct.slice().sort((a, b) => byVol ? b.total - a.total || b.errors - a.errors : b.errors - a.errors);
-    main = pair[0]; sub = pair[1];
-  }
-  if (main && base.main === undefined) base.main = main.v;
-  if (sub && base.sub === undefined) base.sub = sub.v;
-  if (base.main === undefined && base.sub === undefined) return known || null; // dia que não distingue: tenta no próximo
-  const was = JSON.stringify(known || {});
-  base.v = 2; base.learnedAt = new Date().toISOString(); base.date = date;
-  setProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), JSON.stringify(base));
-  if (JSON.stringify(Object.assign({}, known || {}, {main: base.main, sub: base.sub})) !== was || !known) {
-    logSync_('INFO', indicatorKey, date, 'Pedidos principais/filhos: o JMS usa ' +
-      (base.main !== undefined ? ok.param + '=' + base.main + ' (principal)' : 'principal ainda não identificado') + ' e ' +
-      (base.sub !== undefined ? ok.param + '=' + base.sub + ' (filho)' : 'filho ainda não identificado (falta um dia com pedidos filhos)') + '.');
-    // Dias já baixados passam a ter a taxa oficial (o resumo consulta as opções conhecidas).
-    const days = getRates_(indicatorKey, null, null).map(r => r.date);
+  const out = {param: map.param, main: map.main, v: 3, date: date};
+  if (found !== undefined) {
+    out.sub = found; out.learnedAt = new Date().toISOString();
+    setProp_(prop, JSON.stringify(out));
+    logSync_('INFO', indicatorKey, date, 'Pedidos principais/filhos: o JMS usa ' + map.param + '=' + map.main + ' (principal, da tela) e ' +
+      map.param + '=' + found + ' (secundário). Os dias gravados consultam a taxa do secundário.');
+    const days = getRates_(indicatorKey, null, null).map(r => r.date).filter(d => d !== date);
     if (days.length) enqueueJobs_(days.map(d => ['SUMMARY', indicatorKey, d, 0]), {reset: true});
+    return orderKindParams_(indicatorKey);
   }
-  return base;
+  const lastMiss = Date.parse(map.subMissAt || '') || 0;
+  out.subMissAt = new Date().toISOString(); out.tested = tested.join(' · ').slice(0, 400);
+  setProp_(prop, JSON.stringify(out));
+  if (Date.now() - lastMiss > 24 * 3600000) {
+    logSync_('WARN', indicatorKey, date, 'Pedidos principais/filhos: "Pedido secundário" ainda sem código — o JMS não respondeu como a opção a ' +
+      map.param + '=' + ok.candidates.join('/') + ' (' + out.tested + '). Nova tentativa em 6 h. "Pedido principal" (' + map.param + '=' + map.main +
+      ') continua com a taxa do JMS. Para cadastrar: capture o Payload do getBreakageRateData com "Pedido secundário" e grave ' + prop +
+      ' = {"param":"' + map.param + '","main":"' + map.main + '","sub":"<código>"}.');
+  }
+  return orderKindParams_(indicatorKey);
+}
+/** Procurar o código do secundário agora? No máximo de hora em hora (e a cada 6 h depois de uma tentativa sem achar). */
+function orderKindDetectDue_(indicatorKey, map) {
+  if (!orderKindNeedsDetect_(map)) return false;
+  const key = 'ORDERKIND_DETECT_AT_' + indicatorKey.toUpperCase();
+  if (Date.now() - (Number(getProp_(key, '')) || 0) <= 3600000) return false;
+  setProp_(key, Date.now());
+  return true;
 }
 /**
- * Grava a taxa de cada opção do dia ("damage:main" / "damage:sub"): a do JMS (resumo com o parâmetro da opção:
+ * Grava a taxa de cada opção do dia ("damage:main" / "damage:sub"): a do JMS (resumo com o código da opção:
  * 总破损率, 总破损票数 e Qtd processada da tela — inclusive 0 quando o JMS mostra 0) e as remessas da lista do JMS dessa
  * opção (o painel separa as remessas exatamente como a tela). Código ainda não conhecido: nada (nunca uma estimativa).
+ * `cv: 3` marca as linhas gravadas com os códigos da tela (V3.27); as anteriores não valem (getRates_).
  */
-function syncOrderKindRates_(indicatorKey, date, counts, opts) {
+function syncOrderKindRates_(indicatorKey, date, opts) {
   const cfg = getIndicatorConfig_(indicatorKey);
   if (!cfg.orderKinds) return 0;
   const all = getRateDay_(indicatorKey, date);
   if (!all) return 0;
   let map = orderKindParams_(indicatorKey);
-  // A descoberta roda depois do detalhe baixado (não a cada sincronização de hora em hora).
-  if ((!opts || opts.detect !== false) && orderKindNeedsDetect_(map)) {
+  if (opts && opts.detect) {
     try {
       const allFull = fetchSummaryDay_(indicatorKey, date);
-      const det = detectOrderKindParams_(indicatorKey, date, counts || {main: 0, sub: 0}, allFull.empty ? all : allFull, map);
-      if (det) map = det;
+      map = detectOrderKindParams_(indicatorKey, date, allFull.empty ? all : allFull, map) || map;
     } catch (e) { if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e; }
   }
-  // Códigos gravados trocados (versões anteriores): o principal tem a maior "Qtd processada". Confere e corrige.
-  const got = {};
-  if (orderKindComplete_(map)) {
-    ['main', 'sub'].forEach(kind => { got[kind] = fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, kind)); });
-    const vol = r => r && !r.empty && r.totalCount > 0 ? r.totalCount : 0;
-    if (vol(got.main) > 0 && vol(got.sub) > vol(got.main)) {
-      map = Object.assign({}, map, {main: map.sub, sub: map.main, fixedAt: new Date().toISOString()});
-      setProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), JSON.stringify(map));
-      const t = got.main; got.main = got.sub; got.sub = t;
-      logSync_('INFO', indicatorKey, date, 'Pedidos principais/filhos: códigos estavam trocados; agora ' + cfg.orderKinds.param + '=' + map.main +
-        ' (principal) e ' + cfg.orderKinds.param + '=' + map.sub + ' (filho). Os dias gravados são consultados de novo.');
-      const days = getRates_(indicatorKey, null, null).map(r => r.date).filter(d => d !== date);
-      if (days.length) enqueueJobs_(days.map(d => ['SUMMARY', indicatorKey, d, 0]), {reset: true});
-    }
-  }
+  if (!map) return 0;
   // Remessas de UMA opção bastam para separar as duas: a de filhos (menor) quando conhecida.
-  const listKind = map && !map.unsupported ? (map.sub !== undefined ? 'sub' : map.main !== undefined ? 'main' : null) : null;
+  const listKind = map.sub !== undefined ? 'sub' : map.main !== undefined ? 'main' : null;
   let n = 0;
   ['main', 'sub'].forEach(kind => {
-    let s = null;
-    if (map && !map.unsupported && map[kind] !== undefined) {
-      const r = got[kind] || fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, kind));
-      const raw = {official: true};
-      if (kind === listKind) {
-        const cnt = r.empty ? 0 : (r.errorCount || 0);
-        raw.waybills = cnt > 0 && cnt <= 3000 ? fetchOrderKindWaybills_(indicatorKey, date, map, kind) : [];
-      }
-      s = r.empty ? {rate: 0, errorCount: 0, totalCount: null, raw: Object.assign(raw, {empty: true})}
-        : {rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, raw: raw};
-    }
     // V3.25: sem o código da opção no JMS, NADA é gravado (antes: taxa estimada = avarias da opção ÷ volume de Todos,
     // um número que o JMS não mostra). O painel mostra "—" e o motivo até o JMS responder.
-    if (!s) return;
+    if (map[kind] === undefined) return;
+    const r = fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, kind));
+    // allSig: números de Todos nesta consulta — o resumo seguinte só consulta as opções de novo se Todos mudar.
+    const raw = {official: true, cv: 3, code: map[kind], allSig: all.errorCount + '/' + all.totalCount};
+    if (kind === listKind) {
+      const cnt = r.empty ? 0 : (r.errorCount || 0);
+      let ws = cnt > 0 && cnt <= 3000 ? fetchOrderKindWaybills_(indicatorKey, date, map, kind) : [];
+      // Lista do JMS que ignora a opção (devolve as remessas de Todos): não separa nada — vale o sufixo "-001".
+      if (all.errorCount > cnt && ws.length > cnt && ws.length >= all.errorCount) { ws = null; raw.listIgnored = true; }
+      if (ws) raw.waybills = ws;
+    }
+    const s = r.empty ? {rate: 0, errorCount: 0, totalCount: null, raw: Object.assign(raw, {empty: true})}
+      : {rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, raw: raw};
     upsertVariantRate_({indicator: indicatorKey + ':' + kind, date: date, rate: s.rate, errorCount: s.errorCount, totalCount: s.totalCount, raw: s.raw});
     n++;
   });
@@ -444,18 +411,19 @@ function orderKindTags_(indicatorKey, from, to) {
       const d = dateCellIso_(r[1]);
       if ((from && d < from) || (to && d > to)) return;
       const raw = safeJsonParse_(String(r[5] || '{}'), {}) || {};
-      if (!Array.isArray(raw.waybills)) return;
+      // V3.27: só listas baixadas com os códigos da tela.
+      if (raw.cv !== 3 || !Array.isArray(raw.waybills)) return;
       if (!out[d] || kind === 'sub') out[d] = {kind: kind, w: raw.waybills};
     });
   });
   return out;
 }
-/** Depois do detalhe gravado: descobre os códigos de cada opção no JMS (se ainda não conhecidos). Nunca derruba o job. */
+/** Depois do detalhe gravado: procura o código do secundário (se ainda falta). Nunca derruba o job. */
 function afterDetailSaved_(indicatorKey, date) {
   if (!getIndicatorConfig_(indicatorKey).orderKinds) return;
   try {
-    if (orderKindComplete_(orderKindParams_(indicatorKey))) return; // oficiais: o job de resumo consulta
-    syncOrderKindRates_(indicatorKey, date, orderKindCounts_(indicatorKey, date));
+    const map = orderKindParams_(indicatorKey);
+    if (orderKindDetectDue_(indicatorKey, map)) syncOrderKindRates_(indicatorKey, date, {detect: true});
   } catch (e) {
     logSync_('WARN', indicatorKey, date, 'Taxas de pedidos principais/filhos não atualizadas: ' + String(e && e.message || e).slice(0, 300));
   }
@@ -1366,7 +1334,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
   try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
@@ -1615,16 +1583,19 @@ function runSummaryJob_(job) {
       logSync_('WARN', job.indicator, job.date, 'Turnos pelo resumo não consultados: ' + String(e && e.message || e).slice(0, 300));
     }
   }
-  // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (总破损率 do JMS com a opção). Códigos ainda
-  // incompletos: a descoberta também roda aqui, no máximo a cada 6 h (antes só depois do detalhe baixado).
+  // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (总破损率 do JMS com a opção). V3.27: o principal
+  // (mainSubCode "MAIN", da tela) vem desde o 1º resumo; o código do secundário é procurado aqui enquanto faltar.
   const okCfg = getIndicatorConfig_(job.indicator).orderKinds, okMap = okCfg && orderKindParams_(job.indicator);
-  const detKey = 'ORDERKIND_DETECT_AT_' + job.indicator.toUpperCase();
-  // V3.25: até aprender os dois códigos, tenta de hora em hora (antes: 6 h); "sem suporte" é refeito a cada 24 h.
-  const tryDetect = !!okCfg && orderKindNeedsDetect_(okMap) && summary.errorCount > 0 &&
-    Date.now() - (Number(getProp_(detKey, '')) || 0) > 3600000;
-  if (tryDetect) setProp_(detKey, Date.now());
-  if ((okMap && !okMap.unsupported) || tryDetect) {
-    try { syncOrderKindRates_(job.indicator, job.date, null, {detect: tryDetect}); }
+  const tryDetect = !!okCfg && summary.errorCount > 0 && orderKindDetectDue_(job.indicator, okMap);
+  // Cota: as opções já gravadas (com os códigos da tela) com o mesmo Todos de agora = nada mudou nas opções.
+  const okSig = summary.errorCount + '/' + summary.totalCount;
+  const okSame = !!okMap && ['main', 'sub'].every(k => {
+    if (okMap[k] === undefined) return true;
+    const v = getRateDay_(job.indicator + ':' + k, job.date);
+    return !!v && v.allSig === okSig && v.code === String(okMap[k]);
+  });
+  if ((okMap && !okSame) || tryDetect) {
+    try { syncOrderKindRates_(job.indicator, job.date, {detect: tryDetect}); }
     catch (e) {
       if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e;
       logSync_('WARN', job.indicator, job.date, 'Taxas de pedidos principais/filhos não consultadas: ' + String(e && e.message || e).slice(0, 300));
@@ -2206,6 +2177,26 @@ function migrateToV325_() {
   const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
   setProp_('MIGRATION_V325', new Date().toISOString());
   if (n) logSync_('INFO', '', '', 'V3.25: ' + n + ' dia(s) da Avaria consultados de novo no JMS (taxa de Todos e de cada opção, sem estimativa).');
+  return n;
+}
+
+/**
+ * V3.27 (uma vez): o código do "Pedido principal" no JMS é texto (mainSubCode: "MAIN", captura da tela de 03/10).
+ * Códigos numéricos e "sem suporte" gravados por versões antigas são apagados (o secundário é procurado de novo) e
+ * todos os dias da Avaria consultam a taxa de cada opção com os códigos da tela.
+ */
+function migrateToV327_() {
+  if (getProp_('MIGRATION_V327', '')) return 0;
+  const jobs = [];
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].orderKinds).forEach(k => {
+    const prop = 'JMS_ORDERKIND_' + k.toUpperCase(), m = safeJsonParse_(getProp_(prop, '') || 'null', null);
+    if (m && (m.unsupported || (m.main !== undefined && orderKindNumeric_(m.main)) || (m.sub !== undefined && orderKindNumeric_(m.sub)))) deleteProp_(prop);
+    deleteProp_('ORDERKIND_DETECT_AT_' + k.toUpperCase());
+    getRates_(k, null, null).forEach(r => jobs.push(['SUMMARY', k, r.date, 0]));
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V327', new Date().toISOString());
+  if (n) logSync_('INFO', '', '', 'V3.27: ' + n + ' dia(s) da Avaria consultados de novo com os códigos da tela (Pedido principal = mainSubCode "MAIN").');
   return n;
 }
 

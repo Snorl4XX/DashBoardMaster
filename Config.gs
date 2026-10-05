@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.26.0',
+  VERSION: '3.27.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -476,11 +476,14 @@ const INDICATORS = Object.freeze({
       client: {pt: 'Nome do cliente', zh: '客户名称'}
     },
     filters: ['orderKind', 'shift', 'station', 'product', 'interval'],
-    // "Pedidos principais/filhos" (como na tela do JMS): pedido filho = remessa com sufixo "-001", "-002"…
-    // Escolhendo UMA opção, a taxa e a quantidade do dia passam a ser as do JMS para ela (o JMS muda também
-    // o volume): resumo consultado com `param`. Os códigos de cada opção são descobertos sozinhos, conferindo
-    // com as remessas do dia (ou cadastrados em JMS_ORDERKIND_DAMAGE, ex.: {"param":"mainSubCode","main":1,"sub":2}).
-    orderKinds: {field: 'orderKind', values: {main: 'Pedido principal', sub: 'Pedido secundário'}, param: 'mainSubCode', candidates: [1, 2, 0, 3]},
+    // "Pedidos principais/filhos" (como na tela do JMS): escolhendo UMA opção, a taxa e a quantidade do dia passam a
+    // ser as do JMS para ela (o JMS muda também o volume): resumo consultado com `param`.
+    // V3.27: código do "Pedido principal" = captura da tela (03/10: payload do getBreakageRateData com
+    // mainSubCode: "MAIN" — texto, não número). O do "Pedido secundário" não foi capturado: o painel testa os
+    // `candidates` e fica com o que o JMS responde como a opção (ou cadastre JMS_ORDERKIND_DAMAGE =
+    // {"param":"mainSubCode","main":"MAIN","sub":"<código>"}). Dia sem a lista do JMS: filho = sufixo "-001".
+    orderKinds: {field: 'orderKind', values: {main: 'Pedido principal', sub: 'Pedido secundário'}, param: 'mainSubCode',
+      known: {main: 'MAIN'}, candidates: ['SUB', 'CHILD', 'SON', 'SECONDARY', 'SUBORDER']},
     topCards: [],
     // Avaria sem registro na Consulta de Pacote Problemático = registrada por outra base: no lugar de
     // "Sem informação", os campos que vêm da tabela 2 mostram "OUTRAS BASES" (tela, filtros e relatório).

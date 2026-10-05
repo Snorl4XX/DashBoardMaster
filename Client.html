@@ -124,8 +124,8 @@
       detailsWindowHint: 'Para não estourar a cota do Google (~500 mil remessas por dia), os gráficos por DC/base/viagem usam só os últimos dias. Os números do resumo valem para todos os dias:',
       okMissing: 'Taxa do JMS para "{o}" ainda não disponível neste período — o painel não calcula taxa própria. {r}',
       okWhyDay: 'A consulta desta opção no JMS entra na próxima atualização.',
-      okWhyLearning: 'O painel está descobrindo como o JMS identifica a opção (tentativa de hora em hora).',
-      okWhyUnsupported: 'O JMS não respondeu à opção nos testes (nova tentativa em 24 h). Rode diagnosticarAvaria() no editor e mande o Payload do getBreakageRateData com a opção escolhida (sem AuthToken e sem Cookie).',
+      okWhyLearning: 'O painel está procurando o código desta opção no JMS (tentativa de hora em hora).',
+      okWhyUnsupported: 'O JMS não respondeu aos códigos testados para esta opção (nova tentativa em 6 h). Mande o Payload do getBreakageRateData com a opção escolhida (sem AuthToken e sem Cookie).',
       amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total',
       routesOfficial: 'Número oficial de cada rota (tabela principal do JMS)', tripCov: 'IDs consultados no Rastreamento do pacote: {a} de {b} remessas ({c} com ID)',
       tripCovNone: 'IDs de viagem: consulta no Rastreamento do pacote depois do download do dia', tcOfficial: 'número oficial do JMS',
@@ -240,8 +240,8 @@
       detailsWindowHint: '为避免超出 Google 配额（每天约50万票），按中心/网点/车次的图表只使用最近几天的数据。汇总数字涵盖所有日期：',
       okMissing: '该期间 JMS 尚未提供“{o}”的指标率 — 看板不自行计算。{r}',
       okWhyDay: '该选项将在下次更新时向 JMS 查询。',
-      okWhyLearning: '看板正在识别 JMS 中该选项的代码（每小时尝试一次）。',
-      okWhyUnsupported: 'JMS 未响应该选项（24 小时后重试）。请在编辑器中运行 diagnosticarAvaria()，并发送选择该选项时 getBreakageRateData 的 Payload（不含 AuthToken 和 Cookie）。',
+      okWhyLearning: '看板正在查找 JMS 中该选项的代码（每小时尝试一次）。',
+      okWhyUnsupported: 'JMS 未响应该选项已测试的代码（6 小时后重试）。请发送选择该选项时 getBreakageRateData 的 Payload（不含 AuthToken 和 Cookie）。',
       amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额',
       routesOfficial: '各线路官方数字（JMS主表）', tripCov: '包裹轨迹已查询车次号：{a} / {b} 票（{c} 票有车次号）',
       tripCovNone: '车次号：当日明细下载完成后在包裹轨迹查询', tcOfficial: 'JMS官方数字',
@@ -888,8 +888,10 @@
   }
   /** Por que a taxa da opção de "Pedidos principais/filhos" ainda não veio do JMS (situação dos códigos no servidor). */
   function orderKindWhy() {
-    var st = state.data && state.data.meta && state.data.meta.orderKind;
-    return t(!st || st.state === 'learning' ? 'okWhyLearning' : st.state === 'unsupported' ? 'okWhyUnsupported' : 'okWhyDay');
+    var st = state.data && state.data.meta && state.data.meta.orderKind, kind = state.rateView && state.rateView.kind;
+    // V3.27: situação de cada opção (o principal tem o código da tela; o secundário pode ainda estar sendo procurado).
+    var s = st && st.kinds && kind && st.kinds[kind] ? st.kinds[kind] : st && st.state;
+    return t(!s || s === 'learning' ? 'okWhyLearning' : s === 'unsupported' ? 'okWhyUnsupported' : 'okWhyDay');
   }
   function activeRates() { return state.rateView && state.rateView.rates ? state.rateView.rates : state.data.rates; }
   /** Nome do recorte de turno: "T1", "T1 + T2"; no SC → DC, "Turno da expedição T1". */

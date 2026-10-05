@@ -226,10 +226,12 @@ function fakeJms(dayData, options) {
     };
     // Janela de horário num campo informado (Recebimento: sendTime), como o JMS faz com startTime/endTime.
     // Avaria: opção de "Pedidos principais/filhos" pedida (main/sub), 'none' = código que o JMS não conhece, null = Todos.
+    // Códigos como na tela (captura de 03/10: mainSubCode "MAIN" = Pedido principal; "SUB" = secundário, simulado).
+    // options.unknownCodeIgnored: código desconhecido devolve Todos (em vez de vazio).
     const dmKind = b => {
       if (options.ignoreMainSub || b.mainSubCode === undefined || b.mainSubCode === null || b.mainSubCode === '') return null;
-      const codes = options.orderKindCodes || {main: 1, sub: 2};
-      return b.mainSubCode === codes.main ? 'main' : b.mainSubCode === codes.sub ? 'sub' : 'none';
+      const codes = options.orderKindCodes || {main: 'MAIN', sub: 'SUB'};
+      return b.mainSubCode === codes.main ? 'main' : b.mainSubCode === codes.sub ? 'sub' : options.unknownCodeIgnored ? null : 'none';
     };
     // options.plainChildren: o JMS mostra os pedidos filhos sem o sufixo "-001" (número próprio).
     const dmList = dd => dd.dm.map(r => {
@@ -283,7 +285,7 @@ function fakeJms(dayData, options) {
       // ----- Avaria (formato das respostas do documento do usuário) -----
       case 'getBreakageRateData': {
         if (!d || !d.dm) return ok([], 0, 1, body.size);
-        // "Pedidos principais/filhos": mainSubCode (códigos simulados: principal 1, filho 2; options.orderKindCodes troca).
+        // "Pedidos principais/filhos": mainSubCode (principal "MAIN" como na tela, filho "SUB"; options.orderKindCodes troca).
         // Filho = remessa com sufixo "-001"; o volume (operaNumber) também muda com a opção. Código desconhecido = vazio.
         let list = dmList(d), base = d.dmBase;
         const kind = dmKind(body);
