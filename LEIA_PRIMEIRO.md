@@ -1,8 +1,70 @@
-# J&T DASHMASTER V3.27 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.28 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.28 — Novo painel: Sem Movimentação (断更)
+Painel novo no menu lateral, com o mesmo padrão dos outros, montado a partir do PDF "sem movimentação". O número vem da tela do JMS **Indicadores de Negócios > Monitoramento de movimentação em tempo real (novo)**, com os 6 tipos da última operação escolhidos:
+- Bipe de expedição (发件扫描);
+- Bipe de pacote problemático (问题件扫描);
+- Chegadas ao centro (中心到件);
+- Encomenda inserida em lote (建包扫描);
+- Entrada no galpão de pacote não expedido (留仓件入仓, como no payload);
+- Encomenda retirada do lote (拆包扫描).
+
+**De onde vem cada número**
+- **Resumo** (`trajectory_monitor_total`), com o payload igual à captura. É uma linha por tipo de bipe, com o "Total de pedidos sem movimentação" e os dias sem movimentação (1, 2… 7, 10, 14, 30).
+  - O cartão vermelho **"Pedidos sem movimentação"** é a soma das linhas.
+  - Os 6 cartões de "Último bipe" são o total de cada linha. O tipo que o JMS não mostra fica 0.
+  - O cartão vermelho também mostra o **horário da última operação mais recente** da tabela (no exemplo do PDF, 04/10/2026 14:59:54).
+- **Lista** (`trajectory_monitor_detail`): o número vermelho "Total de pedidos sem movimentação" de cada tipo (`queryType: 2`), pela nossa base como Unidade responsável, com o payload igual à captura. Dela saem os filtros, os cartões "com mais", os gráficos e a tabela.
+
+**Filtros** (o pedido do PDF)
+- **Tipo de bipagem:** coluna Tipo da última operação.
+- **Login:** coluna Operador do bipe mais recente.
+- **Turno:** coluna Horário da última operação.
+- **Aging:** coluna Aging, com os valores trocados como pedido ("Exceed 4 days with no track" → **4**).
+- **Problemáticos:** coluna Nome de pacote problemático.
+- **Número do ID:** coluna Número do ID.
+
+**Cartões**
+- Pedidos sem movimentação e cada tipo de bipe.
+- Turnos T1/T2/T3 (quantidade e participação).
+- Número do ID, Base Remetente, Aging e Problemático **com mais pedidos**. Pedido sem problemático não entra nesse cartão.
+
+**Gráficos**
+- Evolução diária.
+- Número do ID com mais pedidos.
+- Turnos.
+- Nome da Base Remetente.
+- **Aging** (em ordem de dias; sem filtro, os números oficiais da tabela do JMS).
+- Tipo de bipe (sem filtro, oficiais).
+- Login.
+- Base (Nome da base mais recente).
+- Problemáticos.
+
+**Tabela:** todas as colunas da lista do JMS.
+
+**Foto do momento.** O JMS não recebe data nesta tela: ele devolve a situação de agora. Por isso:
+- só **hoje** é consultado. O resumo é consultado **de hora em hora**, porque a tela do JMS é atualizada de hora em hora ("Estatísticas de dados Tempo");
+- a lista é baixada de hora em hora no Workspace e a cada 6 h na conta Gmail. Ela tem ~17 mil pedidos (~170 consultas);
+- cada dia passado fica com a **última foto** daquele dia. A "Evolução diária" e o "Dia anterior" saem dessas fotos e começam a contar na instalação;
+- o painel mostra **um dia por vez** (atalhos "Hoje" e "Dia anterior"). Somar fotos de dias diferentes contaria o mesmo pedido várias vezes, e por isso o painel não entra nos **Resultados**.
+
+**Não foi possível conferir no JMS real (rode `diagnosticarSemMovimentacao()` depois de instalar):**
+- **cabeçalho de rota:** o Routename da tela não aparece na captura. O painel usa o nome da página (`TrackRealTimeMonitoringNew`) e, se o JMS recusar, testa as variantes sozinho;
+- **tamanho de página:** se a lista aceita 100 por página (a tela usa 20). Se recusar, o painel aprende o limite sozinho.
+
+O diagnóstico mostra cada tipo de bipe no resumo, a lista de cada tipo × o resumo e o painel × o JMS de agora (✓ / ✗). Não mostra número de remessa, nome de operador nem credencial.
+
+**Cota do Google (conta Gmail, `node tests/simulacao_cotas.js consumer 14 3`, 3º dia):** do 4º dia em diante, **89,6 min por dia de 90**, nenhuma execução bloqueada. Nos 3 primeiros dias, a fila da instalação usa a cota inteira. A Sem Movimentação gasta ~1,8 min por dia (resumo 0,6 + lista 1,2). A margem ficou pequena: se o registro mostrar execuções bloqueadas pela cota, grave a propriedade `ATUALIZACAO_MIN` = `60` (o resumo de hoje dos outros painéis passa a ser consultado de hora em hora).
+
+**Avaria, conta Gmail:** hoje, as taxas de "Pedido principal" e "Pedido secundário" passam a ser consultadas de novo no máximo de hora em hora. Todos continua a cada 30 min. Isso abre espaço na cota para o painel novo.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo; `diagnosticarSemMovimentacao` está no `Code`) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão). Os gatilhos continuam os mesmos, e o painel começa a consultar o JMS na próxima atualização.
+
+**Testes:** 419 verificações. O JMS simulado usa pedidos, operadores, IDs e bases fictícios.
 
 ## V3.27 — Avaria: "Pedido principal" com o código da tela do JMS
 **O que estava errado.** Para pedir ao JMS a taxa de "Pedido principal" ou "Pedido secundário", o painel precisa mandar o código da opção no campo `mainSubCode`. Esse código não estava nas capturas, então o painel testava os números **1, 2, 0 e 3**. A captura da tela de 03/10 mostra que o JMS usa **texto**: `mainSubCode: "MAIN"` para "Pedido principal". Nenhum número testado era o da tela, por isso a taxa das opções nunca vinha do JMS.
@@ -1068,7 +1130,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **418 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **419 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
