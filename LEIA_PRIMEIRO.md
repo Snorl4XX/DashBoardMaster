@@ -4,6 +4,35 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V3.26 — Fluxo de Lotes: número igual ao JMS
+**De onde vem o número.** O cartão vermelho **"Quantidade de sacas criadas"** é a coluna **"Total de pacotes construídos"** da tela do JMS (Estatística de Criação Recorrente de Eco Bag → Resumo → Sumário por dia), campo `packageSum` do `sdploopbagBuildbagCount`. O painel não faz conta: mostra o número como o JMS manda.
+
+**Por que ficava diferente do JMS:** na conta Gmail, para economizar cota, o Fluxo de Lotes tinha um horário próprio (V3.23):
+- **ontem** era consultado só **uma vez, às 3h da manhã**;
+- **hoje**, a cada 3 h.
+
+O cartão abre em **ontem**. Se o relatório do JMS (bigdata) ainda mudava depois das 3h, o painel ficava o dia inteiro com o número antigo.
+
+**Agora**
+- O Fluxo de Lotes segue o mesmo horário dos outros painéis:
+  - **hoje** a cada 30 min (Gmail) / 15 min (Workspace);
+  - **ontem** de hora em hora;
+  - **anteontem** a cada 6 h na conta Gmail (antes: 3 h; o dia já está fechado). Esse tempo paga o Fluxo de Lotes de hora em hora dentro dos 90 min/dia.
+- O cartão mostra **quando o número foi consultado no JMS** ("Número do JMS consultado em 05/10/2026, 14:30"), para comparar com a tela do JMS sabendo de que hora é o número. Vale também para o Recebimento e a Expedição.
+- O `diagnosticarLotes('AAAA-MM-DD')` mostra o número que o painel tem (e a hora da consulta) ao lado do **JMS de agora** (✓ igual / ✗ diferente).
+- O botão **Atualizar** consulta o JMS na hora.
+
+**Ao comparar com o JMS**, confira:
+- **a data:** o título do cartão mostra o dia; o número do **menu lateral** é o de **hoje até agora**;
+- **o período:** em vários dias, o cartão soma os dias;
+- **os filtros da tela do JMS:** tudo em "Todos" (Tipo de entrada e saída, Tipo de ensacamento, Origem da Criação) e "Sumário por dia".
+
+**Cota do Google (conta Gmail, `node tests/simulacao_cotas.js consumer 14 3`, 3º dia):** **85,6 min por dia de 90**, nenhuma execução bloqueada (V3.25: 85,4 min). O resumo dos Lotes de hoje é atualizado a cada **30 min** (antes: 3 h; 32 vezes entre 6h e 22h) e o de ontem de hora em hora. O Fluxo de Lotes gasta ~3 min por dia.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão). Os gatilhos continuam os mesmos.
+
+**Testes:** 405 verificações.
+
 ## V3.25 — Avaria: só a taxa do JMS (nunca um valor criado pelo painel)
 **O que estava errado.** Escolhendo "Pedido principal" ou "Pedido secundário", o painel podia mostrar uma taxa que o JMS não mostra:
 - **Taxa "estimada":** enquanto o painel não sabia o código que o JMS usa para a opção, ele calculava avarias da opção ÷ volume de **Todos**. Com os números da tela de 01/10, isso dava **581,28** no lugar de **658,07**. O JMS divide pela Qtd processada **da própria opção** (328 ÷ 498.429 × 1.000.000 = 658,07).
