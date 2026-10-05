@@ -1005,6 +1005,9 @@ function queueTodayRefresh_() {
   // V3.26: todos os painéis, inclusive o Fluxo de Lotes (antes, na conta Gmail, os Lotes iam a cada 3 h e o número de
   // hoje ficava atrás do JMS).
   Object.keys(INDICATORS).forEach(k => {
+    // V3.28: Sem Movimentação (foto do momento) fica de fora — a tela do JMS é atualizada de hora em hora, e a
+    // sincronização de hora em hora já consulta hoje.
+    if (INDICATORS[k].snapshot) return;
     if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, today, 0]);
   });
   return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
@@ -1603,10 +1606,13 @@ function runSummaryJob_(job) {
   const tryDetect = !!okCfg && summary.errorCount > 0 && orderKindDetectDue_(job.indicator, okMap);
   // Cota: as opções já gravadas (com os códigos da tela) com o mesmo Todos de agora = nada mudou nas opções.
   const okSig = summary.errorCount + '/' + summary.totalCount;
+  // V3.28, conta Gmail: hoje, as opções são consultadas de novo no máximo de hora em hora (Todos segue a cada 30 min).
+  const okHourly = googlePlan_() === 'gmail' && job.date === isoToday_();
   const okSame = !!okMap && ['main', 'sub'].every(k => {
     if (okMap[k] === undefined) return true;
     const v = getRateDay_(job.indicator + ':' + k, job.date);
-    return !!v && v.allSig === okSig && v.code === String(okMap[k]);
+    if (!v || v.code !== String(okMap[k])) return false;
+    return v.allSig === okSig || (okHourly && Date.now() - (Date.parse(v.syncedAt || '') || 0) < 55 * 60000);
   });
   if ((okMap && !okSame) || tryDetect) {
     try { syncOrderKindRates_(job.indicator, job.date, {detect: tryDetect}); }

@@ -2246,9 +2246,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cW = freshCtx(days24(), null, {COTA_GOOGLE: 'workspace', ATUALIZACAO_MIN: ''}), cG24 = freshCtx(days24(), null, {COTA_GOOGLE: 'gmail', ATUALIZACAO_MIN: ''});
   const nW = cW.queueTodayRefresh_(), nW2 = cW.queueTodayRefresh_(), nG = cG24.queueTodayRefresh_();
   reset(cW); reset(cG24);
-  check(cW.todayRefreshMin_() === 15 && cG24.todayRefreshMin_() === 30 && nW === keys24.length && nW2 === 0 && todayJobs(cW).length === keys24.length &&
-    nG === keys24.length && todayJobs(cG24).indexOf('lot_flow') >= 0,
-    'resumo de hoje a cada 15 min (Workspace) / 30 min (Gmail), todos os painéis — inclusive o Fluxo de Lotes (V3.26)', {nW, nW2, nG});
+  // V3.28: a Sem Movimentação (foto do JMS atualizada de hora em hora) fica na sincronização de hora em hora.
+  check(cW.todayRefreshMin_() === 15 && cG24.todayRefreshMin_() === 30 && nW === keysPast.length && nW2 === 0 && todayJobs(cW).length === keysPast.length &&
+    nG === keysPast.length && todayJobs(cG24).indexOf('lot_flow') >= 0 && todayJobs(cG24).indexOf('no_move') < 0,
+    'resumo de hoje a cada 15 min (Workspace) / 30 min (Gmail), todos os painéis — inclusive o Fluxo de Lotes (V3.26); Sem Movimentação de hora em hora', {nW, nW2, nG});
   // Hora da última atualização rápida: 10 min atrás ainda não; 14 min atrás já (1 min de folga do gatilho de 5 min).
   const setAt = m => { cW.__state.props.TODAY_REFRESH_AT = String(Date.now() - m * 60000); cW.invalidateProps_(); };
   const ranAt = m => { setAt(m); cW.queueTodayRefresh_(); cW.invalidateProps_(); return Number(cW.__state.props.TODAY_REFRESH_AT) > Date.now() - 5000; };
@@ -2390,6 +2391,23 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const changedN = optFetches(f0), r24 = c.getRates_('damage:main', D19, D19)[0];
   check(sameN === 0 && changedN >= 2 && r24.errorCount === 24,
     'cota: com Todos igual, as opções não são consultadas de novo; com Todos diferente, sim', {sameN, changedN, main: r24.errorCount});
+  // V3.28, conta Gmail: hoje, Todos muda a cada 30 min mas as opções são consultadas de novo no máximo de hora em hora.
+  {
+    const TD = ctx.isoToday_(), dg = {[TD]: makeDay(TD, 57)};
+    const cg = freshCtx(dg, null, {COTA_GOOGLE: 'gmail'});
+    cg.queueHistory(TD, TD, true); runAll(cg, 12);
+    const grow = () => dg[TD].dm.push(Object.assign({}, dg[TD].dm[0], {id: 'GX' + dg[TD].dm.length, waybillNo: '4448888' + String(dg[TD].dm.length).padStart(6, '0')}));
+    const optN = from => cg.__state.fetches.slice(from).filter(f => f.payload.mainSubCode !== undefined).length;
+    grow(); let g0 = cg.__state.fetches.length;
+    cg.enqueueJobs_([['SUMMARY', 'damage', TD, 0]], {reset: true}); runAll(cg, 4);
+    const within = optN(g0);
+    // Linhas das opções gravadas há mais de 55 min: consultadas de novo.
+    cg.allTabRows_('RATES').forEach((row, i) => { if (/^damage:/.test(row[0]) && cg.dateCellIso_(row[1]) === TD) cg.writeCells_('RATES', i + 2, 7, [new Date(Date.now() - 56 * 60000)]); });
+    reset(cg); grow(); g0 = cg.__state.fetches.length;
+    cg.enqueueJobs_([['SUMMARY', 'damage', TD, 0]], {reset: true}); runAll(cg, 4);
+    check(within === 0 && optN(g0) >= 2 && cg.getRateDay_('damage', TD).errorCount === dg[TD].dm.length,
+      'conta Gmail: opções da Avaria de hoje consultadas de novo no máximo de hora em hora (Todos a cada 30 min)', {within, after: optN(g0)});
+  }
   // Antes de achar o código do secundário, o principal já tem a taxa do JMS (código da tela) e o painel explica o secundário.
   const c2 = freshCtx(day(), {optionBases: {main: 435804, sub: 40000}, orderKindCodes: {main: 'MAIN', sub: 'NAO_TESTADO'}});
   c2.queueHistory(D19, D19, true);
