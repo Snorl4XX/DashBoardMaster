@@ -664,8 +664,8 @@ function makeArrival(date, seed, scale) {
   const bases = {'BA FEC': ['F JUA-BA', 'ITAP-BA'], 'SP BRE': ['F TPA-SP', 'SOD 02-SP'], 'MG CGE': ['PDE-MG', 'F NSR-MG'], 'PE JGS': ['PLT-PE', 'CPV 02-PB'],
     'SC FEC 01': ['CANA -BA', 'PER -BA'], 'CE FOR': ['TAU-CE'], 'MS CGR': ['F CGR 02-MS'], 'DF BSB': ['F SBN-DF']};
   const stations = ['PA AEROGRU-SP', 'PA SHEIN-GRU-SP', 'PA MELI-GRU 02-SP', 'GRU-SP', 'F S-VLGUI 02-SP'];
-  const trips = ['SRTR22605739071', 'SETR22605829951', 'SRTR22605737431', null];
-  const scanners = ['Equipamento SP GRU 009', 'Equipamento SP GRU 006', 'Temporário SP GRU 01'];
+  const trips = ['SRTR00000000001', 'SETR00000000002', 'SRTR00000000003', null];
+  const scanners = ['Equipamento FICTICIO 01', 'Equipamento FICTICIO 02', 'Temporário FICTICIO 01'];
   const should = [], total = [];
   const nS = Math.round((500 + Math.floor(rnd() * 200)) * k), nT = Math.round((1000 + Math.floor(rnd() * 300)) * k);
   const tag = date.replace(/-/g, '').slice(2);
