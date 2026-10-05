@@ -613,7 +613,8 @@ function getDashboardData(indicatorKey, params) {
     // Expedição: cada rota do dia (tabela principal do JMS) no período e no período anterior — gráficos de rotas sem filtro.
     routes: cfg.byRoute ? sendRoutesByDate_(allRates, p.from, p.to) : null,
     // metrics: números do resumo do dia (Recebimento: as subcolunas de "Deve chegar" e "Chegou").
-    rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics}
+    // syncedAt (V3.26): hora em que o número do dia foi consultado no JMS — aparece nos cartões por quantidade.
+    rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics, syncedAt: r.syncedAt}
       : {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount}),
     // Ocorrências por turno de cada dia (filtro de turno: parte do turno na taxa, também no dia anterior).
     agg: (cfg.filters || []).indexOf('shift') >= 0 && !cfg.grouped ? getAgg_(indicatorKey, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total})) : [],

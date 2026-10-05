@@ -680,6 +680,15 @@ function diagnosticarLotes(date) {
       ((cfg.summary.percentMetrics || []).indexOf(m) >= 0 || /Rate$/.test(m) ? fmt(s.raw[m]) + '%' : fmt(s.raw[m]))).join(' · ')));
     if (day) out.resumo = (cfg.summary.metrics || []).reduce((o, m) => { o[m] = day[m]; return o; }, {});
   } catch (e) { add('Resumo: ERRO — ' + err(e)); }
+  // V3.26: o número que o painel mostra (gravado na última consulta) ao lado do JMS de agora.
+  try {
+    const sv = getRateDay_(key, d), saved = sv && sv.metrics ? sv.metrics.packageSum : null;
+    const jmsNow = day ? Number(day.packageSum) : null;
+    out.painel = {packageSum: saved, consultadoEm: sv ? sv.syncedAt : null};
+    add('Painel (cartão "Quantidade de sacas criadas"): ' + (sv ? fmt(saved) + ' sacas, consultado no JMS em ' + String(sv.syncedAt || '').slice(0, 16).replace('T', ' ') +
+      (jmsNow === null ? '' : Number(saved) === jmsNow ? ' ✓ igual ao JMS agora' : ' ✗ JMS agora: ' + fmt(jmsNow) + ' — o painel atualiza hoje a cada ' + todayRefreshMin_() +
+        ' min e ontem de hora em hora; o botão Atualizar consulta na hora') : 'nada gravado para este dia'));
+  } catch (e) { add('Painel: ERRO ao ler — ' + err(e)); }
   const full = dayWindow_(d, false), size = detailPageSize_(cfg);
   try {
     const r = fetchDetailPage_(key, d, 1, size, Object.assign({type: 'packageSum'}, full));

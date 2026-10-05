@@ -131,6 +131,7 @@
       tripCovNone: 'IDs de viagem: consulta no Rastreamento do pacote depois do download do dia', tcOfficial: 'número oficial do JMS',
       tcPartial: 'prévia: o download do dia ainda não terminou', tcShare: '{p} de participação',
       metricsOfficial: 'Números oficiais do JMS (tabela principal)', pctOf: 'Cálculo: {a} ÷ {b}', sumRows: 'Soma', sumCount: '{n}',
+      hmSynced: 'Número do JMS consultado em {t}', hmSyncedPeriod: 'Números do JMS consultados até {t}',
       dcNoDetail: 'Contado na lista baixada: {h}'
     },
     zh: {
@@ -246,6 +247,7 @@
       tripCovNone: '车次号：当日明细下载完成后在包裹轨迹查询', tcOfficial: 'JMS官方数字',
       tcPartial: '预览：当日明细尚未下载完', tcShare: '占比 {p}',
       metricsOfficial: 'JMS官方数字（主表）', pctOf: '计算：{a} ÷ {b}', sumRows: '合计', sumCount: '{n}',
+      hmSynced: 'JMS 数字获取时间：{t}', hmSyncedPeriod: 'JMS 数字最近获取：{t}',
       dcNoDetail: '按下载的列表计数：{h}'
     }
   };
@@ -1504,9 +1506,14 @@
       lines += '<div class="hero-metric"><span>' + esc(L(def.subLabel)) + '</span><b>' + fmtInt(sub) + '</b>' +
         (isNum(sub) && cur ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + '</em>' : '') + '</div>';
     }
+    // V3.26: quando o número foi consultado no JMS (dia escolhido; no período, o mais antigo dos dias) — para comparar
+    // com a tela do JMS sabendo de que hora é o número do painel.
+    var syncs = activeRates().filter(function (r) { return r.date >= state.from && r.date <= state.to && r.syncedAt && r.metrics && isNum(r.metrics[def.key]); })
+      .map(function (r) { return r.syncedAt; }).sort();
+    var syncLine = syncs.length ? '<div class="kpi-sub hm-sync">' + esc(t(day ? 'hmSynced' : 'hmSyncedPeriod', {t: fmtTs(day ? syncs[syncs.length - 1] : syncs[0])})) + '</div>' : '';
     lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
       (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +
-      (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>';
+      (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>' + syncLine;
     return '<article class="kpi ' + cls + ' hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon(def.icon || (def.column === 'Chegou' ? 'check' : 'arrival_flow')) + esc(label) + '</div>' +
       '<div class="kpi-value">' + fmtInt(big) + '</div>' + lines +
       '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="' + sparkId + '" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';

@@ -1026,10 +1026,10 @@ function queueTodayRefresh_() {
   const pauses = activePauses_();
   if (pauses['*']) return 0;
   setProp_('TODAY_REFRESH_AT', String(now));
-  const today = isoToday_(), gmail = googlePlan_() === 'gmail', jobs = [];
+  const today = isoToday_(), jobs = [];
+  // V3.26: todos os painéis, inclusive o Fluxo de Lotes (antes, na conta Gmail, os Lotes iam a cada 3 h e o número de
+  // hoje ficava atrás do JMS).
   Object.keys(INDICATORS).forEach(k => {
-    // Fluxo de Lotes na conta Gmail: a cada 3 h (sincronização de hora em hora).
-    if (INDICATORS[k].light && gmail) return;
     if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, today, 0]);
   });
   return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
@@ -1041,14 +1041,14 @@ function queueRecentRefresh_() {
   const jobs = [];
   // Hoje já entrou agora: a atualização rápida (queueTodayRefresh_) conta o intervalo a partir daqui.
   setProp_('TODAY_REFRESH_AT', String(Date.now()));
-  // Fluxo de Lotes (light) na conta Gmail (90 min/dia de gatilhos para todos os painéis): hoje a cada 3 h e os dois
-  // dias anteriores uma vez por dia, às 3h. No Google Workspace, de hora em hora como os outros.
+  // V3.26: o Fluxo de Lotes segue a mesma regra dos outros painéis. Antes, na conta Gmail, ONTEM era consultado só às 3h
+  // da manhã: se o relatório do JMS (bigdata) fechava o dia mais tarde, o cartão ficava o dia todo com o número antigo.
   const gmail = googlePlan_() === 'gmail', h = gmail ? hourNow_() : 0;
   days.forEach((d, i) => Object.keys(INDICATORS).forEach(k => {
-    if (INDICATORS[k].light && gmail && (i === 0 ? h % 3 !== 0 : h !== 3)) return;
-    // V3.24, conta Gmail: anteontem já está fechado em todos os painéis (SC→SC/SC→DC fecham às 13:59 do dia seguinte):
-    // a cada 3 h em vez de toda hora — o tempo economizado paga o resumo de hoje a cada 30 min.
-    if (gmail && i === 2 && h % 3 !== 0) return;
+    // Conta Gmail: anteontem já está fechado em todos os painéis (SC→SC/SC→DC fecham às 13:59 do dia seguinte): a cada
+    // 6 h (V3.24: 3 h) em vez de toda hora — o tempo economizado paga o resumo de hoje a cada 30 min e o Fluxo de Lotes
+    // de hora em hora (V3.26).
+    if (gmail && i === 2 && h % 6 !== 0) return;
     if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, d, 0]);
   }));
   return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;

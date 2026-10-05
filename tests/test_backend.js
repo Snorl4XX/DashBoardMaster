@@ -2150,10 +2150,24 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
     return {lots: js.filter(j => j.indicator === 'lot_flow').map(j => j.date).sort().join(), send: js.filter(j => j.indicator === 'send_flow').length};
   };
   const T0 = ctx.isoToday_(), T1 = ctx.addDaysIso_(T0, -1), T2 = ctx.addDaysIso_(T0, -2);
-  const gm4 = lotJobsAt('gmail', 4), gm6 = lotJobsAt('gmail', 6), gm3 = lotJobsAt('gmail', 3), ws4 = lotJobsAt('workspace', 4);
-  // (V3.24: na conta Gmail, anteontem dos outros painéis também a cada 3 h — às 4h, só hoje e ontem.)
-  check(gm4.lots === '' && gm4.send === 2 && gm6.send === 3 && gm6.lots === T0 && gm3.lots === [T2, T1, T0].join() && ws4.lots === [T2, T1, T0].join() && ws4.send === 3,
-    'Lotes na conta Gmail: resumo de hoje a cada 3 h e dos dias anteriores 1 vez por dia; Workspace e outros painéis de hora em hora', {gm4, gm6, gm3, ws4});
+  const gm4 = lotJobsAt('gmail', 4), gm6 = lotJobsAt('gmail', 6), gm3 = lotJobsAt('gmail', 12), ws4 = lotJobsAt('workspace', 4);
+  // V3.26: o Fluxo de Lotes segue a regra dos outros painéis (antes, na conta Gmail, ontem só às 3h e hoje a cada 3 h).
+  // Conta Gmail: hoje e ontem toda hora; anteontem a cada 6 h (às 4h, só hoje e ontem; às 6h e 12h, os três).
+  check(gm4.lots === [T1, T0].join() && gm4.send === 2 && gm6.send === 3 && gm6.lots === [T2, T1, T0].join() && gm3.lots === [T2, T1, T0].join() &&
+    ws4.lots === [T2, T1, T0].join() && ws4.send === 3,
+    'Lotes: ontem e hoje consultados de hora em hora também na conta Gmail (como os outros painéis)', {gm4, gm6, gm3, ws4});
+
+  // 6c. V3.26: o cartão mostra quando o número foi consultado no JMS; o diagnóstico compara o JMS de agora com o gravado.
+  const dashSync = cA.getDashboardData('lot_flow', {from: D19, to: D19});
+  const rSync = dashSync.rates.filter(r => r.date === D19)[0];
+  check(rSync && rSync.syncedAt && rSync.metrics.packageSum === tA.n, 'Lotes: o painel recebe a hora da consulta ao JMS de cada dia', rSync && rSync.syncedAt);
+  const dgSame = cA.diagnosticarLotes(D19);
+  dA[D19].lt = dA[D19].lt.concat(dA[D19].lt.slice(0, 4).map((b, i) => Object.assign({}, b, {packageCode: b.packageCode + 'Z' + i})));
+  const dgDiff = cA.diagnosticarLotes(D19);
+  check(/Painel \(cartão "Quantidade de sacas criadas"\): [\d.]+ sacas, consultado no JMS em .* ✓ igual ao JMS agora/.test(dgSame.texto) &&
+    new RegExp('✗ JMS agora: ' + (tA.n + 4)).test(dgDiff.texto) && dgDiff.painel.packageSum === tA.n,
+    'diagnosticarLotes: número do painel (e a hora da consulta) ao lado do JMS de agora', dgDiff.texto);
+  dA[D19].lt = dA[D19].lt.slice(0, tA.n);
 
   // 7. diagnosticarLotes(): resumo, lista, contas da lista inteira × resumo, sem número de saca.
   const dg = cA.diagnosticarLotes(D19);
@@ -2205,8 +2219,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   const nW = cW.queueTodayRefresh_(), nW2 = cW.queueTodayRefresh_(), nG = cG24.queueTodayRefresh_();
   reset(cW); reset(cG24);
   check(cW.todayRefreshMin_() === 15 && cG24.todayRefreshMin_() === 30 && nW === keys24.length && nW2 === 0 && todayJobs(cW).length === keys24.length &&
-    nG === keys24.length - 1 && todayJobs(cG24).indexOf('lot_flow') < 0,
-    'resumo de hoje a cada 15 min (Workspace) / 30 min (Gmail; Fluxo de Lotes segue a cada 3 h)', {nW, nW2, nG});
+    nG === keys24.length && todayJobs(cG24).indexOf('lot_flow') >= 0,
+    'resumo de hoje a cada 15 min (Workspace) / 30 min (Gmail), todos os painéis — inclusive o Fluxo de Lotes (V3.26)', {nW, nW2, nG});
   // Hora da última atualização rápida: 10 min atrás ainda não; 14 min atrás já (1 min de folga do gatilho de 5 min).
   const setAt = m => { cW.__state.props.TODAY_REFRESH_AT = String(Date.now() - m * 60000); cW.invalidateProps_(); };
   const ranAt = m => { setAt(m); cW.queueTodayRefresh_(); cW.invalidateProps_(); return Number(cW.__state.props.TODAY_REFRESH_AT) > Date.now() - 5000; };
