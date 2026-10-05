@@ -233,7 +233,9 @@ function fakeJms(dayData, options) {
     };
     // options.plainChildren: o JMS mostra os pedidos filhos sem o sufixo "-001" (número próprio).
     const dmList = dd => dd.dm.map(r => {
-      const child = /-\d{3}$/.test(r.waybillNo);
+      // options.suffixOnMain: o contrário do comum — as remessas com sufixo "-001" são as do principal (o painel não pode
+      // decidir pelo sufixo; vale a "Qtd processada" de cada opção, como na tela).
+      const child = /-\d{3}$/.test(r.waybillNo) !== !!options.suffixOnMain;
       return Object.assign({}, r, {_child: child, waybillNo: options.plainChildren && child ? r.waybillNo.replace('-', '') : r.waybillNo});
     });
     const inWindowBy = (list, field) => (options.ignoreTime || (start === full.start && end === full.end)) ? list
@@ -290,7 +292,8 @@ function fakeJms(dayData, options) {
           const subBase = Math.round(d.dmBase * 0.12);
           list = list.filter(r => r._child === (kind === 'sub'));
           // options.optionNoVolume: como na tela do JMS em 01/10 — com a opção escolhida, "Qtd processada" 0 e taxa 0.
-          base = options.optionNoVolume ? 0 : kind === 'sub' ? subBase : d.dmBase - subBase;
+          // options.optionBases: "Qtd processada" de cada opção (ex.: a tela de 01/10 — principal 498.429, secundário 65.847).
+          base = options.optionNoVolume ? 0 : options.optionBases ? options.optionBases[kind] : kind === 'sub' ? subBase : d.dmBase - subBase;
         }
         const rate = base ? Math.round(list.length / base * 1e6 * 100) / 100 : 0;
         // Com a opção, a coluna "Taxa…" (breakageRate) usa o volume de Todos; a 总破损率 (breakageRateTotal), o da opção.

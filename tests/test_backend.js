@@ -863,9 +863,13 @@ check(stDm.summary === 'COMPLETE' && stDm.details === 'COMPLETE' && rateDm.error
   Math.abs(rateDm.rate - rateDm.errorCount / rateDm.totalCount * 1e6) < 0.01 && rateDm.rate > 100,
   'taxa gravada como o JMS manda (ex.: 292,78) com avarias e volume oficiais', {st: stDm, rate: rateDm});
 // Taxa gravada pela V3.11.1/V3.11.2 (÷ 10.000) volta para a escala do JMS na leitura; as outras taxas não mudam.
-check(Math.abs(cDm.legacyRate_('damage', 0.029278, 152, 519159) - 292.78) < 1e-6 && cDm.legacyRate_('damage', 292.78, 152, 519159) === 292.78 &&
-  Math.abs(cDm.legacyRate_('damage', 0.029278, null, null) - 292.78) < 1e-6 && cDm.legacyRate_('damage', 0, 0, 519159) === 0 &&
-  cDm.legacyRate_('wrong_send', 0.5, 5, 1000) === 0.5 && cDm.legacyRate_('damage', null) === null, 'taxa antiga da Avaria (÷ 10.000) lida na escala do JMS');
+const OLD = '2026-09-30T19:00:00.000Z', NEW = '2026-10-05T10:00:00.000Z';
+check(Math.abs(cDm.legacyRate_('damage', 0.029278, 152, 519159, OLD) - 292.78) < 1e-6 && cDm.legacyRate_('damage', 292.78, 152, 519159, OLD) === 292.78 &&
+  Math.abs(cDm.legacyRate_('damage', 0.029278, null, null, OLD) - 292.78) < 1e-6 && cDm.legacyRate_('damage', 0, 0, 519159, OLD) === 0 &&
+  cDm.legacyRate_('wrong_send', 0.5, 5, 1000, OLD) === 0.5 && cDm.legacyRate_('damage', null) === null, 'taxa antiga da Avaria (÷ 10.000, gravada antes da V3.11.3) lida na escala do JMS');
+// V3.25: taxa gravada depois da correção = o número do JMS, sem nenhuma conta por cima (mesmo longe de avarias ÷ volume).
+check(cDm.legacyRate_('damage', 0.5, 152, 519159, NEW) === 0.5 && cDm.legacyRate_('damage', 658.07, 328, 564276, NEW) === 658.07 &&
+  cDm.legacyRate_('damage', 0.029278, 152, 519159) === 0.029278, 'taxa da Avaria gravada pela versão atual: exatamente o 总破损率 do JMS');
 cDm.appendRow_('RATES', ['damage', '2026-09-10', 0.029278, 152, 519159, '{}', new Date(Date.parse('2026-09-11T03:00:00Z'))]);
 check(Math.abs(cDm.getRates_('damage', '2026-09-10', '2026-09-10')[0].rate - 292.78) < 1e-6, 'linha antiga da planilha RATES convertida');
 // (as listas de cada opção de pedidos principais/filhos vão com mainSubCode e entram à parte)
@@ -1086,17 +1090,30 @@ cInv.queueHistory(D19, D19, true);
 runAll(cInv, 12);
 const mapInv = JSON.parse(cInv.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
 check(mapInv.main === 2 && mapInv.sub === 1 && cInv.getRates_('damage:sub', D19, D19)[0].errorCount === nOK.sub, 'códigos invertidos descobertos', mapInv);
-// (d) JMS que ignora o parâmetro: taxa de cada opção ESTIMADA (avarias da opção ÷ volume total) e aviso no SYNC_LOG.
+// (d) JMS que ignora o parâmetro: NENHUMA taxa para a opção (V3.25: nunca estimada) e aviso no SYNC_LOG.
 const cIgn = freshCtx(dOK, {ignoreMainSub: true});
 cIgn.queueHistory(D19, D19, true);
 runAll(cIgn, 12);
 const mapIgn = JSON.parse(cIgn.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
-const estR = cIgn.getRates_('damage:main', D19, D19)[0];
 const fIgn = cIgn.__state.fetches.filter(f => /getBreakageRateData/.test(f.url) && f.payload.mainSubCode !== undefined);
-check(mapIgn.unsupported === true && estR.estimated === true && estR.errorCount === nOK.main &&
-  Math.abs(estR.rate - nOK.main / dOK[D19].dmBase * 1e6) < 1e-6 && fIgn.length <= 4 &&
+const dashIgn = cIgn.getDashboardData('damage', {from: D19, to: D19});
+const repIgn = cIgn.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal']}});
+check(mapIgn.unsupported === true && !cIgn.getRates_('damage:main', D19, D19).length && !cIgn.getRates_('damage:sub', D19, D19).length &&
+  !cIgn.allTabRows_('RATES').some(r => /^damage:/.test(r[0])) && fIgn.length <= 4 && dashIgn.rateVariants.main.length === 0 &&
+  dashIgn.meta.orderKind.state === 'unsupported' && repIgn.cards.rate === null && repIgn.cards.currentErrors === null &&
   cIgn.allTabRows_('LOG').some(r => r[1] === 'WARN' && /JMS_ORDERKIND_DAMAGE/.test(r[4])),
-  'JMS sem o filtro: taxa estimada, poucas consultas de teste e aviso com o que cadastrar', {map: mapIgn, est: estR, testes: fIgn.length});
+  'JMS sem o filtro: nenhuma taxa inventada para a opção (nem a de Todos), poucas consultas de teste e aviso com o que cadastrar',
+  {map: mapIgn, testes: fIgn.length, rate: repIgn.cards.rate});
+// Taxa estimada gravada por versão antiga nunca é usada.
+cIgn.appendRow_('RATES', ['damage:main', D19, 581.3, 328, 564276, JSON.stringify({estimated: true}), new Date()]);
+cIgn.STORAGE_CACHE_ = null; cIgn.TAB_CACHE_ = {}; cIgn.TAB_INDEX_ = {};
+check(!cIgn.getRates_('damage:main', D19, D19).length && cIgn.getDashboardData('damage', {from: D19, to: D19}).rateVariants.main.length === 0,
+  'taxa estimada de versão antiga ignorada (o painel mostra só a do JMS)');
+// "Sem suporte" é refeito depois de 24 h (antes ficava para sempre).
+const ign = JSON.parse(cIgn.__state.props.JMS_ORDERKIND_DAMAGE);
+check(cIgn.orderKindNeedsDetect_(ign) === false && cIgn.orderKindNeedsDetect_(Object.assign({}, ign, {at: new Date(Date.now() - 25 * 3600000).toISOString()})) === true &&
+  cIgn.orderKindNeedsDetect_(null) === true && cIgn.orderKindNeedsDetect_({param: 'mainSubCode', main: 1, sub: 2}) === false,
+  '"sem suporte" refeito a cada 24 h; códigos completos não são testados de novo');
 // (e) Códigos cadastrados à mão (JMS_ORDERKIND_DAMAGE) valem sem teste.
 const cMan = freshCtx(dOK, {orderKindCodes: {main: 'P', sub: 'F'}}, {JMS_ORDERKIND_DAMAGE: JSON.stringify({param: 'mainSubCode', main: 'P', sub: 'F'})});
 cMan.queueHistory(D19, D19, true);
@@ -2230,6 +2247,70 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   const rB = cB24.refreshNow('wrong_send', '2026-09-18', D19);
   const reqB = cB24.__state.fetches.slice(fB).filter(f => /center_wrong_send_total/.test(f.url) || /wrong_send/.test(f.url) && !/detail/.test(f.url));
   check(rB.updated === 2 && fa === 2 && reqB.length === 2, 'Atualizar: dias do período consultados em paralelo (sem consulta repetida)', {upd: rB.updated, fa, n: reqB.length});
+}
+
+// ---------- V3.25: Avaria — só a taxa do JMS (números da tela de 01/10) ----------
+{
+  // Dia como a tela do JMS de 01/10: principal 328 avarias / Qtd processada 498.429 → 总破损率 658,07;
+  // secundário 177 / 65.847 → 2.688,05; Todos 505 / 564.276.
+  const scrDay = () => {
+    const d = {[D19]: makeDay(D19, 41)}, src = d[D19].dm;
+    const mains = src.filter(r => !/-\d{3}$/.test(r.waybillNo)), kids = src.filter(r => /-\d{3}$/.test(r.waybillNo));
+    const mk = (from, n, child) => Array.from({length: n}, (_, i) => Object.assign({}, from[i % from.length],
+      {id: 'S' + (child ? 'F' : 'P') + i, serialNum: String(i + 1), waybillNo: (child ? '7770000' : '6660000') + String(i).padStart(6, '0') + (child ? '-001' : '')}));
+    d[D19].dm = mk(mains, 328, false).concat(mk(kids, 177, true));
+    d[D19].dmBase = 564276;
+    return d;
+  };
+  const scrOpts = {optionBases: {main: 498429, sub: 65847}};
+  const cS = freshCtx(scrDay(), scrOpts);
+  cS.queueHistory(D19, D19, true);
+  runAll(cS, 12);
+  const mapS = JSON.parse(cS.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+  const rMain = cS.getRates_('damage:main', D19, D19)[0], rSub = cS.getRates_('damage:sub', D19, D19)[0], rAll = cS.getRateDay_('damage', D19);
+  check(mapS.main === 1 && mapS.sub === 2 && rMain.rate === 658.07 && rMain.errorCount === 328 && rMain.totalCount === 498429 &&
+    rSub.rate === 2688.05 && rSub.errorCount === 177 && rSub.totalCount === 65847 && rAll.errorCount === 505 && rAll.totalCount === 564276,
+    'Avaria: taxa de cada opção = 总破损率 do JMS (principal 658,07 · secundário 2.688,05), avarias e Qtd processada da tela', {rMain, rSub});
+  // Painel (servidor e navegador usam a mesma regra): com a opção, a taxa e a quantidade são as do JMS para ela.
+  const cardsMain = cS.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal']}}).cards;
+  const cardsSub = cS.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido secundário']}}).cards;
+  const cardsAll = cS.computeDashboard_('damage', {from: D19, to: D19}).cards;
+  check(cardsMain.rate === 658.07 && cardsMain.currentErrors === 328 && cardsSub.rate === 2688.05 && cardsSub.currentErrors === 177 &&
+    Math.abs(cardsAll.rate - 505 / 564276 * 1e6) < 0.006, 'cartões: Pedido principal 658,07 (328) · secundário 2.688,05 (177) · Todos = taxa do JMS', {m: cardsMain.rate, s: cardsSub.rate, a: cardsAll.rate});
+  // Período de vários dias: Σ 总破损票数 ÷ Σ Qtd processada × 1.000.000 da opção (como a linha 合计 do JMS).
+  const d2 = scrDay(); d2['2026-09-18'] = makeDay('2026-09-18', 23);
+  const c2 = freshCtx(d2, scrOpts);
+  c2.queueHistory('2026-09-18', D19, true);
+  runAll(c2, 12);
+  const m18 = c2.getRates_('damage:main', '2026-09-18', '2026-09-18')[0], cards2 = c2.computeDashboard_('damage', {from: '2026-09-18', to: D19, filters: {orderKind: ['Pedido principal']}}).cards;
+  check(m18 && Math.abs(cards2.rate - (328 + m18.errorCount) / (498429 + m18.totalCount) * 1e6) < 0.01 && cards2.currentErrors === 328 + m18.errorCount,
+    'período: avarias somadas ÷ Qtd processada somada da opção (sem misturar com Todos)', {rate: cards2.rate});
+  // Remessas com sufixo "-001" NÃO decidem quem é o principal: vale a maior Qtd processada (como na tela).
+  const cX = freshCtx(scrDay(), Object.assign({suffixOnMain: true}, scrOpts));
+  cX.queueHistory(D19, D19, true);
+  runAll(cX, 12);
+  const mapX = JSON.parse(cX.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
+  check(mapX.main === 1 && mapX.sub === 2 && cX.getRates_('damage:main', D19, D19)[0].totalCount === 498429,
+    'principal = opção com a maior Qtd processada, mesmo com o sufixo "-001" nas remessas dele', mapX);
+  // Migração V3.25: todos os dias da Avaria consultados de novo; "sem suporte" refeito.
+  const cM = freshCtx(scrDay(), scrOpts);
+  cM.queueHistory(D19, D19, true);
+  runAll(cM, 12);
+  cM.__state.props.JMS_ORDERKIND_DAMAGE = JSON.stringify({unsupported: true, v: 2, at: new Date().toISOString()});
+  delete cM.__state.props.MIGRATION_V325; cM.invalidateProps_();
+  const nM = cM.migrateToV325_(), nM2 = cM.migrateToV325_();
+  reset(cM);
+  check(nM >= 1 && nM2 === 0 && !cM.__state.props.JMS_ORDERKIND_DAMAGE && cM.pendingJobs_().some(j => j.type === 'SUMMARY' && j.indicator === 'damage' && j.date === D19),
+    'V3.25: todos os dias da Avaria consultados de novo no JMS (uma vez) e "sem suporte" refeito', {nM, nM2});
+  runAll(cM, 12);
+  check(cM.getRates_('damage:main', D19, D19)[0].rate === 658.07, 'depois da migração: taxa do principal = 658,07 do JMS');
+  // diagnosticarAvaria(): JMS (Todos e cada código) × o que o painel gravou, sem número de remessa.
+  const dgA = cS.diagnosticarAvaria(D19);
+  const wbA = scrDay()[D19].dm.map(r => r.waybillNo);
+  check(/总破损率 658,07.*← painel: Pedido principal/.test(dgA.texto) && /总破损率 2\.688,05.*← painel: Pedido secundário/.test(dgA.texto) &&
+    /Painel gravou · Pedido principal: taxa 658,07/.test(dgA.texto) && dgA.codigos.some(x => x.codigo === 1 && x.taxa === 658.07) &&
+    !wbA.some(w => dgA.texto.indexOf(w) >= 0) && !/FAKE/.test(dgA.texto),
+    'diagnosticarAvaria: JMS de cada código ao lado do que o painel gravou (sem número de remessa)', dgA.texto);
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

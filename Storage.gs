@@ -210,11 +210,13 @@ function upsertRate_(s) {
   if (rowNum > 0) writeRow_('RATES', rowNum, row); else appendRow_('RATES', row);
   updateDayStatus_(s.indicator, s.date, {summaryStatus: 'COMPLETE', error: ''});
 }
+/** Gravações da Avaria anteriores a esta data podem estar na escala antiga (V3.11.1/V3.11.2: ÷ 10.000). */
+var LEGACY_DAMAGE_CUTOFF_ = '2026-10-01T12:00:00.000Z';
 function rateFromRow_(r) {
-  const errors = r[3] === '' ? null : num_(r[3], null), total = r[4] === '' ? null : num_(r[4], null);
-  const x = {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : legacyRate_(r[0], num_(r[2], null), errors, total),
-    errorCount: errors, totalCount: total, syncedAt: toIsoTimestamp_(r[6])};
-  // Taxa de uma opção do indicador ("damage:main"): estimada enquanto o JMS não confirmar os códigos do filtro.
+  const errors = r[3] === '' ? null : num_(r[3], null), total = r[4] === '' ? null : num_(r[4], null), synced = toIsoTimestamp_(r[6]);
+  const x = {indicator: r[0], date: dateCellIso_(r[1]), rate: r[2] === '' ? null : legacyRate_(r[0], num_(r[2], null), errors, total, synced),
+    errorCount: errors, totalCount: total, syncedAt: synced};
+  // Taxa de uma opção ("damage:main"): versões antigas gravavam uma ESTIMADA sem os códigos do JMS (getRates_ ignora).
   if (String(r[0]).indexOf(':') > 0) x.estimated = /"estimated":true/.test(String(r[5] || ''));
   // Números do resumo do dia (Recebimento: deve chegar, não chegadas, chegou… — Config.gs → summary.metrics).
   const ic = INDICATORS[r[0]];
@@ -255,6 +257,24 @@ function orderKindParams_(indicatorKey) {
   return v.param && (v.main !== undefined || v.sub !== undefined) && v.main !== v.sub ? v : null;
 }
 function orderKindComplete_(map) { return !!(map && !map.unsupported && map.main !== undefined && map.sub !== undefined); }
+/**
+ * Descobrir os códigos de novo? Sem códigos ou com só uma opção: sim. "Sem suporte" (o JMS ignorou todos os códigos
+ * testados): nova tentativa a cada 24 h — antes ficava assim para sempre e a taxa da opção nunca vinha do JMS.
+ */
+function orderKindNeedsDetect_(map) {
+  if (!map) return true;
+  if (map.unsupported) return Date.now() - (Date.parse(map.at || '') || 0) > 24 * 3600000;
+  return !orderKindComplete_(map);
+}
+/** Situação do filtro "Pedidos principais/filhos" para o painel explicar quando a taxa da opção ainda não veio do JMS. */
+function orderKindStatus_(indicatorKey) {
+  const cfg = INDICATORS[indicatorKey];
+  if (!cfg || !cfg.orderKinds) return null;
+  const map = orderKindParams_(indicatorKey);
+  const state = !map ? 'learning' : map.unsupported ? 'unsupported' : orderKindComplete_(map) ? 'ok' : 'learning';
+  return {state: state, param: map && map.param || cfg.orderKinds.param, main: map ? map.main : undefined, sub: map ? map.sub : undefined,
+    at: map ? (map.at || map.learnedAt || null) : null};
+}
 function orderKindPayload_(map, kind) { const o = {}; o[map.param] = map[kind]; return o; }
 /** Pedidos principais e filhos de um dia, contados nas remessas gravadas (remessas distintas). */
 function orderKindCounts_(indicatorKey, date) {
@@ -309,7 +329,7 @@ function detectOrderKindParams_(indicatorKey, date, counts, all, known) {
     const map = {unsupported: true, v: 2, at: new Date().toISOString(), date: date, counts: counts};
     setProp_('JMS_ORDERKIND_' + indicatorKey.toUpperCase(), JSON.stringify(map));
     logSync_('WARN', indicatorKey, date, 'Pedidos principais/filhos: o JMS ignorou os códigos ' + ok.param + '=' + ok.candidates.join('/') +
-      '. A taxa de cada opção fica ESTIMADA. Capture o payload do getBreakageRateData com a opção escolhida e cadastre JMS_ORDERKIND_' + indicatorKey.toUpperCase() + '.');
+      '. Sem a taxa do JMS, o painel não mostra taxa para a opção (nova tentativa em 24 h). Rode diagnosticarAvaria(), capture o payload do getBreakageRateData com a opção escolhida e cadastre JMS_ORDERKIND_' + indicatorKey.toUpperCase() + '.');
     return map;
   }
   // Quem é filho: a lista do JMS com o código traz remessas com sufixo "-001".
@@ -322,6 +342,13 @@ function detectOrderKindParams_(indicatorKey, date, counts, all, known) {
   });
   let sub = withErr.filter(x => x.ratio >= 0.5).sort((a, b) => b.ratio - a.ratio)[0];
   let main = withErr.filter(x => x !== sub && x.ratio !== null && x.ratio < 0.5).sort((a, b) => b.errors - a.errors)[0];
+  // V3.25: dois códigos que respondem diferente e com "Qtd processada": o principal é SEMPRE o de maior volume, como
+  // na tela do JMS (01/10: principal 498.429, secundário 65.847) — o sufixo "-001" das remessas só decide sem volume.
+  const withVol = withErr.filter((x, i) => x.total > 0 && withErr.findIndex(y => y.errors === x.errors && y.total === x.total) === i);
+  if (withVol.length >= 2) {
+    const byVol = withVol.slice().sort((a, b) => b.total - a.total || b.errors - a.errors);
+    main = byVol[0]; sub = byVol[1];
+  }
   // Dois códigos que valeram e respondem diferente entre si = as duas opções da tela (a tela só tem Todos, principal e
   // secundário). Vale também quando a lista do JMS não traz o sufixo "-001" ou ignora a opção (V3.20.1). O principal é
   // o de maior "Qtd processada" (pedidos principais são a maior parte do volume); sem volume, o de mais avarias.
@@ -348,11 +375,9 @@ function detectOrderKindParams_(indicatorKey, date, counts, all, known) {
   return base;
 }
 /**
- * Grava a taxa de cada opção do dia ("damage:main" / "damage:sub").
- *  - Código conhecido: taxa OFICIAL do JMS (resumo com o parâmetro da opção: 总破损率, quantidade e volume da tela —
- *    inclusive 0 quando o JMS mostra 0) e as remessas da lista do JMS dessa opção (o painel separa as remessas
- *    exatamente como a tela).
- *  - Código ainda não conhecido/sem suporte e `counts` disponíveis: taxa ESTIMADA (avarias da opção ÷ volume total).
+ * Grava a taxa de cada opção do dia ("damage:main" / "damage:sub"): a do JMS (resumo com o parâmetro da opção:
+ * 总破损率, 总破损票数 e Qtd processada da tela — inclusive 0 quando o JMS mostra 0) e as remessas da lista do JMS dessa
+ * opção (o painel separa as remessas exatamente como a tela). Código ainda não conhecido: nada (nunca uma estimativa).
  */
 function syncOrderKindRates_(indicatorKey, date, counts, opts) {
   const cfg = getIndicatorConfig_(indicatorKey);
@@ -361,7 +386,7 @@ function syncOrderKindRates_(indicatorKey, date, counts, opts) {
   if (!all) return 0;
   let map = orderKindParams_(indicatorKey);
   // A descoberta roda depois do detalhe baixado (não a cada sincronização de hora em hora).
-  if ((!opts || opts.detect !== false) && (!map || (!map.unsupported && !orderKindComplete_(map)))) {
+  if ((!opts || opts.detect !== false) && orderKindNeedsDetect_(map)) {
     try {
       const allFull = fetchSummaryDay_(indicatorKey, date);
       const det = detectOrderKindParams_(indicatorKey, date, counts || {main: 0, sub: 0}, allFull.empty ? all : allFull, map);
@@ -397,9 +422,9 @@ function syncOrderKindRates_(indicatorKey, date, counts, opts) {
       }
       s = r.empty ? {rate: 0, errorCount: 0, totalCount: null, raw: Object.assign(raw, {empty: true})}
         : {rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, raw: raw};
-    } else if (counts && all.totalCount) {
-      s = {rate: counts[kind] / all.totalCount * JTCore_.rateScale(cfg.goal), errorCount: counts[kind], totalCount: all.totalCount, raw: {estimated: true}};
     }
+    // V3.25: sem o código da opção no JMS, NADA é gravado (antes: taxa estimada = avarias da opção ÷ volume de Todos,
+    // um número que o JMS não mostra). O painel mostra "—" e o motivo até o JMS responder.
     if (!s) return;
     upsertVariantRate_({indicator: indicatorKey + ':' + kind, date: date, rate: s.rate, errorCount: s.errorCount, totalCount: s.totalCount, raw: s.raw});
     n++;
@@ -425,7 +450,7 @@ function orderKindTags_(indicatorKey, from, to) {
   });
   return out;
 }
-/** Depois do detalhe gravado: taxas de cada opção (estimadas, ou descobre os códigos do JMS). Nunca derruba o job. */
+/** Depois do detalhe gravado: descobre os códigos de cada opção no JMS (se ainda não conhecidos). Nunca derruba o job. */
 function afterDetailSaved_(indicatorKey, date) {
   if (!getIndicatorConfig_(indicatorKey).orderKinds) return;
   try {
@@ -440,9 +465,12 @@ function afterDetailSaved_(indicatorKey, date) {
  * gravam o número do JMS (292,78). Na leitura, a taxa antiga volta para a escala do JMS — conferida
  * com avarias ÷ volume × 1.000.000 do mesmo dia. Sem regravar a planilha e sem baixar nada de novo.
  */
-function legacyRate_(indicator, rate, errors, total) {
+function legacyRate_(indicator, rate, errors, total, syncedAt) {
   const cfg = INDICATORS[indicator];
   if (!cfg || !cfg.goal || Number(cfg.goal.scale) !== 1000000 || rate === null || !(rate > 0)) return rate;
+  // V3.25: só linhas gravadas ANTES da correção da escala (V3.11.3). Taxa gravada depois é o número do JMS, sem
+  // nenhuma conta por cima (antes, um 总破损率 longe de avarias ÷ Qtd processada podia ser multiplicado por 10.000).
+  if (!syncedAt || String(syncedAt) >= LEGACY_DAMAGE_CUTOFF_) return rate;
   if (errors > 0 && total > 0) {
     const jms = errors / total * 1000000;
     return Math.abs(rate * 10000 - jms) < Math.abs(rate - jms) ? rate * 10000 : rate;
@@ -456,6 +484,8 @@ function getRates_(indicator, from, to) {
     if (indicator && r[0] !== indicator) return;
     const x = rateFromRow_(r);
     if ((from && x.date < from) || (to && x.date > to) || !isIso_(x.date)) return;
+    // V3.25: taxa ESTIMADA de uma opção (gravada por versões antigas) nunca é usada — o painel mostra só a do JMS.
+    if (x.estimated) return;
     const prev = byDate[x.date];
     if (!prev || String(x.syncedAt || '') >= String(prev.syncedAt || '')) byDate[x.date] = x;
   });
@@ -1336,7 +1366,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
   try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
@@ -1589,8 +1619,9 @@ function runSummaryJob_(job) {
   // incompletos: a descoberta também roda aqui, no máximo a cada 6 h (antes só depois do detalhe baixado).
   const okCfg = getIndicatorConfig_(job.indicator).orderKinds, okMap = okCfg && orderKindParams_(job.indicator);
   const detKey = 'ORDERKIND_DETECT_AT_' + job.indicator.toUpperCase();
-  const tryDetect = !!okCfg && !orderKindComplete_(okMap) && !(okMap && okMap.unsupported) && summary.errorCount > 0 &&
-    Date.now() - (Number(getProp_(detKey, '')) || 0) > 6 * 3600000;
+  // V3.25: até aprender os dois códigos, tenta de hora em hora (antes: 6 h); "sem suporte" é refeito a cada 24 h.
+  const tryDetect = !!okCfg && orderKindNeedsDetect_(okMap) && summary.errorCount > 0 &&
+    Date.now() - (Number(getProp_(detKey, '')) || 0) > 3600000;
   if (tryDetect) setProp_(detKey, Date.now());
   if ((okMap && !okMap.unsupported) || tryDetect) {
     try { syncOrderKindRates_(job.indicator, job.date, null, {detect: tryDetect}); }
@@ -2156,6 +2187,25 @@ function migrateToV3201_() {
   const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
   setProp_('MIGRATION_V3201', new Date().toISOString());
   if (n) logSync_('INFO', '', '', 'V3.20.1: ' + n + ' dia(s) da Avaria com a taxa de cada opção (总破损率) consultada de novo.');
+  return n;
+}
+
+/**
+ * V3.25 (uma vez): a Avaria passa a mostrar só números do JMS. Todos os dias são consultados de novo (taxa de Todos
+ * e de cada opção, regravadas como o JMS manda), "sem suporte" é refeito e as taxas estimadas antigas deixam de valer.
+ */
+function migrateToV325_() {
+  if (getProp_('MIGRATION_V325', '')) return 0;
+  const jobs = [];
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].orderKinds).forEach(k => {
+    const m = orderKindParams_(k);
+    if (m && m.unsupported) deleteProp_('JMS_ORDERKIND_' + k.toUpperCase());
+    deleteProp_('ORDERKIND_DETECT_AT_' + k.toUpperCase());
+    getRates_(k, null, null).forEach(r => jobs.push(['SUMMARY', k, r.date, 0]));
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V325', new Date().toISOString());
+  if (n) logSync_('INFO', '', '', 'V3.25: ' + n + ' dia(s) da Avaria consultados de novo no JMS (taxa de Todos e de cada opção, sem estimativa).');
   return n;
 }
 

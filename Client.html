@@ -122,7 +122,10 @@
       mpMax: 'Maior', mpMin: 'Menor', noPrevDay: 'sem dia anterior', mpTable: 'Dados gerais / 总体数据',
       mpTableSub: 'Os números de cada dia, como na primeira tabela da tela do JMS',
       detailsWindowHint: 'Para não estourar a cota do Google (~500 mil remessas por dia), os gráficos por DC/base/viagem usam só os últimos dias. Os números do resumo valem para todos os dias:',
-      estimated: 'estimada', estimatedHint: 'O JMS não confirmou o filtro de pedidos principais/filhos: taxa estimada = avarias da opção ÷ volume total.',
+      okMissing: 'Taxa do JMS para "{o}" ainda não disponível neste período — o painel não calcula taxa própria. {r}',
+      okWhyDay: 'A consulta desta opção no JMS entra na próxima atualização.',
+      okWhyLearning: 'O painel está descobrindo como o JMS identifica a opção (tentativa de hora em hora).',
+      okWhyUnsupported: 'O JMS não respondeu à opção nos testes (nova tentativa em 24 h). Rode diagnosticarAvaria() no editor e mande o Payload do getBreakageRateData com a opção escolhida (sem AuthToken e sem Cookie).',
       amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total',
       routesOfficial: 'Número oficial de cada rota (tabela principal do JMS)', tripCov: 'IDs consultados no Rastreamento do pacote: {a} de {b} remessas ({c} com ID)',
       tripCovNone: 'IDs de viagem: consulta no Rastreamento do pacote depois do download do dia', tcOfficial: 'número oficial do JMS',
@@ -234,7 +237,10 @@
       mpMax: '最高', mpMin: '最低', noPrevDay: '无前一日', mpTable: '总体数据 / Dados gerais',
       mpTableSub: '每天的数字，与JMS页面第一张表一致',
       detailsWindowHint: '为避免超出 Google 配额（每天约50万票），按中心/网点/车次的图表只使用最近几天的数据。汇总数字涵盖所有日期：',
-      estimated: '估算', estimatedHint: 'JMS 未确认主子单筛选：估算指标率 = 该选项破损票数 ÷ 总票量。',
+      okMissing: '该期间 JMS 尚未提供“{o}”的指标率 — 看板不自行计算。{r}',
+      okWhyDay: '该选项将在下次更新时向 JMS 查询。',
+      okWhyLearning: '看板正在识别 JMS 中该选项的代码（每小时尝试一次）。',
+      okWhyUnsupported: 'JMS 未响应该选项（24 小时后重试）。请在编辑器中运行 diagnosticarAvaria()，并发送选择该选项时 getBreakageRateData 的 Payload（不含 AuthToken 和 Cookie）。',
       amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额',
       routesOfficial: '各线路官方数字（JMS主表）', tripCov: '包裹轨迹已查询车次号：{a} / {b} 票（{c} 票有车次号）',
       tripCovNone: '车次号：当日明细下载完成后在包裹轨迹查询', tcOfficial: 'JMS官方数字',
@@ -866,16 +872,22 @@
    * não conta como "filtro" no cartão: a taxa já é a dela. Todos (ou as duas opções) = taxa de sempre.
    */
   function rateView(c, f) {
-    var ok = c && c.orderKinds, sel = ok && f[ok.field], rv = state.data && state.data.rateVariants;
-    if (sel && sel.length === 1 && rv) {
+    var ok = c && c.orderKinds, sel = ok && f[ok.field], rv = (state.data && state.data.rateVariants) || {};
+    if (sel && sel.length === 1) {
       var kind = sel[0] === ok.values.main ? 'main' : sel[0] === ok.values.sub ? 'sub' : null;
-      if (kind && rv[kind] && rv[kind].length) {
+      if (kind) {
         var rest = {};
         Object.keys(f).forEach(function (k) { if (k !== ok.field) rest[k] = f[k]; });
-        return {rates: rv[kind], filters: rest, kind: kind, label: sel[0], estimated: rv[kind].some(function (r) { return r.estimated; })};
+        // V3.25: só a taxa do JMS para a opção. Sem ela, nenhuma taxa ("—" e o motivo) — antes ficava a taxa de Todos.
+        return {rates: rv[kind] || [], filters: rest, kind: kind, label: sel[0]};
       }
     }
     return {rates: state.data ? state.data.rates : [], filters: f, kind: null};
+  }
+  /** Por que a taxa da opção de "Pedidos principais/filhos" ainda não veio do JMS (situação dos códigos no servidor). */
+  function orderKindWhy() {
+    var st = state.data && state.data.meta && state.data.meta.orderKind;
+    return t(!st || st.state === 'learning' ? 'okWhyLearning' : st.state === 'unsupported' ? 'okWhyUnsupported' : 'okWhyDay');
   }
   function activeRates() { return state.rateView && state.rateView.rates ? state.rateView.rates : state.data.rates; }
   /** Nome do recorte de turno: "T1", "T1 + T2"; no SC → DC, "Turno da expedição T1". */
@@ -1131,7 +1143,7 @@
       heroSubs = '<div class="kpi-sub">' + esc(t(day ? 'dayRateAll' : 'periodRateAll')) + ': <b>' + fmtRate(sv.dayRate, c.goal) + '</b></div>' + heroSubs +
         '<div class="kpi-sub">' + esc(t(sv.late ? 'shiftLateHint' : 'shiftRateHint')) + '</div>';
     } else if (k.filtered) heroSubs += '<div class="kpi-sub">' + esc(t('officialNotFiltered')) + '</div>';
-    if (state.rateView && state.rateView.estimated) heroSubs += '<div class="kpi-sub">' + esc(t('estimatedHint')) + '</div>';
+    if (state.rateView && state.rateView.kind && !isNum(k.rate)) heroSubs += '<div class="kpi-sub">' + esc(t('okMissing', {o: state.rateView.label, r: orderKindWhy()})) + '</div>';
     var heroLabel = sv ? t(sv.late ? (day ? 'shiftLateOf' : 'shiftLateOfPeriod') : (day ? 'shiftRateOf' : 'shiftRateOfPeriod'), {s: sName, date: fmtDate(state.to, true)}) +
         (day ? '' : ' · ' + fmtRange(state.from, state.to))
       : day ? tx(c, 'rateOfDay', {date: fmtDate(state.to, true)}) : tx(c, 'rateOfPeriod') + ' · ' + fmtRange(state.from, state.to);
@@ -1139,7 +1151,7 @@
       '<b>' + fmtPct(sv.share, 1) + '</b> ' + esc(t('shiftShare', {s: sName})) + '</div>' : '';
     var hero = '<article class="kpi kpi-hero"><div class="kpi-body">' +
       '<div class="kpi-label">' + icon('gauge') + esc(heroLabel +
-        (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) + (state.rateView.estimated ? ' (' + t('estimated') + ')' : '') : '')) + '</div>' +
+        (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) : '')) + '</div>' +
       shareChip + '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroSubs +
       '<div class="hero-row"><span class="status-pill ' + status + '">' + pill + '</span>' + (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '') + '</div>' +
       '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';

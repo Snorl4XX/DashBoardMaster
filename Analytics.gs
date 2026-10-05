@@ -606,7 +606,9 @@ function getDashboardData(indicatorKey, params) {
       // Expedição: remessas já consultadas no Rastreamento do pacote (IDs de viagem) por dia.
       tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null,
       // V3.24: carimbo dos dados deste painel na hora da leitura (o navegador confere a cada 2 min se mudou).
-      stamp: dataStamps_()[indicatorKey] || null
+      stamp: dataStamps_()[indicatorKey] || null,
+      // Avaria: situação dos códigos de "Pedidos principais/filhos" no JMS (o painel explica quando falta a taxa da opção).
+      orderKind: cfg.orderKinds ? orderKindStatus_(indicatorKey) : null
     },
     // Expedição: cada rota do dia (tabela principal do JMS) no período e no período anterior — gráficos de rotas sem filtro.
     routes: cfg.byRoute ? sendRoutesByDate_(allRates, p.from, p.to) : null,
@@ -705,11 +707,11 @@ function rateVariantFor_(cfg, indicatorKey, filters) {
   if (!sel || sel.length !== 1) return null;
   const kind = Object.keys(ok.values).filter(k => ok.values[k] === sel[0])[0];
   if (!kind) return null;
+  // Só a taxa do JMS para a opção. Sem ela: nenhuma taxa (antes caía na taxa de Todos com a opção no filtro).
   const rates = getRates_(indicatorKey + ':' + kind, null, null);
-  if (!rates.length) return null;
   const rest = Object.assign({}, filters);
   delete rest[ok.field];
-  return {kind: kind, rates: rates, filters: rest};
+  return {kind: kind, rates: rates, filters: rest, missing: !rates.length};
 }
 
 /**

@@ -470,8 +470,8 @@ function diagnosticoCompleto(date) {
       rg.comRegistro + ' de ' + rg.remessas + ' avarias da 1ª página com registro (turno, estação e quem registrou)'));
     if (cfg.orderKinds) {
       const om = orderKindParams_(key);
-      lines.push('  Pedidos principais/filhos: ' + (!om ? 'códigos do JMS ainda não descobertos (falta um dia com pedidos principais e filhos baixado); taxa de cada opção estimada' :
-        om.unsupported ? 'o JMS não respondeu a ' + cfg.orderKinds.param + '=' + cfg.orderKinds.candidates.join('/') + ' — taxa de cada opção ESTIMADA. Capture o payload do getBreakageRateData com "Pedido principal" e cadastre JMS_ORDERKIND_' + key.toUpperCase() :
+      lines.push('  Pedidos principais/filhos: ' + (!om ? 'códigos do JMS ainda não descobertos (falta um dia com pedidos principais e filhos baixado); sem taxa para cada opção até o JMS responder' :
+        om.unsupported ? 'o JMS não respondeu a ' + cfg.orderKinds.param + '=' + cfg.orderKinds.candidates.join('/') + ' — sem taxa para cada opção (o painel não estima). Rode diagnosticarAvaria(), capture o payload do getBreakageRateData com "Pedido principal" e cadastre JMS_ORDERKIND_' + key.toUpperCase() :
         om.param + '=' + om.main + ' (principal) · ' + om.param + '=' + om.sub + ' (filho) — taxa oficial do JMS para cada opção'));
     }
     if (item.rota) lines.push('  Cabeçalho de rota: Routename "' + item.rota.routename + '" · Routernamelist "' + item.rota.routernamelist + '" (' + item.rota.origem + ')');
@@ -743,6 +743,65 @@ function diagnosticarLotes(date) {
     } else add('LOG: nenhum aviso ou erro do Fluxo de Lotes.');
   } catch (e) { /* sem banco */ }
   add('Dica: se algo der ERRO ou ✗, abra a tela no JMS, F12 → Rede, clique no número e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
+  console.log(lines.join('\n'));
+  out.texto = lines.join('\n');
+  return out;
+}
+
+/**
+ * Diagnóstico só da Avaria (V3.25). Rode no editor (▶ Executar) e copie o texto do "Registro de execução" — ele não
+ * mostra AuthToken, Cookie nem número de remessa. Consulta o JMS agora, sem gravar nada, e põe lado a lado:
+ *  - o resumo de "Todos" (Qtd processada, 总破损票数, 总破损率 e a coluna "Taxa de Avaria");
+ *  - o resumo com cada código testado de "Pedidos principais/filhos" (mainSubCode = 1, 2, 0, 3) — compare com a tela
+ *    do JMS escolhendo "Pedido principal" e "Pedido secundário" no mesmo dia;
+ *  - o que o painel tem gravado para o dia (Todos, principal e secundário) e os códigos que ele usa.
+ * `date` (opcional, AAAA-MM-DD): padrão = ontem.
+ */
+function diagnosticarAvaria(date) {
+  const key = 'damage', cfg = INDICATORS[key], ok = cfg.orderKinds;
+  const d = isIso_(date) ? date : lastClosedDate_(key);
+  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, codigos: []};
+  const add = x => lines.push(x);
+  const fmt = (n, dg) => n === null || n === undefined || n === '' || !isFinite(Number(n)) ? '—' : Number(n).toLocaleString('pt-BR', {minimumFractionDigits: dg || 0, maximumFractionDigits: dg || 0});
+  const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
+  const cols = s => s.empty ? 'SEM REGISTROS' : 'Qtd processada ' + fmt(s.totalCount) + ' · 总破损票数 ' + fmt(s.errorCount) + ' · 总破损率 ' + fmt(s.rate, 2) +
+    ' · "Taxa de Avaria" ' + fmt(s.raw && s.raw.breakageRate, 2) + ' · 总破损金额 ' + fmt(s.raw && (s.raw.breakageAmountTotal !== undefined ? s.raw.breakageAmountTotal : s.raw.breakageAmount), 2);
+  const cred = authConfigSafe_();
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico da Avaria — dia ' + humanDatePt_(d));
+  add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE'));
+  (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
+  let all = null;
+  try {
+    all = fetchSummaryDay_(key, d);
+    add('JMS · Todos: ' + cols(all));
+    out.todos = all.empty ? null : {qtd: all.totalCount, avarias: all.errorCount, taxa: all.rate};
+  } catch (e) { add('JMS · Todos: ERRO — ' + err(e)); }
+  const map = orderKindParams_(key), st = orderKindStatus_(key);
+  add('Códigos que o painel usa: ' + (st.state === 'ok' ? ok.param + '=' + map.main + ' (Pedido principal) · ' + ok.param + '=' + map.sub + ' (Pedido secundário)'
+    : st.state === 'unsupported' ? 'nenhum — nos testes de ' + humanDatePt_(map.date || d) + ' o JMS ignorou ' + ok.param + '=' + ok.candidates.join('/') + ' (nova tentativa em 24 h)'
+    : 'ainda descobrindo' + (map && (map.main !== undefined || map.sub !== undefined) ? ' (conhecido: ' + JSON.stringify({main: map.main, sub: map.sub}) + ')' : '')) +
+    (getProp_('JMS_ORDERKIND_' + key.toUpperCase(), '') && map && !map.learnedAt && !map.unsupported ? ' [cadastrado à mão]' : ''));
+  add('Cada código no JMS (compare com a tela escolhendo "Pedido principal" e "Pedido secundário"):');
+  const codes = ok.candidates.slice();
+  if (map && !map.unsupported) [map.main, map.sub].forEach(v => { if (v !== undefined && codes.indexOf(v) < 0) codes.push(v); });
+  codes.forEach(v => {
+    const extra = {}; extra[ok.param] = v;
+    try {
+      const s = fetchSummaryDay_(key, d, extra);
+      const same = all && !all.empty && !s.empty && s.errorCount === all.errorCount && s.totalCount === all.totalCount;
+      const tag = map && !map.unsupported && map.main === v ? ' ← painel: Pedido principal' : map && !map.unsupported && map.sub === v ? ' ← painel: Pedido secundário' : '';
+      add('  · ' + ok.param + '=' + v + ': ' + cols(s) + (same ? ' (igual a Todos: o JMS ignorou este código)' : '') + tag);
+      out.codigos.push({codigo: v, qtd: s.empty ? 0 : s.totalCount, avarias: s.empty ? 0 : s.errorCount, taxa: s.empty ? null : s.rate, igualTodos: !!same});
+    } catch (e) { add('  · ' + ok.param + '=' + v + ': ERRO — ' + err(e)); }
+  });
+  const saved = k => getRateDay_(k, d);
+  [['Todos', key], ['Pedido principal', key + ':main'], ['Pedido secundário', key + ':sub']].forEach(([nm, k]) => {
+    const r = saved(k);
+    add('Painel gravou · ' + nm + ': ' + (r ? 'taxa ' + fmt(r.rate, 2) + ' · avarias ' + fmt(r.errorCount) + ' · Qtd processada ' + fmt(r.totalCount) +
+      ' (consultado em ' + String(r.syncedAt || '').slice(0, 16).replace('T', ' ') + ')' : 'nada — o painel mostra "—" para esta opção (não calcula taxa própria)'));
+  });
+  add('Regra do painel: a taxa de um dia é o 总破损率 do JMS, sem conta por cima. Em vários dias: Σ 总破损票数 ÷ Σ Qtd processada × 1.000.000 (como a linha 合计 do JMS).');
+  add('Se "Pedido principal" da tela do JMS não aparecer em nenhum código acima: abra a tela, F12 → Rede, escolha "Pedido principal", clique em Consulta e mande o "Payload" do getBreakageRateData (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));
   out.texto = lines.join('\n');
   return out;
