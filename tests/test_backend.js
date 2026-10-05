@@ -131,8 +131,8 @@ check(ctx.getDashboardData('wrong_send', {}).meta.to === '2026-09-19', 'período
 
 // ---------- 6. Resultados ----------
 const results = ctx.getResultsData({from: '2026-09-17', to: '2026-09-19'});
-check(results.series.length === 9 && results.series.every(s => s.rates.length === 3 && s.agg.length === (s.key === 'arrival_flow' || s.key === 'send_flow' ? 0 : 3)) && !hasDate(results),
-  'resultados de todos os indicadores (Recebimento e Expedição, agrupados, não têm contagem por turno)');
+check(results.series.length === 10 && results.series.every(s => s.rates.length === 3 && s.agg.length === (['arrival_flow', 'send_flow', 'lot_flow'].indexOf(s.key) >= 0 ? 0 : 3)) && !hasDate(results),
+  'resultados de todos os indicadores (Recebimento, Expedição e Lotes, agrupados, não têm contagem por turno)');
 const weekly = C.aggregateResults(results.series[0].rates, cfgWs.goal, 'week', '2026-09-17', '2026-09-19');
 check(weekly.length === 1 && weekly[0].key === '2026-W38' && weekly[0].method === 'weighted', 'agregação semanal', weekly);
 
@@ -293,7 +293,7 @@ runAll(cA);
 const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url) && !(/arrivalbyday/.test(f.url) && f.payload.size === 10));
 check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 1000 registros por página (antes 100)', detA.map(f => f.payload.size));
 check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
-check(Object.keys(cA.__state.files).length === 8, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
+check(Object.keys(cA.__state.files).length === 9, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
 check(cA.loadDetailFile_(cA.dayFilesMap_('wrong_send', D19, D19)[D19].fileId).kind === 'jt-day', 'arquivo diário no formato colunar');
 check(cA.allTabRows_('PAGES').length === 0, 'índice de páginas não cresce no caminho normal');
 // Fila vazia: depois de UMA execução de conferência, o gatilho de 5 min sai sem abrir a planilha.
@@ -356,13 +356,13 @@ const cG = freshCtx({'2026-09-19': makeDay(D19, 3)}, optsG);
 cG.queueHistory(D19, D19, true);
 cG.processSyncQueue({budgetMs: 600000});
 const pausesG = cG.publicPauses_();
-check(pausesG.length === 8 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
-  'token expirado pausa as 8 rotas com aviso claro', pausesG);
-check(cG.__state.fetches.length === 8, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
-check(cG.pendingJobs_().length === 18 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
+check(pausesG.length === 9 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
+  'token expirado pausa as 9 rotas com aviso claro', pausesG);
+check(cG.__state.fetches.length === 9, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
+check(cG.pendingJobs_().length === 20 && cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
 cG.processSyncQueue({budgetMs: 600000});
-check(cG.__state.fetches.length === 8, 'fila pausada não insiste no JMS');
-check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 8 && cG.getAppBootstrap().pauses.length === 8, 'pausa chega ao painel');
+check(cG.__state.fetches.length === 9, 'fila pausada não insiste no JMS');
+check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 9 && cG.getAppBootstrap().pauses.length === 9, 'pausa chega ao painel');
 delete optsG.appError;
 cG.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO';
 runAll(cG);
@@ -372,7 +372,7 @@ check(cG.publicPauses_().length === 0 && ALL.every(k => cG.getDayStatus_(k, D19)
 const cH = freshCtx({'2026-09-19': makeDay(D19, 3)}, {html: true});
 cH.queueHistory(D19, D19, true);
 cH.processSyncQueue({budgetMs: 600000});
-check(cH.publicPauses_().length === 8 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
+check(cH.publicPauses_().length === 9 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
 
 // (i) Cota diária do Google esgotada: pausa geral por 1 h, sem marcar erro nos jobs.
 const cI = freshCtx({'2026-09-19': makeDay(D19, 3)}, {onFetch: () => { throw new Error('Service invoked too many times for one day: urlfetch.'); }});
@@ -636,7 +636,7 @@ cQ.queueHistory(D19, D19, true);
 for (let i = 0; i < 4; i++) { cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {}; cQ.processSyncQueue({budgetMs: 600000, force: true}); }
 cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {};
 const qQ = cQ.queueReport_(1100);
-check(qQ.erros === 9 && qQ.esperandoTaxa === 9 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 9 &&
+check(qQ.erros === 10 && qQ.esperandoTaxa === 10 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 10 &&
   /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
 // ---------- 14. V3.8: docas na Falta de Bipagem na Expedição (planilha do usuário) ----------
@@ -1864,7 +1864,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   const chTr = cA.JTCore_.buildChart(cA.getIndicatorConfig_('send_flow').charts[1], rowsD, {});
   check(chTr.total === tA.n.transit && chTr.labels.indexOf('RT GAMA') < 0, 'Expedição: gráfico "Rotas que ainda não chegou" pela lista Em trânsito', chTr.labels);
   const catSF = cA.getPublicCatalog_().filter(x => x.key === 'send_flow')[0];
-  check(catSF && catSF.columnSets && catSF.topCards.join() === 'login,destination,interval' && catSF.filters.map(f => f.key).join() === 'destination,interval,shift' &&
+  check(catSF && catSF.columnSets && catSF.topCards.join() === 'login,destination,interval' && catSF.filters.map(f => f.key).join() === 'destination,interval,shift,tripId' && catSF.filters[3].label.pt === 'IDs Viagem' &&
     catSF.tables.map(tb => tb.column).join() === 'Enviados,Não entregues,Em trânsito' && catSF.charts.length === 7,
     'Expedição: catálogo com filtros, cartões "que mais", 7 gráficos e 3 tabelas na ordem do pedido');
   cA.UrlFetchApp.fetch = (() => { const f = cA.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cA.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
@@ -1877,7 +1877,17 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   const destT1 = (mS.destination || []).filter(r => r.date === D19 && cA.JTCore_.colMatch('Enviados', r.column)).reduce((a, r) => a + Number(r.qty), 0);
   check(dashS.summary && destT1 === tA.n.T1 && cA.JTCore_.decodeDataset(dashS.summary.top).length > 0,
     'Expedição: período grande com totais por campo no servidor (filtro de turno aplicado)', destT1);
+  // Filtro "IDs Viagem" (V3.23): no navegador, no servidor (período grande) e no relatório.
+  const tripOne = Object.keys(tA.t).map(w => tA.t[w].trip).filter(Boolean)[0], nTrip = Object.keys(tA.t).filter(w => tA.t[w].trip === tripOne).length;
+  const dashTr = cA.getDashboardData('send_flow', {from: D19, to: D19, filters: {tripId: [tripOne]}});
+  const mTr = cA.JTCore_.marginalsByDim(dashTr.summary.marginals);
+  const destTr = (mTr.destination || []).filter(r => cA.JTCore_.colMatch('Enviados', r.column)).reduce((a, r) => a + Number(r.qty), 0);
+  const optTr = (mTr.tripId || []).filter(r => cA.JTCore_.colMatch('Enviados', r.column) && r.tripId === tripOne).reduce((a, r) => a + Number(r.qty), 0);
   delete cA.__state.props.GROUPED_CLIENT_ROWS;
+  const cliTr = cA.JTCore_.applyFilters(rowsD, {tripId: [tripOne]}).filter(r => cA.JTCore_.colMatch('Enviados', r.column)).reduce((a, r) => a + Number(r.qty || 1), 0);
+  const repTr = cA.generateReport('send_flow', {from: D19, to: D19, filters: {tripId: [tripOne]}}, 'xlsx');
+  check(nTrip > 0 && dashTr.summary && destTr === nTrip && optTr === nTrip && cliTr === nTrip && repTr.ok && repTr.rows === nTrip,
+    'Expedição: filtro "IDs Viagem" no navegador, no servidor (período grande) e no relatório', {nTrip, destTr, optTr, cliTr, rep: repTr.rows});
 
   // 4. JMS que não separa por horário: cada rota baixada inteira; turnos do detalhe.
   [['sendIgnoresTime', {sendIgnoresTime: true}], ['sendDailyAt00', {sendDailyAt00: true}]].forEach(([nm, o]) => {
@@ -1968,6 +1978,149 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 1 && mapUp.sub === 2 && subUp &&
   check(/Expedição: fluxo operacional/.test(diag.texto) && diag.resumo.sendcount > 0 && diag.respeitaHorario === true && diag.rastreamento &&
     /VIAGEM/.test(String(diag.rastreamento.idViagem)) && !wbs.some(w => diag.texto.indexOf(w) >= 0),
     'diagnosticarExpedicao: resumo, rota, horário, listas e Rastreamento, sem número de remessa', diag.texto);
+}
+
+// ---------- V3.23: Fluxo de Lotes (sacas e destinos fictícios) ----------
+{
+  const lfDays = () => ({'2026-09-18': makeDay('2026-09-18', 23), [D19]: makeDay(D19, 37)});
+  const truthL = L => {
+    const eco = L.filter(b => b.isLoopPag === 'Y'), sumQ = l => l.reduce((a, b) => a + b.packageQty, 0), sh = {T1: 0, T2: 0, T3: 0};
+    L.forEach(b => { sh[ctx.JTCore_.shiftOf(b.scanDateTime)]++; });
+    return {n: L.length, eco: eco.length, items: sumQ(L), ecoItems: sumQ(eco), arr: L.filter(b => b.portName === '进港').length,
+      dep: L.filter(b => b.portName === '出港').length, arrItems: sumQ(L.filter(b => b.portName === '进港')), sh: sh};
+  };
+  const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.006;
+
+  // 1. Payloads iguais à captura; 100 linhas por página; sem cabeçalho de rota.
+  const cP = freshCtx(lfDays());
+  const pS = cP.buildPayload_('lot_flow', D19, 1, 20, false), pD = cP.buildPayload_('lot_flow', D19, 2, 100, true);
+  check(Object.keys(pS).sort().join() === 'countryId,current,endTime,queryType,size,startTime,totalType' && pS.totalType === 'center' && pS.queryType === 'days' &&
+    pS.startTime === D19 + ' 00:00:00' && pS.endTime === D19 + ' 23:59:59' && pS.countryId === '1', 'Lotes: payload do resumo igual à captura', pS);
+  check(Object.keys(pD).sort().join() === 'countryId,current,detailType,endTime,proxyAreaCode,proxyAreaName,proxySiteCode,proxySiteName,size,startTime' &&
+    pD.detailType === 'packageSum' && pD.proxySiteCode === '30001' && pD.proxySiteName === 'SP GRU' && pD.proxyAreaCode === '370000' && pD.proxyAreaName === 'SPE' &&
+    pD.current === 2 && cP.detailPageSize_(cP.getIndicatorConfig_('lot_flow')) === 100,
+    'Lotes: payload da lista "Total de pacotes construídos" igual à captura, até 100 por página', pD);
+  const hL = cP.jmsHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sdploopbagBuildbagDetail');
+  check(hL.AuthToken === 'FAKE' && !hL.Routename && !hL.Routernamelist, 'Lotes: sem cabeçalho de rota (variantes só se o JMS recusar)');
+  check(!cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'lot_flow'}) && cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'send_flow'}),
+    'Lotes: tarefa leve (fora do teto diário do Recebimento/Expedição)');
+
+  // 2. Dia completo: cartões do resumo ("o restante" calculado), uma linha por saca, Chegada/Partida e turnos.
+  const dA = lfDays(), cA = freshCtx(dA);
+  cA.queueHistory('2026-09-18', D19, true);
+  runAll(cA, 12);
+  const rA = cA.getRateDay_('lot_flow', D19), tA = truthL(dA[D19].lt), m = rA.metrics;
+  check(m.packageSum === tA.n && m.loopSum === tA.eco && m.noloopSum === tA.n - tA.eco && m.waybillSum === tA.items && m.loopWaybillSum === tA.ecoItems &&
+    near(m.loopRate, tA.eco / tA.n * 100) && near(m.noloopRate, 100 - m.loopRate) && m.noloopWaybillSum === tA.items - tA.ecoItems &&
+    near(m.loopWaybillRate, tA.ecoItems / tA.items * 100) && near(m.noloopWaybillRate, 100 - m.loopWaybillRate) && rA.rate === m.loopRate && rA.errorCount === m.noloopSum,
+    'Lotes: cartões = colunas do resumo; não ecológicas = total − ecológicas e 100% − taxa ("o restante")', m);
+  const cfgL = cA.getIndicatorConfig_('lot_flow'), rowsA = cA.getArchivedRange_('lot_flow', D19, D19).rows;
+  cA.JTCore_.setColumnSets(cfgL.columnSets);
+  const qL = f => rowsA.filter(f).reduce((a, r) => a + Number(r.qty || 1), 0), cm = (col, r) => cA.JTCore_.colMatch(col, r.column);
+  check(qL(r => cm('Sacas criadas', r)) === tA.n && qL(r => cm('Sacas ecológicas', r)) === tA.eco && qL(r => cm('Sacas não ecológicas', r)) === tA.n - tA.eco &&
+    qL(r => r.port === 'Chegada') === tA.arr && qL(r => r.port === 'Partida') === tA.dep && ['T1', 'T2', 'T3'].every(s => qL(r => r.shift === s) === tA.sh[s]) &&
+    rowsA.every(r => r.packType === 'Saco normal' && r.lot && (r.sackType === 'Ecológica') === (r.column === 'Ecológica')) &&
+    cA.getDayStatus_('lot_flow', D19).details === 'COMPLETE',
+    'Lotes: uma linha por saca; ecológica pelo isLoopPag; 进港 = Chegada, 出港 = Partida; turno pelo tempo de ensacamento', {rows: rowsA.length});
+  const fL = cA.__state.fetches.filter(f => /sdploopbagBuildbagDetail/.test(f.url));
+  check(fL.length > 0 && fL.every(f => f.payload.size <= 100 && f.payload.detailType === 'packageSum' && f.payload.proxySiteCode === '30001'),
+    'Lotes: só a lista "Total de pacotes construídos" é baixada (a ecológica sai da coluna Saca), páginas de até 100', fL.length);
+  const agL = n => cA.getAgg_('lot_flow:' + n, D19, D19)[0] || {};
+  check(agL('Sacas criadas').total === tA.n && agL('Sacas criadas').T1 === tA.sh.T1 && agL('Sacas ecológicas').total === tA.eco &&
+    agL('Sacas não ecológicas').total === tA.n - tA.eco && agL('arrivals').total === tA.arr && agL('departures').total === tA.dep,
+    'Lotes: turnos de cada lista e de Chegada/Partida por dia (aba AGG, dia anterior dos cartões)', {arr: agL('arrivals'), dep: agL('departures')});
+
+  // 3. Painel: gráficos de lotes com mais pacotes (soma dos itens), catálogo e período grande.
+  const dashL = cA.getDashboardData('lot_flow', {from: D19, to: D19});
+  const rowsD = cA.JTCore_.decodeDataset(dashL.dataset), chDef = k => cfgL.charts.filter(c => c.key === k)[0];
+  const topT = dA[D19].lt.reduce((a, b) => Math.max(a, b.packageQty), 0);
+  const chTop = cA.JTCore_.buildChart(chDef('topLots'), rowsD, {}), chEco = cA.JTCore_.buildChart(chDef('topEco'), rowsD, {});
+  const chNon = cA.JTCore_.buildChart(chDef('topNonEco'), rowsD, {}), chPort = cA.JTCore_.buildChart(chDef('ports'), rowsD, {});
+  check(chTop.total === tA.items && chTop.datasets[0].data[0] === topT && chTop.labels.length === 10 && chEco.total === tA.ecoItems &&
+    chNon.total === tA.items - tA.ecoItems && chPort.labels.join() === (tA.dep >= tA.arr ? 'Partida,Chegada' : 'Chegada,Partida') &&
+    dashL.colAgg.arrivals.some(a => a.date === D19 && a.total === tA.arr) && !dashL.summary && !hasDate(dashL),
+    'Lotes: gráficos de lotes/sacas com mais pacotes = soma de "Quantidade de itens na embalagem"; entradas/partidas', {top: chTop.datasets[0].data[0], topT});
+  const catL = cA.getPublicCatalog_().filter(x => x.key === 'lot_flow')[0];
+  check(catL && catL.filters.map(f => f.key).join() === 'shift,lot,port,sackType' && catL.filters[1].label.pt === 'Lotes (número da saca)' &&
+    catL.charts.length === 6 && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' && catL.detailCards.length === 2 &&
+    catL.metricPanels.length === 2 && catL.shiftCardsByColumn.split.length === 2,
+    'Lotes: catálogo com 4 filtros, 6 gráficos, cartões de Chegada/Partida, turnos com ecológicas/não ecológicas e a tabela Geral');
+  const both = tA.items + truthL(dA['2026-09-18'].lt).items, arrBoth = tA.arrItems + truthL(dA['2026-09-18'].lt).arrItems;
+  cA.__state.props.GROUPED_CLIENT_ROWS = '10';
+  const dS = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {}});
+  const dSf = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {port: ['Chegada']}});
+  delete cA.__state.props.GROUPED_CLIENT_ROWS;
+  const mS = cA.JTCore_.marginalsByDim(dS.summary.marginals), mSf = cA.JTCore_.marginalsByDim(dSf.summary.marginals);
+  const chS = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mS, {}), {});
+  const chSf = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mSf, {port: ['Chegada']}), {});
+  const topBoth = Math.max(topT, dA['2026-09-18'].lt.reduce((a, b) => Math.max(a, b.packageQty), 0));
+  check(dS.summary && chS.total === both && chS.datasets[0].data[0] === topBoth,
+    'Lotes: período grande (totais no servidor) com a soma de itens por saca', {total: chS.total, both});
+  check(dSf.summary && chSf.total === arrBoth, 'Lotes: período grande com filtro de Entrada/Saída aplicado no servidor', {total: chSf.total, arrBoth});
+
+  // 4. Resumo com a linha de outra base: o painel usa a nossa (30001).
+  const cO = freshCtx(lfDays(), {lotOtherSite: true});
+  cO.runSummaryJob_({type: 'SUMMARY', indicator: 'lot_flow', date: D19});
+  check(cO.getRateDay_('lot_flow', D19).metrics.packageSum === tA.n, 'Lotes: resumo com várias bases → só a linha da nossa base');
+
+  // 5. Proteção: o JMS ignorando a base na lista (sacas de todas as bases) não é gravado.
+  const cX = freshCtx(lfDays(), {intercept: (route, h, body) => { if (route === 'sdploopbagBuildbagDetail') body.proxySiteCode = ''; return null; }});
+  cX.queueHistory(D19, D19, true);
+  runAll(cX, 6);
+  const stX = cX.getDayStatus_('lot_flow', D19);
+  check(stX.details !== 'COMPLETE' && /sem filtro/.test(stX.error || '') && !cX.getArchivedRange_('lot_flow', D19, D19).rows.length,
+    'Lotes: lista sem o filtro da base bloqueada (nada gravado)', stX);
+  let otherErr = '';
+  try { cP.normalizeRecords_('lot_flow', D19, [{packageCode: 'BRTESTE1', proxySiteName: 'OUTRA BASE FICTICIA', isLoopPag: 'Y', packageQty: 3}], 'packageSum'); }
+  catch (e) { otherErr = e.message; }
+  const okSite = cP.normalizeRecords_('lot_flow', D19, [{packageCode: 'BRTESTE2', proxySiteName: ' sp  gru ', isLoopPag: 'N', portName: '进港', packageQty: 4,
+    scanDateTime: D19 + ' 07:10:00'}], 'packageSum');
+  check(/sem filtro/.test(otherErr) && okSite.length === 1 && okSite[0].column === 'Não ecológica' && okSite[0].port === 'Chegada' && okSite[0].shift === 'T1',
+    'Lotes: saca de outra base na lista bloqueia a importação (hoje também)', otherErr);
+
+  // 6. Hoje: lista nova no máximo de hora em hora (Google Workspace) ou a cada 3 h (conta Gmail: cota de 90 min/dia).
+  const TODAY = ctx.isoToday_();
+  [['workspace', 61, 1], ['gmail', 61, 0], ['gmail', 181, 1]].forEach(([plan, mins, want]) => {
+    const dH = {[TODAY]: makeDay(TODAY, 41)};
+    const cH = freshCtx(dH, null, {DATA_START_DATE: TODAY, COTA_GOOGLE: plan});
+    cH.queueHistory(TODAY, TODAY, true);
+    runAll(cH, 8);
+    const n0 = cH.getArchivedRange_('lot_flow', TODAY, TODAY).rows.length;
+    dH[TODAY].lt = dH[TODAY].lt.concat(dH[TODAY].lt.slice(0, 3).map((b, i) => Object.assign({}, b, {packageCode: b.packageCode + 'N' + i})));
+    reset(cH);
+    const pendH = () => cH.pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === 'lot_flow' && j.date === TODAY);
+    cH.runSummaryJob_({type: 'SUMMARY', indicator: 'lot_flow', date: TODAY});
+    reset(cH);
+    const before = pendH();
+    const realNowH = vm.runInContext('Date.now', cH);
+    vm.runInContext('Date', cH).now = () => realNowH() + mins * 60000;
+    cH.runSummaryJob_({type: 'SUMMARY', indicator: 'lot_flow', date: TODAY});
+    reset(cH);
+    const after = pendH();
+    vm.runInContext('Date', cH).now = realNowH;
+    check(n0 === dH[TODAY].lt.length - 3 && !before && after === !!want && cH.getRateDay_('lot_flow', TODAY).metrics.packageSum === dH[TODAY].lt.length,
+      'Lotes: hoje, cartões do resumo de hora em hora; lista nova ' + (want ? 'depois de ' : 'ainda não com ') + mins + ' min (' + plan + ')', {n0, before, after});
+  });
+
+  // 6b. Conta Gmail: resumo dos Lotes de hoje a cada 3 h; ontem e anteontem uma vez por dia (3h). Workspace: toda hora.
+  const lotJobsAt = (plan, hour) => {
+    const c = freshCtx(lfDays(), null, {COTA_GOOGLE: plan});
+    c.hourNow_ = () => hour;
+    c.queueRecentRefresh_();
+    reset(c);
+    const js = c.pendingJobs_().filter(j => j.type === 'SUMMARY');
+    return {lots: js.filter(j => j.indicator === 'lot_flow').map(j => j.date).sort().join(), send: js.filter(j => j.indicator === 'send_flow').length};
+  };
+  const T0 = ctx.isoToday_(), T1 = ctx.addDaysIso_(T0, -1), T2 = ctx.addDaysIso_(T0, -2);
+  const gm4 = lotJobsAt('gmail', 4), gm6 = lotJobsAt('gmail', 6), gm3 = lotJobsAt('gmail', 3), ws4 = lotJobsAt('workspace', 4);
+  check(gm4.lots === '' && gm4.send === 3 && gm6.lots === T0 && gm3.lots === [T2, T1, T0].join() && ws4.lots === [T2, T1, T0].join(),
+    'Lotes na conta Gmail: resumo de hoje a cada 3 h e dos dias anteriores 1 vez por dia; Workspace e outros painéis de hora em hora', {gm4, gm6, gm3, ws4});
+
+  // 7. diagnosticarLotes(): resumo, lista, contas da lista inteira × resumo, sem número de saca.
+  const dg = cA.diagnosticarLotes(D19);
+  check(/Fluxo de Lotes/.test(dg.texto) && dg.lista.total === tA.n && dg.listaInteira.ecologicas === tA.eco && dg.listaInteira.pacotes === tA.items &&
+    dg.listaInteira.chegada === tA.arr && /isLoopPag: \d+ ✓/.test(dg.texto.replace(/\./g, '')) && !dA[D19].lt.some(b => dg.texto.indexOf(b.packageCode) >= 0) &&
+    !/FAKE/.test(dg.texto), 'diagnosticarLotes: lista × resumo (ecológicas pelo isLoopPag, pacotes, Chegada/Partida), sem número de saca', dg.texto);
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

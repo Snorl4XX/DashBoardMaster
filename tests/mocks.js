@@ -11,7 +11,8 @@ function fmtDate(d, tz, fmt) {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}).formatToParts(new Date(d));
   const g = t => parts.find(p => p.type === t).value;
   return fmt.replace('yyyy', g('year')).replace('MM', g('month')).replace('dd', g('day'))
-    .replace('HH', g('hour') === '24' ? '00' : g('hour')).replace('mm', g('minute')).replace('ss', g('second'));
+    .replace('HH', g('hour') === '24' ? '00' : g('hour')).replace('mm', g('minute')).replace('ss', g('second'))
+    .replace(/H/, () => String(Number(g('hour')) % 24)); // 'H' = hora sem zero (hourNow_), como no Apps Script
 }
 function sheetCoerce(v) {
   if (typeof v === 'string') {
@@ -384,6 +385,33 @@ function fakeJms(dayData, options) {
         });
         return respond(200, {code: 1, msg: '1:Solicitação concluída', data: data, succ: true, fail: false});
       }
+      // ----- Fluxo de Lotes (formato das capturas; sacas e destinos fictícios) -----
+      case 'sdploopbagBuildbagCount': {
+        if (!d || !d.lt || body.totalType !== 'center' || body.queryType !== 'days') return ok([], 0, 1, body.size);
+        if (!(start === full.start && end === full.end)) return ok([], 0, 1, body.size);
+        const L = d.lt, eco = L.filter(b => b.isLoopPag === 'Y'), sumQ = l => l.reduce((a, b) => a + b.packageQty, 0);
+        const pct = (a, b) => (b ? (a / b * 100).toFixed(2) : '0.00') + '%';
+        const rec = {queryDate: date, startTime: full.start, endTime: full.end, proxyAreaCode: '370000', proxyAreaName: 'SPE', proxySiteCode: '30001',
+          proxySiteName: 'SP GRU', portName: '全部', packageName: '全部', packageSourceName: '全部', packageSum: L.length, loopSum: eco.length,
+          noloopSum: L.length - eco.length, loopRate: pct(eco.length, L.length), waybillSum: sumQ(L), loopWaybillSum: sumQ(eco),
+          loopWaybillRate: pct(sumQ(eco), sumQ(L)), end: 'end', PAGEHELPER_ROW_ID: 1, ROW_ID: 1};
+        // options.lotOtherSite: o JMS manda também a linha de outra base (o painel usa só a nossa).
+        const recs = options.lotOtherSite ? [Object.assign({}, rec, {proxySiteCode: '99999', proxySiteName: 'OUTRA BASE', packageSum: 5000, loopSum: 1})].concat([rec]) : [rec];
+        return ok(recs, recs.length, 1, body.size);
+      }
+      case 'sdploopbagBuildbagDetail': {
+        if (!d || !d.lt) return ok([], 0, 1, body.size);
+        const sz = Math.min(100, body.size); // "PODENDO CHEGAR ATÉ 100 LINHAS"
+        // Sem a base no payload, o JMS devolveria as sacas de todas as bases (payload sem filtro).
+        let list = body.proxySiteCode === '30001' ? d.lt : d.lt.concat(d.lt.map(b => Object.assign({}, b, {packageCode: b.packageCode + 'X', proxySiteName: 'OUTRA BASE FICTICIA'})));
+        if (body.detailType === 'loopSum') list = list.filter(b => b.isLoopPag === 'Y');
+        else if (body.detailType === 'noloopSum') list = list.filter(b => b.isLoopPag === 'N');
+        else if (body.detailType !== 'packageSum') return respond(200, {code: 500, msg: 'detailType inválido', fail: true});
+        if (!(start === full.start && end === full.end)) list = list.filter(b => b.scanDateTime >= start && b.scanDateTime <= end);
+        const recs = list.slice((body.current - 1) * sz, body.current * sz).map((b, i) => Object.assign({queryDate: date, proxyAreaName: 'SPE', proxySiteName: 'SP GRU',
+          proxySiteType: '中心'}, b, {arriveTime: null, openTime: null, end: 'end', PAGEHELPER_ROW_ID: (body.current - 1) * sz + i + 1, ROW_ID: (body.current - 1) * sz + i + 1}));
+        return ok(recs, list.length, body.current, sz);
+      }
       case 'registrationPage': {
         const want = {};
         String(body.waybillNo || '').split(',').forEach(w => { want[w.trim()] = 1; }); // como o JMS: remessa exata (com ou sem "-001")
@@ -441,7 +469,29 @@ function makeDay(date, seed) {
   const pct = v => v.toFixed(2) + '%';
   const day = {ws: ws, wsRate: pct(0.2 + rnd() * 1.1), se: se, seRate: pct(0.3 + rnd() * 0.6), mr: mr, mrRate: pct(0.5 + rnd() * 0.8),
     md: md, mdRate: pct(0.4 + rnd() * 0.9), sc: sc, scRate: pct(88 + rnd() * 9), dc: dc, dcRate: pct(89 + rnd() * 8)};
-  return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5), makeArrival(date, (seed || 7) * 17 + 3), makeSend(date, (seed || 7) * 13 + 1));
+  return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5), makeArrival(date, (seed || 7) * 17 + 3), makeSend(date, (seed || 7) * 13 + 1),
+    makeLots(date, (seed || 7) * 19 + 2));
+}
+
+/**
+ * Fluxo de Lotes: sacas criadas no dia no formato da lista "Total de pacotes construídos" (número da saca, tipo de entrada e saída
+ * 出港/进港, saca ecológica com chip, itens na embalagem, tempo de ensacamento, destino). Números de saca e destinos FICTÍCIOS.
+ */
+function makeLots(date, seed, scale) {
+  let s = seed || 9;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const n = Math.round((150 + Math.floor(rnd() * 60)) * (scale || 1));
+  const dests = ['DC FICTICIO-AL', 'RT ALFA', 'RT BETA', 'F FICTICIA-SP', 'DC FICTICIO-AM', 'RT GAMA'];
+  const tag = date.replace(/-/g, '').slice(2), lt = [];
+  const two = x => String(x).padStart(2, '0');
+  for (let i = 0; i < n; i++) {
+    const eco = rnd() < 0.34, h = Math.floor(rnd() * 24);
+    lt.push({portName: rnd() < 0.6 ? '出港' : '进港', packageName: '普通包', packageSourceName: 'JT', packageCode: 'BR9' + tag + String(i).padStart(5, '0'),
+      chipNo: eco ? '9' + tag + String(i).padStart(7, '0') : null, packageQty: 1 + Math.floor(rnd() * 50),
+      scanDateTime: date + ' ' + two(h) + ':' + two(Math.floor(rnd() * 60)) + ':' + two(Math.floor(rnd() * 60)), openSiteName: dests[Math.floor(rnd() * dests.length)],
+      isLoopPag: eco ? 'Y' : 'N'});
+  }
+  return {lt: lt};
 }
 
 /**
@@ -565,4 +615,4 @@ function makeArrival(date, seed, scale) {
     uploadNoSendNum: prev.length, noSendNum: noSend.length}};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};

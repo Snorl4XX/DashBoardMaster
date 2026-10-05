@@ -624,6 +624,108 @@ function diagnosticarRecebimento(date) {
 }
 
 /**
+ * Diagnóstico só do Fluxo de Lotes (V3.23). Rode no editor (▶ Executar) e copie o texto do "Registro de execução" —
+ * ele não mostra AuthToken, Cookie nem número de saca. Testa no JMS, sem gravar nada no banco:
+ *  - o resumo do dia (sdploopbagBuildbagCount: colunas da tabela principal e as calculadas "o restante");
+ *  - a lista do número vermelho "Total de pacotes construídos" (packageSum): total × resumo, página aceita, campos;
+ *  - a lista INTEIRA do dia (poucas páginas): ecológicas pelo campo isLoopPag × "Número do saco ecológico" do resumo,
+ *    pacotes somados × "Número total de conteúdo do pacote", 进港/出港 (Chegada/Partida) e turnos;
+ *  - as listas das colunas ecológicas e não ecológicas (loopSum / noloopSum) só para conferência;
+ * e mostra a situação do download dos últimos dias e os últimos avisos. `date` (opcional, AAAA-MM-DD): padrão = ontem.
+ */
+function diagnosticarLotes(date) {
+  const key = 'lot_flow', cfg = INDICATORS[key];
+  const d = isIso_(date) ? date : lastClosedDate_(key);
+  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d};
+  const add = x => lines.push(x);
+  const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
+  const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
+  const cred = authConfigSafe_();
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico do Fluxo de Lotes — dia ' + humanDatePt_(d) + ' · base ' + centerName_() + ' (' + centerCode_() + ')');
+  add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · conta Google: ' + googlePlan_() + ' (tarefa leve, fora do teto diário)');
+  (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
+  try {
+    const rt = JMS_ROUTES_.filter(r => r.key === cfg.routeKey)[0], pp = jmsReadProperties_(), v = routeVariant_(rt, pp);
+    const nm = pp['JMS_ROUTENAME_' + rt.key] || v.name, ls = pp['JMS_ROUTENAMELIST_' + rt.key] || v.list;
+    add('Cabeçalho de rota: ' + (nm === 'NONE' ? 'nenhum (a captura não mostra o Routename desta tela; se o JMS recusar, o painel testa as variantes)' : 'Routename "' + nm + '" · Routernamelist "' + ls + '"'));
+  } catch (e) { /* sem rota */ }
+  let day = null;
+  try {
+    const s = fetchSummaryDay_(key, d);
+    day = s.empty ? null : s.raw;
+    add('Resumo (sdploopbagBuildbagCount): ' + (s.empty ? 'SEM REGISTROS neste dia' : (cfg.summary.metrics || []).map(m => m + ' ' +
+      ((cfg.summary.percentMetrics || []).indexOf(m) >= 0 || /Rate$/.test(m) ? fmt(s.raw[m]) + '%' : fmt(s.raw[m]))).join(' · ')));
+    if (day) out.resumo = (cfg.summary.metrics || []).reduce((o, m) => { o[m] = day[m]; return o; }, {});
+  } catch (e) { add('Resumo: ERRO — ' + err(e)); }
+  const full = dayWindow_(d, false), size = detailPageSize_(cfg);
+  try {
+    const r = fetchDetailPage_(key, d, 1, size, Object.assign({type: 'packageSum'}, full));
+    const exp = day ? Number(day.packageSum) : null, pages = Math.ceil(r.total / Math.max(1, r.records.length || size));
+    out.lista = {total: r.total, resumo: exp, pagina: r.records.length};
+    add('Lista "Total de pacotes construídos" (packageSum): ' + fmt(r.total) + ' sacas' + (exp === null ? '' : ' (resumo ' + fmt(exp) +
+      (r.total === exp ? ' ✓' : r.total > exp * 1.5 + 50 ? ' ✗ MUITO MAIOR: o filtro da base não pegou' : ' — diferente do resumo; o painel usa a lista como veio') + ')') +
+      ' · página com ' + r.records.length + ' de ' + size + ' pedidas · ' + fmt(pages) + ' consulta(s) por dia');
+    if (r.records.length) {
+      const map = fieldMappingReport_(key, r.records);
+      const bad = ['lot', 'eventTime', 'port', 'sackType', 'items'].filter(k => map.campos[k] && map.campos[k].situacao !== 'ok');
+      add('  campos: ' + (bad.length ? 'FALTAM ' + bad.map(k => k + ' (' + map.campos[k].configurado + ')').join(', ') :
+        'número da saca, tempo de ensacamento, tipo de entrada e saída, saca ecológica e itens na embalagem OK') + ' · recebidos: ' + map.camposRecebidos.slice(0, 24).join(', '));
+    }
+    // A lista inteira do dia (~1 mil sacas = ~10 consultas): confere as contas do painel com o resumo.
+    if (r.total > 0 && pages <= 60) {
+      const items = [];
+      for (let p = 2; p <= pages; p++) items.push({page: p, size: size, win: Object.assign({type: 'packageSum'}, full)});
+      let all = r.records.slice();
+      for (let i = 0; i < items.length; i += 10) fetchDetailBatch_(key, d, items.slice(i, i + 10)).forEach(x => { all = all.concat(x.records || []); });
+      const rows = all.map(x => normalizeDetailRow_(key, x, d)).filter(Boolean);
+      const seen = {}, uniq = rows.filter(x => !seen[x.lot] && (seen[x.lot] = 1));
+      const cnt = f => uniq.filter(f).length, sumI = l => l.reduce((a, x) => a + (Number(x.items) || 0), 0);
+      const eco = uniq.filter(x => x.sackType === 'Ecológica'), sites = {}, ports = {}, sacks = {};
+      all.forEach(x => { sites[String(x.proxySiteName || '—')] = 1; ports[String(x.portName || '—')] = (ports[String(x.portName || '—')] || 0) + 1; sacks[String(x.isLoopPag || '—')] = (sacks[String(x.isLoopPag || '—')] || 0) + 1; });
+      out.listaInteira = {sacas: uniq.length, ecologicas: eco.length, pacotes: sumI(uniq), pacotesEco: sumI(eco), chegada: cnt(x => x.port === 'Chegada'), partida: cnt(x => x.port === 'Partida')};
+      const ok = (a, b) => b === null || b === undefined || isNaN(b) ? '' : Number(a) === Number(b) ? ' ✓' : ' ✗ resumo ' + fmt(b);
+      add('  lista inteira: ' + fmt(uniq.length) + ' sacas (' + fmt(all.length - uniq.length) + ' repetidas) · bases na lista: ' + Object.keys(sites).join(', '));
+      add('  ecológicas pelo campo isLoopPag: ' + fmt(eco.length) + ok(eco.length, day && day.loopSum) + ' · valores de isLoopPag: ' +
+        Object.keys(sacks).map(k => k + ' ' + fmt(sacks[k])).join(', '));
+      add('  pacotes (soma de "Quantidade de itens na embalagem"): ' + fmt(sumI(uniq)) + ok(sumI(uniq), day && day.waybillSum) + ' · na ecológica ' + fmt(sumI(eco)) + ok(sumI(eco), day && day.loopWaybillSum));
+      add('  tipo de entrada e saída: ' + Object.keys(ports).map(k => k + ' ' + fmt(ports[k])).join(' · ') + ' → Chegada (进港) ' + fmt(out.listaInteira.chegada) +
+        ' · Partida (出港) ' + fmt(out.listaInteira.partida));
+      add('  turnos pelo tempo de ensacamento: T1 ' + fmt(cnt(x => x.shift === 'T1')) + ' · T2 ' + fmt(cnt(x => x.shift === 'T2')) + ' · T3 ' + fmt(cnt(x => x.shift === 'T3')) +
+        (cnt(x => !x.shift) ? ' · sem horário ' + fmt(cnt(x => !x.shift)) : ''));
+    }
+  } catch (e) { add('Lista "Total de pacotes construídos": ERRO — ' + err(e)); }
+  [['loopSum', 'Número do saco ecológico'], ['noloopSum', 'Número de sacas não ecológicas']].forEach(([t, nm]) => {
+    try {
+      const r = fetchDetailPage_(key, d, 1, 10, Object.assign({type: t}, full));
+      add('Lista "' + nm + '" (' + t + ', só conferência): ' + fmt(r.total) + (day ? ' (resumo ' + fmt(day[t]) + (r.total === Number(day[t]) ? ' ✓' : '') + ')' : ''));
+    } catch (e) { add('Lista "' + nm + '" (' + t + '): ERRO — ' + err(e) + ' (o painel não usa esta lista)'); }
+  });
+  try {
+    const back = addDaysIso_(isoToday_(), -3);
+    const dp = detailProgress_(key, back, isoToday_());
+    if (d < back) dp.days = dp.days.concat(detailProgress_(key, d, d).days);
+    add('Download dos últimos dias' + (d < back ? ' e do dia ' + humanDatePt_(d) : '') + ':');
+    dp.days.forEach(x => {
+      const job = x.job ? ' · tarefa ' + x.job.status + (x.job.ahead !== null && x.job.ahead !== undefined ? ' (' + x.job.ahead + ' antes na fila)' : '') + (x.job.attempts ? ', ' + x.job.attempts + ' falha(s)' : '') : ' · sem tarefa';
+      add('  ' + humanDatePt_(x.date) + ': resumo ' + x.summary + ' · detalhe ' + x.details + (x.expected ? ' ' + x.saved + '/' + x.expected : '') + job +
+        (x.error || x.progressError ? ' · erro: ' + (x.progressError || x.error) : ''));
+    });
+    out.dias = dp.days;
+  } catch (e) { add('Download dos últimos dias: ERRO ao ler — ' + err(e)); }
+  try {
+    const logs = allTabRows_('LOG').filter(r => String(r[2]) === key && (r[1] === 'WARN' || r[1] === 'ERROR')).slice(-8);
+    if (logs.length) {
+      add('Últimos avisos do LOG (' + key + '):');
+      logs.forEach(r => add('  ' + (toIsoTimestamp_(r[0]) || '').slice(0, 16).replace('T', ' ') + ' ' + r[1] + ' ' + humanDatePt_(dateCellIso_(r[3])) + ': ' + String(r[4]).slice(0, 260)));
+    } else add('LOG: nenhum aviso ou erro do Fluxo de Lotes.');
+  } catch (e) { /* sem banco */ }
+  add('Dica: se algo der ERRO ou ✗, abra a tela no JMS, F12 → Rede, clique no número e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
+  console.log(lines.join('\n'));
+  out.texto = lines.join('\n');
+  return out;
+}
+
+/**
  * Situação da fila com estimativa de término. A estimativa usa o tempo de resposta
  * medido do JMS e o tamanho recente de cada indicador, e conta só os jobs PRONTOS
  * (detalhe esperando o resumo do dia, ou rota pausada, não anda sozinho).

@@ -22,7 +22,8 @@ function fmtDate(d, tz, fmt) {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}).formatToParts(new Date(+d));
   const g = t => parts.find(p => p.type === t).value;
   return fmt.replace('yyyy', g('year')).replace('MM', g('month')).replace('dd', g('day'))
-    .replace('HH', g('hour') === '24' ? '00' : g('hour')).replace('mm', g('minute')).replace('ss', g('second'));
+    .replace('HH', g('hour') === '24' ? '00' : g('hour')).replace('mm', g('minute')).replace('ss', g('second'))
+    .replace(/H/, () => String(Number(g('hour')) % 24)); // 'H' = hora sem zero (hourNow_), como no Apps Script
 }
 
 function createSimContext(opts) {
@@ -121,6 +122,7 @@ const ARRIVAL = {shouldArriverNum: 172842, noArriverNum: 74190, totalNum: 332990
  * captura). transit = parte que ainda não chegou na próxima parada (no dia de hoje, como na captura; nos dias anteriores
  * cai pela metade a cada dia); não entregue = todas (dias recentes).
  */
+const LOTS_PER_DAY = 906; // Fluxo de Lotes: sacas por dia (Total de pacotes construídos, resumo da captura de 04/10)
 const SEND = [[2697, 1], [5550, 1], [5424, 1], [5616, 1], [1996, 0.02], [1718, 1], [1048, 0.47], [17717, 0.99], [1592, 1], [804, 1],
   [1096, 1], [15876, 1], [38672, 1], [14080, 0.9999], [3732, 1]].map((x, i) => ({name: 'ROTA ' + String.fromCharCode(65 + i), code: String(80001 + i), n: x[0], transit: x[1]}));
 const sendHash = (x, salt) => { let v = (x * 2654435761 + salt * 40503) >>> 0; v ^= v >>> 15; v = Math.imul(v, 2246822519) >>> 0; v ^= v >>> 13; return v; };
@@ -261,6 +263,25 @@ function realisticJms(opts) {
       const out = idx.slice((cur - 1) * sz, cur * sz).map(i => ({billcode: 'SF' + dd.replace(/-/g, '') + 'R' + ri + 'I' + i, inputsite: 'SP GRU', sendTime: timeOf(r, i),
         nextstation: r.name, scanuser: 'OPERADOR ' + (sendHash(i, 7) % 60)}));
       return ok(out, idx.length, cur, sz);
+    }
+    // Fluxo de Lotes: ~906 sacas por dia (volume do resumo da captura), sacas sintéticas.
+    if (route === 'sdploopbagBuildbagCount' || route === 'sdploopbagBuildbagDetail') {
+      const dd = start.slice(0, 10), frac = dd > nowIso ? 0 : dd < nowIso ? 1 : nowH / 24, N = Math.floor(LOTS_PER_DAY * frac);
+      const two = x => String(x).padStart(2, '0');
+      const lot = i => { const sec = Math.floor(i * 86400 / LOTS_PER_DAY), h = sendHash(i, 913);
+        return {packageCode: 'LT' + dd.replace(/-/g, '') + String(i).padStart(5, '0'), isLoopPag: h % 100 < 33 ? 'Y' : 'N', portName: h % 10 < 6 ? '出港' : '进港',
+          packageQty: 1 + (h >>> 8) % 30, packageName: '普通包', packageSourceName: 'JT', chipNo: null, openSiteName: 'DESTINO ' + (h % 40), proxySiteName: 'SP GRU',
+          scanDateTime: dd + ' ' + two(Math.floor(sec / 3600)) + ':' + two(Math.floor(sec / 60) % 60) + ':' + two(sec % 60)}; };
+      if (route === 'sdploopbagBuildbagCount') {
+        if (!N) return ok([], 0, 1, size);
+        let eco = 0, items = 0, ecoItems = 0;
+        for (let i = 0; i < N; i++) { const x = lot(i); items += x.packageQty; if (x.isLoopPag === 'Y') { eco++; ecoItems += x.packageQty; } }
+        return ok([{queryDate: dd, proxySiteCode: '30001', proxySiteName: 'SP GRU', packageSum: N, loopSum: eco, noloopSum: N - eco, loopRate: (eco / N * 100).toFixed(2) + '%',
+          waybillSum: items, loopWaybillSum: ecoItems, loopWaybillRate: (ecoItems / items * 100).toFixed(2) + '%'}], 1, 1, size);
+      }
+      const sz = Math.min(100, body.size), all = [];
+      for (let i = 0; i < N; i++) all.push(i);
+      return ok(all.slice((cur - 1) * sz, cur * sz).map(lot), N, cur, sz);
     }
     if (/center_missscan_next_total/.test(route)) {
       const mr = visible(dayList(date, 'mr')).length, md = visible(dayList(date, 'md')).length;

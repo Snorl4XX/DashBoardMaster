@@ -6,7 +6,9 @@ const SEGMENT_FIRST_CODE_ = {wrong_send: 1, sorting_error: 1, missing_receipt: 1
 const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expeditionTime', 'login', 'segment', 'destination',
   'lot', 'client', 'offenderBase', 'errorType', 'tripId', 'route', 'reason', 'idealTime', 'idealTimeFull', 'correctDest',
   'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw', 'station', 'product', 'content', 'amount', 'regDay',
-  'locationMain', 'locationSub', 'column', 'destCenter', 'destBase', 'qty'];
+  'locationMain', 'locationSub', 'column', 'destCenter', 'destBase', 'qty', 'port', 'sackType', 'items', 'packType', 'source', 'chip'];
+/** Campos extras lidos quando o indicador os configura (Fluxo de Lotes: entrada/saída, saca ecológica, itens, tipo, origem, chip). */
+const EXTRA_FIELDS_ = ['port', 'sackType', 'items', 'packType', 'source', 'chip'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 
@@ -35,6 +37,9 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   if (f.destBase) row.destBase = str(f.destBase);
   if (f.locationMain) row.locationMain = str(f.locationMain);
   if (f.locationSub) row.locationSub = str(f.locationSub);
+  EXTRA_FIELDS_.forEach(k => { if (f[k]) row[k] = str(f[k]); });
+  // Valores do JMS em chinês/código como a tela mostra (Config.gs → valueMaps; ex.: 出港 → Partida, Y → Ecológica).
+  Object.keys(cfg.valueMaps || {}).forEach(k => { const m = cfg.valueMaps[k], v = row[k]; if (v !== undefined && m[v] !== undefined) row[k] = m[v]; });
   // Indicadores com docas guardam o 1º segmento COMPLETO ("BRE - SP"); o campo segment continua
   // só com o código ("BRE"), como nos gráficos de sempre. Destino e doca saem daqui (Core.applyDocks).
   if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') row.segmentRaw = JTCore_.segmentHead(row.segment);
@@ -55,12 +60,24 @@ function normalizeRecords_(indicatorKey, date, records, type) {
   // Campos agrupados que esta lista não usa ficam vazios (keep); copy: ID de viagem/turno no campo da lista.
   const drop = td && td.keep ? (cfgN.groupFields || []).filter(k => k !== 'column' && td.keep.indexOf(k) < 0) : [];
   const copy = td && td.copy ? Object.keys(td.copy) : [];
+  // Fluxo de Lotes: cada saca da lista traz a base (proxySiteName). Saca de outra base = o JMS ignorou o filtro da base
+  // no payload; nada é gravado (as páginas teriam as sacas de todas as bases).
+  const siteF = cfgN.detail && cfgN.detail.siteNameField;
+  if (siteF && records.length) {
+    const key = v => String(v).toUpperCase().replace(/\s+/g, ' ').trim(), site = key(centerName_());
+    const other = records.filter(r => r && r[siteF] && key(r[siteF]) !== site)[0];
+    if (other) {
+      throw new Error('Detalhe de ' + indicatorKey + ' ' + date + ' trouxe registros de outra base (' + String(other[siteF]).slice(0, 40) +
+        '): payload do detalhe sem filtro. Importação bloqueada para não gravar dados errados.');
+    }
+  }
   const rows = [];
   for (let i = 0; i < records.length; i++) {
     const x = normalizeDetailRow_(indicatorKey, records[i], date);
     if (!x) continue;
     if (td) {
-      x.column = td.column;
+      // Coluna principal pela própria remessa (Fluxo de Lotes: saca ecológica ou não) ou pela lista baixada.
+      x.column = cfgN.columnFrom ? (x[cfgN.columnFrom] || 'N/A') : td.column;
       copy.forEach(k => { x[k] = x[td.copy[k]]; });
       drop.forEach(k => { x[k] = ''; });
       (td.blank || []).forEach(k => { x[k] = ''; });
@@ -383,6 +400,15 @@ function GroupSummarySink_(cfg, filters, topLimit) {
   };
   const marg = {}, totals = new Map();
   dims.forEach(k => { marg[k] = new Map(); });
+  // Gráfico que soma um campo (Fluxo de Lotes: itens na embalagem por saca): total do campo por valor ("lot:items").
+  const sums = [];
+  (cfg.charts || []).forEach(c => {
+    const d = c.dim || c.key;
+    if (c.sumField && dims.indexOf(d) >= 0 && (cfg.groupFields || []).indexOf(c.sumField) >= 0 && !sums.some(x => x.dim === d && x.field === c.sumField)) {
+      sums.push({dim: d, field: c.sumField, name: d + ':' + c.sumField});
+    }
+  });
+  sums.forEach(x => { marg[x.name] = new Map(); });
   // Maiores combinações POR LISTA (tabelas do painel: uma por lista; as listas pequenas têm quantidade 1).
   const tops = {}, floors = {};
   let cubeRows = 0, totalQty = 0, outCount = 0;
@@ -402,6 +428,11 @@ function GroupSummarySink_(cfg, filters, topLimit) {
     // Soma do dia por índices (data × coluna × valor) e só no fim vira texto.
     const acc = {}, tot = new Float64Array(dDate.length * nCol);
     dims.forEach(k => { acc[k] = new Float64Array(dDate.length * nCol * vals[k].length); });
+    const fv = {};
+    sums.forEach(x => {
+      acc[x.name] = new Float64Array(dDate.length * nCol * vals[x.dim].length);
+      fv[x.name] = {vals: (ds.dict[x.field] || ['']).map(v => Number(v) || 0), col: idxOf(x.field)};
+    });
     for (let i = 0; i < n; i++) {
       const q = cQty ? qd[cQty[i]] : 1;
       cubeRows++; totalQty += q;
@@ -414,9 +445,18 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       }
       if (fails > 1) continue;
       const base = (cDate ? cDate[i] : 0) * nCol + (cCol ? cCol[i] : 0);
-      if (fails === 1) { const c = cols[failK]; acc[failK][base * vals[failK].length + (c ? c[i] : 0)] += q; continue; }
+      if (fails === 1) {
+        const c = cols[failK];
+        acc[failK][base * vals[failK].length + (c ? c[i] : 0)] += q;
+        sums.forEach(x => { if (x.dim !== failK) return; const f = fv[x.name]; acc[x.name][base * vals[failK].length + (c ? c[i] : 0)] += q * (f.col ? f.vals[f.col[i]] : 0); });
+        continue;
+      }
       tot[base] += q;
       for (let a = 0; a < dims.length; a++) { const k = dims[a], c = cols[k]; acc[k][base * vals[k].length + (c ? c[i] : 0)] += q; }
+      for (let a = 0; a < sums.length; a++) {
+        const x = sums[a], c = cols[x.dim], f = fv[x.name];
+        acc[x.name][base * vals[x.dim].length + (c ? c[i] : 0)] += q * (f.col ? f.vals[f.col[i]] : 0);
+      }
       const colV = vals.column[ci], tl = tops[colV] || (tops[colV] = []), fl = floors[colV] || 0;
       if (topLimit && (q > fl || tl.length < topLimit)) {
         const r = {};
@@ -434,6 +474,10 @@ function GroupSummarySink_(cfg, filters, topLimit) {
           const a = acc[k], m = vals[k].length;
           for (let v = 0; v < m; v++) if (a[b * m + v]) bump(marg[k], key + '\u0001' + vals[k][v], a[b * m + v]);
         });
+        sums.forEach(x => {
+          const a = acc[x.name], m = vals[x.dim].length;
+          for (let v = 0; v < m; v++) if (a[b * m + v]) bump(marg[x.name], key + '\u0001' + vals[x.dim][v], a[b * m + v]);
+        });
       }
     }
   }
@@ -447,7 +491,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       const tb = DatasetBuilder_(['date', 'column', 'shipment', 'qty'], null);
       totals.forEach((q, key) => { const p = key.split('\u0001'); tb.addRows([{date: p[0], column: p[1], shipment: 'T' + (++seq), qty: String(q)}]); });
       const mb = DatasetBuilder_(['date', 'column', 'shipment', '_m', 'value', 'qty'], null);
-      dims.forEach(k => marg[k].forEach((q, key) => {
+      dims.concat(sums.map(x => x.name)).forEach(k => marg[k].forEach((q, key) => {
         const p = key.split('\u0001');
         mb.addRows([{date: p[0], column: p[1], shipment: 'M' + (++seq), _m: k, value: p[2], qty: String(q)}]);
       }));
@@ -570,7 +614,8 @@ function getDashboardData(indicatorKey, params) {
     // Ocorrências por turno de cada dia (filtro de turno: parte do turno na taxa, também no dia anterior).
     agg: (cfg.filters || []).indexOf('shift') >= 0 && !cfg.grouped ? getAgg_(indicatorKey, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total})) : [],
     // Recebimento: turnos de cada lista por dia (cartões dos turnos e dia anterior com o filtro de turno).
-    colAgg: (cfg.shiftAggColumns || []).reduce((o, col) => {
+    colAgg: (cfg.shiftAggColumns || []).reduce((o, e) => {
+      const col = typeof e === 'string' ? e : e.name;
       o[col] = getAgg_(indicatorKey + ':' + col, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total}));
       return o;
     }, {}),

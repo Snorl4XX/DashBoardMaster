@@ -470,12 +470,13 @@ function JTCoreFactory_() {
    * as remessas somadas por combinação de DC/base/viagem/estação/digitalizador/turno, campo qty).
    */
   function weight(r) { var q = r && r.qty; return q === undefined || q === null || q === '' ? 1 : (Number(q) || 0); }
-  function countBy(rows, key) {
+  function countBy(rows, key, wf) {
     var map = {};
     var list = rows || [];
+    var w = wf || weight;
     for (var i = 0; i < list.length; i++) {
       var label = norm(list[i][key]);
-      map[label] = (map[label] || 0) + weight(list[i]);
+      map[label] = (map[label] || 0) + w(list[i]);
     }
     return Object.keys(map).map(function (l) { return {label: l, value: map[l]}; })
       .sort(function (a, b) { return b.value - a.value || compareText(a.label, b.label); });
@@ -537,15 +538,16 @@ function JTCoreFactory_() {
     var out = {};
     decodeDataset(ds).forEach(function (r) {
       var o = {date: r.date, column: r.column, shipment: r.shipment, qty: r.qty};
-      o[r._m] = r.value;
+      // "lot:items" = soma de itens por saca: o valor vai no campo da dimensão (lot).
+      o[String(r._m).split(':')[0]] = r.value;
       (out[r._m] || (out[r._m] = [])).push(o);
     });
     return out;
   }
   function summaryChartRows(def, byDim, filters) {
-    var k = def.dim || def.key, f = {};
+    var k = def.dim || def.key, f = {}, sk = def.sumField ? k + ':' + def.sumField : null;
     if (filters && filters[k]) f[k] = filters[k];
-    return applyFilters((byDim && byDim[k]) || [], f);
+    return applyFilters((byDim && ((sk && byDim[sk]) || byDim[k])) || [], f);
   }
   function buildChart(def, rows, opts) {
     opts = opts || {};
@@ -553,8 +555,12 @@ function JTCoreFactory_() {
     if (def.dim) def = Object.assign({}, def, {key: def.dim, chartKey: def.key});
     var base = {key: def.chartKey || def.key, dim: def.chartKey ? def.key : undefined, type: def.type || 'bar', title: def.title,
       horizontal: !!def.horizontal, ranking: !!def.ranking, where: def.where || null};
-    var total = distinctCount(rows);
+    // sumField (Fluxo de Lotes): soma o campo (itens na embalagem) em vez de contar linhas. Linha já somada no servidor
+    // (totais por campo) não tem o campo: vale a quantidade dela.
+    var sf = def.sumField, wf = sf ? function (r) { var v = r[sf]; return v === undefined ? weight(r) : (Number(v) || 0) * weight(r); } : null;
+    var total = sf ? rows.reduce(function (a, r) { return a + wf(r); }, 0) : distinctCount(rows);
     base.total = total;
+    if (sf) base.sumField = sf;
     var shiftDim = def.key === 'segmentByShift' ? 'segment' : def.byShift;
     if (shiftDim) {
       var cats = [], per = {};
@@ -571,7 +577,7 @@ function JTCoreFactory_() {
       });
       return base;
     }
-    var groups = countBy(rows, def.key);
+    var groups = countBy(rows, def.key, wf);
     if (base.type === 'doughnut' || base.type === 'pie') {
       var map = {}; groups.forEach(function (g) { map[g.label] = g.value; });
       var labels = SHIFT_KEYS[def.key] ? SHIFTS.concat(map['N/A'] ? ['N/A'] : []) : groups.map(function (g) { return g.label; });
@@ -771,12 +777,15 @@ function JTCoreFactory_() {
   // ---------- tradução de valores vindos do JMS ----------
   var VALUE_ZH_PT = {
     '上环节建包异常': 'Erro de ensacamento na etapa anterior', '一段码异常': 'Erro no 1º segmento', '人为因素': 'Fator humano',
-    '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição'
+    '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição',
+    '出港': 'Partida', '进港': 'Chegada', '普通包': 'Saco normal'
   };
   var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
     'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Sem bipe na etapa anterior': '上一环节未发件扫描', 'Sem bipe de expedição nesta base': '本网点未发件扫描', 'Chegou': '已到',
     'Enviados': '已发件', 'Em trânsito': '在途（未到下一站）', 'Não entregues': '未签收', 'Não chegou ao destino': '未到下一站',
-    'Chegou ao destino · não entregue': '已到下一站·未签收', 'Entregue': '已签收', 'Entregue · sem bipe de chegada': '已签收·无到件扫描'};
+    'Chegou ao destino · não entregue': '已到下一站·未签收', 'Entregue': '已签收', 'Entregue · sem bipe de chegada': '已签收·无到件扫描',
+    'Chegada': '进港', 'Partida': '出港', 'Ecológica': '环保袋', 'Não ecológica': '非环保袋', 'Saco normal': '普通包',
+    'Sacas criadas': '建包', 'Sacas ecológicas': '环保袋', 'Sacas não ecológicas': '非环保袋'};
   function hasCjk(s) { return /[㐀-鿿]/.test(s); }
   function localizeValue(value, lang) {
     var s = String(value === null || value === undefined ? '' : value);

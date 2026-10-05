@@ -60,7 +60,7 @@ function credentialSignature_() {
  * Cabeçalhos de rota do gateway JMS. O padrão de "Routename" é o nome da página
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
- * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING
+ * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -89,6 +89,10 @@ const JMS_ROUTES_ = [
   // recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_TRACKING / JMS_ROUTENAMELIST_TRACKING mandam).
   {key: 'TRACKING', pattern: /\/podTracking\/inner\/query\/keywordList(?:\?|$)/, name: 'NONE', list: 'NONE',
     alt: [{name: 'trackingExpress', list: 'NONE'}, {name: 'waybillTracking', list: 'NONE'}, {name: 'packageTracking', list: 'NONE'}]},
+  // Fluxo de Lotes (Dispositivo inteligente > Materiais ecológicos > Estatística de Criação Recorrente de Eco Bag). Os cabeçalhos de
+  // rota não aparecem na captura: primeiro sem eles; se o JMS recusar, as variantes de `alt` são testadas sozinhas.
+  {key: 'LOTS', pattern: /\/bigdataReport\/detail\/sdploopbagBuildbag\w+(?:\?|$)/, name: 'NONE', list: 'NONE',
+    alt: [{name: 'sdploopbagBuildbag', list: 'NONE'}, {name: 'LoopBagBuildBag', list: 'NONE'}, {name: 'ecoBagStatistics', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -408,6 +412,16 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, scansitecode: centerCode, countryId: countryId_()};
     }
 
+    case 'lot_flow':
+      // Estatística de Criação Recorrente de Eco Bag: resumo "Sumário por dia" da unidade SC; detalhe = lista do número
+      // vermelho (detailType = coluna do resumo) da nossa base, como nas capturas.
+      if (detail) {
+        const types = cfg.detail.types || [];
+        return {current: pageNo, size: pageSize, detailType: (win && win.type) || (types[0] && types[0].type), startTime: w.start, endTime: w.end,
+          proxyAreaCode: agentCode, proxyAreaName: agentName_(), proxySiteCode: centerCode, proxySiteName: centerName_(), countryId: countryId_()};
+      }
+      return {current: pageNo, size: pageSize, totalType: 'center', queryType: 'days', startTime: w.start, endTime: w.end, countryId: countryId_()};
+
     case 'sc_dc':
       if (detail) {
         return {current: pageNo, size: pageSize, startTime1: w.start, endTime1: w.end,
@@ -461,6 +475,12 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
     return !dateValue || normalizeDateFromValue_(dateValue, isoDate) === isoDate;
   });
   if (!sameDate.length) return {indicator: indicatorKey, date: isoDate, empty: true};
+  // Resumo de várias bases (Fluxo de Lotes): só a linha da nossa base (summary.siteField = JMS_CENTER_CODE).
+  if (cfg.summary.siteField) {
+    const own = sameDate.filter(r => { const v = r[cfg.summary.siteField]; return v === undefined || v === null || v === '' || String(v) === String(centerCode_()); });
+    if (!own.length) return {indicator: indicatorKey, date: isoDate, empty: true};
+    sameDate.length = 0; own.forEach(r => sameDate.push(r));
+  }
   // Uma linha por rota (Expedição): soma as colunas e guarda cada rota.
   if (cfg.summary.sumRecords) return summedSummary_(cfg, indicatorKey, isoDate, sameDate);
   const parsed = sameDate.map(r => {
@@ -495,8 +515,24 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   if (rate < 0 || rate > scale) throw new Error('Taxa oficial inválida de ' + rate + (scale === 100 ? '%' : ' ppm') + ' para ' + cfg.key + ' ' + isoDate);
   return {
     indicator: indicatorKey, date: isoDate, rate: rate, errorCount: errors, totalCount: total, empty: false,
-    raw: parsed.length === 1 ? parsed[0].raw : {aggregatedRows: parsed.length, source: 'JMS', date: isoDate}
+    raw: parsed.length === 1 ? deriveSummaryMetrics_(cfg, parsed[0].raw) : {aggregatedRows: parsed.length, source: 'JMS', date: isoDate}
   };
+}
+
+/**
+ * Números do resumo que a tela mostra em % ("33.44%" → 33.44) e os que são "o restante" (Fluxo de Lotes: não ecológicas =
+ * total − ecológicas; taxa não ecológica = 100% − taxa ecológica). Grava no próprio registro (aba RATES).
+ */
+function deriveSummaryMetrics_(cfg, raw) {
+  const sm = cfg.summary || {};
+  if (!raw || (!sm.percentMetrics && !sm.derived)) return raw;
+  const out = Object.assign({}, raw);
+  (sm.percentMetrics || []).forEach(k => { const v = parsePercent_(out[k]); out[k] = v === null ? null : v; });
+  Object.keys(sm.derived || {}).forEach(k => {
+    const d = sm.derived[k], a = typeof d.from === 'number' ? d.from : num_(out[d.from], null), b = num_(out[d.minus], null);
+    out[k] = a === null || b === null || out[d.minus] === null ? null : Math.round((a - b) * 100) / 100;
+  });
+  return out;
 }
 
 /**

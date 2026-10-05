@@ -71,11 +71,15 @@ const sfCov = ctx.tripCoverage_('send_flow', from, today);
 console.log('Expedição — situação do detalhe por dia: ' + JSON.stringify(sfSt) + '\n  ' + sfDays.slice(-8).join('\n  ') +
   '\n  IDs de viagem: ' + Object.keys(sfCov).sort().slice(-8).map(d => d + ' ' + sfCov[d].done + '/' + sfCov[d].total).join(' · ') +
   '\n  Uso de hoje (teto da Expedição): ' + (ctx.groupedUsedMs_('send_flow') / 60000).toFixed(1) + ' min de ' + ctx.groupedBudgetMin_('send_flow'));
+// Fluxo de Lotes: ~906 sacas por dia (uma linha por saca), tarefa leve (fora do teto diário).
+const lfDays = ctx.allTabRows_('DAYFILES').filter(r => r[0] === 'lot_flow').map(r => ctx.dateCellIso_(r[1]) + ' ' + r[3] + ' sacas');
+const lfSt = ctx.allTabRows_('STATUS').filter(r => r[0] === 'lot_flow').map(r => r[3]).reduce((m, x) => { m[x] = (m[x] || 0) + 1; return m; }, {});
+console.log('Fluxo de Lotes — situação do detalhe por dia: ' + JSON.stringify(lfSt) + '\n  ' + lfDays.slice(-4).join('\n  '));
 if (process.env.DASH) {
   const t1 = addDays(today, -1);
   const fDC = {column: ['Chegou'], destCenter: ['DC 3']};
   [['sc_sc', 1], ['sc_sc', 7], ['sc_sc', 14], ['missing_receipt', 14], ['wrong_send', 14], ['arrival_flow', 1], ['arrival_flow', 7], ['arrival_flow', 7, fDC],
-    ['send_flow', 1], ['send_flow', 3], ['send_flow', 3, {shift: ['T1']}]].forEach(([k, n, filters]) => {
+    ['send_flow', 1], ['send_flow', 3], ['send_flow', 3, {shift: ['T1']}], ['lot_flow', 1], ['lot_flow', 30]].forEach(([k, n, filters]) => {
     fresh(); const t0 = clock.now, c0 = Date.now();
     let res, err = '';
     try { res = ctx.getDashboardData(k, {from: addDays(t1, -(n - 1)), to: t1, filters: filters}); } catch (e) { err = e.message; }

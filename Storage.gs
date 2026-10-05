@@ -589,22 +589,34 @@ function upsertAggCounts_(indicator, date, c, total) {
  * pelos índices (sem criar objetos). Dá o dia anterior dos cartões de turno sem carregar o detalhe dele.
  */
 function groupedShiftAgg_(indicator, date, ds) {
-  const cols = getIndicatorConfig_(indicator).shiftAggColumns || [];
-  if (!cols.length || !ds || !ds.n || !ds.cols || !ds.cols.column || !ds.cols.shift) return;
+  const cfg = getIndicatorConfig_(indicator);
+  // Entrada = nome de lista (column/columnSets) ou {name, column, where} (Fluxo de Lotes: Chegada/Partida da lista).
+  const ents = (cfg.shiftAggColumns || []).map(e => typeof e === 'string' ? {name: e, column: e} : e);
+  if (!ents.length || !ds || !ds.n || !ds.cols || !ds.cols.column || !ds.cols.shift) return;
   const acc = {};
-  cols.forEach(c => { acc[c] = {T1: 0, T2: 0, T3: 0, NA: 0, total: 0}; });
+  ents.forEach(e => { acc[e.name] = {T1: 0, T2: 0, T3: 0, NA: 0, total: 0}; });
   const dCol = ds.dict.column, dShift = ds.dict.shift, dQty = ds.dict.qty || [], cq = ds.cols.qty;
   // Lista formada por várias situações (Expedição: columnSets): a remessa conta em todas as listas da situação dela.
-  const sets = getIndicatorConfig_(indicator).columnSets || {};
-  const listsOf = dCol.map(v => cols.filter(c => sets[c] ? sets[c].indexOf(v) >= 0 : c === v).map(c => acc[c]));
+  const sets = cfg.columnSets || {};
+  const inList = (c, v) => sets[c] ? sets[c].indexOf(v) >= 0 : c === v;
+  const listsOf = dCol.map(v => ents.filter(e => inList(e.column, v)));
+  const whereOk = (e, i) => !e.where || Object.keys(e.where).every(k => {
+    const cc = ds.cols[k], dd = ds.dict[k];
+    return !!cc && !!dd && dd[cc[i]] === e.where[k];
+  });
   for (let i = 0; i < ds.n; i++) {
     const targets = listsOf[ds.cols.column[i]];
     if (!targets || !targets.length) continue;
     const qv = cq ? dQty[cq[i]] : '', q = qv === '' || qv === undefined || qv === null ? 1 : (Number(qv) || 0);
     const sh = dShift[ds.cols.shift[i]];
-    targets.forEach(a => { if (sh === 'T1' || sh === 'T2' || sh === 'T3') a[sh] += q; else a.NA += q; a.total += q; });
+    targets.forEach(e => {
+      if (!whereOk(e, i)) return;
+      const a = acc[e.name];
+      if (sh === 'T1' || sh === 'T2' || sh === 'T3') a[sh] += q; else a.NA += q;
+      a.total += q;
+    });
   }
-  cols.forEach(c => upsertAggCounts_(indicator + ':' + c, date, acc[c], acc[c].total));
+  ents.forEach(e => upsertAggCounts_(indicator + ':' + e.name, date, acc[e.name], acc[e.name].total));
 }
 function getAgg_(indicator, from, to) {
   const byDate = {};
@@ -950,7 +962,13 @@ function queueRecentRefresh_() {
   if (pauses['*']) return 0;
   const days = [isoToday_(), addDaysIso_(isoToday_(), -1), addDaysIso_(isoToday_(), -2)];
   const jobs = [];
-  days.forEach(d => Object.keys(INDICATORS).forEach(k => { if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, d, 0]); }));
+  // Fluxo de Lotes (light) na conta Gmail (90 min/dia de gatilhos para todos os painéis): hoje a cada 3 h e os dois
+  // dias anteriores uma vez por dia, às 3h. No Google Workspace, de hora em hora como os outros.
+  const gmail = googlePlan_() === 'gmail', h = gmail ? hourNow_() : 0;
+  days.forEach((d, i) => Object.keys(INDICATORS).forEach(k => {
+    if (INDICATORS[k].light && gmail && (i === 0 ? h % 3 !== 0 : h !== 3)) return;
+    if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, d, 0]);
+  }));
   return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
 }
 function retryFailedJobs() {
@@ -973,7 +991,7 @@ function pendingJobs_() {
   // dias dele, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
   const anchor = {};
   const rank = j => {
-    if ((j.type === 'DETAIL_INIT' && INDICATORS[j.indicator].grouped) || j.type === 'TRIPS') {
+    if ((j.type === 'DETAIL_INIT' && heavyGrouped_(INDICATORS[j.indicator])) || j.type === 'TRIPS') {
       const a = anchor[j.indicator] || (anchor[j.indicator] = lastClosedDate_(j.indicator));
       return (j.type === 'TRIPS' ? 2.8 : 2.5) + (j.date === a ? 0 : 0.1);
     }
@@ -1346,8 +1364,10 @@ function jobReady_(job) {
 }
 /** Tarefa pesada com teto diário (conta Gmail): detalhe agrupado (Recebimento, Expedição) e IDs de viagem. */
 function isHeavyJob_(job) {
-  return !!INDICATORS[job.indicator] && ((job.type === 'DETAIL_INIT' && INDICATORS[job.indicator].grouped) || job.type === 'TRIPS');
+  return !!INDICATORS[job.indicator] && ((job.type === 'DETAIL_INIT' && heavyGrouped_(INDICATORS[job.indicator])) || job.type === 'TRIPS');
 }
+/** Detalhe agrupado pesado (Recebimento, Expedição). O Fluxo de Lotes (light, ~10 consultas por dia) segue a fila normal. */
+function heavyGrouped_(cfg) { return !!(cfg && cfg.grouped && !cfg.light); }
 
 function processJob_(job, deadline) {
   const now = new Date();
@@ -1443,7 +1463,13 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   // Dia antigo cuja contagem mudou de verdade: rebaixa já (no Recebimento, que muda o dia todo, respeita o intervalo).
   if (changed && date < addDaysIso_(isoToday_(), -1) && !minH) return true;
   // Hoje/ontem mudando (ou já STALE), ou contagem divergente (CHECK_COUNTS): respeita o intervalo.
-  const hours = Math.max(minH, st.details === 'CHECK_COUNTS' && !changed ? Math.max(6, detailRefreshHours_()) : detailRefreshHours_());
+  // Fluxo de Lotes (light): poucas páginas por dia — o intervalo dele (detail.refreshHours, 1 h) manda. Na conta Gmail
+  // (90 min/dia de gatilhos para todos os painéis), a lista segue o intervalo dos outros (DETAIL_REFRESH_HOURS, 3 h);
+  // os cartões do resumo continuam de hora em hora.
+  const lightH = cfgR.light && cfgR.detail && cfgR.detail.refreshHours ?
+    (googlePlan_() === 'gmail' ? Math.max(cfgR.detail.refreshHours, detailRefreshHours_()) : cfgR.detail.refreshHours) : 0;
+  const hours = lightH ? Math.max(lightH, st.details === 'CHECK_COUNTS' && !changed ? 6 : 0)
+    : Math.max(minH, st.details === 'CHECK_COUNTS' && !changed ? Math.max(6, detailRefreshHours_()) : detailRefreshHours_());
   const df = dayFilesMap_(indicator, date, date)[date];
   const last = df && df.createdAt ? Date.parse(df.createdAt) : 0;
   const due = !(last > 0) || Date.now() - last >= hours * 3600000;
@@ -1515,7 +1541,9 @@ function validateDetailTotal_(cfg, indicator, date, total, type) {
     if (total === 0 && exp > 0) throw new Error('Detalhe zerado em ' + type + ' apesar do resumo ter ' + exp + ' para ' + indicator + ' ' + date);
     // Hoje o número cresce entre o resumo (de hora em hora) e o detalhe: só confere dias fechados
     // (contra payload sem filtro, hoje vale o limite de segurança detail.maxPerDay).
-    if (date < isoToday_() && exp !== null && exp !== undefined && total > exp * 3 + 1000) {
+    // detail.maxRatio (Fluxo de Lotes, ~1 mil sacas por dia): margem menor que a padrão (3× + 1000).
+    const lim = cfg.detail && cfg.detail.maxRatio ? exp * cfg.detail.maxRatio + 50 : exp * 3 + 1000;
+    if (date < isoToday_() && exp !== null && exp !== undefined && total > lim) {
       throw new Error('Detalhe retornou ' + total + ' registros em ' + type + ', mas o resumo tem ' + exp +
         ': payload do detalhe sem filtro. Importação bloqueada para não gravar dados errados.');
     }
@@ -1821,7 +1849,7 @@ function detailProgress_(indicator, from, to) {
     return x;
   });
   const out = {days: days, detailDays: win || 0};
-  if (cfg.grouped) {
+  if (heavyGrouped_(cfg)) {
     const min = groupedBudgetMin_(indicator);
     out.budget = {minPerDay: min, usedMin: Math.round(groupedUsedMs_(indicator) / 6000) / 10, exhausted: min > 0 && groupedBudgetLeftMs_(indicator) < 90000};
   }

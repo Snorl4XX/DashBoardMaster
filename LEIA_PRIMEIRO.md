@@ -1,8 +1,53 @@
-# J&T DASHMASTER V3.22 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.23 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.23 — Novo painel: Fluxo de Lotes / 建包流程 · filtro "IDs Viagem" na Expedição
+Mostra as **sacas criadas no dia**, ecológicas e normais, com as porcentagens de cada uma, como pedido no documento "DASHBOARD: FLUXO DE LOTES". Tela do JMS: **Estatística de Criação Recorrente de Eco Bag** (resumo "Sumário por dia" da unidade SC; o número vermelho da coluna **Total de pacotes construídos** abre a lista).
+
+**Cartões**
+- **Quantidade de sacas criadas** (cartão vermelho): coluna "Total de pacotes construídos", com o dia anterior.
+- **Quantidade de sacas ecológicas**: coluna "Número do saco ecológico" · **Quantidade de sacas não ecológicas**: coluna "Número de sacas não ecológicas".
+- **Taxa de criação de sacas ecológicas**: coluna "Taxa de uso de Saca Ecológica" · **Taxa de criação de sacas não ecológicas**: o restante (100% − taxa ecológica).
+- **Quantidade de pacotes dentro das sacas**: coluna "Número total de conteúdo do pacote".
+- **Quantidade de pacotes na ecológica**: coluna "Total de pacotes dentro do Saca Ecológica", com o percentual da coluna "Percentual de volume de Saca Ecológica".
+- **Quantidade de pacotes na não ecológica**: o restante (Número total de conteúdo do pacote − Total de pacotes dentro do Saca Ecológica), com o restante do percentual.
+- **Chegada** e **Partida**: contadas na lista "Total de pacotes construídos", coluna "Tipo de entrada e saída": 进港 = Chegada, 出港 = Partida.
+- **T1 / T2 / T3**: sacas criadas em cada turno pelo "Tempo de ensacamento", a porcentagem de cada turno e, em cada turno, as ecológicas e as não ecológicas.
+- Variação das taxas em **pontos percentuais** (p.p.); num período de vários dias, a taxa é a conta dos números somados (ex.: ecológicas ÷ criadas), como o JMS calcula.
+
+**Gráficos:** pizza **Turnos** · colunas **Sacas ecológicas / não ecológicas** (sem filtro: os números oficiais da tabela principal) · **Entradas / partidas** · **Lotes/sacas com mais quantidade de pacotes** (soma de "Quantidade de itens na embalagem" por "Número da saca") · **Não ecológicas** e **Ecológicas** (os lotes com mais pacotes de cada tipo).
+
+**Filtros:** Turnos · Lotes (número da saca) · Entrada/Saída (Chegada/Partida) · Sacas (Ecológicas/Não ecológicas). Todos os cartões, gráficos e a tabela seguem os filtros; com filtro, os cartões mostram o número filtrado e o oficial do JMS embaixo.
+
+**Tabela "Geral":** a lista do número vermelho "Total de pacotes construídos", com as colunas da tela: data, número da saca, tipo de entrada e saída, tipo de ensacamento, origem da criação, chip nº, saca (ecológica ou não), quantidade de itens na embalagem, tempo de ensacamento, turno e destino de desembalagem. "Dados gerais" (embaixo) traz os números do resumo de cada dia.
+
+**Como os dados são buscados**
+- **Resumo** (`sdploopbagBuildbagCount`): payload igual à captura (`totalType: "center"`, `queryType: "days"`, dia inteiro). Se o JMS mandar mais de uma base, vale a linha da nossa (`proxySiteCode` = `JMS_CENTER_CODE`).
+- **Lista** (`sdploopbagBuildbagDetail`, `detailType: "packageSum"`): payload igual à captura (base SP GRU, agente SPE), **no máximo 100 linhas por página**. ~906 sacas por dia = ~10 consultas. Todos os dias do histórico têm a lista.
+- **Atualização:** no Google Workspace, resumo e lista **de hora em hora**. Na conta Gmail (o Google dá 90 min/dia de gatilhos para todos os painéis e eles já usam quase tudo), o dia de hoje **a cada 3 h** e os dois dias anteriores **uma vez por dia** (às 3h) — assim o Fluxo de Lotes gasta ~1,2 min por dia.
+- **Cota do Google na conta Gmail** (`node tests/simulacao_cotas.js consumer 14 3`, volume real): do 3º dia depois da instalação em diante, 86,5 min por dia de 90 (V3.22: 85,2), nenhuma execução pulada. No 2º dia, enquanto o histórico dos painéis termina de baixar, o limite pode ser atingido no fim da noite (simulação: as últimas ~3 h sem sincronizar nesse dia); no dia seguinte volta ao normal sozinho. No Google Workspace, sem efeito.
+- Ecológica ou não vem do campo **Saca** da própria lista (`isLoopPag` Y/N): uma lista só, sem baixar as listas das outras colunas.
+- É uma tarefa **leve**: não entra no teto diário do Recebimento/Expedição (conta Gmail).
+- **Proteção:** se a lista vier com sacas de outra base (o JMS ignorando o filtro da base) ou muito maior que o resumo num dia fechado, **nada é gravado** e o painel mostra o erro.
+
+**Expedição: fluxo operacional — filtro novo "IDs Viagem":** escolha um ou mais IDs de viagem; cartões, gráficos, tabelas e o relatório seguem o filtro (também nos períodos grandes, com os totais calculados no servidor). "Sem informação" = remessas ainda sem ID de viagem.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo; `diagnosticarLotes` está no `Code`). Depois, Implantar → Gerenciar implantações → ✏️ → **Nova versão**. O histórico do Fluxo de Lotes entra na fila sozinho.
+
+**Propriedades novas (opcionais)**
+| Propriedade | Para quê |
+|---|---|
+| `JMS_ROUTENAME_LOTS` / `JMS_ROUTENAMELIST_LOTS` | Cabeçalhos de rota da tela (padrão: nenhum; a captura não mostra) |
+
+**Não foi possível conferir no JMS real (rode `diagnosticarLotes()` depois de instalar):**
+- o **Routename** da tela (não aparece na captura). Se o JMS recusar, o painel testa as variantes sozinho;
+- se as ecológicas contadas pelo campo `isLoopPag` da lista **batem** com a coluna "Número do saco ecológico" do resumo — o diagnóstico baixa a lista inteira do dia e mostra as duas contas lado a lado (✓ ou ✗);
+- na captura, a lista aberta na tela mostra **"Total 758"**, mas a resposta JSON da mesma lista e o resumo mostram **906** (a imagem parece ser de outro momento do dia). O painel usa a lista como o JMS entregar; o diagnóstico mostra lista × resumo.
+
+**Testes:** 381 verificações (o JMS simulado usa sacas e destinos fictícios).
 
 ## V3.22 — Novo painel: Expedição: fluxo operacional / 发件运营流程
 Mostra a quantidade que **saiu no dia**, rota por rota, como pedido no documento "DASHBOARD DE EXPEDIÇÃO: FLUXO OPERACIONAL". Tela do JMS: Operação > Monitoramento de dados > **Monitoramento de tipagem de expedição (novo)** (`/crisbiIndex/SendOutMonitor`).
@@ -845,7 +890,7 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 
 ### Links úteis
 - `…/exec?lang=zh` abre em chinês · `…/exec?lang=pt` em português
-- `…/exec?ind=sorting_error` abre direto em um indicador (`wrong_send`, `sorting_error`, `missing_receipt`, `missing_dispatch`, `sc_sc`, `sc_dc`, `damage`, `arrival_flow`, `send_flow`)
+- `…/exec?ind=sorting_error` abre direto em um indicador (`wrong_send`, `sorting_error`, `missing_receipt`, `missing_dispatch`, `sc_sc`, `sc_dc`, `damage`, `arrival_flow`, `send_flow`, `lot_flow`)
 - `…/exec?view=results` abre em Resultados
 
 ## O erro que aparece no painel não bate com nada deste código? Confirme a versão implantada
@@ -883,7 +928,7 @@ O que fazer:
 
 O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho, sem inventar taxa.
 - Rode `diagnosticarConexaoJms` para ver quais rotas respondem 200 e quais respondem 401.
-- Cada rota envia `Routename` com o nome da tela do JMS: ErrorSendRate, ErrorRateStandard|biIndex, BuildSideLeakageNewNew, OutboundTransshipmentNew, TimelinessRatio, damageRate (Avaria) e problemPieceQuery (Consulta de Pacote Problemático). Para alterar, crie a propriedade `JMS_ROUTENAME_<ROTA>` (ROTA = WRONG_SEND, SORTING_ERROR, MISSING_SCAN, SC_SC, SC_DC, DAMAGE, PROBLEM_PIECE, ARRIVAL, SEND, TRACKING); use `NONE` para não enviar. O mesmo vale para `JMS_ROUTENAMELIST_<ROTA>`.
+- Cada rota envia `Routename` com o nome da tela do JMS: ErrorSendRate, ErrorRateStandard|biIndex, BuildSideLeakageNewNew, OutboundTransshipmentNew, TimelinessRatio, damageRate (Avaria) e problemPieceQuery (Consulta de Pacote Problemático). Para alterar, crie a propriedade `JMS_ROUTENAME_<ROTA>` (ROTA = WRONG_SEND, SORTING_ERROR, MISSING_SCAN, SC_SC, SC_DC, DAMAGE, PROBLEM_PIECE, ARRIVAL, SEND, TRACKING, LOTS); use `NONE` para não enviar. O mesmo vale para `JMS_ROUTENAMELIST_<ROTA>`.
 - Se continuar em 401, peça à TI um método autorizado de integração a partir dos servidores do Google.
 
 ## Manutenção
@@ -892,13 +937,14 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 - **`diagnosticoCompleto()`** (V3.7): o ponto de partida quando algo não bate. Mostra o resumo, o detalhe, o tamanho de página, os campos não encontrados e o banco dos últimos 7 dias de cada indicador. Use `diagnosticoCompleto('2026-09-20')` para um dia específico.
 - **`diagnosticarRecebimento()`** (V3.19): só o Recebimento. Testa as 4 listas no JMS (total × resumo, página, horário, paginação, campos), o resumo por horário (turnos) e mostra o download dos últimos dias, a fila, o teto diário e os últimos avisos. Use `diagnosticarRecebimento('2026-10-01')` para um dia específico.
 - **`diagnosticarExpedicao()`** (V3.22): só a Expedição. Testa no JMS o resumo (rotas e as três colunas), a lista de uma rota (página de 100 e campos), se a lista separa por horário (turnos), as listas "Em trânsito" e "Não entregues" e o Rastreamento do pacote de 1 remessa (bipe "Encomenda carregada" e o ID de viagem). Mostra também o download dos últimos dias, os IDs já consultados e os avisos. Não mostra número de remessa nem nomes. Use `diagnosticarExpedicao('2026-10-03')` para um dia específico.
+- **`diagnosticarLotes()`** (V3.23): só o Fluxo de Lotes. Testa no JMS o resumo do dia, a lista "Total de pacotes construídos" (total × resumo, página de 100, campos) e baixa a lista inteira do dia para conferir as contas do painel com o resumo: ecológicas pelo campo `isLoopPag` × "Número do saco ecológico", pacotes somados × "Número total de conteúdo do pacote", Chegada/Partida e turnos. Mostra também o download dos últimos dias e os avisos. Não mostra número de saca. Use `diagnosticarLotes('2026-10-04')` para um dia específico.
 - `diagnosticarDashboard` mostra o estado do banco, da fila, dos gatilhos e o último erro de cada indicador.
 - `diagnosticarDetalheJms('sc_sc')` testa o endpoint de **detalhe** de um indicador na hora (não grava nada); use para achar por que gráficos/filtros ficam vazios mesmo com a Taxa ok.
 - `diagnosticarTodosOsErros()` — diagnóstico completo: lista **todos** os dias com erro no período (não só o mais recente de cada indicador, como `diagnosticarDashboard`), agrupados pela causa **técnica bruta** (o texto real gravado no SYNC_LOG, sem passar pela versão amigável do painel, que resume/oculta detalhes como "Campos recebidos"). Use `diagnosticarTodosOsErros('2026-08-01','2026-08-31')` para um período específico. É o ponto de partida quando existe mais de um erro diferente acontecendo ao mesmo tempo.
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **360 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **381 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
