@@ -1060,6 +1060,8 @@ function pendingJobs_() {
   // dias dele, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
   const anchor = {};
   const rank = j => {
+    // V3.30: Sem Movimentação (foto de hoje, poucas consultas) na frente de tudo — com a fila cheia ela não fica sem dados.
+    if (INDICATORS[j.indicator] && INDICATORS[j.indicator].snapshot && (j.type === 'SUMMARY' || j.type === 'DETAIL_INIT')) return j.type === 'SUMMARY' ? -1 : -0.5;
     if ((j.type === 'DETAIL_INIT' && heavyGrouped_(INDICATORS[j.indicator])) || j.type === 'TRIPS') {
       const a = anchor[j.indicator] || (anchor[j.indicator] = lastClosedDate_(j.indicator));
       // V3.24: IDs de viagem do dia em que o painel abre logo depois do detalhe dele, antes de rebaixar a situação dos

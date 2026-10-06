@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.29.0',
+  VERSION: '3.30.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -23,6 +23,7 @@ const APP_CONFIG = Object.freeze({
   REFRESH_BUDGET_MS: 25000,    // botão "Atualizar" (web) consulta taxas por até 25 s
   REFRESH_MAX_DAYS: 31,
   REFRESH_COOLDOWN_S: 90,
+  SNAPSHOT_LIST_BUDGET_MS: 240000, // V3.30: Sem Movimentação — lista baixada na hora pelo botão Atualizar (até 4 min)
   PAUSE_AUTH_MINUTES: [15, 60, 180, 360], // credencial recusada: nova tentativa em 15 min, 1 h, 3 h, 6 h (ou assim que o token for trocado)
   PAUSE_QUOTA_MINUTES: 60,     // cota do Google esgotada: nova tentativa em 1 h
   PROPS_TTL_MS: 10000,         // propriedades do script relidas no máximo a cada 10 s

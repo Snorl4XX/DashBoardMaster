@@ -133,7 +133,8 @@
       metricsOfficial: 'Números oficiais do JMS (tabela principal)', pctOf: 'Cálculo: {a} ÷ {b}', sumRows: 'Soma', sumCount: '{n}',
       hmSynced: 'Número do JMS consultado em {t}', hmSyncedPeriod: 'Números do JMS consultados até {t}',
       hmRefTime: 'Linha do JMS com o horário mais recente: {type} · {t}', hmSnapshot: 'Foto do momento no JMS: um dia por vez',
-      hmSnapWait: 'A foto de hoje ainda não chegou do JMS: ela entra na próxima execução da fila (até 5 min). O botão Atualizar busca agora.',
+      hmSnapWait: 'A foto de hoje ainda não chegou do JMS. O botão Atualizar busca agora (resumo e lista).',
+      snapFetching: 'Buscando no JMS a foto de agora (resumo e lista)…', snapRefreshing: 'Consultando o JMS agora: resumo e lista da linha do horário mais recente…',
       dcNoDetail: 'Contado na lista baixada: {h}'
     },
     zh: {
@@ -251,7 +252,8 @@
       metricsOfficial: 'JMS官方数字（主表）', pctOf: '计算：{a} ÷ {b}', sumRows: '合计', sumCount: '{n}',
       hmSynced: 'JMS 数字获取时间：{t}', hmSyncedPeriod: 'JMS 数字最近获取：{t}',
       hmRefTime: 'JMS 最新操作时间最近的行：{type} · {t}', hmSnapshot: 'JMS 实时快照：每次显示一天',
-      hmSnapWait: '今天的快照尚未从 JMS 获取：将在下次队列执行时获取（最多 5 分钟）。点击“更新”可立即获取。',
+      hmSnapWait: '今天的快照尚未从 JMS 获取。点击“更新”可立即获取（汇总和明细）。',
+      snapFetching: '正在从 JMS 获取当前快照（汇总和明细）…', snapRefreshing: '正在查询 JMS：最新操作时间最近的行的汇总和明细…',
       dcNoDetail: '按下载的列表计数：{h}'
     }
   };
@@ -321,7 +323,8 @@
     from: '', to: '', filters: {}, data: null, filtered: [], seq: 0,
     evoMode: 'period', intervalMode: 'ranking', chartViews: {}, charts: {}, dropdowns: {},
     table: {sortKey: null, sortDir: 'desc', page: 1, query: ''},
-    results: {indicator: '', shift: 'all', periodicity: 'day', from: '', to: '', data: null}
+    results: {indicator: '', shift: 'all', periodicity: 'day', from: '', to: '', data: null},
+    autoSnap: {}
   };
 
   // ------------------------------------------------------------------ utilidades
@@ -591,7 +594,7 @@
     $('#resultsShift').addEventListener('change', function (e) { state.results.shift = e.target.value; renderResults(); });
     $('#applyBtn').addEventListener('click', applyDates);
     ['#fromDate', '#toDate'].forEach(function (q) { $(q).addEventListener('keydown', function (e) { if (e.key === 'Enter') applyDates(); }); });
-    $('#refreshBtn').addEventListener('click', refreshNow);
+    $('#refreshBtn').addEventListener('click', function () { refreshNow(); });
     $('#reportBtn').addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(); });
     $$('#reportPop button').forEach(function (b) { b.addEventListener('click', function () { toggleMenu(false); downloadReport(b.getAttribute('data-format')); }); });
     $('#menuBtn').addEventListener('click', function () { toggleSidebar(); });
@@ -832,6 +835,12 @@
       renderDashboard();
       updateSidebarStatus(res.meta.sync, res.meta.lastRateSyncedAt);
       state.lastReloadAt = Date.now();
+      // V3.30: Sem Movimentação sem a foto de hoje (ou sem a lista dela): busca no JMS na hora, uma vez por dia nesta aba.
+      var td = state.boot && state.boot.today;
+      if (c && c.snapshot && td && state.to === td && !state.autoSnap[td]) {
+        var hasRate = state.data.rates.some(function (r) { return r.date === td; });
+        if (!hasRate || !state.data.rows.length) { state.autoSnap[td] = 1; setTimeout(function () { refreshNow({auto: true}); }, 50); }
+      }
     }).catch(function (e) {
       if (seq !== state.seq) return;
       if (!state.data || state.data.meta.indicator !== state.indicator) $('#main').classList.add('awaiting');
@@ -2821,11 +2830,12 @@
   }
 
   // ------------------------------------------------------------------ ações: atualizar, relatórios, CSV
-  function refreshNow() {
+  function refreshNow(opts) {
     if (!state.data) return;
+    opts = opts || {};
     var btn = $('#refreshBtn');
     btn.disabled = true; btn.classList.add('spin');
-    toast(t('refreshing'));
+    toast(t(opts.auto ? 'snapFetching' : cfg() && cfg().snapshot ? 'snapRefreshing' : 'refreshing'));
     call('refreshNow', state.indicator, state.from, state.to).then(function (r) {
       if (r.cooldown) { toast(t('refreshCooldown')); return; }
       if (r.pauses) renderSyncBanner(r.pauses);

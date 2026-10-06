@@ -143,10 +143,38 @@ function refreshNow(indicatorKey, from, to) {
     }
   });
   if (later.length) { result.pendingDays = later.length; enqueueJobs_(later, {reset: true}); }
+  // V3.30: foto do momento (Sem Movimentação): a lista da linha do horário mais recente é baixada AQUI, na hora (~20 a 60
+  // consultas). Chamada pela página não gasta a cota diária dos gatilhos (90 min na conta Gmail): o painel mostra os dados
+  // mesmo com a fila parada pela cota.
+  if (cfg.snapshot && !authError && result.updated) {
+    try { Object.assign(result, runSnapshotListNow_(indicatorKey, today)); }
+    catch (e) {
+      const msg = String(e && e.message || e).slice(0, 900);
+      result.errors.push({date: today, reason: publicJmsError_(msg)});
+      logSync_('ERROR', indicatorKey, today, 'Atualização manual (lista): ' + msg);
+    }
+  }
   try { installTriggers(); } catch (e) { logSync_('WARN', indicatorKey, '', 'Gatilhos não verificados: ' + e); }
   result.ok = result.failed === 0 || result.updated > 0;
   result.pauses = publicPauses_();
   return safeReturn_(result);
+}
+
+/**
+ * Sem Movimentação (V3.30): baixa agora a lista do dia, se estiver na fila (resumo mudou ou ainda sem lista). Usa a trava
+ * do trabalhador da fila: se ele estiver rodando, a lista fica com ele (sem baixar duas vezes).
+ */
+function runSnapshotListNow_(indicatorKey, date) {
+  const job = () => pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === indicatorKey && j.date === date)[0];
+  if (!job()) return {listNow: 'ok'};
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return {listNow: 'busy'};
+  try {
+    const j = job();
+    if (!j) return {listNow: 'ok'};
+    const r = processJob_(j, Date.now() + APP_CONFIG.SNAPSHOT_LIST_BUDGET_MS);
+    return {listNow: r === 'done' ? 'done' : r === 'partial' ? 'partial' : r, detailsQueued: r === 'done' ? 0 : 1};
+  } finally { lock.releaseLock(); }
 }
 
 // ------------------------------------------------------------------ instalação e diagnóstico

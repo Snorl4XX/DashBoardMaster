@@ -2489,9 +2489,22 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     rows2.reduce((a, x) => a + q(x), 0) === ofOp(other).length,
     'linha do horário mais recente mudou de tipo: o número e a lista passam a ser os do tipo novo na mesma atualização', {refType: r2.metrics.refType, calls: calls2.length});
   // Botão Atualizar com o painel aberto em outro dia: consulta só hoje (a V3.28 gravava a foto de hoje com a data aberta).
+  // V3.30: e baixa a lista NA HORA (chamada pela página, fora da cota dos gatilhos) — com a fila parada, o painel já mostra tudo.
   const cU = freshCtx(nmDays());
-  cU.refreshNow('no_move', Y, Y);
-  check(!!cU.getRateDay_('no_move', T) && !cU.getRateDay_('no_move', Y), 'botão Atualizar na Sem Movimentação: consulta e grava só hoje');
+  const fU = cU.__state.fetches.length;
+  const rU = cU.refreshNow('no_move', Y, Y);
+  reset(cU);
+  const dashU = cU.getDashboardData('no_move', {from: T, to: T}), rowsU = C.decodeDataset(dashU.dataset);
+  const mU = cU.getRateDay_('no_move', T).metrics;
+  check(!!cU.getRateDay_('no_move', T) && !cU.getRateDay_('no_move', Y) && rU.listNow === 'done' && /COMPLETE/.test(cU.getDayStatus_('no_move', T).details) &&
+    rowsU.reduce((a, x) => a + (Number(x.qty) || 1), 0) === mU.total &&
+    cU.__state.fetches.slice(fU).every(f => !/trajectory_monitor_detail/.test(f.url) || f.payload.operateType[0] === ops[mU.refType - 1]),
+    'botão Atualizar na Sem Movimentação: consulta só hoje e baixa a lista da linha do horário mais recente na hora', {listNow: rU.listNow, total: mU.total});
+  // Fila cheia (histórico de outros painéis): os trabalhos da Sem Movimentação vêm primeiro.
+  const cP = freshCtx(nmDays());
+  cP.enqueueJobs_([['SUMMARY', 'wrong_send', T, 0], ['SUMMARY', 'damage', Y, 0], ['DETAIL_INIT', 'lot_flow', Y, 1], ['SUMMARY', 'no_move', T, 0], ['DETAIL_INIT', 'no_move', T, 1]], {});
+  const orderP = cP.pendingJobs_().map(j => j.indicator + ':' + j.type);
+  check(orderP[0] === 'no_move:SUMMARY' && orderP[1] === 'no_move:DETAIL_INIT', 'fila: a Sem Movimentação (foto de hoje) vem antes dos outros trabalhos', orderP);
   // Foto gravada em outro dia (V3.28) não vale; a primeira foto do dia entra na fila sozinha.
   const cW2 = freshCtx(nmDays());
   cW2.appendRow_('RATES', ['no_move', Y, 0.5, 100, 100, JSON.stringify({total: 100}), new Date()]);
