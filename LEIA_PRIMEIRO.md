@@ -1,8 +1,33 @@
-# J&T DASHMASTER V3.28 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.29 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.29 — Sem Movimentação: a linha do horário mais recente, painel com dados desde a instalação
+**O que você viu (diagnóstico de 05/10):**
+- o JMS respondeu certo: 4 linhas na tabela, e a lista de cada tipo bateu com o resumo ✓;
+- o painel estava vazio por três motivos:
+  1. ele abria em **ontem**, e a 1ª foto só chegava na sincronização de hora em hora;
+  2. o botão **Atualizar** consultava o JMS com a data aberta no painel. A foto de 05/10 foi gravada como **04/10**, e a lista desse dia nunca era baixada;
+  3. o número era a **soma das 4 linhas** (16.192), e não a linha do horário mais recente, como você pediu.
+
+**Agora**
+- **O número do painel é a linha com o "Horário da última operação" mais recente** da tabela do JMS (a mais próxima de agora). Exemplo do seu diagnóstico: Bipe de expedição, 04/10 16:27:41 → **6.227**. A consulta continua com os 6 tipos no filtro: Bipe de expedição, Bipe de pacote problemático, Chegadas ao centro, Encomenda inserida em lote, Entrada no galpão de pacote não expedido e Encomenda retirada do lote.
+- O cartão vermelho diz qual linha é: "Linha do JMS com o horário mais recente: Bipe de expedição · 04/10/2026 16:27:41".
+- **A lista baixada é só a dessa linha.** Saem dela os filtros, os cartões "com mais", os turnos, os gráficos e a tabela. Se a linha mais recente mudar de tipo, a lista nova é baixada na mesma atualização.
+- Os **cartões de cada tipo de bipe** continuam com o total de cada linha da tabela, com a participação sobre a soma da tabela.
+- O painel **abre em hoje**. Sem foto de hoje ainda, o cartão avisa que ela entra na próxima execução da fila (até 5 min); o botão Atualizar busca na hora.
+- O **Atualizar** consulta sempre hoje. A foto gravada com a data errada pela V3.28 deixa de valer sozinha.
+- **A 1ª foto do dia** (instalação e virada do dia) entra na fila na próxima execução, sem esperar a sincronização de hora em hora.
+- A lista ficou menor (~20 a 60 consultas, em vez de ~170). Ela é baixada de hora em hora no Workspace e **a cada 2 h na conta Gmail** (antes: 6 h).
+- `diagnosticarSemMovimentacao()` marca a linha usada ("← painel (horário mais recente)") e a lista que o painel baixa. Ele mostra só as fotos que existem.
+
+**Cota do Google (conta Gmail, `node tests/simulacao_cotas.js consumer 14 5`):** do 3º dia em diante, **88,9 min por dia de 90**, nenhuma execução bloqueada (V3.28: 89,6 min). A Sem Movimentação gasta ~1 min por dia (resumo 0,6 + lista 0,4).
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão).
+
+**Testes:** 422 verificações.
 
 ## V3.28 — Novo painel: Sem Movimentação (断更)
 Painel novo no menu lateral, com o mesmo padrão dos outros, montado a partir do PDF "sem movimentação". O número vem da tela do JMS **Indicadores de Negócios > Monitoramento de movimentação em tempo real (novo)**, com os 6 tipos da última operação escolhidos:
@@ -15,7 +40,7 @@ Painel novo no menu lateral, com o mesmo padrão dos outros, montado a partir do
 
 **De onde vem cada número**
 - **Resumo** (`trajectory_monitor_total`), com o payload igual à captura. É uma linha por tipo de bipe, com o "Total de pedidos sem movimentação" e os dias sem movimentação (1, 2… 7, 10, 14, 30).
-  - O cartão vermelho **"Pedidos sem movimentação"** é a soma das linhas.
+  - O cartão vermelho **"Pedidos sem movimentação"** era a soma das linhas (V3.29: a linha do horário mais recente).
   - Os 6 cartões de "Último bipe" são o total de cada linha. O tipo que o JMS não mostra fica 0.
   - O cartão vermelho também mostra o **horário da última operação mais recente** da tabela (no exemplo do PDF, 04/10/2026 14:59:54).
 - **Lista** (`trajectory_monitor_detail`): o número vermelho "Total de pedidos sem movimentação" de cada tipo (`queryType: 2`), pela nossa base como Unidade responsável, com o payload igual à captura. Dela saem os filtros, os cartões "com mais", os gráficos e a tabela.
@@ -1130,7 +1155,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **419 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **422 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
