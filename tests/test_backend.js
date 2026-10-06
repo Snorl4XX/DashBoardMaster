@@ -2774,4 +2774,37 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'Tempo real com a data de ontem na linha do JMS: a foto de agora é gravada (antes era descartada)', rD);
 }
 
+// ---------- V3.37: Sem Movimentação — sempre a foto de AGORA e só a linha mais nova com tipo de bipe ----------
+{
+  const T = ctx.isoToday_(), Y = ctx.addDaysIso_(T, -1), cfgNm = ctx.getIndicatorConfig_('no_move');
+  const cT = freshCtx({[T]: makeDay(T, 67)});
+  cT.refreshNow('no_move', T, T);
+  // Foto gravada pela V3.28 (soma de todas as linhas, sem a linha escolhida): ontem e hoje — nunca aparece.
+  const legacy = JSON.stringify({date: Y, source: 'JMS', rows: 4, total: 14781, day1: 5533, refTime: 20261004225955, refTimeText: '2026-10-04 22:59:55', types: []});
+  cT.appendRow_('RATES', ['no_move', Y, 0.5, 14781, 14781, legacy, new Date(Date.now() - 12 * 3600000)]);
+  cT.appendRow_('RATES', ['no_move', T, 0.5, 14781, 14781, legacy.replace(Y, T), new Date(Date.now() + 60000)]);
+  cT.TAB_CACHE_ = {}; cT.TAB_INDEX_ = {};
+  // Painel aberto vindo de outro painel (data de ontem no pedido): o Tempo real mostra HOJE.
+  const dT = cT.getDashboardData('no_move', {from: Y, to: Y});
+  const today = cT.getRateDay_('no_move', T);
+  check(dT.meta.from === T && dT.meta.to === T && today && today.totalCount !== 14781 && Number(today.metrics.refType) > 0 &&
+    !cT.getRateDay_('no_move', Y) && !dT.rates.some(r => r.totalCount === 14781),
+    'Tempo real sempre hoje (nunca a data do painel anterior) e foto somada da versão antiga nunca aparece', {meta: [dT.meta.from, dT.meta.to], total: today && today.totalCount});
+  // Linha de total (sem tipo de bipe) com o horário mais novo: nunca é a escolhida; tipo pelo nome da tela também vale.
+  const recs = [{operateType: '发件扫描', operateTime: '2026-10-05 09:47:51', total: 1000, day1: 475},
+    {operateType: 'Bipe de pacote problemático', operateTime: '2026-10-05 09:59:44', total: 6000, day1: 2380},
+    {operateType: '', operateTime: '2026-10-05 09:59:44', total: 14781, day1: 5533}];
+  const sR = ctx.typedSummary_(cfgNm, 'no_move', T, recs);
+  check(sR.totalCount === 6000 && sR.raw.day1 === 2380 && cfgNm.detail.types[sR.raw.refType - 1].op === '问题件扫描',
+    'linha mais nova COM tipo de bipe (a de total/soma de tudo nunca é escolhida); tipo reconhecido pelo nome da tela', sR.raw);
+  // Linha mais nova sem tipo reconhecido: nada de baixar a lista de todos os tipos juntos.
+  const cU = freshCtx({[T]: makeDay(T, 68)});
+  cU.appendRow_('RATES', ['no_move', T, 1, 50, 50, JSON.stringify({date: T, source: 'JMS', rows: 1, total: 50, refType: null, refTime: null, types: []}), new Date(Date.now() + 60000)]);
+  cU.TAB_CACHE_ = {}; cU.TAB_INDEX_ = {};
+  let errU = null;
+  try { cU.detailTypesForDay_(cfgNm, 'no_move', T); } catch (e) { errU = e.message; }
+  check(/não reconhece/.test(String(errU)) && cU.getDashboardData('no_move', {from: T, to: T}).dataset.n === 0,
+    'linha mais nova sem tipo reconhecido: nenhuma lista (nunca a de todos os tipos juntos)', errU);
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

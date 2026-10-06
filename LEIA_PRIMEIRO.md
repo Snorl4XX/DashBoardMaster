@@ -1,8 +1,25 @@
-# J&T DASHMASTER V3.36 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.37 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.37 — Sem Movimentação: Tempo real sempre a foto de AGORA, só da linha mais nova
+**O que os seus prints mostraram (06/10, v3.36.0):** o cartão vermelho dizia "consultado em **05/10/2026, 23:35**" e "Linha mais nova do JMS: **—** · 04/10/2026 22:59:55", com total **14.781**. O menu lateral mostrava 8.392 (a foto de hoje).
+
+**As causas**
+1. **Data herdada:** ao abrir a Sem Movimentação vindo de outro painel, ela herdava a data dele (ontem). No Tempo real a data fica escondida, então o painel mostrava a foto de **ontem** como se fosse a de agora, e a busca automática não rodava.
+2. **Foto somada:** essa foto de ontem tinha sido gravada pela versão antiga (V3.28), que **somava todas as linhas** da tabela. Por isso o tipo "—" e os 14.781: eram os dados gerais.
+
+**Agora**
+- **Sempre hoje:** o Tempo real é sempre hoje, no painel e no servidor, venha de onde vier.
+- **Sem fotos somadas:** fotos somadas da versão antiga nunca mais aparecem.
+- **Só linhas com tipo:** a linha escolhida é a do maior "Horário da última operação" **com tipo de bipe**. Uma linha de total (soma de tudo, sem tipo) nunca é escolhida. O tipo é reconhecido pelo código (中心到件) ou pelo nome da tela (Chegadas ao centro).
+- **Sem lista de tudo:** se a linha mais nova tiver um tipo que o painel não conhece, nenhuma lista é baixada (antes, baixava as listas de todos os tipos juntos), e o painel mostra o motivo.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão). Depois recarregue o painel com Ctrl+F5.
+
+**Testes:** 454 verificações, incluindo: painel aberto vindo de outro (mostra hoje), foto somada da versão antiga ignorada, linha de total nunca escolhida e linha sem tipo sem lista de tudo.
 
 ## V3.36 — Sem Movimentação: só a linha MAIS NOVA da tabela do JMS
 **O pedido (print com as 4 linhas: 08:37:11, 08:37:13, 08:57:27 e 08:59:50):** usar só a linha atual, a de **08:59:50**, e ignorar as mais antigas.
@@ -1288,7 +1305,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **451 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **454 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

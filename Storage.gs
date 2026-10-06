@@ -235,6 +235,8 @@ function rateFromRow_(r) {
     if (ic.summary.sumRecords) x.routes = Array.isArray(raw.routes) ? raw.routes : [];
     // Sem Movimentação (V3.32): as linhas da tabela do JMS no dia (uma por tipo de bipe) — tabela do painel.
     if (ic.summary.byType) x.types = Array.isArray(raw.types) ? raw.types : [];
+    // V3.37: foto gravada pela V3.28 (soma de TODAS as linhas da tabela, sem a linha escolhida) nunca é mostrada.
+    if (ic.summary.byType && ic.summary.byType.pickLatest && raw.refType === undefined) x.legacySum = true;
   }
   return x;
 }
@@ -461,6 +463,7 @@ function getRates_(indicator, from, to) {
     // V3.29: foto do momento (Sem Movimentação) só vale no dia em que foi tirada (a V3.28 podia gravar a foto de hoje
     // com a data de ontem pelo botão Atualizar).
     if (snapshotWrongDay_(x)) return;
+    if (x.legacySum) return;
     const prev = byDate[x.date];
     if (!prev || String(x.syncedAt || '') >= String(prev.syncedAt || '')) byDate[x.date] = x;
   });

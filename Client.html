@@ -924,6 +924,9 @@
     state.indicator = key;
     // V3.32: outro painel abre sempre em Tempo real (Fonte de dados padrão).
     if (changed) state.source = 'live';
+    // V3.37: Tempo real (Sem Movimentação) é sempre HOJE — antes herdava a data do painel anterior (ontem) e mostrava a foto
+    // de ontem como se fosse a de agora.
+    if (isLive()) { var tdy = (state.boot && state.boot.today) || state.to; state.from = tdy; state.to = tdy; }
     renderSourceField();
     if (state.view !== 'dashboard') setView('dashboard');
     $('#indicatorSelect').value = key;
@@ -946,6 +949,7 @@
     // Período longo: avisa que ainda está carregando (antes ficava só a barra, sem explicação).
     var slow = setTimeout(function () { if (seq === state.seq && !opts.silent) toast(t('slowLoading')); }, 12000);
     // V3.32: Histórico — o período escolhido; o servidor devolve o dia mostrado (o mais recente com linha) em meta.from/to.
+    if (isLive() && state.boot && state.boot.today) { state.from = state.boot.today; state.to = state.boot.today; }
     var req = isHist() ? {from: state.hist.from, to: state.hist.to} : {from: state.from, to: state.to};
     if (c && c.grouped) req.filters = filtersObj();
     return call('getDashboardData', key, req).then(function (res) {

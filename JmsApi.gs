@@ -656,10 +656,16 @@ function typedSummary_(cfg, indicatorKey, isoDate, records) {
   const bt = cfg.summary.byType, types = (cfg.detail && cfg.detail.types) || [], sums = {};
   types.forEach(t => { sums[t.type] = 0; });
   let allTotal = 0;
+  // V3.37: tipo reconhecido pelo código (中心到件) ou pelo nome da tela (Chegadas ao centro), com ou sem "código/nome".
+  const plain = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const typeOf = full => {
+    const parts = String(full || '').split('/').map(x => x.trim()).filter(Boolean);
+    return types.filter(t => parts.some(p => p === t.op || plain(p) === plain(t.column)))[0] || null;
+  };
   const rows = records.map(r => {
-    const rd = fieldReader_(r), op = String(rd([bt.field]).value || '').split('/')[0].trim(), m = {};
+    const rd = fieldReader_(r), opFull = String(rd([bt.field]).value || ''), op = opFull.split('/')[0].trim(), m = {};
     (bt.sums || []).forEach(k => { const v = rd([k]).value; m[k] = v === null ? 0 : num_(v, 0); });
-    const td = types.filter(t => t.op === op)[0];
+    const td = typeOf(opFull);
     if (td) sums[td.type] += m.total || 0;
     allTotal += m.total || 0;
     return Object.assign({op: op, time: String(rd([bt.timeField]).value || '').trim(), typeIdx: td ? types.indexOf(td) + 1 : null}, m);
@@ -670,7 +676,9 @@ function typedSummary_(cfg, indicatorKey, isoDate, records) {
   // à frente de agora: dado inválido) fica de fora. Empate: a de mais pedidos. Sem horário em nenhuma: a de mais pedidos.
   const limit = opTimeSec_(opTimeNum_(Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm:ss'))) + 86400;
   const tsec = r => { const n = opTimeNum_(r.time); return n === null ? null : opTimeSec_(n); };
-  const valid = rows.filter(r => tsec(r) !== null && tsec(r) <= limit), pool = valid.length ? valid : rows;
+  // V3.37: linha sem tipo de bipe reconhecido (ex.: linha de total = soma de tudo) nunca é a escolhida.
+  const typed = rows.filter(r => r.typeIdx), base = typed.length ? typed : rows;
+  const valid = base.filter(r => tsec(r) !== null && tsec(r) <= limit), pool = valid.length ? valid : base;
   const pick = pool.slice().sort((a, b) => ((tsec(b) || 0) - (tsec(a) || 0)) || (b.total || 0) - (a.total || 0))[0];
   const chosen = bt.pickLatest ? pick : null;
   const out = {};
@@ -963,7 +971,11 @@ function detailTypesForDay_(cfg, indicatorKey, isoDate) {
   if (!cfg.detail || !cfg.detail.typeFromSummary) return all;
   const r = getRateDay_(indicatorKey, isoDate), idx = r && r.metrics ? Number(r.metrics.refType) : 0;
   const td = idx > 0 ? (cfg.detail.types || [])[idx - 1] : null;
-  return td ? [td.type] : all;
+  if (td) return [td.type];
+  // V3.37: linha mais nova sem tipo reconhecido — NUNCA a lista de todos os tipos juntos (era "pegar tudo").
+  if (r) throw new Error('A linha mais nova do JMS tem um tipo de bipe que o painel não reconhece: a lista não foi baixada para não juntar todos os tipos. ' +
+    'Rode diagnosticarSemMovimentacao() e mande o texto.');
+  return all;
 }
 /**
  * Ordem de download das listas do detalhe: `detail.order` (Recebimento: as listas pequenas primeiro, para as

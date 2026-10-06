@@ -578,7 +578,10 @@ function resolvePeriod_(params, allRates, indicatorKey) {
   }
   const to = isIso_(params.to) ? params.to : anchorDate_(indicatorKey, allRates);
   // Foto do momento (Sem Movimentação): um dia por vez — somar fotos de dias diferentes contaria o mesmo pedido várias vezes.
-  const from = INDICATORS[indicatorKey] && INDICATORS[indicatorKey].snapshot ? to : isIso_(params.from) ? params.from : to;
+  // V3.37: Tempo real é SEMPRE hoje (antes o painel herdava a data do painel anterior — ontem — e mostrava a foto de ontem).
+  const snap = !!(INDICATORS[indicatorKey] && INDICATORS[indicatorKey].snapshot);
+  if (snap && !params.allowPast) return {from: today, to: today, today: today, latest: latest};
+  const from = snap ? to : isIso_(params.from) ? params.from : to;
   if (from > to) throw new Error('A data inicial não pode ser maior que a final.');
   if (JTCore_.daysBetween(from, to) > 366) throw new Error('Selecione um período de no máximo 366 dias.');
   return {from: from, to: to, today: today, latest: latest};
@@ -601,10 +604,11 @@ function rowListType_(cfg, indicatorKey, day) {
   if (!cfg || !cfg.detail || !cfg.detail.typeFromSummary) return null;
   const r = getRateDay_(indicatorKey, day), idx = r && r.metrics ? Number(r.metrics.refType) : 0;
   const td = idx > 0 ? (cfg.detail.types || [])[idx - 1] : null;
-  return td ? td.column : null;
+  // V3.37: linha sem tipo reconhecido → nenhuma lista ('' = nenhum tipo), nunca a de todos os tipos.
+  return td ? td.column : r ? '' : null;
 }
 function onlyRowDataset_(ds, col) {
-  if (!col || !ds || !ds.n || !ds.dict || !ds.dict.column || !ds.cols || !ds.cols.column) return {ds: ds};
+  if (col === null || col === undefined || !ds || !ds.n || !ds.dict || !ds.dict.column || !ds.cols || !ds.cols.column) return {ds: ds};
   const keep = ds.dict.column.indexOf(col);
   const empty = {v: ds.v, n: 0, fields: ds.fields, dict: ds.fields.reduce((o, f) => { o[f] = []; return o; }, {}), cols: ds.fields.reduce((o, f) => { o[f] = []; return o; }, {})};
   if (keep < 0) return {ds: empty, other: true};
@@ -713,7 +717,7 @@ function getDashboardData(indicatorKey, params) {
   } else out.dataset = builder.build();
   // V3.34: Sem Movimentação — só a lista da linha dos cartões (nada de outras linhas juntas).
   const rowCol = summaryMode ? null : rowListType_(cfg, indicatorKey, p.to);
-  if (rowCol) {
+  if (rowCol !== null) {
     const only = onlyRowDataset_(out.dataset, rowCol);
     out.dataset = only.ds;
     if (only.other || only.filtered) {
@@ -833,7 +837,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   const archive = historyListBlocked_(cfg, indicatorKey, p.to) ? blockedArchive_(p.to) : getArchivedRange_(indicatorKey, p.from, p.to, archiveOpts);
   // V3.34: Sem Movimentação — só a lista da linha dos cartões.
   const rowCol = rowListType_(cfg, indicatorKey, p.to);
-  if (rowCol) archive.rows = archive.rows.filter(r => r.column === rowCol);
+  if (rowCol !== null) archive.rows = archive.rows.filter(r => r.column === rowCol);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);
