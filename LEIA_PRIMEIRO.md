@@ -1,8 +1,15 @@
-# J&T DASHMASTER V3.38 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.39 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.39 — Tema escuro como padrão (topo escuro também)
+- O painel **abre no tema escuro**. Quem preferir o claro clica no ☀️, e essa escolha fica guardada no navegador.
+- O topo (título, botões e datas) fica escuro, e o botão **Aplicar** fica vermelho no escuro (antes, branco).
+- A página já nasce escura, sem piscar em branco ao abrir.
+
+**Instalação:** atualize todos os arquivos do ZIP e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão). Recarregue com Ctrl+F5.
 
 ## V3.38 — Avaria em ppm, Maomao novo (dançando/chorando) acima dos cartões, letras maiores e tema escuro
 **Avaria em ppm:** a taxa da Avaria aparece em **ppm**, o número do JMS por milhão (ex.: **189,72 ppm**). A meta aparece como **≤ 90,00 ppm** e a variação em ppm. Vale para o painel, o menu lateral, os Resultados e os relatórios. A conta não muda.
@@ -16,7 +23,7 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 - Para usar os GIFs originais, troque o `src` das imagens em `Mascot.html` (instruções no próprio arquivo).
 - O quadro do Maomao ficou **em cima dos cartões**, com **letras maiores**: título 30 px, texto 17 px e meta 40 px.
 
-**Tema escuro:** botão 🌙/☀️ no topo, ao lado de PT-BR/中文. Fundo grafite com o vermelho da J&T; o cartão principal, os botões e os cabeçalhos das tabelas continuam vermelhos. Gráficos, rótulos e cores dos turnos se ajustam ao tema. A escolha fica guardada no navegador de cada pessoa, e o padrão é o tema claro.
+**Tema escuro:** botão 🌙/☀️ no topo, ao lado de PT-BR/中文. Fundo grafite com o vermelho da J&T; o cartão principal, os botões e os cabeçalhos das tabelas continuam vermelhos. Gráficos, rótulos e cores dos turnos se ajustam ao tema. A escolha fica guardada no navegador de cada pessoa. *(V3.39: o padrão passou a ser o tema escuro.)*
 
 **Instalação:** atualize todos os arquivos do ZIP. O `Mascot.html` mudou: troque o conteúdo inteiro. Publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão) e recarregue com Ctrl+F5.
 

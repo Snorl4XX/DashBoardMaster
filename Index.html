@@ -5,8 +5,13 @@
   <meta charset="UTF-8">
   <meta name="color-scheme" content="light dark">
   <script>
-    /* V3.38: tema escolhido (claro/escuro) antes de desenhar a página — sem piscar em branco. */
-    try { if (localStorage.getItem('jt_theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) {}
+    /* V3.39: tema ESCURO por padrão (pedido); quem escolher o claro no botão ☀️ fica com o claro neste navegador.
+       Aplicado antes de desenhar a página — sem piscar em branco. */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('jt_theme'); } catch (e) {}
+      if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
+    })();
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
