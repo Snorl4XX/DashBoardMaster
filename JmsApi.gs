@@ -476,16 +476,24 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       return {current: pageNo, size: pageSize, totalType: 'center', queryType: 'days', startTime: w.start, endTime: w.end, countryId: countryId_()};
 
     case 'no_move': {
-      // Sem Movimentação: payloads da captura. O JMS não recebe data (foto do momento). Resumo: os 6 tipos de bipe da tela,
-      // pela nossa base (scanCode); lista: o "Total de pedidos sem movimentação" (queryType 2) de UM tipo, pela Unidade responsável.
-      const types = cfg.detail.types || [];
+      // Sem Movimentação: payloads da captura. Tempo real (modleType "modern"): o JMS não recebe data (foto do momento).
+      // Resumo: os 6 tipos de bipe da tela, pela nossa base (scanCode); lista: o "Total de pedidos sem movimentação"
+      // (queryType 2) de UM tipo, pela Unidade responsável. V3.32, Histórico (no_move_hist, captura com Fonte de dados =
+      // Histórico): modleType "history" + Data de início/fim da tela; o resumo pode pedir um período (win.from/win.to).
+      const types = cfg.detail.types || [], hist = !!cfg.historyOf;
+      const dates = p => {
+        if (!hist) return p;
+        p.startDate = ((win && win.from) || isoDate) + ' 00:00:00';
+        p.endDate = ((win && win.to) || isoDate) + ' 23:59:59';
+        return p;
+      };
       if (detail) {
         const td = types.filter(t => t.type === (win && win.type))[0] || types[0];
-        return {current: pageNo, size: pageSize, dutyAgentCode: agentCode, dutyCode: centerCode, modleType: 'modern',
-          operateType: [td.op], queryType: 2, countryId: countryId_()};
+        return Object.assign(dates({current: pageNo, size: pageSize, dutyAgentCode: agentCode, dutyCode: centerCode, modleType: hist ? 'history' : 'modern',
+          operateType: [td.op], queryType: 2}), {countryId: countryId_()});
       }
-      return {current: pageNo, size: pageSize, groupType: 'center', modleType: 'modern', operateType: types.map(t => t.op),
-        scanAgentCode: agentCode, scanCode: centerCode, countryId: countryId_()};
+      return Object.assign(dates({current: pageNo, size: pageSize, groupType: 'center', modleType: hist ? 'history' : 'modern', operateType: types.map(t => t.op),
+        scanAgentCode: agentCode, scanCode: centerCode}), {countryId: countryId_()});
     }
 
     case 'sc_dc':
@@ -655,6 +663,36 @@ function typedSummary_(cfg, indicatorKey, isoDate, records) {
       refTime: digits.length === 14 ? Number(digits) : null, refTimeText: ref, types: rows});
   return {indicator: indicatorKey, date: isoDate, rate: total > 0 ? Math.round((out.day14 || 0) / total * 10000) / 100 : 0,
     errorCount: total, totalCount: total, empty: false, raw: raw};
+}
+
+/**
+ * Sem Movimentação · Histórico (V3.32): o resumo de um PERÍODO numa consulta só (Data de início e Data final da tela,
+ * modleType "history"). O JMS devolve uma linha por dia (dateTime) e tipo de bipe; cada dia vira um resumo como o do tempo
+ * real (typedSummary_: vale a linha do horário mais recente). Dia sem linha no período: empty.
+ */
+function fetchHistoryRange_(indicatorKey, from, to) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  if (!cfg.historyOf || !cfg.summary.byType) throw new Error('Indicador sem Histórico por período: ' + indicatorKey);
+  const endpoint = endpointFor_(cfg, 'summary');
+  const payloadOf = page => buildPayload_(indicatorKey, to, page, APP_CONFIG.PAGE_SIZE, false, {from: from, to: to});
+  const json = jmsPost_(endpoint, payloadOf(1), 2);
+  let records = recordsOf_(json);
+  const pg = pagingOf_(json);
+  if (pg.pages > 50) throw new Error('O Histórico retornou mais de 50 páginas para ' + from + ' a ' + to + ' (' + cfg.key + ')');
+  for (let page = 2; page <= pg.pages; page++) records = records.concat(recordsOf_(jmsPost_(endpoint, payloadOf(page), 2)));
+  if (pg.total > 0 && records.length !== pg.total) {
+    throw new Error('JMS informou ' + pg.total + ' registros no Histórico, mas entregou ' + records.length + ' em ' + cfg.key + ' ' + from + ' a ' + to);
+  }
+  const byDate = {}, site = cfg.summary.siteField;
+  records.forEach(r => {
+    // Só a nossa base (Unidade responsável = JMS_CENTER_CODE), se o JMS mandar outras.
+    if (site) { const v = r[site]; if (!(v === undefined || v === null || v === '' || String(v) === String(centerCode_()))) return; }
+    const dv = firstValue_(r, ['dateTime', 'dt', 'statisticalDate'], null);
+    const d = dv ? normalizeDateFromValue_(dv, '') : (from === to ? to : '');
+    if (!isIso_(d) || d < from || d > to) return;
+    (byDate[d] = byDate[d] || []).push(r);
+  });
+  return dateRangeIso_(from, to).map(d => byDate[d] ? typedSummary_(cfg, indicatorKey, d, byDate[d]) : {indicator: indicatorKey, date: d, empty: true});
 }
 
 /**

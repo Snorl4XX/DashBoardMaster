@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.31.0',
+  VERSION: '3.32.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -996,6 +996,8 @@ const INDICATORS = Object.freeze({
     apiProfile: 'no_move', detailMatchesErrors: false, grouped: true, light: true,
     // Foto do momento: só HOJE é consultado; dia passado nunca é baixado de novo (seria a foto de hoje com outra data).
     snapshot: true,
+    // V3.32: "Fonte de dados" da tela — Tempo real (este) ou Histórico (HISTORY_INDICATORS_.no_move_hist, com as datas).
+    historySource: 'no_move_hist',
     summary: {
       endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/trajectory_monitor_total',
       // Linhas da nossa base (Unidade responsável = JMS_CENTER_CODE), se o JMS mandar outras.
@@ -1154,9 +1156,42 @@ const INDICATORS = Object.freeze({
   }
 });
 
+/**
+ * Sem Movimentação · Histórico (V3.32) — "Fonte de dados = Histórico" da mesma tela (captura do usuário): o mesmo resumo
+ * (trajectory_monitor_total) com modleType "history" e as datas da tela (startDate "AAAA-MM-DD 00:00:00", endDate
+ * "AAAA-MM-DD 23:59:59"); o JMS devolve uma linha por dia (dateTime) e tipo de bipe. Em cada dia vale a linha com o
+ * "Horário da última operação" mais recente, como no tempo real. A lista é a do número dessa linha, com os mesmos
+ * parâmetros do Histórico, e só é gravada se tiver exatamente o total da linha (detail.exactTotal).
+ * Fica FORA de INDICATORS de propósito: nenhum gatilho consulta o histórico (a cota diária dos gatilhos não é usada) —
+ * só o painel, quando o usuário escolhe Histórico e as datas (fetchNoMoveHistory).
+ */
+const HISTORY_INDICATORS_ = (function () {
+  const base = INDICATORS.no_move;
+  const cfg = Object.assign({}, base, {
+    key: 'no_move_hist', order: 11.5, historyOf: 'no_move', onDemand: true, snapshot: false, historySource: null,
+    name: {pt: 'Sem Movimentação · Histórico', zh: '断更 · 历史'},
+    subtitle: {pt: 'Pedidos sem movimentação (Monitoramento de movimentação · Histórico)', zh: '断更件（动态监控 · 历史）'},
+    // Até 31 dias por consulta (a tela do JMS consulta um período curto; o painel faz uma consulta só).
+    summary: Object.assign({}, base.summary, {history: {mode: 'history', maxDays: 31}}),
+    // A lista só vale com o total EXATO da linha do Histórico (lista de outra fonte = outro número: importação bloqueada).
+    detail: Object.assign({}, base.detail, {exactTotal: true, refreshHours: 0, gmailRefreshHours: 0}),
+    heroMetric: Object.assign({}, base.heroMetric, {label: {pt: 'Pedidos sem movimentação (Histórico)', zh: '断更件总数（历史）'},
+      labelPeriod: {pt: 'Pedidos sem movimentação (Histórico)', zh: '断更件总数（历史）'}}),
+    metricPanels: base.metricPanels.map(p => Object.assign({}, p, {title: {pt: 'Linha do horário mais recente do dia (Histórico)', zh: '当日最新操作时间的行（历史）'}})),
+    charts: base.charts.map(c => c.key === 'mTotal' ? Object.assign({}, c, {title: {pt: 'Histórico diário — pedidos sem movimentação', zh: '断更件每日历史'}}) : c),
+    texts: Object.assign({}, base.texts, {
+      navQty: {pt: 'Sem movimentação (Histórico) · {date}', zh: '断更（历史） · {date}'},
+      distinctShipments: {pt: 'Pedidos da lista do Histórico (Total de pedidos sem movimentação)', zh: '历史断更件明细中的运单'}
+    })
+  });
+  return Object.freeze({no_move_hist: cfg});
+})();
+
+/** Configuração de um indicador do menu (INDICATORS) ou de uma fonte só sob demanda (HISTORY_INDICATORS_). */
+function indicatorCfg_(key) { return INDICATORS[key] || HISTORY_INDICATORS_[key] || null; }
 
 function getIndicatorConfig_(key) {
-  const cfg = INDICATORS[key];
+  const cfg = indicatorCfg_(key);
   if (!cfg) {
     // "undefined"/"" só acontece quando a função foi chamada SEM o parâmetro de indicador —
     // normalmente por ter sido executada direto pelo botão ▶ Executar do editor. Essas funções
@@ -1215,31 +1250,40 @@ function getPublicCatalog_() {
   return Object.keys(INDICATORS)
     .map(k => INDICATORS[k])
     .sort((a, b) => a.order - b.order)
-    .map(cfg => ({
-      key: cfg.key, order: cfg.order, name: cfg.name, subtitle: cfg.subtitle, goal: cfg.goal,
-      filters: cfg.filters.map(k => ({key: k, label: dimLabel_(cfg, k)})),
-      labels: usedFields_(cfg).reduce((o, k) => { o[k] = dimLabel_(cfg, k); return o; }, {}),
-      charts: cfg.charts, table: cfg.table, topCards: cfg.topCards || [],
-      summaryTable: cfg.summaryTable || null,
-      pivotTables: cfg.pivotTables || [],
-      rankPanels: cfg.rankPanels || [],
-      docks: cfg.docks || null,
-      emptyLotLabel: cfg.emptyLotLabel || null,
-      hideShiftCards: !!cfg.hideShiftCards,
-      valueCards: cfg.valueCards || [],
-      texts: cfg.texts || null,
-      metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
-      shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
-      columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
-      snapshot: !!cfg.snapshot,
-      // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).
-      refTypes: cfg.detail && cfg.detail.typeFromSummary ? (cfg.detail.types || []).map(t => t.column) : null,
-      labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null,
-      hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
-      grouped: !!cfg.grouped, routeKey: cfg.routeKey,
-      detailDays: cfg.detail && cfg.detail.days || null,
-      naLabel: cfg.naLabel || null,
-      orderKinds: cfg.orderKinds ? {field: cfg.orderKinds.field, values: cfg.orderKinds.values} : null,
-      operationalWindow: cfg.key === 'sc_sc' || cfg.key === 'sc_dc'
-    }));
+    .map(cfg => {
+      const e = catalogEntry_(cfg);
+      // V3.32: "Fonte de dados" (Sem Movimentação): a configuração do Histórico vai junto (o menu continua com um item só).
+      const h = cfg.historySource && HISTORY_INDICATORS_[cfg.historySource];
+      if (h) e.history = Object.assign(catalogEntry_(h), {historyOf: cfg.key, maxDays: (h.summary.history || {}).maxDays || 31});
+      return e;
+    });
+}
+function catalogEntry_(cfg) {
+  return {
+    key: cfg.key, order: cfg.order, name: cfg.name, subtitle: cfg.subtitle, goal: cfg.goal,
+    filters: cfg.filters.map(k => ({key: k, label: dimLabel_(cfg, k)})),
+    labels: usedFields_(cfg).reduce((o, k) => { o[k] = dimLabel_(cfg, k); return o; }, {}),
+    charts: cfg.charts, table: cfg.table, topCards: cfg.topCards || [],
+    summaryTable: cfg.summaryTable || null,
+    pivotTables: cfg.pivotTables || [],
+    rankPanels: cfg.rankPanels || [],
+    docks: cfg.docks || null,
+    emptyLotLabel: cfg.emptyLotLabel || null,
+    hideShiftCards: !!cfg.hideShiftCards,
+    valueCards: cfg.valueCards || [],
+    texts: cfg.texts || null,
+    metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
+    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
+    columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
+    snapshot: !!cfg.snapshot,
+    // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).
+    refTypes: cfg.detail && cfg.detail.typeFromSummary ? (cfg.detail.types || []).map(t => t.column) : null,
+    labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null,
+    hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
+    grouped: !!cfg.grouped, routeKey: cfg.routeKey,
+    detailDays: cfg.detail && cfg.detail.days || null,
+    naLabel: cfg.naLabel || null,
+    orderKinds: cfg.orderKinds ? {field: cfg.orderKinds.field, values: cfg.orderKinds.values} : null,
+    operationalWindow: cfg.key === 'sc_sc' || cfg.key === 'sc_dc'
+  };
 }

@@ -133,6 +133,20 @@
       metricsOfficial: 'Números oficiais do JMS (tabela principal)', pctOf: 'Cálculo: {a} ÷ {b}', sumRows: 'Soma', sumCount: '{n}',
       hmSynced: 'Número do JMS consultado em {t}', hmSyncedPeriod: 'Números do JMS consultados até {t}',
       hmRefTime: 'Linha do JMS com o horário mais recente: {type} · {t}', hmSnapshot: 'Foto do momento no JMS: um dia por vez',
+      dataSource: 'Fonte de dados', srcLive: 'Tempo real', srcHist: 'Histórico', histStart: 'Data de início', histEnd: 'Data final',
+      histFetching: 'Buscando o Histórico no JMS ({a} a {b})…', histNoRows: 'O JMS não tem linha do Histórico entre {a} e {b}.',
+      histListFetching: 'Baixando a lista do Histórico de {d} (Total de pedidos sem movimentação da linha)…',
+      histListDone: 'Lista do Histórico de {d} conferida com a linha do JMS.',
+      histListPartial: 'A lista do Histórico ainda não terminou de baixar: clique em Atualizar para continuar.',
+      histListBusy: 'A sincronização automática está rodando agora: clique em Atualizar daqui a alguns minutos para baixar a lista.',
+      histListError: 'Lista do Histórico não carregada: {e}', histMax: 'No Histórico, escolha no máximo {n} dias.',
+      hmRefTimeHist: 'Linha do Histórico com o horário mais recente: {type} · {t}',
+      histRangeNote: 'Período {a} a {b}: cartões, gráficos da lista e filtros do dia mais recente com linha no JMS ({d}).',
+      jmsTableTitle: 'Tabela do JMS — Monitoramento de movimentação', jmsUsed: 'usada nos cartões', jmsLatest: 'mais recente do dia',
+      jmsTableSubLive: 'Tempo real: uma linha por tipo de bipe. Em destaque, a linha com o Horário da última operação mais recente (a dos cartões, gráficos e filtros).',
+      jmsTableSubHist: 'Histórico: uma linha por dia e tipo de bipe. Em destaque, a linha com o Horário da última operação mais recente de cada dia.',
+      jmsColType: 'Tipo da última operação', jmsColTime: 'Horário da última operação', jmsColTotal: 'Total de pedidos sem movimentação',
+      jmsColOver: '+{n} d', jmsColRate: 'Taxa {n}+ dias',
       hmSnapWait: 'A foto de hoje ainda não chegou do JMS. O botão Atualizar busca agora (resumo e lista).',
       snapFetching: 'Buscando no JMS a foto de agora (resumo e lista)…', snapRefreshing: 'Consultando o JMS agora: resumo e lista da linha do horário mais recente…',
       dcNoDetail: 'Contado na lista baixada: {h}'
@@ -252,6 +266,20 @@
       metricsOfficial: 'JMS官方数字（主表）', pctOf: '计算：{a} ÷ {b}', sumRows: '合计', sumCount: '{n}',
       hmSynced: 'JMS 数字获取时间：{t}', hmSyncedPeriod: 'JMS 数字最近获取：{t}',
       hmRefTime: 'JMS 最新操作时间最近的行：{type} · {t}', hmSnapshot: 'JMS 实时快照：每次显示一天',
+      dataSource: '数据来源', srcLive: '实时', srcHist: '历史', histStart: '开始日期', histEnd: '结束日期',
+      histFetching: '正在从 JMS 查询历史（{a} 至 {b}）…', histNoRows: 'JMS 在 {a} 至 {b} 之间没有历史数据。',
+      histListFetching: '正在下载 {d} 的历史明细（该行的断更件总数）…',
+      histListDone: '{d} 的历史明细已与 JMS 该行核对一致。',
+      histListPartial: '历史明细尚未下载完成：点击“更新”继续。',
+      histListBusy: '自动同步正在运行：请几分钟后点击“更新”下载明细。',
+      histListError: '历史明细未加载：{e}', histMax: '历史最多选择 {n} 天。',
+      hmRefTimeHist: '历史中最新操作时间最近的行：{type} · {t}',
+      histRangeNote: '期间 {a} 至 {b}：卡片、明细图表和筛选为 JMS 有数据的最近一天（{d}）。',
+      jmsTableTitle: 'JMS 表格 — 动态监控', jmsUsed: '卡片使用', jmsLatest: '当日最新',
+      jmsTableSubLive: '实时：每种扫描类型一行。高亮为最新操作时间最近的行（卡片、图表和筛选所用）。',
+      jmsTableSubHist: '历史：每天每种扫描类型一行。高亮为每天最新操作时间最近的行。',
+      jmsColType: '最新操作类型', jmsColTime: '最新操作时间', jmsColTotal: '断更件总数',
+      jmsColOver: '断更{n}天以上', jmsColRate: '断更{n}天以上占比',
       hmSnapWait: '今天的快照尚未从 JMS 获取。点击“更新”可立即获取（汇总和明细）。',
       snapFetching: '正在从 JMS 获取当前快照（汇总和明细）…', snapRefreshing: '正在查询 JMS：最新操作时间最近的行的汇总和明细…',
       dcNoDetail: '按下载的列表计数：{h}'
@@ -324,7 +352,9 @@
     evoMode: 'period', intervalMode: 'ranking', chartViews: {}, charts: {}, dropdowns: {},
     table: {sortKey: null, sortDir: 'desc', page: 1, query: ''},
     results: {indicator: '', shift: 'all', periodicity: 'day', from: '', to: '', data: null},
-    autoSnap: {}
+    autoSnap: {},
+    // V3.32: Sem Movimentação — Fonte de dados ('live' = Tempo real, padrão; 'hist' = Histórico com o período escolhido).
+    source: 'live', hist: {from: '', to: ''}, histSeq: 0
   };
 
   // ------------------------------------------------------------------ utilidades
@@ -432,7 +462,12 @@
     var dec = (String(goal.value).split('.')[1] || '').length;
     return Math.min(goal.digits, dec);
   }
-  function cfg() { return state.catalogMap[state.indicator]; }
+  function baseCfg() { return state.catalogMap[state.indicator]; }
+  /** Configuração do painel aberto; Sem Movimentação com "Fonte de dados = Histórico" usa a do Histórico (V3.32). */
+  function cfg() { var c = baseCfg(); return c && c.history && state.source === 'hist' ? c.history : c; }
+  function isHist() { var c = baseCfg(); return !!(c && c.history && state.source === 'hist'); }
+  /** Indicador consultado no servidor (no_move_hist no Histórico; nos outros casos, o do menu). */
+  function dataKey() { var c = cfg(); return c ? c.key : state.indicator; }
   function dimLabel(key) { var c = cfg(); return (c && c.labels && c.labels[key]) || {pt: key, zh: key}; }
   function filtersObj() { var o = {}; Object.keys(state.filters).forEach(function (k) { if (state.filters[k] && state.filters[k].size) o[k] = Array.from(state.filters[k]); }); return o; }
   function debounce(fn, ms) { var h; return function () { var a = arguments, self = this; clearTimeout(h); h = setTimeout(function () { fn.apply(self, a); }, ms); }; }
@@ -551,7 +586,7 @@
       var rTo = latestOverall();
       state.results.to = rTo;
       state.results.from = boot.historyStart && boot.historyStart <= rTo ? maxIso(boot.historyStart, Core.addDays(rTo, -89)) : Core.addDays(rTo, -89);
-      buildNav(); buildSelects(); buildPresets(); updateSidebarStatus(boot.sync, boot.lastUpdated);
+      buildNav(); buildSelects(); buildPresets(); renderSourceField(); updateSidebarStatus(boot.sync, boot.lastUpdated);
       if (BOOT.view === 'results') { state.results.indicator = BOOT.indicator || ''; return openResults(); }
       return loadDashboard({resetFilters: true});
     }).catch(function (e) {
@@ -590,6 +625,7 @@
   function bindEvents() {
     $$('.lang-btn').forEach(function (b) { b.addEventListener('click', function () { setLanguage(b.getAttribute('data-lang')); }); });
     $('#indicatorSelect').addEventListener('change', function (e) { selectIndicator(e.target.value); });
+    $('#sourceSelect').addEventListener('change', function (e) { setSource(e.target.value); });
     $('#resultsIndicator').addEventListener('change', function (e) { state.results.indicator = e.target.value; loadResults(); });
     $('#resultsShift').addEventListener('change', function (e) { state.results.shift = e.target.value; renderResults(); });
     $('#applyBtn').addEventListener('click', applyDates);
@@ -677,7 +713,7 @@
     store('jt_lang', lang);
     applyStaticI18n();
     if (!state.boot || !state.boot.initialized) return;
-    buildNav(); buildSelects(); buildPresets(); updateSidebarStatus(state.lastSync, state.lastSyncTs);
+    buildNav(); buildSelects(); buildPresets(); renderSourceField(); updateSidebarStatus(state.lastSync, state.lastSyncTs);
     renderSyncBanner(state.pauses);
     if (state.view === 'results') renderResults();
     else if (state.data) { buildFilterGrid(); renderDashboard(); }
@@ -722,11 +758,13 @@
     return state.view === 'results'
       ? [['preset30', 30], ['preset90', 90], ['preset180', 182], ['preset365', 365], ['presetAll', 'all']]
       // Sem Movimentação (foto do momento): um dia por vez — hoje ou o dia anterior.
+      // V3.32: Histórico — períodos de até 31 dias, terminando hoje.
+      : isHist() ? [['presetToday', 'today'], ['presetPrevDay', 'prev'], ['preset7', 7], ['preset30', 30]]
       : cfg() && cfg().snapshot ? [['presetToday', 'today'], ['presetPrevDay', 'prev']]
       : [['presetToday', 'today'], ['presetLastDay', 1], ['preset7', 7], ['preset30', 30], ['presetMonth', 'month'], ['presetAll', 'all']];
   }
   function presetRange(p) {
-    var anchor = state.view === 'results' ? latestOverall() : anchorDate(state.indicator);
+    var anchor = state.view === 'results' ? latestOverall() : isHist() ? ((state.boot && state.boot.today) || state.hist.to) : anchorDate(state.indicator);
     var hs = state.boot && state.boot.historyStart && state.boot.historyStart <= anchor ? state.boot.historyStart : null;
     if (p === 'today') { var td = (state.boot && state.boot.today) || anchor; return {from: td, to: td}; }
     if (p === 'prev') { var pd = Core.addDays((state.boot && state.boot.today) || anchor, -1); return {from: pd, to: pd}; }
@@ -753,7 +791,9 @@
       b.classList.toggle('active', r.from === cur.from && r.to === cur.to);
     });
   }
-  function currentRange() { return state.view === 'results' ? {from: state.results.from, to: state.results.to} : {from: state.from, to: state.to}; }
+  function currentRange() {
+    return state.view === 'results' ? {from: state.results.from, to: state.results.to} : isHist() ? {from: state.hist.from, to: state.hist.to} : {from: state.from, to: state.to};
+  }
   function setDateInputs(from, to) {
     $('#fromDate').value = from || ''; $('#toDate').value = to || '';
     var max = state.boot ? state.boot.today : '';
@@ -770,7 +810,85 @@
     var r;
     try { r = readDates(); } catch (e) { toast(e.message, 'error'); return; }
     if (state.view === 'results') { state.results.from = r.from; state.results.to = r.to; loadResults(); }
+    else if (isHist()) {
+      var mx = cfg().maxDays || 31;
+      if (Core.daysBetween(r.from, r.to) + 1 > mx) { toast(t('histMax', {n: mx}), 'error'); return; }
+      state.hist = {from: r.from, to: r.to};
+      loadHistory({});
+    }
     else { state.from = r.from; state.to = r.to; loadDashboard({}); }
+  }
+  /**
+   * V3.32 — Fonte de dados (Sem Movimentação), como na tela do JMS: Tempo real (padrão, sem datas: a foto de agora) ou
+   * Histórico (Data de início e Data final). Trocar de painel volta para Tempo real.
+   */
+  function setSource(v) {
+    var c = baseCfg();
+    if (!c || !c.history) return;
+    v = v === 'hist' ? 'hist' : 'live';
+    if (v === state.source) return;
+    state.source = v;
+    state.chartViews = {};
+    if (v === 'hist' && (!state.hist.from || !state.hist.to)) {
+      var td = (state.boot && state.boot.today) || state.to;
+      state.hist = {from: td, to: td};
+    }
+    renderSourceField();
+    buildPresets();
+    var cr = currentRange();
+    setDateInputs(cr.from, cr.to);
+    if (v === 'hist') loadHistory({resetFilters: true});
+    else { state.from = state.to = anchorDate(state.indicator); loadDashboard({resetFilters: true}); }
+  }
+  function renderSourceField() {
+    var box = $('#sourceField');
+    if (!box) return;
+    var c = state.catalogMap ? baseCfg() : null, on = state.view === 'dashboard' && !!(c && c.history);
+    box.classList.toggle('hidden', !on);
+    if (on) {
+      $('#sourceSelect').innerHTML = '<option value="live">' + esc(t('srcLive')) + '</option><option value="hist">' + esc(t('srcHist')) + '</option>';
+      $('#sourceSelect').value = state.source;
+    }
+    // Tempo real: o JMS não recebe data (foto de agora) — as datas aparecem só no Histórico, como na tela do JMS.
+    var noDates = on && state.source !== 'hist', hist = on && state.source === 'hist';
+    $$('.toolbar .field-date').forEach(function (el) { el.classList.toggle('hidden', noDates); });
+    $('#presets').classList.toggle('hidden', noDates);
+    $('#applyBtn').classList.toggle('hidden', noDates);
+    $('#fromDateLabel').textContent = t(hist ? 'histStart' : 'startDate');
+    $('#toDateLabel').textContent = t(hist ? 'histEnd' : 'endDate');
+  }
+  /**
+   * V3.32 — Histórico (Sem Movimentação): 1) uma consulta ao JMS com a Data de início e a final (a linha do horário mais
+   * recente de cada dia); 2) o painel mostra o dia mais recente do período; 3) a lista desse dia vem em seguida, se ainda
+   * não estiver gravada (só vale com o total exato da linha).
+   */
+  function loadHistory(opts) {
+    opts = opts || {};
+    var seq = ++state.histSeq, from = state.hist.from, to = state.hist.to, listMsg = null;
+    setBusy(true);
+    toast(t('histFetching', {a: fmtDate(from, true), b: fmtDate(to, true)}));
+    return call('fetchNoMoveHistory', from, to).then(function (r) {
+      if (seq !== state.histSeq || !isHist()) return;
+      if (!r.day) toast(t('histNoRows', {a: fmtDate(from, true), b: fmtDate(to, true)}), 'error');
+      return loadDashboard({resetFilters: !!opts.resetFilters}).then(function () {
+        if (seq !== state.histSeq || !isHist() || !r.day || !r.listNeeded) return;
+        setBusy(true);
+        toast(t('histListFetching', {d: fmtDate(r.day, true)}));
+        return call('fetchNoMoveHistoryList', r.day).then(function (x) {
+          if (seq !== state.histSeq || !isHist()) return;
+          if (x.listNow === 'error') listMsg = t('histListError', {e: x.listError || '—'});
+          else if (x.listNow === 'partial') toast(t('histListPartial'), 'error');
+          else if (x.listNow === 'busy') toast(t('histListBusy'), 'error');
+          else toast(t('histListDone', {d: fmtDate(r.day, true)}), 'success');
+          return loadDashboard({silent: true}).then(function () { if (listMsg && seq === state.histSeq && isHist()) showAlert(listMsg); });
+        });
+      });
+    }).catch(function (e) {
+      if (seq !== state.histSeq) return;
+      toast(t('refreshFailed', {r: e.message}), 'error');
+      // Sem o JMS agora: mostra o que já está gravado do Histórico.
+      if (isHist() && (!state.data || state.data.meta.indicator !== dataKey())) return loadDashboard({resetFilters: true});
+    }).then(function () { if (seq === state.histSeq) setBusy(false); });
   }
 
   function setView(view) {
@@ -782,6 +900,7 @@
     $('#resultsShiftField').classList.toggle('hidden', view !== 'results');
     $('#refreshBtn').classList.toggle('hidden', view !== 'dashboard');
     $('#reportMenu').classList.toggle('hidden', view !== 'dashboard');
+    renderSourceField();
     var r = currentRange();
     setDateInputs(r.from, r.to);
     buildPresets();
@@ -791,6 +910,9 @@
     if (!state.catalogMap[key]) return;
     var changed = key !== state.indicator;
     state.indicator = key;
+    // V3.32: outro painel abre sempre em Tempo real (Fonte de dados padrão).
+    if (changed) state.source = 'live';
+    renderSourceField();
     if (state.view !== 'dashboard') setView('dashboard');
     $('#indicatorSelect').value = key;
     buildNav();
@@ -804,16 +926,17 @@
   // ------------------------------------------------------------------ dashboard: carga
   function loadDashboard(opts) {
     opts = opts || {};
-    if (state.view !== 'dashboard') setView('dashboard'); else { setDateInputs(state.from, state.to); highlightPreset(); }
-    var seq = ++state.seq, c = cfg();
+    if (state.view !== 'dashboard') setView('dashboard'); else { var cr0 = currentRange(); setDateInputs(cr0.from, cr0.to); highlightPreset(); }
+    var seq = ++state.seq, c = cfg(), key = dataKey();
     if (!opts.silent) setBusy(true);
     if (opts.resetFilters) { state.filters = {}; state.table = {sortKey: null, sortDir: 'desc', page: 1, query: ''}; $('#tableFind').value = ''; }
     renderHeader();
     // Período longo: avisa que ainda está carregando (antes ficava só a barra, sem explicação).
     var slow = setTimeout(function () { if (seq === state.seq && !opts.silent) toast(t('slowLoading')); }, 12000);
-    var req = {from: state.from, to: state.to};
+    // V3.32: Histórico — o período escolhido; o servidor devolve o dia mostrado (o mais recente com linha) em meta.from/to.
+    var req = isHist() ? {from: state.hist.from, to: state.hist.to} : {from: state.from, to: state.to};
     if (c && c.grouped) req.filters = filtersObj();
-    return call('getDashboardData', state.indicator, req).then(function (res) {
+    return call('getDashboardData', key, req).then(function (res) {
       if (seq !== state.seq) return;
       renderSyncBanner(res.meta.pauses);
       var sm = res.summary;
@@ -824,14 +947,16 @@
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
           totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};
       state.from = res.meta.from; state.to = res.meta.to;
-      setDateInputs(state.from, state.to); highlightPreset();
+      if (res.meta.source === 'hist') state.hist = {from: res.meta.rangeFrom || state.hist.from, to: res.meta.rangeTo || state.hist.to};
+      var cr = currentRange();
+      setDateInputs(cr.from, cr.to); highlightPreset();
       var allowed = {};
       (c.filters || []).forEach(function (f) { allowed[f.key] = 1; });
       Object.keys(state.filters).forEach(function (k) { if (!allowed[k]) delete state.filters[k]; });
       if (!opts.silent) state.table.page = 1;
       hideAlert();
       $('#main').classList.remove('awaiting');
-      if (opts.resetFilters || !Object.keys(state.dropdowns).length || state.builtFor !== state.indicator) buildFilterGrid();
+      if (opts.resetFilters || !Object.keys(state.dropdowns).length || state.builtFor !== key) buildFilterGrid();
       renderDashboard();
       updateSidebarStatus(res.meta.sync, res.meta.lastRateSyncedAt);
       state.lastReloadAt = Date.now();
@@ -843,7 +968,7 @@
       }
     }).catch(function (e) {
       if (seq !== state.seq) return;
-      if (!state.data || state.data.meta.indicator !== state.indicator) $('#main').classList.add('awaiting');
+      if (!state.data || state.data.meta.indicator !== key) $('#main').classList.add('awaiting');
       showAlert(e.message, null, function () { hideAlert(); loadDashboard(opts); });
       console.error(e);
     }).then(function () { clearTimeout(slow); if (seq === state.seq) setBusy(false); });
@@ -1063,7 +1188,7 @@
       grid.appendChild(d.el);
       d.refreshButton();
     });
-    state.builtFor = state.indicator;
+    state.builtFor = dataKey();
   }
   function refreshFilterOptions(f) {
     var keys = Object.keys(state.dropdowns), sm = state.data.summary, facets = {};
@@ -1541,13 +1666,19 @@
       .map(function (r) { return r.syncedAt; }).sort();
     var syncLine = syncs.length ? '<div class="kpi-sub hm-sync">' + esc(t(day ? 'hmSynced' : 'hmSyncedPeriod', {t: fmtTs(day ? syncs[syncs.length - 1] : syncs[0])})) + '</div>' : '';
     // Sem Movimentação (V3.28): o "Horário da última operação" mais recente da tabela principal do JMS (AAAAMMDDhhmmss).
-    if (cfg() && cfg().snapshot) {
+    // V3.32: também no Histórico (a linha do horário mais recente do dia mostrado) e o período escolhido.
+    if (cfg() && cfg().refTypes) {
+      var hist = isHist();
       var rt = activeRates().filter(function (r) { return r.date === state.to && r.metrics && isNum(r.metrics.refTime); })[0];
       var rs = rt ? String(Math.round(Number(rt.metrics.refTime))) : '', ri = rt && isNum(rt.metrics.refType) ? Number(rt.metrics.refType) : 0;
       var rtype = ri && cfg().refTypes && cfg().refTypes[ri - 1] ? vlabel('scanType', cfg().refTypes[ri - 1]) : '—';
-      if (rs.length === 14) syncLine += '<div class="kpi-sub hm-sync">' + esc(t('hmRefTime', {type: rtype, t: rs.slice(6, 8) + '/' + rs.slice(4, 6) + '/' + rs.slice(0, 4) + ' ' +
+      if (rs.length === 14) syncLine += '<div class="kpi-sub hm-sync">' + esc(t(hist ? 'hmRefTimeHist' : 'hmRefTime', {type: rtype, t: rs.slice(6, 8) + '/' + rs.slice(4, 6) + '/' + rs.slice(0, 4) + ' ' +
         rs.slice(8, 10) + ':' + rs.slice(10, 12) + ':' + rs.slice(12, 14)})) + '</div>';
-      if (!isNum(cur) && state.to === ((state.boot && state.boot.today) || state.to)) syncLine += '<div class="kpi-sub">' + esc(t('hmSnapWait')) + '</div>';
+      if (!hist && !isNum(cur) && state.to === ((state.boot && state.boot.today) || state.to)) syncLine += '<div class="kpi-sub">' + esc(t('hmSnapWait')) + '</div>';
+      if (hist && state.hist.from && state.hist.from !== state.hist.to) {
+        syncLine += '<div class="kpi-sub hm-sync">' + esc(t('histRangeNote', {a: fmtDate(state.hist.from, true), b: fmtDate(state.hist.to, true), d: fmtDate(state.to, true)})) + '</div>';
+      }
+      if (hist && !rt) syncLine += '<div class="kpi-sub">' + esc(t('histNoRows', {a: fmtDate(state.hist.from || state.to, true), b: fmtDate(state.hist.to || state.to, true)})) + '</div>';
     }
     lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
       (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +
@@ -1673,12 +1804,15 @@
   // ------------------------------------------------------------------ Recebimento: gráficos dos números do resumo
   /** Série diária de um número do resumo (rates[].metrics) até a data escolhida. */
   function metricSpec(def) {
-    var n = def.days || MP_DAYS, from = Core.addDays(state.to, -(n - 1));
+    var n = def.days || MP_DAYS, to = state.to, from = Core.addDays(state.to, -(n - 1));
     if (state.from < from) from = state.from;
-    if (Core.daysBetween(from, state.to) > 90) from = Core.addDays(state.to, -90);
+    // V3.32: Histórico — o período escolhido (com um dia só, a semana até ele).
+    var hr = histDays();
+    if (hr) { from = hr[0]; to = hr[hr.length - 1]; }
+    if (Core.daysBetween(from, to) > 90) from = Core.addDays(to, -90);
     var byDate = {};
     activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[def.metric])) byDate[r.date] = Number(r.metrics[def.metric]); });
-    var days = Core.dateRange(from, state.to);
+    var days = Core.dateRange(from, to);
     return {key: def.key, metric: def.metric, type: def.type || 'bar', bad: !!def.bad, title: def.title,
       days: days, values: days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; })};
   }
@@ -2615,7 +2749,15 @@
    * Embaixo, a tabela "Dados gerais" com os 7 números de cada dia, como a primeira tabela da tela do JMS.
    */
   var MP_DAYS = 14;
+  /** V3.32: dias do Histórico no gráfico e nas tabelas: o período escolhido (com um dia só, a semana até ele); null fora dele. */
+  function histDays() {
+    if (!isHist() || !state.hist.to) return null;
+    var hf = state.hist.from && state.hist.from < state.hist.to ? state.hist.from : Core.addDays(state.hist.to, -6);
+    return Core.dateRange(hf, state.hist.to);
+  }
   function metricDays() {
+    var hd = histDays();
+    if (hd) return hd;
     var from = Core.addDays(state.to, -(MP_DAYS - 1));
     if (state.from < from) from = state.from;
     if (Core.daysBetween(from, state.to) > 60) from = Core.addDays(state.to, -60);
@@ -2633,7 +2775,7 @@
       var bd = {};
       (state.data.rates || []).forEach(function (r) { if (r.metrics) bd[r.date] = r.metrics; });
       box.innerHTML = '';
-      tbl.innerHTML = metricTableHtml(panels, null, bd, metricDays());
+      tbl.innerHTML = metricTableHtml(panels, null, bd, metricDays()) + jmsRowsHtml(c, metricDays());
       return;
     }
     var cols = state.filters.column && state.filters.column.size ? state.filters.column : null;
@@ -2720,6 +2862,42 @@
     return '<section class="card mp-section"><div class="chart-head"><span class="chart-ico">' + icon('table') + '</span><div class="chart-titles"><h3>' +
       esc(t('mpTable')) + '</h3><small>' + esc(t('mpTableSub')) + '</small></div></div>' +
       '<div class="mp-table"><table><thead>' + head1 + head2 + '</thead><tbody>' + body + '</tbody></table></div></section>';
+  }
+
+  /**
+   * V3.32 (Sem Movimentação): a tabela do JMS como na tela — uma linha por tipo de bipe em cada dia —, com a linha usada
+   * nos cartões (o "Horário da última operação" mais recente do dia) em destaque.
+   */
+  function jmsRowsHtml(c, days) {
+    if (!c.refTypes || !state.data) return '';
+    var set = {}, rows = [];
+    days.forEach(function (d) { set[d] = 1; });
+    (state.data.rates || []).forEach(function (r) {
+      if (!r.types || !set[r.date]) return;
+      var ref = r.metrics ? Number(r.metrics.refType) : 0;
+      r.types.forEach(function (x) { rows.push({date: r.date, x: x, used: Number(x.typeIdx) > 0 && Number(x.typeIdx) === ref}); });
+    });
+    if (!rows.length) return '';
+    rows.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : String(b.x.time || '') < String(a.x.time || '') ? -1 : String(b.x.time || '') > String(a.x.time || '') ? 1 : 0; });
+    var buckets = [1, 2, 3, 4, 5, 6, 7, 10, 14, 30];
+    var fmtTime = function (v) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)/.exec(String(v || ''));
+      return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] : String(v || '—');
+    };
+    var head = '<tr><th>' + esc(t('date')) + '</th><th>' + esc(t('jmsColType')) + '</th><th>' + esc(t('jmsColTime')) + '</th><th>' + esc(t('jmsColTotal')) + '</th>' +
+      buckets.map(function (n) { return '<th>' + esc(t('jmsColOver', {n: n})) + '</th>'; }).join('') +
+      '<th>' + esc(t('jmsColRate', {n: 14})) + '</th><th>' + esc(t('jmsColRate', {n: 30})) + '</th></tr>';
+    var body = rows.map(function (o) {
+      var x = o.x, tot = Number(x.total) || 0, name = Number(x.typeIdx) > 0 && c.refTypes[x.typeIdx - 1] ? vlabel('scanType', c.refTypes[x.typeIdx - 1]) : String(x.op || '—');
+      var rate = function (k) { return tot ? fmtPct((Number(x[k]) || 0) / tot * 100, 2) : '—'; };
+      return '<tr' + (o.used ? ' class="sel"' : '') + '><td>' + esc(fmtDate(o.date, true)) + '</td><td>' + esc(name) +
+        (o.used ? ' <span class="jms-used">' + esc(t(o.date === state.to ? 'jmsUsed' : 'jmsLatest')) + '</span>' : '') + '</td><td>' + esc(fmtTime(x.time)) + '</td><td>' + fmtInt(tot) + '</td>' +
+        buckets.map(function (n) { var v = x['day' + n]; return '<td>' + (isNum(v) ? fmtInt(v) : '—') + '</td>'; }).join('') +
+        '<td>' + rate('day14') + '</td><td>' + rate('day30') + '</td></tr>';
+    }).join('');
+    return '<section class="card mp-section"><div class="chart-head"><span class="chart-ico">' + icon('table') + '</span><div class="chart-titles"><h3>' +
+      esc(t('jmsTableTitle')) + '</h3><small>' + esc(t(isHist() ? 'jmsTableSubHist' : 'jmsTableSubLive')) + '</small></div></div>' +
+      '<div class="mp-table jms"><table><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div></section>';
   }
 
   // ------------------------------------------------------------------ tabela de remessas
@@ -2834,6 +3012,11 @@
     if (!state.data) return;
     opts = opts || {};
     var btn = $('#refreshBtn');
+    // V3.32: Histórico — consulta o período escolhido de novo (e a lista do dia mostrado, se faltar).
+    if (isHist()) {
+      btn.disabled = true; btn.classList.add('spin');
+      return loadHistory({}).then(function () { btn.disabled = false; btn.classList.remove('spin'); });
+    }
     btn.disabled = true; btn.classList.add('spin');
     toast(t(opts.auto ? 'snapFetching' : cfg() && cfg().snapshot ? 'snapRefreshing' : 'refreshing'));
     call('refreshNow', state.indicator, state.from, state.to).then(function (r) {
@@ -2855,7 +3038,7 @@
     if (format === 'csv') return exportCsv();
     setBusy(true);
     toast(t('reporting'));
-    call('generateReport', state.indicator, {from: state.from, to: state.to, filters: filtersObj()}, format).then(function (res) {
+    call('generateReport', dataKey(), {from: state.from, to: state.to, filters: filtersObj()}, format).then(function (res) {
       if (res.base64) {
         var bin = atob(res.base64), arr = new Uint8Array(bin.length);
         for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
@@ -2871,7 +3054,7 @@
     var q = function (v) { v = String(v === null || v === undefined ? '' : v); return /[";\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     var lines = [cols.map(function (col) { return q(col[1] + ' / ' + col[2]); }).join(';')];
     rows.forEach(function (r) { lines.push(cols.map(function (col) { var v = r[col[0]]; return q(col[0] === 'shipment' || col[0] === 'tripId' ? '\t' + (v || '') : cellText(col[0], v)); }).join(';')); });
-    downloadBlob(new Blob(['﻿' + lines.join('\r\n')], {type: 'text/csv;charset=utf-8'}), 'JT_' + state.indicator + '_' + state.from + '_a_' + state.to + '.csv');
+    downloadBlob(new Blob(['﻿' + lines.join('\r\n')], {type: 'text/csv;charset=utf-8'}), 'JT_' + dataKey() + '_' + state.from + '_a_' + state.to + '.csv');
     toast(t('csvReady', {n: fmtInt(rows.length)}), 'success');
   }
 

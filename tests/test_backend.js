@@ -2543,4 +2543,113 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'diagnosticarSemMovimentacao: resumo por tipo, lista × resumo e painel × JMS (sem remessa, operador nem credencial)', dg.texto);
 }
 
+// ---------- V3.32: Sem Movimentação · Histórico ("Fonte de dados = Histórico" com Data de início e final) ----------
+{
+  const T = ctx.isoToday_(), Y = ctx.addDaysIso_(T, -1), T2 = ctx.addDaysIso_(T, -2), T3 = ctx.addDaysIso_(T, -3);
+  // Payloads = captura do Histórico (modleType "history", startDate 00:00:00 e endDate 23:59:59; a lista com as mesmas datas).
+  const hS = ctx.buildPayload_('no_move_hist', '2026-10-06', 1, 20, false, {from: '2026-10-06', to: '2026-10-06'});
+  const hD = ctx.buildPayload_('no_move_hist', '2026-10-05', 1, 100, true, {type: 'bag'});
+  check(JSON.stringify(hS) === JSON.stringify({current: 1, size: 20, groupType: 'center', modleType: 'history',
+      operateType: ['发件扫描', '问题件扫描', '中心到件', '建包扫描', '留仓件入仓', '拆包扫描'], scanAgentCode: '370000', scanCode: '30001',
+      startDate: '2026-10-06 00:00:00', endDate: '2026-10-06 23:59:59', countryId: '1'}) &&
+    JSON.stringify(hD) === JSON.stringify({current: 1, size: 100, dutyAgentCode: '370000', dutyCode: '30001', modleType: 'history', operateType: ['建包扫描'],
+      queryType: 2, startDate: '2026-10-05 00:00:00', endDate: '2026-10-05 23:59:59', countryId: '1'}) &&
+    ctx.buildPayload_('no_move', T, 1, 20, false).modleType === 'modern' && ctx.buildPayload_('no_move', T, 1, 20, false).startDate === undefined,
+    'Histórico: payloads = captura (modleType history + Data de início/final); Tempo real continua sem data', {hS, hD});
+
+  // Resposta da captura (Histórico de 06/10, 4 linhas): vale a linha do horário mais recente (Chegadas ao centro, 07:59:20).
+  const capRow = (op, total, t, d) => Object.assign({dateTime: '2026-10-06', scanAgentName: 'SPE', scanAgentCode: '370000', dutyCode: '30001', dutyName: 'SP GRU',
+    modleType: 'history', operateType: op, total: total, operateTime: t, dayRate14: (d[8] / total * 100).toFixed(2) + '%', dayRate30: (d[9] / total * 100).toFixed(2) + '%'},
+    ['day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7', 'day10', 'day14', 'day30'].reduce((o, k, i) => { o[k] = d[i]; return o; }, {}));
+  const cap = [capRow('问题件扫描', 6036, '2026-10-05 07:30:10', [418, 513, 2917, 403, 182, 94, 401, 903, 205, 0]),
+    capRow('发件扫描', 6223, '2026-10-05 06:49:54', [2298, 1757, 207, 324, 226, 288, 353, 643, 123, 4]),
+    capRow('建包扫描', 1057, '2026-10-05 07:46:32', [572, 147, 92, 24, 188, 12, 9, 10, 1, 2]),
+    capRow('中心到件', 1423, '2026-10-05 07:59:20', [483, 233, 176, 170, 165, 73, 65, 56, 2, 0])].map((r, i) => Object.assign(r, {PAGEHELPER_ROW_ID: i + 1, ROW_ID: i + 1}));
+  const cCap = freshCtx({}, {intercept: (route, h, body) => route === 'trajectory_monitor_total' && body.modleType === 'history' ?
+    [200, {code: 1, msg: '请求成功', data: {records: cap, total: 4, size: 4, current: 1, pages: 1, other: null, heads: null}, fail: false, succ: true}] : null});
+  const capSums = cCap.fetchHistoryRange_('no_move_hist', '2026-10-05', '2026-10-06');
+  const c06 = capSums.filter(x => x.date === '2026-10-06')[0], c05 = capSums.filter(x => x.date === '2026-10-05')[0];
+  check(c05.empty === true && c06.totalCount === 1423 && c06.raw.refType === 3 && c06.raw.refTime === 20261005075920 && c06.raw.day14 === 2 &&
+    c06.raw.day1 === 483 && c06.raw.allTotal === 6036 + 6223 + 1057 + 1423 && c06.rate === 0.14 && c06.raw.types.length === 4 && c06.raw.problem === 6036,
+    'Histórico da captura: linha do horário mais recente do dia (Chegadas ao centro 07:59:20 → 1.423; 14+ = 2 → 0,14%)', c06);
+
+  // Fluxo pelo painel: período T-2..T (uma consulta) + dia anterior; mostra T; lista do Histórico de T conferida.
+  const hDays = {[T3]: makeDay(T3, 71), [T2]: makeDay(T2, 72), [Y]: makeDay(Y, 73), [T]: makeDay(T, 74)};
+  const cH = freshCtx(hDays);
+  const f0 = cH.__state.fetches.length;
+  const rH = cH.fetchNoMoveHistory(T2, T);
+  const hFetch = cH.__state.fetches.slice(f0);
+  const histTotals = hFetch.filter(f => /trajectory_monitor_total/.test(f.url));
+  check(rH.day === T && rH.days === 3 && rH.listNeeded === true && histTotals.length === 1 && histTotals[0].payload.startDate === T3 + ' 00:00:00' &&
+    histTotals[0].payload.endDate === T + ' 23:59:59' && !hFetch.some(f => /trajectory_monitor_detail/.test(f.url)) &&
+    [T3, T2, Y, T].every(d => !!cH.getRateDay_('no_move_hist', d)) && !cH.getRateDay_('no_move', T) &&
+    /SKIPPED/.test(cH.getDayStatus_('no_move_hist', T2).details) && /SKIPPED/.test(cH.getDayStatus_('no_move_hist', Y).details),
+    'Histórico: UMA consulta traz o período (e o dia anterior); só o resumo; os outros dias ficam sem lista', {rH, n: histTotals.length});
+  const histRate = cH.getRateDay_('no_move_hist', T), hm = histRate.metrics;
+  const hl = hDays[T].nm.filter((r, i) => i % 10 !== 3), kinds = ['发件扫描', '问题件扫描', '中心到件', '建包扫描', '留仓件入仓', '拆包扫描'];
+  const latestOp = kinds.map(k => ({k: k, l: hl.filter(r => r.operateType.split('/')[0] === k)})).filter(x => x.l.length)
+    .map(x => ({k: x.k, n: x.l.length, t: x.l.map(r => r.operateTime).sort().pop()})).sort((a, b) => a.t < b.t ? 1 : a.t > b.t ? -1 : b.n - a.n)[0];
+  check(hm.total === latestOp.n && kinds[hm.refType - 1] === latestOp.k && hm.total !== hDays[T].nm.filter(r => r.operateType.split('/')[0] === latestOp.k).length,
+    'Histórico: cartões = linha do horário mais recente do dia no Histórico (números do Histórico, não do tempo real)', {hm, latestOp});
+  const lH = cH.fetchNoMoveHistoryList(T);
+  const dH = cH.getDashboardData('no_move_hist', {from: T2, to: T}), rowsH = C.decodeDataset(dH.dataset);
+  const qH = rowsH.reduce((a, r) => a + (Number(r.qty) || 1), 0);
+  const detH = cH.__state.fetches.filter(f => /trajectory_monitor_detail/.test(f.url));
+  check(lH.listNow === 'done' && /COMPLETE/.test(cH.getDayStatus_('no_move_hist', T).details) && qH === hm.total &&
+    detH.length > 0 && detH.every(f => f.payload.modleType === 'history' && f.payload.startDate === T + ' 00:00:00' && f.payload.operateType[0] === latestOp.k) &&
+    dH.meta.from === T && dH.meta.to === T && dH.meta.rangeFrom === T2 && dH.meta.rangeTo === T && dH.meta.source === 'hist' &&
+    dH.rates.filter(r => r.types).map(r => r.date).join() === [T2, Y, T].join() && dH.rates.some(r => r.date === T3 && !r.types) &&
+    rowsH.every(r => r.column === ctx.getIndicatorConfig_('no_move_hist').detail.types[hm.refType - 1].column),
+    'Histórico: lista do dia mostrado com os parâmetros do Histórico e o total exato da linha; período e linhas do JMS no painel',
+    {lH, qH, total: hm.total, meta: dH.meta.rangeFrom});
+  // Nada do Histórico na fila dos gatilhos, nos Resultados, no menu nem no catálogo de cima.
+  const fq = cH.__state.fetches.length;
+  cH.processSyncQueue();
+  const cat = cH.getPublicCatalog_(), catNm = cat.filter(c => c.key === 'no_move')[0];
+  check(!cH.__state.fetches.slice(fq).some(f => f.payload && f.payload.modleType === 'history') && !cH.pendingJobs_().some(j => j.indicator === 'no_move_hist') &&
+    !cat.some(c => c.key === 'no_move_hist') && catNm.history && catNm.history.key === 'no_move_hist' && catNm.history.maxDays === 31 &&
+    catNm.history.refTypes.length === 6 && !cH.getResultsData({}).series.some(x => /no_move/.test(x.key)) && !('no_move_hist' in cH.latestByIndicator_()) &&
+    cH.healQueue_(300) >= 0 && !cH.allTabRows_('JOBS').some(r => r[2] === 'no_move_hist' && r[5] !== 'DONE') && cH.computeSyncStatus_().PENDING === 0,
+    'Histórico só pelo painel: gatilhos, autocorreção, Resultados e menu não consultam nem mostram o Histórico');
+  // Mesma consulta de novo: linha igual e lista gravada → nada a baixar.
+  const rH2 = cH.fetchNoMoveHistory(T2, T);
+  check(rH2.listNeeded === false && rH2.day === T, 'Histórico: período consultado de novo sem mudança não baixa a lista outra vez', rH2);
+  // Linha do dia mudou no JMS: a lista antiga sai do painel até a nova chegar.
+  for (let i = 0; i < 40; i++) hDays[T].nm.push(Object.assign({}, hDays[T].nm[0], {billcode: '7779' + i, operateTime: T + ' 23:59:' + String(10 + i).slice(-2)}));
+  const rH3 = cH.fetchNoMoveHistory(T, T);
+  const dH3 = cH.getDashboardData('no_move_hist', {from: T, to: T});
+  const lH3 = cH.fetchNoMoveHistoryList(T);
+  const rowsH3 = C.decodeDataset(cH.getDashboardData('no_move_hist', {from: T, to: T}).dataset);
+  check(rH3.listNeeded === true && dH3.dataset.n === 0 && dH3.meta.archive.notDownloaded.indexOf(T) >= 0 && lH3.listNow === 'done' &&
+    rowsH3.reduce((a, r) => a + (Number(r.qty) || 1), 0) === cH.getRateDay_('no_move_hist', T).metrics.total,
+    'Histórico: linha mudou → lista antiga escondida e a nova baixada com o total novo', {rH3, n: dH3.dataset.n});
+  // Lista que ignora o Histórico (devolve a do tempo real): total diferente → recusada, nada gravado, motivo claro.
+  const cX = freshCtx(hDays, {histDetailIgnored: true});
+  const rX = cX.fetchNoMoveHistory(T, T), lX = cX.fetchNoMoveHistoryList(T), dX = cX.getDashboardData('no_move_hist', {from: T, to: T});
+  check(rX.listNeeded && lX.listNow === 'error' && /Histórico do JMS não confere/.test(lX.listError) && /trajectory_monitor_detail/.test(lX.listError) &&
+    !/COMPLETE/.test(String(cX.getDayStatus_('no_move_hist', T).details)) && dX.dataset.n === 0 && !cX.dayFilesMap_('no_move_hist', T, T)[T],
+    'Histórico: lista com outro total (o JMS ignorou o Histórico) é recusada, com o motivo e o que capturar', lX);
+  const repX = cX.computeDashboard_('no_move_hist', {from: T, to: T}), repH = cH.computeDashboard_('no_move_hist', {from: T, to: T});
+  check(repX.rows.length === 0 && repX.from === T && repH.rows.reduce((a, r) => a + (Number(r.qty) || 1), 0) === cH.getRateDay_('no_move_hist', T).metrics.total,
+    'Histórico no relatório: só a lista conferida (a recusada fica de fora)', {x: repX.rows.length});
+  // Período sem linha, futuro e acima de 31 dias.
+  const cE = freshCtx({[T]: makeDay(T, 75)});
+  const rE = cE.fetchNoMoveHistory(T3, Y);
+  let over = null;
+  try { cE.fetchNoMoveHistory(ctx.addDaysIso_(T, -40), T); } catch (e) { over = e.message; }
+  const dE = cE.getDashboardData('no_move_hist', {from: T3, to: Y});
+  check(rE.day === null && rE.empty === 3 && rE.listNeeded === false && /no máximo 31 dias/.test(String(over)) && dE.meta.from === Y && dE.dataset.n === 0,
+    'Histórico: período sem linha no JMS (sem cartões) e limite de 31 dias', {rE, over});
+  // Período cujo último dia não tem linha: o painel mostra o dia mais recente COM linha.
+  const cL = freshCtx({[T3]: makeDay(T3, 76), [T2]: makeDay(T2, 77)});
+  const rL = cL.fetchNoMoveHistory(T3, T);
+  const dL = cL.getDashboardData('no_move_hist', {from: T3, to: T});
+  check(rL.day === T2 && dL.meta.from === T2 && dL.meta.rangeTo === T && rL.empty === 2, 'Histórico: dia mostrado = o mais recente do período com linha no JMS', rL);
+  // Tempo real continua igual (sem datas no payload, só hoje) com o Histórico gravado na mesma base.
+  cH.refreshNow('no_move', T, T);
+  const live = cH.getRateDay_('no_move', T);
+  check(!!live && live.metrics.total !== cH.getRateDay_('no_move_hist', T).metrics.total && cH.getDashboardData('no_move', {from: T, to: T}).meta.source === null,
+    'Tempo real e Histórico separados: cada um com os próprios números', {live: live && live.metrics.total});
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

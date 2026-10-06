@@ -394,6 +394,10 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .mp-table th.grp{text-align:center;background:#B3000D}
 .mp-table td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
 .mp-table tr.sel td{background:#FFF1F2;font-weight:800}
+/* V3.32: tabela do JMS (Sem Movimentação) — tipo e horário à esquerda; linha usada nos cartões marcada */
+.mp-table.jms th:nth-child(2),.mp-table.jms td:nth-child(2),.mp-table.jms th:nth-child(3),.mp-table.jms td:nth-child(3){text-align:left}
+.jms-used{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:var(--red);color:#fff;font-size:10.5px;font-weight:800;vertical-align:1px}
+.field-source{flex:0 1 190px}
 @media (max-width:820px){.mp-grid{grid-template-columns:1fr}}
 .rp-wrap{position:relative;height:370px}
 .rp-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-top:14px}
@@ -519,7 +523,7 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
   .main{padding:0 12px 28px}
   .progress{margin:0 -12px}
   .toolbar{padding:12px}
-  .field,.field-date,.field-indicator,.field-results{flex:1 1 100%}
+  .field,.field-date,.field-indicator,.field-results,.field-source{flex:1 1 100%}
   .field-date{flex:1 1 calc(50% - 6px);min-width:0}
   .toolbar .btn-dark{width:100%;justify-content:center}
   .filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}

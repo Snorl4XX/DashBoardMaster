@@ -163,9 +163,11 @@ function refreshNow(indicatorKey, from, to) {
 /**
  * Sem Movimentação (V3.30): baixa agora a lista do dia, se estiver na fila (resumo mudou ou ainda sem lista). Usa a trava
  * do trabalhador da fila: se ele estiver rodando, a lista fica com ele (sem baixar duas vezes).
+ * V3.32: também a lista do Histórico (no_move_hist), que nunca entra na fila dos gatilhos (pendingJobs_ não a vê).
  */
 function runSnapshotListNow_(indicatorKey, date) {
-  const job = () => pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === indicatorKey && j.date === date)[0];
+  const job = () => INDICATORS[indicatorKey] ? pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === indicatorKey && j.date === date)[0]
+    : onDemandJob_('DETAIL_INIT', indicatorKey, date);
   if (!job()) return {listNow: 'ok'};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) return {listNow: 'busy'};
@@ -175,6 +177,100 @@ function runSnapshotListNow_(indicatorKey, date) {
     const r = processJob_(j, Date.now() + APP_CONFIG.SNAPSHOT_LIST_BUDGET_MS);
     return {listNow: r === 'done' ? 'done' : r === 'partial' ? 'partial' : r, detailsQueued: r === 'done' ? 0 : 1};
   } finally { lock.releaseLock(); }
+}
+
+/** Tarefa pendente de uma fonte só sob demanda (Histórico): lida direto da aba JOBS. */
+function onDemandJob_(type, indicator, date) {
+  let out = null;
+  allTabRows_('JOBS').forEach((r, i) => {
+    if (out || String(r[1]) !== type || String(r[2]) !== indicator || dateCellIso_(r[3]) !== date || String(r[5]) !== 'PENDING') return;
+    out = {rowNum: i + 2, type: type, indicator: indicator, date: date, page: num_(r[4], 0), status: 'PENDING', attempts: num_(r[6], 0), createdAt: r[7]};
+  });
+  return out;
+}
+
+/**
+ * Sem Movimentação · Histórico (V3.32), chamada pelo painel ao escolher "Fonte de dados = Histórico" e as datas (não gasta a
+ * cota diária dos gatilhos). Uma consulta ao JMS traz o período inteiro (e o dia anterior ao início, para a comparação
+ * dos cartões); cada dia guarda a linha do horário mais recente. O painel mostra o dia mais recente do período com linha
+ * (`day`); `listNeeded` = a lista desse dia ainda não está gravada (ou a linha mudou): o painel chama
+ * fetchNoMoveHistoryList(day) em seguida (os cartões aparecem antes, sem esperar a lista).
+ */
+function fetchNoMoveHistory(from, to) {
+  requireDb_();
+  validateJmsAuth_();
+  const key = 'no_move_hist', cfg = getIndicatorConfig_(key), today = isoToday_();
+  if (!isIso_(from) || !isIso_(to)) throw new Error('Escolha a Data de início e a Data final do Histórico.');
+  if (to > today) to = today;
+  if (from > to) throw new Error('A data inicial não pode ser maior que a final.');
+  const maxDays = (cfg.summary.history || {}).maxDays || 31;
+  if (JTCore_.daysBetween(from, to) + 1 > maxDays) throw new Error('No Histórico, escolha no máximo ' + maxDays + ' dias.');
+  let sums;
+  try { sums = fetchHistoryRange_(key, addDaysIso_(from, -1), to); }
+  catch (e) {
+    const msg = String(e && e.message || e).slice(0, 900), kind = errorKind_(msg);
+    logSync_('ERROR', key, to, 'Histórico ' + from + ' a ' + to + ': ' + msg);
+    if (kind !== 'OTHER') setPause_(kind === 'QUOTA' ? '*' : cfg.routeKey, kind, msg);
+    throw new Error(publicJmsError_(msg));
+  }
+  forgetPause_(cfg.routeKey);
+  const result = {ok: true, from: from, to: to, day: null, days: 0, empty: 0, listNeeded: false};
+  const changed = {};
+  sums.forEach(s => {
+    if (s.empty) {
+      // Sem linha no Histórico: não apaga um dia já gravado (o JMS pode ainda não ter fechado o dia).
+      const st = getDayStatus_(key, s.date);
+      if (!st || st.summary !== 'COMPLETE') updateDayStatus_(key, s.date, {summaryStatus: 'NO_RECORD', detailsStatus: 'NO_RECORD', error: ''});
+      if (s.date >= from) result.empty++;
+      return;
+    }
+    const prev = getRateDay_(key, s.date);
+    upsertRate_(s);
+    changed[s.date] = historyRowChanged_(prev, s);
+    if (s.date >= from) { result.days++; result.day = s.date; }
+  });
+  // Dias que o painel não mostra: só o resumo (a lista fica para quando o dia for o mais recente do período escolhido).
+  sums.forEach(s => {
+    if (s.empty || s.date === result.day) return;
+    const st = getDayStatus_(key, s.date);
+    if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) updateDayStatus_(key, s.date, {detailsStatus: 'SKIPPED'});
+  });
+  if (result.day) {
+    const st = getDayStatus_(key, result.day);
+    result.listNeeded = !!changed[result.day] || !st || DETAIL_USABLE_.indexOf(st.details) < 0 || !dayFilesMap_(key, result.day, result.day)[result.day];
+    // A linha mudou (ou a lista nunca veio): a lista gravada não vale mais até baixar a nova.
+    if (result.listNeeded && st && st.details !== 'PARTIAL') updateDayStatus_(key, result.day, {detailsStatus: 'PENDING'});
+  }
+  return safeReturn_(result);
+}
+/** A linha do Histórico do dia é outra (total, tipo ou horário da linha mais recente)? */
+function historyRowChanged_(prev, s) {
+  return !prev || prev.totalCount !== s.totalCount || !prev.metrics || Number(prev.metrics.refType) !== Number(s.raw.refType) ||
+    Number(prev.metrics.refTime) !== Number(s.raw.refTime);
+}
+
+/**
+ * Lista do Histórico (V3.32): o "Total de pedidos sem movimentação" da linha do horário mais recente do dia, com os
+ * parâmetros do Histórico. Baixada na hora (até SNAPSHOT_LIST_BUDGET_MS); só é gravada com o total exato da linha.
+ * Retorno: {listNow: 'ok'|'done'|'partial'|'busy'|'error', listError}. 'partial': clicar em Atualizar continua.
+ */
+function fetchNoMoveHistoryList(date) {
+  requireDb_();
+  validateJmsAuth_();
+  const key = 'no_move_hist';
+  if (!isIso_(date)) throw new Error('Dia do Histórico inválido.');
+  const st = getDayStatus_(key, date);
+  if (!getRateDay_(key, date) || !st || st.summary !== 'COMPLETE') throw new Error('O Histórico de ' + date + ' ainda não foi consultado: escolha as datas e clique em Aplicar.');
+  const result = {ok: true, date: date, listNow: 'ok', listError: null};
+  if (DETAIL_USABLE_.indexOf(st.details) >= 0 && dayFilesMap_(key, date, date)[date]) return safeReturn_(result);
+  enqueueJobs_([['DETAIL_INIT', key, date, 1]], {reset: true});
+  try { Object.assign(result, runSnapshotListNow_(key, date)); }
+  catch (e) { result.listNow = 'error'; result.listError = publicJmsError_(String(e && e.message || e)); }
+  if (result.listNow === 'error' && !result.listError) {
+    const s2 = getDayStatus_(key, date);
+    result.listError = s2 && s2.error ? publicJmsError_(s2.error) : null;
+  }
+  return safeReturn_(result);
 }
 
 // ------------------------------------------------------------------ instalação e diagnóstico

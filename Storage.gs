@@ -225,13 +225,15 @@ function rateFromRow_(r) {
     x.code = code ? String(safeJsonParse_(code[1], code[1])) : null;
   }
   // Números do resumo do dia (Recebimento: deve chegar, não chegadas, chegou… — Config.gs → summary.metrics).
-  const ic = INDICATORS[r[0]];
+  const ic = indicatorCfg_(r[0]);
   if (ic && ic.summary && ic.summary.metrics) {
     const raw = safeJsonParse_(String(r[5] || '{}'), {}) || {};
     x.metrics = {};
     ic.summary.metrics.forEach(k => { x.metrics[k] = raw[k] === undefined || raw[k] === null || raw[k] === '' ? null : num_(raw[k], null); });
     // Expedição: cada rota do dia (próxima parada, código e números) — gráficos de rotas e o download por rota.
     if (ic.summary.sumRecords) x.routes = Array.isArray(raw.routes) ? raw.routes : [];
+    // Sem Movimentação (V3.32): as linhas da tabela do JMS no dia (uma por tipo de bipe) — tabela do painel.
+    if (ic.summary.byType) x.types = Array.isArray(raw.types) ? raw.types : [];
   }
   return x;
 }
@@ -739,9 +741,9 @@ function scanArchive_(indicator, from, to, opts, sink) {
 /** Arquivo diário atual entra direto (colunar); o resto vira linhas re-derivadas e deduplicadas. */
 function dayPayload_(indicator, parts) {
   if (parts.length === 1 && isDayDataset_(parts[0]) && parts[0].dv === DERIVE_VERSION_) return {encoded: parts[0]};
-  if (INDICATORS[indicator] && INDICATORS[indicator].grouped) {
+  if (indicatorCfg_(indicator) && indicatorCfg_(indicator).grouped) {
     // Dia agrupado ainda em pedaços (download que não coube numa execução): soma as combinações.
-    const acc = GroupAccumulator_(INDICATORS[indicator]);
+    const acc = GroupAccumulator_(indicatorCfg_(indicator));
     parts.forEach(x => fileRows_(x).forEach(r => acc.addRow(rederiveRow_(indicator, r))));
     return {encoded: acc.build()};
   }
@@ -1498,7 +1500,7 @@ function processJob_(job, deadline) {
       writeCells_('JOBS', job.rowNum, 6, ['DONE']);
       writeCells_('JOBS', job.rowNum, 9, [new Date(), '']);
     }
-    if (result !== 'skip' && job.type !== 'COMPACT') forgetPause_(INDICATORS[job.indicator].routeKey);
+    if (result !== 'skip' && job.type !== 'COMPACT') forgetPause_(indicatorCfg_(job.indicator).routeKey);
     if ((result === 'done' || result === 'partial') && job.type !== 'COMPACT') bumpDataStamp_(job.indicator, job.date);
     return result;
   } catch (e) {
@@ -1507,7 +1509,7 @@ function processJob_(job, deadline) {
     const st = job.type === 'COMPACT' ? null : getDayStatus_(job.indicator, job.date);
     if (kind === 'AUTH' || kind === 'QUOTA') {
       // Credencial recusada / cota do Google: insistir não resolve. Pausa sem gastar tentativa.
-      setPause_(kind === 'QUOTA' ? '*' : INDICATORS[job.indicator].routeKey, kind, message);
+      setPause_(kind === 'QUOTA' ? '*' : indicatorCfg_(job.indicator).routeKey, kind, message);
       writeCells_('JOBS', job.rowNum, 6, ['PENDING']);
       writeCells_('JOBS', job.rowNum, 9, [new Date(), message]);
       if (job.type !== 'COMPACT') updateDayStatus_(job.indicator, job.date, {error: message});
@@ -1566,7 +1568,7 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   const changed = !prev || prev.errorCount !== summary.errorCount || prev.totalCount !== summary.totalCount;
   if (!changed && st.details === 'COMPLETE') return false;
   if (manual) return true;
-  const cfgR = INDICATORS[indicator] || {};
+  const cfgR = indicatorCfg_(indicator) || {};
   let minH = cfgR.detail && cfgR.detail.refreshHours ? Math.max(cfgR.detail.refreshHours, heavyDetailLimited_(cfgR) ? 12 : 0) : 0;
   // Expedição: dia fechado só muda a situação (chegou/entregue) — atualizado no máximo a cada closedRefreshHours.
   if (cfgR.detail && cfgR.detail.closedRefreshHours && date < isoToday_()) minH = Math.max(minH, cfgR.detail.closedRefreshHours);
@@ -1663,6 +1665,14 @@ function validateDetailTotal_(cfg, indicator, date, total, type) {
     // Detalhe com várias listas (Recebimento): cada lista confere com o número dela no resumo.
     const exp = rate && rate.metrics ? rate.metrics[type] : null;
     if (total === 0 && exp > 0) throw new Error('Detalhe zerado em ' + type + ' apesar do resumo ter ' + exp + ' para ' + indicator + ' ' + date);
+    // V3.32: Histórico da Sem Movimentação — a lista só vale com o total EXATO da linha do Histórico: um número diferente
+    // é lista de outra fonte (ex.: o JMS ignorou os parâmetros do Histórico e mandou a lista do tempo real).
+    if (cfg.detail && cfg.detail.exactTotal && exp !== null && exp !== undefined && Number(total) !== Number(exp)) {
+      const td = (cfg.detail.types || []).filter(x => x.type === type)[0] || {};
+      throw new Error('Lista do Histórico do JMS não confere: a lista "' + (td.column || type) + '" de ' + date + ' veio com ' + total +
+        ' pedidos, mas a linha do Histórico tem ' + exp + '. Importação bloqueada para não mostrar a lista de outra fonte. ' +
+        'Mande a captura do Payload do trajectory_monitor_detail com Fonte de dados = Histórico (sem AuthToken e Cookie).');
+    }
     // Hoje o número cresce entre o resumo (de hora em hora) e o detalhe: só confere dias fechados
     // (contra payload sem filtro, hoje vale o limite de segurança detail.maxPerDay).
     // detail.maxRatio (Fluxo de Lotes, ~1 mil sacas por dia): margem menor que a padrão (3× + 1000).
@@ -2335,7 +2345,8 @@ function queueMissingCompactions_(limit) {
 
 function computeSyncStatus_() {
   const stats = {PENDING: 0, RUNNING: 0, DONE: 0, ERROR: 0};
-  allTabRows_('JOBS').forEach(r => { stats[r[5]] = (stats[r[5]] || 0) + 1; });
+  // V3.32: tarefas de fontes só sob demanda (Histórico da Sem Movimentação) não são da fila dos gatilhos.
+  allTabRows_('JOBS').forEach(r => { if (!INDICATORS[r[2]] && HISTORY_INDICATORS_[r[2]]) return; stats[r[5]] = (stats[r[5]] || 0) + 1; });
   stats.updatedAt = new Date().toISOString();
   return stats;
 }

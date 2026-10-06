@@ -213,6 +213,8 @@ function publicJmsError_(s) {
   if (/timeout|timed out|tempo de resposta/i.test(value)) return 'Tempo de resposta excedido';
   if (/taxa oficial|rateKeys/i.test(value)) return 'Taxa não encontrada no retorno do JMS';
   if (/detalhe zerado/i.test(value)) return 'Detalhe veio vazio (0 registros), mas o resumo tem erros: confira janela de datas/parâmetros do detalhe';
+  // V3.32: lista do Histórico (Sem Movimentação) com outro total: a mensagem inteira (diz o que mandar).
+  if (/Histórico do JMS não confere/i.test(value)) return excerpt(420);
   if (/sem filtro|payload do detalhe/i.test(value)) return 'Detalhe bloqueado: retorno maior que o resumo';
   if (/Nenhuma remessa reconhecida/i.test(value)) return excerpt(420);
   if (/JMS recusou a consulta|código da aplicação/i.test(value)) {

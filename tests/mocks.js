@@ -514,30 +514,55 @@ function makeNoMove(date, seed, scale) {
   }
   return {nm: nm};
 }
-/** Resumo (uma linha por tipo, como a tabela da tela) e lista (um tipo por vez) da foto do momento. */
+/** Linha da tabela do JMS de um tipo de bipe (Tempo real ou Histórico de um dia). */
+function nmRow(code, l, extra) {
+  const rec = Object.assign({scanAgentName: 'SPE', scanAgentCode: '370000', dutyCode: '30001', dutyName: 'SP GRU', modleType: 'modern', operateType: code,
+    total: l.length, halfwayCount: l.length * 7, day1: 0, day2: 0, day3: 0, day4: 0, day5: 0, day6: 0, day7: 0, day10: 0, day14: 0, day30: 0,
+    operateTime: l.map(r => r.operateTime).sort().pop()}, extra || {});
+  l.forEach(r => { rec[nmDayKey(r._age)]++; });
+  rec.dayRate14 = (rec.day14 / l.length * 100).toFixed(2) + '%'; rec.dayRate30 = (rec.day30 / l.length * 100).toFixed(2) + '%';
+  return rec;
+}
+/**
+ * Resumo (uma linha por tipo, como a tabela da tela) e lista (um tipo por vez) da foto do momento.
+ * V3.32 — Histórico (modleType "history", startDate/endDate como na captura): uma linha por dia (dateTime) e tipo, com
+ * números diferentes do tempo real (90% dos pedidos do dia); a lista do Histórico segue as mesmas datas.
+ * options.histDetailIgnored: a lista ignora o Histórico (devolve a do tempo real) — o painel tem de recusar.
+ */
 function noMoveRoute(route, body, dayData, options, ok, respond, size) {
   const days = Object.keys(dayData).filter(k => dayData[k] && dayData[k].nm).sort();
   const nm = (dayData[options.noMoveDate || days[days.length - 1]] || {}).nm || [];
   const clean = r => { const o = Object.assign({}, r); delete o._age; return o; };
+  const hist = body.modleType === 'history';
+  const d0 = String(body.startDate || '').slice(0, 10), d1 = String(body.endDate || '').slice(0, 10);
+  const histOf = d => ((dayData[d] || {}).nm || []).filter((r, i) => i % 10 !== 3);
+  if (hist && (!/^\d{4}-\d{2}-\d{2} 00:00:00$/.test(String(body.startDate)) || !/^\d{4}-\d{2}-\d{2} 23:59:59$/.test(String(body.endDate)))) {
+    return respond(200, {code: 500, msg: '参数错误', fail: true});
+  }
   if (route === 'trajectory_monitor_total') {
     if (body.groupType !== 'center' || !Array.isArray(body.operateType) || body.scanCode !== '30001') return ok([], 0, 1, body.size);
     const recs = [];
+    if (hist) {
+      days.filter(d => d >= d0 && d <= d1).reverse().forEach(d => NM_TYPES.forEach(([code]) => {
+        if (body.operateType.indexOf(code) < 0) return;
+        const l = histOf(d).filter(r => r.operateType.split('/')[0] === code);
+        if (l.length) recs.push(nmRow(code, l, {dateTime: d, modleType: 'history'}));
+      }));
+      const sz = body.size || 20, page = recs.slice((body.current - 1) * sz, body.current * sz);
+      return ok(page.map((r, i) => Object.assign(r, {PAGEHELPER_ROW_ID: (body.current - 1) * sz + i + 1, ROW_ID: (body.current - 1) * sz + i + 1})), recs.length, body.current, sz);
+    }
     NM_TYPES.forEach(([code]) => {
       if (body.operateType.indexOf(code) < 0) return;
       const l = nm.filter(r => r.operateType.split('/')[0] === code);
       if (!l.length) return; // tipo sem pedido parado: a tabela do JMS não mostra a linha
-      const rec = {scanAgentName: 'SPE', scanAgentCode: '370000', dutyCode: '30001', dutyName: 'SP GRU', modleType: 'modern', operateType: code,
-        total: l.length, halfwayCount: l.length * 7, day1: 0, day2: 0, day3: 0, day4: 0, day5: 0, day6: 0, day7: 0, day10: 0, day14: 0, day30: 0,
-        operateTime: l.map(r => r.operateTime).sort().pop()};
-      l.forEach(r => { rec[nmDayKey(r._age)]++; });
-      rec.dayRate14 = (rec.day14 / l.length * 100).toFixed(2) + '%'; rec.dayRate30 = (rec.day30 / l.length * 100).toFixed(2) + '%';
-      recs.push(rec);
+      recs.push(nmRow(code, l));
     });
     return ok(recs.map((r, i) => Object.assign(r, {PAGEHELPER_ROW_ID: i + 1, ROW_ID: i + 1})), recs.length, 1, body.size);
   }
   if (body.queryType !== 2 || !Array.isArray(body.operateType) || body.operateType.length !== 1) return respond(200, {code: 500, msg: '参数错误', fail: true});
   // Sem a Unidade responsável no payload, o JMS devolveria os pedidos de todas as bases (payload sem filtro).
-  let list = nm.filter(r => r.operateType.split('/')[0] === body.operateType[0]);
+  const src = hist && !options.histDetailIgnored ? histOf(d0) : nm;
+  let list = src.filter(r => r.operateType.split('/')[0] === body.operateType[0]);
   if (body.dutyCode !== '30001') list = list.concat(list.map(r => Object.assign({}, r, {billcode: r.billcode + 'X', dutyName: 'OUTRA BASE FICTICIA'})));
   const sz = Math.min(100, size);
   const recs = list.slice((body.current - 1) * sz, body.current * sz).map((r, i) => Object.assign(clean(r), {PAGEHELPER_ROW_ID: (body.current - 1) * sz + i + 1, ROW_ID: (body.current - 1) * sz + i + 1}));

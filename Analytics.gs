@@ -161,7 +161,7 @@ function warnEmptyFields_(indicatorKey, date, emptyDims, sampleRaw, n) {
  * valem para todo o histórico sem precisar baixar tudo de novo.
  */
 function rederiveRow_(indicatorKey, row) {
-  const cfg = INDICATORS[indicatorKey] || {};
+  const cfg = indicatorCfg_(indicatorKey) || {};
   const r = row;
   const fill = fillEmpty_(cfg);
   Object.keys(fill).forEach(k => { if (r[k] === null || r[k] === undefined || String(r[k]).trim() === '') r[k] = fill[k]; });
@@ -518,7 +518,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
 /** Combinações estimadas do período (arquivos diários + dias ainda em pedaços) acima do limite do navegador? */
 function groupedNeedsSummary_(indicatorKey, from, to, params) {
   if (params && params.summary !== undefined && params.summary !== null) return !!params.summary;
-  const v = Number(getProp_('GROUPED_CLIENT_ROWS', '')), ic = INDICATORS[indicatorKey] || {};
+  const v = Number(getProp_('GROUPED_CLIENT_ROWS', '')), ic = indicatorCfg_(indicatorKey) || {};
   // Expedição (uma linha por remessa): um dia inteiro (~120 mil) vai ao navegador — as tabelas mostram todas as remessas.
   const limit = v >= 1 ? v : ic.clientRows || APP_CONFIG.MAX_GROUPED_CLIENT_ROWS;
   const files = dayFilesMap_(indicatorKey, from, to), st = statusMap_(indicatorKey, from, to);
@@ -565,12 +565,36 @@ function resolvePeriod_(params, allRates, indicatorKey) {
   params = params || {};
   const today = isoToday_();
   const latest = allRates.length ? allRates[allRates.length - 1].date : null;
+  // V3.32: Histórico da Sem Movimentação — o período escolhido (Data de início e final) fica em rangeFrom/rangeTo (gráfico
+  // e tabela do período); cartões, gráficos da lista e filtros mostram o dia mais recente do período com linha no JMS.
+  const hc = indicatorCfg_(indicatorKey);
+  if (hc && hc.historyOf) {
+    const rTo = isIso_(params.to) ? (params.to > today ? today : params.to) : today;
+    const rFrom = isIso_(params.from) && params.from <= rTo ? params.from : rTo;
+    if (JTCore_.daysBetween(rFrom, rTo) > 366) throw new Error('Selecione um período de no máximo 366 dias.');
+    const inRange = allRates.filter(r => r.date >= rFrom && r.date <= rTo);
+    const day = inRange.length ? inRange[inRange.length - 1].date : rTo;
+    return {from: day, to: day, today: today, latest: latest, rangeFrom: rFrom, rangeTo: rTo};
+  }
   const to = isIso_(params.to) ? params.to : anchorDate_(indicatorKey, allRates);
   // Foto do momento (Sem Movimentação): um dia por vez — somar fotos de dias diferentes contaria o mesmo pedido várias vezes.
   const from = INDICATORS[indicatorKey] && INDICATORS[indicatorKey].snapshot ? to : isIso_(params.from) ? params.from : to;
   if (from > to) throw new Error('A data inicial não pode ser maior que a final.');
   if (JTCore_.daysBetween(from, to) > 366) throw new Error('Selecione um período de no máximo 366 dias.');
   return {from: from, to: to, today: today, latest: latest};
+}
+
+/**
+ * V3.32: Histórico (Sem Movimentação) — a lista do dia só entra no painel e nos relatórios quando é a da linha atual do
+ * Histórico e veio inteira com o total exato (lista antiga de outra linha, pela metade ou recusada fica de fora).
+ */
+function historyListBlocked_(cfg, indicatorKey, day) {
+  if (!cfg || !cfg.historyOf) return false;
+  const st = getDayStatus_(indicatorKey, day);
+  return !(st && DETAIL_USABLE_.indexOf(st.details) >= 0);
+}
+function blockedArchive_(day) {
+  return {rows: [], loadedDates: [], partialDates: [], staleDates: [], notDownloaded: [day], notLoaded: [], emptyDates: [], readFiles: 0, fullyLoaded: false};
 }
 
 function maxClientRows_() {
@@ -595,7 +619,8 @@ function getDashboardData(indicatorKey, params) {
   const filters = summaryMode ? normalizeFilters_(params && params.filters) : null;
   const builder = summaryMode ? GroupSummarySink_(cfg, filters, APP_CONFIG.GROUPED_TOP_ROWS) : DatasetBuilder_(clientFields_(cfg), fillEmpty_(cfg));
   const maxRows = summaryMode ? Infinity : maxClientRows_();
-  const archive = scanArchive_(indicatorKey, p.from, p.to, summaryMode ? {maxRows: maxRows, deadline: Date.now() + APP_CONFIG.GROUPED_SUMMARY_BUDGET_MS} : {maxRows: maxRows}, builder);
+  const archive = historyListBlocked_(cfg, indicatorKey, p.to) ? blockedArchive_(p.to)
+    : scanArchive_(indicatorKey, p.from, p.to, summaryMode ? {maxRows: maxRows, deadline: Date.now() + APP_CONFIG.GROUPED_SUMMARY_BUDGET_MS} : {maxRows: maxRows}, builder);
   const built = summaryMode ? builder.build() : null;
   const out = safeReturn_({
     meta: {
@@ -619,13 +644,17 @@ function getDashboardData(indicatorKey, params) {
       // V3.24: carimbo dos dados deste painel na hora da leitura (o navegador confere a cada 2 min se mudou).
       stamp: dataStamps_()[indicatorKey] || null,
       // Avaria: situação dos códigos de "Pedidos principais/filhos" no JMS (o painel explica quando falta a taxa da opção).
-      orderKind: cfg.orderKinds ? orderKindStatus_(indicatorKey) : null
+      orderKind: cfg.orderKinds ? orderKindStatus_(indicatorKey) : null,
+      // V3.32: Histórico (Sem Movimentação): o período escolhido; from/to = o dia mostrado (o mais recente com linha).
+      source: cfg.historyOf ? 'hist' : null, rangeFrom: p.rangeFrom || null, rangeTo: p.rangeTo || null
     },
     // Expedição: cada rota do dia (tabela principal do JMS) no período e no período anterior — gráficos de rotas sem filtro.
     routes: cfg.byRoute ? sendRoutesByDate_(allRates, p.from, p.to) : null,
     // metrics: números do resumo do dia (Recebimento: as subcolunas de "Deve chegar" e "Chegou").
     // syncedAt (V3.26): hora em que o número do dia foi consultado no JMS — aparece nos cartões por quantidade.
-    rates: allRates.map(r => r.metrics ? {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics, syncedAt: r.syncedAt}
+    // types (V3.32, Sem Movimentação): as linhas da tabela do JMS de cada dia do período (a usada nos cartões em destaque).
+    rates: allRates.map(r => r.metrics ? Object.assign({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, metrics: r.metrics, syncedAt: r.syncedAt},
+      r.types && r.date >= (p.rangeFrom || p.from) && r.date <= (p.rangeTo || p.to) ? {types: r.types} : {})
       : {date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount}),
     // Ocorrências por turno de cada dia (filtro de turno: parte do turno na taxa, também no dia anterior).
     agg: (cfg.filters || []).indexOf('shift') >= 0 && !cfg.grouped ? getAgg_(indicatorKey, null, null).map(a => ({date: a.date, T1: a.T1, T2: a.T2, T3: a.T3, NA: a.NA, total: a.total})) : [],
@@ -758,7 +787,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
       charts: view.charts, summary: JTCore_.summaryTable(cfg, view.totals), pivots: []
     };
   }
-  const archive = getArchivedRange_(indicatorKey, p.from, p.to, archiveOpts);
+  const archive = historyListBlocked_(cfg, indicatorKey, p.to) ? blockedArchive_(p.to) : getArchivedRange_(indicatorKey, p.from, p.to, archiveOpts);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);

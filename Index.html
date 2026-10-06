@@ -100,6 +100,11 @@
           <label for="indicatorSelect" data-i18n="indicator">Indicador</label>
           <div class="select-wrap"><select id="indicatorSelect"></select></div>
         </div>
+        <!-- V3.32: Sem Movimentação — Fonte de dados (Tempo real / Histórico), como na tela do JMS -->
+        <div class="field field-source hidden" id="sourceField">
+          <label for="sourceSelect" data-i18n="dataSource">Fonte de dados</label>
+          <div class="select-wrap"><select id="sourceSelect"></select></div>
+        </div>
         <div class="field field-results hidden" id="resultsIndicatorField">
           <label for="resultsIndicator" data-i18n="indicator">Indicador</label>
           <div class="select-wrap"><select id="resultsIndicator"></select></div>
@@ -109,11 +114,11 @@
           <div class="select-wrap"><select id="resultsShift"></select></div>
         </div>
         <div class="field field-date">
-          <label for="fromDate" data-i18n="startDate">Data inicial</label>
+          <label for="fromDate" id="fromDateLabel" data-i18n="startDate">Data inicial</label>
           <input type="date" id="fromDate">
         </div>
         <div class="field field-date">
-          <label for="toDate" data-i18n="endDate">Data final</label>
+          <label for="toDate" id="toDateLabel" data-i18n="endDate">Data final</label>
           <input type="date" id="toDate">
         </div>
         <div class="presets" id="presets" role="group" aria-label="Atalhos de período"></div>

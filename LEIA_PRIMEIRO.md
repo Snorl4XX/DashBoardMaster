@@ -1,8 +1,31 @@
-# J&T DASHMASTER V3.31 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.32 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.32 — Sem Movimentação: Fonte de dados (Tempo real ou Histórico com as datas)
+Feito a partir da captura que você mandou com **Fonte de dados = Histórico**: o mesmo `trajectory_monitor_total`, com `modleType: "history"`, `startDate: "AAAA-MM-DD 00:00:00"` e `endDate: "AAAA-MM-DD 23:59:59"`. O JMS devolve uma linha por **dia (dateTime)** e por tipo de bipe.
+
+**Na barra do painel Sem Movimentação** aparece **Fonte de dados**, como na tela do JMS:
+- **Tempo real (padrão):** igual à V3.31. Não tem data (o JMS mostra a situação de agora). Cartões, gráficos e filtros vêm só da linha com o **Horário da última operação** mais recente.
+- **Histórico:** aparecem **Data de início** e **Data final** (atalhos Hoje, Dia anterior, 7 dias e 30 dias; até 31 dias). Ao clicar em **Aplicar**:
+  1. Uma consulta ao JMS traz o período inteiro, mais o dia anterior ao início (para a comparação "Dia anterior").
+  2. Em cada dia vale a **linha do horário mais recente**, como no tempo real. No exemplo da captura (06/10), é **Chegadas ao centro, 05/10 07:59:20 → 1.423 pedidos** (+14 dias = 2 → taxa 0,14%).
+  3. **Cartões, gráficos da lista e filtros** mostram o **dia mais recente do período** que tem linha no JMS. O cartão vermelho diz qual dia e qual linha.
+  4. O gráfico **Histórico diário** e a tabela **Dados gerais** mostram o período escolhido.
+  5. Em seguida, o painel baixa a **lista** do "Total de pedidos sem movimentação" dessa linha, com os mesmos parâmetros do Histórico.
+- Trocar de painel volta para Tempo real.
+
+**Tabela do JMS (nova, no fim do painel, nos dois modos):** as linhas da tela do JMS (uma por tipo de bipe e por dia), com a linha usada nos cartões em destaque. Dá para conferir com a tela qual linha o painel pegou.
+
+**A lista do Histórico só aparece se tiver exatamente o total da linha.** A sua captura trouxe só o resumo, sem a lista. O painel pede a lista com os parâmetros do Histórico (`modleType: "history"` e as mesmas datas). Se o JMS devolver outro total (por exemplo, a lista do tempo real), a lista é **recusada**: o painel mostra os cartões do resumo e o motivo, com os dois números. Nesse caso, mande o **Payload do `trajectory_monitor_detail`** com Fonte de dados = Histórico (clique no número de "Total de pedidos sem movimentação"), sem o AuthToken e o Cookie.
+
+**Cota do Google:** o Histórico é consultado **só pelo painel**, quando você escolhe Histórico e as datas. Os gatilhos (fila, sincronização de hora em hora, autocorreção) nunca consultam o Histórico, então a cota diária dos gatilhos (90 min na conta Gmail) continua igual à V3.31.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão).
+
+**Testes:** 437 verificações (payloads iguais à captura, linha mais recente da captura, uma consulta por período, lista conferida, lista com outro total recusada, nada do Histórico nos gatilhos), mais o painel no navegador em português, chinês e na largura de celular.
 
 ## V3.31 — Sem Movimentação em tempo real: tudo da linha mais recente
 Conforme o PDF "novas informações pra sem movimentação":
@@ -15,7 +38,7 @@ Conforme o PDF "novas informações pra sem movimentação":
 - **turnos, "com mais", gráficos, filtros e tabela:** a lista do Total dessa linha;
 - o gráfico "Tipo de bipe" não usa mais os totais das outras linhas.
 
-**Histórico (Fonte de dados = Histórico, com Data inicial e final):** ainda não está no painel. A captura não mostra o que o JMS manda quando se escolhe Histórico e as datas: os nomes dos campos e o valor do `modleType`. Em vez de adivinhar (e arriscar mostrar o tempo real como se fosse histórico), o painel espera essa captura.
+**Histórico (Fonte de dados = Histórico, com Data inicial e final):** entrou na V3.32, depois da captura.
 
 **Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão).
 
@@ -1192,7 +1215,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **424 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **437 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
