@@ -544,7 +544,9 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   }
   if (!records.length && json && json.data && !Array.isArray(json.data) && summaryHasMetric_(json.data, cfg)) records = [json.data];
   if (!records.length) return {indicator: indicatorKey, date: isoDate, empty: true};
-  const sameDate = records.filter(r => {
+  // V3.36: foto do momento (Sem Movimentação, Tempo real) não tem data — a tabela é a de AGORA, mesmo que a linha traga outra
+  // data (antes, uma linha com a data de ontem fazia a consulta inteira ser descartada e o painel ficava com a foto antiga).
+  const sameDate = cfg.snapshot ? records.slice() : records.filter(r => {
     const dateValue = firstValue_(r, ['dateTime', 'dt', 'sendDate', 'scanTime', 'countTime', 'statisticalDate'], null);
     return !dateValue || normalizeDateFromValue_(dateValue, isoDate) === isoDate;
   });
@@ -662,11 +664,14 @@ function typedSummary_(cfg, indicatorKey, isoDate, records) {
     allTotal += m.total || 0;
     return Object.assign({op: op, time: String(rd([bt.timeField]).value || '').trim(), typeIdx: td ? types.indexOf(td) + 1 : null}, m);
   });
-  // Linha com o "Horário da última operação" mais PRÓXIMO DE AGORA (V3.34: o horário é lido como data e hora, mesmo com
-  // outra grafia; empate: a de mais pedidos). Sem horário em nenhuma: a de mais pedidos.
-  const now = opTimeNum_(Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm:ss'));
-  const dist = r => { const n = opTimeNum_(r.time); return n === null ? Infinity : Math.abs(opTimeSec_(now) - opTimeSec_(n)); };
-  const pick = rows.slice().sort((a, b) => (dist(a) - dist(b)) || (b.total || 0) - (a.total || 0))[0];
+  // V3.36 (pedido): vale a linha MAIS NOVA — o maior "Horário da última operação" da tabela do JMS; as mais antigas são
+  // ignoradas. (A V3.34 usava a "mais próxima do relógio do Brasil": com o horário do JMS adiantado — outro fuso —, a mais
+  // próxima era a mais ANTIGA.) Horário lido como data e hora, mesmo com outra grafia. Só um horário absurdo (mais de 1 dia
+  // à frente de agora: dado inválido) fica de fora. Empate: a de mais pedidos. Sem horário em nenhuma: a de mais pedidos.
+  const limit = opTimeSec_(opTimeNum_(Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm:ss'))) + 86400;
+  const tsec = r => { const n = opTimeNum_(r.time); return n === null ? null : opTimeSec_(n); };
+  const valid = rows.filter(r => tsec(r) !== null && tsec(r) <= limit), pool = valid.length ? valid : rows;
+  const pick = pool.slice().sort((a, b) => ((tsec(b) || 0) - (tsec(a) || 0)) || (b.total || 0) - (a.total || 0))[0];
   const chosen = bt.pickLatest ? pick : null;
   const out = {};
   (bt.sums || []).forEach(k => { out[k] = chosen ? chosen[k] || 0 : rows.reduce((a, r) => a + (r[k] || 0), 0); });

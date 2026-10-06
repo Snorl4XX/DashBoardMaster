@@ -559,7 +559,8 @@ function noMoveRoute(route, body, dayData, options, ok, respond, size) {
       if (body.operateType.indexOf(code) < 0) return;
       const l = nm.filter(r => r.operateType.split('/')[0] === code);
       if (!l.length) return; // tipo sem pedido parado: a tabela do JMS não mostra a linha
-      recs.push(nmRow(code, l));
+      // options.nmDateTime: a linha do tempo real com uma data (ex.: a de ontem) — o painel não pode descartar a tabela.
+      recs.push(nmRow(code, l, options.nmDateTime ? {dateTime: options.nmDateTime} : null));
     });
     return ok(recs.map((r, i) => Object.assign(r, {PAGEHELPER_ROW_ID: i + 1, ROW_ID: i + 1})), recs.length, 1, body.size);
   }

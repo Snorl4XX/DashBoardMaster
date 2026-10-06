@@ -134,7 +134,7 @@
       tcPartial: 'prévia: o download do dia ainda não terminou', tcShare: '{p} de participação',
       metricsOfficial: 'Números oficiais do JMS (tabela principal)', pctOf: 'Cálculo: {a} ÷ {b}', sumRows: 'Soma', sumCount: '{n}',
       hmSynced: 'Número do JMS consultado em {t}', hmSyncedPeriod: 'Números do JMS consultados até {t}',
-      hmRefTime: 'Linha do JMS com o horário mais recente: {type} · {t}', hmSnapshot: 'Foto do momento no JMS: um dia por vez',
+      hmRefTime: 'Linha mais nova do JMS: {type} · {t}', hmRefOf: '(das {n} linhas da tabela; as mais antigas são ignoradas)', hmSnapshot: 'Foto do momento no JMS: um dia por vez',
       dataSource: 'Fonte de dados', srcLive: 'Tempo real', srcHist: 'Histórico', histStart: 'Data de início', histEnd: 'Data final',
       histFetching: 'Buscando o Histórico no JMS ({a} a {b})…', histNoRows: 'O JMS não tem linha do Histórico entre {a} e {b}.',
       histListFetching: 'Baixando a lista do Histórico de {d} (Total de pedidos sem movimentação da linha)…',
@@ -271,7 +271,7 @@
       tcPartial: '预览：当日明细尚未下载完', tcShare: '占比 {p}',
       metricsOfficial: 'JMS官方数字（主表）', pctOf: '计算：{a} ÷ {b}', sumRows: '合计', sumCount: '{n}',
       hmSynced: 'JMS 数字获取时间：{t}', hmSyncedPeriod: 'JMS 数字最近获取：{t}',
-      hmRefTime: 'JMS 最新操作时间最近的行：{type} · {t}', hmSnapshot: 'JMS 实时快照：每次显示一天',
+      hmRefTime: 'JMS 最新的一行：{type} · {t}', hmRefOf: '（表格共 {n} 行；较早的行不计）', hmSnapshot: 'JMS 实时快照：每次显示一天',
       dataSource: '数据来源', srcLive: '实时', srcHist: '历史', histStart: '开始日期', histEnd: '结束日期',
       histFetching: '正在从 JMS 查询历史（{a} 至 {b}）…', histNoRows: 'JMS 在 {a} 至 {b} 之间没有历史数据。',
       histListFetching: '正在下载 {d} 的历史明细（该行的断更件总数）…',
@@ -1713,8 +1713,9 @@
       var rt = activeRates().filter(function (r) { return r.date === state.to && r.metrics && isNum(r.metrics.refTime); })[0];
       var rs = rt ? String(Math.round(Number(rt.metrics.refTime))) : '', ri = rt && isNum(rt.metrics.refType) ? Number(rt.metrics.refType) : 0;
       var rtype = ri && cfg().refTypes && cfg().refTypes[ri - 1] ? vlabel('scanType', cfg().refTypes[ri - 1]) : '—';
+      var nRows = rt && rt.types ? rt.types.length : 0;
       if (rs.length === 14) syncLine += '<div class="kpi-sub hm-sync">' + esc(t(hist ? 'hmRefTimeHist' : 'hmRefTime', {type: rtype, t: rs.slice(6, 8) + '/' + rs.slice(4, 6) + '/' + rs.slice(0, 4) + ' ' +
-        rs.slice(8, 10) + ':' + rs.slice(10, 12) + ':' + rs.slice(12, 14)})) + '</div>';
+        rs.slice(8, 10) + ':' + rs.slice(10, 12) + ':' + rs.slice(12, 14)})) + (nRows > 1 ? ' ' + esc(t('hmRefOf', {n: nRows})) : '') + '</div>';
       if (!hist && !isNum(cur) && state.to === ((state.boot && state.boot.today) || state.to)) syncLine += '<div class="kpi-sub">' + esc(t('hmSnapWait')) + '</div>';
       if (hist && state.hist.from && state.hist.from !== state.hist.to) {
         syncLine += '<div class="kpi-sub hm-sync">' + esc(t('histRangeNote', {a: fmtDate(state.hist.from, true), b: fmtDate(state.hist.to, true), d: fmtDate(state.to, true)})) + '</div>';

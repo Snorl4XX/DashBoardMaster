@@ -2753,4 +2753,25 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'lista com vários tipos juntos: painel e relatório só com a linha dos cartões', {n3: rows3.length, n2: rows2.length});
 }
 
+// ---------- V3.36: Sem Movimentação — a linha MAIS NOVA (print do usuário: 08:37:11, 08:37:13, 08:57:27, 08:59:50) ----------
+{
+  const T = ctx.isoToday_(), cfgNm = ctx.getIndicatorConfig_('no_move');
+  const row = (op, t, total) => ({operateType: op, operateTime: t, total: total, day1: total});
+  const print = [row('发件扫描', '2026-10-05 08:37:11', 6227), row('问题件扫描', '2026-10-05 08:37:13', 6036),
+    row('建包扫描', '2026-10-05 08:57:27', 1057), row('中心到件', '2026-10-05 08:59:50', 1423)];
+  const sP = ctx.typedSummary_(cfgNm, 'no_move', T, print);
+  check(sP.totalCount === 1423 && sP.raw.refTime === 20261005085950 && cfgNm.detail.types[sP.raw.refType - 1].op === '中心到件',
+    'print do usuário: vale só a linha mais nova (08:59:50), as mais antigas são ignoradas', sP.raw);
+  // Horário do JMS adiantado (outro fuso, ~11 h à frente do Brasil): continua a mais NOVA (a V3.34 pegava a mais antiga).
+  const ahead = h => ctx.Utilities.formatDate(new Date(Date.now() + h * 3600000), ctx.tz_(), 'yyyy-MM-dd HH:mm:ss');
+  const sA = ctx.typedSummary_(cfgNm, 'no_move', T, [row('发件扫描', ahead(10.5), 500), row('问题件扫描', ahead(10.9), 70), row('建包扫描', ahead(9), 900)]);
+  check(sA.totalCount === 70 && cfgNm.detail.types[sA.raw.refType - 1].op === '问题件扫描',
+    'horário do JMS em outro fuso (à frente do Brasil): continua a linha mais nova, nunca a mais antiga', sA.raw.refTimeText);
+  // Linha do tempo real com a data de ontem: a tabela de agora não é descartada.
+  const cD = freshCtx({[T]: makeDay(T, 66)}, {nmDateTime: ctx.addDaysIso_(T, -1)});
+  const rD = cD.refreshNow('no_move', T, T);
+  check(rD.updated === 1 && !!cD.getRateDay_('no_move', T) && rD.listNow === 'done',
+    'Tempo real com a data de ontem na linha do JMS: a foto de agora é gravada (antes era descartada)', rD);
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

@@ -1,8 +1,24 @@
-# J&T DASHMASTER V3.35 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.36 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.36 — Sem Movimentação: só a linha MAIS NOVA da tabela do JMS
+**O pedido (print com as 4 linhas: 08:37:11, 08:37:13, 08:57:27 e 08:59:50):** usar só a linha atual, a de **08:59:50**, e ignorar as mais antigas.
+
+**O que estava errado**
+- **Escolha da linha:** desde a V3.34, o painel escolhia a linha com o horário "mais próximo do relógio do Brasil". Se o horário do JMS está adiantado (outro fuso), todas as linhas ficam "no futuro" e a mais próxima do relógio é a **mais antiga**.
+- **Data da linha:** se a linha do tempo real vinha com uma data diferente da de hoje, a consulta inteira era descartada e o painel ficava com a foto antiga.
+
+**Agora**
+- **Uma linha só:** vale a linha com o **maior "Horário da última operação"** (a mais nova), em qualquer fuso. As outras são ignoradas: cartões, gráficos, filtros e a lista de pedidos vêm só dessa linha. Só um horário absurdo (mais de 1 dia à frente) fica de fora, como dado inválido.
+- **Sem descartar a tabela:** no Tempo real, a tabela do JMS vale sempre como a de agora, mesmo que a linha traga outra data.
+- **Cartão vermelho:** "Linha mais nova do JMS: tipo · horário (das N linhas da tabela; as mais antigas são ignoradas)".
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão).
+
+**Testes:** 451 verificações, incluindo as 4 linhas do seu print (fica a de 08:59:50), o JMS com horário de outro fuso e a linha com a data de ontem.
 
 ## V3.35 — Avaria: a taxa é sempre a do JMS (o painel não calcula)
 **O pedido:** seguir o JMS. A taxa de cada opção (Todos, Pedido principal, Pedido secundário) tem que ser o **总破损率** da tabela do JMS, nunca uma conta do painel.
@@ -1272,7 +1288,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **448 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **451 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
