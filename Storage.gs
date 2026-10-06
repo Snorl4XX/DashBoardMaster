@@ -1302,11 +1302,17 @@ function migrateGroupedLayout_() {
  * V3.11.4: a regra da V3.11.2 ("tem dia com mais de 3 dias = já tem histórico") falhava quando a Avaria
  * já estava instalada havia alguns dias só com a revalidação horária — por isso a propriedade nova.
  */
-/** Foto do momento (Sem Movimentação): a de hoje entra na fila já (sem esperar a sincronização de hora em hora). */
+/**
+ * Foto do momento (Sem Movimentação): a 1ª do dia entra na fila já (instalação, virada do dia), sem esperar a sincronização
+ * de hora em hora. Uma vez por dia (propriedade SNAPSHOT_DAY_<INDICADOR>): o trabalhador roda a cada 5 min e ler a aba
+ * RATES em toda execução gastava cota à toa.
+ */
 function queueSnapshotsToday_() {
-  const today = isoToday_(), pauses = activePauses_();
-  const jobs = Object.keys(INDICATORS).filter(k => INDICATORS[k].snapshot && !getRateDay_(k, today) && !pauseFor_(INDICATORS[k].routeKey, pauses))
-    .map(k => ['SUMMARY', k, today, 0]);
+  const today = isoToday_(), keys = Object.keys(INDICATORS).filter(k => INDICATORS[k].snapshot && getProp_('SNAPSHOT_DAY_' + k.toUpperCase(), '') !== today);
+  if (!keys.length) return 0;
+  const pauses = activePauses_();
+  const jobs = keys.filter(k => !pauseFor_(INDICATORS[k].routeKey, pauses)).map(k => ['SUMMARY', k, today, 0]);
+  keys.forEach(k => setProp_('SNAPSHOT_DAY_' + k.toUpperCase(), today));
   return jobs.length ? enqueueJobs_(jobs, {}) : 0;
 }
 function queueNewIndicatorsHistory_() {
