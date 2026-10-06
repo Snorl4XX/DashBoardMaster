@@ -1,8 +1,28 @@
-# J&T DASHMASTER V3.29 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.30 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.30 — Sem Movimentação: os dados aparecem ao abrir o painel, sem depender da fila
+**Como o painel pega o número (o passo a passo que você descreveu, igual desde a V3.29):**
+1. Consulta a tabela da tela com o filtro **Tipo da última operação** = Bipe de expedição, Bipe de pacote problemático, Chegadas ao centro, Encomenda inserida em lote, Entrada no galpão de pacote não expedido e Encomenda retirada do lote (`trajectory_monitor_total`).
+2. Olha a coluna **Horário da última operação** e fica com a **linha mais recente**.
+3. Dessa linha, pega o **Total de pedidos sem movimentação** e abre a lista desse número (`trajectory_monitor_detail`, `queryType: 2`), que é a tabela de onde saem os filtros, os cartões, os gráficos e a tabela do painel.
+
+**Por que continuava sem valores.** Tudo isso só rodava na **fila dos gatilhos** do Google. Na conta Gmail os gatilhos têm 90 min por dia. Quando a fila tem trabalho acumulado (histórico e reconsultas das versões anteriores), esses 90 min acabam e o Google bloqueia todos os gatilhos até a meia-noite. A Sem Movimentação só tem "hoje", então ficava vazia o dia inteiro. Na simulação da conta Gmail, no dia da instalação nenhum painel atualizava entre 6h e 22h.
+
+**Agora**
+- **Ao abrir o painel sem a foto de hoje**, ele busca sozinho no JMS os passos 1 a 3: resumo e lista. Faz isso uma vez por dia em cada aba aberta.
+- **O botão Atualizar** faz o mesmo na hora (antes, a lista ficava esperando a fila).
+- Essas buscas são feitas pela página. Elas **não gastam a cota diária dos gatilhos**, então funcionam mesmo com a fila parada.
+- Na fila, os trabalhos da Sem Movimentação vêm **antes** dos outros (são poucas consultas).
+
+**Cota do Google (conta Gmail, `node tests/simulacao_cotas.js consumer 14 4`):** igual à V3.29: do 3º dia em diante, **88,9 min por dia de 90**, nenhuma execução bloqueada. A busca feita ao abrir o painel e pelo Atualizar não entra nessa conta.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão). Depois abra o painel Sem Movimentação: a busca leva alguns segundos (mensagem "Buscando no JMS a foto de agora").
+
+**Testes:** 423 verificações, incluindo abrir o painel sem a foto de hoje e com a fila parada (navegador).
 
 ## V3.29 — Sem Movimentação: a linha do horário mais recente, painel com dados desde a instalação
 **O que você viu (diagnóstico de 05/10):**
@@ -1155,7 +1175,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **422 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **423 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.
