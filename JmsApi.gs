@@ -567,15 +567,17 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
     // Tela sem taxa pronta (Recebimento): taxa = erros ÷ total (não chegadas ÷ deve chegar), em %.
     let rate = cfg.summary.rateFromCounts ? (total > 0 && errors !== null ? errors / total * 100 : (total === 0 ? 0 : null))
       : parsePercent_(rd(cfg.summary.rateKeys).value);
-    // V3.33 (Avaria): a taxa da tela é a da própria linha (总破损票数 ÷ Qtd processada). Com "Pedido principal", um dos
-    // campos de taxa vem com a Qtd processada de Todos — o painel mostrava a taxa de Todos (189,72 no lugar de 190,51).
+    // V3.35 (Avaria): o 总破损率 da tela é a taxa da própria linha. Com "Pedido principal", um dos campos de taxa do JMS vem
+    // com a Qtd processada de Todos (o painel mostrava a taxa de Todos: 189,72 no lugar de 190,51). Vale o campo do JMS que
+    // é a taxa da linha; nenhum é: o 1º de rateKeys, como sempre. O painel NUNCA calcula a taxa (só escolhe o campo).
     const rf = cfg.summary.rateFromRow;
+    let rateField = null;
     if (rf && !cfg.summary.rateFromCounts && errors !== null && total > 0) {
-      const exp = errors / total * rf.scale;
-      const match = cfg.summary.rateKeys.map(k => parsePercent_(rd([k]).value)).filter(v => v !== null && Math.abs(v - exp) <= 0.011)[0];
-      if (match !== undefined) rate = match;
-      else if (extra && Object.keys(extra).length) rate = Math.round(exp * 100) / 100;
+      const own = errors / total * rf.scale;
+      rateField = cfg.summary.rateKeys.filter(k => { const v = parsePercent_(rd([k]).value); return v !== null && Math.abs(v - own) <= 0.011; })[0] || null;
+      if (rateField) rate = parsePercent_(rd([rateField]).value);
     }
+    if (rf) r = Object.assign({}, r, {rateField: rateField || rd(cfg.summary.rateKeys).key || null});
     return {rate: rate, errors: errors, total: total, raw: r};
   });
   let rate, errors, total;

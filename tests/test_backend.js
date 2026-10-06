@@ -2672,13 +2672,35 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(all.rate === 189.72 && main && main.rate === 190.51 && main.errorCount === 67 && main.totalCount === 351683 && cardsMain.rate === 190.51 &&
     dashS.rateVariants.main.filter(x => x.date === D19)[0].rate === 190.51,
     'tela de 06/10: Pedido principal = 190,51 (67 ÷ 351.683), não a taxa de Todos (189,72)', {all: all.rate, main: main && main.rate, card: cardsMain.rate});
-  // Linha gravada pela V3.32 com a taxa de Todos (campo do JMS com a Qtd de Todos): corrigida na leitura, sem consultar de novo.
-  const D20 = ctx.addDaysIso_(D19, 1);
-  cS.appendRow_('RATES', ['damage:main', D20, 189.72, 67, 351683, JSON.stringify({official: true, cv: 3, code: 'MAIN', allSig: '67/353152'}), new Date()]);
+  // V3.35: linha gravada até a V3.34 (cv 3, podia ser o campo com a Qtd de Todos) não vale; o painel consulta o JMS na hora.
+  cS.tab_('RATES').data.forEach(r => { if (r && r[0] === 'damage:main') { r[2] = 189.72; r[5] = String(r[5]).replace('"cv":4', '"cv":3'); } });
   cS.TAB_CACHE_ = {}; cS.TAB_INDEX_ = {};
-  const fixed = cS.getRateDay_('damage:main', D20);
-  check(fixed && fixed.rate === 190.51 && cS.getRateDay_('damage', D19).rate === 189.72,
-    'taxa do Pedido principal gravada até a V3.32 corrigida na leitura (190,51); Todos continua a do JMS', fixed);
+  const oldGone = !cS.getRateDay_('damage:main', D19);
+  const nowR = cS.refreshOrderKindsNow('damage', D19, D19);
+  cS.TAB_CACHE_ = {}; cS.TAB_INDEX_ = {};
+  const fresh = cS.getRateDay_('damage:main', D19);
+  check(oldGone && nowR.done === 1 && fresh && fresh.rate === 190.51 && cS.getRateDay_('damage', D19).rate === 189.72 &&
+    /"rateField":"breakageRate"/.test(cS.allTabRows_('RATES').filter(r => r[0] === 'damage:main').slice(-1)[0][5]),
+    'taxa da opção gravada até a V3.34 não vale; o painel consulta o JMS na hora (campo do JMS da linha: 190,51)', {oldGone, nowR, fresh: fresh && fresh.rate});
+  // Botão Atualizar: consulta também a taxa de cada opção no JMS (antes só Todos).
+  const fR = cS.__state.fetches.length;
+  const rR = cS.refreshNow('damage', D19, D19);
+  check(rR.optionsUpdated === 1 && cS.__state.fetches.slice(fR).some(f => f.payload && f.payload.mainSubCode === 'MAIN'),
+    'Avaria: o Atualizar consulta no JMS também a taxa de Pedido principal/secundário', rR);
+  // Nenhum campo de taxa do JMS é a conta da linha: vale o 总破损率 do JMS (breakageRateTotal) — o painel não calcula.
+  const cO = freshCtx(mkDay(), {optionBases: {main: 351683, sub: 1469}, dmRateOverride: {total: 111.11, one: 222.22}});
+  cO.queueHistory(D19, D19, true);
+  runAll(cO, 12);
+  const mO = cO.getRateDay_('damage:main', D19);
+  check(mO && mO.rate === 111.11 && mO.errorCount === 67 && mO.totalCount === 351683,
+    'Avaria: sem campo que seja a conta da linha, a taxa é a do JMS (总破损率 = breakageRateTotal), nunca uma conta do painel', mO);
+  // Migração V3.35: todos os dias da Avaria consultados de novo (opções com o campo certo).
+  const cM = freshCtx(mkDay(), {optionBases: {main: 351683, sub: 1469}});
+  cM.queueHistory(D19, D19, true); runAll(cM, 12);
+  delete cM.__state.props.MIGRATION_V335;
+  const nM = cM.migrateToV335_();
+  check(nM >= 1 && cM.pendingJobs_().some(j => j.indicator === 'damage' && j.date === D19 && j.type === 'SUMMARY') && cM.migrateToV335_() === 0,
+    'migração V3.35: dias da Avaria consultados de novo uma vez', {nM});
   // Diagnóstico mostra os dois campos do JMS e a conta da linha.
   const dgS = cS.diagnosticarAvaria(D19);
   check(/breakageRateTotal 189,72 · breakageRate 190,51 · conta da linha 190,51/.test(dgS.texto) && /总破损率 do painel 190,51/.test(dgS.texto),

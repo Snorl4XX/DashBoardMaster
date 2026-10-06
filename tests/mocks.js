@@ -303,7 +303,9 @@ function fakeJms(dayData, options) {
         // Com a opção, a coluna "Taxa…" (breakageRate) usa o volume de Todos; a 总破损率 (breakageRateTotal), o da opção.
         const rateOther = kind ? Math.round(list.length / d.dmBase * 1e6 * 100) / 100 : rate;
         // options.dmRateSwap: o contrário (tela de 06/10: com "Pedido principal", o breakageRateTotal vem com a Qtd de Todos).
-        const rTot = options.dmRateSwap ? rateOther : rate, rOne = options.dmRateSwap ? rate : rateOther;
+        let rTot = options.dmRateSwap ? rateOther : rate, rOne = options.dmRateSwap ? rate : rateOther;
+        // options.dmRateOverride: com a opção, campos de taxa que não são a conta da linha (o painel usa o do JMS, sem calcular).
+        if (kind && options.dmRateOverride) { rTot = options.dmRateOverride.total; rOne = options.dmRateOverride.one; }
         return ok([{id: '97308731485720' + date.slice(8), serialNum: '1', statisticalDate: date, agentAreaCode: '370000', agentAreaName: 'SPE',
           networkCode: '30001', networkName: 'SP GRU', operaNumber: base, breakageTicketNumber: list.length, breakageRate: rOne,
           breakageAmount: list.reduce((a, r) => a + r.adjudicationAmount, 0), breakageNumberTotal: list.length, breakageRateTotal: rTot,

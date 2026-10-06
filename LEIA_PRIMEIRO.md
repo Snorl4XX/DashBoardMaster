@@ -1,8 +1,24 @@
-# J&T DASHMASTER V3.34 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.35 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.35 — Avaria: a taxa é sempre a do JMS (o painel não calcula)
+**O pedido:** seguir o JMS. A taxa de cada opção (Todos, Pedido principal, Pedido secundário) tem que ser o **总破损率** da tabela do JMS, nunca uma conta do painel.
+
+**O que mudou**
+- **Taxa:** sempre um número que o JMS devolve. Com "Pedido principal/secundário", o JMS manda dois campos de taxa: um com a Qtd processada de Todos (por isso aparecia a taxa de Todos) e outro com a da opção, que é o 总破损率 da tela. O painel usa o campo do JMS que é a taxa da linha da opção. Se nenhum for, usa o `breakageRateTotal` do JMS.
+- **O que saiu da V3.33:** a conta própria e a correção na leitura.
+- **Taxas antigas das opções:** as gravadas até a V3.34 não valem mais e são consultadas de novo no JMS (fila, uma vez). Enquanto isso:
+  - ao escolher "Pedido principal" ou "Pedido secundário", o painel consulta **na hora** no JMS os dias abertos e o dia anterior;
+  - o botão **Atualizar** também consulta a taxa de cada opção (antes, só Todos).
+- **Filtro:** "Pedidos principais/filhos" sempre tem **Pedido principal** e **Pedido secundário**, como o JMS, mesmo com 0 avarias numa delas.
+- **Cartão da taxa do dia:** mostra a linha do JMS, para conferir com a tela: **Qtd processada · 总破损票数 · 总破损率** da opção escolhida.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão).
+
+**Testes:** 448 verificações, incluindo: tela de 06/10 (Todos 189,72; principal 190,51, pelo campo do JMS); nenhum campo bate (taxa = breakageRateTotal do JMS, sem conta); taxa antiga não vale e é consultada na hora; Atualizar consulta as opções.
 
 ## V3.34 — Sem Movimentação em Tempo real: UMA linha só, a mais próxima de agora, buscada na hora
 **O pedido:** no Tempo real, só **uma linha** da tabela do JMS, a do **Horário da última operação mais próximo de agora**. Essa tabela muda a cada bipe (o horário anda quando o pedido é encontrado). Nada de todas as linhas juntas nem de dias anteriores.
@@ -37,7 +53,7 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 **Causa:** o JMS manda dois campos de taxa (`breakageRateTotal` e `breakageRate`). O painel usava sempre o primeiro. Com "Pedido principal", um deles vem calculado com a Qtd processada de **Todos**: 67 ÷ ~353,2 mil = 189,72, o número de Todos. A tela mostra a taxa da **própria linha**: 67 ÷ ~351,7 mil = 190,51.
 
 **Agora**
-- A taxa de cada opção é a da própria linha: **总破损票数 ÷ Qtd processada × 1.000.000**. Vale o campo do JMS que bate com essa conta; se nenhum bater, a própria conta, que é o número da tela. Em Todos nada muda (os dois campos são iguais e batem com a conta).
+- A taxa de cada opção é a da própria linha: **总破损票数 ÷ Qtd processada × 1.000.000**. Vale o campo do JMS que bate com essa conta; se nenhum bater, a própria conta, que é o número da tela. Em Todos nada muda (os dois campos são iguais e batem com a conta). *(V3.35: a conta própria e a correção na leitura saíram — a taxa é sempre um campo do JMS.)*
 - As taxas do Pedido principal já gravadas pelas versões anteriores são **corrigidas na leitura**, sem consultar o JMS de novo. O painel mostra o número certo logo depois de publicar.
 - `diagnosticarAvaria()` mostra, para Todos e para cada opção: os dois campos de taxa do JMS, a conta da linha e a taxa que o painel usa.
 
@@ -1256,7 +1272,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **445 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **448 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

@@ -220,16 +220,10 @@ function rateFromRow_(r) {
   // V3.27: e as gravadas antes dos códigos da tela (sem "cv":3 — códigos 1/2/0/3 que o JMS não usa) também não valem.
   if (String(r[0]).indexOf(':') > 0) {
     const txt = String(r[5] || ''), sig = /"allSig":"([^"]*)"/.exec(txt), code = /"code":("(?:[^"\\]|\\.)*"|[^,}]+)/.exec(txt);
-    x.estimated = /"estimated":true/.test(txt) || !/"cv":3/.test(txt);
+    // V3.35: e as gravadas até a V3.34 (sem "cv":4) podem ter o campo de taxa com a Qtd de Todos: consultadas de novo no JMS.
+    x.estimated = /"estimated":true/.test(txt) || !/"cv":4/.test(txt);
     x.allSig = sig ? sig[1] : null;
     x.code = code ? String(safeJsonParse_(code[1], code[1])) : null;
-    // V3.33: taxa da opção = a da própria linha (总破损票数 ÷ Qtd processada), como a tela. Linhas gravadas até a V3.32 com o
-    // campo calculado pela Qtd de Todos (Pedido principal 189,72 no lugar de 190,51) são corrigidas na leitura.
-    const bc = INDICATORS[String(r[0]).split(':')[0]], rf = bc && bc.summary && bc.summary.rateFromRow;
-    if (rf && x.rate !== null && errors !== null && total > 0) {
-      const exp = errors / total * rf.scale;
-      if (Math.abs(x.rate - exp) > 0.011) x.rate = Math.round(exp * 100) / 100;
-    }
   }
   // Números do resumo do dia (Recebimento: deve chegar, não chegadas, chegou… — Config.gs → summary.metrics).
   const ic = indicatorCfg_(r[0]);
@@ -392,7 +386,8 @@ function syncOrderKindRates_(indicatorKey, date, opts) {
     if (map[kind] === undefined) return;
     const r = fetchSummaryDay_(indicatorKey, date, orderKindPayload_(map, kind));
     // allSig: números de Todos nesta consulta — o resumo seguinte só consulta as opções de novo se Todos mudar.
-    const raw = {official: true, cv: 3, code: map[kind], allSig: all.errorCount + '/' + all.totalCount};
+    // cv: 4 (V3.35) = taxa no campo do JMS que é a da linha da opção; rateField diz qual.
+    const raw = {official: true, cv: 4, code: map[kind], allSig: all.errorCount + '/' + all.totalCount, rateField: r.raw && r.raw.rateField || null};
     if (kind === listKind) {
       const cnt = r.empty ? 0 : (r.errorCount || 0);
       let ws = cnt > 0 && cnt <= 3000 ? fetchOrderKindWaybills_(indicatorKey, date, map, kind) : [];
@@ -421,7 +416,7 @@ function orderKindTags_(indicatorKey, from, to) {
       if ((from && d < from) || (to && d > to)) return;
       const raw = safeJsonParse_(String(r[5] || '{}'), {}) || {};
       // V3.27: só listas baixadas com os códigos da tela.
-      if (raw.cv !== 3 || !Array.isArray(raw.waybills)) return;
+      if ((raw.cv !== 3 && raw.cv !== 4) || !Array.isArray(raw.waybills)) return;
       if (!out[d] || kind === 'sub') out[d] = {kind: kind, w: raw.waybills};
     });
   });
@@ -1379,7 +1374,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
   try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
@@ -2266,6 +2261,23 @@ function migrateToV327_() {
   const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
   setProp_('MIGRATION_V327', new Date().toISOString());
   if (n) logSync_('INFO', '', '', 'V3.27: ' + n + ' dia(s) da Avaria consultados de novo com os códigos da tela (Pedido principal = mainSubCode "MAIN").');
+  return n;
+}
+
+/**
+ * V3.35: as taxas de "Pedido principal/secundário" gravadas até a V3.34 podem ser o campo do JMS calculado com a Qtd de Todos
+ * (a tela mostra a taxa da linha da opção). Uma vez: todos os dias da Avaria são consultados de novo; até lá, a opção mostra
+ * "—" (o painel consulta na hora o dia aberto quando a opção é escolhida).
+ */
+function migrateToV335_() {
+  if (getProp_('MIGRATION_V335', '')) return 0;
+  const jobs = [];
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].orderKinds).forEach(k => {
+    getRates_(k, null, null).map(r => r.date).sort().reverse().forEach(d => jobs.push(['SUMMARY', k, d, 0]));
+  });
+  const n = jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  setProp_('MIGRATION_V335', new Date().toISOString());
+  if (n) logSync_('INFO', '', '', 'V3.35: ' + n + ' dia(s) da Avaria consultados de novo: taxa de Pedido principal/secundário = o campo do JMS que é a taxa da linha da opção.');
   return n;
 }
 

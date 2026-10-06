@@ -123,6 +123,8 @@
       mpTableSub: 'Os números de cada dia, como na primeira tabela da tela do JMS',
       detailsWindowHint: 'Para não estourar a cota do Google (~500 mil remessas por dia), os gráficos por DC/base/viagem usam só os últimos dias. Os números do resumo valem para todos os dias:',
       okMissing: 'Taxa do JMS para "{o}" ainda não disponível neste período — o painel não calcula taxa própria. {r}',
+      okFetching: 'Consultando no JMS a taxa de "{o}" (o painel não calcula taxa própria)…', okFetchingToast: 'Consultando no JMS a taxa de "{o}"…',
+      jmsRowLine: 'Linha do JMS · Qtd processada {q} · 总破损票数 {e} · 总破损率 {r}',
       okWhyDay: 'A consulta desta opção no JMS entra na próxima atualização.',
       okWhyLearning: 'O painel está procurando o código desta opção no JMS (tentativa de hora em hora).',
       okWhyUnsupported: 'O JMS não respondeu aos códigos testados para esta opção (nova tentativa em 6 h). Mande o Payload do getBreakageRateData com a opção escolhida (sem AuthToken e sem Cookie).',
@@ -258,6 +260,8 @@
       mpTableSub: '每天的数字，与JMS页面第一张表一致',
       detailsWindowHint: '为避免超出 Google 配额（每天约50万票），按中心/网点/车次的图表只使用最近几天的数据。汇总数字涵盖所有日期：',
       okMissing: '该期间 JMS 尚未提供“{o}”的指标率 — 看板不自行计算。{r}',
+      okFetching: '正在从 JMS 查询“{o}”的指标率（看板不自行计算）…', okFetchingToast: '正在从 JMS 查询“{o}”的指标率…',
+      jmsRowLine: 'JMS 行 · 处理量 {q} · 总破损票数 {e} · 总破损率 {r}',
       okWhyDay: '该选项将在下次更新时向 JMS 查询。',
       okWhyLearning: '看板正在查找 JMS 中该选项的代码（每小时尝试一次）。',
       okWhyUnsupported: 'JMS 未响应该选项已测试的代码（6 小时后重试）。请发送选择该选项时 getBreakageRateData 的 Payload（不含 AuthToken 和 Cookie）。',
@@ -1004,6 +1008,7 @@
     renderChips();
     renderCoverage(state.data.meta);
     var view = state.rateView = rateView(c, f);
+    maybeFetchOrderKind(c, view);
     // Filtro de turno: parte do turno na taxa oficial (participação do turno nas ocorrências de cada dia).
     var sel = state.data.summary || c.heroMetric ? null : Core.shiftSelection(view.filters), only = null;
     if (view.kind) { only = {}; only[c.orderKinds.field] = [view.label]; }
@@ -1042,6 +1047,26 @@
       }
     }
     return {rates: state.data ? state.data.rates : [], filters: f, kind: null};
+  }
+  /**
+   * V3.35 (Avaria): opção escolhida sem a taxa do JMS em algum dia aberto → consulta agora no JMS (uma vez por opção e
+   * período nesta aba) e recarrega. A taxa mostrada é sempre a do JMS.
+   */
+  function maybeFetchOrderKind(c, view) {
+    if (!view.kind || !state.data || !state.data.rates) return;
+    var have = {};
+    (view.rates || []).forEach(function (r) { if (isNum(r.rate)) have[r.date] = 1; });
+    // O período aberto e o anterior (comparação "Dia anterior"), como os cartões mostram.
+    var len = Core.daysBetween(state.from, state.to) + 1, pFrom = Core.addDays(state.from, -len);
+    var missing = state.data.rates.some(function (r) { return r.date >= pFrom && r.date <= state.to && isNum(r.rate) && !have[r.date]; });
+    var key = view.kind + '|' + state.from + '|' + state.to;
+    state.okTried = state.okTried || {};
+    if (!missing || state.okTried[key] || state.okFetching) return;
+    state.okTried[key] = 1; state.okFetching = true;
+    toast(t('okFetchingToast', {o: view.label}));
+    call('refreshOrderKindsNow', dataKey(), pFrom, state.to).then(function () { return loadDashboard({silent: true}); })
+      .catch(function (e) { toast(t('refreshFailed', {r: e.message}), 'error'); })
+      .then(function () { state.okFetching = false; if (state.data) renderDashboard(); });
   }
   /** Por que a taxa da opção de "Pedidos principais/filhos" ainda não veio do JMS (situação dos códigos no servidor). */
   function orderKindWhy() {
@@ -1200,8 +1225,14 @@
     // Modo de totais: a lista de cada filtro vem dos totais daquele campo (já com os outros filtros).
     if (sm) keys.forEach(function (k) { var o = {}; if (f[k]) o[k] = f[k]; facets[k] = Core.facets(sm.byDim[k] || [], o, [k])[k]; });
     else facets = Core.facets(state.data.rows, f, keys);
+    var okc = cfg() && cfg().orderKinds;
     keys.forEach(function (k) {
       var d = state.dropdowns[k], opts = facets[k] || [];
+      // V3.35 (Avaria): "Pedido principal" e "Pedido secundário" sempre na lista, como no JMS (mesmo com 0 avarias numa
+      // delas: a taxa do JMS dessa opção pode ser 0).
+      if (okc && k === okc.field) {
+        [okc.values.main, okc.values.sub].forEach(function (v) { if (!opts.some(function (o) { return o.value === v; })) opts = opts.concat([{value: v, count: 0}]); });
+      }
       d.setOptions(opts);
       // Dimensão que o JMS manda sempre vazia (ex.: próxima parada na Falta de Bipagem na
       // Expedição): um filtro só com "Sem informação" não ajuda — fica escondido.
@@ -1304,7 +1335,12 @@
       heroSubs = '<div class="kpi-sub">' + esc(t(day ? 'dayRateAll' : 'periodRateAll')) + ': <b>' + fmtRate(sv.dayRate, c.goal) + '</b></div>' + heroSubs +
         '<div class="kpi-sub">' + esc(t(sv.late ? 'shiftLateHint' : 'shiftRateHint')) + '</div>';
     } else if (k.filtered) heroSubs += '<div class="kpi-sub">' + esc(t('officialNotFiltered')) + '</div>';
-    if (state.rateView && state.rateView.kind && !isNum(k.rate)) heroSubs += '<div class="kpi-sub">' + esc(t('okMissing', {o: state.rateView.label, r: orderKindWhy()})) + '</div>';
+    if (state.rateView && state.rateView.kind && !isNum(k.rate)) heroSubs += '<div class="kpi-sub">' + esc(t(state.okFetching ? 'okFetching' : 'okMissing', {o: state.rateView.label, r: orderKindWhy()})) + '</div>';
+    // V3.35 (Avaria): a linha do JMS do dia (da opção escolhida) — os mesmos 3 números da tabela do JMS, para conferir.
+    if (c.orderKinds && day) {
+      var jr = activeRates().filter(function (r) { return r.date === state.to; })[0];
+      if (jr && isNum(jr.rate)) heroSubs += '<div class="kpi-sub hm-sync">' + esc(t('jmsRowLine', {q: fmtInt(jr.totalCount), e: fmtInt(jr.errorCount), r: fmtNum(Number(jr.rate), 2)})) + '</div>';
+    }
     var heroLabel = sv ? t(sv.late ? (day ? 'shiftLateOf' : 'shiftLateOfPeriod') : (day ? 'shiftRateOf' : 'shiftRateOfPeriod'), {s: sName, date: fmtDate(state.to, true)}) +
         (day ? '' : ' · ' + fmtRange(state.from, state.to))
       : day ? tx(c, 'rateOfDay', {date: fmtDate(state.to, true)}) : tx(c, 'rateOfPeriod') + ' · ' + fmtRange(state.from, state.to);

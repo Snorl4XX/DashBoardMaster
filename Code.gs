@@ -116,7 +116,7 @@ function refreshNow(indicatorKey, from, to, opts) {
   // V3.24: os dias do período pedidos ao JMS de uma vez (em paralelo), em vez de um por um.
   try { prefetchSummaries_(dates.slice(0, APP_CONFIG.REFRESH_MAX_DAYS).map(d => ({indicator: indicatorKey, date: d}))); } catch (e) { /* um por um, como antes */ }
   const result = {ok: true, updated: 0, empty: 0, failed: 0, pendingDays: 0, detailsQueued: 0, errors: []};
-  const later = [];
+  const later = [], updatedDays = [];
   let authError = false;
   dates.forEach((d, i) => {
     if (authError || i >= APP_CONFIG.REFRESH_MAX_DAYS || Date.now() > deadline) { later.push(['SUMMARY', indicatorKey, d, 0]); return; }
@@ -129,6 +129,7 @@ function refreshNow(indicatorKey, from, to, opts) {
       if (cfg.snapshot) result.typeChanged = !prev || !prev.metrics || Number(prev.metrics.refType) !== Number(s.raw && s.raw.refType);
       upsertRate_(s);
       result.updated++;
+      updatedDays.push(d);
       bumpDataStamp_(indicatorKey, d);
       if (detailNeedsRefresh_(indicatorKey, d, prev, s, st, true)) result.detailsQueued += enqueueJobs_([['DETAIL_INIT', indicatorKey, d, 1]], {reset: true});
     } catch (e) {
@@ -145,6 +146,12 @@ function refreshNow(indicatorKey, from, to, opts) {
     }
   });
   if (later.length) { result.pendingDays = later.length; enqueueJobs_(later, {reset: true}); }
+  // V3.35 (Avaria): o Atualizar consulta também a taxa de "Pedido principal/secundário" no JMS (antes, só Todos; as opções
+  // esperavam a fila dos gatilhos).
+  if (cfg.orderKinds && !authError && updatedDays.length) {
+    try { result.optionsUpdated = syncOrderKindsRange_(indicatorKey, updatedDays, Date.now() + 20000, true).done; }
+    catch (e) { logSync_('WARN', indicatorKey, '', 'Atualizar: taxas de Pedido principal/secundário não consultadas: ' + String(e && e.message || e).slice(0, 300)); }
+  }
   // V3.30: foto do momento (Sem Movimentação): a lista da linha do horário mais recente é baixada AQUI, na hora (~20 a 60
   // consultas). Chamada pela página não gasta a cota diária dos gatilhos (90 min na conta Gmail): o painel mostra os dados
   // mesmo com a fila parada pela cota.
@@ -203,6 +210,48 @@ function refreshSnapshotList(indicatorKey) {
     logSync_('ERROR', indicatorKey, today, 'Atualização manual (lista): ' + msg);
   }
   return safeReturn_(result);
+}
+
+/**
+ * Avaria (V3.35): taxa de cada opção de "Pedido principal/secundário" no JMS para os dias, até `deadline`. force = consulta
+ * mesmo com a taxa da opção já gravada (botão Atualizar); sem force, só os dias sem a taxa válida da opção.
+ */
+function syncOrderKindsRange_(indicatorKey, dates, deadline, force) {
+  const map = orderKindParams_(indicatorKey), out = {done: 0, pending: 0};
+  if (!map) return out;
+  dates.forEach(d => {
+    if (!getRateDay_(indicatorKey, d)) return;
+    const missing = ['main', 'sub'].some(k => map[k] !== undefined && !getRateDay_(indicatorKey + ':' + k, d));
+    if (!force && !missing) return;
+    if (Date.now() > deadline) { out.pending++; return; }
+    syncOrderKindRates_(indicatorKey, d);
+    out.done++;
+  });
+  return out;
+}
+/**
+ * Avaria (V3.35), chamada pelo painel ao escolher "Pedido principal" ou "Pedido secundário": consulta agora no JMS a taxa da
+ * opção nos dias abertos que ainda não a têm (até 31 dias, ~25 s; o resto fica com a fila). Não gasta a cota dos gatilhos.
+ */
+function refreshOrderKindsNow(indicatorKey, from, to) {
+  requireDb_();
+  validateJmsAuth_();
+  const cfg = getIndicatorConfig_(indicatorKey);
+  if (!cfg.orderKinds) throw new Error('Indicador sem "Pedidos principais/filhos".');
+  const today = isoToday_();
+  to = isIso_(to) ? (to > today ? today : to) : today;
+  from = isIso_(from) && from <= to ? from : to;
+  const days = dateRangeIso_(from, to).reverse().slice(0, APP_CONFIG.REFRESH_MAX_DAYS);
+  let r;
+  try { r = syncOrderKindsRange_(indicatorKey, days, Date.now() + APP_CONFIG.REFRESH_BUDGET_MS, false); }
+  catch (e) {
+    const msg = String(e && e.message || e).slice(0, 900), kind = errorKind_(msg);
+    logSync_('ERROR', indicatorKey, to, 'Pedido principal/secundário (painel): ' + msg);
+    if (kind !== 'OTHER') setPause_(kind === 'QUOTA' ? '*' : cfg.routeKey, kind, msg);
+    throw new Error(publicJmsError_(msg));
+  }
+  if (r.done) bumpDataStamp_(indicatorKey, to);
+  return safeReturn_({ok: true, done: r.done, pending: r.pending, status: orderKindStatus_(indicatorKey)});
 }
 
 /** Tarefa pendente de uma fonte só sob demanda (Histórico): lida direto da aba JOBS. */
@@ -1070,8 +1119,8 @@ function diagnosticarAvaria(date) {
     add('Painel gravou · ' + nm + ': ' + (r ? 'taxa ' + fmt(r.rate, 2) + ' · avarias ' + fmt(r.errorCount) + ' · Qtd processada ' + fmt(r.totalCount) +
       ' (consultado em ' + String(r.syncedAt || '').slice(0, 16).replace('T', ' ') + ')' : 'nada — o painel mostra "—" para esta opção (não calcula taxa própria)'));
   });
-  add('Regra do painel: a taxa de um dia é o 总破损率 da própria linha do JMS (o campo de taxa que bate com 总破损票数 ÷ Qtd processada × 1.000.000; ' +
-    'com "Pedido principal/secundário", se nenhum bater, essa conta — o número da tela). Em vários dias: Σ 总破损票数 ÷ Σ Qtd processada × 1.000.000 (como a linha 合计 do JMS).');
+  add('Regra do painel (V3.35): a taxa de um dia é SEMPRE um campo do JMS — o de taxa que é a da própria linha (o 总破损率 da tela); ' +
+    'nenhum é: breakageRateTotal. O painel não calcula a taxa do dia. Em vários dias: Σ 总破损票数 ÷ Σ Qtd processada × 1.000.000 (como a linha 合计 do JMS).');
   add('Se "Pedido secundário" da tela do JMS não aparecer em nenhum código acima: abra a tela, F12 → Rede, escolha "Pedido secundário", clique em Consulta e mande o "Payload" do getBreakageRateData (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));
   out.texto = lines.join('\n');
