@@ -142,13 +142,15 @@
       histListError: 'Lista do Histórico não carregada: {e}', histMax: 'No Histórico, escolha no máximo {n} dias.',
       hmRefTimeHist: 'Linha do Histórico com o horário mais recente: {type} · {t}',
       histRangeNote: 'Período {a} a {b}: cartões, gráficos da lista e filtros do dia mais recente com linha no JMS ({d}).',
-      jmsTableTitle: 'Tabela do JMS — Monitoramento de movimentação', jmsUsed: 'usada nos cartões', jmsLatest: 'mais recente do dia',
-      jmsTableSubLive: 'Tempo real: uma linha por tipo de bipe. Em destaque, a linha com o Horário da última operação mais recente (a dos cartões, gráficos e filtros).',
-      jmsTableSubHist: 'Histórico: uma linha por dia e tipo de bipe. Em destaque, a linha com o Horário da última operação mais recente de cada dia.',
+      jmsTableTitle: 'Linha do JMS usada no painel', jmsUsed: 'usada nos cartões', jmsLatest: 'mais recente do dia',
+      jmsTableSubLive: 'Tempo real: só a linha com o Horário da última operação mais próximo de agora. Cartões, gráficos, filtros e a tabela de pedidos são dela.',
+      jmsTableSubHist: 'Histórico de {d}: só a linha com o Horário da última operação mais recente do dia. Cartões, gráficos e filtros são dela.',
       jmsColType: 'Tipo da última operação', jmsColTime: 'Horário da última operação', jmsColTotal: 'Total de pedidos sem movimentação',
       jmsColOver: '+{n} d', jmsColRate: 'Taxa {n}+ dias',
       hmSnapWait: 'A foto de hoje ainda não chegou do JMS. O botão Atualizar busca agora (resumo e lista).',
-      snapFetching: 'Buscando no JMS a foto de agora (resumo e lista)…', snapRefreshing: 'Consultando o JMS agora: resumo e lista da linha do horário mais recente…',
+      snapFetching: 'Buscando no JMS a linha mais recente (tempo real)…', snapRefreshing: 'Consultando o JMS agora: a linha com o horário mais recente…',
+      snapListFetching: 'Baixando os pedidos da linha mais recente (Total de pedidos sem movimentação)…',
+      snapListLater: 'A lista de pedidos da linha nova ainda está baixando; os cartões já são da linha mais recente.',
       dcNoDetail: 'Contado na lista baixada: {h}'
     },
     zh: {
@@ -275,13 +277,15 @@
       histListError: '历史明细未加载：{e}', histMax: '历史最多选择 {n} 天。',
       hmRefTimeHist: '历史中最新操作时间最近的行：{type} · {t}',
       histRangeNote: '期间 {a} 至 {b}：卡片、明细图表和筛选为 JMS 有数据的最近一天（{d}）。',
-      jmsTableTitle: 'JMS 表格 — 动态监控', jmsUsed: '卡片使用', jmsLatest: '当日最新',
-      jmsTableSubLive: '实时：每种扫描类型一行。高亮为最新操作时间最近的行（卡片、图表和筛选所用）。',
-      jmsTableSubHist: '历史：每天每种扫描类型一行。高亮为每天最新操作时间最近的行。',
+      jmsTableTitle: '看板使用的 JMS 行', jmsUsed: '卡片使用', jmsLatest: '当日最新',
+      jmsTableSubLive: '实时：只取最新操作时间最接近现在的一行。卡片、图表、筛选和运单表都来自这一行。',
+      jmsTableSubHist: '{d} 的历史：只取当天最新操作时间最近的一行。卡片、图表和筛选都来自这一行。',
       jmsColType: '最新操作类型', jmsColTime: '最新操作时间', jmsColTotal: '断更件总数',
       jmsColOver: '断更{n}天以上', jmsColRate: '断更{n}天以上占比',
       hmSnapWait: '今天的快照尚未从 JMS 获取。点击“更新”可立即获取（汇总和明细）。',
-      snapFetching: '正在从 JMS 获取当前快照（汇总和明细）…', snapRefreshing: '正在查询 JMS：最新操作时间最近的行的汇总和明细…',
+      snapFetching: '正在从 JMS 获取最新的一行（实时）…', snapRefreshing: '正在查询 JMS：最新操作时间最近的行…',
+      snapListFetching: '正在下载最新一行的断更件明细…',
+      snapListLater: '新一行的明细仍在下载；卡片已是最新一行的数据。',
       dcNoDetail: '按下载的列表计数：{h}'
     }
   };
@@ -466,6 +470,8 @@
   /** Configuração do painel aberto; Sem Movimentação com "Fonte de dados = Histórico" usa a do Histórico (V3.32). */
   function cfg() { var c = baseCfg(); return c && c.history && state.source === 'hist' ? c.history : c; }
   function isHist() { var c = baseCfg(); return !!(c && c.history && state.source === 'hist'); }
+  /** V3.34: Sem Movimentação em Tempo real — tudo de UMA linha (a do horário mais recente), sem dias anteriores. */
+  function isLive() { var c = cfg(); return !!(c && c.snapshot); }
   /** Indicador consultado no servidor (no_move_hist no Histórico; nos outros casos, o do menu). */
   function dataKey() { var c = cfg(); return c ? c.key : state.indicator; }
   function dimLabel(key) { var c = cfg(); return (c && c.labels && c.labels[key]) || {pt: key, zh: key}; }
@@ -649,7 +655,9 @@
     // V3.24: a cada 2 min (aba visível) confere no servidor se há dado novo e só então recarrega, sem perder os filtros.
     // Antes: recarregava tudo a cada 30 min, mesmo sem nada novo (o dado novo podia levar até 30 min para aparecer).
     setInterval(function () { checkForUpdates(false); }, POLL_MS);
-    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') checkForUpdates(false); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { checkForUpdates(false); liveTick(); } });
+    // V3.34: Sem Movimentação em Tempo real — a linha mais recente do JMS a cada 5 min (aba visível).
+    setInterval(liveTick, 60000);
     // Rede de segurança: recarga completa a cada 30 min se nada recarregou nesse tempo.
     setInterval(function () {
       if (document.visibilityState !== 'visible' || !state.boot || !state.boot.initialized || Date.now() - (state.lastReloadAt || 0) < 25 * 60 * 1000) return;
@@ -960,12 +968,9 @@
       renderDashboard();
       updateSidebarStatus(res.meta.sync, res.meta.lastRateSyncedAt);
       state.lastReloadAt = Date.now();
-      // V3.30: Sem Movimentação sem a foto de hoje (ou sem a lista dela): busca no JMS na hora, uma vez por dia nesta aba.
-      var td = state.boot && state.boot.today;
-      if (c && c.snapshot && td && state.to === td && !state.autoSnap[td]) {
-        var hasRate = state.data.rates.some(function (r) { return r.date === td; });
-        if (!hasRate || !state.data.rows.length) { state.autoSnap[td] = 1; setTimeout(function () { refreshNow({auto: true}); }, 50); }
-      }
+      // V3.34: Sem Movimentação em Tempo real — a linha mais recente é buscada no JMS ao abrir (se a gravada tem mais de 5 min)
+      // e a cada 5 min com a aba visível (liveTick). V3.30 buscava só uma vez por dia, quando faltava a foto de hoje.
+      if (!opts.silent && liveDue()) setTimeout(function () { liveRefresh('open'); }, 50);
     }).catch(function (e) {
       if (seq !== state.seq) return;
       if (!state.data || state.data.meta.indicator !== key) $('#main').classList.add('awaiting');
@@ -1533,7 +1538,7 @@
    * o dia anterior do turno vem dos agregados do dia. Depois, os cartões T1/T2/T3 do que foi recebido.
    */
   function renderMetricKpis(c, k) {
-    var grid = $('#kpiGrid'), hm = c.heroMetric, bm = c.bigMetric, day = k.mode === 'day', f = filtersObj();
+    var grid = $('#kpiGrid'), hm = c.heroMetric, bm = c.bigMetric, day = k.mode === 'day', f = filtersObj(), live = isLive();
     var comparable = day || metricDayCount(hm.key, state.from, state.to) === metricDayCount(hm.key, k.prevFrom, k.prevTo);
     var dlt = function (a, b, bad) { return comparable ? qtyDelta(a, b, bad) : ''; };
     // V3.21: cartão vermelho = recebido (Chegou); cartão grande ao lado = deve chegar no dia, com as não chegadas.
@@ -1569,8 +1574,8 @@
         cards += '<article class="kpi metric-kpi' + (m.bad ? ' bad-metric' : '') + (m.good ? ' good-metric' : '') + '"><div class="kpi-label">' + icon(m.bad ? 'errors' : 'check') +
           '<span class="mc-name">' + esc(name) + '</span></div>' +
           '<div class="kpi-value">' + fmtInt(v) + '</div>' +
-          '<div class="kpi-sub">' + esc(day ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, m.bad) +
-          (isNum(share) ? '<br>' + esc(t('mcOfTotal', {p: fmtPct(share, 1), of: L(p.metrics[0].label)})) : '') + extra + '</div>' +
+          '<div class="kpi-sub">' + (live ? '' : esc(day ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, m.bad)) +
+          (isNum(share) ? (live ? '' : '<br>') + esc(t('mcOfTotal', {p: fmtPct(share, 1), of: L(p.metrics[0].label)})) : '') + extra + '</div>' +
           (isNum(share) ? '<div class="kpi-foot"><div class="bar"><i data-w="' + share + '" style="background:' + (m.bad ? RED : GOOD) + '"></i></div></div>' : '') + '</article>';
       });
     });
@@ -1602,7 +1607,7 @@
     }
     return '<article class="kpi metric-kpi pct-kpi' + (m.bad ? ' bad-metric' : '') + (m.good ? ' good-metric' : '') + '"><div class="kpi-label">' + icon(m.bad ? 'errors' : 'gauge') +
       '<span class="mc-name">' + esc(name) + '</span></div><div class="kpi-value">' + fmtPct(v, 2) + '</div>' +
-      '<div class="kpi-sub">' + esc(day ? t('mcPrevShort', {n: fmtPct(pv, 2)}) : t('mcPrevPeriodShort', {n: fmtPct(pv, 2)})) + ' ' + ppDelta(v, pv, m.bad) + extra + '</div>' +
+      '<div class="kpi-sub">' + (isLive() ? '' : esc(day ? t('mcPrevShort', {n: fmtPct(pv, 2)}) : t('mcPrevPeriodShort', {n: fmtPct(pv, 2)})) + ' ' + ppDelta(v, pv, m.bad)) + extra + '</div>' +
       '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(v) ? v : 0) + '" style="background:' + (m.bad ? RED : GOOD) + '"></i></div></div></article>';
   }
   /**
@@ -1647,7 +1652,7 @@
     var cur = metricSum(def.key, state.from, state.to), prev = metricSum(def.key, k.prevFrom, k.prevTo);
     var sub = def.sub ? metricSum(def.sub, state.from, state.to) : null, prevSub = def.sub ? metricSum(def.sub, k.prevFrom, k.prevTo) : null;
     var prevWord = day ? t('hmPrev') : t('hmPrevPeriod'), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
-    var label = day ? L(def.label) + ' · ' + fmtDate(state.to, true) : L(def.labelPeriod) + ' · ' + fmtRange(state.from, state.to);
+    var label = day ? L(def.label) + ' · ' + (isLive() ? t('srcLive') : fmtDate(state.to, true)) : L(def.labelPeriod) + ' · ' + fmtRange(state.from, state.to);
     var big = cur, lines = '';
     if (filtersFor(f, def.column).length) {
       var fq = listQty(def.column);
@@ -1680,12 +1685,15 @@
       }
       if (hist && !rt) syncLine += '<div class="kpi-sub">' + esc(t('histNoRows', {a: fmtDate(state.hist.from || state.to, true), b: fmtDate(state.hist.to || state.to, true)})) + '</div>';
     }
-    lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
+    // V3.34: Tempo real (Sem Movimentação) — só a linha de agora: sem dia anterior e sem a minicurva de vários dias.
+    var live = isLive();
+    if (!live) lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
       (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +
-      (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>' + syncLine;
+      (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>';
+    lines += syncLine;
     return '<article class="kpi ' + cls + ' hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon(def.icon || (def.column === 'Chegou' ? 'check' : 'arrival_flow')) + esc(label) + '</div>' +
       '<div class="kpi-value">' + fmtInt(big) + '</div>' + lines +
-      '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="' + sparkId + '" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
+      (live ? '' : '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="' + sparkId + '" aria-label="' + esc(t('spark')) + '"></canvas></div>') + '</div></article>';
   }
   /**
    * Expedição: quantidade oficial de cada rota no período (tabela principal do JMS, número `metric`), com o filtro de
@@ -1773,7 +1781,7 @@
       var pv = others.length ? null : aggShiftSum(col, [s], k.prevFrom, k.prevTo);
       var label = '<i style="background:' + SHIFT_COLORS[s] + '"></i>' + s + ' · ' + SHIFT_HOURS[s];
       var subHtml = !tot ? '<span class="ds-hint">' + esc(shiftSourceHint(c, col) + ' ' + detailHint(col)) + '</span>' : '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('scShare')) +
-        '<br>' + esc(k.mode === 'day' ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, false) +
+        (isLive() ? '' : '<br>' + esc(k.mode === 'day' ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, false)) +
         (fromSum ? '<br><span class="mc-note">' + esc(t('scFromSummary')) + '</span>' : '') +
         (splits.length && tot ? '<span class="sc-split">' + splits.map(function (x) {
           var n = x.r.tot ? x.r.q[s] || 0 : null;
@@ -2137,7 +2145,12 @@
     // Recebimento: com o filtro "Coluna principal", só os gráficos da(s) coluna(s) escolhida(s).
     var cols = state.filters.column && state.filters.column.size ? state.filters.column : null;
     var sm = state.data.summary, fo = sm ? filtersObj() : null;
-    return (c.hideEvolution ? [] : [evo]).concat((c.charts || []).filter(function (def) { return !cols || !def.where || !def.where.column || cols.has(def.where.column); }).map(function (def) {
+    var live = isLive();
+    return (c.hideEvolution ? [] : [evo]).concat((c.charts || []).filter(function (def) {
+      // V3.34: Tempo real (Sem Movimentação) — sem o gráfico de vários dias: só a linha de agora.
+      if (live && def.metric) return false;
+      return !cols || !def.where || !def.where.column || cols.has(def.where.column);
+    }).map(function (def) {
       if (def.metric) return metricSpec(def);
       var spec = Core.buildChart(def, sm ? Core.summaryChartRows(def, sm.byDim, fo) : rows, {intervalMode: state.intervalMode});
       if (def.sub) spec.sub = def.sub;
@@ -2775,7 +2788,8 @@
       var bd = {};
       (state.data.rates || []).forEach(function (r) { if (r.metrics) bd[r.date] = r.metrics; });
       box.innerHTML = '';
-      tbl.innerHTML = metricTableHtml(panels, null, bd, metricDays()) + jmsRowsHtml(c, metricDays());
+      // V3.34: Sem Movimentação — Tempo real: só a linha do JMS usada (nada de vários dias); Histórico: os dias do período.
+      tbl.innerHTML = (isLive() ? '' : metricTableHtml(panels, null, bd, metricDays())) + jmsRowsHtml(c);
       return;
     }
     var cols = state.filters.column && state.filters.column.size ? state.filters.column : null;
@@ -2868,15 +2882,16 @@
    * V3.32 (Sem Movimentação): a tabela do JMS como na tela — uma linha por tipo de bipe em cada dia —, com a linha usada
    * nos cartões (o "Horário da última operação" mais recente do dia) em destaque.
    */
-  function jmsRowsHtml(c, days) {
+  function jmsRowsHtml(c) {
     if (!c.refTypes || !state.data) return '';
-    var set = {}, rows = [];
-    days.forEach(function (d) { set[d] = 1; });
+    // V3.34: UMA linha — a do Horário da última operação mais próximo de agora (a dos cartões, gráficos e filtros).
+    var rows = [];
     (state.data.rates || []).forEach(function (r) {
-      if (!r.types || !set[r.date]) return;
+      if (!r.types || r.date !== state.to) return;
       var ref = r.metrics ? Number(r.metrics.refType) : 0;
-      r.types.forEach(function (x) { rows.push({date: r.date, x: x, used: Number(x.typeIdx) > 0 && Number(x.typeIdx) === ref}); });
+      r.types.forEach(function (x) { if (Number(x.typeIdx) > 0 && Number(x.typeIdx) === ref) rows.push({date: r.date, x: x, used: true}); });
     });
+    rows = rows.slice(0, 1);
     if (!rows.length) return '';
     rows.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : String(b.x.time || '') < String(a.x.time || '') ? -1 : String(b.x.time || '') > String(a.x.time || '') ? 1 : 0; });
     var buckets = [1, 2, 3, 4, 5, 6, 7, 10, 14, 30];
@@ -2891,12 +2906,12 @@
       var x = o.x, tot = Number(x.total) || 0, name = Number(x.typeIdx) > 0 && c.refTypes[x.typeIdx - 1] ? vlabel('scanType', c.refTypes[x.typeIdx - 1]) : String(x.op || '—');
       var rate = function (k) { return tot ? fmtPct((Number(x[k]) || 0) / tot * 100, 2) : '—'; };
       return '<tr' + (o.used ? ' class="sel"' : '') + '><td>' + esc(fmtDate(o.date, true)) + '</td><td>' + esc(name) +
-        (o.used ? ' <span class="jms-used">' + esc(t(o.date === state.to ? 'jmsUsed' : 'jmsLatest')) + '</span>' : '') + '</td><td>' + esc(fmtTime(x.time)) + '</td><td>' + fmtInt(tot) + '</td>' +
+        '' + '</td><td>' + esc(fmtTime(x.time)) + '</td><td>' + fmtInt(tot) + '</td>' +
         buckets.map(function (n) { var v = x['day' + n]; return '<td>' + (isNum(v) ? fmtInt(v) : '—') + '</td>'; }).join('') +
         '<td>' + rate('day14') + '</td><td>' + rate('day30') + '</td></tr>';
     }).join('');
     return '<section class="card mp-section"><div class="chart-head"><span class="chart-ico">' + icon('table') + '</span><div class="chart-titles"><h3>' +
-      esc(t('jmsTableTitle')) + '</h3><small>' + esc(t(isHist() ? 'jmsTableSubHist' : 'jmsTableSubLive')) + '</small></div></div>' +
+      esc(t('jmsTableTitle')) + '</h3><small>' + esc(t(isHist() ? 'jmsTableSubHist' : 'jmsTableSubLive', {d: fmtDate(state.to, true)})) + '</small></div></div>' +
       '<div class="mp-table jms"><table><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div></section>';
   }
 
@@ -3008,10 +3023,56 @@
   }
 
   // ------------------------------------------------------------------ ações: atualizar, relatórios, CSV
+  /**
+   * V3.34 — Tempo real (Sem Movimentação). A tabela do JMS muda a cada bipe (o horário da última operação anda quando o
+   * pedido é encontrado): a linha do horário mais próximo de agora é buscada no JMS ao abrir o painel, no Atualizar e a
+   * cada 5 min com a aba visível. 1) resumo (uma consulta) → cartões da linha nova; 2) a lista dessa linha. No ciclo de
+   * 5 min, a lista é baixada de novo quando a linha muda de tipo ou a gravada tem 30 min ou mais (cota de consultas).
+   */
+  var LIVE_MS = 5 * 60000;
+  function liveDue() {
+    var c = cfg(), td = state.boot && state.boot.today;
+    if (!c || !c.snapshot || state.view !== 'dashboard' || !state.data || !td || state.to !== td || state.liveBusy) return false;
+    if (state.data.meta && state.data.meta.indicator !== c.key) return false;
+    var r = (state.data.rates || []).filter(function (x) { return x.date === td; })[0];
+    var at = Math.max(Date.parse((r && r.syncedAt) || '') || 0, state.liveAt || 0);
+    return Date.now() - at >= LIVE_MS;
+  }
+  function liveRefresh(reason) {
+    var c = cfg(), td = state.boot && state.boot.today, key = c && c.key;
+    if (!c || !c.snapshot || state.liveBusy) return Promise.resolve();
+    state.liveBusy = true; state.liveAt = Date.now();
+    var btn = $('#refreshBtn'), quiet = reason === 'timer';
+    btn.disabled = true; btn.classList.add('spin');
+    if (!quiet) toast(t(reason === 'open' ? 'snapFetching' : 'snapRefreshing'));
+    return call('refreshNow', key, td, td, {listLater: true}).then(function (r) {
+      if (r.pauses) renderSyncBanner(r.pauses);
+      if (r.cooldown) return reason === 'manual' ? loadDashboard({silent: true}) : null;
+      if (r.failed && !r.updated) { if (!quiet) toast(t('refreshFailed', {r: (r.errors[0] && r.errors[0].reason) || '—'}), 'error'); return; }
+      return loadDashboard({silent: true}).then(function () {
+        if (!r.listPending || cfg() !== c) return;
+        if (quiet && !r.typeChanged && isNum(r.listAgeMin) && r.listAgeMin < 30) return;
+        if (!quiet) toast(t('snapListFetching'));
+        return call('refreshSnapshotList', key).then(function (x) {
+          if (x.listNow === 'error' && !quiet) toast(t('refreshFailed', {r: x.listError || '—'}), 'error');
+          else if ((x.listNow === 'partial' || x.listNow === 'busy') && !quiet) toast(t('snapListLater'));
+          if (cfg() === c) return loadDashboard({silent: true});
+        });
+      });
+    }).catch(function (e) { if (!quiet) toast(t('refreshFailed', {r: e.message}), 'error'); })
+      .then(function () { state.liveBusy = false; btn.disabled = false; btn.classList.remove('spin'); });
+  }
+  function liveTick() {
+    if (document.visibilityState !== 'visible') return;
+    var busy = Object.keys(state.dropdowns).some(function (k) { return state.dropdowns[k].isOpen; }) || $('#progress').classList.contains('on');
+    if (!busy && liveDue()) liveRefresh('timer');
+  }
   function refreshNow(opts) {
     if (!state.data) return;
     opts = opts || {};
     var btn = $('#refreshBtn');
+    // V3.34: Tempo real (Sem Movimentação): resumo agora e, em seguida, a lista da linha mais recente.
+    if (isLive()) return liveRefresh(opts.auto ? 'open' : 'manual');
     // V3.32: Histórico — consulta o período escolhido de novo (e a lista do dia mostrado, se faltar).
     if (isHist()) {
       btn.disabled = true; btn.classList.add('spin');

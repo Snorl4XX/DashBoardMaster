@@ -94,7 +94,7 @@ function getAppBootstrap() {
  * Antes, os jobs iam para o fim da fila histórica e a data escolhida não era
  * atualizada.
  */
-function refreshNow(indicatorKey, from, to) {
+function refreshNow(indicatorKey, from, to, opts) {
   requireDb_();
   validateJmsAuth_();
   const cfg = getIndicatorConfig_(indicatorKey);
@@ -125,6 +125,8 @@ function refreshNow(indicatorKey, from, to) {
       const st = getDayStatus_(indicatorKey, d);
       const s = fetchSummaryDay_(indicatorKey, d);
       if (s.empty) { updateDayStatus_(indicatorKey, d, {summaryStatus: 'NO_RECORD', detailsStatus: 'NO_RECORD', error: ''}); result.empty++; return; }
+      // V3.34: Sem Movimentação — a linha do horário mais recente trocou de tipo de bipe (a lista gravada é de outra linha).
+      if (cfg.snapshot) result.typeChanged = !prev || !prev.metrics || Number(prev.metrics.refType) !== Number(s.raw && s.raw.refType);
       upsertRate_(s);
       result.updated++;
       bumpDataStamp_(indicatorKey, d);
@@ -146,7 +148,12 @@ function refreshNow(indicatorKey, from, to) {
   // V3.30: foto do momento (Sem Movimentação): a lista da linha do horário mais recente é baixada AQUI, na hora (~20 a 60
   // consultas). Chamada pela página não gasta a cota diária dos gatilhos (90 min na conta Gmail): o painel mostra os dados
   // mesmo com a fila parada pela cota.
-  if (cfg.snapshot && !authError && result.updated) {
+  // V3.34 (opts.listLater): o painel mostra os cartões da linha nova antes e pede a lista em seguida (refreshSnapshotList).
+  if (cfg.snapshot && opts && opts.listLater) {
+    const df = dayFilesMap_(indicatorKey, today, today)[today];
+    result.listPending = pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === indicatorKey && j.date === today);
+    result.listAgeMin = df && df.createdAt ? Math.round((Date.now() - Date.parse(df.createdAt)) / 60000) : null;
+  } else if (cfg.snapshot && !authError && result.updated) {
     try { Object.assign(result, runSnapshotListNow_(indicatorKey, today)); }
     catch (e) {
       const msg = String(e && e.message || e).slice(0, 900);
@@ -177,6 +184,25 @@ function runSnapshotListNow_(indicatorKey, date) {
     const r = processJob_(j, Date.now() + APP_CONFIG.SNAPSHOT_LIST_BUDGET_MS);
     return {listNow: r === 'done' ? 'done' : r === 'partial' ? 'partial' : r, detailsQueued: r === 'done' ? 0 : 1};
   } finally { lock.releaseLock(); }
+}
+
+/**
+ * Sem Movimentação · Tempo real (V3.34), chamada pelo painel logo depois de refreshNow(..., {listLater: true}): baixa agora a
+ * lista ("Total de pedidos sem movimentação") da linha do horário mais recente, se estiver na fila.
+ */
+function refreshSnapshotList(indicatorKey) {
+  requireDb_();
+  validateJmsAuth_();
+  const cfg = getIndicatorConfig_(indicatorKey);
+  if (!cfg.snapshot) throw new Error('Só para a Sem Movimentação (tempo real).');
+  const today = isoToday_(), result = {ok: true, listNow: 'ok'};
+  try { Object.assign(result, runSnapshotListNow_(indicatorKey, today)); }
+  catch (e) {
+    const msg = String(e && e.message || e).slice(0, 900);
+    result.listNow = 'error'; result.listError = publicJmsError_(msg);
+    logSync_('ERROR', indicatorKey, today, 'Atualização manual (lista): ' + msg);
+  }
+  return safeReturn_(result);
 }
 
 /** Tarefa pendente de uma fonte só sob demanda (Histórico): lida direto da aba JOBS. */

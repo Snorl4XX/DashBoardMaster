@@ -593,6 +593,34 @@ function historyListBlocked_(cfg, indicatorKey, day) {
   const st = getDayStatus_(indicatorKey, day);
   return !(st && DETAIL_USABLE_.indexOf(st.details) >= 0);
 }
+/**
+ * V3.34 (Sem Movimentação): só a lista da linha usada nos cartões (o tipo de bipe da linha do horário mais recente do dia).
+ * Linhas de outro tipo saem; lista inteira de outra linha (a linha mudou e a nova lista ainda não chegou): other = true.
+ */
+function rowListType_(cfg, indicatorKey, day) {
+  if (!cfg || !cfg.detail || !cfg.detail.typeFromSummary) return null;
+  const r = getRateDay_(indicatorKey, day), idx = r && r.metrics ? Number(r.metrics.refType) : 0;
+  const td = idx > 0 ? (cfg.detail.types || [])[idx - 1] : null;
+  return td ? td.column : null;
+}
+function onlyRowDataset_(ds, col) {
+  if (!col || !ds || !ds.n || !ds.dict || !ds.dict.column || !ds.cols || !ds.cols.column) return {ds: ds};
+  const keep = ds.dict.column.indexOf(col);
+  const empty = {v: ds.v, n: 0, fields: ds.fields, dict: ds.fields.reduce((o, f) => { o[f] = []; return o; }, {}), cols: ds.fields.reduce((o, f) => { o[f] = []; return o; }, {})};
+  if (keep < 0) return {ds: empty, other: true};
+  let all = true;
+  for (let i = 0; i < ds.n && all; i++) if (ds.cols.column[i] !== keep) all = false;
+  if (all) return {ds: ds};
+  const cols = {};
+  ds.fields.forEach(f => { cols[f] = []; });
+  let n = 0;
+  for (let i = 0; i < ds.n; i++) {
+    if (ds.cols.column[i] !== keep) continue;
+    ds.fields.forEach(f => cols[f].push(ds.cols[f][i]));
+    n++;
+  }
+  return {ds: {v: ds.v, n: n, fields: ds.fields, dict: ds.dict, cols: cols}, filtered: true};
+}
 function blockedArchive_(day) {
   return {rows: [], loadedDates: [], partialDates: [], staleDates: [], notDownloaded: [day], notLoaded: [], emptyDates: [], readFiles: 0, fullyLoaded: false};
 }
@@ -683,6 +711,21 @@ function getDashboardData(indicatorKey, params) {
     out.summary = {marginals: built.marginals, top: built.top, topLimit: built.topLimit, totalQty: built.totalQty,
       cubeRows: built.cubeRows, filters: filters};
   } else out.dataset = builder.build();
+  // V3.34: Sem Movimentação — só a lista da linha dos cartões (nada de outras linhas juntas).
+  const rowCol = summaryMode ? null : rowListType_(cfg, indicatorKey, p.to);
+  if (rowCol) {
+    const only = onlyRowDataset_(out.dataset, rowCol);
+    out.dataset = only.ds;
+    if (only.other || only.filtered) {
+      // Turnos do dia (aba AGG) eram da lista inteira: os cartões de turno passam a contar a lista filtrada.
+      Object.keys(out.colAgg || {}).forEach(k => { out.colAgg[k] = out.colAgg[k].filter(a => a.date !== p.to); });
+      if (only.other) {
+        out.meta.archive = Object.assign({}, out.meta.archive, {fullyLoaded: false, loadedDates: [], notDownloaded: [p.to]});
+        out.meta.rowsLoaded = 0;
+        out.meta.listOtherRow = true;
+      }
+    }
+  }
   return out;
 }
 
@@ -788,6 +831,9 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
     };
   }
   const archive = historyListBlocked_(cfg, indicatorKey, p.to) ? blockedArchive_(p.to) : getArchivedRange_(indicatorKey, p.from, p.to, archiveOpts);
+  // V3.34: Sem Movimentação — só a lista da linha dos cartões.
+  const rowCol = rowListType_(cfg, indicatorKey, p.to);
+  if (rowCol) archive.rows = archive.rows.filter(r => r.column === rowCol);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);

@@ -660,18 +660,34 @@ function typedSummary_(cfg, indicatorKey, isoDate, records) {
     allTotal += m.total || 0;
     return Object.assign({op: op, time: String(rd([bt.timeField]).value || '').trim(), typeIdx: td ? types.indexOf(td) + 1 : null}, m);
   });
-  // Linha do horário mais recente (empate: a de mais pedidos). Sem horário em nenhuma: a de mais pedidos.
-  const pick = rows.slice().sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0) || (b.total || 0) - (a.total || 0))[0];
+  // Linha com o "Horário da última operação" mais PRÓXIMO DE AGORA (V3.34: o horário é lido como data e hora, mesmo com
+  // outra grafia; empate: a de mais pedidos). Sem horário em nenhuma: a de mais pedidos.
+  const now = opTimeNum_(Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm:ss'));
+  const dist = r => { const n = opTimeNum_(r.time); return n === null ? Infinity : Math.abs(opTimeSec_(now) - opTimeSec_(n)); };
+  const pick = rows.slice().sort((a, b) => (dist(a) - dist(b)) || (b.total || 0) - (a.total || 0))[0];
   const chosen = bt.pickLatest ? pick : null;
   const out = {};
   (bt.sums || []).forEach(k => { out[k] = chosen ? chosen[k] || 0 : rows.reduce((a, r) => a + (r[k] || 0), 0); });
-  const ref = chosen ? chosen.time : rows.reduce((m, r) => r.time > m ? r.time : m, ''), digits = ref.replace(/\D/g, '').slice(0, 14);
+  const ref = chosen ? chosen.time : rows.reduce((m, r) => r.time > m ? r.time : m, ''), refN = opTimeNum_(ref), digits = refN === null ? '' : String(refN);
   const total = out.total || 0;
   const raw = Object.assign({date: isoDate, source: 'JMS', rows: records.length}, out, sums,
     {allTotal: allTotal, refType: chosen ? chosen.typeIdx : null, refOp: chosen ? chosen.op : '',
       refTime: digits.length === 14 ? Number(digits) : null, refTimeText: ref, types: rows});
   return {indicator: indicatorKey, date: isoDate, rate: total > 0 ? Math.round((out.day14 || 0) / total * 10000) / 100 : 0,
     errorCount: total, totalCount: total, empty: false, raw: raw};
+}
+
+/** "2026-10-05 07:59:20" (ou "2026/10/5 7:59", ISO…) → 20261005075920; sem data e hora reconhecíveis: null. */
+function opTimeNum_(v) {
+  const m = /(\d{4})\D(\d{1,2})\D(\d{1,2})(?:\D+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/.exec(String(v === null || v === undefined ? '' : v));
+  if (!m) return null;
+  const p = x => String(Number(x || 0)).padStart(2, '0');
+  return Number(m[1] + p(m[2]) + p(m[3]) + p(m[4]) + p(m[5]) + p(m[6]));
+}
+/** AAAAMMDDhhmmss → segundos (para medir a distância entre dois horários). */
+function opTimeSec_(n) {
+  const s = String(n);
+  return Date.UTC(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8)), Number(s.slice(8, 10)), Number(s.slice(10, 12)), Number(s.slice(12, 14))) / 1000;
 }
 
 /**

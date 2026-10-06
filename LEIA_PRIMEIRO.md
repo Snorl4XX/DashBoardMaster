@@ -1,8 +1,35 @@
-# J&T DASHMASTER V3.33 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.34 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.34 — Sem Movimentação em Tempo real: UMA linha só, a mais próxima de agora, buscada na hora
+**O pedido:** no Tempo real, só **uma linha** da tabela do JMS, a do **Horário da última operação mais próximo de agora**. Essa tabela muda a cada bipe (o horário anda quando o pedido é encontrado). Nada de todas as linhas juntas nem de dias anteriores.
+
+**O que estava errado**
+- O painel mostrava a linha gravada pela sincronização, que podia ter até 1 hora. No JMS, a linha mais recente já era outra.
+- Apareciam outras linhas: a "Tabela do JMS" com todos os tipos de bipe (V3.32), a "Dados gerais" com 14 dias, o gráfico de 30 dias e o "Dia anterior" nos cartões.
+- Quando a linha mais recente trocava de tipo, a lista de pedidos da linha anterior continuava aparecendo até a nova chegar.
+
+**Agora, no Tempo real**
+- **Busca na hora:** ao abrir o painel (se a linha gravada tem mais de 5 min), no botão **Atualizar** e **a cada 5 min** com a aba aberta, o painel consulta o JMS:
+  1. a tabela com os 6 tipos de bipe;
+  2. fica com a linha do horário mais próximo de agora;
+  3. mostra os cartões dessa linha na hora;
+  4. em seguida, baixa a lista "Total de pedidos sem movimentação" dessa linha.
+- **Uma linha em tudo:** cartões, gráficos, filtros, turnos e a tabela de pedidos vêm só dessa linha e da lista dela. Pedidos de outro tipo nunca entram. Se a linha mudou e a lista nova ainda não chegou, a lista antiga sai do painel.
+- No fim do painel, **"Linha do JMS usada no painel"** mostra só essa linha. Saíram a tabela com todas as linhas, a "Dados gerais" de vários dias, o gráfico de 30 dias, a minicurva e o "Dia anterior".
+- O cartão vermelho diz **"Tempo real"**, a hora da consulta e a linha usada (tipo e horário).
+- A linha é escolhida pelo horário lido como data e hora, mesmo com outra grafia (ex.: `2026/10/5 7:59`). Um horário inválido no futuro não ganha da linha certa.
+
+**Cota:** essas buscas são feitas pela página e **não gastam a cota diária dos gatilhos**. No ciclo de 5 min, a lista só é baixada de novo quando a linha muda de tipo ou a gravada tem 30 min ou mais. Isso economiza as consultas externas do Google (UrlFetch). Ao abrir e no Atualizar, a lista é baixada sempre que a linha mudou.
+
+**Histórico:** continua com a Data de início e final. A tabela do fim mostra só a linha usada do dia mostrado, e a "Dados gerais" mostra uma linha por dia do período.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão).
+
+**Testes:** 445 verificações, incluindo: a linha mais próxima de agora; resumo antes da lista; lista da linha anterior escondida quando a linha muda; lista com vários tipos filtrada no painel e no relatório.
 
 ## V3.33 — Avaria: taxa do "Pedido principal" igual à tela do JMS
 **O que você viu:** no JMS, Todos = **189,72** e Pedido principal = **190,51**, com os mesmos 67 avariados. Muda só a **Qtd processada**: a do principal não tem os ~1,5 mil do secundário. No painel, com "Pedido principal", aparecia a taxa de Todos.
@@ -1229,7 +1256,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **440 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **445 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

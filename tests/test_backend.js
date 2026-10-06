@@ -2685,4 +2685,50 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'diagnosticarAvaria: campos de taxa do JMS e a conta da linha de cada opção', dgS.texto);
 }
 
+// ---------- V3.34: Sem Movimentação em Tempo real — UMA linha (a mais próxima de agora), buscada na hora ----------
+{
+  const T = ctx.isoToday_(), cfgNm = ctx.getIndicatorConfig_('no_move');
+  // Linha mais próxima de agora: um horário no futuro (dado inválido) ou com outra grafia não ganha da linha certa.
+  const d2 = ctx.addDaysIso_(T, -2), d5 = ctx.addDaysIso_(T, -5);
+  const recs = [
+    {operateType: '发件扫描', operateTime: d5 + ' 23:00:00', total: 900, day1: 1},
+    {operateType: '中心到件', operateTime: d2.replace(/-0?/g, '/') + ' 7:05:09', total: 120, day1: 2},
+    {operateType: '问题件扫描', operateTime: '2099-01-01 00:00:00', total: 50, day1: 3}];
+  const sm = ctx.typedSummary_(cfgNm, 'no_move', T, recs);
+  check(sm.totalCount === 120 && sm.raw.refType === 3 && sm.raw.day1 === 2 && String(sm.raw.refTime) === d2.replace(/-/g, '') + '070509',
+    'Tempo real: vale UMA linha — a do Horário da última operação mais próximo de agora (nem soma, nem horário inválido)', sm.raw);
+  // Abrir/Atualizar: 1) resumo (cartões da linha nova); 2) a lista dessa linha.
+  const nm = () => ({[T]: makeDay(T, 63)});
+  const days = nm(), cL = freshCtx(days);
+  const f0 = cL.__state.fetches.length;
+  const r1 = cL.refreshNow('no_move', T, T, {listLater: true});
+  const after1 = cL.__state.fetches.slice(f0);
+  const l1 = cL.refreshSnapshotList('no_move');
+  const m1 = cL.getRateDay_('no_move', T).metrics, d1 = cL.getDashboardData('no_move', {from: T, to: T}), rows1 = C.decodeDataset(d1.dataset);
+  const colOf = i => cfgNm.detail.types[i - 1].column;
+  check(r1.listPending === true && r1.typeChanged === true && after1.some(f => /trajectory_monitor_total/.test(f.url)) && !after1.some(f => /trajectory_monitor_detail/.test(f.url)) &&
+    l1.listNow === 'done' && rows1.reduce((a, x) => a + (Number(x.qty) || 1), 0) === m1.total && rows1.every(x => x.column === colOf(m1.refType)),
+    'Tempo real: resumo primeiro (sem a lista), depois a lista da linha — só os pedidos dessa linha', {r1, l1: l1.listNow});
+  // A linha mais recente passa a ser de outro tipo: até a lista nova chegar, a antiga (de outra linha) não aparece.
+  const other = days[T].nm.filter(x => x.operateType.split('/')[0] !== cfgNm.detail.types[m1.refType - 1].op)[0];
+  for (let i = 0; i < 30; i++) days[T].nm.push(Object.assign({}, other, {billcode: '7778' + i, operateTime: ctx.addDaysIso_(T, -1) + ' 23:5' + (i % 10) + ':00'}));
+  cL.CacheService.getScriptCache().remove && cL.CacheService.getScriptCache().remove('REFRESH_no_move_' + T + '_' + T);
+  cL.__state.cache = {};
+  const r2 = cL.refreshNow('no_move', T, T, {listLater: true});
+  const m2 = cL.getRateDay_('no_move', T).metrics, d2b = cL.getDashboardData('no_move', {from: T, to: T});
+  check(r2.typeChanged === true && r2.listPending === true && m2.refType !== m1.refType && d2b.dataset.n === 0 && d2b.meta.listOtherRow === true &&
+    (d2b.colAgg['Sem movimentação'] || []).every(a => a.date !== T),
+    'Tempo real: linha nova de outro tipo → a lista da linha anterior sai do painel (cartões, turnos e gráficos não misturam linhas)', {r2, n: d2b.dataset.n});
+  const l2 = cL.refreshSnapshotList('no_move'), rows2 = C.decodeDataset(cL.getDashboardData('no_move', {from: T, to: T}).dataset);
+  check(l2.listNow === 'done' && rows2.length > 0 && rows2.every(x => x.column === colOf(m2.refType)) && rows2.reduce((a, x) => a + (Number(x.qty) || 1), 0) === m2.total,
+    'Tempo real: a lista da linha nova chega e é a única no painel', {n: rows2.length});
+  // Lista gravada com vários tipos (versões antigas): o painel e o relatório mostram só os pedidos da linha dos cartões.
+  const mixRows = rows2.concat(rows2.map(x => Object.assign({}, x, {shipment: x.shipment + 'M', waybill: (x.waybill || '') + 'M', column: colOf(m2.refType === 1 ? 2 : 1)})));
+  cL.saveDayDataset_('no_move', T, cL.encodeDayFile_(mixRows), 1, mixRows.length);
+  const d3 = cL.getDashboardData('no_move', {from: T, to: T}), rows3 = C.decodeDataset(d3.dataset);
+  const rep3 = cL.computeDashboard_('no_move', {from: T, to: T});
+  check(rows3.length === rows2.length && rows3.every(x => x.column === colOf(m2.refType)) && rep3.rows.every(x => x.column === colOf(m2.refType)) && rep3.rows.length === rows2.length,
+    'lista com vários tipos juntos: painel e relatório só com a linha dos cartões', {n3: rows3.length, n2: rows2.length});
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');
