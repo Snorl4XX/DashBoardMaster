@@ -302,9 +302,11 @@ function fakeJms(dayData, options) {
         const rate = base ? Math.round(list.length / base * 1e6 * 100) / 100 : 0;
         // Com a opção, a coluna "Taxa…" (breakageRate) usa o volume de Todos; a 总破损率 (breakageRateTotal), o da opção.
         const rateOther = kind ? Math.round(list.length / d.dmBase * 1e6 * 100) / 100 : rate;
+        // options.dmRateSwap: o contrário (tela de 06/10: com "Pedido principal", o breakageRateTotal vem com a Qtd de Todos).
+        const rTot = options.dmRateSwap ? rateOther : rate, rOne = options.dmRateSwap ? rate : rateOther;
         return ok([{id: '97308731485720' + date.slice(8), serialNum: '1', statisticalDate: date, agentAreaCode: '370000', agentAreaName: 'SPE',
-          networkCode: '30001', networkName: 'SP GRU', operaNumber: base, breakageTicketNumber: list.length, breakageRate: rateOther,
-          breakageAmount: list.reduce((a, r) => a + r.adjudicationAmount, 0), breakageNumberTotal: list.length, breakageRateTotal: rate,
+          networkCode: '30001', networkName: 'SP GRU', operaNumber: base, breakageTicketNumber: list.length, breakageRate: rOne,
+          breakageAmount: list.reduce((a, r) => a + r.adjudicationAmount, 0), breakageNumberTotal: list.length, breakageRateTotal: rTot,
           monthBreakageRate: 180.46, pickUpDayTotal: null, mainSubCode: body.mainSubCode === undefined ? null : body.mainSubCode}], 1, 1, body.size);
       }
       case 'detailBreakageRateData': {

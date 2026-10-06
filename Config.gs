@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.32.0',
+  VERSION: '3.33.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -458,7 +458,12 @@ const INDICATORS = Object.freeze({
       endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/getBreakageRateData',
       // Colunas da tabela principal do JMS: 总破损率 (breakageRateTotal), 总破损票数 (breakageNumberTotal), Qtd processada
       // total (operaNumber). Com "Todos" o breakageRate é igual; com "Pedido principal/secundário" pode não ser (V3.20.1).
-      rateKeys: ['breakageRateTotal', 'breakageRate'], errorKeys: ['breakageNumberTotal', 'breakageTicketNumber'], totalKeys: ['operaNumber']
+      rateKeys: ['breakageRateTotal', 'breakageRate'], errorKeys: ['breakageNumberTotal', 'breakageTicketNumber'], totalKeys: ['operaNumber'],
+      // V3.33: o 总破损率 da tela = 总破损票数 ÷ Qtd processada × 1.000.000 da PRÓPRIA linha (Todos: 152 ÷ 519.159 = 292,78;
+      // tela de 06/10: principal 67 ÷ ~351,7 mil = 190,51, Todos 67 ÷ ~353,2 mil = 189,72). Vale o campo de rateKeys que
+      // bate com essa conta; com "Pedido principal/secundário", se nenhum bater (campo calculado com a Qtd de Todos), a conta
+      // da própria linha — o número que a tela mostra.
+      rateFromRow: {scale: 1000000}
     },
     detail: {endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/detailBreakageRateData', maxPageSize: 100},
     registration: {endpoint: 'https://gw.jtjms-br.com/servicequality/problemPiece/registrationPage', batch: 100},

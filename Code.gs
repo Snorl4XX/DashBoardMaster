@@ -1003,8 +1003,11 @@ function diagnosticarAvaria(date) {
   const add = x => lines.push(x);
   const fmt = (n, dg) => n === null || n === undefined || n === '' || !isFinite(Number(n)) ? '—' : Number(n).toLocaleString('pt-BR', {minimumFractionDigits: dg || 0, maximumFractionDigits: dg || 0});
   const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
-  const cols = s => s.empty ? 'SEM REGISTROS' : 'Qtd processada ' + fmt(s.totalCount) + ' · 总破损票数 ' + fmt(s.errorCount) + ' · 总破损率 ' + fmt(s.rate, 2) +
-    ' · "Taxa de Avaria" ' + fmt(s.raw && s.raw.breakageRate, 2) + ' · 总破损金额 ' + fmt(s.raw && (s.raw.breakageAmountTotal !== undefined ? s.raw.breakageAmountTotal : s.raw.breakageAmount), 2);
+  // V3.33: os dois campos de taxa do JMS e a conta da linha (总破损票数 ÷ Qtd processada × 1.000.000) — o painel usa a que bate.
+  const cols = s => s.empty ? 'SEM REGISTROS' : 'Qtd processada ' + fmt(s.totalCount) + ' · 总破损票数 ' + fmt(s.errorCount) + ' · 总破损率 do painel ' + fmt(s.rate, 2) +
+    ' (JMS: breakageRateTotal ' + fmt(s.raw && s.raw.breakageRateTotal, 2) + ' · breakageRate ' + fmt(s.raw && s.raw.breakageRate, 2) +
+    ' · conta da linha ' + fmt(s.totalCount > 0 && s.errorCount !== null ? s.errorCount / s.totalCount * 1000000 : null, 2) + ')' +
+    ' · 总破损金额 ' + fmt(s.raw && (s.raw.breakageAmountTotal !== undefined ? s.raw.breakageAmountTotal : s.raw.breakageAmount), 2);
   const cred = authConfigSafe_();
   add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico da Avaria — dia ' + humanDatePt_(d));
   add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE'));
@@ -1041,7 +1044,8 @@ function diagnosticarAvaria(date) {
     add('Painel gravou · ' + nm + ': ' + (r ? 'taxa ' + fmt(r.rate, 2) + ' · avarias ' + fmt(r.errorCount) + ' · Qtd processada ' + fmt(r.totalCount) +
       ' (consultado em ' + String(r.syncedAt || '').slice(0, 16).replace('T', ' ') + ')' : 'nada — o painel mostra "—" para esta opção (não calcula taxa própria)'));
   });
-  add('Regra do painel: a taxa de um dia é o 总破损率 do JMS, sem conta por cima. Em vários dias: Σ 总破损票数 ÷ Σ Qtd processada × 1.000.000 (como a linha 合计 do JMS).');
+  add('Regra do painel: a taxa de um dia é o 总破损率 da própria linha do JMS (o campo de taxa que bate com 总破损票数 ÷ Qtd processada × 1.000.000; ' +
+    'com "Pedido principal/secundário", se nenhum bater, essa conta — o número da tela). Em vários dias: Σ 总破损票数 ÷ Σ Qtd processada × 1.000.000 (como a linha 合计 do JMS).');
   add('Se "Pedido secundário" da tela do JMS não aparecer em nenhum código acima: abra a tela, F12 → Rede, escolha "Pedido secundário", clique em Consulta e mande o "Payload" do getBreakageRateData (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));
   out.texto = lines.join('\n');

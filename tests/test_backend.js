@@ -2359,7 +2359,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // diagnosticarAvaria(): JMS (Todos e cada código) × o que o painel gravou, sem número de remessa.
   const dgA = cS.diagnosticarAvaria(D19);
   const wbA = scrDay()[D19].dm.map(r => r.waybillNo);
-  check(/总破损率 658,07.*← painel: Pedido principal/.test(dgA.texto) && /总破损率 2\.688,05.*← painel: Pedido secundário/.test(dgA.texto) &&
+  check(/总破损率 do painel 658,07.*← painel: Pedido principal/.test(dgA.texto) && /总破损率 do painel 2\.688,05.*← painel: Pedido secundário/.test(dgA.texto) &&
     /Painel gravou · Pedido principal: taxa 658,07/.test(dgA.texto) && dgA.codigos.some(x => x.codigo === 'MAIN' && x.taxa === 658.07) &&
     !wbA.some(w => dgA.texto.indexOf(w) >= 0) && !/FAKE/.test(dgA.texto),
     'diagnosticarAvaria: JMS de cada código ao lado do que o painel gravou (sem número de remessa)', dgA.texto);
@@ -2650,6 +2650,39 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const live = cH.getRateDay_('no_move', T);
   check(!!live && live.metrics.total !== cH.getRateDay_('no_move_hist', T).metrics.total && cH.getDashboardData('no_move', {from: T, to: T}).meta.source === null,
     'Tempo real e Histórico separados: cada um com os próprios números', {live: live && live.metrics.total});
+}
+
+// ---------- V3.33: Avaria — taxa do "Pedido principal" = a da própria linha (tela de 06/10) ----------
+{
+  // Tela de 06/10: Todos 67 avarias → 189,72; Pedido principal 67 avarias → 190,51 (Qtd processada da opção); Pedido
+  // secundário 0. No JMS, com a opção, o breakageRateTotal vinha com a Qtd de Todos (o painel mostrava 189,72). Remessas fictícias.
+  const mkDay = () => {
+    const d = {[D19]: makeDay(D19, 58)}, src = d[D19].dm.filter(r => !/-\d{3}$/.test(r.waybillNo));
+    d[D19].dm = Array.from({length: 67}, (_, i) => Object.assign({}, src[i % src.length],
+      {id: 'V' + i, serialNum: String(i + 1), waybillNo: '4441000' + String(i).padStart(6, '0')}));
+    d[D19].dmBase = 353152;
+    return d;
+  };
+  const cS = freshCtx(mkDay(), {optionBases: {main: 351683, sub: 1469}, dmRateSwap: true});
+  cS.queueHistory(D19, D19, true);
+  runAll(cS, 12);
+  const all = cS.getRateDay_('damage', D19), main = cS.getRateDay_('damage:main', D19);
+  const cardsMain = cS.computeDashboard_('damage', {from: D19, to: D19, filters: {orderKind: ['Pedido principal']}}).cards;
+  const dashS = cS.getDashboardData('damage', {from: D19, to: D19});
+  check(all.rate === 189.72 && main && main.rate === 190.51 && main.errorCount === 67 && main.totalCount === 351683 && cardsMain.rate === 190.51 &&
+    dashS.rateVariants.main.filter(x => x.date === D19)[0].rate === 190.51,
+    'tela de 06/10: Pedido principal = 190,51 (67 ÷ 351.683), não a taxa de Todos (189,72)', {all: all.rate, main: main && main.rate, card: cardsMain.rate});
+  // Linha gravada pela V3.32 com a taxa de Todos (campo do JMS com a Qtd de Todos): corrigida na leitura, sem consultar de novo.
+  const D20 = ctx.addDaysIso_(D19, 1);
+  cS.appendRow_('RATES', ['damage:main', D20, 189.72, 67, 351683, JSON.stringify({official: true, cv: 3, code: 'MAIN', allSig: '67/353152'}), new Date()]);
+  cS.TAB_CACHE_ = {}; cS.TAB_INDEX_ = {};
+  const fixed = cS.getRateDay_('damage:main', D20);
+  check(fixed && fixed.rate === 190.51 && cS.getRateDay_('damage', D19).rate === 189.72,
+    'taxa do Pedido principal gravada até a V3.32 corrigida na leitura (190,51); Todos continua a do JMS', fixed);
+  // Diagnóstico mostra os dois campos do JMS e a conta da linha.
+  const dgS = cS.diagnosticarAvaria(D19);
+  check(/breakageRateTotal 189,72 · breakageRate 190,51 · conta da linha 190,51/.test(dgS.texto) && /总破损率 do painel 190,51/.test(dgS.texto),
+    'diagnosticarAvaria: campos de taxa do JMS e a conta da linha de cada opção', dgS.texto);
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

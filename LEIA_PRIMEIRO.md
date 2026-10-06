@@ -1,8 +1,22 @@
-# J&T DASHMASTER V3.32 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.33 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.33 — Avaria: taxa do "Pedido principal" igual à tela do JMS
+**O que você viu:** no JMS, Todos = **189,72** e Pedido principal = **190,51**, com os mesmos 67 avariados. Muda só a **Qtd processada**: a do principal não tem os ~1,5 mil do secundário. No painel, com "Pedido principal", aparecia a taxa de Todos.
+
+**Causa:** o JMS manda dois campos de taxa (`breakageRateTotal` e `breakageRate`). O painel usava sempre o primeiro. Com "Pedido principal", um deles vem calculado com a Qtd processada de **Todos**: 67 ÷ ~353,2 mil = 189,72, o número de Todos. A tela mostra a taxa da **própria linha**: 67 ÷ ~351,7 mil = 190,51.
+
+**Agora**
+- A taxa de cada opção é a da própria linha: **总破损票数 ÷ Qtd processada × 1.000.000**. Vale o campo do JMS que bate com essa conta; se nenhum bater, a própria conta, que é o número da tela. Em Todos nada muda (os dois campos são iguais e batem com a conta).
+- As taxas do Pedido principal já gravadas pelas versões anteriores são **corrigidas na leitura**, sem consultar o JMS de novo. O painel mostra o número certo logo depois de publicar.
+- `diagnosticarAvaria()` mostra, para Todos e para cada opção: os dois campos de taxa do JMS, a conta da linha e a taxa que o painel usa.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão).
+
+**Testes:** 440 verificações, incluindo os números da tela de 06/10 (Todos 189,72; principal 190,51; secundário 0).
 
 ## V3.32 — Sem Movimentação: Fonte de dados (Tempo real ou Histórico com as datas)
 Feito a partir da captura que você mandou com **Fonte de dados = Histórico**: o mesmo `trajectory_monitor_total`, com `modleType: "history"`, `startDate: "AAAA-MM-DD 00:00:00"` e `endDate: "AAAA-MM-DD 23:59:59"`. O JMS devolve uma linha por **dia (dateTime)** e por tipo de bipe.
@@ -1215,7 +1229,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **437 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **440 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

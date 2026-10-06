@@ -565,8 +565,17 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
     const totalRaw = rd(cfg.summary.totalKeys).value;
     const errors = errorRaw === null ? null : num_(errorRaw, null), total = totalRaw === null ? null : num_(totalRaw, null);
     // Tela sem taxa pronta (Recebimento): taxa = erros ÷ total (não chegadas ÷ deve chegar), em %.
-    const rate = cfg.summary.rateFromCounts ? (total > 0 && errors !== null ? errors / total * 100 : (total === 0 ? 0 : null))
+    let rate = cfg.summary.rateFromCounts ? (total > 0 && errors !== null ? errors / total * 100 : (total === 0 ? 0 : null))
       : parsePercent_(rd(cfg.summary.rateKeys).value);
+    // V3.33 (Avaria): a taxa da tela é a da própria linha (总破损票数 ÷ Qtd processada). Com "Pedido principal", um dos
+    // campos de taxa vem com a Qtd processada de Todos — o painel mostrava a taxa de Todos (189,72 no lugar de 190,51).
+    const rf = cfg.summary.rateFromRow;
+    if (rf && !cfg.summary.rateFromCounts && errors !== null && total > 0) {
+      const exp = errors / total * rf.scale;
+      const match = cfg.summary.rateKeys.map(k => parsePercent_(rd([k]).value)).filter(v => v !== null && Math.abs(v - exp) <= 0.011)[0];
+      if (match !== undefined) rate = match;
+      else if (extra && Object.keys(extra).length) rate = Math.round(exp * 100) / 100;
+    }
     return {rate: rate, errors: errors, total: total, raw: r};
   });
   let rate, errors, total;

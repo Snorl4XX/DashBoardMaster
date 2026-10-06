@@ -223,6 +223,13 @@ function rateFromRow_(r) {
     x.estimated = /"estimated":true/.test(txt) || !/"cv":3/.test(txt);
     x.allSig = sig ? sig[1] : null;
     x.code = code ? String(safeJsonParse_(code[1], code[1])) : null;
+    // V3.33: taxa da opção = a da própria linha (总破损票数 ÷ Qtd processada), como a tela. Linhas gravadas até a V3.32 com o
+    // campo calculado pela Qtd de Todos (Pedido principal 189,72 no lugar de 190,51) são corrigidas na leitura.
+    const bc = INDICATORS[String(r[0]).split(':')[0]], rf = bc && bc.summary && bc.summary.rateFromRow;
+    if (rf && x.rate !== null && errors !== null && total > 0) {
+      const exp = errors / total * rf.scale;
+      if (Math.abs(x.rate - exp) > 0.011) x.rate = Math.round(exp * 100) / 100;
+    }
   }
   // Números do resumo do dia (Recebimento: deve chegar, não chegadas, chegou… — Config.gs → summary.metrics).
   const ic = indicatorCfg_(r[0]);
