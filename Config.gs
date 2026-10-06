@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.30.0',
+  VERSION: '3.31.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1091,15 +1091,22 @@ const INDICATORS = Object.freeze({
     },
     // Colunas da tabela principal da tela: o total de cada tipo de bipe (oficial do JMS); com filtro, a lista baixada.
     metricPanels: [
-      // Cartões de cada tipo de bipe (cada linha da tabela do JMS); a participação é sobre a soma da tabela.
-      {column: 'Sem movimentação', title: {pt: 'Último bipe', zh: '最新操作类型'}, metrics: [
-        {key: 'allTotal', label: {pt: 'Soma da tabela do JMS (todos os tipos)', zh: 'JMS 表合计（全部类型）'}, card: false},
-        {key: 'send', label: {pt: 'Bipe de expedição', zh: '发件扫描'}, detail: 'Bipe de expedição', bad: true},
-        {key: 'problem', label: {pt: 'Bipe de pacote problemático', zh: '问题件扫描'}, detail: 'Bipe de pacote problemático', bad: true},
-        {key: 'arrival', label: {pt: 'Chegadas ao centro', zh: '中心到件'}, detail: 'Chegadas ao centro', bad: true},
-        {key: 'bag', label: {pt: 'Encomenda inserida em lote', zh: '建包扫描'}, detail: 'Encomenda inserida em lote', bad: true},
-        {key: 'stay', label: {pt: 'Entrada no galpão de pacote não expedido', zh: '留仓件入仓'}, detail: 'Entrada no galpão de pacote não expedido', bad: true},
-        {key: 'unbag', label: {pt: 'Encomenda retirada do lote', zh: '拆包扫描'}, detail: 'Encomenda retirada do lote', bad: true}
+      // V3.31 (pedido): cartões em TEMPO REAL = as colunas da linha do horário mais recente da tabela do JMS (nada das
+      // outras linhas): Total, "Sem mov. há mais de N dias" e as taxas de 14+ e 30+ dias (mesma conta do JMS: dayN ÷ total).
+      {column: 'Sem movimentação', title: {pt: 'Linha do horário mais recente (tempo real)', zh: '最新操作时间最近的行（实时）'}, metrics: [
+        {key: 'total', label: {pt: 'Total de pedidos sem movimentação', zh: '断更件总数'}, detail: 'Sem movimentação'},
+        {key: 'day1', label: {pt: 'Sem mov. há mais de 1 dia', zh: '断更1天以上'}, bad: true},
+        {key: 'day2', label: {pt: 'Sem mov. há mais de 2 dias', zh: '断更2天以上'}, bad: true},
+        {key: 'day3', label: {pt: 'Sem mov. há mais de 3 dias', zh: '断更3天以上'}, bad: true},
+        {key: 'day4', label: {pt: 'Sem mov. há mais de 4 dias', zh: '断更4天以上'}, bad: true},
+        {key: 'day5', label: {pt: 'Sem mov. há mais de 5 dias', zh: '断更5天以上'}, bad: true},
+        {key: 'day6', label: {pt: 'Sem mov. há mais de 6 dias', zh: '断更6天以上'}, bad: true},
+        {key: 'day7', label: {pt: 'Sem mov. há mais de 7 dias', zh: '断更7天以上'}, bad: true},
+        {key: 'day10', label: {pt: 'Sem mov. há mais de 10 dias', zh: '断更10天以上'}, bad: true},
+        {key: 'day14', label: {pt: 'Sem mov. há mais de 14 dias', zh: '断更14天以上'}, bad: true},
+        {key: 'day30', label: {pt: 'Sem mov. há mais de 30 dias', zh: '断更30天以上'}, bad: true},
+        {key: 'rate14', label: {pt: 'Taxa de sem mov 14+ dias', zh: '断更14天以上占比'}, pct: true, bad: true, rateOf: {num: 'day14', den: 'total'}},
+        {key: 'rate30', label: {pt: 'Taxa de sem mov 30+ dias', zh: '断更30天以上占比'}, pct: true, bad: true, rateOf: {num: 'day30', den: 'total'}}
       ]}
     ],
     charts: [
@@ -1115,10 +1122,8 @@ const INDICATORS = Object.freeze({
           {value: '5', metric: 'day5'}, {value: '6', metric: 'day6'}, {value: '7', metric: 'day7'}, {value: '10', metric: 'day10'},
           {value: '14', metric: 'day14'}, {value: '30', metric: 'day30'}],
         title: {pt: 'Aging (dias sem movimentação)', zh: '断更天数'}, sub: {pt: 'Pedidos em cada quantidade de dias sem movimentação', zh: '各断更天数的票数'}},
+      // V3.31: só a lista da linha do horário mais recente (sem os totais das outras linhas).
       {key: 'scanTypes', dim: 'scanType', type: 'bar', top: 6,
-        summaryBars: [{value: 'Bipe de expedição', metric: 'send'}, {value: 'Bipe de pacote problemático', metric: 'problem'},
-          {value: 'Chegadas ao centro', metric: 'arrival'}, {value: 'Encomenda inserida em lote', metric: 'bag'},
-          {value: 'Entrada no galpão de pacote não expedido', metric: 'stay'}, {value: 'Encomenda retirada do lote', metric: 'unbag'}],
         title: {pt: 'Tipo de bipe', zh: '最新操作类型'}, sub: {pt: 'Último bipe com mais pedidos sem movimentação', zh: '断更件最多的最新操作类型'}},
       {key: 'logins', dim: 'login', type: 'bar', horizontal: true, top: 10, hideNA: true,
         title: {pt: 'Login', zh: '最新操作人'}, sub: {pt: 'Operador do bipe mais recente', zh: '最新操作人'}},

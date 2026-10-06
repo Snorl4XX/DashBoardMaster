@@ -1,8 +1,25 @@
-# J&T DASHMASTER V3.30 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.31 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.31 — Sem Movimentação em tempo real: tudo da linha mais recente
+Conforme o PDF "novas informações pra sem movimentação":
+
+**Filtros da tela** (já iam na consulta, iguais à captura): Unidade de Análise **Sorting Center** (`groupType: "center"`), Regional responsável **SPE** (370000), Unidade responsável **SP GRU | 30001**, Tipo de produto vazio, Fonte de dados **Tempo real** (`modleType: "modern"`) e os 6 tipos da última operação.
+
+**Tempo real (padrão): só a linha do horário mais recente.** Antes, os cartões mostravam o total de cada tipo de bipe e a soma da tabela, ou seja, números de todas as linhas. Agora **cartões, gráficos e filtros vêm só da linha com o horário da última operação mais recente**:
+- **cartão vermelho:** o Total de pedidos sem movimentação da linha, com o tipo e o horário dela;
+- **cartões:** as colunas da linha. "Sem mov. há mais de 1, 2, 3, 4, 5, 6, 7, 10, 14 e 30 dias" e as **Taxas de sem mov 14+ e 30+ dias** (mesma conta do JMS: dias ÷ total);
+- **turnos, "com mais", gráficos, filtros e tabela:** a lista do Total dessa linha;
+- o gráfico "Tipo de bipe" não usa mais os totais das outras linhas.
+
+**Histórico (Fonte de dados = Histórico, com Data inicial e final):** ainda não está no painel. A captura não mostra o que o JMS manda quando se escolhe Histórico e as datas: os nomes dos campos e o valor do `modleType`. Em vez de adivinhar (e arriscar mostrar o tempo real como se fosse histórico), o painel espera essa captura.
+
+**Instalação:** atualize todos os arquivos do ZIP (não há arquivo novo) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão).
+
+**Testes:** 424 verificações.
 
 ## V3.30 — Sem Movimentação: os dados aparecem ao abrir o painel, sem depender da fila
 **Como o painel pega o número (o passo a passo que você descreveu, igual desde a V3.29):**
@@ -1175,7 +1192,7 @@ O JMS recusou a credencial naquela rota. O painel mostra o erro no selo vermelho
 
 ## Testes (opcional, para desenvolvedores)
 Com Node.js 18+ instalado:
-- `node tests/test_backend.js` executa **423 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
+- `node tests/test_backend.js` executa **424 verificações** do servidor contra um JMS simulado, que responde como as capturas dos PDFs. Ele também simula os problemas vistos em produção: página cortada ou recusada, limite de paginação, token vencido com HTTP 200, página HTML de login, cota esgotada, campos com outra grafia e dia mudando durante o download.
 - `node tests/simulacao_cotas.js consumer 14 2` simula 2 dias de gatilhos com os volumes reais do SP GRU e as cotas do Google (`consumer` = Gmail, `workspace` = Google Workspace). Mostra o tempo de execução, as consultas ao JMS e os arquivos criados por dia.
 
 Esses testes não acessam o JMS real.

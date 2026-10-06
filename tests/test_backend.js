@@ -2512,6 +2512,13 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const nSnap = cW2.queueSnapshotsToday_();
   check(!cW2.getRateDay_('no_move', Y) && nSnap === 1 && cW2.pendingJobs_().some(j => j.indicator === 'no_move' && j.date === T && j.type === 'SUMMARY'),
     'foto gravada com a data errada é ignorada; dia sem foto: a de hoje entra na fila na próxima execução', {nSnap});
+  // V3.31: tempo real = só a linha do horário mais recente — cartões são as colunas dela (Total, Sem mov. há mais de N dias,
+  // taxas 14+/30+) e nenhum gráfico usa os totais das outras linhas.
+  const catN = cN.getPublicCatalog_().filter(c => c.key === 'no_move')[0];
+  const cardKeys = [].concat.apply([], catN.metricPanels.map(p => p.metrics.map(x => x.key)));
+  check(cardKeys.every(k => /^(total|day\d+|rate(14|30))$/.test(k)) && cardKeys.indexOf('allTotal') < 0 && cardKeys.indexOf('send') < 0 &&
+    catN.charts.every(chart => !chart.summaryBars || chart.summaryBars.every(b => /^day\d+$/.test(b.metric))),
+    'tempo real: cartões e gráficos só da linha do horário mais recente (nada das outras linhas)', cardKeys);
   // Foto do momento: dia passado nunca vai para a fila; Resultados não mostram a Sem Movimentação; o painel abre em hoje.
   const nPast = cN.enqueueJobs_([['SUMMARY', 'no_move', Y, 0], ['DETAIL_INIT', 'no_move', Y, 1]], {reset: true});
   const res = cN.getResultsData({});
