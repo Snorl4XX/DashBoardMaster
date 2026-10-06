@@ -299,11 +299,14 @@ const D19 = '2026-09-19';
 const cA = freshCtx({'2026-09-19': makeDay(D19, 99)});
 cA.queueHistory(D19, D19, true);
 runAll(cA);
-// (consultas de turno do Recebimento pedem só a 1ª página de 10: não são download do detalhe)
-const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url) && !(/arrivalbyday/.test(f.url) && f.payload.size === 10));
+// (consultas de turno do Recebimento pedem só a 1ª página de 10: não são download do detalhe; a Sem Movimentação —
+// foto de hoje, que entra na fila sozinha — tem lista de no máximo 100 por página, como a tela)
+const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url) && !(/arrivalbyday/.test(f.url) && f.payload.size === 10) && !/trajectory_monitor/.test(f.url));
 check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 1000 registros por página (antes 100)', detA.map(f => f.payload.size));
 check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
-check(Object.keys(cA.__state.files).length === 9, 'um arquivo por dia e indicador, nenhum arquivo por página', Object.keys(cA.__state.files).length);
+// (a foto de hoje da Sem Movimentação entra na fila sozinha e grava o arquivo de hoje: fora da conta deste dia)
+const filesA = Object.keys(cA.__state.files).filter(id => !/^no_move__/.test(cA.__state.files[id].name || ''));
+check(filesA.length === 9, 'um arquivo por dia e indicador, nenhum arquivo por página', filesA.length);
 check(cA.loadDetailFile_(cA.dayFilesMap_('wrong_send', D19, D19)[D19].fileId).kind === 'jt-day', 'arquivo diário no formato colunar');
 check(cA.allTabRows_('PAGES').length === 0, 'índice de páginas não cresce no caminho normal');
 // Fila vazia: depois de UMA execução de conferência, o gatilho de 5 min sai sem abrir a planilha.
@@ -366,15 +369,16 @@ const cG = freshCtx({'2026-09-19': makeDay(D19, 3)}, optsG);
 cG.queueHistory(D19, D19, true);
 cG.processSyncQueue({budgetMs: 600000});
 const pausesG = cG.publicPauses_();
-check(pausesG.length === 9 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason),
-  'token expirado pausa as 9 rotas com aviso claro', pausesG);
-check(cG.__state.fetches.length === 9, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
+// V3.29: 10 rotas — a foto de hoje da Sem Movimentação também entra na fila sozinha.
+check(pausesG.length === 10 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason) && pausesG.some(p => p.route === 'NOMOVE'),
+  'token expirado pausa as 10 rotas com aviso claro', pausesG);
+check(cG.__state.fetches.length === 10, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
 // (+ o resumo de hoje de cada painel, da atualização rápida de hoje — V3.24)
 check(cG.pendingJobs_().filter(j => j.date !== ctx.isoToday_()).length === 20 && cG.pendingJobs_().filter(j => j.date === ctx.isoToday_()).every(j => j.type === 'SUMMARY') &&
   cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
 cG.processSyncQueue({budgetMs: 600000});
-check(cG.__state.fetches.length === 9, 'fila pausada não insiste no JMS');
-check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 9 && cG.getAppBootstrap().pauses.length === 9, 'pausa chega ao painel');
+check(cG.__state.fetches.length === 10, 'fila pausada não insiste no JMS');
+check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 10 && cG.getAppBootstrap().pauses.length === 10, 'pausa chega ao painel');
 delete optsG.appError;
 cG.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO';
 runAll(cG);
@@ -384,7 +388,7 @@ check(cG.publicPauses_().length === 0 && ALL.every(k => cG.getDayStatus_(k, D19)
 const cH = freshCtx({'2026-09-19': makeDay(D19, 3)}, {html: true});
 cH.queueHistory(D19, D19, true);
 cH.processSyncQueue({budgetMs: 600000});
-check(cH.publicPauses_().length === 9 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
+check(cH.publicPauses_().length === 10 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
 
 // (i) Cota diária do Google esgotada: pausa geral por 1 h, sem marcar erro nos jobs.
 const cI = freshCtx({'2026-09-19': makeDay(D19, 3)}, {onFetch: () => { throw new Error('Service invoked too many times for one day: urlfetch.'); }});
@@ -651,7 +655,8 @@ cQ.queueHistory(D19, D19, true);
 for (let i = 0; i < 4; i++) { cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {}; cQ.processSyncQueue({budgetMs: 600000, force: true}); }
 cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {};
 const qQ = cQ.queueReport_(1100);
-check(qQ.erros === 10 && qQ.esperandoTaxa === 10 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 10 &&
+// V3.29: 11 resumos com erro — a foto de hoje da Sem Movimentação também entra na fila sozinha.
+check(qQ.erros === 11 && qQ.esperandoTaxa === 10 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 11 &&
   /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
 // ---------- 14. V3.8: docas na Falta de Bipagem na Expedição (planilha do usuário) ----------
@@ -2227,7 +2232,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   firstPages.forEach(f => { cnt[sig(f)] = (cnt[sig(f)] || 0) + 1; });
   const dup = Object.keys(cnt).filter(k => cnt[k] > 1 && !/organizationCode/.test(k)).length;
   check(batches >= 1 && inBatch >= 10 && keysPast.every(k => ['2026-09-18', D19].every(d => cR.getRateDay_(k, d))) && cR.pendingJobs_().filter(j => j.type === 'SUMMARY').length === 0 &&
-    !cR.getRateDay_('no_move', D19) && !cR.__state.fetches.some(f => /trajectory_monitor/.test(f.url)),
+    !cR.getRateDay_('no_move', D19) && !cR.getRateDay_('no_move', '2026-09-18'),
     'resumos da fila consultados em paralelo (rajadas do fetchAll) e todos gravados', {batches, inBatch});
   // Falta de Bipagem no Recebimento e na Expedição: o mesmo resumo, agora consultado uma vez por dia (antes, duas).
   const shared = Object.keys(cnt).filter(k => /groupKey/.test(k));
@@ -2435,41 +2440,70 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const pend = cN.pendingJobs_().filter(j => j.indicator === 'no_move');
   runAll(cN, 12);
   const r = cN.getRateDay_('no_move', T), m = r && r.metrics;
-  const byOp = op => nm.filter(x => x.operateType.split('/')[0] === op).length;
-  const maxT = nm.map(x => x.operateTime).sort().pop();
+  const ops = ['发件扫描', '问题件扫描', '中心到件', '建包扫描', '留仓件入仓', '拆包扫描'];
+  const ofOp = op => nm.filter(x => x.operateType.split('/')[0] === op);
+  // V3.29: vale a linha do horário mais recente da tabela (a do tipo com a última operação mais recente), não a soma.
+  const lastOf = op => ofOp(op).map(x => x.operateTime).sort().pop() || '';
+  const chosenOp = ops.filter(op => ofOp(op).length).sort((a, b) => lastOf(a) < lastOf(b) ? 1 : lastOf(a) > lastOf(b) ? -1 : 0)[0];
+  const ch = ofOp(chosenOp), chIdx = ops.indexOf(chosenOp) + 1;
   const dayKeys = ['day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7', 'day10', 'day14', 'day30'];
-  check(pend.length && pend.every(j => j.date === T) && m && m.total === nm.length && m.send === byOp('发件扫描') && m.problem === byOp('问题件扫描') &&
-    m.arrival === byOp('中心到件') && m.bag === byOp('建包扫描') && m.stay === 0 && m.unbag === 0 &&
-    dayKeys.reduce((a, k) => a + m[k], 0) === nm.length && String(m.refTime) === maxT.replace(/\D/g, '') &&
+  check(pend.length && pend.every(j => j.date === T) && m && m.total === ch.length && m.refType === chIdx && m.allTotal === nm.length &&
+    m.send === ofOp('发件扫描').length && m.problem === ofOp('问题件扫描').length && m.arrival === ofOp('中心到件').length && m.bag === ofOp('建包扫描').length &&
+    m.stay === 0 && m.unbag === 0 && dayKeys.reduce((a, k) => a + m[k], 0) === ch.length && String(m.refTime) === lastOf(chosenOp).replace(/\D/g, '') &&
     Math.abs(r.rate - m.day14 / m.total * 100) < 0.01 && !cN.getRateDay_('no_move', Y),
-    'resumo: total, total de cada tipo, dias sem movimentação, horário da última operação mais recente; só hoje é consultado', {m, pend: pend.length});
-  // Lista: uma por tipo, todos os pedidos, campos da tela.
+    'resumo: o número é a linha do horário mais recente (não a soma), dias dela, total de cada tipo guardado; só hoje é consultado',
+    {m, chosenOp, pend: pend.length});
+  // Lista: só a do tipo da linha escolhida (~20–60 consultas em vez de ~170), com os campos da tela.
   const st = cN.getDayStatus_('no_move', T);
   const dash = cN.getDashboardData('no_move', {from: ctx.addDaysIso_(T, -6), to: T});
   const rows = C.decodeDataset(dash.dataset), q = x => Number(x.qty) || 1;
   const nRows = rows.reduce((a, x) => a + q(x), 0);
-  const one = rows.filter(x => x.waybill === nm[0].billcode)[0];
-  const age0 = String(nm[0]._age);
-  check(/COMPLETE/.test(st.details) && nRows === nm.length && one && one.aging === age0 && one.scanType === nm[0].operateType.split('/')[1] &&
-    one.column === one.scanType && one.shift === C.shiftOf(nm[0].operateTime) && one.eventTime === nm[0].operateTime && one.login === nm[0].operateUser &&
-    one.senderBase === nm[0].pickNetworkName && one.recentBase === 'SP GRU' && (one.tripId || '') === (nm[0].transfercode || '') &&
+  const listCalls = cN.__state.fetches.filter(f => /trajectory_monitor_detail/.test(f.url));
+  const one = rows.filter(x => x.waybill === ch[0].billcode)[0];
+  check(/COMPLETE/.test(st.details) && nRows === ch.length && listCalls.length && listCalls.every(f => f.payload.operateType[0] === chosenOp) &&
+    one && one.aging === String(ch[0]._age) && one.scanType === ch[0].operateType.split('/')[1] && one.column === one.scanType &&
+    one.shift === C.shiftOf(ch[0].operateTime) && one.eventTime === ch[0].operateTime && one.login === ch[0].operateUser &&
+    one.senderBase === ch[0].pickNetworkName && one.recentBase === 'SP GRU' && (one.tripId || '') === (ch[0].transfercode || '') &&
     dash.meta.from === T && dash.meta.to === T,
-    'lista: todos os pedidos, Aging "Exceed N days" → N, tipo da última operação, turno pelo horário, login, ID, base; período = um dia (foto)',
-    {st: st.details, nRows, one, from: dash.meta.from});
+    'lista: só a do tipo da linha do horário mais recente, Aging "Exceed N days" → N, tipo, turno pelo horário, login, ID, base; período = um dia (foto)',
+    {st: st.details, nRows, calls: listCalls.length, one, from: dash.meta.from});
   // Cartões e gráficos: "com mais" (ID, base remetente, aging, problemático) e o Aging em ordem de dias.
   const comp = cN.computeDashboard_('no_move', {from: T, to: T});
   const topOf = k => comp.cards.tops.filter(x => x.key === k)[0];
-  const cnt = f => { const c = {}; nm.forEach(x => { const v = f(x); if (v) c[v] = (c[v] || 0) + 1; }); return Object.keys(c).sort((a, b) => c[b] - c[a])[0]; };
-  const ag = comp.charts.filter(ch => ch.key === 'agingBars')[0];
-  check(topOf('tripId').label === cnt(x => x.transfercode) && topOf('senderBase').label === cnt(x => x.pickNetworkName) &&
-    topOf('aging').label === cnt(x => String(x._age)) && topOf('problem').label === cnt(x => x.problemName) &&
+  // O "com mais" de cada dimensão: a contagem do cartão é a maior (empate: qualquer um dos empatados).
+  const best = (f, label) => { const c = {}; ch.forEach(x => { const v = f(x); if (v) c[v] = (c[v] || 0) + 1; });
+    const mx = Math.max.apply(null, Object.values(c)); return c[label] === mx; };
+  const ag = comp.charts.filter(chart => chart.key === 'agingBars')[0];
+  check(best(x => x.transfercode, topOf('tripId').label) && best(x => x.pickNetworkName, topOf('senderBase').label) &&
+    best(x => String(x._age), topOf('aging').label) && best(x => x.problemName, topOf('problem').label) &&
     ag && ag.labels.join(',') === ag.labels.slice().sort((a, b) => Number(a) - Number(b)).join(','),
     'cartões "com mais" (Número do ID, Base Remetente, Aging, Problemático) e Aging em ordem de dias', {tops: comp.cards.tops, aging: ag && ag.labels});
+  // A linha do horário mais recente muda de tipo: a lista do tipo novo é baixada já (sem esperar o intervalo da lista).
+  const other = ops.filter(op => op !== chosenOp && ofOp(op).length)[0];
+  ofOp(other).forEach((x, i) => { if (i === 0) x.operateTime = T + ' 23:59:59'; });
+  const f1 = cN.__state.fetches.length;
+  cN.enqueueJobs_([['SUMMARY', 'no_move', T, 0]], {reset: true}); runAll(cN, 8);
+  const r2 = cN.getRateDay_('no_move', T), calls2 = cN.__state.fetches.slice(f1).filter(f => /trajectory_monitor_detail/.test(f.url));
+  const rows2 = C.decodeDataset(cN.getDashboardData('no_move', {from: T, to: T}).dataset);
+  check(r2.metrics.refType === ops.indexOf(other) + 1 && r2.metrics.total === ofOp(other).length && calls2.length && calls2.every(f => f.payload.operateType[0] === other) &&
+    rows2.reduce((a, x) => a + q(x), 0) === ofOp(other).length,
+    'linha do horário mais recente mudou de tipo: o número e a lista passam a ser os do tipo novo na mesma atualização', {refType: r2.metrics.refType, calls: calls2.length});
+  // Botão Atualizar com o painel aberto em outro dia: consulta só hoje (a V3.28 gravava a foto de hoje com a data aberta).
+  const cU = freshCtx(nmDays());
+  cU.refreshNow('no_move', Y, Y);
+  check(!!cU.getRateDay_('no_move', T) && !cU.getRateDay_('no_move', Y), 'botão Atualizar na Sem Movimentação: consulta e grava só hoje');
+  // Foto gravada em outro dia (V3.28) não vale; a primeira foto do dia entra na fila sozinha.
+  const cW2 = freshCtx(nmDays());
+  cW2.appendRow_('RATES', ['no_move', Y, 0.5, 100, 100, JSON.stringify({total: 100}), new Date()]);
+  reset(cW2);
+  const nSnap = cW2.queueSnapshotsToday_();
+  check(!cW2.getRateDay_('no_move', Y) && nSnap === 1 && cW2.pendingJobs_().some(j => j.indicator === 'no_move' && j.date === T && j.type === 'SUMMARY'),
+    'foto gravada com a data errada é ignorada; dia sem foto: a de hoje entra na fila na próxima execução', {nSnap});
   // Foto do momento: dia passado nunca vai para a fila; Resultados não mostram a Sem Movimentação; o painel abre em hoje.
   const nPast = cN.enqueueJobs_([['SUMMARY', 'no_move', Y, 0], ['DETAIL_INIT', 'no_move', Y, 1]], {reset: true});
   const res = cN.getResultsData({});
   check(nPast === 0 && !cN.pendingJobs_().some(j => j.indicator === 'no_move' && j.date === Y) && cN.lastClosedDate_('no_move') === T &&
-    cN.latestByIndicator_().no_move.date === T && cN.latestByIndicator_().no_move.qty === nm.length &&
+    cN.latestByIndicator_().no_move.date === T && cN.latestByIndicator_().no_move.qty === cN.getRateDay_('no_move', T).metrics.total &&
     !res.series.some(x => x.key === 'no_move') && cN.getPublicCatalog_().filter(c => c.key === 'no_move')[0].snapshot === true,
     'foto do momento: dia passado não é consultado, o painel abre em hoje, menu com o total de hoje e fora dos Resultados', {nPast});
   // Payload sem a Unidade responsável (JMS devolvendo outras bases): nada gravado.
@@ -2483,8 +2517,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'lista com pedidos de outra base (payload sem filtro): importação bloqueada');
   // diagnosticarSemMovimentacao(): JMS de cada tipo × o que o painel gravou, sem remessa nem operador.
   const dg = cN.diagnosticarSemMovimentacao();
-  check(/Resumo \(trajectory_monitor_total\): /.test(dg.texto) && /✓ igual ao JMS agora/.test(dg.texto) &&
-    dg.tipos.filter(x => x.lista === x.resumo).length === 6 && !nm.some(x => dg.texto.indexOf(x.billcode) >= 0) &&
+  check(/linha do horário mais recente = /.test(dg.texto) && /← painel \(horário mais recente\)/.test(dg.texto) && /✓ igual ao JMS agora/.test(dg.texto) &&
+    dg.tipos.filter(x => x.lista === x.resumo).length === 6 && dg.tipos.filter(x => x.painel).length === 1 && !nm.some(x => dg.texto.indexOf(x.billcode) >= 0) &&
     !/Operador Ficticio/.test(dg.texto) && !/FAKE/.test(dg.texto),
     'diagnosticarSemMovimentacao: resumo por tipo, lista × resumo e painel × JMS (sem remessa, operador nem credencial)', dg.texto);
 }

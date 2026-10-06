@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.28.0',
+  VERSION: '3.29.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1000,16 +1000,18 @@ const INDICATORS = Object.freeze({
       // Linhas da nossa base (Unidade responsável = JMS_CENTER_CODE), se o JMS mandar outras.
       siteField: 'dutyCode',
       // Uma linha por tipo de bipe: cada número do dia = soma das linhas; o total de cada tipo vai no número do tipo.
-      byType: {field: 'operateType', timeField: 'operateTime',
+      // V3.29 (pedido): vale a linha do horário mais recente ("pega o horário mais próximo"), não a soma de todas.
+      byType: {field: 'operateType', timeField: 'operateTime', pickLatest: true,
         sums: ['total', 'day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7', 'day10', 'day14', 'day30']},
       rateKeys: [], errorKeys: ['total'], totalKeys: ['total'],
-      metrics: ['total', 'send', 'problem', 'arrival', 'bag', 'stay', 'unbag',
-        'day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7', 'day10', 'day14', 'day30', 'refTime']
+      metrics: ['total', 'send', 'problem', 'arrival', 'bag', 'stay', 'unbag', 'allTotal',
+        'day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7', 'day10', 'day14', 'day30', 'refTime', 'refType']
     },
     detail: {
       endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/trajectory_monitor_detail',
       // A tela mostra 20 por página; como nas outras listas do bigdataReport, até 100 (o painel aprende se o JMS aceitar menos).
-      maxPageSize: 100, days: 0, refreshHours: 1, gmailRefreshHours: 6, maxPerDay: 200000,
+      // V3.29: só a lista da linha do horário mais recente (typeFromSummary) — ~20 a 60 consultas; Gmail a cada 2 h.
+      maxPageSize: 100, days: 0, refreshHours: 1, gmailRefreshHours: 2, maxPerDay: 200000, typeFromSummary: true,
       // A lista não tem horário: nunca é baixada em fatias de horário.
       noSlice: true,
       // Base de cada pedido na lista (Unidade responsável): outra base = payload sem filtro (importação bloqueada).
@@ -1067,6 +1069,7 @@ const INDICATORS = Object.freeze({
       problem: {pt: 'Problemático com mais pedidos', zh: '最多的问题件名称'}
     },
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    // Cartão vermelho: "Total de pedidos sem movimentação" da linha do horário mais recente da tabela do JMS.
     heroMetric: {key: 'total', column: 'Sem movimentação', icon: 'no_move',
       label: {pt: 'Pedidos sem movimentação', zh: '断更件总数'}, labelPeriod: {pt: 'Pedidos sem movimentação', zh: '断更件总数'}},
     navMetric: 'total',
@@ -1087,8 +1090,9 @@ const INDICATORS = Object.freeze({
     },
     // Colunas da tabela principal da tela: o total de cada tipo de bipe (oficial do JMS); com filtro, a lista baixada.
     metricPanels: [
+      // Cartões de cada tipo de bipe (cada linha da tabela do JMS); a participação é sobre a soma da tabela.
       {column: 'Sem movimentação', title: {pt: 'Último bipe', zh: '最新操作类型'}, metrics: [
-        {key: 'total', label: {pt: 'Total de pedidos sem movimentação', zh: '断更件总数'}, detail: 'Sem movimentação'},
+        {key: 'allTotal', label: {pt: 'Soma da tabela do JMS (todos os tipos)', zh: 'JMS 表合计（全部类型）'}, card: false},
         {key: 'send', label: {pt: 'Bipe de expedição', zh: '发件扫描'}, detail: 'Bipe de expedição', bad: true},
         {key: 'problem', label: {pt: 'Bipe de pacote problemático', zh: '问题件扫描'}, detail: 'Bipe de pacote problemático', bad: true},
         {key: 'arrival', label: {pt: 'Chegadas ao centro', zh: '中心到件'}, detail: 'Chegadas ao centro', bad: true},
@@ -1222,6 +1226,8 @@ function getPublicCatalog_() {
       shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
       columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
       snapshot: !!cfg.snapshot,
+      // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).
+      refTypes: cfg.detail && cfg.detail.typeFromSummary ? (cfg.detail.types || []).map(t => t.column) : null,
       labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null,
       hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
       grouped: !!cfg.grouped, routeKey: cfg.routeKey,

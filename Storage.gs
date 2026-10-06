@@ -454,6 +454,9 @@ function getRates_(indicator, from, to) {
     if ((from && x.date < from) || (to && x.date > to) || !isIso_(x.date)) return;
     // V3.25: taxa ESTIMADA de uma opção (gravada por versões antigas) nunca é usada — o painel mostra só a do JMS.
     if (x.estimated) return;
+    // V3.29: foto do momento (Sem Movimentação) só vale no dia em que foi tirada (a V3.28 podia gravar a foto de hoje
+    // com a data de ontem pelo botão Atualizar).
+    if (snapshotWrongDay_(x)) return;
     const prev = byDate[x.date];
     if (!prev || String(x.syncedAt || '') >= String(prev.syncedAt || '')) byDate[x.date] = x;
   });
@@ -894,6 +897,12 @@ function jobIndex_() {
  * Indicador "foto do momento" (Config.gs → snapshot: Sem Movimentação) num dia que não é hoje: o JMS não recebe data,
  * então consultar seria gravar a foto de hoje com a data de outro dia. O dia passado fica com a última foto dele.
  */
+/** Linha de foto do momento consultada em outro dia (data da consulta, no fuso da base, ≠ data da linha). */
+function snapshotWrongDay_(x) {
+  if (!x || !INDICATORS[x.indicator] || !INDICATORS[x.indicator].snapshot || !x.syncedAt) return false;
+  const t = Date.parse(x.syncedAt);
+  return isFinite(t) && Utilities.formatDate(new Date(t), tz_(), 'yyyy-MM-dd') !== x.date;
+}
 function snapshotPast_(indicator, date) { return !!(INDICATORS[indicator] && INDICATORS[indicator].snapshot && date !== isoToday_()); }
 function enqueueJobs_(jobs, opts) {
   opts = opts || {};
@@ -1293,8 +1302,17 @@ function migrateGroupedLayout_() {
  * V3.11.4: a regra da V3.11.2 ("tem dia com mais de 3 dias = já tem histórico") falhava quando a Avaria
  * já estava instalada havia alguns dias só com a revalidação horária — por isso a propriedade nova.
  */
+/** Foto do momento (Sem Movimentação): a de hoje entra na fila já (sem esperar a sincronização de hora em hora). */
+function queueSnapshotsToday_() {
+  const today = isoToday_(), pauses = activePauses_();
+  const jobs = Object.keys(INDICATORS).filter(k => INDICATORS[k].snapshot && !getRateDay_(k, today) && !pauseFor_(INDICATORS[k].routeKey, pauses))
+    .map(k => ['SUMMARY', k, today, 0]);
+  return jobs.length ? enqueueJobs_(jobs, {}) : 0;
+}
 function queueNewIndicatorsHistory_() {
   const flag = k => 'HISTORY_FILL_' + k.toUpperCase();
+  // Foto do momento (Sem Movimentação) não tem histórico no JMS: nada a buscar dos dias passados.
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].snapshot && !getProp_(flag(k), '')).forEach(k => setProp_(flag(k), new Date().toISOString()));
   const keys = Object.keys(INDICATORS).filter(k => !getProp_(flag(k), ''));
   if (!keys.length) return 0;
   const start = getProp_('DATA_START_DATE', ''), end = addDaysIso_(isoToday_(), -1);
@@ -1348,6 +1366,8 @@ function processSyncQueue(opts) {
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
   try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
+  // V3.29: dia sem foto da Sem Movimentação (instalação, virada do dia): a primeira foto entra na fila já.
+  try { queueSnapshotsToday_(); } catch (e) { logSync_('WARN', '', '', 'Foto de hoje (Sem Movimentação) não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return {ok: false, busy: true};
@@ -1571,7 +1591,11 @@ function runSummaryJob_(job) {
     return 'done';
   }
   upsertRate_(summary);
-  if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, false)) {
+  // Sem Movimentação (V3.29): a linha do horário mais recente mudou de tipo de bipe — a lista dela é baixada já.
+  const cfgS = getIndicatorConfig_(job.indicator);
+  const typeChanged = !!(cfgS.detail && cfgS.detail.typeFromSummary && prev && prev.metrics && summary.raw &&
+    Number(prev.metrics.refType) !== Number(summary.raw.refType));
+  if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, typeChanged)) {
     enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
   }
   // Recebimento: quantidade de cada turno pelo resumo (4 consultas), para os cartões e pizzas sem esperar o detalhe.

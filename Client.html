@@ -132,7 +132,8 @@
       tcPartial: 'prévia: o download do dia ainda não terminou', tcShare: '{p} de participação',
       metricsOfficial: 'Números oficiais do JMS (tabela principal)', pctOf: 'Cálculo: {a} ÷ {b}', sumRows: 'Soma', sumCount: '{n}',
       hmSynced: 'Número do JMS consultado em {t}', hmSyncedPeriod: 'Números do JMS consultados até {t}',
-      hmRefTime: 'Horário da última operação mais recente: {t}', hmSnapshot: 'Foto do momento no JMS: um dia por vez',
+      hmRefTime: 'Linha do JMS com o horário mais recente: {type} · {t}', hmSnapshot: 'Foto do momento no JMS: um dia por vez',
+      hmSnapWait: 'A foto de hoje ainda não chegou do JMS: ela entra na próxima execução da fila (até 5 min). O botão Atualizar busca agora.',
       dcNoDetail: 'Contado na lista baixada: {h}'
     },
     zh: {
@@ -249,7 +250,8 @@
       tcPartial: '预览：当日明细尚未下载完', tcShare: '占比 {p}',
       metricsOfficial: 'JMS官方数字（主表）', pctOf: '计算：{a} ÷ {b}', sumRows: '合计', sumCount: '{n}',
       hmSynced: 'JMS 数字获取时间：{t}', hmSyncedPeriod: 'JMS 数字最近获取：{t}',
-      hmRefTime: '最新操作时间（最近）：{t}', hmSnapshot: 'JMS 实时快照：每次显示一天',
+      hmRefTime: 'JMS 最新操作时间最近的行：{type} · {t}', hmSnapshot: 'JMS 实时快照：每次显示一天',
+      hmSnapWait: '今天的快照尚未从 JMS 获取：将在下次队列执行时获取（最多 5 分钟）。点击“更新”可立即获取。',
       dcNoDetail: '按下载的列表计数：{h}'
     }
   };
@@ -557,8 +559,11 @@
   }
   function maxIso(a, b) { return a > b ? a : b; }
   function anchorDate(key) {
-    var b = state.boot, l = b && b.latestByIndicator && b.latestByIndicator[key];
-    return l && l.date ? l.date : Core.addDays((b && b.today) || new Date().toISOString().slice(0, 10), -1);
+    var b = state.boot, l = b && b.latestByIndicator && b.latestByIndicator[key], c = state.catalogMap && state.catalogMap[key];
+    var today = (b && b.today) || new Date().toISOString().slice(0, 10);
+    // Sem Movimentação (foto do momento): abre sempre em hoje (V3.28 abria em ontem antes da 1ª foto, e ficava vazio).
+    if (c && c.snapshot) return today;
+    return l && l.date ? l.date : Core.addDays(today, -1);
   }
   function latestOverall() {
     var best = null, b = state.boot;
@@ -1529,9 +1534,11 @@
     // Sem Movimentação (V3.28): o "Horário da última operação" mais recente da tabela principal do JMS (AAAAMMDDhhmmss).
     if (cfg() && cfg().snapshot) {
       var rt = activeRates().filter(function (r) { return r.date === state.to && r.metrics && isNum(r.metrics.refTime); })[0];
-      var rs = rt ? String(Math.round(Number(rt.metrics.refTime))) : '';
-      if (rs.length === 14) syncLine += '<div class="kpi-sub hm-sync">' + esc(t('hmRefTime', {t: rs.slice(6, 8) + '/' + rs.slice(4, 6) + '/' + rs.slice(0, 4) + ' ' +
+      var rs = rt ? String(Math.round(Number(rt.metrics.refTime))) : '', ri = rt && isNum(rt.metrics.refType) ? Number(rt.metrics.refType) : 0;
+      var rtype = ri && cfg().refTypes && cfg().refTypes[ri - 1] ? vlabel('scanType', cfg().refTypes[ri - 1]) : '—';
+      if (rs.length === 14) syncLine += '<div class="kpi-sub hm-sync">' + esc(t('hmRefTime', {type: rtype, t: rs.slice(6, 8) + '/' + rs.slice(4, 6) + '/' + rs.slice(0, 4) + ' ' +
         rs.slice(8, 10) + ':' + rs.slice(10, 12) + ':' + rs.slice(12, 14)})) + '</div>';
+      if (!isNum(cur) && state.to === ((state.boot && state.boot.today) || state.to)) syncLine += '<div class="kpi-sub">' + esc(t('hmSnapWait')) + '</div>';
     }
     lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
       (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +

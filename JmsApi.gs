@@ -624,29 +624,36 @@ function summedSummary_(cfg, indicatorKey, isoDate, records) {
 }
 
 /**
- * Resumo com uma linha por tipo de bipe (Sem Movimentação: trajectory_monitor_total). Cada número = SOMA das linhas
- * (total e dias sem movimentação day1…day30); o total de cada tipo vai no número do tipo (detail.types[].type).
- * refTime = o "Horário da última operação" mais recente da tabela, como número AAAAMMDDhhmmss (sem fuso).
- * Taxa guardada = Taxa de sem mov 14+ dias, a mesma conta da coluna do JMS (day14 ÷ total), sobre a soma.
+ * Resumo com uma linha por tipo de bipe (Sem Movimentação: trajectory_monitor_total), consultado com os 6 tipos da tela.
+ * V3.29 (pedido): o número do painel é a linha com o "Horário da última operação" MAIS RECENTE (a mais próxima de
+ * agora), não a soma das linhas: total, dias sem movimentação (day1…day30) e taxa vêm dela; refType = posição do tipo
+ * dela em detail.types (1…6) — a lista baixada é a desse tipo. O total de cada tipo continua guardado (cartões de cada
+ * tipo de bipe) e allTotal = soma da tabela. refTime = horário dessa linha, como número AAAAMMDDhhmmss (sem fuso).
+ * Taxa guardada = Taxa de sem mov 14+ dias da linha (day14 ÷ total), a mesma conta da coluna do JMS.
  */
 function typedSummary_(cfg, indicatorKey, isoDate, records) {
   const bt = cfg.summary.byType, types = (cfg.detail && cfg.detail.types) || [], sums = {};
-  (bt.sums || []).forEach(k => { sums[k] = 0; });
   types.forEach(t => { sums[t.type] = 0; });
-  let ref = '';
+  let allTotal = 0;
   const rows = records.map(r => {
     const rd = fieldReader_(r), op = String(rd([bt.field]).value || '').split('/')[0].trim(), m = {};
-    (bt.sums || []).forEach(k => { const v = rd([k]).value; m[k] = v === null ? 0 : num_(v, 0); sums[k] += m[k]; });
+    (bt.sums || []).forEach(k => { const v = rd([k]).value; m[k] = v === null ? 0 : num_(v, 0); });
     const td = types.filter(t => t.op === op)[0];
     if (td) sums[td.type] += m.total || 0;
-    const tm = String(rd([bt.timeField]).value || '').trim();
-    if (tm > ref) ref = tm;
-    return Object.assign({op: op, time: tm}, m);
+    allTotal += m.total || 0;
+    return Object.assign({op: op, time: String(rd([bt.timeField]).value || '').trim(), typeIdx: td ? types.indexOf(td) + 1 : null}, m);
   });
-  const total = sums.total || 0, digits = ref.replace(/\D/g, '').slice(0, 14);
-  const raw = Object.assign({date: isoDate, source: 'JMS', rows: records.length}, sums,
-    {refTime: digits.length === 14 ? Number(digits) : null, refTimeText: ref, types: rows});
-  return {indicator: indicatorKey, date: isoDate, rate: total > 0 ? Math.round((sums.day14 || 0) / total * 10000) / 100 : 0,
+  // Linha do horário mais recente (empate: a de mais pedidos). Sem horário em nenhuma: a de mais pedidos.
+  const pick = rows.slice().sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0) || (b.total || 0) - (a.total || 0))[0];
+  const chosen = bt.pickLatest ? pick : null;
+  const out = {};
+  (bt.sums || []).forEach(k => { out[k] = chosen ? chosen[k] || 0 : rows.reduce((a, r) => a + (r[k] || 0), 0); });
+  const ref = chosen ? chosen.time : rows.reduce((m, r) => r.time > m ? r.time : m, ''), digits = ref.replace(/\D/g, '').slice(0, 14);
+  const total = out.total || 0;
+  const raw = Object.assign({date: isoDate, source: 'JMS', rows: records.length}, out, sums,
+    {allTotal: allTotal, refType: chosen ? chosen.typeIdx : null, refOp: chosen ? chosen.op : '',
+      refTime: digits.length === 14 ? Number(digits) : null, refTimeText: ref, types: rows});
+  return {indicator: indicatorKey, date: isoDate, rate: total > 0 ? Math.round((out.day14 || 0) / total * 10000) / 100 : 0,
     errorCount: total, totalCount: total, empty: false, raw: raw};
 }
 
@@ -851,7 +858,7 @@ function discoverDetailEndpoint_(cfg, isoDate, size, win) {
  */
 function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
   const cfg = getIndicatorConfig_(indicatorKey);
-  const types = detailTypeOrder_(cfg);
+  const types = detailTypesForDay_(cfg, indicatorKey, isoDate);
   if (types.length === 1 && types[0] === null) return planDetailType_(indicatorKey, isoDate, validateTotal, null);
   // Lista opcional (Recebimento: sem bipe na etapa anterior / nesta base): se o JMS recusar o detailType ou
   // devolver outra coisa, o dia segue com as outras listas. Sessão expirada e cota continuam parando tudo.
@@ -876,6 +883,17 @@ function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
   // Tamanho de página: o menor aceito (todas as listas usam o mesmo endereço).
   return {size: Math.min.apply(null, plans.map(p => p.size)), total: plans.reduce((a, p) => a + p.total, 0), windows: windows, chunks: chunks,
     sliced: plans.some(p => p.sliced), types: plans.map(p => p.windows[0] ? p.windows[0].type : null), skipped: skipped};
+}
+/**
+ * Listas do detalhe de um dia. Sem Movimentação (detail.typeFromSummary, V3.29): só a lista do tipo da linha do horário
+ * mais recente do resumo do dia (metrics.refType); sem essa linha (dia sem resumo novo), todas.
+ */
+function detailTypesForDay_(cfg, indicatorKey, isoDate) {
+  const all = detailTypeOrder_(cfg);
+  if (!cfg.detail || !cfg.detail.typeFromSummary) return all;
+  const r = getRateDay_(indicatorKey, isoDate), idx = r && r.metrics ? Number(r.metrics.refType) : 0;
+  const td = idx > 0 ? (cfg.detail.types || [])[idx - 1] : null;
+  return td ? [td.type] : all;
 }
 /**
  * Ordem de download das listas do detalhe: `detail.order` (Recebimento: as listas pequenas primeiro, para as

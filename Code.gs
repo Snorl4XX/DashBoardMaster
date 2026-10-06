@@ -102,6 +102,9 @@ function refreshNow(indicatorKey, from, to) {
   to = isIso_(to) ? to : addDaysIso_(today, -1);
   from = isIso_(from) ? from : to;
   if (to > today) to = today;
+  // V3.29: foto do momento (Sem Movimentação): o JMS devolve a situação de agora — só hoje é consultado (a V3.28 gravava a
+  // foto de hoje com a data do dia aberto no painel).
+  if (cfg.snapshot) { from = today; to = today; }
   if (from > to) throw new Error('A data inicial não pode ser maior que a final.');
   const cache = CacheService.getScriptCache();
   const cooldownKey = 'REFRESH_' + indicatorKey + '_' + from + '_' + to;
@@ -791,14 +794,17 @@ function diagnosticarSemMovimentacao() {
     sum = s.empty ? null : s.raw;
     if (!sum) add('Resumo (trajectory_monitor_total): SEM REGISTROS — nenhum pedido sem movimentação nos 6 tipos de bipe');
     else {
-      add('Resumo (trajectory_monitor_total): ' + fmt(sum.total) + ' pedidos sem movimentação · horário da última operação mais recente: ' + (sum.refTimeText || '—'));
+      const ch = sum.refType ? types[sum.refType - 1] : null;
+      add('Resumo (trajectory_monitor_total), com os 6 tipos de bipe no filtro: linha do horário mais recente = ' + (ch ? ch.column : '—') + ' (' + (sum.refTimeText || '—') +
+        ') → ' + fmt(sum.total) + ' pedidos sem movimentação (o número do painel) · soma da tabela: ' + fmt(sum.allTotal));
       (sum.types || []).forEach(r => {
         const td = types.filter(t => t.op === r.op)[0];
         add('  · ' + (td ? td.column : r.op) + ' (' + r.op + '): ' + fmt(r.total) + ' · dias 1–7: ' + ['day1', 'day2', 'day3', 'day4', 'day5', 'day6', 'day7'].map(k => fmt(r[k])).join('/') +
-          ' · 10+: ' + fmt(r.day10) + ' · 14+: ' + fmt(r.day14) + ' · 30+: ' + fmt(r.day30) + ' · última operação ' + (r.time || '—'));
+          ' · 10+: ' + fmt(r.day10) + ' · 14+: ' + fmt(r.day14) + ' · 30+: ' + fmt(r.day30) + ' · última operação ' + (r.time || '—') +
+          (td && sum.refType === types.indexOf(td) + 1 ? '  ← painel (horário mais recente)' : ''));
       });
       types.filter(t => !(sum.types || []).some(r => r.op === t.op)).forEach(t => add('  · ' + t.column + ' (' + t.op + '): 0 (o JMS não mostra a linha)'));
-      out.resumo = {total: sum.total, refTime: sum.refTimeText};
+      out.resumo = {total: sum.total, somaTabela: sum.allTotal, tipo: ch ? ch.column : null, refTime: sum.refTimeText};
     }
   } catch (e) { add('Resumo: ERRO — ' + err(e)); }
   try {
@@ -813,9 +819,9 @@ function diagnosticarSemMovimentacao() {
   types.forEach(t => {
     try {
       const r = fetchDetailPage_(key, d, 1, size, Object.assign({type: t.type}, full));
-      const exp = sum ? Number(sum[t.type]) || 0 : null;
-      out.tipos.push({tipo: t.column, lista: r.total, resumo: exp});
-      add('Lista "' + t.column + '" (' + t.op + '): ' + fmt(r.total) + (exp === null ? '' : ' (resumo ' + fmt(exp) + (r.total === exp ? ' ✓' : r.total > exp * 1.5 + 50 ? ' ✗ MUITO MAIOR: o filtro da base não pegou' : ' ✗ diferente (o JMS atualiza a foto de hora em hora)') + ')') +
+      const exp = sum ? Number(sum[t.type]) || 0 : null, used = sum && sum.refType === types.indexOf(t) + 1;
+      out.tipos.push({tipo: t.column, lista: r.total, resumo: exp, painel: !!used});
+      add('Lista "' + t.column + '" (' + t.op + ')' + (used ? ' [a que o painel baixa]' : '') + ': ' + fmt(r.total) + (exp === null ? '' : ' (resumo ' + fmt(exp) + (r.total === exp ? ' ✓' : r.total > exp * 1.5 + 50 ? ' ✗ MUITO MAIOR: o filtro da base não pegou' : ' ✗ diferente (o JMS atualiza a foto de hora em hora)') + ')') +
         ' · página com ' + r.records.length + ' de ' + size + ' pedidas · ' + fmt(Math.ceil(r.total / Math.max(1, r.records.length || size))) + ' consulta(s)');
       if (r.records.length && !mapped) {
         mapped = true;
@@ -830,9 +836,13 @@ function diagnosticarSemMovimentacao() {
     } catch (e) { add('Lista "' + t.column + '" (' + t.op + '): ERRO — ' + err(e)); }
   });
   try {
-    const dp = detailProgress_(key, addDaysIso_(d, -3), d);
+    const dp = detailProgress_(key, addDaysIso_(d, -6), d);
+    const got = {};
+    getRates_(key, addDaysIso_(d, -6), d).forEach(r => { got[r.date] = r; });
     add('Fotos guardadas (hoje é refeita a cada atualização; dia passado fica com a última foto dele):');
+    dp.days = dp.days.filter(x => x.date === d || got[x.date]);
     dp.days.forEach(x => {
+      if (got[x.date]) x.summary += ' (' + fmt(got[x.date].metrics && got[x.date].metrics.total) + ' pedidos, consultado em ' + String(got[x.date].syncedAt || '').slice(0, 16).replace('T', ' ') + ')';
       const job = x.job ? ' · tarefa ' + x.job.status + (x.job.ahead !== null && x.job.ahead !== undefined ? ' (' + x.job.ahead + ' antes na fila)' : '') + (x.job.attempts ? ', ' + x.job.attempts + ' falha(s)' : '') : '';
       add('  ' + humanDatePt_(x.date) + ': resumo ' + x.summary + ' · lista ' + x.details + (x.expected ? ' ' + x.saved + '/' + x.expected : '') + job +
         (x.error || x.progressError ? ' · erro: ' + (x.progressError || x.error) : ''));
