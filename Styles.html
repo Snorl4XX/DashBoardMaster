@@ -319,46 +319,21 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .target-goal strong{font-size:40px;letter-spacing:-1px;line-height:1.1}
 .maomao{height:200px;width:200px;display:grid;place-items:center;position:relative}
 .mascot-sprite{height:200px;width:200px;position:relative}
-.mao-shadow{position:absolute;left:50%;bottom:2px;width:96px;height:12px;margin-left:-48px;border-radius:50%;background:rgba(0,0,0,.16);filter:blur(2px)}
+.mao-shadow{position:absolute;left:50%;bottom:2px;width:104px;height:12px;margin-left:-52px;border-radius:50%;background:rgba(0,0,0,.16);filter:blur(2px)}
 :root[data-theme="dark"] .mao-shadow{background:rgba(0,0,0,.55)}
-.mao-fig{position:absolute;left:0;right:0;bottom:6px;margin:auto;height:188px;opacity:0;transition:opacity .35s;transform-origin:50% 100%}
-.mao-fig img{display:block;width:100%;height:100%}
-.mao-fig.mao-happy{aspect-ratio:286/462}
-.mao-fig.mao-sad{aspect-ratio:266/483}
-/* Na meta: Maomao DANÇANDO — pula, gira o corpo de um lado para o outro e balança, com notas e estrelas. */
-.target.good .mao-happy{opacity:1;animation:maoDance 1s ease-in-out infinite}
-.target.good .mao-shadow{animation:maoShadow 1s ease-in-out infinite}
-@keyframes maoDance{
-  0%{transform:translateY(0) rotate(-7deg) scaleY(1)} 15%{transform:translateY(2px) rotate(-7deg) scale(1.04,.95)}
-  35%{transform:translateY(-22px) rotate(0deg) scale(.98,1.04)} 50%{transform:translateY(0) rotate(7deg) scale(1.04,.95)}
-  65%{transform:translateY(-14px) rotate(3deg) scaleY(1.02)} 85%{transform:translateY(0) rotate(-4deg) scale(1.02,.98)} 100%{transform:translateY(0) rotate(-7deg) scaleY(1)}}
-@keyframes maoShadow{0%,50%,100%{transform:scaleX(1);opacity:1}35%{transform:scaleX(.7);opacity:.55}65%{transform:scaleX(.8);opacity:.7}}
-/* Fora da meta: Maomao CHORANDO — soluça (tremidinha), balança a cabeça e as lágrimas caem. */
-.target.bad .mao-sad{opacity:1;animation:maoSob 1.4s ease-in-out infinite}
-@keyframes maoSob{
-  0%,100%{transform:translateY(0) rotate(0deg)} 10%{transform:translateY(2px) rotate(-1.5deg)} 20%{transform:translateY(0) rotate(1.5deg)}
-  30%{transform:translateY(2px) rotate(-1.5deg)} 40%{transform:translateY(0) rotate(0deg)} 70%{transform:translateY(1px) rotate(-2.5deg)} 85%{transform:translateY(0) rotate(2deg)}}
-.mao-tear{position:absolute;width:9px;height:13px;border-radius:50% 50% 50% 50% / 60% 60% 40% 40%;background:linear-gradient(180deg,#9FD4FF,#3B9BFF);opacity:0;top:45%}
-.mao-tear.t1{left:31%} .mao-tear.t2{left:66%} .mao-tear.t3{left:33%} .mao-tear.t4{left:64%}
-.target.bad .mao-tear{animation:maoTear 1.6s ease-in infinite}
-.target.bad .mao-tear.t2{animation-delay:.45s} .target.bad .mao-tear.t3{animation-delay:.8s} .target.bad .mao-tear.t4{animation-delay:1.2s}
-@keyframes maoTear{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1;transform:translateY(2px) scale(1)}80%{opacity:.9}100%{opacity:0;transform:translateY(46px) scale(.85)}}
+/* V3.40: o Maomao se mexe pelos próprios quadros (animação quadro a quadro, como um GIF): braços, perna, cabeça e orelhas
+   dançando na meta; soluçando e chorando fora da meta. A imagem inteira NÃO balança. */
+.mao-fig{position:absolute;left:0;right:0;bottom:4px;margin:auto;height:196px;opacity:0;transition:opacity .35s}
+.mao-fig img{display:block;width:100%;height:100%;object-fit:contain}
+.mao-fig.mao-happy{aspect-ratio:var(--mao-happy-ratio,.66)}
+.mao-fig.mao-sad{aspect-ratio:var(--mao-sad-ratio,.6)}
+.target.good .mao-happy{opacity:1}
+.target.bad .mao-sad{opacity:1}
 /* Sem taxa oficial: Maomao parado e esmaecido (não é "fora da meta"). */
-.target.neutral .mao-happy{opacity:.4;filter:grayscale(1)}
-.mao-fx{position:absolute;inset:-6px;pointer-events:none;opacity:0;transition:opacity .3s}
-.mao-fx span{position:absolute;font-size:22px;font-weight:900}
-.mao-stars span{color:var(--red);animation:starPop 1.6s linear infinite}
-.mao-stars span:nth-child(1){left:6px;top:10px}.mao-stars span:nth-child(2){right:2px;top:26px;animation-delay:.4s}.mao-stars span:nth-child(3){left:12px;bottom:40px;animation-delay:.8s}
-.mao-stars span:nth-child(4){right:14px;bottom:24px;animation-delay:1.2s}
-.mao-stars span.note{color:var(--good);font-size:24px;animation:noteFloat 2s ease-in-out infinite}
-.mao-stars span.note:nth-child(5){left:24px;top:-2px} .mao-stars span.note:nth-child(6){right:20px;top:2px;animation-delay:1s}
-.target.good .mao-stars{opacity:1}
-.mao-rain span{color:#3B9BFF;font-size:16px;animation:rainDrop 1.4s linear infinite}
-.mao-rain span:nth-child(1){left:22px;top:6px}.mao-rain span:nth-child(2){right:26px;top:14px;animation-delay:.5s}.mao-rain span:nth-child(3){left:44px;top:22px;animation-delay:.9s}
-.target.bad .mao-rain{opacity:.85}
-@keyframes noteFloat{0%{opacity:0;transform:translateY(10px) rotate(-10deg)}30%{opacity:1}100%{opacity:0;transform:translateY(-22px) rotate(12deg)}}
-@keyframes rainDrop{0%{opacity:0;transform:translateY(-6px)}20%{opacity:1}100%{opacity:0;transform:translateY(26px)}}
-@media (prefers-reduced-motion: reduce){.mao-fig,.mao-shadow,.mao-tear,.mao-fx span{animation:none!important}}
+.target.neutral .mao-still{opacity:.4;filter:grayscale(1)}
+/* Quem pede "menos movimento" no sistema vê o 1º quadro parado. */
+.mao-fig .mao-still-img{display:none}
+@media (prefers-reduced-motion: reduce){.mao-fig .mao-anim-img{display:none}.mao-fig .mao-still-img{display:block}}
 
 /* ---------- gráficos ---------- */
 /* Todos os gráficos no padrão dos painéis de docas: largura total, título PT / 中文, cartões embaixo. */
@@ -573,7 +548,7 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
   .kpi.span2{grid-column:span 2}
   .target{grid-template-columns:120px 1fr}
   .target-goal{display:none}
-  .maomao,.mascot-sprite{width:130px;height:150px} .mao-fig{height:140px} .target{grid-template-columns:1fr;justify-items:center;text-align:center} .target-goal{text-align:center} .target-copy h3{font-size:24px} .target-copy p{font-size:15px}
+  .maomao,.mascot-sprite{width:140px;height:150px} .mao-fig{height:146px} .target{grid-template-columns:1fr;justify-items:center;text-align:center} .target-goal{text-align:center} .target-copy h3{font-size:24px} .target-copy p{font-size:15px}
   .topbar{flex-wrap:wrap}
   .top-actions{width:100%;justify-content:flex-start}
   .title-wrap h1{font-size:21px}

@@ -1,8 +1,18 @@
-# J&T DASHMASTER V3.39 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.40 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.40 — Maomao animado quadro a quadro (o corpo mexe, a imagem não balança)
+- O Maomao virou uma **animação de verdade, quadro a quadro** (como um GIF), feita a partir das duas imagens enviadas. A imagem inteira não balança mais.
+- **Na meta, Maomao dança:** dá pulinhos, soca o ar com um braço de cada vez, chuta a perna e mexe a cabeça e as orelhas no ritmo.
+- **Fora da meta, Maomao chora:** soluça, balança a cabeça, as orelhas murcham, as mãos tremem no peito e as lágrimas escorrem.
+- O fundo é transparente e fica bom nos temas claro e escuro.
+- Quem ativou "reduzir movimento" no sistema vê o Maomao parado (o primeiro quadro).
+- As animações ficam dentro do `Mascot.html`, sem link externo, então funcionam no Apps Script sem liberar nada.
+
+**Instalação:** atualize o `Mascot.html`, o `Styles.html` e o `Config.gs` (ou todos os arquivos do ZIP) e publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão). Recarregue com Ctrl+F5.
 
 ## V3.39 — Tema escuro como padrão (topo escuro também)
 - O painel **abre no tema escuro**. Quem preferir o claro clica no ☀️, e essa escolha fica guardada no navegador.
