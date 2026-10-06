@@ -1,8 +1,26 @@
-# J&T DASHMASTER V3.37 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V3.38 — Painel de Indicadores (Google Apps Script)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V3.38 — Avaria em ppm, Maomao novo (dançando/chorando) acima dos cartões, letras maiores e tema escuro
+**Avaria em ppm:** a taxa da Avaria aparece em **ppm**, o número do JMS por milhão (ex.: **189,72 ppm**). A meta aparece como **≤ 90,00 ppm** e a variação em ppm. Vale para o painel, o menu lateral, os Resultados e os relatórios. A conta não muda.
+
+**Maomao novo**
+- Usa as **duas imagens que você mandou**, com o fundo removido para funcionar no tema claro e no escuro.
+- As imagens chegaram **paradas** (1 quadro; o chat converteu os GIFs), então o movimento é feito pelo painel:
+  - **na meta:** Maomao **dançando**, pulando, girando e balançando, com notas ♪ e estrelas;
+  - **fora da meta:** Maomao **chorando**, soluçando, com lágrimas caindo e gotas;
+  - **sem taxa oficial:** parado e cinza.
+- Para usar os GIFs originais, troque o `src` das imagens em `Mascot.html` (instruções no próprio arquivo).
+- O quadro do Maomao ficou **em cima dos cartões**, com **letras maiores**: título 30 px, texto 17 px e meta 40 px.
+
+**Tema escuro:** botão 🌙/☀️ no topo, ao lado de PT-BR/中文. Fundo grafite com o vermelho da J&T; o cartão principal, os botões e os cabeçalhos das tabelas continuam vermelhos. Gráficos, rótulos e cores dos turnos se ajustam ao tema. A escolha fica guardada no navegador de cada pessoa, e o padrão é o tema claro.
+
+**Instalação:** atualize todos os arquivos do ZIP. O `Mascot.html` mudou: troque o conteúdo inteiro. Publique uma **Nova versão** (Implantar → Gerenciar implantações → ✏️ → Nova versão) e recarregue com Ctrl+F5.
+
+**Testes:** 454 verificações, mais o painel no navegador em tema claro e escuro, em português, em chinês e na largura de celular.
 
 ## V3.37 — Sem Movimentação: Tempo real sempre a foto de AGORA, só da linha mais nova
 **O que os seus prints mostraram (06/10, v3.36.0):** o cartão vermelho dizia "consultado em **05/10/2026, 23:35**" e "Linha mais nova do JMS: **—** · 04/10/2026 22:59:55", com total **14.781**. O menu lateral mostrava 8.392 (a foto de hoje).

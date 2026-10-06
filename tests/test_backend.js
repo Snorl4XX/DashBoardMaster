@@ -829,9 +829,10 @@ check(Object.keys(vm.runInContext('fillEmpty_(INDICATORS.wrong_send)', ctx)).len
 // (a) Números do documento: 152 avarias ÷ 519.159 operados × 1.000.000 = 292,78, a "Taxa de Avaria" da tela do JMS.
 check(Math.round(152 / 519159 * 1e6 * 100) / 100 === 292.78, 'taxa de avaria do JMS é por milhão');
 const cfgDm = ctx.getIndicatorConfig_('damage');
-check(!cfgDm.goal.unit && cfgDm.goal.direction === 'max' && cfgDm.goal.scale === 1e6 && !cfgDm.summary.rateFactor &&
+// V3.38 (pedido): a Avaria passa a ser mostrada em ppm (antes, o número do JMS com "%").
+check(cfgDm.goal.unit === 'ppm' && cfgDm.goal.direction === 'max' && cfgDm.goal.scale === 1e6 && !cfgDm.summary.rateFactor &&
   C.rateScale(cfgDm.goal) === 1e6 && C.rateScale({unit: 'ppm'}) === 1e6 && C.rateScale(ctx.getIndicatorConfig_('wrong_send').goal) === 100,
-  'Avaria: número do JMS com "%", meta abaixo, contas na escala do JMS (por milhão)');
+  'Avaria: número do JMS em ppm, meta abaixo, contas na escala do JMS (por milhão)');
 // (b) Consultas iguais às do documento.
 const pS = ctx.buildPayload_('damage', '2026-09-29', 1, 20, false), pD = ctx.buildPayload_('damage', '2026-09-29', 1, 100, true);
 check(JSON.stringify(pS) === JSON.stringify({current: 1, size: 20, organizationCode: '30001', organizationType: 3, dateType: 1, countryId: '1', startDate: '2026-09-29', endDate: '2026-09-29'}),
@@ -926,8 +927,8 @@ const prDm = C.periodRate([{rate: 292.78, errorCount: 152, totalCount: 519159}, 
 check(prDm.method === 'weighted' && Math.abs(prDm.rate - 252 / 919159 * 1e6) < 1e-6, 'taxa de vários dias como o JMS = Σavarias ÷ Σvolume × 1.000.000', prDm);
 const shDm = C.aggregateShiftResults([{date: D19, T1: 10, T2: 20, T3: 30, total: 60}], 'day', 'T2', D19, D19, [{date: D19, totalCount: 500000}], C.rateScale(cfgDm.goal));
 check(shDm[0].rate === 40, 'Resultados por turno na escala do JMS (20 ÷ 500.000 × 1.000.000 = 40)', shDm[0]);
-check(ctx.rateFormat_(cfgDm) === '0.00%' && Math.abs(ctx.rateCell_(292.78, cfgDm) - 2.9278) < 1e-12,
-  'relatório: taxa da Avaria igual à tela do JMS (292,78%)');
+check(/ppm/.test(ctx.rateFormat_(cfgDm)) && ctx.rateCell_(292.78, cfgDm) === 292.78 && ctx.rateText_(292.78, cfgDm) === '292,78 ppm',
+  'relatório: taxa da Avaria igual à tela do JMS, em ppm (292,78 ppm)', ctx.rateFormat_(cfgDm));
 // (f) Relatório e diagnóstico.
 cDm.UrlFetchApp.fetch = (() => { const f = cDm.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cDm.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
 const repDm = cDm.generateReport('damage', {from: D19, to: D19}, 'xlsx');

@@ -12,8 +12,30 @@
   var BOOT = window.__BOOT__ || {};
   var $ = function (q, r) { return (r || document).querySelector(q); };
   var $$ = function (q, r) { return Array.prototype.slice.call((r || document).querySelectorAll(q)); };
-  var RED = '#E60012', RED_DARK = '#B8000E', INK = '#1F2430', MUTED = '#6B7280', GRID = '#F0F0F3', GOOD = '#16A34A', BAD = '#D03B3B', GOAL = '#8A8F98';
+  var RED = '#E60012', RED_DARK = '#B8000E', INK = '#1F2430', MUTED = '#6B7280', GRID = '#F0F0F3', GOOD = '#16A34A', BAD = '#D03B3B', GOAL = '#8A8F98', CARD = '#FFFFFF';
   var SHIFT_COLORS = {T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7', 'N/A': '#9CA3AF'};
+  // V3.38: tema claro/escuro (botão no topo; preferência guardada neste navegador). Cores dos gráficos acompanham o tema.
+  function isDark() { return document.documentElement.getAttribute('data-theme') === 'dark'; }
+  function applyThemeColors() {
+    var dark = isDark();
+    INK = dark ? '#F2F3F5' : '#1F2430'; MUTED = dark ? '#9BA1AD' : '#6B7280'; GRID = dark ? '#262A33' : '#F0F0F3'; GOAL = dark ? '#A3A8B3' : '#8A8F98';
+    CARD = dark ? '#17191F' : '#FFFFFF';
+    SHIFT_COLORS.T1 = dark ? '#FF3B4A' : '#E60012'; SHIFT_COLORS.T2 = dark ? '#4C93F0' : '#2A78D6'; SHIFT_COLORS.T3 = dark ? '#9B8CFA' : '#4A3AA7';
+    if (window.Chart && state.chartDefaultsSet) {
+      Chart.defaults.color = MUTED;
+      Chart.defaults.plugins.tooltip.backgroundColor = dark ? '#2A2D36' : INK;
+      Chart.defaults.borderColor = dark ? '#2A2D36' : 'rgba(0,0,0,0.1)';
+    }
+    var b = document.getElementById('themeBtn');
+    if (b) { b.setAttribute('aria-pressed', String(dark)); b.title = t(dark ? 'themeLight' : 'themeDark'); b.setAttribute('aria-label', b.title); }
+  }
+  function toggleTheme() {
+    var dark = !isDark();
+    if (dark) document.documentElement.setAttribute('data-theme', 'dark'); else document.documentElement.removeAttribute('data-theme');
+    store('jt_theme', dark ? 'dark' : 'light');
+    applyThemeColors();
+    if (state.view === 'results') { if (state.results.data) renderResults(); } else if (state.data) renderDashboard();
+  }
   var PAGE_SIZE = 50;
 
   // ------------------------------------------------------------------ textos
@@ -49,7 +71,7 @@
       participation: 'participação', topOffender: '{dim} ofensor', shipments: 'remessas',
       targetGoodTitle: 'Meta atingida! 🎉', targetBadTitle: 'Fora da meta', targetNoneTitle: 'Taxa oficial indisponível',
       targetGoodText: 'Maomao está dançando: {name} está dentro da meta ({goal}). Continue assim!',
-      targetBadText: 'Maomao ficou bravo: {name} está fora da meta ({goal}). Veja abaixo os maiores ofensores.',
+      targetBadText: 'Maomao está chorando: {name} está fora da meta ({goal}). Veja abaixo os maiores ofensores.',
       targetNoneText: 'Ainda não há taxa sincronizada do JMS para este período. Confira a cobertura nos selos acima.',
       goalBelow: 'abaixo de {v}', goalAbove: 'acima de {v}',
       evolution: 'Evolução diária', evolutionSub: 'Taxa oficial do JMS por dia · pontos verdes na meta, vermelhos fora', evolutionSubNoGoal: 'Taxa oficial do JMS por dia',
@@ -84,6 +106,7 @@
       week: 'Sem {w}', quarterLabel: '{q}º tri/{y}', na: 'Sem informação', bootLoading: 'Carregando painel…',
       spark: 'Últimos 14 dias', chartLabelsToggle: 'Rótulos', lastSeen: 'Última taxa',
       presetToday: 'Hoje', slowLoading: 'Carregando um período grande… pode levar até 1 minuto.',
+      themeDark: 'Tema escuro', themeLight: 'Tema claro',
       pauseAuthTitle: 'Sincronização pausada: o JMS recusou a credencial',
       pauseAuthText: 'Desde {since} o JMS não aceita o token (normalmente ele expirou). Indicadores afetados: {list}. O responsável deve gerar um novo AuthToken no JMS e atualizar JMS_AUTHTOKEN nas Propriedades do script — a importação recomeça sozinha. Os dados já sincronizados continuam no painel.',
       pauseQuotaTitle: 'Sincronização pausada: cota diária do Google atingida',
@@ -186,7 +209,7 @@
       participation: '占比', topOffender: '主要{dim}', shipments: '票',
       targetGoodTitle: '目标达成！🎉', targetBadTitle: '未达目标', targetNoneTitle: '暂无官方指标率',
       targetGoodText: 'Maomao 正在跳舞庆祝：{name} 已达标（目标 {goal}），继续保持！',
-      targetBadText: 'Maomao 生气了：{name} 未达标（目标 {goal}）。请查看下方主要问题。',
+      targetBadText: 'Maomao 哭了：{name} 未达标（目标 {goal}）。请查看下方主要问题。',
       targetNoneText: '该期间尚无已同步的JMS指标率，请查看上方的覆盖情况。',
       goalBelow: '低于 {v}', goalAbove: '高于 {v}',
       evolution: '每日趋势', evolutionSub: 'JMS官方每日指标率 · 绿点达标，红点未达标', evolutionSubNoGoal: 'JMS官方每日指标率',
@@ -221,6 +244,7 @@
       week: '第{w}周', quarterLabel: '{y}年Q{q}', na: '无', bootLoading: '正在加载看板…',
       spark: '近14天', chartLabelsToggle: '标签', lastSeen: '最新指标率',
       presetToday: '今天', slowLoading: '正在加载较长期间… 可能需要 1 分钟。',
+      themeDark: '深色主题', themeLight: '浅色主题',
       pauseAuthTitle: '同步已暂停：JMS 拒绝了凭证',
       pauseAuthText: '自 {since} 起 JMS 不接受该令牌（通常已过期）。受影响的指标：{list}。请负责人在 JMS 中重新获取 AuthToken，并在脚本属性中更新 JMS_AUTHTOKEN，导入会自动恢复。已同步的数据仍会显示。',
       pauseQuotaTitle: '同步已暂停：已达到 Google 每日配额',
@@ -567,6 +591,7 @@
 
   function init() {
     state.lang = pickLang();
+    applyThemeColors();
     applyStaticI18n();
     bindEvents();
     if (!Core) { showAlert('Core.gs não foi carregado. Verifique se todos os arquivos foram copiados.'); bootDone(); return; }
@@ -629,11 +654,13 @@
     $$('[data-i18n-placeholder]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-placeholder')); });
     $$('.lang-btn').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-lang') === state.lang)); });
     $('#footNote').innerHTML = esc(t('footer')) + '<span class="made-by">' + esc(t('madeBy')) + '</span>';
+    applyThemeColors();
     var bt = $('#bootText'); if (bt) bt.textContent = t('bootLoading');
   }
 
   function bindEvents() {
     $$('.lang-btn').forEach(function (b) { b.addEventListener('click', function () { setLanguage(b.getAttribute('data-lang')); }); });
+    $('#themeBtn').addEventListener('click', toggleTheme);
     $('#indicatorSelect').addEventListener('change', function (e) { selectIndicator(e.target.value); });
     $('#sourceSelect').addEventListener('change', function (e) { setSource(e.target.value); });
     $('#resultsIndicator').addEventListener('change', function (e) { state.results.indicator = e.target.value; loadResults(); });
@@ -1904,7 +1931,7 @@
       ? {data: vals, borderColor: RED, borderWidth: 2.4, cubicInterpolationMode: 'monotone', spanGaps: true, fill: true,
           backgroundColor: function (ctx) { var a = ctx.chart.chartArea; if (!a) return 'rgba(230,0,18,.08)';
             var g = ctx.chart.ctx.createLinearGradient(0, a.top, 0, a.bottom); g.addColorStop(0, 'rgba(230,0,18,.18)'); g.addColorStop(1, 'rgba(230,0,18,0)'); return g; },
-          pointRadius: vals.map(function (v, i) { return i === last ? 5 : 3; }), pointBackgroundColor: vals.map(function (v, i) { return i === last ? RED : '#fff'; }),
+          pointRadius: vals.map(function (v, i) { return i === last ? 5 : 3; }), pointBackgroundColor: vals.map(function (v, i) { return i === last ? RED : CARD; }),
           pointBorderColor: RED, pointBorderWidth: 1.6}
       : {data: vals, backgroundColor: vals.map(function (v, i) { return i === last ? RED : '#F5A3AA'; }), hoverBackgroundColor: RED_DARK,
           borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start', maxBarThickness: 46, categoryPercentage: .8, barPercentage: .86};
@@ -2141,7 +2168,7 @@
     Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
     Chart.defaults.font.size = 11.5;
     Chart.defaults.color = MUTED;
-    Chart.defaults.plugins.tooltip.backgroundColor = INK;
+    Chart.defaults.plugins.tooltip.backgroundColor = isDark() ? '#2A2D36' : INK;
     Chart.defaults.plugins.tooltip.padding = 10;
     Chart.defaults.plugins.tooltip.cornerRadius = 10;
     Chart.defaults.plugins.tooltip.titleFont = {weight: '700'};
@@ -2402,11 +2429,11 @@
             var g = ctx.chart.ctx.createLinearGradient(0, a.top, 0, a.bottom); g.addColorStop(0, 'rgba(230,0,18,.18)'); g.addColorStop(1, 'rgba(230,0,18,0)'); return g;
           },
           pointRadius: pts.map(function (p) { var inSel = p.date >= spec.selFrom && p.date <= spec.selTo; return n > 90 ? (inSel ? 3 : 1.5) : (inSel ? 4.5 : 2.5); }),
-          pointHoverRadius: 6, pointBorderColor: '#fff', pointBorderWidth: 1.5,
+          pointHoverRadius: 6, pointBorderColor: CARD, pointBorderWidth: 1.5,
           pointBackgroundColor: pts.map(function (p) { return p.met === true ? GOOD : p.met === false ? BAD : MUTED; })},
         {label: t('goal'), data: pts.map(function () { return gLine; }), borderColor: GOAL, borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, fill: false}
       ].concat(spec.shift ? [{label: t('shiftLine', {s: spec.shift.name}), data: spec.shift.values, borderColor: spec.shift.color, borderWidth: 2,
-        cubicInterpolationMode: 'monotone', spanGaps: false, fill: false, pointRadius: 3, pointBackgroundColor: spec.shift.color, pointBorderColor: '#fff', pointBorderWidth: 1}] : [])},
+        cubicInterpolationMode: 'monotone', spanGaps: false, fill: false, pointRadius: 3, pointBackgroundColor: spec.shift.color, pointBorderColor: CARD, pointBorderWidth: 1}] : [])},
       plugins: plugins(),
       options: {
         responsive: true, maintainAspectRatio: false, animation: {duration: 650}, interaction: {mode: 'index', intersect: false},
@@ -2430,7 +2457,7 @@
               if (ctx.datasetIndex !== 0 || vals[i] === null) return false;
               return i === lastI || i === minI || i === maxI ? true : showAll ? 'auto' : false;
             },
-            align: 'top', anchor: 'end', offset: 4, color: INK, backgroundColor: 'rgba(255,255,255,.9)', borderRadius: 4, padding: {top: 2, bottom: 2, left: 4, right: 4},
+            align: 'top', anchor: 'end', offset: 4, color: INK, backgroundColor: isDark() ? 'rgba(23,25,31,.92)' : 'rgba(255,255,255,.9)', borderRadius: 4, padding: {top: 2, bottom: 2, left: 4, right: 4},
             font: {size: 10.5, weight: '700'}, formatter: function (v) { return c.goal.unit === 'ppm' ? fmtNum(v, 2) : fmtRate(v, c.goal); }, clip: false
           }
         },
@@ -2485,7 +2512,7 @@
     return {
       $sig: 'doughnut', type: 'doughnut',
       data: {labels: spec.labels.map(function (l) { return vlabel(spec.dim || spec.key, l); }), datasets: [{data: data,
-        backgroundColor: spec.labels.map(function (l) { return SHIFT_COLORS[l] || '#9CA3AF'; }), borderColor: '#fff', borderWidth: 3, hoverOffset: 8}]},
+        backgroundColor: spec.labels.map(function (l) { return SHIFT_COLORS[l] || '#9CA3AF'; }), borderColor: CARD, borderWidth: 3, hoverOffset: 8}]},
       plugins: plugins([centerText]),
       options: {
         responsive: true, maintainAspectRatio: false, cutout: '60%', animation: {duration: 650}, layout: {padding: 10},
@@ -3265,7 +3292,7 @@
       type: 'line',
       data: {labels: points.map(function (p) { return fmtPeriodKey(p.key, per); }), datasets: [
         {label: t('qty'), data: vals, borderColor: RED, borderWidth: 2.2, cubicInterpolationMode: 'monotone', spanGaps: per !== 'day', fill: false,
-          pointRadius: points.length > 90 ? 1.5 : 4, pointHoverRadius: 6, pointBorderColor: '#fff', pointBorderWidth: 1.5, pointBackgroundColor: RED}
+          pointRadius: points.length > 90 ? 1.5 : 4, pointHoverRadius: 6, pointBorderColor: CARD, pointBorderWidth: 1.5, pointBackgroundColor: RED}
       ]},
       plugins: plugins(),
       options: {responsive: true, maintainAspectRatio: false, animation: {duration: 600}, interaction: {mode: 'index', intersect: false}, layout: {padding: {top: 26, right: 36}},
@@ -3309,7 +3336,7 @@
       type: 'line',
       data: {labels: points.map(function (p) { return fmtPeriodKey(p.key, per); }), datasets: [
         {label: t('rate'), data: vals, borderColor: RED, borderWidth: 2.2, cubicInterpolationMode: 'monotone', spanGaps: per !== 'day', fill: false,
-          pointRadius: points.length > 90 ? 1.5 : 4, pointHoverRadius: 6, pointBorderColor: '#fff', pointBorderWidth: 1.5,
+          pointRadius: points.length > 90 ? 1.5 : 4, pointHoverRadius: 6, pointBorderColor: CARD, pointBorderWidth: 1.5,
           pointBackgroundColor: points.map(function (p) { return p.met === true ? GOOD : p.met === false ? BAD : MUTED; })},
         {label: t('goal'), data: points.map(function () { return gLine; }), borderColor: GOAL, borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0, fill: false}
       ]},

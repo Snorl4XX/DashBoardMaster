@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '3.37.0',
+  VERSION: '3.38.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -452,7 +452,8 @@ const INDICATORS = Object.freeze({
     name: {pt: 'Avaria', zh: '破损'},
     subtitle: {pt: 'Taxa de avaria do JMS (Relatório de Taxa de Avaria)', zh: 'JMS 破损率（破损率报表）'},
     // Meta: taxa ABAIXO de 90 (direction 'max'; na escala do JMS, informada pela operação). null = "Meta não definida".
-    goal: {value: 90, direction: 'max', strict: false, scale: 1000000},
+    // V3.38 (pedido): a taxa da Avaria é mostrada em ppm (por milhão), como o número do JMS: "189,72 ppm", meta ≤ 90 ppm.
+    goal: {value: 90, direction: 'max', strict: false, scale: 1000000, unit: 'ppm'},
     apiProfile: 'damage', detailMatchesErrors: true,
     summary: {
       endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/getBreakageRateData',
