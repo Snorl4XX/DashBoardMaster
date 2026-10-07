@@ -22,6 +22,8 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 - **Dias já baixados:** entram na fila sozinhos, uma vez. Até a consulta de cada dia, a coluna fica vazia. O ID de chegada antigo nunca aparece como se fosse de saída.
 - **Se o JMS recusar só o Rastreamento:** pausa só essa consulta. A taxa, a lista e os cartões do SC → DC continuam.
 
+**Cota do Google (Apps Script):** na simulação da conta Gmail (90 min/dia), a consulta dos IDs de saída custa **cerca de 1 min por dia** a mais. São poucas consultas, porque só as remessas fora do prazo entram e vão 100 por consulta. Nenhuma execução passou de 6 min e todos os indicadores ficaram completos.
+
 **Para conferir no JMS real:** rode **`diagnosticarViagensSCDC`** em Configurações → Executar função (Node.js) ou no editor (Apps Script). Ele mostra, para algumas remessas do dia, o ID de chegada antigo → o ID de saída achado, sem o número das remessas.
 
 **Instalação:** atualize todos os arquivos do ZIP. No Apps Script, publique uma Nova versão. No Node.js, troque os arquivos e reinicie o servidor.

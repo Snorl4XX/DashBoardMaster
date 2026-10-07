@@ -145,6 +145,13 @@ function realisticJms(opts) {
   opts = opts || {};
   const cap = opts.maxPageSize || 1000;
   const cache = {};
+  const dcIdx = {};
+  function dcIndex(date) {
+    if (dcIdx[date]) return dcIdx[date];
+    const m = {};
+    dayList(date, 'dc').forEach(r => { m[r.waybillNo] = r; });
+    return (dcIdx[date] = m);
+  }
   function dayList(date, kind) {
     const k = date + kind;
     if (cache[k]) return cache[k];
@@ -251,6 +258,15 @@ function realisticJms(opts) {
       const timeOf = (r, i) => { const sec = Math.floor(i * 86400 / r.n); return dd + ' ' + two(Math.floor(sec / 3600)) + ':' + two(Math.floor(sec / 60) % 60) + ':' + two(sec % 60); };
       if (route === 'keywordList') {
         const data = (body.keywordList || []).map(w => {
+          // V4.1: remessas do SC→DC (fora do prazo) — carregamento na SP GRU com o ID de viagem de SAÍDA; chegada com outro ID.
+          const md = String(w).match(/^DC(\d{8})(\d{6})$/);
+          if (md) {
+            const d = md[1].slice(0, 4) + '-' + md[1].slice(4, 6) + '-' + md[1].slice(6), rec = dcIndex(d)[w];
+            if (!rec) return null;
+            return {keyword: w, details: [{scanTime: rec.dispatchTime, scanTypeName: 'Encomenda carregada', scanNetworkName: 'SP GRU', nextStopName: rec.sendNextStation,
+              code: 1, originalScanTypeCode: 50, remark2: 'SAIDA' + md[1] + 'V' + (Number(md[2]) % 12)},
+              {scanTime: rec.arrivalScanTime, scanTypeName: 'Coleta de chegadas', scanNetworkName: 'SP GRU', code: 2, originalScanTypeCode: 90, remark2: rec.arrivalShipmentNo}]};
+          }
           const m = String(w).match(/^SF(\d{8})R(\d+)I(\d+)$/);
           if (!m) return null;
           const r = SEND[Number(m[2])], i = Number(m[3]), d8 = m[1], d = d8.slice(0, 4) + '-' + d8.slice(4, 6) + '-' + d8.slice(6);
