@@ -28,7 +28,9 @@ const DEFAULTS = {
   // Caminho do Edge/Chrome para gerar PDF. Vazio = procura sozinho.
   navegadorPdf: '',
   // false = não roda a fila sozinho (só para testes/manutenção).
-  agendador: true
+  agendador: true,
+  // Link público do painel (ex.: https://computador.nome.ts.net, do Tailscale Funnel). Só para mostrar na janela e em Configurações.
+  linkPublico: ''
 };
 
 function configPath() {
@@ -55,6 +57,7 @@ function loadConfig(opts) {
   cfg.dbFile = path.join(cfg.dataDir, 'dashmaster.db');
   cfg.filesDir = path.join(cfg.dataDir, 'arquivos');
   cfg.porta = Number(cfg.porta) || DEFAULTS.porta;
+  cfg.linkPublico = String(cfg.linkPublico || '').trim().replace(/\/+$/, '');
   cfg.filaCadaSegundos = Math.max(15, Number(cfg.filaCadaSegundos) || DEFAULTS.filaCadaSegundos);
   cfg.trabalhadores = Math.max(1, Math.min(8, Number(cfg.trabalhadores) || DEFAULTS.trabalhadores));
   if (process.env.DASHMASTER_SEM_AGENDADOR === '1') cfg.agendador = false;

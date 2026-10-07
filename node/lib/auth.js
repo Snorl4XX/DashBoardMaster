@@ -72,11 +72,22 @@ class Auth {
   check(pwd, typed) { return !!pwd && sameText(pwd, typed); }
 }
 
-/** Pedido feito no próprio computador do servidor (e não repassado por um proxy/túnel). */
+/**
+ * Pedido que veio de fora por um link público (Tailscale Funnel, Cloudflare Tunnel, ngrok, proxy…).
+ * Esses programas rodam no próprio computador e repassam para o localhost, então o endereço de origem
+ * parece local: os cabeçalhos que eles acrescentam é que denunciam.
+ */
+function viaTunnel(req) {
+  return Object.keys(req.headers).some(h => /^(x-forwarded-|x-real-ip$|forwarded$|via$|true-client-ip$|cf-|tailscale-|x-ngrok|ngrok-)/.test(h));
+}
+
+/** Pedido feito no próprio computador do servidor: endereço local, Host local e nada de túnel/proxy no caminho. */
 function isLocal(req) {
-  if (req.headers['x-forwarded-for'] || req.headers.forwarded || req.headers['x-real-ip']) return false;
+  if (viaTunnel(req)) return false;
+  const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+  if (host !== 'localhost' && host !== '127.0.0.1' && host !== '[::1]') return false;
   const a = String(req.socket.remoteAddress || '');
   return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
 }
 
-module.exports = {Auth, isLocal, parseCookies};
+module.exports = {Auth, isLocal, viaTunnel, parseCookies};

@@ -21,7 +21,7 @@ const {loadConfig} = require('./lib/config');
 const {makeLogger} = require('./lib/log');
 const {GasRuntime} = require('./lib/gas');
 const {Pool} = require('./lib/pool');
-const {Auth, isLocal} = require('./lib/auth');
+const {Auth, isLocal, viaTunnel} = require('./lib/auth');
 const pages = require('./lib/pages');
 const {safeId} = require('./lib/drive');
 const SERVER_VERSION = require('./package.json').version;
@@ -237,18 +237,35 @@ function baseUrl(req) {
   const proto = String(req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')).split(',')[0].trim();
   return proto + '://' + String(req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + cfg.porta)).split(',')[0].trim();
 }
-/** POST de outro site (CSRF): o navegador manda Origin; tem que ser este mesmo endereço. */
+/**
+ * POST de outro site (CSRF): o navegador manda Origin; tem que ser este mesmo painel. Pelo link público, o túnel pode trocar
+ * o Host por localhost: valem também o endereço original que ele informa (X-Forwarded-Host) e o "linkPublico" do config.json.
+ */
 function sameOrigin(req) {
   const o = req.headers.origin;
   if (!o) return true;
-  try { return new URL(o).host === String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim(); } catch (e) { return false; }
+  let host;
+  try { host = new URL(o).host.toLowerCase(); } catch (e) { return false; }
+  const first = v => String(v || '').split(',')[0].trim().toLowerCase();
+  const ok = [first(req.headers.host), first(req.headers['x-forwarded-host'])];
+  if (cfg.linkPublico) { try { ok.push(new URL(cfg.linkPublico).host.toLowerCase()); } catch (e) { /* link inválido no config */ } }
+  return ok.some(h => h && h === host);
 }
-function clientIp(req) { return String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(); }
+/**
+ * Endereço de quem tenta a senha (limite de tentativas). Direto da rede: o do próprio socket. Pelo túnel (socket local):
+ * o que o túnel informa — o último da lista X-Forwarded-For é o que ele acrescentou (o começo pode ter sido forjado).
+ */
+function clientIp(req) {
+  const a = String(req.socket.remoteAddress || '');
+  if (a !== '127.0.0.1' && a !== '::1' && a !== '::ffff:127.0.0.1') return a;
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map(x => x.trim()).filter(Boolean);
+  return String(req.headers['cf-connecting-ip'] || xff[xff.length - 1] || a);
+}
 function isSecure(req) { return String(req.headers['x-forwarded-proto'] || '').indexOf('https') === 0 || !!req.socket.encrypted; }
 function safeBack(v, def) { const s = String(v || ''); return /^\/(?!\/)[^\s]*$/.test(s) ? s : def; }
 
 function addresses() {
-  const out = ['http://localhost:' + cfg.porta];
+  const out = (cfg.linkPublico ? [cfg.linkPublico] : []).concat(['http://localhost:' + cfg.porta]);
   if (cfg.host === '127.0.0.1' || cfg.host === 'localhost') return out;
   Object.values(os.networkInterfaces()).forEach(list => (list || []).forEach(a => {
     if (a.family === 'IPv4' && !a.internal) out.push('http://' + a.address + ':' + cfg.porta);
@@ -282,6 +299,7 @@ async function configApi(req, res, name) {
     const last = sched.last.processSyncQueue;
     sendJson(res, 200, {
       ok: true, versaoPainel: panelVersion(), versaoServidor: SERVER_VERSION, token: !!all.JMS_AUTHTOKEN,
+      senhaPainel: !!cfg.senha, senhaConfig: !!cfg.senhaConfig, linkPublico: cfg.linkPublico,
       dataInicial: all.DATA_START_DATE || '', fila, filaTexto,
       agendador: {rodando: sched.running, pendentes: sched.pending.slice(),
         ultima: last ? new Date(last).toLocaleString('pt-BR') + ' · ' + sched.lastSummary : ''},
@@ -397,6 +415,11 @@ async function handle(req, res) {
   }
 
   // ----- painel (com senha, se houver)
+  // Painel aberto pela internet sem senha: avisa uma vez na janela (o link do Google também era aberto, mas vale proteger).
+  if (!cfg.senha && !sched.warnedOpen && viaTunnel(req)) {
+    sched.warnedOpen = true;
+    log('aviso', 'O painel foi aberto por um link público e está SEM senha. Defina "senha" no config.json para pedir senha a quem abrir de fora.');
+  }
   if (!panelOk) {
     if (p === '/api/run') { sendJson(res, 401, {ok: false, error: 'Sessão expirada: recarregue a página e entre com a senha.'}); return; }
     send(res, 303, '', {Location: '/entrar?volta=' + encodeURIComponent(url.pathname + url.search)});
@@ -465,7 +488,8 @@ server.on('error', e => {
 });
 server.listen(cfg.porta, cfg.host, () => {
   log('info', 'J&T DashMaster (Node.js ' + SERVER_VERSION + ', painel ' + panelVersion() + ') no ar.');
-  addresses().forEach(a => log('info', '  Painel: ' + a));
+  addresses().forEach(a => log('info', '  Painel: ' + a + (a === cfg.linkPublico ? '  (link público)' : '')));
+  if (cfg.linkPublico && !cfg.senha) log('aviso', 'Há link público e o painel está sem senha: defina "senha" no config.json.');
   log('info', '  Configurações (AuthToken, histórico, diagnósticos): http://localhost:' + cfg.porta + '/config');
   if (!props.getProperty('JMS_AUTHTOKEN')) log('aviso', 'AuthToken do JMS ainda não cadastrado: abra Configurações.');
   if (cfg.agendador === false) log('aviso', 'Agendador desligado: a fila do JMS só roda pela tela Configurações.');

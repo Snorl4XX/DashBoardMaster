@@ -81,12 +81,41 @@ O arquivo é criado na primeira vez que o servidor abre. Edite-o com o Bloco de 
 | `filaCadaSegundos` | `60` | De quanto em quanto tempo a fila do JMS roda |
 | `trabalhadores` | `3` | Quantas consultas do painel rodam ao mesmo tempo |
 | `navegadorPdf` | vazio | Caminho do Edge/Chrome para o PDF. Vazio = procura sozinho |
+| `linkPublico` | vazio | O link público do painel (seção 5), para aparecer na janela e em Configurações |
 
-**Acesso de fora da base** (internet, 4G):
-1. Coloque `senha` e `senhaConfig` no `config.json`.
-2. Use um túnel seguro, como Cloudflare Tunnel ou Tailscale. **Não** abra a porta direto no roteador.
+Para abrir o painel de fora da base, veja a seção 5 (link público).
 
-## 5. Atualizar para uma versão nova do painel
+## 5. Link público (como o link do Google)
+
+Sozinho, o servidor só abre na rede da base. Para ter um **link `https://` que abre de qualquer lugar** (casa, 4G, outra base), use o **Tailscale Funnel**:
+- É grátis.
+- O link é **fixo** e continua valendo depois de reiniciar o computador.
+- O cadeado (https) é automático.
+- Não precisa comprar domínio nem mexer no roteador.
+
+1. Instale o Tailscale neste computador: https://tailscale.com/download/windows.
+2. Entre com uma conta Google, Microsoft ou e-mail.
+3. Dê dois cliques em **`link-publico.bat`** (pasta `node`).
+   - Na primeira vez, ele mostra um link para **autorizar o Funnel** na sua conta. Abra o link, autorize e rode o `link-publico.bat` de novo.
+   - Se pedir permissão, clique com o botão direito no arquivo → **Executar como administrador**.
+4. O `link-publico.bat` mostra o endereço, algo como **`https://nome-do-computador.nome-da-conta.ts.net`**. Esse é o link público do painel.
+5. No `config.json`, coloque esse endereço em `"linkPublico"` e escolha uma **`"senha"`**. Depois reinicie o servidor.
+   - O link aparece na janela e em Configurações.
+   - Quem abrir o painel de fora vai precisar da senha.
+
+Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.exe" funnel reset`.
+
+**Segurança:**
+- A tela **Configurações nunca abre pelo link público**, mesmo sem `senhaConfig`. O servidor reconhece pedidos vindos de túnel, e a tela só abre no próprio computador (ou com `senhaConfig`).
+- Sem `senha`, o painel fica aberto para quem tiver o link, como era o link do Google. A janela do servidor avisa quando isso acontece.
+- **Não** abra a porta direto no roteador.
+
+**Outras opções:**
+- **Cloudflare Tunnel:** link fixo, mas precisa de conta e de um domínio próprio. Sem domínio, o link `trycloudflare.com` muda toda vez que reinicia e serve só para teste.
+- **Hospedar numa VPS:** um servidor na nuvem, pago por mês.
+
+
+## 6. Atualizar para uma versão nova do painel
 
 1. Feche a janela do servidor.
 2. Substitua **todos os arquivos do ZIP novo** (os `.gs`, os `.html` e a pasta `node`), **menos a pasta `node/dados` e o arquivo `node/config.json`**.
@@ -96,14 +125,14 @@ Se você trocar só os `.gs`/`.html`, o servidor recarrega sozinho em poucos seg
 
 **Cópia de segurança:** copie a pasta `node/dados` (com o servidor fechado). Ela guarda tudo: banco, listas baixadas, relatórios e a configuração das Propriedades.
 
-## 6. Diferenças em relação ao Google
+## 7. Diferenças em relação ao Google
 
 - **Os dados do Google não vêm junto.** O painel baixa de novo do JMS a partir da **Data inicial**, sem limite, então isso é rápido.
 - **O relatório Excel sai sem os gráficos.** Ele tem os dados, as cores e os formatos. O PDF tem os gráficos.
 - **O PDF precisa do Edge ou do Chrome** no computador.
 - **O computador precisa ficar ligado.** Desligado, a fila para; ao religar, ela continua de onde parou.
 
-## 7. Problemas comuns
+## 8. Problemas comuns
 
 | Mensagem | O que fazer |
 |---|---|
@@ -116,7 +145,7 @@ Se você trocar só os `.gs`/`.html`, o servidor recarrega sozinho em poucos seg
 
 Se a página ficar em branco, abra a janela preta: o erro aparece lá e também em `node/dados/servidor.log`.
 
-## 8. Para a TI (como funciona)
+## 9. Para a TI (como funciona)
 
 - **Mesmo código do Apps Script.** O servidor (`server.js`) carrega os mesmos arquivos do Apps Script. Cada chamada roda num ambiente novo do Node (`vm`), como uma execução do Apps Script.
 - **Serviços do Google trocados por versões locais:**

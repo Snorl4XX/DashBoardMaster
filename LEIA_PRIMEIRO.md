@@ -10,6 +10,7 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 - **O painel fica igual** (cartões, gráficos, Maomao, tema escuro, PT-BR/中文, relatórios) e responde mais rápido.
 - **O AuthToken, o histórico e os diagnósticos ficam na tela Configurações** (`http://localhost:3000/config`). Ela substitui as Propriedades do script e o botão ▶ Executar do editor.
 - **Conferido em teste com um JMS simulado pela rede:** os números do painel no Node.js são **iguais** aos da simulação do Apps Script em seis indicadores.
+- **Link público, como o do Google:** com o Tailscale Funnel (grátis), o `node/link-publico.bat` cria um link `https://…ts.net` fixo que abre de qualquer lugar. A tela Configurações nunca abre por esse link.
 - **Passo a passo:** `node/LEIA_NODE.md`. Para começar, instale o Node.js LTS, dê dois cliques em `node/iniciar.bat` e abra `http://localhost:3000/config`.
 
 **Quem continua no Google:** nada muda. Atualizar o Apps Script com estes arquivos é opcional (a única diferença é o número da versão).

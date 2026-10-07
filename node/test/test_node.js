@@ -211,6 +211,24 @@ function firstDiff(a, b, p) {
   check(remote.status === 403 && /só abre/.test(remote.text), 'Configurações bloqueadas fora do computador do servidor');
   const remoteApi = await request(port, 'GET', '/config/api/estado', undefined, {'X-Forwarded-For': '10.0.0.9'});
   check(remoteApi.status === 401, 'API das Configurações bloqueada de fora');
+  // Link público (Tailscale Funnel / Cloudflare / ngrok): o túnel roda no próprio computador e repassa para o localhost.
+  for (const h of [{Host: 'painel.exemplo.ts.net'}, {'Tailscale-Funnel-Request': '?1'}, {'Cf-Connecting-Ip': '203.0.113.7'},
+    {'X-Forwarded-Proto': 'https'}, {Forwarded: 'for=203.0.113.7'}, {'Ngrok-Skip-Browser-Warning': '1'}]) {
+    const r = await request(port, 'GET', '/config/api/estado', undefined, h);
+    check(r.status === 401, 'Configurações não abrem pelo link público: ' + JSON.stringify(h), r.status);
+  }
+  const viaLink = await request(port, 'GET', '/', undefined, {'Tailscale-Funnel-Request': '?1', Host: 'painel.exemplo.ts.net', 'X-Forwarded-Proto': 'https'});
+  check(viaLink.status === 200 && /__PLATAFORMA__/.test(viaLink.text), 'painel abre pelo link público');
+  const linkApi = await request(port, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []},
+    {Host: 'painel.exemplo.ts.net', Origin: 'https://painel.exemplo.ts.net', 'X-Forwarded-Proto': 'https'});
+  check(linkApi.status === 200 && JSON.parse(linkApi.text).ok, 'chamadas do painel funcionam pelo link público (mesma origem)');
+  const rewritten = await request(port, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []},
+    {'X-Forwarded-Host': 'painel.exemplo.ts.net', Origin: 'https://painel.exemplo.ts.net', 'X-Forwarded-Proto': 'https'});
+  check(rewritten.status === 200, 'link público com Host trocado pelo túnel (X-Forwarded-Host) funciona', rewritten.status);
+  const forged = await request(port, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []},
+    {'X-Forwarded-Host': 'painel.exemplo.ts.net', Origin: 'https://outro-site.example', 'X-Forwarded-Proto': 'https'});
+  check(forged.status === 403, 'outro site continua bloqueado pelo link público');
+  check(est.senhaPainel === false && est.linkPublico === '', 'Situação mostra senha e link público');
 
   // ---------- 6. Várias consultas ao mesmo tempo (a fila não trava a página) ----------
   const t1 = Date.now();
