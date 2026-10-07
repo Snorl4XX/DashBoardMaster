@@ -143,7 +143,7 @@ function publicFunctions() {
 function panelVersion() { const m = String(main.source).match(/VERSION:\s*'([^']+)'/); return m ? m[1] : '?'; }
 
 // ------------------------------------------------------------------ agendador (os gatilhos do Apps Script)
-const sched = {pending: [], running: null, startedAt: 0, last: {}, lastSummary: ''};
+const sched = {pending: [], running: null, startedAt: 0, last: {}, lastSummary: '', lastLogged: ''};
 function enqueue(name) {
   if (sched.running === name || sched.pending.indexOf(name) >= 0) return;
   sched.pending.push(name);
@@ -160,7 +160,13 @@ function kick() {
     const w = r && r.worker ? r.worker : r;
     const summary = w ? ['done', 'failed', 'partial', 'waiting', 'paused'].filter(k => Number(w[k]) > 0).map(k => k + '=' + w[k]).join(' ') : '';
     sched.lastSummary = summary || (w && w.idle ? 'nada na fila' : w && w.busy ? 'outra execução em andamento' : 'ok');
-    if (summary || name !== 'processSyncQueue') log('info', name + ': ' + (summary || 'ok') + ' (' + Math.round(out.ms / 1000) + ' s, ' + (out.fetches || 0) + ' consultas ao JMS)');
+    // Na janela: o que baixou, ou quando a situação muda (ex.: fila pausada sem AuthToken aparece uma vez, não a cada minuto).
+    const worked = w && ['done', 'failed', 'partial'].some(k => Number(w[k]) > 0);
+    if (name !== 'processSyncQueue' || worked || (summary && summary !== sched.lastLogged)) {
+      log('info', name + ': ' + (summary || 'ok') + ' (' + Math.round(out.ms / 1000) + ' s, ' + (out.fetches || 0) + ' consultas ao JMS)' +
+        (w && Number(w.paused) > 0 && !worked ? ' · fila pausada: confira o AuthToken em Configurações' : ''));
+    }
+    if (name === 'processSyncQueue') sched.lastLogged = summary;
   }).catch(e => {
     sched.lastSummary = 'erro: ' + String(e.message).slice(0, 200);
     log('erro', name + ': ' + nodeText(e.message));
