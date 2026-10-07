@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.0.0',
+  VERSION: '4.1.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -414,25 +414,34 @@ const INDICATORS = Object.freeze({
       rateKeys: ['inTimelyRate'], errorKeys: ['noTimelyNum'], totalKeys: ['totalNum']
     },
     detail: {endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/inward_transport_timely_rate_detailed'},
+    // V4.1: o ID de viagem é o de SAÍDA, tirado remessa por remessa do Rastreamento do pacote (não mais o "ID Viagem Veículo
+    // de Chegada" da tabela secundária). Linha do bipe: "A encomenda expressa está [SP GRU] sendo enviada, para […]",
+    // J&T Tracking Code 50, tipo "Encomenda carregada"; o ID é o "número do pedido" (remark2). Expedicao.gs → runTripJob_.
+    // replace: o ID da tabela secundária nunca aparece (arquivos antigos têm a coluna limpa até a consulta do dia).
+    trips: {
+      endpoint: 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList',
+      loadCodes: [1], loadOriginalCodes: [50], replace: 'saida'
+    },
     fields: {
       date: ['scanTime'], shipment: ['waybillNo'], eventTime: ['dispatchTime'],
       receiptTime: ['arrivalScanTime', 'actualArrivalTime', 'systemArrivalTime'], expeditionTime: ['dispatchTime'],
-      destination: ['sendNextStation'], tripId: ['arrivalShipmentNo'], lot: ['sendPackageCode'],
+      destination: ['sendNextStation'], lot: ['sendPackageCode'],
       client: ['orderSourceName'], route: ['arrivalShipmentName', 'lastCenterName'], reason: ['isTimely']
     },
-    labels: {tripId: {pt: 'ID viagem de chegada', zh: '到件车次号'}, route: {pt: 'Rota do veículo de chegada', zh: '到件车辆线路'}},
+    labels: {tripId: {pt: 'ID viagem de saída', zh: '发件车次号'}, route: {pt: 'Rota do veículo de chegada', zh: '到件车辆线路'}},
     filters: ['receiptShift', 'expeditionShift', 'tripId', 'interval', 'route'],
     topCards: ['tripId'],
     hideShiftCards: true,
     charts: [
       {key: 'receiptShift', type: 'doughnut', title: {pt: 'Turno que fez o recebimento', zh: '到件班次'}},
       {key: 'expeditionShift', type: 'doughnut', title: {pt: 'Turno que fez a expedição', zh: '发件班次'}},
-      {key: 'tripId', type: 'bar', horizontal: true, top: 10, title: {pt: 'IDs de viagem mais ofensores', zh: '高频到件车次号'}},
+      {key: 'tripId', type: 'bar', horizontal: true, top: 10, hideNA: true, trips: true,
+        title: {pt: 'IDs de viagem de saída mais ofensores', zh: '高频发件车次号'}},
       {key: 'route', type: 'bar', horizontal: true, top: 10, title: {pt: 'Rotas com mais ofensores', zh: '高频线路'}}
     ],
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Número de pedido JMS', 'JMS运单号'],
-      ['route', 'Rota veículo de chegada', '到件车辆线路'], ['tripId', 'ID viagem veículo de chegada', '到件车次号'],
+      ['route', 'Rota veículo de chegada', '到件车辆线路'], ['tripId', 'ID viagem de saída', '发件车次号'],
       ['receiptTime', 'Horário descarregamento veículo de chegada', '到件车辆卸车时间'],
       ['expeditionTime', 'Horário de expedição', '发件时间']
     ]

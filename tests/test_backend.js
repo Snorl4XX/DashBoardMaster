@@ -305,8 +305,11 @@ const detA = cA.__state.fetches.filter(f => isDetailUrl(f.url) && !(/arrivalbyda
 check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 1000 registros por página (antes 100)', detA.map(f => f.payload.size));
 check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
 // (a foto de hoje da Sem Movimentação entra na fila sozinha e grava o arquivo de hoje: fora da conta deste dia)
-const filesA = Object.keys(cA.__state.files).filter(id => !/^no_move__/.test(cA.__state.files[id].name || ''));
-check(filesA.length === 9, 'um arquivo por dia e indicador, nenhum arquivo por página', filesA.length);
+// (arquivos na lixeira não contam: o SC→DC regrava o dia com os IDs de viagem de saída e descarta o anterior)
+const filesA = Object.keys(cA.__state.files).filter(id => !cA.__state.files[id].trashed && !/^no_move__/.test(cA.__state.files[id].name || '') && !/__viagens/.test(cA.__state.files[id].name || ''));
+check(filesA.length === 9, 'um arquivo por dia e indicador, nenhum arquivo por página', filesA.map(id => cA.__state.files[id].name));
+// V4.1: o SC→DC grava também o mapa remessa → ID de viagem de saída (Rastreamento do pacote), um por dia.
+check(Object.keys(cA.__state.files).filter(id => /^sc_dc__.*__viagens/.test(cA.__state.files[id].name || '')).length === 1, 'SC→DC: mapa de IDs de viagem de saída do dia');
 check(cA.loadDetailFile_(cA.dayFilesMap_('wrong_send', D19, D19)[D19].fileId).kind === 'jt-day', 'arquivo diário no formato colunar');
 check(cA.allTabRows_('PAGES').length === 0, 'índice de páginas não cresce no caminho normal');
 // Fila vazia: depois de UMA execução de conferência, o gatilho de 5 min sai sem abrir a planilha.
@@ -411,7 +414,8 @@ cK.queueHistory(D19, D19, true);
 runAll(cK);
 const rowsK = cK.getArchivedRange_('wrong_send', D19, D19).rows;
 check(rowsK.length === rowsA.length && rowsK.every(r => r.login && r.segment && r.destination && r.shift !== 'N/A'), 'campos lidos sem depender de maiúsculas/minúsculas', rowsK[0]);
-check(cK.getArchivedRange_('sc_dc', D19, D19).rows.every(r => r.tripId && r.route), 'idem SC→DC');
+const rowsKdc = cK.getArchivedRange_('sc_dc', D19, D19).rows;
+check(rowsKdc.every(r => r.route) && rowsKdc.filter(r => /^(JBGX|DBGX|SETR)FIC/.test(r.tripId || '')).length > rowsKdc.length * 0.9, 'idem SC→DC (ID de viagem de saída pelo rastreamento)');
 
 // (l) Campo da remessa ausente: erro claro com os campos recebidos (antes: dia vazio, sem aviso).
 const dL = {'2026-09-19': makeDay(D19, 3)};
@@ -1970,12 +1974,13 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   });
 
   // 5. Rastreamento com limite por consulta: aprende sozinho.
-  [['tripLimit', {tripLimit: 20}, 20], ['tripReject', {tripReject: 10}, 7]].forEach(([nm, o, want]) => {
+  // (V4.1: o SC→DC também consulta o rastreamento e o limite aprendido é o mesmo — recusa: fica entre a metade e o limite)
+  [['tripLimit', {tripLimit: 20}, n => n === 20], ['tripReject', {tripReject: 10}, n => n >= 5 && n <= 10]].forEach(([nm, o, ok]) => {
     const dL = sfDays(), cL = freshCtx(dL, o, SF);
     cL.queueHistory(D19, D19, true);
     runAll(cL, 12);
-    check(Number(cL.__state.props.JMS_TRIP_BATCH) === want && exact(cL, dL[D19], D19).trip === 0,
-      'Expedição: ' + nm + ' → ' + want + ' remessas por consulta, IDs exatos', cL.__state.props.JMS_TRIP_BATCH);
+    check(ok(Number(cL.__state.props.JMS_TRIP_BATCH)) && exact(cL, dL[D19], D19).trip === 0,
+      'Expedição: ' + nm + ' → remessas por consulta dentro do limite do JMS, IDs exatos', cL.__state.props.JMS_TRIP_BATCH);
   });
 
   // 6. Tempo acabando: grava as unidades prontas e a execução seguinte continua da próxima.
@@ -2806,6 +2811,85 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   try { cU.detailTypesForDay_(cfgNm, 'no_move', T); } catch (e) { errU = e.message; }
   check(/não reconhece/.test(String(errU)) && cU.getDashboardData('no_move', {from: T, to: T}).dataset.n === 0,
     'linha mais nova sem tipo reconhecido: nenhuma lista (nunca a de todos os tipos juntos)', errU);
+}
+
+// ---------- V4.1: SC→DC com o ID de viagem de SAÍDA (Rastreamento do pacote), como o PDF do usuário ----------
+{
+  const {dcDepartureTrip} = require('./mocks');
+  const days41 = {[D19]: makeDay(D19, 41)};
+  const c41 = freshCtx(days41);
+  const cfg41 = c41.getIndicatorConfig_('sc_dc');
+  check(!cfg41.fields.tripId && cfg41.trips && cfg41.trips.replace === 'saida' && cfg41.labels.tripId.pt === 'ID viagem de saída' &&
+    cfg41.table.some(c => c[0] === 'tripId' && c[1] === 'ID viagem de saída') && !cfg41.table.some(c => /chegada/.test(c[1]) && c[0] === 'tripId') &&
+    cfg41.charts.some(c => c.key === 'tripId' && c.hideNA && c.trips && /saída/.test(c.title.pt)) && cfg41.filters.indexOf('tripId') >= 0 && cfg41.topCards.indexOf('tripId') >= 0,
+    'SC→DC: ID de viagem de saída no cartão, gráfico, tabela e filtro (sem o ID de chegada da tabela secundária)');
+  c41.queueHistory(D19, D19, true);
+  runAll(c41);
+  const S41 = c41.__state, dcList = days41[D19].dc;
+  const track = S41.fetches.filter(f => /keywordList$/.test(f.url));
+  check(track.length > 0 && track.every(f => f.payload.trackingTypeEnum === 'WAYBILL' && f.payload.keywordList.length <= 100 && f.payload.countryId === '1'),
+    'Rastreamento do pacote como a captura (keywordList, WAYBILL, até 100 remessas por consulta)', track.length);
+  check(new Set([].concat(...track.map(f => f.payload.keywordList))).size === dcList.length, 'todas as remessas fora do prazo consultadas, cada uma uma vez');
+  const want = {};
+  dcList.forEach((x, i) => { want[x.waybillNo] = dcDepartureTrip(i) || ''; });
+  const rows41 = c41.getArchivedRange_('sc_dc', D19, D19).rows;
+  const tid = r => (r.tripId === 'N/A' ? '' : String(r.tripId || ''));
+  const wrong = rows41.filter(r => want[r.shipment] !== tid(r));
+  check(rows41.length === dcList.length && !wrong.length, 'cada remessa com o ID da linha "Encomenda carregada" (código 50) da SP GRU', wrong.slice(0, 3).map(r => [want[r.shipment], r.tripId]));
+  check(!rows41.some(r => /^SETR2260|^SRTRFIC/.test(tid(r))), 'nunca o ID da viagem de chegada nem o carregamento em outra base');
+  // Maior ofensor = soma das remessas por ID de saída (sem informação fica de fora do gráfico).
+  const cnt = {};
+  Object.keys(want).forEach(w => { if (want[w]) cnt[want[w]] = (cnt[want[w]] || 0) + 1; });
+  const top = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
+  const comp41 = c41.computeDashboard_('sc_dc', {from: D19, to: D19});
+  const card = comp41.cards.tops.filter(x => x.key === 'tripId')[0];
+  const ch41 = comp41.charts.filter(x => x.key === 'tripId')[0];
+  check(card && card.label === top && card.qty === cnt[top], 'cartão "ID viagem de saída ofensor" = maior soma de remessas', card);
+  check(ch41 && ch41.labels[0] === top && ch41.datasets[0].data[0] === cnt[top] && ch41.labels.indexOf('N/A') < 0 && ch41.labels.length === Object.keys(cnt).length,
+    'gráfico "IDs de viagem de saída mais ofensores" pela soma, sem "Sem informação"', ch41 && ch41.labels);
+  const d41 = c41.getDashboardData('sc_dc', {from: D19, to: D19});
+  const cov41 = d41.meta.tripCoverage && d41.meta.tripCoverage[D19];
+  const nFound = Object.values(want).filter(Boolean).length;
+  check(cov41 && cov41.total === dcList.length && cov41.done === nFound && cov41.found === nFound,
+    'cobertura no painel: remessas com resposta e quantas com ID (sem bipe de carregamento fica para nova tentativa)', cov41);
+  const fT = c41.JTCore_.applyFilters(c41.JTCore_.decodeDataset(d41.dataset), {tripId: [top]});
+  check(fT.length === cnt[top], 'filtro "ID viagem de saída" pelo ID de saída');
+  // Arquivo antigo (V4.0) com o ID de CHEGADA: o painel nunca mostra; a migração põe o dia na fila e troca pelo de saída.
+  const c41b = freshCtx(days41);
+  c41b.queueHistory(D19, D19, true);
+  runAll(c41b);
+  const df41 = c41b.dayFilesMap_('sc_dc', D19, D19)[D19];
+  const old = c41b.loadDetailFile_(df41.fileId);
+  delete old.tripSrc;
+  const oldRows = c41b.JTCore_.decodeDataset(old);
+  dcList.forEach(x => { const r = oldRows.filter(y => y.shipment === x.waybillNo)[0]; if (r) r.tripId = x.arrivalShipmentNo; });
+  const oldDs = c41b.encodeDayFile_(oldRows);
+  c41b.saveDayDataset_('sc_dc', D19, oldDs, df41.expectedPages, df41.expectedRecords, {skipTrips: true});
+  c41b.TAB_CACHE_ = {}; c41b.TAB_INDEX_ = {}; c41b.STORAGE_CACHE_ = null;
+  const seenOld = c41b.getArchivedRange_('sc_dc', D19, D19).rows;
+  check(seenOld.length === dcList.length && !seenOld.some(r => /^SETR2260/.test(tid(r))), 'arquivo antigo: ID de chegada nunca aparece (coluna vazia até a consulta)');
+  c41b.__state.props.MIGRATION_V41 = '';
+  delete c41b.__state.props.MIGRATION_V41;
+  const q41 = c41b.migrateToV41_();
+  check(q41 >= 1 && c41b.pendingJobs_().some(j => j.type === 'TRIPS' && j.indicator === 'sc_dc' && j.date === D19) && c41b.migrateToV41_() === 0,
+    'migração V4.1: dias já baixados na fila do ID de saída (uma vez só)', q41);
+  runAll(c41b);
+  const after = c41b.getArchivedRange_('sc_dc', D19, D19).rows;
+  check(after.every(r => want[r.shipment] === tid(r)), 'depois da fila: ID de saída no arquivo antigo');
+  // Recusa só do Rastreamento: pausa a rota TRACKING, nunca o download do SC→DC.
+  check(c41.jobPauseKey_({type: 'TRIPS', indicator: 'sc_dc'}) === 'TRACKING' && c41.jobPauseKey_({type: 'DETAIL_INIT', indicator: 'sc_dc'}) === 'SC_DC' &&
+    c41.jobPauseKey_({type: 'TRIPS', indicator: 'send_flow'}) === c41.getIndicatorConfig_('send_flow').routeKey,
+    'rastreamento recusado não pausa o SC→DC (Expedição continua como antes)');
+  const c41c = freshCtx(days41, {intercept: (route) => (route === 'keywordList' ? [200, {code: 401, msg: 'token expired', fail: true}] : null)});
+  c41c.queueHistory(D19, D19, true);
+  runAll(c41c);
+  const st41c = c41c.getDayStatus_('sc_dc', D19), pz = c41c.publicPauses_();
+  check(st41c.summary === 'COMPLETE' && st41c.details === 'COMPLETE' && !st41c.error && pz.some(p => p.route === 'TRACKING') && !pz.some(p => p.route === 'SC_DC'),
+    'rastreamento recusado: taxa e lista do SC→DC completas, só os IDs esperam', {st: st41c, pz: pz.map(p => p.route)});
+  // Diagnóstico: amostra com o ID de chegada e o de saída.
+  const dg = c41.diagnosticarViagensSCDC(D19);
+  check(dg.amostra.length && dg.amostra.every((x, i) => x.saida === (dcDepartureTrip(i) || null) || (dcDepartureTrip(i) === null && x.saida === null)) &&
+    /ID de SAÍDA/.test(dg.texto) && !/4440\d{8}/.test(dg.texto), 'diagnosticarViagensSCDC: chegada → saída, sem número de remessa', dg.texto.slice(0, 600));
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

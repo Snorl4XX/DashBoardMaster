@@ -567,7 +567,7 @@ function saveDayFile_(indicator, date, rows, expectedPages, expectedRecords) {
 function saveDayDataset_(indicator, date, ds, expectedPages, expectedRecords, opts) {
   const ic = INDICATORS[indicator];
   if (ic && ic.trips && !(opts && opts.skipTrips)) {
-    try { applyTripMapToDs_(ds, loadTripMap_(indicator, date)); }
+    try { applyTripMapToDs_(ds, loadTripMap_(indicator, date), ic.trips.replace || ''); }
     catch (e) { logSync_('WARN', indicator, date, 'IDs de viagem não aplicados ao dia: ' + String(e && e.message || e).slice(0, 200)); }
   }
   const file = writeGzJson_(indicator + '__' + date + '__dia.json.gz', ds);
@@ -578,6 +578,9 @@ function saveDayDataset_(indicator, date, ds, expectedPages, expectedRecords, op
   const row = [indicator, date, file.getId(), ds.n, expectedPages, expectedRecords, kept && !isNaN(kept.getTime()) ? kept : new Date()];
   if (rowNum > 0) writeRow_('DAYFILES', rowNum, row); else appendRow_('DAYFILES', row);
   if (prev && prev[2] && prev[2] !== file.getId()) trashQuietly_(prev[2], indicator, date);
+  // V4.1 (SC→DC): dia gravado → IDs de viagem de saída no Rastreamento do pacote (só as remessas ainda não consultadas).
+  // A Expedição (agrupada) agenda a sua tarefa no próprio download.
+  if (ic && ic.trips && !ic.grouped && !(opts && opts.skipTrips) && ds.n) enqueueJobs_([['TRIPS', indicator, date, 0]], {reset: true});
   return file.getId();
 }
 
@@ -729,6 +732,7 @@ function scanArchive_(indicator, from, to, opts, sink) {
       readFiles++;
     }
     if (cut) { kind = 'partial'; stop = true; }
+    parts.forEach(x => stripStaleTrips_(indicator, x));
     const day = dayPayload_(indicator, parts);
     const n = day.encoded ? day.encoded.n : day.rows.length;
     if (loaded.length && sink.count() + n > maxRows) { notLoaded.push(date); stop = true; continue; }
@@ -1377,7 +1381,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
   try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
@@ -1407,7 +1411,7 @@ function processSyncQueue(opts) {
       for (const job of queue) {
         if (Date.now() > deadline - 20000) break;
         attempted[job.rowNum] = 1;
-        if (pauseFor_(INDICATORS[job.indicator].routeKey, pauses)) { paused++; continue; }
+        if (pauseFor_(jobPauseKey_(job), pauses)) { paused++; continue; }
         if (!jobReady_(job)) { waiting++; continue; }
         if (job.type === 'COMPACT' && Date.now() > deadline - 90000) { waiting++; continue; }
         if (job.type === 'DETAIL_INIT' && Date.now() > deadline - APP_CONFIG.DETAIL_MIN_START_MS) { waiting++; continue; }
@@ -1474,12 +1478,24 @@ function jobReady_(job) {
   if (job.type === 'TRIPS') return !!(st && (DETAIL_USABLE_.indexOf(st.details) >= 0 || st.details === 'NO_RECORD'));
   return !!(st && ['COMPLETE', 'NO_RECORD'].indexOf(st.summary) >= 0);
 }
-/** Tarefa pesada com teto diário (conta Gmail): detalhe agrupado (Recebimento, Expedição) e IDs de viagem. */
+/**
+ * Tarefa pesada com teto diário (conta Gmail): detalhe agrupado (Recebimento, Expedição) e os IDs de viagem da Expedição.
+ * Os IDs de viagem do SC→DC (só as remessas fora do prazo, poucas dezenas de consultas por dia) seguem a fila normal.
+ */
 function isHeavyJob_(job) {
-  return !!INDICATORS[job.indicator] && ((job.type === 'DETAIL_INIT' && heavyGrouped_(INDICATORS[job.indicator])) || job.type === 'TRIPS');
+  const cfg = INDICATORS[job.indicator];
+  return !!cfg && heavyGrouped_(cfg) && (job.type === 'DETAIL_INIT' || job.type === 'TRIPS');
 }
 /** Detalhe agrupado pesado (Recebimento, Expedição). O Fluxo de Lotes (light, ~10 consultas por dia) segue a fila normal. */
 function heavyGrouped_(cfg) { return !!(cfg && cfg.grouped && !cfg.light); }
+/**
+ * Rota que a tarefa pausa/consulta. IDs de viagem do SC→DC (Rastreamento do pacote): rota própria (TRACKING) — uma recusa
+ * só do rastreamento não para o download do indicador (taxa, lista e cartões continuam).
+ */
+function jobPauseKey_(job) {
+  const cfg = indicatorCfg_(job.indicator) || {};
+  return job.type === 'TRIPS' && !heavyGrouped_(cfg) ? 'TRACKING' : cfg.routeKey;
+}
 
 function processJob_(job, deadline) {
   const now = new Date();
@@ -1505,7 +1521,7 @@ function processJob_(job, deadline) {
       writeCells_('JOBS', job.rowNum, 6, ['DONE']);
       writeCells_('JOBS', job.rowNum, 9, [new Date(), '']);
     }
-    if (result !== 'skip' && job.type !== 'COMPACT') forgetPause_(indicatorCfg_(job.indicator).routeKey);
+    if (result !== 'skip' && job.type !== 'COMPACT') forgetPause_(jobPauseKey_(job));
     if ((result === 'done' || result === 'partial') && job.type !== 'COMPACT') bumpDataStamp_(job.indicator, job.date);
     return result;
   } catch (e) {
@@ -1514,10 +1530,11 @@ function processJob_(job, deadline) {
     const st = job.type === 'COMPACT' ? null : getDayStatus_(job.indicator, job.date);
     if (kind === 'AUTH' || kind === 'QUOTA') {
       // Credencial recusada / cota do Google: insistir não resolve. Pausa sem gastar tentativa.
-      setPause_(kind === 'QUOTA' ? '*' : indicatorCfg_(job.indicator).routeKey, kind, message);
+      setPause_(kind === 'QUOTA' ? '*' : jobPauseKey_(job), kind, message);
       writeCells_('JOBS', job.rowNum, 6, ['PENDING']);
       writeCells_('JOBS', job.rowNum, 9, [new Date(), message]);
-      if (job.type !== 'COMPACT') updateDayStatus_(job.indicator, job.date, {error: message});
+      // Rastreamento do pacote do SC→DC recusado: o dia do indicador continua sem erro (só os IDs de viagem esperam).
+      if (job.type !== 'COMPACT' && jobPauseKey_(job) !== 'TRACKING') updateDayStatus_(job.indicator, job.date, {error: message});
       logSync_('ERROR', job.indicator, job.date, (kind === 'QUOTA' ? 'Fila pausada (cota do Google): ' : 'Rota pausada (credencial): ') + message);
       return kind === 'QUOTA' ? 'quota' : 'paused';
     }
@@ -1528,8 +1545,8 @@ function processJob_(job, deadline) {
       // Falha ao ATUALIZAR uma taxa já gravada não apaga o dia: só registra o erro.
       updateDayStatus_(job.indicator, job.date, st && st.summary === 'COMPLETE' ? {error: message} : {summaryStatus: 'ERROR', error: message});
     } else if (job.type === 'TRIPS') {
-      // IDs de viagem: o detalhe do dia continua valendo; só registra o erro.
-      updateDayStatus_(job.indicator, job.date, {error: message});
+      // IDs de viagem: o detalhe do dia continua valendo; só registra o erro (SC→DC: só no LOG).
+      if (jobPauseKey_(job) !== 'TRACKING') updateDayStatus_(job.indicator, job.date, {error: message});
     } else if (job.type !== 'COMPACT') {
       // Idem para detalhe: o dia completo anterior continua valendo até o novo download dar certo. Download em
       // partes (PARTIAL) continua PARTIAL: a nova tentativa segue da parte seguinte, sem recomeçar o dia.

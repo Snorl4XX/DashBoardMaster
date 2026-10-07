@@ -1,8 +1,30 @@
-# J&T DASHMASTER V4.0 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.1 — Expedição SC → DC: ID de viagem de SAÍDA (Rastreamento do pacote)
+**Antes:** o ID de viagem vinha da coluna "ID Viagem Veículo de Chegada" da tabela secundária. **Agora:** o painel consulta **remessa por remessa** no **Rastreamento do pacote**, como no PDF:
+- Vale a linha **"A encomenda expressa está [SP GRU] sendo enviada, para […]"**, com **J&T Tracking Code 50** e tipo **"Encomenda carregada"**.
+- O ID é o **"número do pedido"** dessa linha, o **ID da viagem de saída**.
+- O bipe de chegada (ID de chegada) e o carregamento em outra base (ex.: DC GRU-SP enviando adiante) **não** contam.
+- Se houver mais de um carregamento na SP GRU, vale o da próxima parada da remessa e mais perto do horário de expedição.
+
+**O que mudou no SC → DC:**
+- **Cartão:** "ID VIAGEM DE SAÍDA OFENSOR", o ID com mais remessas fora do prazo, somando todas.
+- **Gráfico:** "IDs de viagem de saída mais ofensores", com a soma por ID. "Sem informação" fica de fora. Embaixo do título aparece quantas remessas já foram consultadas no Rastreamento.
+- **Tabela:** a coluna "ID viagem veículo de chegada" virou **"ID viagem de saída"**.
+- **Filtro:** "ID viagem de saída".
+
+**Como funciona a coleta:**
+- **Quando consulta:** depois que a lista do dia ("Qtd expedidos fora do prazo") é baixada, a fila consulta só as remessas ainda não consultadas. São até 100 remessas por consulta, várias consultas ao mesmo tempo.
+- **Dias já baixados:** entram na fila sozinhos, uma vez. Até a consulta de cada dia, a coluna fica vazia. O ID de chegada antigo nunca aparece como se fosse de saída.
+- **Se o JMS recusar só o Rastreamento:** pausa só essa consulta. A taxa, a lista e os cartões do SC → DC continuam.
+
+**Para conferir no JMS real:** rode **`diagnosticarViagensSCDC`** em Configurações → Executar função (Node.js) ou no editor (Apps Script). Ele mostra, para algumas remessas do dia, o ID de chegada antigo → o ID de saída achado, sem o número das remessas.
+
+**Instalação:** atualize todos os arquivos do ZIP. No Apps Script, publique uma Nova versão. No Node.js, troque os arquivos e reinicie o servidor.
 
 ## V4.0 — Versão Node.js: o mesmo painel, sem o limite do Google
 - **Nova opção: rodar o painel num computador da base, com Node.js**, em vez do Google Apps Script. Os arquivos do painel são os mesmos.

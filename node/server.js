@@ -124,6 +124,7 @@ const FN_HELP = {
   diagnosticarTodosOsErros: 'lista os erros recentes',
   diagnosticarRecebimento: 'Recebimento (data opcional)',
   diagnosticarExpedicao: 'Expedição (data opcional)',
+  diagnosticarViagensSCDC: 'SC → DC: ID de viagem de saída (data opcional)',
   diagnosticarLotes: 'Fluxo de Lotes (data opcional)',
   diagnosticarAvaria: 'Avaria (data opcional)',
   diagnosticarSemMovimentacao: 'Sem Movimentação',

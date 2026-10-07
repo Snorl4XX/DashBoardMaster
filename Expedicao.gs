@@ -511,26 +511,57 @@ function saveTripMap_(indicator, date, map, total) {
   if (rowNum > 0) writeRow_('DAYFILES', rowNum, row); else appendRow_('DAYFILES', row);
   if (prev && prev[2] && prev[2] !== file.getId()) trashQuietly_(prev[2], indicator, date);
 }
-/** Coloca os IDs do mapa no arquivo do dia (coluna tripId, pela remessa). Devolve quantas linhas mudaram. */
-function applyTripMapToDs_(ds, map) {
-  if (!ds || !ds.n || !ds.cols || !ds.cols.waybill || !ds.dict || !map || !map.ids) return 0;
+/**
+ * Coluna da remessa no arquivo do dia: "waybill" (Expedição, arquivo agrupado) ou "shipment" (SC→DC e os demais).
+ * O arquivo comum também tem a coluna "waybill", só que vazia: vale a que tem número.
+ */
+function tripWaybillCol_(ds) {
+  if (!ds || !ds.cols || !ds.dict) return '';
+  const has = k => !!(ds.cols[k] && ds.dict[k] && ds.dict[k].some(v => v !== '' && v !== null && v !== undefined));
+  return has('waybill') ? 'waybill' : has('shipment') ? 'shipment' : '';
+}
+/**
+ * Coloca os IDs do mapa no arquivo do dia (coluna tripId, pela remessa). Devolve quantas linhas mudaram.
+ * mode (SC→DC: 'saida'): a coluna é SÓ do Rastreamento do pacote — remessa ainda sem ID fica vazia (some o ID que veio
+ * da tabela secundária) e o arquivo fica marcado (tripSrc) para o painel saber que a coluna já é a de saída.
+ */
+function applyTripMapToDs_(ds, map, mode) {
+  const wk = tripWaybillCol_(ds);
+  if (!ds || !ds.n || !wk || !map || !map.ids) return 0;
   if (!ds.cols.tripId) {
     ds.dict.tripId = [''];
     ds.cols.tripId = new Array(ds.n).fill(0);
     if (ds.fields && ds.fields.indexOf('tripId') < 0) ds.fields.push('tripId');
   }
   const D = ds.dict.tripId, idx = new Map();
-  D.forEach((v, j) => idx.set(v, j));
-  const W = ds.dict.waybill, cW = ds.cols.waybill, cT = ds.cols.tripId;
+  D.forEach((v, j) => { if (!idx.has(v)) idx.set(v, j); });
+  const slot = v => { let j = idx.get(v); if (j === undefined) { j = D.length; D.push(v); idx.set(v, j); } return j; };
+  const W = ds.dict[wk], cW = ds.cols[wk], cT = ds.cols.tripId;
   let n = 0;
   for (let i = 0; i < ds.n; i++) {
     const id = map.ids[W[cW[i]]];
-    if (id === undefined || id === '') continue;
-    let j = idx.get(id);
-    if (j === undefined) { j = D.length; D.push(id); idx.set(id, j); }
+    if (id === undefined || id === '') {
+      if (!mode) continue;
+      const j0 = slot('');
+      if (cT[i] !== j0) { cT[i] = j0; n++; }
+      continue;
+    }
+    const j = slot(id);
     if (cT[i] !== j) { cT[i] = j; n++; }
   }
+  if (mode) ds.tripSrc = mode;
   return n;
+}
+/**
+ * SC→DC (trips.replace): arquivo ou pedaço ainda sem a marca do Rastreamento do pacote traz o ID de viagem de CHEGADA da
+ * tabela secundária (versões anteriores). No painel e nos relatórios a coluna sai vazia até a consulta do dia.
+ */
+function stripStaleTrips_(indicator, x) {
+  const t = (indicatorCfg_(indicator) || {}).trips;
+  if (!t || !t.replace || !x || x.tripSrc === t.replace) return x;
+  if (Array.isArray(x)) x.forEach(r => { if (r && typeof r === 'object') r.tripId = ''; });
+  else if (x.cols && x.dict && x.cols.tripId) { x.dict.tripId = ['']; x.cols.tripId = new Array(x.n || 0).fill(0); }
+  return x;
 }
 /** Remessas por consulta: EXPEDICAO_IDS_LOTE (manual) > limite aprendido > padrão (100). */
 function tripBatch_() {
@@ -589,9 +620,12 @@ function runTripJob_(job, deadline) {
   const df = dayFilesMap_(job.indicator, job.date, job.date)[job.date];
   if (!df) return 'skip';
   const ds = loadDetailFile_(df.fileId);
-  if (!isDayDataset_(ds) || !ds.cols.waybill) return 'done';
+  const wk = tripWaybillCol_(ds);
+  if (!isDayDataset_(ds) || !wk) return 'done';
+  const mode = cfg.trips.replace || '';
+  const marked = !mode || ds.tripSrc === mode;
   const map = loadTripMap_(job.indicator, job.date);
-  const W = ds.dict.waybill, cW = ds.cols.waybill;
+  const W = ds.dict[wk], cW = ds.cols[wk];
   const D = ds.dict.destination || [], cD = ds.cols.destination, E = ds.dict.eventTime || [], cE = ds.cols.eventTime;
   const info = {}, todo = [];
   let total = 0;
@@ -675,7 +709,8 @@ function runTripJob_(job, deadline) {
   }
   map.at = new Date().toISOString();
   saveTripMap_(job.indicator, job.date, map, total);
-  if (changed && applyTripMapToDs_(ds, map)) {
+  // SC→DC: o arquivo antigo (com o ID de chegada) é regravado já na primeira vez, mesmo sem ID novo.
+  if ((changed || !marked) && (applyTripMapToDs_(ds, map, mode) || !marked)) {
     // Mesmo arquivo do dia com os IDs; a data do download não muda (o intervalo de atualização do detalhe continua valendo).
     saveDayDataset_(job.indicator, job.date, ds, df.expectedPages, df.expectedRecords, {skipTrips: true, keepCreatedAt: df.createdAt});
   }
@@ -684,6 +719,22 @@ function runTripJob_(job, deadline) {
       'cabeçalhos de rota (JMS_ROUTENAME_TRACKING).');
   }
   return k < todo.length ? 'partial' : 'done';
+}
+/**
+ * V4.1: o SC→DC passa a mostrar o ID de viagem de SAÍDA (Rastreamento do pacote). Uma vez: os dias já baixados entram na
+ * fila de IDs de viagem (só as remessas fora do prazo). Até a consulta de cada dia, o painel mostra a coluna vazia — nunca o
+ * ID de chegada da tabela secundária (stripStaleTrips_).
+ */
+function migrateToV41_() {
+  if (getProp_('MIGRATION_V41', '')) return 0;
+  let n = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].trips && INDICATORS[k].trips.replace && !INDICATORS[k].grouped).forEach(k => {
+    const jobs = Object.keys(dayFilesMap_(k, '', '')).sort().reverse().map(d => ['TRIPS', k, d, 0]);
+    if (jobs.length) n += enqueueJobs_(jobs, {reset: true});
+  });
+  setProp_('MIGRATION_V41', new Date().toISOString());
+  if (n) logSync_('INFO', 'sc_dc', '', 'V4.1: ' + n + ' dia(s) na fila para buscar o ID de viagem de saída no Rastreamento do pacote.');
+  return n;
 }
 /** IDs de viagem consultados por dia (painel): {data: {consultadas, comId, remessas}}. */
 function tripCoverage_(indicator, from, to) {
@@ -807,6 +858,65 @@ function diagnosticarExpedicao(date) {
     } else add('LOG: nenhum aviso ou erro da Expedição.');
   } catch (e) { /* sem banco */ }
   add('Dica: se algo der ERRO, abra a tela no JMS, F12 → Rede, clique no número e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
+  console.log(lines.join('\n'));
+  out.texto = lines.join('\n');
+  return out;
+}
+
+/**
+ * Diagnóstico do ID de viagem de SAÍDA do SC→DC (V4.1). Rode em Executar função (Node.js) ou no editor (Apps Script).
+ * Pega algumas remessas da lista "Qtd expedidos fora do prazo" do dia, consulta o Rastreamento do pacote e mostra, para cada
+ * uma, o ID de chegada (tabela secundária, não usado mais) e o ID de saída achado na linha "Encomenda carregada" (J&T Tracking
+ * Code 50) da nossa base. Número de remessa não aparece. `date` (opcional, AAAA-MM-DD): padrão = último dia fechado.
+ */
+function diagnosticarViagensSCDC(date) {
+  const key = 'sc_dc', cfg = INDICATORS[key];
+  const d = isIso_(date) ? date : lastClosedDate_(key);
+  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, amostra: []};
+  const add = x => lines.push(x);
+  const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
+  const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
+  const cred = authConfigSafe_();
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — SC → DC: ID de viagem de SAÍDA (Rastreamento do pacote) — dia ' + humanDatePt_(d));
+  add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · base: ' + centerName_() + ' (id ' + distributeId_() + ')');
+  (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === 'TRACKING' || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
+  let sample = [];
+  try {
+    const r = fetchDetailPage_(key, d, 1, 20);
+    add('Lista "Qtd expedidos fora do prazo" (tabela secundária): ' + fmt(r.total) + ' remessa(s) · ' + r.records.length + ' na 1ª página');
+    sample = r.records.slice(0, 8);
+  } catch (e) { add('Lista do dia: ERRO — ' + err(e)); }
+  if (sample.length) {
+    const rows = sample.map(x => ({raw: x, row: normalizeDetailRow_(key, x, d) || {}}));
+    const ws = rows.map(x => String(x.row.shipment || '').trim()).filter(Boolean);
+    try {
+      const json = jmsPost_(endpointFor_(cfg, 'trips'), tripPayload_(ws), 2);
+      const got = {};
+      recordsOf_(json).forEach(item => { const kw = String(item && (item.keyword || item.waybillNo) || '').trim(); if (kw) got[kw] = item; });
+      let found = 0;
+      rows.forEach((x, i) => {
+        const w = String(x.row.shipment || '').trim(), item = got[w], det = (item && item.details) || [];
+        const id = item ? pickTripId_(det, {trips: cfg.trips, center: centerName_(), centerId: distributeId_(), route: x.row.destination, time: x.row.eventTime}) : null;
+        const arrival = String(fieldReader_(x.raw)(['arrivalShipmentNo']).value || '').trim();
+        if (id) found++;
+        add('  remessa ' + (i + 1) + ': ' + det.length + ' bipe(s) · ID chegada (tabela secundária) ' + (arrival || '—') + ' → ID de SAÍDA ' +
+          (!item ? 'não veio na consulta' : id === null ? 'SEM linha "Encomenda carregada" na ' + centerName_() : id || '(carregada sem número do pedido)') +
+          (x.row.destination ? ' · próxima parada ' + x.row.destination : ''));
+        out.amostra.push({bipes: det.length, chegada: arrival, saida: id});
+      });
+      add('Resultado: ' + found + ' de ' + rows.length + ' remessa(s) com ID de saída. Lote atual: ' + tripBatch_() + ' remessa(s) por consulta.');
+    } catch (e) { add('Rastreamento do pacote: ERRO — ' + err(e) + ' (sem os IDs de saída o resto do painel funciona)'); }
+  }
+  try {
+    const back = addDaysIso_(isoToday_(), -3), cov = tripCoverage_(key, back, isoToday_());
+    add('IDs de saída consultados nos últimos dias:');
+    dateRangeIso_(back, isoToday_()).forEach(x => {
+      const c = cov[x];
+      add('  ' + humanDatePt_(x) + ': ' + (c ? fmt(c.done) + ' de ' + fmt(c.total) + ' remessas consultadas (' + fmt(c.found) + ' com ID)' : 'ainda não consultado'));
+    });
+    out.cobertura = cov;
+  } catch (e) { add('Cobertura: ERRO ao ler — ' + err(e)); }
+  add('Dica: se der ERRO no rastreamento, abra Rastreamento do pacote no JMS, F12 → Rede, consulte uma remessa e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));
   out.texto = lines.join('\n');
   return out;

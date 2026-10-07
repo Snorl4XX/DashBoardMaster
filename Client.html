@@ -2537,7 +2537,8 @@
         '<span class="pl-bar"><span style="width:' + pct.toFixed(2) + '%;background:' + color + '"></span></span></div>';
     }).join('') + '<div class="pl-total"><span>' + esc(tx(cfg(), 'shipments')) + '</span><b>' + esc(fmtInt(total)) + '</b></div>';
   }
-  function lcFirst(x) { x = String(x || ''); return x.charAt(0).toLowerCase() + x.slice(1); }
+  /** "Rota" → "rota" no meio da frase; sigla fica como está ("ID viagem de saída" não vira "iD …"). */
+  function lcFirst(x) { x = String(x || ''); return /^[A-Z]{2}/.test(x) ? x : x.charAt(0).toLowerCase() + x.slice(1); }
   /** Cartões embaixo de cada gráfico: Total geral · Maior · Menor (ou "Top N somados"), como no modelo. */
   function chartStats(spec, c) {
     if (spec.key === 'evolution') return evolutionStats(spec, c);

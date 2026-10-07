@@ -186,6 +186,15 @@ function createContext(opts) {
  */
 const TIME_FIELD = {center_wrong_send_: 'sendTime', center_error_rate_new_: 'transferCenterSendTime', departure_transport_timely_: 'actualDispatchTime',
   inward_transport_timely_rate_: 'dispatchTime'};
+/**
+ * ID de viagem de SAÍDA (fictício) da i-ésima remessa do SC→DC no Rastreamento do pacote: 40% na viagem 1, 30% na 2,
+ * 20% na 3, 10% na 4; a cada 23ª remessa (i = 0, 23, 46…) não há bipe de carregamento na base (null).
+ */
+function dcDepartureTrip(i) {
+  if (i % 23 === 0) return null;
+  const r = i % 10;
+  return r < 4 ? 'JBGXFIC0001' : r < 7 ? 'JBGXFIC0002' : r < 9 ? 'DBGXFIC0003' : 'SETRFIC0004';
+}
 function addDay(iso, n) { return new Date(Date.parse(iso + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10); }
 function fakeJms(dayData, options) {
   options = options || {};
@@ -380,9 +389,25 @@ function fakeJms(dayData, options) {
         // options.tripLimit: o JMS só devolve as primeiras N remessas da consulta; options.tripReject: recusa acima de N.
         if (options.tripReject && body.keywordList.length > options.tripReject) return respond(200, {code: 500, msg: '单次查询最多' + options.tripReject + '条', fail: true});
         const kws = options.tripLimit ? body.keywordList.slice(0, options.tripLimit) : body.keywordList;
-        const all = {};
+        const all = {}, allDc = {};
         Object.keys(dayData).forEach(k => ((dayData[k].sf || {}).routes || []).forEach(r => r.sent.forEach(x => { all[x.billcode] = x; })));
-        const data = kws.filter(w => all[w]).map(w => {
+        Object.keys(dayData).forEach(k => (dayData[k].dc || []).forEach((x, i) => { allDc[x.waybillNo] = {x: x, i: i}; }));
+        // SC→DC (V4.1, como o PDF do usuário): bipe de chegada na SP GRU (ID da viagem de CHEGADA — não vale), "Encomenda
+        // carregada" (J&T Tracking Code 50) na SP GRU para a próxima parada = ID da viagem de SAÍDA (o que vale) e o
+        // carregamento seguinte em outra base (DC), que também não vale. dcDepartureTrip(i) null = sem carregamento na base.
+        const dcData = kws.filter(w => allDc[w]).map(w => {
+          const x = allDc[w].x, dep = dcDepartureTrip(allDc[w].i), det = [];
+          det.push({billCode: w, waybillNo: w, scanTime: x.arrivalScanTime, scanTypeName: 'Coleta de chegadas', scanNetworkName: 'SP GRU', scanNetworkId: 2826,
+            nextStopName: 'SP GRU', remark2: x.arrivalShipmentNo, code: 2, originalScanTypeCode: 90,
+            waybillTrackingContent: 'O expresso chegou [SP GRU] A parada anterior foi [GRU-SP], o número do pedido [' + x.arrivalShipmentNo + ']'});
+          if (dep !== null) det.push({billCode: w, waybillNo: w, scanTime: x.dispatchTime, scanTypeName: 'Encomenda carregada', scanNetworkName: 'SP GRU',
+            scanNetworkId: 2826, nextStopName: x.sendNextStation, remark2: dep, code: 1, originalScanTypeCode: 50,
+            waybillTrackingContent: 'A encomenda expressa está [SP GRU] sendo enviada, para [' + x.sendNextStation + '], escaneador [EQUIPAMENTO FICTICIO], o número do pedido [' + dep + '], número do voo []'});
+          det.push({billCode: w, waybillNo: w, scanTime: x.dispatchTime.slice(0, 11) + '23:59:00', scanTypeName: 'Encomenda carregada', scanNetworkName: 'DC GRU-SP',
+            scanNetworkId: 2620, nextStopName: 'F FICTICIO-SP', remark2: 'SRTRFIC' + w.slice(-3), code: 1, originalScanTypeCode: 50});
+          return {keyword: w, details: det.reverse(), codes: null};
+        });
+        const data = dcData.concat(kws.filter(w => all[w]).map(w => {
           const x = all[w], det = [];
           // Bipes como na tela: recebido na base (com o ID da viagem de CHEGADA), carregado na base para a rota (ID que vale).
           det.push({billCode: w, waybillNo: w, scanTime: x.sendTime.slice(0, 11) + '00:00:01', scanTypeName: 'Encomenda recebida', scanNetworkName: 'SP GRU',
@@ -393,7 +418,7 @@ function fakeJms(dayData, options) {
           det.push({billCode: w, waybillNo: w, scanTime: x.sendTime.slice(0, 11) + '00:00:00', scanTypeName: 'Encomenda carregada', scanNetworkName: 'PA FICTICIO-SP',
             scanNetworkId: 1732, nextStopName: 'SP GRU', remark2: 'OUTRA' + x.billcode.slice(-3), code: 1, originalScanTypeCode: 50});
           return {keyword: w, details: det.reverse(), codes: null};
-        });
+        }));
         return respond(200, {code: 1, msg: '1:Solicitação concluída', data: data, succ: true, fail: false});
       }
       // ----- Fluxo de Lotes (formato das capturas; sacas e destinos fictícios) -----
@@ -716,4 +741,4 @@ function makeArrival(date, seed, scale) {
     uploadNoSendNum: prev.length, noSendNum: noSend.length}};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+module.exports = {createContext: createContext, fakeJms: fakeJms, dcDepartureTrip: dcDepartureTrip, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
