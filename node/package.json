@@ -1,0 +1,15 @@
+{
+  "name": "jt-dashmaster-node",
+  "version": "4.0.0",
+  "private": true,
+  "description": "J&T DashMaster em Node.js: o mesmo painel do Apps Script, sem cota diária do Google.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/test_node.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "UNLICENSED"
+}

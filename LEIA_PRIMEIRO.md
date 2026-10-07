@@ -1,8 +1,18 @@
-# J&T DASHMASTER V3.40 — Painel de Indicadores (Google Apps Script)
+# J&T DASHMASTER V4.0 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.0 — Versão Node.js: o mesmo painel, sem o limite do Google
+- **Nova opção: rodar o painel num computador da base, com Node.js**, em vez do Google Apps Script. Os arquivos do painel são os mesmos.
+- **Acaba o limite do Google:** não há mais 90 min/dia de gatilhos, 20 mil consultas/dia nem 6 min por execução. A fila do JMS roda a cada 1 minuto, o dia inteiro.
+- **O painel fica igual** (cartões, gráficos, Maomao, tema escuro, PT-BR/中文, relatórios) e responde mais rápido.
+- **O AuthToken, o histórico e os diagnósticos ficam na tela Configurações** (`http://localhost:3000/config`). Ela substitui as Propriedades do script e o botão ▶ Executar do editor.
+- **Conferido em teste com um JMS simulado pela rede:** os números do painel no Node.js são **iguais** aos da simulação do Apps Script em seis indicadores.
+- **Passo a passo:** `node/LEIA_NODE.md`. Para começar, instale o Node.js LTS, dê dois cliques em `node/iniciar.bat` e abra `http://localhost:3000/config`.
+
+**Quem continua no Google:** nada muda. Atualizar o Apps Script com estes arquivos é opcional (a única diferença é o número da versão).
 
 ## V3.40 — Maomao animado quadro a quadro (o corpo mexe, a imagem não balança)
 - O Maomao virou uma **animação de verdade, quadro a quadro** (como um GIF), feita a partir das duas imagens enviadas. A imagem inteira não balança mais.

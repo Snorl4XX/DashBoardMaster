@@ -1,0 +1,4 @@
+# Versão Node.js: banco, arquivos baixados do JMS e configuração local (senhas) ficam só no computador.
+node/dados/
+node/config.json
+node_modules/
