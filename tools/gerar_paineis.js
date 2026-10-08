@@ -99,7 +99,9 @@ function build(outDir, opts) {
   const lineRe = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
   if (!lineRe.test(config)) throw new Error('Config.gs sem a linha PACOTE_PAINEIS_ (o gerador não sabe separar os painéis).');
   const version = versionOf(config);
-  const tag = 'V' + version.split('.').slice(0, 2).join('_');
+  // 4.4.0 → V4_4; 4.4.1 → V4_4_1 (correção com nome próprio, para não confundir com o ZIP anterior).
+  const parts = version.split('.');
+  const tag = 'V' + (parts[2] && parts[2] !== '0' ? parts.slice(0, 3) : parts.slice(0, 2)).join('_');
   fs.mkdirSync(outDir, {recursive: true});
   return PACKAGES.map(pkg => {
     const dir = path.join(outDir, 'painel-' + pkg.id);

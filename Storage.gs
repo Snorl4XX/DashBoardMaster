@@ -1388,9 +1388,83 @@ function migrateToV3114_() {
   return n;
 }
 
+// ------------------------------------------------------------------ V4.4.1: Propriedades do script só com as configurações
+/**
+ * Move as chaves internas que versões anteriores gravaram nas Propriedades do script para o armazenamento interno
+ * (Utils.gs → internalStore_) e apaga as que não servem mais:
+ *  - progresso, plano e assinatura de download de painel DESLIGADO neste projeto (ex.: Recebimento e Expedição no painel
+ *    principal, depois da separação dos painéis) e de dias que já saíram da janela de detalhe;
+ *  - controle diário de dias passados (teto de uso, paralelismo) e os turnos da Expedição quando ela está desligada.
+ * Roda sozinha no começo da fila (uma vez por dia, ou na hora em que aparecer chave interna nas Propriedades do script).
+ * Devolve {movidas, apagadas, propriedadesDoScript: [nomes]} — nunca os valores.
+ */
+function organizePropsCore_(force) {
+  scriptProps_();
+  let c = PROPS_CACHE_;
+  const today = isoToday_(), shared = sharedStores_();
+  const stray = shared ? [] : Object.keys(c.script).filter(isInternalProp_);
+  if (!force && !stray.length && c.internal.PROPS_ORGANIZED_AT === today) return null;
+  let moved = 0, removed = 0;
+  if (stray.length) {
+    const toMove = {};
+    stray.forEach(k => { if (!(k in c.internal)) toMove[k] = c.script[k]; });
+    if (Object.keys(toMove).length) internalStore_().setProperties(toMove);
+    const ss = scriptStore_();
+    stray.forEach(k => { ss.deleteProperty(k); moved++; });
+    invalidateProps_();
+    scriptProps_();
+    c = PROPS_CACHE_;
+  }
+  const keys = Object.keys(INDICATORS).concat(Object.keys(HISTORY_INDICATORS_));
+  const active = {};
+  keys.forEach(k => { active[k.toUpperCase()] = k; });
+  const drop = [];
+  Object.keys(c.internal).forEach(k => {
+    const m = /^GROUPED_(PROG|PLANDATA|PLAN)_([A-Z0-9_]+?)_(\d{4})[-_](\d{2})[-_](\d{2})$/.exec(k);
+    if (m) {
+      const ind = active[m[2]], date = m[3] + '-' + m[4] + '-' + m[5];
+      if (!ind) { drop.push(k); return; }
+      const cfg = INDICATORS[ind];
+      const cut = addDaysIso_(today, -((cfg ? detailDays_(cfg) || 7 : 7) + 3));
+      if (date < cut) drop.push(k);
+      return;
+    }
+    const d = /^(GROUPED_USED_MS_|SEND_USED_MS_|GROUPED_PARALLEL_)(\d{4}-\d{2}-\d{2})$/.exec(k);
+    if (d && d[2] !== today) { drop.push(k); return; }
+    if (/^SEND_SHIFTS_/.test(k) && !Object.keys(INDICATORS).some(x => INDICATORS[x].byRoute)) drop.push(k);
+  });
+  drop.forEach(k => { deleteProp_(k); removed++; });
+  setProp_('PROPS_ORGANIZED_AT', today);
+  if (moved || removed) {
+    try {
+      logSync_('INFO', '', '', 'Propriedades organizadas: ' + moved + ' interna(s) saíram das Propriedades do script e ' + removed +
+        ' antiga(s) foram apagadas. Propriedades do script agora: ' + Object.keys(PROPS_CACHE_.script).length + '.');
+    } catch (e) { /* só registro */ }
+  }
+  return {movidas: moved, apagadas: removed, propriedadesDoScript: Object.keys(PROPS_CACHE_.script).sort()};
+}
+/**
+ * Rode no editor do Apps Script (▶ Executar) quando Configurações do projeto → Propriedades do script disser que passou do
+ * limite: deixa nas Propriedades do script só as configurações (JMS_AUTHTOKEN, DATA_START_DATE…). Mostra os NOMES que
+ * ficaram (nunca os valores).
+ */
+function organizarPropriedades() {
+  const r = organizePropsCore_(true);
+  const txt = 'Propriedades organizadas.\n' +
+    '  Internas que saíram das Propriedades do script: ' + r.movidas + ' (continuam funcionando, só não aparecem mais na tela)\n' +
+    '  Antigas apagadas (painel desligado / dias passados): ' + r.apagadas + '\n' +
+    '  Propriedades do script agora (' + r.propriedadesDoScript.length + '): ' + r.propriedadesDoScript.join(', ') + '\n' +
+    'Agora abra Configurações do projeto → Propriedades do script e troque o JMS_AUTHTOKEN.';
+  console.log(txt);
+  r.texto = txt;
+  return r;
+}
+
 /** Trabalhador da fila (gatilho a cada 5 min). Uma execução por vez. */
 function processSyncQueue(opts) {
   opts = opts || {};
+  // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
+  try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
   try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }

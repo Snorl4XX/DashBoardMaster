@@ -69,6 +69,20 @@ function createSimContext(opts) {
   Spreadsheet.prototype.insertSheet = function (n) { const s = new Sheet(n); this.sheets.push(s); return s; };
   Spreadsheet.prototype.getSpreadsheetTimeZone = function () { return TZ; };
   Spreadsheet.prototype.setSpreadsheetTimeZone = function () {};
+  state.userProps = state.userProps || {};
+  const stores = new Map();
+  function propStore(obj) {
+    if (stores.has(obj)) return stores.get(obj);
+    const x = {
+      getProperty: k => { clock.tick(COST.prop); st.propReads++; return obj[k] === undefined ? null : obj[k]; },
+      getProperties: () => { clock.tick(COST.prop); st.propReads++; return Object.assign({}, obj); },
+      setProperty: (k, v) => { clock.tick(COST.prop); obj[k] = String(v); },
+      setProperties: o => { clock.tick(COST.prop); Object.keys(o).forEach(k => { obj[k] = String(o[k]); }); },
+      deleteProperty: k => { clock.tick(COST.prop); delete obj[k]; }
+    };
+    stores.set(obj, x);
+    return x;
+  }
   function blob(bytes, type, name) {
     return {bytes: Buffer.from(bytes), type, name, getBytes() { return Array.from(this.bytes); }, getDataAsString() { return this.bytes.toString('utf8'); },
       setName(n) { this.name = n; return this; }, getName() { return this.name; }, setContentType(t) { this.type = t; return this; }, copyBlob() { return blob(this.bytes, this.type, this.name); }};
@@ -80,12 +94,8 @@ function createSimContext(opts) {
   const context = {
     console: {log() {}, error() {}, warn() {}},
     Date: VDate, JSON, Math, Object, Array, String, Number, Boolean, RegExp, Error, Set, Map, Intl, encodeURIComponent, Buffer,
-    PropertiesService: {getScriptProperties: () => ({
-      getProperty: k => { clock.tick(COST.prop); st.propReads++; return state.props[k] === undefined ? null : state.props[k]; },
-      getProperties: () => { clock.tick(COST.prop); st.propReads++; return Object.assign({}, state.props); },
-      setProperty: (k, v) => { clock.tick(COST.prop); state.props[k] = String(v); },
-      deleteProperty: k => { clock.tick(COST.prop); delete state.props[k]; }
-    })},
+    // V4.4.1: Propriedades do script (configurações) e do usuário (estado interno) separadas, como no Apps Script.
+    PropertiesService: {getScriptProperties: () => propStore(state.props), getUserProperties: () => propStore(state.userProps)},
     CacheService: {getScriptCache: () => ({get: k => { clock.tick(COST.cache); return state.cache[k] === undefined ? null : state.cache[k]; },
       put: (k, v) => { clock.tick(COST.cache); state.cache[k] = String(v); }, remove: k => { delete state.cache[k]; }})},
     LockService: {getScriptLock: () => ({tryLock: () => true, waitLock: () => true, releaseLock: () => {}, hasLock: () => true})},

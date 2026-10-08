@@ -7,10 +7,30 @@
  * leituras de propriedades de uma conta Gmail comum (50 mil/dia).
  */
 var PROPS_CACHE_ = null;
+/**
+ * V4.4.1 — Propriedades INTERNAS (estado da fila, progresso dos downloads, migrações, limites aprendidos do JMS) ficam nas
+ * Propriedades do USUÁRIO do projeto (PropertiesService.getUserProperties), que não aparecem em Configurações do projeto.
+ * Antes ficavam nas Propriedades do script junto com as configurações: passavam de 50 e o editor do Apps Script não deixava
+ * mais editar nenhuma (nem trocar o JMS_AUTHTOKEN). As Propriedades do script ficam só com as configurações (JMS_*,
+ * DATA_START_DATE, PAINEIS…) e os IDs da planilha/pastas. O gatilho e o app da Web rodam como o dono do projeto
+ * (executeAs USER_DEPLOYING): é sempre o mesmo armazenamento.
+ */
+const INTERNAL_PROP_RE_ = /^(GROUPED_(PROG|PLAN|PLANDATA|PARALLEL|USED_MS|LAYOUT)_|SEND_USED_MS_|SEND_SHIFTS_|HISTORY_FILL_|MIGRATION_|V37_INSTALLED_AT$|QUEUE_HINT_|SYNC_PAUSE_|TODAY_REFRESH_AT$|STAMP_|SNAPSHOT_DAY_|JMS_SLICE_OK_|JMS_NO_SLICE_|JMS_PAGE_SIZE_|JMS_ROUTE_AUTO_|JMS_TRIP_BATCH$|JMS_SUMMARY_SHIFTS_OFF_|ORDERKIND_DETECT_AT_|GOOGLE_PLAN_AUTO$|PROPS_ORGANIZED_AT$)/;
+function isInternalProp_(key) { return INTERNAL_PROP_RE_.test(String(key)); }
+function scriptStore_() { return PropertiesService.getScriptProperties(); }
+/** Armazenamento interno: Propriedades do usuário (sem elas, as do script, como antes). */
+function internalStore_() {
+  try { return PropertiesService.getUserProperties() || scriptStore_(); } catch (e) { return scriptStore_(); }
+}
+/** Mesmo objeto nos dois (Node.js, simulações): mover = não fazer nada. */
+function sharedStores_() { try { return internalStore_() === scriptStore_(); } catch (e) { return true; } }
 function scriptProps_() {
   const now = Date.now();
   if (!PROPS_CACHE_ || now - PROPS_CACHE_.at > APP_CONFIG.PROPS_TTL_MS || now < PROPS_CACHE_.at) {
-    PROPS_CACHE_ = {at: now, values: PropertiesService.getScriptProperties().getProperties() || {}};
+    const script = scriptStore_().getProperties() || {};
+    const internal = sharedStores_() ? script : (internalStore_().getProperties() || {});
+    // Leitura única: configurações + estado interno (o interno vale mais para as chaves internas ainda não movidas).
+    PROPS_CACHE_ = {at: now, script: script, internal: internal, values: Object.assign({}, script, internal)};
   }
   return PROPS_CACHE_.values;
 }
@@ -20,12 +40,20 @@ function getProp_(key, fallback) {
   return (v === null || v === undefined || v === '') ? fallback : v;
 }
 function setProp_(key, value) {
-  PropertiesService.getScriptProperties().setProperty(key, String(value));
-  if (PROPS_CACHE_) PROPS_CACHE_.values[key] = String(value);
+  const internal = isInternalProp_(key);
+  (internal ? internalStore_() : scriptStore_()).setProperty(key, String(value));
+  if (PROPS_CACHE_) {
+    PROPS_CACHE_.values[key] = String(value);
+    (internal ? PROPS_CACHE_.internal : PROPS_CACHE_.script)[key] = String(value);
+  }
 }
 function deleteProp_(key) {
-  PropertiesService.getScriptProperties().deleteProperty(key);
-  if (PROPS_CACHE_) delete PROPS_CACHE_.values[key];
+  // Apaga onde existir (uma chave interna antiga pode ainda estar nas Propriedades do script).
+  scriptProps_();
+  const c = PROPS_CACHE_, inScript = c && c.script && key in c.script, inInternal = c && c.internal && key in c.internal;
+  if (inScript || !c) scriptStore_().deleteProperty(key);
+  if ((inInternal || !c) && !sharedStores_()) internalStore_().deleteProperty(key);
+  if (c) { delete c.values[key]; delete c.script[key]; delete c.internal[key]; }
 }
 
 function centerCode_() { return getProp_('JMS_CENTER_CODE', APP_CONFIG.DEFAULT_CENTER_CODE); }

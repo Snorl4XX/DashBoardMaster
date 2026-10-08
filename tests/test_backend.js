@@ -3121,4 +3121,57 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'Deslacre de hoje: lista refeita pelo intervalo mesmo com a mesma contagem');
 }
 
+// ---------- V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50) ----------
+{
+  const c0 = createContext({props: baseProps, jms: fakeJms({}), quiet: true});
+  const today = c0.isoToday_(), ago = n => c0.addDaysIso_(today, -n);
+  // Como nas telas do usuário (painel principal depois da separação): estado interno de versões anteriores misturado
+  // com as configurações nas Propriedades do script — mais de 50.
+  const old = {GOOGLE_PLAN_AUTO: 'gmail', GROUPED_LAYOUT_ARRIVAL_FLOW: 'v1x', GROUPED_LAYOUT_LOT_FLOW: 'v1y', JMS_TRIP_BATCH: '50',
+    MIGRATION_V41: '2026-10-05T00:00:00Z', QUEUE_HINT_V37: '{"s":"IDLE","at":1}', STAMP_WRONG_SEND: '{"t":1,"d":{}}', V37_INSTALLED_AT: '2026-09-20T00:00:00Z'};
+  ['ARRIVAL_FLOW', 'SEND_FLOW', 'LOT_FLOW', 'NO_MOVE', 'NO_MOVE_HIST'].forEach(ind => { for (let d = 0; d < 9; d++) old['GROUPED_PROG_' + ind + '_' + ago(d)] = '{"at":"x","units":' + d + '}'; });
+  old['GROUPED_PROG_LOT_FLOW_' + ago(40)] = '{"units":1}';
+  old['GROUPED_PLANDATA_ARRIVAL_FLOW_' + ago(1)] = '{"v":1}';
+  old['GROUPED_PLAN_SEND_FLOW_' + ago(2)] = '{"o":"route"}';
+  old['GROUPED_USED_MS_' + ago(1)] = '2076055'; old['GROUPED_USED_MS_' + today] = '1000'; old['GROUPED_PARALLEL_' + ago(2)] = '4';
+  old['SEND_SHIFTS_' + ago(1)] = '{}';
+  ['ARRIVAL_FLOW', 'DAMAGE', 'LOT_FLOW', 'MISSING_DISPATCH', 'MISSING_RECEIPT', 'NO_MOVE', 'SC_DC', 'SC_SC', 'SEND_FLOW', 'SORTING_ERROR', 'UNSEAL', 'WRONG_SEND']
+    .forEach(k => { old['HISTORY_FILL_' + k] = '2026-10-01T08:05:53Z'; });
+  const settings = {JMS_AUTHTOKEN: 'TOKEN_ANTIGO_FICTICIO', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', PAINEIS_FORA: 'arrival_flow,send_flow',
+    GROUPED_CLIENT_ROWS: '60000', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60'};
+  const cP = createContext({props: Object.assign({}, settings, old), jms: fakeJms({[D19]: makeDay(D19, 61)}), quiet: true, separateUserProps: true});
+  cP.setupProject();
+  check(Object.keys(cP.__state.props).length > 50, 'cenário: mais de 50 Propriedades do script', Object.keys(cP.__state.props).length);
+  const rP = cP.organizarPropriedades();
+  const left = Object.keys(cP.__state.props).sort(), U = cP.__state.userProps;
+  check(left.every(k => !cP.isInternalProp_(k)) && left.length <= 12 && ['JMS_AUTHTOKEN', 'DATA_START_DATE', 'PAINEIS_FORA', 'GROUPED_CLIENT_ROWS', 'DB_SPREADSHEET_ID'].every(k => left.indexOf(k) >= 0),
+    'Propriedades do script só com as configurações e os IDs da planilha/pastas', left);
+  check(!/TOKEN_ANTIGO/.test(rP.texto) && /JMS_AUTHTOKEN/.test(rP.texto) && rP.movidas > 40, 'organizarPropriedades() mostra só os nomes, nunca os valores', rP.texto);
+  check(!Object.keys(U).some(k => /^GROUPED_(PROG|PLANDATA|PLAN)_(ARRIVAL|SEND)_FLOW_/.test(k)) && U['GROUPED_PROG_LOT_FLOW_' + today] && U['GROUPED_PROG_NO_MOVE_HIST_' + ago(1)] &&
+    !U['GROUPED_PROG_LOT_FLOW_' + ago(40)] && !U['GROUPED_USED_MS_' + ago(1)] && U['GROUPED_USED_MS_' + today] === '1000' && !U['GROUPED_PARALLEL_' + ago(2)] &&
+    !U['SEND_SHIFTS_' + ago(1)] && U.JMS_TRIP_BATCH === '50' && U.HISTORY_FILL_DAMAGE && U.GROUPED_LAYOUT_LOT_FLOW,
+    'internas no armazenamento interno; apagadas as do painel desligado (Recebimento/Expedição) e de dias passados', Object.keys(U).length);
+  check(cP.tripBatch_() === 50 && cP.getProp_('GROUPED_CLIENT_ROWS', '') === '60000', 'valores internos e configurações continuam valendo');
+  // A fila inteira com o estado interno separado: nada interno volta para as Propriedades do script.
+  cP.queueHistory(D19, D19, true);
+  runAll(cP);
+  check(ALL.every(k => cP.getDayStatus_(k, D19).details === 'COMPLETE') && cP.getDayStatus_('unseal', D19).details === 'COMPLETE' &&
+    Object.keys(cP.__state.props).every(k => !cP.isInternalProp_(k)), 'fila completa; nenhuma chave interna volta para as Propriedades do script',
+    Object.keys(cP.__state.props).filter(k => cP.isInternalProp_(k)));
+  check(cP.organizePropsCore_(false) === null, 'organização automática: uma vez por dia (ou quando aparecer chave interna)');
+  cP.__state.props.JMS_PAGE_SIZE_WRONG_SEND = '500';
+  check(cP.organizePropsCore_(false).movidas === 1 && !('JMS_PAGE_SIZE_WRONG_SEND' in cP.__state.props) && U.JMS_PAGE_SIZE_WRONG_SEND === '500', 'chave interna nova nas Propriedades do script é movida na próxima execução');
+  // Token vencido → pausa (estado interno); token novo nas Propriedades do script → a fila volta sozinha.
+  const optsT = {appError: {code: 135010037, msg: 'token失效，请重新登录'}};
+  const cT2 = createContext({props: Object.assign({}, baseProps), jms: fakeJms({[D19]: makeDay(D19, 62)}, optsT), quiet: true, separateUserProps: true});
+  cT2.setupProject();
+  cT2.queueHistory(D19, D19, true);
+  runAll(cT2, 2);
+  check(cT2.publicPauses_().length > 0 && cT2.__state.userProps.SYNC_PAUSE_V37 && !cT2.__state.props.SYNC_PAUSE_V37, 'pausa por token vencido fica no armazenamento interno');
+  delete optsT.appError;
+  cT2.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO_FICTICIO';
+  runAll(cT2);
+  check(cT2.publicPauses_().length === 0 && ALL.every(k => cT2.getDayStatus_(k, D19).details === 'COMPLETE'), 'token novo nas Propriedades do script: a fila volta sozinha');
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

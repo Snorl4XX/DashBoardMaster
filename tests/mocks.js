@@ -113,15 +113,22 @@ function createContext(opts) {
     set(t, k, v) { t[k] = v; if (typeof context !== 'undefined') context.PROPS_CACHE_ = null; return true; },
     deleteProperty(t, k) { delete t[k]; if (typeof context !== 'undefined') context.PROPS_CACHE_ = null; return true; }
   });
+  const storeOf = obj => ({
+    getProperty: k => (obj()[k] === undefined ? null : obj()[k]),
+    getProperties: () => Object.assign({}, obj()),
+    setProperty: (k, v) => { obj()[k] = String(v); },
+    setProperties: o => { Object.keys(o).forEach(k => { obj()[k] = String(o[k]); }); },
+    deleteProperty: k => { delete obj()[k]; }
+  });
+  const scriptStore = storeOf(() => state.props);
+  if (opts.separateUserProps) state.userProps = Object.assign({}, opts.userProps || {});
+  const userStore = opts.separateUserProps ? storeOf(() => state.userProps) : scriptStore;
   const context = {
     console: opts.quiet ? {log() {}, error() {}, warn() {}} : console,
     Date, JSON, Math, Object, Array, String, Number, Boolean, RegExp, Error, Set, Map, Intl, encodeURIComponent, Buffer,
-    PropertiesService: {getScriptProperties: () => ({
-      getProperty: k => (state.props[k] === undefined ? null : state.props[k]),
-      getProperties: () => Object.assign({}, state.props),
-      setProperty: (k, v) => { state.props[k] = String(v); },
-      deleteProperty: k => { delete state.props[k]; }
-    })},
+    // Propriedades do script = state.props. Propriedades do usuário (V4.4.1, estado interno): o MESMO armazenamento, como
+    // na versão Node.js — ou separado (opts.separateUserProps → state.userProps), como no Apps Script de verdade.
+    PropertiesService: {getScriptProperties: () => scriptStore, getUserProperties: () => userStore},
     CacheService: {getScriptCache: () => ({
       get: k => (state.cache[k] === undefined ? null : state.cache[k]), put: (k, v) => { state.cache[k] = String(v); },
       remove: k => { delete state.cache[k]; }

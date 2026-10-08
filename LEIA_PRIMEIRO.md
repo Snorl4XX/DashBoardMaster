@@ -1,8 +1,31 @@
-# J&T DASHMASTER V4.4 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.4.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.4.1 — Propriedades do script voltam a ser editáveis (troca do AuthToken)
+**O problema:** o painel guardava o controle interno nas mesmas **Propriedades do script** onde ficam o AuthToken e as configurações. Esse controle inclui progresso de download, planos, fila, migrações e limites aprendidos do JMS. Com o tempo passou de 50 propriedades, e o editor do Apps Script avisa que passou do limite e não deixa mais editar, nem trocar o `JMS_AUTHTOKEN`. No painel principal piorava: o progresso do Recebimento e da Expedição, que saíram desse painel, nunca era apagado.
+
+**A correção:**
+- O controle interno passa para as **Propriedades do usuário** do projeto. Elas não aparecem em Configurações do projeto e têm cota própria.
+- Nas **Propriedades do script** ficam só as configurações (`JMS_AUTHTOKEN`, `JMS_AUTH_MODE`, `DATA_START_DATE`, `PAINEIS`…) e os IDs da planilha e das pastas.
+- As propriedades antigas que não servem mais são apagadas:
+  - progresso e planos de painel desligado no projeto;
+  - dias que já saíram da janela de detalhe;
+  - controle diário de dias passados.
+- Isso roda sozinho no começo da fila (uma vez por dia). Também pode ser rodado à mão pela função **`organizarPropriedades`**.
+
+**O que fazer (nos dois projetos: principal e fluxos):**
+1. Troque o conteúdo de todos os `.gs` e `.html` pelos do ZIP V4.4.1 e publique uma **Nova versão**.
+2. No editor, escolha a função **`organizarPropriedades`** e clique em ▶ **Executar**.
+   - Se pedir autorização, autorize.
+   - O Registro de execução mostra quantas propriedades saíram e os **nomes** das que ficaram, nunca os valores.
+3. Abra **Configurações do projeto → Propriedades do script**. A lista fica curta e editável. Troque o **`JMS_AUTHTOKEN`** e salve. A fila volta sozinha.
+
+**Importante:**
+- Rode `organizarPropriedades`, `setupProject` e as outras funções com a **mesma conta Google dona do projeto**, a que publica o app da Web e criou os gatilhos. O controle interno fica nas propriedades dessa conta.
+- Não precisa recriar as propriedades nem os gatilhos.
 
 ## V4.4 — Triagem errada sem informação completada e novo painel Deslacre
 **Como instalar:** use o ZIP **JT_DASHMASTER_V4_4_PRINCIPAL.zip** no projeto que você já usa.
