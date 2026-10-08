@@ -176,7 +176,19 @@
       snapFetching: 'Buscando no JMS a linha mais recente (tempo real)…', snapRefreshing: 'Consultando o JMS agora: a linha com o horário mais recente…',
       snapListFetching: 'Baixando os pedidos da linha mais recente (Total de pedidos sem movimentação)…',
       snapListLater: 'A lista de pedidos da linha nova ainda está baixando; os cartões já são da linha mais recente.',
-      dcNoDetail: 'Contado na lista baixada: {h}'
+      dcNoDetail: 'Contado na lista baixada: {h}',
+      usMissDay: 'IDs sem bipe de deslacre · {date}', usMissPeriod: 'IDs sem bipe de deslacre no período',
+      usMissOf: '{p} dos {n} IDs de viagem', usOfTrips: 'de {n} IDs', usPrevDay: 'Dia anterior ({d})', usPrevPeriod: 'Período anterior',
+      usFilteredNote: 'Contado nos IDs filtrados.', usDaysOf: '{a} de {b} dias',
+      usMedian: 'Tempo mediano: deslacre → bipe de recebimento', usMedianSub: 'Mediana dos {n} IDs com deslacre e Data final',
+      usTop: 'ID com maior tempo mediano', usFrom: 'PDD de saída: {o}', usNoTime: 'Nenhum ID com deslacre e Data final.',
+      usTrips: 'IDs de viagem (linha secundária)', usTripsSub: 'Com deslacre: {a} · sem deslacre: {b}',
+      usShiftMissUnit: 'sem deslacre', usShiftShare: 'dos IDs sem deslacre', usShiftTrips: '{n} IDs no turno',
+      usShiftMed: 'Tempo mediano', usShiftTop: 'Maior mediana',
+      usMinutes: 'Tempo (min)', usTipIds: '{n} ID(s)', usTimedHint: 'com deslacre e Data final',
+      usAggMedianSub: 'Mediana do tempo de cada ID (deslacre → Data final) · {n} IDs com tempo',
+      usAggMaxSub: 'Tempo de cada ID (mediana dos registros de descarregamento) · {n} IDs com tempo',
+      usColMedian: 'Tempo mediano', usColTime: 'Tempo', usColIds: 'IDs'
     },
     zh: {
       panel: '运营看板', autoSync: '自动更新', refresh: '刷新', downloadReport: '下载报告',
@@ -314,7 +326,19 @@
       snapFetching: '正在从 JMS 获取最新的一行（实时）…', snapRefreshing: '正在查询 JMS：最新操作时间最近的行…',
       snapListFetching: '正在下载最新一行的断更件明细…',
       snapListLater: '新一行的明细仍在下载；卡片已是最新一行的数据。',
-      dcNoDetail: '按下载的列表计数：{h}'
+      dcNoDetail: '按下载的列表计数：{h}',
+      usMissDay: '{date} 未解封扫描车次', usMissPeriod: '期间未解封扫描车次',
+      usMissOf: '占 {n} 个车次的 {p}', usOfTrips: '共 {n} 个车次', usPrevDay: '前一日（{d}）', usPrevPeriod: '上一期间',
+      usFilteredNote: '按筛选后的车次计数。', usDaysOf: '{b} 天中的 {a} 天',
+      usMedian: '中位时长：解封 → 卸车扫描', usMedianSub: '{n} 个有解封和结束时间的车次的中位数',
+      usTop: '中位时长最长的车次', usFrom: '始发网点：{o}', usNoTime: '没有同时有解封和结束时间的车次。',
+      usTrips: '车次（支线）', usTripsSub: '已解封：{a} · 未解封：{b}',
+      usShiftMissUnit: '未解封', usShiftShare: '占未解封车次', usShiftTrips: '本班次 {n} 个车次',
+      usShiftMed: '中位时长', usShiftTop: '最长中位时长',
+      usMinutes: '时长（分钟）', usTipIds: '{n} 个车次', usTimedHint: '有解封和结束时间',
+      usAggMedianSub: '各车次时长（解封 → 结束时间）的中位数 · {n} 个车次有时长',
+      usAggMaxSub: '各车次时长（卸车记录的中位数） · {n} 个车次有时长',
+      usColMedian: '中位时长', usColTime: '时长', usColIds: '车次'
     }
   };
 
@@ -322,6 +346,9 @@
   var ICON_PATHS = {
     wrong_send: '<path d="M3 8l8-4 8 4-8 4-8-4zM3 8v9l8 4 8-4V8M11 12v9"/><path d="M16 3l5 5m0-5l-5 5"/>',
     sorting_error: '<path d="M4 7h10m0 0l-3-3m3 3l-3 3M20 17H10m0 0l3-3m-3 3l3 3"/>',
+    unseal: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/><path d="M12 15v2"/>',
+    timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/>',
+    situation: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>',
     missing_receipt: '<path d="M4 8V5h4M20 8V5h-4M4 16v3h4M20 16v3h-4M12 7v10m-4-4l4 4 4-4"/>',
     missing_dispatch: '<path d="M4 8V5h4M20 8V5h-4M4 16v3h4M20 16v3h-4M12 17V7m-4 4l4-4 4 4"/>',
     sc_sc: '<path d="M2 8h12v8H2zM14 11h4l3 3v2h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
@@ -442,6 +469,7 @@
       return na && na.fields.indexOf(key) >= 0 ? L(na.text) : t('na');
     }
     if (key === 'shipment' || key === 'tripId') return String(value);
+    if (key === 'minutes') return fmtDur(value);
     if (key === 'regDay') return fmtDate(value, true);
     if (key === 'amount') return isNum(parseAmount(value)) ? fmtMoney(parseAmount(value)) : String(value);
     return Core.localizeValue(value, state.lang);
@@ -1338,6 +1366,7 @@
 
   // ------------------------------------------------------------------ cartões
   function renderKpis(c, k) {
+    if (c.unsealCards) return renderUnsealKpis(c, k);
     if (c.heroMetric && c.metricCards) return renderMetricKpis(c, k);
     var grid = $('#kpiGrid'), day = k.mode === 'day', sv = k.shiftView, sName = sv ? shiftName(sv) : '';
     var status = k.targetMet === true ? 'good' : k.targetMet === false ? 'bad' : 'none';
@@ -1416,6 +1445,78 @@
         '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(tp.pct) ? tp.pct : 0) + '" style="background:' + RED + '"></i></div></div></article>';
     }).join('');
     grid.innerHTML = hero + errors + prev + variation + shifts + valueCardsHtml(c) + tops;
+    fillGridGaps(grid);
+    requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
+    drawSpark(c);
+  }
+  // ------------------------------------------------------------------ Deslacre (V4.4): cartões próprios
+  /** Minutos → "42 min" / "1 h 05 min" (negativo: Data final antes do deslacre). */
+  function fmtDur(v) {
+    if (v === null || v === undefined || v === '' || !isFinite(Number(v))) return '—';
+    var n = Number(v), neg = n < 0, a = Math.round(Math.abs(n));
+    var txt = a < 60 ? a + ' min' : Math.floor(a / 60) + ' h ' + String(a % 60).padStart(2, '0') + ' min';
+    return (neg ? '−' : '') + txt;
+  }
+  function numOr(v) { if (v === null || v === undefined || v === '') return null; var n = Number(v); return isFinite(n) ? n : null; }
+  /** ID de maior tempo entre as linhas (tempo de cada ID = mediana dos registros de descarregamento). */
+  function slowestTrip(rows) {
+    return rows.reduce(function (m, r) { var v = numOr(r.minutes); return v !== null && (!m || v > Number(m.minutes)) ? r : m; }, null);
+  }
+  /**
+   * Deslacre (V4.4, pedido): cartões contados nos IDs de viagem filtrados (uma linha por ID).
+   *  - IDs sem bipe de deslacre (com o dia/período anterior do JMS);
+   *  - tempo mediano do deslacre até o bipe de recebimento (Data final do Bipe de descarregamento);
+   *  - ID com o maior tempo mediano; IDs de viagem do período;
+   *  - um cartão por turno: IDs sem deslacre, tempo mediano do turno e o ID de maior tempo do turno.
+   */
+  function renderUnsealKpis(c, k) {
+    var grid = $('#kpiGrid'), rows = state.filtered || [], sit = c.situations || {missing: 'Sem bipe de deslacre'};
+    var day = state.from === state.to, f = filtersObj(), filtered = Object.keys(f).length > 0;
+    var miss = rows.filter(function (r) { return r.situation === sit.missing; });
+    var timed = rows.filter(function (r) { return numOr(r.minutes) !== null; });
+    var med = Core.median(timed.map(function (r) { return Number(r.minutes); }));
+    var top = slowestTrip(timed);
+    // Dia/período anterior: números gravados do JMS (IDs, sem deslacre, tempo mediano do dia).
+    var len = Core.daysBetween(state.from, state.to) + 1, pFrom = Core.addDays(state.from, -len), pTo = Core.addDays(state.from, -1);
+    var prev = (state.data.rates || []).filter(function (r) { return r.date >= pFrom && r.date <= pTo && r.metrics; });
+    var sumM = function (list, key) { var any = false, n = 0; list.forEach(function (r) { var v = numOr(r.metrics[key]); if (v !== null) { any = true; n += v; } }); return any ? n : null; };
+    var prevMiss = sumM(prev, 'noUnlockNum'), prevTrips = sumM(prev, 'tripNum');
+    // Tempo mediano do dia anterior (gravado por dia); no período, só a quantidade é comparada (mediana não se soma).
+    var prevMed = day && prev.length === 1 ? numOr(prev[0].metrics.medianMin) : null;
+    // Período anterior incompleto (menos dias gravados que o período): o número aparece, sem a variação.
+    var comparable = prev.length === len;
+    var prevLbl = (day ? t('usPrevDay', {d: fmtDate(pTo, true)}) : t('usPrevPeriod')) + (!comparable && prev.length ? ' (' + t('usDaysOf', {a: prev.length, b: len}) + ')' : '');
+    var share = rows.length ? miss.length / rows.length * 100 : null;
+    var heroSubs = '<div class="kpi-sub">' + esc(t('usMissOf', {p: fmtPct(share, 1), n: fmtInt(rows.length)})) + '</div>' +
+      '<div class="kpi-sub">' + esc(prevLbl) + ': <b>' + fmtInt(prevMiss) + '</b>' + (filtered || !comparable ? '' : ' ' + qtyDelta(miss.length, prevMiss, true)) +
+      (isNum(prevTrips) ? ' · ' + esc(t('usOfTrips', {n: fmtInt(prevTrips)})) : '') + '</div>' +
+      (filtered ? '<div class="kpi-sub">' + esc(t('usFilteredNote')) + '</div>' : '');
+    var hero = '<article class="kpi kpi-hero"><div class="kpi-body"><div class="kpi-label">' + icon('unseal') +
+      esc(day ? t('usMissDay', {date: fmtDate(state.to, true)}) : t('usMissPeriod') + ' · ' + fmtRange(state.from, state.to)) + '</div>' +
+      '<div class="kpi-value">' + fmtInt(miss.length) + '</div>' + heroSubs +
+      '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
+    var medSub = esc(t('usMedianSub', {n: fmtInt(timed.length)})) + (day ? '<br>' + esc(prevLbl) + ': <b>' + esc(fmtDur(prevMed)) + '</b>' +
+      (isNum(med) && isNum(prevMed) && !filtered ? ' ' + qtyDelta(med, prevMed, true) : '') : '');
+    var medCard = kpiCard('timer', t('usMedian'), esc(fmtDur(med)), medSub, 'us-median');
+    var topCard = '<article class="kpi us-top"><div class="kpi-label">' + icon('max') + esc(t('usTop')) + '</div>' +
+      '<div class="kpi-value text" title="' + esc(top ? top.tripId || top.shipment : '') + '">' + (top ? esc(top.tripId || top.shipment) : '—') + '</div>' +
+      '<div class="kpi-sub">' + (top ? '<b>' + esc(fmtDur(top.minutes)) + '</b> · ' + esc(vlabel('route', top.route)) + '<br>' + esc(t('usFrom', {o: vlabel('station', top.station)})) +
+        (top.shift ? ' · ' + esc(top.shift) : '') : esc(t('usNoTime'))) + '</div></article>';
+    var trips = kpiCard('tripId', t('usTrips'), fmtInt(rows.length), esc(t('usTripsSub', {a: fmtInt(rows.length - miss.length), b: fmtInt(miss.length)})) +
+      (isNum(prevTrips) ? '<br>' + esc(prevLbl) + ': <b>' + fmtInt(prevTrips) + '</b>' : ''));
+    var shifts = ['T1', 'T2', 'T3'].map(function (s) {
+      var sr = rows.filter(function (r) { return r.shift === s; }), sm = sr.filter(function (r) { return r.situation === sit.missing; });
+      var st = sr.filter(function (r) { return numOr(r.minutes) !== null; }), smed = Core.median(st.map(function (r) { return Number(r.minutes); }));
+      var stop = slowestTrip(st), pct = miss.length ? sm.length / miss.length * 100 : null;
+      var sel = f.shift && f.shift.length && f.shift.indexOf(s) < 0;
+      return '<article class="kpi shift-kpi us-shift' + (sel ? ' faded' : '') + '"><div class="kpi-label"><i style="background:' + SHIFT_COLORS[s] + '"></i>' + s + ' · ' + SHIFT_HOURS[s] + '</div>' +
+        '<div class="kpi-value">' + fmtInt(sm.length) + '<small class="us-unit"> ' + esc(t('usShiftMissUnit')) + '</small></div>' +
+        '<div class="kpi-sub">' + (isNum(pct) ? '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('usShiftShare')) + ' · ' : '') + esc(t('usShiftTrips', {n: fmtInt(sr.length)})) +
+        '<br>' + esc(t('usShiftMed')) + ': <b>' + esc(fmtDur(smed)) + '</b>' +
+        '<br>' + esc(t('usShiftTop')) + ': <b>' + (stop ? esc(stop.tripId || stop.shipment) + '</b> (' + esc(fmtDur(stop.minutes)) + ')' : '—</b>') + '</div>' +
+        '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(pct) ? pct : 0) + '" style="background:' + SHIFT_COLORS[s] + '"></i></div></div></article>';
+    }).join('');
+    grid.innerHTML = hero + medCard + topCard + trips + shifts;
     fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
@@ -2305,6 +2406,8 @@
     if (key === 'evolution') sub = (spec.extended && state.evoMode !== 'history' ? t('evolution30', {date: fmtDate(state.to, true)}) + ' · ' : '') + t(hasGoal(c.goal) ? 'evolutionSub' : 'evolutionSubNoGoal');
     else if (spec.others > 0) sub = tx(c, spec.sumField ? 'sumRows' : 'distinctShipments') + ' · ' + t('topOf', {n: spec.labels.length, m: fmtInt(spec.labels.length + spec.others)});
     else sub = tx(c, spec.sumField ? 'sumRows' : 'distinctShipments') + (spec.total ? ' · ' + tx(c, spec.sumField ? 'sumCount' : 'tableCount', {n: fmtInt(spec.total)}) : '');
+    if (spec.valueAgg) sub = t(spec.valueAgg === 'median' ? 'usAggMedianSub' : 'usAggMaxSub', {n: fmtInt(spec.total)}) +
+      (spec.others > 0 ? ' · ' + t('topOf', {n: spec.labels.length, m: fmtInt(spec.labels.length + spec.others)}) : '');
     if (spec.sub) sub = L(spec.sub) + ' · ' + sub;
     if (spec.fromSummary) sub = t('pieFromSummary') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
     if (spec.fromRoutes) sub = (spec.sub ? L(spec.sub) + ' · ' : '') + t('routesOfficial') + (spec.total ? ' · ' + t('tableCount', {n: fmtInt(spec.total)}) : '');
@@ -2333,6 +2436,7 @@
     var body = $('.chart-body', card), legend = $('.chart-legend', card);
     legend.innerHTML = '';
     var hasData = key === 'evolution' ? spec.points.some(function (p) { return p.rate !== null; })
+      : spec.valueAgg ? (spec.labels || []).length > 0
       : (spec.labels || []).length && (spec.datasets || []).some(function (d) { return d.data.some(function (v) { return v > 0; }); });
     var stats = $('.rp-stats', card);
     stats.innerHTML = hasData ? chartStats(spec, c) : '';
@@ -2396,6 +2500,12 @@
         if (p.rate === null) return;
         b += '<tr><td>' + esc(fmtDate(p.date, true)) + '</td><td class="num">' + fmtRate(p.rate, c.goal) + '</td><td class="num">' + fmtInt(p.errors) + '</td><td>' +
           (p.met === null || p.met === undefined ? esc(t('noGoal')) : p.met ? '<span style="color:var(--good);font-weight:700">✓ ' + esc(t('inGoal')) + '</span>' : '<span style="color:var(--bad);font-weight:700">✗ ' + esc(t('outGoal')) + '</span>') + '</td></tr>';
+      });
+    } else if (spec.valueAgg) {
+      var vns = spec.datasets[0].n || [];
+      h += '<th>' + esc(L(dimLabel(spec.dim || spec.key))) + '</th><th class="num">' + esc(t(spec.valueAgg === 'median' ? 'usColMedian' : 'usColTime')) + '</th><th class="num">' + esc(t('usColIds')) + '</th>';
+      spec.labels.forEach(function (l, i) {
+        b += '<tr><td>' + esc(vlabel(spec.dim || spec.key, l)) + '</td><td class="num">' + esc(fmtDur(spec.datasets[0].data[i])) + '</td><td class="num">' + fmtInt(vns[i]) + '</td></tr>';
       });
     } else if (spec.grouped) {
       var gdim = spec.dim || 'segment';
@@ -2494,8 +2604,20 @@
     var maxChars = Math.max(6, Math.min(18, Math.floor(Math.max(40, (width - 70) / Math.max(1, n)) / 6.2)));
     var names = spec.labels.map(function (l) { return vlabel(spec.dim || spec.key, l); });
     var values = spec.datasets[0].data;
+    // V4.4: ID de viagem comprido ("SETRFIC00000001") em duas linhas, sem cortar (não tem espaço para quebrar).
+    var lab = function (x) {
+      var d = spec.dim || spec.key;
+      if ((d === 'tripId' || d === 'shipment') && x.length > Math.max(10, maxChars - 4)) { var h = Math.ceil(x.length / 2); return [x.slice(0, h), x.slice(h)]; }
+      return wrapLines(x, maxChars, 3);
+    };
+    // V4.4 (Deslacre): coluna = tempo (mediana / maior) em minutos, não quantidade.
+    if (spec.valueAgg) {
+      var ns = spec.datasets[0].n || [];
+      return columnsConfig({sig: 'cols-val', labels: names.map(lab), values: values, pcts: null,
+        titles: names, accent: 'count', fmt: fmtDur, yTitle: t('usMinutes'), tip: function (i) { return t('usTipIds', {n: fmtInt(ns[i])}); }});
+    }
     return columnsConfig({
-      sig: 'cols', labels: names.map(function (x) { return wrapLines(x, maxChars, 3); }), values: values,
+      sig: 'cols', labels: names.map(lab), values: values,
       pcts: values.map(function (v) { return total ? v / total * 100 : 0; }), titles: names, accent: 'count'
     });
   }
@@ -2548,6 +2670,7 @@
   function chartStats(spec, c) {
     if (spec.key === 'evolution') return evolutionStats(spec, c);
     if (spec.grouped) return rpStats({kind: 'byShift'}, spec.panel);
+    if (spec.valueAgg) return valueChartStats(spec);
     var isPie = spec.type === 'doughnut' || spec.type === 'pie';
     var data = spec.datasets[0].data;
     var total = isPie ? data.reduce(function (a, v) { return a + v; }, 0) : (spec.total || 0);
@@ -2566,6 +2689,19 @@
       out.push(rpStat('top', biLabel(RP_TEXT.topN, {n: data.length}), esc(fmtInt(shown)), '<em>' + esc(fmtPct(pct(shown), 2)) + '</em> ' + esc(t('ofTotalShort'))));
     } else out.push(rpStat('min', biLabel({pt: 'Menor ' + lcFirst(dl.pt), zh: '最少' + (dl.zh || '')}), name(minI), both(data[minI]), 'named'));
     return out.join('');
+  }
+  /** V4.4 (Deslacre): cartões embaixo de um gráfico de tempo — IDs com tempo, maior e menor tempo. */
+  function valueChartStats(spec) {
+    var data = spec.datasets[0].data, ns = spec.datasets[0].n || [];
+    var idx = data.map(function (v, i) { return i; }).filter(function (i) { return spec.labels[i] !== 'N/A'; });
+    if (!idx.length) return '';
+    var maxI = idx.reduce(function (m, i) { return data[i] > data[m] ? i : m; }, idx[0]);
+    var minI = idx.reduce(function (m, i) { return data[i] < data[m] ? i : m; }, idx[0]);
+    var name = function (i) { return '<span class="accent">' + esc(vlabel(spec.dim || spec.key, spec.labels[i])) + '</span>'; };
+    var sub = function (i) { return '<em>' + esc(fmtDur(data[i])) + '</em> <span class="rp-sep">|</span> ' + esc(t('usTipIds', {n: fmtInt(ns[i])})); };
+    return rpStat('total', biLabel({pt: 'IDs com tempo', zh: '有时长的车次'}), esc(fmtInt(spec.total)), esc(t('usTimedHint'))) +
+      rpStat('max', biLabel({pt: 'Maior tempo', zh: '最长'}), name(maxI), sub(maxI), 'named') +
+      (idx.length > 1 ? rpStat('min', biLabel({pt: 'Menor tempo', zh: '最短'}), name(minI), sub(minI), 'named') : '');
   }
   /** Cartões da evolução: dias na meta, maior e menor taxa de TODOS os dias mostrados no gráfico. */
   function evolutionStats(spec, c) {
@@ -2716,7 +2852,7 @@
     var countColor = o.accent === 'pct' ? INK : RED, pctColor = o.accent === 'pct' ? RED : INK;
     return {
       $sig: o.sig + '-' + (o.bandPos || 'none'), type: 'bar',
-      data: {labels: o.labels, datasets: [{label: t('shipments'), data: o.values, backgroundColor: o.colors || redGradient,
+      data: {labels: o.labels, datasets: [{label: o.fmt ? t('usMinutes') : t('shipments'), data: o.values, backgroundColor: o.colors || redGradient,
         hoverBackgroundColor: o.colors || RED_DARK, borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start',
         maxBarThickness: 64, categoryPercentage: .8, barPercentage: .84}]},
       plugins: plugins([shiftBands]),
@@ -2728,21 +2864,25 @@
           shiftBands: {groups: o.bands || [], position: o.bandPos || null},
           tooltip: {callbacks: {
             title: function (tt) { return o.titles[tt[0].dataIndex]; },
-            label: function (ctx) { return ' ' + fmtInt(ctx.raw) + ' ' + t('shipments') + ' · ' + fmtPct(o.pcts[ctx.dataIndex], 2); }
+            label: function (ctx) {
+              if (o.fmt) return ' ' + o.fmt(ctx.raw) + (o.tip ? ' · ' + o.tip(ctx.dataIndex) : '');
+              return ' ' + fmtInt(ctx.raw) + ' ' + t('shipments') + ' · ' + fmtPct(o.pcts[ctx.dataIndex], 2);
+            }
           }},
           datalabels: {anchor: 'end', align: 'end', clip: false, padding: 0,
             labels: {
-              count: {color: countColor, font: {weight: '800', size: 13}, formatter: function (v) { return fmtInt(v); },
-                offset: function (ctx) { return slot(ctx.chart) >= 50 ? 17 : 3; }, display: function (ctx) { return dv(ctx) > 0 && slot(ctx.chart) >= 24; }},
+              count: {color: countColor, font: {weight: '800', size: 13}, formatter: function (v) { return o.fmt ? o.fmt(v) : fmtInt(v); },
+                offset: function (ctx) { return !o.pcts ? 3 : slot(ctx.chart) >= 50 ? 17 : 3; },
+                display: function (ctx) { return (o.fmt ? dv(ctx) !== 0 : dv(ctx) > 0) && slot(ctx.chart) >= 24; }},
               pct: {offset: 3, color: pctColor, font: {weight: '600', size: 10.5},
-                formatter: function (v, ctx) { return '(' + fmtPct(o.pcts[ctx.dataIndex], 2) + ')'; },
-                display: function (ctx) { return dv(ctx) > 0 && slot(ctx.chart) >= 50; }}
+                formatter: function (v, ctx) { return o.pcts ? '(' + fmtPct(o.pcts[ctx.dataIndex], 2) + ')' : ''; },
+                display: function (ctx) { return !!o.pcts && dv(ctx) > 0 && slot(ctx.chart) >= 50; }}
             }}
         },
         scales: {
           x: {grid: {display: false}, border: {color: '#D9DBE1'}, ticks: {color: INK, autoSkip: false, maxRotation: 0, font: {size: 11, weight: '700'}}},
           y: {beginAtZero: true, grace: '24%', grid: {color: GRID}, border: {display: false},
-            title: {display: true, text: t('rpQty'), color: MUTED, font: {size: 11, weight: '700'}},
+            title: {display: true, text: o.yTitle || t('rpQty'), color: MUTED, font: {size: 11, weight: '700'}},
             ticks: {color: MUTED, precision: 0, callback: function (v) { return fmtInt(v); }}}
         }
       }
@@ -3034,7 +3174,8 @@
   function cellText(key, v) {
     if (v === null || v === undefined || v === '') return '';
     if (key === 'shipment' || key === 'waybill' || /^trip/.test(key) || key === 'lot') return key === 'lot' ? vlabel(key, v) : String(v);
-    if (key === 'qty') return fmtInt(v);
+    if (key === 'qty' || key === 'unloads') return fmtInt(v);
+    if (key === 'minutes') return fmtDur(v);
     if (/Time/.test(key)) return fmtStamp(v);
     return key === 'date' ? fmtDate(v, true) : vlabel(key, v);
   }
@@ -3046,6 +3187,10 @@
   }
   function renderDetailTable() {
     var c = cfg(), cols = c.table || [];
+    // Título e busca do painel (Deslacre: "Informações gerais", uma linha por ID de viagem).
+    var h2 = $('#detailCard [data-i18n="shipmentTable"]'), fi = $('#tableFind');
+    if (h2) h2.textContent = tx(c, 'shipmentTable');
+    if (fi) fi.setAttribute('placeholder', tx(c, 'tableFind'));
     var rows = tableRows(), total = Core.distinctCount(state.filtered);
     var pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     if (state.table.page > pages) state.table.page = pages;
@@ -3073,7 +3218,7 @@
       th.addEventListener('click', sortBy);
       th.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(); } });
     });
-    $('#tableCount').textContent = q ? t('tableCountOf', {n: fmtInt(Core.distinctCount(rows)), m: fmtInt(total)}) : t('tableCount', {n: fmtInt(total)});
+    $('#tableCount').textContent = q ? tx(c, 'tableCountOf', {n: fmtInt(Core.distinctCount(rows)), m: fmtInt(total)}) : tx(c, 'tableCount', {n: fmtInt(total)});
     var smT = state.data && state.data.summary;
     $('#tableNote').textContent = smT && smT.top.length >= smT.topLimit ? t('topRowsNote', {n: fmtInt(smT.topLimit)}) : detailIsPartial() ? t('tablePartial') : t('tableComplete');
     renderPager(pages);

@@ -570,6 +570,15 @@ function saveDayDataset_(indicator, date, ds, expectedPages, expectedRecords, op
     try { applyTripMapToDs_(ds, loadTripMap_(indicator, date), ic.trips.replace || ''); }
     catch (e) { logSync_('WARN', indicator, date, 'IDs de viagem não aplicados ao dia: ' + String(e && e.message || e).slice(0, 200)); }
   }
+  // V4.4 (Triagem errada): lote e login já achados na Consulta das bipagens entram no arquivo (detalhe rebaixado não perde).
+  let scanTodo = 0;
+  if (ic && ic.scans && !(opts && opts.skipScans) && ds.n) {
+    try {
+      const map = loadTripMap_(indicator, date, SCAN_KIND_);
+      applyScanMapToDs_(ds, map, ic.scans);
+      scanTodo = scanTodo_(ds, ic.scans, map).todo.length;
+    } catch (e) { logSync_('WARN', indicator, date, 'Lote/login da Consulta das bipagens não aplicados ao dia: ' + String(e && e.message || e).slice(0, 200)); }
+  }
   const file = writeGzJson_(indicator + '__' + date + '__dia.json.gz', ds);
   const rowNum = findRowKey_('DAYFILES', indicator, date);
   const prev = rowNum > 0 ? allTabRows_('DAYFILES')[rowNum - 2] : null;
@@ -581,6 +590,8 @@ function saveDayDataset_(indicator, date, ds, expectedPages, expectedRecords, op
   // V4.1 (SC→DC): dia gravado → IDs de viagem de saída no Rastreamento do pacote (só as remessas ainda não consultadas).
   // A Expedição (agrupada) agenda a sua tarefa no próprio download.
   if (ic && ic.trips && !ic.grouped && !(opts && opts.skipTrips) && ds.n) enqueueJobs_([['TRIPS', indicator, date, 0]], {reset: true});
+  // V4.4: remessas da Triagem ainda sem lote/login (e não consultadas) → Consulta das bipagens.
+  if (scanTodo) enqueueJobs_([['SCANS', indicator, date, 0]], {reset: true});
   return file.getId();
 }
 
@@ -1066,7 +1077,7 @@ function recoverStaleRunning_() {
   });
 }
 function pendingJobs_() {
-  const prio = {SUMMARY: 0, DETAIL_INIT: 1, DETAIL_PAGE: 1, COMPACT: 2, TRIPS: 2.8};
+  const prio = {SUMMARY: 0, DETAIL_INIT: 1, DETAIL_PAGE: 1, COMPACT: 2, TRIPS: 2.8, SCANS: 2.8};
   // Detalhe agrupado (Recebimento: ~500 mil remessas por dia) por último: nunca atrasa os outros painéis. Entre os
   // dias dele, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
   const anchor = {};
@@ -1381,7 +1392,7 @@ function migrateToV3114_() {
 function processSyncQueue(opts) {
   opts = opts || {};
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
   try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
@@ -1475,7 +1486,7 @@ function jobReady_(job) {
   if (job.type === 'SUMMARY' || job.type === 'COMPACT') return true;
   const st = getDayStatus_(job.indicator, job.date);
   // IDs de viagem (Expedição): depois do detalhe do dia gravado.
-  if (job.type === 'TRIPS') return !!(st && (DETAIL_USABLE_.indexOf(st.details) >= 0 || st.details === 'NO_RECORD'));
+  if (job.type === 'TRIPS' || job.type === 'SCANS') return !!(st && (DETAIL_USABLE_.indexOf(st.details) >= 0 || st.details === 'NO_RECORD'));
   return !!(st && ['COMPLETE', 'NO_RECORD'].indexOf(st.summary) >= 0);
 }
 /**
@@ -1494,8 +1505,12 @@ function heavyGrouped_(cfg) { return !!(cfg && cfg.grouped && !cfg.light); }
  */
 function jobPauseKey_(job) {
   const cfg = indicatorCfg_(job.indicator) || {};
+  // V4.4: Consulta das bipagens (lote/login da Triagem errada) também tem rota própria: recusada, a Triagem continua.
+  if (job.type === 'SCANS') return 'SCANQUERY';
   return job.type === 'TRIPS' && !heavyGrouped_(cfg) ? 'TRACKING' : cfg.routeKey;
 }
+/** Tarefa de complemento com rota própria (não marca erro no dia do indicador). */
+function sideRouteJob_(job) { const k = jobPauseKey_(job); return k === 'TRACKING' || k === 'SCANQUERY'; }
 
 function processJob_(job, deadline) {
   const now = new Date();
@@ -1514,6 +1529,7 @@ function processJob_(job, deadline) {
     else if (job.type === 'DETAIL_PAGE') result = runLegacyDetailPageJob_(job);
     else if (job.type === 'COMPACT') result = compactDay_(job.indicator, job.date, deadline).partial ? 'partial' : 'done';
     else if (job.type === 'TRIPS') result = runTripJob_(job, deadline);
+    else if (job.type === 'SCANS') result = runScanJob_(job, deadline);
     else throw new Error('Tipo de job não reconhecido: ' + job.type);
     if (result === 'skip' || result === 'partial') {
       writeCells_('JOBS', job.rowNum, 6, ['PENDING']);
@@ -1534,7 +1550,7 @@ function processJob_(job, deadline) {
       writeCells_('JOBS', job.rowNum, 6, ['PENDING']);
       writeCells_('JOBS', job.rowNum, 9, [new Date(), message]);
       // Rastreamento do pacote do SC→DC recusado: o dia do indicador continua sem erro (só os IDs de viagem esperam).
-      if (job.type !== 'COMPACT' && jobPauseKey_(job) !== 'TRACKING') updateDayStatus_(job.indicator, job.date, {error: message});
+      if (job.type !== 'COMPACT' && !sideRouteJob_(job)) updateDayStatus_(job.indicator, job.date, {error: message});
       logSync_('ERROR', job.indicator, job.date, (kind === 'QUOTA' ? 'Fila pausada (cota do Google): ' : 'Rota pausada (credencial): ') + message);
       return kind === 'QUOTA' ? 'quota' : 'paused';
     }
@@ -1544,9 +1560,9 @@ function processJob_(job, deadline) {
     if (job.type === 'SUMMARY') {
       // Falha ao ATUALIZAR uma taxa já gravada não apaga o dia: só registra o erro.
       updateDayStatus_(job.indicator, job.date, st && st.summary === 'COMPLETE' ? {error: message} : {summaryStatus: 'ERROR', error: message});
-    } else if (job.type === 'TRIPS') {
-      // IDs de viagem: o detalhe do dia continua valendo; só registra o erro (SC→DC: só no LOG).
-      if (jobPauseKey_(job) !== 'TRACKING') updateDayStatus_(job.indicator, job.date, {error: message});
+    } else if (job.type === 'TRIPS' || job.type === 'SCANS') {
+      // IDs de viagem / Consulta das bipagens: o detalhe do dia continua valendo; só registra o erro (SC→DC e Triagem: só no LOG).
+      if (!sideRouteJob_(job)) updateDayStatus_(job.indicator, job.date, {error: message});
     } else if (job.type !== 'COMPACT') {
       // Idem para detalhe: o dia completo anterior continua valendo até o novo download dar certo. Download em
       // partes (PARTIAL) continua PARTIAL: a nova tentativa segue da parte seguinte, sem recomeçar o dia.
@@ -1588,9 +1604,12 @@ function detailRefreshHours_() {
 function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) return true;
   const changed = !prev || prev.errorCount !== summary.errorCount || prev.totalCount !== summary.totalCount;
-  if (!changed && st.details === 'COMPLETE') return false;
-  if (manual) return true;
   const cfgR = indicatorCfg_(indicator) || {};
+  // V4.4 (Deslacre): hoje e ontem os Registros de carga e descarga mudam sem mudar a contagem (descarregamento em andamento):
+  // a lista é refeita pelo intervalo (detail.refreshHours), sem marcar o dia como desatualizado.
+  const live = !!(cfgR.unseal && date >= addDaysIso_(isoToday_(), -1));
+  if (!changed && st.details === 'COMPLETE' && !live) return false;
+  if (manual) return true;
   let minH = cfgR.detail && cfgR.detail.refreshHours ? Math.max(cfgR.detail.refreshHours, heavyDetailLimited_(cfgR) ? 12 : 0) : 0;
   // Expedição: dia fechado só muda a situação (chegou/entregue) — atualizado no máximo a cada closedRefreshHours.
   if (cfgR.detail && cfgR.detail.closedRefreshHours && date < isoToday_()) minH = Math.max(minH, cfgR.detail.closedRefreshHours);
@@ -1741,6 +1760,8 @@ function runDetailJob_(job, deadline) {
   }
   // Expedição: o detalhe é por rota (Expedicao.gs).
   if (cfg.byRoute) return runSendDetailJob_(job, deadline, cfg, st);
+  // V4.4: Deslacre — lista de IDs e os Registros de carga e descarga de cada um (Expedicao.gs).
+  if (cfg.unseal) return runUnsealDetailJob_(job, deadline, cfg, st);
   // Recebimento retomando um dia já fechado: o plano gravado (fatias e totais) dispensa ~80 consultas por execução.
   const plan = (cfg.grouped && storedGroupedPlan_(job, st)) ||
     planDetailDownload_(job.indicator, job.date, (total, type) => validateDetailTotal_(cfg, job.indicator, job.date, total, type));

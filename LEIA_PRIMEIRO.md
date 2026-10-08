@@ -1,8 +1,97 @@
-# J&T DASHMASTER V4.3 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.4 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.4 — Triagem errada sem informação completada e novo painel Deslacre
+**Como instalar:** use o ZIP **JT_DASHMASTER_V4_4_PRINCIPAL.zip** no projeto que você já usa.
+1. Troque o conteúdo de **todos** os `.gs` e `.html` pelos do ZIP. Não tem arquivo novo para criar.
+2. Clique em Implantar → Gerenciar implantações → ✏️ → **Nova versão**.
+
+O painel dos fluxos (**JT_DASHMASTER_V4_4_FLUXOS.zip**) recebe o mesmo código, mas não mostra a Triagem nem o Deslacre. Atualize-o também, para os dois ficarem na mesma versão.
+
+### Triagem errada: Número da Saca e Operador sem informação
+Algumas remessas vêm do JMS sem **Número da Saca**, sem **Unidade de Empacotamento** e sem **Operador do Bipe de Envio no Carregamento**. Agora o painel completa essas informações sozinho, como no PDF:
+1. Pega as remessas da Triagem que estão **sem lote ou sem login**.
+2. Consulta essas remessas em **Operação > Consulta do pacote > Consulta das bipagens (tempo real)** (`scanRecordQuery/listPage`), com o mesmo payload da captura.
+3. Fica só com os bipes de **Tipo de bipagem = "Encomenda inserida em lote"** e **Base de escaneamento = SP GRU**. Se tiver mais de um bipe, vale **o primeiro** (o mais antigo).
+4. Preenche só o que está vazio:
+   - **Número do lote** → coluna **Número do lote** (Número da Saca), no gráfico "Lotes ofensores" e no filtro;
+   - **Digitalizador** → **Login**.
+5. **Unidade de Empacotamento** sem informação continua como **SP GRU**, a mesma regra de antes.
+
+**Como funciona por trás:**
+- A consulta é uma tarefa nova na fila e roda depois que a lista do dia é baixada.
+- O que foi achado fica guardado por dia. Quando a lista do dia é baixada de novo, o lote e o login voltam sem consultar outra vez.
+- Remessa que não tem o bipe "Encomenda inserida em lote" na SP GRU continua sem informação. Ela é consultada no máximo 2 vezes.
+- Os dias da Triagem que já estavam baixados entram na fila sozinhos, uma vez, do mais novo para o mais antigo.
+- Custo: cada remessa tem uns 20 bipes, então cada consulta de 100 linhas cobre cerca de 5 remessas. São poucas dezenas de consultas por dia.
+- Se o JMS recusar a consulta, a Triagem continua igual (taxa, gráficos e tabela), com um aviso no LOG. No editor do Apps Script, rode **`diagnosticarBipagensTriagem`** para ver o motivo.
+
+### Novo painel: Deslacre (linha secundária)
+Aparece no menu como **"Deslacre (linha secundária)"**, no painel principal.
+
+**De onde vêm os dados:**
+- **Lista de IDs:** Transporte > Transporte de linha secundária > Gestão de viagens de linha secundária > **Consulta de Viagens Secundárias** (`tmsBranchTrackingDetail/page`). Os filtros são os da tela:
+  - PDD de chegada = **SP GRU (30001)**;
+  - Status = **Concluído**.
+  
+  A consulta pega as saídas da véspera e do dia, para incluir a viagem que sai à noite e chega de madrugada.
+- **Bipe de deslacre:** coluna **"Horário de deslacração do veículo"**. Vazia = **ID sem bipe de deslacre**.
+- **Bipe de recebimento:** em cada ID, **Registros de carga e descarga** → Bipe de descarregamento da SP GRU → coluna **"Data final"** (`loading/scan/list?shipmentNo=…`).
+- **Tempo de cada ID:** Data final − horário do deslacre, em minutos. Se o ID tiver mais de um registro de descarregamento, vale a **mediana** deles. ID com deslacre mas sem registro de descarga fica sem tempo.
+- **Dia e turno:** pelo horário do deslacre ("vamos medir pela data dessa coluna"). O ID **sem** deslacre usa o horário de chegada do veículo, que é o turno que deveria ter dado o bipe.
+
+**Cartões:**
+- **IDs sem bipe de deslacre**, com o % dos IDs do dia e o dia anterior.
+- **Tempo mediano: deslacre → bipe de recebimento**, com o dia anterior.
+- **ID com maior tempo mediano**, com o tempo, a viagem e o PDD de saída.
+- **IDs de viagem**: quantos chegaram, com e sem deslacre.
+- **Um cartão por turno (T1, T2, T3)**. Cada um mostra:
+  - quantos IDs ficaram sem deslacre;
+  - o tempo mediano do turno;
+  - o ID de **maior mediana** do turno.
+
+**Gráficos:**
+- Turnos com maior falta de bipe de deslacre (T1, T2 e T3 sempre aparecem).
+- Evolução: falta de bipe de deslacre dia a dia (destaca o dia com mais falta).
+- Tempo mediano do deslacre até o bipe de recebimento por turno.
+- Os 10 IDs que mais demoraram do deslacre ao bipe de recebimento.
+- PDD de saída que mais mandou.
+- PDD de saída dos IDs sem bipe de deslacre.
+
+**Filtros:** Número do ID · Nome da viagem · PDD de saída · Turno.
+
+**Tabela "Informações gerais":** uma linha por ID de viagem. Colunas:
+- data, Número do ID, Nome da viagem, PDD de saída, Turno;
+- se teve bipe de deslacre;
+- Tempo real de chegada, Horário de deslacração do veículo, Bipe de recebimento (Data final);
+- **Tempo mediano** de cada ID;
+- placa e transportadora.
+
+**Também:**
+- Nos **Resultados**, o Deslacre aparece com o % de IDs sem deslacre por dia (sem meta) e a quantidade.
+- Relatório PDF/Excel: o mesmo de sempre, com a tabela do Deslacre.
+- **Atualização:** a lista de hoje e de ontem é refeita de hora em hora (na conta Gmail, a cada 3 h). Os Registros de carga e descarga só são consultados de novo para os IDs novos, os sem Data final ou os que ainda estão descarregando. São cerca de 45 IDs por dia, então cerca de 50 consultas por dia.
+- **Se der erro:** no editor do Apps Script, rode **`diagnosticarDeslacre`**. Ele testa a lista e os registros de até 5 IDs, sem mostrar placa nem motorista. Se o JMS recusar os cabeçalhos de rota, mande a URL e o "Payload" da tela (sem AuthToken e sem Cookie) e preencha `JMS_ROUTENAME_UNSEAL`.
+
+### Cota do Google (simulação da conta Gmail, painel principal, 7 dias de histórico)
+| | V4.3 | V4.4 |
+|---|---|---|
+| Uso por dia, depois do histórico | 40,8 min | **48,8 min** (Triagem +0,8 · Deslacre +7) |
+| Dia do histórico | 61,8 min | 74,2 min |
+| Execuções barradas pela cota | 0 | **0** |
+| Fila no fim | vazia | **vazia** |
+
+O Deslacre gasta como os outros painéis:
+- o resumo de hoje e de ontem é atualizado o dia todo (cerca de 4 min/dia);
+- a lista e os Registros, a cada 3 h (cerca de 2 min/dia).
+
+Continua sobrando quase metade da cota da conta Gmail.
+
+### SC → DC
+O PDF "Fazer alterações no dashboard de Expedição SC → DC _2" é **o mesmo arquivo** da V4.1 (ID de viagem de saída pelo Rastreamento do pacote), que já está no painel. Não teve mudança nova no SC → DC.
 
 ## V4.3 — Dois pacotes prontos: painel principal e painel dos fluxos
 Agora vêm **dois ZIPs, cada um já configurado**. Não precisa preencher `PAINEIS` / `PAINEIS_FORA` para separar.

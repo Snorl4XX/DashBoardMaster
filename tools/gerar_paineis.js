@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Gera os dois pacotes do painel para o Apps Script (V4.3), a partir dos mesmos arquivos do repositório:
+ * Gera os dois pacotes do painel para o Apps Script (desde a V4.3), a partir dos mesmos arquivos do repositório:
  *   <saída>/painel-principal/  → todos os painéis, menos Recebimento e Expedição (fluxo operacional)
  *   <saída>/painel-fluxos/     → só Recebimento e Expedição (fluxo operacional), para OUTRA conta Google
  * e os ZIPs JT_DASHMASTER_<versão>_PRINCIPAL.zip e JT_DASHMASTER_<versão>_FLUXOS.zip.
@@ -29,6 +29,7 @@ Este pacote é o **painel principal**. Ele mostra:
 - Falta de Bipagem no Recebimento e na Expedição;
 - Expedição SC → SC e SC → DC;
 - Avaria, Fluxo de Lotes e Sem Movimentação;
+- Deslacre (linha secundária);
 - Resultados.
 
 **Recebimento e Expedição (fluxo operacional) não estão aqui.** Eles ficam no outro pacote, o painel dos fluxos. Assim este painel gasta cerca de metade da cota diária do Google e não para por falta de cota.

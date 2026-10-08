@@ -164,7 +164,9 @@ function realisticJms(opts) {
       const id = kind.toUpperCase() + date.replace(/-/g, '') + String(i).padStart(6, '0');
       const base = {hour: h, _t: t};
       if (kind === 'ws') Object.assign(base, {billcode: id, dateTime: date, sendTime: t, scanUser: 'OP' + Math.floor(rnd() * 40), orderFirstCode: 'SP', orderThirdCode: 'SP,977-00,000', nextstation: 'ST' + Math.floor(rnd() * 20), packageNo: 'BR' + Math.floor(rnd() * 300), orderSourceName: 'C' + Math.floor(rnd() * 10), shouldNextstation: 'ST' + Math.floor(rnd() * 20)});
-      if (kind === 'se') Object.assign(base, {billcode: id, dt: date, transferCenterSendTime: t, scanuser: 'OP' + Math.floor(rnd() * 40), orderFirstCode: 'SP', transferCenterNextName: 'DC' + Math.floor(rnd() * 9), packageNo: 'BR' + Math.floor(rnd() * 200), baggingNetworkName: 'NB' + Math.floor(rnd() * 5), wrongType: 'T' + Math.floor(rnd() * 3)});
+      if (kind === 'se') Object.assign(base, {billcode: id, dt: date, transferCenterSendTime: t, scanuser: 'OP' + Math.floor(rnd() * 40), orderFirstCode: 'SP', transferCenterNextName: 'DC' + Math.floor(rnd() * 9), packageNo: 'BR' + Math.floor(rnd() * 200), baggingNetworkName: 'NB' + Math.floor(rnd() * 5), wrongType: 'T' + Math.floor(rnd() * 3)},
+        // V4.4: ~1 em 5 sem Número da Saca, Unidade de Empacotamento e Operador (completadas pela Consulta das bipagens).
+        i % 5 === 0 ? {packageNo: null, scanuser: null, baggingNetworkName: null} : {});
       if (kind === 'mr') Object.assign(base, {billcode: id, loadPackageTime: t, loadPackageEmp: 'OP' + Math.floor(rnd() * 40), threeSegmentCode: 'GO,795-00,002', nextStop: 'ST' + Math.floor(rnd() * 20), customerName: 'C' + Math.floor(rnd() * 10)});
       if (kind === 'md') Object.assign(base, {billcode: id, unloadArriveTime: t, unloadPackageEmp: 'OP' + Math.floor(rnd() * 40), threeSegmentCode: 'MG,1-00,1', arriveOrder: 'SETR' + Math.floor(rnd() * 60), nextStop: 'ST' + Math.floor(rnd() * 20), customerName: 'C' + Math.floor(rnd() * 10)});
       if (kind === 'sc') Object.assign(base, {billCode: id, sendDate: date, actualDispatchTime: t, arrivalScanTime: t, nextStation: 'ST' + Math.floor(rnd() * 20), sendShipmentNo: 'JB' + Math.floor(rnd() * 120), packageCode: 'BR' + Math.floor(rnd() * 900), untimelycause: 'Fora do prazo', startTime: date + ' 10:00:00', lastName: 'PA'});
@@ -176,7 +178,7 @@ function realisticJms(opts) {
     return (cache[k] = out);
   }
   return function (url, req, clock) {
-    const body = JSON.parse(req.payload), route = url.split('/').pop();
+    const body = req.payload ? JSON.parse(req.payload) : {}, route = url.split('?')[0].split('/').pop(), path = url.split('?')[0];
     const start = String(body.startTime || body.startTime1 || ''), end = String(body.endTime || body.endTime1 || '');
     const op = /departure_transport|inward_transport/.test(route);
     const addDay = (iso, n) => new Date(Date.parse(iso + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
@@ -191,6 +193,34 @@ function realisticJms(opts) {
     const size = Math.min(cap, body.size), cur = body.current;
     const page = l0 => { const list = inWin(l0); return ok(list.slice((cur - 1) * size, cur * size).map(r => { const o = Object.assign({}, r); delete o.hour; delete o._t; return o; }), list.length, cur, size); };
     const kindOf = {center_wrong_send_: 'ws', center_error_rate_new_: 'se', inward_transport_timely_rate_: 'dc', departure_transport_timely_: 'sc'};
+    // V4.4: Consulta das bipagens (tempo real) — ~19 bipes por remessa (como a captura: 467 bipes para 25 remessas).
+    if (/scanRecordQuery\/listPage$/.test(path)) {
+      const all = [];
+      (body.bilNos || []).forEach((w, k) => { for (let j = 0; j < 19; j++) all.push({billNo: w, scanType: j === 6 ? 'Encomenda inserida em lote' : 'Digitalização de descarga',
+        inputDept: j === 6 ? 'SP GRU' : 'DC' + (j % 5), belongNo: j === 6 ? 'BRSIM' + k : null, scanEmp: 'DIGITALIZADOR ' + (k % 30), scanDate: '2026-09-01 ' + String(j).padStart(2, '0') + ':00:00'}); });
+      const sz = Math.min(100, body.size);
+      return ok(all.slice((cur - 1) * sz, cur * sz), all.length, cur, sz);
+    }
+    // V4.4: Deslacre — ~45 IDs de linha secundária por dia chegando na SP GRU; Registros de carga e descarga por ID.
+    if (/tmsBranchTrackingDetail\/page$/.test(path)) {
+      const d0 = String(body.startDepartureTime || '').slice(0, 10), d1 = String(body.endDepartureTime || '').slice(0, 10), list = [];
+      [d0, d1].filter((x, i, a) => x && a.indexOf(x) === i).forEach(dd => {
+        const frac = dd > nowIso ? 0 : dd < nowIso ? 1 : nowH / 24, N = Math.floor(45 * frac);
+        for (let i = 0; i < N; i++) {
+          const hh = String(Math.floor(i * 24 / 45)).padStart(2, '0'), hh2 = String(Math.min(23, Math.floor(i * 24 / 45) + 1)).padStart(2, '0');
+          list.push({shipmentNo: 'SETRSIM' + dd.replace(/-/g, '') + String(i).padStart(3, '0'), shipmentName: 'ORIGEM ' + (i % 9) + '-SP GRU', startName: 'ORIGEM ' + (i % 9),
+            endCode: '30001', shipmentState: 4, plannedDepartureTime: dd + ' ' + hh + ':00:00', actualArrivalTime: dd + ' ' + hh2 + ':10:00',
+            unlockTime: i % 6 === 2 ? null : dd + ' ' + hh2 + ':30:00', plateNumber: 'SIM' + i, carrierShortName: 'TRANSP ' + (i % 4)});
+        }
+      });
+      const sz = Math.min(100, body.size);
+      return ok(list.slice((cur - 1) * sz, cur * sz), list.length, cur, sz);
+    }
+    if (/tmsBranchTrackingDetail\/loading\/scan\/list$/.test(path)) {
+      const no = (url.split('shipmentNo=')[1] || ''), m = /SETRSIM(\d{4})(\d{2})(\d{2})(\d{3})/.exec(no);
+      const dd = m ? m[1] + '-' + m[2] + '-' + m[3] : nowIso, i = m ? Number(m[4]) : 0, hh = String(Math.min(23, Math.floor(i * 24 / 45) + 1)).padStart(2, '0');
+      return respond({code: 1, msg: 'ok', succ: true, fail: false, data: [{jobCode: no, loadingTypeName: '2', scanStartTime: dd + ' ' + hh + ':35:00', scanEndTime: dd + ' ' + hh + ':' + String(40 + i % 19) + ':00'}]});
+    }
     // Sem Movimentação: foto do momento (sem data), volumes da captura de 04/10 (4 tipos com pedidos parados).
     if (route === 'trajectory_monitor_total' || route === 'trajectory_monitor_detail') {
       const NMV = {'发件扫描': 6251, '问题件扫描': 6180, '中心到件': 2238, '建包扫描': 2258};

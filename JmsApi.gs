@@ -61,6 +61,7 @@ function credentialSignature_() {
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
  * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS | NOMOVE
+ *          | SCANQUERY | UNSEAL
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -98,6 +99,15 @@ const JMS_ROUTES_ = [
   // não aparecem na captura: se o JMS recusar, as variantes de `alt` são testadas sozinhas.
   {key: 'NOMOVE', pattern: /\/bigdataReport\/detail\/trajectory_monitor_\w+(?:\?|$)/, name: 'TrackRealTimeMonitoringNew', list: 'NONE',
     alt: [{name: 'NONE', list: 'NONE'}, {name: 'TrackRealTimeMonitoring', list: 'NONE'}]},
+  // V4.4: Consulta das bipagens (tempo real) — Operação > Consulta do pacote (lote e login vazios da Triagem errada). A captura
+  // mostra a página "scanQueryConstantlyNew" (menu SCAN_QUERY_CONSTANTLY_NEW); os cabeçalhos de rota não aparecem: se o JMS
+  // recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_SCANQUERY / JMS_ROUTENAMELIST_SCANQUERY mandam).
+  {key: 'SCANQUERY', pattern: /\/operatingplatform\/scanRecordQuery\/listPage(?:\?|$)/, name: 'scanQueryConstantlyNew', list: 'NONE',
+    alt: [{name: 'NONE', list: 'NONE'}, {name: 'scanQueryConstantly', list: 'NONE'}]},
+  // V4.4: Deslacre — Transporte > Transporte de linha secundária > Gestão de viagens de linha secundária > Consulta de Viagens
+  // Secundárias (lista) e os Registros de carga e descarga de cada ID. Cabeçalhos de rota não capturados: variantes em `alt`.
+  {key: 'UNSEAL', pattern: /\/transportation\/(?:tmsBranchTrackingDetail|tmsnewBranchShipment)\//, name: 'NONE', list: 'NONE',
+    alt: [{name: 'branchTrackingDetail', list: 'NONE'}, {name: 'tmsBranchTrackingDetail', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -184,7 +194,9 @@ function validateJmsAuth_() {
   });
 }
 
+/** payload null = GET (V4.4: as consultas de um ID do Deslacre vão na URL, ex.: ".../loading/scan/list?shipmentNo=…"). */
 function jmsRequestObject_(url, payload) {
+  if (payload === null) return {url: url, method: 'get', headers: jmsHeaders_(url), followRedirects: false, muteHttpExceptions: true};
   return {
     url: url,
     method: 'post',
@@ -496,6 +508,13 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
         scanAgentCode: agentCode, scanCode: centerCode}), {countryId: countryId_()});
     }
 
+    case 'unseal': {
+      // Consulta de Viagens Secundárias (captura do pedido): PDD de chegada = a nossa base, Status = Concluído. Saídas da véspera
+      // e do dia: o dia de cada ID sai do horário do deslacre (Expedicao.gs → unsealTrips_).
+      return {current: pageNo, size: pageSize, startDepartureTime: addDaysIso_(isoDate, -1) + ' 00:00:00', endDepartureTime: isoDate + ' 23:59:59',
+        endCode: centerCode, shipmentState: cfg.shipmentState || 4, countryId: countryId_()};
+    }
+
     case 'sc_dc':
       if (detail) {
         return {current: pageNo, size: pageSize, startTime1: w.start, endTime1: w.end,
@@ -529,6 +548,8 @@ function summaryHasMetric_(row, cfg) {
 /** `extra` (opcional): parâmetros a mais no resumo, ex.: Avaria {mainSubCode: 1} = só pedidos principais. */
 function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   const cfg = getIndicatorConfig_(indicatorKey);
+  // V4.4: Deslacre — a "tabela" do dia é a própria lista de IDs (Expedicao.gs → unsealSummary_).
+  if (cfg.unseal) return unsealSummary_(indicatorKey, isoDate);
   const endpoint = endpointFor_(cfg, 'summary');
   const payloadOf = page => Object.assign(buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, false), extra || {});
   const json = jmsPost_(endpoint, payloadOf(1), 2);

@@ -199,9 +199,10 @@ function addDay(iso, n) { return new Date(Date.parse(iso + 'T12:00:00Z') + n * 8
 function fakeJms(dayData, options) {
   options = options || {};
   return function (url, req, state) {
-    state.fetches.push({url: url, headers: req.headers, payload: JSON.parse(req.payload)});
-    const body = JSON.parse(req.payload);
-    const route = url.split('/').pop();
+    // GET (V4.4, Deslacre: Registros de carga e descarga de um ID) não tem corpo.
+    const body = req.payload ? JSON.parse(req.payload) : {};
+    state.fetches.push({url: url, headers: req.headers, payload: body, method: req.method || 'post'});
+    const route = url.split('?')[0].split('/').pop();
     if (options.onFetch) options.onFetch(url, body);
     // intercept(rota, cabeçalhos, corpo) → [httpStatus, resposta] para simular recusas específicas do JMS.
     if (options.intercept) { const x = options.intercept(route, req.headers || {}, body); if (x) return {getResponseCode: () => x[0], getContentText: () => JSON.stringify(x[1])}; }
@@ -209,6 +210,44 @@ function fakeJms(dayData, options) {
     if (options.status) return respond(options.status, {});
     if (options.html) return respond(200, '<!DOCTYPE html><html><head><title>JMS Login</title></head><body>login</body></html>');
     if (options.appError) return respond(200, {code: options.appError.code, msg: options.appError.msg, data: null, fail: true, succ: false});
+    const path = url.split('?')[0];
+    // ----- V4.4: Consulta das bipagens (tempo real) — lote e login da Triagem errada (bipes FICTÍCIOS por remessa) -----
+    if (/\/operatingplatform\/scanRecordQuery\/listPage$/.test(path)) {
+      state.scanCalls = (state.scanCalls || 0) + 1;
+      if (options.scanReject) return respond(200, {code: 500, msg: 'sem permissão para a consulta', fail: true});
+      if (!Array.isArray(body.bilNos) || body.billType !== 1 || body.sortName !== 'scanDate' || body.scanSite !== '30001') {
+        return respond(200, {code: 500, msg: 'parâmetro inválido', fail: true});
+      }
+      const all = [];
+      body.bilNos.forEach(w => scanRecordsFor(w).forEach(r => all.push(r)));
+      all.sort((a, b) => a.scanDate < b.scanDate ? -1 : a.scanDate > b.scanDate ? 1 : 0);
+      const sz = Math.min(100, body.size);
+      return respond(200, {code: 1, msg: '1:Solicitação concluída', data: {records: all.slice((body.current - 1) * sz, body.current * sz), total: all.length,
+        size: sz, current: body.current, searchCount: true, pages: Math.ceil(all.length / sz)}, succ: true, fail: false});
+    }
+    // ----- V4.4: Deslacre — Consulta de Viagens Secundárias e Registros de carga e descarga (IDs, placas, nomes FICTÍCIOS) -----
+    if (/\/transportation\/tmsBranchTrackingDetail\/page$/.test(path)) {
+      state.unsealListCalls = (state.unsealListCalls || 0) + 1;
+      const from = String(body.startDepartureTime || ''), to = String(body.endDepartureTime || '');
+      let list = [];
+      Object.keys(dayData).forEach(k => (dayData[k].us || []).forEach(t => list.push(t)));
+      if (!options.unsealIgnoreFilter) {
+        list = list.filter(t => String(t.endCode) === String(body.endCode) && (!body.shipmentState || Number(t.shipmentState) === Number(body.shipmentState)) &&
+          t.plannedDepartureTime >= from && t.plannedDepartureTime <= to);
+      }
+      list.sort((a, b) => a.plannedDepartureTime < b.plannedDepartureTime ? -1 : 1);
+      const sz = Math.min(100, body.size);
+      return respond(200, {code: 1, msg: '请求成功', data: {records: list.slice((body.current - 1) * sz, body.current * sz), total: list.length, size: sz,
+        current: body.current, searchCount: true, pages: Math.ceil(list.length / sz)}, details: null, succ: true, fail: false});
+    }
+    if (/\/transportation\/tmsBranchTrackingDetail\/loading\/scan\/list$/.test(path)) {
+      state.unsealUnloadCalls = (state.unsealUnloadCalls || 0) + 1;
+      if ((req.method || 'post') !== 'get') return respond(405, {});
+      const no = decodeURIComponent((url.split('shipmentNo=')[1] || '').split('&')[0]);
+      let recs = null;
+      Object.keys(dayData).forEach(k => { const u = dayData[k].usUnloads; if (u && u[no]) recs = u[no]; });
+      return respond(200, {code: 1, msg: '请求成功', data: recs || [], details: null, succ: true, fail: false});
+    }
     const isDetail = /detail|_verification$|detailed$/.test(route) && !/total/.test(route);
     const size = options.maxPageSize ? Math.min(options.maxPageSize, body.size) : body.size;
     if (isDetail && options.rejectAbove && body.size > options.rejectAbove) return respond(200, {code: 500, msg: 'size参数超出限制', fail: true});
@@ -461,6 +500,73 @@ function fakeJms(dayData, options) {
   };
 }
 
+/**
+ * V4.4 — bipes FICTÍCIOS de uma remessa na Consulta das bipagens (tempo real), no formato da captura. Regras do teste:
+ * hash % 6 === 0 → sem "Encomenda inserida em lote" na SP GRU (fica sem lote/login); hash % 3 === 1 → um 2º bipe de lote na
+ * SP GRU mais tarde (não vale: vale o primeiro); sempre um bipe de lote em OUTRA base ANTES do nosso (não vale: base errada).
+ */
+function scanHash(w) { let h = 7; for (let i = 0; i < w.length; i++) h = (h * 31 + w.charCodeAt(i)) % 1000003; return h; }
+function scanRecordsFor(w) {
+  const h = scanHash(w), m = /^\d{4}(\d{4})(\d{2})(\d{2})/.exec(w), day = m ? m[1] + '-' + m[2] + '-' + m[3] : '2026-09-30';
+  const pad = n => String(n).padStart(2, '0'), t = (hh, mm) => day + ' ' + pad(hh) + ':' + pad(mm) + ':' + pad(h % 60);
+  const base = (type, dept, hh, mm, extra) => Object.assign({recnumber: t(hh, mm) + 'FIC', billNo: w, listNo: null, belongNo: null, rfid: null, scanType: type,
+    scanDate: t(hh, mm), inputDept: dept, upOrNextStation: null, scanEmp: 'OPERADOR FICTICIO ' + (h % 5), employeeCode: 'FIC' + (h % 97),
+    inputDate: t(hh, Math.min(59, mm + 1)), baGunId: 'GJ-FIC-' + (h % 9), dataSource: null}, extra || {});
+  const out = [base('coleta de encomenda', 'PA FICTICIA-SP', 1, 5), base('bipe de expedição', 'PA FICTICIA-SP', 1, 9),
+    base('Encomenda inserida em lote', 'BA FICTICIA', 1, 20, {belongNo: 'BROUTRAFIC' + (h % 50), scanEmp: 'OUTRO DIGITALIZADOR FICTICIO'}),
+    base('Chegadas ao centro', 'SP GRU', 2, 10, {upOrNextStation: 'PA FICTICIA-SP'})];
+  if (h % 6 !== 0) out.push(base('Encomenda inserida em lote', 'SP GRU', 3, 15, {belongNo: 'BRFIC' + (100 + h % 800), scanEmp: 'DIGITALIZADOR FICTICIO ' + (h % 4 + 1), dataSource: '自动分拣设备'}));
+  if (h % 3 === 1) out.push(base('Encomenda inserida em lote', 'SP GRU', 4, 40, {belongNo: 'BRFICDEPOIS' + (h % 50), scanEmp: 'DIGITALIZADOR FICTICIO TARDE'}));
+  out.push(base('Digitalização de carregamento', 'SP GRU', 5, 2, {upOrNextStation: 'DC FICTICIO-SP'}));
+  for (let k = 0; k < 12; k++) out.push(base('Digitalização de descarga', 'DC FICTICIO-SP', 6 + k, 30));
+  return out;
+}
+
+/**
+ * V4.4 — Deslacre: IDs de viagem da linha secundária que chegam na SP GRU num dia (formato da Consulta de Viagens Secundárias)
+ * e os Registros de carga e descarga de cada um. Tudo FICTÍCIO. Regras do teste: i % 5 === 2 → sem bipe de deslacre;
+ * i % 7 === 3 → dois registros de descarregamento (tempo = mediana dos dois); i % 11 === 6 → deslacre sem registro de descarga;
+ * i % 4 === 0 → um registro de carregamento (tipo 1) na origem (não conta). Os primeiros IDs saem na véspera (chegam de madrugada).
+ * Mais um ID de outra base (endCode 99999) e um "Em trânsito" (shipmentState 3), que a consulta não pode trazer.
+ */
+function makeUnseal(date, seed) {
+  let s = seed || 5;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const pad = n => String(n).padStart(2, '0');
+  const at = mins => {
+    let d = date, m = Math.round(mins);
+    while (m < 0) { m += 1440; d = addDay(d, -1); }
+    return d + ' ' + pad(Math.floor(m / 60)) + ':' + pad(m % 60) + ':' + pad(Math.floor(rnd() * 60));
+  };
+  const origins = ['DC FICTICIO 01-SP', 'DC FICTICIO 02-SP', 'PA FICTICIA-SP', 'MGC FICTICIO-SP', 'DC FICTICIO 03-SP'];
+  const us = [], usUnloads = {};
+  const n = 24 + Math.floor(rnd() * 10);
+  for (let i = 0; i < n; i++) {
+    const arrive = i < 3 ? 20 + i * 15 : 30 + Math.floor(rnd() * 1330), travel = 40 + Math.floor(rnd() * 180);
+    const unlock = arrive + 5 + Math.floor(rnd() * 60), origin = origins[(i + Math.floor(rnd() * 5)) % origins.length];
+    const no = 'SETRFIC' + date.replace(/-/g, '').slice(2) + String(i).padStart(3, '0');
+    const t = {id: 'FIC' + date.replace(/-/g, '') + i, shipmentNo: no, distributionType: 1, businessAttribute: 2,
+      shipmentName: origin + '-SP GRU' + pad(Math.floor(arrive / 60)) + '00(99)', shipmentSimpleName: 'S' + (100 + i) + '-GRU-' + pad(Math.floor(arrive / 60)) + '00-99',
+      startName: origin, startCode: '3' + (10000 + i), endCode: '30001', endName: 'SP GRU', shipmentState: 4,
+      plannedDepartureTime: at(arrive - travel), actualDepartureTime: at(arrive - travel + 3), lockTime: at(arrive - travel - 5),
+      actualArrivalTime: at(arrive), appArrivalTime: at(arrive), unlockTime: i % 5 === 2 ? null : at(unlock),
+      unloadStartTime: i % 5 === 2 ? null : at(unlock + 1), plateNumber: 'FIC' + (1000 + i), carrierShortName: 'TRANSP FICTICIA ' + (i % 3 + 1),
+      carrierName: 'TRANSPORTADORA FICTICIA ' + (i % 3 + 1), driverName: 'MOTORISTA FICTICIO', cnt: 2};
+    us.push(t);
+    const recs = [];
+    if (i % 4 === 0) recs.push({jobCode: no, loadingTypeName: '1', scanStartTime: t.lockTime, scanEndTime: t.actualDepartureTime, scanTotalTime: '20', scanWaybillNum: 300});
+    if (t.unlockTime && i % 11 !== 6) {
+      const d1 = 20 + Math.floor(rnd() * 100);
+      recs.push({jobCode: no, loadingTypeName: '2', scanStartTime: at(unlock + 1), scanEndTime: at(unlock + d1), scanTotalTime: String(d1), scanWaybillNum: 900 + i});
+      if (i % 7 === 3) recs.push({jobCode: no, loadingTypeName: '2', scanStartTime: at(unlock + d1 + 5), scanEndTime: at(unlock + d1 + 45), scanTotalTime: '40', scanWaybillNum: 50});
+    }
+    usUnloads[no] = recs;
+  }
+  us.push(Object.assign({}, us[1], {id: 'FICOUTRA' + date, shipmentNo: 'SETRFICOUTRA' + date.replace(/-/g, ''), endCode: '99999', endName: 'BASE FICTICIA'}));
+  us.push(Object.assign({}, us[1], {id: 'FICTRANS' + date, shipmentNo: 'SETRFICTRANS' + date.replace(/-/g, ''), shipmentState: 3}));
+  return {us: us, usUnloads: usUnloads};
+}
+
 /** Dia de Envio Errado com N remessas (volume real de SC→SC / dias grandes). */
 function bigWrongSend(date, n) {
   const list = [];
@@ -506,7 +612,7 @@ function makeDay(date, seed) {
   const day = {ws: ws, wsRate: pct(0.2 + rnd() * 1.1), se: se, seRate: pct(0.3 + rnd() * 0.6), mr: mr, mrRate: pct(0.5 + rnd() * 0.8),
     md: md, mdRate: pct(0.4 + rnd() * 0.9), sc: sc, scRate: pct(88 + rnd() * 9), dc: dc, dcRate: pct(89 + rnd() * 8)};
   return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5), makeArrival(date, (seed || 7) * 17 + 3), makeSend(date, (seed || 7) * 13 + 1),
-    makeLots(date, (seed || 7) * 19 + 2), makeNoMove(date, (seed || 7) * 23 + 4));
+    makeLots(date, (seed || 7) * 19 + 2), makeNoMove(date, (seed || 7) * 23 + 4), makeUnseal(date, (seed || 7) * 29 + 6));
 }
 
 /** Tipos de bipe da tela "Monitoramento de movimentação em tempo real (novo)" (código → nome na lista). */
@@ -741,4 +847,4 @@ function makeArrival(date, seed, scale) {
     uploadNoSendNum: prev.length, noSendNum: noSend.length}};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, dcDepartureTrip: dcDepartureTrip, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+module.exports = {createContext: createContext, fakeJms: fakeJms, dcDepartureTrip: dcDepartureTrip, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, makeUnseal: makeUnseal, scanRecordsFor: scanRecordsFor, scanHash: scanHash, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};

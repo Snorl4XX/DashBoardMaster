@@ -147,9 +147,11 @@ function buildSummaryReportSheet_(sh, dash) {
   (cfg.charts || []).filter(def => def.type === 'bar' && !chartShiftDim_(def)).forEach((def, i) => {
     const ch = dash.charts.filter(x => x.key === def.key)[0];
     if (!ch || !ch.labels.length) return;
-    const lab = dimLabel_(cfg, def.key);
-    headerRow_(sh.getRange(n, 1, 1, 2).setValues([[bilingual_(def.title.pt, def.title.zh), bilingual_('Remessas', '运单量')]]));
-    sh.getRange(n + 1, 1, ch.labels.length, 2).setValues(ch.labels.map((l, j) => [reportValue_(cfg, def.key, l), ch.datasets[0].data[j]]));
+    const dim = def.dim || def.key, lab = dimLabel_(cfg, dim);
+    // V4.4 (Deslacre): gráfico de tempo (mediana/maior) em minutos, não quantidade de remessas.
+    const valHead = def.agg ? bilingual_('Tempo (min)', '时长（分钟）') : bilingual_('Remessas', '运单量');
+    headerRow_(sh.getRange(n, 1, 1, 2).setValues([[bilingual_(def.title.pt, def.title.zh), valHead]]));
+    sh.getRange(n + 1, 1, ch.labels.length, 2).setValues(ch.labels.map((l, j) => [reportValue_(cfg, dim, l), ch.datasets[0].data[j]]));
     if (i < 3) {
       sh.insertChart(sh.newChart().asBarChart().addRange(sh.getRange(n, 1, ch.labels.length + 1, 2))
         .setPosition(n, 6, 0, 0).setOption('title', lab.pt + ' / ' + lab.zh).setOption('legend', {position: 'none'})

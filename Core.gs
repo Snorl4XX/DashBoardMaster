@@ -561,6 +561,9 @@ function JTCoreFactory_() {
     var total = sf ? rows.reduce(function (a, r) { return a + wf(r); }, 0) : distinctCount(rows);
     base.total = total;
     if (sf) base.sumField = sf;
+    // V4.4 (Deslacre): valor por grupo em vez de contagem — agg 'median' | 'max' | 'avg' do campo numérico valueField
+    // (ex.: tempo mediano de cada ID por turno; os 10 IDs que mais demoraram). Linha sem valor fica de fora.
+    if (def.agg && def.valueField) return aggChart(def, rows, base);
     var shiftDim = def.key === 'segmentByShift' ? 'segment' : def.byShift;
     if (shiftDim) {
       var cats = [], per = {};
@@ -593,12 +596,56 @@ function JTCoreFactory_() {
       base.datasets = [{label: 'qty', data: hours.map(function (l) { return byLabel[l] || 0; })}];
       return base;
     }
+    // allShifts (V4.4, Deslacre): colunas T1, T2 e T3 sempre, na ordem (turno sem ocorrência aparece com 0).
+    if (def.allShifts && SHIFT_KEYS[def.key]) {
+      var byL = {}; groups.forEach(function (g) { byL[g.label] = g.value; });
+      base.labels = SHIFTS.concat(byL['N/A'] ? ['N/A'] : []);
+      base.datasets = [{label: 'qty', data: base.labels.map(function (l) { return byL[l] || 0; })}];
+      base.others = 0;
+      return base;
+    }
     var top = groups.filter(function (g) { return !((def.key === 'interval' || def.hideNA) && g.label === 'N/A'); }).slice(0, def.top || 10);
     // order 'num' (Sem Movimentação: Aging 1, 2, 3… 30 dias): na ordem do número, não da quantidade.
     if (def.order === 'num') top.sort(function (a, b) { return (Number(a.label) || 0) - (Number(b.label) || 0); });
     base.labels = top.map(function (g) { return g.label; });
     base.datasets = [{label: 'qty', data: top.map(function (g) { return g.value; })}];
     base.others = groups.length - top.length;
+    return base;
+  }
+  function numOrNull(v) { if (v === null || v === undefined || v === '') return null; var n = Number(v); return isFinite(n) ? n : null; }
+  function median(list) {
+    var a = list.filter(function (v) { return typeof v === 'number' && isFinite(v); }).sort(function (x, y) { return x - y; });
+    if (!a.length) return null;
+    var m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+  function aggOf(kind, vals) {
+    if (!vals.length) return null;
+    if (kind === 'max') return Math.max.apply(null, vals);
+    if (kind === 'min') return Math.min.apply(null, vals);
+    if (kind === 'avg') return vals.reduce(function (a, v) { return a + v; }, 0) / vals.length;
+    return median(vals);
+  }
+  function aggChart(def, rows, base) {
+    var groups = {}, withValue = 0;
+    rows.forEach(function (r) {
+      var v = numOrNull(r[def.valueField]);
+      if (v === null) return;
+      withValue++;
+      var l = norm(r[def.key]);
+      (groups[l] || (groups[l] = [])).push(v);
+    });
+    var list = Object.keys(groups).map(function (l) { return {label: l, value: aggOf(def.agg, groups[l]), n: groups[l].length}; })
+      .filter(function (g) { return g.value !== null && !(def.hideNA && g.label === 'N/A'); });
+    // Turnos sem tempo também aparecem (coluna vazia), na ordem T1, T2, T3.
+    if (def.allShifts && SHIFT_KEYS[def.key]) SHIFTS.forEach(function (sh) { if (!groups[sh]) list.push({label: sh, value: 0, n: 0}); });
+    if (SHIFT_KEYS[def.key]) list.sort(function (a, b) { return compareText(a.label, b.label); });
+    else list.sort(function (a, b) { return b.value - a.value || compareText(a.label, b.label); });
+    var top = list.slice(0, def.top || 10);
+    base.type = 'bar'; base.valueAgg = def.agg; base.unit = def.unit || ''; base.total = withValue;
+    base.labels = top.map(function (g) { return g.label; });
+    base.datasets = [{label: 'value', data: top.map(function (g) { return Math.round(g.value * 10) / 10; }), n: top.map(function (g) { return g.n; })}];
+    base.others = list.length - top.length;
     return base;
   }
   function buildEvolution(rates, goal, from, to) {
@@ -835,7 +882,7 @@ function JTCoreFactory_() {
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
     computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
-    encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText
+    encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText, median: median
   };
 }
 

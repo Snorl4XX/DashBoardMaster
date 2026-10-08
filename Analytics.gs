@@ -13,7 +13,9 @@ const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expediti
  * Sem Movimentação: remessa, pedidos, tipo da última operação, aging, problemático, bases e destino).
  */
 const EXTRA_FIELDS_ = ['port', 'sackType', 'items', 'packType', 'source', 'chip',
-  'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase'];
+  'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase',
+  // V4.4 (Deslacre): horários do ID, tempo mediano, situação do bipe de deslacre, placa, transportadora, registros de descarregamento.
+  'unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 

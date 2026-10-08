@@ -491,20 +491,22 @@ function refreshSendFlags_(job, deadline, cfg, routes) {
  * ids[remessa] = ID ('' = carregada sem número do pedido); miss[remessa] = consultas sem o bipe de carregamento.
  */
 const TRIP_MAX_MISS_ = 2;
-function tripMapKey_(indicator) { return indicator + ':viagens'; }
+/** kind: 'viagens' (IDs de viagem, padrão) ou 'bipagens' (V4.4, Triagem errada: lote e login da Consulta das bipagens). */
+function lookupMapKey_(indicator, kind) { return indicator + ':' + (kind || 'viagens'); }
+function tripMapKey_(indicator) { return lookupMapKey_(indicator, 'viagens'); }
 function emptyTripMap_() { return {v: 1, ids: {}, miss: {}}; }
-function loadTripMap_(indicator, date) {
-  const df = dayFilesMap_(tripMapKey_(indicator), date, date)[date];
+function loadTripMap_(indicator, date, kind) {
+  const df = dayFilesMap_(lookupMapKey_(indicator, kind), date, date)[date];
   if (!df) return emptyTripMap_();
   try {
     const x = JSON.parse(Utilities.ungzip(DriveApp.getFileById(df.fileId).getBlob()).getDataAsString('UTF-8'));
     return x && x.ids ? Object.assign(emptyTripMap_(), x, {miss: x.miss || {}}) : emptyTripMap_();
   } catch (e) { return emptyTripMap_(); }
 }
-function saveTripMap_(indicator, date, map, total) {
-  const key = tripMapKey_(indicator), ids = Object.keys(map.ids);
+function saveTripMap_(indicator, date, map, total, kind) {
+  const key = lookupMapKey_(indicator, kind), ids = Object.keys(map.ids);
   const found = ids.filter(w => map.ids[w]).length;
-  const file = writeGzJson_(indicator + '__' + date + '__viagens.json.gz', map);
+  const file = writeGzJson_(indicator + '__' + date + '__' + (kind || 'viagens') + '.json.gz', map);
   const rowNum = findRowKey_('DAYFILES', key, date);
   const prev = rowNum > 0 ? allTabRows_('DAYFILES')[rowNum - 2] : null;
   const row = [key, date, file.getId(), ids.length, found, total, new Date()];
@@ -744,6 +746,408 @@ function tripCoverage_(indicator, from, to) {
   return out;
 }
 
+// ------------------------------------------------------------------ Triagem errada: Consulta das bipagens (tempo real)
+/**
+ * V4.4 (pedido): remessa da Triagem errada sem "Número da Saca" (lote) ou sem "Operador do Bipe de Envio no Carregamento"
+ * (login): a informação vem de Operação > Consulta do pacote > Consulta das bipagens (tempo real) (scanRecordQuery/listPage),
+ * consultada com as remessas. Vale o PRIMEIRO bipe (mais antigo) com Tipo de bipagem = "Encomenda inserida em lote" e Base de
+ * escaneamento = a nossa (JMS_CENTER_NAME): lote = "Número do lote" (belongNo), login = "Digitalizador" (scanEmp). Só o que
+ * está vazio é preenchido. Unidade de Empacotamento vazia = SP GRU (fillEmpty, já na leitura).
+ * Como os IDs de viagem: mapa remessa → {lote, login} por dia (arquivo "<indicador>__<dia>__bipagens"), aplicado a cada
+ * gravação do dia (o detalhe rebaixado não perde o que já foi achado); só remessas novas são consultadas.
+ */
+const SCAN_MAX_MISS_ = 2;
+const SCAN_KIND_ = 'bipagens';
+/** "Encomenda inserida em lote" → "encomenda inserida em lote" (sem acento, espaço simples). */
+function plainText_(x) {
+  return String(x === null || x === undefined ? '' : x).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+}
+/** Campos do arquivo do dia que a consulta preenche (Config.gs → scans.fill: {lot: 'belongNo', login: 'scanEmp'}). */
+function scanTargets_(sc) { return Object.keys((sc && sc.fill) || {}); }
+/** Remessas do dia com algum campo de scans.fill vazio (em ordem espalhada), menos as já consultadas. */
+function scanTodo_(ds, sc, map) {
+  const W = ds.dict.shipment, cW = ds.cols.shipment, targets = scanTargets_(sc), seen = {}, todo = [];
+  let total = 0;
+  for (let i = 0; i < ds.n; i++) {
+    const w = W[cW[i]];
+    if (!w || seen[w]) continue;
+    const empty = targets.some(f => !ds.cols[f] || String(ds.dict[f][ds.cols[f][i]] || '').trim() === '');
+    if (!empty) continue;
+    seen[w] = 1;
+    total++;
+    if (map.ids[w] !== undefined || (map.miss[w] || 0) >= SCAN_MAX_MISS_) continue;
+    todo.push(w);
+  }
+  todo.sort((a, b) => tripOrderKey_(a) - tripOrderKey_(b));
+  return {todo: todo, total: total};
+}
+/** Coloca lote/login do mapa nas linhas do dia que estão com o campo vazio. Devolve quantos campos mudaram. */
+function applyScanMapToDs_(ds, map, sc) {
+  if (!ds || !ds.n || !ds.cols || !ds.cols.shipment || !map || !map.ids) return 0;
+  const W = ds.dict.shipment, cW = ds.cols.shipment, targets = scanTargets_(sc);
+  const slots = {};
+  const slot = (f, v) => {
+    if (!ds.cols[f]) {
+      ds.dict[f] = [''];
+      ds.cols[f] = new Array(ds.n).fill(0);
+      if (ds.fields && ds.fields.indexOf(f) < 0) ds.fields.push(f);
+    }
+    let m = slots[f];
+    if (!m) { m = slots[f] = new Map(); ds.dict[f].forEach((x, j) => { if (!m.has(x)) m.set(x, j); }); }
+    let j = m.get(v);
+    if (j === undefined) { j = ds.dict[f].length; ds.dict[f].push(v); m.set(v, j); }
+    return j;
+  };
+  let n = 0;
+  for (let i = 0; i < ds.n; i++) {
+    const hit = map.ids[W[cW[i]]];
+    if (!hit || typeof hit !== 'object') continue;
+    targets.forEach(f => {
+      const v = String(hit[f] || '').trim();
+      if (!v) return;
+      const cur = ds.cols[f] ? String(ds.dict[f][ds.cols[f][i]] || '').trim() : '';
+      if (cur) return;
+      ds.cols[f][i] = slot(f, v);
+      n++;
+    });
+  }
+  return n;
+}
+/** Payload da tela (Consulta das bipagens, tempo real), com as remessas. A data da tela vale pouco com remessas (o JMS
+ * devolve os bipes de outros dias): janela do dia da Triagem com 3 dias antes e 1 depois. */
+function scanPayload_(list, date, page, size) {
+  const today = isoToday_(), end = addDaysIso_(date, 1) > today ? today : addDaysIso_(date, 1);
+  return {current: page, size: size, startDates: addDaysIso_(date, -3) + ' 00:00:00', endDates: end + ' 23:59:59', bilNos: list,
+    billType: 1, countryId: countryId_(), querySub: '', reachAddressList: [], scanSite: centerCode_(), scanType: '全部', sendSites: [],
+    sortName: 'scanDate', sortOrder: 'asc'};
+}
+/**
+ * Escolhe, por remessa, o 1º bipe "Encomenda inserida em lote" na nossa base (o mais antigo: scanDate, depois inputDate).
+ * Devolve {remessa: {lot, login, at}}; remessa sem esse bipe fica de fora.
+ */
+function pickScanFills_(records, sc, center) {
+  const types = (sc.scanTypes || ['Encomenda inserida em lote']).map(plainText_), base = plainText_(center), fill = sc.fill || {};
+  const when = r => String(r.scanDate || '') + '|' + String(r.inputDate || '');
+  const best = {};
+  (records || []).forEach(r => {
+    if (!r || types.indexOf(plainText_(r.scanType)) < 0) return;
+    if (plainText_(r[sc.baseField || 'inputDept']) !== base) return;
+    const w = String(r.billNo || '').trim();
+    if (!w) return;
+    if (!best[w] || when(r) < when(best[w])) best[w] = r;
+  });
+  const out = {};
+  Object.keys(best).forEach(w => {
+    const r = best[w], hit = {at: String(r.scanDate || '')};
+    Object.keys(fill).forEach(f => { const v = r[fill[f]]; hit[f] = v === null || v === undefined ? '' : String(v).trim(); });
+    out[w] = hit;
+  });
+  return out;
+}
+/** Remessas por consulta: TRIAGEM_BIPAGENS_LOTE (manual) ou scans.batch (padrão 40; ~20 bipes por remessa = ~8 páginas). */
+function scanBatch_(sc) {
+  const forced = Number(getProp_('TRIAGEM_BIPAGENS_LOTE', ''));
+  return forced >= 1 ? Math.min(500, Math.floor(forced)) : Math.max(1, (sc && sc.batch) || 40);
+}
+/** Todos os bipes das remessas `list` (página 1 e, em paralelo, as outras; até 60 páginas). */
+function fetchScanRecords_(endpoint, list, date) {
+  const size = 100, first = jmsPost_(endpoint, scanPayload_(list, date, 1, size), 3);
+  let out = recordsOf_(first).slice();
+  const pages = Math.min(pagingOf_(first).pages || 1, 60);
+  const rest = [];
+  for (let p = 2; p <= pages; p++) rest.push(p);
+  const parallel = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
+  for (let k = 0; k < rest.length; k += parallel) {
+    const group = rest.slice(k, k + parallel);
+    let responses;
+    try { responses = UrlFetchApp.fetchAll(group.map(p => jmsRequestObject_(endpoint, scanPayload_(list, date, p, size)))); }
+    catch (e) {
+      if (errorKind_(String(e && e.message || e)) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + String(e.message || e).slice(0, 200));
+      responses = group.map(() => null);
+    }
+    group.forEach((p, i) => {
+      let json;
+      try { if (!responses[i]) throw new Error('sem resposta'); json = parseJmsResponse_(responses[i], endpoint); }
+      catch (e) { json = jmsPost_(endpoint, scanPayload_(list, date, p, size), 3); }
+      out = out.concat(recordsOf_(json));
+    });
+  }
+  return out;
+}
+/**
+ * Tarefa SCANS (Triagem errada, depois do detalhe gravado): consulta as remessas sem lote/login, guarda o mapa e regrava
+ * o arquivo do dia com o que foi achado. O tempo acabando, grava o que já veio e continua na próxima execução.
+ */
+function runScanJob_(job, deadline) {
+  const cfg = getIndicatorConfig_(job.indicator), sc = cfg.scans;
+  if (!sc) return 'done';
+  const st = getDayStatus_(job.indicator, job.date);
+  if (!st || st.details === 'NO_RECORD') return 'done';
+  if (DETAIL_USABLE_.indexOf(st.details) < 0) return 'skip';
+  const df = dayFilesMap_(job.indicator, job.date, job.date)[job.date];
+  if (!df) return 'skip';
+  const ds = loadDetailFile_(df.fileId);
+  if (!isDayDataset_(ds) || !ds.n || !ds.cols.shipment) return 'done';
+  const map = loadTripMap_(job.indicator, job.date, SCAN_KIND_);
+  const plan = scanTodo_(ds, sc, map), todo = plan.todo;
+  const endpoint = endpointFor_(cfg, 'scans'), center = centerName_(), batch = scanBatch_(sc);
+  let k = 0, found = 0, slowest = 8000, lastError = '';
+  while (k < todo.length) {
+    if (Date.now() + slowest + 20000 > deadline) break;
+    const list = todo.slice(k, k + batch);
+    k += list.length;
+    const t0 = Date.now();
+    let records;
+    try { records = fetchScanRecords_(endpoint, list, job.date); }
+    catch (e) {
+      const m = String(e && e.message || e);
+      if (errorKind_(m) !== 'OTHER' || /Sessão do JMS/.test(m)) throw e;
+      lastError = m.slice(0, 300);
+      list.forEach(w => { map.miss[w] = (map.miss[w] || 0) + 1; });
+      continue;
+    }
+    slowest = Math.max(slowest, Date.now() - t0);
+    const fills = pickScanFills_(records, sc, center);
+    list.forEach(w => {
+      const hit = fills[w] || fills[baseWaybill_(w)];
+      if (!hit) { map.miss[w] = (map.miss[w] || 0) + 1; return; }
+      map.ids[w] = hit;
+      delete map.miss[w];
+      found++;
+    });
+  }
+  map.at = new Date().toISOString();
+  if (todo.length) saveTripMap_(job.indicator, job.date, map, plan.total, SCAN_KIND_);
+  if (found && applyScanMapToDs_(ds, map, sc)) {
+    saveDayDataset_(job.indicator, job.date, ds, df.expectedPages, df.expectedRecords, {skipScans: true, keepCreatedAt: df.createdAt});
+  }
+  if (lastError && !found) {
+    logSync_('WARN', job.indicator, job.date, 'Consulta das bipagens recusada (lote/login da Triagem): ' + lastError +
+      '. Rode diagnosticarBipagensTriagem() e confira os cabeçalhos de rota (JMS_ROUTENAME_SCANQUERY).');
+  }
+  return k < todo.length ? 'partial' : 'done';
+}
+/** V4.4: uma vez, os dias da Triagem errada já baixados entram na fila da Consulta das bipagens (os mais novos primeiro). */
+function migrateToV44_() {
+  if (getProp_('MIGRATION_V44', '')) return 0;
+  let n = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].scans).forEach(k => {
+    const jobs = Object.keys(dayFilesMap_(k, '', '')).sort().reverse().map(d => ['SCANS', k, d, 0]);
+    if (jobs.length) n += enqueueJobs_(jobs, {reset: true});
+  });
+  setProp_('MIGRATION_V44', new Date().toISOString());
+  if (n) logSync_('INFO', 'sorting_error', '', 'V4.4: ' + n + ' dia(s) na fila da Consulta das bipagens (lote e login vazios da Triagem errada).');
+  return n;
+}
+/** Remessas sem lote/login e quantas a Consulta das bipagens já completou, por dia (painel). */
+function scanCoverage_(indicator, from, to) {
+  const out = {};
+  const files = dayFilesMap_(lookupMapKey_(indicator, SCAN_KIND_), from, to);
+  Object.keys(files).forEach(d => { const f = files[d]; out[d] = {done: f.rows, found: f.expectedPages, total: f.expectedRecords, at: f.createdAt}; });
+  return out;
+}
+
+// ------------------------------------------------------------------ Deslacre (linha secundária)
+/**
+ * V4.4 (pedido "DASHBOARD DE DESLACRE"). Lista = Consulta de Viagens Secundárias (tmsBranchTrackingDetail/page) com os filtros
+ * da tela (PDD de chegada = nossa base, Status Concluído). Por ID com deslacre, os Registros de carga e descarga
+ * (loading/scan/list?shipmentNo=…): "Data final" (scanEndTime) do Bipe de descarregamento = bipe de recebimento.
+ * Tempo do ID = mediana de (Data final − horário de deslacração) dos registros de descarregamento, em minutos.
+ */
+const UNSEAL_FIELDS_ = ['unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads'];
+/** "2026-10-08 04:44:36" → milissegundos (o texto do JMS, sem fuso: só a diferença entre dois horários importa). */
+function unsealMs_(v) {
+  const m = /(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(v === null || v === undefined ? '' : v));
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : NaN;
+}
+function unsealArrival_(t) { return String(t.actualArrivalTime || t.appArrivalTime || t.plannedArrivalTime || '').trim(); }
+/** Horário que decide o dia e o turno do ID: o deslacre; sem deslacre, a chegada do veículo. */
+function unsealEventTime_(t) { return String(t.unlockTime || '').trim() || unsealArrival_(t); }
+function medianOf_(list) {
+  const a = (list || []).filter(v => typeof v === 'number' && Number.isFinite(v)).sort((x, y) => x - y);
+  if (!a.length) return null;
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+/**
+ * IDs do dia: chegam na nossa base (endCode), Concluído (shipmentState) e com o deslacre (ou, sem ele, a chegada) no dia.
+ * A consulta pega as saídas da véspera e do dia (viagem que sai à noite e é deslacrada de madrugada).
+ */
+function unsealTrips_(indicatorKey, isoDate) {
+  const cfg = getIndicatorConfig_(indicatorKey), endpoint = endpointFor_(cfg, 'summary');
+  const payload = page => buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, false);
+  const first = jmsPost_(endpoint, payload(1), 2);
+  let recs = recordsOf_(first);
+  const pg = pagingOf_(first);
+  if (pg.pages > 50) throw new Error('Consulta de Viagens Secundárias com mais de 50 páginas para ' + isoDate + ': filtro da base ignorado? Importação bloqueada.');
+  for (let p = 2; p <= pg.pages; p++) recs = recs.concat(recordsOf_(jmsPost_(endpoint, payload(p), 2)));
+  const code = String(centerCode_()), state = cfg.shipmentState, seen = {};
+  return recs.filter(t => {
+    if (!t || !t.shipmentNo || seen[t.shipmentNo]) return false;
+    if (t.endCode !== undefined && t.endCode !== null && t.endCode !== '' && String(t.endCode) !== code) return false;
+    if (state && t.shipmentState !== undefined && t.shipmentState !== null && t.shipmentState !== '' && Number(t.shipmentState) !== Number(state)) return false;
+    if (normalizeDateFromValue_(unsealEventTime_(t), '') !== isoDate) return false;
+    seen[t.shipmentNo] = true;
+    return true;
+  });
+}
+/** Resumo do dia (aba RATES): IDs, IDs sem deslacre e o tempo mediano (minutesList = tempo de cada ID; null = mantém o gravado). */
+function unsealSummaryFrom_(indicatorKey, isoDate, trips, minutesList) {
+  const miss = trips.filter(t => !String(t.unlockTime || '').trim()).length;
+  const pm = (!minutesList && (getRateDay_(indicatorKey, isoDate) || {}).metrics) || {};
+  const med = minutesList ? medianOf_(minutesList) : (isFinite(pm.medianMin) && pm.medianMin !== null ? pm.medianMin : null);
+  const timed = minutesList ? minutesList.length : (pm.timedNum === null || pm.timedNum === undefined ? null : pm.timedNum);
+  const raw = {date: isoDate, source: 'JMS', tripNum: trips.length, noUnlockNum: miss, unlockNum: trips.length - miss,
+    medianMin: med === null ? null : Math.round(med * 10) / 10, timedNum: timed};
+  return {indicator: indicatorKey, date: isoDate, rate: miss / trips.length * 100, errorCount: miss, totalCount: trips.length, empty: false, raw: raw};
+}
+function unsealSummary_(indicatorKey, isoDate) {
+  const trips = unsealTrips_(indicatorKey, isoDate);
+  if (!trips.length) return {indicator: indicatorKey, date: isoDate, empty: true};
+  return unsealSummaryFrom_(indicatorKey, isoDate, trips, null);
+}
+/** Registro de descarregamento ("Bipe de descarregamento"; o JMS manda loadingTypeName "2"). */
+function unsealIsUnload_(cfg, x) {
+  const types = (cfg.unload && cfg.unload.unloadTypes) || ['2'], v = String(x && x.loadingTypeName === undefined ? '' : x.loadingTypeName);
+  return types.indexOf(v) >= 0 || /descarreg|卸/i.test(v);
+}
+/** Data final e tempo (mediana, minutos) de um ID a partir dos Registros de carga e descarga. */
+function unsealTiming_(cfg, unlock, list) {
+  const use = (list || []).filter(x => unsealIsUnload_(cfg, x) && x.scanEndTime);
+  const t0 = unsealMs_(unlock);
+  const mins = use.map(x => (unsealMs_(x.scanEndTime) - t0) / 60000).filter(Number.isFinite);
+  const med = medianOf_(mins);
+  return {end: use.map(x => String(x.scanEndTime)).sort().pop() || '', minutes: med === null ? '' : String(Math.round(med * 10) / 10), unloads: String(use.length)};
+}
+/**
+ * Detalhe do dia (tarefa DETAIL_INIT do Deslacre): a lista de IDs e, para cada ID com deslacre ainda sem a Data final (ou de
+ * hoje/ontem com descarregamento recente), os Registros de carga e descarga — os já consultados vêm do arquivo do dia. O tempo
+ * acabando, grava o que já veio e continua na próxima execução.
+ */
+function runUnsealDetailJob_(job, deadline, cfg, st) {
+  const ind = job.indicator, date = job.date;
+  const trips = unsealTrips_(ind, date);
+  if (!trips.length) throw new Error('Consulta de Viagens Secundárias sem IDs em ' + date + ' apesar do resumo; nova tentativa mais tarde.');
+  const cache = {};
+  const df = dayFilesMap_(ind, date, date)[date];
+  if (df) { try { fileRows_(loadDetailFile_(df.fileId)).forEach(r => { if (r.shipment) cache[r.shipment] = r; }); } catch (e) { /* consulta tudo */ } }
+  const recent = date >= addDaysIso_(isoToday_(), -1);
+  const nowMs = unsealMs_(Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm:ss'));
+  const need = trips.filter(t => {
+    const unlock = String(t.unlockTime || '').trim();
+    if (!unlock) return false;
+    const c = cache[t.shipmentNo];
+    if (!c || c.unlockTime !== unlock || c.unloads === '' || c.unloads === undefined) return true;
+    // Hoje/ontem: sem Data final ainda, ou terminada há menos de 2 h (descarregamento pode continuar).
+    return recent && (!c.receiptTime || nowMs - unsealMs_(c.receiptTime) < 2 * 3600000);
+  });
+  const endpoint = endpointFor_(cfg, 'unload'), got = {};
+  const parallel = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
+  let k = 0, slowest = 5000, lastError = '';
+  while (k < need.length) {
+    if (Date.now() + slowest + 15000 > deadline) break;
+    const group = need.slice(k, k + parallel);
+    k += group.length;
+    const urls = group.map(t => endpoint + '?shipmentNo=' + encodeURIComponent(t.shipmentNo));
+    const t0 = Date.now();
+    let responses;
+    try { responses = UrlFetchApp.fetchAll(urls.map(u => jmsRequestObject_(u, null))); }
+    catch (e) {
+      const m = String(e && e.message || e);
+      if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m.slice(0, 200));
+      responses = group.map(() => null);
+    }
+    slowest = Math.max(slowest, Date.now() - t0);
+    group.forEach((t, i) => {
+      let json;
+      try { if (!responses[i]) throw new Error('sem resposta'); json = parseJmsResponse_(responses[i], urls[i]); }
+      catch (e) {
+        // De novo, sozinha (jmsPost_ também testa os cabeçalhos de rota alternativos).
+        try { json = jmsPost_(urls[i], null, 2); }
+        catch (e2) {
+          const m2 = String(e2 && e2.message || e2);
+          if (errorKind_(m2) !== 'OTHER' || /Sessão do JMS/.test(m2)) throw e2;
+          lastError = m2.slice(0, 300);
+          return;
+        }
+      }
+      got[t.shipmentNo] = recordsOf_(json);
+    });
+  }
+  const sit = cfg.situations || {missing: 'Sem bipe de deslacre', done: 'Com bipe de deslacre'};
+  const recs = trips.map(t => {
+    const unlock = String(t.unlockTime || '').trim(), c = cache[t.shipmentNo];
+    let tm = {end: '', minutes: '', unloads: ''};
+    if (unlock && got[t.shipmentNo]) tm = unsealTiming_(cfg, unlock, got[t.shipmentNo]);
+    else if (unlock && c && c.unlockTime === unlock) tm = {end: c.receiptTime || '', minutes: c.minutes || '', unloads: c.unloads || ''};
+    return Object.assign({}, t, {__eventTime: unsealEventTime_(t), __unloadEnd: tm.end, __minutes: tm.minutes, __unloads: tm.unloads,
+      __situation: unlock ? sit.done : sit.missing});
+  });
+  const rows = normalizeRecords_(ind, date, recs);
+  saveDayDataset_(ind, date, encodeDayFile_(rows, STORE_FIELDS_.concat(UNSEAL_FIELDS_)), 1, trips.length);
+  // Resultados: IDs sem deslacre por turno (turno pela chegada do veículo).
+  const c = {T1: 0, T2: 0, T3: 0, NA: 0};
+  rows.forEach(r => { if (r.situation !== sit.missing) return; if (c[r.shift] !== undefined) c[r.shift]++; else c.NA++; });
+  upsertAggCounts_(ind, date, c, c.T1 + c.T2 + c.T3 + c.NA);
+  const mins = rows.filter(r => r.minutes !== '' && r.minutes !== undefined).map(r => Number(r.minutes)).filter(Number.isFinite);
+  upsertRate_(unsealSummaryFrom_(ind, date, trips, mins));
+  const complete = k >= need.length;
+  updateDayStatus_(ind, date, {detailsStatus: complete ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: 1, savedPages: 1,
+    expectedRecords: trips.length, savedRows: rows.length, error: ''});
+  if (lastError) {
+    logSync_('WARN', ind, date, 'Registros de carga e descarga recusados em parte dos IDs (sem a Data final, o tempo desses IDs fica vazio): ' + lastError +
+      '. Rode diagnosticarDeslacre() e confira os cabeçalhos de rota (JMS_ROUTENAME_UNSEAL).');
+  }
+  return complete ? 'done' : 'partial';
+}
+
+/**
+ * Diagnóstico do Deslacre (V4.4): testa no JMS real a Consulta de Viagens Secundárias do dia (IDs, sem deslacre, campos que
+ * chegam) e os Registros de carga e descarga de até 5 IDs com deslacre (Data final e tempo). Nada de placa, motorista, CPF
+ * ou telefone no texto. `date` (opcional, AAAA-MM-DD): padrão = ontem.
+ */
+function diagnosticarDeslacre(date) {
+  const key = 'unseal', cfg = activeCfg_(key);
+  const d = isIso_(date) ? date : lastClosedDate_(key);
+  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d};
+  const add = x => lines.push(x);
+  const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
+  const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
+  const cred = authConfigSafe_();
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — Deslacre (linha secundária) — dia ' + humanDatePt_(d));
+  add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · PDD de chegada: ' + centerName_() + ' (' + centerCode_() + ')');
+  (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
+  let trips = [];
+  try {
+    const json = jmsPost_(endpointFor_(cfg, 'summary'), buildPayload_(key, d, 1, APP_CONFIG.PAGE_SIZE, false), 2);
+    const recs = recordsOf_(json), first = recs[0] || {};
+    add('Consulta de Viagens Secundárias (saídas de ' + humanDatePt_(addDaysIso_(d, -1)) + ' e ' + humanDatePt_(d) + '): ' + fmt(pagingOf_(json).total) + ' ID(s) na lista');
+    add('  Campos que chegam: unlockTime ' + ('unlockTime' in first ? 'sim' : 'NÃO') + ' · actualArrivalTime ' + ('actualArrivalTime' in first ? 'sim' : 'NÃO') +
+      ' · startName ' + ('startName' in first ? 'sim' : 'NÃO') + ' · shipmentName ' + ('shipmentName' in first ? 'sim' : 'NÃO'));
+    trips = unsealTrips_(key, d);
+    const miss = trips.filter(t => !String(t.unlockTime || '').trim()).length;
+    add('IDs do dia ' + humanDatePt_(d) + ' (pelo horário do deslacre; sem deslacre, pela chegada): ' + fmt(trips.length) + ' · sem bipe de deslacre: ' + fmt(miss));
+    out.ids = trips.length; out.semDeslacre = miss;
+  } catch (e) { add('Consulta de Viagens Secundárias: ERRO — ' + err(e)); }
+  const sample = trips.filter(t => String(t.unlockTime || '').trim()).slice(0, 5);
+  sample.forEach((t, i) => {
+    try {
+      const list = recordsOf_(jmsPost_(endpointFor_(cfg, 'unload') + '?shipmentNo=' + encodeURIComponent(t.shipmentNo), null, 2));
+      const tm = unsealTiming_(cfg, String(t.unlockTime).trim(), list);
+      add('  ID ' + (i + 1) + ': ' + list.length + ' registro(s) de carga/descarga · ' + tm.unloads + ' de descarregamento · deslacre ' +
+        String(t.unlockTime).slice(11) + ' → Data final ' + (tm.end ? tm.end.slice(11) : '—') + ' · tempo ' + (tm.minutes === '' ? '—' : tm.minutes + ' min'));
+    } catch (e) { add('  ID ' + (i + 1) + ': Registros de carga e descarga: ERRO — ' + err(e)); }
+  });
+  const r = getRateDay_(key, d);
+  if (r && r.metrics) add('Gravado no painel: ' + fmt(r.metrics.tripNum) + ' IDs · ' + fmt(r.metrics.noUnlockNum) + ' sem deslacre · tempo mediano ' +
+    (r.metrics.medianMin === null ? '—' : fmt(r.metrics.medianMin) + ' min'));
+  add('Dica: se der ERRO, abra Transporte > Transporte de linha secundária > Gestão de viagens de linha secundária > Consulta de Viagens Secundárias, ' +
+    'F12 → Rede, consulte e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
+  console.log(lines.join('\n'));
+  out.texto = lines.join('\n');
+  return out;
+}
+
 // ------------------------------------------------------------------ diagnóstico
 /**
  * Diagnóstico da Expedição: fluxo operacional (rode no editor e veja o Registro de execução). Testa no JMS real:
@@ -917,6 +1321,60 @@ function diagnosticarViagensSCDC(date) {
     out.cobertura = cov;
   } catch (e) { add('Cobertura: ERRO ao ler — ' + err(e)); }
   add('Dica: se der ERRO no rastreamento, abra Rastreamento do pacote no JMS, F12 → Rede, consulte uma remessa e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
+  console.log(lines.join('\n'));
+  out.texto = lines.join('\n');
+  return out;
+}
+
+/**
+ * Diagnóstico da Triagem errada (V4.4): lote e login vazios completados pela Consulta das bipagens (tempo real). Testa no JMS
+ * real com até 10 remessas do dia que estão sem lote/login: quantos bipes vieram, os tipos de bipagem e as bases que
+ * apareceram e quantas tinham o bipe "Encomenda inserida em lote" na nossa base. Nada de remessa, nome ou dado pessoal no
+ * texto. `date` (opcional, AAAA-MM-DD): padrão = ontem.
+ */
+function diagnosticarBipagensTriagem(date) {
+  const key = 'sorting_error', cfg = activeCfg_(key), sc = cfg.scans;
+  const d = isIso_(date) ? date : lastClosedDate_(key);
+  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d};
+  const add = x => lines.push(x);
+  const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
+  const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
+  const cred = authConfigSafe_();
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — Triagem errada: lote e login pela Consulta das bipagens (tempo real) — dia ' + humanDatePt_(d));
+  add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · base: ' + centerName_() + ' (' + centerCode_() + ')');
+  (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === 'SCANQUERY' || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
+  const df = dayFilesMap_(key, d, d)[d];
+  if (!df) { add('O dia ainda não tem a lista da Triagem baixada.'); console.log(lines.join('\n')); out.texto = lines.join('\n'); return out; }
+  const ds = loadDetailFile_(df.fileId), map = loadTripMap_(key, d, SCAN_KIND_), plan = scanTodo_(ds, sc, map);
+  const empty = f => { let n = 0; for (let i = 0; i < ds.n; i++) if (!ds.cols[f] || !String(ds.dict[f][ds.cols[f][i]] || '').trim()) n++; return n; };
+  add('Lista do dia: ' + fmt(ds.n) + ' remessa(s) · sem lote: ' + fmt(empty('lot')) + ' · sem login: ' + fmt(empty('login')) +
+    ' · já completadas pela consulta: ' + fmt(Object.keys(map.ids).length) + ' · ainda na fila: ' + fmt(plan.todo.length));
+  // Amostra: as que ainda faltam; sem nenhuma, as já consultadas (testa a consulta do mesmo jeito).
+  const sample = (plan.todo.length ? plan.todo : Object.keys(map.ids)).slice(0, 10);
+  if (sample.length) {
+    try {
+      const recs = fetchScanRecords_(endpointFor_(cfg, 'scans'), sample, d);
+      const types = {}, bases = {};
+      recs.forEach(r => { types[String(r.scanType || '—')] = (types[String(r.scanType || '—')] || 0) + 1; bases[String(r[sc.baseField || 'inputDept'] || '—')] = 1; });
+      const fills = pickScanFills_(recs, sc, centerName_());
+      const got = sample.filter(w => fills[w] || fills[baseWaybill_(w)]);
+      add('Consulta das bipagens com ' + sample.length + ' remessa(s): ' + fmt(recs.length) + ' bipe(s) · ' + Object.keys(bases).length + ' base(s) diferentes');
+      add('  Tipos de bipagem: ' + Object.keys(types).sort((a, b) => types[b] - types[a]).slice(0, 12).map(t => t + ' (' + types[t] + ')').join(' · '));
+      add('  Com "' + (sc.scanTypes || [])[0] + '" na ' + centerName_() + ': ' + got.length + ' de ' + sample.length +
+        ' · com lote: ' + got.filter(w => (fills[w] || fills[baseWaybill_(w)]).lot).length + ' · com login: ' + got.filter(w => (fills[w] || fills[baseWaybill_(w)]).login).length);
+      out.amostra = {remessas: sample.length, bipes: recs.length, achadas: got.length, tipos: types};
+    } catch (e) { add('Consulta das bipagens: ERRO — ' + err(e) + ' (sem ela, as remessas continuam sem lote/login; o resto do painel funciona)'); }
+  }
+  try {
+    const back = addDaysIso_(isoToday_(), -3), cov = scanCoverage_(key, back, isoToday_());
+    add('Remessas sem lote/login consultadas nos últimos dias:');
+    dateRangeIso_(back, isoToday_()).forEach(x => {
+      const c = cov[x];
+      add('  ' + humanDatePt_(x) + ': ' + (c ? fmt(c.done) + ' de ' + fmt(c.total) + ' consultadas (' + fmt(c.found) + ' completadas)' : 'ainda não consultado'));
+    });
+    out.cobertura = cov;
+  } catch (e) { add('Cobertura: ERRO ao ler — ' + err(e)); }
+  add('Dica: se der ERRO, abra Operação > Consulta do pacote > Consulta das bipagens (tempo real), F12 → Rede, consulte uma remessa e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));
   out.texto = lines.join('\n');
   return out;
