@@ -1,8 +1,50 @@
-# J&T DASHMASTER V4.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.2 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.2 — Painel separado para os fluxos (Recebimento e Expedição)
+Os dois fluxos operacionais são os painéis mais pesados: cerca de 550 mil remessas por dia no Recebimento e 117 mil na Expedição. Agora o mesmo código pode virar **dois painéis**: o principal, sem os fluxos, e um painel só dos fluxos. Isso é configurado por uma propriedade do script, sem copiar código diferente.
+
+| Propriedade do script | Para que serve |
+|---|---|
+| `PAINEIS_FORA` = `arrival_flow,send_flow` | **No painel principal:** mostra e baixa todos os painéis, menos os fluxos |
+| `PAINEIS` = `arrival_flow,send_flow` | **No painel dos fluxos:** mostra e baixa só os dois fluxos |
+| `NOME_PAINEL` (opcional) | Nome que aparece embaixo do logo e na aba do navegador (ex.: `Fluxo operacional`) |
+
+Um painel desligado sai do menu e dos Resultados, não entra na fila e não gasta cota. Se o nome estiver errado, o painel mostra todos os painéis, então nunca abre vazio.
+
+**Importante:** a cota diária do Google é **por conta Google**, não por projeto. Dois projetos na **mesma conta** dividem os mesmos 90 min/dia. Para ganhar cota, o painel dos fluxos precisa ficar em **outra conta Google** (por exemplo, um segundo Gmail).
+
+**Resultado na simulação da conta Gmail** (90 min/dia, volumes reais do SP GRU):
+
+| | Tudo num projeto só | Principal sem os fluxos | Painel só dos fluxos (outra conta) |
+|---|---|---|---|
+| Uso por dia (depois do histórico) | 87,6 min (sem folga) | **40,8 min** (metade livre) | 75,7 min |
+| Dia do histórico | 90,3 min, 247 execuções barradas pela cota | 61,8 min, **nenhuma barrada** | 91,8 min, 142 barradas (só no 1º dia) |
+| Fila no fim | 10 pendentes | **vazia** | 9 pendentes (histórico da Expedição) |
+| IDs de viagem da Expedição (dia inteiro) | 15.600 de 117.618 | — | **117.618 de 117.618** |
+
+No painel só dos fluxos, os tetos diários passam a ser Recebimento **40 min** e Expedição **45 min** (antes, 35 e 20 min, divididos com os outros painéis). `RECEBIMENTO_MIN_POR_DIA` e `EXPEDICAO_MIN_POR_DIA` continuam mandando, se estiverem preenchidas. O histórico da Expedição é pesado e, na conta Gmail, avança cerca de 1 dia por dia. Os dias recentes ficam completos.
+
+**Como montar o painel dos fluxos (uma vez):**
+1. Entre com **outra conta Google** e crie um projeto novo em script.google.com.
+2. Copie para ele **todos os arquivos** do ZIP: os mesmos `.gs` e `.html` e o `appsscript.json`. Para ver o `appsscript.json` no editor, ative "Mostrar arquivo de manifesto" em Configurações do projeto.
+3. Em Configurações do projeto → Propriedades do script, coloque:
+   - as mesmas credenciais do principal: `JMS_AUTHTOKEN`, `JMS_AUTH_MODE` e as outras que você usa;
+   - `DATA_START_DATE`;
+   - `PAINEIS` = `arrival_flow,send_flow`;
+   - `NOME_PAINEL` = `Fluxo operacional`, se quiser.
+4. Execute `setupProject`. Ele cria a planilha do banco e os gatilhos nessa conta.
+5. Execute `startFullHistory`.
+6. Clique em Implantar → Nova implantação → App da Web. O link que aparece é o **link do painel dos fluxos**.
+
+**No painel principal:** em Propriedades do script, coloque `PAINEIS_FORA` = `arrival_flow,send_flow` e publique uma Nova versão. Os fluxos saem do menu e a fila deles para. Os dados antigos ficam na planilha, mas não são mais usados.
+
+**Lembretes:**
+- Quando o AuthToken do JMS vencer, troque nos **dois** projetos.
+- A abertura das páginas fica parecida. O ganho está na fila: os dados do principal ficam em dia, sem parar pela cota, e os fluxos ganham cota própria.
 
 ## V4.1 — Expedição SC → DC: ID de viagem de SAÍDA (Rastreamento do pacote)
 **Antes:** o ID de viagem vinha da coluna "ID Viagem Veículo de Chegada" da tabela secundária. **Agora:** o painel consulta **remessa por remessa** no **Rastreamento do pacote**, como no PDF:

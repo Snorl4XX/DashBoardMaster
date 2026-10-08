@@ -2110,8 +2110,21 @@ function groupedBudgetMin_(indicator) {
   const send = sendBudgetKey_(indicator);
   const v = getProp_(send ? 'EXPEDICAO_MIN_POR_DIA' : 'RECEBIMENTO_MIN_POR_DIA', '');
   if (v !== '' && Number(v) >= 0) return Number(v);
-  return googlePlan_() === 'gmail' ? (send ? APP_CONFIG.SEND_GMAIL_MIN_PER_DAY : APP_CONFIG.GROUPED_GMAIL_MIN_PER_DAY)
+  const gmail = googlePlan_() === 'gmail';
+  // V4.2: projeto só com os fluxos pesados (painel separado: PAINEIS = arrival_flow,send_flow): a cota diária é toda
+  // deles — Gmail 40 + 45 min (5 min de folga), Workspace 150 + 200 min; um fluxo sozinho fica com 85 / 350 min.
+  if (onlyHeavyFlows_()) {
+    const both = Object.keys(INDICATORS).filter(k => heavyGrouped_(INDICATORS[k])).length > 1;
+    if (!both) return gmail ? 85 : 350;
+    return gmail ? (send ? 45 : 40) : (send ? 200 : 150);
+  }
+  return gmail ? (send ? APP_CONFIG.SEND_GMAIL_MIN_PER_DAY : APP_CONFIG.GROUPED_GMAIL_MIN_PER_DAY)
     : (send ? APP_CONFIG.SEND_WORKSPACE_MIN_PER_DAY : APP_CONFIG.GROUPED_WORKSPACE_MIN_PER_DAY);
+}
+/** Projeto em que todos os painéis ativos são fluxos pesados (Recebimento / Expedição): os tetos diários não dividem a cota. */
+function onlyHeavyFlows_() {
+  const keys = Object.keys(INDICATORS);
+  return keys.length > 0 && keys.every(k => heavyGrouped_(INDICATORS[k]));
 }
 /** Painel com teto diário próprio (Expedição: detalhe por rota + IDs de viagem). */
 function sendBudgetKey_(indicator) { return !!(indicator && INDICATORS[indicator] && INDICATORS[indicator].byRoute); }
@@ -2385,7 +2398,8 @@ function queueMissingCompactions_(limit) {
 function computeSyncStatus_() {
   const stats = {PENDING: 0, RUNNING: 0, DONE: 0, ERROR: 0};
   // V3.32: tarefas de fontes só sob demanda (Histórico da Sem Movimentação) não são da fila dos gatilhos.
-  allTabRows_('JOBS').forEach(r => { if (!INDICATORS[r[2]] && HISTORY_INDICATORS_[r[2]]) return; stats[r[5]] = (stats[r[5]] || 0) + 1; });
+  // V4.2: tarefas antigas de painel desligado neste projeto (PAINEIS / PAINEIS_FORA) também ficam de fora.
+  allTabRows_('JOBS').forEach(r => { if (!INDICATORS[r[2]] && (HISTORY_INDICATORS_[r[2]] || ALL_INDICATORS_[r[2]])) return; stats[r[5]] = (stats[r[5]] || 0) + 1; });
   stats.updatedAt = new Date().toISOString();
   return stats;
 }

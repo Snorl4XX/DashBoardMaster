@@ -753,7 +753,7 @@ function tripCoverage_(indicator, from, to) {
  * Nada de número de remessa, nome ou dado pessoal no texto. `date` (opcional, AAAA-MM-DD): padrão = ontem.
  */
 function diagnosticarExpedicao(date) {
-  const key = 'send_flow', cfg = INDICATORS[key];
+  const key = 'send_flow', cfg = activeCfg_(key);
   const d = isIso_(date) ? date : lastClosedDate_(key);
   const lines = [], out = {versao: APP_CONFIG.VERSION, data: d};
   const add = x => lines.push(x);
@@ -870,7 +870,7 @@ function diagnosticarExpedicao(date) {
  * Code 50) da nossa base. Número de remessa não aparece. `date` (opcional, AAAA-MM-DD): padrão = último dia fechado.
  */
 function diagnosticarViagensSCDC(date) {
-  const key = 'sc_dc', cfg = INDICATORS[key];
+  const key = 'sc_dc', cfg = activeCfg_(key);
   const d = isIso_(date) ? date : lastClosedDate_(key);
   const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, amostra: []};
   const add = x => lines.push(x);

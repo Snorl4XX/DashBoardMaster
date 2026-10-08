@@ -609,6 +609,11 @@
       state.catalog = boot.catalog || [];
       state.catalog.forEach(function (c) { state.catalogMap[c.key] = c; });
       $('#appVersion').textContent = 'v' + boot.app.version;
+      // V4.2: nome deste painel (Propriedades do script NOME_PAINEL), ex.: o painel separado dos fluxos.
+      if (boot.app.panel) {
+        I18N.pt.panel = boot.app.panel; I18N.zh.panel = boot.app.panel;
+        Array.prototype.forEach.call(document.querySelectorAll('[data-i18n="panel"]'), function (el) { el.textContent = boot.app.panel; });
+      }
       $('#brandCenter').textContent = boot.center || 'SP GRU';
       $('#eyebrowCenter').textContent = boot.center || 'SP GRU';
       if (!boot.initialized) { $('#main').classList.add('no-data'); showAlert(t('setupText'), 'warn'); return; }

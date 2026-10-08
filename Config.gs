@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.1.0',
+  VERSION: '4.2.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -160,7 +160,7 @@ const SHIFT_COLORS = Object.freeze({T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7',
  *   Protege contra payloads sem filtro (que baixariam todas as remessas processadas).
  * routeKey: identifica os cabeçalhos Routename/Routernamelist (ver JmsApi.gs).
  */
-const INDICATORS = Object.freeze({
+const ALL_INDICATORS_ = Object.freeze({
   wrong_send: {
     key: 'wrong_send', order: 1, routeKey: 'WRONG_SEND',
     name: {pt: 'Envio Errado', zh: '错发'},
@@ -1171,6 +1171,35 @@ const INDICATORS = Object.freeze({
 });
 
 /**
+ * V4.2 — painéis deste projeto (Propriedades do script). Permite separar os painéis pesados num outro projeto:
+ *   PAINEIS      = só estes (ex.: "arrival_flow,send_flow" no painel separado dos fluxos);
+ *   PAINEIS_FORA = todos menos estes (ex.: "arrival_flow,send_flow" no painel principal).
+ * Painel fora não aparece no menu nem nos Resultados, não entra na fila e não gasta cota. Sem as duas = todos (como antes).
+ * Nome errado é ignorado; se nenhum nome valer, ficam todos (o painel nunca abre vazio).
+ */
+function activeIndicators_(all) {
+  let only = '', drop = '';
+  try {
+    const p = PropertiesService.getScriptProperties();
+    only = String(p.getProperty('PAINEIS') || '');
+    drop = String(p.getProperty('PAINEIS_FORA') || '');
+  } catch (e) { return all; }
+  const list = x => x.split(/[\s,;]+/).map(k => k.trim()).filter(k => k && all[k]);
+  const keep = list(only), out = list(drop);
+  if (!keep.length && !out.length) return all;
+  const res = {};
+  Object.keys(all).forEach(k => { if ((!keep.length || keep.indexOf(k) >= 0) && out.indexOf(k) < 0) res[k] = all[k]; });
+  return Object.keys(res).length ? Object.freeze(res) : all;
+}
+const INDICATORS = activeIndicators_(ALL_INDICATORS_);
+/** Painel ativo neste projeto (diagnósticos): painel desligado por PAINEIS/PAINEIS_FORA dá um erro claro. */
+function activeCfg_(key) {
+  if (INDICATORS[key]) return INDICATORS[key];
+  throw new Error('O painel "' + key + '" não está ativo neste projeto (Propriedades do script PAINEIS / PAINEIS_FORA). ' +
+    'Rode este diagnóstico no projeto que mostra esse painel.');
+}
+
+/**
  * Sem Movimentação · Histórico (V3.32) — "Fonte de dados = Histórico" da mesma tela (captura do usuário): o mesmo resumo
  * (trajectory_monitor_total) com modleType "history" e as datas da tela (startDate "AAAA-MM-DD 00:00:00", endDate
  * "AAAA-MM-DD 23:59:59"); o JMS devolve uma linha por dia (dateTime) e tipo de bipe. Em cada dia vale a linha com o
@@ -1181,6 +1210,7 @@ const INDICATORS = Object.freeze({
  */
 const HISTORY_INDICATORS_ = (function () {
   const base = INDICATORS.no_move;
+  if (!base) return Object.freeze({}); // V4.2: projeto sem a Sem Movimentação (PAINEIS / PAINEIS_FORA)
   const cfg = Object.assign({}, base, {
     key: 'no_move_hist', order: 11.5, historyOf: 'no_move', onDemand: true, snapshot: false, historySource: null,
     name: {pt: 'Sem Movimentação · Histórico', zh: '断更 · 历史'},

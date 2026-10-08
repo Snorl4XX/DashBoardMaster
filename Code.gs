@@ -14,8 +14,9 @@ function doGet(e) {
     indicator: INDICATORS[p.ind] ? p.ind : '',
     view: p.view === 'results' ? 'results' : 'dashboard'
   });
+  const panelName = String(getProp_('NOME_PAINEL', '') || '').slice(0, 60);
   return view.evaluate()
-    .setTitle(APP_CONFIG.APP_NAME)
+    .setTitle(APP_CONFIG.APP_NAME + (panelName ? ' · ' + panelName : ''))
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
@@ -80,7 +81,8 @@ function getAppBootstrap() {
     pauses = publicPauses_();
   }
   return safeReturn_({
-    app: {name: APP_CONFIG.APP_NAME, nameZh: APP_CONFIG.APP_NAME_ZH, version: APP_CONFIG.VERSION, red: APP_CONFIG.RED},
+    app: {name: APP_CONFIG.APP_NAME, nameZh: APP_CONFIG.APP_NAME_ZH, version: APP_CONFIG.VERSION, red: APP_CONFIG.RED,
+      panel: String(getProp_('NOME_PAINEL', '') || '').slice(0, 60)},
     center: centerName_(), catalog: getPublicCatalog_(), shiftColors: SHIFT_COLORS,
     today: isoToday_(), historyStart: getProp_('DATA_START_DATE', '') || earliest || '',
     latestByIndicator: latest, lastUpdated: lastUpdated, initialized: initialized,
@@ -721,7 +723,7 @@ function diagnosticoCompleto(date) {
  * `date` (opcional, AAAA-MM-DD): padrão = ontem.
  */
 function diagnosticarRecebimento(date) {
-  const key = 'arrival_flow', cfg = INDICATORS[key];
+  const key = 'arrival_flow', cfg = activeCfg_(key);
   const d = isIso_(date) ? date : lastClosedDate_(key);
   const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, listas: []};
   const add = x => lines.push(x);
@@ -862,7 +864,7 @@ function diagnosticarRecebimento(date) {
  * e mostra a situação do download dos últimos dias e os últimos avisos. `date` (opcional, AAAA-MM-DD): padrão = ontem.
  */
 function diagnosticarLotes(date) {
-  const key = 'lot_flow', cfg = INDICATORS[key];
+  const key = 'lot_flow', cfg = activeCfg_(key);
   const d = isIso_(date) ? date : lastClosedDate_(key);
   const lines = [], out = {versao: APP_CONFIG.VERSION, data: d};
   const add = x => lines.push(x);
@@ -972,7 +974,7 @@ function diagnosticarLotes(date) {
  *  - a situação do download de hoje e dos últimos dias e os últimos avisos.
  */
 function diagnosticarSemMovimentacao() {
-  const key = 'no_move', cfg = INDICATORS[key], d = isoToday_();
+  const key = 'no_move', cfg = activeCfg_(key), d = isoToday_();
   const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, tipos: []};
   const add = x => lines.push(x);
   const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
@@ -1072,7 +1074,7 @@ function diagnosticarSemMovimentacao() {
  * `date` (opcional, AAAA-MM-DD): padrão = ontem.
  */
 function diagnosticarAvaria(date) {
-  const key = 'damage', cfg = INDICATORS[key], ok = cfg.orderKinds;
+  const key = 'damage', cfg = activeCfg_(key), ok = cfg.orderKinds;
   const d = isIso_(date) ? date : lastClosedDate_(key);
   const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, codigos: []};
   const add = x => lines.push(x);

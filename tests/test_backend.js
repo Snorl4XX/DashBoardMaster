@@ -2892,4 +2892,48 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     /ID de SAÍDA/.test(dg.texto) && !/4440\d{8}/.test(dg.texto), 'diagnosticarViagensSCDC: chegada → saída, sem número de remessa', dg.texto.slice(0, 600));
 }
 
+// ---------- V4.2: painel separado dos fluxos (PAINEIS / PAINEIS_FORA) ----------
+{
+  const FLOWS = ['arrival_flow', 'send_flow'];
+  const keysOf = c => require('vm').runInContext('Object.keys(INDICATORS)', c);
+  const all = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
+  // Painel principal: tudo menos Recebimento e Expedição (fluxo operacional).
+  const cM = freshCtx({[D19]: makeDay(D19, 42)}, null, {PAINEIS_FORA: 'arrival_flow, send_flow', NOME_PAINEL: 'Indicadores'});
+  const keysM = keysOf(cM);
+  check(keysM.length === all.length - 2 && FLOWS.every(k => keysM.indexOf(k) < 0) && cM.getPublicCatalog_().every(c => FLOWS.indexOf(c.key) < 0),
+    'PAINEIS_FORA: Recebimento e Expedição fora do menu', keysM);
+  cM.queueHistory(D19, D19, true);
+  runAll(cM);
+  const urlsM = cM.__state.fetches.map(f => f.url);
+  check(!urlsM.some(u => /arrivalbyday|sendbyday/.test(u)) && urlsM.some(u => /center_wrong_send/.test(u)) && urlsM.some(u => /keywordList/.test(u)),
+    'painel principal: nenhuma consulta dos fluxos (o SC→DC continua com o rastreamento dos IDs de saída)');
+  check(cM.getResultsData({from: D19, to: D19}).series.every(x => FLOWS.indexOf(x.key) < 0) && cM.getAppBootstrap().app.panel === 'Indicadores',
+    'Resultados sem os fluxos e nome do painel (NOME_PAINEL)');
+  // Tarefas antigas do Recebimento (de antes de separar) não travam a contagem da fila.
+  cM.appendRow_('JOBS', ['x1', 'DETAIL_INIT', 'arrival_flow', D19, 1, 'PENDING', 0, new Date(), new Date(), '']);
+  cM.TAB_CACHE_ = {}; cM.TAB_INDEX_ = {};
+  check(cM.computeSyncStatus_().PENDING === 0 && !cM.pendingJobs_().some(j => j.indicator === 'arrival_flow'), 'fila do principal ignora tarefas dos fluxos', cM.computeSyncStatus_());
+  let errD = '';
+  try { cM.diagnosticarRecebimento(D19); } catch (e) { errD = e.message; }
+  check(/não está ativo neste projeto/.test(errD), 'diagnóstico de painel desligado explica onde rodar', errD);
+  // Painel dos fluxos: só Recebimento e Expedição (sem Sem Movimentação → sem o Histórico dela).
+  const cF = freshCtx({}, null, {PAINEIS: 'arrival_flow,send_flow'});
+  check(keysOf(cF).sort().join() === FLOWS.slice().sort().join() && cF.getPublicCatalog_().map(c => c.key).sort().join() === FLOWS.slice().sort().join() &&
+    !cF.indicatorCfg_('no_move_hist'), 'PAINEIS: só os dois fluxos (e nada da Sem Movimentação)', keysOf(cF));
+  const qF = cF.queueHistory(D19, D19, true);
+  check(cF.pendingJobs_().every(j => FLOWS.indexOf(j.indicator) >= 0) && cF.pendingJobs_().length > 0, 'fila do painel dos fluxos só com os fluxos', qF);
+  // Tetos diários: no projeto só dos fluxos a cota é toda deles; no principal (e no projeto com tudo) ficam como antes.
+  const cFg = freshCtx({}, null, {PAINEIS: 'arrival_flow,send_flow', COTA_GOOGLE: 'gmail'});
+  const cAll = freshCtx({}, null, {COTA_GOOGLE: 'gmail'});
+  check(cFg.groupedBudgetMin_('arrival_flow') === 40 && cFg.groupedBudgetMin_('send_flow') === 45 &&
+    cAll.groupedBudgetMin_('arrival_flow') === 35 && cAll.groupedBudgetMin_('send_flow') === 20,
+    'painel só dos fluxos (Gmail): Recebimento 40 + Expedição 45 min/dia (antes 35 + 20, dividindo com os outros painéis)');
+  const cOne = freshCtx({}, null, {PAINEIS: 'send_flow', COTA_GOOGLE: 'gmail'});
+  check(cOne.groupedBudgetMin_('send_flow') === 85 && freshCtx({}, null, {PAINEIS: 'arrival_flow,send_flow', COTA_GOOGLE: 'gmail', EXPEDICAO_MIN_POR_DIA: '30'}).groupedBudgetMin_('send_flow') === 30,
+    'um fluxo sozinho fica com 85 min; EXPEDICAO_MIN_POR_DIA continua mandando');
+  // Nome errado não esvazia o painel.
+  const cX = createContext({props: Object.assign({}, baseProps, {PAINEIS: 'recebimento'}), jms: fakeJms({}), quiet: true});
+  check(keysOf(cX).length === all.length, 'PAINEIS com nome errado: todos os painéis (nunca vazio)');
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');
