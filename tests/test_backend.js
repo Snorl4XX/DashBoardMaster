@@ -2936,4 +2936,33 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(keysOf(cX).length === all.length, 'PAINEIS com nome errado: todos os painéis (nunca vazio)');
 }
 
+// ---------- V4.3: dois pacotes gerados (painel principal / painel dos fluxos), cada um já configurado ----------
+{
+  const os = require('os'), pathM = require('path'), fsM = require('fs'), vmM = require('vm');
+  const {build} = require('../tools/gerar_paineis');
+  const out = fsM.mkdtempSync(pathM.join(os.tmpdir(), 'jt-pacotes-'));
+  const res = build(out);
+  const keysOf = c => vmM.runInContext('Object.keys(INDICATORS)', c);
+  const ctxOf = (id, props) => createContext({root: res.filter(r => r.id === id)[0].dir, props: Object.assign({}, baseProps, props || {}), jms: fakeJms({}), quiet: true});
+  const full = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
+  const pP = ctxOf('principal'), pF = ctxOf('fluxos');
+  check(keysOf(pP).length === full.length - 2 && keysOf(pP).every(k => k !== 'arrival_flow' && k !== 'send_flow') && pP.getAppBootstrap().app.panel === '',
+    'pacote principal: tudo menos os fluxos, sem precisar de propriedade', keysOf(pP));
+  check(keysOf(pF).sort().join() === 'arrival_flow,send_flow' && pF.getAppBootstrap().app.panel === 'Fluxo operacional',
+    'pacote dos fluxos: só Recebimento e Expedição, com o nome "Fluxo operacional"', keysOf(pF));
+  check(keysOf(ctxOf('fluxos', {PAINEIS: 'arrival_flow'})).join() === 'arrival_flow' && ctxOf('fluxos', {NOME_PAINEL: 'Fluxos GRU'}).getAppBootstrap().app.panel === 'Fluxos GRU',
+    'Propriedades do script valem mais que o pacote');
+  const files = d => fsM.readdirSync(d).sort();
+  const gsP = files(res[0].dir), gsF = files(res[1].dir);
+  check(gsP.join() === gsF.join() && ['Config.gs', 'Code.gs', 'Expedicao.gs', 'Index.html', 'Client.html', 'Styles.html', 'Mascot.html', 'appsscript.json', 'LEIA_ESTE_PAINEL.md'].every(f => gsP.indexOf(f) >= 0),
+    'os dois pacotes com todos os arquivos do Apps Script', gsP);
+  const differ = gsP.filter(f => fsM.readFileSync(pathM.join(res[0].dir, f), 'utf8') !== fsM.readFileSync(pathM.join(res[1].dir, f), 'utf8'));
+  check(differ.sort().join() === 'Config.gs,LEIA_ESTE_PAINEL.md', 'pacotes iguais, menos a linha do Config.gs e o LEIA', differ);
+  check(res.every(r => fsM.readFileSync(r.zip).slice(0, 2).toString() === 'PK') && /OUTRA conta Google/.test(fsM.readFileSync(pathM.join(res[1].dir, 'LEIA_ESTE_PAINEL.md'), 'utf8')),
+    'ZIP de cada pacote e instrução da outra conta no painel dos fluxos');
+  // Repositório (sem pacote): todos os painéis, como antes.
+  check(/^const PACOTE_PAINEIS_ = \{so: '', fora: '', nome: ''\};$/m.test(fsM.readFileSync(pathM.join(__dirname, '..', 'Config.gs'), 'utf8')), 'Config.gs do repositório com todos os painéis');
+  fsM.rmSync(out, {recursive: true, force: true});
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

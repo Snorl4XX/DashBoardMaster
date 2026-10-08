@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.2.0',
+  VERSION: '4.3.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1183,7 +1183,9 @@ function activeIndicators_(all) {
     const p = PropertiesService.getScriptProperties();
     only = String(p.getProperty('PAINEIS') || '');
     drop = String(p.getProperty('PAINEIS_FORA') || '');
-  } catch (e) { return all; }
+  } catch (e) { /* sem Propriedades: vale o pacote */ }
+  // V4.3: sem as propriedades, vale o pacote instalado (painel principal / painel dos fluxos — PACOTE_PAINEIS_).
+  if (!only.trim() && !drop.trim()) { only = PACOTE_PAINEIS_.so; drop = PACOTE_PAINEIS_.fora; }
   const list = x => x.split(/[\s,;]+/).map(k => k.trim()).filter(k => k && all[k]);
   const keep = list(only), out = list(drop);
   if (!keep.length && !out.length) return all;
@@ -1191,7 +1193,17 @@ function activeIndicators_(all) {
   Object.keys(all).forEach(k => { if ((!keep.length || keep.indexOf(k) >= 0) && out.indexOf(k) < 0) res[k] = all[k]; });
   return Object.keys(res).length ? Object.freeze(res) : all;
 }
+/**
+ * V4.3 — pacote instalado. O gerador (tools/gerar_paineis.js) troca a linha abaixo em cada pacote:
+ *   painel principal  → {so: '', fora: 'arrival_flow,send_flow', nome: ''}
+ *   painel dos fluxos → {so: 'arrival_flow,send_flow', fora: '', nome: 'Fluxo operacional'}
+ * No repositório (e em quem instalou um único painel com tudo): vazio = todos os painéis.
+ * As Propriedades do script PAINEIS / PAINEIS_FORA / NOME_PAINEL, quando preenchidas, valem mais que o pacote.
+ */
+const PACOTE_PAINEIS_ = {so: '', fora: '', nome: ''};
 const INDICATORS = activeIndicators_(ALL_INDICATORS_);
+/** Nome deste painel (embaixo do logo e na aba do navegador): NOME_PAINEL ou o do pacote. */
+function panelName_() { return String(getProp_('NOME_PAINEL', '') || PACOTE_PAINEIS_.nome || '').slice(0, 60); }
 /** Painel ativo neste projeto (diagnósticos): painel desligado por PAINEIS/PAINEIS_FORA dá um erro claro. */
 function activeCfg_(key) {
   if (INDICATORS[key]) return INDICATORS[key];

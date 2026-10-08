@@ -161,7 +161,7 @@ function createContext(opts) {
     }};
   }
   vm.createContext(context);
-  const root = path.join(__dirname, '..');
+  const root = opts.root || path.join(__dirname, '..');
   const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
   const code = files.map(f => fs.readFileSync(path.join(root, f + '.gs'), 'utf8')).join('\n;\n');
   vm.runInContext(code, context, {filename: 'projeto.gs'});

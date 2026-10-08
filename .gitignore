@@ -2,3 +2,5 @@
 node/dados/
 node/config.json
 node_modules/
+# Pacotes gerados por tools/gerar_paineis.js (painel principal / painel dos fluxos).
+dist/

@@ -1,8 +1,27 @@
-# J&T DASHMASTER V4.2 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.3 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.3 — Dois pacotes prontos: painel principal e painel dos fluxos
+Agora vêm **dois ZIPs, cada um já configurado**. Não precisa preencher `PAINEIS` / `PAINEIS_FORA` para separar.
+
+| Pacote | O que mostra | Onde instalar |
+|---|---|---|
+| **JT_DASHMASTER_V4_3_PRINCIPAL.zip** | Todos os painéis, menos Recebimento e Expedição (fluxo operacional) | No projeto do Apps Script que você já usa (o link não muda) |
+| **JT_DASHMASTER_V4_3_FLUXOS.zip** | Só Recebimento e Expedição (fluxo operacional), com o nome "Fluxo operacional" | Num projeto novo, em **outra conta Google** (cota própria) |
+
+**Como instalar:** cada ZIP tem um `LEIA_ESTE_PAINEL.md` com o passo a passo daquele painel.
+
+**O que muda entre os pacotes:**
+- Os dois têm os mesmos arquivos `.gs` e `.html`.
+- Só uma linha do `Config.gs` muda (`PACOTE_PAINEIS_`), e é ela que diz qual painel é qual.
+- As Propriedades do script `PAINEIS`, `PAINEIS_FORA` e `NOME_PAINEL` continuam funcionando e, se preenchidas, valem mais que o pacote.
+
+**Para quem mexe no código:**
+- O repositório continua com um código só, com todos os painéis.
+- Os dois pacotes saem de `node tools/gerar_paineis.js`, que grava em `dist/`.
 
 ## V4.2 — Painel separado para os fluxos (Recebimento e Expedição)
 Os dois fluxos operacionais são os painéis mais pesados: cerca de 550 mil remessas por dia no Recebimento e 117 mil na Expedição. Agora o mesmo código pode virar **dois painéis**: o principal, sem os fluxos, e um painel só dos fluxos. Isso é configurado por uma propriedade do script, sem copiar código diferente.
