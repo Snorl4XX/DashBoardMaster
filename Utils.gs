@@ -104,6 +104,29 @@ function countryId_() { return getProp_('JMS_COUNTRY_ID', APP_CONFIG.DEFAULT_COU
 function tz_() { const z = getProp_('JMS_TIMEZONE', APP_CONFIG.TZ); return /^GMT[+-]\d{4}$/.test(z) ? APP_CONFIG.TZ : z; }
 
 function isoToday_() { return Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd'); }
+// ------------------------------------------------------------------ V4.5: modo de atualização
+/**
+ * MODO_ATUALIZACAO (Propriedades do script):
+ *  - 'diario' (padrão, pedido do usuário): cada dia FECHADO é baixado UMA vez, depois que fecha (a partir de
+ *    HORA_ATUALIZACAO, padrão 7h; SC→SC e SC→DC fecham às 14h do dia seguinte), e fica salvo — nunca é baixado de novo.
+ *    Sem atualização de hoje a cada 30 min nem revalidação de hora em hora. Hoje só com o botão Atualizar do painel.
+ *  - 'continuo': como até a V4.4 (hoje a cada ATUALIZACAO_MIN, os 3 últimos dias revalidados de hora em hora).
+ */
+function dailyMode_() { return String(getProp_('MODO_ATUALIZACAO', 'diario')).trim().toLowerCase() !== 'continuo'; }
+function updateHour_() {
+  const raw = String(getProp_('HORA_ATUALIZACAO', '')).trim(), h = Number(raw);
+  return raw !== '' && h >= 0 && h <= 23 ? Math.floor(h) : 7;
+}
+/** Quando o dia fica "fechado" para o download único: dia seguinte na HORA_ATUALIZACAO (SC→SC/SC→DC: às 14h, no mínimo). */
+function dayCloseAt_(indicatorKey, date) {
+  const h = isOperational_(indicatorKey) ? Math.max(14, updateHour_()) : updateHour_();
+  return addDaysIso_(date, 1) + ' ' + String(h).padStart(2, '0') + ':00:00';
+}
+function localStamp_(iso) {
+  const t = iso ? new Date(iso) : null;
+  return t && !isNaN(t.getTime()) ? Utilities.formatDate(t, tz_(), 'yyyy-MM-dd HH:mm:ss') : '';
+}
+
 function hourNow_() { return Number(Utilities.formatDate(new Date(), tz_(), 'H')); }
 function addDaysIso_(iso, days) { return JTCore_.addDays(iso, days); }
 function dateRangeIso_(from, to) { return JTCore_.dateRange(from, to); }

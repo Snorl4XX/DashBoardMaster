@@ -1,8 +1,45 @@
-# J&T DASHMASTER V4.4.2 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.5 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.5 — Atualização diária: cada dia é baixado uma vez e fica salvo
+**Pedido:** não atualizar o tempo todo. Baixar uma vez, deixar salvo e, quando virar o dia, baixar só o dia novo.
+
+**Como funciona agora (modo diário, o padrão):**
+- **Cada dia fechado é baixado uma vez:** a taxa, os cartões e a lista (gráficos e tabela). Depois fica salvo e **nunca é consultado de novo**.
+- **O dia novo entra sozinho depois que fecha:**
+  - todos os painéis: **a partir das 7h** do dia seguinte;
+  - SC → SC e SC → DC: **a partir das 14h**, porque a janela deles vai das 14h às 13:59 do dia seguinte.
+- **Não tem mais:**
+  - atualização de hoje a cada 30 min;
+  - revalidação de hora em hora dos últimos 3 dias;
+  - foto da Sem Movimentação a cada 5 min (agora é uma foto por dia, às 7h).
+- **Hoje:** os números do dia em andamento só aparecem pelo botão **Atualizar** do painel, quando você quiser.
+- **Se a fila ficar parada** (cota, token vencido): os dias que não foram baixados entram sozinhos quando ela voltar. O painel confere os 7 últimos dias fechados.
+- Um dia que tinha sido baixado **antes** de fechar (versões anteriores, ou o Atualizar no meio do dia) é baixado de novo **uma vez**, depois que fecha, para ficar com o número final.
+- O painel mostra a etiqueta **"Atualização diária · 07h"** embaixo dos filtros.
+
+**Economia (simulação da conta Gmail, 90 min/dia de gatilhos, 20 mil consultas/dia):**
+
+| | V4.4.2 (contínuo) | **V4.5 (diário)** |
+|---|---|---|
+| Painel principal, uso por dia | 49 min · 1.344 consultas | **4,5 min · 230 consultas** |
+| Painel principal, dia do histórico | 74,5 min | **31,9 min** |
+| Painel dos fluxos, uso por dia | 76 min · 10.393 consultas | **41 min · 5.301 consultas** |
+| Painel dos fluxos, dia do histórico | 142 execuções barradas pela cota, 9 tarefas pendentes | **nenhuma barrada, fila vazia** |
+
+**Propriedades do script (opcionais):**
+
+| Propriedade | Para que serve |
+|---|---|
+| `HORA_ATUALIZACAO` | Hora em que o dia de ontem é baixado (0 a 23; padrão `7`) |
+| `MODO_ATUALIZACAO` = `continuo` | Volta ao comportamento antigo: hoje a cada 30 min e os 3 últimos dias revalidados de hora em hora |
+
+A versão Node.js continua com a coleta contínua, porque lá não existe cota.
+
+**Como instalar:** troque todos os `.gs` e `.html` pelos do ZIP V4.5 (nos dois projetos) e publique uma **Nova versão**. Não precisa rodar nenhuma função.
 
 ## V4.4.2 — Cota de consultas do Google: sem o aviso vermelho e com economia antes de acabar
 **O problema:** o Google limita as consultas externas (UrlFetch) **por conta**: 20 mil por dia na conta Gmail e 100 mil no Workspace. A fila consultava até a cota acabar. Depois disso:

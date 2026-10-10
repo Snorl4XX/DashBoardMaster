@@ -7,7 +7,9 @@ function hasDate(o) { if (o instanceof Date) return true; if (o && typeof o === 
 const days = {'2026-09-17': makeDay('2026-09-17', 11), '2026-09-18': makeDay('2026-09-18', 23), '2026-09-19': makeDay('2026-09-19', 37)};
 // DETAIL_DAYS_ARRIVAL_FLOW: os dias dos testes (setembro) ficam dentro da janela de detalhe do Recebimento.
 // ATUALIZACAO_MIN 60: os testes antigos contam a fila sem a atualização rápida de hoje (V3.24 tem testes próprios).
-const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60'};
+// MODO_ATUALIZACAO continuo: os testes antigos conferem a atualização contínua (opção); o modo diário (padrão da V4.5) tem os seus.
+const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60',
+  MODO_ATUALIZACAO: 'continuo'};
 const ctx = createContext({props: baseProps, jms: fakeJms(days), quiet: true});
 const S = ctx.__state;
 
@@ -3224,6 +3226,67 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cN = freshCtx({}, null, {PLATAFORMA: 'node'});
   cN.__state.props['URLFETCH_' + today] = '999999';
   check(cN.fetchBudgetMode_() === 'ok', 'versão Node.js: sem cota do Google');
+}
+
+// ---------- V4.5: modo diário — cada dia fechado baixado UMA vez; sem atualizar o tempo todo ----------
+{
+  const c0 = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  check(c0.dailyMode_() === true && c0.updateHour_() === 7, 'padrão: modo diário, a partir das 7h');
+  const c1 = createContext({props: {MODO_ATUALIZACAO: 'continuo', HORA_ATUALIZACAO: '5'}, jms: fakeJms({}), quiet: true});
+  check(c1.dailyMode_() === false && c1.updateHour_() === 5, 'MODO_ATUALIZACAO=continuo volta ao comportamento antigo; HORA_ATUALIZACAO troca a hora');
+  const today = c0.isoToday_(), ago = n => c0.addDaysIso_(today, -n), Y = ago(1), Y2 = ago(2), Y3 = ago(3);
+  const daysD = {[Y]: makeDay(Y, 81), [Y2]: makeDay(Y2, 82), [Y3]: makeDay(Y3, 83)};
+  const cD = freshCtx(daysD, null, {DATA_START_DATE: Y3, MODO_ATUALIZACAO: 'diario', ATUALIZACAO_MIN: '30'});
+  // Relógio do teste: o horário de São Paulo de hoje que o teste escolhe (taxas gravadas e "agora" no mesmo relógio).
+  // O relógio anda normalmente a partir da hora escolhida (prazos e carimbos da fila continuam valendo).
+  const RealDate = Date;
+  let hour = 3, offset = 0;
+  const setHour = h => { hour = h; offset = RealDate.parse(today + 'T' + String(h).padStart(2, '0') + ':30:00-03:00') - RealDate.now(); };
+  class TestDate extends RealDate {
+    constructor(...a) { if (a.length) super(...a); else super(RealDate.now() + offset); }
+    static now() { return RealDate.now() + offset; }
+    static [Symbol.hasInstance](x) { return x instanceof RealDate; } // datas das planilhas continuam sendo datas
+  }
+  setHour(3);
+  cD.Date = TestDate;
+  const S = cD.__state, todayJobs = () => cD.allTabRows_('JOBS').filter(r => cD.dateCellIso_(r[3]) === today);
+  // Madrugada (antes da hora): nada é consultado — nem hoje a cada 30 min, nem a foto da Sem Movimentação.
+  cD.syncHourly();
+  for (let i = 0; i < 3; i++) runAll(cD, 1);
+  check(S.fetches.length === 0 && todayJobs().length === 0, 'antes das 7h: nenhuma consulta ao JMS', S.fetches.length);
+  // A partir das 7h: os dias fechados ainda não baixados entram UMA vez (resumo e lista); hoje não.
+  setHour(9);
+  cD.syncHourly();
+  runAll(cD);
+  const done = k => [Y, Y2, Y3].every(d => cD.getDayStatus_(k, d) && cD.getDayStatus_(k, d).details === 'COMPLETE');
+  check(['wrong_send', 'sorting_error', 'missing_receipt', 'damage', 'unseal'].every(done) && cD.dayIsFinal_('wrong_send', Y),
+    'às 9h: ontem e os dias anteriores baixados (taxa e lista) e marcados como finais');
+  check(todayJobs().every(r => INDICATORS_SNAPSHOT(cD, r[2])), 'hoje não é baixado sozinho (só a foto do dia da Sem Movimentação)', todayJobs().map(r => r[2] + ' ' + r[1]));
+  check(!['sc_sc', 'sc_dc'].some(k => cD.getDayStatus_(k, Y)) && done2(cD, 'sc_sc', [Y2, Y3]), 'SC→SC e SC→DC: ontem só depois das 14h (janela 14h–14h)');
+  // Depois: o dia salvo não é consultado de novo (nem de hora em hora, nem a cada 5 min).
+  const n1 = S.fetches.length;
+  for (let h = 10; h <= 13; h++) { setHour(h); cD.syncHourly(); runAll(cD, 2); }
+  check(S.fetches.length === n1, 'dia salvo não é consultado de novo (10h às 13h: zero consultas)', S.fetches.length - n1);
+  // 14h: o dia de ontem do SC→SC e do SC→DC fecha e entra uma vez.
+  setHour(15);
+  cD.syncHourly();
+  runAll(cD);
+  check(['sc_sc', 'sc_dc'].every(k => cD.getDayStatus_(k, Y) && cD.getDayStatus_(k, Y).details === 'COMPLETE'), 'às 15h: ontem do SC→SC e do SC→DC baixado uma vez');
+  const n2 = S.fetches.length;
+  setHour(16); cD.syncHourly(); runAll(cD, 2);
+  check(S.fetches.length === n2, 'e depois nada mais até o dia seguinte');
+  // Dia baixado ANTES de fechar (ex.: atualização contínua de antes, ou Atualizar no meio do dia): baixado de novo UMA vez.
+  const rates = cD.tab_('RATES').data, ri = rates.findIndex(r => r && r[0] === 'wrong_send' && cD.dateCellIso_(r[1]) === Y);
+  rates[ri][6] = new Date(Date.parse(Y + 'T23:00:00-03:00'));
+  cD.TAB_CACHE_ = {}; cD.TAB_INDEX_ = {};
+  check(!cD.dayIsFinal_('wrong_send', Y), 'taxa gravada antes de o dia fechar não vale como final');
+  setHour(17); cD.syncHourly(); runAll(cD);
+  check(cD.dayIsFinal_('wrong_send', Y) && S.fetches.length > n2, 'é baixada de novo uma vez e passa a ser final');
+  // Painel: o modo e a hora vão para o navegador (a foto da Sem Movimentação não é buscada sozinha ao abrir).
+  const boot = cD.getAppBootstrap();
+  check(boot.app.updateMode === 'diario' && boot.app.updateHour === 7, 'painel sabe do modo diário', boot.app);
+  function INDICATORS_SNAPSHOT(c, k) { return !!(c.getIndicatorConfig_(k) || {}).snapshot; }
+  function done2(c, k, ds) { return ds.every(d => c.getDayStatus_(k, d) && c.getDayStatus_(k, d).details === 'COMPLETE'); }
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

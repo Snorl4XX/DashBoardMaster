@@ -1089,6 +1089,38 @@ function queueRecentRefresh_() {
   }));
   return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
 }
+/**
+ * V4.5 (modo diário): cada dia fechado é baixado UMA vez (resumo e, em seguida, a lista), depois que fecha — dayCloseAt_.
+ * Dia já baixado depois de fechar nunca entra de novo. Confere os 7 últimos dias fechados de cada painel (dia esquecido
+ * com a fila parada) a partir de DATA_START_DATE. Roda na sincronização de hora em hora.
+ */
+function dayIsFinal_(indicatorKey, date) {
+  const st = getDayStatus_(indicatorKey, date);
+  if (!st) return false;
+  const close = dayCloseAt_(indicatorKey, date);
+  if (st.summary === 'NO_RECORD') return localStamp_(st.updatedAt) >= close;
+  if (st.summary !== 'COMPLETE') return false;
+  const r = getRateDay_(indicatorKey, date);
+  return !!(r && localStamp_(r.syncedAt) >= close);
+}
+function queueNewClosedDays_() {
+  if (!getProp_('DB_SPREADSHEET_ID', '')) return 0;
+  const pauses = activePauses_();
+  if (pauses['*'] || hourNow_() < updateHour_()) return 0;
+  const start = getProp_('DATA_START_DATE', ''), now = localStamp_(new Date().toISOString()), jobs = [];
+  Object.keys(INDICATORS).forEach(k => {
+    const cfg = INDICATORS[k];
+    if (cfg.snapshot || pauseFor_(cfg.routeKey, pauses)) return;
+    const last = lastClosedDate_(k);
+    for (let i = 0; i < 7; i++) {
+      const d = addDaysIso_(last, -i);
+      if (start && d < start) break;
+      if (dayCloseAt_(k, d) > now) continue;
+      if (!dayIsFinal_(k, d)) jobs.push(['SUMMARY', k, d, 0]);
+    }
+  });
+  return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+}
 function retryFailedJobs() {
   let count = 0;
   allTabRows_('JOBS').forEach((r, i) => {
@@ -1496,9 +1528,15 @@ function processSyncQueue(opts) {
   try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
-  try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
+  // V4.5: no modo diário (padrão), hoje não é atualizado sozinho (só pelo botão Atualizar do painel).
+  if (!dailyMode_()) {
+    try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
+  }
   // V3.29: dia sem foto da Sem Movimentação (instalação, virada do dia): a primeira foto entra na fila já.
-  try { queueSnapshotsToday_(); } catch (e) { logSync_('WARN', '', '', 'Foto de hoje (Sem Movimentação) não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
+  // V4.5: no modo diário, uma foto por dia, a partir da HORA_ATUALIZACAO.
+  if (!dailyMode_() || hourNow_() >= updateHour_()) {
+    try { queueSnapshotsToday_(); } catch (e) { logSync_('WARN', '', '', 'Foto de hoje (Sem Movimentação) não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
+  }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return {ok: false, busy: true};
@@ -1752,7 +1790,9 @@ function runSummaryJob_(job) {
   const cfgS = getIndicatorConfig_(job.indicator);
   const typeChanged = !!(cfgS.detail && cfgS.detail.typeFromSummary && prev && prev.metrics && summary.raw &&
     Number(prev.metrics.refType) !== Number(summary.raw.refType));
-  if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, typeChanged)) {
+  // V4.5 (modo diário): o resumo só roda no download único do dia (ou no histórico/Atualizar): a lista vem junto, sem esperar
+  // o intervalo de atualização.
+  if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, typeChanged || dailyMode_())) {
     enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
   }
   // Recebimento: quantidade de cada turno pelo resumo (4 consultas), para os cartões e pizzas sem esperar o detalhe.

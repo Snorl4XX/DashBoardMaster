@@ -109,6 +109,7 @@
       themeDark: 'Tema escuro', themeLight: 'Tema claro',
       pauseAuthTitle: 'Sincronização pausada: o JMS recusou a credencial',
       pauseAuthText: 'Desde {since} o JMS não aceita o token (normalmente ele expirou). Indicadores afetados: {list}. O responsável deve gerar um novo AuthToken no JMS e atualizar JMS_AUTHTOKEN nas Propriedades do script — a importação recomeça sozinha. Os dados já sincronizados continuam no painel.',
+      dailyBadge: 'Atualização diária · {h}h', dailyHint: 'Cada dia é baixado uma vez, depois que fecha (SC→SC e SC→DC às 14h), e fica salvo. Os números de hoje só com o botão Atualizar.',
       budgetReserveTitle: 'Economizando a cota de consultas do Google de hoje',
       budgetReserveText: '{u} de {l} consultas usadas hoje. Os números de hoje e de ontem continuam atualizando; o histórico e as listas antigas continuam amanhã.',
       budgetStopTitle: 'Cota de consultas do Google de hoje quase no fim',
@@ -263,6 +264,7 @@
       themeDark: '深色主题', themeLight: '浅色主题',
       pauseAuthTitle: '同步已暂停：JMS 拒绝了凭证',
       pauseAuthText: '自 {since} 起 JMS 不接受该令牌（通常已过期）。受影响的指标：{list}。请负责人在 JMS 中重新获取 AuthToken，并在脚本属性中更新 JMS_AUTHTOKEN，导入会自动恢复。已同步的数据仍会显示。',
+      dailyBadge: '每日更新 · {h}点', dailyHint: '每天的数据在当天结束后下载一次并保存（SC→SC 和 SC→DC 为14点）。今天的数据请点击“更新”。',
       budgetReserveTitle: '正在节省今日 Google 外部请求配额',
       budgetReserveText: '今日已使用 {u} / {l} 次请求。今天和昨天的数据继续更新；历史和较早的列表明天继续。',
       budgetStopTitle: '今日 Google 外部请求配额即将用完',
@@ -1363,6 +1365,9 @@
       t('detailsWindowHint') + ' ' + skipped.map(function (d) { return fmtDate(d, true); }).join(', '));
     if (capped.length) html += badge('warn', 'info', t('rowsCapBadge', {n: fmtInt(a.maxRows || meta.rowsLoaded), d: capped.length}),
       t('rowsCapHint') + ' ' + capped.map(function (d) { return fmtDate(d, true); }).join(', '));
+    // V4.5: modo diário — cada dia é baixado uma vez, quando fecha; hoje só pelo botão Atualizar.
+    var app = state.boot && state.boot.app;
+    if (app && app.updateMode === 'diario') html += badge('ok', 'history', t('dailyBadge', {h: String(app.updateHour).padStart(2, '0')}), t('dailyHint'));
     if (meta.lastError) html += badge('bad', 'warn', t('errorBadge', {r: meta.lastError.reason}),
       meta.lastError.reason + ' (' + fmtDate(meta.lastError.date, true) + ')');
     $('#coverageBadges').innerHTML = html;
@@ -3263,6 +3268,8 @@
   var LIVE_MS = 5 * 60000;
   function liveDue() {
     var c = cfg(), td = state.boot && state.boot.today;
+    // V4.5: modo diário — a foto do dia não é buscada sozinha ao abrir nem a cada 5 min (só no botão Atualizar).
+    if (state.boot && state.boot.app && state.boot.app.updateMode === 'diario') return false;
     if (!c || !c.snapshot || state.view !== 'dashboard' || !state.data || !td || state.to !== td || state.liveBusy) return false;
     if (state.data.meta && state.data.meta.indicator !== c.key) return false;
     var r = (state.data.rates || []).filter(function (x) { return x.date === td; })[0];

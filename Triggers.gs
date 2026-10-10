@@ -25,7 +25,8 @@ function syncHourly() {
   // Antes da revalidação: com os 3 últimos dias já no DAY_STATUS, o indicador novo ainda é reconhecido como novo.
   let history = 0;
   try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
-  const queued = queueRecentRefresh_() + history;
+  // V4.5: modo diário (padrão) — só os dias que fecharam e ainda não foram baixados depois de fechar; nada de revalidar.
+  const queued = (dailyMode_() ? queueNewClosedDays_() : queueRecentRefresh_()) + history;
   return {ok: true, queued: queued, worker: processSyncQueue({budgetMs: 240000})};
 }
 

@@ -171,6 +171,8 @@ class GasRuntime {
     set('RECEBIMENTO_MIN_POR_DIA', '0');
     set('EXPEDICAO_MIN_POR_DIA', '0');
     set('PLATAFORMA', 'node');
+    // V4.5: o Apps Script baixa cada dia uma vez (modo diário, por causa da cota); aqui a coleta continua o dia todo.
+    set('MODO_ATUALIZACAO', 'continuo');
     if (props.getProperty('DATA_FOLDER_ID') === null || props.getProperty('REPORT_FOLDER_ID') === null) {
       return this.run('setupProject', [], {quiet: true}).result;
     }
