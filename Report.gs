@@ -30,6 +30,7 @@ function generateReport(indicatorKey, params, format) {
       url = 'https://docs.google.com/spreadsheets/d/' + temp.getId() + '/export?format=pdf&size=A4&portrait=false&fitw=true' +
         '&sheetnames=true&printtitle=false&pagenumbers=true&gridlines=false&fzr=true';
     }
+    noteFetches_(1);
     const resp = UrlFetchApp.fetch(url, {headers: {Authorization: 'Bearer ' + ScriptApp.getOAuthToken()}, muteHttpExceptions: true});
     if (resp.getResponseCode() !== 200) throw new Error('Falha ao exportar ' + format.toUpperCase() + ' (HTTP ' + resp.getResponseCode() + ').');
     blob = resp.getBlob().setContentType(mime);

@@ -1,8 +1,27 @@
-# J&T DASHMASTER V4.4.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.4.2 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.4.2 — Cota de consultas do Google: sem o aviso vermelho e com economia antes de acabar
+**O problema:** o Google limita as consultas externas (UrlFetch) **por conta**: 20 mil por dia na conta Gmail e 100 mil no Workspace. A fila consultava até a cota acabar. Depois disso:
+- o resto do dia ficava sem atualização nenhuma, nem os números de hoje;
+- o painel mostrava em vermelho "Erro: Cota diária de consultas externas do Google (UrlFetch) esgotada", como se fosse um erro do dia.
+
+**O que mudou:**
+- **Sem o aviso vermelho.** Cota do Google não é erro do dia, então não é mais gravada nem mostrada assim, incluindo as gravações antigas. Quando a cota acaba, aparece só o aviso amarelo no topo, que diz que a importação volta sozinha e a hora da nova tentativa (de hora em hora).
+- **Economia antes de acabar.** Cada consulta é contada no dia. Com **80%** da cota usada, a fila só atualiza **hoje e ontem**:
+  - continuam os resumos (cartões e menu lateral) e as listas desses dias;
+  - ficam para o dia seguinte o histórico, a Consulta das bipagens, os IDs de viagem e o detalhe pesado do Recebimento e da Expedição.
+  
+  Com **95%**, a fila espera o dia seguinte. O painel mostra um aviso amarelo com o uso do dia, por exemplo "16.800 de 20.000 consultas usadas hoje".
+- **Propriedade opcional `COTA_URLFETCH_DIA`:** troca o limite. Exemplo: `15000`, para guardar mais folga para o botão Atualizar.
+- **Versão Node.js:** sem mudança, porque lá não existe cota do Google.
+
+**Lembrete:** a cota é **por conta Google**. O painel dos fluxos (Recebimento e Expedição) precisa ficar em **outra conta**. Na mesma conta, os dois painéis dividem as mesmas 20 mil consultas.
+
+**Como instalar:** troque todos os `.gs` e `.html` pelos do ZIP V4.4.2 (nos dois projetos) e publique uma **Nova versão**. O aviso vermelho some na hora (Ctrl+F5 no painel).
 
 ## V4.4.1 — Propriedades do script voltam a ser editáveis (troca do AuthToken)
 **O problema:** o painel guardava o controle interno nas mesmas **Propriedades do script** onde ficam o AuthToken e as configurações. Esse controle inclui progresso de download, planos, fila, migrações e limites aprendidos do JMS. Com o tempo passou de 50 propriedades, e o editor do Apps Script avisa que passou do limite e não deixa mais editar, nem trocar o `JMS_AUTHTOKEN`. No painel principal piorava: o progresso do Recebimento e da Expedição, que saíram desse painel, nunca era apagado.

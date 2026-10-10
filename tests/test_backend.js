@@ -3174,4 +3174,56 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(cT2.publicPauses_().length === 0 && ALL.every(k => cT2.getDayStatus_(k, D19).details === 'COMPLETE'), 'token novo nas Propriedades do script: a fila volta sozinha');
 }
 
+// ---------- V4.4.2: cota diária de consultas externas (UrlFetch) — sem erro vermelho e com economia antes do fim ----------
+{
+  const c0 = createContext({props: baseProps, jms: fakeJms({}), quiet: true});
+  const today = c0.isoToday_(), ago = n => c0.addDaysIso_(today, -n), Y = ago(1), OLD = ago(5);
+  // (a) Cota esgotada no meio da fila: aviso no topo (pausa de 1 h), nenhum erro gravado no dia.
+  const cQ2 = freshCtx({[D19]: makeDay(D19, 71)}, null, {COTA_GOOGLE: 'gmail'});
+  const realFetch = cQ2.UrlFetchApp.fetch, realAll = cQ2.UrlFetchApp.fetchAll;
+  const boom = () => { throw new Error('Service invoked too many times for one day: urlfetch.'); };
+  cQ2.UrlFetchApp.fetch = boom; cQ2.UrlFetchApp.fetchAll = boom;
+  cQ2.queueHistory(D19, D19, true);
+  runAll(cQ2, 2);
+  const stQ = cQ2.allTabRows_('STATUS').filter(r => r[8]);
+  check(cQ2.publicPauses_().some(p => p.kind === 'QUOTA') && !stQ.some(r => /urlfetch|Cota diária/i.test(String(r[8]))) &&
+    cQ2.pendingJobs_().length > 0 && cQ2.pendingJobs_().every(j => j.attempts === 0),
+    'cota esgotada: aviso no topo (nova tentativa em 1 h), nenhum erro vermelho no dia, nenhuma tentativa gasta', stQ.map(r => r[8]));
+  // Gravação antiga (versões anteriores) com o erro da cota no dia: o painel não mostra mais.
+  cQ2.updateDayStatus_('wrong_send', D19, {error: 'Cota diária do Google esgotada ao consultar o JMS: Service invoked too many times for one day: urlfetch.'});
+  check(cQ2.lastErrorFor_('wrong_send', D19, D19) === null, 'erro antigo da cota no dia não vira o aviso vermelho');
+  cQ2.UrlFetchApp.fetch = realFetch; cQ2.UrlFetchApp.fetchAll = realAll;
+  // (b) Contagem: cada consulta externa conta no contador do dia.
+  const cC = freshCtx({[D19]: makeDay(D19, 72)}, null, {COTA_GOOGLE: 'gmail'});
+  cC.queueHistory(D19, D19, true);
+  runAll(cC);
+  check(Number(cC.__state.props['URLFETCH_' + today]) === cC.__state.fetches.length && cC.__state.fetches.length > 50,
+    'contador do dia = consultas externas feitas', [cC.__state.props['URLFETCH_' + today], cC.__state.fetches.length]);
+  // (c) Perto do limite (80%): só hoje e ontem; o histórico espera o dia seguinte. Acima de 95%: a fila espera.
+  const daysB = {[Y]: makeDay(Y, 73), [OLD]: makeDay(OLD, 74)};
+  const cB = freshCtx(daysB, null, {COTA_GOOGLE: 'gmail', DATA_START_DATE: OLD});
+  cB.__state.props['URLFETCH_' + today] = '16500';
+  cB.queueHistory(OLD, Y, true);
+  runAll(cB);
+  const pend = cB.pendingJobs_();
+  check(cB.getDayStatus_('wrong_send', Y).details === 'COMPLETE' && cB.getDayStatus_('sorting_error', Y).details === 'COMPLETE' &&
+    pend.some(j => j.date === OLD) && !pend.some(j => j.date === Y && j.type === 'SUMMARY') && (!cB.getDayStatus_('wrong_send', OLD) || cB.getDayStatus_('wrong_send', OLD).summary !== 'COMPLETE'),
+    'economia (80%): ontem completo; o histórico fica para o dia seguinte', pend.slice(0, 3).map(j => j.type + ' ' + j.indicator + ' ' + j.date));
+  const bp = cB.publicPauses_().filter(p => p.kind === 'BUDGET')[0];
+  check(bp && bp.mode === 'reserve' && bp.limit === 20000 && bp.used >= 16500, 'aviso amarelo de economia com o uso de hoje', bp);
+  cB.__state.props['URLFETCH_' + today] = '19200';
+  const nBefore = cB.__state.fetches.length;
+  runAll(cB, 2);
+  check(cB.__state.fetches.length === nBefore && cB.publicPauses_().some(p => p.kind === 'BUDGET' && p.mode === 'stop'), 'acima de 95%: a fila espera o dia seguinte, sem consultar');
+  cB.__state.props['URLFETCH_' + today] = '0';
+  runAll(cB);
+  check(cB.getDayStatus_('wrong_send', OLD).details === 'COMPLETE' && !cB.publicPauses_().some(p => p.kind === 'BUDGET'), 'cota nova: o histórico continua sozinho');
+  // (d) Workspace: 100 mil; COTA_URLFETCH_DIA troca; versão Node.js: sem limite.
+  check(freshCtx({}, null, {COTA_GOOGLE: 'workspace'}).fetchLimit_() === 100000 && freshCtx({}, null, {COTA_URLFETCH_DIA: '5000'}).fetchLimit_() === 5000,
+    'limite da conta Workspace e propriedade COTA_URLFETCH_DIA');
+  const cN = freshCtx({}, null, {PLATAFORMA: 'node'});
+  cN.__state.props['URLFETCH_' + today] = '999999';
+  check(cN.fetchBudgetMode_() === 'ok', 'versão Node.js: sem cota do Google');
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

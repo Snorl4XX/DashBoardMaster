@@ -252,12 +252,19 @@ function parseJmsResponse_(resp, url) {
 
 /** UrlFetch com mensagem clara para falha de rede e para cota do Google esgotada. */
 function urlFetch_(req) {
+  noteFetches_(1);
   try { return UrlFetchApp.fetch(req.url, req); }
   catch (e) {
     const m = String(e && e.message || e).slice(0, 200);
     if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m);
     throw new Error('Falha de rede ao consultar o JMS: ' + m);
   }
+}
+
+/** Várias consultas de uma vez (UrlFetchApp.fetchAll), contadas na cota do dia (V4.4.2). */
+function fetchAll_(reqs) {
+  noteFetches_(reqs.length);
+  return UrlFetchApp.fetchAll(reqs);
 }
 
 function isRetryable_(e) {
@@ -369,7 +376,7 @@ function prefetchSummaries_(items) {
   let n = 0;
   for (let i = 0; i < reqs.length; i += par) {
     let resp;
-    try { resp = UrlFetchApp.fetchAll(reqs.slice(i, i + par)); }
+    try { resp = fetchAll_(reqs.slice(i, i + par)); }
     catch (e) { return n; } // cota/rede: cada resumo consulta sozinho e mostra o erro como antes
     resp.forEach((r, j) => { if (r) { JMS_PREFETCH_[keys[i + j]] = {resp: r, left: uses[keys[i + j]] || 1}; n++; } });
   }
@@ -778,7 +785,7 @@ function fetchSummaryMetricsBatch_(indicatorKey, isoDate, wins) {
   const endpoint = endpointFor_(cfg, 'summary');
   const payload = w => buildPayload_(indicatorKey, isoDate, 1, APP_CONFIG.PAGE_SIZE, false, w);
   let responses;
-  try { responses = UrlFetchApp.fetchAll(wins.map(w => jmsRequestObject_(endpoint, payload(w)))); }
+  try { responses = fetchAll_(wins.map(w => jmsRequestObject_(endpoint, payload(w)))); }
   catch (e) {
     if (errorKind_(String(e && e.message || e)) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + String(e && e.message || e).slice(0, 200));
     responses = wins.map(() => null);
@@ -822,7 +829,7 @@ function fetchDetailBatch_(indicatorKey, isoDate, items) {
   const endpoint = endpointFor_(cfg, 'detail');
   const reqs = items.map(it => jmsRequestObject_(endpoint, buildPayload_(indicatorKey, isoDate, it.page, it.size, true, it.win)));
   let responses;
-  try { responses = UrlFetchApp.fetchAll(reqs); }
+  try { responses = fetchAll_(reqs); }
   catch (e) {
     const m = String(e && e.message || e);
     if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m.slice(0, 200));
@@ -1170,6 +1177,7 @@ function diagnosticarConexaoJms() {
     const url = endpointFor_(cfg, 'summary');
     const item = {indicador: key, rota: url.split('/').pop(), data: date};
     try {
+      noteFetches_(1);
       const resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, buildPayload_(key, date, 1, 20, false)));
       item.httpStatus = resp.getResponseCode();
       if (item.httpStatus === 200) {
@@ -1232,6 +1240,7 @@ function diagnosticarDetalheJms(indicatorKey, date) {
     // Expedição: o detalhe é por rota — usa a maior rota do resumo do dia.
     const win = cfg.byRoute ? sendProbeWindow_(key, d) : undefined;
     if (win) item.rotaTestada = win.name;
+    noteFetches_(1);
     const resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, buildPayload_(key, d, 1, 20, true, win)));
     item.httpStatus = resp.getResponseCode();
     // parseJmsResponse_ dá a MESMA mensagem amigável (401/403/timeout/etc.) que o painel mostraria.

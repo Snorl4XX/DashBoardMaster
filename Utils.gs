@@ -15,7 +15,7 @@ var PROPS_CACHE_ = null;
  * DATA_START_DATE, PAINEIS…) e os IDs da planilha/pastas. O gatilho e o app da Web rodam como o dono do projeto
  * (executeAs USER_DEPLOYING): é sempre o mesmo armazenamento.
  */
-const INTERNAL_PROP_RE_ = /^(GROUPED_(PROG|PLAN|PLANDATA|PARALLEL|USED_MS|LAYOUT)_|SEND_USED_MS_|SEND_SHIFTS_|HISTORY_FILL_|MIGRATION_|V37_INSTALLED_AT$|QUEUE_HINT_|SYNC_PAUSE_|TODAY_REFRESH_AT$|STAMP_|SNAPSHOT_DAY_|JMS_SLICE_OK_|JMS_NO_SLICE_|JMS_PAGE_SIZE_|JMS_ROUTE_AUTO_|JMS_TRIP_BATCH$|JMS_SUMMARY_SHIFTS_OFF_|ORDERKIND_DETECT_AT_|GOOGLE_PLAN_AUTO$|PROPS_ORGANIZED_AT$)/;
+const INTERNAL_PROP_RE_ = /^(GROUPED_(PROG|PLAN|PLANDATA|PARALLEL|USED_MS|LAYOUT)_|SEND_USED_MS_|URLFETCH_|SEND_SHIFTS_|HISTORY_FILL_|MIGRATION_|V37_INSTALLED_AT$|QUEUE_HINT_|SYNC_PAUSE_|TODAY_REFRESH_AT$|STAMP_|SNAPSHOT_DAY_|JMS_SLICE_OK_|JMS_NO_SLICE_|JMS_PAGE_SIZE_|JMS_ROUTE_AUTO_|JMS_TRIP_BATCH$|JMS_SUMMARY_SHIFTS_OFF_|ORDERKIND_DETECT_AT_|GOOGLE_PLAN_AUTO$|PROPS_ORGANIZED_AT$)/;
 function isInternalProp_(key) { return INTERNAL_PROP_RE_.test(String(key)); }
 function scriptStore_() { return PropertiesService.getScriptProperties(); }
 /** Armazenamento interno: Propriedades do usuário (sem elas, as do script, como antes). */
@@ -54,6 +54,44 @@ function deleteProp_(key) {
   if (inScript || !c) scriptStore_().deleteProperty(key);
   if ((inInternal || !c) && !sharedStores_()) internalStore_().deleteProperty(key);
   if (c) { delete c.values[key]; delete c.script[key]; delete c.internal[key]; }
+}
+
+// ------------------------------------------------------------------ V4.4.2: cota diária de consultas externas (UrlFetch)
+/**
+ * O Google limita as consultas externas (UrlFetch) por CONTA: 20 mil por dia na conta Gmail, 100 mil no Workspace. Antes,
+ * a fila consultava até a cota acabar: o resto do dia ficava sem atualização nenhuma (nem os números de hoje) e o painel
+ * mostrava o erro. Agora cada consulta é contada (contador do dia, Propriedades internas) e, perto do limite, a fila
+ * economiza: com FETCH_RESERVE_ da cota usada, só os resumos e as listas de hoje e de ontem (o histórico, a Consulta das
+ * bipagens, os IDs de viagem e o detalhe pesado continuam no dia seguinte); com FETCH_STOP_, a fila espera o dia seguinte.
+ * COTA_URLFETCH_DIA (Propriedades do script) troca o limite.
+ */
+const FETCH_RESERVE_ = 0.8, FETCH_STOP_ = 0.95;
+var FETCH_PENDING_ = 0;
+function fetchDayKey_() { return 'URLFETCH_' + isoToday_(); }
+function fetchLimit_() {
+  const forced = Number(getProp_('COTA_URLFETCH_DIA', ''));
+  if (forced > 0) return Math.floor(forced);
+  return googlePlan_() === 'workspace' ? 100000 : 20000;
+}
+/** Consultas feitas hoje nesta conta (gravadas + as desta execução ainda não gravadas). */
+function fetchUsedToday_() { return (Number(getProp_(fetchDayKey_(), '')) || 0) + FETCH_PENDING_; }
+/** Conta n consultas externas; grava no contador do dia a cada 50 (e no fim da fila e do Atualizar: flushFetchCount_). */
+function noteFetches_(n) {
+  FETCH_PENDING_ += Math.max(0, Number(n) || 0);
+  if (FETCH_PENDING_ >= 50) flushFetchCount_();
+}
+function flushFetchCount_() {
+  if (!FETCH_PENDING_) return;
+  const n = FETCH_PENDING_;
+  FETCH_PENDING_ = 0;
+  try { invalidateProps_(); setProp_(fetchDayKey_(), (Number(getProp_(fetchDayKey_(), '')) || 0) + n); }
+  catch (e) { FETCH_PENDING_ += n; }
+}
+/** 'ok' | 'reserve' (economia: só hoje e ontem) | 'stop' (espera o dia seguinte). Versão Node.js: sem cota do Google. */
+function fetchBudgetMode_() {
+  if (getProp_('PLATAFORMA', '') === 'node') return 'ok';
+  const used = fetchUsedToday_(), lim = fetchLimit_();
+  return used >= lim * FETCH_STOP_ ? 'stop' : used >= lim * FETCH_RESERVE_ ? 'reserve' : 'ok';
 }
 
 function centerCode_() { return getProp_('JMS_CENTER_CODE', APP_CONFIG.DEFAULT_CENTER_CODE); }

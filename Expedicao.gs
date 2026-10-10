@@ -650,7 +650,7 @@ function runTripJob_(job, deadline) {
     for (let g = 0; g < parallel && k < todo.length; g++) { groups.push(todo.slice(k, k + batch)); k += batch; }
     const t0 = Date.now();
     let responses;
-    try { responses = UrlFetchApp.fetchAll(groups.map(list => jmsRequestObject_(endpoint, tripPayload_(list)))); }
+    try { responses = fetchAll_(groups.map(list => jmsRequestObject_(endpoint, tripPayload_(list)))); }
     catch (e) {
       const m = String(e && e.message || e);
       if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m.slice(0, 200));
@@ -860,7 +860,7 @@ function fetchScanRecords_(endpoint, list, date) {
   for (let k = 0; k < rest.length; k += parallel) {
     const group = rest.slice(k, k + parallel);
     let responses;
-    try { responses = UrlFetchApp.fetchAll(group.map(p => jmsRequestObject_(endpoint, scanPayload_(list, date, p, size)))); }
+    try { responses = fetchAll_(group.map(p => jmsRequestObject_(endpoint, scanPayload_(list, date, p, size)))); }
     catch (e) {
       if (errorKind_(String(e && e.message || e)) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + String(e.message || e).slice(0, 200));
       responses = group.map(() => null);
@@ -1051,7 +1051,7 @@ function runUnsealDetailJob_(job, deadline, cfg, st) {
     const urls = group.map(t => endpoint + '?shipmentNo=' + encodeURIComponent(t.shipmentNo));
     const t0 = Date.now();
     let responses;
-    try { responses = UrlFetchApp.fetchAll(urls.map(u => jmsRequestObject_(u, null))); }
+    try { responses = fetchAll_(urls.map(u => jmsRequestObject_(u, null))); }
     catch (e) {
       const m = String(e && e.message || e);
       if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m.slice(0, 200));

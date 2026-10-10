@@ -109,6 +109,10 @@
       themeDark: 'Tema escuro', themeLight: 'Tema claro',
       pauseAuthTitle: 'Sincronização pausada: o JMS recusou a credencial',
       pauseAuthText: 'Desde {since} o JMS não aceita o token (normalmente ele expirou). Indicadores afetados: {list}. O responsável deve gerar um novo AuthToken no JMS e atualizar JMS_AUTHTOKEN nas Propriedades do script — a importação recomeça sozinha. Os dados já sincronizados continuam no painel.',
+      budgetReserveTitle: 'Economizando a cota de consultas do Google de hoje',
+      budgetReserveText: '{u} de {l} consultas usadas hoje. Os números de hoje e de ontem continuam atualizando; o histórico e as listas antigas continuam amanhã.',
+      budgetStopTitle: 'Cota de consultas do Google de hoje quase no fim',
+      budgetStopText: '{u} de {l} consultas usadas hoje. A importação continua amanhã; os dados já baixados continuam no painel.',
       pauseQuotaTitle: 'Sincronização pausada: cota diária do Google atingida',
       pauseQuotaText: 'O Google limita o uso diário do Apps Script. A importação recomeça sozinha por volta de {t}. Os dados já sincronizados continuam no painel.',
       rowsCapBadge: 'Limite de {n} remessas: {d} dia(s) fora dos gráficos',
@@ -259,6 +263,10 @@
       themeDark: '深色主题', themeLight: '浅色主题',
       pauseAuthTitle: '同步已暂停：JMS 拒绝了凭证',
       pauseAuthText: '自 {since} 起 JMS 不接受该令牌（通常已过期）。受影响的指标：{list}。请负责人在 JMS 中重新获取 AuthToken，并在脚本属性中更新 JMS_AUTHTOKEN，导入会自动恢复。已同步的数据仍会显示。',
+      budgetReserveTitle: '正在节省今日 Google 外部请求配额',
+      budgetReserveText: '今日已使用 {u} / {l} 次请求。今天和昨天的数据继续更新；历史和较早的列表明天继续。',
+      budgetStopTitle: '今日 Google 外部请求配额即将用完',
+      budgetStopText: '今日已使用 {u} / {l} 次请求。导入将于明天继续；已同步的数据仍会显示。',
       pauseQuotaTitle: '同步已暂停：已达到 Google 每日配额',
       pauseQuotaText: 'Google 限制 Apps Script 每日用量，约在 {t} 自动恢复导入。已同步的数据仍会显示。',
       rowsCapBadge: '单次上限 {n} 票：{d} 天未计入图表',
@@ -595,8 +603,12 @@
     if (!state.pauses.length) { box.className = 'alert warn hidden'; box.innerHTML = ''; return; }
     var quota = state.pauses.filter(function (p) { return p.kind === 'QUOTA'; })[0];
     var auth = state.pauses.filter(function (p) { return p.kind === 'AUTH'; });
+    var budget = state.pauses.filter(function (p) { return p.kind === 'BUDGET'; })[0];
     var html = '';
     if (quota) html += '<div><b>' + esc(t('pauseQuotaTitle')) + '</b>' + esc(t('pauseQuotaText', {t: fmtTs(quota.until)})) + '</div>';
+    // V4.4.2: perto da cota diária de consultas externas — economia (hoje e ontem seguem) ou espera do dia seguinte.
+    if (budget) html += '<div><b>' + esc(t(budget.mode === 'stop' ? 'budgetStopTitle' : 'budgetReserveTitle')) + '</b>' +
+      esc(t(budget.mode === 'stop' ? 'budgetStopText' : 'budgetReserveText', {u: fmtInt(budget.used), l: fmtInt(budget.limit)})) + '</div>';
     if (auth.length) {
       var keys = [];
       auth.forEach(function (p) { (p.indicators || []).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); }); });

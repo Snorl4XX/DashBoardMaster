@@ -141,7 +141,8 @@ function refreshNow(indicatorKey, from, to, opts) {
       if (result.errors.length < 3) result.errors.push({date: d, reason: publicJmsError_(msg)});
       const st = getDayStatus_(indicatorKey, d);
       if (kind === 'OTHER') updateDayStatus_(indicatorKey, d, st && st.summary === 'COMPLETE' ? {error: msg} : {summaryStatus: 'ERROR', error: msg});
-      else updateDayStatus_(indicatorKey, d, {error: msg});
+      // V4.4.2: cota do Google não é erro do dia (o aviso do topo explica e diz quando volta).
+      else if (kind !== 'QUOTA') updateDayStatus_(indicatorKey, d, {error: msg});
       logSync_('ERROR', indicatorKey, d, 'Atualização manual: ' + msg);
       // Credencial recusada ou cota esgotada: para aqui e pausa (o painel mostra o aviso).
       if (kind !== 'OTHER') { authError = true; setPause_(kind === 'QUOTA' ? '*' : cfg.routeKey, kind, msg); }
@@ -171,6 +172,7 @@ function refreshNow(indicatorKey, from, to, opts) {
     }
   }
   try { installTriggers(); } catch (e) { logSync_('WARN', indicatorKey, '', 'Gatilhos não verificados: ' + e); }
+  flushFetchCount_();
   result.ok = result.failed === 0 || result.updated > 0;
   result.pauses = publicPauses_();
   return safeReturn_(result);

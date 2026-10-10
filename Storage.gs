@@ -802,6 +802,8 @@ function lastErrorFor_(indicator, from, to) {
   allTabRows_('STATUS').forEach(r => {
     const d = dateCellIso_(r[1]);
     if (r[0] !== indicator || !r[8] || (from && d < from) || (to && d > to)) return;
+    // V4.4.2: cota do Google esgotada não é erro do dia (gravações antigas incluídas): o aviso fica no topo do painel.
+    if (errorKind_(String(r[8])) === 'QUOTA') return;
     const t = toIsoTimestamp_(r[9]) || '';
     if (!best || t > best.t) best = {t: t, date: d, reason: publicJmsError_(r[8])};
   });
@@ -862,11 +864,36 @@ function clearPauses_() { if (getProp_(PAUSE_PROP_, '')) deleteProp_(PAUSE_PROP_
 /** Pausas em formato seguro para a tela (sem texto bruto). */
 function publicPauses_() {
   const p = activePauses_();
-  return Object.keys(p).map(k => ({
+  const out = Object.keys(p).map(k => ({
     route: k, kind: p[k].kind, reason: publicJmsError_(p[k].reason),
     since: new Date(p[k].since).toISOString(), until: new Date(p[k].until).toISOString(),
     indicators: Object.keys(INDICATORS).filter(i => k === '*' || INDICATORS[i].routeKey === k)
   }));
+  // V4.4.2: economia da cota de consultas externas (não é pausa: hoje e ontem continuam atualizando).
+  try {
+    const mode = fetchBudgetMode_();
+    if (mode !== 'ok' && !p['*']) {
+      const tomorrow = addDaysIso_(isoToday_(), 1);
+      out.push({route: 'URLFETCH', kind: 'BUDGET', mode: mode, used: fetchUsedToday_(), limit: fetchLimit_(),
+        since: new Date().toISOString(), until: tomorrow + 'T00:00:00', reason: '', indicators: []});
+    }
+  } catch (e) { /* só aviso */ }
+  return out;
+}
+/**
+ * V4.4.2: a tarefa pode rodar com a cota de consultas externas de hoje? 'reserve': só resumos e listas de hoje e de ontem
+ * (cartões e gráficos recentes em dia; o histórico, a Consulta das bipagens, os IDs de viagem e o detalhe pesado esperam o
+ * dia seguinte); 'stop': nada que consulte o JMS.
+ */
+function fetchBudgetAllows_(job) {
+  if (job.type === 'COMPACT') return true;
+  const mode = fetchBudgetMode_();
+  if (mode === 'ok') return true;
+  if (mode === 'stop') return false;
+  const recent = job.date >= addDaysIso_(isoToday_(), -1);
+  if (job.type === 'SUMMARY') return recent;
+  if (job.type === 'DETAIL_INIT' || job.type === 'DETAIL_PAGE') return recent && !heavyGrouped_(INDICATORS[job.indicator]);
+  return false;
 }
 
 function setQueueHint_(state) {
@@ -1429,7 +1456,7 @@ function organizePropsCore_(force) {
       if (date < cut) drop.push(k);
       return;
     }
-    const d = /^(GROUPED_USED_MS_|SEND_USED_MS_|GROUPED_PARALLEL_)(\d{4}-\d{2}-\d{2})$/.exec(k);
+    const d = /^(GROUPED_USED_MS_|SEND_USED_MS_|GROUPED_PARALLEL_|URLFETCH_)(\d{4}-\d{2}-\d{2})$/.exec(k);
     if (d && d[2] !== today) { drop.push(k); return; }
     if (/^SEND_SHIFTS_/.test(k) && !Object.keys(INDICATORS).some(x => INDICATORS[x].byRoute)) drop.push(k);
   });
@@ -1477,7 +1504,7 @@ function processSyncQueue(opts) {
   if (!lock.tryLock(3000)) return {ok: false, busy: true};
   const startedAt = Date.now();
   const deadline = startedAt + (opts.budgetMs || APP_CONFIG.WORKER_BUDGET_MS);
-  let done = 0, failed = 0, waiting = 0, partial = 0, paused = 0, stopped = false;
+  let done = 0, failed = 0, waiting = 0, partial = 0, paused = 0, stopped = false, budgetHeld = 0;
   const attempted = {}, prefetched = {};
   // Resumos em paralelo só depois de um resumo desta execução dar certo: com o token vencido, continua uma consulta por rota.
   let summaryOk = false;
@@ -1497,6 +1524,8 @@ function processSyncQueue(opts) {
         if (Date.now() > deadline - 20000) break;
         attempted[job.rowNum] = 1;
         if (pauseFor_(jobPauseKey_(job), pauses)) { paused++; continue; }
+        // V4.4.2: perto da cota diária de consultas externas, só o que mantém hoje e ontem em dia.
+        if (!fetchBudgetAllows_(job)) { waiting++; budgetHeld++; continue; }
         if (!jobReady_(job)) { waiting++; continue; }
         if (job.type === 'COMPACT' && Date.now() > deadline - 90000) { waiting++; continue; }
         if (job.type === 'DETAIL_INIT' && Date.now() > deadline - APP_CONFIG.DETAIL_MIN_START_MS) { waiting++; continue; }
@@ -1551,8 +1580,9 @@ function processSyncQueue(opts) {
       else if (remaining.every(j => overBudget(j) || pauseFor_(INDICATORS[j.indicator].routeKey, pausesNow))) setQueueHint_('BUDGET');
     }
     writeSyncStatusCache_();
-    return {ok: true, done: done, failed: failed, waiting: waiting, partial: partial, paused: paused, remaining: remaining.length};
-  } finally { lock.releaseLock(); }
+    return {ok: true, done: done, failed: failed, waiting: waiting, partial: partial, paused: paused, remaining: remaining.length,
+      budget: budgetHeld ? fetchBudgetMode_() : 'ok'};
+  } finally { flushFetchCount_(); lock.releaseLock(); }
 }
 
 /** Detalhes só depois da taxa do dia (evita escrever RUNNING/PENDING à toa). */
@@ -1623,8 +1653,10 @@ function processJob_(job, deadline) {
       setPause_(kind === 'QUOTA' ? '*' : jobPauseKey_(job), kind, message);
       writeCells_('JOBS', job.rowNum, 6, ['PENDING']);
       writeCells_('JOBS', job.rowNum, 9, [new Date(), message]);
+      // V4.4.2: cota do Google não é erro do dia (o aviso amarelo no topo do painel já explica e diz quando volta). A nova
+      // tentativa é de hora em hora: a janela de 24 h do Google não começa à meia-noite, então não dá para esperar o "dia".
       // Rastreamento do pacote do SC→DC recusado: o dia do indicador continua sem erro (só os IDs de viagem esperam).
-      if (job.type !== 'COMPACT' && !sideRouteJob_(job)) updateDayStatus_(job.indicator, job.date, {error: message});
+      if (kind !== 'QUOTA' && job.type !== 'COMPACT' && !sideRouteJob_(job)) updateDayStatus_(job.indicator, job.date, {error: message});
       logSync_('ERROR', job.indicator, job.date, (kind === 'QUOTA' ? 'Fila pausada (cota do Google): ' : 'Rota pausada (credencial): ') + message);
       return kind === 'QUOTA' ? 'quota' : 'paused';
     }
