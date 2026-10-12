@@ -112,6 +112,9 @@
       dailyBadge: 'Atualiza às {h}', dailyHint: 'O último dia fechado é baixado às {h} e fica salvo (SC→SC e SC→DC: também a janela de ontem, que fecha às 13:59). Fora desses horários, só com o botão Atualizar.',
       everyBadge: 'Atualiza a cada {n} h', everyHint: 'Os números de hoje são baixados a cada {n} horas (0h, {n}h…). Fora desses horários, só com o botão Atualizar.',
       hoursJoin: ' e ', detailsFetching: 'Baixando a lista do dia e os IDs de viagem…', detailsFetched: 'Lista e IDs atualizados.',
+      refreshingAll: 'Atualizando todos os indicadores…', refreshAllDone: 'Taxas e cartões atualizados: {p} de {t} painéis.',
+      refreshSomeFailed: 'Com erro: {r}.', detailsFetchingAll: 'Baixando listas, gráficos e IDs de viagem de todos os painéis…',
+      detailsFetchedAll: 'Todos os indicadores atualizados.',
       detailsLater: 'Parte da lista ainda está baixando; a fila termina em alguns minutos.',
       budgetReserveTitle: 'Economizando a cota de consultas do Google de hoje',
       budgetReserveText: '{u} de {l} consultas usadas hoje. Os números de hoje e de ontem continuam atualizando; o histórico e as listas antigas continuam amanhã.',
@@ -270,6 +273,9 @@
       dailyBadge: '{h} 更新', dailyHint: '最近一个已结束的日期在 {h} 下载并保存（SC→SC 和 SC→DC 另含昨天 14 点开始、今天 13:59 结束的时段）。其他时间请点击“更新”。',
       everyBadge: '每 {n} 小时更新', everyHint: '今天的数据每 {n} 小时下载一次（0 点、{n} 点…）。其他时间请点击“更新”。',
       hoursJoin: '、', detailsFetching: '正在下载当天明细和车次号…', detailsFetched: '明细和车次号已更新。',
+      refreshingAll: '正在更新全部指标…', refreshAllDone: '指标率和卡片已更新：{t} 个看板中的 {p} 个。',
+      refreshSomeFailed: '出错：{r}。', detailsFetchingAll: '正在下载全部看板的明细、图表和车次号…',
+      detailsFetchedAll: '全部指标已更新。',
       detailsLater: '部分明细仍在下载，队列将在几分钟内完成。',
       budgetReserveTitle: '正在节省今日 Google 外部请求配额',
       budgetReserveText: '今日已使用 {u} / {l} 次请求。今天和昨天的数据继续更新；历史和较早的列表明天继续。',
@@ -3319,37 +3325,48 @@
     var busy = Object.keys(state.dropdowns).some(function (k) { return state.dropdowns[k].isOpen; }) || $('#progress').classList.contains('on');
     if (!busy && liveDue()) liveRefresh('timer');
   }
-  function refreshNow(opts) {
+  /**
+   * Botão Atualizar. V4.7 (pedido): atualiza TODOS os painéis de uma vez — taxas e cartões (refreshAllNow) e, em seguida,
+   * listas, gráficos, IDs de viagem e bipagens (refreshAllDetailsNow), o painel aberto primeiro. O menu lateral e o painel
+   * aberto são recarregados a cada etapa. Histórico da Sem Movimentação: consulta o período escolhido de novo (V3.32).
+   */
+  function refreshNow() {
     if (!state.data) return;
-    opts = opts || {};
     var btn = $('#refreshBtn');
-    // V3.34: Tempo real (Sem Movimentação): resumo agora e, em seguida, a lista da linha mais recente.
-    if (isLive()) return liveRefresh(opts.auto ? 'open' : 'manual');
-    // V3.32: Histórico — consulta o período escolhido de novo (e a lista do dia mostrado, se faltar).
     if (isHist()) {
       btn.disabled = true; btn.classList.add('spin');
       return loadHistory({}).then(function () { btn.disabled = false; btn.classList.remove('spin'); });
     }
+    if (state.refreshingAll) return;
+    state.refreshingAll = true;
     btn.disabled = true; btn.classList.add('spin');
-    toast(t(opts.auto ? 'snapFetching' : cfg() && cfg().snapshot ? 'snapRefreshing' : 'refreshing'));
-    var c0 = cfg(), key0 = state.indicator, from0 = state.from, to0 = state.to;
-    call('refreshNow', key0, from0, to0).then(function (r) {
+    toast(t('refreshingAll'));
+    var key0 = state.indicator, from0 = state.from, to0 = state.to;
+    var reload = function () {
+      checkForUpdates(true);
+      return state.view === 'dashboard' && state.indicator === key0 && state.from === from0 && state.to === to0 ? loadDashboard({silent: true}) : null;
+    };
+    var why = function (e) {
+      var c = e && e.indicator && state.catalogMap && state.catalogMap[e.indicator];
+      return ((e && e.reason) || '—') + (c ? ' (' + (c.name[state.lang] || c.name.pt) + ')' : '');
+    };
+    call('refreshAllNow', key0, from0, to0).then(function (r) {
       if (r.cooldown) { toast(t('refreshCooldown')); return; }
       if (r.pauses) renderSyncBanner(r.pauses);
-      if (r.failed && !r.updated) toast(t('refreshFailed', {r: (r.errors[0] && r.errors[0].reason) || '—'}), 'error');
-      else toast(t('refreshDone', {u: r.updated, d: r.detailsQueued}) + (r.pendingDays ? ' ' + t('refreshPending', {n: r.pendingDays}) : ''), 'success');
-      return loadDashboard({silent: false}).then(function () {
-        // V4.6: a lista do dia e os IDs de viagem (SC→DC) vêm na hora, sem esperar a fila (painéis leves).
-        if (!(r.detailsQueued || r.tripsQueued) || !c0 || c0.grouped || c0.snapshot) return;
-        toast(t('detailsFetching'));
-        return call('refreshDetailsNow', key0, from0, to0).then(function (x) {
+      if (r.failed && !r.updated) toast(t('refreshFailed', {r: why(r.errors[0])}), 'error');
+      else toast(t('refreshAllDone', {p: r.panels, t: r.panelsTotal, u: r.updated}) + (r.failed ? ' ' + t('refreshSomeFailed', {r: why(r.errors[0])}) : '') +
+        (r.pendingDays ? ' ' + t('refreshPending', {n: r.pendingDays}) : ''), r.failed ? null : 'success');
+      return Promise.resolve(reload()).then(function () {
+        if (!(r.detailsQueued || r.tripsQueued) && !r.failed) return;
+        toast(t('detailsFetchingAll'));
+        return call('refreshAllDetailsNow', key0, from0, to0).then(function (x) {
           if (x.pauses) renderSyncBanner(x.pauses);
-          toast(t(x.pending || x.busy ? 'detailsLater' : 'detailsFetched'), x.pending || x.busy ? null : 'success');
-          if (cfg() === c0 && state.from === from0 && state.to === to0) return loadDashboard({silent: true});
+          toast(t(x.pending || x.busy ? 'detailsLater' : 'detailsFetchedAll'), x.pending || x.busy ? null : 'success');
+          return reload();
         });
       });
     }).catch(function (e) { toast(t('refreshFailed', {r: e.message}), 'error'); })
-      .then(function () { btn.disabled = false; btn.classList.remove('spin'); });
+      .then(function () { state.refreshingAll = false; btn.disabled = false; btn.classList.remove('spin'); });
   }
   function downloadBlob(blob, name) {
     var url = URL.createObjectURL(blob), a = document.createElement('a');

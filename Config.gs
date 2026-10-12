@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.6.0',
+  VERSION: '4.7.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -26,6 +26,8 @@ const APP_CONFIG = Object.freeze({
   SNAPSHOT_LIST_BUDGET_MS: 240000, // V3.30: Sem Movimentação — lista baixada na hora pelo botão Atualizar (até 4 min)
   UPDATE_HOURS: [6, 8],        // V4.6 (pedido): agenda dos painéis de dia fechado (HORAS_ATUALIZACAO muda)
   REFRESH_DETAIL_BUDGET_MS: 150000, // V4.6: botão Atualizar — lista do dia e IDs de viagem baixados na hora (até 2,5 min)
+  REFRESH_ALL_BUDGET_MS: 90000,      // V4.7: Atualizar TODOS os painéis — taxas e cartões (até 1,5 min)
+  REFRESH_ALL_DETAIL_BUDGET_MS: 270000, // V4.7: em seguida, listas e IDs de todos os painéis (até 4,5 min; a chamada do Google vai até 6)
   PAUSE_AUTH_MINUTES: [15, 60, 180, 360], // credencial recusada: nova tentativa em 15 min, 1 h, 3 h, 6 h (ou assim que o token for trocado)
   PAUSE_QUOTA_MINUTES: 60,     // cota do Google esgotada: nova tentativa em 1 h
   PROPS_TTL_MS: 10000,         // propriedades do script relidas no máximo a cada 10 s
@@ -880,6 +882,9 @@ const ALL_INDICATORS_ = Object.freeze({
     // Taxa do indicador = Taxa de uso de Saca Ecológica (quanto maior melhor); sem meta definida.
     goal: {value: null, direction: 'min', strict: false},
     apiProfile: 'lot_flow', detailMatchesErrors: false, grouped: true, light: true,
+    // V4.7 (pedido): painel RETIRADO — fora do menu, dos Resultados e da fila (não gasta cota). Os dados antigos continuam na
+    // planilha. Para trazer de volta: Propriedade do script REATIVAR_PAINEIS = lot_flow.
+    retired: true,
     // V4.6 (pedido): agenda própria — hoje a cada LOTES_HORAS (padrão 3 h: 0h, 3h, 6h…), fora da agenda só pelo Atualizar.
     agendaEvery: {prop: 'LOTES_HORAS', hours: 3},
     summary: {
@@ -1280,19 +1285,22 @@ const ALL_INDICATORS_ = Object.freeze({
  * Nome errado é ignorado; se nenhum nome valer, ficam todos (o painel nunca abre vazio).
  */
 function activeIndicators_(all) {
-  let only = '', drop = '';
+  let only = '', drop = '', back = '';
   try {
     const p = PropertiesService.getScriptProperties();
     only = String(p.getProperty('PAINEIS') || '');
     drop = String(p.getProperty('PAINEIS_FORA') || '');
+    back = String(p.getProperty('REATIVAR_PAINEIS') || '');
   } catch (e) { /* sem Propriedades: vale o pacote */ }
   // V4.3: sem as propriedades, vale o pacote instalado (painel principal / painel dos fluxos — PACOTE_PAINEIS_).
   if (!only.trim() && !drop.trim()) { only = PACOTE_PAINEIS_.so; drop = PACOTE_PAINEIS_.fora; }
   const list = x => x.split(/[\s,;]+/).map(k => k.trim()).filter(k => k && all[k]);
-  const keep = list(only), out = list(drop);
-  if (!keep.length && !out.length) return all;
+  const keep = list(only), out = list(drop), revived = list(back);
+  // V4.7: painel retirado (Config: retired, ex.: Fluxo de Lotes) fica fora, a não ser que PAINEIS ou REATIVAR_PAINEIS o nomeie.
+  const retired = k => !!all[k].retired && keep.indexOf(k) < 0 && revived.indexOf(k) < 0;
+  if (!keep.length && !out.length && !Object.keys(all).some(retired)) return all;
   const res = {};
-  Object.keys(all).forEach(k => { if ((!keep.length || keep.indexOf(k) >= 0) && out.indexOf(k) < 0) res[k] = all[k]; });
+  Object.keys(all).forEach(k => { if ((!keep.length || keep.indexOf(k) >= 0) && out.indexOf(k) < 0 && !retired(k)) res[k] = all[k]; });
   return Object.keys(res).length ? Object.freeze(res) : all;
 }
 /**
@@ -1309,7 +1317,8 @@ function panelName_() { return String(getProp_('NOME_PAINEL', '') || PACOTE_PAIN
 /** Painel ativo neste projeto (diagnósticos): painel desligado por PAINEIS/PAINEIS_FORA dá um erro claro. */
 function activeCfg_(key) {
   if (INDICATORS[key]) return INDICATORS[key];
-  throw new Error('O painel "' + key + '" não está ativo neste projeto (Propriedades do script PAINEIS / PAINEIS_FORA). ' +
+  throw new Error('O painel "' + key + '" não está ativo neste projeto (Propriedades do script PAINEIS / PAINEIS_FORA' +
+    (ALL_INDICATORS_[key] && ALL_INDICATORS_[key].retired ? '; painel retirado — REATIVAR_PAINEIS = ' + key + ' traz de volta' : '') + '). ' +
     'Rode este diagnóstico no projeto que mostra esse painel.');
 }
 

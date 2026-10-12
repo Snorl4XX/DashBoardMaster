@@ -1,8 +1,36 @@
-# J&T DASHMASTER V4.6 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.7 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.7 — Fluxo de Lotes retirado e botão Atualizar para todos os indicadores de uma vez
+**Pedido:** retirar o Fluxo de Lotes e atualizar de uma vez os dados de todos os indicadores.
+
+### Fluxo de Lotes retirado
+- Sai do menu, dos Resultados, da agenda e da fila. Não consulta mais o JMS nem gasta cota.
+- Os dados antigos continuam na planilha.
+- **Para trazer de volta:** Propriedade do script `REATIVAR_PAINEIS` = `lot_flow`.
+- **Simulação da conta Gmail, painel principal:** **5,2 min por dia** (V4.6: 9 min) e 240 consultas por dia, de 20 mil. Das 9h às 23h, só a foto da Sem Movimentação a cada 2 h.
+
+### Botão Atualizar: todos os indicadores de uma vez
+Antes, o botão atualizava só o painel aberto. Agora um clique atualiza **todos os painéis do projeto**, em duas etapas. As mensagens no canto da tela mostram cada uma:
+1. **Taxas e cartões de todos os painéis:** os resumos são pedidos ao JMS em paralelo, em até 1,5 min. O menu lateral e o painel aberto já mostram os números novos. Mensagem: "Taxas e cartões atualizados: 9 de 9 painéis".
+2. **Listas, gráficos e tabelas de todos os painéis:** inclui os IDs de viagem de saída do SC → DC, o lote e o login da Triagem e a lista da Sem Movimentação. O painel aberto vem primeiro. Leva até 4,5 min, e o painel recarrega no fim.
+
+**Dias atualizados em cada painel:**
+- os mesmos da agenda das 6h e 8h: o último dia fechado, a janela de ontem do SC → SC e do SC → DC, e os dias anteriores ainda sem o número final;
+- a foto de agora da Sem Movimentação;
+- no painel aberto, também o período que está na tela, por exemplo "7 dias".
+
+**Limites:**
+- O que não couber no tempo fica na fila e termina em alguns minutos. Aparece a mensagem "Parte da lista ainda está baixando".
+- Clicar de novo logo em seguida não consulta outra vez (espera de 1,5 min).
+- Painel dos fluxos (Recebimento e Expedição): as taxas e os cartões vêm na hora; as listas, que são pesadas, continuam pela fila.
+
+A agenda da V4.6 continua igual: painéis do dia às 6h e 8h, Sem Movimentação a cada 2 h, e nada fora disso além do botão.
+
+**Como instalar:** troque todos os `.gs` e `.html` pelos do ZIP V4.7 (nos dois projetos) e publique uma **Nova versão**. Não precisa rodar nenhuma função.
 
 ## V4.6 — Agenda de atualização (6h e 8h), IDs de viagem de saída do SC → DC e um pouco mais de cota
 **Pedido:**

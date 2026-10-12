@@ -34,7 +34,8 @@ const mkDays = () => ({'2026-09-17': makeDay('2026-09-17', 11), '2026-09-18': ma
 // MODO_ATUALIZACAO continuo: a versão Node.js coleta o dia todo (node/lib/gas.js); a referência do Apps Script no mesmo modo
 // (no modo diário, padrão do Apps Script desde a V4.5, a agenda da V4.6 põe outras tarefas na fila conforme a hora).
 const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120',
-  ATUALIZACAO_MIN: '60', COTA_GOOGLE: 'workspace', RECEBIMENTO_MIN_POR_DIA: '0', EXPEDICAO_MIN_POR_DIA: '0', MODO_ATUALIZACAO: 'continuo'};
+  ATUALIZACAO_MIN: '60', COTA_GOOGLE: 'workspace', RECEBIMENTO_MIN_POR_DIA: '0', EXPEDICAO_MIN_POR_DIA: '0', MODO_ATUALIZACAO: 'continuo',
+  REATIVAR_PAINEIS: 'lot_flow'};
 const INDICATORS = ['wrong_send', 'sorting_error', 'missing_receipt', 'missing_dispatch', 'sc_sc', 'sc_dc'];
 
 // ------------------------------------------------------------------ utilidades HTTP

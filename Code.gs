@@ -122,49 +122,12 @@ function refreshNow(indicatorKey, from, to, opts) {
   let authError = false;
   dates.forEach((d, i) => {
     if (authError || i >= APP_CONFIG.REFRESH_MAX_DAYS || Date.now() > deadline) { later.push(['SUMMARY', indicatorKey, d, 0]); return; }
-    try {
-      const prev = getRateDay_(indicatorKey, d);
-      const st = getDayStatus_(indicatorKey, d);
-      const s = fetchSummaryDay_(indicatorKey, d);
-      if (s.empty) { updateDayStatus_(indicatorKey, d, {summaryStatus: 'NO_RECORD', detailsStatus: 'NO_RECORD', error: ''}); result.empty++; return; }
-      // V3.34: Sem Movimentação — a linha do horário mais recente trocou de tipo de bipe (a lista gravada é de outra linha).
-      if (cfg.snapshot) result.typeChanged = !prev || !prev.metrics || Number(prev.metrics.refType) !== Number(s.raw && s.raw.refType);
-      upsertRate_(s);
-      result.updated++;
-      updatedDays.push(d);
-      bumpDataStamp_(indicatorKey, d);
-      if (detailNeedsRefresh_(indicatorKey, d, prev, s, st, true)) result.detailsQueued += enqueueJobs_([['DETAIL_INIT', indicatorKey, d, 1]], {reset: true});
-    } catch (e) {
-      const msg = String(e && e.message || e).slice(0, 900);
-      const kind = errorKind_(msg);
-      result.failed++;
-      if (result.errors.length < 3) result.errors.push({date: d, reason: publicJmsError_(msg)});
-      const st = getDayStatus_(indicatorKey, d);
-      if (kind === 'OTHER') updateDayStatus_(indicatorKey, d, st && st.summary === 'COMPLETE' ? {error: msg} : {summaryStatus: 'ERROR', error: msg});
-      // V4.4.2: cota do Google não é erro do dia (o aviso do topo explica e diz quando volta).
-      else if (kind !== 'QUOTA') updateDayStatus_(indicatorKey, d, {error: msg});
-      logSync_('ERROR', indicatorKey, d, 'Atualização manual: ' + msg);
-      // Credencial recusada ou cota esgotada: para aqui e pausa (o painel mostra o aviso).
-      if (kind !== 'OTHER') { authError = true; setPause_(kind === 'QUOTA' ? '*' : cfg.routeKey, kind, msg); }
-    }
+    const r = refreshDayNow_(indicatorKey, d, result, 'Atualização manual');
+    if (r === 'ok') updatedDays.push(d);
+    else if (r === 'auth' || r === 'quota') authError = true;
   });
   if (later.length) { result.pendingDays = later.length; enqueueJobs_(later, {reset: true}); }
-  // V4.6 (SC→DC): dia com remessas ainda sem o ID de viagem de saída — o Atualizar consulta de novo o Rastreamento do pacote
-  // (inclusive as que antes vieram sem a linha "Encomenda carregada"); refreshDetailsNow baixa na hora.
-  if (cfg.trips && !cfg.grouped && !authError && updatedDays.length) {
-    try {
-      const cov = tripCoverage_(indicatorKey, updatedDays[updatedDays.length - 1], updatedDays[0]);
-      const files = dayFilesMap_(indicatorKey, updatedDays[updatedDays.length - 1], updatedDays[0]);
-      const trips = updatedDays.filter(d => files[d] && (!cov[d] || !(cov[d].total > 0) || cov[d].found < cov[d].total)).map(d => ['TRIPS', indicatorKey, d, 1]);
-      if (trips.length) result.tripsQueued = enqueueJobs_(trips, {reset: true});
-    } catch (e) { logSync_('WARN', indicatorKey, '', 'Atualizar: IDs de viagem não enfileirados: ' + String(e && e.message || e).slice(0, 300)); }
-  }
-  // V3.35 (Avaria): o Atualizar consulta também a taxa de "Pedido principal/secundário" no JMS (antes, só Todos; as opções
-  // esperavam a fila dos gatilhos).
-  if (cfg.orderKinds && !authError && updatedDays.length) {
-    try { result.optionsUpdated = syncOrderKindsRange_(indicatorKey, updatedDays, Date.now() + 20000, true).done; }
-    catch (e) { logSync_('WARN', indicatorKey, '', 'Atualizar: taxas de Pedido principal/secundário não consultadas: ' + String(e && e.message || e).slice(0, 300)); }
-  }
+  if (!authError) refreshExtrasNow_(indicatorKey, updatedDays, result);
   // V3.30: foto do momento (Sem Movimentação): a lista da linha do horário mais recente é baixada AQUI, na hora (~20 a 60
   // consultas). Chamada pela página não gasta a cota diária dos gatilhos (90 min na conta Gmail): o painel mostra os dados
   // mesmo com a fila parada pela cota.
@@ -189,6 +152,115 @@ function refreshNow(indicatorKey, from, to, opts) {
 }
 
 /**
+ * Botão Atualizar, um dia de um painel: taxa do JMS agora; a lista entra na fila se mudou (detailNeedsRefresh_, manual).
+ * Devolve 'ok', 'empty', 'error', 'auth' (credencial recusada: a rota pausa) ou 'quota' (cota do Google: a fila pausa).
+ * Os erros vão para result.errors (até 3, com o painel e o dia).
+ */
+function refreshDayNow_(indicatorKey, d, result, label) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  try {
+    const prev = getRateDay_(indicatorKey, d);
+    const st = getDayStatus_(indicatorKey, d);
+    const s = fetchSummaryDay_(indicatorKey, d);
+    if (s.empty) { updateDayStatus_(indicatorKey, d, {summaryStatus: 'NO_RECORD', detailsStatus: 'NO_RECORD', error: ''}); result.empty++; return 'empty'; }
+    // V3.34: Sem Movimentação — a linha do horário mais recente trocou de tipo de bipe (a lista gravada é de outra linha).
+    if (cfg.snapshot) result.typeChanged = !prev || !prev.metrics || Number(prev.metrics.refType) !== Number(s.raw && s.raw.refType);
+    upsertRate_(s);
+    result.updated++;
+    bumpDataStamp_(indicatorKey, d);
+    if (detailNeedsRefresh_(indicatorKey, d, prev, s, st, true)) result.detailsQueued += enqueueJobs_([['DETAIL_INIT', indicatorKey, d, 1]], {reset: true});
+    return 'ok';
+  } catch (e) {
+    const msg = String(e && e.message || e).slice(0, 900);
+    const kind = errorKind_(msg);
+    result.failed++;
+    if (result.errors.length < 3) result.errors.push({indicator: indicatorKey, date: d, reason: publicJmsError_(msg)});
+    const st = getDayStatus_(indicatorKey, d);
+    if (kind === 'OTHER') updateDayStatus_(indicatorKey, d, st && st.summary === 'COMPLETE' ? {error: msg} : {summaryStatus: 'ERROR', error: msg});
+    // V4.4.2: cota do Google não é erro do dia (o aviso do topo explica e diz quando volta).
+    else if (kind !== 'QUOTA') updateDayStatus_(indicatorKey, d, {error: msg});
+    logSync_('ERROR', indicatorKey, d, (label || 'Atualização manual') + ': ' + msg);
+    // Credencial recusada ou cota esgotada: para aqui e pausa (o painel mostra o aviso).
+    if (kind === 'OTHER') return 'error';
+    setPause_(kind === 'QUOTA' ? '*' : cfg.routeKey, kind, msg);
+    return kind === 'QUOTA' ? 'quota' : 'auth';
+  }
+}
+/**
+ * Depois das taxas do Atualizar: Avaria (V3.35) — taxas de "Pedido principal/secundário"; SC→DC (V4.6) — dias com remessas
+ * ainda sem o ID de viagem de saída voltam para a fila do Rastreamento do pacote (refreshDetailsNow baixa na hora).
+ */
+function refreshExtrasNow_(indicatorKey, updatedDays, result) {
+  if (!updatedDays.length) return;
+  const cfg = getIndicatorConfig_(indicatorKey);
+  if (cfg.orderKinds) {
+    try { result.optionsUpdated = (result.optionsUpdated || 0) + syncOrderKindsRange_(indicatorKey, updatedDays, Date.now() + 20000, true).done; }
+    catch (e) { logSync_('WARN', indicatorKey, '', 'Atualizar: taxas de Pedido principal/secundário não consultadas: ' + String(e && e.message || e).slice(0, 300)); }
+  }
+  if (cfg.trips && !cfg.grouped) {
+    try {
+      const lo = updatedDays.reduce((m, d) => d < m ? d : m), hi = updatedDays.reduce((m, d) => d > m ? d : m);
+      const cov = tripCoverage_(indicatorKey, lo, hi), files = dayFilesMap_(indicatorKey, lo, hi);
+      const trips = updatedDays.filter(d => files[d] && (!cov[d] || !(cov[d].total > 0) || cov[d].found < cov[d].total)).map(d => ['TRIPS', indicatorKey, d, 1]);
+      if (trips.length) result.tripsQueued = (result.tripsQueued || 0) + enqueueJobs_(trips, {reset: true});
+    } catch (e) { logSync_('WARN', indicatorKey, '', 'Atualizar: IDs de viagem não enfileirados: ' + String(e && e.message || e).slice(0, 300)); }
+  }
+}
+
+/**
+ * V4.7 (pedido: "atualiza de uma vez todos os dados dos indicadores"): o botão Atualizar atualiza TODOS os painéis do
+ * projeto de uma vez, e não só o aberto. Dias de cada painel = os mesmos da agenda das 6h e 8h (último dia fechado, janela de
+ * ontem do SC→SC/SC→DC, dias ainda sem o número final), a foto de agora da Sem Movimentação e, no painel aberto, o período da
+ * tela. Taxas e cartões aqui (resumos em paralelo, até REFRESH_ALL_BUDGET_MS); as listas, os IDs de viagem e as bipagens vêm em
+ * seguida, em refreshAllDetailsNow. O que não couber fica na fila (gatilho de 5 min).
+ */
+function refreshAllNow(indicatorKey, from, to) {
+  requireDb_();
+  validateJmsAuth_();
+  const today = isoToday_(), open = INDICATORS[indicatorKey] ? indicatorKey : '';
+  to = isIso_(to) ? (to > today ? today : to) : addDaysIso_(today, -1);
+  from = isIso_(from) && from <= to ? from : to;
+  const cache = CacheService.getScriptCache();
+  const cooldownKey = 'REFRESH_ALL_' + open + '_' + from + '_' + to;
+  if (cache.get(cooldownKey)) return safeReturn_({ok: true, cooldown: true, updated: 0, detailsQueued: 0, pendingDays: 0, failed: 0, errors: []});
+  cache.put(cooldownKey, '1', APP_CONFIG.REFRESH_COOLDOWN_S);
+  const pairs = [], seen = {}, details = [];
+  const add = (k, d) => {
+    if (!INDICATORS[k] || !isIso_(d) || d > today || seen[k + '|' + d]) return;
+    seen[k + '|' + d] = 1;
+    pairs.push({indicator: k, date: d});
+  };
+  // Painel aberto primeiro (o período da tela); depois os outros, pela agenda.
+  if (open && !INDICATORS[open].snapshot) dateRangeIso_(from, to).reverse().slice(0, APP_CONFIG.REFRESH_MAX_DAYS).forEach(d => add(open, d));
+  if (open && INDICATORS[open].snapshot) add(open, today);
+  agendaDailyJobs_().forEach(j => { if (j[0] === 'SUMMARY') add(j[1], j[2]); else details.push(j); });
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].agendaEvery).forEach(k => agendaEveryJobs_(k).forEach(j => add(j[1], j[2])));
+  const deadline = Date.now() + APP_CONFIG.REFRESH_ALL_BUDGET_MS;
+  try { prefetchSummaries_(pairs.slice(0, 150)); } catch (e) { /* um por um */ }
+  const result = {ok: true, updated: 0, empty: 0, failed: 0, pendingDays: 0, detailsQueued: 0, errors: [], panels: 0};
+  const later = [], updated = {}, stop = {}, answered = {};
+  pairs.forEach(p => {
+    if (stop['*'] || stop[p.indicator] || Date.now() > deadline) { later.push(['SUMMARY', p.indicator, p.date, 0]); return; }
+    const r = refreshDayNow_(p.indicator, p.date, result, 'Atualizar (todos os painéis)');
+    if (r === 'ok') (updated[p.indicator] = updated[p.indicator] || []).push(p.date);
+    if (r === 'ok' || r === 'empty') answered[p.indicator] = true;
+    else if (r === 'quota') stop['*'] = true;
+    else if (r === 'auth') stop[p.indicator] = true;
+  });
+  if (later.length) { result.pendingDays = later.length; enqueueJobs_(later, {reset: true}); }
+  if (details.length) result.detailsQueued += enqueueJobs_(details, {reset: true});
+  Object.keys(updated).forEach(k => refreshExtrasNow_(k, updated[k], result));
+  // Painel atualizado = o JMS respondeu (com registros ou sem nenhum no dia).
+  result.panels = Object.keys(answered).length;
+  result.panelsTotal = Object.keys(INDICATORS).length;
+  try { installTriggers(); } catch (e) { logSync_('WARN', '', '', 'Gatilhos não verificados: ' + e); }
+  flushFetchCount_();
+  result.ok = result.failed === 0 || result.updated > 0;
+  result.pauses = publicPauses_();
+  return safeReturn_(result);
+}
+
+/**
  * V4.6, chamada pelo painel logo depois de refreshNow (botão Atualizar): baixa AGORA o que o Atualizar deixou na fila para o
  * painel e o período abertos — a lista do dia (DETAIL), os IDs de viagem de saída do SC→DC (TRIPS) e o lote/login da Triagem
  * (SCANS) — por até REFRESH_DETAIL_BUDGET_MS. Sem isso, os gráficos e os IDs esperavam o gatilho da fila. Painéis pesados
@@ -202,25 +274,45 @@ function refreshDetailsNow(indicatorKey, from, to) {
   const today = isoToday_();
   to = isIso_(to) ? (to > today ? today : to) : addDaysIso_(today, -1);
   from = isIso_(from) && from <= to ? from : to;
+  if (cfg.snapshot || heavyGrouped_(cfg)) return safeReturn_({ok: true, done: 0, pending: 0, skipped: true});
+  return safeReturn_(runRefreshJobs_(j => j.indicator === indicatorKey && j.date >= from && j.date <= to, '', APP_CONFIG.REFRESH_DETAIL_BUDGET_MS));
+}
+/**
+ * V4.7, chamada pelo painel logo depois de refreshAllNow: listas do dia, IDs de viagem (SC→DC), bipagens (Triagem) e a lista
+ * da Sem Movimentação de TODOS os painéis leves, o painel aberto primeiro, por até REFRESH_ALL_DETAIL_BUDGET_MS. Recebimento e
+ * Expedição (fluxos, pesados) ficam com a fila. Dias: os da agenda (até 8 dias atrás) e o período aberto na tela.
+ */
+function refreshAllDetailsNow(indicatorKey, from, to) {
+  requireDb_();
+  validateJmsAuth_();
+  const today = isoToday_(), recent = addDaysIso_(today, -8);
+  to = isIso_(to) ? (to > today ? today : to) : today;
+  from = isIso_(from) && from <= to ? from : to;
+  const match = j => !heavyGrouped_(INDICATORS[j.indicator]) &&
+    (j.date >= recent || (j.indicator === indicatorKey && j.date >= from && j.date <= to));
+  return safeReturn_(runRefreshJobs_(match, INDICATORS[indicatorKey] ? indicatorKey : '', APP_CONFIG.REFRESH_ALL_DETAIL_BUDGET_MS));
+}
+/** Roda agora, com a trava da fila, as tarefas de lista/IDs/bipagens que `match` aceita (`first` antes), até `budgetMs`. */
+function runRefreshJobs_(match, first, budgetMs) {
   const result = {ok: true, done: 0, pending: 0};
-  if (cfg.snapshot || heavyGrouped_(cfg)) { result.skipped = true; return safeReturn_(result); }
   const types = ['DETAIL_INIT', 'DETAIL_PAGE', 'TRIPS', 'SCANS'];
-  const mine = () => pendingJobs_().filter(j => j.indicator === indicatorKey && j.date >= from && j.date <= to && types.indexOf(j.type) >= 0);
-  if (!mine().length) return safeReturn_(result);
+  const mine = () => pendingJobs_().filter(j => types.indexOf(j.type) >= 0 && INDICATORS[j.indicator] && match(j));
+  if (!mine().length) return result;
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) { result.busy = true; result.pending = mine().length; return safeReturn_(result); }
-  const deadline = Date.now() + APP_CONFIG.REFRESH_DETAIL_BUDGET_MS, tries = {};
+  if (!lock.tryLock(5000)) { result.busy = true; result.pending = mine().length; return result; }
+  const deadline = Date.now() + budgetMs, tries = {};
   try {
     while (Date.now() < deadline - 20000) {
       const pauses = activePauses_();
-      const job = mine().filter(j => (tries[j.rowNum] || 0) < 6 && !pauseFor_(jobPauseKey_(j), pauses) && jobReady_(j))[0];
+      const ready = mine().filter(j => (tries[j.rowNum] || 0) < 6 && !pauseFor_(jobPauseKey_(j), pauses) && jobReady_(j));
+      const job = ready.filter(j => j.indicator === first)[0] || ready[0];
       if (!job) break;
       if (job.type === 'DETAIL_INIT' && Date.now() > deadline - APP_CONFIG.DETAIL_MIN_START_MS) break;
       tries[job.rowNum] = (tries[job.rowNum] || 0) + 1;
       const r = processJob_(job, deadline);
       if (r === 'done') result.done++;
       else if (r === 'quota' || r === 'paused') { result.stopped = r; break; }
-      else if (r === 'error') { result.failed = (result.failed || 0) + 1; }
+      else if (r === 'error') result.failed = (result.failed || 0) + 1;
     }
   } finally {
     flushFetchCount_();
@@ -228,7 +320,7 @@ function refreshDetailsNow(indicatorKey, from, to) {
   }
   result.pending = mine().length;
   result.pauses = publicPauses_();
-  return safeReturn_(result);
+  return result;
 }
 
 /**
