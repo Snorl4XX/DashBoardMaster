@@ -109,7 +109,10 @@
       themeDark: 'Tema escuro', themeLight: 'Tema claro',
       pauseAuthTitle: 'Sincronização pausada: o JMS recusou a credencial',
       pauseAuthText: 'Desde {since} o JMS não aceita o token (normalmente ele expirou). Indicadores afetados: {list}. O responsável deve gerar um novo AuthToken no JMS e atualizar JMS_AUTHTOKEN nas Propriedades do script — a importação recomeça sozinha. Os dados já sincronizados continuam no painel.',
-      dailyBadge: 'Atualização diária · {h}h', dailyHint: 'Cada dia é baixado uma vez, depois que fecha (SC→SC e SC→DC às 14h), e fica salvo. Os números de hoje só com o botão Atualizar.',
+      dailyBadge: 'Atualiza às {h}', dailyHint: 'O último dia fechado é baixado às {h} e fica salvo (SC→SC e SC→DC: também a janela de ontem, que fecha às 13:59). Fora desses horários, só com o botão Atualizar.',
+      everyBadge: 'Atualiza a cada {n} h', everyHint: 'Os números de hoje são baixados a cada {n} horas (0h, {n}h…). Fora desses horários, só com o botão Atualizar.',
+      hoursJoin: ' e ', detailsFetching: 'Baixando a lista do dia e os IDs de viagem…', detailsFetched: 'Lista e IDs atualizados.',
+      detailsLater: 'Parte da lista ainda está baixando; a fila termina em alguns minutos.',
       budgetReserveTitle: 'Economizando a cota de consultas do Google de hoje',
       budgetReserveText: '{u} de {l} consultas usadas hoje. Os números de hoje e de ontem continuam atualizando; o histórico e as listas antigas continuam amanhã.',
       budgetStopTitle: 'Cota de consultas do Google de hoje quase no fim',
@@ -264,7 +267,10 @@
       themeDark: '深色主题', themeLight: '浅色主题',
       pauseAuthTitle: '同步已暂停：JMS 拒绝了凭证',
       pauseAuthText: '自 {since} 起 JMS 不接受该令牌（通常已过期）。受影响的指标：{list}。请负责人在 JMS 中重新获取 AuthToken，并在脚本属性中更新 JMS_AUTHTOKEN，导入会自动恢复。已同步的数据仍会显示。',
-      dailyBadge: '每日更新 · {h}点', dailyHint: '每天的数据在当天结束后下载一次并保存（SC→SC 和 SC→DC 为14点）。今天的数据请点击“更新”。',
+      dailyBadge: '{h} 更新', dailyHint: '最近一个已结束的日期在 {h} 下载并保存（SC→SC 和 SC→DC 另含昨天 14 点开始、今天 13:59 结束的时段）。其他时间请点击“更新”。',
+      everyBadge: '每 {n} 小时更新', everyHint: '今天的数据每 {n} 小时下载一次（0 点、{n} 点…）。其他时间请点击“更新”。',
+      hoursJoin: '、', detailsFetching: '正在下载当天明细和车次号…', detailsFetched: '明细和车次号已更新。',
+      detailsLater: '部分明细仍在下载，队列将在几分钟内完成。',
       budgetReserveTitle: '正在节省今日 Google 外部请求配额',
       budgetReserveText: '今日已使用 {u} / {l} 次请求。今天和昨天的数据继续更新；历史和较早的列表明天继续。',
       budgetStopTitle: '今日 Google 外部请求配额即将用完',
@@ -1365,9 +1371,17 @@
       t('detailsWindowHint') + ' ' + skipped.map(function (d) { return fmtDate(d, true); }).join(', '));
     if (capped.length) html += badge('warn', 'info', t('rowsCapBadge', {n: fmtInt(a.maxRows || meta.rowsLoaded), d: capped.length}),
       t('rowsCapHint') + ' ' + capped.map(function (d) { return fmtDate(d, true); }).join(', '));
-    // V4.5: modo diário — cada dia é baixado uma vez, quando fecha; hoje só pelo botão Atualizar.
+    // V4.5/V4.6: modo diário — agenda (6h e 8h; Sem Movimentação e Lotes a cada N horas); fora dela, só o botão Atualizar.
     var app = state.boot && state.boot.app;
-    if (app && app.updateMode === 'diario') html += badge('ok', 'history', t('dailyBadge', {h: String(app.updateHour).padStart(2, '0')}), t('dailyHint'));
+    if (app && app.updateMode === 'diario') {
+      var every = cfg() && cfg().agendaEvery;
+      if (every) html += badge('ok', 'history', t('everyBadge', {n: every}), t('everyHint', {n: every}));
+      else {
+        var hrs = (app.updateHours && app.updateHours.length ? app.updateHours : [app.updateHour]).map(function (h) { return String(h).padStart(2, '0') + 'h'; });
+        var hTxt = hrs.length > 1 ? hrs.slice(0, -1).join(', ') + t('hoursJoin') + hrs[hrs.length - 1] : hrs[0];
+        html += badge('ok', 'history', t('dailyBadge', {h: hTxt}), t('dailyHint', {h: hTxt}));
+      }
+    }
     if (meta.lastError) html += badge('bad', 'warn', t('errorBadge', {r: meta.lastError.reason}),
       meta.lastError.reason + ' (' + fmtDate(meta.lastError.date, true) + ')');
     $('#coverageBadges').innerHTML = html;
@@ -3318,12 +3332,22 @@
     }
     btn.disabled = true; btn.classList.add('spin');
     toast(t(opts.auto ? 'snapFetching' : cfg() && cfg().snapshot ? 'snapRefreshing' : 'refreshing'));
-    call('refreshNow', state.indicator, state.from, state.to).then(function (r) {
+    var c0 = cfg(), key0 = state.indicator, from0 = state.from, to0 = state.to;
+    call('refreshNow', key0, from0, to0).then(function (r) {
       if (r.cooldown) { toast(t('refreshCooldown')); return; }
       if (r.pauses) renderSyncBanner(r.pauses);
       if (r.failed && !r.updated) toast(t('refreshFailed', {r: (r.errors[0] && r.errors[0].reason) || '—'}), 'error');
       else toast(t('refreshDone', {u: r.updated, d: r.detailsQueued}) + (r.pendingDays ? ' ' + t('refreshPending', {n: r.pendingDays}) : ''), 'success');
-      return loadDashboard({silent: false});
+      return loadDashboard({silent: false}).then(function () {
+        // V4.6: a lista do dia e os IDs de viagem (SC→DC) vêm na hora, sem esperar a fila (painéis leves).
+        if (!(r.detailsQueued || r.tripsQueued) || !c0 || c0.grouped || c0.snapshot) return;
+        toast(t('detailsFetching'));
+        return call('refreshDetailsNow', key0, from0, to0).then(function (x) {
+          if (x.pauses) renderSyncBanner(x.pauses);
+          toast(t(x.pending || x.busy ? 'detailsLater' : 'detailsFetched'), x.pending || x.busy ? null : 'success');
+          if (cfg() === c0 && state.from === from0 && state.to === to0) return loadDashboard({silent: true});
+        });
+      });
     }).catch(function (e) { toast(t('refreshFailed', {r: e.message}), 'error'); })
       .then(function () { btn.disabled = false; btn.classList.remove('spin'); });
   }

@@ -3201,22 +3201,22 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   runAll(cC);
   check(Number(cC.__state.props['URLFETCH_' + today]) === cC.__state.fetches.length && cC.__state.fetches.length > 50,
     'contador do dia = consultas externas feitas', [cC.__state.props['URLFETCH_' + today], cC.__state.fetches.length]);
-  // (c) Perto do limite (80%): só hoje e ontem; o histórico espera o dia seguinte. Acima de 95%: a fila espera.
+  // (c) Perto do limite (V4.6: 90%, antes 80%): só os dias recentes; o histórico espera o dia seguinte. Acima de 97%: a fila espera.
   const daysB = {[Y]: makeDay(Y, 73), [OLD]: makeDay(OLD, 74)};
   const cB = freshCtx(daysB, null, {COTA_GOOGLE: 'gmail', DATA_START_DATE: OLD});
-  cB.__state.props['URLFETCH_' + today] = '16500';
+  cB.__state.props['URLFETCH_' + today] = '18300';
   cB.queueHistory(OLD, Y, true);
   runAll(cB);
   const pend = cB.pendingJobs_();
   check(cB.getDayStatus_('wrong_send', Y).details === 'COMPLETE' && cB.getDayStatus_('sorting_error', Y).details === 'COMPLETE' &&
     pend.some(j => j.date === OLD) && !pend.some(j => j.date === Y && j.type === 'SUMMARY') && (!cB.getDayStatus_('wrong_send', OLD) || cB.getDayStatus_('wrong_send', OLD).summary !== 'COMPLETE'),
-    'economia (80%): ontem completo; o histórico fica para o dia seguinte', pend.slice(0, 3).map(j => j.type + ' ' + j.indicator + ' ' + j.date));
+    'economia (90%): ontem completo; o histórico fica para o dia seguinte', pend.slice(0, 3).map(j => j.type + ' ' + j.indicator + ' ' + j.date));
   const bp = cB.publicPauses_().filter(p => p.kind === 'BUDGET')[0];
-  check(bp && bp.mode === 'reserve' && bp.limit === 20000 && bp.used >= 16500, 'aviso amarelo de economia com o uso de hoje', bp);
-  cB.__state.props['URLFETCH_' + today] = '19200';
+  check(bp && bp.mode === 'reserve' && bp.limit === 20000 && bp.used >= 18300, 'aviso amarelo de economia com o uso de hoje', bp);
+  cB.__state.props['URLFETCH_' + today] = '19500';
   const nBefore = cB.__state.fetches.length;
   runAll(cB, 2);
-  check(cB.__state.fetches.length === nBefore && cB.publicPauses_().some(p => p.kind === 'BUDGET' && p.mode === 'stop'), 'acima de 95%: a fila espera o dia seguinte, sem consultar');
+  check(cB.__state.fetches.length === nBefore && cB.publicPauses_().some(p => p.kind === 'BUDGET' && p.mode === 'stop'), 'acima de 97%: a fila espera o dia seguinte, sem consultar');
   cB.__state.props['URLFETCH_' + today] = '0';
   runAll(cB);
   check(cB.getDayStatus_('wrong_send', OLD).details === 'COMPLETE' && !cB.publicPauses_().some(p => p.kind === 'BUDGET'), 'cota nova: o histórico continua sozinho');
@@ -3228,20 +3228,30 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(cN.fetchBudgetMode_() === 'ok', 'versão Node.js: sem cota do Google');
 }
 
-// ---------- V4.5: modo diário — cada dia fechado baixado UMA vez; sem atualizar o tempo todo ----------
+// ---------- V4.5/V4.6: modo diário com AGENDA — 6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h ----------
 {
   const c0 = createContext({props: {}, jms: fakeJms({}), quiet: true});
-  check(c0.dailyMode_() === true && c0.updateHour_() === 7, 'padrão: modo diário, a partir das 7h');
-  const c1 = createContext({props: {MODO_ATUALIZACAO: 'continuo', HORA_ATUALIZACAO: '5'}, jms: fakeJms({}), quiet: true});
-  check(c1.dailyMode_() === false && c1.updateHour_() === 5, 'MODO_ATUALIZACAO=continuo volta ao comportamento antigo; HORA_ATUALIZACAO troca a hora');
+  const keys0 = require('vm').runInContext('Object.keys(INDICATORS)', c0);
+  check(c0.dailyMode_() === true && c0.updateHours_().join() === '6,8' && c0.updateHour_() === 6 &&
+    c0.agendaEveryHours_(c0.getIndicatorConfig_('no_move')) === 2 && c0.agendaEveryHours_(c0.getIndicatorConfig_('lot_flow')) === 3 &&
+    keys0.filter(k => c0.getIndicatorConfig_(k).agendaEvery).sort().join() === 'lot_flow,no_move',
+    'padrão: agenda às 6h e 8h; Sem Movimentação a cada 2 h; Fluxo de Lotes a cada 3 h');
+  const c1 = createContext({props: {HORAS_ATUALIZACAO: '9h e 7h', SEM_MOVIMENTACAO_HORAS: '4', LOTES_HORAS: '0'}, jms: fakeJms({}), quiet: true});
+  check(c1.updateHours_().join() === '7,9' && c1.agendaEveryHours_(c1.getIndicatorConfig_('no_move')) === 4 &&
+    c1.agendaEveryHours_(c1.getIndicatorConfig_('lot_flow')) === 3, 'HORAS_ATUALIZACAO ("9h e 7h"), SEM_MOVIMENTACAO_HORAS e LOTES_HORAS (valor inválido = padrão)');
+  const c2 = createContext({props: {MODO_ATUALIZACAO: 'continuo'}, jms: fakeJms({}), quiet: true});
+  check(c2.dailyMode_() === false && c2.runAgenda_() === 0, 'MODO_ATUALIZACAO=continuo: sem agenda (comportamento antigo)');
   const today = c0.isoToday_(), ago = n => c0.addDaysIso_(today, -n), Y = ago(1), Y2 = ago(2), Y3 = ago(3);
-  const daysD = {[Y]: makeDay(Y, 81), [Y2]: makeDay(Y2, 82), [Y3]: makeDay(Y3, 83)};
+  const daysD = {[Y]: makeDay(Y, 81), [Y2]: makeDay(Y2, 82), [Y3]: makeDay(Y3, 83), [today]: makeDay(today, 84)};
   const cD = freshCtx(daysD, null, {DATA_START_DATE: Y3, MODO_ATUALIZACAO: 'diario', ATUALIZACAO_MIN: '30'});
-  // Relógio do teste: o horário de São Paulo de hoje que o teste escolhe (taxas gravadas e "agora" no mesmo relógio).
-  // O relógio anda normalmente a partir da hora escolhida (prazos e carimbos da fila continuam valendo).
+  // Relógio do teste: o horário de São Paulo que o teste escolhe (taxas gravadas e "agora" no mesmo relógio). O relógio anda
+  // normalmente a partir da hora escolhida (prazos e carimbos da fila continuam valendo). dayShift: dias depois de hoje.
   const RealDate = Date;
-  let hour = 3, offset = 0;
-  const setHour = h => { hour = h; offset = RealDate.parse(today + 'T' + String(h).padStart(2, '0') + ':30:00-03:00') - RealDate.now(); };
+  let offset = 0;
+  const setHour = (h, dayShift) => {
+    const d = c0.addDaysIso_(today, dayShift || 0);
+    offset = RealDate.parse(d + 'T' + String(h).padStart(2, '0') + ':30:00-03:00') - RealDate.now();
+  };
   class TestDate extends RealDate {
     constructor(...a) { if (a.length) super(...a); else super(RealDate.now() + offset); }
     static now() { return RealDate.now() + offset; }
@@ -3249,44 +3259,134 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   }
   setHour(3);
   cD.Date = TestDate;
-  const S = cD.__state, todayJobs = () => cD.allTabRows_('JOBS').filter(r => cD.dateCellIso_(r[3]) === today);
-  // Madrugada (antes da hora): nada é consultado — nem hoje a cada 30 min, nem a foto da Sem Movimentação.
-  cD.syncHourly();
-  for (let i = 0; i < 3; i++) runAll(cD, 1);
-  check(S.fetches.length === 0 && todayJobs().length === 0, 'antes das 7h: nenhuma consulta ao JMS', S.fetches.length);
-  // A partir das 7h: os dias fechados ainda não baixados entram UMA vez (resumo e lista); hoje não.
-  setHour(9);
-  cD.syncHourly();
-  runAll(cD);
-  const done = k => [Y, Y2, Y3].every(d => cD.getDayStatus_(k, d) && cD.getDayStatus_(k, d).details === 'COMPLETE');
-  check(['wrong_send', 'sorting_error', 'missing_receipt', 'damage', 'unseal'].every(done) && cD.dayIsFinal_('wrong_send', Y),
-    'às 9h: ontem e os dias anteriores baixados (taxa e lista) e marcados como finais');
-  check(todayJobs().every(r => INDICATORS_SNAPSHOT(cD, r[2])), 'hoje não é baixado sozinho (só a foto do dia da Sem Movimentação)', todayJobs().map(r => r[2] + ' ' + r[1]));
-  check(!['sc_sc', 'sc_dc'].some(k => cD.getDayStatus_(k, Y)) && done2(cD, 'sc_sc', [Y2, Y3]), 'SC→SC e SC→DC: ontem só depois das 14h (janela 14h–14h)');
-  // Depois: o dia salvo não é consultado de novo (nem de hora em hora, nem a cada 5 min).
-  const n1 = S.fetches.length;
-  for (let h = 10; h <= 13; h++) { setHour(h); cD.syncHourly(); runAll(cD, 2); }
-  check(S.fetches.length === n1, 'dia salvo não é consultado de novo (10h às 13h: zero consultas)', S.fetches.length - n1);
-  // 14h: o dia de ontem do SC→SC e do SC→DC fecha e entra uma vez.
-  setHour(15);
-  cD.syncHourly();
-  runAll(cD);
-  check(['sc_sc', 'sc_dc'].every(k => cD.getDayStatus_(k, Y) && cD.getDayStatus_(k, Y).details === 'COMPLETE'), 'às 15h: ontem do SC→SC e do SC→DC baixado uma vez');
-  const n2 = S.fetches.length;
-  setHour(16); cD.syncHourly(); runAll(cD, 2);
-  check(S.fetches.length === n2, 'e depois nada mais até o dia seguinte');
-  // Dia baixado ANTES de fechar (ex.: atualização contínua de antes, ou Atualizar no meio do dia): baixado de novo UMA vez.
-  const rates = cD.tab_('RATES').data, ri = rates.findIndex(r => r && r[0] === 'wrong_send' && cD.dateCellIso_(r[1]) === Y);
-  rates[ri][6] = new Date(Date.parse(Y + 'T23:00:00-03:00'));
-  cD.TAB_CACHE_ = {}; cD.TAB_INDEX_ = {};
-  check(!cD.dayIsFinal_('wrong_send', Y), 'taxa gravada antes de o dia fechar não vale como final');
-  setHour(17); cD.syncHourly(); runAll(cD);
-  check(cD.dayIsFinal_('wrong_send', Y) && S.fetches.length > n2, 'é baixada de novo uma vez e passa a ser final');
-  // Painel: o modo e a hora vão para o navegador (a foto da Sem Movimentação não é buscada sozinha ao abrir).
+  const S = cD.__state;
+  const DAILY = ['wrong_send', 'sorting_error', 'missing_receipt', 'missing_dispatch', 'sc_sc', 'sc_dc', 'damage', 'unseal'];
+  const epOf = k => { const c = cD.getIndicatorConfig_(k); return [c.summary && c.summary.endpoint, c.detail && c.detail.endpoint].filter(Boolean); };
+  const dailyEps = [].concat(...DAILY.map(epOf)), isDaily = u => dailyEps.indexOf(u.split('?')[0]) >= 0;
+  const noMoveEps = epOf('no_move'), lotEps = epOf('lot_flow');
+  const since = n => S.fetches.slice(n).map(f => f.url.split('?')[0]);
+  const tick = (h, dayShift) => { setHour(h, dayShift); cD.syncHourly(); runAll(cD, 3); };
+  const complete = (k, d) => !!cD.getDayStatus_(k, d) && cD.getDayStatus_(k, d).details === 'COMPLETE';
+  // 3h: só a agenda da Sem Movimentação (bloco 2h–3h59) e dos Lotes (3h) — nenhum painel do dia.
+  tick(3);
+  let u = since(0);
+  check(u.length > 0 && !u.some(isDaily) && u.some(x => noMoveEps.indexOf(x) >= 0) && u.some(x => lotEps.indexOf(x) >= 0),
+    'antes das 6h: só Sem Movimentação e Lotes (agenda deles), nenhum painel do dia', u.filter(isDaily).slice(0, 3));
+  let n = S.fetches.length;
+  tick(3);
+  check(S.fetches.length === n, 'mesmo bloco de horário: nada de novo (a cada 5 min não consulta)', S.fetches.length - n);
+  // 6h: 1º horário — o último dia fechado e os anteriores ainda sem o final; SC→SC/SC→DC: também a janela de ontem.
+  tick(6);
+  const civil = ['wrong_send', 'sorting_error', 'missing_receipt', 'missing_dispatch', 'damage', 'unseal'];
+  check(civil.every(k => [Y, Y2, Y3].every(d => complete(k, d))) && civil.every(k => cD.dayIsFinal_(k, Y)),
+    'às 6h: ontem e os dias anteriores baixados (taxa e lista) e finais', civil.map(k => k + ':' + [Y, Y2, Y3].map(d => (cD.getDayStatus_(k, d) || {}).details).join('/')));
+  check(['sc_sc', 'sc_dc'].every(k => [Y, Y2, Y3].every(d => complete(k, d))) && cD.dayIsFinal_('sc_dc', Y2) && !cD.dayIsFinal_('sc_dc', Y),
+    'às 6h: SC→SC e SC→DC com o último dia fechado (anteontem) e a janela de ontem, ainda aberta até 13:59');
+  check(!civil.some(k => cD.getDayStatus_(k, today)), 'hoje não é baixado sozinho nos painéis do dia');
+  // IDs de viagem de saída do SC→DC: chegam junto, na mesma agenda (antes ficavam no fim da fila).
+  const covD = cD.tripCoverage_('sc_dc', Y3, Y);
+  const {dcDepartureTrip: dTrip} = require('./mocks');
+  const withId = d => daysD[d].dc.filter((x, i) => dTrip(i) !== null).length;
+  check([Y, Y2, Y3].every(d => covD[d] && covD[d].total === daysD[d].dc.length && covD[d].found === withId(d)),
+    'às 6h: IDs de viagem de saída do SC→DC consultados (todas as remessas com a linha "Encomenda carregada")', covD);
+  // 7h: fora da agenda (Sem Movimentação 6h–7h59 e Lotes 6h–8h59 já feitos): zero consultas.
+  n = S.fetches.length;
+  tick(7);
+  check(S.fetches.length === n, 'às 7h: nenhuma consulta (fora da agenda)', since(n).slice(0, 3));
+  // 8h: 2º horário — o último dia fechado de novo (a taxa; a lista só se mudou) e a foto da Sem Movimentação (8h–9h59).
+  n = S.fetches.length;
+  tick(8);
+  u = since(n);
+  const sumWs = epOf('wrong_send')[0], detWs = epOf('wrong_send')[1];
+  check(u.indexOf(sumWs) >= 0 && u.indexOf(detWs) < 0 && u.some(x => noMoveEps.indexOf(x) >= 0) && !u.some(x => lotEps.indexOf(x) >= 0),
+    'às 8h: taxa de ontem conferida de novo (lista igual não é baixada de novo) e foto da Sem Movimentação', u.slice(0, 6));
+  // 9h às 23h: painéis do dia nunca; Sem Movimentação a cada 2 h e Lotes a cada 3 h.
+  n = S.fetches.length;
+  const perHour = {};
+  for (let h = 9; h <= 23; h++) { const m = S.fetches.length; tick(h); perHour[h] = since(m); }
+  check(!since(n).some(isDaily), '9h às 23h: nenhum painel do dia consultado (só pelo botão Atualizar)', since(n).filter(isDaily).slice(0, 3));
+  const nmHours = Object.keys(perHour).filter(h => perHour[h].some(x => noMoveEps.indexOf(x) >= 0)).map(Number);
+  const lotHours = Object.keys(perHour).filter(h => perHour[h].some(x => lotEps.indexOf(x) >= 0)).map(Number);
+  check(nmHours.join() === '10,12,14,16,18,20,22' && lotHours.join() === '9,12,15,18,21',
+    'Sem Movimentação às 10h, 12h…22h (a cada 2 h); Lotes às 9h, 12h…21h (a cada 3 h)', {nmHours, lotHours});
+  check(!cD.dayIsFinal_('sc_dc', Y), 'janela de ontem do SC→SC/SC→DC não é baixada às 14h (só na agenda do dia seguinte)');
+  // auditYesterday (gatilho das 7h): no modo diário não consulta nada.
+  n = S.fetches.length;
+  cD.auditYesterday(); runAll(cD, 2);
+  check(S.fetches.length === n, 'gatilho das 7h (auditYesterday) não consulta fora da agenda');
+  // Dia seguinte, 6h: a janela de ontem do SC→SC/SC→DC (fechada às 14h) entra e fica final; o dia de ontem dos outros vira final.
+  tick(6, 1);
+  check(cD.dayIsFinal_('sc_dc', Y) && cD.dayIsFinal_('sc_sc', Y) && complete('wrong_send', today) && cD.dayIsFinal_('wrong_send', today),
+    'dia seguinte, 6h: o dia que acabou entra (taxa e lista) e a janela do SC→SC/SC→DC fechada às 14h fica final');
+  // Painel: a agenda vai para o navegador.
+  setHour(9, 1);
   const boot = cD.getAppBootstrap();
-  check(boot.app.updateMode === 'diario' && boot.app.updateHour === 7, 'painel sabe do modo diário', boot.app);
-  function INDICATORS_SNAPSHOT(c, k) { return !!(c.getIndicatorConfig_(k) || {}).snapshot; }
-  function done2(c, k, ds) { return ds.every(d => c.getDayStatus_(k, d) && c.getDayStatus_(k, d).details === 'COMPLETE'); }
+  const cat = k => boot.catalog.filter(c => c.key === k)[0] || {};
+  check(boot.app.updateMode === 'diario' && boot.app.updateHours.join() === '6,8' && cat('no_move').agendaEvery === 2 && cat('lot_flow').agendaEvery === 3 && !cat('sc_dc').agendaEvery,
+    'painel sabe da agenda (6h e 8h; Sem Movimentação 2 h; Lotes 3 h)', boot.app);
+  // Horário perdido (instalação às 15h, gatilho parado): roda uma vez só na primeira execução depois.
+  const cM = freshCtx({[Y]: makeDay(Y, 85)}, null, {DATA_START_DATE: Y, MODO_ATUALIZACAO: 'diario'});
+  cM.Date = TestDate;
+  setHour(15);
+  const q1 = cM.runAgenda_(), q2 = cM.runAgenda_();
+  check(q1 > 0 && q2 === 0 && JSON.parse(cM.__state.props.AGENDA_ESTADO).s.join() === '6,8', 'horário perdido: roda uma vez só (6h e 8h juntos)', [q1, q2]);
+  cD.Date = RealDate; cM.Date = RealDate;
+}
+
+// ---------- V4.6: SC→DC — IDs de viagem de saída (material do usuário: Rastreamento do pacote) ----------
+{
+  const {dcDepartureTrip} = require('./mocks');
+  const c6 = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const o = {trips: c6.getIndicatorConfig_('sc_dc').trips, center: 'SP GRU', centerId: 2826, route: 'DC FICTICIO-SP', time: '2026-10-06 13:58:00'};
+  // Bipes no formato da resposta do keywordList (valores fictícios).
+  const det = [
+    {scanTypeName: 'Encomenda carregada', scanNetworkName: 'DC FICTICIO-SP', scanNetworkId: 9001, nextStopName: 'F FICTICIO-SP', remark2: 'SRTRFIC00000009', code: 1, originalScanTypeCode: 50, scanTime: '2026-10-07 03:55:12'},
+    {scanTypeName: 'Coleta de chegadas', scanNetworkName: 'DC FICTICIO-SP', scanNetworkId: 9001, nextStopName: 'SP GRU', remark2: 'SETRFIC00000008', code: 91, scanTime: '2026-10-06 23:05:45'},
+    {scanTypeName: 'Encomenda carregada', scanNetworkName: 'SP GRU', scanNetworkId: 2826, nextStopName: 'DC FICTICIO-SP', remark2: 'SETRFIC00000001', code: 1, originalScanTypeCode: 50, scanTime: '2026-10-06 13:58:23',
+      waybillTrackingContent: 'A encomenda expressa está [SP GRU] sendo enviada, para [DC FICTICIO-SP], escaneador [EQUIPAMENTO FICTICIO], o número do pedido [SETRFIC00000001], número do voo []'},
+    {scanTypeName: 'Encomenda recebida', scanNetworkName: 'SP GRU', scanNetworkId: 2826, nextStopName: 'PA FICTICIO-SP', remark2: 'SETRFIC00000007', code: 2, originalScanTypeCode: 90, scanTime: '2026-10-06 08:48:20'}
+  ];
+  check(c6.pickTripId_(det, o) === 'SETRFIC00000001', 'linha "Encomenda carregada" (código 50) da SP GRU: ID = número do pedido');
+  const det2 = [{waybillTrackingContent: 'A encomenda expressa está [SP GRU] sendo enviada, para [DC FICTICIO-SP], escaneador [EQUIPAMENTO FICTICIO], o número do pedido [SETRFIC00000002], número do voo []',
+    scanTime: '2026-10-06 13:58:23'}].concat(det.slice(0, 2));
+  check(c6.pickTripId_(det2, o) === 'SETRFIC00000002', 'sem código e sem remark2: a linha e o ID saem da descrição da etapa');
+  check(c6.pickTripId_(det.slice(0, 2), o) === null, 'sem carregamento na SP GRU: sem ID (não pega o de outra base nem o de chegada)');
+  // Fila: os IDs vêm logo depois da lista do mesmo dia, antes das listas dos dias antigos; perto do limite, continuam.
+  const today = c6.isoToday_(), Y = c6.addDaysIso_(today, -1), OLD = c6.addDaysIso_(today, -9);
+  const c7 = freshCtx({[Y]: makeDay(Y, 61)}, null, {DATA_START_DATE: OLD});
+  c7.enqueueJobs_([['DETAIL_INIT', 'wrong_send', OLD, 1], ['TRIPS', 'sc_dc', Y, 0], ['COMPACT', 'wrong_send', OLD, 0]], {});
+  const order = c7.pendingJobs_().map(j => j.type + ' ' + j.date);
+  check(order.indexOf('TRIPS ' + Y) < order.indexOf('DETAIL_INIT ' + OLD) && order.indexOf('TRIPS ' + Y) < order.indexOf('COMPACT ' + OLD),
+    'IDs de viagem do SC→DC antes das listas e compactações dos dias antigos', order);
+  c7.__state.props['URLFETCH_' + today] = '18500';
+  check(c7.fetchBudgetMode_() === 'reserve' && c7.fetchBudgetAllows_({type: 'TRIPS', indicator: 'sc_dc', date: Y}) &&
+    c7.fetchBudgetAllows_({type: 'SCANS', indicator: 'sorting_error', date: Y}) && c7.fetchBudgetAllows_({type: 'SUMMARY', indicator: 'sc_dc', date: c7.addDaysIso_(today, -2)}) &&
+    !c7.fetchBudgetAllows_({type: 'TRIPS', indicator: 'sc_dc', date: OLD}) && !c7.fetchBudgetAllows_({type: 'TRIPS', indicator: 'send_flow', date: Y}),
+    'perto do limite: IDs de viagem e bipagens dos dias recentes continuam (antes paravam)');
+  // Botão Atualizar: taxa, lista e IDs de saída na hora (refreshNow + refreshDetailsNow), sem esperar a fila.
+  const days8 = {[Y]: makeDay(Y, 62)};
+  const c8 = freshCtx(days8, null, {DATA_START_DATE: Y, MODO_ATUALIZACAO: 'diario'});
+  const r8 = c8.refreshNow('sc_dc', Y, Y);
+  const x8 = c8.refreshDetailsNow('sc_dc', Y, Y);
+  const want = {};
+  days8[Y].dc.forEach((x, i) => { want[x.waybillNo] = dcDepartureTrip(i) || ''; });
+  const rows8 = c8.getArchivedRange_('sc_dc', Y, Y).rows, tid = r => (r.tripId === 'N/A' ? '' : String(r.tripId || ''));
+  check(r8.updated === 1 && r8.detailsQueued === 1 && x8.done >= 2 && x8.pending === 0 && rows8.length === days8[Y].dc.length && rows8.every(r => want[r.shipment] === tid(r)),
+    'Atualizar no SC→DC: lista e IDs de viagem de saída na hora', {r8, x8: {done: x8.done, pending: x8.pending}});
+  check(c8.refreshDetailsNow('wrong_send', Y, Y).done === 0 && c8.refreshDetailsNow('arrival_flow', Y, Y).skipped === true,
+    'sem nada na fila: nada a fazer; painéis pesados ficam com a fila');
+  // Migração V4.6: dias com remessas sem ID (inclusive as que vieram sem a linha de carregamento) consultados de novo, uma vez.
+  const map = c8.loadTripMap_('sc_dc', Y);
+  Object.keys(map.ids).forEach(w => { delete map.ids[w]; map.miss[w] = 2; });
+  c8.saveTripMap_('sc_dc', Y, map, days8[Y].dc.length);
+  check(c8.tripCoverage_('sc_dc', Y, Y)[Y].found === 0, 'cenário: dia sem nenhum ID (consultas antigas sem a linha)');
+  delete c8.__state.props.MIGRATION_V46;
+  const q46 = c8.migrateToV46_();
+  check(q46 === 1 && c8.pendingJobs_().some(j => j.type === 'TRIPS' && j.date === Y && j.page === 1) && c8.migrateToV46_() === 0, 'migração V4.6: o dia volta para a fila uma vez', q46);
+  runAll(c8);
+  const cov8 = c8.tripCoverage_('sc_dc', Y, Y)[Y];
+  check(cov8.found === Object.values(want).filter(Boolean).length && c8.getArchivedRange_('sc_dc', Y, Y).rows.every(r => want[r.shipment] === tid(r)),
+    'depois da migração: IDs de saída de volta no painel', cov8);
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

@@ -82,7 +82,7 @@ function getAppBootstrap() {
   }
   return safeReturn_({
     app: {name: APP_CONFIG.APP_NAME, nameZh: APP_CONFIG.APP_NAME_ZH, version: APP_CONFIG.VERSION, red: APP_CONFIG.RED,
-      panel: panelName_(), updateMode: dailyMode_() ? 'diario' : 'continuo', updateHour: updateHour_()},
+      panel: panelName_(), updateMode: dailyMode_() ? 'diario' : 'continuo', updateHour: updateHour_(), updateHours: updateHours_()},
     center: centerName_(), catalog: getPublicCatalog_(), shiftColors: SHIFT_COLORS,
     today: isoToday_(), historyStart: getProp_('DATA_START_DATE', '') || earliest || '',
     latestByIndicator: latest, lastUpdated: lastUpdated, initialized: initialized,
@@ -149,6 +149,16 @@ function refreshNow(indicatorKey, from, to, opts) {
     }
   });
   if (later.length) { result.pendingDays = later.length; enqueueJobs_(later, {reset: true}); }
+  // V4.6 (SC→DC): dia com remessas ainda sem o ID de viagem de saída — o Atualizar consulta de novo o Rastreamento do pacote
+  // (inclusive as que antes vieram sem a linha "Encomenda carregada"); refreshDetailsNow baixa na hora.
+  if (cfg.trips && !cfg.grouped && !authError && updatedDays.length) {
+    try {
+      const cov = tripCoverage_(indicatorKey, updatedDays[updatedDays.length - 1], updatedDays[0]);
+      const files = dayFilesMap_(indicatorKey, updatedDays[updatedDays.length - 1], updatedDays[0]);
+      const trips = updatedDays.filter(d => files[d] && (!cov[d] || !(cov[d].total > 0) || cov[d].found < cov[d].total)).map(d => ['TRIPS', indicatorKey, d, 1]);
+      if (trips.length) result.tripsQueued = enqueueJobs_(trips, {reset: true});
+    } catch (e) { logSync_('WARN', indicatorKey, '', 'Atualizar: IDs de viagem não enfileirados: ' + String(e && e.message || e).slice(0, 300)); }
+  }
   // V3.35 (Avaria): o Atualizar consulta também a taxa de "Pedido principal/secundário" no JMS (antes, só Todos; as opções
   // esperavam a fila dos gatilhos).
   if (cfg.orderKinds && !authError && updatedDays.length) {
@@ -174,6 +184,49 @@ function refreshNow(indicatorKey, from, to, opts) {
   try { installTriggers(); } catch (e) { logSync_('WARN', indicatorKey, '', 'Gatilhos não verificados: ' + e); }
   flushFetchCount_();
   result.ok = result.failed === 0 || result.updated > 0;
+  result.pauses = publicPauses_();
+  return safeReturn_(result);
+}
+
+/**
+ * V4.6, chamada pelo painel logo depois de refreshNow (botão Atualizar): baixa AGORA o que o Atualizar deixou na fila para o
+ * painel e o período abertos — a lista do dia (DETAIL), os IDs de viagem de saída do SC→DC (TRIPS) e o lote/login da Triagem
+ * (SCANS) — por até REFRESH_DETAIL_BUDGET_MS. Sem isso, os gráficos e os IDs esperavam o gatilho da fila. Painéis pesados
+ * (Recebimento, Expedição) e a Sem Movimentação (refreshSnapshotList) ficam de fora. Usa a trava da fila: se o trabalhador
+ * estiver rodando, ele termina (busy).
+ */
+function refreshDetailsNow(indicatorKey, from, to) {
+  requireDb_();
+  validateJmsAuth_();
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const today = isoToday_();
+  to = isIso_(to) ? (to > today ? today : to) : addDaysIso_(today, -1);
+  from = isIso_(from) && from <= to ? from : to;
+  const result = {ok: true, done: 0, pending: 0};
+  if (cfg.snapshot || heavyGrouped_(cfg)) { result.skipped = true; return safeReturn_(result); }
+  const types = ['DETAIL_INIT', 'DETAIL_PAGE', 'TRIPS', 'SCANS'];
+  const mine = () => pendingJobs_().filter(j => j.indicator === indicatorKey && j.date >= from && j.date <= to && types.indexOf(j.type) >= 0);
+  if (!mine().length) return safeReturn_(result);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) { result.busy = true; result.pending = mine().length; return safeReturn_(result); }
+  const deadline = Date.now() + APP_CONFIG.REFRESH_DETAIL_BUDGET_MS, tries = {};
+  try {
+    while (Date.now() < deadline - 20000) {
+      const pauses = activePauses_();
+      const job = mine().filter(j => (tries[j.rowNum] || 0) < 6 && !pauseFor_(jobPauseKey_(j), pauses) && jobReady_(j))[0];
+      if (!job) break;
+      if (job.type === 'DETAIL_INIT' && Date.now() > deadline - APP_CONFIG.DETAIL_MIN_START_MS) break;
+      tries[job.rowNum] = (tries[job.rowNum] || 0) + 1;
+      const r = processJob_(job, deadline);
+      if (r === 'done') result.done++;
+      else if (r === 'quota' || r === 'paused') { result.stopped = r; break; }
+      else if (r === 'error') { result.failed = (result.failed || 0) + 1; }
+    }
+  } finally {
+    flushFetchCount_();
+    lock.releaseLock();
+  }
+  result.pending = mine().length;
   result.pauses = publicPauses_();
   return safeReturn_(result);
 }

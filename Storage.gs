@@ -890,9 +890,12 @@ function fetchBudgetAllows_(job) {
   const mode = fetchBudgetMode_();
   if (mode === 'ok') return true;
   if (mode === 'stop') return false;
-  const recent = job.date >= addDaysIso_(isoToday_(), -1);
+  // V4.6: anteontem também (SC→SC e SC→DC: antes das 14h o último dia fechado é anteontem).
+  const recent = job.date >= addDaysIso_(isoToday_(), -2);
   if (job.type === 'SUMMARY') return recent;
-  if (job.type === 'DETAIL_INIT' || job.type === 'DETAIL_PAGE') return recent && !heavyGrouped_(INDICATORS[job.indicator]);
+  // V4.6: IDs de viagem (SC→DC) e Consulta das bipagens (Triagem) dos dias recentes também: poucas consultas, e sem elas o
+  // painel ficava sem os IDs de saída.
+  if (job.type === 'DETAIL_INIT' || job.type === 'DETAIL_PAGE' || job.type === 'TRIPS' || job.type === 'SCANS') return recent && !heavyGrouped_(INDICATORS[job.indicator]);
   return false;
 }
 
@@ -1090,9 +1093,9 @@ function queueRecentRefresh_() {
   return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
 }
 /**
- * V4.5 (modo diário): cada dia fechado é baixado UMA vez (resumo e, em seguida, a lista), depois que fecha — dayCloseAt_.
- * Dia já baixado depois de fechar nunca entra de novo. Confere os 7 últimos dias fechados de cada painel (dia esquecido
- * com a fila parada) a partir de DATA_START_DATE. Roda na sincronização de hora em hora.
+ * V4.5/V4.6: dia com o número FINAL — taxa gravada depois que o dia fechou (dayCloseAt_: dia seguinte no 1º horário da
+ * agenda; SC→SC/SC→DC às 14h, fim da janela). Dia final não entra de novo na agenda (só o último dia fechado, que cada
+ * horário confere outra vez).
  */
 function dayIsFinal_(indicatorKey, date) {
   const st = getDayStatus_(indicatorKey, date);
@@ -1103,23 +1106,85 @@ function dayIsFinal_(indicatorKey, date) {
   const r = getRateDay_(indicatorKey, date);
   return !!(r && localStamp_(r.syncedAt) >= close);
 }
-function queueNewClosedDays_() {
-  if (!getProp_('DB_SPREADSHEET_ID', '')) return 0;
-  const pauses = activePauses_();
-  if (pauses['*'] || hourNow_() < updateHour_()) return 0;
-  const start = getProp_('DATA_START_DATE', ''), now = localStamp_(new Date().toISOString()), jobs = [];
+/** Lista do dia baixada depois que o dia fechou (o detalhe pesado não é rebaixado no 2º horário da agenda). */
+function detailIsFinal_(indicatorKey, date) {
+  const df = dayFilesMap_(indicatorKey, date, date)[date];
+  return !!(df && df.createdAt && localStamp_(df.createdAt) >= dayCloseAt_(indicatorKey, date));
+}
+const AGENDA_PROP_ = 'AGENDA_ESTADO';
+/**
+ * V4.6 (pedido do usuário): AGENDA do modo diário — chamada pelo trabalhador da fila (a cada 5 min) e pela sincronização de
+ * hora em hora. Só põe tarefas na fila nos horários combinados; fora deles não consulta nada (o botão Atualizar continua).
+ *  - Painéis de dia fechado: em cada horário de HORAS_ATUALIZACAO (6h e 8h) — agendaDailyJobs_.
+ *  - Sem Movimentação / Fluxo de Lotes (agendaEvery): a cada N horas do relógio (0h, 2h, 4h… / 0h, 3h, 6h…).
+ * Horário que passou sem execução (gatilho atrasado, fila parada pela cota): roda uma vez só, na primeira execução depois.
+ * Estado (propriedade interna AGENDA_ESTADO): {d: dia, s: horários já feitos hoje, i: {painel: "dia#bloco"}}.
+ */
+function runAgenda_() {
+  if (!dailyMode_() || !getProp_('DB_SPREADSHEET_ID', '')) return 0;
+  const today = isoToday_(), h = hourNow_();
+  const prev = safeJsonParse_(getProp_(AGENDA_PROP_, ''), null) || {};
+  const state = {d: today, s: prev.d === today ? (prev.s || []).slice() : [], i: Object.assign({}, prev.i || {})};
+  const due = updateHours_().filter(x => x <= h && state.s.indexOf(x) < 0);
+  const every = Object.keys(INDICATORS).filter(k => INDICATORS[k].agendaEvery && agendaEveryHours_(INDICATORS[k]) > 0)
+    .map(k => ({k: k, slot: today + '#' + Math.floor(h / agendaEveryHours_(INDICATORS[k]))})).filter(x => state.i[x.k] !== x.slot);
+  if (!due.length && !every.length) return 0;
+  // Rota pausada (token vencido, cota do Google): as tarefas entram assim mesmo e esperam na fila — rodam quando a pausa
+  // acabar (token trocado, cota de volta), sem esperar o próximo horário.
+  let jobs = [];
+  if (due.length) {
+    jobs = jobs.concat(agendaDailyJobs_());
+    // 1º horário do dia: também a autocorreção da fila (antes às 7h, pelo gatilho auditYesterday).
+    if (!state.s.length) { try { healQueue_(300); } catch (e) { logSync_('WARN', '', '', 'Autocorreção não concluída: ' + e); } }
+    state.s = state.s.concat(due).filter((x, i, a) => a.indexOf(x) === i).sort((a, b) => a - b);
+  }
+  every.forEach(x => { jobs = jobs.concat(agendaEveryJobs_(x.k)); state.i[x.k] = x.slot; });
+  setProp_(AGENDA_PROP_, JSON.stringify(state));
+  if (!jobs.length) return 0;
+  const n = enqueueJobs_(jobs, {reset: true});
+  logSync_('INFO', '', today, 'Agenda ' + String(h).padStart(2, '0') + 'h: ' + n + ' tarefa(s) na fila' +
+    (due.length ? ' (horário ' + due.map(x => String(x).padStart(2, '0') + 'h').join(' e ') + ')' : '') +
+    (every.length ? ' · ' + every.map(x => x.k).join(', ') : '') + '.');
+  return n;
+}
+/**
+ * Um horário da agenda (6h, 8h) para os painéis de dia fechado: o último dia fechado de novo (taxa; a lista vem junto se
+ * mudou — runSummaryJob_), os 7 dias anteriores que ainda não têm o número final ou a lista completa, e — SC→SC e SC→DC —
+ * a janela de ontem, ainda em andamento até as 13:59 de hoje.
+ */
+function agendaDailyJobs_() {
+  const start = getProp_('DATA_START_DATE', ''), today = isoToday_(), jobs = [];
   Object.keys(INDICATORS).forEach(k => {
     const cfg = INDICATORS[k];
-    if (cfg.snapshot || pauseFor_(cfg.routeKey, pauses)) return;
+    if (cfg.snapshot || cfg.agendaEvery) return;
     const last = lastClosedDate_(k);
-    for (let i = 0; i < 7; i++) {
+    if (start && last < start) return;
+    jobs.push(['SUMMARY', k, last, 0]);
+    const open = addDaysIso_(today, -1);
+    if (isOperational_(k) && open > last) jobs.push(['SUMMARY', k, open, 0]);
+    for (let i = 1; i < 7; i++) {
       const d = addDaysIso_(last, -i);
       if (start && d < start) break;
-      if (dayCloseAt_(k, d) > now) continue;
-      if (!dayIsFinal_(k, d)) jobs.push(['SUMMARY', k, d, 0]);
+      if (!dayIsFinal_(k, d)) { jobs.push(['SUMMARY', k, d, 0]); continue; }
+      const st = getDayStatus_(k, d);
+      // Taxa final, mas a lista do dia falhou ou ficou pela metade: só a lista (dentro da janela de detalhe do painel).
+      const days = detailDays_(cfg);
+      if (st && st.summary === 'COMPLETE' && (!days || d >= addDaysIso_(today, -days)) &&
+          DETAIL_USABLE_.indexOf(st.details) < 0 && st.details !== 'NO_RECORD') jobs.push(['DETAIL_INIT', k, d, 1]);
     }
   });
-  return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  return jobs;
+}
+/** Painel a cada N horas: hoje (Sem Movimentação: só hoje existe) e, nos de dia fechado, os dias anteriores ainda sem o final. */
+function agendaEveryJobs_(k) {
+  const cfg = INDICATORS[k], today = isoToday_(), start = getProp_('DATA_START_DATE', ''), jobs = [['SUMMARY', k, today, 0]];
+  if (cfg.snapshot) return jobs;
+  for (let i = 1; i <= 7; i++) {
+    const d = addDaysIso_(today, -i);
+    if (start && d < start) break;
+    if (dayCloseAt_(k, d) <= localStamp_(new Date().toISOString()) && !dayIsFinal_(k, d)) jobs.push(['SUMMARY', k, d, 0]);
+  }
+  return jobs;
 }
 function retryFailedJobs() {
   let count = 0;
@@ -1143,6 +1208,10 @@ function pendingJobs_() {
   const rank = j => {
     // V3.30: Sem Movimentação (foto de hoje, poucas consultas) na frente de tudo — com a fila cheia ela não fica sem dados.
     if (INDICATORS[j.indicator] && INDICATORS[j.indicator].snapshot && (j.type === 'SUMMARY' || j.type === 'DETAIL_INIT')) return j.type === 'SUMMARY' ? -1 : -0.5;
+    // V4.6: IDs de viagem do SC→DC e Consulta das bipagens da Triagem (consultas leves, só as remessas da lista): logo depois
+    // da lista do mesmo dia, antes das listas dos dias mais antigos (com o histórico na fila, ficavam para o fim e os IDs não
+    // apareciam).
+    if ((j.type === 'TRIPS' || j.type === 'SCANS') && !heavyGrouped_(INDICATORS[j.indicator])) return 1;
     if ((j.type === 'DETAIL_INIT' && heavyGrouped_(INDICATORS[j.indicator])) || j.type === 'TRIPS') {
       const a = anchor[j.indicator] || (anchor[j.indicator] = lastClosedDate_(j.indicator));
       // V3.24: IDs de viagem do dia em que o painel abre logo depois do detalhe dele, antes de rebaixar a situação dos
@@ -1525,16 +1594,16 @@ function processSyncQueue(opts) {
   // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
   try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
-  // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
-  // V4.5: no modo diário (padrão), hoje não é atualizado sozinho (só pelo botão Atualizar do painel).
-  if (!dailyMode_()) {
+  // V4.6: modo diário (padrão) — só a AGENDA põe tarefas na fila (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h).
+  // Fora dos horários, nada é consultado sozinho (o botão Atualizar do painel continua valendo).
+  if (dailyMode_()) {
+    try { runAgenda_(); } catch (e) { logSync_('WARN', '', '', 'Agenda não conferida: ' + String(e && e.message || e).slice(0, 300)); }
+  } else {
+    // V3.24: resumo do dia de hoje mais vezes por hora (ATUALIZACAO_MIN), além da sincronização de hora em hora.
     try { queueTodayRefresh_(); } catch (e) { logSync_('WARN', '', '', 'Atualização rápida de hoje não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
-  }
-  // V3.29: dia sem foto da Sem Movimentação (instalação, virada do dia): a primeira foto entra na fila já.
-  // V4.5: no modo diário, uma foto por dia, a partir da HORA_ATUALIZACAO.
-  if (!dailyMode_() || hourNow_() >= updateHour_()) {
+    // V3.29: dia sem foto da Sem Movimentação (instalação, virada do dia): a primeira foto entra na fila já.
     try { queueSnapshotsToday_(); } catch (e) { logSync_('WARN', '', '', 'Foto de hoje (Sem Movimentação) não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
   }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
@@ -1790,9 +1859,11 @@ function runSummaryJob_(job) {
   const cfgS = getIndicatorConfig_(job.indicator);
   const typeChanged = !!(cfgS.detail && cfgS.detail.typeFromSummary && prev && prev.metrics && summary.raw &&
     Number(prev.metrics.refType) !== Number(summary.raw.refType));
-  // V4.5 (modo diário): o resumo só roda no download único do dia (ou no histórico/Atualizar): a lista vem junto, sem esperar
-  // o intervalo de atualização.
-  if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, typeChanged || dailyMode_())) {
+  // V4.5 (modo diário): o resumo só roda na agenda (ou no histórico/Atualizar): a lista vem junto, sem esperar o intervalo de
+  // atualização. V4.6: detalhe pesado (Recebimento, Expedição) já baixado depois de o dia fechar não é rebaixado no 2º
+  // horário da agenda (8h) — os cartões do resumo são atualizados; a lista segue o intervalo dela.
+  const keepHeavy = heavyGrouped_(cfgS) && !!st && st.details === 'COMPLETE' && detailIsFinal_(job.indicator, job.date);
+  if (detailNeedsRefresh_(job.indicator, job.date, prev, summary, st, typeChanged || (dailyMode_() && !keepHeavy))) {
     enqueueJobs_([['DETAIL_INIT', job.indicator, job.date, 1]], {reset: true});
   }
   // Recebimento: quantidade de cada turno pelo resumo (4 consultas), para os cartões e pizzas sem esperar o detalhe.

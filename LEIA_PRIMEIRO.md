@@ -1,8 +1,91 @@
-# J&T DASHMASTER V4.5 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.6 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.6 — Agenda de atualização (6h e 8h), IDs de viagem de saída do SC → DC e um pouco mais de cota
+**Pedido:**
+- Não atualizar os indicadores a todo momento. Avaria, Falta de Bipagem (Recebimento e Expedição), Envio Errado, Triagem Errada, Expedição SC → SC e SC → DC atualizam **às 6h e às 8h**.
+- Sem Movimentação **a cada 2 horas**; Fluxo de Lotes (sacas criadas) **a cada 3 horas**.
+- Fora disso, só quando apertar o botão **Atualizar**.
+- O limite de cota pode aumentar um pouco.
+- SC → DC: mostrar os IDs de viagem de saída, puxados como no material enviado.
+
+### Agenda (modo diário, o padrão)
+| Painel | Atualiza sozinho |
+|---|---|
+| Envio Errado, Triagem Errada, Falta de Bipagem (Recebimento e Expedição), Avaria, SC → SC, SC → DC, Deslacre | **às 6h e às 8h** |
+| Sem Movimentação | **a cada 2 h** (0h, 2h, 4h … 22h) |
+| Fluxo de Lotes | **a cada 3 h** (0h, 3h, 6h … 21h) |
+| Recebimento e Expedição: fluxo operacional (painel dos fluxos) | às 6h e às 8h |
+
+- **Em cada horário (6h e 8h):**
+  - o último dia fechado é baixado de novo: taxa e cartões, e a lista (gráficos e tabela) se mudou;
+  - às 8h, ele confere o que o JMS ainda fechou depois das 6h;
+  - os dias anteriores que ainda não têm o número final também entram.
+- **SC → SC e SC → DC:** a janela deles vai das 14h às 13:59 do dia seguinte. Às 6h e 8h entram:
+  - o último dia fechado (anteontem);
+  - a janela de ontem, ainda em andamento até as 13:59 de hoje. Ela fica com o número final às 6h do dia seguinte.
+
+  O painel continua abrindo no último dia fechado.
+- **Fora dos horários nada é consultado sozinho.** Só o botão **Atualizar**.
+- **Horário perdido** (fila parada pela cota, token vencido, gatilho atrasado): roda uma vez, na primeira execução depois.
+- **Gatilho das 7h** (`auditYesterday`): não consulta mais nada no modo diário. A conferência dos dias esquecidos e a autocorreção da fila passaram para o horário das 6h.
+- **Etiqueta embaixo dos filtros:** mostra a agenda do painel aberto ("Atualiza às 06h e 08h", "Atualiza a cada 2 h", "Atualiza a cada 3 h").
+
+### Botão Atualizar: tudo na hora
+Antes, o botão trazia só a taxa; a lista (gráficos, tabela) e os IDs de viagem esperavam a fila, 5 minutos ou mais. Agora ele traz na hora:
+- a taxa;
+- a lista do dia;
+- os IDs de viagem de saída do SC → DC;
+- o lote e o login da Triagem Errada (Consulta das bipagens).
+
+Recebimento e Expedição (painel dos fluxos) continuam com a lista pela fila, porque são pesados.
+
+### SC → DC: IDs de viagem de saída
+A consulta é a do material: **Rastreamento do pacote** (`podTracking/inner/query/keywordList`, `trackingTypeEnum: WAYBILL`), remessa por remessa da lista "Qtd expedidos fora do prazo". Vale a linha "A encomenda expressa está [SP GRU] sendo enviada, para […]", com J&T Tracking Code 50 e tipo "Encomenda carregada". O ID é o "número do pedido" (`remark2`).
+
+**Por que os IDs não apareciam:**
+- **A consulta ia para o fim da fila.** Num projeto novo, com o histórico na fila, ela só rodava depois das listas e compactações de todos os dias.
+- **Perto do limite de consultas do Google (80%), ela parava de vez.**
+
+**O que mudou:**
+- Os IDs vêm logo depois da lista do mesmo dia.
+- Continuam perto do limite de consultas. São poucas: só as remessas fora do prazo, 100 por consulta.
+- A linha também é reconhecida pelo tipo "Encomenda carregada" e pela descrição da etapa, se o código vier diferente. O ID também é lido do "número do pedido [ … ]" da descrição, se faltar o `remark2`.
+- **Uma vez, ao instalar:** os últimos 31 dias com remessas sem ID entram de novo na fila. As remessas que antes vieram sem a linha de carregamento também são consultadas de novo.
+- O botão Atualizar no SC → DC consulta na hora as remessas ainda sem ID.
+
+**Para conferir no JMS real:** rode `diagnosticarViagensSCDC`. Ele mostra, para algumas remessas do dia, o ID de chegada → o ID de saída achado, sem o número das remessas.
+
+### Cota
+- **Economia:** a partir de **90%** das consultas do dia (antes 80%).
+- **Parada:** em **97%** (antes 95%).
+- **IDs de viagem e Consulta das bipagens:** dos dias recentes, continuam também na economia.
+
+**Simulação da conta Gmail** (90 min/dia de gatilhos, 20 mil consultas/dia, volumes reais do SP GRU):
+
+| | V4.5 (uma vez por dia) | **V4.6 (agenda)** |
+|---|---|---|
+| Painel principal, uso por dia | 4,5 min · 230 consultas | **9 min · 311 consultas** |
+| Painel principal, dia do histórico | 65,6 min | **68,2 min** |
+| Painel dos fluxos, uso por dia | 41 min / 30 min | **41 min / 30 min** (igual) |
+| SC → DC, IDs de viagem de saída | só depois de toda a fila | **todos os dias completos** |
+
+No painel principal, as consultas do último dia simulado ficaram concentradas às **6h** (188), **8h** (11) e nos horários da Sem Movimentação e dos Lotes. Das 9h às 23h, nenhum painel do dia foi consultado.
+
+### Propriedades do script (opcionais)
+| Propriedade | Para que serve |
+|---|---|
+| `HORAS_ATUALIZACAO` | Horários dos painéis do dia. Padrão `6,8`; exemplo: `5,7,9` |
+| `SEM_MOVIMENTACAO_HORAS` | Intervalo da Sem Movimentação, em horas (padrão `2`) |
+| `LOTES_HORAS` | Intervalo do Fluxo de Lotes, em horas (padrão `3`) |
+| `MODO_ATUALIZACAO` = `continuo` | Volta à coleta contínua (hoje a cada 30 min, revalidação de hora em hora) |
+
+`HORA_ATUALIZACAO` (V4.5) não vale mais: use `HORAS_ATUALIZACAO`.
+
+**Como instalar:** troque todos os `.gs` e `.html` pelos do ZIP V4.6 (nos dois projetos) e publique uma **Nova versão**. Não precisa rodar nenhuma função.
 
 ## V4.5 — Atualização diária: cada dia é baixado uma vez e fica salvo
 **Pedido:** não atualizar o tempo todo. Baixar uma vez, deixar salvo e, quando virar o dia, baixar só o dia novo.
@@ -34,7 +117,7 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 | Propriedade | Para que serve |
 |---|---|
-| `HORA_ATUALIZACAO` | Hora em que o dia de ontem é baixado (0 a 23; padrão `7`) |
+| `HORA_ATUALIZACAO` | Hora em que o dia de ontem é baixado (0 a 23; padrão `7`). **V4.6:** trocada por `HORAS_ATUALIZACAO` (padrão 6h e 8h) |
 | `MODO_ATUALIZACAO` = `continuo` | Volta ao comportamento antigo: hoje a cada 30 min e os 3 últimos dias revalidados de hora em hora |
 
 A versão Node.js continua com a coleta contínua, porque lá não existe cota.

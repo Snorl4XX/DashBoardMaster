@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.5.0',
+  VERSION: '4.6.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -24,6 +24,8 @@ const APP_CONFIG = Object.freeze({
   REFRESH_MAX_DAYS: 31,
   REFRESH_COOLDOWN_S: 90,
   SNAPSHOT_LIST_BUDGET_MS: 240000, // V3.30: Sem Movimentação — lista baixada na hora pelo botão Atualizar (até 4 min)
+  UPDATE_HOURS: [6, 8],        // V4.6 (pedido): agenda dos painéis de dia fechado (HORAS_ATUALIZACAO muda)
+  REFRESH_DETAIL_BUDGET_MS: 150000, // V4.6: botão Atualizar — lista do dia e IDs de viagem baixados na hora (até 2,5 min)
   PAUSE_AUTH_MINUTES: [15, 60, 180, 360], // credencial recusada: nova tentativa em 15 min, 1 h, 3 h, 6 h (ou assim que o token for trocado)
   PAUSE_QUOTA_MINUTES: 60,     // cota do Google esgotada: nova tentativa em 1 h
   PROPS_TTL_MS: 10000,         // propriedades do script relidas no máximo a cada 10 s
@@ -878,6 +880,8 @@ const ALL_INDICATORS_ = Object.freeze({
     // Taxa do indicador = Taxa de uso de Saca Ecológica (quanto maior melhor); sem meta definida.
     goal: {value: null, direction: 'min', strict: false},
     apiProfile: 'lot_flow', detailMatchesErrors: false, grouped: true, light: true,
+    // V4.6 (pedido): agenda própria — hoje a cada LOTES_HORAS (padrão 3 h: 0h, 3h, 6h…), fora da agenda só pelo Atualizar.
+    agendaEvery: {prop: 'LOTES_HORAS', hours: 3},
     summary: {
       endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sdploopbagBuildbagCount',
       // Linha da nossa base (proxySiteCode = JMS_CENTER_CODE), se o JMS mandar mais de uma.
@@ -1025,6 +1029,8 @@ const ALL_INDICATORS_ = Object.freeze({
     apiProfile: 'no_move', detailMatchesErrors: false, grouped: true, light: true,
     // Foto do momento: só HOJE é consultado; dia passado nunca é baixado de novo (seria a foto de hoje com outra data).
     snapshot: true,
+    // V4.6 (pedido): foto a cada SEM_MOVIMENTACAO_HORAS (padrão 2 h: 0h, 2h, 4h…), fora da agenda só pelo Atualizar.
+    agendaEvery: {prop: 'SEM_MOVIMENTACAO_HORAS', hours: 2},
     // V3.32: "Fonte de dados" da tela — Tempo real (este) ou Histórico (HISTORY_INDICATORS_.no_move_hist, com as datas).
     historySource: 'no_move_hist',
     summary: {
@@ -1428,6 +1434,8 @@ function catalogEntry_(cfg) {
     shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
     columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
     snapshot: !!cfg.snapshot,
+    // V4.6: agenda do painel — a cada N horas (Sem Movimentação, Fluxo de Lotes); sem isso, às HORAS_ATUALIZACAO.
+    agendaEvery: cfg.agendaEvery ? agendaEveryHours_(cfg) : null,
     // V4.4 (Deslacre): cartões próprios e o texto de cada situação do bipe de deslacre.
     unsealCards: !!cfg.unsealCards, situations: cfg.situations || null,
     // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).

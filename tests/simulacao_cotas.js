@@ -81,6 +81,13 @@ console.log('Expedição — situação do detalhe por dia: ' + JSON.stringify(s
 const lfDays = ctx.allTabRows_('DAYFILES').filter(r => r[0] === 'lot_flow').map(r => ctx.dateCellIso_(r[1]) + ' ' + r[3] + ' sacas');
 const lfSt = ctx.allTabRows_('STATUS').filter(r => r[0] === 'lot_flow').map(r => r[3]).reduce((m, x) => { m[x] = (m[x] || 0) + 1; return m; }, {});
 console.log('Fluxo de Lotes — situação do detalhe por dia: ' + JSON.stringify(lfSt) + '\n  ' + lfDays.slice(-4).join('\n  '));
+// V4.6: SC→DC — IDs de viagem de saída (Rastreamento do pacote) por dia: com ID / remessas fora do prazo.
+if (keys.indexOf('sc_dc') >= 0) {
+  const dcCov = ctx.tripCoverage_('sc_dc', from, today);
+  console.log('SC→DC — IDs de viagem de saída: ' + Object.keys(dcCov).sort().slice(-6).map(d => d + ' ' + dcCov[d].found + '/' + dcCov[d].total).join(' · '));
+}
+// V4.6: agenda — consultas por hora no último dia simulado (painéis do dia só às 6h e 8h).
+if (st.byHour) console.log('Consultas por hora (último dia): ' + Object.keys(st.byHour).sort().map(h => h + 'h ' + st.byHour[h]).join(' · '));
 if (process.env.DASH) {
   const t1 = addDays(today, -1);
   const fDC = {column: ['Chegou'], destCenter: ['DC 3']};

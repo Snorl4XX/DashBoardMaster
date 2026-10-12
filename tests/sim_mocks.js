@@ -90,7 +90,12 @@ function createSimContext(opts) {
   function folderApi(id) {
     return {getId: () => id, createFile: b => { clock.tick(COST.driveCreate); st.driveCreate++; const fid = 'file' + (++state.seq); state.files[fid] = {blob: b}; return {getId: () => fid, getUrl: () => 'u' + fid}; }};
   }
-  function fetchOne(url, req) { st.urlfetch++; st.urlfetchDay = (st.urlfetchDay || 0) + 1; if (opts.urlfetchQuota && st.urlfetchDay > opts.urlfetchQuota) throw new Error('Service invoked too many times for one day: urlfetch.'); return opts.jms(url, req, clock); }
+  function fetchOne(url, req) {
+    // V4.6: consultas por hora de São Paulo do dia corrente (agenda: painéis do dia só às 6h e 8h).
+    const dh = fmtDate(clock.now, 'America/Sao_Paulo', 'yyyy-MM-dd HH');
+    if (st.byHourDay !== dh.slice(0, 10)) { st.byHourDay = dh.slice(0, 10); st.byHour = {}; }
+    st.byHour[dh.slice(11)] = (st.byHour[dh.slice(11)] || 0) + 1;
+    st.urlfetch++; st.urlfetchDay = (st.urlfetchDay || 0) + 1; if (opts.urlfetchQuota && st.urlfetchDay > opts.urlfetchQuota) throw new Error('Service invoked too many times for one day: urlfetch.'); return opts.jms(url, req, clock); }
   const context = {
     console: {log() {}, error() {}, warn() {}},
     Date: VDate, JSON, Math, Object, Array, String, Number, Boolean, RegExp, Error, Set, Map, Intl, encodeURIComponent, Buffer,

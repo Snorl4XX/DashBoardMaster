@@ -15,7 +15,7 @@ function removeProjectTriggers() {
   return {ok: true};
 }
 
-/** A cada hora: revalida as taxas dos 3 últimos dias e roda a fila. */
+/** A cada hora: agenda (modo diário) ou revalidação dos 3 últimos dias (modo contínuo), e roda a fila. */
 function syncHourly() {
   try { validateJmsAuth_(); }
   catch (e) {
@@ -24,16 +24,19 @@ function syncHourly() {
   }
   // Antes da revalidação: com os 3 últimos dias já no DAY_STATUS, o indicador novo ainda é reconhecido como novo.
   let history = 0;
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
-  // V4.5: modo diário (padrão) — só os dias que fecharam e ainda não foram baixados depois de fechar; nada de revalidar.
-  const queued = (dailyMode_() ? queueNewClosedDays_() : queueRecentRefresh_()) + history;
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
+  // V4.6: modo diário (padrão) — só a agenda (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h); nada de revalidar.
+  const queued = (dailyMode_() ? runAgenda_() : queueRecentRefresh_()) + history;
   return {ok: true, queued: queued, worker: processSyncQueue({budgetMs: 240000})};
 }
 
 /** Todo dia às 7h: garante que ontem tem taxa e detalhes completos e recoloca na fila os dias esquecidos. */
 function auditYesterday() {
-  const yesterday = addDaysIso_(isoToday_(), -1);
   const report = {};
+  // V4.6: no modo diário a agenda (1º horário do dia, 6h) já confere os dias sem o número final ou sem a lista e faz a
+  // autocorreção da fila: nada aqui (nenhuma consulta ao JMS fora da agenda).
+  if (dailyMode_()) { report.agenda = true; return report; }
+  const yesterday = addDaysIso_(isoToday_(), -1);
   const jobs = [];
   Object.keys(INDICATORS).forEach(k => {
     const coverage = getCoverage_(k, yesterday, yesterday);

@@ -589,8 +589,13 @@ function tripPayload_(list) { return {keywordList: list, trackingTypeEnum: 'WAYB
 function pickTripId_(details, o) {
   const up = s => String(s === null || s === undefined ? '' : s).trim().toUpperCase();
   const codes = (o.trips && o.trips.loadCodes) || [1], orig = (o.trips && o.trips.loadOriginalCodes) || [50];
-  const isLoad = d => codes.indexOf(Number(d.code)) >= 0 || orig.indexOf(Number(d.originalScanTypeCode)) >= 0;
-  const atBase = d => up(d.scanNetworkName) === up(o.center) || (!!o.centerId && Number(d.scanNetworkId) === Number(o.centerId));
+  // V4.6: a linha também é reconhecida pelo texto, como no material do usuário — Tipo de bipagem "Encomenda carregada" e
+  // Descrição "A encomenda expressa está [SP GRU] sendo enviada, para […]" (o código pode vir com outra grafia ou vazio).
+  const text = d => up(d.waybillTrackingContent);
+  const isLoad = d => codes.indexOf(Number(d.code)) >= 0 || orig.indexOf(Number(d.originalScanTypeCode)) >= 0 ||
+    /ENCOMENDA CARREGADA/.test(up(d.scanTypeName)) || /\] SENDO ENVIADA/.test(text(d));
+  const atBase = d => up(d.scanNetworkName) === up(o.center) || (!!o.centerId && Number(d.scanNetworkId) === Number(o.centerId)) ||
+    (!d.scanNetworkName && text(d).indexOf('[' + up(o.center) + '] SENDO ENVIADA') >= 0);
   const here = (details || []).filter(d => d && isLoad(d) && atBase(d));
   if (!here.length) return null;
   const same = here.filter(d => up(d.nextStopName) === up(o.route));
@@ -600,7 +605,11 @@ function pickTripId_(details, o) {
   const dist = d => { const t = at(d.scanTime); return Number.isFinite(t) && Number.isFinite(t0) ? Math.abs(t - t0) : Infinity; };
   let best = pool[0];
   pool.forEach(d => { if (dist(d) < dist(best)) best = d; });
-  return String(best.remark2 === null || best.remark2 === undefined ? '' : best.remark2).trim();
+  const id = String(best.remark2 === null || best.remark2 === undefined ? '' : best.remark2).trim();
+  if (id) return id;
+  // Sem o campo remark2: o "número do pedido [ID]" da descrição da etapa.
+  const m = String(best.waybillTrackingContent || '').match(/n[úu]mero do pedido \[([^\]]+)\]/i);
+  return m ? m[1].trim() : '';
 }
 /** Ordem espalhada (amostra do dia inteiro enquanto a consulta não termina): por um código da remessa. */
 function tripOrderKey_(w) {
@@ -627,6 +636,8 @@ function runTripJob_(job, deadline) {
   const mode = cfg.trips.replace || '';
   const marked = !mode || ds.tripSrc === mode;
   const map = loadTripMap_(job.indicator, job.date);
+  // V4.6: tarefa com page 1 (migração/Atualizar) consulta de novo as remessas que antes vieram sem a linha de carregamento.
+  if (job.page === 1) map.miss = {};
   const W = ds.dict[wk], cW = ds.cols[wk];
   const D = ds.dict.destination || [], cD = ds.cols.destination, E = ds.dict.eventTime || [], cE = ds.cols.eventTime;
   const info = {}, todo = [];
@@ -736,6 +747,26 @@ function migrateToV41_() {
   });
   setProp_('MIGRATION_V41', new Date().toISOString());
   if (n) logSync_('INFO', 'sc_dc', '', 'V4.1: ' + n + ' dia(s) na fila para buscar o ID de viagem de saída no Rastreamento do pacote.');
+  return n;
+}
+/**
+ * V4.6: SC→DC sem os IDs de viagem de saída no painel. A consulta seguia o material (Rastreamento do pacote), mas a tarefa ia
+ * para o fim da fila (com o histórico na fila, nunca chegava) e parava perto do limite de consultas do Google. Uma vez: os
+ * dias dos últimos 31 com remessas ainda sem ID entram na fila de novo — logo depois da lista do dia — e as remessas que
+ * vieram sem a linha "Encomenda carregada" são consultadas outra vez (page 1).
+ */
+function migrateToV46_() {
+  if (getProp_('MIGRATION_V46', '')) return 0;
+  let n = 0;
+  const from = addDaysIso_(isoToday_(), -31);
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].trips && INDICATORS[k].trips.replace && !INDICATORS[k].grouped).forEach(k => {
+    const cov = tripCoverage_(k, from, isoToday_());
+    const jobs = Object.keys(dayFilesMap_(k, from, isoToday_())).sort().reverse()
+      .filter(d => !cov[d] || !(cov[d].total > 0) || cov[d].found < cov[d].total).map(d => ['TRIPS', k, d, 1]);
+    if (jobs.length) n += enqueueJobs_(jobs, {reset: true});
+  });
+  setProp_('MIGRATION_V46', new Date().toISOString());
+  if (n) logSync_('INFO', 'sc_dc', '', 'V4.6: ' + n + ' dia(s) na fila para buscar de novo o ID de viagem de saída no Rastreamento do pacote.');
   return n;
 }
 /** IDs de viagem consultados por dia (painel): {data: {consultadas, comId, remessas}}. */

@@ -15,7 +15,7 @@ var PROPS_CACHE_ = null;
  * DATA_START_DATE, PAINEIS…) e os IDs da planilha/pastas. O gatilho e o app da Web rodam como o dono do projeto
  * (executeAs USER_DEPLOYING): é sempre o mesmo armazenamento.
  */
-const INTERNAL_PROP_RE_ = /^(GROUPED_(PROG|PLAN|PLANDATA|PARALLEL|USED_MS|LAYOUT)_|SEND_USED_MS_|URLFETCH_|SEND_SHIFTS_|HISTORY_FILL_|MIGRATION_|V37_INSTALLED_AT$|QUEUE_HINT_|SYNC_PAUSE_|TODAY_REFRESH_AT$|STAMP_|SNAPSHOT_DAY_|JMS_SLICE_OK_|JMS_NO_SLICE_|JMS_PAGE_SIZE_|JMS_ROUTE_AUTO_|JMS_TRIP_BATCH$|JMS_SUMMARY_SHIFTS_OFF_|ORDERKIND_DETECT_AT_|GOOGLE_PLAN_AUTO$|PROPS_ORGANIZED_AT$)/;
+const INTERNAL_PROP_RE_ = /^(GROUPED_(PROG|PLAN|PLANDATA|PARALLEL|USED_MS|LAYOUT)_|SEND_USED_MS_|URLFETCH_|SEND_SHIFTS_|HISTORY_FILL_|MIGRATION_|V37_INSTALLED_AT$|QUEUE_HINT_|SYNC_PAUSE_|TODAY_REFRESH_AT$|STAMP_|SNAPSHOT_DAY_|JMS_SLICE_OK_|JMS_NO_SLICE_|JMS_PAGE_SIZE_|JMS_ROUTE_AUTO_|JMS_TRIP_BATCH$|JMS_SUMMARY_SHIFTS_OFF_|ORDERKIND_DETECT_AT_|GOOGLE_PLAN_AUTO$|PROPS_ORGANIZED_AT$|AGENDA_)/;
 function isInternalProp_(key) { return INTERNAL_PROP_RE_.test(String(key)); }
 function scriptStore_() { return PropertiesService.getScriptProperties(); }
 /** Armazenamento interno: Propriedades do usuário (sem elas, as do script, como antes). */
@@ -61,11 +61,12 @@ function deleteProp_(key) {
  * O Google limita as consultas externas (UrlFetch) por CONTA: 20 mil por dia na conta Gmail, 100 mil no Workspace. Antes,
  * a fila consultava até a cota acabar: o resto do dia ficava sem atualização nenhuma (nem os números de hoje) e o painel
  * mostrava o erro. Agora cada consulta é contada (contador do dia, Propriedades internas) e, perto do limite, a fila
- * economiza: com FETCH_RESERVE_ da cota usada, só os resumos e as listas de hoje e de ontem (o histórico, a Consulta das
- * bipagens, os IDs de viagem e o detalhe pesado continuam no dia seguinte); com FETCH_STOP_, a fila espera o dia seguinte.
+ * economiza: com FETCH_RESERVE_ da cota usada, só os dias recentes (resumo, lista, IDs de viagem e Consulta das bipagens; o
+ * histórico e o detalhe pesado continuam no dia seguinte); com FETCH_STOP_, a fila espera o dia seguinte.
  * COTA_URLFETCH_DIA (Propriedades do script) troca o limite.
+ * V4.6 (pedido: "o limite de cota pode aumentar um pouco"): economia a partir de 90% (antes 80%) e parada em 97% (antes 95%).
  */
-const FETCH_RESERVE_ = 0.8, FETCH_STOP_ = 0.95;
+const FETCH_RESERVE_ = 0.9, FETCH_STOP_ = 0.97;
 var FETCH_PENDING_ = 0;
 function fetchDayKey_() { return 'URLFETCH_' + isoToday_(); }
 function fetchLimit_() {
@@ -104,22 +105,42 @@ function countryId_() { return getProp_('JMS_COUNTRY_ID', APP_CONFIG.DEFAULT_COU
 function tz_() { const z = getProp_('JMS_TIMEZONE', APP_CONFIG.TZ); return /^GMT[+-]\d{4}$/.test(z) ? APP_CONFIG.TZ : z; }
 
 function isoToday_() { return Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd'); }
-// ------------------------------------------------------------------ V4.5: modo de atualização
+// ------------------------------------------------------------------ V4.5 / V4.6: modo de atualização e agenda
 /**
  * MODO_ATUALIZACAO (Propriedades do script):
- *  - 'diario' (padrão, pedido do usuário): cada dia FECHADO é baixado UMA vez, depois que fecha (a partir de
- *    HORA_ATUALIZACAO, padrão 7h; SC→SC e SC→DC fecham às 14h do dia seguinte), e fica salvo — nunca é baixado de novo.
- *    Sem atualização de hoje a cada 30 min nem revalidação de hora em hora. Hoje só com o botão Atualizar do painel.
+ *  - 'diario' (padrão): AGENDA (V4.6, pedido do usuário). Nada é atualizado o tempo todo; fora da agenda, só o botão
+ *    Atualizar do painel consulta o JMS.
+ *      · Envio Errado, Triagem Errada, Falta de Bipagem (Recebimento e Expedição), SC → SC, SC → DC, Avaria (e os outros
+ *        painéis de dia fechado: Deslacre, fluxos) — às HORAS_ATUALIZACAO (padrão "6,8": 6h e 8h). Em cada horário, o
+ *        último dia fechado é baixado de novo (taxa; a lista, se mudou) e os dias anteriores que ainda não têm o número
+ *        final. SC → SC e SC → DC: também a janela de ontem (14h → 13:59 de hoje), ainda em andamento.
+ *      · Sem Movimentação: foto a cada SEM_MOVIMENTACAO_HORAS (padrão 2: 0h, 2h, 4h…).
+ *      · Fluxo de Lotes: hoje a cada LOTES_HORAS (padrão 3: 0h, 3h, 6h…).
+ *    Horário perdido (fila parada, gatilho atrasado): roda uma vez na primeira execução depois dele.
  *  - 'continuo': como até a V4.4 (hoje a cada ATUALIZACAO_MIN, os 3 últimos dias revalidados de hora em hora).
+ * HORA_ATUALIZACAO (V4.5, uma hora só) foi trocada por HORAS_ATUALIZACAO.
  */
 function dailyMode_() { return String(getProp_('MODO_ATUALIZACAO', 'diario')).trim().toLowerCase() !== 'continuo'; }
-function updateHour_() {
-  const raw = String(getProp_('HORA_ATUALIZACAO', '')).trim(), h = Number(raw);
-  return raw !== '' && h >= 0 && h <= 23 ? Math.floor(h) : 7;
+/** Horários da agenda dos painéis de dia fechado (HORAS_ATUALIZACAO = "6,8"), em ordem. */
+function updateHours_() {
+  const raw = String(getProp_('HORAS_ATUALIZACAO', '')).trim();
+  // "6,8", "6;8", "6h e 8h": vale cada número de 0 a 23.
+  const list = (raw.match(/\d{1,2}/g) || []).map(Number).filter(h => h >= 0 && h <= 23);
+  const hs = list.length ? list : APP_CONFIG.UPDATE_HOURS;
+  return hs.filter((h, i) => hs.indexOf(h) === i).sort((a, b) => a - b);
 }
-/** Quando o dia fica "fechado" para o download único: dia seguinte na HORA_ATUALIZACAO (SC→SC/SC→DC: às 14h, no mínimo). */
+/** Primeiro horário da agenda: a partir dele o dia anterior conta como fechado. */
+function updateHour_() { return updateHours_()[0]; }
+/** Painel com agenda própria (a cada N horas): Sem Movimentação e Fluxo de Lotes. A propriedade troca o intervalo. */
+function agendaEveryHours_(cfg) {
+  const a = cfg && cfg.agendaEvery;
+  if (!a) return 0;
+  const v = Number(getProp_(a.prop, ''));
+  return v >= 1 && v <= 24 ? Math.floor(v) : a.hours;
+}
+/** Quando o dia fica "fechado" (número final): dia seguinte no 1º horário da agenda (SC→SC/SC→DC: às 14h, fim da janela). */
 function dayCloseAt_(indicatorKey, date) {
-  const h = isOperational_(indicatorKey) ? Math.max(14, updateHour_()) : updateHour_();
+  const h = isOperational_(indicatorKey) ? 14 : updateHour_();
   return addDaysIso_(date, 1) + ' ' + String(h).padStart(2, '0') + ':00:00';
 }
 function localStamp_(iso) {
