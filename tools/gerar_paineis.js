@@ -28,7 +28,7 @@ Este pacote é o **painel principal**. Ele mostra:
 - Envio Errado e Triagem Errada;
 - Falta de Bipagem no Recebimento e na Expedição;
 - Expedição SC → SC e SC → DC;
-- Avaria e Sem Movimentação (o Fluxo de Lotes foi retirado na V4.7; `REATIVAR_PAINEIS` = `lot_flow` traz de volta);
+- Avaria e Sem Movimentação (o Fluxo de Lotes foi retirado na V4.7; \`REATIVAR_PAINEIS\` = \`lot_flow\` traz de volta);
 - Deslacre (linha secundária);
 - Resultados.
 
