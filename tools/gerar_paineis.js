@@ -7,6 +7,9 @@
  * e os ZIPs JT_DASHMASTER_<versão>_PRINCIPAL.zip e JT_DASHMASTER_<versão>_FLUXOS.zip.
  * Os pacotes só diferem na linha PACOTE_PAINEIS_ do Config.gs (e no LEIA_ESTE_PAINEL.md).
  *
+ * V4.7: também o pacote da versão Node.js (JT_DASHMASTER_<versão>_NODE.zip, pasta "dashmaster/"): TODOS os painéis num
+ * servidor só (sem cota do Google), com a pasta node (instalador da Oracle Cloud, link público e o passo a passo).
+ *
  * Uso: node tools/gerar_paineis.js [pasta de saída]   (padrão: dist/)
  */
 const fs = require('fs');
@@ -126,9 +129,40 @@ function build(outDir, opts) {
   });
 }
 
+/**
+ * Pacote da versão Node.js: os arquivos do repositório como estão (Config.gs com todos os painéis — sem cota, o Recebimento e
+ * a Expedição cabem no mesmo servidor) e a pasta node, sem os testes, os dados e o config.json de quem gerou.
+ */
+function buildNode(outDir, opts) {
+  opts = opts || {};
+  const root = opts.root || ROOT;
+  const config = fs.readFileSync(path.join(root, 'Config.gs'), 'utf8');
+  const parts = versionOf(config).split('.');
+  const tag = 'V' + (parts[2] && parts[2] !== '0' ? parts.slice(0, 3) : parts.slice(0, 2)).join('_');
+  const files = [];
+  const add = rel => files.push({name: 'dashmaster/' + rel.split(path.sep).join('/'), data: fs.readFileSync(path.join(root, rel))});
+  GS_ORDER.forEach(f => add(f + '.gs'));
+  HTML.forEach(f => add(f + '.html'));
+  ['appsscript.json', 'LEIA_PRIMEIRO.md'].forEach(add);
+  const skip = /^node\/(test|dados|node_modules)(\/|$)|^node\/config\.json$|^node\/.*\.log$/;
+  (function walk(rel) {
+    fs.readdirSync(path.join(root, rel), {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name)).forEach(d => {
+      const r = rel + '/' + d.name;
+      if (skip.test(r)) return;
+      if (d.isDirectory()) walk(r); else add(r);
+    });
+  })('node');
+  fs.mkdirSync(outDir, {recursive: true});
+  const zipPath = path.join(outDir, 'JT_DASHMASTER_' + tag + '_NODE.zip');
+  fs.writeFileSync(zipPath, zip(files));
+  return {zip: zipPath, files: files.map(f => f.name)};
+}
+
 if (require.main === module) {
   const out = path.resolve(process.argv[2] || path.join(ROOT, 'dist'));
   build(out).forEach(r => console.log(r.id + ': ' + r.dir + '\n  ' + r.zip + '\n  ' + r.line));
+  const n = buildNode(out);
+  console.log('node: ' + n.zip + ' (' + n.files.length + ' arquivos)');
 }
 
-module.exports = {build, PACKAGES, FLOWS};
+module.exports = {build, buildNode, PACKAGES, FLOWS};

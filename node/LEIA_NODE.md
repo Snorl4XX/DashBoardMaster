@@ -112,7 +112,7 @@ Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.
 
 **Outras opções:**
 - **Cloudflare Tunnel:** link fixo, mas precisa de conta e de um domínio próprio. Sem domínio, o link `trycloudflare.com` muda toda vez que reinicia e serve só para teste.
-- **Hospedar numa VPS:** um servidor na nuvem, pago por mês.
+- **Servidor na nuvem, grátis (Oracle Cloud "Always Free"):** passo a passo em **`ORACLE_CLOUD.md`**, com o instalador `instalar-oracle.sh` (Ubuntu) e o `link-publico.sh` (Tailscale Funnel no Linux).
 
 
 ## 6. Atualizar para uma versão nova do painel

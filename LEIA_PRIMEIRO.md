@@ -30,6 +30,12 @@ Antes, o botão atualizava só o painel aberto. Agora um clique atualiza **todos
 
 A agenda da V4.6 continua igual: painéis do dia às 6h e 8h, Sem Movimentação a cada 2 h, e nada fora disso além do botão.
 
+### Versão Node.js na Oracle Cloud (grátis, sem os limites do Google)
+- **Pacote novo `JT_DASHMASTER_V4_7_NODE.zip`:** todos os painéis num servidor só, inclusive Recebimento e Expedição, e a pasta `node`.
+- **Passo a passo:** `node/ORACLE_CLOUD.md` — criar a conta e o servidor, entrar pelo PowerShell, instalar, criar o link da equipe, fazer cópia de segurança e atualizar para versões novas.
+- **`node/instalar-oracle.sh`:** acerta o fuso, instala o Node.js 22, cria o serviço que liga sozinho e pede o AuthToken, a data inicial e o modo (agenda das 6h e 8h ou contínuo). Depois põe o histórico na fila. Pode rodar de novo sem perder dados.
+- **`node/link-publico.sh`:** cria o link https fixo da equipe (Tailscale Funnel), com senha opcional. A tela Configurações nunca abre por ele; ela abre pelo túnel SSH.
+
 **Como instalar:** troque todos os `.gs` e `.html` pelos do ZIP V4.7 (nos dois projetos) e publique uma **Nova versão**. Não precisa rodar nenhuma função.
 
 ## V4.6 — Agenda de atualização (6h e 8h), IDs de viagem de saída do SC → DC e um pouco mais de cota
