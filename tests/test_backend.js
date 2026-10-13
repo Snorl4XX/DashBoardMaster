@@ -678,8 +678,10 @@ FX.linhas.forEach(([code, turno, n]) => {
   for (let i = 0; i < n; i++) fxRows.push(ctx.normalizeDetailRow_('missing_dispatch', {billcode: 'FX' + (seqFx++), threeSegmentCode: code, unloadArriveTime: FX.data + ' ' + HOUR[turno]}, FX.data));
 });
 C.applyDocks(fxRows, catMD.docks);
-check(fxRows.length === 8473 && fxRows.filter(r => r.segmentRaw === 'BRE - SOD')[0].dockDest === 'BRE 2' && fxRows.filter(r => r.segmentRaw === 'BRE - SOD')[0].dock === 'DOCA 21' &&
-  fxRows.filter(r => r.segmentRaw === 'BRE - SOD')[0].segment === 'BRE', 'destino/doca como na planilha, 1º segmento dos gráficos antigos inalterado');
+// (V4.8: segmentRaw guarda também o 2º segmento; 22/09 é anterior à tabela nova de 04/10: vale a tabela da planilha.)
+const sodRow = fxRows.filter(r => r.segmentRaw.split(',')[0] === 'BRE - SOD')[0];
+check(fxRows.length === 8473 && sodRow.dockDest === 'BRE 2' && sodRow.dock === 'DOCA 21' &&
+  sodRow.segment === 'BRE', 'destino/doca como na planilha, 1º segmento dos gráficos antigos inalterado');
 function asExcel(p) {
   const out = [], lbl = v => v === 'N/A' ? '(em branco)' : v;
   p.groups.forEach(g => {
@@ -706,10 +708,10 @@ catMD.pivotTables.forEach(def => {
 check(C.segmentCode('SP,381-01,020') === 'SP' && C.segmentCode('BAU 484-00,200') === 'BAU' && C.segmentCode('SP1-381-01-020') === 'SP1' &&
   C.segmentCode('主:MG CGE') === 'MG' && C.segmentCode('gru,402-05') === 'GRU' && C.segmentCode('') === '', 'código do 1º segmento em qualquer formato');
 const BRE2_USER = 'Ac am bau bje bvb cdg jdf ldb sod sp sp1 stm to vcp xap dc nat ma mia mrb pa ro sjp'.split(' ');
-check(BRE2_USER.every(x => C.dockDestination(x + ',100-00,1', catMD.docks) === 'BRE 2' && C.dockDestination('BRE - ' + x.toUpperCase(), catMD.docks) === 'BRE 2'),
+check(BRE2_USER.every(x => C.dockDestination(x + ',100-00,1', catMD.docks, FX.data) === 'BRE 2' && C.dockDestination('BRE - ' + x.toUpperCase(), catMD.docks, FX.data) === 'BRE 2'),
   'os 23 segmentos da lista do BRE 2 (com ou sem "BRE - ") vão para BRE 2');
-check(C.dockDestination('BRE,100-00,1', catMD.docks) === 'BRE' && C.dockDestination('BRE-SP', catMD.docks) === 'BRE 2' && C.dockDestination('BRE – SP 1', catMD.docks) === 'BRE 2' &&
-  C.dockDestination('SBN,375-03,420', catMD.docks) === 'SBN' && C.dockDestination('MS 850-00,240', catMD.docks) === 'MS', 'BRE sozinho = BRE (DOCA 22); demais destinos pelo código');
+check(C.dockDestination('BRE,100-00,1', catMD.docks, FX.data) === 'BRE' && C.dockDestination('BRE-SP', catMD.docks, FX.data) === 'BRE 2' && C.dockDestination('BRE – SP 1', catMD.docks, FX.data) === 'BRE 2' &&
+  C.dockDestination('SBN,375-03,420', catMD.docks, FX.data) === 'SBN' && C.dockDestination('MS 850-00,240', catMD.docks, FX.data) === 'MS', 'BRE sozinho = BRE (DOCA 22); demais destinos pelo código');
 const FORMATS = {
   'sem "BRE - "': c => c.replace(/^BRE - /, ''),
   'com espaço': c => c.replace(/^BRE - /, '').replace(',', ' '),
@@ -728,7 +730,7 @@ Object.keys(FORMATS).forEach(name => {
   check(okAll, 'código ' + name + ': as 3 tabelas dinâmicas iguais à planilha', p0.groups.slice(0, 3).map(g => g.value + '=' + g.count));
 });
 // Dado gravado antes da V3.8 (só o código): usa o código; "BRE" sozinho é ambíguo e fica fora.
-const oldCodeRows = C.applyDocks([{segment: 'SP'}, {segment: 'GRU'}, {segment: 'SBN'}, {segment: 'BRE'}], catMD.docks);
+const oldCodeRows = C.applyDocks([{segment: 'SP'}, {segment: 'GRU'}, {segment: 'SBN'}, {segment: 'BRE'}].map(r => Object.assign(r, {date: FX.data})), catMD.docks);
 check(oldCodeRows.map(r => r.dock).join() === "DOCA 21,DOCA 14,SEM DOCA," && oldCodeRows[0].dockDest === "BRE 2", "histórico antigo também sai certo", oldCodeRows);
 // Diagnóstico: mostra como o código chega e o que ficou SEM DOCA.
 const smp = ctx.dockSampleReport_('missing_dispatch', [
@@ -739,13 +741,13 @@ const smp = ctx.dockSampleReport_('missing_dispatch', [
   {billcode: '5', threeSegmentCode: '', unloadArriveTime: FX.data + ' 18:00:00'}]);
 check(smp.amostra === 5 && smp.docas[0].doca === 'DOCA 21' && smp.docas[0].pct === 40 && smp.exemplos[0].codigo === 'SP,381-01,020' && smp.exemplos[0].destino === 'BRE 2' &&
   smp.semDoca.map(x => x.valor).join() === 'SBN,(em branco)', 'diagnóstico: amostra de docas e SEM DOCA', smp);
-check(ctx.dockSampleReport_('sorting_error', [{billcode: '1'}]) === null, 'amostra de docas só onde há docas');
+check(ctx.dockSampleReport_('missing_receipt', [{billcode: '1'}]) === null, 'amostra de docas só onde há docas (V4.8: a Triagem Errada passou a ter)');
 
 // (b) Painel: filtro de docas, 2 gráficos novos, colunas Destino/Doca — sem tirar nada do que existia.
 check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,destination,dock', 'filtro de docas adicionado no fim, filtros antigos mantidos');
 check(catMD.charts.map(c => c.key).join() === 'shift,segmentByShift,segment,login,tripId,client,interval', 'gráficos antigos mantidos', catMD.charts.map(c => c.key));
 check(catMD.rankPanels.map(p => p.key).join() === 'dockOverview,dockByShift,destDockByShift', 'V3.9: 3 painéis de docas (só gráficos) no lugar das tabelas', catMD.rankPanels.map(p => p.key));
-check(catMD.labels.dock.pt === 'Doca' && catMD.labels.dockDest.pt === 'Destino' && catMD.table.some(c => c[0] === 'dock'), 'rótulos e colunas novas');
+check(catMD.labels.dock.pt === 'Doca' && catMD.labels.dockDest.pt === 'Rota de carregamento' && catMD.table.some(c => c[0] === 'dock'), 'rótulos e colunas novas (V4.8: destino = rota de carregamento)');
 const cfMD = vm.runInContext('clientFields_(INDICATORS.missing_dispatch)', ctx);
 check(cfMD.indexOf('segmentRaw') >= 0 && cfMD.indexOf('dock') < 0 && cfMD.indexOf('dockDest') < 0, 'doca é calculada no navegador a partir do 1º segmento completo', cfMD);
 // Painéis (V3.9), conferidos contra uma contagem independente dos dados da planilha de 22/09.
@@ -789,7 +791,7 @@ check(compMD.rows.length > 0 && compMD.rows.every(r => r.dock === 'DOCA 21') && 
   'relatório: filtro por doca e tabelas dinâmicas', compMD.pivots.map(p => p.groups.length));
 const diagMD = cMD.diagnosticoCompleto(D19);
 check(/Docas \(1ª página do detalhe, \d+ remessas\): DOCA/.test(diagMD.texto) && /Código de três segmentos → destino → doca: "/.test(diagMD.texto) &&
-  diagMD.indicadores.missing_dispatch.docas && !diagMD.indicadores.sorting_error.docas && /Próxima parada do veículo → destino → doca: "/.test(diagMD.texto),
+  diagMD.indicadores.missing_dispatch.docas && diagMD.indicadores.sorting_error.docas && !diagMD.indicadores.missing_receipt.docas && /Próxima parada do veículo → destino → doca: "/.test(diagMD.texto),
   'diagnosticoCompleto mostra a amostra de docas (1º segmento e próxima parada)',
   diagMD.texto.split('\n').filter(l => /Docas|segmentos →|SEM DOCA/.test(l)));
 cMD.UrlFetchApp.fetch = () => ({getResponseCode: () => 200, getBlob: () => cMD.Utilities.newBlob('PDF', 'application/pdf', 'x')});
@@ -1033,8 +1035,9 @@ const DPP = vm.runInContext('DOCKS_PROXIMA_PARADA', ctx), DEXP = vm.runInContext
 const stopCases = {'BA FEC': ['FEC', 'DOCA 19'], 'SP BRE': ['BRE', 'DOCA 22'], 'MG CGE': ['MG', 'DOCA 09'], 'DF BSB': ['DF', 'DOCA 16'],
   'RJ SJM': ['RJ', 'DOCA 10'], 'PE JGS': ['PE', 'DOCA 15'], 'SP BAU': ['BRE 2', 'DOCA 21'], 'SP GRU': ['GRU', 'DOCA 14'], 'AM MAO': ['BRE 2', 'DOCA 21'],
   'MS CGR': ['MS', 'DOCA 20'], 'SC JOI': ['SC', 'DOCA 08'], 'GO GYN': ['GO', 'DOCA 07'], 'XX YYY': ['XX', 'SEM DOCA'], '': ['', 'SEM DOCA']};
-const stopRows = C.applyDocks(Object.keys(stopCases).map(v => ({destination: v})), DPP);
-check(stopRows.every(r => r.dockDest === stopCases[r.destination][0] && r.dock === stopCases[r.destination][1]) && DPP.source === 'destination' && DPP.map === DEXP.map,
+// (V4.8: dias antes de 04/10/2026 continuam com a tabela da planilha; a tabela nova tem testes próprios no fim.)
+const stopRows = C.applyDocks(Object.keys(stopCases).map(v => ({destination: v, date: D19})), DPP);
+check(stopRows.every(r => r.dockDest === stopCases[r.destination][0] && r.dock === stopCases[r.destination][1]) && DPP.source === 'destination' && DPP.versions === DEXP.versions,
   'SC → SC: doca pela próxima parada (código da base; se não estiver na lista, a UF) com a mesma tabela de docas', stopRows.map(r => r.destination + '→' + r.dock));
 const cSC = freshCtx({'2026-09-19': makeDay(D19, 81)});
 cSC.queueHistory(D19, D19, true);
@@ -3444,6 +3447,81 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const rF = cFl.refreshAllNow('arrival_flow', Y, Y), xF = cFl.refreshAllDetailsNow('arrival_flow', Y, Y);
   check(rF.panels === 2 && xF.done === 0 && cFl.pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow'),
     'painel dos fluxos: taxas na hora; listas pesadas ficam com a fila', {rF: rF.panels, xF});
+}
+
+// ---------- V4.8: docas e rotas novas (tabela "Ajuste das docas de carregamento em 4 de outubro", atualizada em 11/10) ----------
+{
+  const vmD = require('vm');
+  const cD8 = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CC = cD8.JTCore_, DEXP8 = vmD.runInContext('DOCKS_EXPEDICAO', cD8), DPP8 = vmD.runInContext('DOCKS_PROXIMA_PARADA', cD8);
+  const V1 = '2026-10-05', V2 = '2026-10-12', OLD = '2026-09-22';
+  // Transcrição independente dos prints (rota | doca), conferida contra o motor do painel.
+  const bySeg = (code, date) => { const r = CC.applyDocks([{segmentRaw: CC.segmentHead2(code), segment: CC.firstSegment(code), date: date}], DEXP8)[0]; return r.dockDest + ' | ' + r.dock; };
+  const byStop = (stop, date) => { const r = CC.applyDocks([{destination: stop, date: date}], DPP8)[0]; return r.dockDest + ' | ' + r.dock; };
+  const SEG = {
+    'GO,740-00,1': 'GO GYN | DOCA 05', 'SC,253-00,': 'SC BNU | DOCA 06', 'RS1,900-00,1': 'RS NSR | DOCA 07', 'CE,612-00,9': 'CE FOR | DOCA 09',
+    'RJ1,123-00,1': 'RJ SJM | DOCA 10', 'GRU,378-02,1': 'DC SSZ-SP | DOCA 14', 'GRU,402-05,676': 'DC TBT-SP | DOCA 14', 'AL,570-00,1': 'SE AJU | DOCA 15',
+    'CAC,100-00,1': 'PR SJS | DOCA 16', 'PE,540-00,1': 'PE JGS | DOCA 17', 'SNS,500-00,1': 'BA FEC | DOCA 18', 'CHV,330-00,1': 'MG CGE | DOCA 19',
+    'PA,660-00,1': 'PA ANA | DOCA 20', 'BRE - SOD,018-00,1': 'SP BRE | DOCA 21/22', 'PPB,100-00,1': 'SP BRE | DOCA 21/22', 'SP,977-00,': 'SP BRE | DOCA 21/22',
+    'BRE - XYZ,100-00,1': 'SP BRE | DOCA 21/22', 'BRE - SP,381-06,134': 'DC GRU | DOCA 44', 'SP,405-00,300': 'DC GRU | DOCA 44', 'GRU,381-16,': 'DC GRU | DOCA 44',
+    'GRU,421-00,310': 'DC GRU | DOCA 44', 'gru 404-08,1': 'DC GRU | DOCA 44', 'SP-381-17-020': 'DC GRU | DOCA 44', 'MOO,430-02,1': 'MOO | DOCA 23',
+    'GRU,404-09,1': 'MOO | DOCA 23', 'MS 850-00,240': 'MS CGR | DOCA 43', 'MT,956-00,565': 'MT CGB | DOCA 42', 'PI,600-00,1': 'THE | DOCA 41',
+    'NE1,100-00,1': 'SP RBP | DOCA 39', 'DF,787-00,1': 'DF BSB | DOCA 38', 'XYZ,100-00,1': 'XYZ | SEM DOCA', '': ' | SEM DOCA'
+  };
+  // O que mudou em 11/10 (1º print) em relação a 04/10 (2º print).
+  const SEG_V1 = {'SBN,375-03,420': 'SBN | DOCA 40', 'ES,290-00,1': 'ES SRR | DOCA 08', 'GRU,378-00,100': 'MOO | DOCA 23',
+    'BRE - SP,395-07,300': 'SP BRE | DOCA 21/22', 'GRU,381-12,1': 'DC GRU | DOCA 44'};
+  const SEG_V2 = {'SBN,375-03,420': 'SBN | DOCA 08', 'ES,290-00,1': 'ES SRR | DOCA 40', 'GRU,378-00,100': 'DC SSZ-SP | DOCA 14',
+    'BRE - SP,395-07,300': 'DC JND 02-SP | DOCA 21/22', 'GRU,381-12,1': 'DC JND 02-SP | DOCA 21/22', 'GRU 381-07,5': 'DC JND 02-SP | DOCA 21/22'};
+  const wrong = (cases, date, f) => Object.keys(cases).filter(k => f(k, date) !== cases[k]).map(k => k + ' → ' + f(k, date) + ' (esperado ' + cases[k] + ')');
+  const w2 = wrong(Object.assign({}, SEG, SEG_V2), V2, bySeg), w1 = wrong(Object.assign({}, SEG, SEG_V1), V1, bySeg);
+  check(!w2.length, 'Falta de Bipagem na Expedição: código → rota e doca pela tabela de 11/10 (1º e 2º segmento)', w2);
+  check(!w1.length, 'de 04/10 a 10/10: a tabela do 2º print (SBN na doca 40, ES na 08, GRU 378-00 no MOO)', w1);
+  check(bySeg('SBN,375-03,420', OLD) === 'SBN | SEM DOCA' && bySeg('GRU,378-02,1', OLD) === 'GRU | DOCA 14' && bySeg('BRE - SOD,018-00,1', OLD) === 'BRE 2 | DOCA 21',
+    'antes de 04/10: a tabela antiga da planilha (o histórico não muda)');
+  const STOP = {'BA FEC': 'BA FEC | DOCA 18', 'SP BRE': 'SP BRE | DOCA 21/22', 'MG CGE': 'MG CGE | DOCA 19', 'MG BHZ': 'MG CGE | DOCA 19',
+    'DC SSZ-SP': 'DC SSZ-SP | DOCA 14', 'DC TBT-SP': 'DC TBT-SP | DOCA 14', 'DC GRU-SP': 'DC GRU | DOCA 44', 'SP RBP': 'SP RBP | DOCA 39',
+    'SP CPQ': 'SP BRE | DOCA 21/22', 'DC BAU-SP': 'SP BRE | DOCA 21/22', 'F ITQ-SP': 'SP BRE | DOCA 21/22', 'PI THE': 'THE | DOCA 41', 'GO GYN': 'GO GYN | DOCA 05',
+    'SE AJU': 'SE AJU | DOCA 15', 'AL MCZ': 'SE AJU | DOCA 15', 'PE JGS': 'PE JGS | DOCA 17', 'PA ANA': 'PA ANA | DOCA 20', 'MS CGR': 'MS CGR | DOCA 43',
+    'MOO': 'MOO | DOCA 23', 'XX YYY': 'XX | SEM DOCA', '': ' | SEM DOCA'};
+  const sw2 = wrong(Object.assign({}, STOP, {'SBN': 'SBN | DOCA 08', 'ES SRR': 'ES SRR | DOCA 40', 'DC JND 02-SP': 'DC JND 02-SP | DOCA 21/22'}), V2, byStop);
+  const sw1 = wrong(Object.assign({}, STOP, {'SBN': 'SBN | DOCA 40', 'ES SRR': 'ES SRR | DOCA 08', 'DC JND 02-SP': 'SP BRE | DOCA 21/22'}), V1, byStop);
+  check(!sw2.length && !sw1.length, 'Envio Errado / Triagem Errada / SC→SC: próxima parada → rota e doca (nome da rota, código da base, UF)', sw2.concat(sw1));
+  check(CC.dockDestination('GRU,378-00,1', DEXP8) === 'DC SSZ-SP' && CC.dockDestination('GRU,378-00,1', DEXP8, V1) === 'MOO',
+    'sem data, vale a tabela mais nova');
+  // Triagem Errada: docas pela base destino (DCs novos), painéis e coluna Doca.
+  const cfgSE = cD8.getIndicatorConfig_('sorting_error');
+  check(cfgSE.docks && cfgSE.docks.source === 'destination' && cfgSE.filters.indexOf('dock') >= 0 && cfgSE.rankPanels.map(p => p.key).join() === 'dockOverview,dockByShift,routeDockByShift' &&
+    cfgSE.table.some(c => c[0] === 'dock') && cfgSE.table.some(c => c[0] === 'dockDest') && cfgSE.pivotTables.length === 2,
+    'Triagem Errada: filtro, painéis de docas e colunas Rota de carregamento/Doca');
+  const D8 = '2026-10-12', dTE = {[D8]: makeDay(D8, 88)};
+  const cTE = freshCtx(dTE, null, {DATA_START_DATE: D8});
+  cTE.queueHistory(D8, D8, true);
+  runAll(cTE);
+  const dashTE = cTE.getDashboardData('sorting_error', {from: D8, to: D8});
+  const catTE = cTE.getPublicCatalog_().filter(x => x.key === 'sorting_error')[0];
+  const rowsTE = CC.applyDocks(CC.decodeDataset(dashTE.dataset), catTE.docks);
+  const expTE = {'DC GRU-SP': 'DOCA 44', 'F ITQ-SP': 'DOCA 21/22', 'DC BAU-SP': 'DOCA 21/22'};
+  check(rowsTE.length > 0 && dashTE.dataset.fields.indexOf('date') >= 0 && rowsTE.every(r => r.dock === expTE[r.destination]),
+    'Triagem Errada: cada remessa na doca da base destino (tabela do dia)', rowsTE.slice(0, 3).map(r => r.destination + '→' + r.dock));
+  const compTE = cTE.computeDashboard_('sorting_error', {from: D8, to: D8, filters: {dock: ['DOCA 44']}});
+  check(compTE.rows.length > 0 && compTE.rows.every(r => r.dock === 'DOCA 44' && r.dockDest === 'DC GRU'), 'Triagem Errada: filtro por doca no relatório', compTE.rows.length);
+  // Falta de Bipagem na Expedição: o 2º segmento é gravado; dias desde 04/10 baixados de novo uma vez (migração V4.8).
+  const dMD8 = {[V1]: makeDay(V1, 89), '2026-09-30': makeDay('2026-09-30', 90)};
+  dMD8[V1].md = dMD8[V1].md.map((r, i) => Object.assign({}, r, {threeSegmentCode: ['GRU,378-01,1', 'BRE - SP,381-06,134', 'SBN,375-03,420', 'GO,740-00,1'][i % 4]}));
+  const cM8 = freshCtx(dMD8, null, {DATA_START_DATE: '2026-09-30'});
+  cM8.queueHistory('2026-09-30', V1, true);
+  runAll(cM8);
+  const dashM8 = cM8.getDashboardData('missing_dispatch', {from: V1, to: V1});
+  const rowsM8 = CC.applyDocks(CC.decodeDataset(dashM8.dataset), cM8.getPublicCatalog_().filter(x => x.key === 'missing_dispatch')[0].docks);
+  check(rowsM8.length > 0 && rowsM8.every(r => /,\d{3}-\d{2}$|^\S+ \d{3}-\d{2}$/.test(r.segmentRaw)) &&
+    ['DC SSZ-SP|DOCA 14', 'DC GRU|DOCA 44', 'SBN|DOCA 40', 'GO GYN|DOCA 05'].every(x => rowsM8.some(r => r.dockDest + '|' + r.dock === x)),
+    'Falta de Bipagem na Expedição: 1º e 2º segmento gravados e cada remessa na doca nova', rowsM8.slice(0, 4).map(r => r.segmentRaw + '→' + r.dockDest + '/' + r.dock));
+  delete cM8.__state.props.MIGRATION_V48;
+  const q48 = cM8.migrateToV48_();
+  const pend48 = cM8.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
+  check(q48 === 1 && pend48.length === 1 && pend48[0].indicator === 'missing_dispatch' && pend48[0].date === V1 && cM8.migrateToV48_() === 0,
+    'migração V4.8: só os dias desde 04/10 da Falta de Bipagem na Expedição baixados de novo, uma vez', pend48.map(j => j.indicator + ' ' + j.date));
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

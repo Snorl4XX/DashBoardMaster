@@ -1186,6 +1186,27 @@ function agendaEveryJobs_(k) {
   }
   return jobs;
 }
+/**
+ * V4.8: docas novas (tabela de 04/10/2026, atualizada em 11/10). Na Falta de Bipagem na Expedição os DCs novos (DC GRU,
+ * DC SSZ-SP, DC TBT-SP, MOO, DC JND 02-SP) saem pelo 2º segmento do código, que os dias baixados antes não guardavam.
+ * Uma vez: os dias desde a 1ª tabela nova (no máximo os últimos 31) com a lista baixada são baixados de novo — só a lista.
+ * Envio Errado, Triagem Errada e SC→SC usam a próxima parada, que já está gravada: nada a baixar.
+ */
+function migrateToV48_() {
+  if (getProp_('MIGRATION_V48', '')) return 0;
+  const first = ((DOCKS_EXPEDICAO.versions || []).filter(v => v.entries)[0] || {}).from;
+  let n = 0;
+  if (first) {
+    const back = addDaysIso_(isoToday_(), -31), from = first > back ? first : back, to = isoToday_();
+    Object.keys(INDICATORS).filter(k => INDICATORS[k].docks && (INDICATORS[k].docks.source || 'segment') === 'segment').forEach(k => {
+      const jobs = Object.keys(dayFilesMap_(k, from, to)).sort().reverse().map(d => ['DETAIL_INIT', k, d, 1]);
+      if (jobs.length) n += enqueueJobs_(jobs, {reset: true});
+    });
+  }
+  setProp_('MIGRATION_V48', new Date().toISOString());
+  if (n) logSync_('INFO', 'missing_dispatch', '', 'V4.8: ' + n + ' dia(s) baixados de novo para as docas novas (2º segmento do código).');
+  return n;
+}
 function retryFailedJobs() {
   let count = 0;
   allTabRows_('JOBS').forEach((r, i) => {
@@ -1594,7 +1615,7 @@ function processSyncQueue(opts) {
   // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
   try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V4.6: modo diário (padrão) — só a AGENDA põe tarefas na fila (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h).
   // Fora dos horários, nada é consultado sozinho (o botão Atualizar do painel continua valendo).

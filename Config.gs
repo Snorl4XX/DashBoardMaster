@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.7.0',
+  VERSION: '4.8.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -86,7 +86,7 @@ const FILTER_LABELS = Object.freeze({
   expeditionTime:  {pt: 'Horário da expedição', zh: '发件时间'},
   idealTimeFull:   {pt: 'Horário ideal de expedição', zh: '理想发车时间'},
   dock:            {pt: 'Doca', zh: '月台'},
-  dockDest:        {pt: 'Destino', zh: '目的地'},
+  dockDest:        {pt: 'Rota de carregamento', zh: '装车线路'},
   station:         {pt: 'Estação de registro', zh: '登记网点'},
   product:         {pt: 'Especificação do produto', zh: '产品规格'},
   content:         {pt: 'Conteúdo do pacote', zh: '物品名称'},
@@ -120,42 +120,102 @@ const FILTER_LABELS = Object.freeze({
 });
 
 /**
- * DOCAS da expedição (regra da planilha "Falta Expedição": colunas DESTINOS e DOCAS).
- * DESTINO = código do 1º segmento do código de três segmentos, exceto os segmentos do BRE 2
- *           (lista destinationGroups), que viram "BRE 2" — venham do JMS como "SP", "SP,381-01,020",
- *           "BAU 484-00,200" ou "BRE - SP". DOCA = pela tabela map; destino fora dela é SEM DOCA.
- * Para mudar a distribuição das docas ou incluir um segmento no BRE 2, edite só esta tabela:
- * vale na hora para todo o histórico (destino e doca são calculados na leitura, não ficam gravados).
+ * DOCAS DE CARREGAMENTO, por período (V4.8). Vale, para cada remessa, a tabela mais nova que já tinha começado no dia dela
+ * (`from`): o histórico continua com as docas da época. Destino/rota e doca são calculados na leitura (nada fica gravado):
+ * mudar uma tabela vale na hora para os dias dela.
+ *
+ * Formato antigo (até 03/10/2026 — planilha "Falta Expedição", V3.8–V4.7): DESTINO = código do 1º segmento, menos os
+ * segmentos do BRE 2 (destinationGroups) e o "BRE - X" (destinationRules), que viram "BRE 2"; DOCA pela tabela map.
+ *
+ * Formato novo (entries — tabela "Ajuste das docas de carregamento em 4 de outubro"): cada linha da tabela é
+ * {dock, line (linha de desvio do DWS), route (rota de carregamento após o ajuste), codes}. codes = código de destino do
+ * 1º segmento ("GO") ou do 1º + 2º segmento nos DCs novos ("GRU 378-01"): o 2º segmento vale antes do 1º. Rota = o
+ * "destino" dos gráficos. "BRE - X" (código antigo do JMS) = código X; sem X na tabela, rota do prefixo (SP BRE).
+ * Próxima parada ("BA FEC", "DC SSZ-SP"): nome da rota, depois o código da base (FEC, SSZ…), depois o código (BA, SP…).
+ * Código fora da tabela = SEM DOCA.
  */
+const DOCK_ROUTES_SP_BRE_ = ['AC', 'AM', 'BAU', 'BVB', 'CDG', 'JDF', 'LDB', 'MIA', 'MRB', 'RO', 'SJP', 'SOD', 'SP', 'SP1', 'STM', 'TO',
+  'VCP', 'XAP', 'BJE', 'MA', 'PPB', 'JPN', 'NAT'];
+const DOCK_SUB_ = (first, list) => list.map(x => first + ' ' + x);
+/** Tabela de 04/10/2026, 12h (2º print, ainda sem os ajustes de 11/10). */
+const DOCK_TABLE_2026_10_04_ = [
+  {dock: 'DOCA 05', line: 7, route: 'GO GYN', codes: ['GO']},
+  {dock: 'DOCA 06', line: 7, route: 'SC BNU', codes: ['SC', 'SC1']},
+  {dock: 'DOCA 07', line: 7, route: 'RS NSR', codes: ['RS', 'RS1']},
+  {dock: 'DOCA 08', line: 7, route: 'ES SRR', codes: ['ES']},
+  {dock: 'DOCA 09', line: 7, route: 'CE FOR', codes: ['CE']},
+  {dock: 'DOCA 10', line: 7, route: 'RJ SJM', codes: ['RJ', 'RJ1', 'VDC']},
+  {dock: 'DOCA 14', line: 4, route: 'DC SSZ-SP', codes: DOCK_SUB_('GRU', ['378-01', '378-02', '378-03'])},
+  {dock: 'DOCA 14', line: 4, route: 'DC TBT-SP', codes: DOCK_SUB_('GRU', ['402-00', '402-01', '402-03', '402-05'])},
+  {dock: 'DOCA 15', line: 4, route: 'SE AJU', codes: ['SE', 'AL', 'MCZ']},
+  {dock: 'DOCA 16', line: 4, route: 'PR SJS', codes: ['PR', 'PR1', 'CAC']},
+  {dock: 'DOCA 17', line: 4, route: 'PE JGS', codes: ['PE', 'DC', 'BYE', 'DC-BYE']},
+  {dock: 'DOCA 18', line: 4, route: 'BA FEC', codes: ['BA', 'SBA', 'SNS']},
+  {dock: 'DOCA 19', line: 4, route: 'MG CGE', codes: ['MG', 'MG1', 'CHV']},
+  {dock: 'DOCA 20', line: 4, route: 'PA ANA', codes: ['PA']},
+  {dock: 'DOCA 21/22', line: 2, route: 'SP BRE', codes: DOCK_ROUTES_SP_BRE_.concat(['BRE']), prefixes: ['BRE - ']},
+  {dock: 'DOCA 23', line: 2, route: 'MOO', codes: ['MOO'].concat(DOCK_SUB_('GRU', ['404-00', '404-03', '404-09', '404-10', '378-00']))},
+  {dock: 'DOCA 44', line: 3, route: 'DC GRU', codes: ['GRU'].concat(
+    DOCK_SUB_('GRU', ['381-00', '381-01', '381-02', '381-03', '381-04', '381-05', '381-09', '381-10', '381-11', '381-13', '381-14',
+      '404-01', '404-02', '404-04', '404-05', '404-06', '404-07', '404-08', '378-04', '402-02', '402-04']),
+    DOCK_SUB_('SP', ['381-04', '381-06', '381-08', '381-13', '381-15', '381-16', '381-17', '405-00']))},
+  {dock: 'DOCA 43', line: 3, route: 'MS CGR', codes: ['MS']},
+  {dock: 'DOCA 42', line: 3, route: 'MT CGB', codes: ['MT']},
+  {dock: 'DOCA 41', line: 3, route: 'THE', codes: ['PI', 'IMP']},
+  {dock: 'DOCA 40', line: 3, route: 'SBN', codes: ['SBN']},
+  {dock: 'DOCA 39', line: 3, route: 'SP RBP', codes: ['NE', 'NE1']},
+  {dock: 'DOCA 38', line: 3, route: 'DF BSB', codes: ['DF']}
+];
+/**
+ * Tabela atualizada em 11/10/2026 (1º print): SBN da linha 3 (doca 40) para a linha 7 (doca 08) e ES da linha 7 para a
+ * linha 3 (doca 40); GRU 378-00 passa a ir para o DC SSZ-SP (doca 14); DC JND 02-SP (GRU 381-06/07/12, SP 395-05/06/07)
+ * carregado nas docas 21/22, com o SP BRE.
+ */
+const DOCK_TABLE_2026_10_11_ = DOCK_TABLE_2026_10_04_.map(e => {
+  if (e.route === 'ES SRR') return Object.assign({}, e, {dock: 'DOCA 40', line: 3});
+  if (e.route === 'SBN') return Object.assign({}, e, {dock: 'DOCA 08', line: 7});
+  if (e.route === 'DC SSZ-SP') return Object.assign({}, e, {codes: DOCK_SUB_('GRU', ['378-00', '378-01', '378-02', '378-03'])});
+  if (e.route === 'MOO') return Object.assign({}, e, {codes: e.codes.filter(c => c !== 'GRU 378-00')});
+  return e;
+}).concat([
+  {dock: 'DOCA 21/22', line: 2, route: 'DC JND 02-SP', codes: DOCK_SUB_('GRU', ['381-06', '381-07', '381-12']).concat(DOCK_SUB_('SP', ['395-05', '395-06', '395-07']))}
+]);
 const DOCKS_EXPEDICAO = Object.freeze({
-  destinationGroups: {
-    'BRE 2': ['AC', 'AM', 'BAU', 'BJE', 'BVB', 'CDG', 'JDF', 'LDB', 'SOD', 'SP', 'SP1', 'STM', 'TO', 'VCP', 'XAP',
-      'DC', 'NAT', 'MA', 'MIA', 'MRB', 'PA', 'RO', 'SJP']
-  },
-  destinationRules: [{prefix: 'BRE - ', value: 'BRE 2'}],
-  map: {
-    'DOCA 22': ['BRE'],
-    'DOCA 21': ['BRE 2'],
-    'DOCA 20': ['MS'],
-    'DOCA 19': ['SE', 'BA', 'PI', 'AL', 'CE', 'SBA', 'IMP', 'MCZ', 'SNS', 'FEC'],
-    'DOCA 18': ['PR', 'PR1'],
-    'DOCA 17': ['RS', 'RS1'],
-    'DOCA 16': ['DF'],
-    'DOCA 15': ['PE', 'BYE'],
-    'DOCA 14': ['GRU'],
-    'DOCA 10': ['VDC', 'RJ', 'ES'],
-    'DOCA 09': ['CHV', 'MG', 'MG1'],
-    'DOCA 08': ['SC', 'SC1'],
-    'DOCA 07': ['GO'],
-    'DOCA 06': ['MT'],
-    'DOCA 05': ['NE', 'NE1']
-  },
+  versions: [
+    {
+      from: '',
+      destinationGroups: {
+        'BRE 2': ['AC', 'AM', 'BAU', 'BJE', 'BVB', 'CDG', 'JDF', 'LDB', 'SOD', 'SP', 'SP1', 'STM', 'TO', 'VCP', 'XAP',
+          'DC', 'NAT', 'MA', 'MIA', 'MRB', 'PA', 'RO', 'SJP']
+      },
+      destinationRules: [{prefix: 'BRE - ', value: 'BRE 2'}],
+      map: {
+        'DOCA 22': ['BRE'],
+        'DOCA 21': ['BRE 2'],
+        'DOCA 20': ['MS'],
+        'DOCA 19': ['SE', 'BA', 'PI', 'AL', 'CE', 'SBA', 'IMP', 'MCZ', 'SNS', 'FEC'],
+        'DOCA 18': ['PR', 'PR1'],
+        'DOCA 17': ['RS', 'RS1'],
+        'DOCA 16': ['DF'],
+        'DOCA 15': ['PE', 'BYE'],
+        'DOCA 14': ['GRU'],
+        'DOCA 10': ['VDC', 'RJ', 'ES'],
+        'DOCA 09': ['CHV', 'MG', 'MG1'],
+        'DOCA 08': ['SC', 'SC1'],
+        'DOCA 07': ['GO'],
+        'DOCA 06': ['MT'],
+        'DOCA 05': ['NE', 'NE1']
+      }
+    },
+    {from: '2026-10-04', entries: DOCK_TABLE_2026_10_04_},
+    {from: '2026-10-11', entries: DOCK_TABLE_2026_10_11_}
+  ],
   fallback: 'SEM DOCA'
 });
 /**
- * Mesma tabela de docas, com a PRÓXIMA PARADA como base (Expedição SC → SC: próxima parada do veículo;
- * Envio Errado: próxima parada para onde a saca foi enviada): "BA FEC" → FEC → DOCA 19 · "SP BRE" → BRE →
- * DOCA 22 · "SP BAU" → BRE 2 → DOCA 21 · "MG CGE" (CGE fora da lista) → MG → DOCA 09.
+ * Mesma tabela de docas, com a PRÓXIMA PARADA como base (Envio Errado: próxima parada para onde a saca foi enviada;
+ * Triagem Errada: base destino para onde foi triada; Expedição SC → SC: próxima parada do veículo). Tabela de 11/10:
+ * "BA FEC" → doca 18 · "SP BRE" → docas 21/22 · "DC SSZ-SP" → doca 14 · "MG BHZ" (BHZ fora da lista) → MG → doca 19.
  */
 const DOCKS_PROXIMA_PARADA = Object.freeze(Object.assign({}, DOCKS_EXPEDICAO, {source: 'destination'}));
 
@@ -261,7 +321,10 @@ const ALL_INDICATORS_ = Object.freeze({
       endpoint: 'https://gw.jtjms-br.com/operatingplatform/scanRecordQuery/listPage',
       scanTypes: ['Encomenda inserida em lote'], baseField: 'inputDept', fill: {lot: 'belongNo', login: 'scanEmp'}, batch: 40
     },
-    filters: ['shift', 'offenderBase', 'lot', 'destination', 'interval', 'errorType'],
+    // V4.8 (pedido): docas pela BASE DESTINO (para onde a remessa foi triada), como no Envio Errado — os DCs novos
+    // (DC SSZ-SP, DC TBT-SP, DC JND 02-SP, MOO, DC GRU) caem nas docas da tabela de 04/10 (atualizada em 11/10).
+    docks: DOCKS_PROXIMA_PARADA,
+    filters: ['shift', 'offenderBase', 'lot', 'destination', 'interval', 'errorType', 'dock'],
     topCards: ['offenderBase'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
@@ -271,10 +334,26 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'lot', type: 'bar', horizontal: true, top: 10, title: {pt: 'Lotes ofensores', zh: '高频包号'}},
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
+    rankPanels: [
+      {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
+        title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
+        stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
+      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
+        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
+      {key: 'routeDockByShift', kind: 'byShift', dim: 'dockDest', extra: 'dock', top: 5, accent: 'count', bands: 'top',
+        title: {pt: 'Turno + rota de carregamento + doca', zh: '班次、装车线路与码头'},
+        sub: {pt: 'Quantidade e porcentagem por combinação de turno, rota de carregamento (base destino) e doca · top {n} por turno',
+          zh: '按班次、装车线路（目的网点）与码头的数量及占比 · 每个班次前 {n} 名'},
+        stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
+    ],
+    pivotTables: [
+      {key: 'dockStop', groupBy: ['dock', 'destination'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
+      {key: 'shiftDock', groupBy: ['shift', 'dock'], topPerGroup: 3, skipNA: true, title: {pt: 'Turno × docas mais ofensoras', zh: '各班次责任月台'}}
+    ],
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Remessa', '运单号'], ['shift', 'Turno', '班次'],
       ['offenderBase', 'Base ofensora', '责任网点'], ['errorType', 'Tipo de triagem errada', '错分类型'],
-      ['destination', 'Próxima parada', '下一站'], ['lot', 'Número do lote', '包号'],
+      ['destination', 'Próxima parada', '下一站'], ['dockDest', 'Rota de carregamento', '装车线路'], ['dock', 'Doca', '月台'], ['lot', 'Número do lote', '包号'],
       ['eventTime', 'Horário do bipe de expedição', '发件扫描时间'], ['login', 'Login', '操作员']
     ]
   },
@@ -350,18 +429,18 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
         title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
       {key: 'destDockByShift', kind: 'byShift', dim: 'dockDest', extra: 'dock', top: 5, accent: 'count', bands: 'top',
-        title: {pt: 'Turno + segmento + doca', zh: '班次、分段与码头'},
+        title: {pt: 'Turno + rota de carregamento + doca', zh: '班次、装车线路与码头'},
         stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
     ],
     // Mesmo formato das tabelas dinâmicas da planilha "Falta Expedição" (aba Planilha2): só no relatório (PDF/Excel).
     pivotTables: [
       {key: 'dockDest', groupBy: ['dock', 'dockDest'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
       {key: 'shiftDock', groupBy: ['shift', 'dock'], topPerGroup: 3, skipNA: true, title: {pt: 'Turno × docas mais ofensoras', zh: '各班次责任月台'}},
-      {key: 'shiftDest', groupBy: ['shift', 'dockDest'], topPerGroup: 6, skipNA: true, title: {pt: 'Top 6 destinos mais ofensores por turno', zh: '各班次前6目的地'}}
+      {key: 'shiftDest', groupBy: ['shift', 'dockDest'], topPerGroup: 6, skipNA: true, title: {pt: 'Top 6 rotas de carregamento mais ofensoras por turno', zh: '各班次前6装车线路'}}
     ],
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Remessa', '运单号'], ['login', 'Operador da descarga', '卸车操作员'],
-      ['shift', 'Turno', '班次'], ['segment', '1º segmento', '一段码'], ['dockDest', 'Destino', '目的地'], ['dock', 'Doca', '月台'],
+      ['shift', 'Turno', '班次'], ['segment', '1º segmento', '一段码'], ['dockDest', 'Rota de carregamento', '装车线路'], ['dock', 'Doca', '月台'],
       ['tripId', 'ID viagem recebimento', '到件车次号'],
       ['client', 'Cliente', '客户'], ['eventTime', 'Horário da descarga recebida', '到件卸车时间']
     ]
@@ -1409,6 +1488,8 @@ function clientFields_(cfg) {
   if (cfg.docks) {
     const src = cfg.docks.source || 'segment';
     if (src === 'segment') { set.segmentRaw = 1; set.segment = 1; } else set[src] = 1;
+    // V4.8: tabela de docas do dia de cada remessa.
+    if (cfg.docks.versions) set.date = 1;
   }
   return Object.keys(set);
 }

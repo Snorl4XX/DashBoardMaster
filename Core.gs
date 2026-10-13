@@ -61,8 +61,36 @@ function JTCoreFactory_() {
     return (m ? m[1] : tok).toUpperCase();
   }
   function flatDash(s) { return String(s).toUpperCase().replace(/\s*[-\u2013\u2014]\s*/g, '-').trim(); }
-  /** Índices da configuração de docas (montados uma vez por chamada de applyDocks). */
+  /**
+   * V4.8: 1º segmento + 2º segmento ("SP,381-06,134" → "SP,381-06" · "BRE - SP,395-07,300" → "BRE - SP,395-07" ·
+   * "BAU 484-00,200" → "BAU 484-00"): o que as docas precisam guardar (os DCs novos saem pelo 2º segmento).
+   */
+  function segmentHead2(v) {
+    if (blank(v)) return '';
+    var parts = String(v).trim().replace(/^主\s*[:：]\s*/, '').split(/[,，;]/);
+    var head = parts[0].trim();
+    if (/\d{3}-\d{2}/.test(head) || parts.length < 2) return head;
+    var second = parts[1].trim();
+    return second ? head + ',' + second : head;
+  }
+  /** 2º segmento ("381-06") de um código de três segmentos, em qualquer formato; '' se não houver. */
+  function secondSegment(v) {
+    var m = String(v || '').match(/(\d{3})\s*-\s*(\d{2})/);
+    return m ? m[1] + '-' + m[2] : '';
+  }
+  function normStop(s) { return String(s || '').toUpperCase().replace(/[\s\-–—_,;\/]+/g, ' ').trim(); }
+  /** Tabela de docas que vale no dia (V4.8: docks.versions, a mais nova com from <= dia; sem dia, a mais nova). */
+  function dockVersionIndex(docks, date) {
+    var vs = docks.versions;
+    if (!vs) return -1;
+    var d = String(date || '').slice(0, 10), pick = 0;
+    for (var i = 0; i < vs.length; i++) if (!vs[i].from || !d || vs[i].from <= d) pick = i;
+    return pick;
+  }
+  function dockVersion(docks, date) { var i = dockVersionIndex(docks, date); return i < 0 ? docks : docks.versions[i]; }
+  /** Índices de uma tabela de docas (formato antigo: map/destinationGroups; formato novo: entries). */
   function dockIndex(docks) {
+    if (docks.entries) return entryIndex(docks);
     var ix = {byDest: {}, bySegment: {}, rules: []};
     Object.keys(docks.map || {}).forEach(function (d) { docks.map[d].forEach(function (x) { ix.byDest[String(x).toUpperCase()] = d; }); });
     Object.keys(docks.destinationGroups || {}).forEach(function (dest) {
@@ -71,7 +99,24 @@ function JTCoreFactory_() {
     (docks.destinationRules || []).forEach(function (r) { if (r.prefix) ix.rules.push({prefix: flatDash(r.prefix), value: r.value}); });
     return ix;
   }
+  function entryIndex(docks) {
+    var ix = {entries: true, byCode: {}, bySub: {}, byRoute: {}, byToken: {}, prefixes: []};
+    docks.entries.forEach(function (e) {
+      (e.codes || []).forEach(function (c) {
+        var k = String(c).toUpperCase().trim(), sub = secondSegment(k);
+        if (sub) { var first = segmentCode(k.replace(sub, '').replace(/[\s,]+$/, '')); if (!ix.bySub[first + ' ' + sub]) ix.bySub[first + ' ' + sub] = e; }
+        else if (!ix.byCode[k]) ix.byCode[k] = e;
+      });
+      var r = normStop(e.route);
+      if (!ix.byRoute[r]) ix.byRoute[r] = e;
+      // Código da base no nome da rota (GYN, FEC, SSZ, JND, MOO…): 3 letras ou mais, menos "DC".
+      r.split(' ').forEach(function (t) { if (t.length >= 3 && t !== 'DC' && !/^\d+$/.test(t) && !ix.byToken[t]) ix.byToken[t] = e; });
+      (e.prefixes || []).forEach(function (p) { ix.prefixes.push({prefix: flatDash(p), entry: e}); });
+    });
+    return ix;
+  }
   function destinationOf(seg, ix) {
+    if (ix.entries) { var m = entryForCode(seg, ix); return m ? m.route : ''; }
     var s = String(seg || '').trim().replace(/^主\s*[:：]\s*/, '');
     if (!s) return '';
     var flat = flatDash(s);
@@ -83,19 +128,46 @@ function JTCoreFactory_() {
     return ix.bySegment[code] || code;
   }
   /**
-   * DESTINO do 1º segmento, igual à coluna DESTINOS da planilha. Aceita os formatos que o JMS manda:
-   * "BRE - SP" → BRE 2 · "SP" / "BAU 484-00" → BRE 2 (lista destinationGroups) · "GRU" → GRU.
+   * Tabela nova (entries): rota e doca pelo código de destino. 1º + 2º segmento antes do 1º segmento ("GRU 378-01" →
+   * DC SSZ-SP; "GRU 421-00" → GRU → DC GRU). "BRE - SP,381-06" → código SP 381-06; "BRE - X" sem X na tabela → rota do
+   * prefixo (SP BRE). Fora da tabela: {route: código, dock: null}.
    */
-  function dockDestination(seg, docks) { return docks ? destinationOf(seg, dockIndex(docks)) : ''; }
+  function entryForCode(seg, ix) {
+    var s = String(seg || '').trim().replace(/^主\s*[:：]\s*/, '');
+    if (!s) return null;
+    var viaPrefix = null, flat = flatDash(s);
+    for (var i = 0; i < ix.prefixes.length; i++) {
+      var p = ix.prefixes[i].prefix;
+      if (flat.indexOf(p) === 0 && /^[A-Z]/.test(flat.slice(p.length))) { viaPrefix = ix.prefixes[i].entry; s = flat.slice(p.length); break; }
+    }
+    var code = segmentCode(s), sub = secondSegment(s);
+    var e = (sub && ix.bySub[code + ' ' + sub]) || ix.byCode[code] || viaPrefix;
+    return e ? {route: e.route, dock: e.dock, line: e.line} : {route: code, dock: null};
+  }
+  /** Tabela nova: rota e doca pela próxima parada ("DC SSZ-SP", "BA FEC", "MG BHZ"). */
+  function entryForStop(v, ix) {
+    var n = normStop(v);
+    if (!n) return null;
+    var e = ix.byRoute[n];
+    var tok = n.split(' '), order = tok.slice(1).concat(tok.slice(0, 1)), i;
+    for (i = 0; !e && i < order.length; i++) e = ix.byToken[order[i]];
+    for (i = 0; !e && i < order.length; i++) e = ix.byCode[order[i]];
+    return e ? {route: e.route, dock: e.dock, line: e.line} : {route: tok[0] || '', dock: null};
+  }
   /**
-   * DESTINO a partir da PRÓXIMA PARADA (Expedição SC → SC: "BA FEC", "SP BRE", "MG CGE"), formato
-   * "UF CÓDIGO": vale primeiro o código da base (FEC → doca 19 · BRE → doca 22 · BAU → BRE 2) e, se ele
-   * não estiver na lista de docas, a UF (MG CGE → MG · DF BSB → DF · SP CPQ → SP → BRE 2).
+   * DESTINO do 1º segmento, igual à coluna DESTINOS da planilha (tabela antiga) ou ROTA de carregamento (tabela nova, V4.8).
+   * `date` escolhe a tabela do dia (sem data: a mais nova).
+   */
+  function dockDestination(seg, docks, date) { return docks ? destinationOf(seg, dockIndex(dockVersion(docks, date))) : ''; }
+  /**
+   * DESTINO a partir da PRÓXIMA PARADA (formato "UF CÓDIGO"). Tabela antiga: vale primeiro o código da base (FEC → doca 19 ·
+   * BRE → doca 22 · BAU → BRE 2) e, se ele não estiver na lista de docas, a UF (MG CGE → MG · SP CPQ → SP → BRE 2).
    */
   function stopDestination(v, ix) {
+    if (ix.entries) { var m = entryForStop(v, ix); return m ? m.route : ''; }
     var s = String(v || '').trim().toUpperCase();
     if (!s) return '';
-    var tok = s.split(/[\s,;\/_\-\u2013\u2014]+/).filter(Boolean);
+    var tok = s.split(/[\s,;\/_\-–—]+/).filter(Boolean);
     var order = tok.slice(1).concat(tok.slice(0, 1));
     for (var i = 0; i < order.length; i++) {
       var t = order[i];
@@ -105,41 +177,38 @@ function JTCoreFactory_() {
     return tok[0] || '';
   }
   /**
-   * Acrescenta dockDest (destino) e dock (doca) em cada remessa. Igual ao SE da planilha:
-   * comparação sem diferenciar maiúsculas; destino sem doca = SEM DOCA; 1º segmento em branco = SEM DOCA.
-   * Remessa gravada antes da V3.8 (só com o código do 1º segmento) usa esse código; "BRE" sozinho é
-   * ambíguo nesse caso (pode ter sido "BRE - SP") e fica "Sem informação" até o dia ser baixado de novo.
+   * Acrescenta dockDest (destino / rota de carregamento) e dock (doca) em cada remessa, pela tabela de docas do dia dela.
+   * Comparação sem diferenciar maiúsculas; destino sem doca = SEM DOCA; código em branco = SEM DOCA. Remessa gravada antes da
+   * V3.8 (só com o código do 1º segmento) usa esse código; "BRE" sozinho é ambíguo nesse caso (pode ter sido "BRE - SP") e
+   * fica "Sem informação" até o dia ser baixado de novo.
    */
   function applyDocks(rows, docks) {
     if (!docks || !rows) return rows;
-    var ix = dockIndex(docks);
-    var memo = {};
-    // Base da doca em outra coluna (ex.: SC → SC: docks.source = 'destination', a próxima parada do veículo).
-    if (docks.source && docks.source !== 'segment') {
-      for (var j = 0; j < rows.length; j++) {
-        var row = rows[j], v = blank(row[docks.source]) ? '' : String(row[docks.source]);
-        var mm = memo[v];
-        if (!mm) {
-          var d = stopDestination(v, ix);
-          mm = memo[v] = [d, d ? (ix.byDest[d.toUpperCase()] || docks.fallback) : docks.fallback];
-        }
-        row.dockDest = mm[0];
-        row.dock = mm[1];
-      }
-      return rows;
-    }
+    var ixs = {}, memo = {};
+    var indexFor = function (vi) { return ixs[vi] || (ixs[vi] = dockIndex(vi < 0 ? docks : docks.versions[vi])); };
+    var bySource = docks.source && docks.source !== 'segment';
     for (var i = 0; i < rows.length; i++) {
-      var r = rows[i], raw = r.segmentRaw === undefined || r.segmentRaw === null ? '' : String(r.segmentRaw);
-      var key = raw + '\u0001' + (r.segment || '');
-      var m = memo[key];
-      if (!m) {
-        var legacy = !raw && !blank(r.segment);
-        if (legacy && String(r.segment).trim().toUpperCase() === 'BRE') m = ['', ''];
-        else {
-          var dest = destinationOf(legacy ? r.segment : raw, ix);
-          m = [dest, dest ? (ix.byDest[dest.toUpperCase()] || docks.fallback) : docks.fallback];
+      var r = rows[i], vi = dockVersionIndex(docks, r.date), ix = indexFor(vi), key, m;
+      if (bySource) {
+        var v = blank(r[docks.source]) ? '' : String(r[docks.source]);
+        key = vi + '\u0001' + v;
+        m = memo[key];
+        if (!m) {
+          if (ix.entries) { var es = entryForStop(v, ix); m = es ? [es.route, es.dock || docks.fallback] : ['', docks.fallback]; }
+          else { var d = stopDestination(v, ix); m = [d, d ? (ix.byDest[d.toUpperCase()] || docks.fallback) : docks.fallback]; }
+          memo[key] = m;
         }
-        memo[key] = m;
+      } else {
+        var raw = r.segmentRaw === undefined || r.segmentRaw === null ? '' : String(r.segmentRaw);
+        key = vi + '\u0001' + raw + '\u0001' + (r.segment || '');
+        m = memo[key];
+        if (!m) {
+          var legacy = !raw && !blank(r.segment), src = legacy ? r.segment : raw;
+          if (legacy && String(r.segment).trim().toUpperCase() === 'BRE') m = ['', ''];
+          else if (ix.entries) { var ec = entryForCode(src, ix); m = ec ? [ec.route, ec.dock || docks.fallback] : ['', docks.fallback]; }
+          else { var dest = destinationOf(src, ix); m = [dest, dest ? (ix.byDest[dest.toUpperCase()] || docks.fallback) : docks.fallback]; }
+          memo[key] = m;
+        }
       }
       r.dockDest = m[0];
       r.dock = m[1];
@@ -875,8 +944,9 @@ function JTCoreFactory_() {
 
   return {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
-    intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
-    dockDestination: dockDestination, stopDestination: function (v, docks) { return docks ? stopDestination(v, dockIndex(docks)) : ''; }, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, pivot: pivot, rankPanel: rankPanel,
+    intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
+    dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
+    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

@@ -1,8 +1,96 @@
-# J&T DASHMASTER V4.7 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.8 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.8 — Docas e rotas novas (tabela de 04/10, atualizada em 11/10)
+**Pedido:** atualizar as rotas e as docas pela tabela nova, que também tem rotas novas, no Envio Errado, na Triagem Errada (com as docas dos DCs novos) e na Falta de Bipagem na Expedição. As partes apagadas do print de 11/10 foram completadas pelo print de 04/10.
+
+### Tabela de docas por data
+O painel guarda as tabelas com a data de início e usa, em cada dia, a tabela que valia naquele dia:
+
+| Dias | Tabela |
+|---|---|
+| até 03/10 | a antiga (DOCA 05 a 22) |
+| 04/10 a 10/10 | print de 04/10 |
+| a partir de 11/10 | print de 11/10 |
+
+Assim os dias antigos não mudam de doca.
+
+**Tabela de 11/10 (a que vale hoje):**
+| Linha | Doca | Rota de carregamento | Códigos |
+|---|---|---|---|
+| 7 | DOCA 05 | GO GYN | GO |
+| 7 | DOCA 06 | SC BNU | SC, SC1 |
+| 7 | DOCA 07 | RS NSR | RS, RS1 |
+| 7 | DOCA 08 | SBN | SBN |
+| 7 | DOCA 09 | CE FOR | CE |
+| 7 | DOCA 10 | RJ SJM | RJ, RJ1, VDC |
+| 4 | DOCA 14 | DC SSZ-SP | GRU 378-00, 378-01, 378-02, 378-03 |
+| 4 | DOCA 14 | DC TBT-SP | GRU 402-00, 402-01, 402-03, 402-05 |
+| 4 | DOCA 15 | SE AJU | SE, AL, MCZ |
+| 4 | DOCA 16 | PR SJS | PR, PR1, CAC |
+| 4 | DOCA 17 | PE JGS | PE, DC, BYE |
+| 4 | DOCA 18 | BA FEC | BA, SBA, SNS |
+| 4 | DOCA 19 | MG CGE | MG, MG1, CHV |
+| 4 | DOCA 20 | PA ANA | PA |
+| 2 | DOCA 21/22 | SP BRE | AC, AM, BAU, BVB, CDG, JDF, LDB, MIA, MRB, RO, SJP, SOD, SP, SP1, STM, TO, VCP, XAP, BJE, MA, PPB, JPN, NAT e "BRE - …" |
+| 2 | DOCA 21/22 | DC JND 02-SP | GRU 381-06, 381-07, 381-12 e SP 395-05, 395-06, 395-07 |
+| 2 | DOCA 23 | MOO | MOO e GRU 404-00, 404-03, 404-09, 404-10 |
+| 3 | DOCA 44 | DC GRU | GRU, GRU 381-…, 404-…, 378-04, 402-02, 402-04 e SP 381-…, 405-00 |
+| 3 | DOCA 43 | MS CGR | MS |
+| 3 | DOCA 42 | MT CGB | MT |
+| 3 | DOCA 41 | THE | PI, IMP |
+| 3 | DOCA 40 | ES SRR | ES |
+| 3 | DOCA 39 | SP RBP | NE, NE1 |
+| 3 | DOCA 38 | DF BSB | DF |
+
+**O que mudou de 04/10 para 11/10:**
+- ES SRR passou da DOCA 08 para a DOCA 40, e SBN da DOCA 40 para a DOCA 08;
+- GRU 378-00 saiu do MOO (DOCA 23) e foi para o DC SSZ-SP (DOCA 14);
+- rota nova DC JND 02-SP nas docas 21/22.
+
+### Como a doca é encontrada
+- **Pelo código com o 2º trecho:** os DCs novos dependem do 2º trecho do código, por exemplo "GRU 378-01" vai para o DC SSZ-SP (DOCA 14) e "GRU 404-00" vai para o MOO (DOCA 23). Por isso a Falta de Bipagem na Expedição agora guarda os dois primeiros trechos do código.
+- **Pelo nome da base:** no Envio Errado e na Triagem Errada, a doca sai do nome da base, por exemplo "DC SSZ-SP", "F ITQ-SP" ou "DC BAU-SP".
+- **Código que não está na tabela:** aparece só o código e a doca fica "SEM DOCA".
+
+### O que mudou em cada painel
+- **Falta de Bipagem na Expedição:**
+  - docas pela tabela nova;
+  - a coluna e os gráficos de destino agora se chamam **"Rota de carregamento"**, por exemplo "DC SSZ-SP - DOCA 14";
+  - o gráfico "Top 6 rotas de carregamento mais ofensoras por turno".
+- **Triagem Errada (novo):**
+  - doca pela **base destino** (para onde a remessa foi triada);
+  - filtro **Doca**;
+  - colunas "Rota de carregamento" e "Doca" na tabela;
+  - gráficos de docas: por doca, por turno e rota + doca por turno;
+  - tabelas "Docas mais afetadas" e "Turno × docas mais ofensoras".
+- **Envio Errado:** docas pela tabela nova (próxima parada).
+- **Expedição SC → SC:** usa a mesma tabela.
+
+### Para conferir (o que eu supus pelos prints)
+1. **MCZ** ficou no SE AJU (DOCA 15).
+2. **"DC—BYE"** foi lido como os códigos DC e BYE, no PE JGS (DOCA 17).
+3. **GRU com um 2º trecho que não está na tabela** cai no DC GRU (DOCA 44).
+4. As **docas 21 e 22** têm a mesma lista: aparecem juntas como "DOCA 21/22".
+5. Na Triagem Errada, a doca é a da **base destino**.
+
+Se algo estiver diferente, me avise.
+
+### Como mudar a tabela no futuro
+A tabela fica no **`Config.gs`**, em `DOCK_TABLE_2026_10_04_` e `DOCK_TABLE_2026_10_11_`. Para uma tabela nova:
+1. crie outra lista no mesmo formato;
+2. acrescente uma linha `{from: 'AAAA-MM-DD', entries: …}` em `DOCKS_EXPEDICAO.versions`.
+
+Os dias anteriores continuam com a tabela antiga.
+
+### Como instalar
+- **Google:** troque todos os `.gs` e `.html` pelos do ZIP V4.8 (nos dois projetos) e publique uma **Nova versão**.
+  - Não precisa rodar nenhuma função.
+  - Na primeira execução, a fila baixa de novo a lista da Falta de Bipagem na Expedição desde 04/10, para guardar o 2º trecho do código. Isso acontece uma vez só.
+- **Node.js / Oracle:** envie o `JT_DASHMASTER_V4_8_NODE.zip` e rode `unzip -o JT_DASHMASTER_V4_8_NODE.zip && sudo systemctl restart dashmaster` (passo 9 do `node/ORACLE_CLOUD.md`).
 
 ## V4.7 — Fluxo de Lotes retirado e botão Atualizar para todos os indicadores de uma vez
 **Pedido:** retirar o Fluxo de Lotes e atualizar de uma vez os dados de todos os indicadores.

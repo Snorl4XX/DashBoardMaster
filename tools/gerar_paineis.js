@@ -35,6 +35,8 @@ Este pacote é o **painel principal**. Ele mostra:
 - Deslacre (linha secundária);
 - Resultados.
 
+Desde a V4.8, Envio Errado, Triagem Errada e Falta de Bipagem na Expedição usam as docas e rotas de carregamento da tabela de 11/10 (tabelas em \`DOCKS_EXPEDICAO\` no Config.gs).
+
 **Recebimento e Expedição (fluxo operacional) não estão aqui.** Eles ficam no outro pacote, o painel dos fluxos. Assim este painel gasta cerca de metade da cota diária do Google e não para por falta de cota.
 
 ## Como instalar (no projeto do Apps Script que você já usa)

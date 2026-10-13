@@ -54,7 +54,8 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   Object.keys(cfg.valueMaps || {}).forEach(k => { const m = cfg.valueMaps[k], v = row[k]; if (v !== undefined && m[v] !== undefined) row[k] = m[v]; });
   // Indicadores com docas guardam o 1º segmento COMPLETO ("BRE - SP"); o campo segment continua
   // só com o código ("BRE"), como nos gráficos de sempre. Destino e doca saem daqui (Core.applyDocks).
-  if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') row.segmentRaw = JTCore_.segmentHead(row.segment);
+  // V4.8: com o 2º segmento ("BRE - SP,381-06"): os DCs novos (DC GRU, DC SSZ-SP, MOO…) saem por ele.
+  if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') row.segmentRaw = JTCore_.segmentHead2(row.segment);
   return rederiveRow_(indicatorKey, row);
 }
 
