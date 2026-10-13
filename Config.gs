@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.8.0',
+  VERSION: '4.9.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -92,6 +92,7 @@ const FILTER_LABELS = Object.freeze({
   content:         {pt: 'Conteúdo do pacote', zh: '物品名称'},
   amount:          {pt: 'Valor da arbitragem', zh: '判责金额'},
   regDay:          {pt: 'Data do registro', zh: '登记日期'},
+  expDay:          {pt: 'Data do bipe de expedição', zh: '发件扫描日期'},
   locationMain:    {pt: 'Local principal da avaria', zh: '破损发生一级环节'},
   locationSub:     {pt: 'Local secundário da avaria', zh: '破损发生二级环节'},
   orderKind:       {pt: 'Pedidos principais/filhos', zh: '主子单'},
@@ -325,9 +326,16 @@ const ALL_INDICATORS_ = Object.freeze({
     // (DC SSZ-SP, DC TBT-SP, DC JND 02-SP, MOO, DC GRU) caem nas docas da tabela de 04/10 (atualizada em 11/10).
     docks: DOCKS_PROXIMA_PARADA,
     filters: ['shift', 'offenderBase', 'lot', 'destination', 'interval', 'errorType', 'dock'],
-    topCards: ['offenderBase'],
+    // V4.9 (pedido): dia com mais erros de triagem pela DATA da coluna "Horário do bipe de expedição" (eventTime), e não
+    // pelo dia do indicador. Calculada na leitura (Core.applyDayOf): vale também para os dias já baixados.
+    dayOf: {expDay: 'eventTime'},
+    topCards: ['offenderBase', 'expDay'],
+    topCardLabels: {expDay: {pt: 'Dia com mais erros de triagem', zh: '错分最多的日期'}},
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
+      {key: 'expDay', type: 'bar', top: 10, ranking: true, hideNA: true,
+        title: {pt: 'Dias com mais erros de triagem (data do bipe de expedição)', zh: '错分最多的日期（发件扫描日期）'},
+        stats: {max: {pt: 'Dia com mais erros', zh: '错分最多的日期'}, min: {pt: 'Dia com menos erros', zh: '错分最少的日期'}}},
       {key: 'offenderBase', type: 'bar', horizontal: true, top: 10, title: {pt: 'Bases mais ofensoras', zh: '高频责任网点'}},
       {key: 'errorType', type: 'bar', horizontal: true, top: 10, title: {pt: 'Tipos de erro de triagem', zh: '错分类型'}},
       {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Bases destino', zh: '目的网点'}},
@@ -1478,13 +1486,15 @@ function usedFields_(cfg) {
   (cfg.valueCards || []).forEach(v => { set[v.field] = 1; });
   return Object.keys(set);
 }
-/** Calculadas na leitura (Core.applyDocks / Core.applyOrderKinds): não vão no conjunto de dados. */
+/** Calculadas na leitura (Core.applyDocks / Core.applyOrderKinds / Core.applyDayOf): não vão no conjunto de dados. */
 const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1, orderKind: 1};
 
 /** Campos da linha normalizada que o navegador precisa receber para este indicador. */
 function clientFields_(cfg) {
   const set = {};
-  usedFields_(cfg).forEach(k => { if (!DERIVED_CLIENT_FIELDS_[k]) set[k] = 1; });
+  usedFields_(cfg).forEach(k => { if (!DERIVED_CLIENT_FIELDS_[k] && !(cfg.dayOf && cfg.dayOf[k])) set[k] = 1; });
+  // V4.9: a data calculada (dayOf) sai do horário de origem, que vai no conjunto de dados.
+  Object.keys(cfg.dayOf || {}).forEach(k => { set[cfg.dayOf[k]] = 1; });
   if (cfg.docks) {
     const src = cfg.docks.source || 'segment';
     if (src === 'segment') { set.segmentRaw = 1; set.segment = 1; } else set[src] = 1;
@@ -1516,6 +1526,7 @@ function catalogEntry_(cfg) {
     pivotTables: cfg.pivotTables || [],
     rankPanels: cfg.rankPanels || [],
     docks: cfg.docks || null,
+    dayOf: cfg.dayOf || null,
     emptyLotLabel: cfg.emptyLotLabel || null,
     hideShiftCards: !!cfg.hideShiftCards,
     valueCards: cfg.valueCards || [],

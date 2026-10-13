@@ -1,8 +1,35 @@
-# J&T DASHMASTER V4.8 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.9 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.9 — Triagem Errada: dia com mais erros de triagem
+**Pedido:** um cartão e um gráfico com o dia que teve mais casos de erro de triagem. O dia sai da **data da coluna "Horário do bipe de expedição"**.
+
+### O que aparece
+- **Cartão "Dia com mais erros de triagem"**, ao lado do "Base ofensora ofensor".
+  - Mostra a data, por exemplo **08/10/2026**, e quantas remessas tiveram erro nesse dia, com a participação no período.
+  - Exemplo: "129 remessas · 15,0% participação".
+- **Gráfico "Dias com mais erros de triagem (data do bipe de expedição)"**, logo depois da "Participação por turno".
+  - Uma coluna por dia, do dia com mais erros para o com menos. Mostra até 10 dias.
+  - Embaixo, os quadros "Dia com mais erros" e "Dia com menos erros".
+  - O botão **Tabela** mostra os mesmos números em lista.
+
+### Como o dia é contado
+- Vale a **data do bipe de expedição** de cada remessa, e não o dia do indicador.
+  - Exemplo: uma remessa do indicador de 12/10 bipada na expedição em 11/10 às 23h conta no dia **11/10**.
+- O período da tela continua sendo o do indicador, por exemplo "7 dias". Por isso:
+  - com **um dia** escolhido, aparecem só as datas de bipe das remessas daquele dia;
+  - os dias da ponta do período podem aparecer com menos remessas.
+- **Filtros** (turno, base, doca…) valem também para o cartão e o gráfico.
+- Remessa sem horário de bipe de expedição não entra no gráfico.
+- Os dias **já baixados também mostram**: a data é calculada na hora, a partir do horário que já está salvo. Não precisa baixar nada de novo.
+- No relatório em Excel, o gráfico entra com as datas em DD/MM/AAAA.
+
+### Como instalar
+- **Google:** troque todos os `.gs` e `.html` pelos do ZIP V4.9 e publique uma **Nova versão**. Não precisa rodar nenhuma função.
+- **Node.js / Oracle:** envie o `JT_DASHMASTER_V4_9_NODE.zip` e rode `unzip -o JT_DASHMASTER_V4_9_NODE.zip && sudo systemctl restart dashmaster`.
 
 ## V4.8 — Docas e rotas novas (tabela de 04/10, atualizada em 11/10)
 **Pedido:** atualizar as rotas e as docas pela tabela nova, que também tem rotas novas, no Envio Errado, na Triagem Errada (com as docas dos DCs novos) e na Falta de Bipagem na Expedição. As partes apagadas do print de 11/10 foram completadas pelo print de 04/10.

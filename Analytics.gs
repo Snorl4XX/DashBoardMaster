@@ -842,6 +842,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   const rowCol = rowListType_(cfg, indicatorKey, p.to);
   if (rowCol !== null) archive.rows = archive.rows.filter(r => r.column === rowCol);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
+  if (cfg.dayOf) JTCore_.applyDayOf(archive.rows, cfg.dayOf);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);
   const rv = rateVariantFor_(cfg, indicatorKey, filters);

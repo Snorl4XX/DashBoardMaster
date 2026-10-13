@@ -220,6 +220,26 @@ function JTCoreFactory_() {
    * Avaria: "Pedidos principais/filhos" (Config.gs → orderKinds). Pedido filho = remessa com sufixo "-001",
    * "-002"… Calculado na leitura, como as docas: vale para todo o histórico sem baixar nada.
    */
+  /** Data (AAAA-MM-DD) de um horário: "2026-10-12 08:15:00" · "2026-10-12T08:15" · "12/10/2026 08:15" → 2026-10-12. */
+  function dayPart(v) {
+    if (blank(v)) return '';
+    var s = String(v), m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[0];
+    m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    return m ? m[3] + '-' + pad2(m[2]) + '-' + pad2(m[1]) : '';
+  }
+  /**
+   * V4.9: campos de data calculados na leitura (Config.gs → dayOf, ex.: {expDay: 'eventTime'} na Triagem Errada = data do
+   * "Horário do bipe de expedição"). Assim vale também para os dias já baixados, sem baixar de novo.
+   */
+  function applyDayOf(rows, dayOf) {
+    if (!dayOf || !rows) return rows;
+    var keys = Object.keys(dayOf);
+    for (var i = 0; i < rows.length; i++) {
+      for (var k = 0; k < keys.length; k++) rows[i][keys[k]] = dayPart(rows[i][dayOf[keys[k]]]);
+    }
+    return rows;
+  }
   /**
    * Avaria: "Pedido principal" / "Pedido secundário" de cada remessa. Com `tags` ({data: {kind, w: [remessas]}},
    * listas do JMS de uma opção), igual à tela; dia sem lista: remessa com sufixo "-001" = pedido filho.
@@ -946,7 +966,7 @@ function JTCoreFactory_() {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
-    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, pivot: pivot, rankPanel: rankPanel,
+    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

@@ -52,6 +52,8 @@ function pctCell_(v) { return v === null || v === undefined ? '' : v / 100; }
 function reportValue_(cfg, key, v) {
   const na = cfg.naLabel;
   if ((v === 'N/A' || v === '' || v === null || v === undefined) && na && na.fields.indexOf(key) >= 0) return na.text.pt;
+  // V4.9: data calculada (dayOf, ex.: dia do bipe de expedição da Triagem Errada) em DD/MM/AAAA.
+  if (cfg.dayOf && cfg.dayOf[key] && JTCore_.isIso(v)) return humanDatePt_(v);
   return JTCore_.localizeValue(v, 'pt');
 }
 /** Taxa em texto (notas do relatório): "0,15%" ou "120 ppm". */

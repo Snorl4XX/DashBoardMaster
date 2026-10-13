@@ -3524,4 +3524,45 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'migração V4.8: só os dias desde 04/10 da Falta de Bipagem na Expedição baixados de novo, uma vez', pend48.map(j => j.indicator + ' ' + j.date));
 }
 
+// ---------- V4.9: Triagem Errada — dia com mais erros pela data do "Horário do bipe de expedição" ----------
+{
+  const c9 = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const C9 = c9.JTCore_;
+  const dp = {'2026-10-12 08:15:00': '2026-10-12', '2026-10-12T23:59:07': '2026-10-12', '12/10/2026 08:15': '2026-10-12', '1/9/2026 10:00': '2026-09-01',
+    '': '', 'sem data': ''};
+  const dpWrong = Object.keys(dp).filter(k => C9.dayPart(k) !== dp[k]).map(k => k + ' → ' + C9.dayPart(k));
+  check(!dpWrong.length && C9.dayPart(null) === '' && C9.dayPart(undefined) === '', 'data do horário: AAAA-MM-DD, DD/MM/AAAA e vazio', dpWrong);
+  const cfg9 = c9.getIndicatorConfig_('sorting_error');
+  const ch9 = cfg9.charts.filter(c => c.key === 'expDay')[0];
+  const cat9 = c9.getPublicCatalog_().filter(x => x.key === 'sorting_error')[0];
+  const cf9 = c9.clientFields_(cfg9);
+  check(cfg9.dayOf && cfg9.dayOf.expDay === 'eventTime' && cfg9.topCards.join() === 'offenderBase,expDay' && ch9 && ch9.hideNA &&
+    cat9.dayOf && cat9.dayOf.expDay === 'eventTime' && cat9.labels.expDay.pt === 'Data do bipe de expedição' &&
+    cat9.topCardLabels.expDay.pt === 'Dia com mais erros de triagem' && cf9.indexOf('eventTime') >= 0 && cf9.indexOf('expDay') < 0,
+    'Triagem Errada: cartão e gráfico do dia com mais erros (data calculada do horário do bipe de expedição; não vai no conjunto de dados)', cf9);
+  // Dia 12/10 do indicador com 2/3 dos bipes de expedição em 11/10 (turno da noite): conta pela data do BIPE, não do indicador.
+  const DA = '2026-10-11', DB = '2026-10-12', d9 = {[DA]: makeDay(DA, 91), [DB]: makeDay(DB, 92)};
+  d9[DB].se = d9[DB].se.map((r, i) => Object.assign({}, r, {transferCenterSendTime: (i % 3 ? DA + ' 23:' : DB + ' 01:') + String(i % 60).padStart(2, '0') + ':00'}));
+  const c9b = freshCtx(d9, null, {DATA_START_DATE: DA});
+  c9b.queueHistory(DA, DB, true);
+  runAll(c9b);
+  const rows9 = C9.applyDayOf(C9.decodeDataset(c9b.getDashboardData('sorting_error', {from: DA, to: DB}).dataset), cat9.dayOf);
+  const by9 = {};
+  rows9.forEach(r => { by9[r.expDay] = (by9[r.expDay] || 0) + 1; });
+  const want9 = Object.keys(by9).sort((a, b) => by9[b] - by9[a])[0];
+  check(rows9.length > 0 && want9 === DA && Object.keys(by9).every(k => k === DA || k === DB) && by9[DA] > d9[DA].se.length,
+    'navegador: cada remessa com a data do bipe de expedição (11/10 soma os bipes do indicador de 12/10)', by9);
+  const comp9 = c9b.computeDashboard_('sorting_error', {from: DA, to: DB});
+  const top9 = comp9.cards.tops.filter(t => t.key === 'expDay')[0];
+  const chart9 = comp9.charts.filter(c => c.key === 'expDay')[0];
+  check(top9 && top9.label === DA && top9.qty === by9[DA] && Math.abs(top9.pct - by9[DA] / rows9.length * 100) < 1e-9,
+    'cartão "Dia com mais erros de triagem": o dia, a quantidade e a participação', top9);
+  check(chart9 && chart9.labels.join() === DA + ',' + DB && chart9.datasets[0].data.join() === by9[DA] + ',' + by9[DB] && chart9.labels.indexOf('N/A') < 0,
+    'gráfico "Dias com mais erros de triagem": do dia com mais erros para o com menos', chart9 && chart9.labels);
+  const f9 = c9b.computeDashboard_('sorting_error', {from: DA, to: DB, filters: {shift: ['T1']}});
+  check(f9.rows.length > 0 && f9.rows.length < rows9.length && f9.charts.filter(c => c.key === 'expDay')[0].datasets[0].data.reduce((a, v) => a + v, 0) === f9.rows.length,
+    'com filtro, o gráfico conta só as remessas filtradas');
+  check(c9b.reportValue_(cfg9, 'expDay', DA) === '11/10/2026' && c9b.reportValue_(cfg9, 'destination', DA) === DA, 'relatório: data do bipe em DD/MM/AAAA');
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');
