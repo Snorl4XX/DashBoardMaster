@@ -3463,16 +3463,17 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'RJ1,123-00,1': 'RJ SJM | DOCA 10', 'GRU,378-02,1': 'DC SSZ-SP | DOCA 14', 'GRU,402-05,676': 'DC TBT-SP | DOCA 14', 'AL,570-00,1': 'SE AJU | DOCA 15',
     'CAC,100-00,1': 'PR SJS | DOCA 16', 'PE,540-00,1': 'PE JGS | DOCA 17', 'SNS,500-00,1': 'BA FEC | DOCA 18', 'CHV,330-00,1': 'MG CGE | DOCA 19',
     'PA,660-00,1': 'PA ANA | DOCA 20', 'BRE - SOD,018-00,1': 'SP BRE | DOCA 21/22', 'PPB,100-00,1': 'SP BRE | DOCA 21/22', 'SP,977-00,': 'SP BRE | DOCA 21/22',
-    'BRE - XYZ,100-00,1': 'SP BRE | DOCA 21/22', 'BRE - SP,381-06,134': 'DC GRU | DOCA 44', 'SP,405-00,300': 'DC GRU | DOCA 44', 'GRU,381-16,': 'DC GRU | DOCA 44',
+    'BRE - XYZ,100-00,1': 'SP BRE | DOCA 21/22', 'SP,405-00,300': 'DC GRU | DOCA 44', 'GRU,381-16,': 'DC GRU | DOCA 44',
     'GRU,421-00,310': 'DC GRU | DOCA 44', 'gru 404-08,1': 'DC GRU | DOCA 44', 'SP-381-17-020': 'DC GRU | DOCA 44', 'MOO,430-02,1': 'MOO | DOCA 23',
     'GRU,404-09,1': 'MOO | DOCA 23', 'MS 850-00,240': 'MS CGR | DOCA 43', 'MT,956-00,565': 'MT CGB | DOCA 42', 'PI,600-00,1': 'THE | DOCA 41',
     'NE1,100-00,1': 'SP RBP | DOCA 39', 'DF,787-00,1': 'DF BSB | DOCA 38', 'XYZ,100-00,1': 'XYZ | SEM DOCA', '': ' | SEM DOCA'
   };
   // O que mudou em 11/10 (1º print) em relação a 04/10 (2º print).
-  const SEG_V1 = {'SBN,375-03,420': 'SBN | DOCA 40', 'ES,290-00,1': 'ES SRR | DOCA 08', 'GRU,378-00,100': 'MOO | DOCA 23',
+  const SEG_V1 = {'SBN,375-03,420': 'SBN | DOCA 40', 'ES,290-00,1': 'ES SRR | DOCA 08', 'GRU,378-00,100': 'MOO | DOCA 23', 'BRE - SP,381-06,134': 'DC GRU | DOCA 44',
     'BRE - SP,395-07,300': 'SP BRE | DOCA 21/22', 'GRU,381-12,1': 'DC GRU | DOCA 44'};
   const SEG_V2 = {'SBN,375-03,420': 'SBN | DOCA 08', 'ES,290-00,1': 'ES SRR | DOCA 40', 'GRU,378-00,100': 'DC SSZ-SP | DOCA 14',
-    'BRE - SP,395-07,300': 'DC JND 02-SP | DOCA 21/22', 'GRU,381-12,1': 'DC JND 02-SP | DOCA 21/22', 'GRU 381-07,5': 'DC JND 02-SP | DOCA 21/22'};
+    'BRE - SP,395-07,300': 'DC JND 02-SP | DOCA 21/22', 'GRU,381-12,1': 'DC JND 02-SP | DOCA 21/22', 'GRU 381-07,5': 'DC JND 02-SP | DOCA 21/22',
+    'BRE - SP,381-06,134': 'DC JND 02-SP | DOCA 21/22'}; // V4.10: BRE 381-06/07/12 (print das rotas)
   const wrong = (cases, date, f) => Object.keys(cases).filter(k => f(k, date) !== cases[k]).map(k => k + ' → ' + f(k, date) + ' (esperado ' + cases[k] + ')');
   const w2 = wrong(Object.assign({}, SEG, SEG_V2), V2, bySeg), w1 = wrong(Object.assign({}, SEG, SEG_V1), V1, bySeg);
   check(!w2.length, 'Falta de Bipagem na Expedição: código → rota e doca pela tabela de 11/10 (1º e 2º segmento)', w2);
@@ -3482,10 +3483,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const STOP = {'BA FEC': 'BA FEC | DOCA 18', 'SP BRE': 'SP BRE | DOCA 21/22', 'MG CGE': 'MG CGE | DOCA 19', 'MG BHZ': 'MG CGE | DOCA 19',
     'DC SSZ-SP': 'DC SSZ-SP | DOCA 14', 'DC TBT-SP': 'DC TBT-SP | DOCA 14', 'DC GRU-SP': 'DC GRU | DOCA 44', 'SP RBP': 'SP RBP | DOCA 39',
     'SP CPQ': 'SP BRE | DOCA 21/22', 'DC BAU-SP': 'SP BRE | DOCA 21/22', 'F ITQ-SP': 'SP BRE | DOCA 21/22', 'PI THE': 'THE | DOCA 41', 'GO GYN': 'GO GYN | DOCA 05',
-    'SE AJU': 'SE AJU | DOCA 15', 'AL MCZ': 'SE AJU | DOCA 15', 'PE JGS': 'PE JGS | DOCA 17', 'PA ANA': 'PA ANA | DOCA 20', 'MS CGR': 'MS CGR | DOCA 43',
+    'SE AJU': 'SE AJU | DOCA 15', 'PE JGS': 'PE JGS | DOCA 17', 'PA ANA': 'PA ANA | DOCA 20', 'MS CGR': 'MS CGR | DOCA 43',
     'MOO': 'MOO | DOCA 23', 'XX YYY': 'XX | SEM DOCA', '': ' | SEM DOCA'};
-  const sw2 = wrong(Object.assign({}, STOP, {'SBN': 'SBN | DOCA 08', 'ES SRR': 'ES SRR | DOCA 40', 'DC JND 02-SP': 'DC JND 02-SP | DOCA 21/22'}), V2, byStop);
-  const sw1 = wrong(Object.assign({}, STOP, {'SBN': 'SBN | DOCA 40', 'ES SRR': 'ES SRR | DOCA 08', 'DC JND 02-SP': 'SP BRE | DOCA 21/22'}), V1, byStop);
+  const sw2 = wrong(Object.assign({}, STOP, {'SBN': 'SBN | DOCA 08', 'ES SRR': 'ES SRR | DOCA 40', 'DC JND 02-SP': 'DC JND 02-SP | DOCA 21/22', 'AL MCZ': 'BA FEC | DOCA 18'}), V2, byStop);
+  const sw1 = wrong(Object.assign({}, STOP, {'SBN': 'SBN | DOCA 40', 'ES SRR': 'ES SRR | DOCA 08', 'DC JND 02-SP': 'SP BRE | DOCA 21/22', 'AL MCZ': 'SE AJU | DOCA 15'}), V1, byStop);
   check(!sw2.length && !sw1.length, 'Envio Errado / Triagem Errada / SC→SC: próxima parada → rota e doca (nome da rota, código da base, UF)', sw2.concat(sw1));
   check(CC.dockDestination('GRU,378-00,1', DEXP8) === 'DC SSZ-SP' && CC.dockDestination('GRU,378-00,1', DEXP8, V1) === 'MOO',
     'sem data, vale a tabela mais nova');
@@ -3563,6 +3564,60 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(f9.rows.length > 0 && f9.rows.length < rows9.length && f9.charts.filter(c => c.key === 'expDay')[0].datasets[0].data.reduce((a, v) => a + v, 0) === f9.rows.length,
     'com filtro, o gráfico conta só as remessas filtradas');
   check(c9b.reportValue_(cfg9, 'expDay', DA) === '11/10/2026' && c9b.reportValue_(cfg9, 'destination', DA) === DA, 'relatório: data do bipe em DD/MM/AAAA');
+}
+
+// ---------- V4.10: print "Código de alocação de carga das rotas tronco e de distribuição do SC GRU" ----------
+{
+  const vmR = require('vm');
+  const cR = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CR = cR.JTCore_, DEXP = vmR.runInContext('DOCKS_EXPEDICAO', cR), DPP = vmR.runInContext('DOCKS_PROXIMA_PARADA', cR);
+  const seg = (c, d) => { const r = CR.applyDocks([{segmentRaw: CR.segmentHead2(c), segment: CR.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CR.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  // Transcrição do print: linha → [rota | doca, paradas (código de carregamento), códigos de destino].
+  const LINES = [
+    ['RJ SJM | DOCA 10', ['RJ SJM', 'BA VDC'], ['RJ,1', 'RJ1,1', 'VDC,1']],
+    ['MG CGE | DOCA 19', ['MG CGE'], ['MG,1', 'MG1,1', 'CHV,1']],
+    ['PR SJS | DOCA 16', ['PR SJS', 'DC CAC'], ['PR,1', 'PR1,1', 'CAC,1']],
+    ['SC BNU | DOCA 06', ['SC BNU'], ['SC,1', 'SC1,1']],
+    ['SP RBP | DOCA 39', ['SP RBP'], ['NE,1', 'NE1,1']],
+    ['DF BSB | DOCA 38', ['DF BSB'], ['DF,1']],
+    ['GO GYN | DOCA 05', ['GO GYN'], ['GO,1']],
+    ['RS NSR | DOCA 07', ['RS NSR'], ['RS,1', 'RS1,1']],
+    ['PE JGS | DOCA 17', ['PE JGS', 'DC BYE-PB'], ['PE,1', 'BYE,1']],
+    ['BA FEC | DOCA 18', ['DC MCZ-AL', 'DC SNS-PE', 'DC IMP-MA', 'DC SBA-BA', 'BA FEC'], ['MCZ,1', 'SNS,1', 'IMP,1', 'SBA,1', 'BA,1']],
+    ['ES SRR | DOCA 40', ['ES SRR'], ['ES,1']],
+    ['SE AJU | DOCA 15', ['SE AJU'], ['SE,1', 'AL,1']],
+    ['THE | DOCA 41', ['PI THE'], ['PI,1']],
+    ['CE FOR | DOCA 09', ['CE FOR'], ['CE,1']],
+    ['PA ANA | DOCA 20', ['PA ANA'], ['PA,1']],
+    ['MS CGR | DOCA 43', ['MS CGR'], ['MS,1']],
+    ['MT CGB | DOCA 42', ['MT CGB', 'DC JPN'], ['MT,1', 'JPN,1']],
+    ['SP BRE | DOCA 21/22', ['PA STM', 'PA MRB', 'RO PVH', 'TO PMW', 'DC PPB-SP', 'DC NAT-RN', 'DC XAP-SC', 'DC SJP-SP', 'DC CDG-RJ', 'DC JDF-MG',
+      'DC SLZ-MA', 'DC MAO-AM', 'MGF-PR', 'DC LDB-PR', 'DC RBR-AC', 'DC BJE-PI', 'DC BAU-SP', 'DC SOD-SP', 'DC VCP-SP'],
+      ['STM,1', 'MRB,1', 'PPB,1', 'NAT,1', 'BAU 484-00,1', 'SOD,1', 'VCP,1', 'MA,1', 'BRE - SOD,018-00,1']],
+    ['DC JND 02-SP | DOCA 21/22', [], ['SP,395-05,1', 'SP,395-06,1', 'SP,395-07,1', 'BRE,381-06,1', 'BRE - SP,381-07,1', 'BRE - GRU,381-12,1', 'GRU,381-06,1']],
+    ['DC GRU | DOCA 44', ['DC GRU', 'DC GRU-SP'], ['GRU,381-00,1', 'GRU,381-14,1', 'SP,381-04,1', 'SP,381-06,1', 'SP,381-07,1', 'SP,381-17,1', 'SP,405-00,1',
+      'GRU,378-04,1', 'GRU,402-02,1', 'GRU,402-04,1', 'GRU,404-01,1', 'GRU,404-08,1']],
+    ['MOO | DOCA 23', ['DC MOOCA2'], ['SP,350-00,1', 'SP,364-00,1', 'SP,365-00,1', 'SP,381-12,1', 'SP,398-00,1', 'SP,404-00,1', 'SP,430-01,1', 'SP,435-00,1',
+      'GRU,404-00,1', 'GRU,404-10,1', 'MOO,430-00,1', 'MOO,430-06,1']],
+    ['SBN | DOCA 08', ['DC SBN'], ['SBN,375-00,1', 'SBN,375-09,1']],
+    ['DC SSZ-SP | DOCA 14', ['DC SSZ', 'DC SSZ-SP'], ['SP,378-00,1', 'SP,378-03,1', 'GRU,378-00,1', 'GRU,378-03,1']],
+    ['DC TBT-SP | DOCA 14', ['DC TBT', 'DC TBT-SP'], ['SP,421-00,1', 'SP,402-01,1', 'SP,402-03,1', 'SP,402-05,1', 'GRU,402-00,1', 'GRU,402-05,1']]
+  ];
+  const D10 = '2026-10-13', D11 = '2026-10-11', wrongR = [];
+  LINES.forEach(([want, stops, codes]) => [D10, D11].forEach(d => {
+    stops.forEach(v => { const g = stop(v, d); if (g !== want) wrongR.push(d + ' parada ' + v + ' → ' + g + ' (esperado ' + want + ')'); });
+    codes.forEach(c => { const g = seg(c, d); if (g !== want) wrongR.push(d + ' código ' + c + ' → ' + g + ' (esperado ' + want + ')'); });
+  }));
+  check(!wrongR.length, 'tabela de 11/10 completada pelo print das rotas: todas as paradas e códigos na linha e na doca certas', wrongR);
+  // 04/10 a 10/10 continua como no 2º print das docas (JPN no SP BRE, MCZ no SE AJU, IMP na doca 41, SP 378-00 sem DC SSZ).
+  const V1 = '2026-10-07';
+  check(seg('JPN,1', V1) === 'SP BRE | DOCA 21/22' && seg('MCZ,1', V1) === 'SE AJU | DOCA 15' && seg('IMP,1', V1) === 'THE | DOCA 41' &&
+    seg('SP,378-00,1', V1) === 'SP BRE | DOCA 21/22' && stop('DC JPN', V1) === 'SP BRE | DOCA 21/22',
+    'de 04/10 a 10/10: tabela da época (sem as mudanças do print das rotas)');
+  // "DC" sozinho não escolhe doca; parada desconhecida mostra o nome dela.
+  check(stop('DC XYZ', D10) === 'DC XYZ | SEM DOCA' && stop('DC XYZ-SP', D10) === 'SP BRE | DOCA 21/22' && stop('XX YYY', D10) === 'XX | SEM DOCA',
+    'parada desconhecida: "DC XYZ" fica SEM DOCA (não vai para o PE JGS pelo "DC")', [stop('DC XYZ', D10), stop('DC XYZ-SP', D10)]);
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

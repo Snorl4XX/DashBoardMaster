@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.9.0',
+  VERSION: '4.10.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -132,7 +132,8 @@ const FILTER_LABELS = Object.freeze({
  * {dock, line (linha de desvio do DWS), route (rota de carregamento após o ajuste), codes}. codes = código de destino do
  * 1º segmento ("GO") ou do 1º + 2º segmento nos DCs novos ("GRU 378-01"): o 2º segmento vale antes do 1º. Rota = o
  * "destino" dos gráficos. "BRE - X" (código antigo do JMS) = código X; sem X na tabela, rota do prefixo (SP BRE).
- * Próxima parada ("BA FEC", "DC SSZ-SP"): nome da rota, depois o código da base (FEC, SSZ…), depois o código (BA, SP…).
+ * Próxima parada ("BA FEC", "DC SSZ-SP"): nome da rota ou de uma parada da linha (stops), depois o código da base (FEC,
+ * SSZ, MCZ…), depois o código (BA, SP…; "DC" sozinho não conta).
  * Código fora da tabela = SEM DOCA.
  */
 const DOCK_ROUTES_SP_BRE_ = ['AC', 'AM', 'BAU', 'BVB', 'CDG', 'JDF', 'LDB', 'MIA', 'MRB', 'RO', 'SJP', 'SOD', 'SP', 'SP1', 'STM', 'TO',
@@ -171,15 +172,42 @@ const DOCK_TABLE_2026_10_04_ = [
  * Tabela atualizada em 11/10/2026 (1º print): SBN da linha 3 (doca 40) para a linha 7 (doca 08) e ES da linha 7 para a
  * linha 3 (doca 40); GRU 378-00 passa a ir para o DC SSZ-SP (doca 14); DC JND 02-SP (GRU 381-06/07/12, SP 395-05/06/07)
  * carregado nas docas 21/22, com o SP BRE.
+ *
+ * V4.10: completada pelo print "Código de alocação de carga das rotas tronco e de distribuição do SC GRU" (linha → código
+ * de carregamento). Onde os dois prints divergem, vale o das rotas (o mais novo):
+ *   - JPN vai na linha SC GRU-CGB (MT CGB, doca 42), e não mais no SP BRE;
+ *   - MCZ e IMP vão na linha SC GRU-FEC (BA FEC, doca 18); IMP saía da doca 41;
+ *   - códigos SP dos DCs: SP 378-00/01/02/03 → DC SSZ-SP; SP 421-00 e SP 402-01/03/05 → DC TBT-SP; SP 381-07 → DC GRU;
+ *     SP 350-00, 364-00, 365-00, 381-12, 398-00, 404-00, 430-01, 435-00 → DC MOOCA2 (MOO, doca 23);
+ *   - BRE 381-06/07/12 → DC JND 02-SP.
+ * stops = nomes de parada do print das rotas ("DC MCZ-AL", "MGF-PR"…), para o Envio Errado, a Triagem Errada e o SC → SC.
  */
+const DOCK_STOPS_SP_BRE_ = ['PA STM', 'PA MRB', 'RO PVH', 'TO PMW', 'DC PPB-SP', 'DC NAT-RN', 'DC XAP-SC', 'DC SJP-SP', 'DC CDG-RJ',
+  'DC JDF-MG', 'DC SLZ-MA', 'DC MAO-AM', 'MGF-PR', 'DC LDB-PR', 'DC RBR-AC', 'DC BJE-PI', 'DC BAU-SP', 'DC SOD-SP', 'DC VCP-SP'];
 const DOCK_TABLE_2026_10_11_ = DOCK_TABLE_2026_10_04_.map(e => {
-  if (e.route === 'ES SRR') return Object.assign({}, e, {dock: 'DOCA 40', line: 3});
-  if (e.route === 'SBN') return Object.assign({}, e, {dock: 'DOCA 08', line: 7});
-  if (e.route === 'DC SSZ-SP') return Object.assign({}, e, {codes: DOCK_SUB_('GRU', ['378-00', '378-01', '378-02', '378-03'])});
-  if (e.route === 'MOO') return Object.assign({}, e, {codes: e.codes.filter(c => c !== 'GRU 378-00')});
-  return e;
+  const set = x => Object.assign({}, e, x);
+  switch (e.route) {
+    case 'ES SRR': return set({dock: 'DOCA 40', line: 3});
+    case 'SBN': return set({dock: 'DOCA 08', line: 7, stops: ['DC SBN']});
+    case 'RJ SJM': return set({stops: ['BA VDC']});
+    case 'PR SJS': return set({stops: ['DC CAC']});
+    case 'PE JGS': return set({stops: ['DC BYE-PB']});
+    case 'SE AJU': return set({codes: ['SE', 'AL']});
+    case 'BA FEC': return set({codes: ['BA', 'SBA', 'SNS', 'MCZ', 'IMP'], stops: ['DC MCZ-AL', 'DC SNS-PE', 'DC IMP-MA', 'DC SBA-BA']});
+    case 'THE': return set({codes: ['PI'], stops: ['PI THE']});
+    case 'MT CGB': return set({codes: ['MT', 'JPN'], stops: ['DC JPN']});
+    case 'SP BRE': return set({codes: e.codes.filter(c => c !== 'JPN'), stops: DOCK_STOPS_SP_BRE_});
+    case 'DC SSZ-SP': return set({codes: DOCK_SUB_('GRU', ['378-00', '378-01', '378-02', '378-03']).concat(DOCK_SUB_('SP', ['378-00', '378-01', '378-02', '378-03'])),
+      stops: ['DC SSZ']});
+    case 'DC TBT-SP': return set({codes: e.codes.concat(DOCK_SUB_('SP', ['421-00', '402-01', '402-03', '402-05'])), stops: ['DC TBT']});
+    case 'MOO': return set({codes: e.codes.filter(c => c !== 'GRU 378-00')
+      .concat(DOCK_SUB_('SP', ['350-00', '364-00', '365-00', '381-12', '398-00', '404-00', '430-01', '435-00'])), stops: ['DC MOOCA2', 'DC MOOCA']});
+    case 'DC GRU': return set({codes: e.codes.concat(['SP 381-07'])});
+    default: return e;
+  }
 }).concat([
-  {dock: 'DOCA 21/22', line: 2, route: 'DC JND 02-SP', codes: DOCK_SUB_('GRU', ['381-06', '381-07', '381-12']).concat(DOCK_SUB_('SP', ['395-05', '395-06', '395-07']))}
+  {dock: 'DOCA 21/22', line: 2, route: 'DC JND 02-SP',
+    codes: DOCK_SUB_('GRU', ['381-06', '381-07', '381-12']).concat(DOCK_SUB_('SP', ['395-05', '395-06', '395-07']), DOCK_SUB_('BRE', ['381-06', '381-07', '381-12']))}
 ]);
 const DOCKS_EXPEDICAO = Object.freeze({
   versions: [

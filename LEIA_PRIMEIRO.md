@@ -1,8 +1,49 @@
-# J&T DASHMASTER V4.9 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.10 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.10 — Rotas que faltavam (print "Código de alocação de carga das rotas do SC GRU")
+**Pedido:** ver as modificações novas e conferir nos prints se falta alguma rota.
+
+Conferi as 23 linhas do print das rotas (tronco e distribuição) contra o painel, código por código e parada por parada. Os que faltavam ou caíam na doca errada estão nas tabelas abaixo. Agora todos caem na linha e na doca certas, e o teste confere cada linha do print.
+
+### O que foi acrescentado
+| Linha do print | O que faltava no painel | Agora vai para |
+|---|---|---|
+| SC GRU-DC SSZ | SP 378-00, 378-01, 378-02, 378-03 | DC SSZ-SP · DOCA 14 |
+| SC GRU-DC TBT | SP 421-00, SP 402-01, 402-03, 402-05 | DC TBT-SP · DOCA 14 |
+| SC GRU-DC MOOCA2 | SP 350-00, 364-00, 365-00, 381-12, 398-00, 404-00, 430-01, 435-00 e a parada "DC MOOCA2" | MOO · DOCA 23 |
+| SC GRU-DC GRU | SP 381-07 | DC GRU · DOCA 44 |
+| SC GRU-BRE | BRE 381-06, 381-07, 381-12 (ex.: "BRE - SP,381-06") | DC JND 02-SP · DOCAS 21/22 |
+| SC GRU-BRE | parada "MGF-PR" (ia para o PR SJS) | SP BRE · DOCAS 21/22 |
+| SC GRU-FEC | MCZ e a parada "DC MCZ-AL" (estavam no SE AJU) | BA FEC · DOCA 18 |
+
+Antes, os códigos SP desses DCs caíam no SP BRE (docas 21/22) só pelo "SP".
+
+### Onde os dois prints não batem: usei o das rotas
+| Código | Print das docas (11/10) | Print das rotas (usado) |
+|---|---|---|
+| **JPN** (DC JPN) | SP BRE, docas 21/22 | linha SC GRU-CGB: **MT CGB, doca 42** |
+| **IMP** (DC IMP-MA) | doca 41, com PI | linha SC GRU-FEC: **BA FEC, doca 18** |
+
+**Confira esses dois.** Se valer o print das docas, me avise: é uma linha no `Config.gs`.
+
+### Outras melhorias
+- **Paradas da linha:** cada linha agora tem os nomes de parada do print, por exemplo "BA VDC", "DC CAC", "DC BYE-PB", "DC SNS-PE", "DC SLZ-MA" e "DC MAO-AM". Isso vale para o Envio Errado, a Triagem Errada e o SC → SC.
+- **"DC" sozinho não escolhe mais doca:** uma parada desconhecida como "DC XYZ" fica "SEM DOCA" com o nome dela. Antes, ia para o PE JGS por causa do código "DC".
+
+### Quais dias mudam
+- As mudanças entram na tabela de **11/10**, e os dias desde 11/10 já aparecem com as docas novas.
+- De 04/10 a 10/10 e antes de 04/10 nada muda.
+- A doca é calculada na leitura: não precisa baixar nada de novo.
+
+A tabela da seção V4.8 abaixo mostra o print das docas. Com esta versão, valem também as linhas acima.
+
+### Como instalar
+- **Google:** troque os `.gs` e `.html` pelos do ZIP V4.10 e publique uma **Nova versão**. Mudaram só `Config.gs` e `Core.gs`. Não precisa rodar nenhuma função.
+- **Node.js / Oracle:** envie o `JT_DASHMASTER_V4_10_NODE.zip` e rode `unzip -o JT_DASHMASTER_V4_10_NODE.zip && sudo systemctl restart dashmaster`.
 
 ## V4.9 — Triagem Errada: dia com mais erros de triagem
 **Pedido:** um cartão e um gráfico com o dia que teve mais casos de erro de triagem. O dia sai da **data da coluna "Horário do bipe de expedição"**.

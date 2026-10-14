@@ -110,11 +110,21 @@ function JTCoreFactory_() {
       var r = normStop(e.route);
       if (!ix.byRoute[r]) ix.byRoute[r] = e;
       // Código da base no nome da rota (GYN, FEC, SSZ, JND, MOO…): 3 letras ou mais, menos "DC".
-      r.split(' ').forEach(function (t) { if (t.length >= 3 && t !== 'DC' && !/^\d+$/.test(t) && !ix.byToken[t]) ix.byToken[t] = e; });
-      (e.prefixes || []).forEach(function (p) { ix.prefixes.push({prefix: flatDash(p), entry: e}); });
+      baseTokens(r).forEach(function (t) { if (!ix.byToken[t]) ix.byToken[t] = e; });
+      (e.prefixes || []).forEach(function (p) { ix.prefixes.push({prefix: flatDash(p), code: segmentCode(p), entry: e}); });
+    });
+    // V4.10: nomes de parada da linha (print das rotas: "DC MCZ-AL", "MGF-PR"…) e o código da base de cada um (MCZ, MGF…),
+    // depois dos nomes de rota (não tomam o lugar deles).
+    docks.entries.forEach(function (e) {
+      (e.stops || []).forEach(function (st) {
+        var n = normStop(st);
+        if (!ix.byRoute[n]) ix.byRoute[n] = e;
+        baseTokens(n).forEach(function (t) { if (!ix.byToken[t]) ix.byToken[t] = e; });
+      });
     });
     return ix;
   }
+  function baseTokens(n) { return n.split(' ').filter(function (t) { return t.length >= 3 && t !== 'DC' && !/^\d+$/.test(t); }); }
   function destinationOf(seg, ix) {
     if (ix.entries) { var m = entryForCode(seg, ix); return m ? m.route : ''; }
     var s = String(seg || '').trim().replace(/^主\s*[:：]\s*/, '');
@@ -135,13 +145,14 @@ function JTCoreFactory_() {
   function entryForCode(seg, ix) {
     var s = String(seg || '').trim().replace(/^主\s*[:：]\s*/, '');
     if (!s) return null;
-    var viaPrefix = null, flat = flatDash(s);
+    var viaPrefix = null, pcode = '', flat = flatDash(s);
     for (var i = 0; i < ix.prefixes.length; i++) {
       var p = ix.prefixes[i].prefix;
-      if (flat.indexOf(p) === 0 && /^[A-Z]/.test(flat.slice(p.length))) { viaPrefix = ix.prefixes[i].entry; s = flat.slice(p.length); break; }
+      if (flat.indexOf(p) === 0 && /^[A-Z]/.test(flat.slice(p.length))) { viaPrefix = ix.prefixes[i].entry; pcode = ix.prefixes[i].code; s = flat.slice(p.length); break; }
     }
     var code = segmentCode(s), sub = secondSegment(s);
-    var e = (sub && ix.bySub[code + ' ' + sub]) || ix.byCode[code] || viaPrefix;
+    // V4.10: "BRE - SP,381-06" → BRE 381-06 (DC JND 02-SP) antes de SP 381-06.
+    var e = (sub && pcode && ix.bySub[pcode + ' ' + sub]) || (sub && ix.bySub[code + ' ' + sub]) || ix.byCode[code] || viaPrefix;
     return e ? {route: e.route, dock: e.dock, line: e.line} : {route: code, dock: null};
   }
   /** Tabela nova: rota e doca pela próxima parada ("DC SSZ-SP", "BA FEC", "MG BHZ"). */
@@ -151,8 +162,9 @@ function JTCoreFactory_() {
     var e = ix.byRoute[n];
     var tok = n.split(' '), order = tok.slice(1).concat(tok.slice(0, 1)), i;
     for (i = 0; !e && i < order.length; i++) e = ix.byToken[order[i]];
-    for (i = 0; !e && i < order.length; i++) e = ix.byCode[order[i]];
-    return e ? {route: e.route, dock: e.dock, line: e.line} : {route: tok[0] || '', dock: null};
+    // "DC" sozinho não é código de destino (V4.10: "DC MOOCA2" ia para o PE JGS pelo código "DC").
+    for (i = 0; !e && i < order.length; i++) if (order[i] !== 'DC') e = ix.byCode[order[i]];
+    return e ? {route: e.route, dock: e.dock, line: e.line} : {route: tok[0] === 'DC' ? n : tok[0] || '', dock: null};
   }
   /**
    * DESTINO do 1º segmento, igual à coluna DESTINOS da planilha (tabela antiga) ou ROTA de carregamento (tabela nova, V4.8).
