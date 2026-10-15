@@ -34,7 +34,8 @@
     if (dark) document.documentElement.setAttribute('data-theme', 'dark'); else document.documentElement.removeAttribute('data-theme');
     store('jt_theme', dark ? 'dark' : 'light');
     applyThemeColors();
-    if (state.view === 'results') { if (state.results.data) renderResults(); } else if (state.data) renderDashboard();
+    if (state.view === 'sorter') renderSorter();
+    else if (state.view === 'results') { if (state.results.data) renderResults(); } else if (state.data) renderDashboard();
   }
   var PAGE_SIZE = 50;
 
@@ -199,7 +200,26 @@
       usMinutes: 'Tempo (min)', usTipIds: '{n} ID(s)', usTimedHint: 'com deslacre e Data final',
       usAggMedianSub: 'Mediana do tempo de cada ID (deslacre → Data final) · {n} IDs com tempo',
       usAggMaxSub: 'Tempo de cada ID (mediana dos registros de descarregamento) · {n} IDs com tempo',
-      usColMedian: 'Tempo mediano', usColTime: 'Tempo', usColIds: 'IDs'
+      usColMedian: 'Tempo mediano', usColTime: 'Tempo', usColIds: 'IDs',
+      // V4.11: Sorter em tempo real (monitor do sorter da base)
+      sorterNavLabel: 'Sorter', sorterNavSub: 'Tempo real · monitor do sorter', sorterTitle: 'tempo real',
+      sorterSubtitle: '分拣机 · Separação hora a hora no monitor do sorter (summary statistics of sorter operation)',
+      sorterLive: 'Ao vivo', sorterPast: 'Dados do sorter · {r}', sorterUpdated: 'consultado às {t}', sorterEveryMinute: 'atualiza sozinho a cada minuto',
+      sorterError: 'Não foi possível ler o sorter agora', sorterShowingLast: 'Mostrando a última leitura, de {t}.',
+      sorterNoRows: 'O sorter não devolveu linhas para este período.', sorterRefreshed: 'Sorter consultado agora.',
+      sorterTotalDay: 'Total separado · {date}', sorterTotalPeriod: 'Total separado no período', sorterValid: 'Válidos',
+      sorterAbnormal: 'Anormais', sorterAbnRate: 'Taxa de anormalidade', sorterOfTotal: 'do total',
+      sorterPrevUpto: 'Dia anterior até as {h}', sorterPrevDay: 'Dia anterior', sorterPrevPeriod: 'Período anterior',
+      sorterCurHour: 'Hora atual · {h}', sorterInProgress: 'em andamento', sorterAvgHour: 'média de {n} por hora ativa',
+      sorterAvgHourLbl: 'Média por hora ativa', sorterActiveHours: '{n} horas com separação', sorterPeak: 'Hora de pico',
+      sorterTopReason: 'Principal motivo de anormalidade', sorterOfAbnormal: '{p} dos anormais', sorterShiftSub: '{p} do total · anormais {a} ({r})',
+      sorterShiftNow: 'turno atual', sorterColHour: 'Hora', sorterColDay: 'Dia', sorterColTotal: 'Total', sorterColPct: '% anormal',
+      sorterTotalRow: 'Total', sorterTableHours: 'Separação por hora', sorterTableDays: 'Separação por dia', sorterRowsCount: '{n} linhas',
+      sorterTableNote: 'Números do monitor do sorter (summary.data, uma linha por hora). Anormais = total − válidos = soma dos motivos.',
+      sorterChartHoursSub: 'Válidos e anormais em cada hora', sorterChartDaysSub: 'Válidos e anormais em cada dia', sorterCurHourNote: 'a hora atual ainda está enchendo',
+      sorterChartReasonsSub: '{n} anormais no período', sorterChartPsSub: 'Quantidade separada em cada PS · {n} no total', sorterChartRateSub: 'Anormais ÷ total separado',
+      sorterMaxDays: 'Escolha até {n} dias no sorter.',
+      sorterFooter: 'Fonte: monitor do sorter da base (rede interna) · consultado na hora, nada é gravado no painel'
     },
     zh: {
       panel: '运营看板', autoSync: '自动更新', refresh: '刷新', downloadReport: '下载报告',
@@ -360,7 +380,25 @@
       usMinutes: '时长（分钟）', usTipIds: '{n} 个车次', usTimedHint: '有解封和结束时间',
       usAggMedianSub: '各车次时长（解封 → 结束时间）的中位数 · {n} 个车次有时长',
       usAggMaxSub: '各车次时长（卸车记录的中位数） · {n} 个车次有时长',
-      usColMedian: '中位时长', usColTime: '时长', usColIds: '车次'
+      usColMedian: '中位时长', usColTime: '时长', usColIds: '车次',
+      sorterNavLabel: '分拣机', sorterNavSub: '实时 · 分拣机监控', sorterTitle: '实时',
+      sorterSubtitle: 'Sorter · 分拣机运行汇总（按小时）',
+      sorterLive: '实时', sorterPast: '分拣机数据 · {r}', sorterUpdated: '查询于 {t}', sorterEveryMinute: '每分钟自动刷新',
+      sorterError: '暂时无法读取分拣机数据', sorterShowingLast: '显示上次读取的数据（{t}）。',
+      sorterNoRows: '分拣机没有返回该期间的数据。', sorterRefreshed: '已重新查询分拣机。',
+      sorterTotalDay: '分拣总量 · {date}', sorterTotalPeriod: '期间分拣总量', sorterValid: '有效',
+      sorterAbnormal: '异常', sorterAbnRate: '异常率', sorterOfTotal: '占总量',
+      sorterPrevUpto: '前一日截至 {h}', sorterPrevDay: '前一日', sorterPrevPeriod: '上一期间',
+      sorterCurHour: '当前小时 · {h}', sorterInProgress: '进行中', sorterAvgHour: '每运行小时平均 {n}',
+      sorterAvgHourLbl: '每运行小时平均', sorterActiveHours: '{n} 个小时有分拣', sorterPeak: '峰值小时',
+      sorterTopReason: '主要异常原因', sorterOfAbnormal: '占异常 {p}', sorterShiftSub: '占总量 {p} · 异常 {a}（{r}）',
+      sorterShiftNow: '当前班次', sorterColHour: '时间', sorterColDay: '日期', sorterColTotal: '分拣总量', sorterColPct: '异常率',
+      sorterTotalRow: '合计', sorterTableHours: '按小时分拣量', sorterTableDays: '按日分拣量', sorterRowsCount: '{n} 行',
+      sorterTableNote: '分拣机监控数据（summary.data，每小时一行）。异常 = 总量 − 有效 = 各原因之和。',
+      sorterChartHoursSub: '每小时有效与异常', sorterChartDaysSub: '每日有效与异常', sorterCurHourNote: '当前小时仍在累计',
+      sorterChartReasonsSub: '期间异常 {n}', sorterChartPsSub: '各 PS 分拣量 · 合计 {n}', sorterChartRateSub: '异常 ÷ 分拣总量',
+      sorterMaxDays: '分拣机最多选择 {n} 天。',
+      sorterFooter: '数据来源：基地分拣机监控（内网）· 实时查询，看板不存储'
     }
   };
 
@@ -395,6 +433,7 @@
     locationMain: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     locationSub: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     results: '<path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/>',
+    sorter: '<path d="M3 15h18M5 15l1.5-5h11L19 15"/><circle cx="7.5" cy="18.5" r="1.5"/><circle cx="16.5" cy="18.5" r="1.5"/><path d="M12 3v4m-2.5-1.5L12 8l2.5-2.5"/>',
     evolution: '<path d="M3 17l5-5 4 3 8-9M16 6h4v4"/>',
     shift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', receiptShift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     expeditionShift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -436,7 +475,9 @@
     results: {indicator: '', shift: 'all', periodicity: 'day', from: '', to: '', data: null},
     autoSnap: {},
     // V3.32: Sem Movimentação — Fonte de dados ('live' = Tempo real, padrão; 'hist' = Histórico com o período escolhido).
-    source: 'live', hist: {from: '', to: ''}, histSeq: 0
+    source: 'live', hist: {from: '', to: ''}, histSeq: 0,
+    // V4.11: Sorter em tempo real (getSorterData; nada gravado no painel).
+    sorter: {from: '', to: '', data: null, error: null, seq: 0, lastAt: 0}
   };
 
   // ------------------------------------------------------------------ utilidades
@@ -671,6 +712,8 @@
       }
       $('#brandCenter').textContent = boot.center || 'SP GRU';
       $('#eyebrowCenter').textContent = boot.center || 'SP GRU';
+      // V4.11: computador só com o sorter (painel do JMS ainda sem banco): abre direto na tela do sorter.
+      if (!boot.initialized && boot.sorter) { state.catalog = []; buildNav(); buildPresets(); return openSorter(); }
       if (!boot.initialized) { $('#main').classList.add('no-data'); showAlert(t('setupText'), 'warn'); return; }
       renderSyncBanner(boot.pauses);
       Object.keys(boot.stamps || {}).forEach(function (k) { state.stampKnown = Math.max(state.stampKnown || 0, Number(boot.stamps[k].t) || 0); });
@@ -683,6 +726,8 @@
       state.results.from = boot.historyStart && boot.historyStart <= rTo ? maxIso(boot.historyStart, Core.addDays(rTo, -89)) : Core.addDays(rTo, -89);
       buildNav(); buildSelects(); buildPresets(); renderSourceField(); updateSidebarStatus(boot.sync, boot.lastUpdated);
       if (BOOT.view === 'results') { state.results.indicator = BOOT.indicator || ''; return openResults(); }
+      // V4.11: link ?view=sorter, ou computador só do sorter (nenhum dado do JMS ainda): abre na tela do sorter.
+      if (boot.sorter && (BOOT.view === 'sorter' || (!BOOT.indicator && BOOT.view !== 'results' && !Object.keys(boot.latestByIndicator || {}).length))) return openSorter();
       return loadDashboard({resetFilters: true});
     }).catch(function (e) {
       $('#main').classList.add('no-data');
@@ -708,12 +753,13 @@
     return best || Core.addDays(b.today, -1);
   }
 
+  function renderFoot() { $('#footNote').innerHTML = esc(t(state.view === 'sorter' ? 'sorterFooter' : 'footer')) + '<span class="made-by">' + esc(t('madeBy')) + '</span>'; }
   function applyStaticI18n() {
     document.documentElement.lang = state.lang === 'zh' ? 'zh-CN' : 'pt-BR';
     $$('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
     $$('[data-i18n-placeholder]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-placeholder')); });
     $$('.lang-btn').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-lang') === state.lang)); });
-    $('#footNote').innerHTML = esc(t('footer')) + '<span class="made-by">' + esc(t('madeBy')) + '</span>';
+    renderFoot();
     applyThemeColors();
     var bt = $('#bootText'); if (bt) bt.textContent = t('bootLoading');
   }
@@ -727,7 +773,7 @@
     $('#resultsShift').addEventListener('change', function (e) { state.results.shift = e.target.value; renderResults(); });
     $('#applyBtn').addEventListener('click', applyDates);
     ['#fromDate', '#toDate'].forEach(function (q) { $(q).addEventListener('keydown', function (e) { if (e.key === 'Enter') applyDates(); }); });
-    $('#refreshBtn').addEventListener('click', function () { refreshNow(); });
+    $('#refreshBtn').addEventListener('click', function () { if (state.view === 'sorter') loadSorter({force: true}); else refreshNow(); });
     $('#reportBtn').addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(); });
     $$('#reportPop button').forEach(function (b) { b.addEventListener('click', function () { toggleMenu(false); downloadReport(b.getAttribute('data-format')); }); });
     $('#menuBtn').addEventListener('click', function () { toggleSidebar(); });
@@ -746,9 +792,11 @@
     // V3.24: a cada 2 min (aba visível) confere no servidor se há dado novo e só então recarrega, sem perder os filtros.
     // Antes: recarregava tudo a cada 30 min, mesmo sem nada novo (o dado novo podia levar até 30 min para aparecer).
     setInterval(function () { checkForUpdates(false); }, POLL_MS);
-    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { checkForUpdates(false); liveTick(); } });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { checkForUpdates(false); liveTick(); sorterTick(); } });
     // V3.34: Sem Movimentação em Tempo real — a linha mais recente do JMS a cada 5 min (aba visível).
     setInterval(liveTick, 60000);
+    // V4.11: Sorter com hoje na tela — consulta de novo a cada minuto (aba visível).
+    setInterval(sorterTick, 15000);
     // Rede de segurança: recarga completa a cada 30 min se nada recarregou nesse tempo.
     setInterval(function () {
       if (document.visibilityState !== 'visible' || !state.boot || !state.boot.initialized || Date.now() - (state.lastReloadAt || 0) < 25 * 60 * 1000) return;
@@ -758,7 +806,8 @@
   var POLL_MS = 2 * 60 * 1000;
   function reloadSilently() {
     state.lastReloadAt = Date.now();
-    if (state.view === 'results') loadResults(true); else loadDashboard({silent: true});
+    if (state.view === 'sorter') loadSorter({silent: true});
+    else if (state.view === 'results') loadResults(true); else loadDashboard({silent: true});
   }
   /** Algum dia do período aberto (e do período anterior, usado nas comparações) foi gravado depois da leitura do painel? */
   function stampChangedForView(st, loaded) {
@@ -785,7 +834,7 @@
       if (res.sync) updateSidebarStatus(res.sync, res.lastUpdated || state.lastSyncTs);
       // Não recarrega com uma lista de filtro ou o menu de relatório abertos (tenta de novo na próxima conferência).
       var busy = Object.keys(state.dropdowns).some(function (k) { return state.dropdowns[k].isOpen; }) || !$('#reportPop').hidden || $('#progress').classList.contains('on');
-      if (busy) return;
+      if (busy || state.view === 'sorter') return;
       if (state.view === 'results') {
         var maxT = Object.keys(stamps).reduce(function (m, k) { return Math.max(m, Number(stamps[k].t) || 0); }, 0);
         if (state.results.data && maxT > Number(state.results.data.stampT || 0)) reloadSilently();
@@ -814,7 +863,8 @@
     if (!state.boot || !state.boot.initialized) return;
     buildNav(); buildSelects(); buildPresets(); renderSourceField(); updateSidebarStatus(state.lastSync, state.lastSyncTs);
     renderSyncBanner(state.pauses);
-    if (state.view === 'results') renderResults();
+    if (state.view === 'sorter') renderSorter();
+    else if (state.view === 'results') renderResults();
     else if (state.data) { buildFilterGrid(); renderDashboard(); }
   }
 
@@ -830,14 +880,23 @@
         (l && c.heroMetric && isNum(l.qty) ? '<span class="nav-rate nav-qty" title="' + esc(tx(c, 'navQty', {date: fmtDate(l.qtyDate, true)})) + '"><i></i>' + fmtInt(l.qty) + '</span>'
           : l ? '<span class="nav-rate ' + cls + '" title="' + esc(t('lastSeen') + ': ' + fmtDate(l.date, true)) + '"><i></i>' + fmtRate(l.rate, c.goal) + '</span>' : '') + '</button>';
     });
-    html += '<div class="nav-label">' + esc(t('analyses')) + '</div>' +
+    // V4.11: Sorter em tempo real (só com a propriedade SORTER_URL), com o total de hoje quando já foi lido.
+    if (sorterOn()) {
+      var sd = state.sorter.data, sq = sd && sd.ok !== false && sd.from === sd.to && sd.to === sd.today ? Core.sorterSummary(sd.rows, {}).total : null;
+      html += '<div class="nav-label">' + esc(t('sorterNavLabel')) + '</div>' +
+        '<button type="button" class="nav-item' + (state.view === 'sorter' ? ' active' : '') + '" data-view="sorter"' + (state.view === 'sorter' ? ' aria-current="page"' : '') + '>' +
+        '<span class="nav-ico">' + icon('sorter') + '</span><span class="nav-copy"><b>' + esc(state.boot.sorter.name) + '</b><small>' + esc(t('sorterNavSub')) + '</small></span>' +
+        (isNum(sq) ? '<span class="nav-rate nav-qty"><i></i>' + fmtInt(sq) + '</span>' : '') + '</button>';
+    }
+    if (state.catalog.length) html += '<div class="nav-label">' + esc(t('analyses')) + '</div>' +
       '<button type="button" class="nav-item' + (state.view === 'results' ? ' active' : '') + '" data-view="results">' +
       '<span class="nav-ico">' + icon('results') + '</span><span class="nav-copy"><b>' + esc(t('results')) + '</b><small>' + esc(t('resultsNavSub')) + '</small></span></button>';
     nav.innerHTML = html;
     $$('.nav-item', nav).forEach(function (b) {
       b.addEventListener('click', function () {
         toggleSidebar(false);
-        if (b.getAttribute('data-view') === 'results') openResults(); else selectIndicator(b.getAttribute('data-ind'));
+        var v = b.getAttribute('data-view');
+        if (v === 'results') openResults(); else if (v === 'sorter') openSorter(); else selectIndicator(b.getAttribute('data-ind'));
       });
     });
   }
@@ -854,6 +913,7 @@
     $('#resultsShift').value = state.results.shift;
   }
   function presetList() {
+    if (state.view === 'sorter') return [['presetToday', 'today'], ['presetPrevDay', 'prev'], ['preset7', 7], ['preset30', 30]];
     return state.view === 'results'
       ? [['preset30', 30], ['preset90', 90], ['preset180', 182], ['preset365', 365], ['presetAll', 'all']]
       // Sem Movimentação (foto do momento): um dia por vez — hoje ou o dia anterior.
@@ -863,7 +923,7 @@
       : [['presetToday', 'today'], ['presetLastDay', 1], ['preset7', 7], ['preset30', 30], ['presetMonth', 'month'], ['presetAll', 'all']];
   }
   function presetRange(p) {
-    var anchor = state.view === 'results' ? latestOverall() : isHist() ? ((state.boot && state.boot.today) || state.hist.to) : anchorDate(state.indicator);
+    var anchor = state.view === 'results' ? latestOverall() : state.view === 'sorter' || isHist() ? ((state.boot && state.boot.today) || state.hist.to) : anchorDate(state.indicator);
     var hs = state.boot && state.boot.historyStart && state.boot.historyStart <= anchor ? state.boot.historyStart : null;
     if (p === 'today') { var td = (state.boot && state.boot.today) || anchor; return {from: td, to: td}; }
     if (p === 'prev') { var pd = Core.addDays((state.boot && state.boot.today) || anchor, -1); return {from: pd, to: pd}; }
@@ -891,6 +951,7 @@
     });
   }
   function currentRange() {
+    if (state.view === 'sorter') return {from: state.sorter.from, to: state.sorter.to};
     return state.view === 'results' ? {from: state.results.from, to: state.results.to} : isHist() ? {from: state.hist.from, to: state.hist.to} : {from: state.from, to: state.to};
   }
   function setDateInputs(from, to) {
@@ -909,6 +970,12 @@
     var r;
     try { r = readDates(); } catch (e) { toast(e.message, 'error'); return; }
     if (state.view === 'results') { state.results.from = r.from; state.results.to = r.to; loadResults(); }
+    else if (state.view === 'sorter') {
+      var smx = (state.boot.sorter && state.boot.sorter.maxDays) || 31;
+      if (Core.daysBetween(r.from, r.to) + 1 > smx) { toast(t('sorterMaxDays', {n: smx}), 'error'); return; }
+      state.sorter.from = r.from; state.sorter.to = r.to;
+      loadSorter({});
+    }
     else if (isHist()) {
       var mx = cfg().maxDays || 31;
       if (Core.daysBetween(r.from, r.to) + 1 > mx) { toast(t('histMax', {n: mx}), 'error'); return; }
@@ -994,10 +1061,12 @@
     state.view = view;
     $('#viewDashboard').classList.toggle('hidden', view !== 'dashboard');
     $('#viewResults').classList.toggle('hidden', view !== 'results');
+    $('#viewSorter').classList.toggle('hidden', view !== 'sorter');
+    renderFoot();
     $('#indicatorField').classList.toggle('hidden', view !== 'dashboard');
     $('#resultsIndicatorField').classList.toggle('hidden', view !== 'results');
     $('#resultsShiftField').classList.toggle('hidden', view !== 'results');
-    $('#refreshBtn').classList.toggle('hidden', view !== 'dashboard');
+    $('#refreshBtn').classList.toggle('hidden', view !== 'dashboard' && view !== 'sorter');
     $('#reportMenu').classList.toggle('hidden', view !== 'dashboard');
     renderSourceField();
     var r = currentRange();
@@ -1076,6 +1145,13 @@
 
   function renderHeader() {
     var c = cfg();
+    if (state.view === 'sorter') {
+      var sn = state.boot && state.boot.sorter ? state.boot.sorter.name : 'Sorter';
+      $('#pageTitle').textContent = sn + ' · ' + t('sorterTitle');
+      $('#pageSubtitle').textContent = t('sorterSubtitle');
+      document.title = 'J&T · ' + sn;
+      return;
+    }
     if (state.view === 'results') {
       $('#pageTitle').textContent = t('results');
       $('#pageSubtitle').textContent = t('resultsTitle');
@@ -1489,6 +1565,314 @@
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
   }
+  // ------------------------------------------------------------------ Sorter (V4.11): monitor do sorter em tempo real
+  /**
+   * Tela própria (não é um indicador do JMS): getSorterData consulta o monitor do sorter na hora (Sorter.gs) e nada é
+   * gravado. Com hoje na tela, consulta de novo a cada minuto; o servidor guarda a resposta por 45 s (vários navegadores
+   * abertos fazem uma consulta só).
+   */
+  var SORTER_AMBER = '#F59E0B', PS_COLORS = ['#E60012', '#2A78D6', '#4A3AA7', '#0F9D8A', '#F59E0B', '#8A8F98'];
+  var SORTER_REASON_TEXT = {
+    chuteBlock: {pt: 'Chute bloqueado / cheio', zh: '格口堵塞'}, noInfo: {pt: 'Sem informação', zh: '无信息'},
+    noPlan: {pt: 'Sem plano de destino', zh: '无方案'}, intercept: {pt: 'Interceptado', zh: '拦截'},
+    noRead: {pt: 'Sem leitura', zh: '无读'}, multi: {pt: 'Múltiplos códigos', zh: '多条码'}, other: {pt: 'Outros motivos', zh: '其他原因'}
+  };
+  var SORTER_CHARTS = {
+    hours: {pt: 'Separação hora a hora', zh: '每小时分拣量'}, days: {pt: 'Separação por dia', zh: '每日分拣量'},
+    reasons: {pt: 'Motivos de anormalidade', zh: '异常原因'}, ps: {pt: 'Separação por PS', zh: '各 PS 分拣量'},
+    rate: {pt: 'Taxa de anormalidade', zh: '异常率'}
+  };
+  function sorterOn() { return !!(state.boot && state.boot.sorter); }
+  function p2(n) { return (Number(n) < 10 ? '0' : '') + Number(n); }
+  /** "2026-10-15 15:42:10" → "15:42:10" (outro dia: "14/10 15:42"). */
+  function sorterClock(ts) {
+    var s = String(ts || '');
+    if (s.length < 16) return '—';
+    var today = state.boot && state.boot.today;
+    return s.slice(0, 10) === today ? s.slice(11, 19) : fmtDate(s.slice(0, 10)) + ' ' + s.slice(11, 16);
+  }
+  function openSorter() {
+    if (!sorterOn()) return;
+    if (!state.sorter.from) { var td = (state.boot && state.boot.today) || new Date().toISOString().slice(0, 10); state.sorter.from = td; state.sorter.to = td; }
+    setView('sorter');
+    renderSorter();
+    return loadSorter({});
+  }
+  function sorterIsLive() { var s = state.sorter; return !!(state.boot && s.from === s.to && s.to === state.boot.today); }
+  function loadSorter(opts) {
+    opts = opts || {};
+    var s = state.sorter, seq = ++s.seq, btn = $('#refreshBtn'), endsToday = !!(state.boot && s.to === state.boot.today);
+    s.busy = true;
+    if (!opts.silent) setBusy(true);
+    if (opts.force) { btn.disabled = true; btn.classList.add('spin'); }
+    return call('getSorterData', s.from, s.to, !!opts.force).then(function (res) {
+      if (seq !== s.seq || !res) return;
+      s.lastAt = Date.now();
+      // Virou o dia com um período que terminava hoje na tela (Hoje, 7 dias…): o mesmo período, terminando no dia novo.
+      if (res.today && state.boot && res.today !== state.boot.today) {
+        state.boot.today = res.today;
+        if (endsToday) { var len = Core.daysBetween(s.from, s.to); s.to = res.today; s.from = Core.addDays(res.today, -len); s.busy = false; return loadSorter({silent: true}); }
+      }
+      s.from = res.from; s.to = res.to;
+      if (res.ok) { s.data = res; s.error = null; if (opts.force) toast(t('sorterRefreshed'), 'success'); }
+      else {
+        s.error = res.error || t('sorterError');
+        // Mantém a última leitura do mesmo período (o aviso diz de quando ela é).
+        if (s.data && (s.data.from !== res.from || s.data.to !== res.to)) s.data = null;
+      }
+      if (state.view === 'sorter') { setDateInputs(s.from, s.to); highlightPreset(); renderSorter(); buildNav(); }
+    }).catch(function (e) {
+      if (seq !== s.seq) return;
+      s.error = e.message;
+      if (state.view === 'sorter') renderSorter();
+    }).then(function () {
+      if (seq !== s.seq) return;
+      s.busy = false;
+      if (!opts.silent) setBusy(false);
+      btn.disabled = false; btn.classList.remove('spin');
+    });
+  }
+  function sorterTick() {
+    var s = state.sorter;
+    // Período que termina hoje (Hoje, 7 dias, 30 dias): consulta de novo a cada minuto.
+    if (state.view !== 'sorter' || document.visibilityState !== 'visible' || !state.boot || s.to !== state.boot.today || s.busy) return;
+    if (Date.now() - (s.lastAt || 0) < 58000) return;
+    loadSorter({silent: true});
+  }
+
+  function renderSorter() {
+    if (state.view !== 'sorter') return;
+    renderHeader();
+    var s = state.sorter, d = s.data;
+    renderSorterStatus();
+    var has = !!(d && d.rows && d.rows.length);
+    $('#sorterTableCard').classList.toggle('hidden', !has);
+    if (!has) {
+      $('#sorterKpis').innerHTML = '';
+      Object.keys(state.charts).forEach(function (k) { if (k.indexOf('sorter_') === 0) destroyChart(k); });
+      $('#sorterCharts').innerHTML = d && !s.error ? '<div class="card chart-empty"><div><b>' + esc(t('noData')) + '</b>' + esc(t('sorterNoRows')) + '</div></div>' : '';
+      $('#sorterCharts').removeAttribute('data-sig');
+      return;
+    }
+    var single = d.from === d.to, live = single && d.to === d.today;
+    var nowHour = live ? Number(String(d.now).slice(11, 13)) : null;
+    var sum = Core.sorterSummary(d.rows, {});
+    var prev = d.prevRows ? Core.sorterSummary(d.prevRows, live ? {uptoHour: nowHour} : {}) : null;
+    var ctx = {d: d, sum: sum, prev: prev, single: single, live: live, nowHour: nowHour};
+    renderSorterKpis(ctx);
+    renderSorterCharts(ctx);
+    renderSorterTable(ctx);
+  }
+  function renderSorterStatus() {
+    var s = state.sorter, d = s.data, box = $('#sorterStatus'), html = '';
+    var live = !!(d && d.from === d.to && d.to === d.today);
+    if (s.error) {
+      html += '<div class="sorter-err">' + icon('errors') + '<div><b>' + esc(t('sorterError')) + '</b><span>' + esc(s.error) + '</span>' +
+        (d ? '<small>' + esc(t('sorterShowingLast', {t: sorterClock(d.fetchedAt)})) + '</small>' : '') + '</div></div>';
+    }
+    if (d) {
+      html += '<div class="sorter-line"><span class="live-dot' + (live && !s.error ? ' on' : '') + '"></span><b>' +
+        esc(live ? t('sorterLive') : t('sorterPast', {r: fmtRange(d.from, d.to)})) + '</b><span>' + esc(t('sorterUpdated', {t: sorterClock(d.fetchedAt)})) +
+        (d.to === d.today ? ' · ' + esc(t('sorterEveryMinute')) : '') + '</span></div>';
+    }
+    box.innerHTML = html;
+    box.hidden = !html;
+  }
+  function sorterPct(a, b) { return b ? a / b * 100 : null; }
+  function sorterReasonList(sum) {
+    return Core.SORTER_REASONS.map(function (k) { return {key: k, value: sum.reasons[k] || 0}; })
+      .sort(function (a, b) { return b.value - a.value; });
+  }
+  function renderSorterKpis(x) {
+    var sum = x.sum, prev = x.prev, d = x.d;
+    var abnPct = sorterPct(sum.abnormal, sum.total), prevAbnPct = prev ? sorterPct(prev.abnormal, prev.total) : null;
+    var prevLabel = x.live ? t('sorterPrevUpto', {h: p2(x.nowHour) + 'h'}) : t(x.single ? 'sorterPrevDay' : 'sorterPrevPeriod');
+    var dPrev = prev && prev.total ? (sum.total - prev.total) / prev.total * 100 : null;
+    var heroLabel = x.single ? t('sorterTotalDay', {date: fmtDate(d.to, true)}) : t('sorterTotalPeriod') + ' · ' + fmtRange(d.from, d.to);
+    var hero = '<article class="kpi kpi-hero"><div class="kpi-body"><div class="kpi-label">' + icon('sorter') + esc(heroLabel) + '</div>' +
+      '<div class="kpi-value">' + fmtInt(sum.total) + '</div>' +
+      '<div class="kpi-sub">' + esc(t('sorterValid')) + ': <b>' + fmtInt(sum.valid) + '</b> · ' + fmtPct(sorterPct(sum.valid, sum.total), 2) + '</div>' +
+      '<div class="kpi-sub">' + esc(prevLabel) + ': <b>' + fmtInt(prev ? prev.total : null) + '</b>' + (isNum(dPrev) ? ' · ' + deltaHtml(dPrev, 1) : '') + '</div>' +
+      (x.live ? '<div class="hero-row"><span class="status-pill good"><span class="live-dot on"></span>' + esc(t('sorterLive')) + '</span></div>' : '') +
+      '</div></article>';
+    var abn = kpiCard('errors', t('sorterAbnormal'), fmtInt(sum.abnormal),
+      '<b>' + fmtPct(abnPct, 2) + '</b> ' + esc(t('sorterOfTotal')) + ' · ' + esc(prevLabel) + ': ' + fmtInt(prev ? prev.abnormal : null));
+    var rate = kpiCard('gauge', t('sorterAbnRate'), fmtPct(abnPct, 2),
+      esc(prevLabel) + ': <b>' + fmtPct(prevAbnPct, 2) + '</b>' + (isNum(abnPct) && isNum(prevAbnPct) ? ' · ' + esc(fmtSigned(abnPct - prevAbnPct, 2, ' ' + t('pp'))) : ''));
+    var hourCard;
+    var avg = sum.hoursActive ? sum.total / sum.hoursActive : null;
+    if (x.live) {
+      var cur = sum.byHour[x.nowHour] || {total: 0};
+      hourCard = kpiCard('interval', t('sorterCurHour', {h: p2(x.nowHour) + 'h–' + p2((x.nowHour + 1) % 24) + 'h'}), fmtInt(cur.total),
+        esc(t('sorterInProgress')) + ' · ' + esc(t('sorterAvgHour', {n: fmtInt(avg)})));
+    } else hourCard = kpiCard('interval', t('sorterAvgHourLbl'), fmtInt(avg), esc(t('sorterActiveHours', {n: sum.hoursActive})));
+    var pk = sum.peak;
+    var peak = kpiCard('trend', t('sorterPeak'), pk ? fmtInt(pk.total) : '—',
+      pk ? esc((x.single ? '' : fmtDate(pk.date) + ' · ') + p2(pk.hour) + 'h–' + p2((pk.hour + 1) % 24) + 'h') : '—');
+    var nowShift = x.live ? Core.shiftOf(p2(x.nowHour) + ':00') : null;
+    var shifts = Core.SHIFTS.map(function (sh) {
+      var v = sum.byShift[sh], pct = sorterPct(v.total, sum.total);
+      var label = '<i style="background:' + SHIFT_COLORS[sh] + '"></i>' + sh + ' · ' + {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'}[sh] +
+        (nowShift === sh ? ' · ' + esc(t('sorterShiftNow')) : '');
+      return '<article class="kpi shift-kpi' + (nowShift === sh ? ' selected' : '') + '"><div class="kpi-label">' + label + '</div><div class="kpi-value">' + fmtInt(v.total) + '</div>' +
+        '<div class="kpi-sub">' + esc(t('sorterShiftSub', {p: fmtPct(pct, 1), a: fmtInt(v.abnormal), r: fmtPct(sorterPct(v.abnormal, v.total), 2)})) + '</div>' +
+        '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(pct) ? pct : 0) + '" style="background:' + SHIFT_COLORS[sh] + '"></i></div></div></article>';
+    }).join('');
+    var top = sorterReasonList(sum)[0];
+    var reason = '<article class="kpi"><div class="kpi-label">' + icon('errorType') + esc(t('sorterTopReason')) + '</div>' +
+      '<div class="kpi-value text">' + (top && top.value ? esc(L(SORTER_REASON_TEXT[top.key])) : '—') + '</div><div class="kpi-sub">' +
+      (top && top.value ? fmtInt(top.value) + ' · <b>' + esc(t('sorterOfAbnormal', {p: fmtPct(sorterPct(top.value, sum.abnormal), 1)})) + '</b>' : esc(t('noData'))) + '</div></article>';
+    var grid = $('#sorterKpis');
+    grid.innerHTML = hero + abn + rate + hourCard + peak + shifts + reason;
+    requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
+  }
+
+  function sorterCardHtml(key, ic, title, wrapCls) {
+    return '<article class="card chart-card" data-key="' + key + '"><div class="chart-head"><span class="chart-ico">' + icon(ic) + '</span>' +
+      '<div class="chart-titles"><h3>' + esc(L(title)) + (Lo(title) ? ' <span class="rp-zh">/ ' + esc(Lo(title)) + '</span>' : '') + '</h3><small></small></div></div>' +
+      '<div class="chart-wrap' + (wrapCls ? ' ' + wrapCls : '') + '"><canvas role="img" aria-label="' + esc(L(title)) + '"></canvas></div></article>';
+  }
+  function sorterDraw(key, card, config) {
+    var canvas = $('canvas', card), ch = state.charts[key];
+    if (!canvas || !window.Chart) return;
+    if (ch && ch.$sig === config.$sig && ch.canvas === canvas) { ch.data = config.data; ch.options = config.options; ch.update('none'); }
+    else { destroyChart(key); ch = new Chart(canvas, config); ch.$sig = config.$sig; state.charts[key] = ch; }
+  }
+  function renderSorterCharts(x) {
+    var grid = $('#sorterCharts'), psKeys = Object.keys(x.sum.ps).sort();
+    var sig = state.lang + '|' + (x.single ? 'h' : 'd') + '|' + psKeys.join(',');
+    if (grid.getAttribute('data-sig') !== sig) {
+      Object.keys(state.charts).forEach(function (k) { if (k.indexOf('sorter_') === 0) destroyChart(k); });
+      grid.innerHTML = sorterCardHtml('vol', 'sorter', x.single ? SORTER_CHARTS.hours : SORTER_CHARTS.days, 'large') +
+        sorterCardHtml('rate', 'gauge', SORTER_CHARTS.rate) + sorterCardHtml('reasons', 'errors', SORTER_CHARTS.reasons) +
+        (psKeys.length ? sorterCardHtml('ps', 'interval', SORTER_CHARTS.ps, 'pie') : '');
+      grid.setAttribute('data-sig', sig);
+    }
+    if (!window.Chart) { $$('.chart-wrap', grid).forEach(function (w) { w.innerHTML = '<div class="chart-empty">' + esc(t('noChartLib')) + '</div>'; }); return; }
+    var pts = sorterPoints(x);
+    var vol = $('.chart-card[data-key="vol"]', grid), rate = $('.chart-card[data-key="rate"]', grid);
+    $('small', vol).textContent = t(x.single ? 'sorterChartHoursSub' : 'sorterChartDaysSub') + (x.live ? ' · ' + t('sorterCurHourNote') : '') + ' · ' + t('tableCount', {n: fmtInt(x.sum.total)});
+    sorterDraw('sorter_vol', vol, sorterVolConfig(pts));
+    $('small', rate).textContent = t('sorterChartRateSub') + ' · ' + fmtRange(x.d.from, x.d.to);
+    sorterDraw('sorter_rate', rate, sorterRateConfig(pts));
+    var rc = $('.chart-card[data-key="reasons"]', grid);
+    $('small', rc).textContent = t('sorterChartReasonsSub', {n: fmtInt(x.sum.abnormal)});
+    sorterDraw('sorter_reasons', rc, sorterReasonsConfig(x.sum));
+    var pc = $('.chart-card[data-key="ps"]', grid);
+    if (pc) { $('small', pc).textContent = t('sorterChartPsSub', {n: fmtInt(x.sum.total)}); sorterDraw('sorter_ps', pc, sorterPsConfig(x.sum, psKeys)); }
+  }
+  /** Pontos do gráfico: um por hora (um dia; hoje só até a hora atual) ou um por dia. */
+  function sorterPoints(x) {
+    if (x.single) {
+      return x.sum.byHour.filter(function (h) { return !x.live || h.hour <= x.nowHour; }).map(function (h) {
+        return {label: p2(h.hour) + 'h', valid: h.valid, abnormal: h.abnormal, total: h.total, current: x.live && h.hour === x.nowHour,
+          title: fmtDate(x.d.to, true) + ' · ' + p2(h.hour) + 'h–' + p2((h.hour + 1) % 24) + 'h'};
+      });
+    }
+    return x.sum.byDay.map(function (dd) { return {label: fmtDate(dd.date), valid: dd.valid, abnormal: dd.abnormal, total: dd.total, current: false, title: fmtDate(dd.date, true)}; });
+  }
+  function sorterVolConfig(pts) {
+    var lightRed = isDark() ? 'rgba(255,59,74,.5)' : 'rgba(230,0,18,.45)';
+    return {
+      $sig: 'sorter-vol', type: 'bar', plugins: plugins([]),
+      data: {labels: pts.map(function (p) { return p.label; }), datasets: [
+        {label: t('sorterValid'), data: pts.map(function (p) { return p.valid; }), stack: 's', borderRadius: 3,
+          backgroundColor: pts.map(function (p) { return p.current ? lightRed : SHIFT_COLORS.T1; }), datalabels: {display: false}},
+        {label: t('sorterAbnormal'), data: pts.map(function (p) { return p.abnormal; }), stack: 's', borderRadius: 3, backgroundColor: SORTER_AMBER,
+          datalabels: {anchor: 'end', align: 'end', offset: 2, clip: false, color: INK, font: {weight: '700', size: 10.5},
+            formatter: function (v, ctx) { var p = pts[ctx.dataIndex]; return p && p.total ? compactInt(p.total) : ''; },
+            display: function (ctx) { var w = ctx.chart.scales && ctx.chart.scales.x ? ctx.chart.scales.x.width / Math.max(1, pts.length) : 40; return w >= 26; }}}
+      ]},
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 400}, layout: {padding: {top: 24, right: 8}},
+        plugins: {legend: {display: true, position: 'bottom', labels: {boxWidth: 12, color: MUTED}},
+          tooltip: {mode: 'index', intersect: false, callbacks: {
+            title: function (tt) { return pts[tt[0].dataIndex].title; },
+            label: function (ctx) { return ' ' + ctx.dataset.label + ': ' + fmtInt(ctx.raw); },
+            footer: function (tt) { var p = pts[tt[0].dataIndex]; return t('sorterColTotal') + ': ' + fmtInt(p.total) + ' · ' + t('sorterColPct') + ': ' + fmtPct(sorterPct(p.abnormal, p.total), 2); }}}},
+        scales: {x: {stacked: true, grid: {display: false}, ticks: {color: MUTED, autoSkip: true, maxRotation: 0, font: {size: 10.5}}},
+          y: {stacked: true, beginAtZero: true, grace: '12%', grid: {color: GRID}, border: {display: false},
+            ticks: {color: MUTED, precision: 0, maxTicksLimit: 7, callback: function (v) { return compactInt(v); }}}}}
+    };
+  }
+  function sorterRateConfig(pts) {
+    var vals = pts.map(function (p) { return p.total ? Math.round(p.abnormal / p.total * 10000) / 100 : null; });
+    var mx = -1;
+    vals.forEach(function (v, i) { if (isNum(v) && (mx < 0 || v > vals[mx])) mx = i; });
+    return {
+      $sig: 'sorter-rate', type: 'line', plugins: plugins([]),
+      data: {labels: pts.map(function (p) { return p.label; }), datasets: [{label: t('sorterAbnRate'), data: vals, borderColor: SORTER_AMBER, backgroundColor: 'rgba(245,158,11,.14)',
+        fill: true, tension: 0.3, spanGaps: true, pointRadius: 3, pointBackgroundColor: SORTER_AMBER,
+        datalabels: {align: 'top', offset: 4, clip: false, color: function (ctx) { return ctx.dataIndex === mx ? SORTER_AMBER : MUTED; },
+          font: function (ctx) { return {weight: ctx.dataIndex === mx ? '800' : '600', size: 10}; },
+          formatter: function (v) { return isNum(v) ? fmtNum(v, 2) + '%' : ''; },
+          display: function (ctx) { var w = ctx.chart.scales && ctx.chart.scales.x ? ctx.chart.scales.x.width / Math.max(1, pts.length) : 40; return isNum(vals[ctx.dataIndex]) && (w >= 38 || ctx.dataIndex === mx); }}}]},
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 400}, layout: {padding: {top: 20, right: 12}},
+        plugins: {legend: {display: false}, tooltip: {callbacks: {title: function (tt) { return pts[tt[0].dataIndex].title; },
+          label: function (ctx) { var p = pts[ctx.dataIndex]; return ' ' + fmtPct(ctx.raw, 2) + ' · ' + fmtInt(p.abnormal) + ' / ' + fmtInt(p.total); }}}},
+        scales: {x: {grid: {display: false}, ticks: {color: MUTED, autoSkip: true, maxRotation: 0, font: {size: 10.5}}},
+          y: {beginAtZero: true, grace: '15%', grid: {color: GRID}, border: {display: false}, ticks: {color: MUTED, maxTicksLimit: 6, callback: function (v) { return fmtNum(v, 1) + '%'; }}}}}
+    };
+  }
+  function sorterReasonsConfig(sum) {
+    var list = sorterReasonList(sum), tot = sum.abnormal;
+    return {
+      $sig: 'sorter-reasons', type: 'bar', plugins: plugins([]),
+      data: {labels: list.map(function (r) { return L(SORTER_REASON_TEXT[r.key]); }), datasets: [{label: t('sorterAbnormal'), data: list.map(function (r) { return r.value; }),
+        backgroundColor: list.map(function (r, i) { return i === 0 && r.value ? SORTER_AMBER : 'rgba(245,158,11,.55)'; }), borderRadius: 4,
+        datalabels: {anchor: 'end', align: 'end', offset: 4, clip: false, color: INK, font: {weight: '700', size: 11},
+          formatter: function (v) { return fmtInt(v) + (tot ? ' · ' + fmtPct(v / tot * 100, 1) : ''); }}}]},
+      options: {indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: {duration: 400}, layout: {padding: {right: 90}},
+        plugins: {legend: {display: false}, tooltip: {callbacks: {label: function (ctx) { return ' ' + fmtInt(ctx.raw) + (tot ? ' · ' + fmtPct(ctx.raw / tot * 100, 1) : ''); }}}},
+        scales: {x: {beginAtZero: true, grid: {color: GRID}, border: {display: false}, ticks: {color: MUTED, precision: 0, callback: function (v) { return compactInt(v); }}},
+          y: {grid: {display: false}, ticks: {color: INK, font: {size: 11.5, weight: '600'}}}}}
+    };
+  }
+  function sorterPsConfig(sum, keys) {
+    var vals = keys.map(function (k) { return sum.ps[k] || 0; }), tot = vals.reduce(function (a, v) { return a + v; }, 0);
+    return {
+      $sig: 'sorter-ps', type: 'doughnut', plugins: plugins([]),
+      data: {labels: keys, datasets: [{data: vals, backgroundColor: keys.map(function (k, i) { return PS_COLORS[i % PS_COLORS.length]; }), borderColor: CARD, borderWidth: 2,
+        datalabels: {color: '#fff', font: {weight: '800', size: 12}, formatter: function (v) { return tot && v / tot >= 0.04 ? fmtPct(v / tot * 100, 1) : ''; }}}]},
+      options: {responsive: true, maintainAspectRatio: false, cutout: '55%', animation: {duration: 400},
+        plugins: {legend: {display: true, position: 'right', labels: {color: INK, boxWidth: 14, generateLabels: function (chart) {
+          return keys.map(function (k, i) { return {text: k + ' · ' + fmtInt(vals[i]) + ' (' + fmtPct(tot ? vals[i] / tot * 100 : null, 1) + ')', fillStyle: PS_COLORS[i % PS_COLORS.length], strokeStyle: 'transparent', fontColor: INK, index: i}; });
+        }}}, tooltip: {callbacks: {label: function (ctx) { return ' ' + keys[ctx.dataIndex] + ': ' + fmtInt(ctx.raw) + ' · ' + fmtPct(tot ? ctx.raw / tot * 100 : null, 1); }}}}}
+    };
+  }
+  /** Linha da tabela: hora (linha do sorter) ou dia (soma das horas do dia). */
+  function sorterCells(o, ps) {
+    var reasons = o.reasons || {};
+    var cells = [fmtInt(o.total), fmtInt(o.valid), fmtInt(o.abnormal), fmtPct(sorterPct(o.abnormal, o.total), 2)];
+    Core.SORTER_REASONS.forEach(function (k) { cells.push(fmtInt(o.reasons ? reasons[k] : o[k])); });
+    ps.forEach(function (k) { cells.push(fmtInt((o.ps || {})[k] || 0)); });
+    return cells;
+  }
+  function renderSorterTable(x) {
+    var ps = Object.keys(x.sum.ps).sort(), table = $('#sorterTable');
+    var heads = [t(x.single ? 'sorterColHour' : 'sorterColDay'), t('sorterColTotal'), t('sorterValid'), t('sorterAbnormal'), t('sorterColPct')]
+      .concat(Core.SORTER_REASONS.map(function (k) { return L(SORTER_REASON_TEXT[k]); }), ps);
+    var body = [];
+    if (x.single) {
+      x.d.rows.filter(function (r) { return !x.live || r.hour <= x.nowHour; }).forEach(function (r) {
+        var cur = x.live && r.hour === x.nowHour;
+        body.push('<tr' + (cur ? ' class="sorter-cur"' : '') + '><td>' + esc(r.time + '–' + p2((r.hour + 1) % 24) + ':00') + (cur ? ' <span class="live-dot on"></span>' : '') + '</td>' +
+          sorterCells(r, ps).map(function (c) { return '<td class="num">' + c + '</td>'; }).join('') + '</tr>');
+      });
+    } else {
+      var byDate = {};
+      x.d.rows.forEach(function (r) { (byDate[r.date] = byDate[r.date] || []).push(r); });
+      Object.keys(byDate).sort().forEach(function (dt) {
+        body.push('<tr><td>' + esc(fmtDate(dt, true)) + '</td>' + sorterCells(Core.sorterSummary(byDate[dt], {}), ps).map(function (c) { return '<td class="num">' + c + '</td>'; }).join('') + '</tr>');
+      });
+    }
+    $('thead', table).innerHTML = '<tr>' + heads.map(function (h, i) { return '<th' + (i ? ' class="num"' : '') + '>' + esc(h) + '</th>'; }).join('') + '</tr>';
+    $('tbody', table).innerHTML = body.join('') +
+      '<tr class="sorter-total"><td>' + esc(t('sorterTotalRow')) + '</td>' + sorterCells(x.sum, ps).map(function (c) { return '<td class="num">' + c + '</td>'; }).join('') + '</tr>';
+    $('#sorterTableTitle').textContent = t(x.single ? 'sorterTableHours' : 'sorterTableDays');
+    $('#sorterTableCount').textContent = t('sorterRowsCount', {n: body.length});
+    $('#sorterTableNote').textContent = t('sorterTableNote');
+  }
+
   // ------------------------------------------------------------------ Deslacre (V4.4): cartões próprios
   /** Minutos → "42 min" / "1 h 05 min" (negativo: Data final antes do deslacre). */
   function fmtDur(v) {

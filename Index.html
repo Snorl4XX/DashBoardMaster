@@ -227,6 +227,23 @@
         <section class="results-grid" id="resultsGrid"></section>
       </section>
 
+      <!-- ============ SORTER (V4.11): monitor do sorter em tempo real ============ -->
+      <section id="viewSorter" class="view hidden">
+        <section class="card sorter-status" id="sorterStatus" hidden aria-live="polite"></section>
+        <section class="kpi-grid" id="sorterKpis" aria-live="polite"></section>
+        <section class="charts-grid" id="sorterCharts"></section>
+        <section class="card table-card hidden" id="sorterTableCard">
+          <div class="section-head">
+            <div>
+              <span class="kicker" data-i18n="details">Detalhamento</span>
+              <h2 id="sorterTableTitle">—</h2>
+            </div>
+            <div class="table-tools"><span class="count" id="sorterTableCount">—</span></div>
+          </div>
+          <div class="table-scroll"><table class="data-table sorter-table" id="sorterTable"><thead></thead><tbody></tbody></table></div>
+          <div class="table-foot"><span class="note" id="sorterTableNote"></span></div>
+        </section>
+      </section>
       <footer class="foot" id="footNote"></footer>
     </main>
   </div>

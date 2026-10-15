@@ -127,6 +127,7 @@ const FN_HELP = {
   diagnosticarViagensSCDC: 'SC → DC: ID de viagem de saída (data opcional)',
   diagnosticarLotes: 'Fluxo de Lotes (data opcional)',
   diagnosticarAvaria: 'Avaria (data opcional)',
+  diagnosticarSorter: 'Sorter: lê o monitor do sorter (SORTER_URL) e mostra os totais de hoje',
   diagnosticarSemMovimentacao: 'Sem Movimentação',
   baixarHistoricoAvaria: 'Avaria: baixa o histórico agora',
   testProjectInstallation: 'confere se os arquivos do painel carregaram'

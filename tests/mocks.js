@@ -169,7 +169,7 @@ function createContext(opts) {
   }
   vm.createContext(context);
   const root = opts.root || path.join(__dirname, '..');
-  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
+  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Sorter', 'Code'];
   const code = files.map(f => fs.readFileSync(path.join(root, f + '.gs'), 'utf8')).join('\n;\n');
   vm.runInContext(code, context, {filename: 'projeto.gs'});
   context.__state = state;
@@ -854,4 +854,61 @@ function makeArrival(date, seed, scale) {
     uploadNoSendNum: prev.length, noSendNum: noSend.length}};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, dcDepartureTrip: dcDepartureTrip, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, makeUnseal: makeUnseal, scanRecordsFor: scanRecordsFor, scanHash: scanHash, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+// ---------- V4.11: monitor do sorter (GET /statis/summary.data) — números FICTÍCIOS, mesmo formato da resposta real ----------
+/**
+ * 24 linhas (uma por hora) de um dia. opts.uptoHour: horas depois dela vêm zeradas (o dia de hoje, como o sorter faz).
+ * Regras da resposta real: abnormal = total − valid = soma dos motivos; ps01 + ps02 + ps03 = total.
+ */
+function makeSorterDay(date, seed, opts) {
+  opts = opts || {};
+  let x = seed * 7919 + 17;
+  const rnd = () => { x = (x * 48271) % 2147483647; return x / 2147483647; };
+  const rows = [];
+  for (let h = 0; h < 24; h++) {
+    const off = (opts.uptoHour !== undefined && h > opts.uptoHour) || (opts.offHours || [2]).indexOf(h) >= 0;
+    const total = off ? 0 : Math.floor(6000 + rnd() * 26000);
+    const reasons = {chute: 0, noinfo: 0, noplan: 0, intercept: 0, noread: 0, multi: 0, other: 0};
+    if (total) {
+      reasons.chute = Math.floor(total * (0.004 + rnd() * 0.008));
+      reasons.noinfo = Math.floor(rnd() * 12); reasons.noplan = Math.floor(rnd() * 6); reasons.intercept = Math.floor(rnd() * 14);
+      reasons.noread = rnd() < 0.2 ? 1 : 0; reasons.multi = 0; reasons.other = Math.floor(rnd() * 8);
+    }
+    const abnormal = Object.keys(reasons).reduce((a, k) => a + reasons[k], 0);
+    const p1 = Math.floor(total * (0.2 + rnd() * 0.2)), p2 = Math.floor((total - p1) * (0.4 + rnd() * 0.3)), p3 = total - p1 - p2;
+    const hh = String(h).padStart(2, '0');
+    rows.push({timearea: date + ' ' + hh + ':00:00~' + date + ' ' + hh + ':59:59', sorter_sorttotal: total, sorter_validtotal: total - abnormal,
+      sorter_abnormaltotal: abnormal, sorter_noinfototal: reasons.noinfo, sorter_noplantotal: reasons.noplan, intercept: reasons.intercept,
+      noread: reasons.noread, multi: reasons.multi, sorter_chuteblocktotal: reasons.chute, sorter_otherreasontotal: reasons.other,
+      ps01_sorttotal: p1, ps02_sorttotal: p2, ps03_sorttotal: p3});
+  }
+  return rows;
+}
+/**
+ * Envolve o JMS falso: GET .../statis/summary.data responde como o sorter (paginado por limit; opts.maxPage limita o
+ * tamanho da página). opts.today/nowHour: hoje vem zerado depois da hora atual. opts.down: sem rede; opts.code: recusa;
+ * opts.html: página de login.
+ */
+function fakeSorter(jms, opts) {
+  opts = opts || {};
+  return function (url, req, state) {
+    if (!/\/statis\/summary\.data\?/.test(String(url))) return jms(url, req, state);
+    state.sorterCalls = (state.sorterCalls || []);
+    state.sorterCalls.push(url);
+    const respond = (code, obj) => ({getResponseCode: () => code, getContentText: () => typeof obj === 'string' ? obj : JSON.stringify(obj)});
+    if (opts.down) throw new Error('Exception: fetch failed (ECONNREFUSED): ' + String(url).split('?')[0]);
+    if (opts.html) return respond(200, '<!DOCTYPE html><html><body>login</body></html>');
+    if (opts.code !== undefined) return respond(200, {code: opts.code, msg: '失败', count: 0, data: []});
+    const q = {};
+    String(url).split('?')[1].split('&').forEach(kv => { const i = kv.indexOf('='); q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
+    const from = q.start.slice(0, 10), to = q.end.slice(0, 10), all = [];
+    for (let d = from, i = 0; d <= to && i < 400; i++) {
+      const today = d === opts.today;
+      makeSorterDay(d, Number(d.replace(/-/g, '')) % 9973, today ? {uptoHour: opts.nowHour} : {}).forEach(r => all.push(r));
+      const dt = new Date(d + 'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate() + 1); d = dt.toISOString().slice(0, 10);
+    }
+    const limit = Math.min(Number(q.limit) || 10, opts.maxPage || 100000), page = Number(q.page) || 1;
+    return respond(200, {code: 1, msg: '\u6210\u529f', count: all.length, data: all.slice((page - 1) * limit, page * limit)});
+  };
+}
+
+module.exports = {createContext: createContext, fakeJms: fakeJms, makeSorterDay: makeSorterDay, fakeSorter: fakeSorter, dcDepartureTrip: dcDepartureTrip, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, makeUnseal: makeUnseal, scanRecordsFor: scanRecordsFor, scanHash: scanHash, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};

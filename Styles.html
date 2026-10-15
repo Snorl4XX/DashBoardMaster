@@ -150,6 +150,18 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .chip.active{background:var(--red-50);border-color:var(--red-200);color:var(--red-600)}
 .toolbar .btn-dark{height:42px}
 
+/* V4.11: Sorter em tempo real */
+.sorter-status{margin-top:12px;padding:12px 16px;display:grid;gap:8px}
+.sorter-line{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;color:var(--muted)}
+.sorter-line b{color:var(--ink)}
+.sorter-err{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--bad);background:var(--bad-bg);border:1px solid var(--bad-line);border-radius:12px;padding:10px 12px}
+.sorter-err svg{width:18px;height:18px;flex:none;margin-top:1px}
+.sorter-err div{display:grid;gap:2px} .sorter-err small{color:var(--muted)}
+.live-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--muted);vertical-align:middle;flex:none}
+.live-dot.on{background:var(--good);box-shadow:0 0 0 0 rgba(22,163,74,.6);animation:livePulse 1.8s infinite}
+.status-pill .live-dot{margin-right:2px}
+@keyframes livePulse{0%{box-shadow:0 0 0 0 rgba(22,163,74,.55)}70%{box-shadow:0 0 0 8px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}
+@media (prefers-reduced-motion:reduce){.live-dot.on{animation:none}}
 .alert{margin-top:12px;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;font-size:13px;border:1px solid var(--bad-line);background:var(--bad-bg);color:var(--bad)}
 .alert.warn{border-color:var(--warn-line);background:var(--warn-bg);color:var(--warn)}
 .alert b{display:block}
@@ -395,6 +407,9 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .data-table tbody tr:nth-child(even) td{background:var(--row-alt)}
 .data-table tbody tr:hover td{background:var(--row-hover)}
 .data-table td.num,.data-table th.num{text-align:right;font-variant-numeric:tabular-nums}
+.sorter-table thead th{cursor:default}
+.sorter-table tr.sorter-cur td{background:var(--red-50);font-weight:700}
+.sorter-table tr.sorter-total td{font-weight:800;border-top:2px solid var(--red);background:var(--soft-2)}
 .data-table td .mini-bar{display:inline-block;height:6px;border-radius:99px;background:var(--red);vertical-align:middle;margin-right:8px;opacity:.85}
 .data-table mark{background:var(--mark);color:#1F2430;border-radius:3px;padding:0 1px}
 /* Painéis de docas (padrão dos gráficos da planilha "Falta Expedição") */

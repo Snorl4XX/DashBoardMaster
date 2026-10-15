@@ -46,6 +46,13 @@ Para rodar mesmo **sem ninguém entrar no Windows**, use o **Agendador de Tarefa
 2. Em **Ação**, coloque o `iniciar.bat`.
 3. Marque **"Executar estando o usuário conectado ou não"**.
 
+### Sorter da base em tempo real (V4.11)
+Num computador **dentro da rede da base**, o painel também lê o monitor do sorter (`http://10.1.166.9`):
+1. Em Configurações → Propriedades, crie `SORTER_URL` = `http://10.1.166.9`.
+2. Em Executar, rode `diagnosticarSorter` para conferir.
+
+O item **Sorter B** aparece no menu e se atualiza a cada minuto. Com proxy, apague o `rem` da linha `set NO_PROXY=…` do `iniciar.bat`. Na Oracle Cloud isso não funciona: o endereço é da rede interna. Detalhes: `LEIA_PRIMEIRO.md`, seção V4.11.
+
 ## 3. Uso no dia a dia
 
 | O que fazer | Onde |
