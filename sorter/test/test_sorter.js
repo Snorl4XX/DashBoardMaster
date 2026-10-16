@@ -249,7 +249,9 @@ function S_add(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.
       boot.sorters.map(x => x.id + (x.pronto ? '+' : '-')).join() === 'B+,A+' && /src="resumo\.js"/.test(html) && /src="app\.js"/.test(html) &&
       ['fSorter', 'fBalanca', 'fTurno', 'fHoraIni', 'fHoraFim', 'fPer', 'fTempo'].every(id => html.indexOf('id="' + id + '"') >= 0), 'página com a configuração, os 7 filtros e os scripts');
     const appJs = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
-    check(!/google\.script|Client\.html|getDashboardData|getAppBootstrap/.test(html + appJs) && /api\/dados\?/.test(appJs), 'página não chama nada do DashMaster');
+    // google.script.run aparece só para o projeto Apps Script do PRÓPRIO sorter (getDados/pedirAtualizacao).
+    check(!/Client\.html|getDashboardData|getAppBootstrap|JTCore|INDICATORS/.test(html + appJs) && /api\/dados\?/.test(appJs) &&
+      /\.getDados\(q\)/.test(appJs) && /\.pedirAtualizacao\(\)/.test(appJs), 'página não chama nada do DashMaster');
     const js = await get(port, '/app.js'), css = await get(port, '/app.css'), rs = await get(port, '/resumo.js');
     check(js.status === 200 && /javascript/.test(js.headers['content-type']) && css.status === 200 && /css/.test(css.headers['content-type']) &&
       rs.status === 200 && /SorterResumo/.test(rs.text), 'arquivos da página (app.js, app.css, resumo.js)');

@@ -6,13 +6,10 @@
  * intercept, noRead, multi, other, ps: {PS01: n, …}}. Na tela do sorter: total = Sort total, valid = Valid total,
  * noInfo = No Sort Code, noPlan = No plan, chuteBlock = Chute, intercept = Intercept, noRead = No Read, multi = Multi,
  * PS01/PS02/PS03 = Layer1/Layer2/Layer3 total (andares).
- * Turno pela hora da linha: T1 06–13h, T2 14–21h, T3 22–05h. JavaScript simples (ES5): roda também em navegador de TV.
+ * Turno pela hora da linha: T1 06–14h, T2 14–22h, T3 22–06h. JavaScript simples (ES5): roda também em navegador de TV.
+ * No Apps Script, este mesmo arquivo é o Resumo.gs; a página recebe o código pelo toString() da fábrica (resumoSource_).
  */
-(function (root, factory) {
-  var api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
-  else root.SorterResumo = api;
-})(typeof self !== 'undefined' ? self : this, function () {
+function SorterResumoFactory_() {
   'use strict';
   /** Motivos de anormalidade, na ordem da tela do sorter (a soma = anormais = total − válidos). */
   var REASONS = ['noInfo', 'noPlan', 'chuteBlock', 'intercept', 'noRead', 'multi', 'other'];
@@ -131,6 +128,37 @@
     return s;
   }
 
+  // ---------- formato compacto (ponte → Apps Script → página) ----------
+  /**
+   * Linhas → {k: ["PS01", …], d: [[data, hora, total, valid, abnormal, noInfo, noPlan, chuteBlock, intercept, noRead,
+   * multi, other, PS01, …], …]}: o mesmo conteúdo em bem menos texto.
+   */
+  function pack(rows) {
+    var keys = {};
+    (rows || []).forEach(function (r) { Object.keys(r.ps || {}).forEach(function (k) { keys[k] = 1; }); });
+    var k = Object.keys(keys).sort();
+    return {k: k, d: (rows || []).map(function (r) {
+      return [r.date, r.hour].concat(NUMS.map(function (f) { return num(r[f]); }), k.map(function (x) { return num((r.ps || {})[x]); }));
+    })};
+  }
+  function unpack(p) {
+    if (!p || !p.d) return [];
+    var k = p.k || [], n = NUMS.length;
+    return p.d.map(function (a) {
+      var r = {date: a[0], time: p2(Number(a[1])) + ':00', hour: Number(a[1]), ps: {}};
+      NUMS.forEach(function (f, i) { r[f] = num(a[2 + i]); });
+      k.forEach(function (x, i) { r.ps[x] = num(a[2 + n + i]); });
+      return r;
+    });
+  }
+
   return {REASONS: REASONS, NUMS: NUMS, SHIFTS: SHIFTS, shiftOfHour: shiftOfHour, inHours: inHours, filterRows: filterRows,
-    mergeRows: mergeRows, sumRows: sumRows, periodKey: periodKey, isoWeek: isoWeek, byPeriod: byPeriod, byTime: byTime, summarize: summarize};
-});
+    mergeRows: mergeRows, sumRows: sumRows, periodKey: periodKey, isoWeek: isoWeek, byPeriod: byPeriod, byTime: byTime, summarize: summarize,
+    pack: pack, unpack: unpack};
+}
+/* Node (require), navegador (window.SorterResumo) e Apps Script (este arquivo é o Resumo.gs: SorterResumo global). */
+(function (root) {
+  var api = SorterResumoFactory_();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.SorterResumo = api;
+})(typeof globalThis !== 'undefined' ? globalThis : typeof self !== 'undefined' ? self : this);

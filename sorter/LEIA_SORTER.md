@@ -5,7 +5,11 @@ Painel **separado do DashMaster**. Ele mostra a produção do sorter da base a p
 - **Sorter A**, **Sorter B** ou **os dois juntos**;
 - por **balança** (Induction No.), **turno** e **horário**.
 
-Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_0.zip`).
+Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_1.zip`).
+
+**Duas formas de abrir (a mesma tela):**
+- **Link do Google (Apps Script)**: abre de qualquer lugar, até fora da base. Precisa de um projeto Apps Script **separado** (não o do DashMaster) e da **ponte** ligada num computador da base. Veja "Painel no Apps Script".
+- **Painel local**: `http://IP-DO-COMPUTADOR:3100`, só dentro da rede da base.
 
 *Feito por Caike Oliveira.*
 
@@ -68,13 +72,13 @@ Há uma linha por tempo escolhido e a linha de **Total** no fim.
 
 ## Onde roda
 - O sorter fica na **rede interna da base** (`http://10.1.166.9`). Só um computador **dentro dessa rede** consegue lê-lo.
-- **Na Oracle e no Google não funciona.**
-- Basta **um** computador da base ligado, com o painel aberto. Os outros computadores, celulares no Wi-Fi da base e TVs abrem o painel pelo endereço desse computador.
+- **O Google (Apps Script) e a Oracle não enxergam essa rede.** Por isso o Apps Script recebe os números pela **ponte**: o mesmo programa (`iniciar.bat`), rodando num computador da base, lê o sorter e manda para o Apps Script.
+- Basta **um** computador da base ligado, com o `iniciar.bat` aberto. Ele mantém o painel local e a ponte.
 
 ## Instalar (Windows)
 1. Instale o **Node.js** (versão LTS) em https://nodejs.org.
-2. Extraia o `JT_SORTER_V2_0.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
-   - **Já tem a V1?** Extraia por cima, na mesma pasta. O `config.json` antigo passa sozinho para a V2 (atualização a cada 1 hora, até 92 dias, Sorter A e B).
+2. Extraia o `JT_SORTER_V2_1.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
+   - **Já tem uma versão anterior?** Extraia por cima, na mesma pasta. O `config.json` antigo é atualizado sozinho: a V1 passa a ler a cada 1 hora, até 92 dias, com os Sorters A e B; os campos novos do Apps Script entram vazios.
 3. Na pasta `sorter`, dê dois cliques em **`testar.bat`**. Ele lê cada sorter uma vez e mostra:
    - total, deu certo, No Sort Code e anormais de hoje;
    - turnos, andares e balanças.
@@ -90,6 +94,81 @@ Há uma linha por tempo escolhido e a linha de **Total** no fim.
    - **TV:** `http://IP-DESTE-COMPUTADOR:3100/?tv=1&sorter=todos`.
 
 **Abrir sozinho quando o Windows ligar:** dê dois cliques em **`iniciar-com-windows.bat`**. Ele cria um atalho na pasta Inicializar.
+
+## Painel no Apps Script (link do Google)
+O painel fica num link do Google, que abre de qualquer lugar. Os números chegam pela **ponte**, que roda junto com o `iniciar.bat` no computador da base.
+
+```
+sorter (10.1.166.9) ──► computador da base (iniciar.bat = ponte) ──► Apps Script (planilha) ──► link do painel
+        rede interna                         internet
+```
+
+**1. Instale o programa no computador da base** ("Instalar (Windows)" acima) e confira com o `testar.bat`.
+
+**2. Crie um projeto Apps Script SEPARADO.** Não use o projeto do DashMaster.
+1. Abra https://script.google.com → **Novo projeto**. Dê o nome **J&T Sorter**.
+2. Em **Configurações do projeto** (engrenagem), marque **Mostrar arquivo de manifesto "appsscript.json" no editor**.
+3. No **Editor**, crie os arquivos abaixo e cole o conteúdo de cada um. Eles estão na pasta `sorter\appscript` do ZIP.
+
+| Arquivo no editor | Tipo | Conteúdo |
+|---|---|---|
+| `Codigo` | Script (.gs) | `appscript\Codigo.gs`. Troque todo o conteúdo do `Código.gs` que já vem no projeto e renomeie para `Codigo` |
+| `Resumo` | Script (.gs) | `appscript\Resumo.gs` |
+| `Index` | HTML | `appscript\Index.html` |
+| `Estilo` | HTML | `appscript\Estilo.html` |
+| `App` | HTML | `appscript\App.html` |
+| `appsscript.json` | manifesto | `appscript\appsscript.json` (troque todo o conteúdo) |
+
+**3. Configure (uma vez).**
+1. Escolha a função **configurar** no menu de funções e clique em **▶ Executar**.
+2. Autorize com a sua conta (ela só pede acesso às planilhas).
+3. O **Registro de execução** mostra duas coisas:
+   - o endereço da **planilha** criada (`J&T · Sorter (dados da ponte)`);
+   - a **chave da ponte**. Copie a chave.
+
+**4. Publique.**
+1. **Implantar → Nova implantação → engrenagem → App da Web**.
+2. **Executar como: Eu**. **Quem pode acessar: Qualquer pessoa**. A ponte entra sem login, por isso precisa ser "Qualquer pessoa".
+3. **Implantar**. Copie a **URL do App da Web**: ela termina em `/exec`.
+
+**5. Ligue a ponte no computador da base.**
+1. Abra o `config.json` da pasta `sorter` com o Bloco de Notas e preencha:
+   ```json
+   "appsScriptUrl": "https://script.google.com/macros/s/…/exec",
+   "chavePonte": "a chave do passo 3",
+   ```
+2. Feche a janela preta e abra o `iniciar.bat` de novo. Ele mostra "Ponte para o Apps Script ligada".
+3. Na primeira vez, a ponte manda o histórico (`diasHistorico`, 184 dias). Isso leva alguns minutos. Depois manda só o dia de hoje.
+4. Para conferir: o `testar.bat` mostra "Apps Script … OK: N dia(s) enviados" e o endereço da planilha.
+
+**6. Abra o painel:** a URL do passo 4. Funciona no computador, no celular e na TV, de qualquer lugar.
+- TV: a URL com `?tv=1&sorter=todos` no fim.
+- Os links prontos (`?sorter=`, `?per=`, `?tempo=`, `?lang=zh`) também valem.
+
+**Atualização no Apps Script:**
+- **A cada 1 hora** (no minuto 1: 08:01, 09:01…), a ponte lê o sorter e manda.
+- **Botão Atualizar:** a página deixa um pedido; a ponte confere a cada 30 s, lê o sorter na hora e manda. O número novo aparece em até 1 minuto.
+- A página relê a planilha sozinha a cada 5 minutos.
+- **Computador da base desligado ou sem internet:**
+  - o painel avisa "Ponte da base desligada" e continua mostrando os últimos números;
+  - quando o computador volta, a ponte manda o que faltou.
+
+**Atualizar o código depois** (versão nova do ZIP):
+1. Troque o conteúdo dos arquivos no editor.
+2. **Implantar → Gerenciar implantações → lápis → Versão: Nova versão → Implantar**.
+
+O link continua o mesmo.
+
+**Segurança:**
+- Quem tem o link vê o painel: são só números de produção.
+- **Só a ponte grava** dados, e só com a chave. A chave fica no `config.json` do computador da base e nas Propriedades do script. Não mande a chave em grupos.
+- **Trocar a chave:** em **Configurações do projeto → Propriedades do script**, apague `CHAVE_PONTE`. Rode `configurar()` de novo e coloque a chave nova no `config.json`.
+- Conta do Google Workspace da empresa sem a opção "Qualquer pessoa": publique com uma conta Gmail comum ou peça ao administrador.
+
+**Conferir pelo editor:** a função **diagnosticar** mostra no registro:
+- se a ponte está ligada;
+- quantos dias de cada sorter estão na planilha;
+- os erros da última leitura.
 
 ## Sorter A: configurar a troca (uma vez)
 O site do sorter mostra **um dispositivo por vez**. O botão **switch device** troca entre Cross-belt GRU-A e GRU-B, e a escolha fica na sessão do navegador.
@@ -149,6 +228,11 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
 | `balancas` | `"auto"` | `"auto"` descobre as balanças com produção nos últimos 7 dias. Também aceita uma lista para os dois sorters (`[1, 2, 3]`) ou uma lista por sorter (`{"A": [1, 2], "B": [1, 2, 3]}`) |
 | `maxBalancas` | `40` | com `"auto"`: testa as balanças de 1 até este número |
 | `sorters` | B e A | os sorters do site; veja "Sorter A: configurar a troca" acima |
+| `appsScriptUrl` | vazio | URL do App da Web do Apps Script (termina em `/exec`). Vazio = sem ponte, só o painel local |
+| `chavePonte` | vazio | a chave que `configurar()` mostra no Apps Script |
+| `enviarMinutos` | `60` | a ponte lê o sorter e manda a cada N minutos |
+| `diasHistorico` | `184` | na primeira vez, a ponte manda os últimos N dias (dois trimestres, para comparar 92 dias com os 92 anteriores) |
+| `verificarSegundos` | `30` | a cada N segundos a ponte confere se alguém apertou Atualizar no painel do Apps Script |
 
 ## Como funciona (para a TI)
 - **De onde vêm os dados:** `GET {sorterUrl}/statis/summary.data?page=1&limit=1000&start=AAAA-MM-DD 00:00:00&end=AAAA-MM-DD 23:59:59&group=60&inductionno=N&layerno=0`.
@@ -188,9 +272,26 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
   - `/` — a página;
   - `/api/dados?de=AAAA-MM-DD&ate=AAAA-MM-DD&sorter=B|A|todos&balanca=B:3&turnos=T1,T2&hIni=0&hFim=23` — os números (`&forcar=1` ignora o cache);
   - `/saude` — versão, endereço e sorters configurados.
+- **Ponte → Apps Script** (`lib/ponte.js`):
+  - **Pedidos da ponte:**
+    - `GET {appsScriptUrl}?acao=estado&chave=…`: os dias que a planilha já tem e quando chegaram;
+    - `GET …?acao=pedido`: pedido do botão Atualizar, conferido a cada `verificarSegundos`;
+    - `POST {chave, acao: "dados", sorters, dias: [{date, device, t, b}]}`, em lotes de até ~1,5 MB.
+  - **Formato compacto** (`t` = total do sorter, `b` = cada balança): `{k: ["PS01"…], d: [[data, hora, Sort, Valid, Anormais, No Sort Code, No plan, Chute, Intercept, No Read, Multi, Outros, Layer1…], …]}`.
+  - **Dias reenviados:** um dia passado só conta como completo se chegou depois de 00:10 do dia seguinte; antes disso, a ponte manda de novo.
+- **Apps Script** (`appscript/`):
+  - **Aba `Sorter_Dados`:** uma linha por dia e por sorter. Colunas:
+    - Data, Sorter, Recebido em, Versão;
+    - Sort total, Valid total, No Sort Code, Balanças;
+    - de I em diante, os números compactados (gzip + base64, em partes de 45.000 caracteres).
+  - **Guarda:** 400 dias.
+  - **Leitura:** `getDados` devolve o mesmo formato do `/api/dados`, com as linhas compactadas. Os dias lidos ficam 6 h no cache.
+  - **Mesma tela:** `Index.html`, `Estilo.html`, `App.html` e `Resumo.gs` são gerados da página local por `node gerar-appscript.js`. O `Codigo.gs` e o `appsscript.json` ficam na pasta `appscript/`.
 - **Requisitos:** Node.js 18 ou mais novo, sem instalar pacotes.
 - **Gráficos:** vêm de Chart.js pela internet (jsDelivr ou cdnjs). Sem internet, a tela mostra os cartões e a tabela.
-- **Testes:** `node test/test_sorter.js`, com um sorter simulado e números fictícios. O simulador tem dois dispositivos, balanças, sessão e troca com XSRF.
+- **Testes**, com números fictícios:
+  - `node test/test_sorter.js`: sorter simulado com dois dispositivos, balanças, sessão e troca com XSRF;
+  - `node test/test_appscript.js`: ponte → Apps Script simulado (o mesmo `Codigo.gs`). O `getDados` tem que dar os mesmos números do painel local.
 - **Pacote:** `node gerar-zip.js [pasta]`.
 
 ## Problemas comuns
@@ -204,3 +305,8 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
 | "A porta 3100 já está em uso" | O painel já está aberto em outra janela. Feche-a ou troque `porta` no `config.json` |
 | Outro computador não abre o painel | Permita o Node.js no Firewall do Windows em Redes privadas, e confira o IP na janela preta |
 | Sem gráficos, só as tabelas | O computador que abriu a página está sem internet: os gráficos vêm do jsDelivr ou cdnjs |
+| "O Apps Script não respondeu em JSON" | A URL no `config.json` não é a do App da Web (`…/exec`), ou a implantação não está com "Quem pode acessar: Qualquer pessoa" |
+| "chave da ponte inválida" | A `chavePonte` do `config.json` não é a que o `configurar()` mostrou. Copie de novo, sem espaços |
+| "Não consegui falar com o Apps Script" | O computador da base está sem internet. A ponte tenta de novo sozinha |
+| "Ponte da base desligada" (no painel do Google) | O `iniciar.bat` está fechado ou o computador da base está desligado ou sem internet |
+| "A ponte da base ainda não mandou dados" | A ponte nunca rodou com este Apps Script. Confira `appsScriptUrl` e `chavePonte` e rode o `testar.bat` |

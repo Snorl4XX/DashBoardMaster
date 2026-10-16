@@ -10,8 +10,9 @@
  *
  * Node.js 18 ou mais novo, sem instalar pacotes. Configuração: config.json (criado na primeira vez, ao lado deste arquivo).
  *
- * Uso:   node server.js            → painel no ar
- *        node server.js --teste    → lê cada sorter uma vez, mostra os totais de hoje e as balanças, e sai
+ * Uso:   node server.js            → painel no ar (e, com "appsScriptUrl" no config.json, a ponte para o Apps Script)
+ *        node server.js --teste    → lê cada sorter uma vez, mostra os totais de hoje e as balanças (e manda uma vez
+ *                                    para o Apps Script, se configurado), e sai
  *
  * Nada é gravado: cada consulta vai ao sorter, que guarda o histórico. As respostas ficam guardadas por alguns minutos
  * (cacheSegundos) para várias telas abertas não repetirem a mesma consulta.
@@ -23,8 +24,9 @@ const os = require('os');
 const zlib = require('zlib');
 const {fetchRange, Sessao} = require('./lib/sorter');
 const R = require('./lib/resumo');
+const {criarPonte} = require('./lib/ponte');
 
-const VERSAO = '2.0.0';
+const VERSAO = '2.1.0';
 const TZ = 'America/Sao_Paulo';
 const PUBLIC = path.join(__dirname, 'public');
 const DEFAULTS = {
@@ -41,7 +43,14 @@ const DEFAULTS = {
   sorters: [
     {id: 'B', nome: 'Sorter B', nomeZh: '分拣机 B套', padrao: true, troca: null},
     {id: 'A', nome: 'Sorter A', nomeZh: '分拣机 A套', troca: null}
-  ]
+  ],
+  // Painel no Apps Script (opcional): a ponte manda os números para o App da Web. Os dois vêm da função configurar()
+  // no editor do Apps Script (URL do App da Web, terminando em /exec, e a chave).
+  appsScriptUrl: '',
+  chavePonte: '',
+  enviarMinutos: 60,                 // a ponte lê o sorter e manda a cada N minutos (e quando alguém aperta Atualizar)
+  diasHistorico: 184,                // na primeira vez, manda os últimos N dias (dois trimestres)
+  verificarSegundos: 30              // a cada N segundos a ponte confere se alguém apertou Atualizar no painel
 };
 
 // ------------------------------------------------------------------ configuração
@@ -72,6 +81,14 @@ function loadConfig() {
     try { fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n'); console.log('config.json da versão anterior atualizado para a ' + VERSAO + '.'); }
     catch (e) { console.log('Não consegui gravar o config.json atualizado (' + e.message + '); seguindo com o padrão novo.'); }
   }
+  // Campos novos (ex.: os do Apps Script) entram no arquivo com o padrão, para ficarem à mão na hora de editar.
+  if (fs.existsSync(file) && raw && typeof raw === 'object' && Object.keys(DEFAULTS).some(k => !(k in raw))) {
+    const completo = {};
+    Object.keys(DEFAULTS).forEach(k => { completo[k] = k in raw ? raw[k] : DEFAULTS[k]; });
+    Object.keys(raw).forEach(k => { if (!(k in completo)) completo[k] = raw[k]; });
+    raw = completo;
+    try { fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n'); } catch (e) { /* só leitura: segue com o padrão */ }
+  }
   const c = Object.assign({}, DEFAULTS, raw);
   c.sorterUrl = String(c.sorterUrl || '').trim().replace(/\/+$/, '');
   if (!URL_RE.test(c.sorterUrl)) throw new Error('"sorterUrl" inválido no config.json: use, por exemplo, "http://10.1.166.9".');
@@ -90,6 +107,15 @@ function loadConfig() {
       padrao: !!s.padrao, troca: s.troca && typeof s.troca === 'object' ? s.troca : null, proprioUrl: !!s.sorterUrl};
   });
   if (new Set(c.sorters.map(s => s.id)).size !== c.sorters.length) throw new Error('Há dois sorters com o mesmo "id" no config.json.');
+  c.appsScriptUrl = String(c.appsScriptUrl || '').trim();
+  c.chavePonte = String(c.chavePonte || '').trim();
+  if (c.appsScriptUrl && !/^https?:\/\/[^\s?#]+\/exec$/.test(c.appsScriptUrl)) {
+    throw new Error('"appsScriptUrl" inválido no config.json: use a URL do App da Web, que termina em /exec.');
+  }
+  if (c.appsScriptUrl && c.chavePonte.length < 16) throw new Error('"chavePonte" vazia ou curta no config.json: copie a chave que a função configurar() mostra no Apps Script.');
+  c.enviarMinutos = Math.min(720, Math.max(5, Number(c.enviarMinutos) || DEFAULTS.enviarMinutos));
+  c.diasHistorico = Math.min(400, Math.max(1, Number(c.diasHistorico) || DEFAULTS.diasHistorico));
+  c.verificarSegundos = Math.min(600, Math.max(10, Number(c.verificarSegundos) || DEFAULTS.verificarSegundos));
   return c;
 }
 /** Sorter pronto: é o padrão do site, tem a troca configurada ou um endereço próprio. */
@@ -240,6 +266,11 @@ function criarEstado(cfg) {
   return {dados, linhas, balancasDe};
 }
 
+/** Ponte para o painel do Apps Script, com o mesmo estado (sessões e cache) do painel local. */
+function ponteDe(cfg, estado) {
+  return criarPonte(cfg, estado, {agora, addDays, daysBetween, pronto, versao: VERSAO});
+}
+
 // ------------------------------------------------------------------ servidor HTTP
 const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8'};
 const STATIC = {'/app.js': path.join(PUBLIC, 'app.js'), '/app.css': path.join(PUBLIC, 'app.css'), '/resumo.js': path.join(__dirname, 'lib', 'resumo.js')};
@@ -314,6 +345,14 @@ async function teste(cfg) {
     console.log('   Andares: ' + Object.keys(s.ps).sort().map(k => k + ' ' + s.ps[k]).join(' · '));
     console.log('   Balanças: ' + (info.balancaErro ? 'ERRO: ' + info.balancaErro : (info.balancas || []).join(', ') || 'nenhuma com produção nos últimos 7 dias'));
   }
+  if (cfg.appsScriptUrl) {
+    console.log('— Apps Script (' + cfg.appsScriptUrl + ')');
+    try {
+      const r = await ponteDe(cfg, estado).enviar({force: true});
+      console.log('   OK: ' + r.dias + ' dia(s) enviados' + (r.planilha ? ' · planilha: ' + r.planilha : ''));
+      r.sorters.filter(x => x.erro).forEach(x => { console.log('   ERRO no ' + x.nome + ': ' + x.erro); erros++; });
+    } catch (e) { console.log('   ERRO: ' + e.message); erros++; }
+  }
   return erros ? 1 : 0;
 }
 
@@ -323,7 +362,8 @@ async function main() {
   let cfg;
   try { cfg = loadConfig(); } catch (e) { console.error(e.message); process.exit(1); }
   if (process.argv.indexOf('--teste') > 0) { process.exit(await teste(cfg)); }
-  const server = criarServidor(cfg);
+  const estado = criarEstado(cfg);
+  const server = criarServidor(cfg, estado);
   server.on('error', e => {
     if (e.code === 'EADDRINUSE') console.error('A porta ' + cfg.porta + ' já está em uso: o painel do sorter já está aberto em outra janela, ou troque "porta" no config.json.');
     else console.error('Não foi possível abrir o servidor: ' + e.message);
@@ -333,9 +373,13 @@ async function main() {
     console.log('J&T · Painel do Sorter v' + VERSAO + ' — lendo ' + cfg.sorterUrl + ' (' + cfg.sorters.map(s => s.nome + (pronto(s) ? '' : ' [falta configurar a troca]')).join(', ') + ')');
     console.log('Abra no navegador:');
     enderecos(cfg).forEach(a => console.log('   ' + a));
+    if (cfg.appsScriptUrl) {
+      console.log('Ponte para o Apps Script ligada: manda os números a cada ' + cfg.enviarMinutos + ' min e quando alguém aperta Atualizar no painel.');
+      ponteDe(cfg, estado).iniciar();
+    }
     console.log('Deixe esta janela aberta. Para desligar, feche a janela (ou Ctrl+C).');
   });
 }
 
 if (require.main === module) main();
-module.exports = {criarEstado, criarServidor, loadConfig, agora, addDays, daysBetween, pronto, VERSAO, DEFAULTS};
+module.exports = {criarEstado, criarServidor, ponteDe, loadConfig, agora, addDays, daysBetween, pronto, VERSAO, DEFAULTS};

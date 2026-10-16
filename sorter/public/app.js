@@ -3,6 +3,8 @@
  * Lê /api/dados (server.js → monitor do sorter) e desenha filtros, cartões, gráficos e tabela. Período que termina hoje:
  * consulta de novo sozinho (atualizarSegundos do config.json; padrão 1 hora) e no botão Atualizar.
  * Link: ?sorter=A|B|todos, ?de=AAAA-MM-DD&ate=AAAA-MM-DD, ?per=day|week|month|quarter, ?tempo=1, ?lang=zh, ?tv=1 (TV).
+ * A mesma página roda no Apps Script (App.html): lá os dados vêm por google.script.run.getDados (linhas compactadas) e o
+ * botão Atualizar deixa um pedido para a ponte da base (o Google não enxerga o sorter).
  * JavaScript simples (ES5): roda também em navegador antigo de TV.
  */
 (function () {
@@ -26,6 +28,8 @@
     });
     return o;
   })();
+  var GAS = !!(BOOT.gas && window.google && google.script && google.script.run);
+  if (GAS && BOOT.params) params = BOOT.params;     // no Apps Script a página fica num iframe: o link chega pelo servidor
   var state = {lang: 'pt', from: '', to: '', today: BOOT.hoje || '', sorter: '', balanca: '', turno: '', hIni: 0, hFim: 23, per: 'day', tempo: 1,
     data: null, error: null, seq: 0, busy: false, lastAt: 0, charts: {}, libsDone: false, balOpts: []};
 
@@ -67,7 +71,13 @@
       tableTitle: 'Tabela do sorter ({t})', rows: '{n} linhas', tableNote: 'Os mesmos números da tela do sorter (summary statistics). Anormais = Sort total − Valid total = soma dos motivos.',
       maxDays: 'Escolha até {n} dias.', badDates: 'Confira as datas.', perAdjusted: 'Período ampliado para ver a evolução {p}.',
       noChartLib: 'Biblioteca de gráficos indisponível (sem internet?): veja a tabela abaixo.',
-      foot: 'Fonte: monitor do sorter da base (rede interna) · consultado na hora, nada é gravado', madeBy: 'Feito por Caike Oliveira'
+      foot: 'Fonte: monitor do sorter da base (rede interna) · consultado na hora, nada é gravado', madeBy: 'Feito por Caike Oliveira',
+      footGas: 'Fonte: monitor do sorter da base, enviado pela ponte (computador da base) · Apps Script',
+      updatedGas: 'lido do sorter às {t} (ponte da base)',
+      ponteOff: 'A ponte da base está desligada (última conversa: {t}). Mostrando os números que já chegaram.',
+      ponteOffLine: 'Ponte da base desligada desde {t}: os números param de chegar até o computador da base voltar (iniciar.bat).',
+      ponteNever: 'nunca', askedBridge: 'Pedido enviado à ponte da base: os números chegam em até 1 minuto.',
+      bridgeSlow: 'A ponte não respondeu em 2 minutos. Confira o computador da base.', fullHint: 'Para tela cheia, aperte F11.'
     },
     zh: {
       refresh: '刷新', startDate: '开始日期', endDate: '结束日期', apply: '应用', details: '明细',
@@ -105,7 +115,13 @@
       tableTitle: '分拣机表格（{t}）', rows: '{n} 行', tableNote: '与分拣机页面（summary statistics）相同的数据。异常 = Sort total − Valid total = 各原因之和。',
       maxDays: '最多选择 {n} 天。', badDates: '请检查日期。', perAdjusted: '已扩大期间以查看{p}趋势。',
       noChartLib: '图表库不可用（无网络？）：请查看下方表格。',
-      foot: '数据来源：基地分拣机监控（内网）· 实时查询，不存储', madeBy: '由 Caike Oliveira 制作'
+      foot: '数据来源：基地分拣机监控（内网）· 实时查询，不存储', madeBy: '由 Caike Oliveira 制作',
+      footGas: '数据来源：基地分拣机监控，经数据桥（基地电脑）发送 · Apps Script',
+      updatedGas: '分拣机读取于 {t}（基地数据桥）',
+      ponteOff: '基地数据桥已断开（最后联系：{t}）。显示已收到的数据。',
+      ponteOffLine: '基地数据桥自 {t} 起断开：在基地电脑恢复（iniciar.bat）之前不会收到新数据。',
+      ponteNever: '从未', askedBridge: '已向基地数据桥发送请求：数据将在1分钟内到达。',
+      bridgeSlow: '数据桥2分钟内没有响应。请检查基地电脑。', fullHint: '按 F11 全屏。'
     }
   };
   var REASON_TEXT = {
@@ -206,9 +222,14 @@
     buildPresets(); buildFilters(); destroyCharts(); render();
   }
   function toggleFull() {
-    var d = document, el = d.documentElement;
-    if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
-    else if (el.requestFullscreen || el.webkitRequestFullscreen) (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    var d = document, el = d.documentElement, r;
+    try {
+      if (d.fullscreenElement || d.webkitFullscreenElement) r = (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      else if (el.requestFullscreen || el.webkitRequestFullscreen) r = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+      else toast(t('fullHint'));
+    } catch (e) { toast(t('fullHint')); }
+    // Dentro do iframe do Apps Script o navegador pode negar a tela cheia: F11 resolve.
+    if (r && r.catch) r.catch(function () { toast(t('fullHint')); });
   }
 
   // ------------------------------------------------------------------ período e filtros
@@ -314,6 +335,33 @@
   function hourFilter() { var f = shiftFilter(); f.turnos = []; return f; }
 
   // ------------------------------------------------------------------ leitura
+  /** Uma consulta: /api/dados no painel local; google.script.run.getDados no Apps Script (linhas compactadas). */
+  function apiDados(q) {
+    if (GAS) {
+      return new Promise(function (ok, fail) {
+        google.script.run.withSuccessHandler(function (res) {
+          if (res && res.pacote) {
+            res.rows = R.unpack(res.rows);
+            res.prevRows = res.prevRows ? R.unpack(res.prevRows) : null;
+            if (res.rowsByDevice) Object.keys(res.rowsByDevice).forEach(function (k) { res.rowsByDevice[k] = R.unpack(res.rowsByDevice[k]); });
+          }
+          ok(res || {ok: false, error: t('error')});
+        }).withFailureHandler(function (e) { fail(new Error((e && e.message) || String(e))); }).getDados(q);
+      });
+    }
+    var qs = Object.keys(q).filter(function (k) { return q[k] !== undefined && q[k] !== null; })
+      .map(function (k) { return k + '=' + encodeURIComponent(q[k]); }).join('&');
+    return fetch('api/dados?' + qs, {cache: 'no-store'}).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  }
+  function resetBtn() {
+    if (state.waiting) return;
+    var btn = $('#refreshBtn');
+    setBusy(false);
+    btn.disabled = false; btn.classList.remove('spin');
+  }
   function load(opts) {
     opts = opts || {};
     var seq = ++state.seq, btn = $('#refreshBtn'), endsToday = state.to === state.today;
@@ -321,15 +369,13 @@
     if (!opts.silent) setBusy(true);
     if (opts.force) { btn.disabled = true; btn.classList.add('spin'); }
     if (!state.data && !state.error) renderStatus(t('loading'));
-    var q = 'de=' + encodeURIComponent(state.from) + '&ate=' + encodeURIComponent(state.to) + '&sorter=' + encodeURIComponent(state.sorter) +
-      '&balanca=' + encodeURIComponent(state.balanca) + '&turnos=' + encodeURIComponent(state.turno) +
-      (state.hIni !== 0 || state.hFim !== 23 ? '&hIni=' + state.hIni + '&hFim=' + state.hFim : '') + (opts.force ? '&forcar=1' : '');
-    return fetch('api/dados?' + q, {cache: 'no-store'}).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    }).then(function (res) {
+    var q = {de: state.from, ate: state.to, sorter: state.sorter, balanca: state.balanca, turnos: state.turno};
+    if (state.hIni !== 0 || state.hFim !== 23) { q.hIni = String(state.hIni); q.hFim = String(state.hFim); }
+    if (opts.force) q.forcar = '1';
+    if (opts.desde) q.desde = opts.desde;
+    return apiDados(q).then(function (res) {
       if (seq !== state.seq) return;
-      state.lastAt = Date.now();
+      state.lastAt = Date.now(); state.lastRes = res;
       // Virou o dia com um período que terminava hoje: o mesmo período, terminando no dia novo.
       if (res.today && res.today !== state.today) {
         state.today = res.today;
@@ -353,18 +399,51 @@
       render();
     }).catch(function (e) {
       if (seq !== state.seq) return;
-      state.error = e.message + ' (' + location.host + ')';
+      state.error = e.message + (GAS ? '' : ' (' + location.host + ')');
       render();
     }).then(function () {
       if (seq !== state.seq) return;
       state.busy = false;
-      setBusy(false);
-      btn.disabled = false; btn.classList.remove('spin');
+      resetBtn();
     });
   }
+  /** Atualizar no Apps Script: pede à ponte da base uma leitura nova e confere a planilha até ela chegar (até 2 min). */
+  function refreshGas() {
+    if (state.waiting) return;
+    var btn = $('#refreshBtn');
+    btn.disabled = true; btn.classList.add('spin'); setBusy(true);
+    google.script.run.withSuccessHandler(function (r) {
+      if (!r || !r.ligada) {
+        toast(t('ponteOff', {t: r && r.vista ? clock(r.vista) : t('ponteNever')}), 'error');
+        load({});
+        return;
+      }
+      toast(t('askedBridge'));
+      state.waiting = {desde: r.em, until: Date.now() + 120000};
+      pollGas();
+    }).withFailureHandler(function (e) { toast((e && e.message) || String(e), 'error'); resetBtn(); }).pedirAtualizacao();
+  }
+  function pollGas() {
+    var w = state.waiting;
+    if (!w) return;
+    load({silent: true, desde: w.desde}).then(function () {
+      if (state.waiting !== w) return;
+      var done = state.data && state.data.novo, late = Date.now() > w.until;
+      if (done || late) {
+        state.waiting = null;
+        resetBtn();
+        toast(t(done ? 'refreshed' : 'bridgeSlow'), done ? 'success' : 'error');
+        return;
+      }
+      setTimeout(pollGas, 6000);
+    });
+  }
+  function refresh() { if (GAS) refreshGas(); else load({force: true}); }
   function tick() {
-    if (document.visibilityState === 'hidden' || state.busy || state.to !== state.today) return;
-    if (Date.now() - state.lastAt < (Number(BOOT.atualizarSegundos) || 3600) * 1000 - 2000) return;
+    if (document.visibilityState === 'hidden' || state.busy || state.waiting || state.to !== state.today) return;
+    // Apps Script: relê a planilha a cada lerSegundos (os números chegam pela ponte a cada atualizarSegundos).
+    var every = Number(GAS ? BOOT.lerSegundos : BOOT.atualizarSegundos) || 3600;
+    if (Date.now() - state.lastAt < every * 1000 - 2000) return;
     load({silent: true});
   }
 
@@ -373,7 +452,7 @@
     $('#title').textContent = t('title') + ' · ' + (state.sorter === 'todos' ? BOOT.sorters.map(function (s) { return s.id; }).join(' + ') : devName(state.sorter));
     $('#subtitle').textContent = t('subtitle');
     document.title = 'J&T · ' + t('title');
-    $('#foot').innerHTML = esc(t('foot')) + (BOOT.versao ? ' · v' + esc(BOOT.versao) : '') + '<b>' + esc(t('madeBy')) + '</b>';
+    $('#foot').innerHTML = esc(t(GAS ? 'footGas' : 'foot')) + (BOOT.versao ? ' · v' + esc(BOOT.versao) : '') + '<b>' + esc(t('madeBy')) + '</b>';
     renderStatus();
     var d = state.data, has = !!(d && d.rows && d.rows.length);
     $('#tableCard').hidden = !has;
@@ -406,19 +485,23 @@
     if (d) {
       var live = d.from === d.to && d.to === d.today;
       // Próxima consulta automática no relógio da base (hora do servidor + intervalo), não no deste navegador.
-      var next = null;
-      if (d.to === d.today && /\d{2}:\d{2}/.test(String(d.now).slice(11))) {
-        var mins = (Number(d.now.slice(11, 13)) * 60 + Number(d.now.slice(14, 16)) + Math.round((Number(BOOT.atualizarSegundos) || 3600) / 60)) % 1440;
+      // No Apps Script: a próxima leitura da ponte (hora da última leitura + intervalo).
+      var next = null, base = String(GAS ? d.dadosEm || d.fetchedAt || '' : d.now || '');
+      if (d.to === d.today && /\d{2}:\d{2}/.test(base.slice(11))) {
+        var mins = (Number(base.slice(11, 13)) * 60 + Number(base.slice(14, 16)) + Math.round((Number(BOOT.atualizarSegundos) || 3600) / 60)) % 1440;
         next = p2(Math.floor(mins / 60)) + ':' + p2(mins % 60);
       }
       html += '<div class="status-line"><span class="live-dot' + (live && !state.error ? ' on' : '') + '"></span><b>' +
-        esc(live ? t('live') : t('past', {r: fmtRange(d.from, d.to)})) + '</b><span>' + esc(t('updated', {t: clock(d.fetchedAt)})) +
+        esc(live ? t('live') : t('past', {r: fmtRange(d.from, d.to)})) + '</b><span>' + esc(t(GAS ? 'updatedGas' : 'updated', {t: clock(GAS ? d.dadosEm || d.fetchedAt : d.fetchedAt)})) +
         (next ? ' · ' + esc(t('every', {s: everyLabel()})) + ' (' + esc(t('nextAt', {t: next})) + ')' : '') + '</span></div>';
       (d.devices || []).forEach(function (dv) {
         if (dv.error) html += '<div class="warn-line">' + icon('errors') + '<span><b>' + esc(devName(dv.id)) + ':</b> ' + esc(dv.error) + '</span></div>';
         else if (dv.balancaErro) html += '<div class="warn-line">' + icon('scale') + '<span><b>' + esc(devName(dv.id)) + ':</b> ' + esc(dv.balancaErro) + '</span></div>';
+        if (dv.aviso) html += '<div class="warn-line">' + icon('clock') + '<span><b>' + esc(devName(dv.id)) + ':</b> ' + esc(dv.aviso) + '</span></div>';
       });
     }
+    var pt = (d && d.ponte) || (state.lastRes && state.lastRes.ponte);
+    if (GAS && pt && !pt.ligada) html += '<div class="warn-line">' + icon('errors') + '<span>' + esc(t('ponteOffLine', {t: pt.vista ? clock(pt.vista) : t('ponteNever')})) + '</span></div>';
     box.innerHTML = html;
     box.hidden = !html;
   }
@@ -706,7 +789,7 @@
     $$('.lang-btn').forEach(function (b) { b.addEventListener('click', function () { setLang(b.getAttribute('data-lang')); }); });
     $('#themeBtn').addEventListener('click', toggleTheme);
     $('#fullBtn').addEventListener('click', toggleFull);
-    $('#refreshBtn').addEventListener('click', function () { load({force: true}); });
+    $('#refreshBtn').addEventListener('click', refresh);
     $('#applyBtn').addEventListener('click', applyDates);
     $('#clearBtn').addEventListener('click', clearFilters);
     ['#fromDate', '#toDate'].forEach(function (q) { $(q).addEventListener('keydown', function (e) { if (e.key === 'Enter') applyDates(); }); });
