@@ -5,7 +5,7 @@ Painel **separado do DashMaster**. Ele mostra a produção do sorter da base a p
 - **Sorter A**, **Sorter B** ou **os dois juntos**;
 - por **balança** (Induction No.), **turno** e **horário**.
 
-Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_1.zip`).
+Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_2.zip`).
 
 **Duas formas de abrir (a mesma tela):**
 - **Link do Google (Apps Script)**: abre de qualquer lugar, até fora da base. Precisa de um projeto Apps Script **separado** (não o do DashMaster) e da **ponte** ligada num computador da base. Veja "Painel no Apps Script".
@@ -77,11 +77,13 @@ Há uma linha por tempo escolhido e a linha de **Total** no fim.
 
 ## Instalar (Windows)
 1. Instale o **Node.js** (versão LTS) em https://nodejs.org.
-2. Extraia o `JT_SORTER_V2_1.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
+2. Extraia o `JT_SORTER_V2_2.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
    - **Já tem uma versão anterior?** Extraia por cima, na mesma pasta. O `config.json` antigo é atualizado sozinho: a V1 passa a ler a cada 1 hora, até 92 dias, com os Sorters A e B; os campos novos do Apps Script entram vazios.
-3. Na pasta `sorter`, dê dois cliques em **`testar.bat`**. Ele lê cada sorter uma vez e mostra:
-   - total, deu certo, No Sort Code e anormais de hoje;
-   - turnos, andares e balanças.
+3. Na pasta `sorter`, dê dois cliques em **`testar.bat`**. Ele:
+   - abre a página `http://10.1.166.9/home` e acha sozinho como trocar entre o Sorter A e o B (veja "Troca de sorter");
+   - lê cada sorter uma vez;
+   - mostra total, deu certo, No Sort Code e anormais de hoje;
+   - mostra turnos, andares e balanças.
 
    Os números devem bater com a tela do sorter.
 4. Dê dois cliques em **`iniciar.bat`**.
@@ -170,46 +172,49 @@ O link continua o mesmo.
 - quantos dias de cada sorter estão na planilha;
 - os erros da última leitura.
 
-## Sorter A: configurar a troca (uma vez)
-O site do sorter mostra **um dispositivo por vez**. O botão **switch device** troca entre Cross-belt GRU-A e GRU-B, e a escolha fica na sessão do navegador.
+## Troca de sorter (A / B) com o _token
+O site do sorter mostra **um dispositivo por vez**. O botão **switch device** troca entre Cross-belt GRU-A e GRU-B. Ao trocar, o navegador manda no Payload o **`_token`**. É o token de segurança do site (CSRF do Laravel), e ele **muda a cada sessão**: um valor copiado da tela não funciona depois.
 
-O painel abre uma sessão própria para cada sorter e faz a mesma troca antes de consultar. Para isso, ele precisa saber **qual pedido o site faz** ao escolher o GRU-A. Enquanto isso não estiver configurado:
-- o **Sorter B** (o que o site mostra sem trocar) funciona normalmente;
-- o **Sorter A** aparece como "falta configurar".
+**O painel faz como o navegador, sozinho:**
+1. Abre a página `http://10.1.166.9/home` numa sessão própria para cada sorter e lê o `_token` dessa página.
+2. Acha na página as opções "Cross-belt GRU-A" e "GRU-B" e o pedido que o site faz ao escolher uma delas: um formulário, um link ou o `$.post`, `$.ajax`, `axios` ou `fetch` do script.
+3. **Testa:** troca para o A e para o B e confere se os números saem diferentes. Um pedido que responde "OK" mas não troca nada é recusado.
+4. Confere se a troca vale **só para a sessão do painel**. Se ela valesse para o site inteiro, trocar pelo painel mudaria a tela de quem está usando o sorter: nesse caso o painel não troca e avisa.
+5. **Grava** no `config.json` o pedido achado, com a data. Ao reabrir, usa direto, sem descobrir de novo.
 
-**Como descobrir o pedido** (no computador da base, no Chrome ou no Edge):
-1. Abra `http://10.1.166.9`, aperte **F12** e vá na aba **Rede** (Network). Marque **Manter registro** (Preserve log).
-2. Clique em **switch device** → **Cross-belt GRU-A**.
-3. Na lista da aba Rede, clique no primeiro pedido que aparece depois do clique e anote:
-   - o **endereço** (URL);
-   - o **método** (GET ou POST);
-   - em **Payload**, o que foi enviado.
+Depois disso, cada pedido de troca leva o `_token` novo da sessão, e as consultas dos números (`summary.data`) vêm do sorter escolhido.
 
-   **Não** copie os valores de Cookie nem de token.
-4. Coloque no `config.json`, no sorter **A**. Exemplo, com um pedido **POST /device/switch** com `device=A`:
+**Se o painel não achar sozinho:**
+- O Sorter B (o que o site mostra sem trocar) continua funcionando.
+- O Sorter A aparece como "falta configurar", com o motivo.
+- Dê dois cliques em **`descobrir.bat`**. Ele refaz a busca mostrando tudo e escreve o arquivo **`descoberta.txt`** na pasta `sorter`.
+- Mande o `descoberta.txt`. Ele tem só os nomes dos campos e dos cookies, **sem** valores de token e de cookie.
+
+**Configurar à mão** (se precisar): no Chrome ou no Edge, abra `http://10.1.166.9/home`, aperte **F12** → **Rede**, clique em switch device → Cross-belt GRU-A e veja o primeiro pedido. Coloque no `config.json` o endereço, o método e o Payload **como aparece**, com `_token` e tudo. O painel troca o `_token` pelo da sessão, sempre. Exemplo:
 
 ```json
 "sorters": [
-  {"id": "B", "nome": "Sorter B", "nomeZh": "分拣机 B套", "padrao": true, "troca": null},
+  {"id": "B", "nome": "Sorter B", "nomeZh": "分拣机 B套", "padrao": true,
+   "troca": {"metodo": "POST", "caminho": "/home/switchDevice", "corpo": "_token=qualquer&device_id=7"}},
   {"id": "A", "nome": "Sorter A", "nomeZh": "分拣机 A套",
-   "troca": {"pagina": "/home", "metodo": "POST", "caminho": "/device/switch", "corpo": "device=A"}}
+   "troca": {"metodo": "POST", "caminho": "/home/switchDevice", "corpo": "_token=qualquer&device_id=3"}}
 ]
 ```
 
-| Campo da troca | Para quê |
+| Campo de cada sorter | Para quê |
 |---|---|
-| `pagina` | página aberta antes, para o site criar a sessão (padrão: `/home`) |
-| `metodo` | `GET` ou `POST` |
-| `caminho` | o endereço do pedido, sem o `http://10.1.166.9` (com o `?…`, se tiver) |
-| `corpo` | o Payload. Texto = formulário (`device=A`); objeto `{…}` = JSON |
-| `cookie` | quando o site guarda a escolha num cookie: `{"nome-do-cookie": "valor"}` |
+| `troca` | `"auto"` (padrão) = descobrir na página; `false` = nunca trocar; ou o pedido à mão `{metodo, caminho, corpo}` |
+| `troca.caminho` | o endereço do pedido, sem o `http://10.1.166.9` (com o `?…`, se tiver) |
+| `troca.corpo` | o Payload. Texto = formulário (`device_id=3`); objeto `{…}` = JSON. O `_token` é sempre o da sessão |
+| `troca.cookie` | quando o site guarda a escolha num cookie: `{"nome-do-cookie": "valor"}` |
+| `rotulo` | o nome do sorter na janela "device choose", se não for `GRU-A` / `GRU-B` (ex.: `"Cross-belt GRU-A"`) |
+| `padrao` | o sorter que o site mostra sem trocar (usado quando a troca não é achada) |
+| `sorterUrl` | só se o sorter tiver um endereço próprio. Aí não precisa de troca |
 
-**Sobre o token:** o site é feito em Laravel e entrega sozinho um cookie **XSRF-TOKEN** a cada visita. Esse token muda com o tempo.
-- O painel pega o token **do próprio site**, a cada sessão, e devolve no cabeçalho `X-XSRF-TOKEN` quando faz a troca.
-- **Não copie o token nem o Cookie** para o `config.json`: um valor copiado vence e para de funcionar.
+**Token:**
+- Não copie o token nem o Cookie para o `config.json`, e não mande para ninguém. O painel pega o deles na hora, a cada sessão.
+- Um `_token` copiado no `corpo` é ignorado.
 - As consultas dos números (`summary.data`) não precisam de token nem de login: o site abre como Guest.
-
-Se o sorter **B** for o que precisa de troca, faça o contrário: `"padrao": true` no A e a `troca` no B. Se cada sorter tiver **um endereço próprio**, coloque `"sorterUrl": "http://…"` dentro dele. Assim não precisa de troca.
 
 ## Configuração (`config.json`)
 O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
@@ -219,7 +224,7 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
 
 | Campo | Padrão | Para quê |
 |---|---|---|
-| `sorterUrl` | `http://10.1.166.9` | endereço do monitor do sorter |
+| `sorterUrl` | `http://10.1.166.9/home` | a página do monitor do sorter, a mesma que abre no navegador. As consultas vão para a raiz do site (`/statis/summary.data`) |
 | `porta` | `3100` | porta do painel. O DashMaster usa a 3000; os dois podem rodar no mesmo computador |
 | `host` | `0.0.0.0` | `0.0.0.0` abre para a rede da base; `127.0.0.1` deixa só neste computador |
 | `atualizarSegundos` | `3600` | a tela com hoje consulta de novo a cada N segundos (1 hora) |
@@ -227,7 +232,7 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
 | `maxDias` | `92` | maior período que dá para escolher (um trimestre) |
 | `balancas` | `"auto"` | `"auto"` descobre as balanças com produção nos últimos 7 dias. Também aceita uma lista para os dois sorters (`[1, 2, 3]`) ou uma lista por sorter (`{"A": [1, 2], "B": [1, 2, 3]}`) |
 | `maxBalancas` | `40` | com `"auto"`: testa as balanças de 1 até este número |
-| `sorters` | B e A | os sorters do site; veja "Sorter A: configurar a troca" acima |
+| `sorters` | B e A, com `"troca": "auto"` | os sorters do site; veja "Troca de sorter" acima |
 | `appsScriptUrl` | vazio | URL do App da Web do Apps Script (termina em `/exec`). Vazio = sem ponte, só o painel local |
 | `chavePonte` | vazio | a chave que `configurar()` mostra no Apps Script |
 | `enviarMinutos` | `60` | a ponte lê o sorter e manda a cada N minutos |
@@ -289,6 +294,9 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
   - **Mesma tela:** `Index.html`, `Estilo.html`, `App.html` e `Resumo.gs` são gerados da página local por `node gerar-appscript.js`. O `Codigo.gs` e o `appsscript.json` ficam na pasta `appscript/`.
 - **Requisitos:** Node.js 18 ou mais novo, sem instalar pacotes.
 - **Gráficos:** vêm de Chart.js pela internet (jsDelivr ou cdnjs). Sem internet, a tela mostra os cartões e a tabela.
+- **Troca de sorter:**
+  - `lib/sorter.js` (`Sessao`): abre a página, lê o token (`<meta name="csrf-token">`, `<input name="_token">` ou o script) e manda na troca. O token vai no corpo (`_token`) e nos cabeçalhos `X-CSRF-TOKEN` e `X-XSRF-TOKEN`.
+  - `lib/troca.js`: descobre e testa a troca, comparando o Sort total de 7 dias de cada sorter (`group=0`).
 - **Testes**, com números fictícios:
   - `node test/test_sorter.js`: sorter simulado com dois dispositivos, balanças, sessão e troca com XSRF;
   - `node test/test_appscript.js`: ponte → Apps Script simulado (o mesmo `Codigo.gs`). O `getDados` tem que dar os mesmos números do painel local.
@@ -298,8 +306,11 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
 | Mensagem | O que fazer |
 |---|---|
 | "Não consegui acessar o sorter em http://10.1.166.9" | Este computador está fora da rede da base, ou o endereço mudou. Abra `http://10.1.166.9` no navegador dele; se abrir, confira `sorterUrl` no `config.json` |
-| "Falta configurar como trocar para o Sorter A" | Siga "Sorter A: configurar a troca" acima. O Sorter B continua funcionando |
-| "O site recusou a troca para o Sorter A (HTTP 419…)" | O pedido de troca no `config.json` não é o que o site espera (método, caminho ou corpo). Confira na aba Rede de novo |
+| "Não achei sozinho como trocar para o Sorter A" | Rode o `descobrir.bat` e mande o `descoberta.txt`. O Sorter B continua funcionando |
+| "O site recusou o token (_token) na troca… (HTTP 419)" | A página não entregou o token da sessão, ou o pedido mudou. Rode o `descobrir.bat` |
+| "O site recusou a troca para o Sorter A" | O pedido de troca no `config.json` não é o que o site espera (método, caminho ou corpo). Rode o `descobrir.bat` ou confira na aba Rede |
+| "Os números do Sorter A vieram iguais aos do outro sorter" | A troca respondeu, mas não mudou o sorter. Rode o `descobrir.bat` |
+| "No site do sorter a troca de dispositivo vale para todo mundo" | O site guarda a escolha para todos, não por sessão. O painel não troca, para não mudar a tela de quem usa o sorter: só o sorter padrão aparece |
 | "O sorter não separou por balança" | O site ignorou o número da balança. Coloque a lista em `balancas` no `config.json` e mande um print da tela com uma balança escolhida |
 | "O sorter não respondeu em JSON" | A tela do sorter pediu login ou mudou. Mande um print da tela e da requisição `summary.data` (F12 → Rede), **sem** o Cookie e o token |
 | "A porta 3100 já está em uso" | O painel já está aberto em outra janela. Feche-a ou troque `porta` no `config.json` |

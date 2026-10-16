@@ -11,9 +11,9 @@ const path = require('path');
 const zlib = require('zlib');
 const {VERSAO} = require('./server.js');
 
-const FILES = ['server.js', 'lib/resumo.js', 'lib/sorter.js', 'lib/ponte.js', 'public/index.html', 'public/app.js', 'public/app.css',
+const FILES = ['server.js', 'lib/resumo.js', 'lib/sorter.js', 'lib/troca.js', 'lib/ponte.js', 'public/index.html', 'public/app.js', 'public/app.css',
   'appscript/Codigo.gs', 'appscript/Resumo.gs', 'appscript/Index.html', 'appscript/Estilo.html', 'appscript/App.html', 'appscript/appsscript.json',
-  'iniciar.bat', 'iniciar-com-windows.bat', 'testar.bat', 'LEIA_SORTER.md'];
+  'iniciar.bat', 'iniciar-com-windows.bat', 'testar.bat', 'descobrir.bat', 'LEIA_SORTER.md'];
 // Os arquivos do Apps Script saem da mesma página do painel local: confere antes de empacotar.
 const gen = require('./gerar-appscript.js').arquivos();
 Object.keys(gen).forEach(f => {

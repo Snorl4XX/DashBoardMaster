@@ -15,7 +15,7 @@
  *
  * Quem abre o link vê o painel; só a ponte (com a chave) grava dados.
  */
-var VERSAO = '2.1.0';
+var VERSAO = '2.2.0';
 var TZ = 'America/Sao_Paulo';
 var MAX_DIAS = 92;                 // maior período na tela (um trimestre)
 var GUARDAR_DIAS = 400;            // dias guardados na planilha (os mais antigos saem sozinhos)
@@ -330,7 +330,7 @@ function getDados(q) {
     var inf = {id: d.id, nome: d.nome, nomeZh: d.nomeZh, ok: false};
     if (!d.pronto) {
       inf.pendente = true;
-      inf.error = 'Falta configurar como trocar para o ' + d.nome + ' (config.json da ponte → sorters → troca).';
+      inf.error = d.erro || 'Falta configurar como trocar para o ' + d.nome + ' (rode o descobrir.bat no computador da base).';
       return {info: inf};
     }
     if (bal && bal.dev !== d.id) { inf.ok = true; inf.fora = true; return {info: inf, rows: [], prevRows: [], balancas: null}; }

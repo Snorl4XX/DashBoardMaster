@@ -5,9 +5,10 @@
  *
  * - Dois dispositivos (B = o padrão do site, A) e balanças (inductionno) fictícias por dispositivo; inductionno=0 = soma
  *   de todas. group=60 = uma linha por hora; group=0 = uma linha só para o período ("no group by").
- * - Sessão como um site Laravel: GET /home entrega os cookies laravel_session e XSRF-TOKEN; POST /device/switch
- *   (corpo device=A, cabeçalho X-XSRF-TOKEN igual ao cookie) troca o dispositivo da sessão. O cookie "device" também
- *   escolhe o dispositivo (para a troca por cookie).
+ * - Sessão como um site Laravel: GET /home entrega os cookies laravel_session e XSRF-TOKEN e a página com o token CSRF
+ *   (<meta name="csrf-token">) e a janela "device choose" (veja paginaHome). A troca como o site faz leva o _token no
+ *   corpo (o que aparece no Payload do navegador); sem ele, HTTP 419. Também: POST /device/switch (device=A, cabeçalho
+ *   X-XSRF-TOKEN) e o cookie "device" (troca por cookie).
  */
 const http = require('http');
 const crypto = require('crypto');
@@ -79,41 +80,107 @@ function parseCookies(h) {
  * srv.mode: '' normal · 'code' recusa (code 0) · 'html' página de login · 'slow' demora 20 s · 'semBalanca' ignora o
  * inductionno (devolve o total para qualquer balança). srv.calls: [{url, device, xsrf}] · srv.trocas: pedidos de troca.
  */
+/** Números dos dispositivos na lista "device choose" do site falso (de propósito fora de ordem: B vem primeiro). */
+const IDS = {3: 'A', 7: 'B'};
+/**
+ * A página /home como um site Laravel + layui: token CSRF no <meta>, o dispositivo atual, a janela "device choose" com
+ * Cross-belt GRU-B / GRU-A e o pedido de troca. modo: 'ajax' ($.post com _token e device_id) · 'form' (formulário com
+ * lista) · 'link' (links GET) · 'concat' ($.ajax para /home/device/<id>) · 'global' (como ajax, mas a troca vale para
+ * todo o site) · 'nada' (página sem a troca) · 'isca' (as opções, mas só o pedido que não troca nada). Sempre com uma "isca" (/home/setLang) que responde OK e não troca nada.
+ */
+function paginaHome(modo, s) {
+  const tok = s ? s.csrf : '', atual = s && s.device === 'A' ? 'Cross-belt GRU-A' : 'Cross-belt GRU-B';
+  const topo = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="csrf-token" content="' + tok + '"><title>巴西GRU分拣机</title>' +
+    '<script src="/static/layui/layui.js"></script></head><body><div class="header"><a href="/home">Home</a> <a href="/statis/summary">summary statistics</a>' +
+    ' <a href="/logout">Guest</a> <span class="device-now">' + (modo === 'nada' ? '' : atual) + '</span> <button id="switchBtn">switch device</button></div>' +
+    '<form action="/home/search" method="get"><input name="q"></form>' +
+    '<script>$.post("/home/setLang", {_token: $("meta[name=csrf-token]").attr("content"), lang: "zh"});</script>';
+  const fim = '</body></html>';
+  if (modo === 'nada') return topo + fim;
+  if (modo === 'isca') {
+    return topo + '<div id="deviceChoose"><ul><li data-id="7">Cross-belt GRU-B</li><li data-id="3">Cross-belt GRU-A</li></ul></div>' + fim;
+  }
+  if (modo === 'form') {
+    return topo + '<div id="deviceChoose" style="display:none"><h3>device choose</h3><form action="/device/choose" method="post">' +
+      '<input type="hidden" name="_token" value="' + tok + '"><select name="device"><option value="7">Cross-belt GRU-B</option>' +
+      '<option value="3">Cross-belt GRU-A</option></select><button type="submit">OK</button></form></div>' + fim;
+  }
+  if (modo === 'link') {
+    return topo + '<div id="deviceChoose"><h3>device choose</h3><ul><li><a href="/device/use/7">Cross-belt GRU-B</a></li>' +
+      '<li><a href="/device/use/3">Cross-belt GRU-A</a></li></ul></div>' + fim;
+  }
+  if (modo === 'concat') {
+    return topo + '<div id="deviceChoose"><a href="javascript:;" onclick="trocar(7)">Cross-belt GRU-B</a> <a href="javascript:;" onclick="trocar(3)">Cross-belt GRU-A</a></div>' +
+      '<script>function trocar(id){ $.ajax({url: "/home/device/" + id, type: "post", data: {_token: "' + tok + '"}, success: function(){ location.reload(); }}); }</script>' + fim;
+  }
+  return topo + '<div id="deviceChoose" style="display:none"><h3>device choose</h3><ul class="device-list">' +
+    '<li class="device-item" data-id="7"><i class="layui-icon"></i><span>Cross-belt GRU-B</span></li>' +
+    '<li class="device-item" data-id="3"><i class="layui-icon"></i><span>Cross-belt GRU-A</span></li></ul></div>' +
+    '<script>layui.use(["layer"], function(){ var layer = layui.layer;\n' +
+    '  $("#switchBtn").click(function(){ layer.open({type: 1, title: "device choose", content: $("#deviceChoose")}); });\n' +
+    '  $(".device-item").click(function(){ $.post("/home/switchDevice", {_token: $("meta[name=csrf-token]").attr("content"), device_id: $(this).data("id")},' +
+    ' function(res){ if (res.code == 1) location.reload(); else layer.msg(res.msg); }); });\n});</script>' + fim;
+}
+
 function startFakeSorter(opts) {
   opts = opts || {};
-  const srv = {calls: [], trocas: [], mode: '', sessions: {}};
+  const srv = {calls: [], trocas: [], mode: '', pagina: opts.pagina || 'ajax', exigirTokenNoCorpo: true, globalDevice: null, sessions: {}};
   srv.server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     const ck = parseCookies(req.headers.cookie);
     let sid = ck.laravel_session;
     const head = {'Content-Type': 'application/json;charset=UTF-8'};
     const novaSessao = () => {
-      sid = crypto.randomBytes(8).toString('hex');
-      const xsrf = crypto.randomBytes(12).toString('base64');
-      srv.sessions[sid] = {device: null, xsrf};
-      return ['laravel_session=' + sid + '; Path=/; HttpOnly', 'XSRF-TOKEN=' + encodeURIComponent(xsrf) + '; Path=/'];
+      if (!sid || !srv.sessions[sid]) {
+        sid = crypto.randomBytes(8).toString('hex');
+        const csrf = crypto.randomBytes(20).toString('hex');
+        srv.sessions[sid] = {device: null, csrf, xsrf: 'enc.' + csrf};
+      }
+      return ['laravel_session=' + sid + '; Path=/; HttpOnly', 'XSRF-TOKEN=' + encodeURIComponent(srv.sessions[sid].xsrf) + '; Path=/'];
     };
+    const corpo = fn => { let b = ''; req.on('data', c => { b += c; }); req.on('end', () => fn(b, Object.fromEntries(new URLSearchParams(b)))); };
+    const trocar = (dev, s) => { if (srv.pagina === 'global') srv.globalDevice = dev; else s.device = dev; };
+    const json = (code, obj) => { res.writeHead(code, head); res.end(JSON.stringify(obj)); };
     if (u.pathname === '/home') {
-      res.writeHead(200, {'Content-Type': 'text/html', 'Set-Cookie': novaSessao()});
-      res.end('<!DOCTYPE html><html><body>sorter</body></html>');
+      res.writeHead(200, {'Content-Type': 'text/html; charset=UTF-8', 'Set-Cookie': novaSessao()});
+      res.end(paginaHome(srv.pagina, srv.sessions[sid]));
       return;
     }
+    // Troca à mão (V2.1): device=A|B com X-XSRF-TOKEN do cookie.
     if (u.pathname === '/device/switch') {
-      let body = '';
-      req.on('data', c => { body += c; });
-      req.on('end', () => {
+      corpo(body => {
         const s = srv.sessions[sid], x = req.headers['x-xsrf-token'];
-        srv.trocas.push({method: req.method, body, xsrf: x || '', okToken: !!(s && x && x === s.xsrf)});
-        if (req.method !== 'POST' || !s || x !== s.xsrf) { res.writeHead(419, head); res.end(JSON.stringify({code: 0, msg: 'CSRF token mismatch'})); return; }
+        srv.trocas.push({method: req.method, path: u.pathname, body, xsrf: x || '', okToken: !!(s && x && x === s.xsrf)});
+        if (req.method !== 'POST' || !s || x !== s.xsrf) { json(419, {code: 0, msg: 'CSRF token mismatch'}); return; }
         const m = body.match(/device=([A-Za-z])/);
         s.device = m ? m[1] : null;
-        res.writeHead(200, head);
-        res.end(JSON.stringify({code: 1, msg: 'Succeed'}));
+        json(200, {code: 1, msg: 'Succeed'});
+      });
+      return;
+    }
+    // Trocas como o site faz (o _token da sessão no corpo, igual ao que aparece no Payload do navegador).
+    const ROTA = /^\/home\/switchDevice$|^\/device\/choose$|^\/device\/use\/(\d+)$|^\/home\/device\/(\d+)$|^\/home\/setLang$/;
+    const rota = u.pathname.match(ROTA);
+    if (rota) {
+      corpo((body, f) => {
+        const s = srv.sessions[sid];
+        const tokOk = !!(s && (f._token === s.csrf || req.headers['x-csrf-token'] === s.csrf));
+        srv.trocas.push({method: req.method, path: u.pathname, campos: Object.keys(f), okToken: tokOk, tokenNoCorpo: !!(s && f._token === s.csrf)});
+        if (!s) { json(419, {code: 0, msg: 'Page expired'}); return; }
+        const isGet = req.method === 'GET';
+        if (!isGet && !(srv.exigirTokenNoCorpo ? f._token === s.csrf : tokOk)) { json(419, {code: 0, msg: 'CSRF token mismatch'}); return; }
+        if (u.pathname === '/home/setLang') { json(200, {code: 1, msg: 'Succeed'}); return; }   // isca: responde OK e não troca nada
+        const id = rota[1] || rota[2] || f.device_id || f.device;
+        const dev = IDS[id];
+        if (!dev) { json(200, {code: 0, msg: '设备不存在'}); return; }
+        trocar(dev, s);
+        if (/^\/device\//.test(u.pathname)) { res.writeHead(302, {Location: '/home'}); res.end(); return; }
+        json(200, {code: 1, msg: 'Succeed'});
       });
       return;
     }
     if (u.pathname !== '/statis/summary.data') { res.writeHead(404); res.end('nao'); return; }
-    const device = ck.device || (sid && srv.sessions[sid] && srv.sessions[sid].device) || 'B';
+    const device = ck.device || (sid && srv.sessions[sid] && srv.sessions[sid].device) || srv.globalDevice || 'B';
     srv.calls.push({url: req.url, device});
     if (srv.mode === 'html') { res.writeHead(200, {'Content-Type': 'text/html'}); res.end('<!DOCTYPE html><html><body>login</body></html>'); return; }
     if (srv.mode === 'code') { res.writeHead(200, head); res.end(JSON.stringify({code: 0, msg: '失败', count: 0, data: []})); return; }
@@ -134,4 +201,4 @@ function startFakeSorter(opts) {
   return new Promise(resolve => srv.server.listen(0, '127.0.0.1', () => { srv.port = srv.server.address().port; srv.url = 'http://127.0.0.1:' + srv.port; resolve(srv); }));
 }
 
-module.exports = {BALANCAS, makeDay, sumSiteRows, startFakeSorter};
+module.exports = {BALANCAS, IDS, makeDay, sumSiteRows, paginaHome, startFakeSorter};

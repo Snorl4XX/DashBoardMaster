@@ -33,10 +33,10 @@ function get(port, p, headers, method) {
 }
 const json = async (port, p) => JSON.parse((await get(port, p)).text);
 function freePort() { return new Promise(r => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); }); }
-function runTeste(env) {
+function runNode(args, env) {
   // Assíncrono: o sorter falso roda neste mesmo processo e precisa responder enquanto o --teste espera.
   return new Promise(resolve => {
-    const ch = spawn(process.execPath, [path.join(ROOT, 'server.js'), '--teste'], {env, stdio: ['ignore', 'pipe', 'pipe']});
+    const ch = spawn(process.execPath, [path.join(ROOT, 'server.js')].concat(args), {env, stdio: ['ignore', 'pipe', 'pipe']});
     let so = '', se = '';
     ch.stdout.on('data', x => { so += x; }); ch.stderr.on('data', x => { se += x; });
     ch.on('exit', code => resolve({status: code, stdout: so, stderr: se}));
@@ -108,9 +108,10 @@ function S_add(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.
   process.env.SORTER_CONFIG = cfgNew;
   const srvMod = require('../server.js');
   const c0 = srvMod.loadConfig();
-  check(fs.existsSync(cfgNew) && c0.porta === 3100 && c0.sorterUrl === 'http://10.1.166.9' && c0.atualizarSegundos === 3600 && c0.balancas === 'auto' &&
-    c0.sorters.map(x => x.id).join() === 'B,A' && srvMod.pronto(c0.sorters[0]) && !srvMod.pronto(c0.sorters[1]) && c0.sorters[1].url === 'http://10.1.166.9',
-    'config.json criado com o padrão (porta 3100, 1 hora, Sorter B pronto, Sorter A falta a troca)', c0);
+  check(fs.existsSync(cfgNew) && c0.porta === 3100 && c0.sorterUrl === 'http://10.1.166.9' && c0.pagina === '/home' && c0.atualizarSegundos === 3600 &&
+    c0.balancas === 'auto' && c0.sorters.map(x => x.id + ':' + x.troca).join() === 'B:auto,A:auto' && c0.sorters.every(srvMod.pronto) &&
+    c0.sorters[1].url === 'http://10.1.166.9' && c0.sorters[1].pagina === '/home',
+    'config.json criado com o padrão (página http://10.1.166.9/home, 1 hora, troca de sorter descoberta sozinha)', c0);
   const bads = [{sorterUrl: 'javascript:alert(1)'}, {sorters: [{id: 'B'}, {id: 'B'}]}, {sorters: [{id: 'a b'}]}, {sorters: [{id: 'A', sorterUrl: 'ftp://x'}]}];
   const msgs = bads.map(b => { fs.writeFileSync(cfgNew, JSON.stringify(b)); try { srvMod.loadConfig(); return ''; } catch (e) { return e.message; } });
   check(/sorterUrl/.test(msgs[0]) && /mesmo "id"/.test(msgs[1]) && /id/.test(msgs[2]) && /sorterUrl/.test(msgs[3]), 'configuração inválida é recusada com mensagem clara', msgs);
@@ -129,7 +130,7 @@ function S_add(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.
   const sA = new S.Sessao(fake.url, devA);
   await Promise.all([sA.garantir(), sA.garantir(), sA.garantir()]);
   const gotA = await S.fetchRange(fake.url, TODAY, TODAY, {sessao: sA});
-  check(fake.trocas.length === 1 && fake.trocas[0].okToken && fake.trocas[0].body === 'device=A' && sA.cookies.laravel_session &&
+  check(fake.trocas.length === 1 && fake.trocas[0].okToken && /^device=A&_token=[0-9a-f]{40}$/.test(fake.trocas[0].body) && sA.cookies.laravel_session &&
     gotA.length === 24 && R.sumRows(gotA).total === R.sumRows(rowsA).total && fake.calls[fake.calls.length - 1].device === 'A',
     'troca para o Sorter A: abre a sessão, manda X-XSRF-TOKEN do próprio cookie do site (uma troca só) e lê o A', fake.trocas);
   await sA.garantir();
@@ -142,7 +143,7 @@ function S_add(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.
     'troca por cookie; sem troca = o dispositivo padrão do site (B)');
   let bad419 = '';
   try { await new S.Sessao(fake.url, {id: 'A', nome: 'Sorter A', troca: {metodo: 'GET', caminho: '/device/switch'}}).garantir(); } catch (e) { bad419 = e.message; }
-  check(/recusou a troca para o Sorter A \(HTTP 419/.test(bad419), 'troca recusada pelo site: mensagem clara', bad419);
+  check(/recusou o token \(_token\) na troca para o Sorter A \(HTTP 419\)/.test(bad419), 'troca recusada pelo site: mensagem clara', bad419);
   const b3 = await S.fetchRange(fake.url, TODAY, TODAY, {inductionno: 3}), g0 = await S.fetchRange(fake.url, '2026-10-10', TODAY, {group: 0});
   const all6 = []; days('2026-10-10', TODAY).forEach(d => makeDay(d, d === TODAY ? {uptoHour: 15} : {}).forEach(r => all6.push(r)));
   check(R.sumRows(b3).total === sumOf(makeDay(TODAY, {balanca: 3, uptoHour: 15}), 'sorter_sorttotal') && R.sumRows(b3).total < s.total &&
@@ -151,7 +152,7 @@ function S_add(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.
   // ---------- 5. Estado do servidor: filtros A / B / todos, balança, turno, horário ----------
   process.env.SORTER_AGORA = NOW;
   const cfgFile = path.join(tmp, 'config.json');
-  const sorters = [{id: 'B', nome: 'Sorter B', nomeZh: '分拣机 B套', padrao: true}, {id: 'A', nome: 'Sorter A', nomeZh: '分拣机 A套', troca: devA.troca}];
+  const sorters = [{id: 'B', nome: 'Sorter B', nomeZh: '分拣机 B套', padrao: true, troca: false}, {id: 'A', nome: 'Sorter A', nomeZh: '分拣机 A套', troca: devA.troca}];
   fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: fake.url + '/', cacheSegundos: 45, maxBalancas: 10, sorters}));
   process.env.SORTER_CONFIG = cfgFile;
   const cfg = srvMod.loadConfig();
@@ -207,12 +208,15 @@ function S_add(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.
     longo.balancas.reduce((a, b) => a + b.total, 0) === R.sumRows(longo.rows).total, 'período até hoje, no máximo 92 dias; acima de 31 dias, balanças com uma linha cada (sem turno)',
     [fut.to, inval.from, longo.from, longo.devices[0]]);
 
-  // Sorter A sem a troca configurada.
+  // Página do sorter sem a troca: o A não é lido (seria o B com o nome errado).
+  fake.pagina = 'nada';
   fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: fake.url, maxBalancas: 10, balancas: [1, 2, 3]}));
   const stP = srvMod.criarEstado(srvMod.loadConfig());
   const pA = await stP.dados({de: TODAY, ate: TODAY, sorter: 'A'}), pT = await stP.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
-  check(!pA.ok && pA.devices[0].pendente && /Falta configurar como trocar para o Sorter A/.test(pA.error) && pT.ok && R.sumRows(pT.rows).total === totB &&
-    pT.devices.find(x => x.id === 'A').pendente && pT.balancas.map(b => b.id).join() === 'B:1,B:2,B:3', 'Sorter A sem troca: aviso claro; Todos juntos segue com o B; lista de balanças do config.json');
+  fake.pagina = 'ajax';
+  check(!pA.ok && pA.devices[0].pendente && /Não achei sozinho como trocar para o Sorter A/.test(pA.error) && /descobrir\.bat/.test(pA.error) && pT.ok &&
+    R.sumRows(pT.rows).total === totB && pT.devices.find(x => x.id === 'A').pendente && pT.balancas.map(b => b.id).join() === 'B:1,B:2,B:3',
+    'troca não achada: aviso claro (descobrir.bat); Todos juntos segue com o B; lista de balanças do config.json', pA.error);
   // Site que ignora o filtro de balança.
   fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: fake.url, maxBalancas: 4}));
   const stI = srvMod.criarEstado(srvMod.loadConfig());
@@ -273,12 +277,76 @@ function S_add(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.
 
   // ---------- 7. node server.js --teste (testar.bat) ----------
   const fake2 = await startFakeSorter({today: TODAY, nowHour: 15});
-  fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: fake2.url, maxBalancas: 10}));
-  const tst = await runTeste(env);
-  check(tst.status === 0 && new RegExp('Total ' + totB + ' · válidos ' + s.valid + ' · No Sort Code ' + s.noInfo + ' · anormais ' + s.abnormal).test(tst.stdout) &&
-    /Andares: PS01 \d+ · PS02 \d+ · PS03 \d+/.test(tst.stdout) && new RegExp('Balanças: ' + BALANCAS.B.join(', ')).test(tst.stdout) &&
-    /Sorter A[\s\S]*falta configurar a troca/.test(tst.stdout), 'testar.bat (node server.js --teste) mostra os totais, as balanças e o que falta configurar', tst.stdout + tst.stderr);
+  fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: fake2.url + '/home', maxBalancas: 10}));
+  const tst = await runNode(['--teste'], env);
+  check(tst.status === 0 && /Troca de sorter: achada na página \/home \(POST \/home\/switchDevice \(campo device_id\)\)/.test(tst.stdout) &&
+    new RegExp('Total ' + totB + ' · válidos ' + s.valid + ' · No Sort Code ' + s.noInfo + ' · anormais ' + s.abnormal).test(tst.stdout) &&
+    new RegExp('Sorter A[\\s\\S]*Total ' + totA + ' ').test(tst.stdout) && /Andares: PS01 \d+ · PS02 \d+ · PS03 \d+/.test(tst.stdout) &&
+    new RegExp('Balanças: ' + BALANCAS.B.join(', ')).test(tst.stdout), 'testar.bat (node server.js --teste): acha a troca, mostra os totais do B e do A e as balanças', tst.stdout + tst.stderr);
   fake2.server.close();
+
+  // ---------- 8. Troca de sorter com o _token, descoberta na página /home ----------
+  const fake3 = await startFakeSorter({today: TODAY, nowHour: 15});
+  // O Payload como aparece no navegador (com um _token velho): o painel troca pelo da sessão, lido na /home.
+  const s3 = new S.Sessao(fake3.url, {id: 'A', nome: 'Sorter A', troca: {metodo: 'POST', caminho: '/home/switchDevice', corpo: '_token=COPIADO_DO_NAVEGADOR&device_id=3'}}, 15000, '/home');
+  await s3.garantir();
+  const g3 = await S.fetchRange(fake3.url, TODAY, TODAY, {sessao: s3}), tr3 = fake3.trocas[fake3.trocas.length - 1];
+  check(s3.csrf.length === 40 && tr3.tokenNoCorpo && tr3.campos.join() === '_token,device_id' && R.sumRows(g3).total === totA,
+    'Payload copiado do navegador: o _token velho vira o da sessão (lido na /home) e a troca funciona', tr3);
+  process.env.SORTER_CONFIG = cfgFile;
+  const urls = ['http://10.1.166.9/home/', 'http://10.1.166.9', 'http://10.1.166.9/statis/summary', 'http://10.1.166.9:8080/index']
+    .map(u => { fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: u})); const c = srvMod.loadConfig(); return c.sorterUrl + ' ' + c.pagina; });
+  check(urls.join() === 'http://10.1.166.9 /home,http://10.1.166.9 /home,http://10.1.166.9 /home,http://10.1.166.9:8080 /index',
+    '"sorterUrl" aceita o endereço da página (http://10.1.166.9/home): as consultas vão para a raiz do site', urls);
+  const cfg3 = path.join(tmp, 'c3.json'), env3 = Object.assign({}, process.env, {SORTER_CONFIG: cfg3, SORTER_AGORA: NOW});
+  process.env.SORTER_CONFIG = cfg3;
+  for (const modo of ['ajax', 'form', 'link', 'concat']) {
+    fake3.pagina = modo; fake3.trocas = [];
+    fs.writeFileSync(cfg3, JSON.stringify({sorterUrl: fake3.url + '/home', maxBalancas: 3}));
+    const st3 = srvMod.criarEstado(srvMod.loadConfig());
+    const a3 = await st3.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
+    const salvo = JSON.parse(fs.readFileSync(cfg3, 'utf8')).sorters;
+    const reais = fake3.trocas.filter(t => t.path !== '/home/setLang');
+    check(a3.ok && R.sumRows(a3.rowsByDevice.A).total === totA && R.sumRows(a3.rowsByDevice.B).total === totB && !a3.devices.some(d => d.aviso) &&
+      salvo.every(x => x.troca && x.troca.descoberta && x.troca.caminho) && reais.length && reais.every(t => t.method === 'GET' || t.tokenNoCorpo),
+      'troca descoberta sozinha na /home (página "' + modo + '"): A e B certos, _token da sessão no corpo, gravada no config.json',
+      {erro: a3.error, salvo: salvo.map(x => x.troca), reais});
+  }
+  const st4 = srvMod.criarEstado(srvMod.loadConfig());
+  const a4 = await st4.dados({de: TODAY, ate: TODAY, sorter: 'A'});
+  check(a4.ok && R.sumRows(a4.rows).total === totA && st4.statusTroca() === null, 'ao reabrir, usa a troca gravada (não descobre de novo)');
+  fake3.pagina = 'isca';
+  fs.writeFileSync(cfg3, JSON.stringify({sorterUrl: fake3.url + '/home', maxBalancas: 3}));
+  const st5 = srvMod.criarEstado(srvMod.loadConfig());
+  const a5 = await st5.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
+  check(a5.ok && a5.devices.find(d => d.id === 'A').pendente && /nenhuma mudou os números/.test(a5.devices.find(d => d.id === 'A').error) &&
+    R.sumRows(a5.rows).total === totB && st5.statusTroca().relatorio.some(l => /✗ POST \/home\/setLang/.test(l)),
+    'pedido que responde OK mas não troca nada é recusado (os números de A e B têm que mudar)', st5.statusTroca().relatorio);
+  fake3.pagina = 'global';
+  fs.writeFileSync(cfg3, JSON.stringify({sorterUrl: fake3.url + '/home', maxBalancas: 3}));
+  const st6 = srvMod.criarEstado(srvMod.loadConfig());
+  const a6 = await st6.dados({de: TODAY, ate: TODAY, sorter: 'A'});
+  check(!a6.ok && /vale para todo mundo/.test(a6.error) && fake3.globalDevice === 'B', 'troca que vale para todo o site: o painel não troca e devolve o sorter que estava', a6.error);
+  fake3.pagina = 'ajax'; fake3.globalDevice = null;
+  fs.writeFileSync(cfg3, JSON.stringify({sorterUrl: fake3.url + '/home', maxBalancas: 3,
+    sorters: [{id: 'B', padrao: true, troca: false}, {id: 'A', troca: {metodo: 'POST', caminho: '/home/setLang', corpo: 'lang=zh'}}]}));
+  const a7 = await srvMod.criarEstado(srvMod.loadConfig()).dados({de: TODAY, ate: TODAY, sorter: 'todos'});
+  check(a7.ok && /vieram iguais/.test(a7.devices.find(d => d.id === 'A').aviso || ''), 'A e B com os mesmos números: aviso de que a troca não funcionou');
+  // descobrir.bat
+  fs.writeFileSync(cfg3, JSON.stringify({sorterUrl: fake3.url + '/home', maxBalancas: 3}));
+  const ds = await runNode(['--descobrir'], env3);
+  const txt = fs.readFileSync(path.join(tmp, 'descoberta.txt'), 'utf8');
+  const segredos = Object.keys(fake3.sessions).concat(Object.values(fake3.sessions).map(x => x.csrf));
+  check(ds.status === 0 && /RESULTADO: troca achada \(POST \/home\/switchDevice \(campo device_id\)\)/.test(ds.stdout) && /_token \(CSRF\) na página: sim/.test(txt) &&
+    /Opções do Sorter A \("GRU-A" na página\): id=3/.test(txt) && segredos.every(x => ds.stdout.indexOf(x) < 0 && txt.indexOf(x) < 0) &&
+    JSON.parse(fs.readFileSync(cfg3, 'utf8')).sorters.every(x => x.troca && x.troca.descoberta),
+    'descobrir.bat: acha, testa, grava no config.json e escreve descoberta.txt SEM token nem cookie', ds.stdout + ds.stderr);
+  fake3.pagina = 'nada';
+  fs.writeFileSync(cfg3, JSON.stringify({sorterUrl: fake3.url + '/home', maxBalancas: 3}));
+  const dn = await runNode(['--descobrir'], env3);
+  check(dn.status === 1 && /não achei a troca/.test(fs.readFileSync(path.join(tmp, 'descoberta.txt'), 'utf8')), 'descobrir.bat sem a troca na página: diz que não achou', dn.stdout);
+  fake3.server.close();
+  if (env0 === undefined) delete process.env.SORTER_CONFIG; else process.env.SORTER_CONFIG = env0;
   fs.rmSync(tmp, {recursive: true, force: true});
   console.log('OK: ' + passed + ' verificações do Painel do Sorter passaram (' + Math.round((Date.now() - t0) / 1000) + ' s; sorter simulado por HTTP).');
 })().catch(e => { if (!process.exitCode) console.error(e); process.exit(1); });

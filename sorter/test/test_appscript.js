@@ -174,15 +174,24 @@ function unpackRes(res) {
   const conv = unpackRes(g.chamar('getDados', {de: '2026-10-10', ate: '2026-10-10', sorter: 'A'}));
   check(conv.ok && conv.rows.length === 24 && conv.rows[0].date === '2026-10-10', 'célula de data convertida pelo Planilhas ainda é lida');
 
-  // ---------- 6. Sorter A sem troca, chave errada, implantação sem acesso anônimo ----------
-  fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: fake.url, maxBalancas: 10, appsScriptUrl: gas.url, chavePonte: cf.chave, diasHistorico: 3}));
+  // ---------- 6. Troca de sorter não achada na página, chave errada, implantação sem acesso anônimo ----------
+  fake.pagina = 'nada';
+  fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: fake.url + '/home', maxBalancas: 10, appsScriptUrl: gas.url, chavePonte: cf.chave, diasHistorico: 3}));
   const cfgP = srv.loadConfig(), ponteP = criarPonte(cfgP, srv.criarEstado(cfgP), deps);
   await ponteP.enviar({});
+  fake.pagina = 'ajax';
   const pA = g.chamar('getDados', {de: TODAY, ate: TODAY, sorter: 'A'}), pT = unpackRes(g.chamar('getDados', {de: TODAY, ate: TODAY, sorter: 'todos'}));
   const bootP = JSON.parse(g.ctx.doGet({parameter: {}}).s.match(/window\.__SORTER__ = (\{.*?\});<\/script>/)[1]);
-  check(!pA.ok && pA.devices[0].pendente && /Falta configurar como trocar para o Sorter A/.test(pA.error) && pT.ok &&
+  check(!pA.ok && pA.devices[0].pendente && /Não achei sozinho como trocar para o Sorter A[\s\S]*descobrir\.bat/.test(pA.error) && pT.ok &&
     R.sumRows(pT.rows).total === R.sumRows(dB.rows).total && bootP.sorters.map(s => s.id + (s.pronto ? '+' : '-')).join() === 'B+,A-',
-    'Sorter A sem troca na ponte: aviso no painel; Todos juntos com o B; a página já abre com o A marcado');
+    'troca não achada pela ponte: o painel do Google mostra o motivo; Todos juntos com o B; a página abre com o A marcado', pA.error);
+  // Com a troca achada sozinha na /home, a ponte manda o A certo.
+  fs.writeFileSync(cfgFile, JSON.stringify({sorterUrl: fake.url + '/home', maxBalancas: 10, appsScriptUrl: gas.url, chavePonte: cf.chave, diasHistorico: 3}));
+  const cfgQ = srv.loadConfig(), estQ = srv.criarEstado(cfgQ);
+  const rQ = await criarPonte(cfgQ, estQ, deps).enviar({force: true});
+  const qA = unpackRes(g.chamar('getDados', {de: TODAY, ate: TODAY, sorter: 'A'}));
+  check(rQ.sorters.every(x => x.pronto && !x.erro) && qA.ok && igual(qA.rows, (await estado.dados({de: TODAY, ate: TODAY, sorter: 'A'})).rows),
+    'troca achada sozinha (com o _token da /home): a ponte manda o Sorter A certo', rQ.sorters);
   const errada = criarPonte(Object.assign({}, cfg, {chavePonte: 'x'.repeat(40)}), estado, deps);
   let e1 = ''; try { await errada.enviar({}); } catch (e) { e1 = e.message; }
   gas.modo = 'login';

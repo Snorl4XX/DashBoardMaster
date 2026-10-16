@@ -84,7 +84,7 @@ function criarPonte(cfg, estado, deps) {
       if (!s.pronto) continue;
       try {
         let list = [];
-        try { list = await estado.balancasDe(dev, today, !!opts.force); } catch (e) { s.balancaErro = e.message; }
+        try { list = await estado.balancasDe(dev, today, !!opts.force); } catch (e) { if (e.pendente) throw e; s.balancaErro = e.message; }
         s.balancas = list;
         const tem = (remoto.dias && remoto.dias[dev.id]) || {};
         const precisa = [];
@@ -111,6 +111,7 @@ function criarPonte(cfg, estado, deps) {
         }
       } catch (e) {
         s.erro = e.message;
+        if (e.pendente) s.pronto = false;   // troca de sorter não achada: o painel mostra o motivo
       }
     }
     await despachar();
