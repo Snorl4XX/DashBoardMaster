@@ -25,13 +25,14 @@ function arquivos() {
   index = trocar(index, '<link rel="stylesheet" href="app.css">', "<?!= include('Estilo'); ?>");
   index = trocar(index, '<script>window.__SORTER__ = __SORTER_BOOT__;</script>', '<script>window.__SORTER__ = <?!= boot ?>;</script>');
   index = trocar(index, '<script src="resumo.js"></script>', '<script><?!= resumoSource_(); ?></script>');
+  index = trocar(index, '<script src="planilha.js"></script>\n', '');
   index = trocar(index, '<script src="app.js"></script>', "<?!= include('App'); ?>");
   if (/<\?(?!!= (include\('(Estilo|App)'\);|boot|resumoSource_\(\);) \?>)/.test(index)) throw new Error('Index.html com <? inesperado.');
   return {
     'Resumo.gs': '/* ' + AVISO + 'lib/resumo.js: não edite aqui. */\n' + ler('lib/resumo.js'),
     'Index.html': index.replace('<!DOCTYPE html>', '<!DOCTYPE html>\n<!-- ' + AVISO + 'public/index.html: não edite aqui. -->'),
     'Estilo.html': '<!-- ' + AVISO + 'public/app.css: não edite aqui. -->\n<style>\n' + ler('public/app.css') + '</style>\n',
-    'App.html': '<!-- ' + AVISO + 'public/app.js: não edite aqui. -->\n<script>\n' + ler('public/app.js') + '</script>\n'
+    'App.html': '<!-- ' + AVISO + 'lib/planilha.js e public/app.js: não edite aqui. -->\n<script>\n' + ler('lib/planilha.js') + '</script>\n<script>\n' + ler('public/app.js') + '</script>\n'
   };
 }
 

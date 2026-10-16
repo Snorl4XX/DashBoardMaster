@@ -68,6 +68,10 @@
           <button type="button" class="lang-btn" data-lang="pt" aria-pressed="true">PT-BR</button>
           <button type="button" class="lang-btn" data-lang="zh" aria-pressed="false">中文</button>
         </div>
+        <button type="button" class="btn btn-light" id="excelBtn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5l5 5 5-5M5 20h14"/></svg>
+          <span data-i18n="excel">Baixar planilha</span>
+        </button>
         <button type="button" class="btn btn-light" id="refreshBtn">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
           <span data-i18n="refresh">Atualizar</span>
@@ -123,6 +127,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <script>window.__SORTER__ = __SORTER_BOOT__;</script>
   <script src="resumo.js"></script>
+  <script src="planilha.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

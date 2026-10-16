@@ -11,7 +11,8 @@ const path = require('path');
 const zlib = require('zlib');
 const {VERSAO} = require('./server.js');
 
-const FILES = ['server.js', 'lib/resumo.js', 'lib/sorter.js', 'lib/troca.js', 'lib/ponte.js', 'public/index.html', 'public/app.js', 'public/app.css',
+const FILES = ['server.js', 'lib/resumo.js', 'lib/site.js', 'lib/estado.js', 'lib/planilha.js', 'lib/sorter.js', 'lib/troca.js', 'lib/ponte.js',
+  'site/navegador.js', 'site/favorito.js', 'site/instalar.html', 'gerar-favorito.js', 'public/index.html', 'public/app.js', 'public/app.css',
   'appscript/Codigo.gs', 'appscript/Resumo.gs', 'appscript/Index.html', 'appscript/Estilo.html', 'appscript/App.html', 'appscript/appsscript.json',
   'iniciar.bat', 'iniciar-com-windows.bat', 'testar.bat', 'descobrir.bat', 'LEIA_SORTER.md'];
 // Os arquivos do Apps Script saem da mesma página do painel local: confere antes de empacotar.
@@ -54,12 +55,15 @@ function zip(entries) {
 
 const outDir = path.resolve(process.argv[2] || path.join(__dirname, 'dist'));
 fs.mkdirSync(outDir, {recursive: true});
+// O favorito (instalar-favorito.html) é montado na hora, com a mesma página do painel.
+const FAV = require('./gerar-favorito.js');
 const entries = FILES.map(f => {
   let data = fs.readFileSync(path.join(__dirname, f));
   // .bat com fim de linha do Windows (CRLF): o cmd lê os rótulos (goto) sem erro.
   if (/\.bat$/.test(f)) data = Buffer.from(data.toString('utf8').replace(/\r?\n/g, '\r\n'), 'utf8');
   return {name: 'sorter/' + f, data};
 });
+entries.push({name: 'sorter/instalar-favorito.html', data: Buffer.from(FAV.paginaInstalar(FAV.montar(), true), 'utf8')});
 const tag = 'V' + VERSAO.split('.').slice(0, 2).join('_');
 const file = path.join(outDir, 'JT_SORTER_' + tag + '.zip');
 fs.writeFileSync(file, zip(entries));

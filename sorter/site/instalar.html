@@ -1,0 +1,123 @@
+<title>Favorito do Sorter</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Uma coluna: o botão do favorito no topo (o que se arrasta), os 3 passos e o que o painel faz. */
+:root {
+  --bg: #F6F4F2; --surface: #FFFFFF; --ink: #1D1B1A; --muted: #6A625E; --line: #E3DDD8;
+  --red: #E60012; --red-ink: #FFFFFF; --red-soft: #FCE8EA; --ok: #1E7A4A; --ok-soft: #E3F2E9;
+  --display: "Archivo", "Segoe UI", Arial, sans-serif;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121112; --surface: #1C1A1B; --ink: #F1EDEA; --muted: #A69E99; --line: #332F2E;
+  --red: #FF3B4A; --red-ink: #170405; --red-soft: #3A1418; --ok: #5CC88E; --ok-soft: #14301F; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121112; --surface: #1C1A1B; --ink: #F1EDEA; --muted: #A69E99; --line: #332F2E;
+  --red: #FF3B4A; --red-ink: #170405; --red-soft: #3A1418; --ok: #5CC88E; --ok-soft: #14301F; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 56px; margin: 0 }
+.wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 28px }
+.eyebrow { font: 600 12px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--red) }
+h1 { font: 800 34px/1.1 var(--display); margin: 8px 0 10px; letter-spacing: -.5px; text-wrap: balance }
+h2 { font: 700 18px/1.3 var(--display); margin: 0 }
+p { margin: 0; max-width: 64ch }
+.muted { color: var(--muted) }
+code { font-family: var(--mono); font-size: .92em; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; overflow-wrap: anywhere }
+.drag { display: grid; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px }
+.drag-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center }
+a.fav { display: inline-flex; align-items: center; gap: 10px; background: var(--red); color: var(--red-ink); text-decoration: none; font: 800 16px/1 var(--display); padding: 14px 20px; border-radius: 12px; cursor: grab; box-shadow: 0 8px 20px rgba(230,0,18,.22) }
+a.fav:focus-visible, button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px }
+a.fav svg { width: 18px; height: 18px }
+button { font: 600 14px/1 var(--sans); border-radius: 10px; padding: 12px 16px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; min-height: 44px }
+button.ok { background: var(--ok-soft); color: var(--ok); border-color: var(--ok) }
+.hint { font-size: 13px; color: var(--muted) }
+ol.steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; counter-reset: p }
+ol.steps > li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; counter-increment: p }
+ol.steps > li::before { content: counter(p); width: 34px; height: 34px; border-radius: 50%; background: var(--red-soft); color: var(--red); font: 800 15px/34px var(--display); text-align: center }
+ol.steps > li > div { display: grid; gap: 4px; min-width: 0 }
+.alt { border-top: 1px dashed var(--line); padding-top: 14px; display: grid; gap: 8px }
+.alt ol { margin: 0; padding-left: 1.2em; display: grid; gap: 4px }
+textarea { width: 100%; height: 90px; font: 12px/1.4 var(--mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px }
+.fact { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 4px; min-width: 0 }
+.fact b { font-family: var(--display) }
+footer { font-size: 13px; color: var(--muted) }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Painel do Sorter · versão __VERSAO__ · sem instalar nada</div>
+    <h1>Favorito do Sorter</h1>
+    <p class="muted">Um favorito do navegador que abre o painel do sorter por cima da própria página <code>http://10.1.166.9/home</code>. Ele lê os números direto do site, com a sua sessão. Não precisa de servidor, de outro computador nem de programa instalado.</p>
+  </header>
+
+  <section class="drag" aria-labelledby="pegar">
+    <h2 id="pegar">1. Pegue o favorito</h2>
+    <div class="drag-row">
+      <a class="fav" id="fav" href="__FAVORITO_URL__" draggable="true" title="Arraste para a barra de favoritos">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>Painel do Sorter
+      </a>
+      <button type="button" id="copiar">Copiar o favorito</button>
+    </div>
+    <p class="hint" id="dica">Arraste o botão vermelho para a barra de favoritos do Chrome ou do Edge. Se a barra não aparece, aperte <code>Ctrl+Shift+B</code>.</p>
+    <div class="alt">
+      <p><b>Se arrastar não funcionar</b>, clique em <b>Copiar o favorito</b> e:</p>
+      <ol>
+        <li>aperte <code>Ctrl+Shift+O</code> (Gerenciador de favoritos) → <b>⋮</b> → <b>Adicionar novo favorito</b>;</li>
+        <li>Nome: <b>Painel do Sorter</b>;</li>
+        <li>URL: cole com <code>Ctrl+V</code> → <b>Salvar</b>.</li>
+      </ol>
+      <textarea id="codigo" readonly hidden aria-label="Código do favorito"></textarea>
+    </div>
+  </section>
+
+  <section aria-labelledby="usar">
+    <h2 id="usar" style="margin-bottom:14px">Como usar</h2>
+    <ol class="steps">
+      <li><div><b>Abra o site do sorter</b><span class="muted">No mesmo navegador: <code>http://10.1.166.9/home</code>.</span></div></li>
+      <li><div><b>Clique no favorito "Painel do Sorter"</b><span class="muted">O painel abre por cima do site. Na primeira vez, ele descobre sozinho como trocar entre o Sorter A e o B (alguns segundos).</span></div></li>
+      <li><div><b>Deixe a aba aberta</b><span class="muted">Ele lê de novo a cada 1 hora. O botão <b>Atualizar</b> lê na hora. <b>Baixar planilha</b> gera o Excel do que está na tela. Para voltar ao site: <b>Fechar painel</b> ou <code>Esc</code>.</span></div></li>
+    </ol>
+  </section>
+
+  <section class="facts" aria-label="O que o painel faz">
+    <div class="fact"><b>Direto do site</b><span class="muted">As mesmas consultas do botão "make statistics", com a sessão do seu navegador.</span></div>
+    <div class="fact"><b>Sorter A, B e Todos</b><span class="muted">Troca de sorter com o <code>_token</code> da sessão. Depois de cada leitura, o site volta para o sorter que estava.</span></div>
+    <div class="fact"><b>Planilha .xlsx</b><span class="muted">Abas Resumo, Por tempo, Evolução, Balanças e Dados por hora, com os filtros da tela.</span></div>
+  </section>
+
+  <footer>Feito por Caike Oliveira. O favorito não guarda nem manda token, cookie ou senha: só lê o site enquanto a aba está aberta.</footer>
+</div>
+
+<script>
+(function () {
+  var url = __FAVORITO_JSON__;
+  var fav = document.getElementById('fav'), btn = document.getElementById('copiar'), dica = document.getElementById('dica'), ta = document.getElementById('codigo');
+  fav.addEventListener('click', function (e) {
+    e.preventDefault();
+    dica.textContent = 'Não clique aqui: arraste o botão para a barra de favoritos, ou use "Copiar o favorito". Ele só funciona na página do sorter.';
+  });
+  function feito() {
+    btn.textContent = 'Copiado ✓';
+    btn.className = 'ok';
+    setTimeout(function () { btn.textContent = 'Copiar o favorito'; btn.className = ''; }, 2500);
+  }
+  function manual() {
+    ta.hidden = false;
+    ta.value = url;
+    ta.focus();
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    if (ok) feito(); else dica.textContent = 'O navegador não deixou copiar sozinho: o código está selecionado na caixa abaixo, use Ctrl+C.';
+  }
+  btn.addEventListener('click', function () {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(feito, manual);
+    else manual();
+  });
+})();
+</script>

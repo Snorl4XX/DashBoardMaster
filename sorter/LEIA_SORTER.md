@@ -5,11 +5,12 @@ Painel **separado do DashMaster**. Ele mostra a produção do sorter da base a p
 - **Sorter A**, **Sorter B** ou **os dois juntos**;
 - por **balança** (Induction No.), **turno** e **horário**.
 
-Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_2.zip`).
+Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_3.zip`).
 
-**Duas formas de abrir (a mesma tela):**
+**Três formas de abrir (a mesma tela):**
+- **Favorito no navegador**: o jeito mais fácil, **sem instalar nada e sem outro computador**. Veja "Favorito do Sorter (sem instalar nada)".
+- **Painel local**: `http://IP-DO-COMPUTADOR:3100`, só dentro da rede da base. Precisa do Node.js e do `iniciar.bat`.
 - **Link do Google (Apps Script)**: abre de qualquer lugar, até fora da base. Precisa de um projeto Apps Script **separado** (não o do DashMaster) e da **ponte** ligada num computador da base. Veja "Painel no Apps Script".
-- **Painel local**: `http://IP-DO-COMPUTADOR:3100`, só dentro da rede da base.
 
 *Feito por Caike Oliveira.*
 
@@ -57,6 +58,19 @@ São as mesmas colunas da tela do sorter:
 
 Há uma linha por tempo escolhido e a linha de **Total** no fim.
 
+### Baixar planilha
+O botão **Baixar planilha** (no topo, ao lado de Atualizar) baixa um arquivo **Excel (.xlsx)** com o que está na tela, já com os filtros. Ele abre no Excel, no Google Planilhas e no LibreOffice.
+
+| Aba | O que tem |
+|---|---|
+| **Resumo** | os filtros usados; Sort total, Valid total, No Sort Code, anormais, cada motivo e cada andar, com % do total, período anterior e variação; turnos T1/T2/T3; cada sorter (em Todos juntos) |
+| **Por tempo** | a tabela da tela (o tempo escolhido), com todas as colunas, % No Sort Code e o Total |
+| **Evolução** | por dia, semana, mês ou trimestre (a periodicidade escolhida), com cada sorter em Todos juntos |
+| **Balanças** | cada balança: Sort total, Valid total, No Sort Code, anormais, % do total e % No Sort Code |
+| **Dados por hora** | cada hora de cada sorter, com todas as colunas |
+
+O nome do arquivo diz o que é, por exemplo: `Sorter_B+A_2026-10-16_T1.xlsx` (Todos juntos, um dia, turno T1).
+
 ### Atualização, idioma e tema
 - **Atualização:**
   - com um período que termina **hoje**, a tela consulta de novo **a cada 1 hora**, sozinha;
@@ -70,6 +84,34 @@ Há uma linha por tempo escolhido e a linha de **Total** no fim.
   - `?sorter=A` abre no Sorter A;
   - `?per=week&tempo=3` abre com periodicidade semanal e tempo de 3 horas.
 
+## Favorito do Sorter (sem instalar nada)
+É um **favorito do navegador** (Chrome ou Edge) que abre o painel inteiro **por cima da própria página do sorter**. Ele lê os números direto do site, com a sessão do seu navegador. Não precisa de servidor, de Node.js, de outro computador nem de programa instalado.
+
+**Colocar o favorito (uma vez):**
+1. Abra o arquivo **`instalar-favorito.html`** (na pasta `sorter`, com dois cliques).
+2. Arraste o botão vermelho **Painel do Sorter** para a barra de favoritos. Se a barra não aparece, aperte `Ctrl+Shift+B`.
+   - **Se arrastar não funcionar:** clique em **Copiar o favorito**.
+   - Aperte `Ctrl+Shift+O` → **⋮** → **Adicionar novo favorito**.
+   - Nome: **Painel do Sorter**. URL: cole com `Ctrl+V`. Clique em **Salvar**.
+
+**Usar:**
+1. Abra `http://10.1.166.9/home` no navegador.
+2. Clique no favorito **Painel do Sorter**. O painel abre por cima do site.
+   - Na primeira vez, ele descobre sozinho como trocar entre o Sorter A e o B, com o `_token` da sessão. Isso leva alguns segundos. Depois fica guardado neste navegador.
+3. Deixe a aba aberta:
+   - ele lê de novo **a cada 1 hora**;
+   - o botão **Atualizar** lê na hora;
+   - **Baixar planilha** baixa o Excel.
+4. Para voltar ao site: **✕ Fechar painel** (canto de baixo) ou `Esc`.
+
+**Bom saber:**
+- **A aba precisa estar aberta.** Se a aba ficar em segundo plano, a leitura de 1 hora acontece assim que você volta para ela.
+- **Sem token copiado:** o favorito usa a sessão que já está aberta no navegador. Para ler o A e o B, ele troca o sorter da **sua** sessão e, no fim de cada leitura, volta o site para o sorter que estava.
+- **Troca não achada:** o Sorter B (o que o site mostra sem trocar) continua funcionando.
+  - O aviso tem os botões **Copiar relatório da troca** (para mandar; não tem token nem cookie) e **Procurar a troca de novo**.
+- **Gráficos:** vêm da internet (Chart.js), como no painel local. Sem internet, ficam os cartões e a tabela.
+- **Outra página:** se você clicar no favorito fora do site do sorter, ele avisa e não abre.
+
 ## Onde roda
 - O sorter fica na **rede interna da base** (`http://10.1.166.9`). Só um computador **dentro dessa rede** consegue lê-lo.
 - **O Google (Apps Script) e a Oracle não enxergam essa rede.** Por isso o Apps Script recebe os números pela **ponte**: o mesmo programa (`iniciar.bat`), rodando num computador da base, lê o sorter e manda para o Apps Script.
@@ -77,7 +119,7 @@ Há uma linha por tempo escolhido e a linha de **Total** no fim.
 
 ## Instalar (Windows)
 1. Instale o **Node.js** (versão LTS) em https://nodejs.org.
-2. Extraia o `JT_SORTER_V2_2.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
+2. Extraia o `JT_SORTER_V2_3.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
    - **Já tem uma versão anterior?** Extraia por cima, na mesma pasta. O `config.json` antigo é atualizado sozinho: a V1 passa a ler a cada 1 hora, até 92 dias, com os Sorters A e B; os campos novos do Apps Script entram vazios.
 3. Na pasta `sorter`, dê dois cliques em **`testar.bat`**. Ele:
    - abre a página `http://10.1.166.9/home` e acha sozinho como trocar entre o Sorter A e o B (veja "Troca de sorter");
@@ -292,7 +334,16 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
   - **Guarda:** 400 dias.
   - **Leitura:** `getDados` devolve o mesmo formato do `/api/dados`, com as linhas compactadas. Os dias lidos ficam 6 h no cache.
   - **Mesma tela:** `Index.html`, `Estilo.html`, `App.html` e `Resumo.gs` são gerados da página local por `node gerar-appscript.js`. O `Codigo.gs` e o `appsscript.json` ficam na pasta `appscript/`.
-- **Requisitos:** Node.js 18 ou mais novo, sem instalar pacotes.
+- **Favorito** (`site/`, montado por `node gerar-favorito.js`):
+  - um código `javascript:` com a página do painel inteira dentro: `lib/resumo.js`, `lib/site.js`, `lib/estado.js`, `site/navegador.js`, `lib/planilha.js` e `public/app.js`;
+  - roda numa moldura (iframe `srcdoc`) da mesma origem do site, então as consultas `/statis/summary.data` saem com a sessão do navegador;
+  - as leituras ficam numa fila por sorter: a sessão mostra um sorter por vez;
+  - a troca de sorter é descoberta e testada pelo mesmo `lib/site.js` do servidor e fica guardada no `localStorage` da página do sorter.
+- **Mesmo código nos três lugares:**
+  - `lib/site.js` (consulta, `_token`, descoberta da troca) e `lib/estado.js` (os números da tela) rodam no Node e no navegador;
+  - os números do favorito, do painel local e do Apps Script são os mesmos.
+- **Planilha:** `lib/planilha.js` monta o `.xlsx` no navegador, sem biblioteca (XML do formato + ZIP).
+- **Requisitos:** Node.js 18 ou mais novo, sem instalar pacotes (só para o painel local e a ponte; o favorito não precisa).
 - **Gráficos:** vêm de Chart.js pela internet (jsDelivr ou cdnjs). Sem internet, a tela mostra os cartões e a tabela.
 - **Troca de sorter:**
   - `lib/sorter.js` (`Sessao`): abre a página, lê o token (`<meta name="csrf-token">`, `<input name="_token">` ou o script) e manda na troca. O token vai no corpo (`_token`) e nos cabeçalhos `X-CSRF-TOKEN` e `X-XSRF-TOKEN`.
@@ -300,6 +351,7 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
 - **Testes**, com números fictícios:
   - `node test/test_sorter.js`: sorter simulado com dois dispositivos, balanças, sessão e troca com XSRF;
   - `node test/test_appscript.js`: ponte → Apps Script simulado (o mesmo `Codigo.gs`). O `getDados` tem que dar os mesmos números do painel local.
+  - `node test/test_favorito.js`: o `site/navegador.js` num navegador simulado (cookies da sessão), contra o sorter simulado, com os mesmos números do servidor; e a planilha `.xlsx`.
 - **Pacote:** `node gerar-zip.js [pasta]`.
 
 ## Problemas comuns
@@ -316,6 +368,9 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
 | "A porta 3100 já está em uso" | O painel já está aberto em outra janela. Feche-a ou troque `porta` no `config.json` |
 | Outro computador não abre o painel | Permita o Node.js no Firewall do Windows em Redes privadas, e confira o IP na janela preta |
 | Sem gráficos, só as tabelas | O computador que abriu a página está sem internet: os gráficos vêm do jsDelivr ou cdnjs |
+| Favorito: "esta página não é o site do sorter" | Abra `http://10.1.166.9/home` primeiro e clique no favorito nessa aba |
+| Favorito: o painel não abre ao clicar | O favorito foi salvo cortado. Apague-o e coloque de novo pelo `instalar-favorito.html` (Copiar o favorito) |
+| A planilha não baixa | O navegador pode pedir para permitir downloads do site: permita e clique em Baixar planilha de novo |
 | "O Apps Script não respondeu em JSON" | A URL no `config.json` não é a do App da Web (`…/exec`), ou a implantação não está com "Quem pode acessar: Qualquer pessoa" |
 | "chave da ponte inválida" | A `chavePonte` do `config.json` não é a que o `configurar()` mostrou. Copie de novo, sem espaços |
 | "Não consegui falar com o Apps Script" | O computador da base está sem internet. A ponte tenta de novo sozinha |

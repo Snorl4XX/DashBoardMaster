@@ -5,6 +5,8 @@
  * Link: ?sorter=A|B|todos, ?de=AAAA-MM-DD&ate=AAAA-MM-DD, ?per=day|week|month|quarter, ?tempo=1, ?lang=zh, ?tv=1 (TV).
  * A mesma página roda no Apps Script (App.html): lá os dados vêm por google.script.run.getDados (linhas compactadas) e o
  * botão Atualizar deixa um pedido para a ponte da base (o Google não enxerga o sorter).
+ * No favorito (painel dentro da própria página do sorter, sem servidor) os dados vêm de window.__SORTER_FONTE__ (site/
+ * navegador.js), que lê o site com a sessão deste navegador. Botão "Baixar planilha": .xlsx do que está na tela.
  * JavaScript simples (ES5): roda também em navegador antigo de TV.
  */
 (function () {
@@ -29,6 +31,7 @@
     return o;
   })();
   var GAS = !!(BOOT.gas && window.google && google.script && google.script.run);
+  var SITE = !!(BOOT.site && window.__SORTER_FONTE__);   // favorito: lê o site do sorter direto, neste navegador
   if (GAS && BOOT.params) params = BOOT.params;     // no Apps Script a página fica num iframe: o link chega pelo servidor
   var state = {lang: 'pt', from: '', to: '', today: BOOT.hoje || '', sorter: '', balanca: '', turno: '', hIni: 0, hFim: 23, per: 'day', tempo: 1,
     data: null, error: null, seq: 0, busy: false, lastAt: 0, charts: {}, libsDone: false, balOpts: []};
@@ -77,7 +80,14 @@
       ponteOff: 'A ponte da base está desligada (última conversa: {t}). Mostrando os números que já chegaram.',
       ponteOffLine: 'Ponte da base desligada desde {t}: os números param de chegar até o computador da base voltar (iniciar.bat).',
       ponteNever: 'nunca', askedBridge: 'Pedido enviado à ponte da base: os números chegam em até 1 minuto.',
-      bridgeSlow: 'A ponte não respondeu em 2 minutos. Confira o computador da base.', fullHint: 'Para tela cheia, aperte F11.'
+      bridgeSlow: 'A ponte não respondeu em 2 minutos. Confira o computador da base.', fullHint: 'Para tela cheia, aperte F11.',
+      footSite: 'Fonte: o site do sorter, lido por este navegador (sem servidor) · nada é gravado',
+      copiarRel: 'Copiar relatório da troca', relCopiado: 'Relatório copiado: cole numa conversa e mande (não tem token nem cookie).',
+      procurarTroca: 'Procurar a troca de novo',
+      excel: 'Baixar planilha', excelOk: 'Planilha baixada: {f}', excelVazio: 'Ainda não há números para a planilha.',
+      shResumo: 'Resumo', shTempo: 'Por tempo', shEvo: 'Evolução', shBal: 'Balanças', shHoras: 'Dados por hora',
+      xPeriodo: 'Período', xHorario: 'Horário', xConsultado: 'Consultado no sorter', xGerado: 'Planilha gerada em', xIndicador: 'Indicador',
+      xValor: 'Quantidade', xVariacao: 'Variação', xPctNoSort: '% No Sort Code', xDe: 'De', xAte: 'Até', xData: 'Data', xHora: 'Hora'
     },
     zh: {
       refresh: '刷新', startDate: '开始日期', endDate: '结束日期', apply: '应用', details: '明细',
@@ -121,7 +131,13 @@
       ponteOff: '基地数据桥已断开（最后联系：{t}）。显示已收到的数据。',
       ponteOffLine: '基地数据桥自 {t} 起断开：在基地电脑恢复（iniciar.bat）之前不会收到新数据。',
       ponteNever: '从未', askedBridge: '已向基地数据桥发送请求：数据将在1分钟内到达。',
-      bridgeSlow: '数据桥2分钟内没有响应。请检查基地电脑。', fullHint: '按 F11 全屏。'
+      bridgeSlow: '数据桥2分钟内没有响应。请检查基地电脑。', fullHint: '按 F11 全屏。',
+      footSite: '数据来源：分拣机网站，由本浏览器读取（无需服务器）· 不存储',
+      copiarRel: '复制切换报告', relCopiado: '报告已复制：粘贴到对话中发送（不含 token 和 cookie）。', procurarTroca: '重新查找切换方式',
+      excel: '下载表格', excelOk: '已下载表格：{f}', excelVazio: '还没有可导出的数据。',
+      shResumo: '汇总', shTempo: '按时间', shEvo: '趋势', shBal: '供包台', shHoras: '每小时数据',
+      xPeriodo: '期间', xHorario: '时间', xConsultado: '分拣机查询时间', xGerado: '表格生成时间', xIndicador: '指标',
+      xValor: '数量', xVariacao: '变化', xPctNoSort: '未分拣占比', xDe: '从', xAte: '到', xData: '日期', xHora: '小时'
     }
   };
   var REASON_TEXT = {
@@ -337,6 +353,7 @@
   // ------------------------------------------------------------------ leitura
   /** Uma consulta: /api/dados no painel local; google.script.run.getDados no Apps Script (linhas compactadas). */
   function apiDados(q) {
+    if (SITE) return window.__SORTER_FONTE__.dados(q);
     if (GAS) {
       return new Promise(function (ok, fail) {
         google.script.run.withSuccessHandler(function (res) {
@@ -384,6 +401,7 @@
       state.from = res.from; state.to = res.to;
       if (res.ok) {
         state.data = res; state.error = null;
+        if (SITE) BOOT.sorters = window.__SORTER_FONTE__.sorters();   // a troca pode ter sido achada (ou não) agora
         // Opções de balança: as que o servidor mandou, somadas às já conhecidas deste sorter (com uma balança escolhida em
         // "Todos juntos", o outro sorter não manda as dele).
         (res.balancas || []).forEach(function (b) { if (state.balOpts.indexOf(b.id) < 0) state.balOpts.push(b.id); });
@@ -399,7 +417,7 @@
       render();
     }).catch(function (e) {
       if (seq !== state.seq) return;
-      state.error = e.message + (GAS ? '' : ' (' + location.host + ')');
+      state.error = e.message + (GAS || SITE ? '' : ' (' + location.host + ')');
       render();
     }).then(function () {
       if (seq !== state.seq) return;
@@ -452,10 +470,11 @@
     $('#title').textContent = t('title') + ' · ' + (state.sorter === 'todos' ? BOOT.sorters.map(function (s) { return s.id; }).join(' + ') : devName(state.sorter));
     $('#subtitle').textContent = t('subtitle');
     document.title = 'J&T · ' + t('title');
-    $('#foot').innerHTML = esc(t(GAS ? 'footGas' : 'foot')) + (BOOT.versao ? ' · v' + esc(BOOT.versao) : '') + '<b>' + esc(t('madeBy')) + '</b>';
+    $('#foot').innerHTML = esc(t(GAS ? 'footGas' : SITE ? 'footSite' : 'foot')) + (BOOT.versao ? ' · v' + esc(BOOT.versao) : '') + '<b>' + esc(t('madeBy')) + '</b>';
     renderStatus();
     var d = state.data, has = !!(d && d.rows && d.rows.length);
     $('#tableCard').hidden = !has;
+    state.view = null;
     if (!has) {
       $('#kpis').innerHTML = '';
       destroyCharts();
@@ -471,6 +490,7 @@
     var x = {d: d, single: single, live: live, nowHour: nowHour, rows: rows, sum: R.summarize(rows, {}), sumH: R.summarize(rowsH, {}),
       prev: prevRows ? R.summarize(prevRows, live ? {uptoHour: nowHour} : {}) : null,
       byDev: d.rowsByDevice ? Object.keys(d.rowsByDevice).map(function (id) { return {id: id, rows: R.filterRows(d.rowsByDevice[id], f)}; }) : null};
+    state.view = x;
     renderKpis(x);
     renderCharts(x);
     renderTable(x);
@@ -498,7 +518,14 @@
         if (dv.error) html += '<div class="warn-line">' + icon('errors') + '<span><b>' + esc(devName(dv.id)) + ':</b> ' + esc(dv.error) + '</span></div>';
         else if (dv.balancaErro) html += '<div class="warn-line">' + icon('scale') + '<span><b>' + esc(devName(dv.id)) + ':</b> ' + esc(dv.balancaErro) + '</span></div>';
         if (dv.aviso) html += '<div class="warn-line">' + icon('clock') + '<span><b>' + esc(devName(dv.id)) + ':</b> ' + esc(dv.aviso) + '</span></div>';
+        // Favorito: a troca de sorter não foi achada nesta página → o relatório para mandar e tentar de novo.
+        if (SITE && (dv.pendente || dv.aviso) && !state.relBtns) {
+          state.relBtns = true;
+          html += '<div class="warn-line acts"><button type="button" class="btn btn-light btn-sm" data-acao="rel">' + esc(t('copiarRel')) + '</button>' +
+            '<button type="button" class="btn btn-light btn-sm" data-acao="troca">' + esc(t('procurarTroca')) + '</button></div>';
+        }
       });
+      state.relBtns = false;
     }
     var pt = (d && d.ponte) || (state.lastRes && state.lastRes.ponte);
     if (GAS && pt && !pt.ligada) html += '<div class="warn-line">' + icon('errors') + '<span>' + esc(t('ponteOffLine', {t: pt.vista ? clock(pt.vista) : t('ponteNever')})) + '</span></div>';
@@ -773,6 +800,111 @@
     $('#tableNote').textContent = t('tableNote');
   }
 
+  // ------------------------------------------------------------------ planilha (.xlsx) do que está na tela
+  /** Agora em São Paulo ("AAAA-MM-DD HH:mm"); navegador sem fuso: a hora deste computador. */
+  function horaSP() {
+    var d = new Date();
+    try {
+      var p = {};
+      new Intl.DateTimeFormat('en-CA', {timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false})
+        .formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+      return p.year + '-' + p.month + '-' + p.day + ' ' + (p.hour === '24' ? '00' : p.hour) + ':' + p.minute;
+    } catch (e) {
+      return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    }
+  }
+  function nomeArquivo(d) {
+    var s = state.sorter === 'todos' ? BOOT.sorters.map(function (x) { return x.id; }).join('+') : state.sorter;
+    return 'Sorter_' + s + '_' + d.from + (d.to !== d.from ? '_a_' + d.to : '') + (state.balanca ? '_balanca_' + state.balanca.replace(':', '') : '') +
+      (state.turno ? '_' + state.turno : '') + '.xlsx';
+  }
+  function baixarPlanilha() {
+    var x = state.view;
+    if (!x || !window.SorterPlanilha) { toast(t('excelVazio'), 'error'); return; }
+    var bytes, nome = nomeArquivo(x.d);
+    try { bytes = SorterPlanilha.criar(abasPlanilha(x)); } catch (e) { toast(e.message, 'error'); return; }
+    var blob = new Blob([bytes], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    if (window.navigator && navigator.msSaveOrOpenBlob) { navigator.msSaveOrOpenBlob(blob, nome); return; }
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = nome; a.style.display = 'none';
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.parentNode.removeChild(a); }, 4000);
+    toast(t('excelOk', {f: nome}), 'success');
+  }
+  /** As abas: Resumo (filtros, indicadores, turnos, sorters), Por tempo (a tabela da tela), Evolução, Balanças e as horas. */
+  function abasPlanilha(x) {
+    var d = x.d, sum = x.sum, prev = x.prev, layers = Object.keys(sum.ps).sort();
+    var C = function (v) { return {v: v, s: 'cab'}; }, B = function (v) { return {v: v, s: 'negrito'}; };
+    var P = function (a, b) { return b ? {v: a / b, s: 'pct'} : ''; };
+    var prevLabel = x.live ? t('prevUpto', {h: p2(x.nowHour) + 'h'}) : t(x.single ? 'prevDay' : 'prevPeriod');
+    var turnoTxt = state.turno ? state.turno + ' · ' + {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'}[state.turno] : t('allShifts');
+    var agora = horaSP();
+    var resumo = [[{v: 'J&T · ' + t('title'), s: 'titulo'}], [],
+      [B(t('xPeriodo')), fmtRange(d.from, d.to)],
+      [B(t('fSorter')), state.sorter === 'todos' ? t('allSorters', {n: BOOT.sorters.map(function (s) { return s.id; }).join(' + ')}) : devName(state.sorter)],
+      [B(t('fBalanca')), state.balanca ? balLabel(state.balanca) : t('all')], [B(t('fTurno')), turnoTxt],
+      [B(t('xHorario')), p2(state.hIni) + ':00:00 – ' + p2(state.hFim) + ':59:59'],
+      [B(t('fPer')), t({day: 'perDay', week: 'perWeek', month: 'perMonth', quarter: 'perQuarter'}[state.per])], [B(t('fTempo')), tempoLabel(state.tempo)],
+      [B(t('xConsultado')), String(d.fetchedAt || '')], [B(t('xGerado')), fmtDate(agora.slice(0, 10), true) + ' ' + agora.slice(11, 16)],
+      [], [C(t('xIndicador')), C(t('xValor')), C(t('ofTotal')), C(prevLabel), C(t('xVariacao'))]];
+    var ind = function (nome, v, pv) { return [nome, v, P(v, sum.total), pv === null || pv === undefined ? '' : pv, pv ? {v: (v - pv) / pv, s: 'pct'} : '']; };
+    resumo.push(ind(t('totalProd'), sum.total, prev && prev.total), ind(t('valid'), sum.valid, prev && prev.valid),
+      ind(t('noSort'), sum.noInfo, prev && prev.noInfo), ind(t('abnormal'), sum.abnormal, prev && prev.abnormal));
+    R.REASONS.filter(function (k) { return k !== 'noInfo'; }).forEach(function (k) { resumo.push(ind('  ' + L(REASON_TEXT[k]), sum[k], prev && prev[k])); });
+    layers.forEach(function (k) { resumo.push(ind(layerName(k), sum.ps[k] || 0, prev && prev.ps ? prev.ps[k] : null)); });
+    resumo.push([], [C(t('fTurno')), C(t('colSort')), C(t('ofTotal')), C(t('colValid')), C(t('colNoSort'))]);
+    R.SHIFTS.forEach(function (s) {
+      var v = x.sumH.byShift[s];
+      resumo.push([s + ' · ' + {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'}[s], v.total, P(v.total, x.sumH.total), v.valid, v.noInfo]);
+    });
+    if (x.byDev && x.byDev.length > 1) {
+      resumo.push([], [C(t('bySorter')), C(t('colSort')), C(t('ofTotal')), C(t('colValid')), C(t('colNoSort'))]);
+      x.byDev.forEach(function (dv) { var o = R.sumRows(dv.rows); resumo.push([devName(dv.id), o.total, P(o.total, sum.total), o.valid, o.noInfo]); });
+    }
+    // Por tempo: a mesma tabela da tela, com o Total.
+    var nums = function (o, tot) {
+      return [o.total, o.valid, o.noInfo, o.noPlan, o.chuteBlock, o.intercept, o.noRead, o.multi]
+        .concat(layers.map(function (k) { return (o.ps || {})[k] || 0; }), [o.abnormal, o.other])
+        .map(function (v) { return tot ? {v: v, s: 'total'} : v; })
+        .concat([o.total ? {v: o.noInfo / o.total, s: tot ? 'totalPct' : 'pct'} : '']);
+    };
+    var cabT = [t('colArea'), t('colSort'), t('colValid'), t('colNoSort'), t('colNoPlan'), t('colChute'), t('colIntercept'), t('colNoRead'), t('colMulti')]
+      .concat(layers.map(layerName), [t('colAbn'), t('colOther'), t('xPctNoSort')]);
+    var tempo = [cabT.map(C)].concat(R.byTime(x.rows, state.tempo).map(function (g) { return [areaLabel(g, x.single)].concat(nums(g)); }),
+      [[{v: t('totalRow'), s: 'total'}].concat(nums(sum, true))]);
+    // Evolução pela periodicidade (com cada sorter, em Todos juntos).
+    var evoG = R.byPeriod(x.rows, state.per), devCols = x.byDev && x.byDev.length > 1 ? x.byDev : [];
+    var devMaps = devCols.map(function (dv) { var m = {}; R.byPeriod(dv.rows, state.per).forEach(function (g) { m[g.key] = g.total; }); return m; });
+    var evo = [[t('xPeriodo'), t('xDe'), t('xAte'), t('colSort'), t('colValid'), t('colNoSort'), t('colAbn'), t('xPctNoSort')]
+      .concat(devCols.map(function (dv) { return devName(dv.id) + ' · ' + t('colSort'); })).map(C)]
+      .concat(evoG.map(function (g, i) {
+        return [periodLabel(g), fmtDate(g.from, true), fmtDate(g.to, true), g.total, g.valid, g.noInfo, g.abnormal, P(g.noInfo, g.total)]
+          .concat(devMaps.map(function (m) { return m[g.key] || 0; }));
+      }));
+    var abas = [{nome: t('shResumo'), larguras: [34, 22, 12, 22, 12], linhas: resumo},
+      {nome: t('shTempo') + ' (' + tempoLabel(state.tempo) + ')', larguras: [30].concat(cabT.slice(1).map(function () { return 14; })), congelar: 1, linhas: tempo},
+      {nome: t('shEvo') + ' (' + t('per')[state.per] + ')', larguras: [18, 13, 13, 14, 14, 14, 12, 14].concat(devCols.map(function () { return 22; })), congelar: 1, linhas: evo}];
+    if (d.balancas && d.balancas.length) {
+      var bt = d.balancas.reduce(function (a, b) { return a + b.total; }, 0);
+      abas.push({nome: t('shBal'), larguras: [16, 16, 14, 14, 14, 12, 12, 16], congelar: 1, linhas: [[t('fSorter'), t('fBalanca'), t('colSort'), t('colValid'), t('colNoSort'), t('colAbn'), t('ofTotal'), t('xPctNoSort')].map(C)]
+        .concat(d.balancas.slice().sort(function (a, b) { return a.device === b.device ? a.num - b.num : a.device < b.device ? -1 : 1; }).map(function (b) {
+          return [devName(b.device), b.num, b.total, b.valid, b.noInfo, b.abnormal, P(b.total, bt), P(b.noInfo, b.total)];
+        }))});
+    }
+    // As horas (com o filtro de turno e horário), de cada sorter.
+    var fontes = x.byDev && x.byDev.length ? x.byDev : [{id: state.sorter === 'todos' ? '' : state.sorter, rows: x.rows}];
+    var horas = [[t('xData'), t('xHora'), t('fSorter'), t('colSort'), t('colValid'), t('colNoSort'), t('colNoPlan'), t('colChute'), t('colIntercept'), t('colNoRead'), t('colMulti')]
+      .concat(layers.map(layerName), [t('colAbn'), t('colOther')]).map(C)];
+    fontes.forEach(function (dv) {
+      dv.rows.forEach(function (r) {
+        horas.push([fmtDate(r.date, true), p2(r.hour) + ':00', dv.id ? devName(dv.id) : '', r.total, r.valid, r.noInfo, r.noPlan, r.chuteBlock, r.intercept, r.noRead, r.multi]
+          .concat(layers.map(function (k) { return (r.ps || {})[k] || 0; }), [r.abnormal, r.other]));
+      });
+    });
+    abas.push({nome: t('shHoras'), larguras: [13, 8, 14].concat(horas[0].slice(3).map(function () { return 13; })), congelar: 1, linhas: horas});
+    return abas;
+  }
+
   // ------------------------------------------------------------------ início
   function init() {
     if (params.tv === '1') document.body.classList.add('tv');
@@ -790,6 +922,21 @@
     $('#themeBtn').addEventListener('click', toggleTheme);
     $('#fullBtn').addEventListener('click', toggleFull);
     $('#refreshBtn').addEventListener('click', refresh);
+    $('#excelBtn').addEventListener('click', baixarPlanilha);
+    // Favorito: botões do aviso de troca (copiar o relatório, procurar de novo).
+    $('#status').addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('[data-acao]') : null;
+      if (!b || !SITE) return;
+      if (b.getAttribute('data-acao') === 'rel') {
+        var txt = (window.__SORTER_FONTE__.relatorio() || []).join('\n');
+        var ok = function () { toast(t('relCopiado'), 'success'); };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, function () { window.prompt('', txt); });
+        else window.prompt('', txt);
+      } else {
+        b.disabled = true;
+        window.__SORTER_FONTE__.procurarTroca().then(function () { load({force: true}); });
+      }
+    });
     $('#applyBtn').addEventListener('click', applyDates);
     $('#clearBtn').addEventListener('click', clearFilters);
     ['#fromDate', '#toDate'].forEach(function (q) { $(q).addEventListener('keydown', function (e) { if (e.key === 'Enter') applyDates(); }); });
