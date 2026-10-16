@@ -19,7 +19,7 @@ const {zip} = require('../node/lib/report');
 const ROOT = path.join(__dirname, '..');
 const FLOWS = 'arrival_flow,send_flow';
 
-const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Sorter', 'Code'];
+const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
 const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
 
 const PACKAGES = [

@@ -14,7 +14,7 @@ const zlib = require('zlib');
 const {spawn} = require('child_process');
 
 const ROOT = path.join(__dirname, '..', '..');
-const {createContext, fakeJms, makeDay, fakeSorter} = require(path.join(ROOT, 'tests', 'mocks.js'));
+const {createContext, fakeJms, makeDay} = require(path.join(ROOT, 'tests', 'mocks.js'));
 
 let passed = 0;
 const children = [];
@@ -243,34 +243,6 @@ function firstDiff(a, b, p) {
     api('getAppBootstrap', [])
   ]);
   check(many.every(Boolean), 'consultas simultâneas respondem', Date.now() - t1);
-
-  // ---------- 6b. V4.11: Sorter em tempo real (monitor do sorter por HTTP, sem login; números fictícios) ----------
-  const sport = await freePort();
-  const sorterFake = fakeSorter(() => { throw new Error('só o sorter'); }, {nowHour: 15});
-  const sState = {fetches: []};
-  const sorterSrv = http.createServer((req, res) => {
-    try {
-      const r = sorterFake('http://127.0.0.1:' + sport + req.url, {headers: req.headers}, sState);
-      res.writeHead(r.getResponseCode(), {'Content-Type': 'application/json;charset=UTF-8', 'Set-Cookie': 'JSESSIONID=ficticio; Path=/'});
-      res.end(r.getContentText());
-    } catch (e) { res.writeHead(500); res.end(String(e && e.message || e)); }
-  });
-  servers.push(sorterSrv);
-  await new Promise(r => sorterSrv.listen(sport, '127.0.0.1', r));
-  check(!(await api('getAppBootstrap', [])).sorter, 'sem SORTER_URL: sem a tela do sorter');
-  await admin('propriedade', {k: 'SORTER_URL', v: 'http://127.0.0.1:' + sport});
-  const sb = await api('getAppBootstrap', []);
-  const sd = await api('getSorterData', [sb.today, sb.today]);
-  check(sb.sorter && sb.sorter.name === 'Sorter B' && sd.ok && sd.rows.length === 24 && sd.prevRows.length === 24 && (sState.sorterCalls || []).length === 2,
-    'Node.js lê o sorter por HTTP (hoje e o dia anterior)', sd.error || sd.rows.length);
-  const s7 = await api('getSorterData', [sb.today, sb.today]);
-  check(s7.cached === true && sState.sorterCalls.length === 2, 'Node.js: cache curto (vários navegadores, uma consulta)');
-  // Sorter fora do ar: a tela recebe o motivo em segundos (não espera 90 s).
-  await new Promise(r => sorterSrv.close(r));
-  const tDown = Date.now();
-  const sdown = await api('getSorterData', [sb.today, sb.today, true]);
-  check(!sdown.ok && /rede da base/.test(sdown.error) && Date.now() - tDown < 20000, 'sorter fora do ar: mensagem clara e rápida', sdown.error);
-  await admin('remover', {k: 'SORTER_URL'});
 
   // ---------- 7. Relatórios (Excel sem Google; PDF pelo navegador do computador) ----------
   const xl = await api('generateReport', ['wrong_send', {from: '2026-09-17', to: '2026-09-19'}, 'xlsx']);

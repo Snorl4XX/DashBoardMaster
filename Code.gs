@@ -4,7 +4,7 @@
  * navegador devolvem dados via safeReturn_ (sem objetos Date, que fariam o
  * google.script.run entregar null ao dashboard).
  *
- * Parâmetros opcionais do link: ?lang=zh | ?lang=pt, ?ind=sorting_error, ?view=results, ?view=sorter (V4.11)
+ * Parâmetros opcionais do link: ?lang=zh | ?lang=pt, ?ind=sorting_error, ?view=results
  */
 function doGet(e) {
   const p = (e && e.parameter) || {};
@@ -12,7 +12,7 @@ function doGet(e) {
   view.boot = JSON.stringify({
     lang: p.lang === 'zh' || p.lang === 'pt' ? p.lang : '',
     indicator: INDICATORS[p.ind] ? p.ind : '',
-    view: p.view === 'results' || p.view === 'sorter' ? p.view : 'dashboard'
+    view: p.view === 'results' ? 'results' : 'dashboard'
   });
   const panelName = panelName_();
   return view.evaluate()
@@ -86,9 +86,7 @@ function getAppBootstrap() {
     center: centerName_(), catalog: getPublicCatalog_(), shiftColors: SHIFT_COLORS,
     today: isoToday_(), historyStart: getProp_('DATA_START_DATE', '') || earliest || '',
     latestByIndicator: latest, lastUpdated: lastUpdated, initialized: initialized,
-    sync: initialized ? getSyncStatus() : null, pauses: pauses, stamps: initialized ? dataStamps_() : {},
-    // V4.11: tela do sorter (Sorter.gs), só com a propriedade SORTER_URL. Projeto sem o arquivo Sorter.gs: sem a tela.
-    sorter: typeof sorterInfo_ === 'function' ? safeCall_(sorterInfo_) : null
+    sync: initialized ? getSyncStatus() : null, pauses: pauses, stamps: initialized ? dataStamps_() : {}
   });
 }
 

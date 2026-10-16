@@ -1,85 +1,8 @@
-# J&T DASHMASTER V4.11 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.10 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
-
-## V4.11 — Sorter B em tempo real (monitor do sorter da base)
-**Pedido:** puxar em tempo real os dados do monitor do sorter (巴西GRU分拣机 B套, `http://10.1.166.9`), tela "summary statistics of sorter operation".
-
-### De onde vêm os números
-- **Consulta:** `GET http://10.1.166.9/statis/summary.data`, a mesma que a tela do sorter faz.
-  - Pede o dia inteiro, uma linha por hora (`group=60`), todas as entradas (`inductionno=0`) e todos os andares (`layerno=0`).
-  - Não precisa de login nem de Cookie: a consulta abre como Guest.
-- **Nada é gravado no painel.** Cada consulta vai ao sorter, que guarda o histórico.
-- **Vários navegadores abertos fazem uma consulta só:** o servidor guarda a resposta por 45 s.
-- **Campos da resposta:**
-
-| Campo do sorter | No painel |
-|---|---|
-| `sorter_sorttotal` | Total separado |
-| `sorter_validtotal` | Válidos |
-| `sorter_abnormaltotal` | Anormais (= total − válidos = soma dos motivos) |
-| `sorter_chuteblocktotal` | Chute bloqueado / cheio |
-| `sorter_noinfototal` | Sem informação |
-| `sorter_noplantotal` | Sem plano de destino |
-| `intercept` | Interceptado |
-| `noread` | Sem leitura |
-| `multi` | Múltiplos códigos |
-| `sorter_otherreasontotal` | Outros motivos |
-| `ps01_sorttotal`, `ps02_sorttotal`, `ps03_sorttotal` | PS01, PS02, PS03 (a soma dá o total) |
-
-### A tela "Sorter B · tempo real"
-Fica no menu lateral, na seção **Sorter**. Também abre direto pelo link `…?view=sorter`, bom para deixar numa TV.
-
-**Atalhos de período:** Hoje, Dia anterior, 7 dias, 30 dias, ou datas à escolha (até 31 dias).
-
-**Cartões:**
-- Total separado, válidos e a comparação com o dia anterior. Com "Hoje", compara **até a mesma hora**.
-- Anormais e taxa de anormalidade.
-- **Hora atual** (com "Hoje") ou média por hora ativa.
-- Hora de pico.
-- **T1, T2 e T3:** total, participação e anormais de cada turno. O turno atual fica marcado.
-- Principal motivo de anormalidade.
-
-**Gráficos:**
-- separação **hora a hora**, com válidos e anormais (no período: por dia); a hora atual aparece mais clara porque ainda está enchendo;
-- taxa de anormalidade por hora;
-- motivos de anormalidade;
-- separação por PS.
-
-**Tabela:** hora a hora (ou dia a dia), com todas as colunas e a linha de **Total**.
-
-**Atualização:**
-- Com um período que termina **hoje**, a tela consulta de novo **a cada minuto** sozinha. Com outro período, consulta só ao abrir.
-- O botão **Atualizar** consulta o sorter na hora.
-- Na virada do dia, "Hoje" passa sozinho para o dia novo.
-
-**Se o sorter não responder,** a tela mostra o motivo. Exemplo: o painel está fora da rede da base. Se já tinha números, eles continuam na tela com a hora da última leitura.
-
-### Onde precisa rodar
-- `10.1.166.9` é um endereço da **rede interna da base**. **Google e Oracle não alcançam esse endereço.**
-- A tela funciona na **versão Node.js num computador dentro da rede da base**: um PC que fique ligado, ou um servidor da TI.
-
-### Como ligar (num computador da base)
-1. Instale o Node.js 22 (https://nodejs.org) e extraia o `JT_DASHMASTER_V4_11_NODE.zip`, por exemplo em `C:\DashMaster`.
-2. Abra a pasta `node` e dê dois cliques em **`iniciar.bat`** (passo a passo: `node/LEIA_NODE.md`).
-3. Neste computador, abra **http://localhost:3000/config** e, em **Propriedades**, crie:
-   - `SORTER_URL` = `http://10.1.166.9`;
-   - opcional: `SORTER_NOME` = outro nome para a tela, por exemplo `Sorter A`.
-4. Em **Executar**, rode **`diagnosticarSorter`**. Ele mostra o total, os válidos, os anormais, os turnos e os PS de hoje.
-5. Recarregue o painel: o item **Sorter B** aparece no menu.
-6. **Se a empresa usa proxy:** no `iniciar.bat`, apague o `rem` da linha `set NO_PROXY=10.1.166.9,…`. Assim o sorter não passa pelo proxy.
-
-O mesmo computador pode rodar também os painéis do JMS (AuthToken em Configurações), como na Oracle. Se ele for só para o sorter (sem dados do JMS), o painel já abre na tela do sorter.
-
-### Arquivos
-- **`Sorter.gs`** (novo): consulta e cache.
-- `Core.gs`: soma por turno, hora, dia, motivo e PS (a mesma no navegador e no servidor).
-- `Client.html`, `Index.html`, `Styles.html`: a tela.
-- `Code.gs`: menu e link `?view=sorter`.
-
-No Google o arquivo `Sorter.gs` pode ficar sem uso: sem `SORTER_URL`, a tela não aparece.
 
 ## V4.10 — Rotas que faltavam (print "Código de alocação de carga das rotas do SC GRU")
 **Pedido:** ver as modificações novas e conferir nos prints se falta alguma rota.

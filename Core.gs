@@ -232,41 +232,6 @@ function JTCoreFactory_() {
    * Avaria: "Pedidos principais/filhos" (Config.gs → orderKinds). Pedido filho = remessa com sufixo "-001",
    * "-002"… Calculado na leitura, como as docas: vale para todo o histórico sem baixar nada.
    */
-  // ---------- sorter (V4.11): totais do monitor do sorter (Sorter.gs) por turno, hora, dia, motivo e PS ----------
-  /** Motivos de anormalidade, na ordem da tela do sorter (a soma = anormais). */
-  var SORTER_REASONS = ['chuteBlock', 'noInfo', 'noPlan', 'intercept', 'noRead', 'multi', 'other'];
-  /**
-   * Linhas por hora do sorter → totais. Turno pela hora da linha (T1 06–13h, T2 14–21h, T3 22–05h, como nos outros
-   * painéis). opts.uptoHour: só as horas até essa (comparar hoje com o dia anterior até a mesma hora).
-   */
-  function sorterSummary(rows, opts) {
-    opts = opts || {};
-    var upto = isNum(opts.uptoHour) ? Number(opts.uptoHour) : null;
-    var zero = function () { return {total: 0, valid: 0, abnormal: 0}; };
-    var s = {total: 0, valid: 0, abnormal: 0, reasons: {}, ps: {}, byShift: {T1: zero(), T2: zero(), T3: zero()}, byHour: [], byDay: [],
-      peak: null, hoursActive: 0, rows: 0};
-    var h, days = {}, order = [];
-    SORTER_REASONS.forEach(function (k) { s.reasons[k] = 0; });
-    for (h = 0; h < 24; h++) s.byHour.push({hour: h, total: 0, valid: 0, abnormal: 0, rows: 0});
-    (rows || []).forEach(function (r) {
-      if (!r || (upto !== null && r.hour > upto)) return;
-      var tot = Number(r.total) || 0, val = Number(r.valid) || 0, ab = Number(r.abnormal) || 0;
-      s.rows++;
-      s.total += tot; s.valid += val; s.abnormal += ab;
-      SORTER_REASONS.forEach(function (k) { s.reasons[k] += Number(r[k]) || 0; });
-      Object.keys(r.ps || {}).forEach(function (k) { s.ps[k] = (s.ps[k] || 0) + (Number(r.ps[k]) || 0); });
-      var sh = s.byShift[shiftOf(pad2(r.hour) + ':00')];
-      if (sh) { sh.total += tot; sh.valid += val; sh.abnormal += ab; }
-      var bh = s.byHour[r.hour];
-      if (bh) { bh.total += tot; bh.valid += val; bh.abnormal += ab; bh.rows++; }
-      if (!days[r.date]) { days[r.date] = {date: r.date, total: 0, valid: 0, abnormal: 0}; order.push(r.date); }
-      days[r.date].total += tot; days[r.date].valid += val; days[r.date].abnormal += ab;
-      if (tot > 0) s.hoursActive++;
-      if (tot > 0 && (!s.peak || tot > s.peak.total)) s.peak = {date: r.date, hour: r.hour, total: tot};
-    });
-    s.byDay = order.sort().map(function (d) { return days[d]; });
-    return s;
-  }
   /** Data (AAAA-MM-DD) de um horário: "2026-10-12 08:15:00" · "2026-10-12T08:15" · "12/10/2026 08:15" → 2026-10-12. */
   function dayPart(v) {
     if (blank(v)) return '';
@@ -1013,7 +978,7 @@ function JTCoreFactory_() {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
-    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, SORTER_REASONS: SORTER_REASONS, sorterSummary: sorterSummary, pivot: pivot, rankPanel: rankPanel,
+    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
