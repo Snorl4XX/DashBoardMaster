@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Gera o pacote do Painel do Sorter: JT_SORTER_B_V<versão>.zip, com a pasta "sorter/" (sem os testes e sem o config.json,
+ * Gera o pacote do Painel do Sorter: JT_SORTER_V<versão>.zip, com a pasta "sorter/" (sem os testes e sem o config.json,
  * que é criado na primeira vez). Separado do pacote do DashMaster.
  * Uso: node gerar-zip.js [pasta de saída]   (padrão: dist/ dentro desta pasta)
  */
@@ -54,6 +54,6 @@ const entries = FILES.map(f => {
   return {name: 'sorter/' + f, data};
 });
 const tag = 'V' + VERSAO.split('.').slice(0, 2).join('_');
-const file = path.join(outDir, 'JT_SORTER_B_' + tag + '.zip');
+const file = path.join(outDir, 'JT_SORTER_' + tag + '.zip');
 fs.writeFileSync(file, zip(entries));
 console.log(file + ' (' + entries.length + ' arquivos)');

@@ -72,6 +72,20 @@ input[type=date]:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,1
 .chip:hover{border-color:var(--red-200);color:var(--red-600)}
 .chip.active{background:var(--red-50);border-color:var(--red-200);color:var(--red-600)}
 
+/* filtros */
+.filters{margin-top:12px;padding:14px 16px}
+.filter-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-top:12px}
+.filter-grid .field{flex:none}
+.select-wrap{position:relative}
+.select-wrap::after{content:"";position:absolute;right:13px;top:50%;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:translateY(-70%) rotate(45deg);pointer-events:none}
+select{width:100%;height:42px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 34px 0 12px;font-size:13.5px;font-weight:600;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;transition:border-color .18s,box-shadow .18s}
+select:hover{border-color:var(--field-line-2)}
+select:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}
+select.on{border-color:var(--red-200);background:var(--red-50);color:var(--red-600)}
+.btn-sm{padding:7px 12px;font-size:12px}
+.warn-line{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#B45309;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);border-radius:12px;padding:8px 12px}
+:root[data-theme="dark"] .warn-line{color:#F5A524}
+
 /* situação da leitura */
 .status{margin-top:12px;padding:12px 16px;display:grid;gap:8px}
 .status-line{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;color:var(--muted)}
@@ -88,6 +102,7 @@ input[type=date]:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,1
 .kpi-label svg{width:15px;height:15px;color:var(--red)}
 .kpi-label i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .kpi-value{font-size:30px;font-weight:800;letter-spacing:-1px;margin-top:8px;line-height:1.05}
+.kpi-sub small{display:block;margin-top:3px}
 .kpi-value.text{font-size:19px;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kpi-sub{font-size:12px;color:var(--muted);margin-top:6px}
 .kpi-sub b{color:var(--ink-2)}
@@ -107,6 +122,10 @@ input[type=date]:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,1
 .hero-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:auto;padding-top:12px}
 .pill{display:inline-flex;align-items:center;gap:6px;background:#fff;color:#15803D;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:800}
 .shift-kpi.now{box-shadow:0 0 0 2px var(--red) inset}
+.shift-kpi.faded{opacity:.55}
+.dev-line{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px}
+.dev-line i{width:10px;height:10px;border-radius:3px;flex:none}
+.dev-line span{margin-left:auto;font-variant-numeric:tabular-nums}
 
 /* gráficos */
 .charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
@@ -136,6 +155,7 @@ input[type=date]:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,1
 .data-table tbody td{padding:9px 12px;border-bottom:1px solid var(--line-2);white-space:nowrap}
 .data-table tbody tr:nth-child(even) td{background:var(--row-alt)}
 .data-table tbody tr:hover td{background:var(--row-hover)}
+.data-table .num-col{width:44px;color:var(--muted);text-align:right}
 .data-table td.num,.data-table th.num{text-align:right;font-variant-numeric:tabular-nums}
 .data-table tr.cur td{background:var(--red-50);font-weight:700}
 .data-table tr.total td{font-weight:800;border-top:2px solid var(--red);background:var(--soft-2);position:sticky;bottom:0}
@@ -147,7 +167,7 @@ input[type=date]:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,1
 .toast.error{background:#9F1713;color:#fff} .toast.success{background:#166534;color:#fff}
 
 /* TV (?tv=1): só os números, sem os controles */
-body.tv .toolbar,body.tv .table-card,body.tv #refreshBtn,body.tv .lang-switch,body.tv #themeBtn{display:none}
+body.tv .toolbar,body.tv .filters,body.tv .table-card,body.tv #refreshBtn,body.tv .lang-switch,body.tv #themeBtn{display:none}
 body.tv .kpi-hero .kpi-value{font-size:72px}
 
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}

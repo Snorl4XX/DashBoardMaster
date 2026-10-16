@@ -91,6 +91,22 @@
       </button>
     </section>
 
+    <section class="card filters" id="filters" aria-labelledby="filtersTitle">
+      <div class="section-head">
+        <div><span class="kicker" data-i18n="filters">Filtros</span><h2 id="filtersTitle" data-i18n="filtersTitle">Refine os resultados</h2></div>
+        <button type="button" class="btn btn-light btn-sm" id="clearBtn" data-i18n="clear">Limpar filtros</button>
+      </div>
+      <div class="filter-grid">
+        <div class="field"><label for="fSorter" data-i18n="fSorter">Sorter</label><div class="select-wrap"><select id="fSorter"></select></div></div>
+        <div class="field"><label for="fBalanca" data-i18n="fBalanca">Balança (Induction No.)</label><div class="select-wrap"><select id="fBalanca"></select></div></div>
+        <div class="field"><label for="fTurno" data-i18n="fTurno">Turno</label><div class="select-wrap"><select id="fTurno"></select></div></div>
+        <div class="field"><label for="fHoraIni" data-i18n="fHoraIni">Horário inicial</label><div class="select-wrap"><select id="fHoraIni"></select></div></div>
+        <div class="field"><label for="fHoraFim" data-i18n="fHoraFim">Horário final</label><div class="select-wrap"><select id="fHoraFim"></select></div></div>
+        <div class="field"><label for="fPer" data-i18n="fPer">Periodicidade</label><div class="select-wrap"><select id="fPer"></select></div></div>
+        <div class="field"><label for="fTempo" data-i18n="fTempo">Tempo (agrupar por)</label><div class="select-wrap"><select id="fTempo"></select></div></div>
+      </div>
+    </section>
+
     <section class="card status" id="status" hidden aria-live="polite"></section>
     <section class="kpi-grid" id="kpis" aria-live="polite"></section>
     <section class="charts" id="charts"></section>
