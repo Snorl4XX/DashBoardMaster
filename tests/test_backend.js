@@ -3753,4 +3753,107 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'depois da migração o dia continua completo, com o segmento');
 }
 
+// ---------- V4.12.1: segmento e sacas/lotes que não apareceram no painel real ----------
+{
+  const {scanHash} = require('./mocks');
+  const c1 = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const C1 = c1.JTCore_, DQ = '2026-10-12';
+  // 2º segmento num campo de nome desconhecido (o nome real não estava nas capturas): achado pelo valor.
+  const norm = raw => c1.normalizeDetailRow_('sorting_error', Object.assign({billcode: 'S1', dt: DQ, transferCenterSendTime: DQ + ' 10:00:00'}, raw), DQ);
+  const cases = [
+    [{orderFirstCode: 'SP', campoDesconhecido: '391-18'}, 'SP,391-18'],
+    [{orderFirstCode: 'GRU', codigoX: 'GRU,402-03,020'}, 'GRU,402-03'],
+    [{codigoCompleto: 'MOO 430-00,001'}, 'MOO,430-00'],
+    [{orderFirstCode: 'BA', dia: '2026-10-12', hora: '10:00:00', packageNo: 'BR1045', terminalDispatchCode: '020', cep: '12345-678', cep2: '12345678'}, 'BA'],
+    [{orderFirstCode: 'SP', orderSecondCode: '376-00', outro: '391-18'}, 'SP,376-00']
+  ];
+  const wrongC = cases.filter(([raw, want]) => norm(raw).segmentPair !== want).map(([raw, want]) => JSON.stringify(raw) + ' → ' + norm(raw).segmentPair + ' (esperado ' + want + ')');
+  check(!wrongC.length, '2º segmento achado pelo valor (391-18 ou SP,391-18,020) em qualquer campo; datas, CEP e 3º trecho não confundem', wrongC);
+  const rowsF = C1.applyFillFrom([{segment: 'SP', segmentPair: ''}, {segment: 'GRU', segmentPair: 'GRU,402-03'}, {segment: '', segmentPair: ''}], {segmentPair: 'segment'});
+  const cfg1 = c1.getIndicatorConfig_('sorting_error'), cat1 = c1.getPublicCatalog_().filter(x => x.key === 'sorting_error')[0];
+  check(rowsF.map(r => r.segmentPair).join('|') === 'SP|GRU,402-03|' && cat1.fillFrom.segmentPair === 'segment' && cat1.scans === true &&
+    c1.clientFields_(cfg1).indexOf('segment') >= 0, 'dia antigo sem o segmento novo mostra o 1º segmento (fillFrom) até ser baixado de novo');
+
+  // Dia baixado ANTES da V4.12 (arquivo sem a coluna do segmento): o painel mostra o 1º segmento, não fica vazio.
+  const DO = '2026-10-13', cOld = freshCtx({[DO]: makeDay(DO, 101)}, null, {DATA_START_DATE: DO});
+  cOld.queueHistory(DO, DO, true);
+  runAll(cOld);
+  const dfO = cOld.dayFilesMap_('sorting_error', DO, DO)[DO], dsO = cOld.loadDetailFile_(dfO.fileId);
+  delete dsO.cols.segmentPair; delete dsO.dict.segmentPair; dsO.fields = dsO.fields.filter(f => f !== 'segmentPair');
+  cOld.saveDayDataset_('sorting_error', DO, dsO, dfO.expectedPages, dfO.expectedRecords, {skipScans: true});
+  const rowsO = C1.applyFillFrom(C1.decodeDataset(cOld.getDashboardData('sorting_error', {from: DO, to: DO}).dataset), cat1.fillFrom);
+  const compO = cOld.computeDashboard_('sorting_error', {from: DO, to: DO}), topO = compO.cards.tops.filter(t => t.key === 'segmentPair')[0];
+  check(rowsO.length > 0 && rowsO.every(r => r.segmentPair && r.segmentPair === r.segment) && topO && /^(SP|GRU|MG)$/.test(topO.label),
+    'arquivo antigo: cartão e painel com o 1º segmento (no navegador e no relatório)', topO);
+
+  // Consulta das bipagens: erro do JMS NÃO é "remessa sem bipe" (antes, 2 erros e a remessa era abandonada para sempre).
+  const DS = '2026-10-14', mk = seed => { const d = makeDay(DS, seed); d.se.forEach((r, i) => { if (i % 3 === 0) { r.packageNo = null; r.scanuser = null; } }); return d; };
+  const exp = w => { const h = scanHash(w); return h % 6 === 0 ? null : 'BRFIC' + (100 + h % 800); };
+  let failLeft = 4;
+  const dA = {[DS]: mk(102)};
+  const cA = freshCtx(dA, {intercept: route => route === 'listPage' && failLeft-- > 0 ? [200, {code: 500, msg: 'erro temporário do gateway', fail: true, succ: false}] : null}, {DATA_START_DATE: DS});
+  cA.queueHistory(DS, DS, true);
+  runAll(cA, 12);
+  const needA = dA[DS].se.filter(r => !r.packageNo).map(r => r.billcode);
+  const byA = {};
+  cA.getArchivedRange_('sorting_error', DS, DS).rows.forEach(r => { byA[r.shipment] = r; });
+  const badA = needA.filter(w => String(byA[w].lot || '') !== String(exp(w) || ''));
+  check(failLeft < 0 && !badA.length && needA.some(w => exp(w)), 'duas execuções com erro e depois a consulta responde: todas as sacas achadas (nenhuma abandonada)', badA.slice(0, 3));
+  const stA = cA.scanStatus_('sorting_error', DS, DS);
+  check(stA.total === needA.length && stA.found === needA.filter(w => exp(w)).length && stA.gaveUp === needA.filter(w => !exp(w)).length && !stA.paused,
+    'situação no painel: completadas, sem o bipe "Encomenda inserida em lote" na SP GRU e total', stA);
+  check(cA.getDashboardData('sorting_error', {from: DS, to: DS}).meta.scanStatus.found === stA.found, 'a situação vai para o painel (meta.scanStatus)');
+
+  // O JMS recusa páginas de 100: tenta 20 (o tamanho da tela) e guarda.
+  const dB = {[DS]: mk(103)};
+  const cB = freshCtx(dB, {intercept: (route, h, body) => route === 'listPage' && body.size > 20 ? [200, {code: 500, msg: 'size inválido', fail: true}] : null}, {DATA_START_DATE: DS});
+  cB.queueHistory(DS, DS, true);
+  runAll(cB);
+  const byB = {};
+  cB.getArchivedRange_('sorting_error', DS, DS).rows.forEach(r => { byB[r.shipment] = r; });
+  const needB = dB[DS].se.filter(r => !r.packageNo).map(r => r.billcode), badB = needB.filter(w => String(byB[w].lot || '') !== String(exp(w) || ''));
+  const okCalls = cB.__state.fetches.filter(f => /scanRecordQuery\/listPage$/.test(f.url) && f.payload.size === 20);
+  check(!badB.length && cB.__state.props.TRIAGEM_BIPAGENS_PAGINA === '20' && okCalls.length > 0, 'páginas de 100 recusadas: a consulta segue com 20 por página', badB.slice(0, 3));
+
+  // Mapa antigo (V4.4–V4.12) com remessas abandonadas por erro: consultadas de novo.
+  let reject = true;
+  const dC = {[DS]: mk(104)};
+  const cC = freshCtx(dC, {intercept: route => reject && route === 'listPage' ? [200, {code: 500, msg: 'fora do ar', fail: true}] : null}, {DATA_START_DATE: DS});
+  cC.queueHistory(DS, DS, true);
+  runAll(cC);
+  const needC = dC[DS].se.filter(r => !r.packageNo).map(r => r.billcode), stC = cC.scanStatus_('sorting_error', DS, DS);
+  check(stC.error && /fora do ar|recusada/.test(stC.error.reason) && cC.getDashboardData('sorting_error', {from: DS, to: DS}).meta.scanStatus.error,
+    'erro da consulta aparece no painel (meta.scanStatus.error)', stC);
+  const oldMiss = {};
+  needC.forEach(w => { oldMiss[w] = 2; });
+  cC.saveTripMap_('sorting_error', DS, {v: 1, ids: {}, miss: oldMiss}, needC.length, 'bipagens');
+  reject = false;
+  cC.enqueueJobs_([['SCANS', 'sorting_error', DS, 0]], {reset: true});
+  runAll(cC);
+  const byC = {};
+  cC.getArchivedRange_('sorting_error', DS, DS).rows.forEach(r => { byC[r.shipment] = r; });
+  const badC = needC.filter(w => String(byC[w].lot || '') !== String(exp(w) || ''));
+  check(!badC.length, 'mapa antigo com remessas abandonadas por erro: consultadas de novo e completadas', badC.slice(0, 3));
+
+  // Tipo de bipagem em chinês e base "SP GRU | 30001".
+  const sc = cfg1.scans, recs = [
+    {billNo: 'W1', scanType: '建包扫描', inputDept: 'SP GRU | 30001', scanDate: '2026-10-14 03:00:00', belongNo: 'BRZH1', scanEmp: 'DIG ZH'},
+    {billNo: 'W2', scanType: 'Encomenda inserida em lote', inputDept: 'SP GRU', scanDate: '2026-10-14 03:00:00', belongNo: 'BRPT1', scanEmp: 'DIG PT'},
+    {billNo: 'W3', scanType: 'Encomenda inserida em lote', inputDept: 'SP GRUX', scanDate: '2026-10-14 03:00:00', belongNo: 'BRX', scanEmp: 'X'}];
+  const fl = c1.pickScanFills_(recs, sc, 'SP GRU');
+  check(fl.W1 && fl.W1.lot === 'BRZH1' && fl.W2 && fl.W2.lot === 'BRPT1' && !fl.W3, 'tipo "建包扫描" e base "SP GRU | 30001" aceitos; outra base não', fl);
+
+  // Migração V4.12.1: os últimos 31 dias baixados de novo e a Consulta das bipagens refeita, uma vez.
+  const today = c1.isoToday_(), dN = c1.addDaysIso_(today, -2), dOld = c1.addDaysIso_(today, -45);
+  const cM = freshCtx({[dN]: makeDay(dN, 105), [dOld]: makeDay(dOld, 106)}, null, {DATA_START_DATE: dOld});
+  cM.queueHistory(dOld, dOld, true);
+  cM.queueHistory(dN, dN, true);
+  runAll(cM);
+  delete cM.__state.props.MIGRATION_V4121;
+  const qM = cM.migrateToV4121_(), pendM = cM.pendingJobs_();
+  check(qM === 1 && pendM.some(j => j.type === 'DETAIL_INIT' && j.indicator === 'sorting_error' && j.date === dN) &&
+    !pendM.some(j => j.date === dOld && j.indicator === 'sorting_error') && cM.migrateToV4121_() === 0,
+    'migração V4.12.1: só a Triagem dos últimos 31 dias, uma vez', pendM.map(j => j.type + ' ' + j.indicator + ' ' + j.date));
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

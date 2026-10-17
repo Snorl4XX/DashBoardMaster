@@ -165,6 +165,13 @@
       amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total',
       routesOfficial: 'Número oficial de cada rota (tabela principal do JMS)', tripCov: 'IDs consultados no Rastreamento do pacote: {a} de {b} remessas ({c} com ID)',
       tripCovNone: 'IDs de viagem: consulta no Rastreamento do pacote depois do download do dia', tcOfficial: 'número oficial do JMS',
+      scanBadge: 'Sacas pela Consulta das bipagens: {f} de {t} · ainda sem saca: {l}',
+      scanBadgeHint: 'Sem operador: {o} · {g} remessa(s) sem o bipe "Encomenda inserida em lote" na {b} (não há saca para pegar) · {q} dia(s) na fila da consulta',
+      scanWait: 'Sem saca: {l} · Consulta das bipagens ainda não rodou', scanWaitHint: 'Sem operador: {o}. A consulta roda depois da lista do dia (ou no botão Atualizar).',
+      scanNone: 'Saca e operador: todas as remessas com informação',
+      scanPaused: 'Consulta das bipagens pausada: {r}', scanError: 'Consulta das bipagens com erro: {r}',
+      segBadge: 'Segmento (1º e 2º): {a} de {b} remessas com o 2º segmento',
+      segBadgeHint: 'Dias baixados antes da V4.12 mostram só o 1º segmento até serem baixados de novo (é automático). Se continuar sem o 2º segmento, rode diagnosticoCompleto e mande a linha "Segmento".',
       tcPartial: 'prévia: o download do dia ainda não terminou', tcShare: '{p} de participação',
       metricsOfficial: 'Números oficiais do JMS (tabela principal)', pctOf: 'Cálculo: {a} ÷ {b}', sumRows: 'Soma', sumCount: '{n}',
       hmSynced: 'Número do JMS consultado em {t}', hmSyncedPeriod: 'Números do JMS consultados até {t}',
@@ -326,6 +333,13 @@
       amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额',
       routesOfficial: '各线路官方数字（JMS主表）', tripCov: '包裹轨迹已查询车次号：{a} / {b} 票（{c} 票有车次号）',
       tripCovNone: '车次号：当日明细下载完成后在包裹轨迹查询', tcOfficial: 'JMS官方数字',
+      scanBadge: '扫描记录查询补全包号：{f} / {t} · 仍无包号：{l}',
+      scanBadgeHint: '无操作员：{o} · {g} 票在 {b} 没有“建包扫描”记录（无包号可取）· 查询队列 {q} 天',
+      scanWait: '无包号：{l} · 扫描记录查询尚未运行', scanWaitHint: '无操作员：{o}。当日明细下载后（或点击“更新”）运行查询。',
+      scanNone: '包号和操作员：全部有信息',
+      scanPaused: '扫描记录查询已暂停：{r}', scanError: '扫描记录查询出错：{r}',
+      segBadge: '一段码+二段码：{a} / {b} 票有二段码',
+      segBadgeHint: 'V4.12 之前下载的日期在重新下载前只显示一段码（自动重新下载）。如仍无二段码，请运行 diagnosticoCompleto 并发送“Segmento”一行。',
       tcPartial: '预览：当日明细尚未下载完', tcShare: '占比 {p}',
       metricsOfficial: 'JMS官方数字（主表）', pctOf: '计算：{a} ÷ {b}', sumRows: '合计', sumCount: '{n}',
       hmSynced: 'JMS 数字获取时间：{t}', hmSyncedPeriod: 'JMS 数字最近获取：{t}',
@@ -1045,7 +1059,7 @@
       var sm = res.summary;
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
         shiftSum: res.shiftSum || {}, routes: res.routes || null,
-        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
+        rows: Core.applyFillFrom(Core.applyDayOf(Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds, res.orderKindTags), c && c.dayOf), c && c.fillFrom),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
           totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};
@@ -1391,7 +1405,33 @@
     }
     if (meta.lastError) html += badge('bad', 'warn', t('errorBadge', {r: meta.lastError.reason}),
       meta.lastError.reason + ' (' + fmtDate(meta.lastError.date, true) + ')');
+    html += scanBadges(meta);
     $('#coverageBadges').innerHTML = html;
+  }
+  /**
+   * V4.12.1 (Triagem Errada): saca e operador completados pela Consulta das bipagens (quantos, quantos ainda vazios, fila e
+   * erro) e quantas remessas já têm o 2º segmento — o painel mostra o que falta e por quê.
+   */
+  function scanBadges(meta) {
+    var c = cfg(), ss = meta.scanStatus, rows = (state.data && state.data.rows) || [], html = '';
+    if (!c || !rows.length) return '';
+    var empty = function (v) { return v === null || v === undefined || String(v).trim() === ''; };
+    if (ss) {
+      var noLot = 0, noLogin = 0;
+      rows.forEach(function (r) { if (empty(r.lot)) noLot++; if (empty(r.login)) noLogin++; });
+      var miss = noLot || noLogin;
+      if (ss.total > 0) html += badge(miss ? 'warn' : 'ok', miss ? 'warn' : 'check', t('scanBadge', {f: fmtInt(ss.found), t: fmtInt(ss.total), l: fmtInt(noLot)}),
+        t('scanBadgeHint', {o: fmtInt(noLogin), g: fmtInt(ss.gaveUp), b: ss.center || '', q: fmtInt(ss.queued)}));
+      else if (miss) html += badge('warn', 'warn', t('scanWait', {l: fmtInt(noLot)}), t('scanWaitHint', {o: fmtInt(noLogin)}));
+      else html += badge('ok', 'check', t('scanNone'), '');
+      if (ss.paused) html += badge('bad', 'warn', t('scanPaused', {r: ss.paused.reason}), ss.paused.reason);
+      else if (ss.error) html += badge('bad', 'warn', t('scanError', {r: ss.error.reason}), ss.error.reason + ' (' + fmtDate(ss.error.date, true) + ')');
+    }
+    if (c.fillFrom && c.fillFrom.segmentPair) {
+      var with2 = rows.filter(function (r) { return String(r.segmentPair || '').indexOf(',') > 0; }).length;
+      html += badge(with2 === rows.length ? 'ok' : 'warn', with2 === rows.length ? 'check' : 'info', t('segBadge', {a: fmtInt(with2), b: fmtInt(rows.length)}), t('segBadgeHint'));
+    }
+    return html;
   }
   function badge(kind, ic, text, title) {
     return '<span class="badge ' + kind + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + icon(ic) + '<span>' + esc(text) + '</span></span>';

@@ -1,8 +1,47 @@
-# J&T DASHMASTER V4.12 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.12.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.12.1 — Correção: segmento e sacas/lotes que não apareciam
+**Pedido:** "Não apareceu os dados do segmento e nem arrumou as questões das sacas/lotes."
+
+### O que estava errado
+1. **Sacas/lotes:** quando a Consulta das bipagens dava erro no JMS (recusa, gateway fora do ar, página grande demais), o painel contava o erro como "remessa sem bipe". Depois de 2 erros, a remessa era abandonada e nunca mais consultada. Por isso as sacas continuavam vazias.
+2. **Segmento:**
+   - o painel só procurava o 2º segmento em alguns nomes de campo do JMS; com outro nome, ele não aparecia;
+   - os dias baixados antes da V4.12 não tinham o segmento, e o painel ficava vazio até a rebaixa terminar.
+
+### O que mudou
+- **Consulta das bipagens:**
+  - erro do JMS não conta mais como "sem bipe": a remessa continua na fila e é consultada de novo;
+  - as remessas abandonadas por erro antes desta versão são consultadas de novo, sozinhas;
+  - se o JMS recusar páginas de 100, a consulta passa a usar 20 por página (o tamanho da tela);
+  - aceita o tipo "Encomenda inserida em lote" também em chinês (建包扫描) e a base escrita "SP GRU | 30001".
+- **Segmento:**
+  - o 2º segmento é achado pelo formato ("391-18" ou "SP,391-18,020") em qualquer campo da lista do JMS;
+  - dias antigos mostram o 1º segmento ("SP") até serem baixados de novo.
+- **Uma vez, na primeira execução:** a lista da Triagem Errada dos últimos 31 dias é baixada de novo e a Consulta das bipagens é refeita.
+
+### O painel mostra a situação
+Acima dos filtros da Triagem Errada há selos novos:
+
+| Selo | O que diz |
+|---|---|
+| **Sacas pela Consulta das bipagens: X de Y · ainda sem saca: Z** | Das Y remessas que vieram sem saca, X foram completadas. Passe o mouse para ver quantas estão sem operador, quantas não têm o bipe "Encomenda inserida em lote" na SP GRU e quantos dias estão na fila. |
+| **Consulta das bipagens com erro: …** | O erro que o JMS devolveu (só aparece se houver erro). |
+| **Segmento (1º e 2º): X de Y remessas com o 2º segmento** | Quantas remessas já têm o 2º segmento. |
+
+Remessa **sem** o bipe "Encomenda inserida em lote" na SP GRU continua sem saca: não existe saca para pegar (regra do PDF).
+
+### Se ainda faltar
+Mande um print desses selos. Se aparecer o selo de erro, ou o segmento continuar sem o 2º, rode `diagnosticoCompleto` e `diagnosticarBipagensTriagem` e mande o resultado (sem AuthToken e sem Cookie).
+
+### Como instalar
+- **Google:** troque os `.gs` e `.html` pelos do ZIP V4.12.1 e publique uma **Nova versão**. Se já tem a V4.12, mudaram `Config.gs`, `Core.gs`, `Analytics.gs`, `Code.gs`, `Storage.gs`, `Triggers.gs`, `Expedicao.gs` e `Client.html`. Não precisa rodar nenhuma função.
+- A fila refaz os 31 dias sozinha em seguida. Para ver mais rápido, abra a Triagem Errada e aperte **Atualizar**.
+- **Node.js / Oracle:** envie o `JT_DASHMASTER_V4_12_1_NODE.zip` e rode `unzip -o JT_DASHMASTER_V4_12_1_NODE.zip && sudo systemctl restart dashmaster`.
 
 ## V4.12 — Triagem Errada: segmento mais ofensor e tabela de docas do print
 **Pedido (PDF "Novas alterações na Triagem Errada"):**

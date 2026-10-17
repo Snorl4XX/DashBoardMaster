@@ -844,6 +844,7 @@ function diagnosticoCompleto(date) {
       lines.push('  Segmento (1º e 2º, 1ª página, ' + sg.amostra + ' remessas): ' + sg.com2 + ' com o 2º segmento' +
         (sg.campo ? ' (campo ' + sg.campo + ')' : ' — o 2º segmento NÃO veio (procurado em ' + cfg.fields.segment2.join('/') + ')') +
         (sg.top.length ? ' · mais ofensores: ' + sg.top.map(x => x.valor + ' (' + x.n + ')').join(' · ') : ''));
+      if (!sg.campo) lines.push('  Campos recebidos do JMS (me mande esta linha): ' + (sg.campos || []).join(', '));
     }
     const u = item.ultimos7dias;
     if (u && !u.erro) {

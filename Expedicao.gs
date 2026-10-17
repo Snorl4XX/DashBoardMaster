@@ -503,13 +503,13 @@ function loadTripMap_(indicator, date, kind) {
     return x && x.ids ? Object.assign(emptyTripMap_(), x, {miss: x.miss || {}}) : emptyTripMap_();
   } catch (e) { return emptyTripMap_(); }
 }
-function saveTripMap_(indicator, date, map, total, kind) {
+function saveTripMap_(indicator, date, map, total, kind, done) {
   const key = lookupMapKey_(indicator, kind), ids = Object.keys(map.ids);
   const found = ids.filter(w => map.ids[w]).length;
   const file = writeGzJson_(indicator + '__' + date + '__' + (kind || 'viagens') + '.json.gz', map);
   const rowNum = findRowKey_('DAYFILES', key, date);
   const prev = rowNum > 0 ? allTabRows_('DAYFILES')[rowNum - 2] : null;
-  const row = [key, date, file.getId(), ids.length, found, total, new Date()];
+  const row = [key, date, file.getId(), done === undefined ? ids.length : done, found, total, new Date()];
   if (rowNum > 0) writeRow_('DAYFILES', rowNum, row); else appendRow_('DAYFILES', row);
   if (prev && prev[2] && prev[2] !== file.getId()) trashQuietly_(prev[2], indicator, date);
 }
@@ -789,6 +789,19 @@ function tripCoverage_(indicator, from, to) {
  */
 const SCAN_MAX_MISS_ = 2;
 const SCAN_KIND_ = 'bipagens';
+/**
+ * V4.12.1: até a V4.12, um ERRO da consulta (JMS recusou, página grande demais, fora do ar) também contava como "remessa não
+ * achada": duas falhas e a remessa nunca mais era consultada (lote/login ficavam vazios). Agora só conta quando a consulta
+ * respondeu e a remessa não tem o bipe. Os mapas antigos (sem mv = 2) perdem essas marcas e as remessas são consultadas de novo.
+ */
+const SCAN_MISS_VERSION_ = 2;
+function loadScanMap_(indicator, date) {
+  const map = loadTripMap_(indicator, date, SCAN_KIND_);
+  if (map.mv !== SCAN_MISS_VERSION_) { map.miss = {}; map.mv = SCAN_MISS_VERSION_; }
+  return map;
+}
+/** Tipo de bipagem "Encomenda inserida em lote" também como o JMS manda em chinês (建包扫描) ou sem o idioma PT. */
+const SCAN_TYPE_ALIASES_ = ['encomenda inserida em lote', '建包扫描', '建包', '集包扫描'];
 /** "Encomenda inserida em lote" → "encomenda inserida em lote" (sem acento, espaço simples). */
 function plainText_(x) {
   return String(x === null || x === undefined ? '' : x).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
@@ -857,12 +870,14 @@ function scanPayload_(list, date, page, size) {
  * Devolve {remessa: {lot, login, at}}; remessa sem esse bipe fica de fora.
  */
 function pickScanFills_(records, sc, center) {
-  const types = (sc.scanTypes || ['Encomenda inserida em lote']).map(plainText_), base = plainText_(center), fill = sc.fill || {};
+  const types = (sc.scanTypes || ['Encomenda inserida em lote']).map(plainText_).concat(SCAN_TYPE_ALIASES_), base = plainText_(center), fill = sc.fill || {};
   const when = r => String(r.scanDate || '') + '|' + String(r.inputDate || '');
+  // "SP GRU" · "SP GRU | 30001" · "SP GRU(30001)" = a nossa base.
+  const isBase = v => { const x = plainText_(v); return x === base || x.replace(/\s*[|(].*$/, '').trim() === base; };
   const best = {};
   (records || []).forEach(r => {
     if (!r || types.indexOf(plainText_(r.scanType)) < 0) return;
-    if (plainText_(r[sc.baseField || 'inputDept']) !== base) return;
+    if (!isBase(r[sc.baseField || 'inputDept'])) return;
     const w = String(r.billNo || '').trim();
     if (!w) return;
     if (!best[w] || when(r) < when(best[w])) best[w] = r;
@@ -880,9 +895,20 @@ function scanBatch_(sc) {
   const forced = Number(getProp_('TRIAGEM_BIPAGENS_LOTE', ''));
   return forced >= 1 ? Math.min(500, Math.floor(forced)) : Math.max(1, (sc && sc.batch) || 40);
 }
-/** Todos os bipes das remessas `list` (página 1 e, em paralelo, as outras; até 60 páginas). */
+/**
+ * Todos os bipes das remessas `list` (página 1 e, em paralelo, as outras; até 60 páginas). Páginas de 100; se o JMS recusar
+ * a página 1 assim (erro que não é de credencial), tenta com 20 — o tamanho da tela — e guarda (TRIAGEM_BIPAGENS_PAGINA).
+ */
 function fetchScanRecords_(endpoint, list, date) {
-  const size = 100, first = jmsPost_(endpoint, scanPayload_(list, date, 1, size), 3);
+  let size = Number(getProp_('TRIAGEM_BIPAGENS_PAGINA', '')) || 100, first;
+  try { first = jmsPost_(endpoint, scanPayload_(list, date, 1, size), 3); }
+  catch (e) {
+    if (size <= 20 || errorKind_(String(e && e.message || e)) !== 'OTHER' || /Sessão do JMS/.test(String(e && e.message || e))) throw e;
+    size = 20;
+    first = jmsPost_(endpoint, scanPayload_(list, date, 1, size), 3);
+    setProp_('TRIAGEM_BIPAGENS_PAGINA', '20');
+    logSync_('INFO', 'sorting_error', date, 'Consulta das bipagens: o JMS recusou páginas de 100; usando 20 por página.');
+  }
   let out = recordsOf_(first).slice();
   const pages = Math.min(pagingOf_(first).pages || 1, 60);
   const rest = [];
@@ -919,24 +945,25 @@ function runScanJob_(job, deadline) {
   if (!df) return 'skip';
   const ds = loadDetailFile_(df.fileId);
   if (!isDayDataset_(ds) || !ds.n || !ds.cols.shipment) return 'done';
-  const map = loadTripMap_(job.indicator, job.date, SCAN_KIND_);
+  const map = loadScanMap_(job.indicator, job.date);
   const plan = scanTodo_(ds, sc, map), todo = plan.todo;
   const endpoint = endpointFor_(cfg, 'scans'), center = centerName_(), batch = scanBatch_(sc);
-  let k = 0, found = 0, slowest = 8000, lastError = '';
+  let k = 0, found = 0, answered = 0, slowest = 8000, lastError = '';
   while (k < todo.length) {
     if (Date.now() + slowest + 20000 > deadline) break;
     const list = todo.slice(k, k + batch);
-    k += list.length;
     const t0 = Date.now();
     let records;
     try { records = fetchScanRecords_(endpoint, list, job.date); }
     catch (e) {
       const m = String(e && e.message || e);
       if (errorKind_(m) !== 'OTHER' || /Sessão do JMS/.test(m)) throw e;
+      // V4.12.1: erro NÃO é "remessa sem bipe": as remessas continuam na fila e são consultadas de novo depois.
       lastError = m.slice(0, 300);
-      list.forEach(w => { map.miss[w] = (map.miss[w] || 0) + 1; });
-      continue;
+      break;
     }
+    k += list.length;
+    answered++;
     slowest = Math.max(slowest, Date.now() - t0);
     const fills = pickScanFills_(records, sc, center);
     list.forEach(w => {
@@ -948,15 +975,27 @@ function runScanJob_(job, deadline) {
     });
   }
   map.at = new Date().toISOString();
-  if (todo.length) saveTripMap_(job.indicator, job.date, map, plan.total, SCAN_KIND_);
+  if (lastError) map.err = {at: map.at, msg: lastError}; else if (answered) delete map.err;
+  if (todo.length) saveScanMap_(job.indicator, job.date, map, plan.total);
   if (found && applyScanMapToDs_(ds, map, sc)) {
     saveDayDataset_(job.indicator, job.date, ds, df.expectedPages, df.expectedRecords, {skipScans: true, keepCreatedAt: df.createdAt});
   }
-  if (lastError && !found) {
+  if (lastError) {
     logSync_('WARN', job.indicator, job.date, 'Consulta das bipagens recusada (lote/login da Triagem): ' + lastError +
       '. Rode diagnosticarBipagensTriagem() e confira os cabeçalhos de rota (JMS_ROUTENAME_SCANQUERY).');
+    // Nenhuma consulta respondeu nesta execução: erro da tarefa (conta tentativa; a agenda e o Atualizar põem de novo na fila).
+    if (!answered) throw new Error('Consulta das bipagens recusada: ' + lastError);
   }
   return k < todo.length ? 'partial' : 'done';
+}
+/**
+ * Mapa da Consulta das bipagens. Na linha do DAYFILES: consultadas (completadas + as que a consulta respondeu SEM o bipe
+ * "Encomenda inserida em lote" na nossa base), completadas e o total do dia.
+ */
+function saveScanMap_(indicator, date, map, total) {
+  map.mv = SCAN_MISS_VERSION_;
+  const noScan = Object.keys(map.miss).filter(w => !map.ids[w] && map.miss[w] >= 1).length;
+  saveTripMap_(indicator, date, map, total, SCAN_KIND_, Object.keys(map.ids).length + noScan);
 }
 /** V4.4: uma vez, os dias da Triagem errada já baixados entram na fila da Consulta das bipagens (os mais novos primeiro). */
 function migrateToV44_() {
@@ -975,6 +1014,35 @@ function scanCoverage_(indicator, from, to) {
   const out = {};
   const files = dayFilesMap_(lookupMapKey_(indicator, SCAN_KIND_), from, to);
   Object.keys(files).forEach(d => { const f = files[d]; out[d] = {done: f.rows, found: f.expectedPages, total: f.expectedRecords, at: f.createdAt}; });
+  return out;
+}
+
+/**
+ * V4.12.1: situação da Consulta das bipagens no período (painel da Triagem Errada): remessas sem lote/login, quantas já foram
+ * completadas, quantas não têm o bipe "Encomenda inserida em lote" na nossa base, quantos dias estão na fila e o último erro.
+ */
+function scanStatus_(indicator, from, to) {
+  const cov = scanCoverage_(indicator, from, to), out = {total: 0, found: 0, gaveUp: 0, days: 0, queued: 0, error: null, paused: null, center: centerName_()};
+  Object.keys(cov).forEach(d => {
+    const c = cov[d];
+    out.days++;
+    out.total += Number(c.total) || 0;
+    out.found += Number(c.found) || 0;
+    out.gaveUp += Math.max(0, (Number(c.done) || 0) - (Number(c.found) || 0));
+  });
+  allTabRows_('JOBS').forEach(r => {
+    if (r[1] !== 'SCANS' || r[2] !== indicator) return;
+    const d = dateCellIso_(r[3]);
+    if (d < from || d > to) return;
+    if (r[5] === 'PENDING' || r[5] === 'RUNNING') out.queued++;
+    const msg = String(r[9] || '').trim();
+    if (msg && (r[5] === 'ERROR' || r[5] === 'PENDING')) {
+      const at = toIsoTimestamp_(r[8]) || '';
+      if (!out.error || at > out.error.at) out.error = {date: d, at: at, reason: publicJmsError_(msg).slice(0, 300)};
+    }
+  });
+  const pz = (publicPauses_() || []).filter(p => p.route === 'SCANQUERY' || p.route === '*')[0];
+  if (pz) out.paused = {kind: pz.kind, reason: pz.reason, until: pz.until};
   return out;
 }
 
@@ -1376,7 +1444,7 @@ function diagnosticarBipagensTriagem(date) {
   (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === 'SCANQUERY' || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
   const df = dayFilesMap_(key, d, d)[d];
   if (!df) { add('O dia ainda não tem a lista da Triagem baixada.'); console.log(lines.join('\n')); out.texto = lines.join('\n'); return out; }
-  const ds = loadDetailFile_(df.fileId), map = loadTripMap_(key, d, SCAN_KIND_), plan = scanTodo_(ds, sc, map);
+  const ds = loadDetailFile_(df.fileId), map = loadScanMap_(key, d), plan = scanTodo_(ds, sc, map);
   const empty = f => { let n = 0; for (let i = 0; i < ds.n; i++) if (!ds.cols[f] || !String(ds.dict[f][ds.cols[f][i]] || '').trim()) n++; return n; };
   add('Lista do dia: ' + fmt(ds.n) + ' remessa(s) · sem lote: ' + fmt(empty('lot')) + ' · sem login: ' + fmt(empty('login')) +
     ' · já completadas pela consulta: ' + fmt(Object.keys(map.ids).length) + ' · ainda na fila: ' + fmt(plan.todo.length));

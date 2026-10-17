@@ -262,6 +262,18 @@ function JTCoreFactory_() {
     return rows;
   }
   /**
+   * V4.12.1: campo vazio copiado de outro (Config.gs → fillFrom; ex.: {segmentPair: 'segment'} na Triagem Errada — dia baixado
+   * antes do 2º segmento mostra o 1º segmento até ser baixado de novo).
+   */
+  function applyFillFrom(rows, map) {
+    if (!map || !rows) return rows;
+    var keys = Object.keys(map);
+    for (var i = 0; i < rows.length; i++) {
+      for (var k = 0; k < keys.length; k++) if (blank(rows[i][keys[k]]) && !blank(rows[i][map[keys[k]]])) rows[i][keys[k]] = rows[i][map[keys[k]]];
+    }
+    return rows;
+  }
+  /**
    * Avaria: "Pedido principal" / "Pedido secundário" de cada remessa. Com `tags` ({data: {kind, w: [remessas]}},
    * listas do JMS de uma opção), igual à tela; dia sem lista: remessa com sufixo "-001" = pedido filho.
    */
@@ -994,7 +1006,7 @@ function JTCoreFactory_() {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentPair: segmentPair, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
-    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
+    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, applyFillFrom: applyFillFrom, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

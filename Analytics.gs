@@ -58,13 +58,39 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   // só com o código ("BRE"), como nos gráficos de sempre. Destino e doca saem daqui (Core.applyDocks).
   // V4.8: com o 2º segmento ("BRE - SP,381-06"): os DCs novos (DC GRU, DC SSZ-SP, MOO…) saem por ele.
   if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') row.segmentRaw = JTCore_.segmentHead2(row.segment);
-  // V4.12 (Triagem Errada): segmento "SP,391-18" = 1º segmento + o 1º campo de fields.segment2 que tiver um 2º segmento.
-  if (f.segment2) {
-    let sec = '';
-    for (let i = 0; i < f.segment2.length && !sec; i++) sec = JTCore_.secondSegment(str([f.segment2[i]]));
-    row.segmentPair = JTCore_.segmentPair(row.segment, sec || row.segment);
-  }
+  // V4.12 (Triagem Errada): segmento "SP,391-18" = 1º segmento + 2º segmento (segmentPairOf_).
+  if (f.segment2) row.segmentPair = segmentPairOf_(raw, row, f.segment2).pair;
   return rederiveRow_(indicatorKey, row);
+}
+
+/**
+ * V4.12.1: 1º + 2º segmento de uma remessa da Triagem Errada ("SP,391-18"). O nome do campo do 2º segmento no JMS não estava
+ * nas capturas: vale o 1º campo de `keys` com um 2º segmento (391-18); sem nenhum, QUALQUER campo do registro cujo valor seja
+ * um 2º segmento ("391-18") ou um código de três segmentos ("SP,391-18,020"). Sem o 1º segmento, ele sai do código completo.
+ * Devolve {pair, key} (key = campo de onde veio o 2º segmento, para o diagnóstico).
+ */
+const SEG2_ONLY_RE_ = /^\s*\d{3}\s*-\s*\d{2}\s*$/;
+const SEG_FULL_RE_ = /^\s*(?:主\s*[:：]\s*)?([A-Za-z]{1,4}\d?)\s*(?:-\s*[A-Za-z]{1,4}\s*)?[,，\s]\s*(\d{3})\s*-\s*(\d{2})\b/;
+function segmentPairOf_(raw, row, keys) {
+  const read = fieldReader_(raw || {});
+  let first = JTCore_.firstSegment(row.segment), second = '', key = '';
+  for (let i = 0; i < keys.length && !second; i++) {
+    const hit = read([keys[i]]);
+    const s = hit.value === null || hit.value === undefined || typeof hit.value === 'object' ? '' : JTCore_.secondSegment(hit.value);
+    if (s) { second = s; key = hit.key || keys[i]; }
+  }
+  if (!second && raw) {
+    const ks = Object.keys(raw);
+    for (let i = 0; i < ks.length && !second; i++) {
+      const v = raw[ks[i]];
+      if (typeof v !== 'string') continue;
+      if (SEG2_ONLY_RE_.test(v)) { second = JTCore_.secondSegment(v); key = ks[i]; continue; }
+      const m = SEG_FULL_RE_.exec(v);
+      if (m) { second = m[2] + '-' + m[3]; key = ks[i]; if (!first) first = m[1].toUpperCase(); }
+    }
+  }
+  if (!second) second = JTCore_.secondSegment(row.segment);
+  return {pair: JTCore_.segmentPair(first, second), key: key};
 }
 
 /**
@@ -172,14 +198,12 @@ function segmentSampleReport_(indicatorKey, records) {
     if (v) by[v] = (by[v] || 0) + 1;
     if (v.indexOf(',') < 0) return;
     com2++;
-    const read = fieldReader_(rec);
-    for (let i = 0; i < keys.length; i++) {
-      const hit = read([keys[i]]);
-      if (hit.value !== null && JTCore_.secondSegment(hit.value)) { from[hit.key || keys[i]] = (from[hit.key || keys[i]] || 0) + 1; break; }
-    }
+    const k = segmentPairOf_(rec, row, keys).key;
+    if (k) from[k] = (from[k] || 0) + 1;
   });
   const top = obj => Object.keys(obj).map(k => ({valor: k, n: obj[k]})).sort((a, b) => b.n - a.n);
-  return {amostra: n, com2: com2, campo: (top(from)[0] || {}).valor || '', top: top(by).slice(0, 5)};
+  return {amostra: n, com2: com2, campo: (top(from)[0] || {}).valor || '', top: top(by).slice(0, 5),
+    campos: Object.keys(records[0] || {}).slice(0, 60)};
 }
 
 /**
@@ -718,6 +742,8 @@ function getDashboardData(indicatorKey, params) {
         : ((cfg.detail || {}).shiftProbe || []).length ? summaryShiftsOff_(cfg) : null,
       // Expedição: remessas já consultadas no Rastreamento do pacote (IDs de viagem) por dia.
       tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null,
+      // V4.12.1 (Triagem Errada): lote/login pela Consulta das bipagens — completadas, sem o bipe, na fila, erro.
+      scanStatus: cfg.scans ? safeCall_(() => scanStatus_(indicatorKey, p.from, p.to)) : null,
       // V3.24: carimbo dos dados deste painel na hora da leitura (o navegador confere a cada 2 min se mudou).
       stamp: dataStamps_()[indicatorKey] || null,
       // Avaria: situação dos códigos de "Pedidos principais/filhos" no JMS (o painel explica quando falta a taxa da opção).
@@ -885,6 +911,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   if (rowCol !== null) archive.rows = archive.rows.filter(r => r.column === rowCol);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.dayOf) JTCore_.applyDayOf(archive.rows, cfg.dayOf);
+  if (cfg.fillFrom) JTCore_.applyFillFrom(archive.rows, cfg.fillFrom);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);
   const rv = rateVariantFor_(cfg, indicatorKey, filters);

@@ -574,7 +574,7 @@ function saveDayDataset_(indicator, date, ds, expectedPages, expectedRecords, op
   let scanTodo = 0;
   if (ic && ic.scans && !(opts && opts.skipScans) && ds.n) {
     try {
-      const map = loadTripMap_(indicator, date, SCAN_KIND_);
+      const map = loadScanMap_(indicator, date);
       applyScanMapToDs_(ds, map, ic.scans);
       scanTodo = scanTodo_(ds, ic.scans, map).todo.length;
     } catch (e) { logSync_('WARN', indicator, date, 'Lote/login da Consulta das bipagens não aplicados ao dia: ' + String(e && e.message || e).slice(0, 200)); }
@@ -1223,6 +1223,24 @@ function migrateToV412_() {
   if (n) logSync_('INFO', 'sorting_error', '', 'V4.12: ' + n + ' dia(s) da Triagem Errada baixados de novo para o segmento (1º e 2º segmento).');
   return n;
 }
+/**
+ * V4.12.1: uma vez, de novo os últimos 31 dias da Triagem Errada: o 2º segmento agora é achado também pelo valor (em qualquer
+ * campo do JMS) e as remessas que a Consulta das bipagens tinha abandonado por ERRO voltam a ser consultadas (loadScanMap_).
+ * A lista gravada de novo põe a Consulta das bipagens na fila (saveDayDataset_).
+ */
+function migrateToV4121_() {
+  if (getProp_('MIGRATION_V4121', '')) return 0;
+  const to = isoToday_(), from = addDaysIso_(to, -31);
+  let n = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].fields && INDICATORS[k].fields.segment2).forEach(k => {
+    const days = Object.keys(dayFilesMap_(k, from, to)).sort().reverse();
+    if (days.length) n += enqueueJobs_(days.map(d => ['DETAIL_INIT', k, d, 1]), {reset: true});
+    if (INDICATORS[k].scans && days.length) enqueueJobs_(days.map(d => ['SCANS', k, d, 0]), {reset: true});
+  });
+  setProp_('MIGRATION_V4121', new Date().toISOString());
+  if (n) logSync_('INFO', 'sorting_error', '', 'V4.12.1: ' + n + ' dia(s) da Triagem Errada baixados de novo (2º segmento) e com a Consulta das bipagens refeita.');
+  return n;
+}
 function retryFailedJobs() {
   let count = 0;
   allTabRows_('JOBS').forEach((r, i) => {
@@ -1631,7 +1649,7 @@ function processSyncQueue(opts) {
   // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
   try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V4.6: modo diário (padrão) — só a AGENDA põe tarefas na fila (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h).
   // Fora dos horários, nada é consultado sozinho (o botão Atualizar do painel continua valendo).
