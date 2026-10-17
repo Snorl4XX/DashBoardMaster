@@ -80,12 +80,12 @@ function JTCoreFactory_() {
   }
   /**
    * V4.12 (Triagem Errada): 1º segmento + 2º segmento com vírgula, como a planilha do JMS ("primeiro segmento de pedido JMS"
-   * + "Código de 2º Segmento do Pedido"): ("SP", "391-18") → "SP,391-18" · ("GRU", "GRU,402-03,020") → "GRU,402-03".
-   * Sem o 2º segmento, só o 1º ("SP").
+   * + "Código de 2º Segmento do Pedido"): ("GRU", "391-05") → "GRU,391-05" · ("GRU", "GRU,402-03,020") → "GRU,402-03".
+   * V4.12.2 (pedido): é SEMPRE a junção das duas colunas; faltando uma delas, fica vazio (sem informação) — nunca só "GRU".
    */
   function segmentPair(first, second) {
     var a = firstSegment(first), b = secondSegment(second);
-    return a && b ? a + ',' + b : a;
+    return a && b ? a + ',' + b : '';
   }
   function normStop(s) { return String(s || '').toUpperCase().replace(/[\s\-–—_,;\/]+/g, ' ').trim(); }
   /** Tabela de docas que vale no dia (V4.8: docks.versions, a mais nova com from <= dia; sem dia, a mais nova). */
@@ -258,18 +258,6 @@ function JTCoreFactory_() {
     var keys = Object.keys(dayOf);
     for (var i = 0; i < rows.length; i++) {
       for (var k = 0; k < keys.length; k++) rows[i][keys[k]] = dayPart(rows[i][dayOf[keys[k]]]);
-    }
-    return rows;
-  }
-  /**
-   * V4.12.1: campo vazio copiado de outro (Config.gs → fillFrom; ex.: {segmentPair: 'segment'} na Triagem Errada — dia baixado
-   * antes do 2º segmento mostra o 1º segmento até ser baixado de novo).
-   */
-  function applyFillFrom(rows, map) {
-    if (!map || !rows) return rows;
-    var keys = Object.keys(map);
-    for (var i = 0; i < rows.length; i++) {
-      for (var k = 0; k < keys.length; k++) if (blank(rows[i][keys[k]]) && !blank(rows[i][map[keys[k]]])) rows[i][keys[k]] = rows[i][map[keys[k]]];
     }
     return rows;
   }
@@ -1006,7 +994,7 @@ function JTCoreFactory_() {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentPair: segmentPair, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
-    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, applyFillFrom: applyFillFrom, pivot: pivot, rankPanel: rankPanel,
+    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

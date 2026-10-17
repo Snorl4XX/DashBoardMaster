@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.12.1',
+  VERSION: '4.12.2',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -355,7 +355,10 @@ const ALL_INDICATORS_ = Object.freeze({
     // Digitalizador (scanEmp). Só preenche o que está vazio (Expedicao.gs → runScanJob_).
     scans: {
       endpoint: 'https://gw.jtjms-br.com/operatingplatform/scanRecordQuery/listPage',
-      scanTypes: ['Encomenda inserida em lote'], baseField: 'inputDept', fill: {lot: 'belongNo', login: 'scanEmp'}, batch: 40
+      scanTypes: ['Encomenda inserida em lote'], baseField: 'inputDept', fill: {lot: 'belongNo', login: 'scanEmp'}, batch: 40,
+      // V4.12.2 (pedido "seguir à risca"): a consulta já vai com o filtro da tela — Tipo de bipagem "Encomenda inserida em lote"
+      // (建包扫描 no JMS) e Base de escaneamento SP GRU (scanSite). Se o JMS não aceitar o tipo, consulta todos e filtra aqui.
+      requestType: '建包扫描'
     },
     // V4.8 (pedido): docas pela BASE DESTINO (para onde a remessa foi triada), como no Envio Errado — os DCs novos
     // (DC SSZ-SP, DC TBT-SP, DC JND 02-SP, MOO, DC GRU) caem nas docas da tabela de 04/10 (atualizada em 11/10).
@@ -364,8 +367,6 @@ const ALL_INDICATORS_ = Object.freeze({
     // V4.9 (pedido): dia com mais erros de triagem pela DATA da coluna "Horário do bipe de expedição" (eventTime), e não
     // pelo dia do indicador. Calculada na leitura (Core.applyDayOf): vale também para os dias já baixados.
     dayOf: {expDay: 'eventTime'},
-    // V4.12.1: dia baixado antes do 2º segmento mostra o 1º segmento ("SP") até ser baixado de novo (Core.applyFillFrom).
-    fillFrom: {segmentPair: 'segment'},
     // V4.12 (pedido): cartão do segmento mais ofensor ("SP,391-18").
     topCards: ['offenderBase', 'expDay', 'segmentPair'],
     topCardLabels: {expDay: {pt: 'Dia com mais erros de triagem', zh: '错分最多的日期'},
@@ -1534,8 +1535,6 @@ function clientFields_(cfg) {
   usedFields_(cfg).forEach(k => { if (!DERIVED_CLIENT_FIELDS_[k] && !(cfg.dayOf && cfg.dayOf[k])) set[k] = 1; });
   // V4.9: a data calculada (dayOf) sai do horário de origem, que vai no conjunto de dados.
   Object.keys(cfg.dayOf || {}).forEach(k => { set[cfg.dayOf[k]] = 1; });
-  // V4.12.1: campo de reserva (fillFrom) também vai.
-  Object.keys(cfg.fillFrom || {}).forEach(k => { set[cfg.fillFrom[k]] = 1; });
   if (cfg.docks) {
     const src = cfg.docks.source || 'segment';
     if (src === 'segment') { set.segmentRaw = 1; set.segment = 1; } else set[src] = 1;
@@ -1567,7 +1566,7 @@ function catalogEntry_(cfg) {
     pivotTables: cfg.pivotTables || [],
     rankPanels: cfg.rankPanels || [],
     docks: cfg.docks || null,
-    dayOf: cfg.dayOf || null, fillFrom: cfg.fillFrom || null, scans: !!cfg.scans,
+    dayOf: cfg.dayOf || null, scans: !!cfg.scans,
     emptyLotLabel: cfg.emptyLotLabel || null,
     hideShiftCards: !!cfg.hideShiftCards,
     valueCards: cfg.valueCards || [],

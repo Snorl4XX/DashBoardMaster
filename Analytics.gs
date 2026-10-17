@@ -64,13 +64,15 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
 }
 
 /**
- * V4.12.1: 1º + 2º segmento de uma remessa da Triagem Errada ("SP,391-18"). O nome do campo do 2º segmento no JMS não estava
- * nas capturas: vale o 1º campo de `keys` com um 2º segmento (391-18); sem nenhum, QUALQUER campo do registro cujo valor seja
- * um 2º segmento ("391-18") ou um código de três segmentos ("SP,391-18,020"). Sem o 1º segmento, ele sai do código completo.
- * Devolve {pair, key} (key = campo de onde veio o 2º segmento, para o diagnóstico).
+ * V4.12.1/V4.12.2: 1º + 2º segmento de uma remessa da Triagem Errada ("GRU,391-05" = "primeiro segmento de pedido JMS" +
+ * "Código de 2º Segmento do Pedido"). O nome do campo do 2º segmento no JMS não estava nas capturas: vale o 1º campo de `keys`
+ * com um 2º segmento; sem nenhum, QUALQUER campo (texto, também dentro de um objeto) com um código "391-05" — sozinho
+ * ("391-05"), colado ("GRU391-05") ou no código de três segmentos ("GRU,391-05,020"). Datas ("2026-10-08"), CEP
+ * ("01234-567") e o 3º trecho ("020") não são 2º segmento. Sem o 1º segmento, ele sai das letras antes do código.
+ * Devolve {pair, key} (key = campo de onde veio o 2º segmento, para o diagnóstico); pair vazio sem os dois.
  */
-const SEG2_ONLY_RE_ = /^\s*\d{3}\s*-\s*\d{2}\s*$/;
-const SEG_FULL_RE_ = /^\s*(?:主\s*[:：]\s*)?([A-Za-z]{1,4}\d?)\s*(?:-\s*[A-Za-z]{1,4}\s*)?[,，\s]\s*(\d{3})\s*-\s*(\d{2})\b/;
+const SEG2_IN_TEXT_RE_ = /(^|[^0-9])(\d{3})\s*-\s*(\d{2})(?![0-9])/;
+const SEG1_LEAD_RE_ = /^\s*(?:主\s*[:：]\s*)?([A-Za-z]{1,4}\d?)(?=[\s,，\-]*\d{3}\s*-\s*\d{2})/;
 function segmentPairOf_(raw, row, keys) {
   const read = fieldReader_(raw || {});
   let first = JTCore_.firstSegment(row.segment), second = '', key = '';
@@ -79,15 +81,21 @@ function segmentPairOf_(raw, row, keys) {
     const s = hit.value === null || hit.value === undefined || typeof hit.value === 'object' ? '' : JTCore_.secondSegment(hit.value);
     if (s) { second = s; key = hit.key || keys[i]; }
   }
+  const look = (v, k) => {
+    if (second || typeof v !== 'string' || v.length > 40) return;
+    const m = SEG2_IN_TEXT_RE_.exec(v);
+    if (!m) return;
+    second = m[2] + '-' + m[3];
+    key = k;
+    const lead = SEG1_LEAD_RE_.exec(v);
+    if (!first && lead) first = lead[1].toUpperCase();
+  };
   if (!second && raw) {
-    const ks = Object.keys(raw);
-    for (let i = 0; i < ks.length && !second; i++) {
-      const v = raw[ks[i]];
-      if (typeof v !== 'string') continue;
-      if (SEG2_ONLY_RE_.test(v)) { second = JTCore_.secondSegment(v); key = ks[i]; continue; }
-      const m = SEG_FULL_RE_.exec(v);
-      if (m) { second = m[2] + '-' + m[3]; key = ks[i]; if (!first) first = m[1].toUpperCase(); }
-    }
+    Object.keys(raw).forEach(k => {
+      const v = raw[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) Object.keys(v).forEach(k2 => look(v[k2], k + '.' + k2));
+      else look(v, k);
+    });
   }
   if (!second) second = JTCore_.secondSegment(row.segment);
   return {pair: JTCore_.segmentPair(first, second), key: key};
@@ -744,6 +752,8 @@ function getDashboardData(indicatorKey, params) {
       tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null,
       // V4.12.1 (Triagem Errada): lote/login pela Consulta das bipagens — completadas, sem o bipe, na fila, erro.
       scanStatus: cfg.scans ? safeCall_(() => scanStatus_(indicatorKey, p.from, p.to)) : null,
+      // V4.12.2: dias do período com a lista gravada antes da busca do 2º segmento (o painel pede para baixar de novo).
+      segStale: cfg.fields && cfg.fields.segment2 ? safeCall_(() => segmentStaleDays_(indicatorKey, p.from, p.to).length) : null,
       // V3.24: carimbo dos dados deste painel na hora da leitura (o navegador confere a cada 2 min se mudou).
       stamp: dataStamps_()[indicatorKey] || null,
       // Avaria: situação dos códigos de "Pedidos principais/filhos" no JMS (o painel explica quando falta a taxa da opção).
@@ -911,7 +921,6 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   if (rowCol !== null) archive.rows = archive.rows.filter(r => r.column === rowCol);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.dayOf) JTCore_.applyDayOf(archive.rows, cfg.dayOf);
-  if (cfg.fillFrom) JTCore_.applyFillFrom(archive.rows, cfg.fillFrom);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);
   const rv = rateVariantFor_(cfg, indicatorKey, filters);

@@ -292,6 +292,29 @@ function refreshAllDetailsNow(indicatorKey, from, to) {
     (j.date >= recent || (j.indicator === indicatorKey && j.date >= from && j.date <= to));
   return safeReturn_(runRefreshJobs_(match, INDICATORS[indicatorKey] ? indicatorKey : '', APP_CONFIG.REFRESH_ALL_DETAIL_BUDGET_MS));
 }
+/**
+ * V4.12.2 (Triagem Errada), chamada pelo painel ao abrir e no botão Atualizar: no período da tela, baixa de novo as listas
+ * gravadas antes da busca do 2º segmento ("GRU,391-05") e roda a Consulta das bipagens das remessas sem Número da Saca /
+ * Operador, na hora (até REFRESH_DETAIL_BUDGET_MS). O que não couber fica na fila.
+ */
+function completeTriagemNow(indicatorKey, from, to) {
+  requireDb_();
+  validateJmsAuth_();
+  const cfg = INDICATORS[indicatorKey];
+  if (!cfg || !cfg.scans) return safeReturn_({ok: true, skipped: true, done: 0, pending: 0});
+  const today = isoToday_();
+  to = isIso_(to) ? (to > today ? today : to) : today;
+  from = isIso_(from) && from <= to ? from : to;
+  if (JTCore_.daysBetween(from, to) > 31) from = addDaysIso_(to, -31);
+  const stale = segmentStaleDays_(indicatorKey, from, to);
+  const files = Object.keys(dayFilesMap_(indicatorKey, from, to));
+  const queued = (stale.length ? enqueueJobs_(stale.map(d => ['DETAIL_INIT', indicatorKey, d, 1]), {reset: true}) : 0) +
+    (files.length ? enqueueJobs_(files.map(d => ['SCANS', indicatorKey, d, 0]), {reset: true}) : 0);
+  const r = runRefreshJobs_(j => j.indicator === indicatorKey && j.date >= from && j.date <= to, indicatorKey, APP_CONFIG.REFRESH_DETAIL_BUDGET_MS);
+  r.queued = queued;
+  r.staleDays = stale.length;
+  return safeReturn_(r);
+}
 /** Roda agora, com a trava da fila, as tarefas de lista/IDs/bipagens que `match` aceita (`first` antes), até `budgetMs`. */
 function runRefreshJobs_(match, first, budgetMs) {
   const result = {ok: true, done: 0, pending: 0};

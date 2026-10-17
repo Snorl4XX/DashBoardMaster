@@ -2990,10 +2990,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   runAll(c44);
   const S44 = c44.__state;
   const calls = S44.fetches.filter(f => /scanRecordQuery\/listPage$/.test(f.url));
-  check(calls.length > 0 && calls.every(f => f.payload.scanSite === '30001' && f.payload.billType === 1 && f.payload.scanType === '全部' && f.payload.sortName === 'scanDate' &&
+  check(calls.length > 0 && calls.every(f => f.payload.scanSite === '30001' && f.payload.billType === 1 && f.payload.scanType === '建包扫描' && f.payload.sortName === 'scanDate' &&
     f.payload.sortOrder === 'asc' && f.payload.size === 100 && f.payload.bilNos.length <= 40 && f.payload.countryId === '1' && /00:00:00$/.test(f.payload.startDates) && /23:59:59$/.test(f.payload.endDates)),
-    'Consulta das bipagens como a captura (remessas, base 30001, todos os tipos, mais antigo primeiro, 100 por página)', calls.slice(0, 1).map(f => f.payload));
-  check(calls.some(f => f.payload.current > 1), 'todas as páginas da consulta (cerca de 20 bipes por remessa)');
+    'Consulta das bipagens como a tela (remessas, base 30001, tipo "Encomenda inserida em lote" = 建包扫描, mais antigo primeiro, 100 por página)', calls.slice(0, 1).map(f => f.payload));
   const needs = se.filter(r => !r.packageNo || !r.scanuser).map(r => r.billcode);
   const asked = [].concat(...calls.filter(f => f.payload.current === 1).map(f => f.payload.bilNos));
   check(asked.length === needs.length && new Set(asked).size === needs.length && needs.every(w => asked.indexOf(w) >= 0), 'só as remessas sem lote/login são consultadas, cada uma uma vez', [asked.length, needs.length]);
@@ -3666,16 +3665,16 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'de 04/10 a 10/10 continua a tabela da época');
 
   // Segmento "SP,391-18": 1º segmento + 2º segmento com vírgula.
-  check(CS.segmentPair('SP', '391-18') === 'SP,391-18' && CS.segmentPair('GRU', 'GRU,402-03,020') === 'GRU,402-03' && CS.segmentPair('SP', '') === 'SP' &&
-    CS.segmentPair('SP', '020') === 'SP' && CS.segmentPair('', '391-18') === '' && CS.segmentPair('MOO', '430-00') === 'MOO,430-00',
-    'segmentPair: "SP" + "391-18" → "SP,391-18"; sem 2º segmento, só o 1º');
+  check(CS.segmentPair('SP', '391-18') === 'SP,391-18' && CS.segmentPair('GRU', 'GRU,402-03,020') === 'GRU,402-03' && CS.segmentPair('SP', '') === '' &&
+    CS.segmentPair('SP', '020') === '' && CS.segmentPair('', '391-18') === '' && CS.segmentPair('MOO', '430-00') === 'MOO,430-00',
+    'segmentPair: "SP" + "391-18" → "SP,391-18"; faltando uma das duas colunas, vazio (nunca só "SP")');
   const D12 = '2026-10-12', norm = raw => cS.normalizeDetailRow_('sorting_error', Object.assign({billcode: 'S1', dt: D12, transferCenterSendTime: D12 + ' 10:00:00'}, raw), D12);
   const nCases = [
     [{orderFirstCode: 'SP', orderSecondCode: '391-18'}, 'SP,391-18'],
     [{orderFirstCode: 'GRU', terminalDispatchCode: 'GRU,402-03,020'}, 'GRU,402-03'],
     [{orderFirstCode: 'SBN', terminalDispatchCode: '375-07-110'}, 'SBN,375-07'],
     [{orderFirstCode: 'MOO', orderSecondCode: '', orderThirdCode: 'MOO,430-00,001'}, 'MOO,430-00'],
-    [{orderFirstCode: 'BA', terminalDispatchCode: '020'}, 'BA'],
+    [{orderFirstCode: 'BA', terminalDispatchCode: '020'}, ''],
     [{terminalDispatchCode: 'SP,376-00,010'}, 'SP,376-00'],
     [{orderFirstCode: 'GRU', second_code: 'x', ORDERSECONDCODE: '378-03'}, 'GRU,378-03']
   ];
@@ -3703,10 +3702,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const rowsS = CS.decodeDataset(cSd.getDashboardData('sorting_error', {from: DS, to: DS}).dataset);
   const seRaw = dS[DS].se, withSeg = seRaw.filter(r => r.orderSecondCode).length;
   check(rowsS.length === seRaw.length && rowsS.filter(r => /^[A-Z]+,\d{3}-\d{2}$/.test(r.segmentPair)).length === withSeg &&
-    rowsS.filter(r => r.segmentPair && r.segmentPair.indexOf(',') < 0).length === seRaw.length - withSeg,
-    'dia baixado: "SP,391-18" gravado em cada remessa (sem o 2º segmento, só o 1º)', rowsS.slice(0, 3).map(r => r.segmentPair));
+    rowsS.filter(r => !r.segmentPair).length === seRaw.length - withSeg,
+    'dia baixado: "SP,391-18" gravado em cada remessa (sem o 2º segmento, vazio)', rowsS.slice(0, 3).map(r => r.segmentPair));
   const cnt = {};
-  rowsS.forEach(r => { cnt[r.segmentPair] = (cnt[r.segmentPair] || 0) + 1; });
+  rowsS.forEach(r => { if (r.segmentPair) cnt[r.segmentPair] = (cnt[r.segmentPair] || 0) + 1; });
   const order = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || a.localeCompare(b));
   const compS = cSd.computeDashboard_('sorting_error', {from: DS, to: DS});
   const topS = compS.cards.tops.filter(t => t.key === 'segmentPair')[0];
@@ -3764,27 +3763,35 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     [{orderFirstCode: 'SP', campoDesconhecido: '391-18'}, 'SP,391-18'],
     [{orderFirstCode: 'GRU', codigoX: 'GRU,402-03,020'}, 'GRU,402-03'],
     [{codigoCompleto: 'MOO 430-00,001'}, 'MOO,430-00'],
-    [{orderFirstCode: 'BA', dia: '2026-10-12', hora: '10:00:00', packageNo: 'BR1045', terminalDispatchCode: '020', cep: '12345-678', cep2: '12345678'}, 'BA'],
-    [{orderFirstCode: 'SP', orderSecondCode: '376-00', outro: '391-18'}, 'SP,376-00']
+    [{orderFirstCode: 'BA', dia: '2026-10-12', hora: '10:00:00', packageNo: 'BR1045', terminalDispatchCode: '020', cep: '12345-678', cep2: '12345678'}, ''],
+    [{orderFirstCode: 'SP', orderSecondCode: '376-00', outro: '391-18'}, 'SP,376-00'],
+    [{orderFirstCode: 'GRU', codigoColado: 'GRU391-05'}, 'GRU,391-05'],
+    [{orderFirstCode: 'GRU', pedido: {segundo: '391-05'}}, 'GRU,391-05'],
+    [{orderFirstCode: 'GRU', inicio: '2026-10-12 08:15:00', fim: '12/10/2026'}, '']
   ];
   const wrongC = cases.filter(([raw, want]) => norm(raw).segmentPair !== want).map(([raw, want]) => JSON.stringify(raw) + ' → ' + norm(raw).segmentPair + ' (esperado ' + want + ')');
-  check(!wrongC.length, '2º segmento achado pelo valor (391-18 ou SP,391-18,020) em qualquer campo; datas, CEP e 3º trecho não confundem', wrongC);
-  const rowsF = C1.applyFillFrom([{segment: 'SP', segmentPair: ''}, {segment: 'GRU', segmentPair: 'GRU,402-03'}, {segment: '', segmentPair: ''}], {segmentPair: 'segment'});
+  check(!wrongC.length, '2º segmento achado pelo valor (391-05, GRU391-05, GRU,391-05,020, dentro de objeto) em qualquer campo; sem ele, vazio — nunca só "GRU"', wrongC);
   const cfg1 = c1.getIndicatorConfig_('sorting_error'), cat1 = c1.getPublicCatalog_().filter(x => x.key === 'sorting_error')[0];
-  check(rowsF.map(r => r.segmentPair).join('|') === 'SP|GRU,402-03|' && cat1.fillFrom.segmentPair === 'segment' && cat1.scans === true &&
-    c1.clientFields_(cfg1).indexOf('segment') >= 0, 'dia antigo sem o segmento novo mostra o 1º segmento (fillFrom) até ser baixado de novo');
+  check(cat1.scans === true && !cat1.fillFrom && !cfg1.fillFrom && cfg1.scans.requestType === '建包扫描', 'sem o 1º segmento sozinho no lugar da junção; consulta com o filtro da tela');
 
-  // Dia baixado ANTES da V4.12 (arquivo sem a coluna do segmento): o painel mostra o 1º segmento, não fica vazio.
+  // Dia baixado ANTES da junção (arquivo sem a coluna): não mostra "GRU" sozinho; o painel pede a rebaixa e a junção aparece.
   const DO = '2026-10-13', cOld = freshCtx({[DO]: makeDay(DO, 101)}, null, {DATA_START_DATE: DO});
   cOld.queueHistory(DO, DO, true);
   runAll(cOld);
   const dfO = cOld.dayFilesMap_('sorting_error', DO, DO)[DO], dsO = cOld.loadDetailFile_(dfO.fileId);
   delete dsO.cols.segmentPair; delete dsO.dict.segmentPair; dsO.fields = dsO.fields.filter(f => f !== 'segmentPair');
-  cOld.saveDayDataset_('sorting_error', DO, dsO, dfO.expectedPages, dfO.expectedRecords, {skipScans: true});
-  const rowsO = C1.applyFillFrom(C1.decodeDataset(cOld.getDashboardData('sorting_error', {from: DO, to: DO}).dataset), cat1.fillFrom);
-  const compO = cOld.computeDashboard_('sorting_error', {from: DO, to: DO}), topO = compO.cards.tops.filter(t => t.key === 'segmentPair')[0];
-  check(rowsO.length > 0 && rowsO.every(r => r.segmentPair && r.segmentPair === r.segment) && topO && /^(SP|GRU|MG)$/.test(topO.label),
-    'arquivo antigo: cartão e painel com o 1º segmento (no navegador e no relatório)', topO);
+  cOld.saveDayDataset_('sorting_error', DO, dsO, dfO.expectedPages, dfO.expectedRecords, {skipScans: true, keepCreatedAt: dfO.createdAt});
+  cOld.__state.props.SEGMENTO_DESDE = new Date(Date.parse(dfO.createdAt) + 1).toISOString();
+  const dashO = cOld.getDashboardData('sorting_error', {from: DO, to: DO}), rowsO = C1.decodeDataset(dashO.dataset);
+  const topO = cOld.computeDashboard_('sorting_error', {from: DO, to: DO}).cards.tops.filter(t => t.key === 'segmentPair')[0];
+  check(rowsO.length > 0 && rowsO.every(r => !r.segmentPair) && dashO.meta.segStale === 1 && topO && !topO.label,
+    'arquivo antigo: nada de "GRU" sozinho; o painel sabe que o dia precisa ser baixado de novo (meta.segStale)', [dashO.meta.segStale, topO]);
+  const t0 = Date.now(); while (Date.now() - t0 < 5) { /* o download novo fica depois de SEGMENTO_DESDE */ }
+  const rC = cOld.completeTriagemNow('sorting_error', DO, DO);
+  const dashO2 = cOld.getDashboardData('sorting_error', {from: DO, to: DO}), rowsO2 = C1.decodeDataset(dashO2.dataset);
+  check(rC.staleDays === 1 && rC.done > 0 && dashO2.meta.segStale === 0 && rowsO2.some(r => /^[A-Z]+,\d{3}-\d{2}$/.test(r.segmentPair)) &&
+    rowsO2.every(r => !r.segmentPair || /,/.test(r.segmentPair)),
+    'ao abrir o painel (completeTriagemNow): o dia é baixado de novo e aparece "GRU,391-05"', rC);
 
   // Consulta das bipagens: erro do JMS NÃO é "remessa sem bipe" (antes, 2 erros e a remessa era abandonada para sempre).
   const DS = '2026-10-14', mk = seed => { const d = makeDay(DS, seed); d.se.forEach((r, i) => { if (i % 3 === 0) { r.packageNo = null; r.scanuser = null; } }); return d; };
@@ -3854,6 +3861,75 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(qM === 1 && pendM.some(j => j.type === 'DETAIL_INIT' && j.indicator === 'sorting_error' && j.date === dN) &&
     !pendM.some(j => j.date === dOld && j.indicator === 'sorting_error') && cM.migrateToV4121_() === 0,
     'migração V4.12.1: só a Triagem dos últimos 31 dias, uma vez', pendM.map(j => j.type + ' ' + j.indicator + ' ' + j.date));
+}
+
+// ---------- V4.12.2: junção "GRU,391-05" e o processo das sacas à risca (filtro da tela), rodando ao abrir/Atualizar ----------
+{
+  const {scanHash} = require('./mocks');
+  const DS = '2026-10-15', mk = seed => { const d = makeDay(DS, seed); d.se.forEach((r, i) => { if (i % 3 === 0) { r.packageNo = null; r.scanuser = null; r.baggingNetworkName = null; } }); return d; };
+  const exp = w => { const h = scanHash(w); return h % 6 === 0 ? null : {lot: 'BRFIC' + (100 + h % 800), login: 'DIGITALIZADOR FICTICIO ' + (h % 4 + 1)}; };
+  const filled = (c, d) => {
+    const by = {};
+    c.getArchivedRange_('sorting_error', DS, DS).rows.forEach(r => { by[r.shipment] = r; });
+    return d[DS].se.filter(r => !r.packageNo).filter(r => {
+      const e = exp(r.billcode), row = by[r.billcode];
+      return String(row.lot || '') !== String(e ? e.lot : '') || String(row.login || '') !== String(e ? e.login : '') || row.offenderBase !== 'SP GRU';
+    }).map(r => r.billcode);
+  };
+  // Como a tela: Tipo de bipagem "Encomenda inserida em lote" (建包扫描) e Base de escaneamento SP GRU (30001); o 1º bipe;
+  // Número do lote → Número da Saca; Digitalizador → Operador; Unidade de Empacotamento sem informação → SP GRU.
+  const dA = {[DS]: mk(110)}, cA = freshCtx(dA, null, {DATA_START_DATE: DS});
+  cA.queueHistory(DS, DS, true);
+  runAll(cA);
+  const callsA = cA.__state.fetches.filter(f => /scanRecordQuery\/listPage$/.test(f.url));
+  check(!filled(cA, dA).length && callsA.length > 0 && callsA.every(f => f.payload.scanType === '建包扫描' && f.payload.scanSite === '30001') && !cA.__state.props.TRIAGEM_BIPAGENS_TIPO,
+    'consulta com o filtro da tela (建包扫描 + 30001): saca, operador e Unidade de Empacotamento preenchidos', filled(cA, dA).slice(0, 3));
+  // O JMS não conhece o valor do filtro (não devolve nada): consulta todos os tipos e filtra aqui; depois só todos.
+  const dB = {[DS]: mk(111)}, cB = freshCtx(dB, {scanTypeUnknown: true}, {DATA_START_DATE: DS});
+  cB.queueHistory(DS, DS, true);
+  runAll(cB);
+  const callsB = cB.__state.fetches.filter(f => /scanRecordQuery\/listPage$/.test(f.url));
+  const firstAll = callsB.findIndex(f => f.payload.scanType === '全部');
+  check(!filled(cB, dB).length && cB.__state.props.TRIAGEM_BIPAGENS_TIPO === 'todos' && firstAll > 0 && callsB.slice(firstAll).every(f => f.payload.scanType === '全部'),
+    'filtro do tipo sem resultado: consulta todos os tipos, preenche igual e guarda (TRIAGEM_BIPAGENS_TIPO = todos)', filled(cB, dB).slice(0, 3));
+  // Base de escaneamento sem informação = SP GRU (pedido); outra base não.
+  const sc = cA.getIndicatorConfig_('sorting_error').scans;
+  const fl = cA.pickScanFills_([
+    {billNo: 'W1', scanType: 'Encomenda inserida em lote', inputDept: '', scanDate: '2026-10-15 03:00:00', belongNo: 'BRVAZIO', scanEmp: 'DIG 1'},
+    {billNo: 'W2', scanType: 'Encomenda inserida em lote', inputDept: null, scanDate: '2026-10-15 03:00:00', belongNo: 'BRNULO', scanEmp: 'DIG 2'},
+    {billNo: 'W3', scanType: 'Encomenda inserida em lote', inputDept: 'RJ SJM', scanDate: '2026-10-15 02:00:00', belongNo: 'BROUTRA', scanEmp: 'DIG 3'}], sc, 'SP GRU');
+  check(fl.W1 && fl.W1.lot === 'BRVAZIO' && fl.W2 && fl.W2.lot === 'BRNULO' && !fl.W3, 'Base de escaneamento sem informação conta como SP GRU; outra base não', fl);
+  // Cota em economia: lista e Consulta das bipagens da Triagem do último mês continuam (os outros painéis esperam).
+  const today = cA.isoToday_(), d20 = cA.addDaysIso_(today, -20), d40 = cA.addDaysIso_(today, -40);
+  cA.__state.props['URLFETCH_' + today] = '18500';
+  check(cA.fetchBudgetMode_() === 'reserve' && cA.fetchBudgetAllows_({type: 'DETAIL_INIT', indicator: 'sorting_error', date: d20}) &&
+    cA.fetchBudgetAllows_({type: 'SCANS', indicator: 'sorting_error', date: d20}) && !cA.fetchBudgetAllows_({type: 'SCANS', indicator: 'sorting_error', date: d40}) &&
+    !cA.fetchBudgetAllows_({type: 'DETAIL_INIT', indicator: 'wrong_send', date: d20}),
+    'cota em economia: Triagem (leve) continua no último mês; os outros painéis antigos esperam');
+  delete cA.__state.props['URLFETCH_' + today];
+  // Ao abrir o painel: remessas ainda sem saca e nunca consultadas são consultadas na hora (completeTriagemNow).
+  const dC = {[DS]: mk(112)}, cC = freshCtx(dC, null, {DATA_START_DATE: DS});
+  cC.queueHistory(DS, DS, true);
+  runAll(cC, 1);
+  const pendC = cC.pendingJobs_().filter(j => j.type === 'SCANS').length;
+  const rC = cC.completeTriagemNow('sorting_error', DS, DS);
+  check(!filled(cC, dC).length && rC.ok !== false && cC.getDashboardData('sorting_error', {from: DS, to: DS}).meta.scanStatus.found > 0,
+    'ao abrir a Triagem: a Consulta das bipagens do período roda na hora', [pendC, rC]);
+  const needC = dC[DS].se.filter(r => !r.packageNo).length, st1 = cC.scanStatus_('sorting_error', DS, DS);
+  cC.enqueueJobs_([['DETAIL_INIT', 'sorting_error', DS, 1]], {reset: true});
+  runAll(cC);
+  const st2 = cC.scanStatus_('sorting_error', DS, DS);
+  check(st1.total === needC && st2.total === needC && st2.found === st1.found && st2.found <= st2.total,
+    'dia baixado de novo depois da consulta: o selo continua "X de Y" com o total certo (antes ficava "231 de 101")', [st1, st2]);
+  // Migração V4.12.2: os últimos 31 dias baixados de novo (arquivos de antes da junção) e a consulta refeita, uma vez.
+  const dN = cA.addDaysIso_(today, -3), cM = freshCtx({[dN]: makeDay(dN, 113)}, null, {DATA_START_DATE: dN});
+  cM.queueHistory(dN, dN, true);
+  runAll(cM);
+  delete cM.__state.props.MIGRATION_V4122;
+  cM.__state.props.SEGMENTO_DESDE = new Date(Date.now() + 60000).toISOString();
+  const qM = cM.migrateToV4122_(), pendM = cM.pendingJobs_();
+  check(qM === 1 && pendM.some(j => j.type === 'DETAIL_INIT' && j.indicator === 'sorting_error' && j.date === dN) &&
+    pendM.some(j => j.type === 'SCANS' && j.date === dN) && cM.migrateToV4122_() === 0, 'migração V4.12.2: rebaixa e consulta refeita, uma vez', pendM.map(j => j.type + ' ' + j.date));
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

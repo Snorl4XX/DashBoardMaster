@@ -170,8 +170,10 @@
       scanWait: 'Sem saca: {l} · Consulta das bipagens ainda não rodou', scanWaitHint: 'Sem operador: {o}. A consulta roda depois da lista do dia (ou no botão Atualizar).',
       scanNone: 'Saca e operador: todas as remessas com informação',
       scanPaused: 'Consulta das bipagens pausada: {r}', scanError: 'Consulta das bipagens com erro: {r}',
-      segBadge: 'Segmento (1º e 2º): {a} de {b} remessas com o 2º segmento',
-      segBadgeHint: 'Dias baixados antes da V4.12 mostram só o 1º segmento até serem baixados de novo (é automático). Se continuar sem o 2º segmento, rode diagnosticoCompleto e mande a linha "Segmento".',
+      segBadge: 'Segmento (1º e 2º): {a} de {b} remessas', segBadgeHint: 'Junção do primeiro segmento de pedido JMS com o código do 2º segmento (ex.: GRU,391-05). Remessa sem uma das duas colunas fica sem segmento.',
+      segStaleBadge: 'Segmento: {n} dia(s) sendo baixados de novo do JMS', segStaleHint: 'Esses dias foram baixados antes da junção dos dois segmentos. O painel baixa de novo sozinho (ou aperte Atualizar).',
+      segMissingBadge: 'Segmento: o JMS não mandou o 2º segmento', segMissingHint: 'Rode diagnosticoCompleto e mande a linha "Segmento" (ela lista os campos que o JMS mandou).',
+      triagemCompleting: 'Triagem Errada: baixando os segmentos e consultando as sacas sem informação…', triagemCompleted: 'Triagem Errada: segmentos e sacas atualizados',
       tcPartial: 'prévia: o download do dia ainda não terminou', tcShare: '{p} de participação',
       metricsOfficial: 'Números oficiais do JMS (tabela principal)', pctOf: 'Cálculo: {a} ÷ {b}', sumRows: 'Soma', sumCount: '{n}',
       hmSynced: 'Número do JMS consultado em {t}', hmSyncedPeriod: 'Números do JMS consultados até {t}',
@@ -338,8 +340,10 @@
       scanWait: '无包号：{l} · 扫描记录查询尚未运行', scanWaitHint: '无操作员：{o}。当日明细下载后（或点击“更新”）运行查询。',
       scanNone: '包号和操作员：全部有信息',
       scanPaused: '扫描记录查询已暂停：{r}', scanError: '扫描记录查询出错：{r}',
-      segBadge: '一段码+二段码：{a} / {b} 票有二段码',
-      segBadgeHint: 'V4.12 之前下载的日期在重新下载前只显示一段码（自动重新下载）。如仍无二段码，请运行 diagnosticoCompleto 并发送“Segmento”一行。',
+      segBadge: '一段码+二段码：{a} / {b} 票', segBadgeHint: 'JMS订单一段码与二段码合并（例：GRU,391-05）。缺少其中一列的运单不显示段码。',
+      segStaleBadge: '段码：{n} 天正在从 JMS 重新下载', segStaleHint: '这些日期在合并两段码之前下载。面板会自动重新下载（或点击“更新”）。',
+      segMissingBadge: '段码：JMS 未返回二段码', segMissingHint: '请运行 diagnosticoCompleto 并发送“Segmento”一行（其中列出 JMS 返回的字段）。',
+      triagemCompleting: '错分：正在下载段码并查询无信息的包号…', triagemCompleted: '错分：段码和包号已更新',
       tcPartial: '预览：当日明细尚未下载完', tcShare: '占比 {p}',
       metricsOfficial: 'JMS官方数字（主表）', pctOf: '计算：{a} ÷ {b}', sumRows: '合计', sumCount: '{n}',
       hmSynced: 'JMS 数字获取时间：{t}', hmSyncedPeriod: 'JMS 数字最近获取：{t}',
@@ -1059,7 +1063,7 @@
       var sm = res.summary;
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
         shiftSum: res.shiftSum || {}, routes: res.routes || null,
-        rows: Core.applyFillFrom(Core.applyDayOf(Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds, res.orderKindTags), c && c.dayOf), c && c.fillFrom),
+        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
           totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};
@@ -1080,6 +1084,8 @@
       // V3.34: Sem Movimentação em Tempo real — a linha mais recente é buscada no JMS ao abrir (se a gravada tem mais de 5 min)
       // e a cada 5 min com a aba visível (liveTick). V3.30 buscava só uma vez por dia, quando faltava a foto de hoje.
       if (!opts.silent && liveDue()) setTimeout(function () { liveRefresh('open'); }, 50);
+      // V4.12.2: Triagem Errada — segmento e saca/operador completados na hora ao abrir.
+      if (!state.refreshingAll && triagemNeedsWork(res.meta)) setTimeout(function () { completeTriagem(false); }, 50);
     }).catch(function (e) {
       if (seq !== state.seq) return;
       if (!state.data || state.data.meta.indicator !== key) $('#main').classList.add('awaiting');
@@ -1427,11 +1433,39 @@
       if (ss.paused) html += badge('bad', 'warn', t('scanPaused', {r: ss.paused.reason}), ss.paused.reason);
       else if (ss.error) html += badge('bad', 'warn', t('scanError', {r: ss.error.reason}), ss.error.reason + ' (' + fmtDate(ss.error.date, true) + ')');
     }
-    if (c.fillFrom && c.fillFrom.segmentPair) {
+    if (c.scans) {
       var with2 = rows.filter(function (r) { return String(r.segmentPair || '').indexOf(',') > 0; }).length;
-      html += badge(with2 === rows.length ? 'ok' : 'warn', with2 === rows.length ? 'check' : 'info', t('segBadge', {a: fmtInt(with2), b: fmtInt(rows.length)}), t('segBadgeHint'));
+      if (meta.segStale) html += badge('warn', 'history', t('segStaleBadge', {n: fmtInt(meta.segStale)}), t('segStaleHint'));
+      else if (!with2) html += badge('bad', 'warn', t('segMissingBadge'), t('segMissingHint'));
+      else html += badge(with2 === rows.length ? 'ok' : 'warn', with2 === rows.length ? 'check' : 'info', t('segBadge', {a: fmtInt(with2), b: fmtInt(rows.length)}), t('segBadgeHint'));
     }
     return html;
+  }
+  /**
+   * V4.12.2 (Triagem Errada): faltando o 2º segmento (dia baixado antes) ou saca/operador ainda não consultados, o painel
+   * pede ao servidor para completar o período na hora (completeTriagemNow) — uma vez por período nesta aba — e recarrega.
+   */
+  function triagemNeedsWork(meta) {
+    var c = cfg(), ss = (meta && meta.scanStatus) || null, rows = (state.data && state.data.rows) || [];
+    if (!c || !c.scans || !meta || isHist() || !rows.length) return false;
+    if (meta.segStale) return true;
+    if (!ss) return false;
+    if (ss.queued > 0 || ss.total > ss.found + ss.gaveUp) return true;
+    return !ss.total && rows.some(function (r) { return !String(r.lot || '').trim() || !String(r.login || '').trim(); });
+  }
+  function completeTriagem(force) {
+    var key = state.indicator, from = state.from, to = state.to, k = key + '|' + from + '|' + to;
+    state.triagemDone = state.triagemDone || {};
+    if (state.triagemBusy || (!force && state.triagemDone[k])) return Promise.resolve();
+    state.triagemDone[k] = 1;
+    state.triagemBusy = true;
+    toast(t('triagemCompleting'));
+    return call('completeTriagemNow', key, from, to).then(function (x) {
+      if (x.pauses) renderSyncBanner(x.pauses);
+      toast(t(x.pending || x.busy ? 'detailsLater' : 'triagemCompleted'), x.pending || x.busy ? null : 'success');
+      if (state.view === 'dashboard' && state.indicator === key && state.from === from && state.to === to) return loadDashboard({silent: true});
+    }).catch(function (e) { toast(t('refreshFailed', {r: e.message}), 'error'); })
+      .then(function () { state.triagemBusy = false; });
   }
   function badge(kind, ic, text, title) {
     return '<span class="badge ' + kind + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + icon(ic) + '<span>' + esc(text) + '</span></span>';
@@ -3404,6 +3438,9 @@
       else toast(t('refreshAllDone', {p: r.panels, t: r.panelsTotal, u: r.updated}) + (r.failed ? ' ' + t('refreshSomeFailed', {r: why(r.errors[0])}) : '') +
         (r.pendingDays ? ' ' + t('refreshPending', {n: r.pendingDays}) : ''), r.failed ? null : 'success');
       return Promise.resolve(reload()).then(function () {
+        // V4.12.2: Triagem Errada aberta — segmento e saca/operador do período completados sempre no Atualizar.
+        if (cfg() && cfg().scans && state.indicator === key0) return completeTriagem(true);
+      }).then(function () {
         if (!(r.detailsQueued || r.tripsQueued) && !r.failed) return;
         toast(t('detailsFetchingAll'));
         return call('refreshAllDetailsNow', key0, from0, to0).then(function (x) {

@@ -895,6 +895,9 @@ function fetchBudgetAllows_(job) {
   if (job.type === 'SUMMARY') return recent;
   // V4.6: IDs de viagem (SC→DC) e Consulta das bipagens (Triagem) dos dias recentes também: poucas consultas, e sem elas o
   // painel ficava sem os IDs de saída.
+  // V4.12.2: Triagem Errada (poucas centenas de remessas por dia): lista e Consulta das bipagens do último mês também — sem elas
+  // o segmento "GRU,391-05" e as sacas não apareciam enquanto a cota estava em economia.
+  if ((job.type === 'DETAIL_INIT' || job.type === 'SCANS') && INDICATORS[job.indicator] && INDICATORS[job.indicator].scans) return job.date >= addDaysIso_(isoToday_(), -31);
   if (job.type === 'DETAIL_INIT' || job.type === 'DETAIL_PAGE' || job.type === 'TRIPS' || job.type === 'SCANS') return recent && !heavyGrouped_(INDICATORS[job.indicator]);
   return false;
 }
@@ -1239,6 +1242,39 @@ function migrateToV4121_() {
   });
   setProp_('MIGRATION_V4121', new Date().toISOString());
   if (n) logSync_('INFO', 'sorting_error', '', 'V4.12.1: ' + n + ' dia(s) da Triagem Errada baixados de novo (2º segmento) e com a Consulta das bipagens refeita.');
+  return n;
+}
+/**
+ * V4.12.2: a lista da Triagem Errada gravada antes desta versão pode não ter o 2º segmento ("GRU,391-05"). SEGMENTO_DESDE marca
+ * quando a busca nova começou: dia com o arquivo mais antigo que isso é baixado de novo (agora, na fila; ao abrir o painel e no
+ * botão Atualizar — completeTriagemNow).
+ */
+function segmentSince_() {
+  let v = getProp_('SEGMENTO_DESDE', '');
+  if (!v) { v = new Date().toISOString(); setProp_('SEGMENTO_DESDE', v); }
+  return v;
+}
+/** Dias do período com a lista da Triagem gravada antes da busca do 2º segmento (V4.12.2). */
+function segmentStaleDays_(indicator, from, to) {
+  const cfg = INDICATORS[indicator];
+  if (!cfg || !cfg.fields || !cfg.fields.segment2) return [];
+  const since = segmentSince_(), files = dayFilesMap_(indicator, from, to);
+  return Object.keys(files).filter(d => !files[d].createdAt || files[d].createdAt < since).sort().reverse();
+}
+/** V4.12.2: uma vez — os últimos 31 dias da Triagem baixados de novo (2º segmento) e a Consulta das bipagens refeita. */
+function migrateToV4122_() {
+  if (getProp_('MIGRATION_V4122', '')) return 0;
+  segmentSince_();
+  const to = isoToday_(), from = addDaysIso_(to, -31);
+  let n = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].fields && INDICATORS[k].fields.segment2).forEach(k => {
+    const days = segmentStaleDays_(k, from, to);
+    if (days.length) n += enqueueJobs_(days.map(d => ['DETAIL_INIT', k, d, 1]), {reset: true});
+    const all = Object.keys(dayFilesMap_(k, from, to));
+    if (INDICATORS[k].scans && all.length) enqueueJobs_(all.map(d => ['SCANS', k, d, 0]), {reset: true});
+  });
+  setProp_('MIGRATION_V4122', new Date().toISOString());
+  if (n) logSync_('INFO', 'sorting_error', '', 'V4.12.2: ' + n + ' dia(s) da Triagem Errada baixados de novo (1º e 2º segmento) e Consulta das bipagens refeita.');
   return n;
 }
 function retryFailedJobs() {
@@ -1649,7 +1685,7 @@ function processSyncQueue(opts) {
   // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
   try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V4.6: modo diário (padrão) — só a AGENDA põe tarefas na fila (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h).
   // Fora dos horários, nada é consultado sozinho (o botão Atualizar do painel continua valendo).

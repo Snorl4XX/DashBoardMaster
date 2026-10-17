@@ -225,8 +225,13 @@ function fakeJms(dayData, options) {
       if (!Array.isArray(body.bilNos) || body.billType !== 1 || body.sortName !== 'scanDate' || body.scanSite !== '30001') {
         return respond(200, {code: 500, msg: 'parâmetro inválido', fail: true});
       }
-      const all = [];
+      let all = [];
       body.bilNos.forEach(w => scanRecordsFor(w).forEach(r => all.push(r)));
+      // V4.12.2: filtro "Tipo de bipagem" da tela — 建包扫描 = Encomenda inserida em lote; scanTypeUnknown: o JMS não conhece o
+      // valor do filtro e não devolve nada (o painel consulta todos os tipos).
+      if (body.scanType && body.scanType !== '全部') {
+        all = options.scanTypeUnknown ? [] : options.scanTypeIgnored ? all : all.filter(r => body.scanType === '建包扫描' && r.scanType === 'Encomenda inserida em lote');
+      }
       all.sort((a, b) => a.scanDate < b.scanDate ? -1 : a.scanDate > b.scanDate ? 1 : 0);
       const sz = Math.min(100, body.size);
       return respond(200, {code: 1, msg: '1:Solicitação concluída', data: {records: all.slice((body.current - 1) * sz, body.current * sz), total: all.length,

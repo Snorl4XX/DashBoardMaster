@@ -1,8 +1,49 @@
-# J&T DASHMASTER V4.12.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.12.2 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.12.2 — Segmento sempre "GRU,391-05" e o processo das sacas como na tela
+**Pedido:** "Em vez de aparecer GRU,391-05, que é a junção de duas colunas… também a questão dos sem informações, você não fez o processo. Segue à risca."
+
+### O que estava errado na V4.12.1
+- **"GRU" sozinho:** enquanto um dia não era baixado de novo, o painel mostrava só o 1º segmento. Isso foi tirado.
+- **O processo não rodava:** o botão Atualizar só baixava as listas quando a taxa do dia mudava. A rebaixa dos dias e a Consulta das bipagens ficavam paradas na fila. Com a cota em economia, os dias mais antigos também esperavam.
+
+### Segmento
+- O segmento é **sempre a junção das duas colunas**: primeiro segmento de pedido JMS + código do 2º segmento, com vírgula (**GRU,391-05**).
+- Faltando uma das duas colunas, a remessa fica sem segmento (fora do cartão e do gráfico). Nunca aparece só "GRU".
+- O 2º segmento é procurado em qualquer campo da lista do JMS: "391-05", "GRU391-05", "GRU,391-05,020" ou dentro de um objeto. Datas e CEP não confundem.
+- Dias baixados antes desta versão são baixados de novo:
+  - automaticamente, ao abrir a Triagem Errada;
+  - no botão Atualizar;
+  - na fila, para os últimos 31 dias.
+
+### Sacas, operador e Unidade de Empacotamento sem informação (como no PDF)
+1. Pega as remessas da Triagem sem **Número da Saca** ou sem **Operador do Bipe de Envio no Carregamento**.
+2. Consulta essas remessas em **Operação > Consulta do pacote > Consulta das bipagens (tempo real)**, com os filtros da tela:
+   - **Tipo de bipagem: Encomenda inserida em lote**;
+   - **Base de escaneamento: SP GRU**.
+3. Se tiver mais de um bipe, pega **o primeiro**.
+4. **Número do lote** → Número da Saca. **Digitalizador** → Operador.
+5. **Base de escaneamento sem informação = SP GRU**. **Unidade de Empacotamento sem informação = SP GRU**.
+
+Se o JMS não aceitar o filtro de tipo, a consulta pega todos os tipos e o painel aplica o mesmo filtro.
+
+Isso roda **ao abrir a Triagem Errada** e no **Atualizar**, na hora. Também roda na fila (6h e 8h), mesmo com a cota em economia (a Triagem é leve).
+
+### Selos acima dos filtros
+| Selo | O que diz |
+|---|---|
+| **Sacas pela Consulta das bipagens: X de Y · ainda sem saca: Z** | Das Y remessas que vieram sem saca/operador, X foram completadas. Z = sem o bipe "Encomenda inserida em lote" na SP GRU (não existe saca para pegar). |
+| **Segmento: N dia(s) sendo baixados de novo do JMS** | Dias de antes da junção; somem sozinhos. |
+| **Segmento (1º e 2º): X de Y remessas** | Remessas com a junção. |
+| **Segmento: o JMS não mandou o 2º segmento** | Só aparece se nenhuma remessa trouxer o 2º segmento. |
+
+### Como instalar
+- **Google:** troque os `.gs` e `.html` pelos do ZIP V4.12.2 e publique uma **Nova versão**. Abra a Triagem Errada: o painel completa o período sozinho (leva alguns minutos; aparece um aviso).
+- **Node.js / Oracle:** envie o `JT_DASHMASTER_V4_12_2_NODE.zip` e rode `unzip -o JT_DASHMASTER_V4_12_2_NODE.zip && sudo systemctl restart dashmaster`.
 
 ## V4.12.1 — Correção: segmento e sacas/lotes que não apareciam
 **Pedido:** "Não apareceu os dados do segmento e nem arrumou as questões das sacas/lotes."

@@ -812,9 +812,13 @@ function scanTargets_(sc) { return Object.keys((sc && sc.fill) || {}); }
 function scanTodo_(ds, sc, map) {
   const W = ds.dict.shipment, cW = ds.cols.shipment, targets = scanTargets_(sc), seen = {}, todo = [];
   let total = 0;
+  // V4.12.2: total = remessas do dia que vieram sem saca/operador — as ainda vazias e as já completadas pela consulta.
+  const inDay = {};
   for (let i = 0; i < ds.n; i++) {
     const w = W[cW[i]];
-    if (!w || seen[w]) continue;
+    if (!w) continue;
+    inDay[w] = 1;
+    if (seen[w]) continue;
     const empty = targets.some(f => !ds.cols[f] || String(ds.dict[f][ds.cols[f][i]] || '').trim() === '');
     if (!empty) continue;
     seen[w] = 1;
@@ -822,6 +826,7 @@ function scanTodo_(ds, sc, map) {
     if (map.ids[w] !== undefined || (map.miss[w] || 0) >= SCAN_MAX_MISS_) continue;
     todo.push(w);
   }
+  Object.keys(map.ids || {}).forEach(w => { if (inDay[w] && !seen[w]) total++; });
   todo.sort((a, b) => tripOrderKey_(a) - tripOrderKey_(b));
   return {todo: todo, total: total};
 }
@@ -859,10 +864,10 @@ function applyScanMapToDs_(ds, map, sc) {
 }
 /** Payload da tela (Consulta das bipagens, tempo real), com as remessas. A data da tela vale pouco com remessas (o JMS
  * devolve os bipes de outros dias): janela do dia da Triagem com 3 dias antes e 1 depois. */
-function scanPayload_(list, date, page, size) {
+function scanPayload_(list, date, page, size, type) {
   const today = isoToday_(), end = addDaysIso_(date, 1) > today ? today : addDaysIso_(date, 1);
   return {current: page, size: size, startDates: addDaysIso_(date, -3) + ' 00:00:00', endDates: end + ' 23:59:59', bilNos: list,
-    billType: 1, countryId: countryId_(), querySub: '', reachAddressList: [], scanSite: centerCode_(), scanType: '全部', sendSites: [],
+    billType: 1, countryId: countryId_(), querySub: '', reachAddressList: [], scanSite: centerCode_(), scanType: type || '全部', sendSites: [],
     sortName: 'scanDate', sortOrder: 'asc'};
 }
 /**
@@ -872,8 +877,8 @@ function scanPayload_(list, date, page, size) {
 function pickScanFills_(records, sc, center) {
   const types = (sc.scanTypes || ['Encomenda inserida em lote']).map(plainText_).concat(SCAN_TYPE_ALIASES_), base = plainText_(center), fill = sc.fill || {};
   const when = r => String(r.scanDate || '') + '|' + String(r.inputDate || '');
-  // "SP GRU" · "SP GRU | 30001" · "SP GRU(30001)" = a nossa base.
-  const isBase = v => { const x = plainText_(v); return x === base || x.replace(/\s*[|(].*$/, '').trim() === base; };
+  // "SP GRU" · "SP GRU | 30001" · "SP GRU(30001)" = a nossa base. V4.12.2 (pedido): Base de escaneamento sem informação = SP GRU.
+  const isBase = v => { const x = plainText_(v); return !x || x === base || x.replace(/\s*[|(].*$/, '').trim() === base; };
   const best = {};
   (records || []).forEach(r => {
     if (!r || types.indexOf(plainText_(r.scanType)) < 0) return;
@@ -899,13 +904,13 @@ function scanBatch_(sc) {
  * Todos os bipes das remessas `list` (página 1 e, em paralelo, as outras; até 60 páginas). Páginas de 100; se o JMS recusar
  * a página 1 assim (erro que não é de credencial), tenta com 20 — o tamanho da tela — e guarda (TRIAGEM_BIPAGENS_PAGINA).
  */
-function fetchScanRecords_(endpoint, list, date) {
+function fetchScanRecords_(endpoint, list, date, type) {
   let size = Number(getProp_('TRIAGEM_BIPAGENS_PAGINA', '')) || 100, first;
-  try { first = jmsPost_(endpoint, scanPayload_(list, date, 1, size), 3); }
+  try { first = jmsPost_(endpoint, scanPayload_(list, date, 1, size, type), 3); }
   catch (e) {
     if (size <= 20 || errorKind_(String(e && e.message || e)) !== 'OTHER' || /Sessão do JMS/.test(String(e && e.message || e))) throw e;
     size = 20;
-    first = jmsPost_(endpoint, scanPayload_(list, date, 1, size), 3);
+    first = jmsPost_(endpoint, scanPayload_(list, date, 1, size, type), 3);
     setProp_('TRIAGEM_BIPAGENS_PAGINA', '20');
     logSync_('INFO', 'sorting_error', date, 'Consulta das bipagens: o JMS recusou páginas de 100; usando 20 por página.');
   }
@@ -917,7 +922,7 @@ function fetchScanRecords_(endpoint, list, date) {
   for (let k = 0; k < rest.length; k += parallel) {
     const group = rest.slice(k, k + parallel);
     let responses;
-    try { responses = fetchAll_(group.map(p => jmsRequestObject_(endpoint, scanPayload_(list, date, p, size)))); }
+    try { responses = fetchAll_(group.map(p => jmsRequestObject_(endpoint, scanPayload_(list, date, p, size, type)))); }
     catch (e) {
       if (errorKind_(String(e && e.message || e)) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + String(e.message || e).slice(0, 200));
       responses = group.map(() => null);
@@ -925,11 +930,28 @@ function fetchScanRecords_(endpoint, list, date) {
     group.forEach((p, i) => {
       let json;
       try { if (!responses[i]) throw new Error('sem resposta'); json = parseJmsResponse_(responses[i], endpoint); }
-      catch (e) { json = jmsPost_(endpoint, scanPayload_(list, date, p, size), 3); }
+      catch (e) { json = jmsPost_(endpoint, scanPayload_(list, date, p, size, type), 3); }
       out = out.concat(recordsOf_(json));
     });
   }
   return out;
+}
+/**
+ * V4.12.2 (pedido "seguir à risca"): bipes de um lote de remessas como na tela — Tipo de bipagem "Encomenda inserida em lote"
+ * (sc.requestType) e Base de escaneamento SP GRU. Se o JMS recusar esse tipo ou não devolver nenhum bipe dele, consulta todos os
+ * tipos (全部) e o filtro é feito aqui (pickScanFills_); dando certo assim, fica em TRIAGEM_BIPAGENS_TIPO = todos.
+ */
+function scanBatchRecords_(endpoint, list, date, sc, center) {
+  const typed = sc.requestType && getProp_('TRIAGEM_BIPAGENS_TIPO', '') !== 'todos';
+  if (typed) {
+    let recs = null;
+    try { recs = fetchScanRecords_(endpoint, list, date, sc.requestType); }
+    catch (e) { const m = String(e && e.message || e); if (errorKind_(m) !== 'OTHER' || /Sessão do JMS/.test(m)) throw e; }
+    if (recs && Object.keys(pickScanFills_(recs, sc, center)).length) return recs;
+  }
+  const all = fetchScanRecords_(endpoint, list, date, '全部');
+  if (typed && Object.keys(pickScanFills_(all, sc, center)).length) setProp_('TRIAGEM_BIPAGENS_TIPO', 'todos');
+  return all;
 }
 /**
  * Tarefa SCANS (Triagem errada, depois do detalhe gravado): consulta as remessas sem lote/login, guarda o mapa e regrava
@@ -954,7 +976,7 @@ function runScanJob_(job, deadline) {
     const list = todo.slice(k, k + batch);
     const t0 = Date.now();
     let records;
-    try { records = fetchScanRecords_(endpoint, list, job.date); }
+    try { records = scanBatchRecords_(endpoint, list, job.date, sc, center); }
     catch (e) {
       const m = String(e && e.message || e);
       if (errorKind_(m) !== 'OTHER' || /Sessão do JMS/.test(m)) throw e;
@@ -1452,7 +1474,7 @@ function diagnosticarBipagensTriagem(date) {
   const sample = (plan.todo.length ? plan.todo : Object.keys(map.ids)).slice(0, 10);
   if (sample.length) {
     try {
-      const recs = fetchScanRecords_(endpointFor_(cfg, 'scans'), sample, d);
+      const recs = scanBatchRecords_(endpointFor_(cfg, 'scans'), sample, d, sc, centerName_());
       const types = {}, bases = {};
       recs.forEach(r => { types[String(r.scanType || '—')] = (types[String(r.scanType || '—')] || 0) + 1; bases[String(r[sc.baseField || 'inputDept'] || '—')] = 1; });
       const fills = pickScanFills_(recs, sc, centerName_());
