@@ -782,6 +782,7 @@ function diagnosticoCompleto(date) {
       item.campos = map.campos;
       item.camposRecebidos = map.camposRecebidos;
       if (cfg.docks) item.docas = dockSampleReport_(key, probe.records);
+      if (cfg.fields && cfg.fields.segment2) item.segmentos = segmentSampleReport_(key, probe.records);
     } catch (e) { item.detalhe = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
     if (out.bancoConfigurado) {
       try {
@@ -837,6 +838,12 @@ function diagnosticoCompleto(date) {
       lines.push('  ' + (cfg.docks && cfg.docks.source === 'destination' ? 'Próxima parada do veículo' : 'Código de três segmentos') + ' → destino → doca: ' + dk.exemplos.map(x => '"' + x.codigo + '" → ' + x.destino + ' → ' + x.doca).join(' · '));
       if (dk.semDoca.length) lines.push('  SEM DOCA nesta amostra (inclua em DOCKS_EXPEDICAO, Config.gs, se tiverem doca): ' +
         dk.semDoca.slice(0, 12).map(x => x.valor + ' (' + x.n + ')').join(' · '));
+    }
+    const sg = item.segmentos;
+    if (sg && sg.amostra) {
+      lines.push('  Segmento (1º e 2º, 1ª página, ' + sg.amostra + ' remessas): ' + sg.com2 + ' com o 2º segmento' +
+        (sg.campo ? ' (campo ' + sg.campo + ')' : ' — o 2º segmento NÃO veio (procurado em ' + cfg.fields.segment2.join('/') + ')') +
+        (sg.top.length ? ' · mais ofensores: ' + sg.top.map(x => x.valor + ' (' + x.n + ')').join(' · ') : ''));
     }
     const u = item.ultimos7dias;
     if (u && !u.erro) {

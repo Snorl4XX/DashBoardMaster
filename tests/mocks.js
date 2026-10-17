@@ -602,8 +602,10 @@ function makeDay(date, seed) {
     orderThirdCode: pick(segs), orderFirstCode: pick(segs).split(/[ ,]/)[0], packageNo: rnd() < 0.15 ? null : 'BR104' + Math.floor(rnd() * 90 + 10),
     sendTime: time(), scanUser: pick(logins), shouldNextstation: '主:' + pick(stations), nextstation: pick(stations), wrongType: pick(['上环节建包异常', '一段码异常', '人为因素'])});
   if (ws.length > 3) ws.push(Object.assign({}, ws[0])); // remessa duplicada (deve ser deduplicada)
+  // V4.12: 2º segmento do pedido (fixo pela posição, para não mudar a sequência aleatória); 1 em cada 9 sem ele.
+  const seg2 = ['391-18', '402-03', '430-00', '376-00', '378-03', '378-01'];
   for (let i = 0; i < n(143); i++) se.push({billcode: '9998' + date.replace(/-/g, '') + i, dt: date, orderFirstCode: pick(['SP', 'GRU', 'MG']),
-    packageNo: 'BR1043' + Math.floor(rnd() * 20), scanuser: pick(logins), baggingNetworkName: pick(['SP GRU', 'SP BRE', 'DC GRU-SP']),
+    orderSecondCode: i % 9 === 8 ? '' : seg2[i % seg2.length], packageNo: 'BR1043' + Math.floor(rnd() * 20), scanuser: pick(logins), baggingNetworkName: pick(['SP GRU', 'SP BRE', 'DC GRU-SP']),
     transferCenterNextName: pick(['DC GRU-SP', 'F ITQ-SP', 'DC BAU-SP']), transferCenterSendTime: time(), orderSourceName: pick(clients),
     wrongType: pick(['交叉带/翻板机错用包牌|Uso incorreto da etiqueta do pacote no cross-belt/sorter', '末端人为错分一错扫|Erro humano de triagem Last Mile — bipe incorreto'])});
   for (let i = 0; i < n(312); i++) mr.push({billcode: '7770' + date.replace(/-/g, '') + i, threeSegmentCode: pick(segs), loadPackageTime: time(),

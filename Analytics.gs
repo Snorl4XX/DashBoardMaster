@@ -7,7 +7,9 @@ const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expediti
   'lot', 'client', 'offenderBase', 'errorType', 'tripId', 'route', 'reason', 'idealTime', 'idealTimeFull', 'correctDest',
   'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw', 'station', 'product', 'content', 'amount', 'regDay',
   'locationMain', 'locationSub', 'column', 'destCenter', 'destBase', 'qty', 'port', 'sackType', 'items', 'packType', 'source', 'chip',
-  'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase'];
+  'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase',
+  // V4.12 (Triagem Errada): 1º + 2º segmento ("SP,391-18").
+  'segmentPair'];
 /**
  * Campos extras lidos quando o indicador os configura (Fluxo de Lotes: entrada/saída, saca ecológica, itens, tipo, origem, chip;
  * Sem Movimentação: remessa, pedidos, tipo da última operação, aging, problemático, bases e destino).
@@ -56,6 +58,12 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   // só com o código ("BRE"), como nos gráficos de sempre. Destino e doca saem daqui (Core.applyDocks).
   // V4.8: com o 2º segmento ("BRE - SP,381-06"): os DCs novos (DC GRU, DC SSZ-SP, MOO…) saem por ele.
   if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') row.segmentRaw = JTCore_.segmentHead2(row.segment);
+  // V4.12 (Triagem Errada): segmento "SP,391-18" = 1º segmento + o 1º campo de fields.segment2 que tiver um 2º segmento.
+  if (f.segment2) {
+    let sec = '';
+    for (let i = 0; i < f.segment2.length && !sec; i++) sec = JTCore_.secondSegment(str([f.segment2[i]]));
+    row.segmentPair = JTCore_.segmentPair(row.segment, sec || row.segment);
+  }
   return rederiveRow_(indicatorKey, row);
 }
 
@@ -96,6 +104,13 @@ function normalizeRecords_(indicatorKey, date, records, type) {
       (td.blank || []).forEach(k => { x[k] = ''; });
     }
     rows.push(x);
+  }
+  // V4.12: nenhuma remessa com o 2º segmento (o segmento fica só com o 1º, "SP"): avisa uma vez, com os campos recebidos.
+  const f2 = cfgN.fields && cfgN.fields.segment2;
+  if (f2 && rows.length >= 20 && !SEG2_WARNED_[indicatorKey] && !rows.some(r => String(r.segmentPair || '').indexOf(',') > 0)) {
+    SEG2_WARNED_[indicatorKey] = 1;
+    logSync_('WARN', indicatorKey, date, '2º segmento do pedido não veio no detalhe: o segmento fica só com o 1º (ex.: "SP"). Campos procurados: ' +
+      f2.join('/') + '. Campos recebidos: ' + Object.keys(records[0] || {}).slice(0, 40).join(', ') + '. Rode diagnosticoCompleto.');
   }
   if (records.length && !rows.length) {
     const cfg = getIndicatorConfig_(indicatorKey);
@@ -141,11 +156,38 @@ function dockSampleReport_(indicatorKey, records) {
 }
 
 /**
+ * V4.12: amostra do segmento "SP,391-18" (Triagem Errada, diagnosticoCompleto): quantas remessas trouxeram o 2º segmento, de
+ * que campo do JMS ele veio e os mais ofensores da amostra. Só códigos de roteamento.
+ */
+function segmentSampleReport_(indicatorKey, records) {
+  const cfg = getIndicatorConfig_(indicatorKey), keys = (cfg.fields && cfg.fields.segment2) || [];
+  if (!keys.length || !records || !records.length) return null;
+  const by = {}, from = {};
+  let n = 0, com2 = 0;
+  records.forEach(rec => {
+    const row = normalizeDetailRow_(indicatorKey, rec, '');
+    if (!row) return;
+    n++;
+    const v = String(row.segmentPair || '');
+    if (v) by[v] = (by[v] || 0) + 1;
+    if (v.indexOf(',') < 0) return;
+    com2++;
+    const read = fieldReader_(rec);
+    for (let i = 0; i < keys.length; i++) {
+      const hit = read([keys[i]]);
+      if (hit.value !== null && JTCore_.secondSegment(hit.value)) { from[hit.key || keys[i]] = (from[hit.key || keys[i]] || 0) + 1; break; }
+    }
+  });
+  const top = obj => Object.keys(obj).map(k => ({valor: k, n: obj[k]})).sort((a, b) => b.n - a.n);
+  return {amostra: n, com2: com2, campo: (top(from)[0] || {}).valor || '', top: top(by).slice(0, 5)};
+}
+
+/**
  * Avisa (SYNC_LOG) quando um campo USADO no painel veio vazio em TODAS as remessas do dia
  * (o gráfico/filtro daquela dimensão fica só com "Sem informação").
  * `emptyDims` = dimensões vazias no dia (DayAccumulator_.emptyFields).
  */
-var FIELD_WARNED_ = {};
+var FIELD_WARNED_ = {}, SEG2_WARNED_ = {};
 function warnEmptyFields_(indicatorKey, date, emptyDims, sampleRaw, n) {
   if (FIELD_WARNED_[indicatorKey] || n < 20) return;
   const cfg = getIndicatorConfig_(indicatorKey);

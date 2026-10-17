@@ -3492,9 +3492,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'sem data, vale a tabela mais nova');
   // Triagem Errada: docas pela base destino (DCs novos), painéis e coluna Doca.
   const cfgSE = cD8.getIndicatorConfig_('sorting_error');
-  check(cfgSE.docks && cfgSE.docks.source === 'destination' && cfgSE.filters.indexOf('dock') >= 0 && cfgSE.rankPanels.map(p => p.key).join() === 'dockOverview,dockByShift,routeDockByShift' &&
+  check(cfgSE.docks && cfgSE.docks.source === 'destination' && cfgSE.filters.indexOf('dock') >= 0 && cfgSE.rankPanels.map(p => p.key).join() === 'dockOverview,segmentOverview' &&
     cfgSE.table.some(c => c[0] === 'dock') && cfgSE.table.some(c => c[0] === 'dockDest') && cfgSE.pivotTables.length === 2,
-    'Triagem Errada: filtro, painéis de docas e colunas Rota de carregamento/Doca');
+    'Triagem Errada: filtro, painéis (docas e, na V4.12, segmentos) e colunas Rota de carregamento/Doca');
   const D8 = '2026-10-12', dTE = {[D8]: makeDay(D8, 88)};
   const cTE = freshCtx(dTE, null, {DATA_START_DATE: D8});
   cTE.queueHistory(D8, D8, true);
@@ -3537,7 +3537,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const ch9 = cfg9.charts.filter(c => c.key === 'expDay')[0];
   const cat9 = c9.getPublicCatalog_().filter(x => x.key === 'sorting_error')[0];
   const cf9 = c9.clientFields_(cfg9);
-  check(cfg9.dayOf && cfg9.dayOf.expDay === 'eventTime' && cfg9.topCards.join() === 'offenderBase,expDay' && ch9 && ch9.hideNA &&
+  check(cfg9.dayOf && cfg9.dayOf.expDay === 'eventTime' && cfg9.topCards.join() === 'offenderBase,expDay,segmentPair' && ch9 && ch9.hideNA &&
     cat9.dayOf && cat9.dayOf.expDay === 'eventTime' && cat9.labels.expDay.pt === 'Data do bipe de expedição' &&
     cat9.topCardLabels.expDay.pt === 'Dia com mais erros de triagem' && cf9.indexOf('eventTime') >= 0 && cf9.indexOf('expDay') < 0,
     'Triagem Errada: cartão e gráfico do dia com mais erros (data calculada do horário do bipe de expedição; não vai no conjunto de dados)', cf9);
@@ -3584,23 +3584,23 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     ['GO GYN | DOCA 05', ['GO GYN'], ['GO,1']],
     ['RS NSR | DOCA 07', ['RS NSR'], ['RS,1', 'RS1,1']],
     ['PE JGS | DOCA 17', ['PE JGS', 'DC BYE-PB'], ['PE,1', 'BYE,1']],
-    ['BA FEC | DOCA 18', ['DC MCZ-AL', 'DC SNS-PE', 'DC IMP-MA', 'DC SBA-BA', 'BA FEC'], ['MCZ,1', 'SNS,1', 'IMP,1', 'SBA,1', 'BA,1']],
+    ['BA FEC | DOCA 18', ['DC MCZ-AL', 'DC SNS-PE', 'DC SBA-BA', 'BA FEC'], ['MCZ,1', 'SNS,1', 'SBA,1', 'BA,1']],
     ['ES SRR | DOCA 40', ['ES SRR'], ['ES,1']],
     ['SE AJU | DOCA 15', ['SE AJU'], ['SE,1', 'AL,1']],
-    ['THE | DOCA 41', ['PI THE'], ['PI,1']],
+    ['THE | DOCA 41', ['PI THE', 'DC IMP-MA'], ['PI,1', 'IMP,1']],
     ['CE FOR | DOCA 09', ['CE FOR'], ['CE,1']],
     ['PA ANA | DOCA 20', ['PA ANA'], ['PA,1']],
     ['MS CGR | DOCA 43', ['MS CGR'], ['MS,1']],
-    ['MT CGB | DOCA 42', ['MT CGB', 'DC JPN'], ['MT,1', 'JPN,1']],
+    ['MT CGB | DOCA 42', ['MT CGB'], ['MT,1']],
     ['SP BRE | DOCA 21/22', ['PA STM', 'PA MRB', 'RO PVH', 'TO PMW', 'DC PPB-SP', 'DC NAT-RN', 'DC XAP-SC', 'DC SJP-SP', 'DC CDG-RJ', 'DC JDF-MG',
-      'DC SLZ-MA', 'DC MAO-AM', 'MGF-PR', 'DC LDB-PR', 'DC RBR-AC', 'DC BJE-PI', 'DC BAU-SP', 'DC SOD-SP', 'DC VCP-SP'],
-      ['STM,1', 'MRB,1', 'PPB,1', 'NAT,1', 'BAU 484-00,1', 'SOD,1', 'VCP,1', 'MA,1', 'BRE - SOD,018-00,1']],
+      'DC SLZ-MA', 'DC MAO-AM', 'MGF-PR', 'DC LDB-PR', 'DC RBR-AC', 'DC BJE-PI', 'DC BAU-SP', 'DC SOD-SP', 'DC VCP-SP', 'DC JPN'],
+      ['STM,1', 'MRB,1', 'PPB,1', 'NAT,1', 'JPN,1', 'BAU 484-00,1', 'SOD,1', 'VCP,1', 'MA,1', 'BRE - SOD,018-00,1']],
     ['DC JND 02-SP | DOCA 21/22', [], ['SP,395-05,1', 'SP,395-06,1', 'SP,395-07,1', 'BRE,381-06,1', 'BRE - SP,381-07,1', 'BRE - GRU,381-12,1', 'GRU,381-06,1']],
     ['DC GRU | DOCA 44', ['DC GRU', 'DC GRU-SP'], ['GRU,381-00,1', 'GRU,381-14,1', 'SP,381-04,1', 'SP,381-06,1', 'SP,381-07,1', 'SP,381-17,1', 'SP,405-00,1',
       'GRU,378-04,1', 'GRU,402-02,1', 'GRU,402-04,1', 'GRU,404-01,1', 'GRU,404-08,1']],
     ['MOO | DOCA 23', ['DC MOOCA2'], ['SP,350-00,1', 'SP,364-00,1', 'SP,365-00,1', 'SP,381-12,1', 'SP,398-00,1', 'SP,404-00,1', 'SP,430-01,1', 'SP,435-00,1',
-      'GRU,404-00,1', 'GRU,404-10,1', 'MOO,430-00,1', 'MOO,430-06,1']],
-    ['SBN | DOCA 08', ['DC SBN'], ['SBN,375-00,1', 'SBN,375-09,1']],
+      'GRU,404-00,1', 'GRU,404-03,1', 'GRU,404-09,1', 'GRU,404-10,1', 'MOO,430-00,1', 'MOO,430-03,1', 'MOO,430-06,1', 'MOO,1']],
+    ['SBN | DOCA 08', ['DC SBN'], ['SBN,375-00,1', 'SBN,375-05,1', 'SBN,375-09,1', 'SBN,1']],
     ['DC SSZ-SP | DOCA 14', ['DC SSZ', 'DC SSZ-SP'], ['SP,378-00,1', 'SP,378-03,1', 'GRU,378-00,1', 'GRU,378-03,1']],
     ['DC TBT-SP | DOCA 14', ['DC TBT', 'DC TBT-SP'], ['SP,421-00,1', 'SP,402-01,1', 'SP,402-03,1', 'SP,402-05,1', 'GRU,402-00,1', 'GRU,402-05,1']]
   ];
@@ -3618,6 +3618,139 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // "DC" sozinho não escolhe doca; parada desconhecida mostra o nome dela.
   check(stop('DC XYZ', D10) === 'DC XYZ | SEM DOCA' && stop('DC XYZ-SP', D10) === 'SP BRE | DOCA 21/22' && stop('XX YYY', D10) === 'XX | SEM DOCA',
     'parada desconhecida: "DC XYZ" fica SEM DOCA (não vai para o PE JGS pelo "DC")', [stop('DC XYZ', D10), stop('DC XYZ-SP', D10)]);
+}
+
+// ---------- V4.12: Triagem Errada — segmento "SP,391-18", painéis trocados e tabela de docas de 11/10 igual ao print ----------
+{
+  const vmS = require('vm');
+  const cS = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CS = cS.JTCore_, DEXP = vmS.runInContext('DOCKS_EXPEDICAO', cS), DPP = vmS.runInContext('DOCKS_PROXIMA_PARADA', cS);
+  // Tabela de docas: cada linha do print "Ajuste das docas de carregamento em 4 de outubro (Atualizado em 11/10)".
+  const PRINT = [
+    [7, 'DOCA 05', 'GO GYN', ['GO']], [7, 'DOCA 06', 'SC BNU', ['SC', 'SC1']], [7, 'DOCA 07', 'RS NSR', ['RS', 'RS1']],
+    [7, 'DOCA 08', 'SBN', ['SBN 375-00', 'SBN 375-01', 'SBN 375-02', 'SBN 375-03', 'SBN 375-04', 'SBN 375-05', 'SBN 375-06', 'SBN 375-07', 'SBN 375-08', 'SBN 375-09']],
+    [7, 'DOCA 09', 'CE FOR', ['CE']], [7, 'DOCA 10', 'RJ SJM', ['RJ', 'RJ1', 'VDC']],
+    [4, 'DOCA 14', 'DC SSZ-SP', ['GRU 378-01', 'GRU 378-02', 'GRU 378-03', 'GRU 378-00']],
+    [4, 'DOCA 14', 'DC TBT-SP', ['GRU 402-00', 'GRU 402-01', 'GRU 402-03', 'GRU 402-05']],
+    [4, 'DOCA 15', 'SE AJU', ['SE', 'AL']], [4, 'DOCA 16', 'PR SJS', ['PR', 'PR1', 'CAC']], [4, 'DOCA 17', 'PE JGS', ['PE', 'BYE']],
+    [4, 'DOCA 18', 'BA FEC', ['BA', 'SBA', 'SNS']], [4, 'DOCA 19', 'MG CGE', ['MG', 'MG1', 'CHV']], [4, 'DOCA 20', 'PA ANA', ['PA']],
+    [2, 'DOCA 21/22', 'SP BRE', ['AC', 'AM', 'BAU', 'BVB', 'CDG', 'JDF', 'LDB', 'MIA', 'MRB', 'RO', 'SJP', 'SOD', 'SP', 'SP1', 'STM', 'TO', 'VCP', 'XAP', 'BJE',
+      'MA', 'PPB', 'JPN', 'NAT']],
+    [2, 'DOCA 21/22', 'DC JND 02-SP', ['GRU 381-12', 'SP 395-07', 'GRU 381-06', 'SP 395-05', 'GRU 381-07', 'SP 395-06']],
+    [2, 'DOCA 23', 'MOO', ['MOO 430-00', 'MOO 430-01', 'MOO 430-02', 'MOO 430-03', 'MOO 430-04', 'MOO 430-05', 'MOO 430-06',
+      'GRU 404-00', 'GRU 404-03', 'GRU 404-09', 'GRU 404-10']],
+    [3, 'DOCA 44', 'DC GRU', ['GRU 381-00', 'GRU 381-01', 'GRU 381-02', 'GRU 381-03', 'GRU 381-04', 'GRU 381-05', 'GRU 381-09', 'GRU 381-10', 'GRU 381-11',
+      'GRU 381-13', 'GRU 381-14', 'GRU 404-01', 'GRU 404-02', 'GRU 404-04', 'GRU 404-05', 'GRU 404-06', 'GRU 404-07', 'GRU 404-08', 'GRU 378-04',
+      'GRU 402-02', 'GRU 402-04', 'SP 381-04', 'SP 381-06', 'SP 381-08', 'SP 381-13', 'SP 381-15', 'SP 381-16', 'SP 381-17', 'SP 405-00']],
+    [3, 'DOCA 43', 'MS CGR', ['MS']], [3, 'DOCA 42', 'MT CGB', ['MT']], [3, 'DOCA 41', 'THE', ['PI', 'IMP']], [3, 'DOCA 40', 'ES SRR', ['ES']],
+    [3, 'DOCA 39', 'SP RBP', ['NE', 'NE1']], [3, 'DOCA 38', 'DF BSB', ['DF']]
+  ];
+  // Código do print → código como o JMS manda ("GRU 378-01" → "GRU,378-01,020"; "GO" → "GO,795-00,002").
+  const asJms = c => { const m = c.match(/^(\S+) (\d{3}-\d{2})$/); return m ? m[1] + ',' + m[2] + ',020' : c + ',795-00,002'; };
+  const segD = (c, d) => { const r = CS.applyDocks([{segmentRaw: CS.segmentHead2(c), segment: CS.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stopD = (v, d) => { const r = CS.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const ver = CS.dockVersion(DEXP, '2026-10-13'), wrongP = [];
+  PRINT.forEach(([line, dock, route, codes]) => {
+    const e = ver.entries.filter(x => x.route === route)[0];
+    if (!e || e.dock !== dock || e.line !== line) wrongP.push(route + ': linha/doca ' + (e ? e.line + ' ' + e.dock : 'não existe'));
+    codes.forEach(c => ['2026-10-11', '2026-10-17'].forEach(d => {
+      const g = segD(asJms(c), d);
+      if (g !== route + ' | ' + dock) wrongP.push(d + ' ' + c + ' → ' + g + ' (print: ' + route + ' | ' + dock + ')');
+    }));
+  });
+  check(!wrongP.length, 'tabela de 11/10 igual ao print: cada código na linha, na rota e na doca do print', wrongP);
+  check(stopD('DC JPN', '2026-10-13') === 'SP BRE | DOCA 21/22' && stopD('DC IMP-MA', '2026-10-13') === 'THE | DOCA 41' && stopD('PI THE', '2026-10-13') === 'THE | DOCA 41' &&
+    stopD('MT CGB', '2026-10-13') === 'MT CGB | DOCA 42' && stopD('DC MCZ-AL', '2026-10-13') === 'BA FEC | DOCA 18',
+    'próxima parada: JPN no SP BRE e IMP no THE (print das docas); MCZ, fora do print, segue o print das rotas (BA FEC)');
+  check(segD('JPN,1', '2026-10-07') === 'SP BRE | DOCA 21/22' && segD('IMP,1', '2026-10-07') === 'THE | DOCA 41' && segD('SBN,375-03,420', '2026-10-07') === 'SBN | DOCA 40',
+    'de 04/10 a 10/10 continua a tabela da época');
+
+  // Segmento "SP,391-18": 1º segmento + 2º segmento com vírgula.
+  check(CS.segmentPair('SP', '391-18') === 'SP,391-18' && CS.segmentPair('GRU', 'GRU,402-03,020') === 'GRU,402-03' && CS.segmentPair('SP', '') === 'SP' &&
+    CS.segmentPair('SP', '020') === 'SP' && CS.segmentPair('', '391-18') === '' && CS.segmentPair('MOO', '430-00') === 'MOO,430-00',
+    'segmentPair: "SP" + "391-18" → "SP,391-18"; sem 2º segmento, só o 1º');
+  const D12 = '2026-10-12', norm = raw => cS.normalizeDetailRow_('sorting_error', Object.assign({billcode: 'S1', dt: D12, transferCenterSendTime: D12 + ' 10:00:00'}, raw), D12);
+  const nCases = [
+    [{orderFirstCode: 'SP', orderSecondCode: '391-18'}, 'SP,391-18'],
+    [{orderFirstCode: 'GRU', terminalDispatchCode: 'GRU,402-03,020'}, 'GRU,402-03'],
+    [{orderFirstCode: 'SBN', terminalDispatchCode: '375-07-110'}, 'SBN,375-07'],
+    [{orderFirstCode: 'MOO', orderSecondCode: '', orderThirdCode: 'MOO,430-00,001'}, 'MOO,430-00'],
+    [{orderFirstCode: 'BA', terminalDispatchCode: '020'}, 'BA'],
+    [{terminalDispatchCode: 'SP,376-00,010'}, 'SP,376-00'],
+    [{orderFirstCode: 'GRU', second_code: 'x', ORDERSECONDCODE: '378-03'}, 'GRU,378-03']
+  ];
+  const nWrong = nCases.filter(([raw, want]) => norm(raw).segmentPair !== want).map(([raw, want]) => JSON.stringify(raw) + ' → ' + norm(raw).segmentPair + ' (esperado ' + want + ')');
+  check(!nWrong.length && norm({orderFirstCode: 'SP', orderSecondCode: '391-18'}).segment === 'SP',
+    'leitura: 2º segmento do campo próprio ou do código de três segmentos (nunca o 3º trecho); o 1º segmento continua igual', nWrong);
+
+  // Painéis: "Docas por turno" e "Turno + rota de carregamento + doca" saem; entram os segmentos; cartão e coluna novos.
+  const cfgS = cS.getIndicatorConfig_('sorting_error'), catS = cS.getPublicCatalog_().filter(x => x.key === 'sorting_error')[0];
+  const rp = cfgS.rankPanels.filter(p => p.key === 'segmentOverview')[0];
+  check(cfgS.rankPanels.map(p => p.key).join() === 'dockOverview,segmentOverview' && !cfgS.rankPanels.some(p => /Docas por turno|Turno \+ rota/.test(p.title.pt)) &&
+    rp && rp.dim === 'segmentPair' && rp.kind === 'overview' && rp.top === 15 && rp.title.pt === 'Segmentos mais ofensores' &&
+    cfgS.topCards.indexOf('segmentPair') >= 0 && catS.topCardLabels.segmentPair.pt === 'Segmento mais ofensor' && catS.labels.segmentPair.pt === 'Segmento (1º e 2º)' &&
+    cfgS.table.some(c => c[0] === 'segmentPair') && cS.clientFields_(cfgS).indexOf('segmentPair') >= 0,
+    'Triagem Errada: painel de segmentos no lugar dos 2 painéis de docas por turno, cartão "Segmento mais ofensor" e coluna na tabela');
+  const others = ['wrong_send', 'missing_dispatch', 'sc_sc'].map(k => cS.getIndicatorConfig_(k));
+  check(others[0].rankPanels.some(p => p.key === 'dockByShift') && others.every(c => !c.topCards || c.topCards.indexOf('segmentPair') < 0),
+    'os outros indicadores não mudam (Envio Errado continua com "Docas por turno")');
+
+  // Dia baixado: segmento gravado, cartão e painel (top 15, percentual sobre todos os erros).
+  const DS = '2026-10-14', dS = {[DS]: makeDay(DS, 95)};
+  const cSd = freshCtx(dS, null, {DATA_START_DATE: DS});
+  cSd.queueHistory(DS, DS, true);
+  runAll(cSd);
+  const rowsS = CS.decodeDataset(cSd.getDashboardData('sorting_error', {from: DS, to: DS}).dataset);
+  const seRaw = dS[DS].se, withSeg = seRaw.filter(r => r.orderSecondCode).length;
+  check(rowsS.length === seRaw.length && rowsS.filter(r => /^[A-Z]+,\d{3}-\d{2}$/.test(r.segmentPair)).length === withSeg &&
+    rowsS.filter(r => r.segmentPair && r.segmentPair.indexOf(',') < 0).length === seRaw.length - withSeg,
+    'dia baixado: "SP,391-18" gravado em cada remessa (sem o 2º segmento, só o 1º)', rowsS.slice(0, 3).map(r => r.segmentPair));
+  const cnt = {};
+  rowsS.forEach(r => { cnt[r.segmentPair] = (cnt[r.segmentPair] || 0) + 1; });
+  const order = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || a.localeCompare(b));
+  const compS = cSd.computeDashboard_('sorting_error', {from: DS, to: DS});
+  const topS = compS.cards.tops.filter(t => t.key === 'segmentPair')[0];
+  check(topS && cnt[topS.label] === cnt[order[0]] && topS.qty === cnt[order[0]] && Math.abs(topS.pct - topS.qty / rowsS.length * 100) < 1e-9 && /,/.test(topS.label),
+    'cartão "Segmento mais ofensor": o segmento, a quantidade e a participação', topS);
+  const pS = CS.rankPanel(rowsS, rp);
+  check(pS.items.length === Math.min(15, order.length) && pS.total === rowsS.length && pS.max.value === pS.items[0].value && pS.max.count === cnt[order[0]] &&
+    Math.abs(pS.items[0].pct - cnt[order[0]] / rowsS.length * 100) < 1e-9 && pS.items.every((it, i) => !i || it.count <= pS.items[i - 1].count),
+    'painel "Segmentos mais ofensores": do maior para o menor, percentual sobre todos os erros', pS.items.slice(0, 3));
+  const many = [];
+  for (let i = 0; i < 40; i++) for (let j = 0; j <= i % 5; j++) many.push({segmentPair: 'SP,' + (300 + i) + '-00'});
+  many.push({segmentPair: ''}, {segmentPair: ''});
+  const pM = CS.rankPanel(many, rp), pOld = CS.rankPanel([{segmentPair: ''}, {segmentPair: ''}], rp), pDock = CS.rankPanel(many.map(r => ({dock: r.segmentPair})), {kind: 'overview', dim: 'dock'});
+  check(pM.items.length === 15 && pM.total === many.length && Math.abs(pM.items.reduce((a, it) => a + it.pct, 0) - pM.items.reduce((a, it) => a + it.count, 0) / many.length * 100) < 1e-9 &&
+    pOld.total === 2 && !pOld.items.length && pDock.items.length === 40 && pDock.total === many.length - 2,
+    'top 15: o total conta também os de fora do top e os sem segmento; sem top (docas) nada muda; dia antigo sem segmento = sem barras');
+
+  // Aviso: o JMS não mandou o 2º segmento em nenhuma remessa.
+  const recs = [];
+  for (let i = 0; i < 25; i++) recs.push({billcode: 'W' + i, dt: D12, orderFirstCode: 'SP', transferCenterSendTime: D12 + ' 10:00:00'});
+  const cW = freshCtx({}, null, {});
+  cW.normalizeRecords_('sorting_error', D12, recs);
+  check(cW.allTabRows_('LOG').some(r => r[1] === 'WARN' && /2º segmento do pedido não veio/.test(r[4]) && /orderSecondCode/.test(r[4])),
+    'sem o 2º segmento em nenhuma remessa: aviso no SYNC_LOG com os campos procurados');
+  const diagS = cSd.diagnosticoCompleto(DS);
+  check(/Segmento \(1º e 2º, 1ª página, \d+ remessas\): \d+ com o 2º segmento \(campo orderSecondCode\)/.test(diagS.texto),
+    'diagnosticoCompleto: de que campo veio o 2º segmento', (diagS.texto.match(/Segmento \(1º e 2º[^\n]*/) || [''])[0]);
+
+  // Migração V4.12: os dias da Triagem Errada dos últimos 31 dias são baixados de novo uma vez (só a lista).
+  const today = cS.isoToday_(), dNew = cS.addDaysIso_(today, -3), dOld = cS.addDaysIso_(today, -40);
+  const dMg = {[dNew]: makeDay(dNew, 96), [dOld]: makeDay(dOld, 97)};
+  const cMg = freshCtx(dMg, null, {DATA_START_DATE: dOld});
+  cMg.queueHistory(dOld, dOld, true);
+  cMg.queueHistory(dNew, dNew, true);
+  runAll(cMg);
+  delete cMg.__state.props.MIGRATION_V412;
+  const q412 = cMg.migrateToV412_();
+  const pend412 = cMg.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
+  check(q412 === 1 && pend412.length === 1 && pend412[0].indicator === 'sorting_error' && pend412[0].date === dNew && cMg.migrateToV412_() === 0,
+    'migração V4.12: só a Triagem Errada dos últimos 31 dias, uma vez', pend412.map(j => j.indicator + ' ' + j.date));
+  runAll(cMg);
+  const rMg = cMg.getArchivedRange_('sorting_error', dNew, dNew).rows;
+  check(rMg.length === dMg[dNew].se.length && rMg.some(r => /,\d{3}-\d{2}$/.test(r.segmentPair)) && cMg.getDayStatus_('sorting_error', dNew).details === 'COMPLETE',
+    'depois da migração o dia continua completo, com o segmento');
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

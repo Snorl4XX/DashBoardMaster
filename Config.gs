@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.10.0',
+  VERSION: '4.12.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -93,6 +93,7 @@ const FILTER_LABELS = Object.freeze({
   amount:          {pt: 'Valor da arbitragem', zh: '判责金额'},
   regDay:          {pt: 'Data do registro', zh: '登记日期'},
   expDay:          {pt: 'Data do bipe de expedição', zh: '发件扫描日期'},
+  segmentPair:     {pt: 'Segmento (1º e 2º)', zh: '一段码+二段码'},
   locationMain:    {pt: 'Local principal da avaria', zh: '破损发生一级环节'},
   locationSub:     {pt: 'Local secundário da avaria', zh: '破损发生二级环节'},
   orderKind:       {pt: 'Pedidos principais/filhos', zh: '主子单'},
@@ -174,12 +175,13 @@ const DOCK_TABLE_2026_10_04_ = [
  * carregado nas docas 21/22, com o SP BRE.
  *
  * V4.10: completada pelo print "Código de alocação de carga das rotas tronco e de distribuição do SC GRU" (linha → código
- * de carregamento). Onde os dois prints divergem, vale o das rotas (o mais novo):
- *   - JPN vai na linha SC GRU-CGB (MT CGB, doca 42), e não mais no SP BRE;
- *   - MCZ e IMP vão na linha SC GRU-FEC (BA FEC, doca 18); IMP saía da doca 41;
+ * de carregamento), só no que o print das docas não tem:
+ *   - MCZ vai na linha SC GRU-FEC (BA FEC, doca 18);
  *   - códigos SP dos DCs: SP 378-00/01/02/03 → DC SSZ-SP; SP 421-00 e SP 402-01/03/05 → DC TBT-SP; SP 381-07 → DC GRU;
  *     SP 350-00, 364-00, 365-00, 381-12, 398-00, 404-00, 430-01, 435-00 → DC MOOCA2 (MOO, doca 23);
  *   - BRE 381-06/07/12 → DC JND 02-SP.
+ * V4.12 (pedido, print completo de 11/10): vale o print das docas — JPN no SP BRE (docas 21/22) e IMP no THE (doca 41),
+ * como na tabela; SBN 375-00 a 375-09 (doca 08) e MOO 430-00 a 430-06 (doca 23) escritos como no print.
  * stops = nomes de parada do print das rotas ("DC MCZ-AL", "MGF-PR"…), para o Envio Errado, a Triagem Errada e o SC → SC.
  */
 const DOCK_STOPS_SP_BRE_ = ['PA STM', 'PA MRB', 'RO PVH', 'TO PMW', 'DC PPB-SP', 'DC NAT-RN', 'DC XAP-SC', 'DC SJP-SP', 'DC CDG-RJ',
@@ -188,20 +190,21 @@ const DOCK_TABLE_2026_10_11_ = DOCK_TABLE_2026_10_04_.map(e => {
   const set = x => Object.assign({}, e, x);
   switch (e.route) {
     case 'ES SRR': return set({dock: 'DOCA 40', line: 3});
-    case 'SBN': return set({dock: 'DOCA 08', line: 7, stops: ['DC SBN']});
+    case 'SBN': return set({dock: 'DOCA 08', line: 7, codes: ['SBN'].concat(DOCK_SUB_('SBN', ['375-00', '375-01', '375-02', '375-03', '375-04',
+      '375-05', '375-06', '375-07', '375-08', '375-09'])), stops: ['DC SBN']});
     case 'RJ SJM': return set({stops: ['BA VDC']});
     case 'PR SJS': return set({stops: ['DC CAC']});
     case 'PE JGS': return set({stops: ['DC BYE-PB']});
     case 'SE AJU': return set({codes: ['SE', 'AL']});
-    case 'BA FEC': return set({codes: ['BA', 'SBA', 'SNS', 'MCZ', 'IMP'], stops: ['DC MCZ-AL', 'DC SNS-PE', 'DC IMP-MA', 'DC SBA-BA']});
-    case 'THE': return set({codes: ['PI'], stops: ['PI THE']});
-    case 'MT CGB': return set({codes: ['MT', 'JPN'], stops: ['DC JPN']});
-    case 'SP BRE': return set({codes: e.codes.filter(c => c !== 'JPN'), stops: DOCK_STOPS_SP_BRE_});
+    case 'BA FEC': return set({codes: ['BA', 'SBA', 'SNS', 'MCZ'], stops: ['DC MCZ-AL', 'DC SNS-PE', 'DC SBA-BA']});
+    case 'THE': return set({codes: ['PI', 'IMP'], stops: ['PI THE', 'DC IMP-MA']});
+    case 'SP BRE': return set({stops: DOCK_STOPS_SP_BRE_.concat(['DC JPN'])});
     case 'DC SSZ-SP': return set({codes: DOCK_SUB_('GRU', ['378-00', '378-01', '378-02', '378-03']).concat(DOCK_SUB_('SP', ['378-00', '378-01', '378-02', '378-03'])),
       stops: ['DC SSZ']});
     case 'DC TBT-SP': return set({codes: e.codes.concat(DOCK_SUB_('SP', ['421-00', '402-01', '402-03', '402-05'])), stops: ['DC TBT']});
     case 'MOO': return set({codes: e.codes.filter(c => c !== 'GRU 378-00')
-      .concat(DOCK_SUB_('SP', ['350-00', '364-00', '365-00', '381-12', '398-00', '404-00', '430-01', '435-00'])), stops: ['DC MOOCA2', 'DC MOOCA']});
+      .concat(DOCK_SUB_('MOO', ['430-00', '430-01', '430-02', '430-03', '430-04', '430-05', '430-06']),
+        DOCK_SUB_('SP', ['350-00', '364-00', '365-00', '381-12', '398-00', '404-00', '430-01', '435-00'])), stops: ['DC MOOCA2', 'DC MOOCA']});
     case 'DC GRU': return set({codes: e.codes.concat(['SP 381-07'])});
     default: return e;
   }
@@ -335,7 +338,11 @@ const ALL_INDICATORS_ = Object.freeze({
     fields: {
       date: ['dt'], shipment: ['billcode'], eventTime: ['transferCenterSendTime', 'signTime'], login: ['scanuser'],
       segment: ['orderFirstCode', 'terminalDispatchCode'], destination: ['transferCenterNextName'], lot: ['packageNo'],
-      client: ['orderSourceName'], offenderBase: ['baggingNetworkName'], errorType: ['wrongType']
+      client: ['orderSourceName'], offenderBase: ['baggingNetworkName'], errorType: ['wrongType'],
+      // V4.12 (pedido): "Código de 2º Segmento do Pedido", juntado ao "primeiro segmento de pedido JMS" com vírgula
+      // ("SP,391-18" = segmentPair). Vale o 1º campo com um 2º segmento (391-18): o campo próprio ou o código de três segmentos.
+      segment2: ['orderSecondCode', 'secondCode', 'orderTwoCode', 'twoSegmentCode', 'secondSegmentCode', 'orderSecondSegmentCode',
+        'terminalDispatchCode', 'orderThirdCode', 'threeSegmentCode', 'orderFirstCode']
     },
     labels: {destination: {pt: 'Base destino', zh: '目的网点'}, lot: {pt: 'Número do lote', zh: '包号'}},
     // O JMS manda a base ofensora (baggingNetworkName) VAZIA quando a própria base é a responsável:
@@ -357,8 +364,10 @@ const ALL_INDICATORS_ = Object.freeze({
     // V4.9 (pedido): dia com mais erros de triagem pela DATA da coluna "Horário do bipe de expedição" (eventTime), e não
     // pelo dia do indicador. Calculada na leitura (Core.applyDayOf): vale também para os dias já baixados.
     dayOf: {expDay: 'eventTime'},
-    topCards: ['offenderBase', 'expDay'],
-    topCardLabels: {expDay: {pt: 'Dia com mais erros de triagem', zh: '错分最多的日期'}},
+    // V4.12 (pedido): cartão do segmento mais ofensor ("SP,391-18").
+    topCards: ['offenderBase', 'expDay', 'segmentPair'],
+    topCardLabels: {expDay: {pt: 'Dia com mais erros de triagem', zh: '错分最多的日期'},
+      segmentPair: {pt: 'Segmento mais ofensor', zh: '最高频段码'}},
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
       {key: 'expDay', type: 'bar', top: 10, ranking: true, hideNA: true,
@@ -374,13 +383,13 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
         title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
         stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
-      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
-        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
-      {key: 'routeDockByShift', kind: 'byShift', dim: 'dockDest', extra: 'dock', top: 5, accent: 'count', bands: 'top',
-        title: {pt: 'Turno + rota de carregamento + doca', zh: '班次、装车线路与码头'},
-        sub: {pt: 'Quantidade e porcentagem por combinação de turno, rota de carregamento (base destino) e doca · top {n} por turno',
-          zh: '按班次、装车线路（目的网点）与码头的数量及占比 · 每个班次前 {n} 名'},
-        stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
+      // V4.12 (pedido): "Docas por turno" e "Turno + rota de carregamento + doca" saíram; no lugar, os segmentos ofensores
+      // ("SP,391-18"). Top 15; o percentual é sobre todos os erros do filtro.
+      {key: 'segmentOverview', kind: 'overview', dim: 'segmentPair', top: 15, accent: 'count', icon: 'segment', barWidth: 70,
+        title: {pt: 'Segmentos mais ofensores', zh: '高频段码'},
+        sub: {pt: 'Primeiro segmento de pedido JMS + código do 2º segmento (ex.: SP,391-18) · top {n} · percentual sobre o total de erros',
+          zh: '一段码 + 二段码（例：SP,391-18）· 前 {n} 名 · 占全部错分的比例'},
+        stats: {max: {pt: 'Maior segmento ofensor', zh: '最高频段码'}, min: {pt: 'Menor segmento do gráfico', zh: '图中最少的段码'}}}
     ],
     pivotTables: [
       {key: 'dockStop', groupBy: ['dock', 'destination'], title: {pt: 'Docas mais afetadas', zh: '受影响最多的月台'}},
@@ -388,7 +397,7 @@ const ALL_INDICATORS_ = Object.freeze({
     ],
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Remessa', '运单号'], ['shift', 'Turno', '班次'],
-      ['offenderBase', 'Base ofensora', '责任网点'], ['errorType', 'Tipo de triagem errada', '错分类型'],
+      ['offenderBase', 'Base ofensora', '责任网点'], ['segmentPair', 'Segmento (1º e 2º)', '一段码+二段码'], ['errorType', 'Tipo de triagem errada', '错分类型'],
       ['destination', 'Próxima parada', '下一站'], ['dockDest', 'Rota de carregamento', '装车线路'], ['dock', 'Doca', '月台'], ['lot', 'Número do lote', '包号'],
       ['eventTime', 'Horário do bipe de expedição', '发件扫描时间'], ['login', 'Login', '操作员']
     ]

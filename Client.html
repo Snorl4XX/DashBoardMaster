@@ -407,7 +407,7 @@
     port: '<path d="M7 4v16m-3-3l3 3 3-3M17 20V4m-3 3l3-3 3 3"/>',
     sackType: '<path d="M5 19c0-8 6-14 15-14 0 9-6 14-14 14"/><path d="M5 19c3-4 6-7 10-9"/>',
     items: '<path d="M3 8l9-5 9 5-9 5-9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M8 14v3M16 14v3"/>',
-    segment: '<path d="M4 6h16M4 12h10M4 18h6"/>', correctDest: '<path d="M5 12l4 4L19 6"/>',
+    segment: '<path d="M4 6h16M4 12h10M4 18h6"/>', segmentPair: '<path d="M4 6h16M4 12h10M4 18h6"/>', correctDest: '<path d="M5 12l4 4L19 6"/>',
     destination: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     interval: '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5h5"/>',
     client: '<path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/>',
@@ -2975,7 +2975,8 @@
       (detailIsPartial() ? '<span class="partial-tag">' + esc(t('partial')) + '</span>' : '');
     $('small', card).textContent = def.sub ? fill(L(def.sub), {n: def.top}) : def.kind === 'byGroup' ? t('rpSubGroup') : def.kind === 'byShift' ? t(def.extra ? 'rpSubCombo' : 'rpSubShift', {n: def.top}) : t('rpSubAll');
     var body = $('.rp-body', card), stats = $('.rp-stats', card);
-    if (!p.total) {
+    // V4.12: com top N, o total conta também as remessas sem o campo (dias antigos sem o segmento): sem barras = sem dados.
+    if (!p.total || !p.items.length) {
       destroyChart(key);
       body.innerHTML = '<div class="chart-wrap"><div class="chart-empty"><div><b>' + esc(t('noData')) + '</b>' + esc(t('noDataHint')) + '</div></div></div>';
       stats.innerHTML = '';
@@ -2983,7 +2984,8 @@
     }
     stats.innerHTML = rpStats(def, p);
     if (!window.Chart) { destroyChart(key); body.innerHTML = '<p class="muted small">' + esc(t('noChartLib')) + '</p>'; return; }
-    var minW = Math.max(520, p.items.length * (p.kind === 'byGroup' ? 104 : p.extra ? 64 : 62));
+    // V4.12: barWidth (Config.gs) para rótulos mais longos ("GRU,402-03").
+    var minW = Math.max(520, p.items.length * (def.barWidth || (p.kind === 'byGroup' ? 104 : p.extra ? 64 : 62)));
     var host = $('.rp-wrap', body);
     if (!host || !$('canvas', host)) {
       destroyChart(key);

@@ -78,6 +78,15 @@ function JTCoreFactory_() {
     var m = String(v || '').match(/(\d{3})\s*-\s*(\d{2})/);
     return m ? m[1] + '-' + m[2] : '';
   }
+  /**
+   * V4.12 (Triagem Errada): 1º segmento + 2º segmento com vírgula, como a planilha do JMS ("primeiro segmento de pedido JMS"
+   * + "Código de 2º Segmento do Pedido"): ("SP", "391-18") → "SP,391-18" · ("GRU", "GRU,402-03,020") → "GRU,402-03".
+   * Sem o 2º segmento, só o 1º ("SP").
+   */
+  function segmentPair(first, second) {
+    var a = firstSegment(first), b = secondSegment(second);
+    return a && b ? a + ',' + b : a;
+  }
   function normStop(s) { return String(s || '').toUpperCase().replace(/[\s\-–—_,;\/]+/g, ' ').trim(); }
   /** Tabela de docas que vale no dia (V4.8: docks.versions, a mais nova com from <= dia; sem dia, a mais nova). */
   function dockVersionIndex(docks, date) {
@@ -344,11 +353,18 @@ function JTCoreFactory_() {
         return {shift: s, items: def.top ? items.slice(0, def.top) : items};
       });
     } else {
-      var all = {};
-      (rows || []).forEach(function (r) { if (blank(r[dim])) return; all[r[dim]] = (all[r[dim]] || 0) + weight(r); note(r); });
-      groups = [{shift: null, items: sorted(all)}];
+      var all = {}, rest = 0;
+      (rows || []).forEach(function (r) {
+        if (blank(r[dim])) { if (def.top) rest += weight(r); return; }
+        all[r[dim]] = (all[r[dim]] || 0) + weight(r);
+        note(r);
+      });
+      var items = sorted(all);
+      // V4.12: top N (segmentos da Triagem Errada); o total e o percentual continuam sobre TODAS as remessas.
+      if (def.top && items.length > def.top) { items.slice(def.top).forEach(function (it) { rest += it.count; }); items = items.slice(0, def.top); }
+      groups = [{shift: null, items: items}];
     }
-    var total = 0, flat = [];
+    var total = rest || 0, flat = [];
     groups.forEach(function (g) {
       g.count = 0;
       g.items.forEach(function (it) { it.shift = g.shift; if (g.group !== undefined) it.group = g.group; if (extra) it.extra = extraOf[it.value] || ''; g.count += it.count; flat.push(it); });
@@ -976,7 +992,7 @@ function JTCoreFactory_() {
 
   return {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
-    intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
+    intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentPair: segmentPair, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
     dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,

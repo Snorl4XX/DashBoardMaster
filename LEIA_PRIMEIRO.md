@@ -1,8 +1,77 @@
-# J&T DASHMASTER V4.10 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.12 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.12 — Triagem Errada: segmento mais ofensor e tabela de docas do print
+**Pedido (PDF "Novas alterações na Triagem Errada"):**
+- um cartão com o segmento mais ofensor, no formato "SP,391-18";
+- tirar os gráficos "Turno + rota de carregamento + doca" e "Docas por turno" e pôr os segmentos no lugar;
+- mudanças na tabela de rotas;
+- seguir as regras do PDF "Triagem errada" (dados sem informação).
+
+*A V4.11 foi a do Sorter, que virou um painel separado. Por isso esta versão é a V4.12.*
+
+### Segmento "SP,391-18"
+O painel junta o **primeiro segmento de pedido JMS** com o **código do 2º segmento do pedido**, separados por vírgula: SP + 391-18 = **SP,391-18**.
+
+- **Cartão "Segmento mais ofensor":** o segmento com mais erros, quantas remessas e a participação.
+- **Painel "Segmentos mais ofensores"** (no lugar dos dois retirados):
+  - os 15 segmentos com mais erros, do maior para o menor;
+  - quantidade e porcentagem sobre o total de erros;
+  - embaixo: Total geral, Maior segmento ofensor e Menor segmento do gráfico.
+- **Coluna "Segmento (1º e 2º)"** na tabela de remessas e no relatório.
+- Remessa sem o 2º segmento aparece só com o 1º (ex.: "GRU").
+
+### Gráficos retirados (só na Triagem Errada)
+- "Turno + rota de carregamento + doca"
+- "Docas por turno"
+
+"Distribuição geral por docas" e as tabelas de docas continuam. O Envio Errado não mudou.
+
+### Tabela de docas: igual ao print de 11/10
+Conferi o print linha por linha. O que mudou:
+
+| Código | Antes (V4.10) | Agora (print) |
+|---|---|---|
+| **JPN** | MT CGB · DOCA 42 | **SP BRE · DOCAS 21/22** |
+| **IMP** | BA FEC · DOCA 18 | **THE · DOCA 41** |
+
+- **SBN 375-00 a 375-09** (DOCA 08) e **MOO 430-00 a 430-06** (DOCA 23) agora estão escritos como no print. Eles já caíam nessas docas.
+- O resto do print já estava igual no painel.
+- **MCZ** não aparece no print das docas. Ele continua no **BA FEC (DOCA 18)**, como no print das rotas. Se for outra doca, me avise.
+- Vale a partir de 11/10. Os dias anteriores não mudam. A doca é calculada na leitura, então não precisa baixar nada de novo.
+
+### Dados sem informação (PDF "Triagem errada")
+Esse PDF é o mesmo da V4.4. Conferi cada regra no painel:
+
+| Regra do PDF | No painel |
+|---|---|
+| Remessa sem Número da Saca ou sem Operador do Bipe de Envio no Carregamento → Consulta das bipagens (tempo real) | consulta automática, pelas remessas |
+| Tipo de bipagem: só "Encomenda inserida em lote" | ✓ |
+| Base de escaneamento: SP GRU | ✓ |
+| Mais de um bipe → pegar sempre o primeiro | ✓ o bipe mais antigo |
+| Número do lote → Número da Saca | ✓ |
+| Digitalizador → Operador (login) | ✓ |
+| Unidade de Empacotamento sem informação → SP GRU | ✓ |
+
+### Dias já baixados
+- Os dias baixados antes não guardavam o 2º segmento.
+- Na primeira execução, a fila baixa de novo a lista da Triagem Errada dos **últimos 31 dias**. Isso acontece uma vez só.
+- O que a Consulta das bipagens já achou continua.
+- Dias mais antigos que 31 dias ficam sem o segmento.
+
+### Para conferir
+O nome do campo do 2º segmento no JMS não estava nas capturas. O painel procura:
+- nos campos próprios do 2º segmento (`orderSecondCode` e parecidos);
+- no código de três segmentos (`terminalDispatchCode`).
+
+Rode `diagnosticoCompleto`: a linha **"Segmento (1º e 2º…)"** mostra de que campo o 2º segmento veio. Se ela disser "o 2º segmento NÃO veio", me mande essa linha e o aviso do SYNC_LOG (ele lista os campos recebidos).
+
+### Como instalar
+- **Google:** troque todos os `.gs` e `.html` pelos do ZIP V4.12 (painel principal) e publique uma **Nova versão**. Não precisa rodar nenhuma função. O painel dos fluxos não precisa mudar.
+- **Node.js / Oracle:** envie o `JT_DASHMASTER_V4_12_NODE.zip` e rode `unzip -o JT_DASHMASTER_V4_12_NODE.zip && sudo systemctl restart dashmaster`.
 
 ## V4.10 — Rotas que faltavam (print "Código de alocação de carga das rotas do SC GRU")
 **Pedido:** ver as modificações novas e conferir nos prints se falta alguma rota.
@@ -29,6 +98,8 @@ Antes, os códigos SP desses DCs caíam no SP BRE (docas 21/22) só pelo "SP".
 | **IMP** (DC IMP-MA) | doca 41, com PI | linha SC GRU-FEC: **BA FEC, doca 18** |
 
 **Confira esses dois.** Se valer o print das docas, me avise: é uma linha no `Config.gs`.
+
+*V4.12: o print completo das docas de 11/10 confirmou JPN no SP BRE (docas 21/22) e IMP no THE (doca 41). O painel segue o print das docas.*
 
 ### Outras melhorias
 - **Paradas da linha:** cada linha agora tem os nomes de parada do print, por exemplo "BA VDC", "DC CAC", "DC BYE-PB", "DC SNS-PE", "DC SLZ-MA" e "DC MAO-AM". Isso vale para o Envio Errado, a Triagem Errada e o SC → SC.
