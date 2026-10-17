@@ -150,13 +150,47 @@ function navegador(base, guardado) {
   const nav3 = navegador(fake.url);
   const dN = await nav3.fonte.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
   const rel = nav3.fonte.relatorio().join('\n');
-  check(dN.ok && dN.devices.find(d => d.id === 'A').pendente && /Copiar relatório da troca/.test(dN.devices.find(d => d.id === 'A').error) &&
+  check(dN.ok && dN.devices.find(d => d.id === 'A').pendente && /Ensinar a troca/.test(dN.devices.find(d => d.id === 'A').error) &&
     !/config\.json|descobrir\.bat/.test(dN.devices.find(d => d.id === 'A').error) && nav3.fonte.sorters().map(s => s.id + (s.pronto ? '+' : '-')).join() === 'B+,A-' &&
     /_token \(CSRF\) na página: sim/.test(rel) && Object.values(fake.sessions).every(s => rel.indexOf(s.csrf) < 0),
     'favorito numa página sem a troca: B lido, A com aviso e o relatório (sem token nem cookie)', dN.devices);
   fake.pagina = 'ajax';
   const pr = await nav3.fonte.procurarTroca();
   check(pr.ok && nav3.fonte.sorters().every(s => s.pronto), '"Procurar a troca de novo" acha quando a página passa a ter a troca');
+
+  // ---------- 4. Sorter A com a troca "ensinada" no site (quando o painel não acha sozinho) ----------
+  fake.pagina = 'externo';
+  fs.writeFileSync(process.env.SORTER_CONFIG, JSON.stringify({sorterUrl: fake.url + '/home', maxBalancas: 10,
+    sorters: [{id: 'B', padrao: true, troca: false}, {id: 'A', troca: {metodo: 'POST', caminho: '/api/equip/select', corpo: 'cod=3'}}]}));
+  const localE = srv.criarEstado(srv.loadConfig());
+  const navE = navegador(fake.url);
+  const dE = await navE.fonte.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
+  const errE = (dE.devices.find(d => d.id === 'A') || {}).error || '';
+  check(dE.ok && /Ensinar a troca/.test(errE) && /Cross-belt GRU-A/.test(errE) && R.sumRows(dE.rows).total === R.sumRows((await localE.dados({de: TODAY, ate: TODAY, sorter: 'B'})).rows).total,
+    'troca num arquivo à parte (o painel não acha): B lido; A pede "Ensinar a troca" (escolher Cross-belt GRU-A no site)', errE);
+  // O que o favorito guarda ao ver o clique em Cross-belt GRU-A no site (o _token vira {token}).
+  const ensinado = {A: {metodo: 'POST', caminho: '/api/equip/select', corpo: '_token={token}&cod=3'}, quando: '2026-10-17T12:00:00Z'};
+  const navT = navegador(fake.url, [['jt_sorter_aprendido', JSON.stringify(ensinado)]]);
+  fake.trocas = [];
+  const dT2 = await navT.fonte.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
+  const lA = await localE.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
+  const guardou = JSON.parse(navT.store.get('jt_sorter_favorito_troca') || '{}');
+  check(dT2.ok && igual(campos(dT2), campos(lA)) && !navT.store.has('jt_sorter_aprendido') && guardou.troca && guardou.troca.A.caminho === '/api/equip/select' &&
+    /✓ Troca ensinada no site para o Sorter A/.test(navT.fonte.relatorio().join('\n')) && fake.trocas.length && fake.trocas.every(t => t.tokenNoCorpo) &&
+    navT.fonte.sorters().every(x => x.pronto), 'troca ensinada: testada (os números mudam), guardada e usada — Sorter A igual ao servidor, com o _token da sessão',
+    {rel: navT.fonte.relatorio(), devs: dT2.devices});
+  const navT2 = navegador(fake.url, navT.store);
+  const dT3 = await navT2.fonte.dados({de: TODAY, ate: TODAY, sorter: 'A'});
+  check(dT3.ok && igual(dT3.rows, lA.rowsByDevice.A), 'troca ensinada continua guardada ao abrir o favorito de novo');
+  const navR = navegador(fake.url, [['jt_sorter_aprendido', JSON.stringify({A: {metodo: 'POST', caminho: '/home/setLang', corpo: '_token={token}&lang=zh'}})]]);
+  const dR = await navR.fonte.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
+  check(dR.ok && dR.devices.find(d => d.id === 'A').pendente && /✗ Troca ensinada/.test(navR.fonte.relatorio().join('\n')) && !navR.store.has('jt_sorter_favorito_troca'),
+    'troca ensinada que não muda os números é recusada (o A continua pedindo para ensinar)', navR.fonte.relatorio());
+  // O sorter padrão (B) é lido numa sessão nova: ler só o B não troca nada na sessão do navegador.
+  const navB2 = navegador(fake.url, navT.store), tB = fake.trocas.length;
+  const dB2 = await navB2.fonte.dados({de: TODAY, ate: TODAY, sorter: 'B'});
+  check(dB2.ok && fake.trocas.length === tB && !navB2.jar.laravel_session, 'Sorter B lido sem trocar nada e sem usar a sessão do navegador');
+  fake.pagina = 'ajax';
 
   fake.server.close();
   console.log('OK: ' + passed + ' verificações do favorito e da planilha passaram (' + Math.round((Date.now() - t0) / 1000) + ' s; sorter simulado por HTTP).');

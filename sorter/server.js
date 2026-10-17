@@ -30,7 +30,7 @@ const R = require('./lib/resumo');
 const {criarEstado: criarEstadoBase} = require('./lib/estado');
 const {criarPonte} = require('./lib/ponte');
 
-const VERSAO = '2.3.0';
+const VERSAO = '2.4.0';
 const TZ = 'America/Sao_Paulo';
 const PUBLIC = path.join(__dirname, 'public');
 const DEFAULTS = {

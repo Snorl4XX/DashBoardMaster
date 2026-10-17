@@ -15,7 +15,7 @@
  *
  * Quem abre o link vê o painel; só a ponte (com a chave) grava dados.
  */
-var VERSAO = '2.3.0';
+var VERSAO = '2.4.0';
 var TZ = 'America/Sao_Paulo';
 var MAX_DIAS = 92;                 // maior período na tela (um trimestre)
 var GUARDAR_DIAS = 400;            // dias guardados na planilha (os mais antigos saem sozinhos)

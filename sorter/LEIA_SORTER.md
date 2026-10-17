@@ -5,7 +5,7 @@ Painel **separado do DashMaster**. Ele mostra a produção do sorter da base a p
 - **Sorter A**, **Sorter B** ou **os dois juntos**;
 - por **balança** (Induction No.), **turno** e **horário**.
 
-Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_3.zip`).
+Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_4.zip`).
 
 **Três formas de abrir (a mesma tela):**
 - **Favorito no navegador**: o jeito mais fácil, **sem instalar nada e sem outro computador**. Veja "Favorito do Sorter (sem instalar nada)".
@@ -107,8 +107,15 @@ O nome do arquivo diz o que é, por exemplo: `Sorter_B+A_2026-10-16_T1.xlsx` (To
 **Bom saber:**
 - **A aba precisa estar aberta.** Se a aba ficar em segundo plano, a leitura de 1 hora acontece assim que você volta para ela.
 - **Sem token copiado:** o favorito usa a sessão que já está aberta no navegador. Para ler o A e o B, ele troca o sorter da **sua** sessão e, no fim de cada leitura, volta o site para o sorter que estava.
-- **Troca não achada:** o Sorter B (o que o site mostra sem trocar) continua funcionando.
-  - O aviso tem os botões **Copiar relatório da troca** (para mandar; não tem token nem cookie) e **Procurar a troca de novo**.
+- **Sorter B:** é lido numa sessão nova, sem cookies (o sorter que o site mostra sem trocar). Ler o B não muda nada no seu site.
+- **Sorter A sem a troca achada sozinha:** o aviso mostra o botão **Ensinar a troca**. Faça uma vez:
+  1. clique em **Ensinar a troca**: o painel fecha e aparece uma faixa vermelha no topo do site;
+  2. no site, clique em **switch device** e escolha **Cross-belt GRU-A**, como você faz sempre;
+  3. a página recarrega: clique no favorito **Painel do Sorter** de novo.
+
+  O favorito guardou o pedido que o site fez ao trocar (endereço e campos; o `_token` não é guardado, ele usa o da sessão na hora). Ele testa o pedido (os números do A têm que ser diferentes dos do B) e passa a usar sempre. Se o teste falhar, o aviso volta e dá para ensinar de novo.
+- Outros botões do aviso: **Procurar a troca de novo** e **Copiar relatório da troca** (para mandar; não tem token nem cookie).
+- **Favorito novo (versão nova):** apague o favorito antigo e coloque o novo pelo `instalar-favorito.html`. A troca guardada continua valendo.
 - **Gráficos:** vêm da internet (Chart.js), como no painel local. Sem internet, ficam os cartões e a tabela.
 - **Outra página:** se você clicar no favorito fora do site do sorter, ele avisa e não abre.
 
@@ -119,7 +126,7 @@ O nome do arquivo diz o que é, por exemplo: `Sorter_B+A_2026-10-16_T1.xlsx` (To
 
 ## Instalar (Windows)
 1. Instale o **Node.js** (versão LTS) em https://nodejs.org.
-2. Extraia o `JT_SORTER_V2_3.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
+2. Extraia o `JT_SORTER_V2_4.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
    - **Já tem uma versão anterior?** Extraia por cima, na mesma pasta. O `config.json` antigo é atualizado sozinho: a V1 passa a ler a cada 1 hora, até 92 dias, com os Sorters A e B; os campos novos do Apps Script entram vazios.
 3. Na pasta `sorter`, dê dois cliques em **`testar.bat`**. Ele:
    - abre a página `http://10.1.166.9/home` e acha sozinho como trocar entre o Sorter A e o B (veja "Troca de sorter");
@@ -338,7 +345,9 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
   - um código `javascript:` com a página do painel inteira dentro: `lib/resumo.js`, `lib/site.js`, `lib/estado.js`, `site/navegador.js`, `lib/planilha.js` e `public/app.js`;
   - roda numa moldura (iframe `srcdoc`) da mesma origem do site, então as consultas `/statis/summary.data` saem com a sessão do navegador;
   - as leituras ficam numa fila por sorter: a sessão mostra um sorter por vez;
-  - a troca de sorter é descoberta e testada pelo mesmo `lib/site.js` do servidor e fica guardada no `localStorage` da página do sorter.
+  - a troca de sorter é descoberta e testada pelo mesmo `lib/site.js` do servidor e fica guardada no `localStorage` da página do sorter;
+  - "Ensinar a troca" (`site/favorito.js`): observa o XHR/fetch/formulário/link que o site dispara depois do clique em "Cross-belt GRU-A" (também em janelas iframe do site) e guarda `{metodo, caminho, corpo}` com `_token={token}`; o `navegador.js` testa (Sort total de 7 dias diferente do sorter padrão) antes de usar;
+  - o sorter padrão (B) é lido com `credentials: 'omit'` (sessão nova); só o A passa pela fila com a troca na sessão do navegador.
 - **Mesmo código nos três lugares:**
   - `lib/site.js` (consulta, `_token`, descoberta da troca) e `lib/estado.js` (os números da tela) rodam no Node e no navegador;
   - os números do favorito, do painel local e do Apps Script são os mesmos.

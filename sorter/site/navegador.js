@@ -6,18 +6,22 @@
  * - A sessão do navegador mostra UM sorter por vez: as leituras ficam numa fila por sorter (troca → lê → próxima).
  * - Troca de sorter: descoberta na /home com o _token da sessão e TESTADA (site.js → descobrir); fica guardada neste
  *   navegador. Depois de cada leitura o site volta para o sorter que estava (a página por baixo não muda).
- * - window.__SORTER_FONTE__ = {dados(q), sorters(), relatorio(), procurarTroca()} — usado pelo app.js.
+ * - O sorter padrão do site (B) é lido numa sessão nova, sem cookies: não precisa trocar nada. Só o outro (A) usa a troca.
+ * - "Ensinar a troca": quando o painel não acha sozinho, a pessoa escolhe Cross-belt GRU-A no próprio site e o favorito
+ *   (site/favorito.js) guarda o pedido que o site fez; aqui ele é testado (os números têm que mudar) e passa a ser usado.
+ * - window.__SORTER_FONTE__ = {dados(q), sorters(), relatorio(), procurarTroca(), ensinar()} — usado pelo app.js.
  */
 (function () {
   'use strict';
   const S = window.SorterSite, E = window.SorterEstado, R = window.SorterResumo;
-  const CHAVE = 'jt_sorter_favorito_troca';
+  const CHAVE = 'jt_sorter_favorito_troca', APRENDIDO = 'jt_sorter_aprendido';
   const cfg = {cacheSegundos: 120, maxDias: 92, balancas: 'auto', maxBalancas: 40, sorters: [
     {id: 'B', nome: 'Sorter B', nomeZh: '分拣机 B套', padrao: true, troca: 'auto'},
     {id: 'A', nome: 'Sorter A', nomeZh: '分拣机 A套', troca: 'auto'}
   ]};
-  const ler = () => { try { return JSON.parse(localStorage.getItem(CHAVE) || 'null'); } catch (e) { return null; } };
-  const gravar = v => { try { if (v) localStorage.setItem(CHAVE, JSON.stringify(v)); else localStorage.removeItem(CHAVE); } catch (e) { /* sem armazenamento: descobre de novo */ } };
+  const lerChave = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+  const gravarChave = (k, v) => { try { if (v) localStorage.setItem(k, JSON.stringify(v)); else localStorage.removeItem(k); } catch (e) { /* sem armazenamento: descobre de novo */ } };
+  const ler = () => lerChave(CHAVE), gravar = v => gravarChave(CHAVE, v);
   let inicial = '';
   const salvo = ler();
   if (salvo && salvo.troca) {
@@ -95,7 +99,9 @@
 
   // ---------- troca de sorter descoberta na página ----------
   let trocaP = null, trocaRes = null, trocaEm = 0;
-  const precisa = () => cfg.sorters.some(d => d.troca === 'auto');
+  // Só o sorter que NÃO é o padrão precisa de troca: o padrão é lido numa sessão nova (sem cookies).
+  const precisa = () => cfg.sorters.some(d => !d.padrao && d.troca === 'auto');
+  const descTroca = t => (t.metodo || 'POST') + ' ' + t.caminho + (t.corpo && typeof t.corpo === 'string' ? ' (' + t.corpo.replace(/(^|&)_token=[^&]*/, '').replace(/^&/, '') + ')' : '');
   function prepararTrocas(opts) {
     opts = opts || {};
     if (!precisa()) {
@@ -114,12 +120,34 @@
         return R.sumRows(await S.lerPeriodo(pedir, de, hoje, {group: 0})).total;
       }
     };
-    trocaP = comSorter(null, () => S.descobrir(io, cfg.sorters, {pagina: '/home', base}))
+    trocaP = comSorter(null, async () => {
+      // 1) A troca ENSINADA no site (o clique em Cross-belt GRU-A que o favorito observou): testa e, se mudar os números, usa.
+      const ap = lerChave(APRENDIDO), rel = [];
+      if (ap) {
+        gravarChave(APRENDIDO, null);
+        for (const d of cfg.sorters.filter(x => !x.padrao && x.troca === 'auto' && ap[x.id])) {
+          const t0 = await io.total(null), t1 = await io.total(ap[d.id]);
+          const ok = t1 > 0 && t1 !== t0;
+          rel.push((ok ? '✓' : '✗') + ' Troca ensinada no site para o ' + d.nome + ': ' + descTroca(ap[d.id]) + ' · Sort total de 7 dias: ' +
+            'sorter padrão ' + t0 + ' · trocando ' + t1 + (ok ? '' : ' (números iguais: não trocou)'));
+          if (ok) d.troca = Object.assign({}, ap[d.id], {pagina: '/home', como: 'ensinada no site'});
+        }
+        if (!precisa()) {
+          const troca = {};
+          cfg.sorters.forEach(d => { if (d.troca && typeof d.troca === 'object') troca[d.id] = d.troca; });
+          return {ok: true, ensinada: true, troca, como: 'ensinada no site', inicial: '', relatorio: rel};
+        }
+      }
+      // 2) Procura sozinho na página.
+      const r = await S.descobrir(io, cfg.sorters, {pagina: '/home', base});
+      r.relatorio = rel.concat(r.relatorio || []);
+      return r;
+    })
       .catch(e => ({ok: false, erro: e.message, relatorio: ['Erro: ' + e.message]}))
       .then(r => {
         if (r.ok) {
           const quando = E.agoraSP();
-          cfg.sorters.forEach(d => { if (d.troca === 'auto') d.troca = Object.assign({}, r.troca[d.id], {pagina: '/home', como: r.como}); });
+          cfg.sorters.forEach(d => { if (d.troca === 'auto' && r.troca[d.id]) d.troca = Object.assign({}, r.troca[d.id], {pagina: '/home', como: r.como}); });
           inicial = r.inicial || '';
           gravar({troca: r.troca, inicial, como: r.como, quando: quando.date + ' ' + quando.time.slice(0, 5)});
           estado.limparCache();
@@ -133,7 +161,7 @@
     if (dev.troca !== 'auto' || dev.padrao) return null;
     const r = trocaRes || {};
     const e = new Error(r.global ? r.erro : 'Não achei sozinho como trocar para o ' + dev.nome + ' nesta página' + (r.erro ? ' (' + r.erro + ')' : '') +
-      '. Use "Copiar relatório da troca" e mande o texto (ele não tem token nem cookie).');
+      '. Clique em "Ensinar a troca" e escolha ' + S.rotuloTexto(dev).replace(/^GRU/, 'Cross-belt GRU') + ' no site (uma vez só).');
     e.pendente = true;
     return e;
   }
@@ -146,7 +174,9 @@
 
   const estado = E.criarEstado(cfg, {
     agora: E.agoraSP, pronto, prepararTrocas, erroTroca,
-    ler: (dev, from, to, ind, group) => comSorter(dev, () => S.lerPeriodo(pedir, from, to, {inductionno: ind, group})),
+    // O sorter padrão numa sessão nova (sem trocar); o outro, na sessão deste navegador, com a troca.
+    ler: (dev, from, to, ind, group) => dev.padrao ? S.lerPeriodo(pedirSemSessao, from, to, {inductionno: ind, group})
+      : comSorter(dev, () => S.lerPeriodo(pedir, from, to, {inductionno: ind, group})),
     textos: {iguais: ' (use "Procurar a troca de novo")'}
   });
 
@@ -160,6 +190,11 @@
       trocaRes = null;
       estado.limparCache();
       return prepararTrocas({force: true});
+    },
+    /** "Ensinar a troca": fecha o painel e o favorito observa o clique em Cross-belt GRU-A no site (site/favorito.js). */
+    ensinar: () => {
+      try { if (window.parent && window.parent !== window && window.parent.__jtSorterEnsinar) { window.parent.__jtSorterEnsinar(); return true; } } catch (e) { /* fora do favorito */ }
+      return false;
     }
   };
 })();

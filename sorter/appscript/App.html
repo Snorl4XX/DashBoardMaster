@@ -236,6 +236,7 @@
       footSite: 'Fonte: o site do sorter, lido por este navegador (sem servidor) · nada é gravado',
       copiarRel: 'Copiar relatório da troca', relCopiado: 'Relatório copiado: cole numa conversa e mande (não tem token nem cookie).',
       procurarTroca: 'Procurar a troca de novo',
+      ensinar: 'Ensinar a troca (escolher Cross-belt GRU-A no site)', ensinarFora: 'Abra o painel pelo favorito, na página do sorter.',
       excel: 'Baixar planilha', excelOk: 'Planilha baixada: {f}', excelVazio: 'Ainda não há números para a planilha.',
       shResumo: 'Resumo', shTempo: 'Por tempo', shEvo: 'Evolução', shBal: 'Balanças', shHoras: 'Dados por hora',
       xPeriodo: 'Período', xHorario: 'Horário', xConsultado: 'Consultado no sorter', xGerado: 'Planilha gerada em', xIndicador: 'Indicador',
@@ -286,6 +287,7 @@
       bridgeSlow: '数据桥2分钟内没有响应。请检查基地电脑。', fullHint: '按 F11 全屏。',
       footSite: '数据来源：分拣机网站，由本浏览器读取（无需服务器）· 不存储',
       copiarRel: '复制切换报告', relCopiado: '报告已复制：粘贴到对话中发送（不含 token 和 cookie）。', procurarTroca: '重新查找切换方式',
+      ensinar: '演示切换（在网站上选择 Cross-belt GRU-A）', ensinarFora: '请在分拣机页面通过书签打开面板。',
       excel: '下载表格', excelOk: '已下载表格：{f}', excelVazio: '还没有可导出的数据。',
       shResumo: '汇总', shTempo: '按时间', shEvo: '趋势', shBal: '供包台', shHoras: '每小时数据',
       xPeriodo: '期间', xHorario: '时间', xConsultado: '分拣机查询时间', xGerado: '表格生成时间', xIndicador: '指标',
@@ -673,8 +675,9 @@
         // Favorito: a troca de sorter não foi achada nesta página → o relatório para mandar e tentar de novo.
         if (SITE && (dv.pendente || dv.aviso) && !state.relBtns) {
           state.relBtns = true;
-          html += '<div class="warn-line acts"><button type="button" class="btn btn-light btn-sm" data-acao="rel">' + esc(t('copiarRel')) + '</button>' +
-            '<button type="button" class="btn btn-light btn-sm" data-acao="troca">' + esc(t('procurarTroca')) + '</button></div>';
+          html += '<div class="warn-line acts">' + (dv.pendente ? '<button type="button" class="btn btn-red btn-sm" data-acao="ensinar">' + esc(t('ensinar')) + '</button>' : '') +
+            '<button type="button" class="btn btn-light btn-sm" data-acao="troca">' + esc(t('procurarTroca')) + '</button>' +
+            '<button type="button" class="btn btn-light btn-sm" data-acao="rel">' + esc(t('copiarRel')) + '</button></div>';
         }
       });
       state.relBtns = false;
@@ -1079,7 +1082,9 @@
     $('#status').addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('[data-acao]') : null;
       if (!b || !SITE) return;
-      if (b.getAttribute('data-acao') === 'rel') {
+      if (b.getAttribute('data-acao') === 'ensinar') {
+        if (!window.__SORTER_FONTE__.ensinar()) toast(t('ensinarFora'), 'error');
+      } else if (b.getAttribute('data-acao') === 'rel') {
         var txt = (window.__SORTER_FONTE__.relatorio() || []).join('\n');
         var ok = function () { toast(t('relCopiado'), 'success'); };
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, function () { window.prompt('', txt); });

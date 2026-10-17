@@ -86,7 +86,8 @@ const IDS = {3: 'A', 7: 'B'};
  * A página /home como um site Laravel + layui: token CSRF no <meta>, o dispositivo atual, a janela "device choose" com
  * Cross-belt GRU-B / GRU-A e o pedido de troca. modo: 'ajax' ($.post com _token e device_id) · 'form' (formulário com
  * lista) · 'link' (links GET) · 'concat' ($.ajax para /home/device/<id>) · 'global' (como ajax, mas a troca vale para
- * todo o site) · 'nada' (página sem a troca) · 'isca' (as opções, mas só o pedido que não troca nada). Sempre com uma "isca" (/home/setLang) que responde OK e não troca nada.
+ * todo o site) · 'nada' (página sem a troca) · 'isca' (as opções, mas só o pedido que não troca nada) · 'externo' (a troca
+ * num arquivo /static/troca.js: XHR POST /api/equip/select com _token e cod; o painel não acha sozinho). Sempre com uma "isca" (/home/setLang) que responde OK e não troca nada.
  */
 function paginaHome(modo, s) {
   const tok = s ? s.csrf : '', atual = s && s.device === 'A' ? 'Cross-belt GRU-A' : 'Cross-belt GRU-B';
@@ -97,6 +98,11 @@ function paginaHome(modo, s) {
     '<script>$.post("/home/setLang", {_token: $("meta[name=csrf-token]").attr("content"), lang: "zh"});</script>';
   const fim = '</body></html>';
   if (modo === 'nada') return topo + fim;
+  // A troca num arquivo .js à parte (o painel não acha na página): só "Ensinar a troca" resolve.
+  if (modo === 'externo') {
+    return topo + '<div id="deviceChoose"><h3>device choose</h3><ul><li class="dv" data-v="7">Cross-belt GRU-B</li>' +
+      '<li class="dv" data-v="3"><b>Cross-belt GRU-A</b></li></ul></div><script src="/static/troca.js"></script>' + fim;
+  }
   if (modo === 'isca') {
     return topo + '<div id="deviceChoose"><ul><li data-id="7">Cross-belt GRU-B</li><li data-id="3">Cross-belt GRU-A</li></ul></div>' + fim;
   }
@@ -159,7 +165,15 @@ function startFakeSorter(opts) {
       return;
     }
     // Trocas como o site faz (o _token da sessão no corpo, igual ao que aparece no Payload do navegador).
-    const ROTA = /^\/home\/switchDevice$|^\/device\/choose$|^\/device\/use\/(\d+)$|^\/home\/device\/(\d+)$|^\/home\/setLang$/;
+    if (u.pathname === '/static/troca.js') {
+      res.writeHead(200, {'Content-Type': 'text/javascript'});
+      res.end('document.addEventListener("click", function (e) { var li = e.target.closest("[data-v]"); if (!li) return;' +
+        ' var x = new XMLHttpRequest(); x.open("POST", "/api/equip/select"); x.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");' +
+        ' x.onload = function () { location.reload(); };' +
+        ' x.send("_token=" + encodeURIComponent(document.querySelector("meta[name=csrf-token]").content) + "&cod=" + li.getAttribute("data-v")); });');
+      return;
+    }
+    const ROTA = /^\/home\/switchDevice$|^\/device\/choose$|^\/device\/use\/(\d+)$|^\/home\/device\/(\d+)$|^\/home\/setLang$|^\/api\/equip\/select$/;
     const rota = u.pathname.match(ROTA);
     if (rota) {
       corpo((body, f) => {
@@ -170,7 +184,7 @@ function startFakeSorter(opts) {
         const isGet = req.method === 'GET';
         if (!isGet && !(srv.exigirTokenNoCorpo ? f._token === s.csrf : tokOk)) { json(419, {code: 0, msg: 'CSRF token mismatch'}); return; }
         if (u.pathname === '/home/setLang') { json(200, {code: 1, msg: 'Succeed'}); return; }   // isca: responde OK e não troca nada
-        const id = rota[1] || rota[2] || f.device_id || f.device;
+        const id = rota[1] || rota[2] || f.device_id || f.device || f.cod;
         const dev = IDS[id];
         if (!dev) { json(200, {code: 0, msg: '设备不存在'}); return; }
         trocar(dev, s);
