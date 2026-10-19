@@ -1,11 +1,11 @@
-'use strict';
 /**
  * PONTE da base → Apps Script.
  *
  * O Apps Script roda nos servidores do Google e não enxerga a rede interna da base (o sorter fica em 10.1.166.9).
- * Esta ponte roda num computador DA BASE (junto com o server.js): lê o sorter — por hora, o total e cada balança — e
- * manda os números para o App da Web do Apps Script (doPost), que guarda numa planilha e mostra o painel para qualquer
- * pessoa com o link, de qualquer lugar.
+ * Esta ponte lê o sorter — por hora, o total e cada balança — e manda os números para o App da Web do Apps Script
+ * (doPost), que guarda numa planilha e mostra o painel para qualquer pessoa com o link, de qualquer lugar.
+ * Roda num computador DA BASE (junto com o server.js) ou, desde a V2.5, dentro do FAVORITO ("Gravar no Google"): o mesmo
+ * arquivo no Node (require) e no navegador (window.SorterPonte).
  *
  * - Na primeira vez manda o histórico (diasHistorico, padrão 184 dias = dois trimestres, para comparar 92 dias com os
  *   92 anteriores). Depois manda hoje a cada enviarMinutos (padrão 60) e refaz o dia anterior até ele fechar.
@@ -13,10 +13,20 @@
  *   se houver pedido novo, lê o sorter na hora e manda.
  * - A chave (chavePonte) é gerada pela função configurar() no editor do Apps Script e só vai no config.json da base.
  */
-const R = require('./resumo');
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./resumo'));
+  else root.SorterPonte = factory(root.SorterResumo);
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (R) {
+'use strict';
 
 const LOTE_BYTES = 1500000;   // cada envio ao Apps Script com até ~1,5 MB (o doPost tem 6 min para gravar)
+/** Prazo do pedido (navegador antigo sem AbortSignal.timeout: sem prazo). */
+const prazo = ms => (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined);
 
+/**
+ * deps: {agora, addDays, daysBetween, pronto, versao, log, loteBytes} e, no favorito, os avisos para a tela:
+ * aoComecar(motivo) e aoTerminar({ok, motivo, r | erro}).
+ */
 function criarPonte(cfg, estado, deps) {
   const log = deps.log || (m => console.log(m)), loteBytes = deps.loteBytes || LOTE_BYTES;
   let ultimoPedido = null, rodando = null, proxima = 0, ultimoErroPedido = '', timer = null;
@@ -28,10 +38,10 @@ function criarPonte(cfg, estado, deps) {
     try {
       if (corpo) {
         res = await fetch(base, {method: 'POST', headers: {'Content-Type': 'text/plain;charset=utf-8'}, redirect: 'follow',
-          body: JSON.stringify(Object.assign({chave: cfg.chavePonte, acao}, corpo)), signal: AbortSignal.timeout(6 * 60 * 1000)});
+          body: JSON.stringify(Object.assign({chave: cfg.chavePonte, acao}, corpo)), signal: prazo(6 * 60 * 1000)});
       } else {
         res = await fetch(base + '?acao=' + encodeURIComponent(acao) + '&chave=' + encodeURIComponent(cfg.chavePonte),
-          {redirect: 'follow', signal: AbortSignal.timeout(60 * 1000)});
+          {redirect: 'follow', signal: prazo(60 * 1000)});
       }
     } catch (e) {
       const cause = e && e.name === 'TimeoutError' ? 'sem resposta' : (e && e.cause && (e.cause.code || e.cause.message)) || (e && e.message) || String(e);
@@ -128,12 +138,15 @@ function criarPonte(cfg, estado, deps) {
   async function rodar(motivo, force) {
     if (rodando) return rodando;
     rodando = (async () => {
+      if (deps.aoComecar) deps.aoComecar(motivo);
       try {
         const r = await enviar({force});
         log('[' + hora() + '] ' + motivo + ' → ' + resumo(r));
+        if (deps.aoTerminar) deps.aoTerminar({ok: true, motivo, r});
         return r;
       } catch (e) {
         log('[' + hora() + '] ' + motivo + ' → ERRO: ' + e.message);
+        if (deps.aoTerminar) deps.aoTerminar({ok: false, motivo, erro: e.message});
         return null;
       } finally {
         proxima = proximoHorario(cfg.enviarMinutos);
@@ -174,4 +187,5 @@ function criarPonte(cfg, estado, deps) {
   return {chamar, enviar, rodar, verificar, iniciar, parar, resumo, blocos, proximoHorario};
 }
 
-module.exports = {criarPonte};
+return {criarPonte};
+});

@@ -5,12 +5,12 @@ Painel **separado do DashMaster**. Ele mostra a produção do sorter da base a p
 - **Sorter A**, **Sorter B** ou **os dois juntos**;
 - por **balança** (Induction No.), **turno** e **horário**.
 
-Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_4.zip`).
+Não usa nenhum arquivo do DashMaster e não aparece no menu dele. Tem servidor, link e pacote próprios (`JT_SORTER_V2_5.zip`).
 
 **Três formas de abrir (a mesma tela):**
 - **Favorito no navegador**: o jeito mais fácil, **sem instalar nada e sem outro computador**. Veja "Favorito do Sorter (sem instalar nada)".
 - **Painel local**: `http://IP-DO-COMPUTADOR:3100`, só dentro da rede da base. Precisa do Node.js e do `iniciar.bat`.
-- **Link do Google (Apps Script)**: abre de qualquer lugar, até fora da base. Precisa de um projeto Apps Script **separado** (não o do DashMaster) e da **ponte** ligada num computador da base. Veja "Painel no Apps Script".
+- **Link do Google (Apps Script)**: abre de qualquer lugar, até fora da base, com **tudo o que foi gravado**. Precisa de um projeto Apps Script **separado** (não o do DashMaster). Quem manda os números é o **favorito** (botão **Gravar no Google**, sem outro computador) ou a **ponte** num computador da base. Veja "Gravar no Google (acessar a qualquer momento)".
 
 *Feito por Caike Oliveira.*
 
@@ -101,7 +101,8 @@ O nome do arquivo diz o que é, por exemplo: `Sorter_B+A_2026-10-16_T1.xlsx` (To
 3. Deixe a aba aberta:
    - ele lê de novo **a cada 1 hora**;
    - o botão **Atualizar** lê na hora;
-   - **Baixar planilha** baixa o Excel.
+   - **Baixar planilha** baixa o Excel;
+   - **Gravar no Google** guarda os números para abrir de qualquer lugar (veja "Gravar no Google").
 4. Para voltar ao site: **✕ Fechar painel** (canto de baixo) ou `Esc`.
 
 **Bom saber:**
@@ -119,14 +120,48 @@ O nome do arquivo diz o que é, por exemplo: `Sorter_B+A_2026-10-16_T1.xlsx` (To
 - **Gráficos:** vêm da internet (Chart.js), como no painel local. Sem internet, ficam os cartões e a tabela.
 - **Outra página:** se você clicar no favorito fora do site do sorter, ele avisa e não abre.
 
+## Gravar no Google (acessar a qualquer momento)
+Novo na V2.5. O favorito **grava os números numa planilha do Google**. Depois, o **link do Apps Script** mostra o painel com tudo o que foi gravado, **a qualquer hora e de qualquer lugar** (celular, casa, TV), mesmo com o site do sorter fechado.
+
+```
+site do sorter ──► favorito (botão Gravar no Google) ──► Apps Script (planilha) ──► link do painel, de qualquer lugar
+```
+
+**Preparar (uma vez, uns 10 minutos):**
+1. Crie o projeto Apps Script do Sorter: passos **2, 3 e 4** de "Painel no Apps Script" (abaixo). No fim você tem:
+   - a **chave** (o `configurar()` mostra no Registro de execução);
+   - o **link do App da Web** (termina em `/exec`).
+2. Abra `http://10.1.166.9/home` e clique no favorito **Painel do Sorter**.
+3. Clique em **Gravar no Google** (no topo, ao lado de Baixar planilha).
+4. Cole o **link** e a **chave** e clique em **Salvar e gravar agora**.
+   - Na primeira vez ele manda **até 92 dias** de cada sorter. Leva alguns segundos.
+   - O botão fica com a bolinha **verde**: "Gravando no Google".
+5. Pronto. Abra o **link do App da Web** em qualquer lugar: é o painel com os números gravados. Guarde o link nos favoritos do celular.
+
+**Quando grava:**
+- Enquanto o painel do favorito estiver **aberto** numa aba:
+  - ao abrir (com os dias que faltaram, até 92);
+  - **a cada 1 hora**;
+  - quando alguém aperta **Atualizar** no link do Google (o favorito confere a cada 30 s).
+- Com o painel fechado, nada é gravado. O link do Google continua mostrando o que já foi gravado e avisa que o favorito está fechado. Ao abrir o favorito de novo, ele manda os dias que faltaram.
+- Para gravar o dia todo: deixe uma aba com o painel do favorito aberta num computador da base (o computador não pode dormir).
+- A planilha guarda **400 dias**. Os mais antigos saem sozinhos.
+
+**Bom saber:**
+- O link e a chave ficam guardados **só neste navegador**. Em outro computador, faça o passo 3 e 4 de novo.
+- **Desligar:** Gravar no Google → **Desligar**. Apaga o link e a chave deste navegador; o que já foi gravado continua na planilha.
+- **Gravar agora:** manda o dia de hoje na hora, sem esperar 1 hora.
+- **Abrir o painel gravado:** abre o link do Google numa aba nova.
+- Pode usar o favorito **e** a ponte do computador (`iniciar.bat`) com o mesmo Apps Script. O mesmo dia de novo só substitui a linha.
+
 ## Onde roda
 - O sorter fica na **rede interna da base** (`http://10.1.166.9`). Só um computador **dentro dessa rede** consegue lê-lo.
-- **O Google (Apps Script) e a Oracle não enxergam essa rede.** Por isso o Apps Script recebe os números pela **ponte**: o mesmo programa (`iniciar.bat`), rodando num computador da base, lê o sorter e manda para o Apps Script.
+- **O Google (Apps Script) e a Oracle não enxergam essa rede.** Por isso o Apps Script recebe os números de quem enxerga: o **favorito** (botão Gravar no Google, no navegador) ou a **ponte** (o `iniciar.bat`, num computador da base).
 - Basta **um** computador da base ligado, com o `iniciar.bat` aberto. Ele mantém o painel local e a ponte.
 
 ## Instalar (Windows)
 1. Instale o **Node.js** (versão LTS) em https://nodejs.org.
-2. Extraia o `JT_SORTER_V2_4.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
+2. Extraia o `JT_SORTER_V2_5.zip` numa pasta fixa, por exemplo `C:\JT-Sorter`. Isso cria a pasta `sorter`.
    - **Já tem uma versão anterior?** Extraia por cima, na mesma pasta. O `config.json` antigo é atualizado sozinho: a V1 passa a ler a cada 1 hora, até 92 dias, com os Sorters A e B; os campos novos do Apps Script entram vazios.
 3. Na pasta `sorter`, dê dois cliques em **`testar.bat`**. Ele:
    - abre a página `http://10.1.166.9/home` e acha sozinho como trocar entre o Sorter A e o B (veja "Troca de sorter");
@@ -147,7 +182,7 @@ O nome do arquivo diz o que é, por exemplo: `Sorter_B+A_2026-10-16_T1.xlsx` (To
 **Abrir sozinho quando o Windows ligar:** dê dois cliques em **`iniciar-com-windows.bat`**. Ele cria um atalho na pasta Inicializar.
 
 ## Painel no Apps Script (link do Google)
-O painel fica num link do Google, que abre de qualquer lugar. Os números chegam pela **ponte**, que roda junto com o `iniciar.bat` no computador da base.
+O painel fica num link do Google, que abre de qualquer lugar. Os números chegam pelo **favorito** (botão **Gravar no Google**, veja acima; não precisa dos passos 1 e 5) ou pela **ponte**, que roda junto com o `iniciar.bat` no computador da base.
 
 ```
 sorter (10.1.166.9) ──► computador da base (iniciar.bat = ponte) ──► Apps Script (planilha) ──► link do painel
@@ -182,7 +217,10 @@ sorter (10.1.166.9) ──► computador da base (iniciar.bat = ponte) ──►
 2. **Executar como: Eu**. **Quem pode acessar: Qualquer pessoa**. A ponte entra sem login, por isso precisa ser "Qualquer pessoa".
 3. **Implantar**. Copie a **URL do App da Web**: ela termina em `/exec`.
 
-**5. Ligue a ponte no computador da base.**
+**5. Ligue quem manda os números.**
+- **Pelo favorito (sem outro computador):** botão **Gravar no Google** → cole a URL e a chave → **Salvar e gravar agora**. Veja "Gravar no Google".
+- **Pela ponte do computador da base:**
+
 1. Abra o `config.json` da pasta `sorter` com o Bloco de Notas e preencha:
    ```json
    "appsScriptUrl": "https://script.google.com/macros/s/…/exec",
@@ -197,12 +235,12 @@ sorter (10.1.166.9) ──► computador da base (iniciar.bat = ponte) ──►
 - Os links prontos (`?sorter=`, `?per=`, `?tempo=`, `?lang=zh`) também valem.
 
 **Atualização no Apps Script:**
-- **A cada 1 hora** (no minuto 1: 08:01, 09:01…), a ponte lê o sorter e manda.
-- **Botão Atualizar:** a página deixa um pedido; a ponte confere a cada 30 s, lê o sorter na hora e manda. O número novo aparece em até 1 minuto.
+- **A cada 1 hora** (no minuto 1: 08:01, 09:01…), o favorito aberto ou a ponte lê o sorter e manda.
+- **Botão Atualizar:** a página deixa um pedido; o favorito aberto (ou a ponte) confere a cada 30 s, lê o sorter na hora e manda. O número novo aparece em até 1 minuto.
 - A página relê a planilha sozinha a cada 5 minutos.
-- **Computador da base desligado ou sem internet:**
-  - o painel avisa "Ponte da base desligada" e continua mostrando os últimos números;
-  - quando o computador volta, a ponte manda o que faltou.
+- **Favorito fechado, ou computador da base desligado ou sem internet:**
+  - o painel avisa "Sem gravação desde…" e continua mostrando os últimos números;
+  - quando o favorito abre de novo (ou o computador volta), ele manda o que faltou.
 
 **Atualizar o código depois** (versão nova do ZIP):
 1. Troque o conteúdo dos arquivos no editor.
@@ -212,8 +250,8 @@ O link continua o mesmo.
 
 **Segurança:**
 - Quem tem o link vê o painel: são só números de produção.
-- **Só a ponte grava** dados, e só com a chave. A chave fica no `config.json` do computador da base e nas Propriedades do script. Não mande a chave em grupos.
-- **Trocar a chave:** em **Configurações do projeto → Propriedades do script**, apague `CHAVE_PONTE`. Rode `configurar()` de novo e coloque a chave nova no `config.json`.
+- **Só quem tem a chave grava** dados (o favorito ou a ponte). A chave fica no navegador que ligou o Gravar no Google, no `config.json` do computador da base e nas Propriedades do script. Não mande a chave em grupos.
+- **Trocar a chave:** em **Configurações do projeto → Propriedades do script**, apague `CHAVE_PONTE`. Rode `configurar()` de novo e coloque a chave nova no favorito (Gravar no Google) e no `config.json`.
 - Conta do Google Workspace da empresa sem a opção "Qualquer pessoa": publique com uma conta Gmail comum ou peça ao administrador.
 
 **Conferir pelo editor:** a função **diagnosticar** mostra no registro:
@@ -381,7 +419,10 @@ O arquivo é criado na primeira vez, na pasta `sorter`. Para mudar:
 | Favorito: o painel não abre ao clicar | O favorito foi salvo cortado. Apague-o e coloque de novo pelo `instalar-favorito.html` (Copiar o favorito) |
 | A planilha não baixa | O navegador pode pedir para permitir downloads do site: permita e clique em Baixar planilha de novo |
 | "O Apps Script não respondeu em JSON" | A URL no `config.json` não é a do App da Web (`…/exec`), ou a implantação não está com "Quem pode acessar: Qualquer pessoa" |
-| "chave da ponte inválida" | A `chavePonte` do `config.json` não é a que o `configurar()` mostrou. Copie de novo, sem espaços |
+| "chave da ponte inválida" | A chave colada no favorito (ou a `chavePonte` do `config.json`) não é a que o `configurar()` mostrou. Copie de novo, sem espaços |
 | "Não consegui falar com o Apps Script" | O computador da base está sem internet. A ponte tenta de novo sozinha |
-| "Ponte da base desligada" (no painel do Google) | O `iniciar.bat` está fechado ou o computador da base está desligado ou sem internet |
-| "A ponte da base ainda não mandou dados" | A ponte nunca rodou com este Apps Script. Confira `appsScriptUrl` e `chavePonte` e rode o `testar.bat` |
+| "Sem gravação desde…" ou "Ninguém está gravando agora" (no link do Google) | O painel do favorito está fechado, ou o `iniciar.bat` está fechado, ou o computador da base está desligado ou sem internet. Abra o favorito: ele manda o que faltou |
+| Gravar no Google: "O link do App da Web começa com https://script.google.com/…" | Cole a URL da implantação **App da Web** (termina em `/exec`), não a do editor (`/edit`) |
+| Gravar no Google: "A chave tem só letras e números" | Copie a chave do Registro de execução do `configurar()` inteira, sem espaços nem aspas |
+| Gravar no Google: "Não consegui falar com o Apps Script (Failed to fetch)" | Este computador está sem internet, ou a rede da base bloqueia o `script.google.com`. Abra `https://script.google.com` numa aba: se não abrir, use a ponte (`iniciar.bat`) num computador com internet |
+| "Ainda não chegaram dados do Sorter … deste período" | Ninguém gravou esses dias ainda. Abra o favorito com o Gravar no Google ligado (manda até 92 dias), ou confira `appsScriptUrl` e `chavePonte` da ponte e rode o `testar.bat` |

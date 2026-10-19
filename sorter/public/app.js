@@ -75,13 +75,25 @@
       maxDays: 'Escolha até {n} dias.', badDates: 'Confira as datas.', perAdjusted: 'Período ampliado para ver a evolução {p}.',
       noChartLib: 'Biblioteca de gráficos indisponível (sem internet?): veja a tabela abaixo.',
       foot: 'Fonte: monitor do sorter da base (rede interna) · consultado na hora, nada é gravado', madeBy: 'Feito por Caike Oliveira',
-      footGas: 'Fonte: monitor do sorter da base, enviado pela ponte (computador da base) · Apps Script',
-      updatedGas: 'lido do sorter às {t} (ponte da base)',
-      ponteOff: 'A ponte da base está desligada (última conversa: {t}). Mostrando os números que já chegaram.',
-      ponteOffLine: 'Ponte da base desligada desde {t}: os números param de chegar até o computador da base voltar (iniciar.bat).',
-      ponteNever: 'nunca', askedBridge: 'Pedido enviado à ponte da base: os números chegam em até 1 minuto.',
-      bridgeSlow: 'A ponte não respondeu em 2 minutos. Confira o computador da base.', fullHint: 'Para tela cheia, aperte F11.',
-      footSite: 'Fonte: o site do sorter, lido por este navegador (sem servidor) · nada é gravado',
+      footGas: 'Fonte: monitor do sorter da base, gravado no Google pelo favorito (ou pela ponte da base) · Apps Script',
+      updatedGas: 'lido do sorter às {t}',
+      ponteOff: 'Ninguém está gravando agora (última vez: {t}). Mostrando os números já gravados.',
+      ponteOffLine: 'Sem gravação desde {t}: abra o painel pelo favorito na página do sorter, com "Gravar no Google" ligado.',
+      ponteNever: 'nunca', askedBridge: 'Pedido enviado: o favorito aberto na base grava os números em até 1 minuto.',
+      bridgeSlow: 'Ninguém gravou em 2 minutos. Abra o painel pelo favorito na página do sorter, com "Gravar no Google" ligado.', fullHint: 'Para tela cheia, aperte F11.',
+      footSite: 'Fonte: o site do sorter, lido por este navegador (sem servidor)', footSiteOff: ' · nada é gravado', footSiteOn: ' · gravando no Google',
+      gravar: 'Gravar no Google', gravarOn: 'Gravando no Google', gravarRun: 'Gravando…', gravarErr: 'Gravar no Google: erro',
+      gravarTitulo: 'Gravar os números no Google',
+      gravarIntro: 'Os números do sorter vão para uma planilha do Google. O link do Apps Script mostra o painel com tudo o que foi gravado, a qualquer hora e de qualquer lugar (celular, casa).',
+      gravarP1: 'No Apps Script do sorter, execute configurar() e copie a chave que aparece no registro.',
+      gravarP2: 'Implante como App da Web (Executar como: Eu · Quem pode acessar: Qualquer pessoa) e copie o link que termina em /exec.',
+      gravarP3: 'Cole os dois aqui e clique em Salvar. É uma vez só: fica guardado neste navegador.',
+      gravarAberto: 'Grava enquanto este painel estiver aberto: ao ligar (com os dias que faltarem, até 92), de hora em hora e quando alguém aperta Atualizar no link do Google.',
+      gravarUrl: 'Link do App da Web (termina em /exec)', gravarChave: 'Chave', gravarChaveGuardada: 'guardada (deixe em branco para manter)',
+      gravarSalvar: 'Salvar e gravar agora', gravarAgora: 'Gravar agora', gravarDesligar: 'Desligar', fechar: 'Fechar', abrirLink: 'Abrir o painel gravado',
+      gravarOk: 'Gravado às {t}: {n} dia(s) enviados para a planilha.', gravarNada: 'Gravado às {t}: os dias já estavam na planilha.',
+      gravarRodando: 'Gravando no Google… (pode levar alguns minutos na primeira vez)', gravarDesl: 'Desligado: nada é gravado.',
+      gravarErro: 'Não gravou: {e}', gravarAviso: 'Aviso: {e}', gravarFaltaChave: 'Cole a chave.',
       copiarRel: 'Copiar relatório da troca', relCopiado: 'Relatório copiado: cole numa conversa e mande (não tem token nem cookie).',
       procurarTroca: 'Procurar a troca de novo',
       ensinar: 'Ensinar a troca (escolher Cross-belt GRU-A no site)', ensinarFora: 'Abra o painel pelo favorito, na página do sorter.',
@@ -127,13 +139,25 @@
       maxDays: '最多选择 {n} 天。', badDates: '请检查日期。', perAdjusted: '已扩大期间以查看{p}趋势。',
       noChartLib: '图表库不可用（无网络？）：请查看下方表格。',
       foot: '数据来源：基地分拣机监控（内网）· 实时查询，不存储', madeBy: '由 Caike Oliveira 制作',
-      footGas: '数据来源：基地分拣机监控，经数据桥（基地电脑）发送 · Apps Script',
-      updatedGas: '分拣机读取于 {t}（基地数据桥）',
-      ponteOff: '基地数据桥已断开（最后联系：{t}）。显示已收到的数据。',
-      ponteOffLine: '基地数据桥自 {t} 起断开：在基地电脑恢复（iniciar.bat）之前不会收到新数据。',
-      ponteNever: '从未', askedBridge: '已向基地数据桥发送请求：数据将在1分钟内到达。',
-      bridgeSlow: '数据桥2分钟内没有响应。请检查基地电脑。', fullHint: '按 F11 全屏。',
-      footSite: '数据来源：分拣机网站，由本浏览器读取（无需服务器）· 不存储',
+      footGas: '数据来源：基地分拣机监控，由书签（或基地数据桥）保存到 Google · Apps Script',
+      updatedGas: '分拣机读取于 {t}',
+      ponteOff: '当前没有人在保存数据（最后一次：{t}）。显示已保存的数据。',
+      ponteOffLine: '自 {t} 起没有保存：请在分拣机页面通过书签打开面板，并开启“保存到 Google”。',
+      ponteNever: '从未', askedBridge: '已发送请求：基地打开的书签将在1分钟内保存数据。',
+      bridgeSlow: '2分钟内没有保存。请在分拣机页面通过书签打开面板，并开启“保存到 Google”。', fullHint: '按 F11 全屏。',
+      footSite: '数据来源：分拣机网站，由本浏览器读取（无需服务器）', footSiteOff: ' · 不存储', footSiteOn: ' · 正在保存到 Google',
+      gravar: '保存到 Google', gravarOn: '正在保存到 Google', gravarRun: '保存中…', gravarErr: '保存到 Google：出错',
+      gravarTitulo: '将数据保存到 Google',
+      gravarIntro: '分拣机数据保存到 Google 表格。Apps Script 链接随时随地（手机、家里）显示已保存的数据面板。',
+      gravarP1: '在分拣机的 Apps Script 中运行 configurar()，复制日志中显示的密钥。',
+      gravarP2: '部署为网页应用（执行身份：我 · 访问权限：任何人），复制以 /exec 结尾的链接。',
+      gravarP3: '把两者粘贴到这里并点击保存。只需一次：保存在本浏览器中。',
+      gravarAberto: '面板打开期间保存：开启时（补齐缺少的日期，最多 92 天）、每小时一次，以及有人在 Google 链接点击“更新”时。',
+      gravarUrl: '网页应用链接（以 /exec 结尾）', gravarChave: '密钥', gravarChaveGuardada: '已保存（留空则保留）',
+      gravarSalvar: '保存并立即上传', gravarAgora: '立即上传', gravarDesligar: '停止保存', fechar: '关闭窗口', abrirLink: '打开已保存的面板',
+      gravarOk: '{t} 已保存：{n} 天发送到表格。', gravarNada: '{t} 已保存：这些日期已在表格中。',
+      gravarRodando: '正在保存到 Google…（第一次可能需要几分钟）', gravarDesl: '已关闭：不保存数据。',
+      gravarErro: '未保存：{e}', gravarAviso: '提示：{e}', gravarFaltaChave: '请粘贴密钥。',
       copiarRel: '复制切换报告', relCopiado: '报告已复制：粘贴到对话中发送（不含 token 和 cookie）。', procurarTroca: '重新查找切换方式',
       ensinar: '演示切换（在网站上选择 Cross-belt GRU-A）', ensinarFora: '请在分拣机页面通过书签打开面板。',
       excel: '下载表格', excelOk: '已下载表格：{f}', excelVazio: '还没有可导出的数据。',
@@ -472,7 +496,9 @@
     $('#title').textContent = t('title') + ' · ' + (state.sorter === 'todos' ? BOOT.sorters.map(function (s) { return s.id; }).join(' + ') : devName(state.sorter));
     $('#subtitle').textContent = t('subtitle');
     document.title = 'J&T · ' + t('title');
-    $('#foot').innerHTML = esc(t(GAS ? 'footGas' : SITE ? 'footSite' : 'foot')) + (BOOT.versao ? ' · v' + esc(BOOT.versao) : '') + '<b>' + esc(t('madeBy')) + '</b>';
+    var gv = SITE && window.__SORTER_FONTE__.gravar ? window.__SORTER_FONTE__.gravar.estado() : null;
+    $('#foot').innerHTML = esc(t(GAS ? 'footGas' : SITE ? 'footSite' : 'foot') + (gv ? t(gv.ligado ? 'footSiteOn' : 'footSiteOff') : '')) +
+      (BOOT.versao ? ' · v' + esc(BOOT.versao) : '') + '<b>' + esc(t('madeBy')) + '</b>';
     renderStatus();
     var d = state.data, has = !!(d && d.rows && d.rows.length);
     $('#tableCard').hidden = !has;
@@ -908,6 +934,84 @@
     return abas;
   }
 
+  // ------------------------------------------------------------------ V2.5: gravar no Google (favorito)
+  /**
+   * Botão "Gravar no Google" (só no favorito): uma janela para colar uma vez o link do App da Web do Apps Script e a chave.
+   * Depois o favorito manda os números para a planilha do Google (site/navegador.js → gravar) e o link do Google mostra o
+   * painel com tudo o que foi gravado, de qualquer lugar.
+   */
+  function gravarFonte() { return SITE && window.__SORTER_FONTE__.gravar ? window.__SORTER_FONTE__.gravar : null; }
+  function gravarTexto(g) {
+    if (!g.ligado) return {cls: '', txt: t('gravarDesl')};
+    if (g.rodando) return {cls: 'run', txt: t('gravarRodando')};
+    if (g.erro) return {cls: 'err', txt: t('gravarErro', {e: g.erro})};
+    if (g.ultimo) {
+      var txt = t(g.ultimo.dias ? 'gravarOk' : 'gravarNada', {t: g.ultimo.em, n: g.ultimo.dias});
+      if (g.ultimo.erros && g.ultimo.erros.length) txt += ' ' + t('gravarAviso', {e: g.ultimo.erros.join(' · ')});
+      return {cls: 'on', txt: txt};
+    }
+    return {cls: 'on', txt: t('gravarOn')};
+  }
+  function renderGravar() {
+    var G = gravarFonte(), btn = $('#saveBtn');
+    if (!G || !btn) return;
+    var g = G.estado(), st = gravarTexto(g);
+    btn.hidden = false;
+    btn.title = st.txt;
+    $('#saveTxt').textContent = !g.ligado ? t('gravar') : g.rodando ? t('gravarRun') : g.erro ? t('gravarErr') : t('gravarOn');
+    $('#saveDot').className = 'dot ' + (g.ligado ? (g.rodando ? 'run' : g.erro ? 'err' : 'on') : '');
+    var box = $('#gravarModal');
+    if (box) {
+      var el = $('.st', box);
+      el.className = 'st ' + st.cls;
+      el.textContent = st.txt;
+      $$('[data-g="on"]', box).forEach(function (b) { b.hidden = !g.ligado; b.disabled = !!g.rodando; });
+      var a = $('[data-g="link"]', box);
+      if (a) { a.hidden = !g.ligado; a.href = g.url || '#'; }
+    }
+  }
+  function fecharGravar() { var m = $('#gravarModal'); if (m) m.parentNode.removeChild(m); }
+  function abrirGravar() {
+    var G = gravarFonte();
+    if (!G) return;
+    fecharGravar();
+    var g = G.estado(), back = document.createElement('div');
+    back.className = 'modal-back';
+    back.id = 'gravarModal';
+    back.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="gravarTit">' +
+      '<h2 id="gravarTit">' + esc(t('gravarTitulo')) + '</h2><p>' + esc(t('gravarIntro')) + '</p>' +
+      '<ol><li>' + esc(t('gravarP1')) + '</li><li>' + esc(t('gravarP2')) + '</li><li>' + esc(t('gravarP3')) + '</li></ol>' +
+      '<label for="gravarUrl">' + esc(t('gravarUrl')) + '</label><input type="text" id="gravarUrl" spellcheck="false" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec" value="' + esc(g.url) + '">' +
+      '<label for="gravarChave">' + esc(t('gravarChave')) + '</label><input type="password" id="gravarChave" spellcheck="false" autocomplete="off" placeholder="' + esc(g.ligado ? t('gravarChaveGuardada') : '') + '">' +
+      '<p class="hint">' + esc(t('gravarAberto')) + '</p><div class="st"></div>' +
+      '<div class="acts"><a class="btn btn-light" data-g="link" target="_blank" rel="noopener" hidden>' + esc(t('abrirLink')) + '</a>' +
+      '<button type="button" class="btn btn-light" data-g="on" data-acao="desligar" hidden>' + esc(t('gravarDesligar')) + '</button>' +
+      '<button type="button" class="btn btn-light" data-g="on" data-acao="agora" hidden>' + esc(t('gravarAgora')) + '</button>' +
+      '<button type="button" class="btn btn-red" data-acao="salvar">' + esc(t('gravarSalvar')) + '</button>' +
+      '<button type="button" class="btn btn-light" data-acao="fechar">' + esc(t('fechar')) + '</button></div></div>';
+    document.body.appendChild(back);
+    back.addEventListener('click', function (e) {
+      if (e.target === back) return fecharGravar();
+      var b = e.target.closest ? e.target.closest('[data-acao]') : null;
+      if (!b) return;
+      var acao = b.getAttribute('data-acao'), cur = G.estado();
+      if (acao === 'fechar') return fecharGravar();
+      if (acao === 'desligar') { G.desligar(); renderGravar(); if (state.data) render(); return; }
+      if (acao === 'agora') { G.enviar(); renderGravar(); return; }
+      var chave = $('#gravarChave', back).value.trim();
+      if (!chave && !cur.ligado) { toast(t('gravarFaltaChave'), 'error'); return; }
+      b.disabled = true;
+      G.salvar($('#gravarUrl', back).value, chave || null).then(function () {
+        toast(gravarTexto(G.estado()).txt, 'success');
+      }, function (err) { toast(t('gravarErro', {e: err.message}), 'error'); })
+        .then(function () { b.disabled = false; renderGravar(); if (state.data) render(); });
+      renderGravar();
+    });
+    back.addEventListener('keydown', function (e) { if (e.key === 'Escape') fecharGravar(); });
+    renderGravar();
+    $('#gravarUrl', back).focus();
+  }
+
   // ------------------------------------------------------------------ início
   function init() {
     if (params.tv === '1') document.body.classList.add('tv');
@@ -926,6 +1030,12 @@
     $('#fullBtn').addEventListener('click', toggleFull);
     $('#refreshBtn').addEventListener('click', refresh);
     $('#excelBtn').addEventListener('click', baixarPlanilha);
+    // V2.5: favorito — "Gravar no Google" (o link do Apps Script mostra o painel gravado de qualquer lugar).
+    if (gravarFonte()) {
+      $('#saveBtn').addEventListener('click', abrirGravar);
+      gravarFonte().ouvir(function () { renderGravar(); if (state.data) render(); });
+      renderGravar();
+    }
     // Favorito: botões do aviso de troca (copiar o relatório, procurar de novo).
     $('#status').addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('[data-acao]') : null;

@@ -2,20 +2,22 @@
  * J&T · PAINEL DO SORTER — versão Apps Script (projeto SEPARADO do DashMaster: não use no mesmo projeto).
  *
  * O Apps Script roda nos servidores do Google e NÃO enxerga a rede interna da base (o sorter fica em 10.1.166.9).
- * Por isso os números chegam pela PONTE: o programa do sorter (server.js) roda num computador da base, lê o sorter e
- * manda para este App da Web (doPost). Aqui eles ficam numa planilha (aba Sorter_Dados, um dia por linha e por sorter)
- * e a página mostra o painel para qualquer pessoa com o link, de qualquer lugar.
+ * Por isso os números chegam de quem está na base e manda para este App da Web (doPost):
+ *   - o FAVORITO (V2.5, botão "Gravar no Google"): o painel aberto na página do sorter manda os números; ou
+ *   - a PONTE: o programa do sorter (server.js) num computador da base.
+ * Aqui eles ficam numa planilha (aba Sorter_Dados, um dia por linha e por sorter) e a página mostra o painel para qualquer
+ * pessoa com o link, de qualquer lugar.
  *
  * Instalação (uma vez):
  *   1. Arquivos: Codigo.gs, Resumo.gs, Index.html, Estilo.html, App.html e o appsscript.json (manifesto).
  *   2. Execute configurar() no editor (▶ Executar) e autorize: cria a planilha e mostra a CHAVE da ponte no registro.
  *   3. Implantar → Nova implantação → App da Web · Executar como: Eu · Quem pode acessar: Qualquer pessoa.
- *   4. No computador da base, no config.json do sorter: "appsScriptUrl" = URL do App da Web (termina em /exec) e
- *      "chavePonte" = a chave do passo 2. Abra o iniciar.bat.
+ *   4. No favorito (painel aberto na página do sorter): botão "Gravar no Google" → cole a URL do App da Web (termina
+ *      em /exec) e a chave do passo 2. (Com a ponte: "appsScriptUrl" e "chavePonte" no config.json e o iniciar.bat.)
  *
- * Quem abre o link vê o painel; só a ponte (com a chave) grava dados.
+ * Quem abre o link vê o painel; só quem tem a chave (o favorito ou a ponte) grava dados.
  */
-var VERSAO = '2.4.0';
+var VERSAO = '2.5.0';
 var TZ = 'America/Sao_Paulo';
 var MAX_DIAS = 92;                 // maior período na tela (um trimestre)
 var GUARDAR_DIAS = 400;            // dias guardados na planilha (os mais antigos saem sozinhos)
@@ -67,7 +69,7 @@ function api_(acao, p) {
   try {
     var chave = PropertiesService.getScriptProperties().getProperty('CHAVE_PONTE');
     if (!chave) return {ok: false, error: 'O Apps Script ainda não foi configurado: execute configurar() no editor'};
-    if (String(p.chave || '') !== chave) return {ok: false, error: 'chave da ponte inválida: copie a "chavePonte" que configurar() mostra para o config.json'};
+    if (String(p.chave || '') !== chave) return {ok: false, error: 'chave da ponte inválida: copie a chave que configurar() mostra (no favorito: botão "Gravar no Google"; na ponte: "chavePonte" do config.json)'};
     marcarPonte_();
     if (acao === 'estado') return estadoPonte_();
     if (acao === 'pedido') return {ok: true, pedido: CacheService.getScriptCache().get('pedido') || '', agora: agora_()};
@@ -93,9 +95,9 @@ function configurar() {
     props.setProperty('CHAVE_PONTE', chave);
   }
   Logger.log('Planilha dos dados: ' + ss.getUrl());
-  Logger.log('Chave da ponte (cole em "chavePonte" no config.json do computador da base): ' + chave);
+  Logger.log('Chave (cole no botão "Gravar no Google" do favorito, ou em "chavePonte" no config.json da ponte): ' + chave);
   Logger.log('Agora: Implantar → Nova implantação → App da Web · Executar como: Eu · Quem pode acessar: Qualquer pessoa. ' +
-    'Copie a URL do App da Web (termina em /exec) para "appsScriptUrl" no config.json.');
+    'Copie a URL do App da Web (termina em /exec) para o botão "Gravar no Google" do favorito (ou "appsScriptUrl" no config.json).');
   return {planilha: ss.getUrl(), chave: chave};
 }
 
@@ -330,7 +332,7 @@ function getDados(q) {
     var inf = {id: d.id, nome: d.nome, nomeZh: d.nomeZh, ok: false};
     if (!d.pronto) {
       inf.pendente = true;
-      inf.error = d.erro || 'Falta configurar como trocar para o ' + d.nome + ' (rode o descobrir.bat no computador da base).';
+      inf.error = d.erro || 'Falta configurar como trocar para o ' + d.nome + ' (no favorito: "Ensinar a troca"; ou o descobrir.bat no computador da base).';
       return {info: inf};
     }
     if (bal && bal.dev !== d.id) { inf.ok = true; inf.fora = true; return {info: inf, rows: [], prevRows: [], balancas: null}; }
@@ -342,14 +344,14 @@ function getDados(q) {
       if (dia.at > at) at = dia.at;
     }
     if (!at) {
-      inf.error = d.erro ? 'Última leitura da ponte com erro: ' + d.erro
-        : 'A ponte da base ainda não mandou dados do ' + d.nome + ' para este período.';
+      inf.error = d.erro ? 'Última gravação com erro: ' + d.erro
+        : 'Ainda não chegaram dados do ' + d.nome + ' deste período: abra o painel pelo favorito na página do sorter, com "Gravar no Google" ligado.';
       return {info: inf};
     }
     inf.ok = true; inf.fetchedAt = at; inf.cached = true;
     var avisos = [];
     if (faltam) avisos.push('faltam ' + faltam + ' dia(s) deste período na planilha');
-    if (d.erro) avisos.push('última leitura da ponte com erro: ' + d.erro);
+    if (d.erro) avisos.push('última gravação com erro: ' + d.erro);
     if (avisos.length) inf.aviso = avisos.join(' · ');
     var prevRows = [];
     for (var y = prevFrom; y <= prevTo && prevRows; y = addDays_(y, 1)) prevRows = dias[y] ? prevRows.concat(serie_(dias[y], ind)) : null;

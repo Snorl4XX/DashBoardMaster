@@ -30,7 +30,7 @@ function paginaPainel() {
     'hoje: SorterEstado.agoraSP().date, sorters: window.__SORTER_FONTE__.sorters()};';
   h = trocar(h, '<script>window.__SORTER__ = __SORTER_BOOT__;</script>\n  <script src="resumo.js"></script>\n  <script src="planilha.js"></script>\n  <script src="app.js"></script>',
     [inline(ler('lib/resumo.js'), 'resumo.js'), inline(ler('lib/site.js'), 'site.js'), inline(ler('lib/estado.js'), 'estado.js'),
-      inline(ler('site/navegador.js'), 'navegador.js'), inline(boot, 'boot'), inline(ler('lib/planilha.js'), 'planilha.js'),
+      inline(ler('lib/ponte.js'), 'ponte.js'), inline(ler('site/navegador.js'), 'navegador.js'), inline(boot, 'boot'), inline(ler('lib/planilha.js'), 'planilha.js'),
       inline(ler('public/app.js'), 'app.js')].join('\n'));
   if (/__SORTER_BOOT__|src="(resumo|planilha|app)\.js"/.test(h)) throw new Error('Sobrou referência a arquivo na página do favorito.');
   return h;

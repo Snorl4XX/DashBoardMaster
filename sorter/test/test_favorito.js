@@ -15,6 +15,7 @@ const R = require('../lib/resumo');
 const E = require('../lib/estado');
 const P = require('../lib/planilha');
 const {startFakeSorter} = require('./sorter_falso');
+const {criarGas, startFakeGas} = require('./gas_falso');
 
 const ROOT = path.join(__dirname, '..');
 let passed = 0;
@@ -24,6 +25,14 @@ function check(cond, name, extra) {
 }
 // Objetos criados no vm têm outro protótipo: compara pelo conteúdo (JSON).
 const igual = (a, b) => { try { assert.deepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b))); return true; } catch (e) { return false; } };
+/** Resposta compactada do getDados (Apps Script) → linhas. */
+function unpackRes(res) {
+  if (!res.pacote) return res;
+  const o = Object.assign({}, res);
+  o.rows = R.unpack(res.rows); o.prevRows = res.prevRows ? R.unpack(res.prevRows) : null;
+  if (res.rowsByDevice) { o.rowsByDevice = {}; Object.keys(res.rowsByDevice).forEach(k => { o.rowsByDevice[k] = R.unpack(res.rowsByDevice[k]); }); }
+  return o;
+}
 /** Lê um .xlsx (ZIP sem compressão ou deflate) → {nome: texto}. */
 function unzip(buf) {
   const out = {};
@@ -36,36 +45,44 @@ function unzip(buf) {
   }
   return out;
 }
-/** Um "navegador" na página do sorter: os scripts do favorito num vm, com fetch na mesma origem e cookies. */
+// Relógios dos "navegadores" (a gravação no Google confere a cada 30 s): o teste chama na hora e desliga no fim.
+const RELOGIOS = new Set();
+/** Um "navegador" na página do sorter: os scripts do favorito num vm, com fetch, cookies (só para o sorter) e relógios. */
 function navegador(base, guardado) {
-  const jar = {}, store = new Map(guardado || []);
+  const jar = {}, store = new Map(guardado || []), intervalos = [];
+  const origem = new URL(base).origin;
   const guardar = res => (res.headers.getSetCookie ? res.headers.getSetCookie() : []).forEach(c => {
     const m = String(c).match(/^\s*([^=;\s]+)=([^;]*)/);
     if (m) jar[m[1]] = {v: m[2], http: /httponly/i.test(c)};
   });
   const ctx = {
-    console, URL, URLSearchParams, Intl, Promise, setTimeout, clearTimeout, TextEncoder,
+    console, URL, URLSearchParams, Intl, Promise, TextEncoder,
+    setTimeout: (fn, ms) => { const t = setTimeout(() => { RELOGIOS.delete(t); fn(); }, ms); RELOGIOS.add(t); return t; },
+    clearTimeout: t => { RELOGIOS.delete(t); clearTimeout(t); },
+    setInterval: (fn, ms) => { const t = setInterval(fn, ms); RELOGIOS.add(t); intervalos.push({t, fn, ms}); return t; },
+    clearInterval: t => { RELOGIOS.delete(t); clearInterval(t); const i = intervalos.findIndex(x => x.t === t); if (i >= 0) intervalos.splice(i, 1); },
     document: {baseURI: base + '/home', get cookie() { return Object.keys(jar).filter(k => !jar[k].http).map(k => k + '=' + jar[k].v).join('; '); }},
     localStorage: {getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k)},
     fetch: async (url, opts) => {
       opts = opts || {};
+      const href = new URL(url, base + '/home').href, cookies = opts.credentials !== 'omit' && new URL(href).origin === origem;
       const headers = Object.assign({}, opts.headers || {});
-      if (opts.credentials !== 'omit') {
+      if (cookies) {
         const ck = Object.keys(jar).map(k => k + '=' + jar[k].v).join('; ');
         if (ck) headers.Cookie = ck;
       }
-      const res = await fetch(new URL(url, base + '/home').href, {method: opts.method || 'GET', headers, body: opts.body, redirect: 'manual'});
-      if (opts.credentials !== 'omit') guardar(res);
+      const res = await fetch(href, {method: opts.method || 'GET', headers, body: opts.body, redirect: 'manual'});
+      if (cookies) guardar(res);
       // Segue o redirecionamento como o navegador (GET, com os cookies novos).
       const loc = res.headers.get('location');
-      if (res.status >= 300 && res.status < 400 && loc) return ctx.fetch(loc, {credentials: opts.credentials});
+      if (res.status >= 300 && res.status < 400 && loc) return ctx.fetch(new URL(loc, href).href, {credentials: opts.credentials});
       return res;
     }
   };
   ctx.window = ctx;
   vm.createContext(ctx);
-  ['lib/resumo.js', 'lib/site.js', 'lib/estado.js', 'site/navegador.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, {filename: f}));
-  return {fonte: ctx.__SORTER_FONTE__, store, jar};
+  ['lib/resumo.js', 'lib/site.js', 'lib/estado.js', 'lib/ponte.js', 'site/navegador.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, {filename: f}));
+  return {fonte: ctx.__SORTER_FONTE__, store, jar, intervalos};
 }
 
 (async function main() {
@@ -100,7 +117,7 @@ function navegador(base, guardado) {
   try { new Function(m.codigo); } catch (e) { sintaxe = e.message; }
   check(!sintaxe && /^javascript:/.test(m.url) && m.url.length < 1.5 * 1024 * 1024 && decodeURIComponent(m.url.slice(11)).indexOf(m.codigo) === 0,
     'favorito: um código só, válido, dentro do limite do navegador para favoritos', {sintaxe, kb: Math.round(m.url.length / 1024)});
-  check(['function SorterResumoFactory_', 'root.SorterSite', 'root.SorterEstado', '__SORTER_FONTE__', 'root.SorterPlanilha', 'site: true', 'id="excelBtn"']
+  check(['function SorterResumoFactory_', 'root.SorterSite', 'root.SorterEstado', '__SORTER_FONTE__', 'root.SorterPlanilha', 'root.SorterPonte', 'site: true', 'id="excelBtn"', 'id="saveBtn"']
     .every(x => m.html.indexOf(x) > 0) && !/src="(resumo|planilha|app)\.js"|href="app\.css"|__SORTER_BOOT__/.test(m.html),
     'favorito: a página do painel vai inteira dentro (sem arquivos de fora, só gráficos e fonte da internet)');
   const inst = G.paginaInstalar(m, true);
@@ -191,6 +208,67 @@ function navegador(base, guardado) {
   const dB2 = await navB2.fonte.dados({de: TODAY, ate: TODAY, sorter: 'B'});
   check(dB2.ok && fake.trocas.length === tB && !navB2.jar.laravel_session, 'Sorter B lido sem trocar nada e sem usar a sessão do navegador');
   fake.pagina = 'ajax';
+
+  // ---------- 5. "Gravar no Google": o favorito manda os dias para o Apps Script (planilha) ----------
+  const g = criarGas({agora: TODAY + ' ' + agora.time});
+  const cf = g.chamar('configurar'), gas = await startFakeGas(g);
+  const navG = navegador(fake.url), vistos = [];
+  navG.fonte.gravar.ouvir(e => vistos.push(e));
+  const e0 = navG.fonte.gravar.estado();
+  check(e0.disponivel && !e0.ligado && !navG.intervalos.length, 'gravar: começa desligado (nada vai para o Google sem o link e a chave)', e0);
+  const recusa = async (url, chave) => { try { await navG.fonte.gravar.salvar(url, chave); return ''; } catch (e) { return e.message; } };
+  const rUrl = await recusa('https://script.google.com/macros/s/abc/edit', cf.chave), rChave = await recusa(gas.url, 'curta');
+  check(/termina em \/exec/.test(rUrl) && /letras e números/.test(rChave) && !navG.store.has('jt_sorter_gravar') && gas.posts === 0,
+    'gravar: link que não é do App da Web e chave errada são recusados antes de mandar', {rUrl, rChave});
+  const e1 = await navG.fonte.gravar.salvar(gas.url, cf.chave);
+  const linhasG = g.aba().rows.slice(1), hojeG = linhasG.find(r => r[0] === TODAY && r[1] === 'B');
+  const dG = await navG.fonte.dados({de: TODAY, ate: TODAY, sorter: 'todos'});
+  const infoG = JSON.parse(g.props.INFO);
+  check(e1.ligado && e1.url === gas.url && e1.ultimo && e1.ultimo.dias === linhasG.length && e1.ultimo.dias > 92 && !e1.ultimo.erros.length &&
+    linhasG.some(r => r[1] === 'A') && hojeG && hojeG[4] === R.sumRows(dG.rowsByDevice.B).total && /^favorito /.test(infoG.versaoPonte) &&
+    infoG.sorters.every(x => x.pronto) && JSON.parse(navG.store.get('jt_sorter_gravar')).chave === cf.chave,
+    'gravar: salvar manda o histórico dos dois sorters na hora (um dia por linha na planilha) e guarda o link e a chave neste navegador',
+    {dias: e1.ultimo, linhas: linhasG.length, versao: infoG.versaoPonte});
+  check(vistos.some(x => x.rodando && x.motivo === 'ligado agora') && !vistos[vistos.length - 1].rodando && navG.intervalos.length === 1 && navG.intervalos[0].ms === 30000,
+    'gravar: a tela vê "gravando…" e o fim; depois o favorito confere o Google a cada 30 s', vistos.map(x => x.motivo + (x.rodando ? '…' : '')));
+  const gT = unpackRes(g.chamar('getDados', {de: TODAY, ate: TODAY, sorter: 'todos'}));
+  check(gT.ok && igual(gT.rows, dG.rows) && igual(gT.rowsByDevice, dG.rowsByDevice) && gT.ponte.ligada,
+    'gravar: o link do Apps Script mostra os mesmos números do favorito (de qualquer lugar)');
+  const semanaG = unpackRes(g.chamar('getDados', {de: E.addDays(TODAY, -30), ate: E.addDays(TODAY, -1), sorter: 'B'}));
+  const semanaL = await navG.fonte.dados({de: E.addDays(TODAY, -30), ate: E.addDays(TODAY, -1), sorter: 'B'});
+  check(semanaG.ok && R.sumRows(semanaG.rows).total > 0 && igual(semanaG.rows, semanaL.rows), 'gravar: dias passados também ficam guardados (30 dias = favorito)');
+
+  // Botão Atualizar no link do Google: o pedido fica no Apps Script; o favorito aberto confere e manda na hora.
+  const conferir = () => navG.intervalos[0].fn();
+  await conferir();
+  const postsG = gas.posts;
+  const pedG = g.chamar('pedirAtualizacao');
+  g.agora = TODAY + ' ' + E.agoraSP().time;
+  await conferir();
+  const depoisG = g.chamar('getDados', {de: TODAY, ate: TODAY, sorter: 'B', desde: E.addDays(TODAY, -1) + ' 23:59:59'});
+  const e2 = navG.fonte.gravar.estado();
+  check(pedG.ok && pedG.ligada && gas.posts > postsG && /Atualizar/.test(e2.motivo) && e2.ultimo.dias >= 2 && e2.ultimo.dias < e1.ultimo.dias && depoisG.ok,
+    'gravar: "Atualizar" no link do Google → o favorito aberto lê o sorter e manda só hoje (o histórico já está lá)', {motivo: e2.motivo, dias: e2.ultimo.dias});
+
+  // Abrir o favorito de novo: a gravação volta sozinha (sem pedir o link e a chave de novo).
+  const navG2 = navegador(fake.url, navG.store);
+  const e3 = navG2.fonte.gravar.estado();
+  const rVazia = await navG2.fonte.gravar.salvar(gas.url, '');
+  check(e3.ligado && e3.url === gas.url && rVazia.ligado && rVazia.ultimo && JSON.parse(navG2.store.get('jt_sorter_gravar')).chave === cf.chave,
+    'gravar: abrir o favorito de novo continua gravando; chave em branco mantém a guardada');
+  navG2.fonte.gravar.desligar();
+
+  // Chave que não é a do configurar(): o Apps Script recusa e a tela mostra o motivo.
+  const navW = navegador(fake.url);
+  let rW = '';
+  try { await navW.fonte.gravar.salvar(gas.url, 'X'.repeat(40)); } catch (e) { rW = e.message; }
+  check(/chave da ponte inválida/.test(rW) && /chave da ponte inválida/.test(navW.fonte.gravar.estado().erro), 'gravar: chave que o Apps Script não conhece → aviso claro', rW);
+  navW.fonte.gravar.desligar();
+
+  const e4 = navG.fonte.gravar.desligar();
+  check(!e4.ligado && !navG.store.has('jt_sorter_gravar') && !navG.intervalos.length, 'gravar: Desligar para de mandar e apaga o link e a chave deste navegador');
+  gas.server.close();
+  RELOGIOS.forEach(t => clearTimeout(t));
 
   fake.server.close();
   console.log('OK: ' + passed + ' verificações do favorito e da planilha passaram (' + Math.round((Date.now() - t0) / 1000) + ' s; sorter simulado por HTTP).');

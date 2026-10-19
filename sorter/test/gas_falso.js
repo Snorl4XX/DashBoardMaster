@@ -188,7 +188,7 @@ function startFakeGas(g) {
         if (u.pathname === '/macros/echo') {
           const out = srv.echo[u.searchParams.get('id')];
           if (!out) { res.writeHead(404); res.end('sumiu'); return; }
-          res.writeHead(200, {'Content-Type': out.mime + '; charset=utf-8'}); res.end(out.s); return;
+          res.writeHead(200, {'Content-Type': out.mime + '; charset=utf-8', 'Access-Control-Allow-Origin': '*'}); res.end(out.s); return;
         }
         if (u.pathname === '/rpc' && req.method === 'POST') {
           const r = JSON.parse(body);
@@ -206,7 +206,8 @@ function startFakeGas(g) {
         if (out.kind === 'html') { res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); res.end(out.s); return; }
         const id = String(++seq);
         srv.echo[id] = out;
-        res.writeHead(302, {Location: '/macros/echo?id=' + id}); res.end();
+        // Como o Google: o 302 e a resposta liberam a leitura por outra página (o favorito na página do sorter).
+        res.writeHead(302, {Location: '/macros/echo?id=' + id, 'Access-Control-Allow-Origin': '*'}); res.end();
       } catch (e) {
         res.writeHead(500, {'Content-Type': 'text/plain'}); res.end('erro: ' + e.stack);
       }

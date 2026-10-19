@@ -9,12 +9,15 @@
  * - O sorter padrão do site (B) é lido numa sessão nova, sem cookies: não precisa trocar nada. Só o outro (A) usa a troca.
  * - "Ensinar a troca": quando o painel não acha sozinho, a pessoa escolhe Cross-belt GRU-A no próprio site e o favorito
  *   (site/favorito.js) guarda o pedido que o site fez; aqui ele é testado (os números têm que mudar) e passa a ser usado.
- * - window.__SORTER_FONTE__ = {dados(q), sorters(), relatorio(), procurarTroca(), ensinar()} — usado pelo app.js.
+ * - V2.5 "Gravar no Google": com o link do App da Web do Apps Script e a chave (guardados neste navegador), o favorito faz o
+ *   papel da ponte da base (lib/ponte.js): manda os números para a planilha do Google ao ligar, de hora em hora e quando
+ *   alguém aperta Atualizar no link do Google — enquanto este painel estiver aberto. Os dias que faltam (até 92) vão na volta.
+ * - window.__SORTER_FONTE__ = {dados(q), sorters(), relatorio(), procurarTroca(), ensinar(), gravar} — usado pelo app.js.
  */
 (function () {
   'use strict';
-  const S = window.SorterSite, E = window.SorterEstado, R = window.SorterResumo;
-  const CHAVE = 'jt_sorter_favorito_troca', APRENDIDO = 'jt_sorter_aprendido';
+  const S = window.SorterSite, E = window.SorterEstado, R = window.SorterResumo, P = window.SorterPonte;
+  const CHAVE = 'jt_sorter_favorito_troca', APRENDIDO = 'jt_sorter_aprendido', GRAVAR = 'jt_sorter_gravar';
   const cfg = {cacheSegundos: 120, maxDias: 92, balancas: 'auto', maxBalancas: 40, sorters: [
     {id: 'B', nome: 'Sorter B', nomeZh: '分拣机 B套', padrao: true, troca: 'auto'},
     {id: 'A', nome: 'Sorter A', nomeZh: '分拣机 A套', troca: 'auto'}
@@ -180,6 +183,40 @@
     textos: {iguais: ' (use "Procurar a troca de novo")'}
   });
 
+  // ---------- V2.5: gravar no Google (o favorito faz o papel da ponte da base) ----------
+  let ponte = null, ouvinte = null, ligarTimer = null;
+  const gs = {ligado: false, rodando: false, ultimo: null, erro: '', motivo: ''};
+  const avisar = () => { if (ouvinte) try { ouvinte(gravacao()); } catch (e) { /* a tela some: nada a fazer */ } };
+  const hm = () => E.agoraSP().time.slice(0, 5);
+  function gravacao() {
+    const g = lerChave(GRAVAR) || {};
+    return {ligado: !!(g.url && g.chave), url: g.url || '', rodando: gs.rodando, ultimo: gs.ultimo, erro: gs.erro, motivo: gs.motivo, disponivel: !!P};
+  }
+  /** Liga a ponte com o link e a chave guardados (espera `espera` ms para não disputar com a primeira leitura da tela). */
+  function ligarPonte(espera) {
+    if (ponte) { ponte.parar(); ponte = null; }
+    clearTimeout(ligarTimer);
+    const g = lerChave(GRAVAR);
+    if (!P || !g || !g.url || !g.chave) { gs.ligado = false; avisar(); return null; }
+    gs.ligado = true;
+    ponte = P.criarPonte({appsScriptUrl: g.url, chavePonte: g.chave, sorters: cfg.sorters, diasHistorico: 92, enviarMinutos: 60, verificarSegundos: 30}, estado, {
+      agora: E.agoraSP, addDays: E.addDays, daysBetween: E.daysBetween, pronto, loteBytes: 300000, log: () => {},
+      get versao() { return 'favorito ' + ((window.__SORTER__ && window.__SORTER__.versao) || ''); },
+      aoComecar: motivo => { gs.rodando = true; gs.motivo = motivo; avisar(); },
+      aoTerminar: x => {
+        gs.rodando = false;
+        if (x.ok) { gs.ultimo = {em: hm(), dias: x.r.dias, planilha: x.r.planilha || '', erros: x.r.sorters.filter(d => d.erro).map(d => d.nome + ': ' + d.erro)}; gs.erro = ''; }
+        else gs.erro = x.erro;
+        avisar();
+        voltar();
+      }
+    });
+    const p = ponte;
+    ligarTimer = setTimeout(() => { if (ponte === p) p.iniciar(); }, espera || 0);
+    return p;
+  }
+  if (lerChave(GRAVAR)) ligarPonte(15000);
+
   window.__SORTER_FONTE__ = {
     dados: q => estado.dados(q).then(r => { voltar(); return r; }, e => { voltar(); throw e; }),
     sorters: () => cfg.sorters.map(d => ({id: d.id, nome: d.nome, nomeZh: d.nomeZh, pronto: pronto(d) && !(trocaRes && !trocaRes.ok && erroTroca(d))})),
@@ -190,6 +227,28 @@
       trocaRes = null;
       estado.limparCache();
       return prepararTrocas({force: true});
+    },
+    /**
+     * "Gravar no Google": salvar(url, chave) guarda e manda na hora; desligar(); enviar() manda agora; estado(); ouvir(fn)
+     * avisa a tela a cada envio. A chave só fica neste navegador (e vai no pedido ao Apps Script).
+     */
+    gravar: {
+      estado: gravacao,
+      ouvir: fn => { ouvinte = fn; },
+      salvar: (url, chave) => {
+        // Chave em branco com a gravação já ligada: mantém a guardada.
+        url = String(url || '').trim(); chave = String(chave || '').trim() || String((lerChave(GRAVAR) || {}).chave || '');
+        if (!/^https:\/\/script\.google(usercontent)?\.com\/.+\/exec$/.test(url) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/.+\/exec$/.test(url)) {
+          return Promise.reject(new Error('O link do App da Web começa com https://script.google.com/ e termina em /exec.'));
+        }
+        if (!/^[A-Za-z0-9]{20,64}$/.test(chave)) return Promise.reject(new Error('A chave tem só letras e números (a que o configurar() mostrou no Apps Script).'));
+        gravarChave(GRAVAR, {url, chave});
+        gs.erro = ''; gs.ultimo = null;
+        const p = ligarPonte(0);
+        return p ? p.rodar('ligado agora', true).then(r => { if (!r) throw new Error(gs.erro || 'O Apps Script não respondeu.'); return gravacao(); }) : Promise.resolve(gravacao());
+      },
+      desligar: () => { gravarChave(GRAVAR, null); ligarPonte(0); gs.ultimo = null; gs.erro = ''; avisar(); return gravacao(); },
+      enviar: () => (ponte ? ponte.rodar('botão Gravar agora', true).then(() => gravacao()) : Promise.resolve(gravacao()))
     },
     /** "Ensinar a troca": fecha o painel e o favorito observa o clique em Cross-belt GRU-A no site (site/favorito.js). */
     ensinar: () => {
