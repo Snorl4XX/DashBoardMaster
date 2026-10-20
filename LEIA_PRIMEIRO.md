@@ -1,8 +1,18 @@
-# J&T DASHMASTER V4.12.3 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.12.4 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.12.4 — Versão Node.js: tela Configurações corrigida e atualização de hora em hora
+**Pedido:** instalar o painel no próprio computador, sem cota, sem permissão de administrador, atualizando a cada 1 hora.
+
+- **Tela Configurações (Node.js) corrigida.** Um erro no código da página deixava todos os botões sem efeito: Salvar e testar a conexão, Salvar data, Baixar histórico, Propriedades e Executar função. Agora funcionam.
+- **De hora em hora já na instalação:** a instalação nova vem com `ATUALIZACAO_MIN` = 60 e `DETAIL_REFRESH_HOURS` = 1. Taxas, cartões, gráficos e tabelas de hoje são atualizados por volta do minuto 5 de cada hora.
+- **Sem administrador:** o `LEIA_NODE.md` explica como usar o `node.exe` sem instalar, um atalho no lugar dos `.bat` e o link do Tailscale por atalho.
+- **Apps Script:** nada muda (só o número da versão).
+
+**Como instalar (Node.js):** feche a janela do painel, extraia o `JT_DASHMASTER_V4_12_4_NODE.zip` por cima da pasta (os dados em `node\dados` ficam) e abra o painel de novo.
 
 ## V4.12.3 — Expedição SC → SC e SC → DC com valores; Deslacre retirado
 **Pedido:** "Não está mostrando os valores de Expedição SC/SC e SC/DC. Quero que tire o gráfico de Deslacre."

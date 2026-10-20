@@ -36,6 +36,13 @@ O único limite que sobra é o do próprio JMS (100 linhas por página).
    - **neste computador:** http://localhost:3000
    - **outros computadores e celulares na mesma rede:** `http://IP-DESTE-COMPUTADOR:3000`. O endereço aparece na janela preta e na tela Configurações.
 
+### Sem permissão de administrador (computador da empresa)
+Se o Windows bloquear o instalador do Node.js ou os arquivos `.bat`:
+1. **Node.js sem instalar:** em https://nodejs.org/dist/latest-v22.x/ baixe o arquivo que termina em `-win-x64.zip`. Abra o ZIP, copie só o **`node.exe`** e cole na pasta `node` do painel.
+2. **Atalho no lugar do `iniciar.bat`:** na Área de Trabalho, botão direito → **Novo → Atalho** → cole `"C:\dashmaster\node\node.exe" "C:\dashmaster\node\server.js"` (troque pelo caminho da sua pasta) → nome **DashMaster**. Dois cliques abrem a janela do servidor.
+3. **Aviso do Firewall pedindo administrador:** clique em **Cancelar**. O painel funciona neste computador e pelo link público; só não abre pelo IP para outros computadores da rede.
+4. **Abrir sozinho:** **Windows + R** → `shell:startup` → cole o atalho nessa pasta.
+
 ### Abrir sozinho quando o Windows ligar
 
 1. Dê dois cliques em **`iniciar-com-windows.bat`**. Ele cria um atalho na pasta Inicializar do Windows: quando esse usuário entrar no Windows, o painel abre minimizado.
@@ -45,6 +52,8 @@ Para rodar mesmo **sem ninguém entrar no Windows**, use o **Agendador de Tarefa
 1. Crie uma tarefa **"Ao iniciar o computador"**.
 2. Em **Ação**, coloque o `iniciar.bat`.
 3. Marque **"Executar estando o usuário conectado ou não"**.
+
+**Atualização:** desde a V4.12.4, a instalação nova já vem **de hora em hora**: taxas, cartões e a lista do dia (gráficos e tabelas) de hoje, ontem e anteontem, por volta do minuto 5 de cada hora. Para mudar: Propriedades `ATUALIZACAO_MIN` (minutos, de 5 a 60) e `DETAIL_REFRESH_HOURS` (horas).
 
 ## 3. Uso no dia a dia
 
@@ -104,6 +113,8 @@ Sozinho, o servidor só abre na rede da base. Para ter um **link `https://` que 
    - Quem abrir o painel de fora vai precisar da senha.
 
 Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.exe" funnel reset`.
+
+**Sem o `link-publico.bat`** (arquivos `.bat` bloqueados): crie um atalho com `"C:\Program Files\Tailscale\tailscale.exe" funnel 3000` e dê dois cliques. A janela mostra o link `https://….ts.net` e precisa ficar aberta (coloque o atalho também em `shell:startup`). Na primeira vez, ela mostra um endereço para ativar o Funnel na sua conta do Tailscale.
 
 **Segurança:**
 - A tela **Configurações nunca abre pelo link público**, mesmo sem `senhaConfig`. O servidor reconhece pedidos vindos de túnel, e a tela só abre no próprio computador (ou com `senhaConfig`).

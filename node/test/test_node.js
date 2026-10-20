@@ -152,6 +152,10 @@ function firstDiff(a, b, p) {
   const saude = JSON.parse((await request(port, 'GET', '/saude')).text);
   check(saude.ok && /^\d+\.\d+\.\d+$/.test(saude.versao), 'servidor no ar (/saude)', saude);
 
+  // V4.12.4 (pedido): instalação nova já atualiza de hora em hora (taxas, cartões e a lista do dia).
+  const est0 = await admin('estado'), p0 = k => ((est0.props || []).filter(p => p.k === k)[0] || {}).v;
+  check(p0('ATUALIZACAO_MIN') === '60' && p0('DETAIL_REFRESH_HOURS') === '1' && p0('MODO_ATUALIZACAO') === 'continuo',
+    'instalação nova: atualiza de hora em hora, sem configurar nada', (est0.props || []).map(p => p.k));
   // Propriedades pela tela Configurações (equivale às Propriedades do script).
   for (const k of Object.keys(baseProps)) if (k !== 'JMS_AUTHTOKEN') await admin('propriedade', {k, v: baseProps[k]});
   await admin('credenciais', {authToken: 'FAKE'});
@@ -198,6 +202,13 @@ function firstDiff(a, b, p) {
   check(/__PLATAFORMA__/.test(page.text) && !/<\?!?=/.test(page.text) && /window\.__BOOT__ = \{/.test(page.text), 'página montada (sem marcas do Apps Script)');
   check(/<title>J&amp;T Express/.test(page.text) && /name="viewport"/.test(page.text), 'título e viewport');
   check(!/Propriedades do script|editor do Apps Script|abrir o Apps Script|Google Drive|Abrir no Drive/.test(page.text), 'textos apontam para Configurações e para este servidor, não para o Google');
+  // V4.12.4: os scripts das páginas compilam (a tela Configurações tinha um "\/" no modelo que virava "///" e travava todos
+  // os botões — salvar o AuthToken, baixar o histórico, propriedades).
+  const badScripts = html => (html.match(/<script(?![^>]*\bsrc=)(?![^>]*application\/json)[^>]*>[\s\S]*?<\/script>/g) || [])
+    .map(t => t.replace(/^<script[^>]*>|<\/script>$/g, '')).filter(js => { try { new Function(js); return false; } catch (e) { return true; } });
+  const cfgPage = await request(port, 'GET', '/config');
+  check(cfgPage.status === 200 && /Salvar e testar a conexão/.test(cfgPage.text) && !badScripts(cfgPage.text).length && !badScripts(page.text).length,
+    'scripts da tela Configurações e do painel sem erro de sintaxe (os botões funcionam)', badScripts(cfgPage.text).map(x => x.slice(0, 80)));
 
   // ---------- 5. Segurança das chamadas ----------
   const deny = await request(port, 'POST', '/api/run', {fn: 'setupProject', args: []});

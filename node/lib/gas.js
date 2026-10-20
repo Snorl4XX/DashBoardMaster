@@ -173,6 +173,10 @@ class GasRuntime {
     set('PLATAFORMA', 'node');
     // V4.5: o Apps Script baixa cada dia uma vez (modo diário, por causa da cota); aqui a coleta continua o dia todo.
     set('MODO_ATUALIZACAO', 'continuo');
+    // V4.12.4 (pedido): de hora em hora — taxas e cartões de hoje (ATUALIZACAO_MIN) e a lista do dia (DETAIL_REFRESH_HOURS).
+    // Só na primeira vez: o que já estiver nas Propriedades fica como está.
+    set('ATUALIZACAO_MIN', '60');
+    set('DETAIL_REFRESH_HOURS', '1');
     if (props.getProperty('DATA_FOLDER_ID') === null || props.getProperty('REPORT_FOLDER_ID') === null) {
       return this.run('setupProject', [], {quiet: true}).result;
     }
