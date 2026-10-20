@@ -1,8 +1,37 @@
-# J&T DASHMASTER V4.12.2 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.12.3 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.12.3 — Expedição SC → SC e SC → DC com valores; Deslacre retirado
+**Pedido:** "Não está mostrando os valores de Expedição SC/SC e SC/DC. Quero que tire o gráfico de Deslacre."
+
+### Por que SC → SC e SC → DC ficavam sem valores
+- O dia desses dois painéis vai das **14h às 13:59 do dia seguinte**. O dia 19/10, por exemplo, só fecha às 14h de 20/10. Antes disso, o JMS não tem o número.
+- Ao trocar de painel, a data do painel anterior era mantida. Abrindo o Envio Errado em 19/10 de manhã e indo para o SC → SC, o painel mostrava 19/10, um dia ainda aberto no JMS: **"Taxa oficial indisponível"** e cartões vazios.
+- Depois das 14h, o dia que acabou de fechar só era baixado no dia seguinte, às 6h.
+
+### O que mudou
+- **Ao trocar de painel:** o SC → SC e o SC → DC abrem no último dia fechado com taxa (no exemplo, 18/10). Um período de 7 dias continua com 7 dias, terminando nesse dia. Isso vale para todos os painéis: nenhum abre depois do último dia que ele tem.
+- **Agenda:** SC → SC e SC → DC também às **15h e 17h**, logo depois que o dia fecha às 14h. O número final de ontem aparece à tarde, sem esperar o dia seguinte.
+- **Dia ainda aberto escolhido na mão:** o cartão explica: "O dia 19/10 deste painel vai das 14h de 19/10 às 13:59 de 20/10: o JMS só tem o número depois das 14h de 20/10. Último dia com taxa: 18/10."
+
+| Painel | Atualiza sozinho |
+|---|---|
+| Envio Errado, Triagem Errada, Falta de Bipagem (Recebimento e Expedição), Avaria | às 6h e às 8h |
+| **SC → SC e SC → DC** | às 6h e às 8h, e **às 15h e às 17h** |
+
+Para mudar os horários da tarde: Propriedade do script **`HORAS_ATUALIZACAO_SC`** (padrão `15,17`; exemplo: `16`).
+
+### Deslacre retirado
+- O painel **Deslacre (linha secundária)** saiu do menu, dos Resultados e da fila (não gasta cota). Foi feito como o Fluxo de Lotes na V4.7.
+- Os dados antigos continuam na planilha.
+- Para trazer de volta: Propriedade do script **`REATIVAR_PAINEIS`** = `unseal` (com o Fluxo de Lotes também: `lot_flow,unseal`).
+
+### Como instalar
+- **Google:** troque os `.gs` e `.html` pelos do ZIP V4.12.3 e publique uma **Nova versão**. Não precisa rodar nenhuma função.
+- **Node.js / Oracle:** envie o `JT_DASHMASTER_V4_12_3_NODE.zip` e rode `unzip -o JT_DASHMASTER_V4_12_3_NODE.zip && sudo systemctl restart dashmaster`.
 
 ## V4.12.2 — Segmento sempre "GRU,391-05" e o processo das sacas como na tela
 **Pedido:** "Em vez de aparecer GRU,391-05, que é a junção de duas colunas… também a questão dos sem informações, você não fez o processo. Segue à risca."
@@ -420,6 +449,7 @@ No painel principal, as consultas do último dia simulado ficaram concentradas �
 | Propriedade | Para que serve |
 |---|---|
 | `HORAS_ATUALIZACAO` | Horários dos painéis do dia. Padrão `6,8`; exemplo: `5,7,9` |
+| `HORAS_ATUALIZACAO_SC` | **V4.12.3:** horários da tarde do SC → SC e SC → DC (o dia deles fecha às 14h). Padrão `15,17` |
 | `SEM_MOVIMENTACAO_HORAS` | Intervalo da Sem Movimentação, em horas (padrão `2`) |
 | `LOTES_HORAS` | Intervalo do Fluxo de Lotes, em horas (padrão `3`) |
 | `MODO_ATUALIZACAO` = `continuo` | Volta à coleta contínua (hoje a cada 30 min, revalidação de hora em hora) |

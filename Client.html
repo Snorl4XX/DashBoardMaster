@@ -73,6 +73,7 @@
       targetGoodText: 'Maomao está dançando: {name} está dentro da meta ({goal}). Continue assim!',
       targetBadText: 'Maomao está chorando: {name} está fora da meta ({goal}). Veja abaixo os maiores ofensores.',
       targetNoneText: 'Ainda não há taxa sincronizada do JMS para este período. Confira a cobertura nos selos acima.',
+      targetOpenText: 'O dia {d} deste painel vai das 14h de {d} às 13:59 de {n}: o JMS só tem o número depois das 14h de {n}. Último dia com taxa: {a}.',
       goalBelow: 'abaixo de {v}', goalAbove: 'acima de {v}',
       evolution: 'Evolução diária', evolutionSub: 'Taxa oficial do JMS por dia · pontos verdes na meta, vermelhos fora', evolutionSubNoGoal: 'Taxa oficial do JMS por dia',
       evolution30: '30 dias até {date}',
@@ -109,7 +110,7 @@
       themeDark: 'Tema escuro', themeLight: 'Tema claro',
       pauseAuthTitle: 'Sincronização pausada: o JMS recusou a credencial',
       pauseAuthText: 'Desde {since} o JMS não aceita o token (normalmente ele expirou). Indicadores afetados: {list}. O responsável deve gerar um novo AuthToken no JMS e atualizar JMS_AUTHTOKEN nas Propriedades do script — a importação recomeça sozinha. Os dados já sincronizados continuam no painel.',
-      dailyBadge: 'Atualiza às {h}', dailyHint: 'O último dia fechado é baixado às {h} e fica salvo (SC→SC e SC→DC: também a janela de ontem, que fecha às 13:59). Fora desses horários, só com o botão Atualizar.',
+      dailyBadge: 'Atualiza às {h}', dailyHint: 'O último dia fechado é baixado às {h} e fica salvo (SC→SC e SC→DC: o dia vai das 14h às 13:59 do dia seguinte; o número final é baixado à tarde, depois que ele fecha). Fora desses horários, só com o botão Atualizar.',
       everyBadge: 'Atualiza a cada {n} h', everyHint: 'Os números de hoje são baixados a cada {n} horas (0h, {n}h…). Fora desses horários, só com o botão Atualizar.',
       hoursJoin: ' e ', detailsFetching: 'Baixando a lista do dia e os IDs de viagem…', detailsFetched: 'Lista e IDs atualizados.',
       refreshingAll: 'Atualizando todos os indicadores…', refreshAllDone: 'Taxas e cartões atualizados: {p} de {t} painéis.',
@@ -243,6 +244,7 @@
       targetGoodText: 'Maomao 正在跳舞庆祝：{name} 已达标（目标 {goal}），继续保持！',
       targetBadText: 'Maomao 哭了：{name} 未达标（目标 {goal}）。请查看下方主要问题。',
       targetNoneText: '该期间尚无已同步的JMS指标率，请查看上方的覆盖情况。',
+      targetOpenText: '本面板的 {d} 为 {d} 14 点至 {n} 13:59：JMS 在 {n} 14 点后才有数据。最近有指标率的日期：{a}。',
       goalBelow: '低于 {v}', goalAbove: '高于 {v}',
       evolution: '每日趋势', evolutionSub: 'JMS官方每日指标率 · 绿点达标，红点未达标', evolutionSubNoGoal: 'JMS官方每日指标率',
       evolution30: '截至 {date} 的30天',
@@ -279,7 +281,7 @@
       themeDark: '深色主题', themeLight: '浅色主题',
       pauseAuthTitle: '同步已暂停：JMS 拒绝了凭证',
       pauseAuthText: '自 {since} 起 JMS 不接受该令牌（通常已过期）。受影响的指标：{list}。请负责人在 JMS 中重新获取 AuthToken，并在脚本属性中更新 JMS_AUTHTOKEN，导入会自动恢复。已同步的数据仍会显示。',
-      dailyBadge: '{h} 更新', dailyHint: '最近一个已结束的日期在 {h} 下载并保存（SC→SC 和 SC→DC 另含昨天 14 点开始、今天 13:59 结束的时段）。其他时间请点击“更新”。',
+      dailyBadge: '{h} 更新', dailyHint: '最近一个已结束的日期在 {h} 下载并保存（SC→SC 和 SC→DC 的一天为 14 点至次日 13:59，结束后于下午下载最终数据）。其他时间请点击“更新”。',
       everyBadge: '每 {n} 小时更新', everyHint: '今天的数据每 {n} 小时下载一次（0 点、{n} 点…）。其他时间请点击“更新”。',
       hoursJoin: '、', detailsFetching: '正在下载当天明细和车次号…', detailsFetched: '明细和车次号已更新。',
       refreshingAll: '正在更新全部指标…', refreshAllDone: '指标率和卡片已更新：{t} 个看板中的 {p} 个。',
@@ -1032,6 +1034,13 @@
     // V3.37: Tempo real (Sem Movimentação) é sempre HOJE — antes herdava a data do painel anterior (ontem) e mostrava a foto
     // de ontem como se fosse a de agora.
     if (isLive()) { var tdy = (state.boot && state.boot.today) || state.to; state.from = tdy; state.to = tdy; }
+    // V4.12.3: o painel novo não abre depois do último dia fechado dele. SC→SC e SC→DC fecham o dia às 14h do dia seguinte:
+    // o dia herdado de outro painel (ontem) ainda estava aberto no JMS e o painel ficava sem valores. O período volta para
+    // terminar no último dia fechado, com o mesmo tamanho.
+    else if (changed && state.from && state.to) {
+      var lastDay = anchorDate(key);
+      if (state.to > lastDay) { var span = Core.daysBetween(state.from, state.to); state.to = lastDay; state.from = Core.addDays(lastDay, -span); }
+    }
     renderSourceField();
     if (state.view !== 'dashboard') setView('dashboard');
     $('#indicatorSelect').value = key;
@@ -1404,7 +1413,10 @@
       var every = cfg() && cfg().agendaEvery;
       if (every) html += badge('ok', 'history', t('everyBadge', {n: every}), t('everyHint', {n: every}));
       else {
-        var hrs = (app.updateHours && app.updateHours.length ? app.updateHours : [app.updateHour]).map(function (h) { return String(h).padStart(2, '0') + 'h'; });
+        var hl = (app.updateHours && app.updateHours.length ? app.updateHours : [app.updateHour]);
+        // V4.12.3: SC→SC e SC→DC também à tarde (o dia operacional fecha às 14h).
+        if (cfg() && cfg().operationalWindow && app.updateHoursSc) hl = hl.concat(app.updateHoursSc).filter(function (h, i, a) { return a.indexOf(h) === i; }).sort(function (a, b) { return a - b; });
+        var hrs = hl.map(function (h) { return String(h).padStart(2, '0') + 'h'; });
         var hTxt = hrs.length > 1 ? hrs.slice(0, -1).join(', ') + t('hoursJoin') + hrs[hrs.length - 1] : hrs[0];
         html += badge('ok', 'history', t('dailyBadge', {h: hTxt}), t('dailyHint', {h: hTxt}));
       }
@@ -2378,7 +2390,10 @@
     var vars = {name: L(c.name), goal: goalSentence(c.goal)};
     $('#targetPill').textContent = st === 'good' ? t('inGoal').toUpperCase() : st === 'bad' ? t('outGoal').toUpperCase() : '—';
     $('#targetTitle').textContent = st === 'good' ? t('targetGoodTitle') : st === 'bad' ? t('targetBadTitle') : noGoal ? t('targetNoGoalTitle') : t('targetNoneTitle');
-    $('#targetText').textContent = st === 'good' ? t('targetGoodText', vars) : st === 'bad' ? t('targetBadText', vars) : noGoal ? t('targetNoGoalText', vars) : t('targetNoneText');
+    // V4.12.3: SC→SC/SC→DC num dia depois do último fechado: explica a janela das 14h em vez de "sem taxa".
+    var lastDay = anchorDate(state.indicator), openDay = c.operationalWindow && state.to > lastDay;
+    $('#targetText').textContent = st === 'good' ? t('targetGoodText', vars) : st === 'bad' ? t('targetBadText', vars) : noGoal ? t('targetNoGoalText', vars)
+      : openDay ? t('targetOpenText', {d: fmtDate(state.to), n: fmtDate(Core.addDays(state.to, 1)), a: fmtDate(lastDay)}) : t('targetNoneText');
     $('#goalValue').textContent = hasGoal(c.goal) ? goalText(c.goal) : '—';
   }
 

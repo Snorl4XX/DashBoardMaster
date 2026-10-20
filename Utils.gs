@@ -129,6 +129,15 @@ function updateHours_() {
   const hs = list.length ? list : APP_CONFIG.UPDATE_HOURS;
   return hs.filter((h, i) => hs.indexOf(h) === i).sort((a, b) => a - b);
 }
+/**
+ * V4.12.3: horários da agenda de SC → SC e SC → DC (HORAS_ATUALIZACAO_SC = "15,17"). A janela 14:00 → 13:59 fecha às 14h:
+ * sem estes horários, o número final do dia que acabou de fechar só vinha na agenda das 6h do dia seguinte.
+ */
+function updateHoursSc_() {
+  const list = (String(getProp_('HORAS_ATUALIZACAO_SC', '')).match(/\d{1,2}/g) || []).map(Number).filter(h => h >= 0 && h <= 23);
+  const hs = list.length ? list : APP_CONFIG.UPDATE_HOURS_SC;
+  return hs.filter((h, i) => hs.indexOf(h) === i).sort((a, b) => a - b);
+}
 /** Primeiro horário da agenda: a partir dele o dia anterior conta como fechado. */
 function updateHour_() { return updateHours_()[0]; }
 /** Painel com agenda própria (a cada N horas): Sem Movimentação e Fluxo de Lotes. A propriedade troca o intervalo. */

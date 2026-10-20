@@ -1121,17 +1121,21 @@ const AGENDA_PROP_ = 'AGENDA_ESTADO';
  *  - Painéis de dia fechado: em cada horário de HORAS_ATUALIZACAO (6h e 8h) — agendaDailyJobs_.
  *  - Sem Movimentação / Fluxo de Lotes (agendaEvery): a cada N horas do relógio (0h, 2h, 4h… / 0h, 3h, 6h…).
  * Horário que passou sem execução (gatilho atrasado, fila parada pela cota): roda uma vez só, na primeira execução depois.
- * Estado (propriedade interna AGENDA_ESTADO): {d: dia, s: horários já feitos hoje, i: {painel: "dia#bloco"}}.
+ *  - V4.12.3: SC → SC e SC → DC também em HORAS_ATUALIZACAO_SC (15h e 17h): o dia operacional fecha às 14h.
+ * Estado (propriedade interna AGENDA_ESTADO): {d: dia, s: horários já feitos hoje, o: horários de SC feitos hoje,
+ * i: {painel: "dia#bloco"}}.
  */
 function runAgenda_() {
   if (!dailyMode_() || !getProp_('DB_SPREADSHEET_ID', '')) return 0;
   const today = isoToday_(), h = hourNow_();
   const prev = safeJsonParse_(getProp_(AGENDA_PROP_, ''), null) || {};
-  const state = {d: today, s: prev.d === today ? (prev.s || []).slice() : [], i: Object.assign({}, prev.i || {})};
+  const state = {d: today, s: prev.d === today ? (prev.s || []).slice() : [], o: prev.d === today ? (prev.o || []).slice() : [],
+    i: Object.assign({}, prev.i || {})};
   const due = updateHours_().filter(x => x <= h && state.s.indexOf(x) < 0);
+  const dueSc = Object.keys(INDICATORS).some(isOperational_) ? updateHoursSc_().filter(x => x <= h && state.o.indexOf(x) < 0) : [];
   const every = Object.keys(INDICATORS).filter(k => INDICATORS[k].agendaEvery && agendaEveryHours_(INDICATORS[k]) > 0)
     .map(k => ({k: k, slot: today + '#' + Math.floor(h / agendaEveryHours_(INDICATORS[k]))})).filter(x => state.i[x.k] !== x.slot);
-  if (!due.length && !every.length) return 0;
+  if (!due.length && !dueSc.length && !every.length) return 0;
   // Rota pausada (token vencido, cota do Google): as tarefas entram assim mesmo e esperam na fila — rodam quando a pausa
   // acabar (token trocado, cota de volta), sem esperar o próximo horário.
   let jobs = [];
@@ -1141,25 +1145,31 @@ function runAgenda_() {
     if (!state.s.length) { try { healQueue_(300); } catch (e) { logSync_('WARN', '', '', 'Autocorreção não concluída: ' + e); } }
     state.s = state.s.concat(due).filter((x, i, a) => a.indexOf(x) === i).sort((a, b) => a - b);
   }
+  if (dueSc.length) {
+    jobs = jobs.concat(agendaDailyJobs_(isOperational_));
+    state.o = state.o.concat(dueSc).filter((x, i, a) => a.indexOf(x) === i).sort((a, b) => a - b);
+  }
   every.forEach(x => { jobs = jobs.concat(agendaEveryJobs_(x.k)); state.i[x.k] = x.slot; });
   setProp_(AGENDA_PROP_, JSON.stringify(state));
   if (!jobs.length) return 0;
   const n = enqueueJobs_(jobs, {reset: true});
   logSync_('INFO', '', today, 'Agenda ' + String(h).padStart(2, '0') + 'h: ' + n + ' tarefa(s) na fila' +
     (due.length ? ' (horário ' + due.map(x => String(x).padStart(2, '0') + 'h').join(' e ') + ')' : '') +
+    (dueSc.length ? ' (SC → SC e SC → DC: ' + dueSc.map(x => String(x).padStart(2, '0') + 'h').join(' e ') + ')' : '') +
     (every.length ? ' · ' + every.map(x => x.k).join(', ') : '') + '.');
   return n;
 }
 /**
  * Um horário da agenda (6h, 8h) para os painéis de dia fechado: o último dia fechado de novo (taxa; a lista vem junto se
  * mudou — runSummaryJob_), os 7 dias anteriores que ainda não têm o número final ou a lista completa, e — SC→SC e SC→DC —
- * a janela de ontem, ainda em andamento até as 13:59 de hoje.
+ * a janela de ontem, ainda em andamento até as 13:59 de hoje. `only` (opcional): só os painéis que ele aceita (V4.12.3: a agenda
+ * da tarde de SC → SC e SC → DC, quando o último dia fechado já é ontem).
  */
-function agendaDailyJobs_() {
+function agendaDailyJobs_(only) {
   const start = getProp_('DATA_START_DATE', ''), today = isoToday_(), jobs = [];
   Object.keys(INDICATORS).forEach(k => {
     const cfg = INDICATORS[k];
-    if (cfg.snapshot || cfg.agendaEvery) return;
+    if (cfg.snapshot || cfg.agendaEvery || (only && !only(k))) return;
     const last = lastClosedDate_(k);
     if (start && last < start) return;
     jobs.push(['SUMMARY', k, last, 0]);

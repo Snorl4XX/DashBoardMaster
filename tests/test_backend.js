@@ -8,9 +8,10 @@ const days = {'2026-09-17': makeDay('2026-09-17', 11), '2026-09-18': makeDay('20
 // DETAIL_DAYS_ARRIVAL_FLOW: os dias dos testes (setembro) ficam dentro da janela de detalhe do Recebimento.
 // ATUALIZACAO_MIN 60: os testes antigos contam a fila sem a atualização rápida de hoje (V3.24 tem testes próprios).
 // MODO_ATUALIZACAO continuo: os testes antigos conferem a atualização contínua (opção); o modo diário (padrão da V4.5) tem os seus.
-// REATIVAR_PAINEIS lot_flow: o Fluxo de Lotes foi retirado na V4.7 (pedido); os testes antigos dele continuam valendo com ele de volta.
+// REATIVAR_PAINEIS lot_flow,unseal: o Fluxo de Lotes (V4.7) e o Deslacre (V4.12.3) foram retirados (pedido); os testes antigos
+// deles continuam valendo com eles de volta.
 const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60',
-  MODO_ATUALIZACAO: 'continuo', REATIVAR_PAINEIS: 'lot_flow'};
+  MODO_ATUALIZACAO: 'continuo', REATIVAR_PAINEIS: 'lot_flow,unseal'};
 const ctx = createContext({props: baseProps, jms: fakeJms(days), quiet: true});
 const S = ctx.__state;
 
@@ -3143,7 +3144,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   ['ARRIVAL_FLOW', 'DAMAGE', 'LOT_FLOW', 'MISSING_DISPATCH', 'MISSING_RECEIPT', 'NO_MOVE', 'SC_DC', 'SC_SC', 'SEND_FLOW', 'SORTING_ERROR', 'UNSEAL', 'WRONG_SEND']
     .forEach(k => { old['HISTORY_FILL_' + k] = '2026-10-01T08:05:53Z'; });
   const settings = {JMS_AUTHTOKEN: 'TOKEN_ANTIGO_FICTICIO', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', PAINEIS_FORA: 'arrival_flow,send_flow',
-    GROUPED_CLIENT_ROWS: '60000', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60', REATIVAR_PAINEIS: 'lot_flow'};
+    GROUPED_CLIENT_ROWS: '60000', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60', REATIVAR_PAINEIS: 'lot_flow,unseal'};
   const cP = createContext({props: Object.assign({}, settings, old), jms: fakeJms({[D19]: makeDay(D19, 61)}), quiet: true, separateUserProps: true});
   cP.setupProject();
   check(Object.keys(cP.__state.props).length > 50, 'cenário: mais de 50 Propriedades do script', Object.keys(cP.__state.props).length);
@@ -3237,13 +3238,13 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const keys0 = require('vm').runInContext('Object.keys(INDICATORS)', c0);
   // (V4.7: o Fluxo de Lotes foi retirado — fora de INDICATORS sem REATIVAR_PAINEIS; a agenda dele continua na configuração.)
   const lotCfg = c => require('vm').runInContext('ALL_INDICATORS_.lot_flow', c);
-  check(c0.dailyMode_() === true && c0.updateHours_().join() === '6,8' && c0.updateHour_() === 6 &&
+  check(c0.dailyMode_() === true && c0.updateHours_().join() === '6,8' && c0.updateHour_() === 6 && c0.updateHoursSc_().join() === '15,17' &&
     c0.agendaEveryHours_(c0.getIndicatorConfig_('no_move')) === 2 && c0.agendaEveryHours_(lotCfg(c0)) === 3 &&
     keys0.filter(k => c0.getIndicatorConfig_(k).agendaEvery).sort().join() === 'no_move',
     'padrão: agenda às 6h e 8h; Sem Movimentação a cada 2 h; Fluxo de Lotes (se reativado) a cada 3 h');
-  const c1 = createContext({props: {HORAS_ATUALIZACAO: '9h e 7h', SEM_MOVIMENTACAO_HORAS: '4', LOTES_HORAS: '0'}, jms: fakeJms({}), quiet: true});
-  check(c1.updateHours_().join() === '7,9' && c1.agendaEveryHours_(c1.getIndicatorConfig_('no_move')) === 4 &&
-    c1.agendaEveryHours_(lotCfg(c1)) === 3, 'HORAS_ATUALIZACAO ("9h e 7h"), SEM_MOVIMENTACAO_HORAS e LOTES_HORAS (valor inválido = padrão)');
+  const c1 = createContext({props: {HORAS_ATUALIZACAO: '9h e 7h', HORAS_ATUALIZACAO_SC: '16h', SEM_MOVIMENTACAO_HORAS: '4', LOTES_HORAS: '0'}, jms: fakeJms({}), quiet: true});
+  check(c1.updateHours_().join() === '7,9' && c1.updateHoursSc_().join() === '16' && c1.agendaEveryHours_(c1.getIndicatorConfig_('no_move')) === 4 &&
+    c1.agendaEveryHours_(lotCfg(c1)) === 3, 'HORAS_ATUALIZACAO ("9h e 7h"), HORAS_ATUALIZACAO_SC, SEM_MOVIMENTACAO_HORAS e LOTES_HORAS (valor inválido = padrão)');
   const c2 = createContext({props: {MODO_ATUALIZACAO: 'continuo'}, jms: fakeJms({}), quiet: true});
   check(c2.dailyMode_() === false && c2.runAgenda_() === 0, 'MODO_ATUALIZACAO=continuo: sem agenda (comportamento antigo)');
   const today = c0.isoToday_(), ago = n => c0.addDaysIso_(today, -n), Y = ago(1), Y2 = ago(2), Y3 = ago(3);
@@ -3305,16 +3306,24 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const sumWs = epOf('wrong_send')[0], detWs = epOf('wrong_send')[1];
   check(u.indexOf(sumWs) >= 0 && u.indexOf(detWs) < 0 && u.some(x => noMoveEps.indexOf(x) >= 0) && !u.some(x => lotEps.indexOf(x) >= 0),
     'às 8h: taxa de ontem conferida de novo (lista igual não é baixada de novo) e foto da Sem Movimentação', u.slice(0, 6));
-  // 9h às 23h: painéis do dia nunca; Sem Movimentação a cada 2 h e Lotes a cada 3 h.
+  // 9h às 23h: painéis do dia nunca, a não ser SC→SC e SC→DC às 15h e 17h (V4.12.3: o dia operacional fecha às 14h);
+  // Sem Movimentação a cada 2 h e Lotes a cada 3 h.
   n = S.fetches.length;
   const perHour = {};
-  for (let h = 9; h <= 23; h++) { const m = S.fetches.length; tick(h); perHour[h] = since(m); }
-  check(!since(n).some(isDaily), '9h às 23h: nenhum painel do dia consultado (só pelo botão Atualizar)', since(n).filter(isDaily).slice(0, 3));
+  for (let h = 9; h <= 23; h++) {
+    const m = S.fetches.length; tick(h); perHour[h] = since(m);
+    if (h === 14) check(!cD.dayIsFinal_('sc_dc', Y), '14h: a janela de ontem do SC→SC/SC→DC acabou de fechar e ainda não foi baixada');
+  }
+  const scEps = [].concat(epOf('sc_sc'), epOf('sc_dc')), isSc = u => scEps.indexOf(u) >= 0;
+  const scHours = Object.keys(perHour).filter(h => perHour[h].some(isSc)).map(Number);
+  check(!since(n).some(x => isDaily(x) && !isSc(x)) && scHours.join() === '15,17',
+    '9h às 23h: nenhum painel do dia consultado (só pelo botão Atualizar), a não ser SC→SC e SC→DC às 15h e 17h', {scHours, outros: since(n).filter(x => isDaily(x) && !isSc(x)).slice(0, 3)});
+  check(['sc_sc', 'sc_dc'].every(k => cD.dayIsFinal_(k, Y) && complete(k, Y)) && JSON.parse(S.props.AGENDA_ESTADO).o.join() === '15,17',
+    'SC→SC/SC→DC: à tarde a janela de ontem (fechada às 14h) entra com o número final — antes só no dia seguinte às 6h');
   const nmHours = Object.keys(perHour).filter(h => perHour[h].some(x => noMoveEps.indexOf(x) >= 0)).map(Number);
   const lotHours = Object.keys(perHour).filter(h => perHour[h].some(x => lotEps.indexOf(x) >= 0)).map(Number);
   check(nmHours.join() === '10,12,14,16,18,20,22' && lotHours.join() === '9,12,15,18,21',
     'Sem Movimentação às 10h, 12h…22h (a cada 2 h); Lotes às 9h, 12h…21h (a cada 3 h)', {nmHours, lotHours});
-  check(!cD.dayIsFinal_('sc_dc', Y), 'janela de ontem do SC→SC/SC→DC não é baixada às 14h (só na agenda do dia seguinte)');
   // auditYesterday (gatilho das 7h): no modo diário não consulta nada.
   n = S.fetches.length;
   cD.auditYesterday(); runAll(cD, 2);
@@ -3327,7 +3336,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   setHour(9, 1);
   const boot = cD.getAppBootstrap();
   const cat = k => boot.catalog.filter(c => c.key === k)[0] || {};
-  check(boot.app.updateMode === 'diario' && boot.app.updateHours.join() === '6,8' && cat('no_move').agendaEvery === 2 && cat('lot_flow').agendaEvery === 3 && !cat('sc_dc').agendaEvery,
+  check(boot.app.updateMode === 'diario' && boot.app.updateHours.join() === '6,8' && boot.app.updateHoursSc.join() === '15,17' && cat('no_move').agendaEvery === 2 && cat('lot_flow').agendaEvery === 3 && !cat('sc_dc').agendaEvery,
     'painel sabe da agenda (6h e 8h; Sem Movimentação 2 h; Lotes 3 h)', boot.app);
   // Horário perdido (instalação às 15h, gatilho parado): roda uma vez só na primeira execução depois.
   const cM = freshCtx({[Y]: makeDay(Y, 85)}, null, {DATA_START_DATE: Y, MODO_ATUALIZACAO: 'diario'});
@@ -3407,8 +3416,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cB = createContext({props: {REATIVAR_PAINEIS: 'lot_flow'}, jms: fakeJms({}), quiet: true});
   const cP = createContext({props: {PAINEIS: 'lot_flow,wrong_send'}, jms: fakeJms({}), quiet: true});
   const cF = createContext({props: {PAINEIS_FORA: 'arrival_flow,send_flow'}, jms: fakeJms({}), quiet: true});
-  check(keysOf(cB).indexOf('lot_flow') >= 0 && keysOf(cP).join() === 'wrong_send,lot_flow' && keysOf(cF).indexOf('lot_flow') < 0 && keysOf(cF).length === 9,
-    'REATIVAR_PAINEIS (ou PAINEIS) traz de volta; painel principal com 9 painéis', [keysOf(cP), keysOf(cF).length]);
+  check(keysOf(cB).indexOf('lot_flow') >= 0 && keysOf(cP).join() === 'wrong_send,lot_flow' && keysOf(cF).indexOf('lot_flow') < 0 && keysOf(cF).length === 8,
+    'REATIVAR_PAINEIS (ou PAINEIS) traz de volta; painel principal com 8 painéis (V4.12.3: sem o Deslacre)', [keysOf(cP), keysOf(cF)]);
+  // V4.12.3 (pedido): Deslacre retirado do mesmo jeito.
+  let msgU = '';
+  try { cR.activeCfg_('unseal'); } catch (e) { msgU = e.message; }
+  const cU = createContext({props: {REATIVAR_PAINEIS: 'unseal'}, jms: fakeJms({}), quiet: true});
+  check(keysOf(cR).indexOf('unseal') < 0 && keysOf(cF).indexOf('unseal') < 0 && !cR.getPublicCatalog_().some(c => c.key === 'unseal') &&
+    /REATIVAR_PAINEIS = unseal/.test(msgU) && keysOf(cU).indexOf('unseal') >= 0 && keysOf(cU).indexOf('lot_flow') < 0,
+    'Deslacre retirado: fora do menu, dos Resultados e da fila; REATIVAR_PAINEIS = unseal traz de volta', msgU);
   // Nenhuma consulta dos Lotes e Resultados sem eles.
   const today = cR.isoToday_(), ago = n => cR.addDaysIso_(today, -n), Y = ago(1), Y2 = ago(2), Y3 = ago(3);
   const daysR = {[today]: makeDay(today, 91), [Y]: makeDay(Y, 92), [Y2]: makeDay(Y2, 93), [Y3]: makeDay(Y3, 94)};
@@ -3417,16 +3433,17 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   cL.queueHistory(Y3, Y, true);
   runAll(cL);
   const lotEp = vmR.runInContext('ALL_INDICATORS_.lot_flow.summary.endpoint', cL);
-  check(!cL.__state.fetches.some(f => f.url.split('?')[0] === lotEp) && !cL.allTabRows_('JOBS').some(r => r[2] === 'lot_flow'),
-    'histórico do painel principal sem nenhuma consulta dos Lotes');
+  const unsealEp = vmR.runInContext('ALL_INDICATORS_.unseal.summary.endpoint', cL);
+  check(!cL.__state.fetches.some(f => [lotEp, unsealEp].indexOf(f.url.split('?')[0]) >= 0) && !cL.allTabRows_('JOBS').some(r => r[2] === 'lot_flow' || r[2] === 'unseal'),
+    'histórico do painel principal sem nenhuma consulta dos Lotes nem do Deslacre');
   const res = cL.getResultsData({from: Y3, to: Y});
-  check(res && !JSON.stringify(res).includes('lot_flow'), 'Resultados sem o Fluxo de Lotes');
+  check(res && !JSON.stringify(res).includes('lot_flow') && !JSON.stringify(res).includes('unseal'), 'Resultados sem o Fluxo de Lotes e sem o Deslacre');
   // Atualizar: todos os painéis de uma vez (taxas e cartões; depois listas, IDs de viagem e bipagens), o aberto primeiro.
   const cA = freshCtx(daysR, null, PRINC);
   const r1 = cA.refreshAllNow('wrong_send', Y, Y);
   const panels = keysOf(cA);
-  check(r1.ok && r1.panels === panels.length && r1.panelsTotal === 9 && r1.failed === 0 && r1.detailsQueued >= 8,
-    'Atualizar: taxa e cartões dos 9 painéis numa chamada', {panels: r1.panels, total: r1.panelsTotal, q: r1.detailsQueued, err: r1.errors});
+  check(r1.ok && r1.panels === panels.length && r1.panelsTotal === 8 && r1.failed === 0 && r1.detailsQueued >= 7,
+    'Atualizar: taxa e cartões dos 8 painéis numa chamada', {panels: r1.panels, total: r1.panelsTotal, q: r1.detailsQueued, err: r1.errors});
   check(cA.refreshAllNow('wrong_send', Y, Y).cooldown === true, 'clique repetido em seguida não consulta de novo');
   const x1 = cA.refreshAllDetailsNow('wrong_send', Y, Y);
   const complete = (k, d) => !!cA.getDayStatus_(k, d) && cA.getDayStatus_(k, d).details === 'COMPLETE';

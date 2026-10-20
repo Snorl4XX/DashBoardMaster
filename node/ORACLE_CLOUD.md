@@ -9,7 +9,7 @@ O painel fica num servidor da Oracle, ligado 24 h, **sem os limites do Google**:
 
 **O que precisa:**
 - um cartão de crédito, só para a Oracle verificar a conta (o plano "Always Free" não cobra);
-- o arquivo **`JT_DASHMASTER_V4_12_2_NODE.zip`**;
+- o arquivo **`JT_DASHMASTER_V4_12_3_NODE.zip`**;
 - um computador com Windows 10 ou 11 (o PowerShell já tem os comandos `ssh` e `scp`);
 - o **AuthToken do JMS**.
 
@@ -56,12 +56,12 @@ Nos comandos abaixo, troque **`IP`** pelo Public IP address do passo 2.
 ## 4. Mandar o painel para o servidor
 1. Abra **outra janela** do PowerShell, no seu computador, e envie o ZIP:
    ```
-   scp -i C:\DashMaster\chave.key C:\DashMaster\JT_DASHMASTER_V4_12_2_NODE.zip ubuntu@IP:~/
+   scp -i C:\DashMaster\chave.key C:\DashMaster\JT_DASHMASTER_V4_12_3_NODE.zip ubuntu@IP:~/
    ```
 2. Na janela do **servidor**, extraia:
    ```
    sudo apt-get update && sudo apt-get install -y unzip
-   unzip -o JT_DASHMASTER_V4_12_2_NODE.zip
+   unzip -o JT_DASHMASTER_V4_12_3_NODE.zip
    ```
    Isso cria a pasta `~/dashmaster`.
 

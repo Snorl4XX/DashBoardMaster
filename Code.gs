@@ -82,7 +82,8 @@ function getAppBootstrap() {
   }
   return safeReturn_({
     app: {name: APP_CONFIG.APP_NAME, nameZh: APP_CONFIG.APP_NAME_ZH, version: APP_CONFIG.VERSION, red: APP_CONFIG.RED,
-      panel: panelName_(), updateMode: dailyMode_() ? 'diario' : 'continuo', updateHour: updateHour_(), updateHours: updateHours_()},
+      panel: panelName_(), updateMode: dailyMode_() ? 'diario' : 'continuo', updateHour: updateHour_(), updateHours: updateHours_(),
+        updateHoursSc: updateHoursSc_()},
     center: centerName_(), catalog: getPublicCatalog_(), shiftColors: SHIFT_COLORS,
     today: isoToday_(), historyStart: getProp_('DATA_START_DATE', '') || earliest || '',
     latestByIndicator: latest, lastUpdated: lastUpdated, initialized: initialized,

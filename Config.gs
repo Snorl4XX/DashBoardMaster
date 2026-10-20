@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.12.2',
+  VERSION: '4.12.3',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -25,6 +25,7 @@ const APP_CONFIG = Object.freeze({
   REFRESH_COOLDOWN_S: 90,
   SNAPSHOT_LIST_BUDGET_MS: 240000, // V3.30: Sem Movimentação — lista baixada na hora pelo botão Atualizar (até 4 min)
   UPDATE_HOURS: [6, 8],        // V4.6 (pedido): agenda dos painéis de dia fechado (HORAS_ATUALIZACAO muda)
+  UPDATE_HOURS_SC: [15, 17],   // V4.12.3: SC → SC e SC → DC — o dia operacional fecha às 14h; busca o número final à tarde (HORAS_ATUALIZACAO_SC muda)
   REFRESH_DETAIL_BUDGET_MS: 150000, // V4.6: botão Atualizar — lista do dia e IDs de viagem baixados na hora (até 2,5 min)
   REFRESH_ALL_BUDGET_MS: 90000,      // V4.7: Atualizar TODOS os painéis — taxas e cartões (até 1,5 min)
   REFRESH_ALL_DETAIL_BUDGET_MS: 270000, // V4.7: em seguida, listas e IDs de todos os painéis (até 4,5 min; a chamada do Google vai até 6)
@@ -1340,6 +1341,9 @@ const ALL_INDICATORS_ = Object.freeze({
     subtitle: {pt: 'IDs sem bipe de deslacre e tempo do deslacre até o bipe de recebimento', zh: '未解封扫描车次及解封至卸车扫描时长'},
     goal: {value: null, direction: 'max', strict: false},
     apiProfile: 'unseal', detailMatchesErrors: false, light: true, unseal: true,
+    // V4.12.3 (pedido): painel RETIRADO, como o Fluxo de Lotes na V4.7 — fora do menu, dos Resultados e da fila (não gasta
+    // cota). Os dados antigos continuam na planilha. Para trazer de volta: Propriedade do script REATIVAR_PAINEIS = unseal.
+    retired: true,
     summary: {
       endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page',
       rateFromCounts: true, rateKeys: [], errorKeys: ['noUnlockNum'], totalKeys: ['tripNum'],
