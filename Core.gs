@@ -250,6 +250,60 @@ function JTCoreFactory_() {
     return m ? m[3] + '-' + pad2(m[2]) + '-' + pad2(m[1]) : '';
   }
   /**
+   * V4.12.6 (pedido): "segmento" pela fórmula do WPS do usuário (Envio Errado: "Primeiro segmento afetado"; Falta de Bipagem
+   * na Expedição: "Segmentos ofensores (1º segmento)"), aplicada ao código de três segmentos ("GRU,378-00,020"), à risca:
+   *  - vazio → vazio;
+   *  - começa com "GRU," → pelo 2º segmento: DC SSZ-SP, DC TBT-SP, MOOCA, DC GRU ou SP BRE; nenhum → "REVISAR GRU";
+   *  - "SP," → SP BRE · "SBN," → SBN (com "375-") ou "REVISAR SBN" · "MOO," → MOOCA (430-00 a 430-08) ou "REVISAR MOO";
+   *  - senão, pelo texto antes da 1ª vírgula (GO → GO GYN, SC/SC1 → SC BNU …); nenhum → "REVISAR SEGMENTO".
+   * Como no WPS: a comparação de texto (ESQUERDA(…)="GRU,") não diferencia maiúsculas; PROCURAR procura o trecho no código.
+   */
+  var SEG_GRU_ = [
+    [['378-00', '378-01', '378-02', '378-03', '378-05', '378-06'], 'DC SSZ-SP'],
+    [['402-00', '402-01', '402-03', '402-05', '402-06', '402-07'], 'DC TBT-SP'],
+    [['404-00', '404-03', '404-09', '404-10', '404-11', '404-12'], 'MOOCA'],
+    [['381-00', '381-01', '381-02', '381-03', '381-04', '381-05', '381-11', '381-13', '381-14', '381-15', '404-01', '404-02', '404-04',
+      '404-05', '404-06', '404-07', '404-08', '378-04', '402-02', '402-04'], 'DC GRU'],
+    [['381-06', '381-07', '381-12'], 'SP BRE']
+  ];
+  var SEG_MOO_ = ['430-00', '430-01', '430-02', '430-03', '430-04', '430-05', '430-06', '430-07', '430-08'];
+  var SEG_FIRST_ = [
+    [['GO'], 'GO GYN'], [['SC', 'SC1'], 'SC BNU'], [['RS', 'RS1'], 'RS NSR'], [['CE'], 'CE FOR'], [['RJ', 'RJ1_', 'VDC'], 'RJ SJM'],
+    [['SE', 'AL'], 'SE AJU'], [['PR', 'PR1', 'CAC'], 'PR SJS'], [['PE', 'BYE', 'DC-BYE'], 'PE JGS'], [['BA', 'SBA', 'SNS'], 'BA FEC'],
+    [['MG', 'MG1', 'CHV'], 'MG CGE'], [['PA'], 'PA ANA'],
+    [['AC', 'AM', 'BAU', 'BVB', 'CDG', 'JDF', 'LDB', 'MIA', 'MRB', 'RO', 'SJP', 'SOD', 'SP1', 'STM', 'TO', 'VCP', 'XAP', 'BJE', 'MA', 'PPB', 'NAT'], 'SP BRE'],
+    [['MS'], 'MS CGR'], [['MT', 'JPN'], 'MT CGB'], [['PI', 'IMP'], 'THE'], [['ES'], 'ES SRR'], [['NE', 'NE1'], 'SP RBP'], [['DF'], 'DF BSB']
+  ];
+  function segmentBase(v) {
+    if (blank(v)) return '';
+    var c = String(v).trim(), up = c.toUpperCase();
+    var has = function (list) { for (var i = 0; i < list.length; i++) if (c.indexOf(list[i]) >= 0) return true; return false; };
+    if (up.slice(0, 4) === 'GRU,') {
+      for (var g = 0; g < SEG_GRU_.length; g++) if (has(SEG_GRU_[g][0])) return SEG_GRU_[g][1];
+      return 'REVISAR GRU';
+    }
+    if (up.slice(0, 3) === 'SP,') return 'SP BRE';
+    if (up.slice(0, 4) === 'SBN,') return c.indexOf('375-') >= 0 ? 'SBN' : 'REVISAR SBN';
+    if (up.slice(0, 4) === 'MOO,') return has(SEG_MOO_) ? 'MOOCA' : 'REVISAR MOO';
+    var first = up.split(',')[0];
+    for (var f = 0; f < SEG_FIRST_.length; f++) if (SEG_FIRST_[f][0].indexOf(first) >= 0) return SEG_FIRST_[f][1];
+    return 'REVISAR SEGMENTO';
+  }
+  /**
+   * Coluna "segmentBase" calculada na leitura (Config.gs → segmentBase), como as docas: do código de três segmentos guardado
+   * (segmentFull); dias baixados antes da V4.12.6 usam o 1º + 2º segmento (segmentRaw) ou o 1º segmento.
+   */
+  function applySegmentBase(rows, on) {
+    if (!on || !rows) return rows;
+    var memo = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i], src = !blank(r.segmentFull) ? r.segmentFull : !blank(r.segmentRaw) ? r.segmentRaw : r.segment;
+      var k = blank(src) ? '' : String(src);
+      r.segmentBase = memo.hasOwnProperty(k) ? memo[k] : (memo[k] = segmentBase(k));
+    }
+    return rows;
+  }
+  /**
    * V4.9: campos de data calculados na leitura (Config.gs → dayOf, ex.: {expDay: 'eventTime'} na Triagem Errada = data do
    * "Horário do bipe de expedição"). Assim vale também para os dias já baixados, sem baixar de novo.
    */
@@ -994,7 +1048,7 @@ function JTCoreFactory_() {
     SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentPair: segmentPair, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
-    dockVersion: dockVersion, applyDocks: applyDocks, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
+    dockVersion: dockVersion, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

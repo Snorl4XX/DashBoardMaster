@@ -1294,6 +1294,24 @@ function migrateToV4122_() {
   if (n) logSync_('INFO', 'sorting_error', '', 'V4.12.2: ' + n + ' dia(s) da Triagem Errada baixados de novo (1º e 2º segmento) e Consulta das bipagens refeita.');
   return n;
 }
+/**
+ * V4.12.6: a fórmula do WPS (Core.segmentBase) precisa do código de três segmentos completo. O Envio Errado guardava só o 1º
+ * segmento ("GRU"): uma vez, os últimos 31 dias com a lista baixada são baixados de novo — só a lista. A Falta de Bipagem na
+ * Expedição já guarda o 1º + 2º segmento (segmentRaw, V4.8), que basta para a fórmula: nada a baixar.
+ */
+function migrateToV4126_() {
+  if (getProp_('MIGRATION_V4126', '')) return 0;
+  const to = isoToday_(), from = addDaysIso_(to, -31);
+  let n = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].segmentBase && !(INDICATORS[k].docks && (INDICATORS[k].docks.source || 'segment') === 'segment'))
+    .forEach(k => {
+      const days = Object.keys(dayFilesMap_(k, from, to)).sort().reverse();
+      if (days.length) n += enqueueJobs_(days.map(d => ['DETAIL_INIT', k, d, 1]), {reset: true});
+    });
+  setProp_('MIGRATION_V4126', new Date().toISOString());
+  if (n) logSync_('INFO', 'wrong_send', '', 'V4.12.6: ' + n + ' dia(s) do Envio Errado baixados de novo (código de três segmentos para o gráfico do segmento).');
+  return n;
+}
 function retryFailedJobs() {
   let count = 0;
   allTabRows_('JOBS').forEach((r, i) => {

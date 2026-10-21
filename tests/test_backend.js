@@ -746,8 +746,10 @@ check(ctx.dockSampleReport_('missing_receipt', [{billcode: '1'}]) === null, 'amo
 
 // (b) Painel: filtro de docas, 2 gráficos novos, colunas Destino/Doca — sem tirar nada do que existia.
 check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,destination,dock', 'filtro de docas adicionado no fim, filtros antigos mantidos');
-check(catMD.charts.map(c => c.key).join() === 'shift,segmentByShift,segment,login,tripId,client,interval', 'gráficos antigos mantidos', catMD.charts.map(c => c.key));
-check(catMD.rankPanels.map(p => p.key).join() === 'dockOverview,dockByShift,destDockByShift', 'V3.9: 3 painéis de docas (só gráficos) no lugar das tabelas', catMD.rankPanels.map(p => p.key));
+// V4.12.6 (pedido): sem "Top 4 segmentos por turno" e sem "Turno + rota de carregamento + doca"; segmentos pela fórmula do WPS.
+check(catMD.charts.map(c => c.key).join() === 'shift,segmentBase,login,tripId,client,interval' && catMD.segmentBase === true,
+  'V4.12.6: gráficos da Falta de Bipagem na Expedição (sem o Top 4 por turno; segmentos pela fórmula)', catMD.charts.map(c => c.key));
+check(catMD.rankPanels.map(p => p.key).join() === 'dockOverview,dockByShift', 'V4.12.6: painéis de docas sem "Turno + rota de carregamento + doca"', catMD.rankPanels.map(p => p.key));
 check(catMD.labels.dock.pt === 'Doca' && catMD.labels.dockDest.pt === 'Rota de carregamento' && catMD.table.some(c => c[0] === 'dock'), 'rótulos e colunas novas (V4.8: destino = rota de carregamento)');
 const cfMD = vm.runInContext('clientFields_(INDICATORS.missing_dispatch)', ctx);
 check(cfMD.indexOf('segmentRaw') >= 0 && cfMD.indexOf('dock') < 0 && cfMD.indexOf('dockDest') < 0, 'doca é calculada no navegador a partir do 1º segmento completo', cfMD);
@@ -767,7 +769,8 @@ const shownShift = expShift.reduce((a, g) => a + g.reduce((b, e) => b + e[1], 0)
 check(pShift.groups.map(g => g.shift).join() === 'T1,T2,T3' && pShift.groups.every((g, i) => g.items.map(x => x.value + '=' + x.count).join() === expShift[i].map(e => e[0] + '=' + e[1]).join()) &&
   pShift.total === shownShift && pShift.groups[2].items[0].value === 'DOCA 21' && pShift.groups[2].items[0].count === 2085 && Math.abs(pShift.groups.reduce((a, g) => a + g.pct, 0) - 100) < 1e-9,
   'painel "Docas por turno": exatamente 5 por turno (T1, T2, T3), % sobre o total exibido', pShift.groups.map(g => g.shift + ':' + g.items.map(x => x.value + '=' + x.count).join('/')));
-const pCombo = C.rankPanel(fxRows, RP('destDockByShift'));
+// O painel saiu do SC GRU na V4.12.6; o cálculo (turno + destino + doca) continua conferido, como na planilha.
+const pCombo = C.rankPanel(fxRows, {key: 'destDockByShift', kind: 'byShift', dim: 'dockDest', extra: 'dock', top: 5, accent: 'count', bands: 'top'});
 const t3 = pCombo.groups.find(g => g.shift === 'T3').items;
 check(t3.slice(0, 5).map(x => x.value + '|' + x.extra + '=' + x.count).join() === 'BRE 2|DOCA 21=2085,GRU|DOCA 14=654,RJ|DOCA 10=165,MS|DOCA 20=160,BA|DOCA 19=148' &&
   pCombo.max.value === 'BRE 2' && pCombo.max.extra === 'DOCA 21' && pCombo.max.shift === 'T3' && pCombo.items.every(x => x.pct === x.count / pCombo.total * 100),
@@ -4026,6 +4029,58 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   runAll(c5, 4);
   check(q5 >= 1 && Object.keys(c5.loadTripMap_('sc_dc', D).ids).length === before + 30 && c5.migrateToV4125_() === 0,
     'migração V4.12.5: dias com remessas abandonadas consultados de novo, uma vez', {q5, before});
+}
+
+// ---------- V4.12.6: segmento pela fórmula do WPS (Envio Errado e Falta de Bipagem na Expedição) ----------
+{
+  const SB = C.segmentBase;
+  // Um caso por ramo da fórmula (SE/ESQUERDA/PROCURAR/LOCALIZAR do usuário), na ordem dela.
+  const casos = [
+    ['', ''], [null, ''], ['GRU,378-00,020', 'DC SSZ-SP'], ['GRU,378-06,001', 'DC SSZ-SP'], ['GRU,402-07,100', 'DC TBT-SP'],
+    ['GRU,404-00,010', 'MOOCA'], ['GRU,404-12,010', 'MOOCA'], ['GRU,381-00,020', 'DC GRU'], ['GRU,404-08,020', 'DC GRU'],
+    ['GRU,378-04,020', 'DC GRU'], ['GRU,402-02,020', 'DC GRU'], ['GRU,402-04,020', 'DC GRU'], ['GRU,381-06,134', 'SP BRE'],
+    ['GRU,381-12,001', 'SP BRE'], ['GRU,391-05,020', 'REVISAR GRU'], ['gru,378-01,020', 'DC SSZ-SP'],
+    ['SP,977-00,000', 'SP BRE'], ['SBN,375-03,420', 'SBN'], ['SBN,999-00,000', 'REVISAR SBN'], ['MOO,430-08,001', 'MOOCA'], ['MOO,431-00,001', 'REVISAR MOO'],
+    ['GO,795-00,002', 'GO GYN'], ['SC1,100-00,001', 'SC BNU'], ['RS,100-00,001', 'RS NSR'], ['CE,100-00,001', 'CE FOR'], ['RJ1_,100-00,001', 'RJ SJM'],
+    ['VDC,100-00,001', 'RJ SJM'], ['AL,100-00,001', 'SE AJU'], ['CAC,100-00,001', 'PR SJS'], ['DC-BYE,100-00,001', 'PE JGS'], ['SNS,100-00,001', 'BA FEC'],
+    ['CHV,A111-00,005', 'MG CGE'], ['PA,100-00,001', 'PA ANA'], ['MIA,303-01,024', 'SP BRE'], ['NAT,100-00,001', 'SP BRE'], ['MS,850-00,240', 'MS CGR'],
+    ['JPN,100-00,001', 'MT CGB'], ['IMP,100-00,001', 'THE'], ['ES,100-00,001', 'ES SRR'], ['NE1,100-00,001', 'SP RBP'], ['DF,100-00,001', 'DF BSB'],
+    ['PE,639-00,578', 'PE JGS'], ['XYZ,100-00,001', 'REVISAR SEGMENTO'], ['BAU 484-00,200', 'REVISAR SEGMENTO'], ['GO', 'GO GYN'], ['GRU', 'REVISAR SEGMENTO'],
+    ['SP', 'REVISAR SEGMENTO']
+  ];
+  const errados = casos.filter(c => SB(c[0]) !== c[1]).map(c => c[0] + ' → ' + SB(c[0]) + ' (esperado ' + c[1] + ')');
+  check(!errados.length, 'fórmula do WPS: cada ramo (GRU pelo 2º segmento, SP, SBN, MOO, o texto antes da 1ª vírgula e os "REVISAR")', errados);
+  // Envio Errado: o código completo é guardado e o gráfico "Primeiro segmento afetado" usa a coluna da fórmula.
+  const catWS = vm.runInContext('getPublicCatalog_()', ctx).filter(c => c.key === 'wrong_send')[0];
+  check(catWS.segmentBase === true && catWS.charts.some(c => c.key === 'segmentBase' && c.title.pt === 'Primeiro segmento afetado' && c.title.zh === '受影响一段码') &&
+    !catWS.charts.some(c => c.key === 'segment'), 'Envio Errado: "Primeiro segmento afetado / 受影响一段码" pela fórmula');
+  const DR = C.addDays(ctx.isoToday_(), -3), dW = makeDay(DR, 151);
+  dW.ws = dW.ws.map((r, i) => Object.assign({}, r, {orderFirstCode: ['GRU', 'SP', 'GO', 'MOO'][i % 4],
+    orderThirdCode: ['GRU,378-00,020', 'SP,381-01,020', 'GO,795-00,002', 'MOO,430-02,001'][i % 4]}));
+  const cW = freshCtx({[DR]: dW}, null, {DATA_START_DATE: DR});
+  cW.queueHistory(DR, DR, true);
+  runAll(cW);
+  const dashW = cW.getDashboardData('wrong_send', {from: DR, to: DR});
+  const rowsW = C.applySegmentBase(C.decodeDataset(dashW.dataset), true);
+  const want = {'GRU,378-00,020': 'DC SSZ-SP', 'SP,381-01,020': 'SP BRE', 'GO,795-00,002': 'GO GYN', 'MOO,430-02,001': 'MOOCA'};
+  check(dashW.dataset.fields.indexOf('segmentFull') >= 0 && rowsW.length && rowsW.every(r => r.segmentBase === want[r.segmentFull]) &&
+    rowsW.some(r => r.segment === 'GRU' && r.segmentBase === 'DC SSZ-SP'), 'Envio Errado: código de três segmentos guardado; GRU,378-00 → DC SSZ-SP (o 1º segmento continua "GRU")',
+    rowsW.slice(0, 4).map(r => [r.segment, r.segmentFull, r.segmentBase]));
+  const repW = cW.computeDashboard_('wrong_send', {from: DR, to: DR});
+  const chW = (repW.charts || []).filter(c => c.key === 'segmentBase')[0];
+  check(chW && ['DC SSZ-SP', 'SP BRE', 'GO GYN', 'MOOCA'].every(v => chW.labels ? chW.labels.indexOf(v) >= 0 : JSON.stringify(chW).indexOf(v) >= 0),
+    'Envio Errado: relatório (PDF/Excel) com o gráfico do segmento pela fórmula', chW && (chW.labels || chW));
+  // Dia antigo (sem o código completo): a fórmula usa o 1º segmento; a migração baixa os 31 dias de novo, uma vez.
+  check(C.applySegmentBase([{segment: 'GO'}, {segment: 'GRU'}], true).map(r => r.segmentBase).join() === 'GO GYN,REVISAR SEGMENTO',
+    'dia antigo do Envio Errado sem o código completo: fórmula pelo que tem (GRU sozinho → REVISAR SEGMENTO)');
+  delete cW.__state.props.MIGRATION_V4126;
+  const q6 = cW.migrateToV4126_();
+  check(q6 === 1 && cW.pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === 'wrong_send' && j.date === DR) &&
+    !cW.pendingJobs_().some(j => j.indicator === 'missing_dispatch') && cW.migrateToV4126_() === 0,
+    'migração V4.12.6: Envio Errado baixado de novo (a Falta de Bipagem na Expedição já tem o 1º + 2º segmento)', q6);
+  // Falta de Bipagem na Expedição: dias antigos usam o 1º + 2º segmento já guardado (segmentRaw).
+  check(C.applySegmentBase([{segment: 'GRU', segmentRaw: 'GRU,402-05'}, {segment: 'SBN', segmentRaw: 'SBN,375-03'}], true).map(r => r.segmentBase).join() === 'DC TBT-SP,SBN',
+    'Falta de Bipagem na Expedição: dias já baixados usam o 1º + 2º segmento guardado (sem baixar de novo)');
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

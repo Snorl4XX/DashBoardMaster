@@ -8,8 +8,8 @@ const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expediti
   'shift', 'receiptShift', 'expeditionShift', 'interval', 'segmentRaw', 'station', 'product', 'content', 'amount', 'regDay',
   'locationMain', 'locationSub', 'column', 'destCenter', 'destBase', 'qty', 'port', 'sackType', 'items', 'packType', 'source', 'chip',
   'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase',
-  // V4.12 (Triagem Errada): 1º + 2º segmento ("SP,391-18").
-  'segmentPair'];
+  // V4.12 (Triagem Errada): 1º + 2º segmento ("SP,391-18"). V4.12.6: código de três segmentos completo (fórmula do WPS).
+  'segmentPair', 'segmentFull'];
 /**
  * Campos extras lidos quando o indicador os configura (Fluxo de Lotes: entrada/saída, saca ecológica, itens, tipo, origem, chip;
  * Sem Movimentação: remessa, pedidos, tipo da última operação, aging, problemático, bases e destino).
@@ -60,6 +60,8 @@ function normalizeDetailRow_(indicatorKey, raw, fallbackDate) {
   if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') row.segmentRaw = JTCore_.segmentHead2(row.segment);
   // V4.12 (Triagem Errada): segmento "SP,391-18" = 1º segmento + 2º segmento (segmentPairOf_).
   if (f.segment2) row.segmentPair = segmentPairOf_(raw, row, f.segment2).pair;
+  // V4.12.6: código de três segmentos completo ("GRU,378-00,020"), para a coluna segmentBase (fórmula do WPS).
+  if (f.segmentFull) row.segmentFull = str(f.segmentFull);
   return rederiveRow_(indicatorKey, row);
 }
 
@@ -920,6 +922,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   const rowCol = rowListType_(cfg, indicatorKey, p.to);
   if (rowCol !== null) archive.rows = archive.rows.filter(r => r.column === rowCol);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
+  if (cfg.segmentBase) JTCore_.applySegmentBase(archive.rows, true);
   if (cfg.dayOf) JTCore_.applyDayOf(archive.rows, cfg.dayOf);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);

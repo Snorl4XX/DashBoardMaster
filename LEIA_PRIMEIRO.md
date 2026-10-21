@@ -1,8 +1,38 @@
-# J&T DASHMASTER V4.12.5 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.12.6 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.12.6 — Envio Errado e Falta de Bipagem na Expedição: segmento pela fórmula do WPS
+**Pedido:** modificar os gráficos do Envio Errado e da Falta de Bipagem na Expedição, seguindo a fórmula do WPS enviada, e tirar dois gráficos da Falta de Bipagem na Expedição.
+
+### Os gráficos de segmento seguem a fórmula do WPS
+- **Envio Errado:** "Primeiro segmento afetado / 受影响一段码".
+- **Falta de Bipagem na Expedição:** "Segmentos ofensores (1º segmento) / 高频一段码".
+
+A fórmula é aplicada ao **código de três segmentos** da remessa (por exemplo `GRU,378-00,020`), na mesma ordem do WPS:
+
+| Código começa com | Resultado |
+|---|---|
+| (vazio) | vazio |
+| `GRU,` | pelo 2º segmento: 378-00/01/02/03/05/06 → **DC SSZ-SP** · 402-00/01/03/05/06/07 → **DC TBT-SP** · 404-00/03/09/10/11/12 → **MOOCA** · 381-00 a 05, 381-11/13/14/15, 404-01/02/04 a 08, 378-04, 402-02/04 → **DC GRU** · 381-06/07/12 → **SP BRE** · outro → **REVISAR GRU** |
+| `SP,` | **SP BRE** |
+| `SBN,` | com `375-` → **SBN**; sem → **REVISAR SBN** |
+| `MOO,` | 430-00 a 430-08 → **MOOCA**; outro → **REVISAR MOO** |
+| outro | pelo texto antes da 1ª vírgula: GO → GO GYN · SC/SC1 → SC BNU · RS/RS1 → RS NSR · CE → CE FOR · RJ/RJ1_/VDC → RJ SJM · SE/AL → SE AJU · PR/PR1/CAC → PR SJS · PE/BYE/DC-BYE → PE JGS · BA/SBA/SNS → BA FEC · MG/MG1/CHV → MG CGE · PA → PA ANA · AC, AM, BAU, BVB, CDG, JDF, LDB, MIA, MRB, RO, SJP, SOD, SP1, STM, TO, VCP, XAP, BJE, MA, PPB, NAT → SP BRE · MS → MS CGR · MT/JPN → MT CGB · PI/IMP → THE · ES → ES SRR · NE/NE1 → SP RBP · DF → DF BSB · nenhum → **REVISAR SEGMENTO** |
+
+Como no WPS, maiúsculas e minúsculas não fazem diferença, e um código fora do padrão aparece como "REVISAR …" no gráfico.
+
+### Retirado da Falta de Bipagem na Expedição
+- O gráfico **"Top 4 segmentos por turno / 各班次前4一段码"**.
+- O painel **"Turno + rota de carregamento + doca / 班次、装车线路与码头"**.
+
+### Dias já baixados
+- **Envio Errado:** guardava só o 1º segmento ("GRU"). Os **últimos 31 dias são baixados de novo uma vez** (só a lista, poucas consultas), para guardar o código completo. Até lá, os dias antigos usam o 1º segmento; "GRU" sozinho aparece como "REVISAR SEGMENTO".
+- **Falta de Bipagem na Expedição:** já guardava o 1º + 2º segmento (V4.8). Vale para os dias antigos sem baixar nada.
+
+**Como instalar (Google):** troque `Config.gs`, `Core.gs`, `Analytics.gs`, `Storage.gs`, `Triggers.gs` e `Client.html` e publique uma **Nova versão**. Não precisa rodar nenhuma função.
 
 ## V4.12.5 — Expedição SC → DC: IDs de viagem de saída de volta
 **Pedido:** "Não está aparecendo os IDs de Viagens de saída das remessas" (Expedição SC → DC, dia 19/10).

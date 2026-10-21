@@ -433,7 +433,7 @@
     port: '<path d="M7 4v16m-3-3l3 3 3-3M17 20V4m-3 3l3-3 3 3"/>',
     sackType: '<path d="M5 19c0-8 6-14 15-14 0 9-6 14-14 14"/><path d="M5 19c3-4 6-7 10-9"/>',
     items: '<path d="M3 8l9-5 9 5-9 5-9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M8 14v3M16 14v3"/>',
-    segment: '<path d="M4 6h16M4 12h10M4 18h6"/>', segmentPair: '<path d="M4 6h16M4 12h10M4 18h6"/>', correctDest: '<path d="M5 12l4 4L19 6"/>',
+    segment: '<path d="M4 6h16M4 12h10M4 18h6"/>', segmentPair: '<path d="M4 6h16M4 12h10M4 18h6"/>', segmentBase: '<path d="M4 6h16M4 12h10M4 18h6"/>', correctDest: '<path d="M5 12l4 4L19 6"/>',
     destination: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     interval: '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5h5"/>',
     client: '<path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/>',
@@ -1078,7 +1078,7 @@
       var sm = res.summary;
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
         shiftSum: res.shiftSum || {}, routes: res.routes || null,
-        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
+        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applySegmentBase(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.segmentBase), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
           totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.12.5',
+  VERSION: '4.12.6',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -95,6 +95,8 @@ const FILTER_LABELS = Object.freeze({
   regDay:          {pt: 'Data do registro', zh: '登记日期'},
   expDay:          {pt: 'Data do bipe de expedição', zh: '发件扫描日期'},
   segmentPair:     {pt: 'Segmento (1º e 2º)', zh: '一段码+二段码'},
+  segmentFull:     {pt: 'Código de três segmentos', zh: '三段码'},
+  segmentBase:     {pt: 'Segmento (base)', zh: '一段码（网点）'},
   locationMain:    {pt: 'Local principal da avaria', zh: '破损发生一级环节'},
   locationSub:     {pt: 'Local secundário da avaria', zh: '破损发生二级环节'},
   orderKind:       {pt: 'Pedidos principais/filhos', zh: '主子单'},
@@ -278,8 +280,12 @@ const ALL_INDICATORS_ = Object.freeze({
     fields: {
       date: ['dateTime'], shipment: ['billcode'], eventTime: ['sendTime'], login: ['scanUser'],
       segment: ['orderFirstCode', 'orderThirdCode'], destination: ['nextstation'], lot: ['packageNo'],
-      client: ['orderSourceName'], errorType: ['wrongType'], correctDest: ['shouldNextstation']
+      client: ['orderSourceName'], errorType: ['wrongType'], correctDest: ['shouldNextstation'],
+      // V4.12.6: código de três segmentos completo ("GRU,378-00,020"), para a fórmula do WPS (Core.segmentBase).
+      segmentFull: ['orderThirdCode']
     },
+    // V4.12.6 (pedido): "Primeiro segmento afetado" pela fórmula do WPS do usuário (coluna segmentBase, calculada na leitura).
+    segmentBase: true,
     labels: {destination: {pt: 'Destino incorreto', zh: '错发下一站'}, segment: {pt: '1º segmento', zh: '一段码'}},
     emptyLotLabel: {pt: 'Volumosos', zh: '大件'},
     // Docas pela PRÓXIMA PARADA (destino para onde a saca foi enviada): mostra em que doca estão
@@ -291,7 +297,7 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
       {key: 'login', type: 'bar', horizontal: true, top: 10, title: {pt: 'Logins mais ofensores', zh: '高频责任操作员'}},
       {key: 'lot', type: 'bar', horizontal: true, top: 10, title: {pt: 'Sacas / lotes mais ofensores', zh: '高频包号'}},
-      {key: 'segment', type: 'bar', top: 10, title: {pt: 'Primeiro segmento afetado', zh: '受影响一段码'}},
+      {key: 'segmentBase', type: 'bar', top: 10, title: {pt: 'Primeiro segmento afetado', zh: '受影响一段码'}},
       {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Destinos incorretos ofensores', zh: '高频错发下一站'}},
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
@@ -454,16 +460,20 @@ const ALL_INDICATORS_ = Object.freeze({
     fields: {
       shipment: ['billcode'], eventTime: ['unloadArriveTime'], login: ['unloadPackageEmp'],
       segment: ['threeSegmentCode'], destination: ['nextStop'], client: ['customerName'],
-      tripId: ['arriveOrder'], route: ['lastStop']
+      tripId: ['arriveOrder'], route: ['lastStop'],
+      // V4.12.6: código de três segmentos completo, para a fórmula do WPS (Core.segmentBase).
+      segmentFull: ['threeSegmentCode']
     },
+    // V4.12.6 (pedido): "Segmentos ofensores (1º segmento)" pela fórmula do WPS do usuário (coluna segmentBase).
+    segmentBase: true,
     labels: {login: {pt: 'Login (descarga)', zh: '卸车操作员'}, tripId: {pt: 'ID viagem recebimento', zh: '到件车次号'}},
     docks: DOCKS_EXPEDICAO,
     filters: ['shift', 'login', 'interval', 'client', 'tripId', 'segment', 'destination', 'dock'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
-      {key: 'segmentByShift', type: 'bar', top: 4, title: {pt: 'Top 4 segmentos por turno', zh: '各班次前4一段码'}},
-      {key: 'segment', type: 'bar', top: 10, title: {pt: 'Segmentos ofensores (1º segmento)', zh: '高频一段码'}},
+      // V4.12.6 (pedido): saiu "Top 4 segmentos por turno"; os segmentos ofensores seguem a fórmula do WPS.
+      {key: 'segmentBase', type: 'bar', top: 10, title: {pt: 'Segmentos ofensores (1º segmento)', zh: '高频一段码'}},
       {key: 'login', type: 'bar', horizontal: true, top: 10, title: {pt: 'Logins mais ofensores', zh: '高频卸车操作员'}},
       {key: 'tripId', type: 'bar', horizontal: true, top: 10, title: {pt: 'IDs de viagem de recebimento', zh: '高频到件车次号'}},
       {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
@@ -476,10 +486,8 @@ const ALL_INDICATORS_ = Object.freeze({
         title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
         stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
       {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
-        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
-      {key: 'destDockByShift', kind: 'byShift', dim: 'dockDest', extra: 'dock', top: 5, accent: 'count', bands: 'top',
-        title: {pt: 'Turno + rota de carregamento + doca', zh: '班次、装车线路与码头'},
-        stats: {max: {pt: 'Maior combinação', zh: '最大组合'}, min: {pt: 'Menor combinação', zh: '最小组合'}}}
+        title: {pt: 'Docas por turno', zh: '各班次码头分布'}}
+      // V4.12.6 (pedido): saiu o painel "Turno + rota de carregamento + doca".
     ],
     // Mesmo formato das tabelas dinâmicas da planilha "Falta Expedição" (aba Planilha2): só no relatório (PDF/Excel).
     pivotTables: [
@@ -1531,7 +1539,7 @@ function usedFields_(cfg) {
   return Object.keys(set);
 }
 /** Calculadas na leitura (Core.applyDocks / Core.applyOrderKinds / Core.applyDayOf): não vão no conjunto de dados. */
-const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1, orderKind: 1};
+const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1, orderKind: 1, segmentBase: 1};
 
 /** Campos da linha normalizada que o navegador precisa receber para este indicador. */
 function clientFields_(cfg) {
@@ -1545,6 +1553,8 @@ function clientFields_(cfg) {
     // V4.8: tabela de docas do dia de cada remessa.
     if (cfg.docks.versions) set.date = 1;
   }
+  // V4.12.6: a fórmula do segmento (Core.applySegmentBase) lê o código completo, ou o 1º + 2º segmento dos dias antigos.
+  if (cfg.segmentBase) { set.segmentFull = 1; set.segment = 1; if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') set.segmentRaw = 1; }
   return Object.keys(set);
 }
 
@@ -1570,7 +1580,7 @@ function catalogEntry_(cfg) {
     pivotTables: cfg.pivotTables || [],
     rankPanels: cfg.rankPanels || [],
     docks: cfg.docks || null,
-    dayOf: cfg.dayOf || null, scans: !!cfg.scans,
+    dayOf: cfg.dayOf || null, scans: !!cfg.scans, segmentBase: !!cfg.segmentBase,
     emptyLotLabel: cfg.emptyLotLabel || null,
     hideShiftCards: !!cfg.hideShiftCards,
     valueCards: cfg.valueCards || [],
