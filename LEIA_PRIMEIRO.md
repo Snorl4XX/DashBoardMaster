@@ -1,8 +1,32 @@
-# J&T DASHMASTER V4.12.4 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.12.5 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.12.5 — Expedição SC → DC: IDs de viagem de saída de volta
+**Pedido:** "Não está aparecendo os IDs de Viagens de saída das remessas" (Expedição SC → DC, dia 19/10).
+
+### Por que a coluna ficava vazia
+- O ID de saída vem do **Rastreamento do pacote**: a linha "Encomenda carregada" da SP GRU. Essa linha só existe **depois** que a remessa sai da base.
+- O SC → DC lista justamente as remessas expedidas **com atraso**, e a lista do dia é baixada enquanto a janela (14h → 13:59) ainda está aberta.
+- O painel consultava a remessa **antes** de ela sair da base. Sem a linha de carregamento, contava uma falha. **Com 2 falhas, desistia da remessa para sempre**, mesmo depois da expedição. No Node.js (de hora em hora), isso acontecia em 2 horas.
+- No Google, as remessas expedidas depois da busca das 15h não eram consultadas de novo.
+
+Simulando o dia hora a hora, só 48 de 286 remessas expedidas ficavam com ID. Agora ficam as 286.
+
+### O que mudou
+- Remessa **sem horário de expedição** na lista, ou consultada **até 1 h depois da expedição**: não conta como falha, é consultada de novo mais tarde.
+- A mesma remessa é consultada de novo no máximo a cada 90 min, até 3 falhas (antes 2).
+- **Remessas sem ID dos últimos 3 dias voltam para a fila sozinhas:** de hora em hora no Node.js; no Google, nos horários da agenda (6h, 8h, 15h, 17h). Só essas remessas são consultadas: poucas consultas.
+- **Migração (uma vez):** os dias dos últimos 31 com remessas sem ID são consultados de novo, inclusive as remessas abandonadas antes.
+- **Selo novo** acima dos filtros do SC → DC: **"IDs de viagem de saída: X de Y remessas"**. Amarelo = ainda buscando; verde = todas consultadas (sem ID = sem o bipe "Encomenda carregada" na base).
+- O botão **Atualizar** continua consultando na hora.
+
+**Como instalar:**
+- **Google:** troque `Config.gs`, `Storage.gs`, `Expedicao.gs`, `Triggers.gs` e `Client.html` e publique uma **Nova versão**.
+- **Node.js:** feche as janelas do painel, extraia o `JT_DASHMASTER_V4_12_5_NODE.zip` por cima de `C:\` e abra o atalho de novo. Os dados em `node\dados` ficam.
+- Nos dois, os IDs que faltavam aparecem sozinhos em até 1 hora. Para não esperar, abra o SC → DC e clique em **Atualizar**.
 
 ## V4.12.4 — Versão Node.js: tela Configurações corrigida e atualização de hora em hora
 **Pedido:** instalar o painel no próprio computador, sem cota, sem permissão de administrador, atualizando a cada 1 hora.

@@ -3949,4 +3949,83 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     pendM.some(j => j.type === 'SCANS' && j.date === dN) && cM.migrateToV4122_() === 0, 'migração V4.12.2: rebaixa e consulta refeita, uma vez', pendM.map(j => j.type + ' ' + j.date));
 }
 
+// ---------- V4.12.5: SC→DC — IDs de viagem de saída das remessas expedidas depois da consulta ----------
+{
+  // O JMS real, hora a hora: a lista da janela 14:00 → 13:59 cresce com as chegadas, o horário de expedição aparece quando a
+  // remessa sai, e o bipe "Encomenda carregada" só existe no rastreamento depois da expedição (remessas FICTÍCIAS).
+  const RealDate = Date;
+  let offset = 0;
+  class TestDate extends RealDate {
+    constructor(...a) { if (a.length) super(...a); else super(RealDate.now() + offset); }
+    static now() { return RealDate.now() + offset; }
+    static [Symbol.hasInstance](x) { return x instanceof RealDate; }
+  }
+  const {dcDepartureTrip} = require('./mocks');
+  const isoSP = t => new RealDate(t - 3 * 3600e3).toISOString().slice(0, 10);
+  const stampSP = t => { const x = new RealDate(t - 3 * 3600e3).toISOString(); return x.slice(0, 10) + ' ' + x.slice(11, 19); };
+  const msSP = s => RealDate.parse(s.replace(' ', 'T') + '-03:00');
+  const D = isoSP(RealDate.now() - 3 * 864e5), next = n => isoSP(msSP(D + ' 12:00:00') + n * 864e5);
+  const full = [];
+  for (let i = 0; i < 240; i++) {
+    const arr = msSP(D + ' 14:00:00') + (i * 79 % 1440) * 60e3, dis = arr + (60 + (i * 37 % 660)) * 60e3;
+    full.push({scanTime: D, waybillNo: '4441' + D.replace(/-/g, '') + String(i).padStart(4, '0'), arrivalShipmentName: 'D107-GRU-2210-99', lastCenterName: 'GRU-SP',
+      arrivalShipmentNo: 'SETRFIC' + (i % 9), arrivalScanTime: stampSP(arr), dispatchTime: stampSP(dis), sendNextStation: 'DC GRU-SP', isTimely: 'Fora do prazo', _i: i, _arr: arr, _dis: dis});
+  }
+  const byW = {};
+  full.forEach(r => { byW[r.waybillNo] = r; });
+  const now = () => RealDate.now() + offset;
+  const intercept = (route, h, body) => {
+    if (route !== 'keywordList') return null;
+    return [200, {code: 1, msg: 'ok', succ: true, fail: false, data: (body.keywordList || []).filter(w => byW[w]).map(w => {
+      const x = byW[w], dep = dcDepartureTrip(x._i), det = [{scanTime: x.arrivalScanTime, scanTypeName: 'Coleta de chegadas', scanNetworkName: 'SP GRU', scanNetworkId: 2826, code: 2, remark2: x.arrivalShipmentNo}];
+      if (dep !== null && x._dis <= now()) det.push({scanTime: x.dispatchTime, scanTypeName: 'Encomenda carregada', scanNetworkName: 'SP GRU', scanNetworkId: 2826,
+        nextStopName: x.sendNextStation, remark2: dep, code: 1, originalScanTypeCode: 50});
+      return {keyword: w, details: det.reverse()};
+    })}];
+  };
+  const shouldHave = () => full.filter(r => dcDepartureTrip(r._i) !== null && r._dis <= now());
+  const run = (mode, extra) => {
+    const days = {[D]: makeDay(D, 141), [next(1)]: makeDay(next(1), 142), [next(2)]: makeDay(next(2), 143)};
+    const c = createContext({props: Object.assign({JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: D, MODO_ATUALIZACAO: mode, ATUALIZACAO_MIN: '60',
+      PAINEIS: 'sc_dc', COTA_GOOGLE: 'workspace'}, extra || {}), jms: fakeJms(days, {intercept}), quiet: true});
+    c.Date = TestDate;
+    const setNow = s => {
+      offset = msSP(s) - RealDate.now();
+      days[D].dc = full.filter(r => r._arr <= now()).map(r => Object.assign({}, r, {dispatchTime: r._dis <= now() ? r.dispatchTime : ''}));
+    };
+    setNow(D + ' 14:30:00');
+    c.setupProject();
+    const log = {};
+    for (let t = msSP(D + ' 15:05:00'); t <= msSP(next(2) + ' 09:05:00'); t += 3600e3) {
+      setNow(stampSP(t));
+      c.syncHourly(); runAll(c, 4);
+      const h = stampSP(t).slice(5, 13);
+      if (/ (15|17|06)$/.test(h)) {
+        const ids = c.loadTripMap_('sc_dc', D).ids, want = shouldHave();
+        log[h] = want.filter(r => ids[r.waybillNo]).length + '/' + want.length;
+      }
+    }
+    offset = 0;
+    return {c, log};
+  };
+  const rN = run('continuo', {DETAIL_REFRESH_HOURS: '1'}), rG = run('diario');
+  const all = shouldHave().length, final = r => { const ids = r.c.loadTripMap_('sc_dc', D).ids; return shouldHave().filter(x => ids[x.waybillNo]).length; };
+  check(final(rN) === all && rN.log[next(1).slice(5) + ' 15'] === rN.log[next(1).slice(5) + ' 15'].split('/')[1] + '/' + rN.log[next(1).slice(5) + ' 15'].split('/')[1],
+    'Node.js (de hora em hora): toda remessa expedida com o bipe na base fica com o ID de saída — antes 2 consultas antes da expedição a abandonavam', rN.log);
+  check(final(rG) === all, 'Google (agenda 6h, 8h, 15h, 17h): remessas expedidas depois da busca das 15h também ganham o ID', rG.log);
+  const cov = rN.c.tripCoverage_('sc_dc', D, D)[D], noScan = full.filter(r => dcDepartureTrip(r._i) === null).length;
+  check(cov && cov.total === full.length && cov.found === all && cov.done >= all && cov.done <= full.length && noScan > 0,
+    'cobertura: com ID + sem o bipe depois de todas as tentativas', cov);
+  // Migração V4.12.5: mapa antigo com remessas abandonadas (2 falhas antes da expedição) — consultadas de novo uma vez.
+  const c5 = rG.c, map = c5.loadTripMap_('sc_dc', D);
+  Object.keys(map.ids).slice(0, 30).forEach(w => { delete map.ids[w]; map.miss[w] = 3; });
+  c5.saveTripMap_('sc_dc', D, map, full.length);
+  const before = Object.keys(c5.loadTripMap_('sc_dc', D).ids).length;
+  delete c5.__state.props.MIGRATION_V4125;
+  const q5 = c5.migrateToV4125_();
+  runAll(c5, 4);
+  check(q5 >= 1 && Object.keys(c5.loadTripMap_('sc_dc', D).ids).length === before + 30 && c5.migrateToV4125_() === 0,
+    'migração V4.12.5: dias com remessas abandonadas consultados de novo, uma vez', {q5, before});
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

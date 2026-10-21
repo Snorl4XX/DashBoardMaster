@@ -488,19 +488,30 @@ function refreshSendFlags_(job, deadline, cfg, routes) {
 /**
  * Mapa remessa → ID de viagem de cada dia (arquivo no Drive; aba DAY_FILES com o indicador "send_flow:viagens":
  * rows = remessas consultadas, expectedPages = com ID, expectedRecords = remessas do dia).
- * ids[remessa] = ID ('' = carregada sem número do pedido); miss[remessa] = consultas sem o bipe de carregamento.
+ * ids[remessa] = ID ('' = carregada sem número do pedido); miss[remessa] = consultas sem o bipe de carregamento;
+ * last[remessa] (V4.12.5) = hora da última consulta sem ID.
+ *
+ * V4.12.5: o SC→DC lista remessas expedidas com atraso, e a lista do dia é baixada enquanto a janela ainda está aberta. Até a
+ * V4.12.4, a remessa consultada antes de sair da base (sem o bipe "Encomenda carregada") contava como falha; com 2 falhas ela
+ * nunca mais era consultada, e a coluna "ID viagem de saída" ficava vazia mesmo depois da expedição. Agora (SC→DC; a
+ * Expedição do painel dos fluxos só ganha a 3ª tentativa):
+ *  - sem o bipe, a remessa ainda sem horário de expedição na lista (pode sair da base depois) ou consultada até 1 h depois da
+ *    expedição (o rastreamento pode estar atrasado) não conta como falha: é consultada de novo mais tarde;
+ *  - a mesma remessa é consultada de novo no máximo a cada 90 min, até 3 falhas;
+ *  - os dias recentes com remessas ainda sem ID voltam para a fila (queueTripRetries_).
  */
-const TRIP_MAX_MISS_ = 2;
+const TRIP_MAX_MISS_ = 3;
+const TRIP_RETRY_MS_ = 90 * 60000, TRIP_GRACE_MS_ = 60 * 60000;
 /** kind: 'viagens' (IDs de viagem, padrão) ou 'bipagens' (V4.4, Triagem errada: lote e login da Consulta das bipagens). */
 function lookupMapKey_(indicator, kind) { return indicator + ':' + (kind || 'viagens'); }
 function tripMapKey_(indicator) { return lookupMapKey_(indicator, 'viagens'); }
-function emptyTripMap_() { return {v: 1, ids: {}, miss: {}}; }
+function emptyTripMap_() { return {v: 1, ids: {}, miss: {}, last: {}}; }
 function loadTripMap_(indicator, date, kind) {
   const df = dayFilesMap_(lookupMapKey_(indicator, kind), date, date)[date];
   if (!df) return emptyTripMap_();
   try {
     const x = JSON.parse(Utilities.ungzip(DriveApp.getFileById(df.fileId).getBlob()).getDataAsString('UTF-8'));
-    return x && x.ids ? Object.assign(emptyTripMap_(), x, {miss: x.miss || {}}) : emptyTripMap_();
+    return x && x.ids ? Object.assign(emptyTripMap_(), x, {miss: x.miss || {}, last: x.last || {}}) : emptyTripMap_();
   } catch (e) { return emptyTripMap_(); }
 }
 function saveTripMap_(indicator, date, map, total, kind, done) {
@@ -637,10 +648,13 @@ function runTripJob_(job, deadline) {
   const marked = !mode || ds.tripSrc === mode;
   const map = loadTripMap_(job.indicator, job.date);
   // V4.6: tarefa com page 1 (migração/Atualizar) consulta de novo as remessas que antes vieram sem a linha de carregamento.
-  if (job.page === 1) map.miss = {};
+  if (job.page === 1) { map.miss = {}; map.last = {}; }
   const W = ds.dict[wk], cW = ds.cols[wk];
   const D = ds.dict.destination || [], cD = ds.cols.destination, E = ds.dict.eventTime || [], cE = ds.cols.eventTime;
-  const info = {}, todo = [];
+  const info = {}, todo = [], nowMs = Date.now();
+  // Horários da lista e "agora" no relógio da base, comparados como texto de data e hora (o fuso do servidor não importa).
+  const wall = s => Date.parse(String(s || '').trim().replace(' ', 'T').slice(0, 19) + 'Z');
+  const nowWall = wall(localStamp_(new Date(nowMs).toISOString()));
   let total = 0;
   for (let i = 0; i < ds.n; i++) {
     const w = W[cW[i]];
@@ -648,8 +662,22 @@ function runTripJob_(job, deadline) {
     info[w] = {route: cD ? D[cD[i]] : '', time: cE ? E[cE[i]] : ''};
     total++;
     if (map.ids[w] !== undefined || (map.miss[w] || 0) >= TRIP_MAX_MISS_) continue;
+    // V4.12.5 (SC→DC): consultada há pouco sem ID: espera a próxima vez.
+    if (mode && map.last[w] && nowMs - map.last[w] < TRIP_RETRY_MS_) continue;
     todo.push(w);
   }
+  /**
+   * Consulta sem o bipe de carregamento (V4.12.5): só conta como falha 1 h depois da expedição. Sem horário de expedição na
+   * lista (SC→DC: ainda não saiu da base quando a lista foi baixada), nunca conta — volta para a fila enquanto o dia é recente.
+   */
+  const fail = w => {
+    if (mode) {
+      map.last[w] = nowMs;
+      const t = wall(info[w] && info[w].time);
+      if (!Number.isFinite(t) || (Number.isFinite(nowWall) && nowWall - t < TRIP_GRACE_MS_)) return;
+    }
+    map.miss[w] = (map.miss[w] || 0) + 1;
+  };
   todo.sort((a, b) => tripOrderKey_(a) - tripOrderKey_(b));
   const endpoint = endpointFor_(cfg, 'trips');
   const parallel = Math.max(1, Math.min(8, Number(getProp_('EXPEDICAO_IDS_PARALELO', '')) || APP_CONFIG.TRIP_PARALLEL));
@@ -686,7 +714,7 @@ function runTripJob_(job, deadline) {
             learnTripBatch_(job.indicator, Math.ceil(list.length / 2), 'o JMS recusou ' + list.length + ' remessas numa consulta');
             batch = tripBatch_();
             list.forEach(w => todo.push(w));
-          } else map.miss[list[0]] = (map.miss[list[0]] || 0) + 1;
+          } else fail(list[0]);
           return;
         }
       }
@@ -711,17 +739,20 @@ function runTripJob_(job, deadline) {
       }
       list.forEach((w, x) => {
         const item = got[w];
-        if (!item) { if (!(prefix && x >= nGot)) map.miss[w] = (map.miss[w] || 0) + 1; return; }
+        if (!item) { if (!(prefix && x >= nGot)) fail(w); return; }
         const id = pickTripId_(item.details || [], Object.assign({route: info[w].route, time: info[w].time}, ctx));
-        if (id === null) { map.miss[w] = (map.miss[w] || 0) + 1; return; }
+        if (id === null) { fail(w); return; }
         map.ids[w] = id;
         delete map.miss[w];
+        delete map.last[w];
         changed++;
       });
     });
   }
   map.at = new Date().toISOString();
-  saveTripMap_(job.indicator, job.date, map, total);
+  // "Consultadas" = com resposta final: com ID, ou sem o bipe depois de todas as tentativas. As outras voltam para a fila.
+  const settled = Object.keys(map.ids).length + Object.keys(map.miss).filter(w => map.ids[w] === undefined && map.miss[w] >= TRIP_MAX_MISS_).length;
+  saveTripMap_(job.indicator, job.date, map, total, undefined, settled);
   // SC→DC: o arquivo antigo (com o ID de chegada) é regravado já na primeira vez, mesmo sem ID novo.
   if ((changed || !marked) && (applyTripMapToDs_(ds, map, mode) || !marked)) {
     // Mesmo arquivo do dia com os IDs; a data do download não muda (o intervalo de atualização do detalhe continua valendo).
@@ -767,6 +798,41 @@ function migrateToV46_() {
   });
   setProp_('MIGRATION_V46', new Date().toISOString());
   if (n) logSync_('INFO', 'sc_dc', '', 'V4.6: ' + n + ' dia(s) na fila para buscar de novo o ID de viagem de saída no Rastreamento do pacote.');
+  return n;
+}
+/**
+ * V4.12.5: dias recentes (hoje e os 3 anteriores) com remessas ainda sem resposta do Rastreamento do pacote voltam para a fila
+ * de IDs de viagem — remessa expedida depois da última consulta, ou o rastreamento ainda sem o bipe. Só essas remessas são
+ * consultadas (cada uma no máximo a cada 90 min). Chamada de hora em hora (coleta contínua) e nos horários da agenda.
+ */
+function queueTripRetries_() {
+  const today = isoToday_(), from = addDaysIso_(today, -3), jobs = [];
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].trips && INDICATORS[k].trips.replace && !INDICATORS[k].grouped).forEach(k => {
+    const cov = tripCoverage_(k, from, today);
+    Object.keys(dayFilesMap_(k, from, today)).forEach(d => {
+      const c = cov[d], st = getDayStatus_(k, d);
+      if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) return;
+      if (!c || !(c.total > 0) || c.done < c.total) jobs.push(['TRIPS', k, d, 0]);
+    });
+  });
+  return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+}
+/**
+ * V4.12.5: os dias dos últimos 31 com remessas sem ID de viagem de saída são consultados de novo uma vez (page 1: as remessas
+ * abandonadas antes da expedição também). Ver TRIP_MAX_MISS_.
+ */
+function migrateToV4125_() {
+  if (getProp_('MIGRATION_V4125', '')) return 0;
+  let n = 0;
+  const from = addDaysIso_(isoToday_(), -31);
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].trips && INDICATORS[k].trips.replace && !INDICATORS[k].grouped).forEach(k => {
+    const cov = tripCoverage_(k, from, isoToday_());
+    const jobs = Object.keys(dayFilesMap_(k, from, isoToday_())).sort().reverse()
+      .filter(d => !cov[d] || !(cov[d].total > 0) || cov[d].found < cov[d].total).map(d => ['TRIPS', k, d, 1]);
+    if (jobs.length) n += enqueueJobs_(jobs, {reset: true});
+  });
+  setProp_('MIGRATION_V4125', new Date().toISOString());
+  if (n) logSync_('INFO', 'sc_dc', '', 'V4.12.5: ' + n + ' dia(s) na fila para buscar de novo os IDs de viagem de saída que faltavam.');
   return n;
 }
 /** IDs de viagem consultados por dia (painel): {data: {consultadas, comId, remessas}}. */

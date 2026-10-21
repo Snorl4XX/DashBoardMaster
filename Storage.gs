@@ -1093,7 +1093,10 @@ function queueRecentRefresh_() {
     if (gmail && i === 2 && h % 6 !== 0) return;
     if (!pauseFor_(INDICATORS[k].routeKey, pauses)) jobs.push(['SUMMARY', k, d, 0]);
   }));
-  return jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0;
+  // V4.12.5: IDs de viagem de saída (SC→DC) que ainda faltam nos dias recentes: de hora em hora.
+  let retries = 0;
+  try { retries = queueTripRetries_(); } catch (e) { logSync_('WARN', 'sc_dc', '', 'IDs de viagem pendentes não enfileirados: ' + e); }
+  return (jobs.length ? enqueueJobs_(jobs, {reset: true}) : 0) + retries;
 }
 /**
  * V4.5/V4.6: dia com o número FINAL — taxa gravada depois que o dia fechou (dayCloseAt_: dia seguinte no 1º horário da
@@ -1148,6 +1151,10 @@ function runAgenda_() {
   if (dueSc.length) {
     jobs = jobs.concat(agendaDailyJobs_(isOperational_));
     state.o = state.o.concat(dueSc).filter((x, i, a) => a.indexOf(x) === i).sort((a, b) => a - b);
+  }
+  // V4.12.5: em cada horário da agenda, os IDs de viagem de saída (SC→DC) que ainda faltam nos dias recentes.
+  if (due.length || dueSc.length) {
+    try { queueTripRetries_(); } catch (e) { logSync_('WARN', 'sc_dc', '', 'IDs de viagem pendentes não enfileirados: ' + e); }
   }
   every.forEach(x => { jobs = jobs.concat(agendaEveryJobs_(x.k)); state.i[x.k] = x.slot; });
   setProp_(AGENDA_PROP_, JSON.stringify(state));

@@ -166,6 +166,9 @@
       amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total',
       routesOfficial: 'Número oficial de cada rota (tabela principal do JMS)', tripCov: 'IDs consultados no Rastreamento do pacote: {a} de {b} remessas ({c} com ID)',
       tripCovNone: 'IDs de viagem: consulta no Rastreamento do pacote depois do download do dia', tcOfficial: 'número oficial do JMS',
+      tripBadge: 'IDs de viagem de saída: {f} de {b} remessas',
+      tripBadgeWait: 'As remessas sem ID são consultadas de novo no Rastreamento do pacote (de hora em hora no Node.js; nos horários da agenda no Google) por até 3 dias: as que saem da base depois aparecem sozinhas. O botão Atualizar consulta na hora.',
+      tripBadgeDone: 'Todas as remessas do período já foram consultadas no Rastreamento do pacote. Sem ID = sem o bipe "Encomenda carregada" na base.',
       scanBadge: 'Sacas pela Consulta das bipagens: {f} de {t} · ainda sem saca: {l}',
       scanBadgeHint: 'Sem operador: {o} · {g} remessa(s) sem o bipe "Encomenda inserida em lote" na {b} (não há saca para pegar) · {q} dia(s) na fila da consulta',
       scanWait: 'Sem saca: {l} · Consulta das bipagens ainda não rodou', scanWaitHint: 'Sem operador: {o}. A consulta roda depois da lista do dia (ou no botão Atualizar).',
@@ -337,6 +340,9 @@
       amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额',
       routesOfficial: '各线路官方数字（JMS主表）', tripCov: '包裹轨迹已查询车次号：{a} / {b} 票（{c} 票有车次号）',
       tripCovNone: '车次号：当日明细下载完成后在包裹轨迹查询', tcOfficial: 'JMS官方数字',
+      tripBadge: '发件车次号：{f} / {b} 票',
+      tripBadgeWait: '没有车次号的运单会在包裹轨迹中再次查询（Node.js 每小时一次；Google 按计划时间），最多 3 天：之后发出的运单会自动显示。点击“更新”立即查询。',
+      tripBadgeDone: '该期间所有运单都已在包裹轨迹查询。无车次号 = 本网点没有“装车发件”扫描。',
       scanBadge: '扫描记录查询补全包号：{f} / {t} · 仍无包号：{l}',
       scanBadgeHint: '无操作员：{o} · {g} 票在 {b} 没有“建包扫描”记录（无包号可取）· 查询队列 {q} 天',
       scanWait: '无包号：{l} · 扫描记录查询尚未运行', scanWaitHint: '无操作员：{o}。当日明细下载后（或点击“更新”）运行查询。',
@@ -1424,6 +1430,13 @@
     if (meta.lastError) html += badge('bad', 'warn', t('errorBadge', {r: meta.lastError.reason}),
       meta.lastError.reason + ' (' + fmtDate(meta.lastError.date, true) + ')');
     html += scanBadges(meta);
+    // V4.12.5 (SC→DC): quantas remessas do período já têm o ID de viagem de saída; as que faltam continuam sendo consultadas.
+    var tc = meta.tripCoverage;
+    if (tc) {
+      var tA = 0, tB = 0, tF = 0;
+      Object.keys(tc).forEach(function (d) { if (d < state.from || d > state.to) return; tA += Number(tc[d].done) || 0; tB += Number(tc[d].total) || 0; tF += Number(tc[d].found) || 0; });
+      if (tB) html += badge(tA >= tB ? 'ok' : 'warn', tA >= tB ? 'check' : 'history', t('tripBadge', {f: fmtInt(tF), b: fmtInt(tB)}), t(tA >= tB ? 'tripBadgeDone' : 'tripBadgeWait'));
+    }
     $('#coverageBadges').innerHTML = html;
   }
   /**
