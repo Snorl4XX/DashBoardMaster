@@ -1,13 +1,11 @@
 /**
- * J&T · PESQUISA NO RASTREAMENTO — planilha .xlsx feita na página, com gráficos do próprio Excel e as FOTOS das linhas dentro
- * das células. Sem bibliotecas: o arquivo é um ZIP com os XML do Excel (planilhas, estilos, desenhos, gráficos e imagens).
+ * J&T · PESQUISA NO RASTREAMENTO — planilha .xlsx feita na página, com gráficos do próprio Excel.
+ * Sem bibliotecas: o arquivo é um ZIP com os XML do Excel (planilhas, estilos, desenhos e gráficos).
  * Comprime com CompressionStream quando o navegador tem; senão grava sem compressão.
  *
  * Planilha.build(livro) → Promise<Uint8Array>. livro = {sheets: [{name, cols: [larguras], rows: [[célula…]], heights: {linha: pt},
  *   merges: ['A1:H1'], freeze: 'A4', filter: 'A3:J3', charts: [{type: 'col'|'bar'|'doughnut', title, sheet, cat: 'A7:A8',
- *   val: 'B7:B8', name, colors: ['E60012'…], at: [col, linha, col2, linha2]}],
- *   images: [{row, col, bytes (Uint8Array), w, h, ext: 'jpeg'|'png', name}]}]}. Célula: texto, número ou {v, s, link}.
- *   A foto fica DENTRO da célula (linha `row`, coluna `col`, contando de 1) e anda junto com ela ao ordenar e filtrar.
+ *   val: 'B7:B8', name, colors: ['E60012'…], at: [col, linha, col2, linha2]}]}]}. Célula: texto, número ou {v, s, link}.
  */
 (function (root, factory) {
   var api = factory();
@@ -200,27 +198,8 @@
       '<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="ECECEF"/></a:solidFill></a:ln></c:spPr>' +
       txPr(1000) + '</c:chartSpace>';
   }
-  var EMU = 9525; // 1 pixel
-  /** Tamanho da foto dentro da caixa (pixels), sem deformar. Sem medida (testes): 4:3. */
-  function fitBox(w, h, bw, bh) {
-    w = Number(w) || 4; h = Number(h) || 3;
-    var s = Math.min(bw / w, bh / h);
-    return {w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s))};
-  }
-  function picXml(p, id) {
-    var pt = function (c, r, dx, dy) {
-      return '<xdr:col>' + c + '</xdr:col><xdr:colOff>' + dx * EMU + '</xdr:colOff><xdr:row>' + r + '</xdr:row><xdr:rowOff>' + dy * EMU + '</xdr:rowOff>';
-    };
-    var c = p.col - 1, r = p.row - 1, pad = 5;
-    return '<xdr:twoCellAnchor editAs="twoCell"><xdr:from>' + pt(c, r, pad, pad) + '</xdr:from><xdr:to>' + pt(c, r, pad + p.w, pad + p.h) + '</xdr:to>' +
-      '<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="' + id + '" name="' + esc(p.name || 'Foto ' + id) + '"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
-      '<xdr:blipFill><a:blip xmlns:r="' + NS_R + '" r:embed="' + p.rid + '"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>' +
-      '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + p.w * EMU + '" cy="' + p.h * EMU + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>' +
-      '</xdr:pic><xdr:clientData/></xdr:twoCellAnchor>';
-  }
-  function drawingXml(charts, firstId, pics) {
+  function drawingXml(charts, firstId) {
     return HEAD + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="' + NS_A + '">' +
-      (pics || []).map(function (p, i) { return picXml(p, firstId + charts.length + i); }).join('') +
       charts.map(function (ch, i) {
         var a = ch.at, pt = function (c, r) { return '<xdr:col>' + c + '</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>' + r + '</xdr:row><xdr:rowOff>0</xdr:rowOff>'; };
         return '<xdr:twoCellAnchor editAs="oneCell"><xdr:from>' + pt(a[0], a[1]) + '</xdr:from><xdr:to>' + pt(a[2], a[3]) + '</xdr:to>' +
@@ -238,29 +217,21 @@
 
   /** Arquivos do .xlsx: [{name, text}] */
   function parts(book) {
-    var files = [], sheets = book.sheets, ct = [], chartN = 0, drawN = 0, names = [], media = [], exts = {};
+    var files = [], sheets = book.sheets, ct = [], chartN = 0, drawN = 0, names = [];
     sheets.forEach(function (sh, i) {
       var n = i + 1, srels = [], drawingRid = null, links = [];
-      if ((sh.charts || []).length || (sh.images || []).length) {
+      if ((sh.charts || []).length) {
         drawN++;
         drawingRid = 'rIdD1';
         srels.push({id: drawingRid, type: REL + 'drawing', target: '../drawings/drawing' + drawN + '.xml'});
-        var drels = [], pics = [];
-        // A mesma foto (bloco 1 e bloco 2 na mesma linha do JMS) entra uma vez só no arquivo.
-        (sh.images || []).forEach(function (im, j) {
-          var k = media.indexOf(im.bytes), ext = im.ext === 'png' ? 'png' : 'jpeg';
-          if (k < 0) { media.push(im.bytes); k = media.length - 1; files.push({name: 'xl/media/image' + (k + 1) + '.' + ext, bytes: im.bytes}); exts[ext] = 1; }
-          var rid = 'rIdP' + (j + 1);
-          drels.push({id: rid, type: REL + 'image', target: '../media/image' + (k + 1) + '.' + ext});
-          pics.push({row: im.row, col: im.col, w: im.w, h: im.h, rid: rid, name: im.name});
-        });
+        var drels = [];
         (sh.charts || []).forEach(function (ch, j) {
           chartN++;
           files.push({name: 'xl/charts/chart' + chartN + '.xml', text: chartXml(Object.assign({sheet: sh.name}, ch), sh)});
           ct.push('<Override PartName="/xl/charts/chart' + chartN + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>');
           drels.push({id: 'rId' + (j + 1), type: REL + 'chart', target: '../charts/chart' + chartN + '.xml'});
         });
-        files.push({name: 'xl/drawings/drawing' + drawN + '.xml', text: drawingXml(sh.charts || [], 2, pics)});
+        files.push({name: 'xl/drawings/drawing' + drawN + '.xml', text: drawingXml(sh.charts || [], 2)});
         files.push({name: 'xl/drawings/_rels/drawing' + drawN + '.xml.rels', text: rels(drels)});
         ct.push('<Override PartName="/xl/drawings/drawing' + drawN + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>');
       }
@@ -278,7 +249,6 @@
     files.unshift(
       {name: '[Content_Types].xml', text: HEAD + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
-        Object.keys(exts).map(function (e) { return '<Default Extension="' + e + '" ContentType="image/' + e + '"/>'; }).join('') +
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
         '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
         '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
@@ -349,14 +319,8 @@
   var COLORS = {yes: 'E60012', no: '7B818C', T1: 'E60012', T2: '2A78D6', T3: '4A3AA7'};
   function two(pt, zh) { return zh ? pt + '\n' + zh : pt; }
   function pct(n, d) { return d ? n / d : 0; }
-  // Foto dentro da célula "Imagem": caixa de 160 × 116 pixels numa coluna de largura 27 e linha de 96 pontos (128 pixels).
-  var FOTO = {col: 9, box: [160, 116], height: 96};
-  function imageCell(h) {
-    if (h.foto) return {v: ' ', s: S.text}; // um espaço: o texto da descrição não "vaza" por baixo da foto
-    if (!h.img) return {v: 'NÃO TEM IMAGEM!', s: S.noimg};
-    if (h.url) return {v: 'A foto não baixou (abra o link)', s: S.text};
-    return {v: 'Tem imagem no JMS (ensine a foto no app)', s: S.text};
-  }
+  /** Coluna "Imagem": se a linha tem "Ver imagem" no JMS. */
+  function imageCell(h) { return h.img ? {v: 'Tem imagem no JMS', s: S.text} : {v: 'NÃO TEM IMAGEM!', s: S.noimg}; }
   function stamp(d) {
     var p = function (n) { return (n < 10 ? '0' : '') + n; };
     return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
@@ -429,25 +393,19 @@
     var rows = [[{v: 'J&T EXPRESS · ' + title, s: S.title}], [{v: 'Padrão: ' + pat + ' · horário, origem e escaneador do PRIMEIRO bipe com o padrão', s: S.subtitle}],
       [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}, {v: two('Tempo de digitalização', '扫描时间'), s: S.header}, {v: two('Turno', '班次'), s: S.header},
         {v: two('Origem', '网点'), s: S.header}, {v: two('Quem escaneou', '扫描员'), s: S.header}, {v: two('Tipo de bipagem', '扫描类型'), s: S.header},
-        {v: two('Descrição da etapa de bipagem', '扫描描述'), s: S.header}, {v: two('Imagem', '图片'), s: S.header}, {v: two('Link da foto', '图片链接'), s: S.header},
+        {v: two('Descrição da etapa de bipagem', '扫描描述'), s: S.header}, {v: two('Imagem', '图片'), s: S.header},
         {v: two('Linhas com o padrão', '匹配行数'), s: S.header}]];
-    var n = 0, images = [], heights = {1: 28, 3: 30};
+    var n = 0;
     data.results.forEach(function (r) {
       var h = r.p && r.p[k];
       if (!h) return;
       var t = serial(h.t);
       rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}, t === null ? {v: h.t, s: S.text} : {v: t, s: S.date}, {v: h.shift, s: S.center},
-        {v: h.origin, s: S.text}, {v: h.by, s: S.text}, {v: h.type, s: S.text}, {v: h.desc, s: S.text}, imageCell(h),
-        h.url ? {v: 'Abrir foto', s: S.link, link: h.url} : {v: '', s: S.text}, {v: h.n, s: S.int}]);
-      if (h.foto && h.foto.bytes) {
-        var box = fitBox(h.foto.w, h.foto.h, FOTO.box[0], FOTO.box[1]);
-        images.push({row: rows.length, col: FOTO.col, bytes: h.foto.bytes, w: box.w, h: box.h, ext: /png/.test(h.foto.mime || '') ? 'png' : 'jpeg', name: 'Foto ' + r.w});
-        heights[rows.length] = FOTO.height;
-      }
+        {v: h.origin, s: S.text}, {v: h.by, s: S.text}, {v: h.type, s: S.text}, {v: h.desc, s: S.text}, imageCell(h), {v: h.n, s: S.int}]);
     });
     if (!n) rows.push([{v: 'Nenhuma remessa com o padrão.', s: S.note}]);
-    return {name: name, cols: [7, 18, 21, 8, 16, 30, 24, 70, 27, 12, 11], rows: rows, heights: heights, merges: ['A1:K1', 'A2:K2'], freeze: 'C4',
-      filter: n ? 'A3:K3' : '', images: images};
+    return {name: name, cols: [7, 18, 21, 8, 16, 30, 24, 70, 20, 11], rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:J1', 'A2:J2'], freeze: 'C4',
+      filter: n ? 'A3:J3' : ''};
   }
   function missSheet(name, title, pat, data, k) {
     var rows = [[{v: 'J&T EXPRESS · ' + title, s: S.title}], [{v: 'Padrão: ' + pat, s: S.subtitle}],
@@ -462,5 +420,5 @@
     return {name: name, cols: [7, 20, 46], rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:C1', 'A2:C2'], freeze: 'C4', filter: n ? 'A3:C3' : ''};
   }
 
-  return {build: build, parts: parts, zip: zip, crc32: crc32, serial: serial, fitBox: fitBox, rastreioBook: rastreioBook, STYLE: S};
+  return {build: build, parts: parts, zip: zip, crc32: crc32, serial: serial, rastreioBook: rastreioBook, STYLE: S};
 });

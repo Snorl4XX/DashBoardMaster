@@ -1,10 +1,11 @@
 /**
  * J&T · PESQUISA NO RASTREAMENTO — a página. Funciona igual no Apps Script (google.script.run) e no Node.js (api/…):
  * o servidor consulta o JMS com o AuthToken DELE (como o DashMaster: Propriedades do script ou o token do DashMaster deste
- * computador) e baixa as fotos. A página não pede token.
+ * computador). A página não pede token.
  */
 (function () {
   'use strict';
+  var VERSAO_PAGINA = '1.2.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
   var BOOT = window.__PESQUISA__ || {}, R = window.Rastreio, P = window.Pesquisa, X = window.Planilha, PAGE = 100;
   var SHIFTS = R.SHIFTS, SHIFT_HOURS = R.SHIFT_HOURS;
   var DEFAULTS = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
@@ -18,28 +19,27 @@
       accNoGas: 'Falta o AuthToken: no editor do Apps Script, Configurações do projeto → Propriedades do script → JMS_AUTHTOKEN (o mesmo do DashMaster).',
       accNoLocal: 'Falta o AuthToken. Cole abaixo (fica salvo neste computador). Com o DashMaster instalado em C:\\dashmaster, o app usa o token dele sozinho.',
       accNoRemote: 'Falta o AuthToken: cadastre no computador onde o app está rodando.',
-      badgeOk: 'Conectado pelo servidor', badgeNo: 'Falta o AuthToken', tokSaved: 'AuthToken salvo neste computador.',
+      badgeOk: 'Conectado pelo servidor', badgeNo: 'Falta o AuthToken', badgeErr: 'Confira o passo 1', tokSaved: 'AuthToken salvo neste computador.',
       tokNeed: 'Falta o AuthToken do JMS no servidor do app (veja o passo 1).',
-      step2: '2 · Fotos das linhas', photoTitle: '"Ver imagem" do rastreamento',
-      photoNote: 'Para trazer a foto de cada linha para a planilha, o app precisa aprender, uma vez, o pedido que o JMS faz ao clicar em "Ver imagem". A foto do bipe de pacote problemático já vem sem isso.',
-      teach: 'Ensinar a foto', teachForget: 'Apagar o que aprendeu', photoOk: 'Foto das linhas: aprendida', photoNo: 'Foto das linhas: falta ensinar',
-      t1: 'No JMS, abra Rastreamento do pacote e consulte uma remessa.', t2: 'Aperte F12 → aba Rede (Network) e clique em "Ver imagem" numa linha.',
-      t3: 'Na lista da Rede, clique com o botão direito na consulta nova → Copiar → Copiar como fetch.',
-      t4: 'Cole abaixo e clique em Testar. O token do texto colado é jogado fora.', teachPh: 'fetch("https://gw.jtjms-br.com/…", {…})',
-      teachWb: 'Remessa da linha clicada (se o app pedir)', teachTest: 'Testar e salvar', teachBusy: 'Testando no JMS…',
-      teachOk: 'Aprendido! Esta é a foto da linha de {t} da remessa {w}. As próximas pesquisas trazem as fotos.', teachForgot: 'O app esqueceu o pedido da foto.',
-      waybills: '3 · Remessas (uma por linha)', waybillsPh: 'Cole aqui as remessas, uma por linha',
+      accLen: 'Token em uso: propriedade "{k}", {n} caracteres.',
+      accNames: 'Propriedades que existem neste projeto: {n}. O nome tem que ser JMS_AUTHTOKEN.',
+      accNoProps: 'Este projeto não tem nenhuma propriedade. Crie JMS_AUTHTOKEN no projeto da PESQUISA (não no do DashMaster) e clique em "Salvar propriedades do script". Depois recarregue esta página.',
+      accVer: 'Os arquivos no Google estão misturados: Codigo.gs V{a} e App.html V{b}. Cole os 5 arquivos de novo e use Implantar → Gerenciar implantações → ✏️ → Versão: Nova versão → Implantar.',
+      accOld: 'O Codigo.gs publicado é antigo (falta a função {f}). Cole o Codigo.gs novo e use Implantar → Gerenciar implantações → ✏️ → Versão: Nova versão → Implantar.',
+      accAuth: 'O Google ainda não autorizou o app a falar com o JMS. No editor do Apps Script, escolha testarConexao, clique em ▶ Executar e aceite. Depois use Implantar → Gerenciar implantações → ✏️ → Nova versão.',
+      accErr: 'Não consegui falar com o servidor do app: {m}',
+      testRoute: ' (com Routename {r})', testAll: 'Também testei os cabeçalhos de rota do DashMaster (trackingExpress, waybillTracking e packageTracking).',
+      waybills: '2 · Remessas (uma por linha)', waybillsPh: 'Cole aqui as remessas, uma por linha',
       block1: 'Bloco 1 · Tem ou não tem', block1Q: 'Quantas remessas têm esta linha no rastreamento?',
       block2: 'Bloco 2 · Turno que mais ocorreu', block2Q: 'Em que turno aconteceu o primeiro bipe com esta linha?',
       hint: 'Copie o texto da coluna "Descrição da etapa de bipagem". Maiúsculas, acentos e espaços dentro dos [ ] não importam; * vale qualquer trecho (ex.: "está [*] sendo enviada"). Deixe um bloco vazio para não usar.',
-      withPhotos: 'Trazer as fotos das linhas para a planilha', run: 'Pesquisar no JMS', stop: 'Parar', download: 'Baixar planilha (.xlsx)', clear: 'Limpar',
+      run: 'Pesquisar no JMS', stop: 'Parar', download: 'Baixar planilha (.xlsx)', clear: 'Limpar',
       madeBy: 'Feito por Caike Oliveira', count: '{n} remessa(s)', dup: '{n} repetida(s) ignorada(s)', bad: '{n} linha(s) que não parecem remessa',
       noWaybills: 'Cole pelo menos uma remessa.', noPattern: 'Digite o texto padrão de pelo menos um bloco.',
-      progress: 'Pesquisando no JMS… {done} de {total} remessas', photos: 'Buscando as fotos… {done} de {total} linhas com imagem',
-      finished: 'Pronto: {total} remessa(s) em {sec} s.', finishedPhotos: 'Pronto: {total} remessa(s) e {fotos} foto(s) em {sec} s.',
+      progress: 'Pesquisando no JMS… {done} de {total} remessas',
+      finished: 'Pronto: {total} remessa(s) em {sec} s.',
       stopped: 'Pesquisa parada: {done} de {total} remessas.', failed: 'A pesquisa parou', resume: 'Continuar',
-      photoMissing: '{n} linha(s) com imagem ficaram sem foto: ensine a foto (passo 2) e pesquise de novo.',
-      photoErr: '{n} foto(s) não baixaram.', limit: 'O JMS aceita {n} remessas por consulta (aprendido).',
+      limit: 'O JMS aceita {n} remessas por consulta (aprendido).',
       searched: 'Pesquisadas', yes: 'Tem o padrão', no: 'Não tem o padrão', none: '{n} sem rastreamento no JMS', noneTile: 'Sem rastreamento no JMS',
       topShift: 'Turno que mais ocorreu', ofYes: '{p} das que têm o padrão', noHits: 'Nenhuma remessa tem o padrão.', remessas: 'remessas', partial: 'parcial',
       chartYesNo: 'Tem × não tem o padrão', chartShift: 'Remessas por turno do primeiro bipe', chartHour: 'Remessas por hora do primeiro bipe',
@@ -47,7 +47,7 @@
       copy: 'Copiar remessas', copied: '{n} remessa(s) copiada(s).', rows: '{a}–{b} de {n}', first: 'Primeiro bipe com o padrão',
       cWaybill: 'Remessa', cTime: 'Tempo de digitalização', cShift: 'Turno', cOrigin: 'Origem', cBy: 'Quem escaneou', cType: 'Tipo de bipagem',
       cDesc: 'Descrição da etapa de bipagem', cImg: 'Imagem', cLines: 'Linhas', cWhy: 'Situação no rastreamento',
-      noImg: 'NÃO TEM IMAGEM!', imgLoading: 'buscando…', imgTeach: 'Tem imagem (ensine a foto)', imgFail: 'Não baixou', openPhoto: 'Abrir foto',
+      noImg: 'NÃO TEM IMAGEM!', hasImg: 'Tem imagem no JMS',
       whyNone: 'Sem rastreamento no JMS', whyErr: 'Consulta recusada pelo JMS', whyNo: 'Nenhuma linha com o padrão',
       xlsxOk: 'Planilha baixada.', xlsxBusy: 'Montando a planilha…'},
     zh: {title: '轨迹关键字查询', subtitle: 'JMS › 运营 › 包裹查询 › 包裹轨迹 · 始终取包含关键字的第一条扫描',
@@ -58,29 +58,29 @@
       accApp: '程序使用保存在本电脑的 AuthToken。如需更换，请在下方粘贴新的令牌。',
       accNoGas: '缺少 AuthToken：在 Apps Script 编辑器 → 项目设置 → 脚本属性中添加 JMS_AUTHTOKEN（与 DashMaster 相同）。',
       accNoLocal: '缺少 AuthToken。请在下方粘贴（保存在本电脑）。如本电脑在 C:\\dashmaster 安装了 DashMaster，程序会自动使用其令牌。',
-      accNoRemote: '缺少 AuthToken：请在运行程序的电脑上填写。', badgeOk: '已通过服务器连接', badgeNo: '缺少 AuthToken', tokSaved: '已保存在本电脑。',
-      tokNeed: '程序服务器缺少 JMS AuthToken（见步骤1）。', step2: '2 · 扫描行图片', photoTitle: '轨迹中的“查看图片”',
-      photoNote: '要把每行的图片放进表格，需要先让程序学习一次点击“查看图片”时 JMS 发出的请求。问题件扫描的图片无需学习。',
-      teach: '学习图片请求', teachForget: '删除已学习的请求', photoOk: '图片：已学习', photoNo: '图片：尚未学习',
-      t1: '在 JMS 打开包裹轨迹并查询一个运单。', t2: '按 F12 → 网络 (Network)，点击某一行的“查看图片”。', t3: '在网络列表中右键新请求 → 复制 → 以 fetch 格式复制。',
-      t4: '粘贴到下方并点击测试。粘贴内容中的令牌会被丢弃。', teachPh: 'fetch("https://gw.jtjms-br.com/…", {…})', teachWb: '所点击行的运单号（如有需要）',
-      teachTest: '测试并保存', teachBusy: '正在 JMS 测试…', teachOk: '学习成功！这是运单 {w} 在 {t} 的图片。之后的查询会带出图片。', teachForgot: '已删除图片请求。',
-      waybills: '3 · 运单号（每行一个）', waybillsPh: '在此粘贴运单号，每行一个', block1: '模块1 · 有/无', block1Q: '多少运单的轨迹中有这一行？',
+      accNoRemote: '缺少 AuthToken：请在运行程序的电脑上填写。', badgeOk: '已通过服务器连接', badgeNo: '缺少 AuthToken', badgeErr: '请检查步骤1', tokSaved: '已保存在本电脑。',
+      tokNeed: '程序服务器缺少 JMS AuthToken（见步骤1）。', accLen: '当前令牌：属性“{k}”，{n} 个字符。',
+      accNames: '本项目已有的属性：{n}。名称必须是 JMS_AUTHTOKEN。',
+      accNoProps: '本项目没有任何属性。请在“查询”项目（不是 DashMaster 项目）中创建 JMS_AUTHTOKEN 并点击“保存脚本属性”，然后刷新本页。',
+      accVer: 'Google 中的文件版本不一致：Codigo.gs V{a}，App.html V{b}。请重新粘贴 5 个文件并发布新版本。',
+      accOld: '已发布的 Codigo.gs 是旧版本（缺少函数 {f}）。请粘贴新的 Codigo.gs 并发布新版本。',
+      accAuth: 'Google 尚未授权程序访问 JMS。请在 Apps Script 编辑器中选择 testarConexao，点击 ▶ 运行并授权，然后发布新版本。',
+      accErr: '无法连接程序服务器：{m}', testRoute: '（Routename {r}）', testAll: '也测试了 DashMaster 的路由头（trackingExpress、waybillTracking、packageTracking）。',
+      waybills: '2 · 运单号（每行一个）', waybillsPh: '在此粘贴运单号，每行一个', block1: '模块1 · 有/无', block1Q: '多少运单的轨迹中有这一行？',
       block2: '模块2 · 最多的班次', block2Q: '包含这一行的第一条扫描发生在哪个班次？', hint: '复制“扫描描述”列的文字。大小写、重音和 [ ] 内的空格不影响；* 代表任意文字。留空则不使用该模块。',
-      withPhotos: '把扫描行的图片放进表格', run: '在 JMS 中查询', stop: '停止', download: '下载表格 (.xlsx)', clear: '清空', madeBy: '由 Caike Oliveira 制作',
+      run: '在 JMS 中查询', stop: '停止', download: '下载表格 (.xlsx)', clear: '清空', madeBy: '由 Caike Oliveira 制作',
       count: '{n} 个运单', dup: '忽略 {n} 个重复', bad: '{n} 行不像运单号', noWaybills: '请至少粘贴一个运单号。', noPattern: '请至少填写一个模块的关键字。',
-      progress: '正在查询 JMS… {done} / {total}', photos: '正在获取图片… {done} / {total}', finished: '完成：{total} 个运单，用时 {sec} 秒。',
-      finishedPhotos: '完成：{total} 个运单，{fotos} 张图片，用时 {sec} 秒。', stopped: '已停止：{done} / {total}。', failed: '查询停止', resume: '继续',
-      photoMissing: '{n} 行有图片但未获取：请学习图片请求（步骤2）后重新查询。', photoErr: '{n} 张图片下载失败。', limit: 'JMS 每次最多查询 {n} 个运单（已学习）。',
+      progress: '正在查询 JMS… {done} / {total}', finished: '完成：{total} 个运单，用时 {sec} 秒。',
+      stopped: '已停止：{done} / {total}。', failed: '查询停止', resume: '继续', limit: 'JMS 每次最多查询 {n} 个运单（已学习）。',
       searched: '已查询', yes: '有关键字', no: '无关键字', none: '{n} 个在 JMS 无轨迹', noneTile: 'JMS 无轨迹', topShift: '最多的班次', ofYes: '占有关键字的 {p}',
       noHits: '没有运单包含该关键字。', remessas: '运单', partial: '部分', chartYesNo: '有/无关键字', chartShift: '第一条扫描的班次分布', chartHour: '第一条扫描的小时分布',
       chartBy: '扫描最多的人员（前10）', tabYes: '有 ({n})', tabNo: '无 ({n})', find: '查找运单或扫描员', copy: '复制运单号', copied: '已复制 {n} 个运单号。',
       rows: '{a}–{b} / {n}', first: '包含关键字的第一条扫描', cWaybill: '运单号', cTime: '扫描时间', cShift: '班次', cOrigin: '网点', cBy: '扫描员', cType: '扫描类型',
-      cDesc: '扫描描述', cImg: '图片', cLines: '行数', cWhy: '轨迹情况', noImg: '无图片！', imgLoading: '获取中…', imgTeach: '有图片（请学习图片请求）', imgFail: '下载失败',
-      openPhoto: '打开图片', whyNone: 'JMS 无轨迹', whyErr: 'JMS 拒绝查询', whyNo: '没有包含关键字的行', xlsxOk: '表格已下载。', xlsxBusy: '正在生成表格…'}
+      cDesc: '扫描描述', cImg: '图片', cLines: '行数', cWhy: '轨迹情况', noImg: '无图片！', hasImg: 'JMS 有图片',
+      whyNone: 'JMS 无轨迹', whyErr: 'JMS 拒绝查询', whyNo: '没有包含关键字的行', xlsxOk: '表格已下载。', xlsxBusy: '正在生成表格…'}
   };
   var lang = 'pt';
-  var state = {list: [], pats: ['', ''], results: [], running: false, stop: false, started: 0, modelo: null, fotos: null, phase: '', acesso: null,
+  var state = {list: [], pats: ['', ''], results: [], running: false, stop: false, started: 0, acesso: null, acessoErro: '',
     tab: {0: 'yes', 1: 'yes'}, page: {0: 1, 1: 1}, find: {0: '', 1: ''}};
 
   function $(s, el) { return (el || document).querySelector(s); }
@@ -100,7 +100,12 @@
   var GAS = !!(window.google && google.script && google.script.run);
   function gas(fn, args) {
     return new Promise(function (ok, ko) {
-      var r = google.script.run.withSuccessHandler(ok).withFailureHandler(function (e) { ko(new Error(e && e.message ? e.message : String(e))); });
+      var r = google.script.run.withSuccessHandler(ok).withFailureHandler(function (e) {
+        var m = e && e.message ? e.message : String(e);
+        // Sem a autorização do dono (UrlFetchApp): o Google responde em inglês ou português.
+        ko(new Error(/authoriz|autoriza|permiss|PERMISSION_DENIED/i.test(m) ? t('accAuth') + ' (' + m.slice(0, 160) + ')' : m));
+      });
+      if (typeof r[fn] !== 'function') { ko(new Error(t('accOld', {f: fn}))); return; }
       r[fn].apply(r, args);
     });
   }
@@ -114,12 +119,7 @@
       return GAS ? gas('jms', [url, body === undefined ? null : body, headers || {}]) : http('jms', {url: url, body: body === undefined ? null : body, headers: headers || {}});
     },
     estado: function () { return GAS ? gas('estado', []) : http('estado', {}); },
-    token: function (v) { return http('token', {token: v}); },
-    fotos: function (urls) { return GAS ? gas('fotos', [urls]) : http('fotos', {urls: urls}); },
-    modelo: function (acao, valor) {
-      var v = valor === undefined ? null : JSON.stringify(valor);
-      return (GAS ? gas('modelo', [acao, v]) : http('modelo', {acao: acao, valor: v})).then(function (s) { return s ? JSON.parse(s) : null; });
-    }
+    token: function (v) { return http('token', {token: v}); }
   };
 
   function toast(msg, type) {
@@ -134,55 +134,55 @@
     setTimeout(function () { el.remove(); }, type === 'error' ? 9000 : 5000);
   }
 
-  // ------------------------------------------------------------------ acesso ao JMS e foto
+  // ------------------------------------------------------------------ acesso ao JMS
   function renderSetup() {
     var a = state.acesso || {}, b = $('#tokenBadge'), ok = !!a.fonte;
-    b.className = 'badge ' + (ok ? 'ok' : state.acesso ? 'warn' : '');
-    b.textContent = state.acesso ? (ok ? t('badgeOk') : t('badgeNo')) : '…';
-    $('#accessText').textContent = !state.acesso ? '' : a.fonte === 'propriedades' ? t('accProp') : a.fonte === 'dashmaster' ? t('accDash') : a.fonte === 'app' ? t('accApp')
+    var ver = [BOOT.versao, a.versao].filter(function (v) { return v && v !== VERSAO_PAGINA; })[0];
+    b.className = 'badge ' + (ok ? 'ok' : state.acesso || state.acessoErro ? 'warn' : '');
+    b.textContent = state.acesso ? (ok ? t('badgeOk') : t('badgeNo')) : state.acessoErro ? t('badgeErr') : '…';
+    $('#accessText').textContent = state.acessoErro ? t('accErr', {m: state.acessoErro}) : !state.acesso ? ''
+      : a.fonte === 'propriedades' ? t('accProp') : a.fonte === 'dashmaster' ? t('accDash') : a.fonte === 'app' ? t('accApp')
       : a.plataforma === 'appsscript' ? t('accNoGas') : a.local ? t('accNoLocal') : t('accNoRemote');
+    // O que conferir quando o token não passa: nomes das propriedades (nunca os valores), tamanho do token e versão dos arquivos.
+    var dica = [];
+    if (ver && ver !== VERSAO_PAGINA) dica.push(t('accVer', {a: ver, b: VERSAO_PAGINA}));
+    if (ok && a.tamanho) dica.push(t('accLen', {k: a.chave || 'JMS_AUTHTOKEN', n: a.tamanho}));
+    if (!ok && a.plataforma === 'appsscript') dica.push(a.nomes && a.nomes.length ? t('accNames', {n: a.nomes.join(', ')}) : t('accNoProps'));
+    $('#accessHint').innerHTML = dica.map(function (d) { return '<p>' + esc(d) + '</p>'; }).join('');
+    $('#accessHint').classList.toggle('hidden', !dica.length);
     // Campo do token só no computador do app (versão Node.js), quando ele não usa o token do DashMaster.
     $('#tokenRow').classList.toggle('hidden', !(a.plataforma === 'node' && a.local && a.fonte !== 'dashmaster'));
-    var pb = $('#photoBadge');
-    pb.className = 'badge ' + (state.modelo ? 'ok' : 'warn');
-    pb.textContent = state.modelo ? t('photoOk') : t('photoNo');
-    $('#teachForget').classList.toggle('hidden', !state.modelo);
-  }
-  function teach() {
-    var box = $('#teachResult'), btn = $('#teachTest');
-    btn.disabled = true;
-    box.innerHTML = '<p class="note">' + esc(t('teachBusy')) + '</p>';
-    var feito;
-    try { feito = P.ensinarFoto(api, $('#teachText').value, $('#teachWaybill').value.trim(), {headers: rota()}); }
-    catch (e) { feito = Promise.reject(e); }
-    feito.then(function (r) {
-      return api.modelo('gravar', r.modelo).then(function () {
-        state.modelo = r.modelo;
-        store('jt_pesquisa_modelo', JSON.stringify(r.modelo));
-        $('#teachText').value = '';
-        box.innerHTML = '<div class="alert ok"><div><b>' + esc(t('teachOk', {w: r.linha.waybillNo || r.linha.billCode || '', t: fmtTime(r.linha.scanTime)})) + '</b></div></div>' +
-          '<img alt="" src="data:image/' + (R.sniffImage(P.b64ToBytes(r.foto)) || 'jpeg') + ';base64,' + r.foto + '">';
-        renderSetup();
-      });
-    }).catch(function (e) {
-      box.innerHTML = '<div class="alert"><div>' + esc(e.message) + '</div></div>';
-    }).then(function () { btn.disabled = false; });
   }
   function rota() { try { return JSON.parse(load('jt_pesquisa_rota') || 'null'); } catch (e) { return null; } }
   function carregarAcesso() {
-    return api.estado().then(function (a) { state.acesso = a; renderSetup(); }, function () { renderSetup(); });
+    return api.estado().then(function (a) { state.acesso = a; state.acessoErro = ''; renderSetup(); },
+      function (e) { state.acesso = null; state.acessoErro = e.message; renderSetup(); });
   }
-  /** Testar conexão: uma consulta com uma remessa de teste (o JMS responde vazio quando aceita o token). */
+  /**
+   * Testar conexão: uma consulta com uma remessa de teste (o JMS responde vazio quando aceita o token). Se o JMS recusar,
+   * testa os cabeçalhos de rota do DashMaster; o que funcionar fica para a pesquisa.
+   */
   function testar() {
-    var box = $('#testResult'), btn = $('#testBtn');
+    var box = $('#testResult'), btn = $('#testBtn'), vistos = {}, primeiro = null;
+    var lista = [rota() || {}, {}].concat(P.ROUTE_VARIANTS).filter(function (h) { var k = JSON.stringify(h); if (vistos[k]) return false; vistos[k] = 1; return true; });
+    var falha = function (msg, extra) { box.innerHTML = '<div class="alert"><div>' + esc(msg) + (extra ? '<br><span class="small">' + esc(extra) + '</span>' : '') + '</div></div>'; };
     btn.disabled = true;
     box.innerHTML = '<p class="note">' + esc(t('testBusy')) + '</p>';
-    api.jms(R.KEYWORD_URL, R.keywordPayload(['TESTE0000000000']), rota() || {}).then(function (r) {
-      R.parseJms(r.status, r.text);
-      box.innerHTML = '<div class="alert ok"><div><b>' + esc(t('testOk')) + '</b></div></div>';
-    }).catch(function (e) {
-      box.innerHTML = '<div class="alert"><div>' + esc(e.message) + '</div></div>';
-    }).then(function () { btn.disabled = false; carregarAcesso(); });
+    var tenta = function (i) {
+      if (i >= lista.length) { falha(primeiro.message, t('testAll')); return; }
+      var h = lista[i];
+      return api.jms(R.KEYWORD_URL, R.keywordPayload(['TESTE0000000000']), h).then(function (r) {
+        R.parseJms(r.status, r.text);
+        store('jt_pesquisa_rota', h.routename ? JSON.stringify(h) : null);
+        box.innerHTML = '<div class="alert ok"><div><b>' + esc(t('testOk')) + (h.routename ? esc(t('testRoute', {r: h.routename})) : '') + '</b></div></div>';
+      }, function (e) {
+        // Erro do servidor do app (sem token, arquivo antigo, sem autorização): não adianta trocar o cabeçalho.
+        if (!e.kind || e.kind === 'temp') { falha(e.message); return; }
+        if (!primeiro) primeiro = e;
+        return tenta(i + 1);
+      });
+    };
+    Promise.resolve(tenta(0)).catch(function (e) { falha(e.message); }).then(function () { btn.disabled = false; carregarAcesso(); });
   }
 
   // ------------------------------------------------------------------ remessas
@@ -220,14 +220,14 @@
     if (!p.list.length) { toast(t('noWaybills'), 'error'); return; }
     if (!pats[0] && !pats[1]) { toast(t('noPattern'), 'error'); return; }
     store('jt_pesquisa_p1', pats[0]); store('jt_pesquisa_p2', pats[1]);
-    state.list = p.list; state.pats = pats; state.results = []; state.fotos = null;
+    state.list = p.list; state.pats = pats; state.results = [];
     state.tab = {0: 'yes', 1: 'yes'}; state.page = {0: 1, 1: 1}; state.find = {0: '', 1: ''};
     state.started = Date.now();
     showAlert('');
     $('#results').innerHTML = '';
     run(p.list);
   }
-  /** Pesquisa (ou continua) as remessas `list`; depois as fotos, se marcado. */
+  /** Pesquisa (ou continua) as remessas `list`. */
   function run(list) {
     state.stop = false;
     setRunning(true);
@@ -243,14 +243,7 @@
       antes.concat(res.results).forEach(function (r) { byW[r.w] = r; });
       state.results = state.list.filter(function (w) { return byW[w]; }).map(function (w) { return byW[w]; });
       render();
-      if (state.stop || res.faltam.length) return done('stopped');
-      var comImg = state.results.some(function (r) { return r.p.some(function (h) { return h && h.img && !h.foto; }); });
-      if (!$('#withPhotos').checked || !comImg) return done('finished');
-      state.phase = 'fotos';
-      return P.buscarFotos(api, state.results, {modelo: state.modelo, headers: rota(), paralelo: 4, parar: parar, miniatura: miniatura,
-        onProgresso: function (feitas, total) { progress(feitas, total, 'photos'); },
-        onFoto: function () { scheduleRender(); }
-      }).then(function (st) { state.fotos = st; render(); done(state.stop ? 'stopped' : 'finishedPhotos'); });
+      done(state.stop || res.faltam.length ? 'stopped' : 'finished');
     }).catch(function (e) {
       render();
       setRunning(false);
@@ -260,39 +253,12 @@
     });
   }
   function done(key) {
-    state.phase = '';
     setRunning(false);
-    var sec = Math.round((Date.now() - state.started) / 1000), st = state.fotos;
+    var sec = Math.round((Date.now() - state.started) / 1000);
     $('#barFill').style.width = '100%';
     $('#statusText').textContent = key === 'stopped' ? t('stopped', {done: fmtInt(state.results.length), total: fmtInt(state.list.length)})
-      : t(key, {total: fmtInt(state.results.length), fotos: fmtInt(st ? st.comFoto : 0), sec: sec});
-    if (st && st.semLink) showAlert(t('photoMissing', {n: fmtInt(st.semLink)}), null, 'warn');
-    else if (st && st.erros) showAlert(t('photoErr', {n: fmtInt(st.erros)}), null, 'warn');
+      : t(key, {total: fmtInt(state.results.length), sec: sec});
     render();
-  }
-  var renderTimer = null;
-  function scheduleRender() { if (!renderTimer) renderTimer = setTimeout(function () { renderTimer = null; [0, 1].forEach(function (k) { if (state.pats[k] && $('#block' + k)) renderTable(k); }); }, 400); }
-
-  /** Foto reduzida (até 360 px) para a tela e a planilha. */
-  function miniatura(bytes, tipo) {
-    return new Promise(function (ok) {
-      var url = URL.createObjectURL(new Blob([bytes], {type: 'image/' + (tipo || 'jpeg')})), img = new Image();
-      img.onload = function () {
-        var s = Math.min(1, 360 / Math.max(img.naturalWidth, img.naturalHeight)), w = Math.max(1, Math.round(img.naturalWidth * s)), h = Math.max(1, Math.round(img.naturalHeight * s));
-        var c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        var g = c.getContext('2d');
-        g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
-        g.drawImage(img, 0, 0, w, h);
-        URL.revokeObjectURL(url);
-        c.toBlob(function (b) {
-          if (!b) { ok(null); return; }
-          b.arrayBuffer().then(function (ab) { ok({bytes: new Uint8Array(ab), w: w, h: h, mime: 'image/jpeg', url: URL.createObjectURL(b)}); }, function () { ok(null); });
-        }, 'image/jpeg', 0.8);
-      };
-      img.onerror = function () { URL.revokeObjectURL(url); ok(null); };
-      img.src = url;
-    });
   }
 
   // ------------------------------------------------------------------ gráficos (SVG simples)
@@ -415,16 +381,7 @@
       return !q || r.w.indexOf(q) >= 0 || (h && String(h.by || '').toUpperCase().indexOf(q) >= 0);
     });
   }
-  function imgCell(h) {
-    if (h.foto && h.foto.url) {
-      var img = '<img class="tk-thumb" loading="lazy" src="' + esc(h.foto.url) + '" alt="">';
-      return h.url ? '<a href="' + esc(h.url) + '" target="_blank" rel="noopener noreferrer" title="' + esc(t('openPhoto')) + '">' + img + '</a>' : img;
-    }
-    if (!h.img) return '<span class="tk-noimg">' + esc(t('noImg')) + '</span>';
-    if (state.phase === 'fotos' && !h.fotoErro && h.url === undefined) return '<span class="muted">' + esc(t('imgLoading')) + '</span>';
-    if (h.url) return '<a href="' + esc(h.url) + '" target="_blank" rel="noopener noreferrer">' + esc(t('imgFail')) + ' · ' + esc(t('openPhoto')) + '</a>';
-    return '<span class="muted">' + esc(t('imgTeach')) + '</span>';
-  }
+  function imgCell(h) { return h.img ? esc(t('hasImg')) : '<span class="tk-noimg">' + esc(t('noImg')) + '</span>'; }
   function renderTable(k) {
     var box = $('#block' + k), list = rowsOf(k), yes = state.tab[k] === 'yes';
     var pages = Math.max(1, Math.ceil(list.length / PAGE));
@@ -505,19 +462,13 @@
     $('#tkVersion').textContent = 'V' + (BOOT.versao || '');
     $('#pat1').value = load('jt_pesquisa_p1') !== null ? load('jt_pesquisa_p1') : DEFAULTS[0];
     $('#pat2').value = load('jt_pesquisa_p2') !== null ? load('jt_pesquisa_p2') : DEFAULTS[1];
-    try { state.modelo = JSON.parse(load('jt_pesquisa_modelo') || 'null'); } catch (e) { state.modelo = null; }
-    api.modelo('ler').then(function (m) { state.modelo = m; store('jt_pesquisa_modelo', m ? JSON.stringify(m) : null); renderSetup(); }, function () {});
+    store('jt_pesquisa_modelo', null); // da V1.1 (fotos), que saiu
     carregarAcesso();
     $('#testBtn').addEventListener('click', testar);
     $('#tokenSave').addEventListener('click', function () {
-      var v = $('#tokenInput').value.trim().replace(/^authtoken\s*:\s*/i, '');
+      var v = $('#tokenInput').value.trim();
       if (!v) { $('#tokenInput').focus(); return; }
       api.token(v).then(function () { $('#tokenInput').value = ''; toast(t('tokSaved'), 'success'); return carregarAcesso(); }, function (e) { toast(e.message, 'error'); });
-    });
-    $('#teachOpen').addEventListener('click', function () { $('#teachBox').classList.toggle('hidden'); });
-    $('#teachTest').addEventListener('click', teach);
-    $('#teachForget').addEventListener('click', function () {
-      api.modelo('apagar').then(function () { state.modelo = null; store('jt_pesquisa_modelo', null); renderSetup(); toast(t('teachForgot')); }, function (e) { toast(e.message, 'error'); });
     });
     $('#waybills').addEventListener('input', updateCount);
     $('#runBtn').addEventListener('click', start);
@@ -525,7 +476,7 @@
     $('#xlsxBtn').addEventListener('click', download);
     $('#clearBtn').addEventListener('click', function () {
       if (state.running) return;
-      $('#waybills').value = ''; state.list = []; state.results = []; state.fotos = null;
+      $('#waybills').value = ''; state.list = []; state.results = [];
       $('#statusBox').classList.add('hidden'); showAlert(''); updateCount(); render();
     });
     $('#themeBtn').addEventListener('click', function () {

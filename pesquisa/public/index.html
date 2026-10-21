@@ -38,12 +38,13 @@
       </div>
     </header>
 
-    <!-- Acesso ao JMS e fotos -->
+    <!-- Acesso ao JMS -->
     <section class="card tk-setup" aria-label="Acesso ao JMS">
       <div>
         <div class="section-head"><div><span class="kicker" data-i18n="step1">1 · Acesso ao JMS</span><h2 data-i18n="tokenTitle">Direto do JMS, como o DashMaster</h2></div>
           <span class="badge" id="tokenBadge"></span></div>
         <p class="note" id="accessText"></p>
+        <div class="tk-hintbox hidden" id="accessHint"></div>
         <div class="row"><button type="button" class="btn btn-light" id="testBtn"><span data-i18n="test">Testar conexão</span></button></div>
         <div class="row hidden" id="tokenRow">
           <input type="password" class="input" id="tokenInput" autocomplete="off" spellcheck="false" data-i18n-placeholder="tokenPh" placeholder="Cole aqui o AuthToken">
@@ -51,33 +52,12 @@
         </div>
         <div id="testResult" aria-live="polite"></div>
       </div>
-      <div>
-        <div class="section-head"><div><span class="kicker" data-i18n="step2">2 · Fotos das linhas</span><h2 data-i18n="photoTitle">"Ver imagem" do rastreamento</h2></div>
-          <span class="badge" id="photoBadge"></span></div>
-        <p class="note" data-i18n="photoNote">Para trazer a foto de cada linha para a planilha, o app precisa aprender, uma vez, o pedido que o JMS faz ao clicar em "Ver imagem". A foto do bipe de pacote problemático já vem sem isso.</p>
-        <div class="row"><button type="button" class="btn btn-light" id="teachOpen"><span data-i18n="teach">Ensinar a foto</span></button>
-          <button type="button" class="btn btn-ghost hidden" id="teachForget"><span data-i18n="teachForget">Apagar o que aprendeu</span></button></div>
-        <div class="tk-teach hidden" id="teachBox">
-          <ol class="tk-steps">
-            <li data-i18n="t1">No JMS, abra Rastreamento do pacote e consulte uma remessa.</li>
-            <li data-i18n="t2">Aperte F12 → aba Rede (Network) e clique em "Ver imagem" numa linha.</li>
-            <li data-i18n="t3">Na lista da Rede, clique com o botão direito na consulta nova → Copiar → Copiar como fetch.</li>
-            <li data-i18n="t4">Cole abaixo e clique em Testar. O token do texto colado é jogado fora.</li>
-          </ol>
-          <textarea class="input" id="teachText" spellcheck="false" data-i18n-placeholder="teachPh" placeholder='fetch("https://gw.jtjms-br.com/…", {…})'></textarea>
-          <div class="row" style="margin-top:0">
-            <input type="text" class="input" id="teachWaybill" autocomplete="off" data-i18n-placeholder="teachWb" placeholder="Remessa da linha clicada (se o app pedir)">
-            <button type="button" class="btn btn-red" id="teachTest"><span data-i18n="teachTest">Testar e salvar</span></button>
-          </div>
-          <div id="teachResult" aria-live="polite"></div>
-        </div>
-      </div>
     </section>
 
     <!-- Pesquisa -->
     <section class="card tk-input" aria-label="Pesquisa">
       <div>
-        <label class="label" for="waybills" data-i18n="waybills">3 · Remessas (uma por linha)</label>
+        <label class="label" for="waybills" data-i18n="waybills">2 · Remessas (uma por linha)</label>
         <textarea class="input" id="waybills" spellcheck="false" autocomplete="off" data-i18n-placeholder="waybillsPh" placeholder="Cole aqui as remessas, uma por linha"></textarea>
         <div class="tk-count" id="wbCount" aria-live="polite"></div>
       </div>
@@ -93,7 +73,6 @@
           <input type="text" class="input" id="pat2" autocomplete="off" aria-label="Texto padrão do bloco 2">
         </div>
         <div class="tk-hint" data-i18n="hint">Copie o texto da coluna "Descrição da etapa de bipagem". Maiúsculas, acentos e espaços dentro dos [ ] não importam; * vale qualquer trecho (ex.: "está [*] sendo enviada"). Deixe um bloco vazio para não usar.</div>
-        <label class="check"><input type="checkbox" id="withPhotos" checked><span data-i18n="withPhotos">Trazer as fotos das linhas para a planilha</span></label>
         <div class="tk-actions">
           <button type="button" class="btn btn-red" id="runBtn">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span data-i18n="run">Pesquisar no JMS</span>

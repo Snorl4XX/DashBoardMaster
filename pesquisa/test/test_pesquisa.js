@@ -7,7 +7,7 @@ const vm = require('vm');
 const zlib = require('zlib');
 const http = require('http');
 const ROOT = path.join(__dirname, '..');
-const {criar, bipes, fetchCopiado, TOKEN} = require('./jms_falso');
+const {criar, bipes, TOKEN} = require('./jms_falso');
 
 // O servidor do app lê o endereço do JMS (simulado) ao carregar: definir antes do require.
 let jmsPorta = 0;
@@ -17,17 +17,15 @@ const X = require('../lib/planilha');
 
 let passed = 0;
 function check(cond, name, extra) { if (!cond) { console.error('FALHOU: ' + name, extra === undefined ? '' : extra); process.exit(1); } passed++; }
-const JPEG = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAGAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDnKKKK84/QT//Z', 'base64');
 const WS = n => Array.from({length: n}, (_, i) => 'FIC' + String(i).padStart(9, '0'));
 const PATS = ['A encomenda expressa está [ SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
 
-/** "Servidor" para os testes da página: fala direto com o JMS falso (como o api/jms e o api/fotos do app). */
+/** "Servidor" para os testes da página: fala direto com o JMS falso (como o api/jms do app). */
 function apiFalsa(porta, token) {
   const local = u => u.replace(/^https:\/\/[^/]+/, 'http://127.0.0.1:' + porta);
   return {
-    jms: (url, body, headers) => fetch(local(url), {method: body === null ? 'GET' : 'POST', headers: Object.assign({'Content-Type': 'application/json', authtoken: token || TOKEN},
-      headers || {}), body: body === null ? undefined : JSON.stringify(body)}).then(async r => ({status: r.status, text: await r.text()})),
-    fotos: urls => Promise.all(urls.map(u => fetch(local(u)).then(async r => r.ok ? {ok: true, b64: Buffer.from(await r.arrayBuffer()).toString('base64')} : {ok: false, error: 'HTTP ' + r.status})))
+    jms: (url, body, headers) => fetch(local(url), {method: 'POST', headers: Object.assign({'Content-Type': 'application/json', authtoken: token || TOKEN},
+      headers || {}), body: JSON.stringify(body)}).then(async r => ({status: r.status, text: await r.text()}))
   };
 }
 function unzip(bytes) {
@@ -66,7 +64,7 @@ function request(porta, method, p, body, headers) {
     !m1('A encomenda expressa está [PA FIC-SP] sendo enviada, para [SP GRU]'), 'padrão: colchete com espaço, acento e maiúscula não importam; outra base não vale');
   check(R.matcher('está [*] sendo enviada')('A encomenda expressa está [PA FIC] sendo enviada') && R.matcher(' ') === null, 'padrão com * e padrão vazio');
   const d2 = bipes('FIC000000002', 2), h2 = R.hit(d2, R.matcher(PATS[1]));
-  check(h2.t === '2026-09-09 14:36:12' && h2.shift === 'T2' && h2.n === 2 && h2.origin === 'SP GRU' && h2.by === 'RECEBEDOR FICTICIO 2' && h2.img && h2.raw.scanTime === h2.t,
+  check(h2.t === '2026-09-09 14:36:12' && h2.shift === 'T2' && h2.n === 2 && h2.origin === 'SP GRU' && h2.by === 'RECEBEDOR FICTICIO 2' && h2.img && h2.raw === undefined,
     'sempre o PRIMEIRO bipe com o padrão (o JMS manda do mais novo para o mais antigo)', h2);
   const semCampos = R.hit([{scanTime: '2026-09-09 07:00:00', imgType: '', waybillTrackingContent: 'O expresso chegou [SP GRU] A parada anterior foi [], escaneador [FICTICIO X]'}], R.matcher(PATS[1]));
   check(semCampos.origin === 'SP GRU' && semCampos.by === 'FICTICIO X' && semCampos.img === false && semCampos.shift === 'T1', 'origem e escaneador pela descrição; sem imgType = sem imagem');
@@ -78,33 +76,8 @@ function request(porta, method, p, body, headers) {
     try { R.parseJms(s, t); return 'ok'; } catch (e) { return e.kind; }
   });
   check(kinds.join() === 'auth,auth,auth,temp,refused', 'respostas do JMS: token vencido, login, indisponível, recusa', kinds);
-  check(R.findImageUrls({data: {a: 'x', imgs: ['https://f.example/a.png?s=1', 'https://f.example/b']}})[0] === 'https://f.example/a.png?s=1' &&
-    R.findImageUrls('https://f.example/1.jpg,https://f.example/2.jpg').length === 2 && R.findImageUrls({b: 'data:image/png;base64,AAAA'})[0] === 'data:image/png;base64,AAAA',
-    'links de foto em qualquer resposta');
-  check(R.sniffImage(JPEG) === 'jpeg' && R.sniffImage(Buffer.from('<html>')) === '', 'tipo do arquivo pelos primeiros bytes');
-  // Ensinar a foto: "Copiar como fetch", cURL e texto simples; token e cookie do texto colado são descartados.
-  const cp = fetchCopiado('FIC000000002', h2.t), req = R.parseCopiedRequest(cp);
-  check(req.url === 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/fotoFicticia' && req.method === 'POST' && req.body.billCode === 'FIC000000002' &&
-    JSON.stringify(req.headers) === '{"routename":"trackingExpress"}' && JSON.stringify(req).indexOf('NAO-USAR') < 0, 'pedido "Copiar como fetch": token e cookie descartados', req);
-  const curl = R.parseCopiedRequest("curl 'https://gw.jtjms-br.com/operatingplatform/x/foto?billCode=FIC000000002&imgType=8' \\\n  -H 'authtoken: NAO-USAR' \\\n  -H 'routename: trackingExpress'");
-  check(curl.method === 'GET' && curl.query.billCode === 'FIC000000002' && !curl.body && !curl.headers.authtoken, 'pedido "Copiar como cURL" (GET com parâmetros)', curl);
-  const plain = R.parseCopiedRequest('https://gw.jtjms-br.com/operatingplatform/x/foto\n{"waybillNo":"FIC000000002","scanTime":"' + h2.t + '"}');
-  check(plain.method === 'POST' && plain.body.waybillNo === 'FIC000000002', 'endereço numa linha e o JSON embaixo');
-  let errUrl = '';
-  try { R.parseCopiedRequest('fetch("https://outro.example/x", {"method":"POST"})'); } catch (e) { errUrl = e.message; }
-  check(/gw\.jtjms-br\.com/.test(errUrl), 'pedido fora do JMS recusado');
-  const lt = R.learnTemplate(req, d2);
-  check(lt.usados === 3 && lt.linha.scanTime === h2.t && lt.modelo.body.billCode.from === 'billCode' && lt.modelo.body.scanTime.from === 'scanTime' &&
-    lt.modelo.body.imgType.from === 'imgType' && lt.modelo.body.imgType.num && lt.modelo.body.countryId.value === '1', 'modelo: remessa, horário e tipo de imagem vêm da linha; o resto fica fixo', lt.modelo);
-  const outra = bipes('FIC000000005', 5).filter(d => d.code === 110)[0], br = R.buildRequest(lt.modelo, outra);
-  check(br.body.billCode === 'FIC000000005' && br.body.scanTime === outra.scanTime && br.body.imgType === 3 && br.body.countryId === '1' && br.headers.routename === 'trackingExpress',
-    'pedido do "Ver imagem" montado para outra linha (outro tipo de imagem)', br);
-  const ltq = R.learnTemplate(curl, d2), bq = R.buildRequest(ltq.modelo, outra);
-  check(ltq.usados === 2 && bq.body === null && /billCode=FIC000000005&imgType=3$/.test(bq.url), 'modelo GET com parâmetros no endereço', bq.url);
-  check(R.waybillsIn(req).join() === 'FIC000000002', 'remessa achada no pedido copiado');
-
-  // ---------- 2. Pesquisa e fotos (pesquisa.js) com o JMS falso ----------
-  const jms = await criar({fotos: [JPEG]});
+  // ---------- 2. Pesquisa (pesquisa.js) com o JMS falso ----------
+  const jms = await criar({});
   jmsPorta = jms.porta;
   const api = apiFalsa(jms.porta), lista = WS(120).concat(['NAOEXISTE0001', 'NAOEXISTE0002']);
   const r0 = await P.pesquisar(api, lista, PATS, {espera: 0});
@@ -136,6 +109,11 @@ function request(porta, method, p, body, headers) {
   const rr = await P.pesquisar(apiFalsa(jr.porta), WS(20), PATS, {espera: 0, onHeaders: h => heads.push(h)});
   await jr.fechar();
   check(rr.results.filter(x => x.p[1]).length === 20 && heads[0] && heads[0].routename === 'trackingExpress', 'cabeçalho de rota da tela testado sozinho e guardado', heads);
+  const jp = await criar({rota: 'packageTracking'}), headsP = [];
+  const rpk = await P.pesquisar(apiFalsa(jp.porta), WS(10), PATS, {espera: 0, onHeaders: h => headsP.push(h)});
+  await jp.fechar();
+  check(rpk.results.filter(x => x.p[1]).length === 10 && headsP[0].routename === 'packageTracking' && P.ROUTE_VARIANTS.length === 3,
+    'as 3 variantes de rota do DashMaster (trackingExpress, waybillTracking, packageTracking)', headsP);
   let eTok = null;
   try { await P.pesquisar(apiFalsa(jms.porta, 'TOKEN-VENCIDO'), WS(10), PATS, {espera: 0}); } catch (e) { eTok = e; }
   check(eTok && eTok.kind === 'auth' && /AuthToken/.test(eTok.message), 'token vencido: a pesquisa para com o aviso', eTok && eTok.message);
@@ -146,59 +124,24 @@ function request(porta, method, p, body, headers) {
   try { await P.pesquisar(api, WS(3), ['', ' '], {}); } catch (e) { eVazio = e.message; }
   check(/texto padrão/.test(eVazio), 'sem padrão: aviso');
 
-  // Fotos sem ensinar: só a do bipe de pacote problemático (Lista registrada de pacote problemático).
-  const rProb = await P.pesquisar(api, WS(12), ['', 'problema foi realizada'], {espera: 0});
-  const stP = await P.buscarFotos(api, rProb.results, {espera: 0});
-  const hp = rProb.results[0].p[1];
-  check(stP.total === 3 && stP.comFoto === 3 && hp.url === 'https://pro-ficticio.jtjms-br.com/foto/problema-FIC000000000.jpeg?sig=FICT' && R.sniffImage(hp.foto.bytes) === 'jpeg',
-    'foto do bipe de pacote problemático sem precisar ensinar', stP);
-  const st0 = await P.buscarFotos(api, r0.results.slice(0, 10), {espera: 0});
-  check(st0.semLink === 10 && st0.comFoto === 0 && r0.results[1].p[1].url === '' && !r0.results[1].p[1].foto, 'outras linhas com imagem sem ensinar: ficam sem foto (avisa)', st0);
-  // Ensinar e buscar todas.
-  const ens = await P.ensinarFoto(api, cp, '', {espera: 0});
-  check(ens.modelo && ens.linha.scanTime === h2.t && /^https:\/\/pro-ficticio\.jtjms-br\.com\/foto\/FIC000000002-/.test(ens.url) && Buffer.from(ens.foto, 'base64').equals(JPEG) &&
-    JSON.stringify(ens.modelo).indexOf('NAO-USAR') < 0, 'Ensinar a foto: acha a linha pela remessa do pedido, testa e devolve a foto', ens.url);
-  let eEns = '';
-  try { await P.ensinarFoto(api, cp.replace(/FIC000000002/g, 'FIC999999999'), '', {espera: 0}); } catch (e) { eEns = e.message; }
-  check(/não tem rastreamento/.test(eEns), 'Ensinar com remessa sem rastreamento: aviso claro', eEns);
+  // ---------- 3. Planilha (planilha.js) ----------
   const rAll = await P.pesquisar(api, WS(30), ['O expresso chegou [SP GRU]', 'chegou [SP GRU] A parada anterior foi []'], {espera: 0});
-  const antes = jms.estado.chamadas.filter(c => c.rota === 'fotoFicticia').length, vistos = [];
-  const stA = await P.buscarFotos(api, rAll.results, {modelo: ens.modelo, espera: 0, onFoto: h => vistos.push(h)});
-  const pedidosFoto = jms.estado.chamadas.filter(c => c.rota === 'fotoFicticia').length - antes;
-  check(stA.total === 30 && stA.comFoto === 30 && pedidosFoto === 30 && rAll.results.every(r => r.p[0].foto && r.p[0].foto === r.p[1].foto) && vistos.length === 60,
-    'com o modelo: foto de cada linha; a mesma linha nos dois blocos busca uma vez só', {stA, pedidosFoto});
-  const miniaturas = [];
-  await P.buscarFotos(api, (await P.pesquisar(api, WS(4), ['', 'chegou [SP GRU]'], {espera: 0})).results,
-    {modelo: ens.modelo, espera: 0, miniatura: (b, t) => { miniaturas.push(t); return Promise.resolve({bytes: b.slice(0, 10), w: 40, h: 30, mime: 'image/jpeg'}); }});
-  check(miniaturas.length === 4 && miniaturas.every(t => t === 'jpeg'), 'cada foto passa pela miniatura da página');
-
-  // ---------- 3. Planilha com as fotos (planilha.js) ----------
   const book = X.rastreioBook({patterns: ['O expresso chegou [SP GRU]', 'chegou [SP GRU] A parada anterior foi []'], results: rAll.results,
     summaries: [R.summary(rAll.results, 0), R.summary(rAll.results, 1)], at: new Date(2026, 9, 21, 9, 5)});
   const tem2 = book.sheets[3];
-  check(book.sheets.map(s => s.name).join('|') === 'Resumo|Bloco 1 - Tem|Bloco 1 - Não tem|Bloco 2 - Tem|Bloco 2 - Não tem' && tem2.images.length === 30 &&
-    tem2.images[0].row === 4 && tem2.images[0].col === 9 && tem2.rows[3][1].v === 'FIC000000000' && tem2.heights[4] === 96 && tem2.rows[3][9].link,
-    'aba Tem: a foto fica na linha da própria remessa (coluna Imagem) e o link ao lado', tem2.images[0]);
+  check(book.sheets.map(s => s.name).join('|') === 'Resumo|Bloco 1 - Tem|Bloco 1 - Não tem|Bloco 2 - Tem|Bloco 2 - Não tem' && tem2.rows[3][1].v === 'FIC000000000' &&
+    tem2.rows[2].length === 10 && /^Imagem/.test(tem2.rows[2][8].v) && tem2.rows[3][8].v === 'Tem imagem no JMS' && !tem2.images && tem2.filter === 'A3:J3',
+    'aba Tem: remessa, horário, turno, origem, escaneador, tipo, descrição, imagem (só texto) e linhas', tem2.rows[2].map(c => c.v));
   const z = unzip(await X.build(book)), names = Object.keys(z);
-  const media = names.filter(n => /^xl\/media\//.test(n));
-  check(media.length === 30 && media.every(n => R.sniffImage(z[n]) === 'jpeg') && /<Default Extension="jpeg" ContentType="image\/jpeg"\/>/.test(z['[Content_Types].xml'].toString()),
-    'fotos dentro do .xlsx (uma vez cada, mesmo usadas nos dois blocos)', media.length);
-  const dr = names.filter(n => /^xl\/drawings\/drawing\d+\.xml$/.test(n)).map(n => z[n].toString());
-  const pics = dr.map(x => (x.match(/<xdr:pic>/g) || []).length);
-  const draw2 = dr.filter(x => /<xdr:pic>/.test(x))[0];
-  check(pics.filter(n => n === 30).length === 2 && /<xdr:twoCellAnchor editAs="twoCell"><xdr:from><xdr:col>8<\/xdr:col><xdr:colOff>\d+<\/xdr:colOff><xdr:row>3<\/xdr:row>/.test(draw2) &&
-    names.filter(n => /\.(xml|rels)$/.test(n)).every(n => wellFormed(z[n].toString())), 'desenho: cada foto ancorada na célula da remessa; XML bem formado', pics);
-  const r4 = names.filter(n => /sheet4\.xml\.rels$/.test(n))[0];
-  check(r4 && /drawing/.test(z[r4].toString()) && (z[r4].toString().match(/TargetMode="External"/g) || []).length === 30, 'links "Abrir foto" na aba');
-  const semFoto = X.rastreioBook({patterns: ['', 'chegou'], results: [{w: 'FIC1', ok: true, p: [null, {t: '2026-09-09 10:00:00', shift: 'T1', img: true, url: '', n: 1}]},
+  const charts = names.filter(n => /^xl\/charts\/chart\d+\.xml$/.test(n));
+  check(charts.length === 5 && !names.some(n => /^xl\/media\//.test(n)) && !/<xdr:pic>/.test(names.filter(n => /drawing\d+\.xml$/.test(n)).map(n => z[n].toString()).join('')) &&
+    names.filter(n => /\.(xml|rels)$/.test(n)).every(n => wellFormed(z[n].toString())), 'planilha: 5 gráficos do Excel, sem fotos; XML bem formado', charts.length);
+  const semFoto = X.rastreioBook({patterns: ['', 'chegou'], results: [{w: 'FIC1', ok: true, p: [null, {t: '2026-09-09 10:00:00', shift: 'T1', img: true, n: 1}]},
     {w: 'FIC2', ok: true, p: [null, {t: '2026-09-09 10:00:00', shift: 'T1', img: false, n: 1}]}], summaries: [R.summary([], 0), R.summary([], 1)]});
-  check(semFoto.sheets[1].rows[3][8].v === 'Tem imagem no JMS (ensine a foto no app)' && semFoto.sheets[1].rows[4][8].v === 'NÃO TEM IMAGEM!' && !semFoto.sheets[1].images.length,
-    'sem foto: "NÃO TEM IMAGEM!" ou o aviso de ensinar');
-  check(X.fitBox(360, 270, 160, 116).h === 116 && X.fitBox(270, 360, 160, 116).w === 87, 'foto cabe na célula sem deformar');
+  check(semFoto.sheets[1].rows[3][8].v === 'Tem imagem no JMS' && semFoto.sheets[1].rows[4][8].v === 'NÃO TEM IMAGEM!', 'coluna Imagem: "Tem imagem no JMS" ou "NÃO TEM IMAGEM!"');
 
   // ---------- 4. Servidor do app (server.js) ----------
   process.env.PESQUISA_JMS_URL = 'http://127.0.0.1:' + jms.porta;
-  process.env.PESQUISA_FOTO_URL = 'http://127.0.0.1:' + jms.porta;
   const os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pesquisa-'));
   process.env.PESQUISA_CONFIG = path.join(tmp, 'config.json');
   fs.writeFileSync(process.env.PESQUISA_CONFIG, JSON.stringify({dashmaster: false}));
@@ -211,11 +154,12 @@ function request(porta, method, p, body, headers) {
   const e0 = await api2('estado', {}), j0 = await api2('jms', {url: R.KEYWORD_URL, body: R.keywordPayload(['FIC000000001'])});
   check(e0.ok && e0.result.fonte === '' && e0.result.local === true && !j0.ok && /Falta o AuthToken/.test(j0.error), 'sem token no servidor: a página avisa (passo 1)', [e0, j0.error]);
   const tRede = await api2('token', {token: TOKEN}, {'X-Forwarded-For': '10.0.0.9'});
-  const tOk = await api2('token', {token: 'authtoken: ' + TOKEN}), e1 = await api2('estado', {});
-  check(tRede.status === 403 && tOk.ok && e1.result.fonte === 'app' && JSON.parse(fs.readFileSync(path.join(cfg.dados, 'credenciais.json'), 'utf8')).JMS_AUTHTOKEN === TOKEN,
-    'token salvo só pelo computador do app (pela rede: recusado)');
+  const tOk = await api2('token', {token: ' authtoken: "' + TOKEN + '"\n'}), e1 = await api2('estado', {});
+  check(tRede.status === 403 && tOk.ok && e1.result.fonte === 'app' && e1.result.tamanho === TOKEN.length && e1.result.versao === S.VERSAO &&
+    JSON.parse(fs.readFileSync(path.join(cfg.dados, 'credenciais.json'), 'utf8')).JMS_AUTHTOKEN === TOKEN,
+    'token salvo só pelo computador do app (pela rede: recusado); "authtoken:", aspas e espaços saem');
   const home = await request(porta, 'GET', '/');
-  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.1\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
+  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.2\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
     ['rastreio.js', 'pesquisa.js', 'planilha.js', 'app.js', 'app.css'].every(f => home.text.indexOf(f) >= 0), 'página do app (Node.js)');
   const libs = await Promise.all(['/rastreio.js', '/pesquisa.js', '/planilha.js', '/app.js'].map(f => request(porta, 'GET', f)));
   check(libs.every(r => r.status === 200 && /javascript/.test(r.headers['content-type'])) && libs.every(r => { try { new Function(r.text); return true; } catch (e) { return false; } }),
@@ -225,16 +169,10 @@ function request(porta, method, p, body, headers) {
   const ch = jms.estado.chamadas[antesJ];
   check(pj.status === 200 && JSON.parse(pj.text).ok && JSON.parse(JSON.parse(pj.text).result.text).data[0].keyword === 'FIC000000001' && ch.headers.authtoken === TOKEN &&
     ch.headers.routename === 'trackingExpress' && !ch.headers.cookie, 'api/jms: consulta o JMS com o token DO SERVIDOR (o que a página mandar é ignorado; extras só os de rota)');
-  const bad = JSON.parse((await request(porta, 'POST', '/api/jms', {url: 'https://outro.example/x', body: {}})).text);
-  check(!bad.ok && /não permitido/.test(bad.error), 'api/jms: só o JMS');
-  const ROTAS = {'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList': true, 'https://gw.jtjms-br.com/operatingplatform/abnormalPieceScanList/pageList': true,
-    'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/fotoFicticia': true, 'https://gw.jtjms-br.com/ficticio/oss/getSignedUrl?file=a.jpg': true,
-    'https://gw.jtjms-br.com/ficticio/waybill/deleteWaybill': false, 'https://gw.jtjms-br.com/ficticio/user/updatePassword': false, 'https://gw.jtjms-br.com/ficticio/order/save': false,
-    'https://gw.jtjms-br.com/ficticio/query/list?acao=remove': false, 'https://gw.jtjms-br.com/ficticio/query/list?acao=%72emove': false,
-    'https://gw.jtjms-br.com/ficticio/query/list?x=%FF': false, 'https://gw.jtjms-br.com/ficticio/abc': false};
-  const rotasErradas = Object.keys(ROTAS).filter(u => S.rotaLeitura(u) !== ROTAS[u]);
-  const grava = JSON.parse((await request(porta, 'POST', '/api/jms', {url: 'https://gw.jtjms-br.com/ficticio/waybill/deleteWaybill', body: {}})).text);
-  check(!rotasErradas.length && !grava.ok && /só faz consultas/.test(grava.error), 'com o token do servidor, só consultas de leitura no JMS (nada que grave ou apague)', rotasErradas);
+  const outras = ['https://outro.example/x', 'https://gw.jtjms-br.com/operatingplatform/abnormalPieceScanList/pageList', 'https://gw.jtjms-br.com/ficticio/user/updatePassword',
+    R.KEYWORD_URL + '?x=1'];
+  const recusas = await Promise.all(outras.map(u => request(porta, 'POST', '/api/jms', {url: u, body: {}}).then(r => JSON.parse(r.text))));
+  check(recusas.every(r => !r.ok && /só consulta o Rastreamento do pacote/.test(r.error)), 'com o token do servidor, só o Rastreamento do pacote (nada que grave ou apague)');
   // Com o DashMaster neste computador: o MESMO token dele (banco dashmaster.db, tela Configurações), sem colar nada.
   let sqliteOk = true;
   try { require('node:sqlite'); } catch (e) { sqliteOk = false; }
@@ -254,25 +192,23 @@ function request(porta, method, p, body, headers) {
   }
   const hc = S.cabecalhos({JMS_AUTH_MODE: 'AUTHTOKEN_COOKIE', JMS_AUTHTOKEN: 'A', JMS_COOKIE: 'C'}), hk = S.cabecalhos({JMS_COOKIE: 'C'});
   check(hc.AuthToken === 'A' && hc.Cookie === 'C' && !hk.AuthToken && hk.Cookie === 'C', 'modos de acesso iguais aos do DashMaster (JMS_AUTH_MODE)');
-  const fo = JSON.parse((await request(porta, 'POST', '/api/fotos', {urls: ['https://pro-ficticio.jtjms-br.com/foto/a.jpeg?sig=1', 'https://outro.example/b.jpg']})).text);
-  check(fo.ok && fo.result[0].ok && Buffer.from(fo.result[0].b64, 'base64').equals(JPEG) && !fo.result[1].ok && /fora do JMS/.test(fo.result[1].error), 'api/fotos: baixa só do JMS');
-  const mg = JSON.parse((await request(porta, 'POST', '/api/modelo', {acao: 'gravar', valor: JSON.stringify(ens.modelo)})).text);
-  const ml = JSON.parse((await request(porta, 'POST', '/api/modelo', {acao: 'ler'})).text);
-  const ma = JSON.parse((await request(porta, 'POST', '/api/modelo', {acao: 'apagar'})).text);
-  const ml2 = JSON.parse((await request(porta, 'POST', '/api/modelo', {acao: 'ler'})).text);
-  check(mg.ok && JSON.parse(ml.result).url === ens.modelo.url && ma.ok && ml2.result === null, 'api/modelo: grava, lê e apaga o "Ver imagem" ensinado');
+  const hr1 = S.cabecalhos({JMS_AUTHTOKEN: 'A', JMS_ROUTENAME_TRACKING: 'rotaFicticia'}, {routename: 'trackingExpress'});
+  const hr2 = S.cabecalhos({JMS_AUTHTOKEN: 'A', JMS_ROUTE_AUTO_TRACKING: '3'}, {});
+  const hr3 = S.cabecalhos({JMS_AUTHTOKEN: 'A', JMS_ROUTENAME_TRACKING: 'NONE', JMS_EXTRA_HEADERS_JSON: '{"X-Ficticio":"1","authtoken":"NAO"}'}, {routename: 'trackingExpress'});
+  check(hr1.Routename === 'rotaFicticia' && hr2.Routename === 'packageTracking' && !hr3.Routename && hr3['X-Ficticio'] === '1' && hr3.AuthToken === 'A',
+    'propriedades do DashMaster: JMS_ROUTENAME_TRACKING manda, JMS_ROUTE_AUTO_TRACKING aprendido, JMS_EXTRA_HEADERS_JSON', [hr1, hr2, hr3]);
   const csrf = await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: {}}, {Origin: 'http://outro-site.example'});
   const get = await request(porta, 'GET', '/api/jms');
   const form = await request(porta, 'POST', '/api/jms', 'url=x', {'Content-Type': 'application/x-www-form-urlencoded'});
   check(csrf.status === 403 && get.status === 405 && form.status === 415, 'outro site não usa o app (CSRF); só POST com JSON');
+  const fotosApi = await request(porta, 'POST', '/api/fotos', {urls: []}), modeloApi = await request(porta, 'POST', '/api/modelo', {acao: 'ler'});
+  check(fotosApi.status === 404 && modeloApi.status === 404, 'fotos e "Ver imagem" saíram do app');
   // A página inteira pelo servidor do app (api de verdade, em vez da falsa).
   const viaApp = {
-    jms: (url, body, headers) => request(porta, 'POST', '/api/jms', {url, body, headers}).then(r => { const j = JSON.parse(r.text); if (!j.ok) throw new Error(j.error); return j.result; }),
-    fotos: urls => request(porta, 'POST', '/api/fotos', {urls}).then(r => JSON.parse(r.text).result)
+    jms: (url, body, headers) => request(porta, 'POST', '/api/jms', {url, body, headers}).then(r => { const j = JSON.parse(r.text); if (!j.ok) throw new Error(j.error); return j.result; })
   };
   const rv = await P.pesquisar(viaApp, WS(15), PATS, {espera: 0});
-  const sv = await P.buscarFotos(viaApp, rv.results, {modelo: ens.modelo, espera: 0});
-  check(rv.results.filter(x => x.p[1]).length === 15 && sv.comFoto === 15, 'pesquisa e fotos pelo servidor do app', sv);
+  check(rv.results.filter(x => x.p[1]).length === 15, 'pesquisa pelo servidor do app');
   await new Promise(ok => srv.close(ok));
 
   // ---------- 5. Versão Apps Script ----------
@@ -289,17 +225,38 @@ function request(porta, method, p, body, headers) {
     HtmlService: {createTemplateFromFile: n => ({evaluate: () => ({setTitle() { return this; }, addMetaTag() { return this; }, n})}), createHtmlOutputFromFile: n => ({getContent: () => 'conteúdo ' + n})},
     PropertiesService: {getScriptProperties: () => ({getProperty: k => (props[k] === undefined ? null : props[k]), getProperties: () => Object.assign({}, props),
       setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }})},
-    Utilities: {base64Encode: b => Buffer.from(b).toString('base64')},
+    console: {log: () => {}},
     UrlFetchApp: {
-      fetch: (url, req) => { fetched.push({url, req}); return {getResponseCode: () => 200, getContentText: () => '{"code":1,"data":[]}'}; },
-      fetchAll: reqs => reqs.map(r => { fetched.push({url: r.url, req: r}); return /venceu/.test(r.url) ? {getResponseCode: () => 403} : {getResponseCode: () => 200, getBlob: () => ({getBytes: () => Array.from(JPEG)})}; })
+      // JMS de mentira: aceita só o token fictício e, se `exigeRota`, só esse Routename.
+      fetch: (url, req) => {
+        fetched.push({url, req});
+        const ok = req.headers.AuthToken === TOKEN && (!gctx.exigeRota || req.headers.Routename === gctx.exigeRota);
+        return {getResponseCode: () => 200, getContentText: () => ok ? '{"code":1,"data":[]}' : req.headers.AuthToken === TOKEN ? '{"code":500,"msg":"rota inválida"}' : '{"code":401,"msg":"token失效"}'};
+      }
     }
   };
   vm.createContext(gctx);
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'appscript', 'Codigo.gs'), 'utf8'), gctx);
   let gErr = '', gTok = '';
   try { gctx.jms(R.KEYWORD_URL, {}, {}); } catch (e) { gTok = e.message; }
-  check(gctx.estado().fonte === '' && /Propriedades do script → JMS_AUTHTOKEN/.test(gTok) && !fetched.length, 'Apps Script sem JMS_AUTHTOKEN: avisa onde cadastrar', gTok);
+  const est0 = gctx.estado();
+  check(est0.fonte === '' && est0.versao === S.VERSAO && est0.nomes.length === 0 && /Propriedades do script → JMS_AUTHTOKEN/.test(gTok) && !fetched.length &&
+    /FALTA O TOKEN[\s\S]*nenhuma propriedade/.test(gctx.testarConexao()), 'Apps Script sem JMS_AUTHTOKEN: avisa onde cadastrar', gTok);
+  // Nomes e valores como a pessoa costuma colar: todos valem (o valor nunca volta para a página).
+  const apelidos = {'JMS_AUTHTOKEN ': TOKEN, 'AuthToken': 'authtoken: ' + TOKEN, 'jms_authtoken': '"' + TOKEN + '"', 'TOKEN': ' ' + TOKEN + '\n'};
+  const lidos = Object.keys(apelidos).map(k => {
+    Object.keys(props).forEach(x => { delete props[x]; });
+    props[k] = apelidos[k];
+    const e = gctx.estado();
+    gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {});
+    return e.fonte === 'propriedades' && e.chave === k && e.tamanho === TOKEN.length && JSON.stringify(e).indexOf(TOKEN) < 0 && fetched[fetched.length - 1].req.headers.AuthToken === TOKEN;
+  });
+  check(lidos.every(Boolean), 'Apps Script: aceita o token com espaço no nome, "AuthToken", minúsculas, "authtoken:", aspas e quebra de linha', lidos);
+  Object.keys(props).forEach(x => { delete props[x]; });
+  props.OUTRA_COISA = 'x';
+  check(gctx.estado().nomes.join() === 'OUTRA_COISA', 'Apps Script sem token: mostra os NOMES das propriedades (para achar nome errado)');
+  delete props.OUTRA_COISA;
+  fetched.length = 0;
   props.JMS_AUTHTOKEN = TOKEN;
   const gj = gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {routename: 'trackingExpress', authtoken: 'x', cookie: 'y'});
   const gr = fetched[0];
@@ -309,13 +266,36 @@ function request(porta, method, p, body, headers) {
   let gGrava = '';
   try { gctx.jms('https://outro.example/x', {}, {}); } catch (e) { gErr = e.message; }
   try { gctx.jms('https://gw.jtjms-br.com/ficticio/user/updatePassword', {}, {}); } catch (e) { gGrava = e.message; }
-  check(/não permitido/.test(gErr) && /só faz consultas/.test(gGrava) && /OK: o JMS aceitou/.test(gctx.testarConexao()), 'Apps Script: só consultas de leitura no JMS; testarConexao() no editor');
-  const gf = gctx.fotos(['https://pro-ficticio.jtjms-br.com/foto/a.jpeg', 'https://outro.example/b.jpg', 'https://pro-ficticio.jtjms-br.com/foto/venceu.jpeg']);
-  check(gf[0].ok && Buffer.from(gf[0].b64, 'base64').equals(JPEG) && !gf[1].ok && /fora do JMS/.test(gf[1].error) && !gf[2].ok && /venceu/.test(gf[2].error),
-    'Apps Script fotos(): baixa só do JMS; link vencido avisa');
-  gctx.modelo('gravar', JSON.stringify(ens.modelo));
-  check(JSON.parse(gctx.modelo('ler')).url === ens.modelo.url && gctx.modelo('apagar') === null && gctx.modelo('ler') === null, 'Apps Script modelo(): grava, lê e apaga');
+  check(/não permitido/.test(gErr) && /só consulta o Rastreamento do pacote/.test(gGrava) && typeof gctx.fotos === 'undefined' && typeof gctx.modelo === 'undefined',
+    'Apps Script: só o Rastreamento do pacote; fotos e "Ver imagem" saíram');
+  const tc1 = gctx.testarConexao();
+  gctx.exigeRota = 'waybillTracking';
+  const tc2 = gctx.testarConexao();
+  props.JMS_AUTHTOKEN = 'TOKEN-VENCIDO';
+  const tc3 = gctx.testarConexao();
+  props.JMS_AUTHTOKEN = TOKEN;
+  gctx.exigeRota = '';
+  check(/Sem Routename: HTTP 200, código 1 → OK\nOK: o JMS aceitou/.test(tc1) && /Com Routename waybillTracking: HTTP 200, código 1 → OK/.test(tc2) &&
+    /código 401: token[\s\S]*O JMS recusou/.test(tc3) && [tc1, tc2, tc3].every(x => x.indexOf(TOKEN) < 0 && x.indexOf('TOKEN-VENCIDO') < 0),
+    'testarConexao() no editor: mostra o que o JMS respondeu, testa as rotas do DashMaster e nunca mostra o token', [tc1, tc2, tc3]);
+  const fetchOk = gctx.UrlFetchApp.fetch;
+  gctx.UrlFetchApp.fetch = () => { throw new Error('Exception: Você não tem permissão para chamar UrlFetchApp.fetch. Permissões necessárias: https://www.googleapis.com/auth/script.external_request'); };
+  let gAut = '';
+  try { gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {}); } catch (e) { gAut = e.message; }
+  gctx.UrlFetchApp.fetch = () => { throw new Error('Address unavailable'); };
+  const gRede = gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {});
+  gctx.UrlFetchApp.fetch = fetchOk;
+  let kRede = '';
+  try { R.parseJms(gRede.status, gRede.text); } catch (e) { kRede = e.message; }
+  check(/ainda não autorizou[\s\S]*testarConexao/.test(gAut) && /HTTP 0: Falha de rede ao consultar o JMS: Address unavailable/.test(kRede),
+    'Apps Script sem autorização do Google: diz o que fazer (não confunde com JMS fora do ar)', [gAut, kRede]);
+  props.JMS_COUNTRY_ID = '7';
+  gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1'], countryId: '1'}, {});
+  check(JSON.parse(fetched[fetched.length - 1].req.payload).countryId === '7', 'Apps Script: JMS_COUNTRY_ID do DashMaster vale');
+  delete props.JMS_COUNTRY_ID;
   check(gctx.doGet({}).n === 'Index' && /conteúdo App/.test(gctx.include('App')), 'Apps Script doGet() e include()');
+  const appJs = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
+  check((appJs.match(/var VERSAO_PAGINA = '([^']+)'/) || [])[1] === S.VERSAO && gctx.VERSAO === S.VERSAO, 'mesma versão na página, no Codigo.gs e no server.js (a página avisa se misturar)');
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'appscript', 'appsscript.json'), 'utf8'));
   check(manifest.oauthScopes.join() === 'https://www.googleapis.com/auth/script.external_request' && manifest.webapp.executeAs === 'USER_DEPLOYING', 'manifesto: só acesso à internet');
 

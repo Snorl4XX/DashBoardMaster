@@ -1,14 +1,10 @@
 'use strict';
 /**
- * JMS FALSO para os testes da Pesquisa (dados FICTÍCIOS: remessas FIC…, operadores fictícios, fotos geradas).
+ * JMS FALSO para os testes da Pesquisa (dados FICTÍCIOS: remessas FIC…, operadores fictícios).
  * Responde como as capturas do Rastreamento do pacote:
  *   POST /operatingplatform/podTracking/inner/query/keywordList   {keywordList, trackingTypeEnum: 'WAYBILL', countryId}
- *   POST /operatingplatform/abnormalPieceScanList/pageList        {current, size, waybillId, countryId} (foto do pacote problemático)
- *   POST /operatingplatform/podTracking/inner/query/fotoFicticia  {billCode, scanTime, imgType, countryId} — o "Ver imagem" de
- *        mentira (o endereço real não foi capturado: o app aprende o que for colado em "Ensinar a foto")
- *   GET  /foto/…  → a foto (servidor de arquivos; o app troca o host pelo PESQUISA_FOTO_URL)
  * Opções: reject (recusa acima de N remessas), silent (vazio acima de N), trunc (só as N primeiras), token (AuthToken aceito),
- *   fotos (lista de Buffers JPEG), atraso (ms).
+ *   rota (Routename exigido), atraso (ms).
  */
 const http = require('http');
 
@@ -35,7 +31,6 @@ function remessas(n) { const out = {}; for (let i = 0; i < n; i++) out['FIC' + S
 function criar(opts) {
   opts = opts || {};
   const conhecidas = remessas(opts.quantas || 3000), estado = {chamadas: []};
-  const fotoDe = key => { const f = opts.fotos || []; let h = 0; for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0; return f.length ? f[h % f.length] : null; };
   const server = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', c => chunks.push(c));
@@ -45,12 +40,6 @@ function criar(opts) {
       try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch (e) { /* GET */ }
       estado.chamadas.push({rota: rota.split('/').pop(), n: (body.keywordList || []).length, headers: req.headers, body});
       const json = (o, code) => setTimeout(() => { res.writeHead(code || 200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(o)); }, opts.atraso || 0);
-      if (rota.indexOf('/foto/') === 0) {
-        const f = fotoDe(rota);
-        if (!f) { res.writeHead(404); res.end(); return; }
-        res.writeHead(200, {'Content-Type': 'application/octet-stream'}); res.end(f);
-        return;
-      }
       if ((req.headers.authtoken || '') !== (opts.token || TOKEN)) { json({code: 401, msg: 'token失效，请重新登录', fail: true}); return; }
       if (/keywordList$/.test(rota)) {
         const kws = body.keywordList || [];
@@ -63,29 +52,10 @@ function criar(opts) {
           data: take.filter(w => conhecidas[w] !== undefined).map(w => ({keyword: w, details: bipes(w, conhecidas[w]), codes: null}))});
         return;
       }
-      if (/abnormalPieceScanList\/pageList$/.test(rota)) {
-        if (!body.waybillId || body.current !== 1) { json({code: 500, msg: 'parâmetro inválido', fail: true}); return; }
-        json({code: 1, msg: 'ok', succ: true, data: {current: 1, pages: 1, total: 1, records: [{waybillId: body.waybillId, scanTime: '2026-09-11 09:07:38',
-          abnormalPieceName: 'Erro.de.triagem', images: 'https://pro-ficticio.jtjms-br.com/foto/problema-' + body.waybillId + '.jpeg?sig=FICT'}]}});
-        return;
-      }
-      if (/fotoFicticia$/.test(rota)) {
-        if (!body.billCode || !body.scanTime || !body.imgType || conhecidas[body.billCode] === undefined) { json({code: 500, msg: 'imagem não encontrada', fail: true}); return; }
-        json({code: 1, msg: 'ok', succ: true, data: {imageUrl: 'https://pro-ficticio.jtjms-br.com/foto/' + body.billCode + '-' + body.scanTime.replace(/\D/g, '') + '.jpeg?sig=FICT'}});
-        return;
-      }
       json({code: 404, msg: 'rota desconhecida', fail: true}, 404);
     });
   });
   return new Promise(ok => server.listen(0, '127.0.0.1', () => ok({server, porta: server.address().port, estado, fechar: () => new Promise(f => server.close(f))})));
 }
 
-/** "Copiar como fetch" do "Ver imagem" fictício (o AuthToken do texto é de mentira e o app joga fora). */
-function fetchCopiado(w, scanTime) {
-  return 'fetch("https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/fotoFicticia", {\n  "headers": {\n    "accept": "application/json, text/plain, */*",\n' +
-    '    "authtoken": "NAO-USAR-ESTE",\n    "content-type": "application/json;charset=UTF-8",\n    "routename": "trackingExpress",\n    "cookie": "NAO-USAR"\n  },\n' +
-    '  "referrer": "https://jmsbr.jtjms-br.com/",\n  "body": ' + JSON.stringify(JSON.stringify({billCode: w, scanTime: scanTime, imgType: 8, countryId: '1'})) +
-    ',\n  "method": "POST",\n  "mode": "cors",\n  "credentials": "include"\n});';
-}
-
-module.exports = {criar, bipes, remessas, fetchCopiado, TOKEN};
+module.exports = {criar, bipes, remessas, TOKEN};
