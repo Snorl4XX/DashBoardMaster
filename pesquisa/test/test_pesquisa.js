@@ -201,24 +201,59 @@ function request(porta, method, p, body, headers) {
   process.env.PESQUISA_FOTO_URL = 'http://127.0.0.1:' + jms.porta;
   const os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pesquisa-'));
   process.env.PESQUISA_CONFIG = path.join(tmp, 'config.json');
+  fs.writeFileSync(process.env.PESQUISA_CONFIG, JSON.stringify({dashmaster: false}));
   const S = require('../server');
   const cfg = S.loadConfig(), srv = S.createServer(cfg);
   await new Promise(ok => srv.listen(0, '127.0.0.1', ok));
   const porta = srv.address().port;
+  const api2 = (fn, body, h) => request(porta, 'POST', '/api/' + fn, body, h).then(r => Object.assign(JSON.parse(r.text), {status: r.status}));
+  // Token do servidor, como o DashMaster: sem DashMaster, o app pede o token só no computador dele e guarda nele.
+  const e0 = await api2('estado', {}), j0 = await api2('jms', {url: R.KEYWORD_URL, body: R.keywordPayload(['FIC000000001'])});
+  check(e0.ok && e0.result.fonte === '' && e0.result.local === true && !j0.ok && /Falta o AuthToken/.test(j0.error), 'sem token no servidor: a página avisa (passo 1)', [e0, j0.error]);
+  const tRede = await api2('token', {token: TOKEN}, {'X-Forwarded-For': '10.0.0.9'});
+  const tOk = await api2('token', {token: 'authtoken: ' + TOKEN}), e1 = await api2('estado', {});
+  check(tRede.status === 403 && tOk.ok && e1.result.fonte === 'app' && JSON.parse(fs.readFileSync(path.join(cfg.dados, 'credenciais.json'), 'utf8')).JMS_AUTHTOKEN === TOKEN,
+    'token salvo só pelo computador do app (pela rede: recusado)');
   const home = await request(porta, 'GET', '/');
-  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.0\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
+  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.1\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
     ['rastreio.js', 'pesquisa.js', 'planilha.js', 'app.js', 'app.css'].every(f => home.text.indexOf(f) >= 0), 'página do app (Node.js)');
   const libs = await Promise.all(['/rastreio.js', '/pesquisa.js', '/planilha.js', '/app.js'].map(f => request(porta, 'GET', f)));
   check(libs.every(r => r.status === 200 && /javascript/.test(r.headers['content-type'])) && libs.every(r => { try { new Function(r.text); return true; } catch (e) { return false; } }),
     'scripts da página entregues e sem erro de sintaxe');
   const antesJ = jms.estado.chamadas.length;
-  const pj = await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: R.keywordPayload(['FIC000000001']), token: TOKEN, headers: {routename: 'trackingExpress', cookie: 'x', authtoken: 'y'}});
+  const pj = await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: R.keywordPayload(['FIC000000001']), token: 'TOKEN-DA-PAGINA', headers: {routename: 'trackingExpress', cookie: 'x', authtoken: 'y'}});
   const ch = jms.estado.chamadas[antesJ];
   check(pj.status === 200 && JSON.parse(pj.text).ok && JSON.parse(JSON.parse(pj.text).result.text).data[0].keyword === 'FIC000000001' && ch.headers.authtoken === TOKEN &&
-    ch.headers.routename === 'trackingExpress' && !ch.headers.cookie, 'api/jms: repassa ao JMS com o token da página (cabeçalhos extras só os de rota)');
-  const bad = JSON.parse((await request(porta, 'POST', '/api/jms', {url: 'https://outro.example/x', body: {}, token: TOKEN})).text);
-  const noTok = JSON.parse((await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: {}, token: ''})).text);
-  check(!bad.ok && /não permitido/.test(bad.error) && !noTok.ok && /AuthToken/.test(noTok.error), 'api/jms: só o JMS e só com token');
+    ch.headers.routename === 'trackingExpress' && !ch.headers.cookie, 'api/jms: consulta o JMS com o token DO SERVIDOR (o que a página mandar é ignorado; extras só os de rota)');
+  const bad = JSON.parse((await request(porta, 'POST', '/api/jms', {url: 'https://outro.example/x', body: {}})).text);
+  check(!bad.ok && /não permitido/.test(bad.error), 'api/jms: só o JMS');
+  const ROTAS = {'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList': true, 'https://gw.jtjms-br.com/operatingplatform/abnormalPieceScanList/pageList': true,
+    'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/fotoFicticia': true, 'https://gw.jtjms-br.com/ficticio/oss/getSignedUrl?file=a.jpg': true,
+    'https://gw.jtjms-br.com/ficticio/waybill/deleteWaybill': false, 'https://gw.jtjms-br.com/ficticio/user/updatePassword': false, 'https://gw.jtjms-br.com/ficticio/order/save': false,
+    'https://gw.jtjms-br.com/ficticio/query/list?acao=remove': false, 'https://gw.jtjms-br.com/ficticio/query/list?acao=%72emove': false,
+    'https://gw.jtjms-br.com/ficticio/query/list?x=%FF': false, 'https://gw.jtjms-br.com/ficticio/abc': false};
+  const rotasErradas = Object.keys(ROTAS).filter(u => S.rotaLeitura(u) !== ROTAS[u]);
+  const grava = JSON.parse((await request(porta, 'POST', '/api/jms', {url: 'https://gw.jtjms-br.com/ficticio/waybill/deleteWaybill', body: {}})).text);
+  check(!rotasErradas.length && !grava.ok && /só faz consultas/.test(grava.error), 'com o token do servidor, só consultas de leitura no JMS (nada que grave ou apague)', rotasErradas);
+  // Com o DashMaster neste computador: o MESMO token dele (banco dashmaster.db, tela Configurações), sem colar nada.
+  let sqliteOk = true;
+  try { require('node:sqlite'); } catch (e) { sqliteOk = false; }
+  if (sqliteOk) {
+    const {DatabaseSync} = require('node:sqlite'), dbFile = path.join(tmp, 'dm', 'node', 'dados', 'dashmaster.db');
+    fs.mkdirSync(path.dirname(dbFile), {recursive: true});
+    const db = new DatabaseSync(dbFile);
+    db.exec('CREATE TABLE props (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+    db.prepare('INSERT INTO props (k, v) VALUES (?, ?), (?, ?)').run('JMS_AUTHTOKEN', TOKEN, 'DB_SPREADSHEET_ID', 'x');
+    db.close();
+    const cfgDm = Object.assign({}, cfg, {dashmaster: path.join(tmp, 'dm')});
+    fs.writeFileSync(path.join(cfg.dados, 'credenciais.json'), JSON.stringify({JMS_AUTHTOKEN: 'TOKEN-VELHO-DO-APP'}));
+    const cDm = S.credenciais(cfgDm), rDm = await S.jms({url: R.KEYWORD_URL, body: R.keywordPayload(['FIC000000003'])}, cfgDm);
+    check(cDm.fonte === 'dashmaster' && cDm.JMS_AUTHTOKEN === TOKEN && rDm.status === 200 && JSON.parse(rDm.text).data[0].keyword === 'FIC000000003',
+      'usa o mesmo AuthToken do DashMaster deste computador (o dele vale mais que o salvo no app)', cDm.fonte);
+    fs.writeFileSync(path.join(cfg.dados, 'credenciais.json'), JSON.stringify({JMS_AUTHTOKEN: TOKEN}));
+  }
+  const hc = S.cabecalhos({JMS_AUTH_MODE: 'AUTHTOKEN_COOKIE', JMS_AUTHTOKEN: 'A', JMS_COOKIE: 'C'}), hk = S.cabecalhos({JMS_COOKIE: 'C'});
+  check(hc.AuthToken === 'A' && hc.Cookie === 'C' && !hk.AuthToken && hk.Cookie === 'C', 'modos de acesso iguais aos do DashMaster (JMS_AUTH_MODE)');
   const fo = JSON.parse((await request(porta, 'POST', '/api/fotos', {urls: ['https://pro-ficticio.jtjms-br.com/foto/a.jpeg?sig=1', 'https://outro.example/b.jpg']})).text);
   check(fo.ok && fo.result[0].ok && Buffer.from(fo.result[0].b64, 'base64').equals(JPEG) && !fo.result[1].ok && /fora do JMS/.test(fo.result[1].error), 'api/fotos: baixa só do JMS');
   const mg = JSON.parse((await request(porta, 'POST', '/api/modelo', {acao: 'gravar', valor: JSON.stringify(ens.modelo)})).text);
@@ -226,13 +261,13 @@ function request(porta, method, p, body, headers) {
   const ma = JSON.parse((await request(porta, 'POST', '/api/modelo', {acao: 'apagar'})).text);
   const ml2 = JSON.parse((await request(porta, 'POST', '/api/modelo', {acao: 'ler'})).text);
   check(mg.ok && JSON.parse(ml.result).url === ens.modelo.url && ma.ok && ml2.result === null, 'api/modelo: grava, lê e apaga o "Ver imagem" ensinado');
-  const csrf = await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: {}, token: TOKEN}, {Origin: 'http://outro-site.example'});
+  const csrf = await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: {}}, {Origin: 'http://outro-site.example'});
   const get = await request(porta, 'GET', '/api/jms');
   const form = await request(porta, 'POST', '/api/jms', 'url=x', {'Content-Type': 'application/x-www-form-urlencoded'});
   check(csrf.status === 403 && get.status === 405 && form.status === 415, 'outro site não usa o app (CSRF); só POST com JSON');
   // A página inteira pelo servidor do app (api de verdade, em vez da falsa).
   const viaApp = {
-    jms: (url, body, headers) => request(porta, 'POST', '/api/jms', {url, body, token: TOKEN, headers}).then(r => { const j = JSON.parse(r.text); if (!j.ok) throw new Error(j.error); return j.result; }),
+    jms: (url, body, headers) => request(porta, 'POST', '/api/jms', {url, body, headers}).then(r => { const j = JSON.parse(r.text); if (!j.ok) throw new Error(j.error); return j.result; }),
     fotos: urls => request(porta, 'POST', '/api/fotos', {urls}).then(r => JSON.parse(r.text).result)
   };
   const rv = await P.pesquisar(viaApp, WS(15), PATS, {espera: 0});
@@ -252,7 +287,8 @@ function request(porta, method, p, body, headers) {
   const gctx = {
     JSON, Object, Array, String, Number, Math, Date, Error, RegExp,
     HtmlService: {createTemplateFromFile: n => ({evaluate: () => ({setTitle() { return this; }, addMetaTag() { return this; }, n})}), createHtmlOutputFromFile: n => ({getContent: () => 'conteúdo ' + n})},
-    PropertiesService: {getScriptProperties: () => ({getProperty: k => (props[k] === undefined ? null : props[k]), setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }})},
+    PropertiesService: {getScriptProperties: () => ({getProperty: k => (props[k] === undefined ? null : props[k]), getProperties: () => Object.assign({}, props),
+      setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }})},
     Utilities: {base64Encode: b => Buffer.from(b).toString('base64')},
     UrlFetchApp: {
       fetch: (url, req) => { fetched.push({url, req}); return {getResponseCode: () => 200, getContentText: () => '{"code":1,"data":[]}'}; },
@@ -261,14 +297,19 @@ function request(porta, method, p, body, headers) {
   };
   vm.createContext(gctx);
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'appscript', 'Codigo.gs'), 'utf8'), gctx);
-  const gj = gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, TOKEN, {routename: 'trackingExpress', authtoken: 'x', cookie: 'y'});
-  const gr = fetched[0];
-  check(gj.status === 200 && gr.req.headers.AuthToken === TOKEN && gr.req.headers.Routename === 'trackingExpress' && !gr.req.headers.Cookie && gr.req.method === 'post' &&
-    JSON.parse(gr.req.payload).keywordList[0] === 'FIC1' && gr.req.followRedirects === false, 'Apps Script jms(): repassa ao JMS com o token da página');
   let gErr = '', gTok = '';
-  try { gctx.jms('https://outro.example/x', {}, TOKEN); } catch (e) { gErr = e.message; }
-  try { gctx.jms(R.KEYWORD_URL, {}, ''); } catch (e) { gTok = e.message; }
-  check(/não permitido/.test(gErr) && /AuthToken/.test(gTok), 'Apps Script jms(): só o JMS e só com token');
+  try { gctx.jms(R.KEYWORD_URL, {}, {}); } catch (e) { gTok = e.message; }
+  check(gctx.estado().fonte === '' && /Propriedades do script → JMS_AUTHTOKEN/.test(gTok) && !fetched.length, 'Apps Script sem JMS_AUTHTOKEN: avisa onde cadastrar', gTok);
+  props.JMS_AUTHTOKEN = TOKEN;
+  const gj = gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {routename: 'trackingExpress', authtoken: 'x', cookie: 'y'});
+  const gr = fetched[0];
+  check(gctx.estado().fonte === 'propriedades' && gj.status === 200 && gr.req.headers.AuthToken === TOKEN && gr.req.headers.Routename === 'trackingExpress' &&
+    !gr.req.headers.Cookie && gr.req.method === 'post' && JSON.parse(gr.req.payload).keywordList[0] === 'FIC1' && gr.req.followRedirects === false,
+    'Apps Script jms(): consulta o JMS com o JMS_AUTHTOKEN das Propriedades do script, como o DashMaster');
+  let gGrava = '';
+  try { gctx.jms('https://outro.example/x', {}, {}); } catch (e) { gErr = e.message; }
+  try { gctx.jms('https://gw.jtjms-br.com/ficticio/user/updatePassword', {}, {}); } catch (e) { gGrava = e.message; }
+  check(/não permitido/.test(gErr) && /só faz consultas/.test(gGrava) && /OK: o JMS aceitou/.test(gctx.testarConexao()), 'Apps Script: só consultas de leitura no JMS; testarConexao() no editor');
   const gf = gctx.fotos(['https://pro-ficticio.jtjms-br.com/foto/a.jpeg', 'https://outro.example/b.jpg', 'https://pro-ficticio.jtjms-br.com/foto/venceu.jpeg']);
   check(gf[0].ok && Buffer.from(gf[0].b64, 'base64').equals(JPEG) && !gf[1].ok && /fora do JMS/.test(gf[1].error) && !gf[2].ok && /venceu/.test(gf[2].error),
     'Apps Script fotos(): baixa só do JMS; link vencido avisa');

@@ -8,7 +8,8 @@
  *
  * Toda a pesquisa roda na página (lib/ e public/). Este servidor só:
  *   - entrega a página (http://localhost:3200);
- *   - repassa as consultas ao JMS (api/jms) com o AuthToken que a página manda (o token fica no navegador, nunca aqui);
+ *   - consulta o JMS (api/jms) com o AuthToken DO SERVIDOR, como o DashMaster: o mesmo token do DashMaster deste computador
+ *     (lido do banco dele, dados/dashmaster.db) ou, sem DashMaster, o salvo neste app (api/token, só deste computador);
  *   - baixa as fotos do JMS (api/fotos) — o navegador não pode baixar direto do servidor de arquivos do JMS;
  *   - guarda o pedido do "Ver imagem" ensinado na página (api/modelo, em dados/modelo-imagem.json).
  *
@@ -22,11 +23,12 @@ const path = require('path');
 const os = require('os');
 const zlib = require('zlib');
 
-const VERSAO = '1.0.0';
+const VERSAO = '1.1.0';
 const DEFAULTS = {
   porta: 3200,         // 3200: não briga com o DashMaster (3000) nem com o painel do sorter (3100)
   host: '0.0.0.0',     // 0.0.0.0 = abre para a rede (cada pessoa usa o próprio AuthToken); 127.0.0.1 = só neste computador
-  abrirNavegador: true // no Windows, abre a página no navegador quando o app liga
+  abrirNavegador: true, // no Windows, abre a página no navegador quando o app liga
+  dashmaster: ''        // pasta ou banco do DashMaster para usar o mesmo AuthToken (vazio = procura em C:\dashmaster; false = não usar)
 };
 const JMS = 'https://gw.jtjms-br.com';
 const FOTO_HOSTS = /(^|\.)jtjms-br\.com$|(^|\.)blob\.core\.windows\.net$/i;
@@ -56,13 +58,92 @@ function loadConfig() {
 const JMS_BASE = (process.env.PESQUISA_JMS_URL || JMS).replace(/\/+$/, '');
 const FOTO_TESTE = process.env.PESQUISA_FOTO_URL ? process.env.PESQUISA_FOTO_URL.replace(/\/+$/, '') : '';
 
+// ------------------------------------------------------------------ AuthToken do servidor (como o DashMaster)
+const CRED_KEYS = ['JMS_AUTHTOKEN', 'JMS_AUTH_MODE', 'JMS_COOKIE', 'JMS_AUTHORIZATION', 'JMS_LANG', 'JMS_LANGTYPE', 'JMS_TIMEZONE'];
+function lerJson(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return null; } }
+function bancosDashmaster(cfg) {
+  const out = [];
+  if (cfg.dashmaster === false || cfg.dashmaster === 'nao') return out;
+  if (cfg.dashmaster) out.push(path.resolve(cfg.dashmaster, /\.db$/i.test(cfg.dashmaster) ? '' : 'node/dados/dashmaster.db'));
+  if (process.env.PESQUISA_DASHMASTER_DB) out.push(process.env.PESQUISA_DASHMASTER_DB);
+  out.push(path.join(__dirname, '..', 'dashmaster', 'node', 'dados', 'dashmaster.db'), path.join(__dirname, '..', 'node', 'dados', 'dashmaster.db'));
+  if (process.platform === 'win32') out.push('C:\\dashmaster\\node\\dados\\dashmaster.db');
+  return out;
+}
+let CACHE_DM = {at: 0, key: '', props: null};
+/** Propriedades JMS_* do DashMaster deste computador (as mesmas da tela Configurações dele). null = não achou. */
+function tokenDashmaster(cfg) {
+  const bancos = bancosDashmaster(cfg), key = bancos.join('|');
+  if (CACHE_DM.key === key && Date.now() - CACHE_DM.at < 15000) return CACHE_DM.props;
+  let props = null;
+  for (const f of bancos) {
+    if (!f || !fs.existsSync(f)) continue;
+    try {
+      const {DatabaseSync} = require('node:sqlite');
+      let db;
+      try { db = new DatabaseSync(f, {readOnly: true}); } catch (e) { db = new DatabaseSync(f); }
+      try {
+        const rows = db.prepare('SELECT k, v FROM props WHERE k IN (' + CRED_KEYS.map(() => '?').join(',') + ')').all(...CRED_KEYS);
+        props = {};
+        rows.forEach(r => { props[r.k] = String(r.v || ''); });
+      } finally { db.close(); }
+      if (props.JMS_AUTHTOKEN || props.JMS_COOKIE || props.JMS_AUTHORIZATION) break;
+      props = null;
+    } catch (e) { props = null; /* Node sem SQLite ou banco ocupado: tenta o próximo */ }
+  }
+  CACHE_DM = {at: Date.now(), key, props};
+  return props;
+}
+/** Credenciais em uso: as do DashMaster deste computador; sem elas, as salvas neste app (dados/credenciais.json). */
+function credenciais(cfg) {
+  const dm = tokenDashmaster(cfg);
+  if (dm) return Object.assign({fonte: 'dashmaster'}, dm);
+  const proprio = lerJson(path.join(cfg.dados, 'credenciais.json'));
+  if (proprio && proprio.JMS_AUTHTOKEN) return Object.assign({fonte: 'app'}, proprio);
+  return {fonte: ''};
+}
+/** Cabeçalhos de acesso como no DashMaster (JMS_AUTH_MODE: AUTHTOKEN, AUTHTOKEN_COOKIE, COOKIE…). */
+function cabecalhos(c) {
+  const mode = String(c.JMS_AUTH_MODE || (c.JMS_AUTHTOKEN ? 'AUTHTOKEN' : c.JMS_AUTHORIZATION && c.JMS_COOKIE ? 'AUTHORIZATION_COOKIE' :
+    c.JMS_AUTHORIZATION ? 'AUTHORIZATION' : 'COOKIE')).trim().toUpperCase().split('_');
+  const h = {Accept: 'application/json, text/plain, */*', Lang: c.JMS_LANG || 'PT', Langtype: c.JMS_LANGTYPE || 'PT', Timezone: c.JMS_TIMEZONE || 'GMT-0300'};
+  if (mode.indexOf('AUTHTOKEN') >= 0 && c.JMS_AUTHTOKEN) h.AuthToken = String(c.JMS_AUTHTOKEN).trim();
+  if (mode.indexOf('COOKIE') >= 0 && c.JMS_COOKIE) h.Cookie = String(c.JMS_COOKIE).trim();
+  if (mode.indexOf('AUTHORIZATION') >= 0 && c.JMS_AUTHORIZATION) h.Authorization = String(c.JMS_AUTHORIZATION).trim();
+  return h;
+}
+function salvarToken(cfg, token) {
+  token = String(token || '').trim().replace(/^authtoken\s*:\s*/i, '');
+  if (!token || /[\r\n]/.test(token) || token.length > 4000) throw new Error('Cole só o valor do AuthToken.');
+  fs.mkdirSync(cfg.dados, {recursive: true});
+  fs.writeFileSync(path.join(cfg.dados, 'credenciais.json'), JSON.stringify({JMS_AUTHTOKEN: token}, null, 2));
+  return true;
+}
+/** Pedido feito no próprio computador do app (não pela rede nem por túnel). */
+function isLocal(req) {
+  const a = String(req.socket.remoteAddress || '');
+  return /^(127\.|::1$|::ffff:127\.)/.test(a) && !req.headers['x-forwarded-for'] && !req.headers['x-forwarded-host'] && !req.headers.forwarded;
+}
+
 // ------------------------------------------------------------------ JMS e fotos
-async function jms(req) {
+const ROTA_GRAVA = /^(add|save|update|upd|delete|del|remove|edit|submit|create|insert|modify|cancel|approve|audit|reject|upload|import|send|confirm|bind|unbind|set|reset|change|logout|login|password|pwd|sign|push|write|put|apply|close|lock|unlock|assign|transfer|dispatch)$/;
+const ROTA_LE = /^(query|list|page|search|get|detail|details|image|images|img|imgs|photo|photos|pic|pics|picture|foto|view|url|urls|file|preview|tracking|track|info|find|select|show|load|download|count)$/;
+/** Só consultas de leitura no JMS: o servidor usa o token dele, então nada de rota que grava, apaga ou muda algo. */
+function rotaLeitura(url) {
+  const m = String(url || '').match(/^https:\/\/gw\.jtjms-br\.com(\/[A-Za-z0-9_\/.\-]+)(\?[^\s#]*)?$/);
+  if (!m) return false;
+  const palavras = s => s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  let q;
+  try { q = decodeURIComponent(m[2] || ''); } catch (e) { return false; }
+  const caminho = palavras(m[1]), tudo = caminho.concat(palavras(q));
+  return !tudo.some(p => ROTA_GRAVA.test(p)) && caminho.some(p => ROTA_LE.test(p));
+}
+async function jms(req, cfg) {
   const url = String(req.url || '');
-  if (!/^https:\/\/gw\.jtjms-br\.com\/[A-Za-z0-9_\/.\-]+(\?[^\s#]*)?$/.test(url)) throw new Error('Endereço do JMS não permitido.');
-  const token = String(req.token || '').trim();
-  if (!token) throw new Error('Cole o AuthToken do JMS na página.');
-  const headers = {Accept: 'application/json, text/plain, */*', AuthToken: token, Lang: 'PT', Langtype: 'PT', Timezone: 'GMT-0300'};
+  if (!rotaLeitura(url)) throw new Error('Endereço do JMS não permitido: o app só faz consultas (nada que grave ou apague no JMS).');
+  const c = credenciais(cfg);
+  if (!c.fonte) throw new Error('Falta o AuthToken do JMS no computador do app (o mesmo do DashMaster). Veja o passo 1 da tela.');
+  const headers = cabecalhos(c);
   Object.keys(req.headers || {}).forEach(k => {
     const v = String(req.headers[k] || '');
     if (SAFE_HEADERS.indexOf(k.toLowerCase()) >= 0 && v && !/[\r\n]/.test(v)) headers[k.charAt(0).toUpperCase() + k.slice(1).toLowerCase()] = /[^\x20-\x7E]/.test(v) ? encodeURIComponent(v) : v;
@@ -101,7 +182,7 @@ function modelo(cfg, acao, valor) {
   const file = path.join(cfg.dados, 'modelo-imagem.json');
   if (acao === 'gravar') {
     const m = JSON.parse(String(valor || 'null'));
-    if (!m || typeof m !== 'object' || !/^https:\/\/gw\.jtjms-br\.com\//.test(String(m.url || ''))) throw new Error('Modelo da foto inválido.');
+    if (!m || typeof m !== 'object' || !rotaLeitura(m.url)) throw new Error('Modelo da foto inválido.');
     fs.mkdirSync(cfg.dados, {recursive: true});
     fs.writeFileSync(file, JSON.stringify(m, null, 2));
     return JSON.stringify(m);
@@ -153,7 +234,12 @@ function createServer(cfg) {
         if (!sameOrigin(req)) { sendJson(req, res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
         const body = await readJson(req);
         let result;
-        if (p === '/api/jms') result = await jms(body);
+        if (p === '/api/jms') result = await jms(body, cfg);
+        else if (p === '/api/estado') result = {fonte: credenciais(cfg).fonte, local: isLocal(req), plataforma: 'node'};
+        else if (p === '/api/token') {
+          if (!isLocal(req)) { sendJson(req, res, 403, {ok: false, error: 'O AuthToken só pode ser trocado no computador do app.'}); return; }
+          result = salvarToken(cfg, body.token);
+        }
         else if (p === '/api/fotos') result = await fotos(body.urls);
         else if (p === '/api/modelo') result = modelo(cfg, String(body.acao || 'ler'), body.valor);
         else { sendJson(req, res, 404, {ok: false, error: 'Não encontrado.'}); return; }
@@ -198,4 +284,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = {createServer, loadConfig, jms, fotos, modelo, VERSAO};
+module.exports = {createServer, loadConfig, jms, fotos, modelo, credenciais, cabecalhos, rotaLeitura, VERSAO};

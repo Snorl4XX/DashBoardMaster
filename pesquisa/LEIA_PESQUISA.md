@@ -1,4 +1,4 @@
-# J&T · Pesquisa no Rastreamento — V1.0
+# J&T · Pesquisa no Rastreamento — V1.1
 
 App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto da coluna "Descrição da etapa de bipagem" (JMS › Operação › Consulta do pacote › Rastreamento do pacote). O app:
 
@@ -18,6 +18,8 @@ App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto d
 
 A tela e a planilha são iguais nas duas.
 
+**Novo na V1.1:** o app puxa direto do JMS, **como o DashMaster**: o AuthToken fica no servidor, não no navegador. Ninguém precisa colar token na página.
+
 ## Instalar — Apps Script
 1. Entre em https://script.google.com → **Novo projeto**. Dê o nome "JT Pesquisa". Use um projeto **novo**, não o do DashMaster.
 2. Arquivo `Codigo.gs`: apague o que o Google escreveu e cole o conteúdo de `appscript/Codigo.gs`.
@@ -26,7 +28,13 @@ A tela e a planilha são iguais nas duas.
    - `Estilo`;
    - `App`.
 4. Engrenagem (**Configurações do projeto**) → marque **Mostrar arquivo de manifesto "appsscript.json"**. Volte ao editor e troque o conteúdo do `appsscript.json` pelo da pasta `appscript`.
-5. **Implantar → Nova implantação** → tipo **App da Web**:
+5. Ainda em **Configurações do projeto** → **Propriedades do script** → **Adicionar propriedade do script**:
+   - Propriedade: `JMS_AUTHTOKEN`;
+   - Valor: o AuthToken do JMS (o mesmo do DashMaster, veja "Como pegar o AuthToken" abaixo).
+
+   Se o seu DashMaster usa cookie, crie também `JMS_AUTH_MODE` e `JMS_COOKIE` com os mesmos valores dele.
+6. Para conferir: no editor, escolha **testarConexao** e clique em **▶ Executar**. No Registro de execução deve aparecer `OK: o JMS aceitou o AuthToken.`
+7. **Implantar → Nova implantação** → tipo **App da Web**:
    - Executar como: **Eu**;
    - Quem pode acessar: **Qualquer pessoa**.
 
@@ -46,19 +54,29 @@ Para atualizar depois: troque os arquivos e clique em **Implantar → Gerenciar 
 
    → **Avançar** → nome **Pesquisa J&T** → **Concluir**.
 4. Dois cliques no atalho: abre a janela preta (deixe aberta) e o navegador abre sozinho em `http://localhost:3200`.
+5. **AuthToken:**
+   - Se o DashMaster está neste computador em `C:\dashmaster`, não precisa fazer nada: o app usa **o mesmo token do DashMaster**. Quando você troca o token nas Configurações do DashMaster, a pesquisa já usa o novo.
+   - Sem DashMaster: no passo 1 da tela, cole o AuthToken e clique em **Salvar neste computador**. Isso só funciona no próprio computador do app (`localhost`), não pela rede.
 
 - Para outras pessoas da rede abrirem, use o endereço com o IP que aparece na janela preta. Se o Windows pedir administrador no Firewall, clique em **Cancelar**: o app continua funcionando neste computador.
 - Para abrir sozinho quando o Windows ligar: **Windows + R** → `shell:startup` → cole o atalho nessa pasta.
 - Se a porta 3200 estiver ocupada, troque `"porta"` no `config.json`, que é criado na primeira vez.
+- DashMaster em outra pasta: no `config.json`, ponha em `"dashmaster"` a pasta dele (ex.: `"D:\\dashmaster"`). Para não usar o token do DashMaster: `"dashmaster": false`.
 
 ## Usar
-### 1. AuthToken do JMS (uma vez por navegador)
+### 1. Acesso ao JMS (como o DashMaster)
+O passo 1 da tela mostra de onde vem o token:
+- **Conectado pelo servidor**: pronto. Clique em **Testar conexão** para conferir com o JMS.
+- **Falta o AuthToken**: a tela diz onde cadastrar (Propriedades do script no Apps Script; no computador, o DashMaster ou o campo **Salvar neste computador**).
+
+Quando o JMS pedir login de novo, o app avisa. Pegue um token novo e troque **no mesmo lugar** (no DashMaster, a pesquisa já pega o novo sozinha).
+
+**Como pegar o AuthToken:**
 1. Abra o JMS no navegador e entre normalmente.
 2. Aperte **F12** → aba **Rede** (Network) → clique em qualquer consulta da lista.
 3. Em **Cabeçalhos de solicitação**, copie o valor de `authtoken`.
-4. No app, cole em **AuthToken do JMS** e clique em **Salvar**.
 
-O token fica **só no seu navegador**: cada pessoa usa o próprio. Quando o JMS pedir login de novo, o app avisa; repita estes passos.
+Não mande o token por mensagem nem coloque em print.
 
 ### 2. Fotos das linhas (uma vez para todos)
 A foto do **bipe de pacote problemático** já vem sem fazer nada. Para as outras linhas com "Ver imagem", o app precisa aprender, uma vez, o pedido que o JMS faz ao clicar em "Ver imagem":
@@ -104,8 +122,10 @@ Regras:
 
 ## Para a TI
 - Toda a pesquisa roda na página: `lib/rastreio.js` (regras), `lib/pesquisa.js` (consultas e fotos) e `lib/planilha.js` (.xlsx com gráficos e fotos).
-- O servidor só repassa ao JMS (`gw.jtjms-br.com`) com o AuthToken que a página manda e baixa as fotos (`*.jtjms-br.com`):
-  - Node.js: `server.js`, rotas `api/jms`, `api/fotos` e `api/modelo`;
-  - Apps Script: `Codigo.gs`, funções `jms`, `fotos` e `modelo`.
+- O servidor consulta o JMS (`gw.jtjms-br.com`) com o **token dele**, como o DashMaster, e baixa as fotos (`*.jtjms-br.com`). A página não guarda o token (só o campo **Salvar neste computador** manda, uma vez, ao servidor local):
+  - Node.js: `server.js`, rotas `api/estado`, `api/jms`, `api/token` (só de `localhost`), `api/fotos` e `api/modelo`. O token vem do banco do DashMaster (`node/dados/dashmaster.db`, tabela `props`, só leitura) ou de `dados/credenciais.json`;
+  - Apps Script: `Codigo.gs`, funções `estado`, `jms`, `fotos`, `modelo` e `testarConexao`. O token vem das Propriedades do script.
+  - Os nomes são os mesmos do DashMaster: `JMS_AUTHTOKEN` e, se usar, `JMS_AUTH_MODE`, `JMS_COOKIE`, `JMS_AUTHORIZATION`.
+  - Como o token é do servidor, `jms` só aceita **consultas de leitura** do JMS (rota com query, list, page, get, image…; nada com save, update, delete, login…).
 - O "Ver imagem" ensinado fica em `dados/modelo-imagem.json` (Node.js) ou na propriedade `MODELO_IMAGEM` (Apps Script). Não guarda token.
 - `appscript/Index.html`, `Estilo.html` e `App.html` saem de `public/` e `lib/` (`node gerar-appscript.js`). Testes: `node test/test_pesquisa.js`, com JMS simulado e dados fictícios.

@@ -147,7 +147,7 @@
       var code = json && !blank(json.code) ? String(json.code) : '?';
       var msg = json && (json.msg || json.message) ? String(json.msg || json.message).replace(/\s+/g, ' ').slice(0, 160) : '';
       if (code === '401' || code === '403' || AUTH_RE.test(msg)) {
-        throw jmsError('auth', 'O JMS não aceitou o AuthToken (código ' + code + (msg ? ': ' + msg : '') + '). Gere um novo no JMS e cole aqui.');
+        throw jmsError('auth', 'O JMS não aceitou o AuthToken (código ' + code + (msg ? ': ' + msg : '') + '). Gere um novo AuthToken no JMS e troque no servidor do app (Propriedades do script ou DashMaster).');
       }
       throw jmsError('refused', 'O JMS recusou a consulta (código ' + code + (msg ? ': ' + msg : '') + ').');
     }

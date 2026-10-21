@@ -42,19 +42,15 @@
     <!-- Acesso ao JMS e fotos -->
     <section class="card tk-setup" aria-label="Acesso ao JMS">
       <div>
-        <div class="section-head"><div><span class="kicker" data-i18n="step1">1 · Acesso ao JMS</span><h2 data-i18n="tokenTitle">AuthToken do JMS</h2></div>
+        <div class="section-head"><div><span class="kicker" data-i18n="step1">1 · Acesso ao JMS</span><h2 data-i18n="tokenTitle">Direto do JMS, como o DashMaster</h2></div>
           <span class="badge" id="tokenBadge"></span></div>
-        <div class="row">
+        <p class="note" id="accessText"></p>
+        <div class="row"><button type="button" class="btn btn-light" id="testBtn"><span data-i18n="test">Testar conexão</span></button></div>
+        <div class="row hidden" id="tokenRow">
           <input type="password" class="input" id="tokenInput" autocomplete="off" spellcheck="false" data-i18n-placeholder="tokenPh" placeholder="Cole aqui o AuthToken">
-          <button type="button" class="btn btn-red" id="tokenSave"><span data-i18n="save">Salvar</span></button>
-          <button type="button" class="btn btn-ghost" id="tokenForget"><span data-i18n="forget">Esquecer</span></button>
+          <button type="button" class="btn btn-red" id="tokenSave"><span data-i18n="save">Salvar neste computador</span></button>
         </div>
-        <ol class="tk-steps">
-          <li data-i18n="tok1">Abra o JMS no navegador e entre normalmente.</li>
-          <li data-i18n="tok2">Aperte F12 → aba Rede (Network) → clique em qualquer consulta da lista.</li>
-          <li data-i18n="tok3">Em Cabeçalhos de solicitação, copie o valor de "authtoken" e cole acima.</li>
-        </ol>
-        <p class="note" data-i18n="tokNote">O token fica só neste navegador. Quando o JMS pedir login de novo, cole o token novo.</p>
+        <div id="testResult" aria-live="polite"></div>
       </div>
       <div>
         <div class="section-head"><div><span class="kicker" data-i18n="step2">2 · Fotos das linhas</span><h2 data-i18n="photoTitle">"Ver imagem" do rastreamento</h2></div>

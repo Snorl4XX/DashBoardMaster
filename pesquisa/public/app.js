@@ -1,6 +1,7 @@
 /**
  * J&T · PESQUISA NO RASTREAMENTO — a página. Funciona igual no Apps Script (google.script.run) e no Node.js (api/…):
- * o servidor só repassa as consultas ao JMS (com o AuthToken guardado neste navegador) e baixa as fotos.
+ * o servidor consulta o JMS com o AuthToken DELE (como o DashMaster: Propriedades do script ou o token do DashMaster deste
+ * computador) e baixa as fotos. A página não pede token.
  */
 (function () {
   'use strict';
@@ -9,12 +10,16 @@
   var DEFAULTS = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
   var I18N = {
     pt: {title: 'Pesquisa no Rastreamento', subtitle: 'JMS › Operação › Consulta do pacote › Rastreamento do pacote · sempre o PRIMEIRO bipe com o texto padrão',
-      step1: '1 · Acesso ao JMS', tokenTitle: 'AuthToken do JMS', tokenPh: 'Cole aqui o AuthToken', save: 'Salvar', forget: 'Esquecer',
-      tok1: 'Abra o JMS no navegador e entre normalmente.', tok2: 'Aperte F12 → aba Rede (Network) → clique em qualquer consulta da lista.',
-      tok3: 'Em Cabeçalhos de solicitação, copie o valor de "authtoken" e cole acima.',
-      tokNote: 'O token fica só neste navegador. Quando o JMS pedir login de novo, cole o token novo.',
-      tokOk: 'Token salvo neste navegador', tokNo: 'Sem token', tokSaved: 'AuthToken salvo.', tokForgot: 'AuthToken apagado deste navegador.',
-      tokNeed: 'Cole o AuthToken do JMS (passo 1) antes de pesquisar.',
+      step1: '1 · Acesso ao JMS', tokenTitle: 'Direto do JMS, como o DashMaster', tokenPh: 'Cole aqui o AuthToken', save: 'Salvar neste computador',
+      test: 'Testar conexão', testBusy: 'Testando no JMS…', testOk: 'O JMS aceitou o AuthToken do servidor.',
+      accProp: 'O app usa o AuthToken das Propriedades do script (JMS_AUTHTOKEN), como o DashMaster. Quando o JMS pedir login de novo, troque o valor lá.',
+      accDash: 'O app usa o mesmo AuthToken do DashMaster deste computador. Quando você troca o token nas Configurações do DashMaster, a pesquisa já usa o novo.',
+      accApp: 'O app usa o AuthToken salvo neste computador. Para trocar, cole o novo abaixo.',
+      accNoGas: 'Falta o AuthToken: no editor do Apps Script, Configurações do projeto → Propriedades do script → JMS_AUTHTOKEN (o mesmo do DashMaster).',
+      accNoLocal: 'Falta o AuthToken. Cole abaixo (fica salvo neste computador). Com o DashMaster instalado em C:\\dashmaster, o app usa o token dele sozinho.',
+      accNoRemote: 'Falta o AuthToken: cadastre no computador onde o app está rodando.',
+      badgeOk: 'Conectado pelo servidor', badgeNo: 'Falta o AuthToken', tokSaved: 'AuthToken salvo neste computador.',
+      tokNeed: 'Falta o AuthToken do JMS no servidor do app (veja o passo 1).',
       step2: '2 · Fotos das linhas', photoTitle: '"Ver imagem" do rastreamento',
       photoNote: 'Para trazer a foto de cada linha para a planilha, o app precisa aprender, uma vez, o pedido que o JMS faz ao clicar em "Ver imagem". A foto do bipe de pacote problemático já vem sem isso.',
       teach: 'Ensinar a foto', teachForget: 'Apagar o que aprendeu', photoOk: 'Foto das linhas: aprendida', photoNo: 'Foto das linhas: falta ensinar',
@@ -46,10 +51,15 @@
       whyNone: 'Sem rastreamento no JMS', whyErr: 'Consulta recusada pelo JMS', whyNo: 'Nenhuma linha com o padrão',
       xlsxOk: 'Planilha baixada.', xlsxBusy: 'Montando a planilha…'},
     zh: {title: '轨迹关键字查询', subtitle: 'JMS › 运营 › 包裹查询 › 包裹轨迹 · 始终取包含关键字的第一条扫描',
-      step1: '1 · JMS 登录信息', tokenTitle: 'JMS AuthToken', tokenPh: '在此粘贴 AuthToken', save: '保存', forget: '删除',
-      tok1: '在浏览器中打开 JMS 并正常登录。', tok2: '按 F12 → 网络 (Network) → 点击列表中任意请求。', tok3: '在请求头中复制 "authtoken" 的值并粘贴到上方。',
-      tokNote: '令牌只保存在此浏览器。JMS 要求重新登录时，请粘贴新的令牌。', tokOk: '已在此浏览器保存', tokNo: '未填写令牌', tokSaved: '已保存。', tokForgot: '已从此浏览器删除。',
-      tokNeed: '查询前请先粘贴 JMS AuthToken（步骤1）。', step2: '2 · 扫描行图片', photoTitle: '轨迹中的“查看图片”',
+      step1: '1 · JMS 连接', tokenTitle: '直接从 JMS 获取（与看板相同）', tokenPh: '在此粘贴 AuthToken', save: '保存在此电脑',
+      test: '测试连接', testBusy: '正在测试 JMS…', testOk: 'JMS 已接受服务器的 AuthToken。',
+      accProp: '程序使用脚本属性中的 AuthToken (JMS_AUTHTOKEN)，与 DashMaster 相同。JMS 要求重新登录时，请在那里更换。',
+      accDash: '程序使用本电脑 DashMaster 的同一个 AuthToken。在 DashMaster 设置中更换后，查询会自动使用新令牌。',
+      accApp: '程序使用保存在本电脑的 AuthToken。如需更换，请在下方粘贴新的令牌。',
+      accNoGas: '缺少 AuthToken：在 Apps Script 编辑器 → 项目设置 → 脚本属性中添加 JMS_AUTHTOKEN（与 DashMaster 相同）。',
+      accNoLocal: '缺少 AuthToken。请在下方粘贴（保存在本电脑）。如本电脑在 C:\\dashmaster 安装了 DashMaster，程序会自动使用其令牌。',
+      accNoRemote: '缺少 AuthToken：请在运行程序的电脑上填写。', badgeOk: '已通过服务器连接', badgeNo: '缺少 AuthToken', tokSaved: '已保存在本电脑。',
+      tokNeed: '程序服务器缺少 JMS AuthToken（见步骤1）。', step2: '2 · 扫描行图片', photoTitle: '轨迹中的“查看图片”',
       photoNote: '要把每行的图片放进表格，需要先让程序学习一次点击“查看图片”时 JMS 发出的请求。问题件扫描的图片无需学习。',
       teach: '学习图片请求', teachForget: '删除已学习的请求', photoOk: '图片：已学习', photoNo: '图片：尚未学习',
       t1: '在 JMS 打开包裹轨迹并查询一个运单。', t2: '按 F12 → 网络 (Network)，点击某一行的“查看图片”。', t3: '在网络列表中右键新请求 → 复制 → 以 fetch 格式复制。',
@@ -70,7 +80,7 @@
       openPhoto: '打开图片', whyNone: 'JMS 无轨迹', whyErr: 'JMS 拒绝查询', whyNo: '没有包含关键字的行', xlsxOk: '表格已下载。', xlsxBusy: '正在生成表格…'}
   };
   var lang = 'pt';
-  var state = {list: [], pats: ['', ''], results: [], running: false, stop: false, started: 0, modelo: null, fotos: null, phase: '',
+  var state = {list: [], pats: ['', ''], results: [], running: false, stop: false, started: 0, modelo: null, fotos: null, phase: '', acesso: null,
     tab: {0: 'yes', 1: 'yes'}, page: {0: 1, 1: 1}, find: {0: '', 1: ''}};
 
   function $(s, el) { return (el || document).querySelector(s); }
@@ -85,7 +95,6 @@
   function fmtTime(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)/); return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] : String(s || ''); }
   function store(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
-  function token() { return String(load('jt_pesquisa_token') || '').trim(); }
 
   // ------------------------------------------------------------------ servidor (Apps Script ou Node.js)
   var GAS = !!(window.google && google.script && google.script.run);
@@ -102,9 +111,10 @@
   }
   var api = {
     jms: function (url, body, headers) {
-      if (!token()) return Promise.reject(new Error(t('tokNeed')));
-      return GAS ? gas('jms', [url, body === undefined ? null : body, token(), headers || {}]) : http('jms', {url: url, body: body === undefined ? null : body, token: token(), headers: headers || {}});
+      return GAS ? gas('jms', [url, body === undefined ? null : body, headers || {}]) : http('jms', {url: url, body: body === undefined ? null : body, headers: headers || {}});
     },
+    estado: function () { return GAS ? gas('estado', []) : http('estado', {}); },
+    token: function (v) { return http('token', {token: v}); },
     fotos: function (urls) { return GAS ? gas('fotos', [urls]) : http('fotos', {urls: urls}); },
     modelo: function (acao, valor) {
       var v = valor === undefined ? null : JSON.stringify(valor);
@@ -124,11 +134,15 @@
     setTimeout(function () { el.remove(); }, type === 'error' ? 9000 : 5000);
   }
 
-  // ------------------------------------------------------------------ token e foto
+  // ------------------------------------------------------------------ acesso ao JMS e foto
   function renderSetup() {
-    var b = $('#tokenBadge'), ok = !!token();
-    b.className = 'badge ' + (ok ? 'ok' : 'warn');
-    b.textContent = ok ? t('tokOk') : t('tokNo');
+    var a = state.acesso || {}, b = $('#tokenBadge'), ok = !!a.fonte;
+    b.className = 'badge ' + (ok ? 'ok' : state.acesso ? 'warn' : '');
+    b.textContent = state.acesso ? (ok ? t('badgeOk') : t('badgeNo')) : '…';
+    $('#accessText').textContent = !state.acesso ? '' : a.fonte === 'propriedades' ? t('accProp') : a.fonte === 'dashmaster' ? t('accDash') : a.fonte === 'app' ? t('accApp')
+      : a.plataforma === 'appsscript' ? t('accNoGas') : a.local ? t('accNoLocal') : t('accNoRemote');
+    // Campo do token só no computador do app (versão Node.js), quando ele não usa o token do DashMaster.
+    $('#tokenRow').classList.toggle('hidden', !(a.plataforma === 'node' && a.local && a.fonte !== 'dashmaster'));
     var pb = $('#photoBadge');
     pb.className = 'badge ' + (state.modelo ? 'ok' : 'warn');
     pb.textContent = state.modelo ? t('photoOk') : t('photoNo');
@@ -155,6 +169,21 @@
     }).then(function () { btn.disabled = false; });
   }
   function rota() { try { return JSON.parse(load('jt_pesquisa_rota') || 'null'); } catch (e) { return null; } }
+  function carregarAcesso() {
+    return api.estado().then(function (a) { state.acesso = a; renderSetup(); }, function () { renderSetup(); });
+  }
+  /** Testar conexão: uma consulta com uma remessa de teste (o JMS responde vazio quando aceita o token). */
+  function testar() {
+    var box = $('#testResult'), btn = $('#testBtn');
+    btn.disabled = true;
+    box.innerHTML = '<p class="note">' + esc(t('testBusy')) + '</p>';
+    api.jms(R.KEYWORD_URL, R.keywordPayload(['TESTE0000000000']), rota() || {}).then(function (r) {
+      R.parseJms(r.status, r.text);
+      box.innerHTML = '<div class="alert ok"><div><b>' + esc(t('testOk')) + '</b></div></div>';
+    }).catch(function (e) {
+      box.innerHTML = '<div class="alert"><div>' + esc(e.message) + '</div></div>';
+    }).then(function () { btn.disabled = false; carregarAcesso(); });
+  }
 
   // ------------------------------------------------------------------ remessas
   function updateCount() {
@@ -187,7 +216,7 @@
   }
   function start() {
     var p = R.parseWaybills($('#waybills').value), pats = [$('#pat1').value.trim(), $('#pat2').value.trim()];
-    if (!token()) { toast(t('tokNeed'), 'error'); $('#tokenInput').focus(); return; }
+    if (state.acesso && !state.acesso.fonte) { toast(t('tokNeed'), 'error'); return; }
     if (!p.list.length) { toast(t('noWaybills'), 'error'); return; }
     if (!pats[0] && !pats[1]) { toast(t('noPattern'), 'error'); return; }
     store('jt_pesquisa_p1', pats[0]); store('jt_pesquisa_p2', pats[1]);
@@ -227,7 +256,7 @@
       setRunning(false);
       var falta = state.list.filter(function (w) { return !state.results.some(function (r) { return r.w === w; }); });
       showAlert(e.message, e.kind === 'auth' ? null : falta.length ? falta : null);
-      if (e.kind === 'auth') { $('#tokenInput').focus(); renderSetup(); }
+      if (e.kind === 'auth') carregarAcesso();
     });
   }
   function done(key) {
@@ -478,12 +507,13 @@
     $('#pat2').value = load('jt_pesquisa_p2') !== null ? load('jt_pesquisa_p2') : DEFAULTS[1];
     try { state.modelo = JSON.parse(load('jt_pesquisa_modelo') || 'null'); } catch (e) { state.modelo = null; }
     api.modelo('ler').then(function (m) { state.modelo = m; store('jt_pesquisa_modelo', m ? JSON.stringify(m) : null); renderSetup(); }, function () {});
+    carregarAcesso();
+    $('#testBtn').addEventListener('click', testar);
     $('#tokenSave').addEventListener('click', function () {
       var v = $('#tokenInput').value.trim().replace(/^authtoken\s*:\s*/i, '');
       if (!v) { $('#tokenInput').focus(); return; }
-      store('jt_pesquisa_token', v); $('#tokenInput').value = ''; renderSetup(); toast(t('tokSaved'), 'success');
+      api.token(v).then(function () { $('#tokenInput').value = ''; toast(t('tokSaved'), 'success'); return carregarAcesso(); }, function (e) { toast(e.message, 'error'); });
     });
-    $('#tokenForget').addEventListener('click', function () { store('jt_pesquisa_token', null); renderSetup(); toast(t('tokForgot')); });
     $('#teachOpen').addEventListener('click', function () { $('#teachBox').classList.toggle('hidden'); });
     $('#teachTest').addEventListener('click', teach);
     $('#teachForget').addEventListener('click', function () {
