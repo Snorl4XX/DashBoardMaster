@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<!-- Gerado por gerar-appscript.js a partir de public/index.html: não edite aqui. -->
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>J&amp;T · Pesquisa no Rastreamento</title>
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('jt_theme'); } catch (e) {}
+      if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
+    })();
+  </script>
+  <?!= include('Estilo'); ?>
+</head>
+<body>
+  <main class="tk">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">J&amp;T</div>
+        <div class="title-wrap">
+          <div class="eyebrow"><span>J&amp;T EXPRESS</span></div>
+          <h1 data-i18n="title">Pesquisa no Rastreamento</h1>
+          <p data-i18n="subtitle">JMS › Operação › Consulta do pacote › Rastreamento do pacote · sempre o PRIMEIRO bipe com o texto padrão</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button type="button" class="theme-btn" id="themeBtn" aria-label="Tema claro / escuro">
+          <svg class="ico-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+          <svg class="ico-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <div class="lang-switch" role="group" aria-label="Idioma / 语言">
+          <button type="button" class="lang-btn" data-lang="pt" aria-pressed="true">PT-BR</button>
+          <button type="button" class="lang-btn" data-lang="zh" aria-pressed="false">中文</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Acesso ao JMS e fotos -->
+    <section class="card tk-setup" aria-label="Acesso ao JMS">
+      <div>
+        <div class="section-head"><div><span class="kicker" data-i18n="step1">1 · Acesso ao JMS</span><h2 data-i18n="tokenTitle">AuthToken do JMS</h2></div>
+          <span class="badge" id="tokenBadge"></span></div>
+        <div class="row">
+          <input type="password" class="input" id="tokenInput" autocomplete="off" spellcheck="false" data-i18n-placeholder="tokenPh" placeholder="Cole aqui o AuthToken">
+          <button type="button" class="btn btn-red" id="tokenSave"><span data-i18n="save">Salvar</span></button>
+          <button type="button" class="btn btn-ghost" id="tokenForget"><span data-i18n="forget">Esquecer</span></button>
+        </div>
+        <ol class="tk-steps">
+          <li data-i18n="tok1">Abra o JMS no navegador e entre normalmente.</li>
+          <li data-i18n="tok2">Aperte F12 → aba Rede (Network) → clique em qualquer consulta da lista.</li>
+          <li data-i18n="tok3">Em Cabeçalhos de solicitação, copie o valor de "authtoken" e cole acima.</li>
+        </ol>
+        <p class="note" data-i18n="tokNote">O token fica só neste navegador. Quando o JMS pedir login de novo, cole o token novo.</p>
+      </div>
+      <div>
+        <div class="section-head"><div><span class="kicker" data-i18n="step2">2 · Fotos das linhas</span><h2 data-i18n="photoTitle">"Ver imagem" do rastreamento</h2></div>
+          <span class="badge" id="photoBadge"></span></div>
+        <p class="note" data-i18n="photoNote">Para trazer a foto de cada linha para a planilha, o app precisa aprender, uma vez, o pedido que o JMS faz ao clicar em "Ver imagem". A foto do bipe de pacote problemático já vem sem isso.</p>
+        <div class="row"><button type="button" class="btn btn-light" id="teachOpen"><span data-i18n="teach">Ensinar a foto</span></button>
+          <button type="button" class="btn btn-ghost hidden" id="teachForget"><span data-i18n="teachForget">Apagar o que aprendeu</span></button></div>
+        <div class="tk-teach hidden" id="teachBox">
+          <ol class="tk-steps">
+            <li data-i18n="t1">No JMS, abra Rastreamento do pacote e consulte uma remessa.</li>
+            <li data-i18n="t2">Aperte F12 → aba Rede (Network) e clique em "Ver imagem" numa linha.</li>
+            <li data-i18n="t3">Na lista da Rede, clique com o botão direito na consulta nova → Copiar → Copiar como fetch.</li>
+            <li data-i18n="t4">Cole abaixo e clique em Testar. O token do texto colado é jogado fora.</li>
+          </ol>
+          <textarea class="input" id="teachText" spellcheck="false" data-i18n-placeholder="teachPh" placeholder='fetch("https://gw.jtjms-br.com/…", {…})'></textarea>
+          <div class="row" style="margin-top:0">
+            <input type="text" class="input" id="teachWaybill" autocomplete="off" data-i18n-placeholder="teachWb" placeholder="Remessa da linha clicada (se o app pedir)">
+            <button type="button" class="btn btn-red" id="teachTest"><span data-i18n="teachTest">Testar e salvar</span></button>
+          </div>
+          <div id="teachResult" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pesquisa -->
+    <section class="card tk-input" aria-label="Pesquisa">
+      <div>
+        <label class="label" for="waybills" data-i18n="waybills">3 · Remessas (uma por linha)</label>
+        <textarea class="input" id="waybills" spellcheck="false" autocomplete="off" data-i18n-placeholder="waybillsPh" placeholder="Cole aqui as remessas, uma por linha"></textarea>
+        <div class="tk-count" id="wbCount" aria-live="polite"></div>
+      </div>
+      <div class="tk-pats">
+        <div class="tk-pat">
+          <span class="kicker" data-i18n="block1">Bloco 1 · Tem ou não tem</span>
+          <h3 data-i18n="block1Q">Quantas remessas têm esta linha no rastreamento?</h3>
+          <input type="text" class="input" id="pat1" autocomplete="off" aria-label="Texto padrão do bloco 1">
+        </div>
+        <div class="tk-pat">
+          <span class="kicker" data-i18n="block2">Bloco 2 · Turno que mais ocorreu</span>
+          <h3 data-i18n="block2Q">Em que turno aconteceu o primeiro bipe com esta linha?</h3>
+          <input type="text" class="input" id="pat2" autocomplete="off" aria-label="Texto padrão do bloco 2">
+        </div>
+        <div class="tk-hint" data-i18n="hint">Copie o texto da coluna "Descrição da etapa de bipagem". Maiúsculas, acentos e espaços dentro dos [ ] não importam; * vale qualquer trecho (ex.: "está [*] sendo enviada"). Deixe um bloco vazio para não usar.</div>
+        <label class="check"><input type="checkbox" id="withPhotos" checked><span data-i18n="withPhotos">Trazer as fotos das linhas para a planilha</span></label>
+        <div class="tk-actions">
+          <button type="button" class="btn btn-red" id="runBtn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span data-i18n="run">Pesquisar no JMS</span>
+          </button>
+          <button type="button" class="btn btn-light hidden" id="stopBtn"><span data-i18n="stop">Parar</span></button>
+          <button type="button" class="btn btn-dark" id="xlsxBtn" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg><span data-i18n="download">Baixar planilha (.xlsx)</span>
+          </button>
+          <button type="button" class="btn btn-ghost" id="clearBtn"><span data-i18n="clear">Limpar</span></button>
+        </div>
+      </div>
+      <div class="tk-status hidden" id="statusBox" aria-live="polite">
+        <div class="tk-bar"><span id="barFill"></span></div>
+        <div class="note" id="statusText"></div>
+      </div>
+    </section>
+
+    <div class="alert hidden" id="alertBox" role="alert"></div>
+    <section id="results"></section>
+    <div class="tk-foot"><span id="tkVersion"></span> · <span data-i18n="madeBy">Feito por Caike Oliveira</span></div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script>window.__PESQUISA__ = <?!= boot ?>;</script>
+  <?!= include('App'); ?>
+</body>
+</html>

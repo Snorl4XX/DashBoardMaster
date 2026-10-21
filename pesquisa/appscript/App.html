@@ -1,0 +1,1604 @@
+<!-- Gerado por gerar-appscript.js a partir de lib/rastreio.js, lib/pesquisa.js, lib/planilha.js, public/app.js: não edite aqui. -->
+<script>
+/**
+ * J&T · PESQUISA NO RASTREAMENTO — regras (o mesmo código roda na página, no Node.js e nos testes).
+ * JavaScript puro, sem DOM e sem rede: a página chama o JMS pelo servidor (pesquisa.js) e usa estas funções.
+ *
+ *  - remessas coladas → lista sem repetir;
+ *  - texto padrão → comparação sem maiúsculas, acentos e espaços nos colchetes ("*" vale qualquer trecho);
+ *  - bipes de uma remessa → o PRIMEIRO bipe com o texto (horário, turno, origem, quem escaneou, imagem);
+ *  - totais de um bloco (tem / não tem, turnos, horas, quem mais escaneou);
+ *  - respostas do JMS (erros, token vencido) e links de foto numa resposta;
+ *  - "Ensinar a foto": o pedido do "Ver imagem" copiado do DevTools vira um modelo para qualquer linha.
+ */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.Rastreio = api;
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  var KEYWORD_URL = 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList';
+  var PROBLEM_URL = 'https://gw.jtjms-br.com/operatingplatform/abnormalPieceScanList/pageList';
+  var SHIFTS = ['T1', 'T2', 'T3'];
+  var SHIFT_HOURS = {T1: '06:00–13:59', T2: '14:00–21:59', T3: '22:00–05:59'};
+
+  function blank(v) { return v === null || v === undefined || String(v).trim() === ''; }
+  function isNum(v) { return !blank(v) && isFinite(Number(v)); }
+
+  // ---------- turnos ----------
+  function hourOf(v) {
+    var m = String(v || '').match(/(\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    var h = Number(m[1]);
+    return h >= 0 && h < 24 ? h : null;
+  }
+  /** T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59 (como no painel). */
+  function shiftOf(v) {
+    var h = hourOf(v);
+    if (h === null) return 'N/A';
+    return h >= 6 && h < 14 ? 'T1' : h >= 14 && h < 22 ? 'T2' : 'T3';
+  }
+
+  // ---------- remessas ----------
+  /** Remessas coladas (uma por linha, ou separadas por espaço, vírgula ou ponto e vírgula), sem repetir, na ordem. */
+  function parseWaybills(text) {
+    var seen = {}, list = [], dup = 0, bad = 0;
+    String(text || '').split(/[\s,;]+/).forEach(function (x) {
+      var w = x.trim().toUpperCase();
+      if (!w) return;
+      if (!/^[A-Z0-9-]{4,40}$/.test(w)) { bad++; return; }
+      if (seen[w]) { dup++; return; }
+      seen[w] = 1;
+      list.push(w);
+    });
+    return {list: list, dup: dup, bad: bad};
+  }
+
+  // ---------- texto padrão ----------
+  /** Texto comparável: sem acento, minúsculo, espaços únicos e sem espaço colado nos colchetes ("[ SP GRU]" = "[SP GRU]"). */
+  function norm(s) {
+    var t = String(s === null || s === undefined ? '' : s);
+    if (t.normalize) t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return t.toLowerCase().replace(/\s+/g, ' ').replace(/\[\s+/g, '[').replace(/\s+\]/g, ']').trim();
+  }
+  /** Padrão → função (descrição → tem/não tem). "*" vale qualquer trecho. Padrão vazio → null (bloco desligado). */
+  function matcher(pattern) {
+    var parts = norm(pattern).split('*').map(function (p) { return p.trim(); }).filter(function (p) { return p; });
+    if (!parts.length) return null;
+    return function (text) {
+      var t = norm(text), at = 0;
+      for (var i = 0; i < parts.length; i++) {
+        var j = t.indexOf(parts[i], at);
+        if (j < 0) return false;
+        at = j + parts[i].length;
+      }
+      return true;
+    };
+  }
+
+  // ---------- primeiro bipe ----------
+  /**
+   * O PRIMEIRO bipe (o mais antigo; o JMS manda do mais novo para o mais antigo) cuja "Descrição da etapa de bipagem" tem o
+   * texto: Tempo de digitalização, turno, origem (a base do bipe, o "[SP GRU]"), quem escaneou ("escaneador [Nome]"), tipo de
+   * bipagem, descrição, se a linha tem "Ver imagem" (imgType) e quantas linhas tinham o texto. `raw` = a linha do JMS (para
+   * buscar a foto). null = nenhuma linha com o texto.
+   */
+  function hit(details, match) {
+    var hits = (details || []).filter(function (d) { return d && match(d.waybillTrackingContent); });
+    if (!hits.length) return null;
+    var key = function (d) { return blank(d.scanTime) ? '9999' : String(d.scanTime); };
+    var d = hits[0];
+    hits.forEach(function (x) { if (key(x) <= key(d)) d = x; });
+    var text = String(d.waybillTrackingContent || '');
+    var by = String(d.scanByName || '').trim(), origin = String(d.scanNetworkName || '').trim(), m;
+    if (!by && (m = text.match(/escaneador (?:[eé] )?\[([^\]]+)\]/i))) by = m[1].trim();
+    if (!origin && (m = text.match(/\[([^\]]+)\]/))) origin = m[1].trim();
+    return {t: String(d.scanTime || ''), shift: shiftOf(d.scanTime), origin: origin, by: by, type: String(d.scanTypeName || '').trim(),
+      desc: text, img: isNum(d.imgType) && Number(d.imgType) > 0, code: isNum(d.code) ? Number(d.code) : null, n: hits.length, raw: d};
+  }
+  /** Bipe de pacote problemático (J&T Tracking Code 110): a foto também está no registro do pacote problemático. */
+  function isProblem(h) { return !!h && (h.code === 110 || /problem/i.test(h.type || '')); }
+
+  /**
+   * Totais de um bloco (`k` = 0 ou 1): tem / não tem (remessas sem rastreamento no JMS contam em "não tem" e também em `none`),
+   * turnos e horas do primeiro bipe, turno que mais ocorreu (empate: o primeiro de T1, T2, T3) e quem mais escaneou.
+   */
+  function summary(results, k) {
+    var s = {total: 0, yes: 0, no: 0, none: 0, shifts: {T1: 0, T2: 0, T3: 0}, hours: [], top: '', topCount: 0, scanners: []};
+    var by = {};
+    for (var i = 0; i < 24; i++) s.hours.push(0);
+    (results || []).forEach(function (r) {
+      s.total++;
+      var h = r && r.p && r.p[k];
+      if (!h) { s.no++; if (!r || !r.ok) s.none++; return; }
+      s.yes++;
+      if (s.shifts[h.shift] !== undefined) s.shifts[h.shift]++;
+      var hr = hourOf(h.t);
+      if (hr !== null) s.hours[hr]++;
+      var b = h.by || 'N/A';
+      by[b] = (by[b] || 0) + 1;
+    });
+    SHIFTS.forEach(function (t) { if (s.shifts[t] > s.topCount) { s.top = t; s.topCount = s.shifts[t]; } });
+    s.scanners = Object.keys(by).map(function (l) { return {label: l, value: by[l]}; })
+      .sort(function (a, b) { return b.value - a.value || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0); });
+    s.pct = s.total ? s.yes / s.total * 100 : null;
+    return s;
+  }
+
+  // ---------- respostas do JMS ----------
+  var AUTH_RE = /token|登录|登陆|login|expired|expirad|过期|失效|unauthori|未授权|无权限|权限不足|没有权限|认证|会话|session|sess[aã]o/i;
+  function jmsError(kind, message) { var e = new Error(message); e.kind = kind; return e; }
+  /**
+   * Resposta do JMS (pelo servidor: {status, text}) → JSON. Erros com `kind`:
+   *  auth (token vencido, sem permissão, página de login) · temp (rede, 429, 5xx) · refused (o JMS recusou a consulta).
+   */
+  function parseJms(status, text) {
+    status = Number(status) || 0;
+    if (status === 401 || status === 403) throw jmsError('auth', 'O JMS recusou o acesso (HTTP ' + status + '). Confira o AuthToken.');
+    if (status >= 300 && status < 400) throw jmsError('auth', 'O JMS mandou para a tela de login (HTTP ' + status + '): o AuthToken venceu.');
+    if (status === 429 || status >= 500 || status === 0) throw jmsError('temp', 'JMS indisponível agora (HTTP ' + status + ').');
+    if (status < 200 || status >= 300) throw jmsError('refused', 'O JMS recusou a consulta (HTTP ' + status + ').');
+    var json;
+    try { json = JSON.parse(text); }
+    catch (e) {
+      if (/^\s*</.test(String(text || ''))) throw jmsError('auth', 'O JMS devolveu uma página em vez de dados: o AuthToken venceu.');
+      throw jmsError('temp', 'Resposta do JMS sem dados (não é JSON).');
+    }
+    if (!json || typeof json !== 'object' || json.fail === true || (!blank(json.code) && Number(json.code) !== 1 && Number(json.code) !== 200)) {
+      var code = json && !blank(json.code) ? String(json.code) : '?';
+      var msg = json && (json.msg || json.message) ? String(json.msg || json.message).replace(/\s+/g, ' ').slice(0, 160) : '';
+      if (code === '401' || code === '403' || AUTH_RE.test(msg)) {
+        throw jmsError('auth', 'O JMS não aceitou o AuthToken (código ' + code + (msg ? ': ' + msg : '') + '). Gere um novo no JMS e cole aqui.');
+      }
+      throw jmsError('refused', 'O JMS recusou a consulta (código ' + code + (msg ? ': ' + msg : '') + ').');
+    }
+    return json;
+  }
+  function recordsOf(json) {
+    if (!json) return [];
+    if (json.data && Array.isArray(json.data.records)) return json.data.records;
+    if (Array.isArray(json.records)) return json.records;
+    if (Array.isArray(json.data)) return json.data;
+    return [];
+  }
+  function keywordPayload(list, country) { return {keywordList: list, trackingTypeEnum: 'WAYBILL', countryId: String(country || '1')}; }
+  function problemPayload(w, country) { return {current: 1, size: 100, waybillId: w, countryId: String(country || '1')}; }
+
+  // ---------- fotos ----------
+  /** Links de foto em qualquer resposta: textos "https://…" (também separados por vírgula) e imagens "data:image/…". */
+  function findImageUrls(json) {
+    var out = [], seen = {};
+    var add = function (u) { u = String(u || '').trim(); if (u && !seen[u]) { seen[u] = 1; out.push(u); } };
+    (function walk(v, depth) {
+      if (depth > 8 || v === null || v === undefined) return;
+      if (typeof v === 'string') {
+        if (/^data:image\//i.test(v)) { add(v); return; }
+        v.split(/[,;\s]+/).forEach(function (p) { if (/^https?:\/\/\S+$/i.test(p)) add(p); });
+        return;
+      }
+      if (Array.isArray(v)) { v.forEach(function (x) { walk(x, depth + 1); }); return; }
+      if (typeof v === 'object') Object.keys(v).forEach(function (k) { walk(v[k], depth + 1); });
+    })(json, 0);
+    // Primeiro os que parecem arquivo de imagem.
+    var img = /\.(jpe?g|png|webp|gif|bmp)(\?|$)|^data:image\//i;
+    return out.filter(function (u) { return img.test(u); }).concat(out.filter(function (u) { return !img.test(u); }));
+  }
+  /** Registro do pacote problemático do mesmo horário (ou o mais próximo) com foto → link. '' = sem foto. */
+  function nearestImage(records, t) {
+    var at = function (s) { return Date.parse(String(s || '').trim().replace(' ', 'T')); };
+    var t0 = at(t), best = '', bestD = Infinity;
+    (records || []).forEach(function (x) {
+      var url = findImageUrls(x && x.images)[0];
+      if (!url) return;
+      var d = Math.abs(at(x.scanTime || x.dataCollectionTime) - t0), dist = isFinite(d) ? d : 1e15;
+      if (!best || dist < bestD) { best = url; bestD = dist; }
+    });
+    return best;
+  }
+  /** Tipo do arquivo pelos primeiros bytes (o link do JMS diz "octet-stream"). */
+  function sniffImage(b) {
+    if (!b || b.length < 4) return '';
+    if (b[0] === 0xFF && b[1] === 0xD8) return 'jpeg';
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return 'png';
+    if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'gif';
+    if (b.length > 11 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'webp';
+    return '';
+  }
+
+  // ---------- "Ensinar a foto": o pedido do "Ver imagem" vira um modelo ----------
+  var SAFE_HEADERS = ['routename', 'routernamelist', 'lang', 'langtype', 'timezone'];
+  function safeHeaders(h) {
+    var out = {};
+    Object.keys(h || {}).forEach(function (k) { if (SAFE_HEADERS.indexOf(k.toLowerCase()) >= 0 && !blank(h[k])) out[k.toLowerCase()] = String(h[k]); });
+    return out;
+  }
+  function splitUrl(u) {
+    var i = u.indexOf('?'), q = {};
+    if (i < 0) return {url: u, query: null};
+    u.slice(i + 1).split('&').forEach(function (p) {
+      if (!p) return;
+      var j = p.indexOf('='), k = decodeURIComponent((j < 0 ? p : p.slice(0, j)).replace(/\+/g, ' '));
+      q[k] = j < 0 ? '' : decodeURIComponent(p.slice(j + 1).replace(/\+/g, ' '));
+    });
+    return {url: u.slice(0, i), query: q};
+  }
+  function jsonBody(b) {
+    if (b === null || b === undefined || b === '') return null;
+    if (typeof b === 'object') return b;
+    try { var o = JSON.parse(b); return o && typeof o === 'object' ? o : null; } catch (e) { return null; }
+  }
+  /**
+   * Pedido copiado no DevTools (aba Rede → botão direito → Copiar → "Copiar como fetch" ou "Copiar como cURL (bash)"), ou o
+   * endereço numa linha e o JSON enviado embaixo. O AuthToken e o Cookie do texto são DESCARTADOS (o app usa o token salvo).
+   * → {url, method, body (objeto ou null), query (objeto ou null), headers (só Routename, Lang…)}
+   */
+  function parseCopiedRequest(text) {
+    var s = String(text || '').trim(), url = '', method = '', body = null, headers = {}, m;
+    if ((m = s.match(/fetch\(\s*("(?:[^"\\]|\\.)*")\s*,\s*(\{[\s\S]*\})\s*\)\s*;?\s*$/))) {
+      url = JSON.parse(m[1]);
+      var opt = {};
+      try { opt = JSON.parse(m[2]); } catch (e) { throw new Error('Não entendi o "Copiar como fetch". Copie de novo e cole o texto inteiro.'); }
+      headers = opt.headers || {};
+      method = String(opt.method || (opt.body ? 'POST' : 'GET')).toUpperCase();
+      body = jsonBody(opt.body);
+    } else if (/^curl\s/i.test(s)) {
+      var unq = function (x) { return x.replace(/^\$?'([\s\S]*)'$/, '$1').replace(/^"([\s\S]*)"$/, '$1').replace(/\\"/g, '"').replace(/\^(.)/g, '$1'); };
+      var parts = s.replace(/\\\r?\n/g, ' ').replace(/\^\r?\n/g, ' ').match(/\$?'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\S+/g) || [];
+      for (var i = 1; i < parts.length; i++) {
+        var p = parts[i];
+        if (p === '-H' || p === '--header') { var hv = unq(parts[++i] || ''), c = hv.indexOf(':'); if (c > 0) headers[hv.slice(0, c).trim()] = hv.slice(c + 1).trim(); }
+        else if (/^(--data|--data-raw|--data-binary|-d)$/.test(p)) { body = jsonBody(unq(parts[++i] || '')); if (!method) method = 'POST'; }
+        else if (p === '-X' || p === '--request') method = unq(parts[++i] || '').toUpperCase();
+        else if (/^['"]?https?:\/\//.test(p) && !url) url = unq(p);
+      }
+      if (!method) method = body ? 'POST' : 'GET';
+    } else if ((m = s.match(/(https?:\/\/\S+)/))) {
+      url = m[1].replace(/["',;]+$/, '');
+      var j = s.indexOf('{');
+      body = j >= 0 ? jsonBody(s.slice(j, s.lastIndexOf('}') + 1)) : null;
+      method = body ? 'POST' : 'GET';
+    }
+    if (!/^https:\/\/gw\.jtjms-br\.com\//.test(url)) throw new Error('Não achei o endereço do JMS (https://gw.jtjms-br.com/…) no texto colado.');
+    var su = splitUrl(url);
+    return {url: su.url, method: method === 'GET' ? 'GET' : 'POST', body: method === 'GET' ? null : body, query: su.query, headers: safeHeaders(headers)};
+  }
+  // Campos da linha do rastreamento que o "Ver imagem" pode usar; nos empates, vale o de mesmo nome da chave, depois esta ordem.
+  var LINE_FIELDS = ['waybillNo', 'billCode', 'scanTime', 'imgType', 'code', 'originalScanTypeCode', 'scanNetworkId', 'scanNetworkName', 'scanByCode',
+    'scanByName', 'uploadTime', 'remark1', 'remark2', 'remark3', 'remark4', 'staffCode', 'nextNetworkId', 'nextStopName', 'packageNumber', 'scanTypeName'];
+  function fieldFor(key, value, line) {
+    var v = String(value), cands = [];
+    Object.keys(line || {}).forEach(function (f) {
+      var x = line[f];
+      if (x !== null && x !== undefined && typeof x !== 'object' && String(x) === v && v !== '') cands.push(f);
+    });
+    if (!cands.length) return null;
+    var k = String(key).toLowerCase();
+    var same = cands.filter(function (f) { return f.toLowerCase() === k; })[0];
+    if (same) return same;
+    var near = cands.filter(function (f) { return f.toLowerCase().indexOf(k) >= 0 || k.indexOf(f.toLowerCase()) >= 0; })[0];
+    if (near) return near;
+    cands.sort(function (a, b) {
+      var ia = LINE_FIELDS.indexOf(a), ib = LINE_FIELDS.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    return cands[0];
+  }
+  function templateOf(obj, line) {
+    var out = {}, used = 0;
+    Object.keys(obj || {}).forEach(function (k) {
+      var v = obj[k];
+      if (v !== null && typeof v === 'object') { out[k] = {value: v}; return; }
+      var f = v === null || v === undefined ? null : fieldFor(k, v, line);
+      if (f) { out[k] = {from: f, num: typeof v === 'number'}; used++; } else out[k] = {value: v};
+    });
+    return {fields: out, used: used};
+  }
+  /** Valores do pedido que parecem remessa (para achar a linha clicada sem perguntar). */
+  function waybillsIn(req) {
+    var out = [];
+    [req.body, req.query].forEach(function (o) {
+      Object.keys(o || {}).forEach(function (k) {
+        var v = String(o[k] === null || o[k] === undefined ? '' : o[k]).trim().toUpperCase();
+        if (/^[A-Z0-9]{8,30}$/.test(v) && (v.match(/\d/g) || []).length >= 6 && out.indexOf(v) < 0) out.push(v);
+      });
+    });
+    return out;
+  }
+  /**
+   * Modelo do "Ver imagem": cada valor do pedido copiado que é igual a um campo da linha clicada vira "pegar esse campo da linha";
+   * o resto fica fixo. `details` = bipes da remessa da linha clicada. Devolve {modelo, linha, usados} — usados = quantos valores
+   * vieram da linha (0 = não deu para ligar o pedido à linha).
+   */
+  function learnTemplate(req, details) {
+    var best = null;
+    (details || []).forEach(function (line) {
+      var a = templateOf(req.body, line), b = templateOf(req.query, line), used = a.used + b.used;
+      // Linha com imagem ganha nos empates (o "Ver imagem" só aparece nelas).
+      var score = used * 10 + (isNum(line.imgType) && Number(line.imgType) > 0 ? 1 : 0);
+      if (!best || score > best.score) best = {score: score, line: line, body: a.fields, query: b.fields, used: used};
+    });
+    if (!best || !best.used) return {modelo: null, linha: null, usados: 0};
+    return {modelo: {v: 1, url: req.url, method: req.method, body: req.body ? best.body : null, query: req.query ? best.query : null, headers: req.headers || {}},
+      linha: best.line, usados: best.used};
+  }
+  function fill(fields, line) {
+    var out = {};
+    Object.keys(fields || {}).forEach(function (k) {
+      var f = fields[k];
+      if (f.from) {
+        var v = line ? line[f.from] : undefined;
+        out[k] = v === undefined || v === null ? '' : f.num && isNum(v) ? Number(v) : f.num ? v : String(v);
+      } else out[k] = f.value;
+    });
+    return out;
+  }
+  /** Pedido do "Ver imagem" para uma linha qualquer: {url, body (null = GET), headers}. */
+  function buildRequest(modelo, line) {
+    var url = modelo.url;
+    if (modelo.query) {
+      var q = fill(modelo.query, line);
+      url += '?' + Object.keys(q).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(q[k]); }).join('&');
+    }
+    return {url: url, body: modelo.method === 'GET' ? null : fill(modelo.body || {}, line), headers: modelo.headers || {}};
+  }
+
+  return {
+    KEYWORD_URL: KEYWORD_URL, PROBLEM_URL: PROBLEM_URL, SHIFTS: SHIFTS, SHIFT_HOURS: SHIFT_HOURS,
+    hourOf: hourOf, shiftOf: shiftOf, parseWaybills: parseWaybills, norm: norm, matcher: matcher, hit: hit, isProblem: isProblem,
+    summary: summary, parseJms: parseJms, recordsOf: recordsOf, keywordPayload: keywordPayload, problemPayload: problemPayload,
+    findImageUrls: findImageUrls, nearestImage: nearestImage, sniffImage: sniffImage,
+    parseCopiedRequest: parseCopiedRequest, waybillsIn: waybillsIn, learnTemplate: learnTemplate, buildRequest: buildRequest
+  };
+});
+</script>
+<script>
+/**
+ * J&T · PESQUISA NO RASTREAMENTO — a pesquisa em si, na página (o servidor só repassa ao JMS e baixa as fotos).
+ *
+ * `api` (o servidor, Apps Script ou Node.js):
+ *   api.jms(url, body, headers) → Promise<{status, text}>   (body null = GET; o servidor põe o AuthToken)
+ *   api.fotos(urls)             → Promise<[{ok, b64, error}]> (baixa as fotos; a página não pode, por causa do navegador)
+ *
+ * buscarBipes: as remessas vão ao Rastreamento do pacote (keywordList) várias por consulta, algumas consultas de cada vez.
+ *   - Recusa com várias remessas: o limite cai pela metade (aprendido) e o grupo volta em duas metades.
+ *   - Vazio maior que todas as consultas que já responderam: o grupo volta em duas metades (pode ser o limite); se a metade
+ *     responder, o limite era esse. Vazio do tamanho das que responderam (ou pequeno): as remessas não existem no JMS.
+ *   - Só as primeiras vieram: as outras voltam para a fila.
+ *   - Recusa na 1ª vez: testa uma vez os cabeçalhos de rota da tela (Routename) antes de concluir que é o tamanho.
+ * buscarFotos: para cada linha encontrada com "Ver imagem", o link da foto (pelo modelo ensinado ou, no bipe de pacote
+ *   problemático, pela "Lista registrada de pacote problemático"), depois a foto baixada e reduzida (miniatura).
+ */
+(function (root, factory) {
+  var api = factory(root.Rastreio || (typeof require === 'function' ? require('./rastreio.js') : null));
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.Pesquisa = api;
+})(typeof self !== 'undefined' ? self : this, function (R) {
+  'use strict';
+
+  var ROUTE_VARIANTS = [{routename: 'trackingExpress'}, {routename: 'waybillTracking'}];
+  function wait(ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); }
+
+  /** Uma consulta ao JMS pelo servidor, com 1 nova tentativa em falha passageira. Erros com `kind` (rastreio.js → parseJms). */
+  function chamada(api, estado) {
+    return function chamar(url, body, headers) {
+      var h = Object.assign({}, estado.headers || {}, headers || {});
+      var tentar = function (n) {
+        return Promise.resolve().then(function () { return api.jms(url, body, h); }).then(function (r) {
+          return R.parseJms(r && r.status, r && r.text);
+        }, function (e) {
+          var err = new Error('Falha ao falar com o servidor: ' + String(e && e.message || e).slice(0, 200));
+          err.kind = /AuthToken|token/i.test(String(e && e.message || '')) ? 'auth' : 'temp';
+          throw err;
+        }).catch(function (e) {
+          if (e.kind === 'temp' && n < 1) return wait(estado.espera === undefined ? 1500 : estado.espera).then(function () { return tentar(n + 1); });
+          throw e;
+        });
+      };
+      return tentar(0);
+    };
+  }
+
+  /**
+   * Bipes de cada remessa. o: {lote (limite atual), paralelo, minProbe, pais, headers, onLote(n, motivo), onHeaders(h),
+   * onProgresso(feitas, total), parar()}. → {map: remessa → bipes ([] = sem rastreamento; null = recusada), erro, lote, headers}
+   * Remessas fora do map: a pesquisa parou antes (parar()).
+   */
+  function buscarBipes(api, list, o) {
+    o = o || {};
+    var estado = {headers: o.headers || null, espera: o.espera}, chamar = chamada(api, estado);
+    var lote = Math.max(1, Math.floor(o.lote || 100)), paralelo = Math.max(1, o.paralelo || 4), minProbe = o.minProbe || 8;
+    var map = {}, fila = [], provado = 0, erro = '', testouRota = !!o.headers;
+    for (var i = 0; i < list.length; i += lote) fila.push({list: list.slice(i, i + lote)});
+    var metades = function (g, vazio) {
+      var h = Math.ceil(g.list.length / 2);
+      fila.push({list: g.list.slice(0, h), vazio: vazio}, {list: g.list.slice(h), vazio: vazio});
+    };
+    var aprender = function (n, motivo) {
+      n = Math.max(1, Math.floor(n));
+      if (n >= lote) return;
+      lote = n;
+      if (o.onLote) o.onLote(n, motivo);
+      fila.splice(0).forEach(function (g) { for (var j = 0; j < g.list.length; j += lote) fila.push({list: g.list.slice(j, j + lote), vazio: g.vazio}); });
+    };
+    var consultar = function (g) {
+      return chamar(R.KEYWORD_URL, R.keywordPayload(g.list, o.pais)).catch(function (e) {
+        if (e.kind === 'auth' || e.kind === 'refused') {
+          if (testouRota) throw e;
+          // Uma vez: os cabeçalhos de rota da tela. O que funcionar fica para as próximas consultas.
+          testouRota = true;
+          var v = 0;
+          var proxima = function () {
+            if (v >= ROUTE_VARIANTS.length) throw e;
+            var h = ROUTE_VARIANTS[v++];
+            return chamar(R.KEYWORD_URL, R.keywordPayload(g.list, o.pais), h).then(function (json) {
+              estado.headers = h;
+              if (o.onHeaders) o.onHeaders(h);
+              return json;
+            }, function (e2) { if (e2.kind === 'temp') throw e2; return proxima(); });
+          };
+          return proxima();
+        }
+        throw e;
+      });
+    };
+    var trata = function (g) {
+      return consultar(g).then(function (json) {
+        var got = {};
+        R.recordsOf(json).forEach(function (item) {
+          var kw = String(item && (item.keyword || item.waybillNo || item.billCode) || '').trim().toUpperCase();
+          if (kw) got[kw] = Array.isArray(item.details) ? item.details : [];
+        });
+        var n = g.list.length, comDados = g.list.filter(function (w) { return got[w] && got[w].length; }).length;
+        if (!comDados) {
+          if (n >= minProbe && n > provado) { metades(g, true); return; }
+          g.list.forEach(function (w) { map[w] = got[w] || []; });
+          return;
+        }
+        provado = Math.max(provado, n);
+        // A metade respondeu e o grupo inteiro tinha voltado vazio: o JMS aceita no máximo esse tanto por consulta.
+        if (g.vazio && n < lote) aprender(n, 'consulta com ' + (n * 2) + ' remessas voltou vazia e com ' + n + ' respondeu');
+        var volta = g.list.filter(function (w) { return got[w] === undefined; });
+        g.list.forEach(function (w) { if (got[w] !== undefined) map[w] = got[w]; });
+        if (volta.length) fila.push({list: volta});
+      }, function (e) {
+        if (e.kind === 'auth') throw e;
+        erro = e.message;
+        if (g.list.length > 1) { aprender(Math.ceil(g.list.length / 2), 'o JMS recusou ' + g.list.length + ' remessas numa consulta'); metades(g, false); }
+        else map[g.list[0]] = null;
+      });
+    };
+    var feitas = function () { return Object.keys(map).length; };
+    var rodada = function () {
+      if (!fila.length || (o.parar && o.parar())) return Promise.resolve();
+      var grupos = fila.splice(0, paralelo);
+      return Promise.all(grupos.map(trata)).then(function () {
+        if (o.onProgresso) o.onProgresso(feitas(), list.length);
+        return rodada();
+      });
+    };
+    return rodada().then(function () { return {map: map, erro: erro, lote: lote, headers: estado.headers}; });
+  }
+
+  /**
+   * Pesquisa completa: bipes + primeiro bipe de cada padrão. → {results: [{w, ok, err, p: [hit|null, hit|null]}], faltam, erro, lote}
+   * (results na ordem colada; `faltam` = remessas não pesquisadas porque a pesquisa foi parada).
+   */
+  function pesquisar(api, list, padroes, o) {
+    var match = (padroes || []).slice(0, 2).map(function (p) { return R.matcher(p); });
+    if (!list.length) return Promise.reject(new Error('Cole pelo menos uma remessa.'));
+    if (!match.some(Boolean)) return Promise.reject(new Error('Digite o texto padrão de pelo menos um bloco.'));
+    return buscarBipes(api, list, o).then(function (b) {
+      var results = [], faltam = [];
+      list.forEach(function (w) {
+        var d = b.map[w];
+        if (d === undefined) { faltam.push(w); return; }
+        var r = {w: w, ok: !!(d && d.length), p: match.map(function (m) { return m && d ? R.hit(d, m) : null; })};
+        if (d === null) r.err = true;
+        results.push(r);
+      });
+      return {results: results, faltam: faltam, erro: b.erro, lote: b.lote, headers: b.headers};
+    });
+  }
+
+  function b64ToBytes(b64) {
+    if (typeof atob === 'function') {
+      var s = atob(b64), out = new Uint8Array(s.length);
+      for (var i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+      return out;
+    }
+    return new Uint8Array(Buffer.from(b64, 'base64'));
+  }
+  function dataUrlBytes(u) { var i = u.indexOf(','); return b64ToBytes(u.slice(i + 1)); }
+
+  /**
+   * Fotos das linhas encontradas com "Ver imagem". o: {modelo (o "Ver imagem" ensinado ou null), pais, headers, paralelo,
+   * miniatura(bytes, tipo) → Promise<{bytes, w, h, mime, url?}|null>, onFoto(h), onProgresso(feitas, total), parar()}.
+   * Em cada hit: h.url (link da foto), h.foto ({bytes, w, h, mime}) ou h.fotoErro. Linhas iguais (mesma remessa, horário e
+   * código) dividem a mesma foto. → Promise<{total, comFoto, semLink, erros}>
+   */
+  function buscarFotos(api, results, o) {
+    o = o || {};
+    var estado = {headers: o.headers || null, espera: o.espera}, chamar = chamada(api, estado), paralelo = Math.max(1, o.paralelo || 4);
+    var grupos = {}, ordem = [];
+    (results || []).forEach(function (r) {
+      (r.p || []).forEach(function (h) {
+        if (!h || !h.img) return;
+        var k = r.w + '|' + h.t + '|' + h.code;
+        if (!grupos[k]) { grupos[k] = {w: r.w, hits: []}; ordem.push(k); }
+        grupos[k].hits.push(h);
+      });
+    });
+    var stats = {total: ordem.length, comFoto: 0, semLink: 0, erros: 0}, feitas = 0, problemas = {};
+    var registrosProblema = function (w) {
+      if (!problemas[w]) problemas[w] = chamar(R.PROBLEM_URL, R.problemPayload(w, o.pais)).then(R.recordsOf, function (e) { if (e.kind === 'auth') throw e; return []; });
+      return problemas[w];
+    };
+    var linkDe = function (g) {
+      var h = g.hits[0];
+      var pelo = o.modelo ? (function () {
+        var req = R.buildRequest(o.modelo, h.raw || {});
+        return chamar(req.url, req.body, req.headers).then(function (json) { return R.findImageUrls(json)[0] || ''; },
+          function (e) { if (e.kind === 'auth') throw e; return ''; });
+      })() : Promise.resolve('');
+      return pelo.then(function (url) {
+        if (url || !R.isProblem(h)) return url;
+        return registrosProblema(g.w).then(function (recs) { return R.nearestImage(recs, h.t); });
+      });
+    };
+    var trata = function (lista) {
+      return Promise.all(lista.map(function (k) { return linkDe(grupos[k]).then(function (url) { return {k: k, url: url}; }); })).then(function (links) {
+        var baixar = links.filter(function (x) { return x.url && !/^data:/i.test(x.url); });
+        var pedido = baixar.length ? Promise.resolve(api.fotos(baixar.map(function (x) { return x.url; }))).catch(function (e) {
+          return baixar.map(function () { return {ok: false, error: String(e && e.message || e)}; });
+        }) : Promise.resolve([]);
+        return pedido.then(function (fotos) {
+          var porUrl = {};
+          baixar.forEach(function (x, i) { porUrl[x.k] = fotos[i] || {ok: false, error: 'sem resposta'}; });
+          return Promise.all(links.map(function (x) {
+            var hits = grupos[x.k].hits;
+            hits.forEach(function (h) { h.url = /^data:/i.test(x.url) ? '' : x.url; });
+            if (!x.url) { stats.semLink++; return null; }
+            var bytes = null;
+            if (/^data:/i.test(x.url)) bytes = dataUrlBytes(x.url);
+            else if (porUrl[x.k].ok && porUrl[x.k].b64) bytes = b64ToBytes(porUrl[x.k].b64);
+            if (!bytes || !R.sniffImage(bytes)) {
+              stats.erros++;
+              hits.forEach(function (h) { h.fotoErro = porUrl[x.k] && porUrl[x.k].error || 'arquivo sem imagem'; });
+              return null;
+            }
+            var tipo = R.sniffImage(bytes);
+            return Promise.resolve(o.miniatura ? o.miniatura(bytes, tipo) : {bytes: bytes, w: 0, h: 0, mime: 'image/' + tipo}).then(function (m) {
+              if (!m) { stats.erros++; hits.forEach(function (h) { h.fotoErro = 'não abriu a imagem'; }); return; }
+              stats.comFoto++;
+              hits.forEach(function (h) { h.foto = m; if (o.onFoto) o.onFoto(h); });
+            });
+          }));
+        });
+      }).then(function () {
+        feitas += lista.length;
+        if (o.onProgresso) o.onProgresso(feitas, ordem.length);
+      });
+    };
+    var i = 0, LOTE = 8;
+    var rodada = function () {
+      if (i >= ordem.length || (o.parar && o.parar())) return Promise.resolve(stats);
+      var vez = [];
+      for (var p = 0; p < paralelo && i < ordem.length; p++) { vez.push(ordem.slice(i, i + LOTE)); i += LOTE; }
+      return Promise.all(vez.map(trata)).then(rodada);
+    };
+    return rodada();
+  }
+
+  /**
+   * "Ensinar a foto": o pedido copiado do "Ver imagem" + (opcional) a remessa da linha clicada. Acha a linha, monta o modelo e
+   * testa nessa linha. → Promise<{modelo, linha, url, foto (b64), usados}>
+   */
+  function ensinarFoto(api, texto, remessa, o) {
+    o = o || {};
+    var chamar = chamada(api, {headers: o.headers || null, espera: o.espera});
+    var req = R.parseCopiedRequest(texto);
+    var ws = remessa ? [String(remessa).trim().toUpperCase()] : R.waybillsIn(req);
+    if (!ws.length) return Promise.reject(new Error('Não achei a remessa no pedido copiado. Digite a remessa da linha em que você clicou.'));
+    return chamar(R.KEYWORD_URL, R.keywordPayload(ws.slice(0, 10), o.pais)).then(function (json) {
+      var details = [];
+      R.recordsOf(json).forEach(function (it) { if (it && Array.isArray(it.details)) details = details.concat(it.details); });
+      if (!details.length) throw new Error('O JMS não tem rastreamento para ' + ws.slice(0, 3).join(', ') + '. Confira a remessa da linha clicada.');
+      var l = R.learnTemplate(req, details);
+      if (!l.modelo) throw new Error('O pedido colado não tem nenhum dado da linha (remessa, horário…). Copie o pedido que aparece ao clicar em "Ver imagem".');
+      var teste = R.buildRequest(l.modelo, l.linha);
+      return chamar(teste.url, teste.body, teste.headers).then(function (resp) {
+        var url = R.findImageUrls(resp)[0] || '';
+        if (!url) throw new Error('O pedido funcionou, mas a resposta não tem link de foto. Confira se copiou o pedido do "Ver imagem".');
+        if (/^data:/i.test(url)) return {modelo: l.modelo, linha: l.linha, url: '', foto: url.slice(url.indexOf(',') + 1), usados: l.usados};
+        return Promise.resolve(api.fotos([url])).then(function (f) {
+          if (!f || !f[0] || !f[0].ok) throw new Error('Achei o link da foto, mas não consegui baixar: ' + (f && f[0] && f[0].error || 'sem resposta'));
+          return {modelo: l.modelo, linha: l.linha, url: url, foto: f[0].b64, usados: l.usados};
+        });
+      });
+    });
+  }
+
+  return {buscarBipes: buscarBipes, pesquisar: pesquisar, buscarFotos: buscarFotos, ensinarFoto: ensinarFoto, b64ToBytes: b64ToBytes};
+});
+</script>
+<script>
+/**
+ * J&T · PESQUISA NO RASTREAMENTO — planilha .xlsx feita na página, com gráficos do próprio Excel e as FOTOS das linhas dentro
+ * das células. Sem bibliotecas: o arquivo é um ZIP com os XML do Excel (planilhas, estilos, desenhos, gráficos e imagens).
+ * Comprime com CompressionStream quando o navegador tem; senão grava sem compressão.
+ *
+ * Planilha.build(livro) → Promise<Uint8Array>. livro = {sheets: [{name, cols: [larguras], rows: [[célula…]], heights: {linha: pt},
+ *   merges: ['A1:H1'], freeze: 'A4', filter: 'A3:J3', charts: [{type: 'col'|'bar'|'doughnut', title, sheet, cat: 'A7:A8',
+ *   val: 'B7:B8', name, colors: ['E60012'…], at: [col, linha, col2, linha2]}],
+ *   images: [{row, col, bytes (Uint8Array), w, h, ext: 'jpeg'|'png', name}]}]}. Célula: texto, número ou {v, s, link}.
+ *   A foto fica DENTRO da célula (linha `row`, coluna `col`, contando de 1) e anda junto com ela ao ordenar e filtrar.
+ */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.Planilha = api;
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+  var NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  var NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  var NS_PR = 'http://schemas.openxmlformats.org/package/2006/relationships';
+  var NS_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+  var NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+  // Em pedaços: "<" + "?" juntos seriam lidos como marca de modelo pelo HtmlService do Apps Script.
+  var HEAD = '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"?' + '>\n';
+
+  // Estilos (índice em cellXfs). Cores da J&T: vermelho E60012, cinzas do painel.
+  var S = {title: 1, subtitle: 2, header: 3, text: 4, int: 5, pct: 6, label: 7, date: 8, link: 9, noimg: 10, section: 11, hero: 12,
+    yes: 13, center: 14, bold: 15, intBold: 16, pctBold: 17, note: 18};
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function colName(n) { var s = ''; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+  function ref(c, r) { return colName(c) + r; }
+  /** "B7:B9" → {c1, r1, c2, r2} */
+  function parseRange(a) {
+    var m = String(a).match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
+    var cn = function (s) { var n = 0; for (var i = 0; i < s.length; i++) n = n * 26 + s.charCodeAt(i) - 64; return n; };
+    return {c1: cn(m[1]), r1: Number(m[2]), c2: cn(m[3] || m[1]), r2: Number(m[4] || m[2])};
+  }
+  function absRange(sheet, a) {
+    var p = parseRange(a);
+    return "'" + sheet.replace(/'/g, "''") + "'!$" + colName(p.c1) + '$' + p.r1 + (p.c1 === p.c2 && p.r1 === p.r2 ? '' : ':$' + colName(p.c2) + '$' + p.r2);
+  }
+  /** "2026-09-09 15:36:12" → número de série do Excel (data e hora como na tela do JMS, sem fuso). */
+  function serial(t) {
+    var m = String(t || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) return null;
+    return (Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) - Date.UTC(1899, 11, 30)) / 86400000;
+  }
+
+  // ------------------------------------------------------------------ partes do Excel
+  function stylesXml() {
+    var fonts = [
+      '<font><sz val="10"/><color rgb="FF1F2430"/><name val="Arial"/></font>',
+      '<font><b/><sz val="16"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>',
+      '<font><i/><sz val="10"/><color rgb="FF6B7280"/><name val="Arial"/></font>',
+      '<font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>',
+      '<font><b/><sz val="12"/><color rgb="FFE60012"/><name val="Arial"/></font>',
+      '<font><b/><sz val="10"/><color rgb="FF1F2430"/><name val="Arial"/></font>',
+      '<font><u/><sz val="10"/><color rgb="FF1155CC"/><name val="Arial"/></font>',
+      '<font><b/><sz val="10"/><color rgb="FFB42318"/><name val="Arial"/></font>',
+      '<font><b/><sz val="18"/><color rgb="FFE60012"/><name val="Arial"/></font>'
+    ];
+    var fill = function (rgb) { return '<fill><patternFill patternType="solid"><fgColor rgb="FF' + rgb + '"/><bgColor indexed="64"/></patternFill></fill>'; };
+    var fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>', fill('E60012'), fill('FFF1F2'), fill('F3F4F6')];
+    var side = '<color rgb="FFD1D5DB"/>';
+    var borders = ['<border><left/><right/><top/><bottom/><diagonal/></border>',
+      '<border><left style="thin">' + side + '</left><right style="thin">' + side + '</right><top style="thin">' + side + '</top><bottom style="thin">' + side + '</bottom><diagonal/></border>'];
+    // [fonte, fundo, borda, formato, alinhamento]
+    var xf = [
+      [0, 0, 0, 0, ''], [1, 2, 0, 0, '<alignment vertical="center"/>'], [2, 0, 0, 0, '<alignment vertical="center"/>'],
+      [3, 2, 1, 0, '<alignment horizontal="center" vertical="center" wrapText="1"/>'], [0, 0, 1, 0, '<alignment vertical="center"/>'],
+      [0, 0, 1, 3, '<alignment vertical="center"/>'], [0, 0, 1, 165, '<alignment vertical="center"/>'], [5, 4, 1, 0, '<alignment vertical="center"/>'],
+      [0, 0, 1, 164, '<alignment horizontal="center" vertical="center"/>'], [6, 0, 1, 0, '<alignment vertical="center"/>'],
+      [7, 0, 1, 0, '<alignment vertical="center"/>'], [4, 0, 0, 0, '<alignment vertical="center"/>'], [8, 0, 0, 0, '<alignment vertical="center"/>'],
+      [5, 3, 1, 0, '<alignment vertical="center"/>'], [0, 0, 1, 0, '<alignment horizontal="center" vertical="center"/>'],
+      [5, 0, 0, 0, '<alignment vertical="center"/>'], [5, 4, 1, 3, '<alignment vertical="center"/>'], [5, 4, 1, 165, '<alignment vertical="center"/>'],
+      [2, 0, 0, 0, '<alignment vertical="center" wrapText="1"/>']
+    ];
+    return HEAD + '<styleSheet xmlns="' + NS_MAIN + '">' +
+      '<numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy hh:mm:ss"/><numFmt numFmtId="165" formatCode="0.0%"/></numFmts>' +
+      '<fonts count="' + fonts.length + '">' + fonts.join('') + '</fonts>' +
+      '<fills count="' + fills.length + '">' + fills.join('') + '</fills>' +
+      '<borders count="' + borders.length + '">' + borders.join('') + '</borders>' +
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      '<cellXfs count="' + xf.length + '">' + xf.map(function (x) {
+        return '<xf numFmtId="' + x[3] + '" fontId="' + x[0] + '" fillId="' + x[1] + '" borderId="' + x[2] + '" xfId="0"' +
+          (x[0] ? ' applyFont="1"' : '') + (x[1] ? ' applyFill="1"' : '') + (x[2] ? ' applyBorder="1"' : '') + (x[3] ? ' applyNumberFormat="1"' : '') +
+          (x[4] ? ' applyAlignment="1">' + x[4] + '</xf>' : '/>');
+      }).join('') + '</cellXfs>' +
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  }
+
+  function cellXml(v, c, r, links) {
+    var o = v !== null && typeof v === 'object' ? v : {v: v};
+    var val = o.v, s = o.s ? ' s="' + o.s + '"' : '', at = ref(c, r);
+    if (o.link) links.push({ref: at, url: o.link});
+    if (val === null || val === undefined || val === '') return o.s ? '<c r="' + at + '"' + s + '/>' : '';
+    if (typeof val === 'number' && isFinite(val)) return '<c r="' + at + '"' + s + '><v>' + val + '</v></c>';
+    return '<c r="' + at + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(val) + '</t></is></c>';
+  }
+
+  function sheetXml(sh, drawingRid, linkRids) {
+    var links = [], out = [];
+    (sh.rows || []).forEach(function (row, i) {
+      var r = i + 1, cells = '';
+      (row || []).forEach(function (v, j) { cells += cellXml(v, j + 1, r, links); });
+      var ht = sh.heights && sh.heights[r];
+      if (cells || ht) out.push('<row r="' + r + '"' + (ht ? ' ht="' + ht + '" customHeight="1"' : '') + '>' + cells + '</row>');
+    });
+    var view = '<sheetViews><sheetView workbookViewId="0"' + (sh.tabSelected ? ' tabSelected="1"' : '') + ' showGridLines="0">';
+    if (sh.freeze) {
+      var f = parseRange(sh.freeze), xs = f.c1 - 1, ys = f.r1 - 1;
+      view += '<pane' + (xs ? ' xSplit="' + xs + '"' : '') + (ys ? ' ySplit="' + ys + '"' : '') + ' topLeftCell="' + sh.freeze + '" activePane="' +
+        (xs && ys ? 'bottomRight' : ys ? 'bottomLeft' : 'topRight') + '" state="frozen"/>';
+    }
+    view += '</sheetView></sheetViews>';
+    var cols = (sh.cols || []).length ? '<cols>' + sh.cols.map(function (w, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>'; }).join('') + '</cols>' : '';
+    var filter = sh.filter ? '<autoFilter ref="' + sh.filter + '"/>' : '';
+    var merges = (sh.merges || []).length ? '<mergeCells count="' + sh.merges.length + '">' + sh.merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join('') + '</mergeCells>' : '';
+    links.forEach(function (l, i) { l.rid = 'rIdL' + (i + 1); });
+    linkRids.push.apply(linkRids, links);
+    var hyper = links.length ? '<hyperlinks>' + links.map(function (l) { return '<hyperlink ref="' + l.ref + '" r:id="' + l.rid + '"/>'; }).join('') + '</hyperlinks>' : '';
+    return HEAD + '<worksheet xmlns="' + NS_MAIN + '" xmlns:r="' + NS_R + '"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>' + view + '<sheetFormatPr defaultRowHeight="15"/>' + cols +
+      '<sheetData>' + out.join('') + '</sheetData>' + filter + merges + hyper +
+      '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>' +
+      '<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>' + (drawingRid ? '<drawing r:id="' + drawingRid + '"/>' : '') + '</worksheet>';
+  }
+
+  // ------------------------------------------------------------------ gráficos
+  function rich(text, size) {
+    return '<c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="' + size + '" b="1"><a:solidFill><a:srgbClr val="1F2430"/></a:solidFill></a:defRPr></a:pPr>' +
+      '<a:r><a:rPr lang="pt-BR" sz="' + size + '" b="1"><a:solidFill><a:srgbClr val="1F2430"/></a:solidFill></a:rPr><a:t>' + esc(text) + '</a:t></a:r></a:p></c:rich></c:tx>';
+  }
+  function txPr(size, color, bold) {
+    return '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="' + size + '"' + (bold ? ' b="1"' : '') + '><a:solidFill><a:srgbClr val="' + (color || '434A5B') + '"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="pt-BR"/></a:p></c:txPr>';
+  }
+  function solid(rgb) { return '<c:spPr><a:solidFill><a:srgbClr val="' + rgb + '"/></a:solidFill><a:ln w="19050"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr>'; }
+  function strCache(list) {
+    return '<c:strCache><c:ptCount val="' + list.length + '"/>' + list.map(function (v, i) { return '<c:pt idx="' + i + '"><c:v>' + esc(v) + '</c:v></c:pt>'; }).join('') + '</c:strCache>';
+  }
+  function numCache(list) {
+    return '<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="' + list.length + '"/>' +
+      list.map(function (v, i) { return '<c:pt idx="' + i + '"><c:v>' + (Number(v) || 0) + '</c:v></c:pt>'; }).join('') + '</c:numCache>';
+  }
+  /** Valores das células do intervalo (para o cache do gráfico: o Excel mostra o gráfico sem recalcular). */
+  function rangeValues(sh, a) {
+    var p = parseRange(a), out = [];
+    for (var r = p.r1; r <= p.r2; r++) for (var c = p.c1; c <= p.c2; c++) {
+      var v = ((sh.rows[r - 1] || [])[c - 1]);
+      out.push(v !== null && typeof v === 'object' ? v.v : v);
+    }
+    return out;
+  }
+  function dLbls(pos, pct) {
+    // Rosca: número branco em cima da fatia; barras: número escuro na ponta.
+    return '<c:dLbls><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>' + (pct ? txPr(1000, 'FFFFFF', true) : txPr(900, '1F2430')) + (pos ? '<c:dLblPos val="' + pos + '"/>' : '') +
+      '<c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="' + (pct ? 1 : 0) + '"/>' +
+      '<c:showBubbleSize val="0"/>' + (pct ? '<c:separator>' + esc(' · ') + '</c:separator>' : '') + '</c:dLbls>';
+  }
+  function chartXml(ch, sh) {
+    var cats = rangeValues(sh, ch.cat).map(function (v) { return v === null || v === undefined ? '' : String(v); });
+    var vals = rangeValues(sh, ch.val);
+    var colors = ch.colors || ['E60012'];
+    var points = '';
+    if (ch.type === 'doughnut' || colors.length > 1) {
+      cats.forEach(function (_, i) {
+        points += '<c:dPt><c:idx val="' + i + '"/>' + (ch.type === 'doughnut' ? '<c:bubble3D val="0"/>' : '<c:invertIfNegative val="0"/><c:bubble3D val="0"/>') +
+          solid(colors[i % colors.length]) + '</c:dPt>';
+      });
+    }
+    var ser = '<c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:v>' + esc(ch.name || ch.title) + '</c:v></c:tx>' + solid(colors[0]) +
+      (ch.type === 'doughnut' ? '' : '<c:invertIfNegative val="0"/>') + points +
+      dLbls(ch.type === 'doughnut' ? '' : 'outEnd', ch.type === 'doughnut') +
+      '<c:cat><c:strRef><c:f>' + esc(absRange(ch.sheet, ch.cat)) + '</c:f>' + strCache(cats) + '</c:strRef></c:cat>' +
+      '<c:val><c:numRef><c:f>' + esc(absRange(ch.sheet, ch.val)) + '</c:f>' + numCache(vals) + '</c:numRef></c:val></c:ser>';
+    var plot, legend = '';
+    if (ch.type === 'doughnut') {
+      plot = '<c:doughnutChart><c:varyColors val="1"/>' + ser + '<c:firstSliceAng val="0"/><c:holeSize val="55"/></c:doughnutChart>';
+      legend = '<c:legend><c:legendPos val="b"/><c:overlay val="0"/>' + txPr(900) + '</c:legend>';
+    } else {
+      var bar = ch.type === 'bar', line = '<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D1D5DB"/></a:solidFill></a:ln></c:spPr>';
+      plot = '<c:barChart><c:barDir val="' + (bar ? 'bar' : 'col') + '"/><c:grouping val="clustered"/><c:varyColors val="0"/>' + ser +
+        '<c:gapWidth val="' + (ch.gap || 60) + '"/><c:axId val="5001"/><c:axId val="5002"/></c:barChart>' +
+        '<c:catAx><c:axId val="5001"/><c:scaling><c:orientation val="' + (bar ? 'maxMin' : 'minMax') + '"/></c:scaling><c:delete val="0"/>' +
+        '<c:axPos val="' + (bar ? 'l' : 'b') + '"/><c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/>' +
+        '<c:tickLblPos val="nextTo"/>' + line + txPr(900) + '<c:crossAx val="5002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/>' +
+        '<c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>' +
+        '<c:valAx><c:axId val="5002"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="' + (bar ? 'b' : 'l') + '"/>' +
+        '<c:majorGridlines><c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="ECECEF"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>' +
+        '<c:numFmt formatCode="#,##0" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>' +
+        '<c:spPr><a:ln><a:noFill/></a:ln></c:spPr>' + txPr(900, '6B7280') + '<c:crossAx val="5001"/><c:crosses val="' + (bar ? 'max' : 'autoZero') + '"/>' +
+        '<c:crossBetween val="between"/></c:valAx>';
+    }
+    return HEAD + '<c:chartSpace xmlns:c="' + NS_C + '" xmlns:a="' + NS_A + '" xmlns:r="' + NS_R + '"><c:roundedCorners val="0"/>' +
+      '<c:chart><c:title>' + rich(ch.title, 1200) + '<c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>' + plot + '</c:plotArea>' +
+      legend + '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>' +
+      '<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="ECECEF"/></a:solidFill></a:ln></c:spPr>' +
+      txPr(1000) + '</c:chartSpace>';
+  }
+  var EMU = 9525; // 1 pixel
+  /** Tamanho da foto dentro da caixa (pixels), sem deformar. Sem medida (testes): 4:3. */
+  function fitBox(w, h, bw, bh) {
+    w = Number(w) || 4; h = Number(h) || 3;
+    var s = Math.min(bw / w, bh / h);
+    return {w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s))};
+  }
+  function picXml(p, id) {
+    var pt = function (c, r, dx, dy) {
+      return '<xdr:col>' + c + '</xdr:col><xdr:colOff>' + dx * EMU + '</xdr:colOff><xdr:row>' + r + '</xdr:row><xdr:rowOff>' + dy * EMU + '</xdr:rowOff>';
+    };
+    var c = p.col - 1, r = p.row - 1, pad = 5;
+    return '<xdr:twoCellAnchor editAs="twoCell"><xdr:from>' + pt(c, r, pad, pad) + '</xdr:from><xdr:to>' + pt(c, r, pad + p.w, pad + p.h) + '</xdr:to>' +
+      '<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="' + id + '" name="' + esc(p.name || 'Foto ' + id) + '"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
+      '<xdr:blipFill><a:blip xmlns:r="' + NS_R + '" r:embed="' + p.rid + '"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>' +
+      '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + p.w * EMU + '" cy="' + p.h * EMU + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>' +
+      '</xdr:pic><xdr:clientData/></xdr:twoCellAnchor>';
+  }
+  function drawingXml(charts, firstId, pics) {
+    return HEAD + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="' + NS_A + '">' +
+      (pics || []).map(function (p, i) { return picXml(p, firstId + charts.length + i); }).join('') +
+      charts.map(function (ch, i) {
+        var a = ch.at, pt = function (c, r) { return '<xdr:col>' + c + '</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>' + r + '</xdr:row><xdr:rowOff>0</xdr:rowOff>'; };
+        return '<xdr:twoCellAnchor editAs="oneCell"><xdr:from>' + pt(a[0], a[1]) + '</xdr:from><xdr:to>' + pt(a[2], a[3]) + '</xdr:to>' +
+          '<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="' + (firstId + i) + '" name="' + esc('Gráfico ' + (firstId + i)) + '"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>' +
+          '<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="' + NS_C + '">' +
+          '<c:chart xmlns:c="' + NS_C + '" xmlns:r="' + NS_R + '" r:id="rId' + (i + 1) + '"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>';
+      }).join('') + '</xdr:wsDr>';
+  }
+  function rels(list) {
+    return HEAD + '<Relationships xmlns="' + NS_PR + '">' + list.map(function (r) {
+      return '<Relationship Id="' + r.id + '" Type="' + r.type + '" Target="' + esc(r.target) + '"' + (r.external ? ' TargetMode="External"' : '') + '/>';
+    }).join('') + '</Relationships>';
+  }
+  var REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
+
+  /** Arquivos do .xlsx: [{name, text}] */
+  function parts(book) {
+    var files = [], sheets = book.sheets, ct = [], chartN = 0, drawN = 0, names = [], media = [], exts = {};
+    sheets.forEach(function (sh, i) {
+      var n = i + 1, srels = [], drawingRid = null, links = [];
+      if ((sh.charts || []).length || (sh.images || []).length) {
+        drawN++;
+        drawingRid = 'rIdD1';
+        srels.push({id: drawingRid, type: REL + 'drawing', target: '../drawings/drawing' + drawN + '.xml'});
+        var drels = [], pics = [];
+        // A mesma foto (bloco 1 e bloco 2 na mesma linha do JMS) entra uma vez só no arquivo.
+        (sh.images || []).forEach(function (im, j) {
+          var k = media.indexOf(im.bytes), ext = im.ext === 'png' ? 'png' : 'jpeg';
+          if (k < 0) { media.push(im.bytes); k = media.length - 1; files.push({name: 'xl/media/image' + (k + 1) + '.' + ext, bytes: im.bytes}); exts[ext] = 1; }
+          var rid = 'rIdP' + (j + 1);
+          drels.push({id: rid, type: REL + 'image', target: '../media/image' + (k + 1) + '.' + ext});
+          pics.push({row: im.row, col: im.col, w: im.w, h: im.h, rid: rid, name: im.name});
+        });
+        (sh.charts || []).forEach(function (ch, j) {
+          chartN++;
+          files.push({name: 'xl/charts/chart' + chartN + '.xml', text: chartXml(Object.assign({sheet: sh.name}, ch), sh)});
+          ct.push('<Override PartName="/xl/charts/chart' + chartN + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>');
+          drels.push({id: 'rId' + (j + 1), type: REL + 'chart', target: '../charts/chart' + chartN + '.xml'});
+        });
+        files.push({name: 'xl/drawings/drawing' + drawN + '.xml', text: drawingXml(sh.charts || [], 2, pics)});
+        files.push({name: 'xl/drawings/_rels/drawing' + drawN + '.xml.rels', text: rels(drels)});
+        ct.push('<Override PartName="/xl/drawings/drawing' + drawN + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>');
+      }
+      files.push({name: 'xl/worksheets/sheet' + n + '.xml', text: sheetXml(sh, drawingRid, links)});
+      links.forEach(function (l) { srels.push({id: l.rid, type: REL + 'hyperlink', target: l.url, external: true}); });
+      if (srels.length) files.push({name: 'xl/worksheets/_rels/sheet' + n + '.xml.rels', text: rels(srels)});
+      ct.push('<Override PartName="/xl/worksheets/sheet' + n + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+      if (sh.filter) {
+        var f = parseRange(sh.filter);
+        names.push('<definedName name="_xlnm._FilterDatabase" localSheetId="' + i + '" hidden="1">' +
+          esc(absRange(sh.name, colName(f.c1) + f.r1 + ':' + colName(f.c2) + Math.max(f.r1, (sh.rows || []).length))) + '</definedName>');
+      }
+    });
+    var now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    files.unshift(
+      {name: '[Content_Types].xml', text: HEAD + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+        Object.keys(exts).map(function (e) { return '<Default Extension="' + e + '" ContentType="image/' + e + '"/>'; }).join('') +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+        '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
+        '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>' + ct.join('') + '</Types>'},
+      {name: '_rels/.rels', text: rels([{id: 'rId1', type: REL + 'officeDocument', target: 'xl/workbook.xml'},
+        {id: 'rId2', type: 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties', target: 'docProps/core.xml'},
+        {id: 'rId3', type: REL + 'extended-properties', target: 'docProps/app.xml'}])},
+      {name: 'docProps/core.xml', text: HEAD + '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
+        '<dc:title>' + esc(book.title || 'J&T Express') + '</dc:title><dc:creator>J&amp;T DashMaster</dc:creator>' +
+        '<dcterms:created xsi:type="dcterms:W3CDTF">' + now + '</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">' + now + '</dcterms:modified></cp:coreProperties>'},
+      {name: 'docProps/app.xml', text: HEAD + '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>J&amp;T DashMaster</Application></Properties>'},
+      {name: 'xl/workbook.xml', text: HEAD + '<workbook xmlns="' + NS_MAIN + '" xmlns:r="' + NS_R + '"><bookViews><workbookView activeTab="0"/></bookViews><sheets>' +
+        sheets.map(function (sh, i) { return '<sheet name="' + esc(sh.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') + '</sheets>' +
+        (names.length ? '<definedNames>' + names.join('') + '</definedNames>' : '') + '</workbook>'},
+      {name: 'xl/_rels/workbook.xml.rels', text: rels(sheets.map(function (sh, i) { return {id: 'rId' + (i + 1), type: REL + 'worksheet', target: 'worksheets/sheet' + (i + 1) + '.xml'}; })
+        .concat([{id: 'rId' + (sheets.length + 1), type: REL + 'styles', target: 'styles.xml'}]))},
+      {name: 'xl/styles.xml', text: stylesXml()}
+    );
+    return files;
+  }
+
+  // ------------------------------------------------------------------ ZIP
+  var CRC = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })();
+  function crc32(b) { var c = 0xFFFFFFFF; for (var i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function deflate(bytes) {
+    if (typeof CompressionStream === 'undefined' || typeof Response === 'undefined') return Promise.resolve(null);
+    try {
+      var cs = new CompressionStream('deflate-raw');
+      var out = new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer();
+      return out.then(function (b) { return new Uint8Array(b); }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  /** files: [{name, bytes, comp (opcional: dados já comprimidos)}] → Uint8Array */
+  function zip(files) {
+    var enc = new TextEncoder(), chunks = [], central = [], offset = 0;
+    var u16 = function (v) { return [v & 0xFF, (v >>> 8) & 0xFF]; };
+    var u32 = function (v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; };
+    files.forEach(function (f) {
+      var name = enc.encode(f.name), data = f.comp || f.bytes, method = f.comp ? 8 : 0, crc = crc32(f.bytes);
+      var head = [].concat([0x50, 0x4B, 0x03, 0x04], u16(20), u16(0x0800), u16(method), u16(0), u16(0x21), u32(crc), u32(data.length), u32(f.bytes.length), u16(name.length), u16(0));
+      chunks.push(new Uint8Array(head), name, data);
+      central.push(new Uint8Array([].concat([0x50, 0x4B, 0x01, 0x02], u16(20), u16(20), u16(0x0800), u16(method), u16(0), u16(0x21), u32(crc), u32(data.length),
+        u32(f.bytes.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+      offset += head.length + name.length + data.length;
+    });
+    var cdSize = central.reduce(function (s, c) { return s + c.length; }, 0);
+    var end = new Uint8Array([].concat([0x50, 0x4B, 0x05, 0x06], u16(0), u16(0), u16(files.length), u16(files.length), u32(cdSize), u32(offset), u16(0)));
+    var all = chunks.concat(central, [end]), size = all.reduce(function (s, c) { return s + c.length; }, 0), out = new Uint8Array(size), at = 0;
+    all.forEach(function (c) { out.set(c, at); at += c.length; });
+    return out;
+  }
+  function build(book) {
+    var enc = new TextEncoder();
+    var files = parts(book).map(function (f) { return {name: f.name, bytes: f.bytes || enc.encode(f.text), text: !f.bytes}; });
+    return Promise.all(files.map(function (f) { return f.text && f.bytes.length > 512 ? deflate(f.bytes) : Promise.resolve(null); })).then(function (comp) {
+      files.forEach(function (f, i) { if (comp[i] && comp[i].length < f.bytes.length) f.comp = comp[i]; });
+      return zip(files);
+    });
+  }
+
+  // ------------------------------------------------------------------ planilha da Pesquisa no Rastreamento
+  var SHIFT_HOURS = {T1: '06:00 – 13:59', T2: '14:00 – 21:59', T3: '22:00 – 05:59'};
+  var COLORS = {yes: 'E60012', no: '7B818C', T1: 'E60012', T2: '2A78D6', T3: '4A3AA7'};
+  function two(pt, zh) { return zh ? pt + '\n' + zh : pt; }
+  function pct(n, d) { return d ? n / d : 0; }
+  // Foto dentro da célula "Imagem": caixa de 160 × 116 pixels numa coluna de largura 27 e linha de 96 pontos (128 pixels).
+  var FOTO = {col: 9, box: [160, 116], height: 96};
+  function imageCell(h) {
+    if (h.foto) return {v: ' ', s: S.text}; // um espaço: o texto da descrição não "vaza" por baixo da foto
+    if (!h.img) return {v: 'NÃO TEM IMAGEM!', s: S.noimg};
+    if (h.url) return {v: 'A foto não baixou (abra o link)', s: S.text};
+    return {v: 'Tem imagem no JMS (ensine a foto no app)', s: S.text};
+  }
+  function stamp(d) {
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  /**
+   * Livro da pesquisa: Resumo (blocos com tabelas e gráficos) + uma aba "Tem" e uma "Não tem" por bloco.
+   * data = {center, patterns: [p1, p2], results: [{w, ok, err, p: [hit|null, hit|null]}], summaries: [Rastreio.summary…], at: Date}
+   */
+  function rastreioBook(data) {
+    var blocks = [], at = data.at || new Date(), total = (data.results || []).length;
+    var title = 'J&T EXPRESS · Pesquisa no Rastreamento do pacote', sub = (data.center ? 'Base ' + data.center + ' · ' : '') + 'gerado em ' + stamp(at) + ' · ' +
+      total.toLocaleString('pt-BR') + ' remessa(s) pesquisada(s) · sempre o PRIMEIRO bipe com o padrão';
+    var resumo = {name: 'Resumo', tabSelected: true, cols: [34, 16, 15, 4, 4, 12, 12, 12, 12, 12, 12, 12, 12], rows: [[{v: title, s: S.title}], [{v: sub, s: S.subtitle}]],
+      heights: {1: 30}, merges: ['A1:M1', 'A2:M2'], charts: []};
+    var R = resumo.rows, row = function (cells) { R.push(cells || []); return R.length; };
+    var sheets = [resumo];
+    (data.patterns || []).forEach(function (pat, k) {
+      if (!pat) return;
+      var s = data.summaries[k], name = k === 0 ? 'Bloco 1' : 'Bloco 2';
+      blocks.push(k);
+      row();
+      var top = row([{v: name + (k === 0 ? ' · Tem ou não tem o padrão' : ' · Turno que mais ocorreu'), s: S.section}]);
+      var pr = row([{v: 'Padrão pesquisado: ' + pat, s: S.note}]);
+      resumo.merges.push('A' + pr + ':D' + pr);
+      resumo.heights[pr] = 30;
+      var h = row([{v: two('Situação', '状态'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}, {v: '%', s: S.header}]);
+      resumo.heights[h] = 28;
+      var y = row([{v: 'Tem o padrão', s: S.yes}, {v: s.yes, s: S.int}, {v: pct(s.yes, s.total), s: S.pct}]);
+      row([{v: 'Não tem o padrão', s: S.text}, {v: s.no, s: S.int}, {v: pct(s.no, s.total), s: S.pct}]);
+      row([{v: 'Total pesquisado', s: S.label}, {v: s.total, s: S.intBold}, {v: s.total ? 1 : 0, s: S.pctBold}]);
+      if (s.none) row([{v: 'Dentro de "Não tem": ' + s.none + ' sem rastreamento no JMS (ou consulta recusada)', s: S.note}]);
+      resumo.charts.push({type: 'doughnut', title: name + ': tem × não tem o padrão', name: 'Remessas', cat: 'A' + y + ':A' + (y + 1), val: 'B' + y + ':B' + (y + 1),
+        colors: [COLORS.yes, COLORS.no], at: [5, top - 1, 11, top + 15]});
+      var last = R.length;
+      if (k === 1) {
+        row();
+        row([{v: 'Turno que mais ocorreu', s: S.bold}, {v: s.top ? s.top + ' (' + SHIFT_HOURS[s.top] + ')' : '—', s: S.hero}]);
+        resumo.heights[R.length] = 26;
+        var sh = row([{v: two('Turno · horário', '班次'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}, {v: two('% das que têm', '占比'), s: S.header}]);
+        resumo.heights[sh] = 28;
+        ['T1', 'T2', 'T3'].forEach(function (t) { row([{v: t + ' · ' + SHIFT_HOURS[t], s: t === s.top ? S.yes : S.text}, {v: s.shifts[t], s: S.int}, {v: pct(s.shifts[t], s.yes), s: S.pct}]); });
+        resumo.charts.push({type: 'col', title: name + ': remessas por turno do primeiro bipe', name: 'Remessas', cat: 'A' + (sh + 1) + ':A' + (sh + 3),
+          val: 'B' + (sh + 1) + ':B' + (sh + 3), colors: [COLORS.T1, COLORS.T2, COLORS.T3], gap: 50, at: [5, top + 16, 11, top + 32]});
+        row();
+        var hh = row([{v: two('Hora do primeiro bipe', '小时'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}]);
+        resumo.heights[hh] = 28;
+        for (var i = 0; i < 24; i++) row([{v: (i < 10 ? '0' : '') + i + 'h', s: S.center}, {v: s.hours[i], s: S.int}]);
+        resumo.charts.push({type: 'col', title: name + ': remessas por hora do primeiro bipe', name: 'Remessas', cat: 'A' + (hh + 1) + ':A' + (hh + 24),
+          val: 'B' + (hh + 1) + ':B' + (hh + 24), colors: [COLORS.T1], gap: 30, at: [5, top + 33, 13, top + 50]});
+        var tops = s.scanners.slice(0, 10);
+        if (tops.length) {
+          row();
+          var sc = row([{v: two('Quem escaneou (10 mais)', '扫描员'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}]);
+          resumo.heights[sc] = 28;
+          tops.forEach(function (x) { row([{v: x.label, s: S.text}, {v: x.value, s: S.int}]); });
+          resumo.charts.push({type: 'bar', title: name + ': quem mais escaneou (primeiro bipe)', name: 'Remessas', cat: 'A' + (sc + 1) + ':A' + (sc + tops.length),
+            val: 'B' + (sc + 1) + ':B' + (sc + tops.length), colors: [COLORS.T1], gap: 40, at: [5, top + 51, 13, top + 51 + Math.max(10, tops.length + 6)]});
+        }
+        last = R.length;
+      }
+      // Os gráficos ficam ao lado das tabelas: o próximo bloco começa depois do último gráfico.
+      var chartEnd = resumo.charts[resumo.charts.length - 1].at[3] + 1;
+      while (R.length < Math.max(last, chartEnd)) row();
+      sheets.push(hitsSheet(name + ' - Tem', name + ' · remessas COM o padrão', pat, data, k));
+      sheets.push(missSheet(name + ' - Não tem', name + ' · remessas SEM o padrão', pat, data, k));
+    });
+    return {title: title, sheets: sheets};
+  }
+  function hitsSheet(name, title, pat, data, k) {
+    var rows = [[{v: 'J&T EXPRESS · ' + title, s: S.title}], [{v: 'Padrão: ' + pat + ' · horário, origem e escaneador do PRIMEIRO bipe com o padrão', s: S.subtitle}],
+      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}, {v: two('Tempo de digitalização', '扫描时间'), s: S.header}, {v: two('Turno', '班次'), s: S.header},
+        {v: two('Origem', '网点'), s: S.header}, {v: two('Quem escaneou', '扫描员'), s: S.header}, {v: two('Tipo de bipagem', '扫描类型'), s: S.header},
+        {v: two('Descrição da etapa de bipagem', '扫描描述'), s: S.header}, {v: two('Imagem', '图片'), s: S.header}, {v: two('Link da foto', '图片链接'), s: S.header},
+        {v: two('Linhas com o padrão', '匹配行数'), s: S.header}]];
+    var n = 0, images = [], heights = {1: 28, 3: 30};
+    data.results.forEach(function (r) {
+      var h = r.p && r.p[k];
+      if (!h) return;
+      var t = serial(h.t);
+      rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}, t === null ? {v: h.t, s: S.text} : {v: t, s: S.date}, {v: h.shift, s: S.center},
+        {v: h.origin, s: S.text}, {v: h.by, s: S.text}, {v: h.type, s: S.text}, {v: h.desc, s: S.text}, imageCell(h),
+        h.url ? {v: 'Abrir foto', s: S.link, link: h.url} : {v: '', s: S.text}, {v: h.n, s: S.int}]);
+      if (h.foto && h.foto.bytes) {
+        var box = fitBox(h.foto.w, h.foto.h, FOTO.box[0], FOTO.box[1]);
+        images.push({row: rows.length, col: FOTO.col, bytes: h.foto.bytes, w: box.w, h: box.h, ext: /png/.test(h.foto.mime || '') ? 'png' : 'jpeg', name: 'Foto ' + r.w});
+        heights[rows.length] = FOTO.height;
+      }
+    });
+    if (!n) rows.push([{v: 'Nenhuma remessa com o padrão.', s: S.note}]);
+    return {name: name, cols: [7, 18, 21, 8, 16, 30, 24, 70, 27, 12, 11], rows: rows, heights: heights, merges: ['A1:K1', 'A2:K2'], freeze: 'C4',
+      filter: n ? 'A3:K3' : '', images: images};
+  }
+  function missSheet(name, title, pat, data, k) {
+    var rows = [[{v: 'J&T EXPRESS · ' + title, s: S.title}], [{v: 'Padrão: ' + pat, s: S.subtitle}],
+      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}, {v: two('Situação no rastreamento', '轨迹情况'), s: S.header}]];
+    var n = 0;
+    data.results.forEach(function (r) {
+      if (r.p && r.p[k]) return;
+      var why = r.err ? 'Consulta recusada pelo JMS (tente de novo)' : !r.ok ? 'Sem rastreamento no JMS' : 'Nenhuma linha com o padrão';
+      rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}, {v: why, s: r.ok ? S.text : S.noimg}]);
+    });
+    if (!n) rows.push([{v: 'Todas as remessas têm o padrão.', s: S.note}]);
+    return {name: name, cols: [7, 20, 46], rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:C1', 'A2:C2'], freeze: 'C4', filter: n ? 'A3:C3' : ''};
+  }
+
+  return {build: build, parts: parts, zip: zip, crc32: crc32, serial: serial, fitBox: fitBox, rastreioBook: rastreioBook, STYLE: S};
+});
+</script>
+<script>
+/**
+ * J&T · PESQUISA NO RASTREAMENTO — a página. Funciona igual no Apps Script (google.script.run) e no Node.js (api/…):
+ * o servidor só repassa as consultas ao JMS (com o AuthToken guardado neste navegador) e baixa as fotos.
+ */
+(function () {
+  'use strict';
+  var BOOT = window.__PESQUISA__ || {}, R = window.Rastreio, P = window.Pesquisa, X = window.Planilha, PAGE = 100;
+  var SHIFTS = R.SHIFTS, SHIFT_HOURS = R.SHIFT_HOURS;
+  var DEFAULTS = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
+  var I18N = {
+    pt: {title: 'Pesquisa no Rastreamento', subtitle: 'JMS › Operação › Consulta do pacote › Rastreamento do pacote · sempre o PRIMEIRO bipe com o texto padrão',
+      step1: '1 · Acesso ao JMS', tokenTitle: 'AuthToken do JMS', tokenPh: 'Cole aqui o AuthToken', save: 'Salvar', forget: 'Esquecer',
+      tok1: 'Abra o JMS no navegador e entre normalmente.', tok2: 'Aperte F12 → aba Rede (Network) → clique em qualquer consulta da lista.',
+      tok3: 'Em Cabeçalhos de solicitação, copie o valor de "authtoken" e cole acima.',
+      tokNote: 'O token fica só neste navegador. Quando o JMS pedir login de novo, cole o token novo.',
+      tokOk: 'Token salvo neste navegador', tokNo: 'Sem token', tokSaved: 'AuthToken salvo.', tokForgot: 'AuthToken apagado deste navegador.',
+      tokNeed: 'Cole o AuthToken do JMS (passo 1) antes de pesquisar.',
+      step2: '2 · Fotos das linhas', photoTitle: '"Ver imagem" do rastreamento',
+      photoNote: 'Para trazer a foto de cada linha para a planilha, o app precisa aprender, uma vez, o pedido que o JMS faz ao clicar em "Ver imagem". A foto do bipe de pacote problemático já vem sem isso.',
+      teach: 'Ensinar a foto', teachForget: 'Apagar o que aprendeu', photoOk: 'Foto das linhas: aprendida', photoNo: 'Foto das linhas: falta ensinar',
+      t1: 'No JMS, abra Rastreamento do pacote e consulte uma remessa.', t2: 'Aperte F12 → aba Rede (Network) e clique em "Ver imagem" numa linha.',
+      t3: 'Na lista da Rede, clique com o botão direito na consulta nova → Copiar → Copiar como fetch.',
+      t4: 'Cole abaixo e clique em Testar. O token do texto colado é jogado fora.', teachPh: 'fetch("https://gw.jtjms-br.com/…", {…})',
+      teachWb: 'Remessa da linha clicada (se o app pedir)', teachTest: 'Testar e salvar', teachBusy: 'Testando no JMS…',
+      teachOk: 'Aprendido! Esta é a foto da linha de {t} da remessa {w}. As próximas pesquisas trazem as fotos.', teachForgot: 'O app esqueceu o pedido da foto.',
+      waybills: '3 · Remessas (uma por linha)', waybillsPh: 'Cole aqui as remessas, uma por linha',
+      block1: 'Bloco 1 · Tem ou não tem', block1Q: 'Quantas remessas têm esta linha no rastreamento?',
+      block2: 'Bloco 2 · Turno que mais ocorreu', block2Q: 'Em que turno aconteceu o primeiro bipe com esta linha?',
+      hint: 'Copie o texto da coluna "Descrição da etapa de bipagem". Maiúsculas, acentos e espaços dentro dos [ ] não importam; * vale qualquer trecho (ex.: "está [*] sendo enviada"). Deixe um bloco vazio para não usar.',
+      withPhotos: 'Trazer as fotos das linhas para a planilha', run: 'Pesquisar no JMS', stop: 'Parar', download: 'Baixar planilha (.xlsx)', clear: 'Limpar',
+      madeBy: 'Feito por Caike Oliveira', count: '{n} remessa(s)', dup: '{n} repetida(s) ignorada(s)', bad: '{n} linha(s) que não parecem remessa',
+      noWaybills: 'Cole pelo menos uma remessa.', noPattern: 'Digite o texto padrão de pelo menos um bloco.',
+      progress: 'Pesquisando no JMS… {done} de {total} remessas', photos: 'Buscando as fotos… {done} de {total} linhas com imagem',
+      finished: 'Pronto: {total} remessa(s) em {sec} s.', finishedPhotos: 'Pronto: {total} remessa(s) e {fotos} foto(s) em {sec} s.',
+      stopped: 'Pesquisa parada: {done} de {total} remessas.', failed: 'A pesquisa parou', resume: 'Continuar',
+      photoMissing: '{n} linha(s) com imagem ficaram sem foto: ensine a foto (passo 2) e pesquise de novo.',
+      photoErr: '{n} foto(s) não baixaram.', limit: 'O JMS aceita {n} remessas por consulta (aprendido).',
+      searched: 'Pesquisadas', yes: 'Tem o padrão', no: 'Não tem o padrão', none: '{n} sem rastreamento no JMS', noneTile: 'Sem rastreamento no JMS',
+      topShift: 'Turno que mais ocorreu', ofYes: '{p} das que têm o padrão', noHits: 'Nenhuma remessa tem o padrão.', remessas: 'remessas', partial: 'parcial',
+      chartYesNo: 'Tem × não tem o padrão', chartShift: 'Remessas por turno do primeiro bipe', chartHour: 'Remessas por hora do primeiro bipe',
+      chartBy: 'Quem mais escaneou (primeiro bipe, 10 mais)', tabYes: 'Tem ({n})', tabNo: 'Não tem ({n})', find: 'Localizar remessa ou escaneador',
+      copy: 'Copiar remessas', copied: '{n} remessa(s) copiada(s).', rows: '{a}–{b} de {n}', first: 'Primeiro bipe com o padrão',
+      cWaybill: 'Remessa', cTime: 'Tempo de digitalização', cShift: 'Turno', cOrigin: 'Origem', cBy: 'Quem escaneou', cType: 'Tipo de bipagem',
+      cDesc: 'Descrição da etapa de bipagem', cImg: 'Imagem', cLines: 'Linhas', cWhy: 'Situação no rastreamento',
+      noImg: 'NÃO TEM IMAGEM!', imgLoading: 'buscando…', imgTeach: 'Tem imagem (ensine a foto)', imgFail: 'Não baixou', openPhoto: 'Abrir foto',
+      whyNone: 'Sem rastreamento no JMS', whyErr: 'Consulta recusada pelo JMS', whyNo: 'Nenhuma linha com o padrão',
+      xlsxOk: 'Planilha baixada.', xlsxBusy: 'Montando a planilha…'},
+    zh: {title: '轨迹关键字查询', subtitle: 'JMS › 运营 › 包裹查询 › 包裹轨迹 · 始终取包含关键字的第一条扫描',
+      step1: '1 · JMS 登录信息', tokenTitle: 'JMS AuthToken', tokenPh: '在此粘贴 AuthToken', save: '保存', forget: '删除',
+      tok1: '在浏览器中打开 JMS 并正常登录。', tok2: '按 F12 → 网络 (Network) → 点击列表中任意请求。', tok3: '在请求头中复制 "authtoken" 的值并粘贴到上方。',
+      tokNote: '令牌只保存在此浏览器。JMS 要求重新登录时，请粘贴新的令牌。', tokOk: '已在此浏览器保存', tokNo: '未填写令牌', tokSaved: '已保存。', tokForgot: '已从此浏览器删除。',
+      tokNeed: '查询前请先粘贴 JMS AuthToken（步骤1）。', step2: '2 · 扫描行图片', photoTitle: '轨迹中的“查看图片”',
+      photoNote: '要把每行的图片放进表格，需要先让程序学习一次点击“查看图片”时 JMS 发出的请求。问题件扫描的图片无需学习。',
+      teach: '学习图片请求', teachForget: '删除已学习的请求', photoOk: '图片：已学习', photoNo: '图片：尚未学习',
+      t1: '在 JMS 打开包裹轨迹并查询一个运单。', t2: '按 F12 → 网络 (Network)，点击某一行的“查看图片”。', t3: '在网络列表中右键新请求 → 复制 → 以 fetch 格式复制。',
+      t4: '粘贴到下方并点击测试。粘贴内容中的令牌会被丢弃。', teachPh: 'fetch("https://gw.jtjms-br.com/…", {…})', teachWb: '所点击行的运单号（如有需要）',
+      teachTest: '测试并保存', teachBusy: '正在 JMS 测试…', teachOk: '学习成功！这是运单 {w} 在 {t} 的图片。之后的查询会带出图片。', teachForgot: '已删除图片请求。',
+      waybills: '3 · 运单号（每行一个）', waybillsPh: '在此粘贴运单号，每行一个', block1: '模块1 · 有/无', block1Q: '多少运单的轨迹中有这一行？',
+      block2: '模块2 · 最多的班次', block2Q: '包含这一行的第一条扫描发生在哪个班次？', hint: '复制“扫描描述”列的文字。大小写、重音和 [ ] 内的空格不影响；* 代表任意文字。留空则不使用该模块。',
+      withPhotos: '把扫描行的图片放进表格', run: '在 JMS 中查询', stop: '停止', download: '下载表格 (.xlsx)', clear: '清空', madeBy: '由 Caike Oliveira 制作',
+      count: '{n} 个运单', dup: '忽略 {n} 个重复', bad: '{n} 行不像运单号', noWaybills: '请至少粘贴一个运单号。', noPattern: '请至少填写一个模块的关键字。',
+      progress: '正在查询 JMS… {done} / {total}', photos: '正在获取图片… {done} / {total}', finished: '完成：{total} 个运单，用时 {sec} 秒。',
+      finishedPhotos: '完成：{total} 个运单，{fotos} 张图片，用时 {sec} 秒。', stopped: '已停止：{done} / {total}。', failed: '查询停止', resume: '继续',
+      photoMissing: '{n} 行有图片但未获取：请学习图片请求（步骤2）后重新查询。', photoErr: '{n} 张图片下载失败。', limit: 'JMS 每次最多查询 {n} 个运单（已学习）。',
+      searched: '已查询', yes: '有关键字', no: '无关键字', none: '{n} 个在 JMS 无轨迹', noneTile: 'JMS 无轨迹', topShift: '最多的班次', ofYes: '占有关键字的 {p}',
+      noHits: '没有运单包含该关键字。', remessas: '运单', partial: '部分', chartYesNo: '有/无关键字', chartShift: '第一条扫描的班次分布', chartHour: '第一条扫描的小时分布',
+      chartBy: '扫描最多的人员（前10）', tabYes: '有 ({n})', tabNo: '无 ({n})', find: '查找运单或扫描员', copy: '复制运单号', copied: '已复制 {n} 个运单号。',
+      rows: '{a}–{b} / {n}', first: '包含关键字的第一条扫描', cWaybill: '运单号', cTime: '扫描时间', cShift: '班次', cOrigin: '网点', cBy: '扫描员', cType: '扫描类型',
+      cDesc: '扫描描述', cImg: '图片', cLines: '行数', cWhy: '轨迹情况', noImg: '无图片！', imgLoading: '获取中…', imgTeach: '有图片（请学习图片请求）', imgFail: '下载失败',
+      openPhoto: '打开图片', whyNone: 'JMS 无轨迹', whyErr: 'JMS 拒绝查询', whyNo: '没有包含关键字的行', xlsxOk: '表格已下载。', xlsxBusy: '正在生成表格…'}
+  };
+  var lang = 'pt';
+  var state = {list: [], pats: ['', ''], results: [], running: false, stop: false, started: 0, modelo: null, fotos: null, phase: '',
+    tab: {0: 'yes', 1: 'yes'}, page: {0: 1, 1: 1}, find: {0: '', 1: ''}};
+
+  function $(s, el) { return (el || document).querySelector(s); }
+  function $$(s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); }
+  function t(k, v) {
+    var s = (I18N[lang] && I18N[lang][k]) || I18N.pt[k] || k;
+    return v ? s.replace(/\{(\w+)\}/g, function (_, x) { return v[x] === undefined ? '' : v[x]; }) : s;
+  }
+  function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function fmtInt(n) { return Number(n || 0).toLocaleString(lang === 'zh' ? 'zh-CN' : 'pt-BR'); }
+  function fmtPct(n, d) { return d ? (n / d * 100).toLocaleString('pt-BR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + '%' : '—'; }
+  function fmtTime(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)/); return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] : String(s || ''); }
+  function store(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function token() { return String(load('jt_pesquisa_token') || '').trim(); }
+
+  // ------------------------------------------------------------------ servidor (Apps Script ou Node.js)
+  var GAS = !!(window.google && google.script && google.script.run);
+  function gas(fn, args) {
+    return new Promise(function (ok, ko) {
+      var r = google.script.run.withSuccessHandler(ok).withFailureHandler(function (e) { ko(new Error(e && e.message ? e.message : String(e))); });
+      r[fn].apply(r, args);
+    });
+  }
+  function http(fn, body) {
+    return fetch('api/' + fn, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+      .then(function (r) { return r.json().catch(function () { throw new Error('Resposta inválida do servidor (HTTP ' + r.status + ').'); }); })
+      .then(function (j) { if (!j.ok) throw new Error(j.error || 'Erro no servidor.'); return j.result; });
+  }
+  var api = {
+    jms: function (url, body, headers) {
+      if (!token()) return Promise.reject(new Error(t('tokNeed')));
+      return GAS ? gas('jms', [url, body === undefined ? null : body, token(), headers || {}]) : http('jms', {url: url, body: body === undefined ? null : body, token: token(), headers: headers || {}});
+    },
+    fotos: function (urls) { return GAS ? gas('fotos', [urls]) : http('fotos', {urls: urls}); },
+    modelo: function (acao, valor) {
+      var v = valor === undefined ? null : JSON.stringify(valor);
+      return (GAS ? gas('modelo', [acao, v]) : http('modelo', {acao: acao, valor: v})).then(function (s) { return s ? JSON.parse(s) : null; });
+    }
+  };
+
+  function toast(msg, type) {
+    var el = document.createElement('div');
+    el.className = 'toast ' + (type || '');
+    el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    var span = document.createElement('span'); span.textContent = msg; el.appendChild(span);
+    var x = document.createElement('button'); x.type = 'button'; x.setAttribute('aria-label', 'Fechar'); x.textContent = '✕';
+    x.addEventListener('click', function () { el.remove(); });
+    el.appendChild(x);
+    $('#toasts').appendChild(el);
+    setTimeout(function () { el.remove(); }, type === 'error' ? 9000 : 5000);
+  }
+
+  // ------------------------------------------------------------------ token e foto
+  function renderSetup() {
+    var b = $('#tokenBadge'), ok = !!token();
+    b.className = 'badge ' + (ok ? 'ok' : 'warn');
+    b.textContent = ok ? t('tokOk') : t('tokNo');
+    var pb = $('#photoBadge');
+    pb.className = 'badge ' + (state.modelo ? 'ok' : 'warn');
+    pb.textContent = state.modelo ? t('photoOk') : t('photoNo');
+    $('#teachForget').classList.toggle('hidden', !state.modelo);
+  }
+  function teach() {
+    var box = $('#teachResult'), btn = $('#teachTest');
+    btn.disabled = true;
+    box.innerHTML = '<p class="note">' + esc(t('teachBusy')) + '</p>';
+    var feito;
+    try { feito = P.ensinarFoto(api, $('#teachText').value, $('#teachWaybill').value.trim(), {headers: rota()}); }
+    catch (e) { feito = Promise.reject(e); }
+    feito.then(function (r) {
+      return api.modelo('gravar', r.modelo).then(function () {
+        state.modelo = r.modelo;
+        store('jt_pesquisa_modelo', JSON.stringify(r.modelo));
+        $('#teachText').value = '';
+        box.innerHTML = '<div class="alert ok"><div><b>' + esc(t('teachOk', {w: r.linha.waybillNo || r.linha.billCode || '', t: fmtTime(r.linha.scanTime)})) + '</b></div></div>' +
+          '<img alt="" src="data:image/' + (R.sniffImage(P.b64ToBytes(r.foto)) || 'jpeg') + ';base64,' + r.foto + '">';
+        renderSetup();
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<div class="alert"><div>' + esc(e.message) + '</div></div>';
+    }).then(function () { btn.disabled = false; });
+  }
+  function rota() { try { return JSON.parse(load('jt_pesquisa_rota') || 'null'); } catch (e) { return null; } }
+
+  // ------------------------------------------------------------------ remessas
+  function updateCount() {
+    var p = R.parseWaybills($('#waybills').value), parts = [];
+    if (p.list.length) parts.push('<b>' + esc(t('count', {n: fmtInt(p.list.length)})) + '</b>');
+    if (p.dup) parts.push(esc(t('dup', {n: fmtInt(p.dup)})));
+    if (p.bad) parts.push(esc(t('bad', {n: fmtInt(p.bad)})));
+    $('#wbCount').innerHTML = parts.join(' · ');
+  }
+
+  // ------------------------------------------------------------------ pesquisa
+  function setRunning(on) {
+    state.running = on;
+    $('#runBtn').disabled = on;
+    $('#runBtn').classList.toggle('spin', on);
+    $('#stopBtn').classList.toggle('hidden', !on);
+    $('#xlsxBtn').disabled = on || !state.results.length;
+  }
+  function progress(done, total, key) {
+    $('#statusBox').classList.remove('hidden');
+    $('#barFill').style.width = (total ? Math.round(done / total * 100) : 0) + '%';
+    $('#statusText').textContent = t(key, {done: fmtInt(done), total: fmtInt(total)});
+  }
+  function showAlert(msg, resume, kind) {
+    var box = $('#alertBox');
+    if (!msg) { box.className = 'alert hidden'; box.innerHTML = ''; return; }
+    box.className = 'alert' + (kind ? ' ' + kind : '');
+    box.innerHTML = '<div><b>' + esc(t('failed')) + '</b>' + esc(msg) + '</div>' + (resume ? '<button type="button" class="btn btn-light" id="resumeBtn">' + esc(t('resume')) + '</button>' : '');
+    if (resume) $('#resumeBtn').addEventListener('click', function () { showAlert(''); run(resume); });
+  }
+  function start() {
+    var p = R.parseWaybills($('#waybills').value), pats = [$('#pat1').value.trim(), $('#pat2').value.trim()];
+    if (!token()) { toast(t('tokNeed'), 'error'); $('#tokenInput').focus(); return; }
+    if (!p.list.length) { toast(t('noWaybills'), 'error'); return; }
+    if (!pats[0] && !pats[1]) { toast(t('noPattern'), 'error'); return; }
+    store('jt_pesquisa_p1', pats[0]); store('jt_pesquisa_p2', pats[1]);
+    state.list = p.list; state.pats = pats; state.results = []; state.fotos = null;
+    state.tab = {0: 'yes', 1: 'yes'}; state.page = {0: 1, 1: 1}; state.find = {0: '', 1: ''};
+    state.started = Date.now();
+    showAlert('');
+    $('#results').innerHTML = '';
+    run(p.list);
+  }
+  /** Pesquisa (ou continua) as remessas `list`; depois as fotos, se marcado. */
+  function run(list) {
+    state.stop = false;
+    setRunning(true);
+    progress(state.results.length, state.list.length, 'progress');
+    var antes = state.results.slice(), lote = Number(load('jt_pesquisa_lote')) || 100;
+    var parar = function () { return state.stop; };
+    P.pesquisar(api, list, state.pats, {lote: lote, paralelo: 4, headers: rota(), parar: parar,
+      onLote: function (n) { store('jt_pesquisa_lote', String(n)); toast(t('limit', {n: fmtInt(n)})); },
+      onHeaders: function (h) { store('jt_pesquisa_rota', JSON.stringify(h)); },
+      onProgresso: function (feitas) { progress(antes.length + feitas, state.list.length, 'progress'); }
+    }).then(function (res) {
+      var byW = {};
+      antes.concat(res.results).forEach(function (r) { byW[r.w] = r; });
+      state.results = state.list.filter(function (w) { return byW[w]; }).map(function (w) { return byW[w]; });
+      render();
+      if (state.stop || res.faltam.length) return done('stopped');
+      var comImg = state.results.some(function (r) { return r.p.some(function (h) { return h && h.img && !h.foto; }); });
+      if (!$('#withPhotos').checked || !comImg) return done('finished');
+      state.phase = 'fotos';
+      return P.buscarFotos(api, state.results, {modelo: state.modelo, headers: rota(), paralelo: 4, parar: parar, miniatura: miniatura,
+        onProgresso: function (feitas, total) { progress(feitas, total, 'photos'); },
+        onFoto: function () { scheduleRender(); }
+      }).then(function (st) { state.fotos = st; render(); done(state.stop ? 'stopped' : 'finishedPhotos'); });
+    }).catch(function (e) {
+      render();
+      setRunning(false);
+      var falta = state.list.filter(function (w) { return !state.results.some(function (r) { return r.w === w; }); });
+      showAlert(e.message, e.kind === 'auth' ? null : falta.length ? falta : null);
+      if (e.kind === 'auth') { $('#tokenInput').focus(); renderSetup(); }
+    });
+  }
+  function done(key) {
+    state.phase = '';
+    setRunning(false);
+    var sec = Math.round((Date.now() - state.started) / 1000), st = state.fotos;
+    $('#barFill').style.width = '100%';
+    $('#statusText').textContent = key === 'stopped' ? t('stopped', {done: fmtInt(state.results.length), total: fmtInt(state.list.length)})
+      : t(key, {total: fmtInt(state.results.length), fotos: fmtInt(st ? st.comFoto : 0), sec: sec});
+    if (st && st.semLink) showAlert(t('photoMissing', {n: fmtInt(st.semLink)}), null, 'warn');
+    else if (st && st.erros) showAlert(t('photoErr', {n: fmtInt(st.erros)}), null, 'warn');
+    render();
+  }
+  var renderTimer = null;
+  function scheduleRender() { if (!renderTimer) renderTimer = setTimeout(function () { renderTimer = null; [0, 1].forEach(function (k) { if (state.pats[k] && $('#block' + k)) renderTable(k); }); }, 400); }
+
+  /** Foto reduzida (até 360 px) para a tela e a planilha. */
+  function miniatura(bytes, tipo) {
+    return new Promise(function (ok) {
+      var url = URL.createObjectURL(new Blob([bytes], {type: 'image/' + (tipo || 'jpeg')})), img = new Image();
+      img.onload = function () {
+        var s = Math.min(1, 360 / Math.max(img.naturalWidth, img.naturalHeight)), w = Math.max(1, Math.round(img.naturalWidth * s)), h = Math.max(1, Math.round(img.naturalHeight * s));
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        var g = c.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+        g.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (b) {
+          if (!b) { ok(null); return; }
+          b.arrayBuffer().then(function (ab) { ok({bytes: new Uint8Array(ab), w: w, h: h, mime: 'image/jpeg', url: URL.createObjectURL(b)}); }, function () { ok(null); });
+        }, 'image/jpeg', 0.8);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); ok(null); };
+      img.src = url;
+    });
+  }
+
+  // ------------------------------------------------------------------ gráficos (SVG simples)
+  function topRounded(x, y, w, h, r) {
+    if (h <= 0) return '';
+    r = Math.min(r, w / 2, h);
+    return 'M' + x + ',' + (y + h) + 'V' + (y + r) + 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y + 'H' + (x + w - r) + 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) + 'V' + (y + h) + 'Z';
+  }
+  function rightRounded(x, y, w, h, r) {
+    if (w <= 0) return '';
+    r = Math.min(r, h / 2, w);
+    return 'M' + x + ',' + y + 'H' + (x + w - r) + 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) + 'V' + (y + h - r) + 'Q' + (x + w) + ',' + (y + h) + ' ' + (x + w - r) + ',' + (y + h) + 'H' + x + 'Z';
+  }
+  function niceMax(v) {
+    if (v <= 4) return Math.max(1, v);
+    var p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p, steps = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+    for (var i = 0; i < steps.length; i++) if (n <= steps[i]) return steps[i] * p;
+    return 10 * p;
+  }
+  function columns(items, opts) {
+    opts = opts || {};
+    var W = opts.w || 560, H = opts.h || 220, L = 34, B = 26, T = 18, max = niceMax(Math.max.apply(null, items.map(function (i) { return i.value; }).concat([0]))) || 1;
+    var pw = W - L - 6, ph = H - B - T, slot = pw / items.length, bw = Math.max(4, Math.min(opts.bar || 48, slot - 2));
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(opts.label || '') + '">';
+    [0, 0.5, 1].forEach(function (f) {
+      var y = T + ph - f * ph;
+      svg += '<line class="grid" x1="' + L + '" x2="' + (W - 6) + '" y1="' + y + '" y2="' + y + '"/><text class="m" x="' + (L - 6) + '" y="' + (y + 4) + '" text-anchor="end">' + fmtInt(Math.round(max * f)) + '</text>';
+    });
+    items.forEach(function (it, i) {
+      var h = it.value / max * ph, x = L + i * slot + (slot - bw) / 2, y = T + ph - h;
+      svg += '<g><title>' + esc(it.tip || (it.label + ': ' + fmtInt(it.value))) + '</title><rect class="hit" x="' + (L + i * slot) + '" y="' + T + '" width="' + slot + '" height="' + ph + '"/>' +
+        '<path class="mk ' + (it.cls || 'f-yes') + '" d="' + topRounded(x, y, bw, h, 4) + '"/></g>';
+      if (it.value) svg += '<text class="v" x="' + (x + bw / 2) + '" y="' + (y - 5) + '" text-anchor="middle">' + fmtInt(it.value) + '</text>';
+      svg += '<text x="' + (x + bw / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(it.label) + '</text>';
+    });
+    return svg + '</svg>';
+  }
+  function hbars(items) {
+    var W = 1120, row = 26, L = 230, H = items.length * row + 6, max = Math.max.apply(null, items.map(function (i) { return i.value; }).concat([1]));
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+    items.forEach(function (it, i) {
+      var y = i * row + 3, w = it.value / max * (W - L - 50), lab = it.label.length > 32 ? it.label.slice(0, 31) + '…' : it.label;
+      svg += '<g><title>' + esc(it.label + ': ' + fmtInt(it.value)) + '</title><rect class="hit" x="0" y="' + y + '" width="' + W + '" height="' + row + '"/>' +
+        '<path class="mk f-yes" d="' + rightRounded(L, y + 5, w, row - 10, 4) + '"/></g>' +
+        '<text x="' + (L - 8) + '" y="' + (y + row / 2 + 4) + '" text-anchor="end">' + esc(lab) + '</text>' +
+        '<text class="v" x="' + (L + w + 6) + '" y="' + (y + row / 2 + 4) + '">' + fmtInt(it.value) + '</text>';
+    });
+    return svg + '</svg>';
+  }
+  function donut(yes, no) {
+    var tot = yes + no, R0 = 80, r0 = 52, cx = 100, cy = 100, svg = '<svg viewBox="0 0 200 200" role="img">';
+    if (!tot) return svg + '</svg>';
+    var arc = function (a0, a1, cls, tip) {
+      if (a1 - a0 >= Math.PI * 2 - 1e-6) return '<g><title>' + esc(tip) + '</title><circle class="mk" cx="100" cy="100" r="66" fill="none" style="stroke:var(--' + (cls === 'f-yes' ? 't1' : 'no') + ');stroke-width:28"/></g>';
+      var gap = 0.012, b0 = a0 + gap, b1 = a1 - gap, large = b1 - b0 > Math.PI ? 1 : 0;
+      var p = function (rad, a) { return (cx + rad * Math.sin(a)).toFixed(2) + ',' + (cy - rad * Math.cos(a)).toFixed(2); };
+      return '<g><title>' + esc(tip) + '</title><path class="mk ' + cls + '" d="M' + p(R0, b0) + 'A' + R0 + ',' + R0 + ' 0 ' + large + ' 1 ' + p(R0, b1) + 'L' + p(r0, b1) +
+        'A' + r0 + ',' + r0 + ' 0 ' + large + ' 0 ' + p(r0, b0) + 'Z"/></g>';
+    };
+    var a = yes / tot * Math.PI * 2;
+    if (yes) svg += arc(0, a, 'f-yes', t('yes') + ': ' + fmtInt(yes) + ' (' + fmtPct(yes, tot) + ')');
+    if (no) svg += arc(a, Math.PI * 2, 'f-no', t('no') + ': ' + fmtInt(no) + ' (' + fmtPct(no, tot) + ')');
+    return svg + '<text class="v" x="100" y="98" text-anchor="middle" style="font-size:22px">' + fmtPct(yes, tot) + '</text>' +
+      '<text class="m" x="100" y="118" text-anchor="middle">' + esc(t('yes')) + '</text></svg>';
+  }
+
+  // ------------------------------------------------------------------ resultado
+  function render() {
+    var host = $('#results');
+    if (!state.results.length) { host.innerHTML = ''; $('#xlsxBtn').disabled = true; return; }
+    $('#xlsxBtn').disabled = state.running;
+    var html = '';
+    [0, 1].forEach(function (k) { if (state.pats[k]) html += blockHtml(k); });
+    host.innerHTML = html;
+    [0, 1].forEach(function (k) { if (state.pats[k]) { renderTable(k); wireBlock(k); } });
+  }
+  function blockHtml(k) {
+    var s = R.summary(state.results, k), partial = state.running ? ' · ' + t('partial') : '';
+    var head = '<div class="section-head"><div><span class="kicker">' + esc(t(k ? 'block2' : 'block1')) + partial + '</span><h2>“' + esc(state.pats[k]) + '”</h2>' +
+      '<p class="muted small">' + esc(t('first')) + '</p></div></div>';
+    var tiles = '<div class="tk-tiles">' +
+      '<div class="tk-tile"><small>' + esc(t('searched')) + '</small><b>' + fmtInt(s.total) + '</b><span>' + esc(t('remessas')) + '</span></div>' +
+      '<div class="tk-tile' + (k ? '' : ' hero') + '"><small>' + esc(t('yes')) + '</small><b>' + fmtInt(s.yes) + '</b><span>' + fmtPct(s.yes, s.total) + '</span></div>' +
+      '<div class="tk-tile"><small>' + esc(t('no')) + '</small><b>' + fmtInt(s.no) + '</b><span>' + fmtPct(s.no, s.total) + '</span></div>';
+    tiles += k ? '<div class="tk-tile hero"><small>' + esc(t('topShift')) + '</small><b>' + (s.top || '—') + '</b><span>' +
+      (s.top ? esc(SHIFT_HOURS[s.top] + ' · ' + fmtInt(s.topCount) + ' · ' + t('ofYes', {p: fmtPct(s.topCount, s.yes)})) : '&nbsp;') + '</span></div>'
+      : '<div class="tk-tile"><small>' + esc(t('noneTile')) + '</small><b>' + fmtInt(s.none) + '</b><span>' + fmtPct(s.none, s.total) + '</span></div>';
+    tiles += '</div>';
+    var charts = '<div class="tk-charts"><div class="tk-chart"><h4>' + esc(t('chartYesNo')) + '</h4><div class="tk-donut">' + donut(s.yes, s.no) +
+      '<div><div class="tk-legend"><span><i class="sw bg-yes"></i>' + esc(t('yes')) + ' · <b>' + fmtInt(s.yes) + '</b> (' + fmtPct(s.yes, s.total) + ')</span></div>' +
+      '<div class="tk-legend"><span><i class="sw bg-no"></i>' + esc(t('no')) + ' · <b>' + fmtInt(s.no) + '</b> (' + fmtPct(s.no, s.total) + ')</span></div>' +
+      (s.none ? '<p class="muted small">' + esc(t('none', {n: fmtInt(s.none)})) + '</p>' : '') + '</div></div></div>';
+    if (k) {
+      charts += '<div class="tk-chart"><h4>' + esc(t('chartShift')) + '</h4>' + columns(SHIFTS.map(function (x) {
+        return {label: x + ' · ' + SHIFT_HOURS[x], value: s.shifts[x], cls: 'f-' + x.toLowerCase(), tip: x + ' (' + SHIFT_HOURS[x] + '): ' + fmtInt(s.shifts[x]) + ' · ' + fmtPct(s.shifts[x], s.yes)};
+      }), {label: t('chartShift'), bar: 64}) + '</div>';
+      charts += '<div class="tk-chart wide"><h4>' + esc(t('chartHour')) + '</h4>' + columns(s.hours.map(function (v, h) {
+        var hh = (h < 10 ? '0' : '') + h;
+        return {label: hh + 'h', value: v, cls: 'f-' + R.shiftOf(hh + ':00').toLowerCase()};
+      }), {w: 1120, h: 220, bar: 30, label: t('chartHour')}) + '<div class="tk-legend">' + SHIFTS.map(function (x) {
+        return '<span><i class="sw bg-' + x.toLowerCase() + '"></i>' + x + ' · ' + SHIFT_HOURS[x] + '</span>';
+      }).join('') + '</div></div>';
+      if (s.scanners.length) charts += '<div class="tk-chart wide"><h4>' + esc(t('chartBy')) + '</h4>' + hbars(s.scanners.slice(0, 10)) + '</div>';
+    }
+    charts += '</div>';
+    return '<section class="card" id="block' + k + '" aria-label="' + esc(t(k ? 'block2' : 'block1')) + '">' + head + tiles + charts +
+      '<div class="tk-tabs"><div class="seg" role="tablist">' +
+      '<button type="button" role="tab" data-tab="yes" aria-selected="' + (state.tab[k] === 'yes') + '">' + esc(t('tabYes', {n: fmtInt(s.yes)})) + '</button>' +
+      '<button type="button" role="tab" data-tab="no" aria-selected="' + (state.tab[k] === 'no') + '">' + esc(t('tabNo', {n: fmtInt(s.no)})) + '</button></div>' +
+      '<label class="find"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg><input type="text" class="tk-find" autocomplete="off" placeholder="' + esc(t('find')) + '" value="' + esc(state.find[k]) + '"></label>' +
+      '<button type="button" class="btn btn-light tk-copy">' + esc(t('copy')) + '</button></div>' +
+      '<div class="table-scroll"><table class="data-table"><thead></thead><tbody></tbody></table></div>' +
+      '<div class="table-foot"><span class="note tk-note"></span><div class="pager tk-pager"></div></div></section>';
+  }
+  function rowsOf(k) {
+    var yes = state.tab[k] === 'yes', q = state.find[k].trim().toUpperCase();
+    return state.results.filter(function (r) {
+      var h = r.p && r.p[k];
+      if (yes !== !!h) return false;
+      return !q || r.w.indexOf(q) >= 0 || (h && String(h.by || '').toUpperCase().indexOf(q) >= 0);
+    });
+  }
+  function imgCell(h) {
+    if (h.foto && h.foto.url) {
+      var img = '<img class="tk-thumb" loading="lazy" src="' + esc(h.foto.url) + '" alt="">';
+      return h.url ? '<a href="' + esc(h.url) + '" target="_blank" rel="noopener noreferrer" title="' + esc(t('openPhoto')) + '">' + img + '</a>' : img;
+    }
+    if (!h.img) return '<span class="tk-noimg">' + esc(t('noImg')) + '</span>';
+    if (state.phase === 'fotos' && !h.fotoErro && h.url === undefined) return '<span class="muted">' + esc(t('imgLoading')) + '</span>';
+    if (h.url) return '<a href="' + esc(h.url) + '" target="_blank" rel="noopener noreferrer">' + esc(t('imgFail')) + ' · ' + esc(t('openPhoto')) + '</a>';
+    return '<span class="muted">' + esc(t('imgTeach')) + '</span>';
+  }
+  function renderTable(k) {
+    var box = $('#block' + k), list = rowsOf(k), yes = state.tab[k] === 'yes';
+    var pages = Math.max(1, Math.ceil(list.length / PAGE));
+    if (state.page[k] > pages) state.page[k] = pages;
+    var a = (state.page[k] - 1) * PAGE, part = list.slice(a, a + PAGE);
+    var th = function (key) { return '<th>' + esc(t(key)) + '</th>'; };
+    $('thead', box).innerHTML = '<tr><th class="num">#</th>' + (yes ? ['cWaybill', 'cTime', 'cShift', 'cOrigin', 'cBy', 'cImg', 'cType', 'cDesc', 'cLines'].map(th).join('')
+      : ['cWaybill', 'cWhy'].map(th).join('')) + '</tr>';
+    $('tbody', box).innerHTML = part.length ? part.map(function (r, i) {
+      var n = '<td class="num">' + (a + i + 1) + '</td><td>' + esc(r.w) + '</td>';
+      if (!yes) return '<tr>' + n + '<td>' + esc(r.err ? t('whyErr') : !r.ok ? t('whyNone') : t('whyNo')) + '</td></tr>';
+      var h = r.p[k], sc = h.shift && h.shift !== 'N/A' ? '<span class="tk-pill bg-' + h.shift.toLowerCase() + '">' + h.shift + '</span>' : esc(h.shift);
+      return '<tr>' + n + '<td>' + esc(fmtTime(h.t)) + '</td><td>' + sc + '</td><td>' + esc(h.origin) + '</td><td>' + esc(h.by) + '</td><td>' + imgCell(h) + '</td>' +
+        '<td>' + esc(h.type) + '</td><td class="desc" title="' + esc(h.desc) + '">' + esc(h.desc) + '</td><td class="num">' + fmtInt(h.n) + '</td></tr>';
+    }).join('') : '<tr><td colspan="10" class="tk-empty">' + esc(yes ? t('noHits') : '—') + '</td></tr>';
+    $('.tk-note', box).textContent = list.length ? t('rows', {a: fmtInt(a + 1), b: fmtInt(a + part.length), n: fmtInt(list.length)}) : '';
+    var pg = '';
+    if (pages > 1) {
+      pg += '<button type="button" data-p="' + (state.page[k] - 1) + '"' + (state.page[k] <= 1 ? ' disabled' : '') + ' aria-label="Anterior">‹</button>';
+      pg += '<span>' + state.page[k] + ' / ' + pages + '</span>';
+      pg += '<button type="button" data-p="' + (state.page[k] + 1) + '"' + (state.page[k] >= pages ? ' disabled' : '') + ' aria-label="Próxima">›</button>';
+    }
+    $('.tk-pager', box).innerHTML = pg;
+    $$('.tk-pager button', box).forEach(function (b) { b.addEventListener('click', function () { state.page[k] = Number(b.getAttribute('data-p')); renderTable(k); }); });
+  }
+  function wireBlock(k) {
+    var box = $('#block' + k);
+    $$('.seg button', box).forEach(function (b) {
+      b.addEventListener('click', function () {
+        state.tab[k] = b.getAttribute('data-tab'); state.page[k] = 1;
+        $$('.seg button', box).forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+        renderTable(k);
+      });
+    });
+    $('.tk-find', box).addEventListener('input', function (e) { state.find[k] = e.target.value; state.page[k] = 1; renderTable(k); });
+    $('.tk-copy', box).addEventListener('click', function () {
+      var text = rowsOf(k).map(function (r) { return r.w; }).join('\n'), n = text ? text.split('\n').length : 0;
+      var ok = function () { toast(t('copied', {n: fmtInt(n)}), 'success'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, function () { copyOld(text); ok(); });
+      else { copyOld(text); ok(); }
+    });
+  }
+  function copyOld(text) {
+    var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    ta.remove();
+  }
+
+  // ------------------------------------------------------------------ planilha
+  function download() {
+    if (!state.results.length) return;
+    var btn = $('#xlsxBtn');
+    btn.disabled = true;
+    toast(t('xlsxBusy'));
+    var book = X.rastreioBook({patterns: state.pats, results: state.results, summaries: [R.summary(state.results, 0), R.summary(state.results, 1)], at: new Date()});
+    X.build(book).then(function (bytes) {
+      var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
+      var name = 'JT_Pesquisa_Rastreamento_' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + 'h' + p(d.getMinutes()) + '.xlsx';
+      var url = URL.createObjectURL(new Blob([bytes], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})), a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+      toast(t('xlsxOk'), 'success');
+    }).catch(function (e) { toast(String(e && e.message || e), 'error'); }).then(function () { btn.disabled = state.running || !state.results.length; });
+  }
+
+  // ------------------------------------------------------------------ tela
+  function applyLang() {
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'pt-BR';
+    $$('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
+    $$('[data-i18n-placeholder]').forEach(function (el) { el.setAttribute('placeholder', t(el.getAttribute('data-i18n-placeholder'))); });
+    $$('.lang-btn').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-lang') === lang)); });
+    updateCount(); renderSetup(); render();
+  }
+  function init() {
+    var sl = load('jt_lang');
+    if (sl === 'zh' || sl === 'pt') lang = sl;
+    $('#tkVersion').textContent = 'V' + (BOOT.versao || '');
+    $('#pat1').value = load('jt_pesquisa_p1') !== null ? load('jt_pesquisa_p1') : DEFAULTS[0];
+    $('#pat2').value = load('jt_pesquisa_p2') !== null ? load('jt_pesquisa_p2') : DEFAULTS[1];
+    try { state.modelo = JSON.parse(load('jt_pesquisa_modelo') || 'null'); } catch (e) { state.modelo = null; }
+    api.modelo('ler').then(function (m) { state.modelo = m; store('jt_pesquisa_modelo', m ? JSON.stringify(m) : null); renderSetup(); }, function () {});
+    $('#tokenSave').addEventListener('click', function () {
+      var v = $('#tokenInput').value.trim().replace(/^authtoken\s*:\s*/i, '');
+      if (!v) { $('#tokenInput').focus(); return; }
+      store('jt_pesquisa_token', v); $('#tokenInput').value = ''; renderSetup(); toast(t('tokSaved'), 'success');
+    });
+    $('#tokenForget').addEventListener('click', function () { store('jt_pesquisa_token', null); renderSetup(); toast(t('tokForgot')); });
+    $('#teachOpen').addEventListener('click', function () { $('#teachBox').classList.toggle('hidden'); });
+    $('#teachTest').addEventListener('click', teach);
+    $('#teachForget').addEventListener('click', function () {
+      api.modelo('apagar').then(function () { state.modelo = null; store('jt_pesquisa_modelo', null); renderSetup(); toast(t('teachForgot')); }, function (e) { toast(e.message, 'error'); });
+    });
+    $('#waybills').addEventListener('input', updateCount);
+    $('#runBtn').addEventListener('click', start);
+    $('#stopBtn').addEventListener('click', function () { state.stop = true; });
+    $('#xlsxBtn').addEventListener('click', download);
+    $('#clearBtn').addEventListener('click', function () {
+      if (state.running) return;
+      $('#waybills').value = ''; state.list = []; state.results = []; state.fotos = null;
+      $('#statusBox').classList.add('hidden'); showAlert(''); updateCount(); render();
+    });
+    $('#themeBtn').addEventListener('click', function () {
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      if (dark) document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', 'dark');
+      store('jt_theme', dark ? 'light' : 'dark');
+    });
+    $$('.lang-btn').forEach(function (b) { b.addEventListener('click', function () { lang = b.getAttribute('data-lang'); store('jt_lang', lang); applyLang(); }); });
+    applyLang();
+  }
+  init();
+})();
+</script>
