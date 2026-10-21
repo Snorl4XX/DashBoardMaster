@@ -4083,4 +4083,192 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'Falta de Bipagem na Expedição: dias já baixados usam o 1º + 2º segmento guardado (sem baixar de novo)');
 }
 
-console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');
+// ---------- V4.13: Pesquisa no Rastreamento do pacote (dados FICTÍCIOS) ----------
+{
+  const C = ctx.JTCore_;
+  // Texto padrão: maiúsculas, acentos e espaços nos colchetes não importam; "*" vale qualquer trecho.
+  const m1 = C.trackMatcher('A encomenda expressa está [ SP GRU] sendo enviada');
+  check(m1('A encomenda expressa está [SP GRU] sendo enviada, para [MT FIC], escaneador [X]') && m1('a ENCOMENDA expressa esta [sp gru ]  sendo enviada') &&
+    !m1('A encomenda expressa está [PA FIC-SP] sendo enviada, para [SP GRU]'), 'padrão: colchete com espaço, acento e maiúscula não importam; outra base não vale');
+  const mw = C.trackMatcher('está [*] sendo enviada');
+  check(mw('A encomenda expressa está [PA FIC-SP] sendo enviada') && !mw('O expresso chegou [SP GRU]'), 'padrão com * (qualquer trecho)');
+  check(C.trackMatcher('   ') === null && C.trackMatcher('') === null && C.trackMatcher(null) === null, 'padrão vazio = bloco desligado');
+  // Primeiro bipe (o mais antigo), mesmo com o JMS mandando do mais novo para o mais antigo.
+  const det = [
+    {scanTime: '2026-09-10 23:10:00', scanTypeName: 'Encomenda recebida', scanNetworkName: 'SP GRU', scanByName: 'SEGUNDO FICTICIO', code: 2, imgType: 8,
+      waybillTrackingContent: 'O expresso chegou [SP GRU] A parada anterior foi [X], escaneador [SEGUNDO FICTICIO]'},
+    {scanTime: '2026-09-09 15:36:12', scanTypeName: 'Encomenda recebida', scanNetworkName: '', scanByName: '', code: 2, imgType: 8,
+      waybillTrackingContent: 'O expresso chegou [SP GRU] A parada anterior foi [], escaneador [PRIMEIRO FICTICIO], o número do pedido []'},
+    {scanTime: '2026-09-09 21:00:00', scanTypeName: 'Encomenda carregada', scanNetworkName: 'SP GRU', scanByName: 'CARREGADOR FICTICIO', code: 1,
+      waybillTrackingContent: 'A encomenda expressa está [SP GRU] sendo enviada, para [MT FIC], escaneador [CARREGADOR FICTICIO]'}];
+  const h2 = C.trackHit(det, C.trackMatcher('O expresso chegou [SP GRU]'));
+  check(h2 && h2.t === '2026-09-09 15:36:12' && h2.shift === 'T2' && h2.n === 2 && h2.origin === 'SP GRU' && h2.by === 'PRIMEIRO FICTICIO' && h2.img === true,
+    'sempre o PRIMEIRO bipe com o padrão; origem e escaneador tirados da descrição quando o JMS não manda os campos', h2);
+  const h1 = C.trackHit(det, m1);
+  check(h1 && h1.img === false && h1.by === 'CARREGADOR FICTICIO' && h1.code === 1 && C.trackHit(det, C.trackMatcher('pacote problemático')) === null,
+    'linha sem imgType = sem imagem; sem a linha = null');
+  const sm = C.trackSummary([{w: 'A', ok: true, p: [h1, h2]}, {w: 'B', ok: true, p: [null, Object.assign({}, h2, {t: '2026-09-09 07:00:00', shift: 'T1'})]},
+    {w: 'C', ok: false, p: [null, null]}, {w: 'D', ok: true, p: [null, Object.assign({}, h2, {t: '2026-09-09 08:00:00', shift: 'T1'})]}], 1);
+  check(sm.total === 4 && sm.yes === 3 && sm.no === 1 && sm.none === 1 && sm.top === 'T1' && sm.topCount === 2 && sm.shifts.T2 === 1 && sm.hours[15] === 1 &&
+    sm.hours[7] === 1 && sm.scanners[0].label === 'PRIMEIRO FICTICIO' && sm.scanners[0].value === 3, 'resumo do bloco: tem/não tem, sem rastreamento, turno que mais ocorreu, horas', sm);
+  const tie = C.trackSummary([{ok: true, p: [Object.assign({}, h1, {shift: 'T3'})]}, {ok: true, p: [Object.assign({}, h1, {shift: 'T2'})]}], 0);
+  check(tie.top === 'T2', 'empate no turno: o primeiro de T1, T2, T3');
+
+  // Servidor: JMS falso do Rastreamento do pacote.
+  const trackOf = (w, i) => {
+    const d = [{waybillNo: w, scanTime: '2026-09-09 ' + String((i * 7) % 24).padStart(2, '0') + ':36:12', scanTypeName: 'Encomenda recebida', scanNetworkName: 'SP GRU',
+      scanByName: 'RECEBEDOR FICTICIO ' + (i % 3), code: 2, imgType: 8, waybillTrackingContent: 'O expresso chegou [SP GRU] A parada anterior foi [], escaneador [RECEBEDOR FICTICIO ' + (i % 3) + ']'}];
+    if (i % 3) d.push({waybillNo: w, scanTime: '2026-09-09 23:00:00', scanTypeName: 'Encomenda carregada', scanNetworkName: 'SP GRU', scanByName: 'CARREGADOR FICTICIO', code: 1,
+      waybillTrackingContent: 'A encomenda expressa está [SP GRU] sendo enviada, para [MT FIC], escaneador [CARREGADOR FICTICIO]'});
+    if (i % 5 === 0) d.push({waybillNo: w, scanTime: '2026-09-11 09:07:38', scanTypeName: 'bipe de pacote problemático', scanNetworkName: 'SP GRU', scanByName: 'PROBLEMA FICTICIO',
+      code: 110, imgType: 3, waybillTrackingContent: '[SP GRU] A verificação do problema foi realizada, o escaneador é [FIC01-PROBLEMA FICTICIO]'});
+    return d.reverse();
+  };
+  const known = {};
+  for (let i = 0; i < 300; i++) known['FIC' + String(i).padStart(9, '0')] = i;
+  const trackCtx = opts => createContext({props: {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN'}, quiet: true, jms: (url, req, state) => {
+    const body = JSON.parse(req.payload || '{}'), resp = (code, o) => ({getResponseCode: () => code, getContentText: () => JSON.stringify(o), getHeaders: () => ({})});
+    (state.calls = state.calls || []).push({route: url.split('/').pop(), n: (body.keywordList || [1]).length, headers: req.headers});
+    if (/keywordList$/.test(url)) {
+      const kws = body.keywordList;
+      if (body.trackingTypeEnum !== 'WAYBILL') return resp(200, {code: 500, msg: 'parâmetro inválido', fail: true});
+      if (opts.reject && kws.length > opts.reject) return resp(200, {code: 500, msg: 'máximo ' + opts.reject, fail: true});
+      if (opts.silent && kws.length > opts.silent) return resp(200, {code: 1, msg: 'ok', succ: true, data: []});
+      const take = opts.trunc ? kws.slice(0, opts.trunc) : kws;
+      return resp(200, {code: 1, msg: 'ok', succ: true, data: take.filter(w => known[w] !== undefined).map(w => ({keyword: w, details: trackOf(w, known[w])}))});
+    }
+    if (/abnormalPieceScanList\/pageList$/.test(url)) {
+      if (!body.waybillId || body.current !== 1 || body.countryId !== '1') return resp(200, {code: 500, msg: 'parâmetro inválido', fail: true});
+      return resp(200, {code: 1, msg: 'ok', succ: true, data: {current: 1, pages: 1, records: [{waybillId: body.waybillId, scanTime: '2026-09-11 09:07:38',
+        images: 'https://arquivo-ficticio.example/foto-' + body.waybillId + '.jpeg?sig=FICT'}]}});
+    }
+    return resp(404, {});
+  }});
+  const ws = Object.keys(known).slice(0, 120).concat(['NAOEXISTE0001', 'NAOEXISTE0002']);
+  const pats = ['A encomenda expressa está [ SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
+  const tc = trackCtx({});
+  const r0 = tc.pesquisarRastreio(ws.join('\n') + '\nFIC000000001\n', pats);
+  const kw = tc.__state.calls.filter(c => c.route === 'keywordList');
+  check(r0.ok && r0.results.length === 122 && !r0.pending.length && r0.results.filter(x => x.p[0]).length === 80 && r0.results.filter(x => x.p[1]).length === 120 &&
+    r0.results.filter(x => !x.ok).length === 2 && kw.length === 3 && kw[0].n === 100, 'pesquisa: 1 consulta para cada 100 remessas, repetida ignorada, tem/não tem por bloco', kw.map(c => c.n));
+  check(r0.results[0].w === 'FIC000000000' && r0.results[0].p[0] === null && r0.results[1].p[0].t === '2026-09-09 23:00:00' && r0.results[1].p[1].shift === 'T1',
+    'resultado na ordem colada, com o primeiro bipe de cada bloco', r0.results[1]);
+  const fotos = r0.results.filter(x => x.p.some(h => h && h.url));
+  check(fotos.length === 0 && tc.__state.calls.filter(c => c.route === 'pageList').length === 0, 'sem bipe de pacote problemático no padrão: nenhuma consulta de foto');
+  const rImg = tc.pesquisarRastreio(['FIC000000005', 'FIC000000006'], ['', 'problema foi realizada']);
+  const pl = tc.__state.calls.filter(c => c.route === 'pageList');
+  check(rImg.results[0].p[0] === null && rImg.results[0].p[1].url === 'https://arquivo-ficticio.example/foto-FIC000000005.jpeg?sig=FICT' && rImg.results[1].p[1] === null &&
+    pl.length === 1 && !pl[0].headers.Routename, 'foto do bipe de pacote problemático (abnormalPieceScanList/pageList) no link da linha', rImg.results[0]);
+  // Limite do JMS: recusa acima de 30 → aprende 25 (metade, metade); vazio acima de 40 → aprende a metade que respondeu; corte nas 25 primeiras.
+  const tr = trackCtx({reject: 30}), rr = tr.pesquisarRastreio(ws, pats);
+  check(rr.results.length === 122 && rr.results.filter(x => x.p[1]).length === 120 && rr.batch === 25 && tr.__state.props.JMS_TRIP_BATCH === '25',
+    'JMS recusa lotes grandes: limite aprendido (o mesmo dos IDs de viagem) e nenhuma remessa perdida', rr.batch);
+  const tsl = trackCtx({silent: 40}), rs = tsl.pesquisarRastreio(ws, pats);
+  check(rs.results.filter(x => x.p[1]).length === 120 && rs.batch === 25, 'JMS devolve vazio acima do limite: metade que responde vira o limite', rs.batch);
+  const ttr = trackCtx({trunc: 25}), rt = ttr.pesquisarRastreio(ws, pats);
+  check(rt.results.filter(x => x.p[1]).length === 120 && !rt.pending.length, 'JMS devolve só as primeiras: as outras voltam para a fila');
+  // Remessas que não existem: poucas consultas (não divide sem fim).
+  const fake = [];
+  for (let i = 0; i < 300; i++) fake.push('NAOEXISTE' + String(i).padStart(4, '0'));
+  const tb = trackCtx({}), rb = tb.pesquisarRastreio(fake, pats), nb = tb.__state.calls.filter(c => c.route === 'keywordList').length;
+  check(rb.results.length === 300 && rb.results.every(x => !x.ok && !x.p[0] && !x.p[1]) && nb <= 100 && !tb.__state.props.JMS_TRIP_BATCH,
+    'remessas coladas erradas: "sem rastreamento", poucas consultas e o limite não muda', nb);
+  // Tempo acabando: o que não deu tempo volta para a página (pending), sem perder nada.
+  vm.runInContext('RASTREIO_.BUDGET_MS = 0', tc);
+  const rp = tc.pesquisarRastreio(ws.slice(0, 10), pats);
+  vm.runInContext('RASTREIO_.BUDGET_MS = 240000', tc);
+  check(rp.results.length === 0 && rp.pending.length === 10, 'sem tempo: as remessas voltam para a página mandar de novo', rp.pending.length);
+  let e1 = '', e2 = '', e3 = '';
+  try { tc.pesquisarRastreio('', pats); } catch (e) { e1 = e.message; }
+  try { tc.pesquisarRastreio(ws, ['', ' ']); } catch (e) { e2 = e.message; }
+  try { tc.pesquisarRastreio(Array.from({length: 1001}, (_, i) => 'FIC' + String(i).padStart(9, '0')), pats); } catch (e) { e3 = e.message; }
+  check(/pelo menos uma remessa/.test(e1) && /texto padrão/.test(e2) && /1000 remessas por consulta/.test(e3), 'avisos: sem remessa, sem padrão, mais de 1.000 por chamada', [e1, e2, e3]);
+  const sess = createContext({props: {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN'}, quiet: true, jms: () => ({getResponseCode: () => 200,
+    getContentText: () => JSON.stringify({code: 401, msg: 'token失效，请重新登录', fail: true}), getHeaders: () => ({})})});
+  let es = '';
+  try { sess.pesquisarRastreio(ws.slice(0, 5), pats); } catch (e) { es = e.message; }
+  check(/Sessão do JMS expirada/.test(es), 'token vencido: a página mostra o aviso para trocar o AuthToken', es);
+  check(tc.rastreioWaybills_('fic1234 , FIC1234;FIC9999\n\n x  abc') .join() === 'FIC1234,FIC9999', 'remessas coladas: sem repetir, separadas por linha, espaço, vírgula ou ponto e vírgula');
+  check(tc.webAppUrl_('rastreio') === '?page=rastreio' && JSON.stringify(tc.getAppBootstrap()).indexOf('"trackingUrl":"?page=rastreio"') >= 0,
+    'link da pesquisa no menu do painel (sem implantação: relativo)');
+  const hT = tc.jmsHeaders_('https://gw.jtjms-br.com/operatingplatform/abnormalPieceScanList/pageList');
+  check(!hT.Routename && hT.AuthToken === 'FAKE', 'pacote problemático: primeiro sem cabeçalho de rota (variantes só se o JMS recusar)');
+  const vFrom = (u, page) => createContext({props: {}, quiet: true, jms: () => null});
+  const cU = vFrom();
+  cU.ScriptApp.getService = () => ({getUrl: () => 'https://script.google.com/macros/s/FICTICIO/exec'});
+  const cN = vFrom();
+  cN.ScriptApp.getService = () => ({getUrl: () => 'http://127.0.0.1:8080'});
+  check(cU.webAppUrl_('rastreio') === 'https://script.google.com/macros/s/FICTICIO/exec?page=rastreio' && cN.webAppUrl_('rastreio') === 'http://127.0.0.1:8080/?page=rastreio' &&
+    cU.webAppUrl_('') === 'https://script.google.com/macros/s/FICTICIO/exec', 'link da pesquisa no Apps Script (…/exec?page=rastreio) e no Node.js (/?page=rastreio)');
+}
+
+// V4.13: no Apps Script, um .gs e um .html não podem ter o mesmo nome (o editor recusa) — Rastreio.gs + PesquisaRastreio.html.
+{
+  const fsN = require('fs'), root = require('path').join(__dirname, '..');
+  const gsN = fsN.readdirSync(root).filter(f => /\.gs$/.test(f)).map(f => f.slice(0, -3).toLowerCase());
+  const htN = fsN.readdirSync(root).filter(f => /\.html$/.test(f)).map(f => f.slice(0, -5).toLowerCase());
+  check(gsN.filter(n => htN.indexOf(n) >= 0).length === 0 && htN.indexOf('pesquisarastreio') >= 0 && htN.indexOf('planilha') >= 0,
+    'nomes dos arquivos do Apps Script sem repetição entre .gs e .html', gsN.filter(n => htN.indexOf(n) >= 0));
+}
+
+// ---------- V4.13: planilha .xlsx com gráficos (gerada no navegador) ----------
+(async () => {
+  const fs = require('fs'), path = require('path'), zlib = require('zlib');
+  const pctx = {window: {}, TextEncoder, CompressionStream, Response, Blob, Date, Math, JSON, Object, Array, String, Number, Promise, Uint8Array, Uint32Array, Intl};
+  vm.createContext(pctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'Core.gs'), 'utf8') + '\nwindow.JTCore = JTCoreFactory_();', pctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'Planilha.html'), 'utf8').replace(/^\s*<script>|<\/script>\s*$/g, ''), pctx);
+  const P = pctx.window.JTPlanilha, C = pctx.window.JTCore;
+  check(P.crc32(new TextEncoder().encode('123456789')) === 0xCBF43926, 'CRC-32 do ZIP');
+  check(Math.abs(P.serial('2026-09-09 15:36:12') - (46274 + (15 * 3600 + 36 * 60 + 12) / 86400)) < 1e-9 && P.serial('') === null, 'Tempo de digitalização vira data e hora do Excel');
+  const results = [];
+  for (let i = 0; i < 30; i++) {
+    const w = 'FIC' + String(i).padStart(9, '0'), ok = i !== 7;
+    const h1 = ok && i % 2 ? {t: '2026-09-09 2' + (i % 4) + ':00:00', origin: 'SP GRU', by: 'CARREGADOR FICTICIO', type: 'Encomenda carregada', desc: 'A encomenda expressa está [SP GRU] sendo enviada <&>', img: false, n: 1} : null;
+    const h2 = ok ? {t: '2026-09-09 ' + String((i * 5) % 24).padStart(2, '0') + ':10:00', origin: 'SP GRU', by: 'RECEBEDOR FICTICIO ' + (i % 3), type: 'Encomenda recebida',
+      desc: 'O expresso chegou [SP GRU]', img: i % 2 === 0, n: 1, url: i % 10 === 0 ? 'https://arquivo-ficticio.example/f' + i + '.jpeg?a=1&b=2' : ''} : null;
+    [h1, h2].forEach(h => { if (h) h.shift = C.shiftOf(h.t); });
+    results.push({w, ok, p: [h1, h2]});
+  }
+  const pats = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU]'];
+  const book = P.rastreioBook({center: 'SP GRU', patterns: pats, results, summaries: [C.trackSummary(results, 0), C.trackSummary(results, 1)], at: new Date(2026, 9, 21, 9, 5)});
+  check(book.sheets.map(s => s.name).join('|') === 'Resumo|Bloco 1 - Tem|Bloco 1 - Não tem|Bloco 2 - Tem|Bloco 2 - Não tem' && book.sheets[0].charts.length === 5,
+    'planilha: Resumo com 5 gráficos (rosca dos 2 blocos, turno, hora, quem escaneou) + abas Tem e Não tem de cada bloco', book.sheets[0].charts.map(c => c.type));
+  const t2 = book.sheets[3].rows, t2r = t2[3];
+  check(t2.length === 3 + 29 && t2r[1].v === 'FIC000000000' && typeof t2r[2].v === 'number' && t2r[3].v === 'T3' && t2r[8].link && t2r[8].v === 'Ver imagem' &&
+    t2[4][8].v === 'NÃO TEM IMAGEM!' && t2[5][8].v === 'Tem imagem (ver no JMS)', 'aba Tem: horário, turno, origem, escaneador e imagem (link, "NÃO TEM IMAGEM!" ou imagem no JMS)');
+  const miss = book.sheets[2].rows.slice(3).map(r => r[2].v);
+  check(miss.length === 16 && miss.filter(v => v === 'Sem rastreamento no JMS').length === 1 && miss.filter(v => v === 'Nenhuma linha com o padrão').length === 15,
+    'aba Não tem: o motivo de cada remessa');
+  const one = P.rastreioBook({center: 'SP GRU', patterns: ['', pats[1]], results, summaries: [C.trackSummary(results, 0), C.trackSummary(results, 1)]});
+  check(one.sheets.length === 3 && one.sheets[0].charts.length === 4, 'só o bloco 2 preenchido: só as abas dele');
+  const unzipped = {};
+  const bytes = Buffer.from(await P.build(book));
+  let at = 0;
+  while (bytes.readUInt32LE(at) === 0x04034b50) {
+    const method = bytes.readUInt16LE(at + 8), csize = bytes.readUInt32LE(at + 18), nlen = bytes.readUInt16LE(at + 26), elen = bytes.readUInt16LE(at + 28);
+    const name = bytes.slice(at + 30, at + 30 + nlen).toString('utf8'), data = bytes.slice(at + 30 + nlen + elen, at + 30 + nlen + elen + csize);
+    unzipped[name] = (method === 8 ? zlib.inflateRawSync(data) : data).toString('utf8');
+    at += 30 + nlen + elen + csize;
+  }
+  const names = Object.keys(unzipped);
+  const wellFormed = xml => {
+    const stack = [], re = /<(\/?)([A-Za-z_][\w:.-]*)[^>]*?(\/?)>/g;
+    let m;
+    const body = xml.replace(/^<\?xml[^>]*\?>/, '');
+    while ((m = re.exec(body))) { if (m[3]) continue; if (m[1]) { if (stack.pop() !== m[2]) return false; } else stack.push(m[2]); }
+    return !stack.length && !/&(?!amp;|lt;|gt;|quot;|apos;|#)/.test(body);
+  };
+  check(names.length === 21 && ['[Content_Types].xml', 'xl/workbook.xml', 'xl/styles.xml', 'xl/charts/chart5.xml', 'xl/drawings/drawing1.xml', 'xl/worksheets/sheet5.xml'].every(n => unzipped[n]) &&
+    names.filter(n => /\.xml$|\.rels$/.test(n)).every(n => wellFormed(unzipped[n])), 'arquivo .xlsx: ZIP com as partes do Excel e XML bem formado', names);
+  check(/<c:doughnutChart>/.test(unzipped['xl/charts/chart1.xml']) && /<c:barDir val="col"\/>/.test(unzipped['xl/charts/chart3.xml']) &&
+    /<c:barDir val="bar"\/>/.test(unzipped['xl/charts/chart5.xml']) && /<c:min val="0"\/>/.test(unzipped['xl/charts/chart3.xml']) &&
+    /'Resumo'!\$B\$\d+:\$B\$\d+/.test(unzipped['xl/charts/chart1.xml']), 'gráficos do Excel ligados às tabelas do Resumo (eixo começa no zero)');
+  check((unzipped['xl/worksheets/_rels/sheet4.xml.rels'].match(/TargetMode="External"/g) || []).length === 3 &&
+    /a=1&amp;b=2/.test(unzipped['xl/worksheets/_rels/sheet4.xml.rels']) && /<hyperlink ref="I4" r:id="rIdL1"\/>/.test(unzipped['xl/worksheets/sheet4.xml']) &&
+    /&lt;&amp;&gt;/.test(unzipped['xl/worksheets/sheet2.xml']), 'link "Ver imagem" e texto com < & > escapados');
+  check(/<pane ySplit="3" xSplit|<pane xSplit="2" ySplit="3"/.test(unzipped['xl/worksheets/sheet2.xml']) && /<autoFilter ref="A3:J3"\/>/.test(unzipped['xl/worksheets/sheet2.xml']) &&
+    /_xlnm\._FilterDatabase/.test(unzipped['xl/workbook.xml']), 'abas com cabeçalho fixo e filtro');
+})().then(() => {
+  console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');
+}, e => { console.error('FALHOU: ' + (e && e.stack || e)); process.exit(1); });

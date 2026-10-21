@@ -94,19 +94,21 @@ const POLYFILL = `<script>
 
 // ------------------------------------------------------------------ funções liberadas
 const ALLOW = {stamp: '', names: new Set()};
-/** Só as funções que a página chama (call('…') no Client.html) podem ser chamadas pela rede. */
+/** Só as funções que as páginas chamam (call('…') no Client.html e no PesquisaRastreio.html, V4.13) podem ser chamadas pela rede. */
+const PAGE_FILES = ['Client.html', 'PesquisaRastreio.html'];
 function allowed(fn) {
-  const file = path.join(cfg.codeDir, 'Client.html');
-  let stamp = '';
-  try { stamp = String(fs.statSync(file).mtimeMs); } catch (e) { /* sem arquivo */ }
+  const files = PAGE_FILES.map(f => path.join(cfg.codeDir, f));
+  const stamp = files.map(file => { try { return String(fs.statSync(file).mtimeMs); } catch (e) { return ''; } }).join('|');
   if (stamp !== ALLOW.stamp) {
     ALLOW.stamp = stamp;
     ALLOW.names = new Set();
-    try {
-      const re = /call\('([A-Za-z0-9]+)'/g, text = fs.readFileSync(file, 'utf8');
-      let m;
-      while ((m = re.exec(text))) ALLOW.names.add(m[1]);
-    } catch (e) { /* nenhuma */ }
+    files.forEach(file => {
+      try {
+        const re = /call\('([A-Za-z0-9]+)'/g, text = fs.readFileSync(file, 'utf8');
+        let m;
+        while ((m = re.exec(text))) ALLOW.names.add(m[1]);
+      } catch (e) { /* sem o arquivo */ }
+    });
   }
   return typeof fn === 'string' && !/_$/.test(fn) && ALLOW.names.has(fn);
 }

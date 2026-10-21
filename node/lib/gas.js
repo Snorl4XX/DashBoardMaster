@@ -20,7 +20,7 @@ const {makeDriveApp, makeBlob} = require('./drive');
 const {fetchAllSync, sleepSync} = require('./syncfetch');
 
 const TZ = 'America/Sao_Paulo';
-const FILE_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
+const FILE_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Rastreio', 'Analytics', 'Report', 'Triggers', 'Code'];
 const LOCK_MS = 10 * 60 * 1000;
 const TRIGGERS = ['syncHourly', 'processSyncQueue', 'auditYesterday'];
 

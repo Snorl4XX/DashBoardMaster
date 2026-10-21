@@ -48,6 +48,7 @@
       tableFind: 'Localizar remessa na tabela', results: 'Resultados', resultsTitle: 'Evolução consolidada',
       daily: 'Diário', weekly: 'Semanal', monthly: 'Mensal', quarterly: 'Trimestral', goal: 'Meta',
       indicators: 'Indicadores', analyses: 'Análises', resultsNavSub: 'Diário · semanal · mensal · trimestral',
+      trackingNav: 'Pesquisa no Rastreamento', trackingNavSub: 'Texto padrão · tem/não tem · turno',
       all: 'Todos', allIndicators: 'Todos os indicadores', allShifts: 'Todos os turnos', selectedN: '{n} selecionados',
       clear: 'Limpar', clearFilters: 'Limpar filtros', showMore: 'Mostrar mais {n}', noOptions: 'Sem valores no período', close: 'Fechar',
       presetLastDay: 'Último dia', presetPrevDay: 'Dia anterior', preset7: '7 dias', preset30: '30 dias', presetMonth: 'Mês atual', preset90: '90 dias',
@@ -222,6 +223,7 @@
       tableFind: '在表格中查找运单', results: '结果', resultsTitle: '综合趋势',
       daily: '日', weekly: '周', monthly: '月', quarterly: '季度', goal: '目标',
       indicators: '指标', analyses: '分析', resultsNavSub: '日 · 周 · 月 · 季度',
+      trackingNav: '轨迹关键字查询', trackingNavSub: '关键字 · 有/无 · 班次',
       all: '全部', allIndicators: '全部指标', allShifts: '全部班次', selectedN: '已选 {n} 项',
       clear: '清除', clearFilters: '清除筛选', showMore: '显示更多 {n} 项', noOptions: '该期间无数据', close: '关闭',
       presetLastDay: '最近一天', presetPrevDay: '前一天', preset7: '近7天', preset30: '近30天', presetMonth: '本月', preset90: '近90天',
@@ -421,6 +423,7 @@
     locationMain: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     locationSub: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     results: '<path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/>',
+    tracking: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8M8 10.5h5M10.5 8v5"/>',
     evolution: '<path d="M3 17l5-5 4 3 8-9M16 6h4v4"/>',
     shift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', receiptShift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     expeditionShift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -859,8 +862,13 @@
     html += '<div class="nav-label">' + esc(t('analyses')) + '</div>' +
       '<button type="button" class="nav-item' + (state.view === 'results' ? ' active' : '') + '" data-view="results">' +
       '<span class="nav-ico">' + icon('results') + '</span><span class="nav-copy"><b>' + esc(t('results')) + '</b><small>' + esc(t('resultsNavSub')) + '</small></span></button>';
+    // V4.13: Pesquisa no Rastreamento do pacote (outra página: ?page=rastreio).
+    if (state.boot.app && state.boot.app.trackingUrl) {
+      html += '<a class="nav-item" href="' + esc(state.boot.app.trackingUrl) + '" target="_top">' +
+        '<span class="nav-ico">' + icon('tracking') + '</span><span class="nav-copy"><b>' + esc(t('trackingNav')) + '</b><small>' + esc(t('trackingNavSub')) + '</small></span></a>';
+    }
     nav.innerHTML = html;
-    $$('.nav-item', nav).forEach(function (b) {
+    $$('button.nav-item', nav).forEach(function (b) {
       b.addEventListener('click', function () {
         toggleSidebar(false);
         if (b.getAttribute('data-view') === 'results') openResults(); else selectIndicator(b.getAttribute('data-ind'));

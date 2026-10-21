@@ -1,8 +1,56 @@
-# J&T DASHMASTER V4.12.6 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.13 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.13 — Pesquisa no Rastreamento do pacote (texto padrão, turno e planilha com gráficos)
+**Pedido:** colar remessas, pesquisar no JMS (Operação › Consulta do pacote › Rastreamento do pacote) um texto padrão da coluna "Descrição da etapa de bipagem", contar quantas têm e quantas não têm, ver o turno do primeiro bipe e baixar uma planilha J&T com gráficos.
+
+### Onde fica
+- No painel: menu lateral → **Análises → Pesquisa no Rastreamento**.
+- Ou o link do painel com `?page=rastreio` no fim (Apps Script: `…/exec?page=rastreio`; Node.js: `http://computador:porta/?page=rastreio`).
+
+### Como usar
+1. Cole as remessas na caixa da esquerda (uma por linha; também aceita espaço, vírgula ou ponto e vírgula). Repetidas são ignoradas.
+2. **Bloco 1 · Tem ou não tem:** o texto padrão. Exemplo: `A encomenda expressa está [SP GRU] sendo enviada` (tem o bipe de expedição na base).
+3. **Bloco 2 · Turno que mais ocorreu:** outro texto padrão. Exemplo: `O expresso chegou [SP GRU] A parada anterior foi`.
+4. Clique em **Pesquisar no JMS**. As remessas vão de 1.000 em 1.000, como na caixa do JMS.
+5. Clique em **Baixar planilha (.xlsx)**.
+
+Regras da pesquisa:
+- Vale **sempre o primeiro bipe** (o mais antigo) que tem o texto.
+- Maiúsculas, acentos e espaços dentro dos colchetes não fazem diferença (`[ SP GRU]` = `[SP GRU]`).
+- `*` vale qualquer trecho: `está [*] sendo enviada` pega qualquer base.
+- Um bloco vazio fica desligado.
+
+### O que aparece
+- **Cartões:** remessas pesquisadas, quantas têm o padrão, quantas não têm, e quantas estão sem rastreamento no JMS (bloco 1) ou o turno que mais ocorreu (bloco 2).
+- **Gráficos:** tem × não tem (rosca). No bloco 2, também por turno (T1 06:00–13:59, T2 14:00–21:59, T3 22:00–05:59), por hora e quem mais escaneou.
+- **Tabelas:** abas "Tem" e "Não tem". Colunas: remessa, Tempo de digitalização, turno, origem (a base do bipe, o `[SP GRU]`), quem escaneou (`escaneador [Nome]`), tipo de bipagem, descrição, imagem e quantas linhas tinham o texto.
+- **Imagem:** "NÃO TEM IMAGEM!" quando a linha não tem "Ver imagem". No bipe de pacote problemático, a foto vem do bloco "Lista registrada de pacote problemático" e aparece na linha. Nos outros bipes com "Ver imagem", a tabela diz "Tem imagem (ver no JMS)".
+- **Copiar remessas:** copia as remessas da aba aberta, para colar no JMS.
+
+### Planilha (.xlsx), padrão J&T
+- **Resumo:** as tabelas de cada bloco e os gráficos do próprio Excel ao lado (rosca, por turno, por hora, quem mais escaneou).
+- Uma aba **Tem** e uma **Não tem** para cada bloco. Os cabeçalhos ficam fixos, com filtro, e o link "Ver imagem" abre a foto.
+
+A planilha é montada no navegador: não gasta cota do Google nem passa pelo servidor.
+
+### Consultas ao JMS
+- Usa o mesmo Rastreamento do pacote dos IDs de viagem (`podTracking/inner/query/keywordList`), com várias remessas por consulta.
+- Se o JMS recusar ou cortar a consulta, o painel aprende o limite sozinho e nenhuma remessa se perde.
+- Se o tempo da chamada acabar, a página manda de novo o que faltou.
+- Se o AuthToken vencer no meio, a pesquisa para com o aviso e o botão **Continuar** retoma de onde parou.
+
+### Como instalar
+- **Apps Script:** troque `Config.gs`, `Core.gs`, `JmsApi.gs`, `Code.gs`, `Client.html` e `Styles.html` pelos do pacote. Crie três arquivos novos:
+  - `Rastreio` (botão **+ → Script**);
+  - `PesquisaRastreio` (botão **+ → HTML**);
+  - `Planilha` (botão **+ → HTML**).
+
+  Depois **Implantar → Gerenciar implantações → ✏️ → Nova versão**.
+- **Node.js:** copie a pasta nova por cima e reinicie o `iniciar` (o `node/server.js` mudou: libera a função da página nova).
 
 ## V4.12.6 — Envio Errado e Falta de Bipagem na Expedição: segmento pela fórmula do WPS
 **Pedido:** modificar os gráficos do Envio Errado e da Falta de Bipagem na Expedição, seguindo a fórmula do WPS enviada, e tirar dois gráficos da Falta de Bipagem na Expedição.

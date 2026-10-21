@@ -1,0 +1,424 @@
+<script>
+/**
+ * V4.13 — PLANILHA .xlsx NO NAVEGADOR, com gráficos do próprio Excel (Pesquisa no Rastreamento). Sem bibliotecas: o arquivo
+ * é um ZIP com os XML do Excel (planilhas, estilos, desenhos e gráficos). Funciona igual no Apps Script e no Node.js, porque
+ * nada passa pelo servidor. Comprime com CompressionStream quando o navegador tem; senão grava sem compressão.
+ *
+ * JTPlanilha.build(livro) → Promise<Uint8Array>. livro = {sheets: [{name, cols: [larguras], rows: [[célula…]], heights: {linha: pt},
+ *   merges: ['A1:H1'], freeze: 'A4', filter: 'A3:J3', charts: [{type: 'col'|'bar'|'doughnut', title, sheet, cat: 'A7:A8',
+ *   val: 'B7:B8', name, colors: ['E60012'…], at: [col, linha, col2, linha2]}]}]}. Célula: texto, número ou {v, s, link}.
+ */
+window.JTPlanilha = (function () {
+  'use strict';
+  var NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  var NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  var NS_PR = 'http://schemas.openxmlformats.org/package/2006/relationships';
+  var NS_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+  var NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+  // Em pedaços: "<" + "?" juntos seriam lidos como marca de modelo pelo HtmlService do Apps Script.
+  var HEAD = '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"?' + '>\n';
+
+  // Estilos (índice em cellXfs). Cores da J&T: vermelho E60012, cinzas do painel.
+  var S = {title: 1, subtitle: 2, header: 3, text: 4, int: 5, pct: 6, label: 7, date: 8, link: 9, noimg: 10, section: 11, hero: 12,
+    yes: 13, center: 14, bold: 15, intBold: 16, pctBold: 17, note: 18};
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function colName(n) { var s = ''; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+  function ref(c, r) { return colName(c) + r; }
+  /** "B7:B9" → {c1, r1, c2, r2} */
+  function parseRange(a) {
+    var m = String(a).match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
+    var cn = function (s) { var n = 0; for (var i = 0; i < s.length; i++) n = n * 26 + s.charCodeAt(i) - 64; return n; };
+    return {c1: cn(m[1]), r1: Number(m[2]), c2: cn(m[3] || m[1]), r2: Number(m[4] || m[2])};
+  }
+  function absRange(sheet, a) {
+    var p = parseRange(a);
+    return "'" + sheet.replace(/'/g, "''") + "'!$" + colName(p.c1) + '$' + p.r1 + (p.c1 === p.c2 && p.r1 === p.r2 ? '' : ':$' + colName(p.c2) + '$' + p.r2);
+  }
+  /** "2026-09-09 15:36:12" → número de série do Excel (data e hora como na tela do JMS, sem fuso). */
+  function serial(t) {
+    var m = String(t || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) return null;
+    return (Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) - Date.UTC(1899, 11, 30)) / 86400000;
+  }
+
+  // ------------------------------------------------------------------ partes do Excel
+  function stylesXml() {
+    var fonts = [
+      '<font><sz val="10"/><color rgb="FF1F2430"/><name val="Arial"/></font>',
+      '<font><b/><sz val="16"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>',
+      '<font><i/><sz val="10"/><color rgb="FF6B7280"/><name val="Arial"/></font>',
+      '<font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>',
+      '<font><b/><sz val="12"/><color rgb="FFE60012"/><name val="Arial"/></font>',
+      '<font><b/><sz val="10"/><color rgb="FF1F2430"/><name val="Arial"/></font>',
+      '<font><u/><sz val="10"/><color rgb="FF1155CC"/><name val="Arial"/></font>',
+      '<font><b/><sz val="10"/><color rgb="FFB42318"/><name val="Arial"/></font>',
+      '<font><b/><sz val="18"/><color rgb="FFE60012"/><name val="Arial"/></font>'
+    ];
+    var fill = function (rgb) { return '<fill><patternFill patternType="solid"><fgColor rgb="FF' + rgb + '"/><bgColor indexed="64"/></patternFill></fill>'; };
+    var fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>', fill('E60012'), fill('FFF1F2'), fill('F3F4F6')];
+    var side = '<color rgb="FFD1D5DB"/>';
+    var borders = ['<border><left/><right/><top/><bottom/><diagonal/></border>',
+      '<border><left style="thin">' + side + '</left><right style="thin">' + side + '</right><top style="thin">' + side + '</top><bottom style="thin">' + side + '</bottom><diagonal/></border>'];
+    // [fonte, fundo, borda, formato, alinhamento]
+    var xf = [
+      [0, 0, 0, 0, ''], [1, 2, 0, 0, '<alignment vertical="center"/>'], [2, 0, 0, 0, '<alignment vertical="center"/>'],
+      [3, 2, 1, 0, '<alignment horizontal="center" vertical="center" wrapText="1"/>'], [0, 0, 1, 0, '<alignment vertical="center"/>'],
+      [0, 0, 1, 3, '<alignment vertical="center"/>'], [0, 0, 1, 165, '<alignment vertical="center"/>'], [5, 4, 1, 0, '<alignment vertical="center"/>'],
+      [0, 0, 1, 164, '<alignment horizontal="center" vertical="center"/>'], [6, 0, 1, 0, '<alignment vertical="center"/>'],
+      [7, 0, 1, 0, '<alignment vertical="center"/>'], [4, 0, 0, 0, '<alignment vertical="center"/>'], [8, 0, 0, 0, '<alignment vertical="center"/>'],
+      [5, 3, 1, 0, '<alignment vertical="center"/>'], [0, 0, 1, 0, '<alignment horizontal="center" vertical="center"/>'],
+      [5, 0, 0, 0, '<alignment vertical="center"/>'], [5, 4, 1, 3, '<alignment vertical="center"/>'], [5, 4, 1, 165, '<alignment vertical="center"/>'],
+      [2, 0, 0, 0, '<alignment vertical="center" wrapText="1"/>']
+    ];
+    return HEAD + '<styleSheet xmlns="' + NS_MAIN + '">' +
+      '<numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy hh:mm:ss"/><numFmt numFmtId="165" formatCode="0.0%"/></numFmts>' +
+      '<fonts count="' + fonts.length + '">' + fonts.join('') + '</fonts>' +
+      '<fills count="' + fills.length + '">' + fills.join('') + '</fills>' +
+      '<borders count="' + borders.length + '">' + borders.join('') + '</borders>' +
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      '<cellXfs count="' + xf.length + '">' + xf.map(function (x) {
+        return '<xf numFmtId="' + x[3] + '" fontId="' + x[0] + '" fillId="' + x[1] + '" borderId="' + x[2] + '" xfId="0"' +
+          (x[0] ? ' applyFont="1"' : '') + (x[1] ? ' applyFill="1"' : '') + (x[2] ? ' applyBorder="1"' : '') + (x[3] ? ' applyNumberFormat="1"' : '') +
+          (x[4] ? ' applyAlignment="1">' + x[4] + '</xf>' : '/>');
+      }).join('') + '</cellXfs>' +
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  }
+
+  function cellXml(v, c, r, links) {
+    var o = v !== null && typeof v === 'object' ? v : {v: v};
+    var val = o.v, s = o.s ? ' s="' + o.s + '"' : '', at = ref(c, r);
+    if (o.link) links.push({ref: at, url: o.link});
+    if (val === null || val === undefined || val === '') return o.s ? '<c r="' + at + '"' + s + '/>' : '';
+    if (typeof val === 'number' && isFinite(val)) return '<c r="' + at + '"' + s + '><v>' + val + '</v></c>';
+    return '<c r="' + at + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(val) + '</t></is></c>';
+  }
+
+  function sheetXml(sh, drawingRid, linkRids) {
+    var links = [], out = [];
+    (sh.rows || []).forEach(function (row, i) {
+      var r = i + 1, cells = '';
+      (row || []).forEach(function (v, j) { cells += cellXml(v, j + 1, r, links); });
+      var ht = sh.heights && sh.heights[r];
+      if (cells || ht) out.push('<row r="' + r + '"' + (ht ? ' ht="' + ht + '" customHeight="1"' : '') + '>' + cells + '</row>');
+    });
+    var view = '<sheetViews><sheetView workbookViewId="0"' + (sh.tabSelected ? ' tabSelected="1"' : '') + ' showGridLines="0">';
+    if (sh.freeze) {
+      var f = parseRange(sh.freeze), xs = f.c1 - 1, ys = f.r1 - 1;
+      view += '<pane' + (xs ? ' xSplit="' + xs + '"' : '') + (ys ? ' ySplit="' + ys + '"' : '') + ' topLeftCell="' + sh.freeze + '" activePane="' +
+        (xs && ys ? 'bottomRight' : ys ? 'bottomLeft' : 'topRight') + '" state="frozen"/>';
+    }
+    view += '</sheetView></sheetViews>';
+    var cols = (sh.cols || []).length ? '<cols>' + sh.cols.map(function (w, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>'; }).join('') + '</cols>' : '';
+    var filter = sh.filter ? '<autoFilter ref="' + sh.filter + '"/>' : '';
+    var merges = (sh.merges || []).length ? '<mergeCells count="' + sh.merges.length + '">' + sh.merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join('') + '</mergeCells>' : '';
+    links.forEach(function (l, i) { l.rid = 'rIdL' + (i + 1); });
+    linkRids.push.apply(linkRids, links);
+    var hyper = links.length ? '<hyperlinks>' + links.map(function (l) { return '<hyperlink ref="' + l.ref + '" r:id="' + l.rid + '"/>'; }).join('') + '</hyperlinks>' : '';
+    return HEAD + '<worksheet xmlns="' + NS_MAIN + '" xmlns:r="' + NS_R + '"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>' + view + '<sheetFormatPr defaultRowHeight="15"/>' + cols +
+      '<sheetData>' + out.join('') + '</sheetData>' + filter + merges + hyper +
+      '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>' +
+      '<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>' + (drawingRid ? '<drawing r:id="' + drawingRid + '"/>' : '') + '</worksheet>';
+  }
+
+  // ------------------------------------------------------------------ gráficos
+  function rich(text, size) {
+    return '<c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="' + size + '" b="1"><a:solidFill><a:srgbClr val="1F2430"/></a:solidFill></a:defRPr></a:pPr>' +
+      '<a:r><a:rPr lang="pt-BR" sz="' + size + '" b="1"><a:solidFill><a:srgbClr val="1F2430"/></a:solidFill></a:rPr><a:t>' + esc(text) + '</a:t></a:r></a:p></c:rich></c:tx>';
+  }
+  function txPr(size, color, bold) {
+    return '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="' + size + '"' + (bold ? ' b="1"' : '') + '><a:solidFill><a:srgbClr val="' + (color || '434A5B') + '"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="pt-BR"/></a:p></c:txPr>';
+  }
+  function solid(rgb) { return '<c:spPr><a:solidFill><a:srgbClr val="' + rgb + '"/></a:solidFill><a:ln w="19050"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr>'; }
+  function strCache(list) {
+    return '<c:strCache><c:ptCount val="' + list.length + '"/>' + list.map(function (v, i) { return '<c:pt idx="' + i + '"><c:v>' + esc(v) + '</c:v></c:pt>'; }).join('') + '</c:strCache>';
+  }
+  function numCache(list) {
+    return '<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="' + list.length + '"/>' +
+      list.map(function (v, i) { return '<c:pt idx="' + i + '"><c:v>' + (Number(v) || 0) + '</c:v></c:pt>'; }).join('') + '</c:numCache>';
+  }
+  /** Valores das células do intervalo (para o cache do gráfico: o Excel mostra o gráfico sem recalcular). */
+  function rangeValues(sh, a) {
+    var p = parseRange(a), out = [];
+    for (var r = p.r1; r <= p.r2; r++) for (var c = p.c1; c <= p.c2; c++) {
+      var v = ((sh.rows[r - 1] || [])[c - 1]);
+      out.push(v !== null && typeof v === 'object' ? v.v : v);
+    }
+    return out;
+  }
+  function dLbls(pos, pct) {
+    // Rosca: número branco em cima da fatia; barras: número escuro na ponta.
+    return '<c:dLbls><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>' + (pct ? txPr(1000, 'FFFFFF', true) : txPr(900, '1F2430')) + (pos ? '<c:dLblPos val="' + pos + '"/>' : '') +
+      '<c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="' + (pct ? 1 : 0) + '"/>' +
+      '<c:showBubbleSize val="0"/>' + (pct ? '<c:separator>' + esc(' · ') + '</c:separator>' : '') + '</c:dLbls>';
+  }
+  function chartXml(ch, sh) {
+    var cats = rangeValues(sh, ch.cat).map(function (v) { return v === null || v === undefined ? '' : String(v); });
+    var vals = rangeValues(sh, ch.val);
+    var colors = ch.colors || ['E60012'];
+    var points = '';
+    if (ch.type === 'doughnut' || colors.length > 1) {
+      cats.forEach(function (_, i) {
+        points += '<c:dPt><c:idx val="' + i + '"/>' + (ch.type === 'doughnut' ? '<c:bubble3D val="0"/>' : '<c:invertIfNegative val="0"/><c:bubble3D val="0"/>') +
+          solid(colors[i % colors.length]) + '</c:dPt>';
+      });
+    }
+    var ser = '<c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:v>' + esc(ch.name || ch.title) + '</c:v></c:tx>' + solid(colors[0]) +
+      (ch.type === 'doughnut' ? '' : '<c:invertIfNegative val="0"/>') + points +
+      dLbls(ch.type === 'doughnut' ? '' : 'outEnd', ch.type === 'doughnut') +
+      '<c:cat><c:strRef><c:f>' + esc(absRange(ch.sheet, ch.cat)) + '</c:f>' + strCache(cats) + '</c:strRef></c:cat>' +
+      '<c:val><c:numRef><c:f>' + esc(absRange(ch.sheet, ch.val)) + '</c:f>' + numCache(vals) + '</c:numRef></c:val></c:ser>';
+    var plot, legend = '';
+    if (ch.type === 'doughnut') {
+      plot = '<c:doughnutChart><c:varyColors val="1"/>' + ser + '<c:firstSliceAng val="0"/><c:holeSize val="55"/></c:doughnutChart>';
+      legend = '<c:legend><c:legendPos val="b"/><c:overlay val="0"/>' + txPr(900) + '</c:legend>';
+    } else {
+      var bar = ch.type === 'bar', line = '<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D1D5DB"/></a:solidFill></a:ln></c:spPr>';
+      plot = '<c:barChart><c:barDir val="' + (bar ? 'bar' : 'col') + '"/><c:grouping val="clustered"/><c:varyColors val="0"/>' + ser +
+        '<c:gapWidth val="' + (ch.gap || 60) + '"/><c:axId val="5001"/><c:axId val="5002"/></c:barChart>' +
+        '<c:catAx><c:axId val="5001"/><c:scaling><c:orientation val="' + (bar ? 'maxMin' : 'minMax') + '"/></c:scaling><c:delete val="0"/>' +
+        '<c:axPos val="' + (bar ? 'l' : 'b') + '"/><c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/>' +
+        '<c:tickLblPos val="nextTo"/>' + line + txPr(900) + '<c:crossAx val="5002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/>' +
+        '<c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>' +
+        '<c:valAx><c:axId val="5002"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="' + (bar ? 'b' : 'l') + '"/>' +
+        '<c:majorGridlines><c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="ECECEF"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>' +
+        '<c:numFmt formatCode="#,##0" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>' +
+        '<c:spPr><a:ln><a:noFill/></a:ln></c:spPr>' + txPr(900, '6B7280') + '<c:crossAx val="5001"/><c:crosses val="' + (bar ? 'max' : 'autoZero') + '"/>' +
+        '<c:crossBetween val="between"/></c:valAx>';
+    }
+    return HEAD + '<c:chartSpace xmlns:c="' + NS_C + '" xmlns:a="' + NS_A + '" xmlns:r="' + NS_R + '"><c:roundedCorners val="0"/>' +
+      '<c:chart><c:title>' + rich(ch.title, 1200) + '<c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>' + plot + '</c:plotArea>' +
+      legend + '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>' +
+      '<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="ECECEF"/></a:solidFill></a:ln></c:spPr>' +
+      txPr(1000) + '</c:chartSpace>';
+  }
+  function drawingXml(charts, firstId) {
+    return HEAD + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="' + NS_A + '">' +
+      charts.map(function (ch, i) {
+        var a = ch.at, pt = function (c, r) { return '<xdr:col>' + c + '</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>' + r + '</xdr:row><xdr:rowOff>0</xdr:rowOff>'; };
+        return '<xdr:twoCellAnchor editAs="oneCell"><xdr:from>' + pt(a[0], a[1]) + '</xdr:from><xdr:to>' + pt(a[2], a[3]) + '</xdr:to>' +
+          '<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="' + (firstId + i) + '" name="' + esc('Gráfico ' + (firstId + i)) + '"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>' +
+          '<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="' + NS_C + '">' +
+          '<c:chart xmlns:c="' + NS_C + '" xmlns:r="' + NS_R + '" r:id="rId' + (i + 1) + '"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>';
+      }).join('') + '</xdr:wsDr>';
+  }
+  function rels(list) {
+    return HEAD + '<Relationships xmlns="' + NS_PR + '">' + list.map(function (r) {
+      return '<Relationship Id="' + r.id + '" Type="' + r.type + '" Target="' + esc(r.target) + '"' + (r.external ? ' TargetMode="External"' : '') + '/>';
+    }).join('') + '</Relationships>';
+  }
+  var REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
+
+  /** Arquivos do .xlsx: [{name, text}] */
+  function parts(book) {
+    var files = [], sheets = book.sheets, ct = [], chartN = 0, drawN = 0, names = [];
+    sheets.forEach(function (sh, i) {
+      var n = i + 1, srels = [], drawingRid = null, links = [];
+      if ((sh.charts || []).length) {
+        drawN++;
+        drawingRid = 'rIdD1';
+        srels.push({id: drawingRid, type: REL + 'drawing', target: '../drawings/drawing' + drawN + '.xml'});
+        var drels = [];
+        sh.charts.forEach(function (ch, j) {
+          chartN++;
+          files.push({name: 'xl/charts/chart' + chartN + '.xml', text: chartXml(Object.assign({sheet: sh.name}, ch), sh)});
+          ct.push('<Override PartName="/xl/charts/chart' + chartN + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>');
+          drels.push({id: 'rId' + (j + 1), type: REL + 'chart', target: '../charts/chart' + chartN + '.xml'});
+        });
+        files.push({name: 'xl/drawings/drawing' + drawN + '.xml', text: drawingXml(sh.charts, 2)});
+        files.push({name: 'xl/drawings/_rels/drawing' + drawN + '.xml.rels', text: rels(drels)});
+        ct.push('<Override PartName="/xl/drawings/drawing' + drawN + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>');
+      }
+      files.push({name: 'xl/worksheets/sheet' + n + '.xml', text: sheetXml(sh, drawingRid, links)});
+      links.forEach(function (l) { srels.push({id: l.rid, type: REL + 'hyperlink', target: l.url, external: true}); });
+      if (srels.length) files.push({name: 'xl/worksheets/_rels/sheet' + n + '.xml.rels', text: rels(srels)});
+      ct.push('<Override PartName="/xl/worksheets/sheet' + n + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+      if (sh.filter) {
+        var f = parseRange(sh.filter);
+        names.push('<definedName name="_xlnm._FilterDatabase" localSheetId="' + i + '" hidden="1">' +
+          esc(absRange(sh.name, colName(f.c1) + f.r1 + ':' + colName(f.c2) + Math.max(f.r1, (sh.rows || []).length))) + '</definedName>');
+      }
+    });
+    var now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    files.unshift(
+      {name: '[Content_Types].xml', text: HEAD + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+        '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
+        '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>' + ct.join('') + '</Types>'},
+      {name: '_rels/.rels', text: rels([{id: 'rId1', type: REL + 'officeDocument', target: 'xl/workbook.xml'},
+        {id: 'rId2', type: 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties', target: 'docProps/core.xml'},
+        {id: 'rId3', type: REL + 'extended-properties', target: 'docProps/app.xml'}])},
+      {name: 'docProps/core.xml', text: HEAD + '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
+        '<dc:title>' + esc(book.title || 'J&T Express') + '</dc:title><dc:creator>J&amp;T DashMaster</dc:creator>' +
+        '<dcterms:created xsi:type="dcterms:W3CDTF">' + now + '</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">' + now + '</dcterms:modified></cp:coreProperties>'},
+      {name: 'docProps/app.xml', text: HEAD + '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>J&amp;T DashMaster</Application></Properties>'},
+      {name: 'xl/workbook.xml', text: HEAD + '<workbook xmlns="' + NS_MAIN + '" xmlns:r="' + NS_R + '"><bookViews><workbookView activeTab="0"/></bookViews><sheets>' +
+        sheets.map(function (sh, i) { return '<sheet name="' + esc(sh.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') + '</sheets>' +
+        (names.length ? '<definedNames>' + names.join('') + '</definedNames>' : '') + '</workbook>'},
+      {name: 'xl/_rels/workbook.xml.rels', text: rels(sheets.map(function (sh, i) { return {id: 'rId' + (i + 1), type: REL + 'worksheet', target: 'worksheets/sheet' + (i + 1) + '.xml'}; })
+        .concat([{id: 'rId' + (sheets.length + 1), type: REL + 'styles', target: 'styles.xml'}]))},
+      {name: 'xl/styles.xml', text: stylesXml()}
+    );
+    return files;
+  }
+
+  // ------------------------------------------------------------------ ZIP
+  var CRC = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })();
+  function crc32(b) { var c = 0xFFFFFFFF; for (var i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function deflate(bytes) {
+    if (typeof CompressionStream === 'undefined' || typeof Response === 'undefined') return Promise.resolve(null);
+    try {
+      var cs = new CompressionStream('deflate-raw');
+      var out = new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer();
+      return out.then(function (b) { return new Uint8Array(b); }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  /** files: [{name, bytes, comp (opcional: dados já comprimidos)}] → Uint8Array */
+  function zip(files) {
+    var enc = new TextEncoder(), chunks = [], central = [], offset = 0;
+    var u16 = function (v) { return [v & 0xFF, (v >>> 8) & 0xFF]; };
+    var u32 = function (v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; };
+    files.forEach(function (f) {
+      var name = enc.encode(f.name), data = f.comp || f.bytes, method = f.comp ? 8 : 0, crc = crc32(f.bytes);
+      var head = [].concat([0x50, 0x4B, 0x03, 0x04], u16(20), u16(0x0800), u16(method), u16(0), u16(0x21), u32(crc), u32(data.length), u32(f.bytes.length), u16(name.length), u16(0));
+      chunks.push(new Uint8Array(head), name, data);
+      central.push(new Uint8Array([].concat([0x50, 0x4B, 0x01, 0x02], u16(20), u16(20), u16(0x0800), u16(method), u16(0), u16(0x21), u32(crc), u32(data.length),
+        u32(f.bytes.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+      offset += head.length + name.length + data.length;
+    });
+    var cdSize = central.reduce(function (s, c) { return s + c.length; }, 0);
+    var end = new Uint8Array([].concat([0x50, 0x4B, 0x05, 0x06], u16(0), u16(0), u16(files.length), u16(files.length), u32(cdSize), u32(offset), u16(0)));
+    var all = chunks.concat(central, [end]), size = all.reduce(function (s, c) { return s + c.length; }, 0), out = new Uint8Array(size), at = 0;
+    all.forEach(function (c) { out.set(c, at); at += c.length; });
+    return out;
+  }
+  function build(book) {
+    var enc = new TextEncoder();
+    var files = parts(book).map(function (f) { return {name: f.name, bytes: enc.encode(f.text)}; });
+    return Promise.all(files.map(function (f) { return f.bytes.length > 512 ? deflate(f.bytes) : Promise.resolve(null); })).then(function (comp) {
+      files.forEach(function (f, i) { if (comp[i] && comp[i].length < f.bytes.length) f.comp = comp[i]; });
+      return zip(files);
+    });
+  }
+
+  // ------------------------------------------------------------------ planilha da Pesquisa no Rastreamento
+  var SHIFT_HOURS = {T1: '06:00 – 13:59', T2: '14:00 – 21:59', T3: '22:00 – 05:59'};
+  var COLORS = {yes: 'E60012', no: '7B818C', T1: 'E60012', T2: '2A78D6', T3: '4A3AA7'};
+  function two(pt, zh) { return zh ? pt + '\n' + zh : pt; }
+  function pct(n, d) { return d ? n / d : 0; }
+  function imageCell(h) {
+    if (h.url) return {v: 'Ver imagem', s: S.link, link: h.url};
+    if (h.img) return {v: 'Tem imagem (ver no JMS)', s: S.text};
+    return {v: 'NÃO TEM IMAGEM!', s: S.noimg};
+  }
+  function stamp(d) {
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  /**
+   * Livro da pesquisa: Resumo (blocos com tabelas e gráficos) + uma aba "Tem" e uma "Não tem" por bloco.
+   * data = {center, patterns: [p1, p2], results: [{w, ok, err, p: [hit|null, hit|null]}], summaries: [JTCore.trackSummary…], at: Date}
+   */
+  function rastreioBook(data) {
+    var blocks = [], at = data.at || new Date(), total = (data.results || []).length;
+    var title = 'J&T EXPRESS · Pesquisa no Rastreamento do pacote', sub = 'Base ' + (data.center || '') + ' · gerado em ' + stamp(at) + ' · ' +
+      total.toLocaleString('pt-BR') + ' remessa(s) pesquisada(s) · sempre o PRIMEIRO bipe com o padrão';
+    var resumo = {name: 'Resumo', tabSelected: true, cols: [34, 16, 15, 4, 4, 12, 12, 12, 12, 12, 12, 12, 12], rows: [[{v: title, s: S.title}], [{v: sub, s: S.subtitle}]],
+      heights: {1: 30}, merges: ['A1:M1', 'A2:M2'], charts: []};
+    var R = resumo.rows, row = function (cells) { R.push(cells || []); return R.length; };
+    var sheets = [resumo];
+    (data.patterns || []).forEach(function (pat, k) {
+      if (!pat) return;
+      var s = data.summaries[k], name = k === 0 ? 'Bloco 1' : 'Bloco 2';
+      blocks.push(k);
+      row();
+      var top = row([{v: name + (k === 0 ? ' · Tem ou não tem o padrão' : ' · Turno que mais ocorreu'), s: S.section}]);
+      var pr = row([{v: 'Padrão pesquisado: ' + pat, s: S.note}]);
+      resumo.merges.push('A' + pr + ':D' + pr);
+      resumo.heights[pr] = 30;
+      var h = row([{v: two('Situação', '状态'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}, {v: '%', s: S.header}]);
+      resumo.heights[h] = 28;
+      var y = row([{v: 'Tem o padrão', s: S.yes}, {v: s.yes, s: S.int}, {v: pct(s.yes, s.total), s: S.pct}]);
+      row([{v: 'Não tem o padrão', s: S.text}, {v: s.no, s: S.int}, {v: pct(s.no, s.total), s: S.pct}]);
+      row([{v: 'Total pesquisado', s: S.label}, {v: s.total, s: S.intBold}, {v: s.total ? 1 : 0, s: S.pctBold}]);
+      if (s.none) row([{v: 'Dentro de "Não tem": ' + s.none + ' sem rastreamento no JMS (ou consulta recusada)', s: S.note}]);
+      resumo.charts.push({type: 'doughnut', title: name + ': tem × não tem o padrão', name: 'Remessas', cat: 'A' + y + ':A' + (y + 1), val: 'B' + y + ':B' + (y + 1),
+        colors: [COLORS.yes, COLORS.no], at: [5, top - 1, 11, top + 15]});
+      var last = R.length;
+      if (k === 1) {
+        row();
+        row([{v: 'Turno que mais ocorreu', s: S.bold}, {v: s.top ? s.top + ' (' + SHIFT_HOURS[s.top] + ')' : '—', s: S.hero}]);
+        resumo.heights[R.length] = 26;
+        var sh = row([{v: two('Turno · horário', '班次'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}, {v: two('% das que têm', '占比'), s: S.header}]);
+        resumo.heights[sh] = 28;
+        ['T1', 'T2', 'T3'].forEach(function (t) { row([{v: t + ' · ' + SHIFT_HOURS[t], s: t === s.top ? S.yes : S.text}, {v: s.shifts[t], s: S.int}, {v: pct(s.shifts[t], s.yes), s: S.pct}]); });
+        resumo.charts.push({type: 'col', title: name + ': remessas por turno do primeiro bipe', name: 'Remessas', cat: 'A' + (sh + 1) + ':A' + (sh + 3),
+          val: 'B' + (sh + 1) + ':B' + (sh + 3), colors: [COLORS.T1, COLORS.T2, COLORS.T3], gap: 50, at: [5, top + 16, 11, top + 32]});
+        row();
+        var hh = row([{v: two('Hora do primeiro bipe', '小时'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}]);
+        resumo.heights[hh] = 28;
+        for (var i = 0; i < 24; i++) row([{v: (i < 10 ? '0' : '') + i + 'h', s: S.center}, {v: s.hours[i], s: S.int}]);
+        resumo.charts.push({type: 'col', title: name + ': remessas por hora do primeiro bipe', name: 'Remessas', cat: 'A' + (hh + 1) + ':A' + (hh + 24),
+          val: 'B' + (hh + 1) + ':B' + (hh + 24), colors: [COLORS.T1], gap: 30, at: [5, top + 33, 13, top + 50]});
+        var tops = s.scanners.slice(0, 10);
+        if (tops.length) {
+          row();
+          var sc = row([{v: two('Quem escaneou (10 mais)', '扫描员'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}]);
+          resumo.heights[sc] = 28;
+          tops.forEach(function (x) { row([{v: x.label, s: S.text}, {v: x.value, s: S.int}]); });
+          resumo.charts.push({type: 'bar', title: name + ': quem mais escaneou (primeiro bipe)', name: 'Remessas', cat: 'A' + (sc + 1) + ':A' + (sc + tops.length),
+            val: 'B' + (sc + 1) + ':B' + (sc + tops.length), colors: [COLORS.T1], gap: 40, at: [5, top + 51, 13, top + 51 + Math.max(10, tops.length + 6)]});
+        }
+        last = R.length;
+      }
+      // Os gráficos ficam ao lado das tabelas: o próximo bloco começa depois do último gráfico.
+      var chartEnd = resumo.charts[resumo.charts.length - 1].at[3] + 1;
+      while (R.length < Math.max(last, chartEnd)) row();
+      sheets.push(hitsSheet(name + ' - Tem', name + ' · remessas COM o padrão', pat, data, k));
+      sheets.push(missSheet(name + ' - Não tem', name + ' · remessas SEM o padrão', pat, data, k));
+    });
+    return {title: title, sheets: sheets};
+  }
+  function hitsSheet(name, title, pat, data, k) {
+    var rows = [[{v: 'J&T EXPRESS · ' + title, s: S.title}], [{v: 'Padrão: ' + pat + ' · horário, origem e escaneador do PRIMEIRO bipe com o padrão', s: S.subtitle}],
+      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}, {v: two('Tempo de digitalização', '扫描时间'), s: S.header}, {v: two('Turno', '班次'), s: S.header},
+        {v: two('Origem', '网点'), s: S.header}, {v: two('Quem escaneou', '扫描员'), s: S.header}, {v: two('Tipo de bipagem', '扫描类型'), s: S.header},
+        {v: two('Descrição da etapa de bipagem', '扫描描述'), s: S.header}, {v: two('Imagem', '图片'), s: S.header}, {v: two('Linhas com o padrão', '匹配行数'), s: S.header}]];
+    var n = 0;
+    data.results.forEach(function (r) {
+      var h = r.p && r.p[k];
+      if (!h) return;
+      var t = serial(h.t);
+      rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}, t === null ? {v: h.t, s: S.text} : {v: t, s: S.date}, {v: h.shift, s: S.center},
+        {v: h.origin, s: S.text}, {v: h.by, s: S.text}, {v: h.type, s: S.text}, {v: h.desc, s: S.text}, imageCell(h), {v: h.n, s: S.int}]);
+    });
+    if (!n) rows.push([{v: 'Nenhuma remessa com o padrão.', s: S.note}]);
+    return {name: name, cols: [7, 18, 21, 8, 16, 30, 24, 90, 24, 11], rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:J1', 'A2:J2'], freeze: 'C4',
+      filter: n ? 'A3:J3' : ''};
+  }
+  function missSheet(name, title, pat, data, k) {
+    var rows = [[{v: 'J&T EXPRESS · ' + title, s: S.title}], [{v: 'Padrão: ' + pat, s: S.subtitle}],
+      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}, {v: two('Situação no rastreamento', '轨迹情况'), s: S.header}]];
+    var n = 0;
+    data.results.forEach(function (r) {
+      if (r.p && r.p[k]) return;
+      var why = r.err ? 'Consulta recusada pelo JMS (tente de novo)' : !r.ok ? 'Sem rastreamento no JMS' : 'Nenhuma linha com o padrão';
+      rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}, {v: why, s: r.ok ? S.text : S.noimg}]);
+    });
+    if (!n) rows.push([{v: 'Todas as remessas têm o padrão.', s: S.note}]);
+    return {name: name, cols: [7, 20, 46], rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:C1', 'A2:C2'], freeze: 'C4', filter: n ? 'A3:C3' : ''};
+  }
+
+  return {build: build, parts: parts, zip: zip, crc32: crc32, serial: serial, rastreioBook: rastreioBook, STYLE: S};
+})();
+</script>

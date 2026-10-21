@@ -64,6 +64,7 @@ Para rodar mesmo **sem ninguém entrar no Windows**, use o **Agendador de Tarefa
 | Rodar um diagnóstico (`diagnosticarConexaoJms`, `diagnosticarAvaria`…) | Configurações → **Executar função**: igual ao ▶ Executar do Apps Script |
 | Mudar uma propriedade (ex.: `JMS_PARALLEL`) | Configurações → **Propriedades**: as mesmas "Propriedades do script" do Apps Script |
 | Relatório PDF / Excel | Botão **Baixar relatório** do painel, como antes |
+| Pesquisar um texto no Rastreamento do pacote (V4.13) | Menu lateral → **Pesquisa no Rastreamento** (ou http://localhost:3000/?page=rastreio): cole as remessas, digite o texto e baixe a planilha com gráficos |
 
 A tela Configurações **só abre no próprio computador do servidor** (http://localhost:3000/config). Para abrir de outro lugar, defina `senhaConfig` no `config.json` (veja a seção 4).
 

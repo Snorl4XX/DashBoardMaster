@@ -121,7 +121,7 @@ function createSimContext(opts) {
       deleteTrigger: () => {}, getOAuthToken: () => 't'}
   };
   vm.createContext(context);
-  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
+  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Rastreio', 'Analytics', 'Report', 'Triggers', 'Code'];
   vm.runInContext(files.map(f => fs.readFileSync(path.join(opts.root, f + '.gs'), 'utf8')).join('\n;\n'), context, {filename: 'projeto.gs'});
   context.__state = state;
   return context;

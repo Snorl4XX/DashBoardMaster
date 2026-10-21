@@ -19,8 +19,8 @@ const {zip} = require('../node/lib/report');
 const ROOT = path.join(__dirname, '..');
 const FLOWS = 'arrival_flow,send_flow';
 
-const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
-const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
+const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Rastreio', 'Analytics', 'Report', 'Triggers', 'Code'];
+const HTML = ['Index', 'Client', 'Styles', 'Mascot', 'PesquisaRastreio', 'Planilha'];
 
 const PACKAGES = [
   {
@@ -37,6 +37,8 @@ Este pacote é o **painel principal**. Ele mostra:
 Retirados (os dados antigos ficam na planilha): Fluxo de Lotes (V4.7) e Deslacre (V4.12.3). \`REATIVAR_PAINEIS\` = \`lot_flow,unseal\` traz de volta.
 
 Desde a V4.8, Envio Errado, Triagem Errada e Falta de Bipagem na Expedição usam as docas e rotas de carregamento da tabela de 11/10 (tabelas em \`DOCKS_EXPEDICAO\` no Config.gs).
+
+V4.13: **Pesquisa no Rastreamento** (menu lateral, em Análises; ou o link do painel com \`?page=rastreio\` no fim). Cole as remessas, digite o texto padrão do rastreamento e baixe a planilha com gráficos.
 
 **Recebimento e Expedição (fluxo operacional) não estão aqui.** Eles ficam no outro pacote, o painel dos fluxos. Assim este painel gasta cerca de metade da cota diária do Google e não para por falta de cota.
 
