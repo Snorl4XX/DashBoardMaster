@@ -13,7 +13,8 @@
  *   - guarda o pedido do "Ver imagem" ensinado na página (api/modelo, em dados/modelo-imagem.json).
  *
  * Node.js 18 ou mais novo, sem instalar pacotes. Configuração: config.json (criado na primeira vez, ao lado deste arquivo).
- * Uso: node server.js   (ou iniciar.bat no Windows)
+ * Uso: node server.js — no Windows, por um atalho na Área de Trabalho: "C:\caminho\node.exe" "C:\pesquisa\server.js"
+ * (sem .bat e sem administrador). No Windows o navegador abre sozinho na página (config.json → "abrirNavegador": false desliga).
  */
 const http = require('http');
 const fs = require('fs');
@@ -23,8 +24,9 @@ const zlib = require('zlib');
 
 const VERSAO = '1.0.0';
 const DEFAULTS = {
-  porta: 3200,       // 3200: não briga com o DashMaster (3000) nem com o painel do sorter (3100)
-  host: '0.0.0.0'    // 0.0.0.0 = abre para a rede (cada pessoa usa o próprio AuthToken); 127.0.0.1 = só neste computador
+  porta: 3200,         // 3200: não briga com o DashMaster (3000) nem com o painel do sorter (3100)
+  host: '0.0.0.0',     // 0.0.0.0 = abre para a rede (cada pessoa usa o próprio AuthToken); 127.0.0.1 = só neste computador
+  abrirNavegador: true // no Windows, abre a página no navegador quando o app liga
 };
 const JMS = 'https://gw.jtjms-br.com';
 const FOTO_HOSTS = /(^|\.)jtjms-br\.com$|(^|\.)blob\.core\.windows\.net$/i;
@@ -190,6 +192,9 @@ if (require.main === module) {
     console.log('\n  J&T · Pesquisa no Rastreamento ' + VERSAO + ' no ar. Abra no navegador:');
     addresses(cfg).forEach(a => console.log('    ' + a));
     console.log('\n  Deixe esta janela aberta enquanto usa a pesquisa.\n');
+    if (process.platform === 'win32' && cfg.abrirNavegador !== false) {
+      try { require('child_process').spawn('explorer.exe', ['http://localhost:' + cfg.porta], {detached: true, stdio: 'ignore'}).unref(); } catch (e) { /* abre à mão */ }
+    }
   });
 }
 

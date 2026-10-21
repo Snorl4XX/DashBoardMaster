@@ -13,7 +13,7 @@ App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto d
 | | Apps Script (link do Google) | No computador (Node.js) |
 |---|---|---|
 | Abre em | qualquer lugar, pelo link `…/exec` | `http://localhost:3200` (e na rede, pelo IP do computador) |
-| Precisa | uma conta Google | o Node.js instalado (o mesmo do DashMaster) |
+| Precisa | uma conta Google (nada para rodar no computador) | o `node.exe` (o mesmo do DashMaster) e um atalho — sem `.bat` |
 | Limite | cota diária do Google (cerca de 20 mil consultas por dia) | sem cota |
 
 A tela e a planilha são iguais nas duas.
@@ -34,12 +34,22 @@ A tela e a planilha são iguais nas duas.
 
 Para atualizar depois: troque os arquivos e clique em **Implantar → Gerenciar implantações → ✏️ → Nova versão**. O link não muda.
 
-## Instalar — no computador
-1. Extraia o ZIP em `C:\pesquisa` (a pasta `pesquisa` do ZIP).
-2. Dê dois cliques em `iniciar.bat`. A janela preta fica aberta e o navegador abre `http://localhost:3200`.
-3. Para outras pessoas da rede abrirem, use o endereço com o IP que aparece na janela preta.
+## Instalar — no computador (sem .bat e sem administrador)
+1. Extraia o ZIP em `C:\` (fica a pasta `C:\pesquisa`).
+2. Ache o `node.exe`. Se você já usa o DashMaster sem administrador, é o mesmo: `C:\dashmaster\node\node.exe`.
+   - Se não tiver: em https://nodejs.org/dist/latest-v22.x/ baixe o arquivo que termina em `-win-x64.zip`, abra, copie só o `node.exe` e cole em `C:\pesquisa`.
+3. Na Área de Trabalho: botão direito → **Novo → Atalho** → cole (com o caminho do seu `node.exe`):
 
-Não precisa de administrador. Se a porta 3200 estiver ocupada, troque `"porta"` no `config.json`, que é criado na primeira vez.
+   `"C:\dashmaster\node\node.exe" "C:\pesquisa\server.js"`
+
+   (Se você copiou o `node.exe` para `C:\pesquisa`: `"C:\pesquisa\node.exe" "C:\pesquisa\server.js"`.)
+
+   → **Avançar** → nome **Pesquisa J&T** → **Concluir**.
+4. Dois cliques no atalho: abre a janela preta (deixe aberta) e o navegador abre sozinho em `http://localhost:3200`.
+
+- Para outras pessoas da rede abrirem, use o endereço com o IP que aparece na janela preta. Se o Windows pedir administrador no Firewall, clique em **Cancelar**: o app continua funcionando neste computador.
+- Para abrir sozinho quando o Windows ligar: **Windows + R** → `shell:startup` → cole o atalho nessa pasta.
+- Se a porta 3200 estiver ocupada, troque `"porta"` no `config.json`, que é criado na primeira vez.
 
 ## Usar
 ### 1. AuthToken do JMS (uma vez por navegador)
