@@ -4,8 +4,8 @@
  * Cola as remessas, pesquisa no JMS (Rastreamento do pacote) um texto da "Descrição da etapa de bipagem", conta quem tem e
  * quem não tem, mostra o turno do primeiro bipe e baixa a planilha J&T com gráficos.
  * Toda a pesquisa roda na página (App.html). Aqui fica só:
- *   - consultar(pedidos): até 2500 consultas ao Rastreamento do pacote e à Informação básica (getOrderDetail) DE UMA VEZ, 25 ao
- *     mesmo tempo, com o AuthToken das Propriedades do script, como o DashMaster (JMS_AUTHTOKEN e, se usar, JMS_AUTH_MODE /
+ *   - consultar(pedidos, {paralelo}): até 2500 consultas ao Rastreamento do pacote e à Informação básica (getOrderDetail) DE UMA
+ *     VEZ, até 100 ao mesmo tempo (a página ajusta o ritmo), com o AuthToken das Propriedades do script, como o DashMaster (JMS_AUTHTOKEN e, se usar, JMS_AUTH_MODE /
  *     JMS_COOKIE / JMS_AUTHORIZATION / JMS_ROUTENAME_TRACKING / JMS_EXTRA_HEADERS_JSON / JMS_COUNTRY_ID — os mesmos nomes e
  *     valores do DashMaster). Devolve só os campos que a pesquisa usa (nada de nome, endereço ou telefone do cliente);
  *   - estado(): se o token está cadastrado (nunca mostra o valor);
@@ -17,11 +17,11 @@
  * implantação → App da Web · Executar como: Eu · Quem pode acessar: Qualquer pessoa. O link que aparece (termina em /exec)
  * é o link da Pesquisa. Trocou o código? Implantar → Gerenciar implantações → ✏️ → Versão: Nova versão → Implantar.
  */
-var VERSAO = '1.3.0';
+var VERSAO = '1.4.0';
 var KEYWORD_URL_ = 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList';
 // "Informação básica" (uma remessa por consulta): o bloco "3 Segmentos" é o campo terminalDispatchCode.
 var ORDER_URL_ = 'https://gw.jtjms-br.com/operatingplatform/order/getOrderDetail';
-var PARALELO_ = 25, MAX_PEDIDOS_ = 2500, PRAZO_MS_ = 280000;
+var PARALELO_ = 50, PARALELO_MAX_ = 100, MAX_PEDIDOS_ = 2500, PRAZO_MS_ = 280000;
 // Campos de cada bipe que a pesquisa usa (o resto não volta para a página).
 var CAMPOS_BIPE_ = ['billCode', 'waybillNo', 'scanTime', 'scanTypeName', 'scanNetworkName', 'scanByName', 'imgType', 'code', 'waybillTrackingContent'];
 // Variantes de cabeçalho de rota do Rastreamento do pacote: as mesmas do DashMaster (JMS_ROUTE_AUTO_TRACKING = 1, 2 ou 3).
@@ -152,19 +152,20 @@ function enxugar_(url, text) {
 
 /**
  * Várias consultas de uma vez, pela página: pedidos = [{url, body, headers}] (Rastreamento do pacote ou Informação básica).
- * Faz 25 ao mesmo tempo (UrlFetchApp.fetchAll). Devolve [{status, text}] na mesma ordem. O que não couber no tempo do Google
- * volta com status 0 (a página manda de novo).
+ * Faz `opcoes.paralelo` (padrão 50, no máximo 100) ao mesmo tempo (UrlFetchApp.fetchAll). Devolve [{status, text}] na mesma
+ * ordem. O que não couber no tempo do Google volta com status 0 (a página manda de novo).
  */
-function consultar(pedidos) {
+function consultar(pedidos, opcoes) {
   if (!Array.isArray(pedidos) || !pedidos.length || pedidos.length > MAX_PEDIDOS_) throw new Error('Mande de 1 a ' + MAX_PEDIDOS_ + ' consultas por vez.');
   pedidos.forEach(function (p) {
     if (!p || (p.url !== KEYWORD_URL_ && p.url !== ORDER_URL_)) throw new Error('Endereço do JMS não permitido: o app só consulta o Rastreamento do pacote e a Informação básica.');
   });
   var c = credenciais_();
   if (!c.ok) throw new Error('Falta o AuthToken do JMS: no editor do Apps Script, Configurações do projeto → Propriedades do script → JMS_AUTHTOKEN (o mesmo do DashMaster).');
+  var par = Math.max(1, Math.min(PARALELO_MAX_, Math.floor(Number(opcoes && opcoes.paralelo) || PARALELO_)));
   var inicio = Date.now(), out = [];
-  for (var i = 0; i < pedidos.length; i += PARALELO_) {
-    var parte = pedidos.slice(i, i + PARALELO_);
+  for (var i = 0; i < pedidos.length; i += par) {
+    var parte = pedidos.slice(i, i + par);
     if (Date.now() - inicio > PRAZO_MS_) {
       parte.forEach(function () { out.push({status: 0, text: 'Tempo do Google esgotado nesta rodada (a consulta volta para a fila).'}); });
       continue;

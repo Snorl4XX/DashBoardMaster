@@ -2,9 +2,9 @@
  * J&T · PESQUISA NO RASTREAMENTO — a pesquisa em si, na página (o servidor só consulta o JMS com o token dele).
  *
  * `api` (o servidor, Apps Script ou Node.js):
- *   api.consultar(pedidos) → Promise<[{status, text}]>, na mesma ordem. pedidos = [{url, body, headers}]: Rastreamento do pacote
- *     (keywordList) e Informação básica (getOrderDetail). O servidor põe o AuthToken, faz as consultas AO MESMO TEMPO e devolve
- *     só os campos que a pesquisa usa.
+ *   api.consultar(pedidos, {paralelo}) → Promise<[{status, text}]>, na mesma ordem. pedidos = [{url, body, headers}]: Rastreamento
+ *     do pacote (keywordList) e Informação básica (getOrderDetail). O servidor põe o AuthToken, faz `paralelo` consultas AO MESMO
+ *     TEMPO e devolve só os campos que a pesquisa usa.
  *
  * buscarBipes: as remessas vão ao servidor 1000 por vez (uma chamada por rodada). Na rodada, cada consulta ao Rastreamento leva
  * várias remessas e, junto, vai a Informação básica de cada remessa (códigos de segmento).
@@ -14,7 +14,9 @@
  *   - Vazio maior que todas as consultas que já responderam: o grupo volta em duas metades (pode ser o limite); se a metade
  *     responder, o limite era esse. Vazio do tamanho das que responderam (ou pequeno): as remessas não existem no JMS.
  *   - Recusa na 1ª vez: testa uma vez os cabeçalhos de rota do DashMaster antes de concluir que é o tamanho.
- *   - Falha passageira (rede, 429, 5xx, tempo do Google): a consulta volta para a fila (até 3 vezes).
+ *   - Falha passageira (rede, 429, 5xx, tempo do Google): a consulta volta para a fila (até 5 vezes).
+ *   - Ritmo: começa com 50 consultas ao mesmo tempo e sobe até 100 enquanto o JMS responde sem falhas. Se o JMS pedir para ir
+ *     mais devagar (ou falhar muito), cai pela metade e espera um pouco antes da próxima rodada.
  */
 (function (root, factory) {
   var api = factory(root.Rastreio || (typeof require === 'function' ? require('./rastreio.js') : null));
@@ -25,7 +27,7 @@
 
   // As mesmas variantes do DashMaster para o Rastreamento do pacote (JmsApi.gs, rota TRACKING).
   var ROUTE_VARIANTS = [{routename: 'trackingExpress'}, {routename: 'waybillTracking'}, {routename: 'packageTracking'}];
-  var POR_RODADA = 1000, TENTATIVAS = 3;
+  var POR_RODADA = 1000, TENTATIVAS = 5, PARALELO = 50, PARALELO_MAX = 100, PARALELO_MIN = 5;
   function wait(ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); }
 
   /** Erro da chamada ao servidor (não do JMS): sem token, sem autorização ou arquivo antigo param a pesquisa. */
@@ -35,9 +37,9 @@
     return err;
   }
   /** Uma chamada ao servidor com várias consultas; 1 nova tentativa se a chamada inteira falhar por um motivo passageiro. */
-  function consultar(api, pedidos, espera) {
+  function consultar(api, pedidos, espera, paralelo) {
     var vez = function (n) {
-      return Promise.resolve().then(function () { return api.consultar(pedidos); }).then(function (resps) {
+      return Promise.resolve().then(function () { return api.consultar(pedidos, {paralelo: paralelo || PARALELO}); }).then(function (resps) {
         if (!Array.isArray(resps) || resps.length !== pedidos.length) throw new Error('Resposta incompleta do servidor do app.');
         return resps;
       }).catch(function (e) {
@@ -52,13 +54,14 @@
 
   /**
    * Bipes e segmentos de cada remessa. o: {lote (remessas por consulta, aprendido), porRodada (1000), minProbe, pais, headers,
-   * segmentos (false = sem a Informação básica), espera, onLote(n, motivo), onHeaders(h), onProgresso(feitas, total), parar()}.
+   * segmentos (false = sem a Informação básica), paralelo (consultas ao mesmo tempo, ajustado sozinho), espera, onLote(n, motivo),
+   * onHeaders(h), onParalelo(n), onProgresso(feitas, total), parar()}.
    * → {map: remessa → bipes ([] = sem rastreamento; null = recusada), segs: remessa → {s1, s2} | null, erro, lote, headers}
    * Remessas fora do map: a pesquisa parou antes (parar()).
    */
   function buscarBipes(api, list, o) {
     o = o || {};
-    var estado = {headers: o.headers || null};
+    var estado = {headers: o.headers || null, paralelo: Math.max(PARALELO_MIN, Math.min(PARALELO_MAX, Math.floor(o.paralelo || PARALELO)))};
     var lote = Math.max(1, Math.floor(o.lote || 100)), porRodada = Math.max(1, o.porRodada || POR_RODADA), minProbe = o.minProbe || 8;
     var map = {}, segs = {}, segFila = [], segTent = {}, fila = [], provado = 0, erro = '', erroSeg = '', testouRota = !!o.headers;
     var comSeg = o.segmentos !== false;
@@ -116,7 +119,7 @@
       var proxima = function () {
         if (v >= ROUTE_VARIANTS.length) return null;
         var h = ROUTE_VARIANTS[v++];
-        return consultar(api, [{url: R.KEYWORD_URL, body: R.keywordPayload(g.list, o.pais), headers: h}], o.espera).then(function (r) {
+        return consultar(api, [{url: R.KEYWORD_URL, body: R.keywordPayload(g.list, o.pais), headers: h}], o.espera, 1).then(function (r) {
           var json;
           try { json = ler(r[0]); } catch (e) { return e.kind === 'temp' ? null : proxima(); }
           estado.headers = h;
@@ -140,12 +143,15 @@
         segFila = segFila.filter(function (w) { if ((nesta[w] || !grupos.length) && segList.length < porRodada) { segList.push(w); return false; } return true; });
       }
       var pedidos = grupos.map(pedido).concat(segList.map(function (w) { return {url: R.ORDER_URL, body: R.orderPayload(w, o.pais), headers: estado.headers || {}}; }));
-      return consultar(api, pedidos, o.espera).then(function (resps) {
+      var passageiras = 0, devagar = false;
+      var anota = function (e) { if (e.kind === 'temp') passageiras++; if (e.limite) devagar = true; };
+      return consultar(api, pedidos, o.espera, estado.paralelo).then(function (resps) {
         var info = {completo: 0, prefixos: []}, recusados = [], auth = null;
         grupos.forEach(function (g, i) {
           var json;
           try { json = ler(resps[i]); }
           catch (e) {
+            anota(e);
             if (e.kind === 'temp') {
               erro = e.message;
               g.tent = (g.tent || 0) + 1;
@@ -162,6 +168,7 @@
         segList.forEach(function (w, i) {
           try { segs[w] = R.segmentosDe(ler(resps[grupos.length + i])); }
           catch (e) {
+            anota(e);
             segTent[w] = (segTent[w] || 0) + 1;
             if (e.kind === 'temp' && segTent[w] < TENTATIVAS) segFila.push(w);
             else { segs[w] = null; erroSeg = e.message; }
@@ -172,13 +179,19 @@
           var k = Math.max.apply(null, info.prefixos);
           if (info.completo <= k) aprender(k, 'o JMS devolve no máximo ' + k + ' remessa(s) por consulta');
         }
-        if (!recusados.length) return;
+        // Ritmo da próxima rodada: mais consultas ao mesmo tempo enquanto o JMS aguenta; menos (e uma pausa) quando reclama.
+        var antes = estado.paralelo, pausa = 0;
+        if (devagar || passageiras > pedidos.length * 0.05) { estado.paralelo = Math.max(PARALELO_MIN, Math.floor(antes / 2)); pausa = o.espera === undefined ? 3000 : o.espera; }
+        else if (!passageiras) estado.paralelo = Math.min(PARALELO_MAX, Math.ceil(antes * 1.5));
+        if (estado.paralelo !== antes && o.onParalelo) o.onParalelo(estado.paralelo);
+        var segue = pausa ? wait(pausa) : Promise.resolve();
+        if (!recusados.length) return segue;
         var depois = function () {
           if (auth) throw auth;
           recusados.forEach(function (x) { recusar(x.g, x.e); });
         };
-        if (testouRota) return depois();
-        return testarRotas(recusados[0].g).then(function (ok) {
+        if (testouRota) return segue.then(depois);
+        return segue.then(function () { return testarRotas(recusados[0].g); }).then(function (ok) {
           if (!ok) return depois();
           // O cabeçalho resolveu: a 1ª já respondeu; as outras voltam para a fila com ele.
           aceitar(recusados[0].g, ok.json, info);
@@ -189,7 +202,7 @@
         return rodada();
       });
     };
-    return rodada().then(function () { return {map: map, segs: segs, erro: erro, erroSeg: erroSeg, lote: lote, headers: estado.headers}; });
+    return rodada().then(function () { return {map: map, segs: segs, erro: erro, erroSeg: erroSeg, lote: lote, headers: estado.headers, paralelo: estado.paralelo}; });
   }
 
   /**
@@ -211,9 +224,9 @@
         results.push(r);
       });
       return {results: results, faltam: faltam, erro: b.erro, erroSeg: b.erroSeg, semSeg: results.filter(function (r) { return r.ok && !r.seg; }).length,
-        lote: b.lote, headers: b.headers};
+        lote: b.lote, headers: b.headers, paralelo: b.paralelo};
     });
   }
 
-  return {buscarBipes: buscarBipes, pesquisar: pesquisar, ROUTE_VARIANTS: ROUTE_VARIANTS, POR_RODADA: POR_RODADA};
+  return {buscarBipes: buscarBipes, pesquisar: pesquisar, ROUTE_VARIANTS: ROUTE_VARIANTS, POR_RODADA: POR_RODADA, PARALELO: PARALELO, PARALELO_MAX: PARALELO_MAX};
 });

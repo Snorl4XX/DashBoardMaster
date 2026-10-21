@@ -8,8 +8,8 @@
  *
  * Toda a pesquisa roda na página (lib/ e public/). Este servidor só:
  *   - entrega a página (http://localhost:3200);
- *   - consulta o Rastreamento do pacote e a Informação básica do JMS (api/consultar: até 2500 consultas por chamada, 25 ao
- *     mesmo tempo) com o AuthToken DO SERVIDOR, como o DashMaster: o mesmo token do DashMaster deste computador (lido do banco
+ *   - consulta o Rastreamento do pacote e a Informação básica do JMS (api/consultar: até 2500 consultas por chamada, até 100
+ *     ao mesmo tempo; a página ajusta o ritmo) com o AuthToken DO SERVIDOR, como o DashMaster: o mesmo token do DashMaster deste computador (lido do banco
  *     dele, dados/dashmaster.db) ou, sem DashMaster, o salvo neste app (api/token, só deste computador). Usa as mesmas
  *     propriedades do DashMaster (JMS_AUTH_MODE, JMS_ROUTENAME_TRACKING…). Devolve só os campos que a pesquisa usa.
  *
@@ -23,7 +23,7 @@ const path = require('path');
 const os = require('os');
 const zlib = require('zlib');
 
-const VERSAO = '1.3.0';
+const VERSAO = '1.4.0';
 const DEFAULTS = {
   porta: 3200,         // 3200: não briga com o DashMaster (3000) nem com o painel do sorter (3100)
   host: '0.0.0.0',     // 0.0.0.0 = abre para a rede (todos usam o AuthToken deste computador); 127.0.0.1 = só neste computador
@@ -34,7 +34,7 @@ const JMS = 'https://gw.jtjms-br.com';
 const KEYWORD_PATH = '/operatingplatform/podTracking/inner/query/keywordList';
 // "Informação básica" (uma remessa por consulta): o bloco "3 Segmentos" é o campo terminalDispatchCode.
 const ORDER_PATH = '/operatingplatform/order/getOrderDetail';
-const PARALELO = 25, MAX_PEDIDOS = 2500;
+const PARALELO = 50, PARALELO_MAX = 100, MAX_PEDIDOS = 2500;
 // Campos de cada bipe que a pesquisa usa (o resto não volta para a página).
 const CAMPOS_BIPE = ['billCode', 'waybillNo', 'scanTime', 'scanTypeName', 'scanNetworkName', 'scanByName', 'imgType', 'code', 'waybillTrackingContent'];
 // Variantes de cabeçalho de rota do Rastreamento do pacote: as mesmas do DashMaster (JMS_ROUTE_AUTO_TRACKING = 1, 2 ou 3).
@@ -190,8 +190,8 @@ async function umaConsulta(c, caminho, body, pagina) {
     return {status: 0, text: 'Falha de rede ao consultar o JMS: ' + String(e && e.message || e).slice(0, 200)};
   }
 }
-/** Várias consultas de uma vez (25 ao mesmo tempo): pedidos = [{url, body, headers}]. → [{status, text}] na mesma ordem. */
-async function consultar(pedidos, cfg) {
+/** Várias consultas de uma vez (opcoes.paralelo ao mesmo tempo, padrão 50, até 100): pedidos = [{url, body, headers}]. → [{status, text}]. */
+async function consultar(pedidos, cfg, opcoes) {
   if (!Array.isArray(pedidos) || !pedidos.length || pedidos.length > MAX_PEDIDOS) throw new Error('Mande de 1 a ' + MAX_PEDIDOS + ' consultas por vez.');
   const caminhos = pedidos.map(p => {
     const u = String(p && p.url || '');
@@ -208,7 +208,8 @@ async function consultar(pedidos, cfg) {
       out[i] = await umaConsulta(c, caminhos[i], pedidos[i].body, pedidos[i].headers);
     }
   };
-  await Promise.all(Array.from({length: Math.min(PARALELO, pedidos.length)}, trabalhador));
+  const par = Math.max(1, Math.min(PARALELO_MAX, Math.floor(Number(opcoes && opcoes.paralelo) || PARALELO)));
+  await Promise.all(Array.from({length: Math.min(par, pedidos.length)}, trabalhador));
   return out;
 }
 /** Situação do acesso para a página (nunca mostra o token). */
@@ -260,7 +261,7 @@ function createServer(cfg) {
         if (!sameOrigin(req)) { sendJson(req, res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
         const body = await readJson(req);
         let result;
-        if (p === '/api/consultar') result = await consultar(body.pedidos, cfg);
+        if (p === '/api/consultar') result = await consultar(body.pedidos, cfg, body.opcoes);
         else if (p === '/api/estado') result = estado(req, cfg);
         else if (p === '/api/token') {
           if (!isLocal(req)) { sendJson(req, res, 403, {ok: false, error: 'O AuthToken só pode ser trocado no computador do app.'}); return; }

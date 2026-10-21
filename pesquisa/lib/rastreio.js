@@ -123,17 +123,21 @@
   }
 
   // ---------- respostas do JMS ----------
+  // "Muitas consultas" (o JMS pede para ir mais devagar): passageiro — a pesquisa diminui o ritmo e tenta de novo.
+  var LIMITE_RE = /频繁|限流|frequen|too many|rate.?limit|limite de requisi|muitas requisi|muitas consultas|请稍后/i;
   var AUTH_RE = /token|登录|登陆|login|expired|expirad|过期|失效|unauthori|未授权|无权限|权限不足|没有权限|认证|会话|session|sess[aã]o/i;
   function jmsError(kind, message) { var e = new Error(message); e.kind = kind; return e; }
   /**
    * Resposta do JMS (pelo servidor: {status, text}) → JSON. Erros com `kind`:
-   *  auth (token vencido, sem permissão, página de login) · temp (rede, 429, 5xx) · refused (o JMS recusou a consulta).
+   *  auth (token vencido, sem permissão, página de login) · temp (rede, 429, 5xx, "muitas consultas"; `limite` = o JMS pediu
+   *  para ir mais devagar) · refused (o JMS recusou a consulta).
    */
   function parseJms(status, text) {
     status = Number(status) || 0;
     if (status === 401 || status === 403) throw jmsError('auth', 'O JMS recusou o acesso (HTTP ' + status + '). Confira o AuthToken.');
     if (status >= 300 && status < 400) throw jmsError('auth', 'O JMS mandou para a tela de login (HTTP ' + status + '): o AuthToken venceu.');
-    if (status === 429 || status >= 500 || status === 0) {
+    if (status === 429) { var e429 = jmsError('temp', 'O JMS pediu para ir mais devagar (HTTP 429).'); e429.limite = true; throw e429; }
+    if (status >= 500 || status === 0) {
       var det = status === 0 ? String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
       throw jmsError('temp', 'JMS indisponível agora (HTTP ' + status + (det ? ': ' + det : '') + ').');
     }
@@ -147,6 +151,7 @@
     if (!json || typeof json !== 'object' || json.fail === true || (!blank(json.code) && Number(json.code) !== 1 && Number(json.code) !== 200)) {
       var code = json && !blank(json.code) ? String(json.code) : '?';
       var msg = json && (json.msg || json.message) ? String(json.msg || json.message).replace(/\s+/g, ' ').slice(0, 160) : '';
+      if (LIMITE_RE.test(msg)) { var el = jmsError('temp', 'O JMS pediu para ir mais devagar (código ' + code + ': ' + msg + ').'); el.limite = true; throw el; }
       if (code === '401' || code === '403' || AUTH_RE.test(msg)) {
         throw jmsError('auth', 'O JMS não aceitou o AuthToken (código ' + code + (msg ? ': ' + msg : '') + '). Gere um novo AuthToken no JMS e troque JMS_AUTHTOKEN (Propriedades do script ou DashMaster).');
       }

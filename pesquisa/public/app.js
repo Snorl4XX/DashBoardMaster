@@ -5,7 +5,7 @@
  */
 (function () {
   'use strict';
-  var VERSAO_PAGINA = '1.3.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
+  var VERSAO_PAGINA = '1.4.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
   var BOOT = window.__PESQUISA__ || {}, R = window.Rastreio, P = window.Pesquisa, X = window.Planilha, PAGE = 100;
   var SHIFTS = R.SHIFTS, SHIFT_HOURS = R.SHIFT_HOURS;
   var DEFAULTS = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
@@ -37,7 +37,7 @@
       madeBy: 'Feito por Caike Oliveira', count: '{n} remessa(s)', dup: '{n} repetida(s) ignorada(s)', bad: '{n} linha(s) que não parecem remessa',
       noWaybills: 'Cole pelo menos uma remessa.', noPattern: 'Digite o texto padrão de pelo menos um bloco.',
       progress: 'Pesquisando no JMS (1.000 por vez)… {done} de {total} remessas',
-      segWarn: '{n} remessa(s) ficaram sem os códigos de segmento (Informação básica do JMS: {m}).',
+      segWarn: '{n} remessa(s) ficaram sem os códigos de segmento (Informação básica do JMS: {m}).', eta: ' · faltam ~{t}',
       finished: 'Pronto: {total} remessa(s) em {sec} s.',
       stopped: 'Pesquisa parada: {done} de {total} remessas.', failed: 'A pesquisa parou', resume: 'Continuar',
       limit: 'O JMS devolve {n} remessa(s) por consulta (aprendido): o app faz as consultas ao mesmo tempo.',
@@ -71,7 +71,7 @@
       block2: '模块2 · 最多的班次', block2Q: '包含这一行的第一条扫描发生在哪个班次？', hint: '复制“扫描描述”列的文字。大小写、重音和 [ ] 内的空格不影响；* 代表任意文字。留空则不使用该模块。',
       run: '在 JMS 中查询', stop: '停止', download: '下载表格 (.xlsx)', clear: '清空', madeBy: '由 Caike Oliveira 制作',
       count: '{n} 个运单', dup: '忽略 {n} 个重复', bad: '{n} 行不像运单号', noWaybills: '请至少粘贴一个运单号。', noPattern: '请至少填写一个模块的关键字。',
-      progress: '正在查询 JMS（每次 1000 个）… {done} / {total}', segWarn: '{n} 个运单没有段码（JMS 基本信息：{m}）。', finished: '完成：{total} 个运单，用时 {sec} 秒。',
+      progress: '正在查询 JMS（每次 1000 个）… {done} / {total}', segWarn: '{n} 个运单没有段码（JMS 基本信息：{m}）。', eta: ' · 约剩 {t}', finished: '完成：{total} 个运单，用时 {sec} 秒。',
       stopped: '已停止：{done} / {total}。', failed: '查询停止', resume: '继续', limit: 'JMS 每次查询返回 {n} 个运单（已学习），程序会同时发送多个查询。',
       searched: '已查询', yes: '有关键字', no: '无关键字', none: '{n} 个在 JMS 无轨迹', noneTile: 'JMS 无轨迹', topShift: '最多的班次', ofYes: '占有关键字的 {p}',
       noHits: '没有运单包含该关键字。', remessas: '运单', partial: '部分', chartYesNo: '有/无关键字', chartShift: '第一条扫描的班次分布', chartHour: '第一条扫描的小时分布',
@@ -93,6 +93,7 @@
   function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function fmtInt(n) { return Number(n || 0).toLocaleString(lang === 'zh' ? 'zh-CN' : 'pt-BR'); }
   function fmtPct(n, d) { return d ? (n / d * 100).toLocaleString('pt-BR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + '%' : '—'; }
+  function fmtDur(sec) { return sec < 60 ? Math.max(1, Math.round(sec)) + ' s' : Math.round(sec / 60) + ' min'; }
   function fmtTime(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)/); return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] : String(s || ''); }
   function store(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -117,7 +118,7 @@
   }
   var api = {
     /** Várias consultas ao JMS de uma vez: [{url, body, headers}] → [{status, text}]. */
-    consultar: function (pedidos) { return GAS ? gas('consultar', [pedidos]) : http('consultar', {pedidos: pedidos}); },
+    consultar: function (pedidos, opcoes) { return GAS ? gas('consultar', [pedidos, opcoes || {}]) : http('consultar', {pedidos: pedidos, opcoes: opcoes || {}}); },
     estado: function () { return GAS ? gas('estado', []) : http('estado', {}); },
     token: function (v) { return http('token', {token: v}); }
   };
@@ -232,13 +233,20 @@
     state.stop = false;
     setRunning(true);
     progress(state.results.length, state.list.length, 'progress');
-    // V1.3: o limite aprendido antes (consultas uma depois da outra) não vale mais: chave nova.
-    var antes = state.results.slice(), lote = Number(load('jt_pesquisa_porconsulta')) || 100;
-    var parar = function () { return state.stop; };
+    // O JMS devolve uma remessa por consulta ao Rastreamento (como a tela dele): já começa assim, sem rodada perdida.
+    var antes = state.results.slice(), lote = Number(load('jt_pesquisa_porconsulta')) || 1;
+    var parar = function () { return state.stop; }, t0 = Date.now(), base = antes.length;
     P.pesquisar(api, list, state.pats, {lote: lote, porRodada: P.POR_RODADA, headers: rota(), parar: parar,
+      paralelo: Number(load('jt_pesquisa_paralelo')) || P.PARALELO,
+      onParalelo: function (n) { store('jt_pesquisa_paralelo', String(n)); },
       onLote: function (n) { store('jt_pesquisa_porconsulta', String(n)); toast(t('limit', {n: fmtInt(n)})); },
       onHeaders: function (h) { store('jt_pesquisa_rota', JSON.stringify(h)); },
-      onProgresso: function (feitas) { progress(antes.length + feitas, state.list.length, 'progress'); }
+      onProgresso: function (feitas) {
+        progress(antes.length + feitas, state.list.length, 'progress');
+        // Quanto falta, pela velocidade desta pesquisa.
+        var feito = antes.length + feitas - base, resta = state.list.length - antes.length - feitas, seg = (Date.now() - t0) / 1000;
+        if (feito > 0 && resta > 0) $('#statusText').textContent += t('eta', {t: fmtDur(resta * seg / feito)});
+      }
     }).then(function (res) {
       var byW = {};
       antes.concat(res.results).forEach(function (r) { byW[r.w] = r; });

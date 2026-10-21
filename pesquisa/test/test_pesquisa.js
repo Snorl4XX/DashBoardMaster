@@ -25,8 +25,10 @@ function apiFalsa(porta, token) {
   const local = u => u.replace(/^https:\/\/[^/]+/, 'http://127.0.0.1:' + porta), chamadas = [];
   return {
     chamadas,
-    consultar: pedidos => {
+    paralelos: [],
+    consultar(pedidos, opcoes) {
       chamadas.push(pedidos.length);
+      this.paralelos.push(opcoes && opcoes.paralelo);
       return Promise.all(pedidos.map(p => fetch(local(p.url), {method: 'POST', headers: Object.assign({'Content-Type': 'application/json', authtoken: token || TOKEN},
         p.headers || {}), body: JSON.stringify(p.body)}).then(async r => ({status: r.status, text: await r.text()}))));
     }
@@ -140,6 +142,23 @@ function request(porta, method, p, body, headers) {
   check(sg[0].s1 === 'XA' && sg[0].s2 === '101-01' && sg[1].s1 === 'XB' && sg[1].s2 === '202-02' && sg[2].s1 === 'XC - SP' && sg[2].s2 === '303-03' &&
     JSON.stringify(sg).indexOf('900') < 0 && JSON.stringify(sg).indexOf('901') < 0 && r1.semSeg === 0,
     'segmentos de cada remessa: Código de primeiro segmento e Código de dois segmentos (o 3º fica de fora)', sg);
+  // Já começando com uma remessa por consulta (como a página faz): 1000 por rodada desde a 1ª.
+  const j1b = await criar({trunc: 1}), api1b = apiFalsa(j1b.porta), prog1b = [], pars = [];
+  const r1b = await P.pesquisar(api1b, WS(2500), PATS, {espera: 0, lote: 1, onProgresso: f => prog1b.push(f), onParalelo: n => pars.push(n)});
+  await j1b.fechar();
+  check(r1b.results.filter(x => x.p[1]).length === 2500 && prog1b.join() === '1000,2000,2500' && api1b.chamadas.length === 3 &&
+    api1b.paralelos.join() === '50,75,100' && pars.join() === '75,100' && r1b.paralelo === 100,
+    'começando com 1 por consulta: 1000, 2000, 2500; consultas ao mesmo tempo sobem de 50 para 100 enquanto o JMS responde bem',
+    {prog1b, paralelos: api1b.paralelos});
+  // O JMS pede para ir mais devagar (429 ou "muitas consultas"): cai pela metade, espera e tenta de novo; nada se perde.
+  let lim = 0;
+  const apiLim = {consultar: (ps, op) => api.consultar(ps, op).then(rs2 => rs2.map((r, i) => (lim < 30 && i % 5 === 0 ? (lim++, i % 10 ? {status: 429, text: ''}
+    : {status: 200, text: '{"code":500,"msg":"请求过于频繁，请稍后再试","fail":true}'}) : r)))};
+  const parsL = [], rl = await P.pesquisar(apiLim, WS(100), PATS, {espera: 0, lote: 1, paralelo: 40, onParalelo: n => parsL.push(n)});
+  check(rl.results.filter(x => x.p[1]).length === 100 && !rl.results.some(x => x.err) && parsL[0] === 20 && lim === 30,
+    'JMS pede para ir mais devagar: metade das consultas ao mesmo tempo, pausa e nenhuma remessa perdida', parsL);
+  const kLim = ['{"code":500,"msg":"请求过于频繁"}', '{"code":0,"msg":"Too many requests"}'].map(t => { try { R.parseJms(200, t); return ''; } catch (e) { return e.kind + (e.limite ? '+limite' : ''); } });
+  check(kLim.join() === 'temp+limite,temp+limite', '"muitas consultas" do JMS = passageiro (não é recusa nem token)', kLim);
   check(R.segmentosDe({data: {details: {terminalDispatchCode: 'XA,101-01,'}}}).s2 === '101-01' && R.segmentosDe({data: null}).s1 === '' &&
     R.segmentosDe({data: {terminalDispatchCode: 'XB,202-02,9'}}).s1 === 'XB', 'segmentos: código com o 3º vazio, sem dados ou fora de "details"');
   const js = await criar({semOrder: true});
@@ -195,7 +214,7 @@ function request(porta, method, p, body, headers) {
     JSON.parse(fs.readFileSync(path.join(cfg.dados, 'credenciais.json'), 'utf8')).JMS_AUTHTOKEN === TOKEN,
     'token salvo só pelo computador do app (pela rede: recusado); "authtoken:", aspas e espaços saem');
   const home = await request(porta, 'GET', '/');
-  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.3\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
+  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.4\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
     ['rastreio.js', 'pesquisa.js', 'planilha.js', 'app.js', 'app.css'].every(f => home.text.indexOf(f) >= 0), 'página do app (Node.js)');
   const libs = await Promise.all(['/rastreio.js', '/pesquisa.js', '/planilha.js', '/app.js'].map(f => request(porta, 'GET', f)));
   check(libs.every(r => r.status === 200 && /javascript/.test(r.headers['content-type'])) && libs.every(r => { try { new Function(r.text); return true; } catch (e) { return false; } }),
@@ -216,10 +235,15 @@ function request(porta, method, p, body, headers) {
   const recusas = await Promise.all(outras.map(u => api2('consultar', {pedidos: [kwPed(['FIC1']), {url: u, body: {}}]})));
   check(!muitos.ok && /2500/.test(muitos.error) && recusas.every(r => !r.ok && /só consulta o Rastreamento do pacote e a Informação básica/.test(r.error)),
     'com o token do servidor, só o Rastreamento do pacote e a Informação básica (nada que grave ou apague); no máximo 2500 por chamada');
-  // 1000 remessas numa chamada: o servidor faz as consultas ao mesmo tempo (25 por vez).
-  const t0 = Date.now(), mil = await api2('consultar', {pedidos: WS(1000).map(w => kwPed([w]))});
-  check(mil.ok && mil.result.length === 1000 && mil.result.every((r, i) => JSON.parse(r.text).data[0].keyword === WS(1000)[i]), 'api/consultar: 1000 consultas numa chamada, na mesma ordem',
-    Date.now() - t0);
+  // 1000 remessas numa chamada: o servidor faz as consultas ao mesmo tempo (quantas a página pedir, até 100).
+  jms.estado.maxSimultaneas = 0;
+  const t0 = Date.now(), mil = await api2('consultar', {pedidos: WS(1000).map(w => kwPed([w])), opcoes: {paralelo: 80}});
+  const maxMil = jms.estado.maxSimultaneas;
+  jms.estado.maxSimultaneas = 0;
+  await api2('consultar', {pedidos: WS(300).map(w => kwPed([w])), opcoes: {paralelo: 5000}});
+  const maxTeto = jms.estado.maxSimultaneas;
+  check(mil.ok && mil.result.length === 1000 && mil.result.every((r, i) => JSON.parse(r.text).data[0].keyword === WS(1000)[i]) && maxMil > 25 && maxMil <= 80 && maxTeto <= 100,
+    'api/consultar: 1000 consultas numa chamada, na mesma ordem, até 100 ao mesmo tempo', {ms: Date.now() - t0, maxMil, maxTeto});
   // Com o DashMaster neste computador: o MESMO token dele (banco dashmaster.db, tela Configurações), sem colar nada.
   let sqliteOk = true;
   try { require('node:sqlite'); } catch (e) { sqliteOk = false; }
@@ -318,8 +342,15 @@ function request(porta, method, p, body, headers) {
   fetched.length = 0;
   gctx.fetchAlls = 0;
   const g60 = gctx.consultar(Array.from({length: 60}, (_, i) => kwG({keywordList: ['FIC' + i]})));
-  check(g60.length === 60 && gctx.fetchAlls === 3 && fetched.map(f => JSON.parse(f.req.payload).keywordList[0]).join() === Array.from({length: 60}, (_, i) => 'FIC' + i).join(),
-    'Apps Script consultar(): 25 consultas ao mesmo tempo (UrlFetchApp.fetchAll), na mesma ordem', gctx.fetchAlls);
+  const fa60 = gctx.fetchAlls;
+  gctx.fetchAlls = 0;
+  gctx.consultar(Array.from({length: 60}, () => kwG()), {paralelo: 10});
+  const fa10 = gctx.fetchAlls;
+  gctx.fetchAlls = 0;
+  gctx.consultar(Array.from({length: 250}, () => kwG()), {paralelo: 999});
+  check(g60.length === 60 && fa60 === 2 && fa10 === 6 && gctx.fetchAlls === 3 &&
+    fetched.slice(0, 60).map(f => JSON.parse(f.req.payload).keywordList[0]).join() === Array.from({length: 60}, (_, i) => 'FIC' + i).join(),
+    'Apps Script consultar(): 50 ao mesmo tempo (UrlFetchApp.fetchAll), o que a página pedir até 100, na mesma ordem', [fa60, fa10, gctx.fetchAlls]);
   let gGrava = '', gMuitos = '';
   try { gctx.consultar([kwG(), {url: 'https://outro.example/x', body: {}}]); } catch (e) { gErr = e.message; }
   try { gctx.consultar([{url: 'https://gw.jtjms-br.com/ficticio/user/updatePassword', body: {}}]); } catch (e) { gGrava = e.message; }

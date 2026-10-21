@@ -35,9 +35,12 @@ function remessas(n) { const out = {}; for (let i = 0; i < n; i++) out['FIC' + S
 
 function criar(opts) {
   opts = opts || {};
-  const conhecidas = remessas(opts.quantas || 3000), estado = {chamadas: []};
+  const conhecidas = remessas(opts.quantas || 3000), estado = {chamadas: [], agora: 0, maxSimultaneas: 0};
   const server = http.createServer((req, res) => {
     const chunks = [];
+    estado.agora++;
+    estado.maxSimultaneas = Math.max(estado.maxSimultaneas, estado.agora);
+    res.on('finish', () => { estado.agora--; });
     req.on('data', c => chunks.push(c));
     req.on('end', () => {
       const url = new URL(req.url, 'http://x'), rota = url.pathname;

@@ -1,4 +1,4 @@
-# J&T · Pesquisa no Rastreamento — V1.3
+# J&T · Pesquisa no Rastreamento — V1.4
 
 App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto da coluna "Descrição da etapa de bipagem" (JMS › Operação › Consulta do pacote › Rastreamento do pacote). O app:
 
@@ -9,7 +9,12 @@ App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto d
 
 *Feito por Caike Oliveira.*
 
-**Novo na V1.3:**
+**Novo na V1.4 — mais rápida (cerca de 2,5× nos testes):**
+- Faz **50 consultas ao mesmo tempo** e sobe sozinha até **100** enquanto o JMS responde bem. Se o JMS pedir para ir mais devagar, cai pela metade, espera um pouco e continua, sem perder remessa.
+- Já começa com uma remessa por consulta (como o JMS responde), sem a primeira rodada perdida.
+- A barra mostra **quanto tempo falta**.
+
+**Na V1.3:**
 - Pesquisa **1000 remessas por vez**. Antes andava de 4 em 4 porque o JMS devolve só uma remessa por consulta (a tela do JMS também consulta uma por vez). Agora o app aprende isso na primeira rodada e faz as consultas ao mesmo tempo.
 - **Códigos de segmento** da Informação básica do JMS (bloco "3 Segmentos"): **Código de primeiro segmento** e **Código de dois segmentos**, nas tabelas e na planilha. O valor de "3 Segmentos" fica de fora.
 
@@ -125,8 +130,8 @@ Regras:
 
 ## Consultas ao JMS
 - A tela manda as remessas ao servidor do app **1000 por vez**. O contador anda de 1000 em 1000.
-- O servidor faz as consultas ao JMS **ao mesmo tempo** (25 por vez):
-  - Rastreamento do pacote: várias remessas por consulta. O JMS devolve só a primeira de cada consulta, então o app aprende isso na primeira rodada e passa a mandar uma remessa por consulta;
+- O servidor faz as consultas ao JMS **ao mesmo tempo**: começa com 50 e sobe até 100 enquanto o JMS responde sem falhas. Se o JMS pedir para ir mais devagar (HTTP 429 ou "muitas consultas"), cai pela metade e espera um pouco. O ritmo aprendido fica guardado no navegador.
+  - Rastreamento do pacote: o JMS devolve só a primeira remessa de cada consulta, então o app manda uma remessa por consulta, como a tela do JMS;
   - Informação básica (`getOrderDetail`): uma consulta por remessa, para os códigos de segmento.
 - Se o JMS recusar ou cortar, o app aprende o limite sozinho e nenhuma remessa se perde. Uma falha passageira volta para a fila.
 - Se a Informação básica falhar, a pesquisa termina do mesmo jeito e a tela avisa quantas remessas ficaram sem os segmentos.
@@ -136,7 +141,7 @@ Regras:
 ## Para a TI
 - Toda a pesquisa roda na página: `lib/rastreio.js` (regras), `lib/pesquisa.js` (consultas) e `lib/planilha.js` (.xlsx com gráficos).
 - O servidor só consulta o **Rastreamento do pacote** (`podTracking/inner/query/keywordList`) e a **Informação básica** (`order/getOrderDetail`), com o **token dele**, como o DashMaster. Qualquer outro endereço é recusado.
-  - Até 2500 consultas por chamada, 25 ao mesmo tempo.
+  - Até 2500 consultas por chamada, até 100 ao mesmo tempo (a página diz quantas: `api/consultar` com `opcoes.paralelo`; `consultar(pedidos, {paralelo})` no Apps Script).
   - Devolve à página só os campos que a pesquisa usa: as linhas do rastreamento e o `terminalDispatchCode`. Nome, endereço e telefone do cliente não saem do servidor.
   - A página não guarda o token: só o campo **Salvar neste computador** (Node.js) manda o token, uma vez, ao servidor local.
   - Node.js: `server.js`, rotas `api/estado`, `api/consultar` e `api/token` (só de `localhost`). O token vem do banco do DashMaster (`node/dados/dashmaster.db`, tabela `props`, só leitura) ou de `dados/credenciais.json`.
