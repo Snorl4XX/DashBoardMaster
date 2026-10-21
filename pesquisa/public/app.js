@@ -5,7 +5,7 @@
  */
 (function () {
   'use strict';
-  var VERSAO_PAGINA = '1.5.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
+  var VERSAO_PAGINA = '1.6.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
   var BOOT = window.__PESQUISA__ || {}, R = window.Rastreio, P = window.Pesquisa, X = window.Planilha, PAGE = 100;
   var SHIFTS = R.SHIFTS, SHIFT_HOURS = R.SHIFT_HOURS;
   var DEFAULTS = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
@@ -40,6 +40,9 @@
       withSeg: 'Trazer os códigos de segmento (Informação básica). Desligado, a pesquisa fica cerca de 2× mais rápida.',
       segWarn: '{n} remessa(s) ficaram sem os códigos de segmento (Informação básica do JMS: {m}).', eta: ' · faltam ~{t}',
       finished: 'Pronto: {total} remessa(s) em {sec} s · {q} consultas ao JMS ({v} por segundo).',
+      revInfo: ' {r} vazia(s) ou recusada(s) conferida(s) de novo, devagar: {a} apareceram.',
+      errWarn: '{n} remessa(s) ficaram sem resposta do JMS. Motivo: {m} Elas aparecem em "Não tem" como "Consulta recusada pelo JMS".',
+      errNote: '{n} com consulta recusada pelo JMS', retry: 'Tentar de novo essas remessas',
       stopped: 'Pesquisa parada: {done} de {total} remessas.', failed: 'A pesquisa parou', resume: 'Continuar',
       limit: 'O JMS devolve {n} remessa(s) por consulta (aprendido): o app faz as consultas ao mesmo tempo.',
       searched: 'Pesquisadas', yes: 'Tem o padrão', no: 'Não tem o padrão', none: '{n} sem rastreamento no JMS', noneTile: 'Sem rastreamento no JMS',
@@ -72,7 +75,8 @@
       block2: '模块2 · 最多的班次', block2Q: '包含这一行的第一条扫描发生在哪个班次？', hint: '复制“扫描描述”列的文字。大小写、重音和 [ ] 内的空格不影响；* 代表任意文字。留空则不使用该模块。',
       run: '在 JMS 中查询', stop: '停止', download: '下载表格 (.xlsx)', clear: '清空', madeBy: '由 Caike Oliveira 制作',
       count: '{n} 个运单', dup: '忽略 {n} 个重复', bad: '{n} 行不像运单号', noWaybills: '请至少粘贴一个运单号。', noPattern: '请至少填写一个模块的关键字。',
-      progress: '正在查询 JMS… {done} / {total}', withSeg: '获取段码（基本信息）。关闭后查询速度约快 2 倍。', segWarn: '{n} 个运单没有段码（JMS 基本信息：{m}）。', eta: ' · 约剩 {t}', finished: '完成：{total} 个运单，用时 {sec} 秒 · JMS 查询 {q} 次（每秒 {v} 次）。',
+      progress: '正在查询 JMS… {done} / {total}', withSeg: '获取段码（基本信息）。关闭后查询速度约快 2 倍。', segWarn: '{n} 个运单没有段码（JMS 基本信息：{m}）。', eta: ' · 约剩 {t}', finished: '完成：{total} 个运单，用时 {sec} 秒 · JMS 查询 {q} 次（每秒 {v} 次）。', revInfo: ' 重新慢速核对 {r} 个空/被拒运单：找到 {a} 个。',
+      errWarn: '{n} 个运单 JMS 未响应。原因：{m}', errNote: '{n} 个被 JMS 拒绝', retry: '重新查询这些运单',
       stopped: '已停止：{done} / {total}。', failed: '查询停止', resume: '继续', limit: 'JMS 每次查询返回 {n} 个运单（已学习），程序会同时发送多个查询。',
       searched: '已查询', yes: '有关键字', no: '无关键字', none: '{n} 个在 JMS 无轨迹', noneTile: 'JMS 无轨迹', topShift: '最多的班次', ofYes: '占有关键字的 {p}',
       noHits: '没有运单包含该关键字。', remessas: '运单', partial: '部分', chartYesNo: '有/无关键字', chartShift: '第一条扫描的班次分布', chartHour: '第一条扫描的小时分布',
@@ -209,11 +213,12 @@
     $('#barFill').style.width = (total ? Math.round(done / total * 100) : 0) + '%';
     $('#statusText').textContent = t(key, {done: fmtInt(done), total: fmtInt(total)});
   }
-  function showAlert(msg, resume, kind) {
+  function showAlert(msg, resume, kind, label) {
     var box = $('#alertBox');
     if (!msg) { box.className = 'alert hidden'; box.innerHTML = ''; return; }
     box.className = 'alert' + (kind ? ' ' + kind : '');
-    box.innerHTML = '<div>' + (kind === 'warn' ? '' : '<b>' + esc(t('failed')) + '</b>') + esc(msg) + '</div>' + (resume ? '<button type="button" class="btn btn-light" id="resumeBtn">' + esc(t('resume')) + '</button>' : '');
+    box.innerHTML = '<div>' + (kind === 'warn' ? '' : '<b>' + esc(t('failed')) + '</b>') + esc(msg) + '</div>' +
+      (resume ? '<button type="button" class="btn btn-light" id="resumeBtn">' + esc(label || t('resume')) + '</button>' : '');
     if (resume) $('#resumeBtn').addEventListener('click', function () { showAlert(''); run(resume); });
   }
   function start() {
@@ -234,15 +239,22 @@
   /** Pesquisa (ou continua) as remessas `list`. */
   function run(list) {
     state.stop = false;
+    // Tempo e consultas desta vez (continuar ou tentar de novo também conta do zero).
+    state.started = Date.now();
+    state.consultas = 0;
     setRunning(true);
     progress(state.results.length, state.list.length, 'progress');
     // O JMS devolve uma remessa por consulta ao Rastreamento (como a tela dele): já começa assim, sem rodada perdida.
-    var antes = state.results.slice(), lote = Number(load('jt_pesquisa_porconsulta')) || 1;
+    // As que vão ser pesquisadas agora (continuar ou tentar de novo) saem do que já veio.
+    var agora = {};
+    list.forEach(function (w) { agora[w] = 1; });
+    var antes = state.results.filter(function (r) { return !agora[r.w]; }), lote = Number(load('jt_pesquisa_porconsulta')) || 1;
     var parar = function () { return state.stop; }, t0 = Date.now(), base = antes.length;
+    // V1.6: ritmo guardado com chave nova (o da V1.5 começava rápido demais para o JMS).
     P.pesquisar(api, list, state.pats, {lote: lote, porChamada: P.POR_CHAMADA, chamadas: P.CHAMADAS, headers: rota(), parar: parar,
       segmentos: state.comSeg,
-      paralelo: Number(load('jt_pesquisa_paralelo')) || P.PARALELO,
-      onParalelo: function (n) { store('jt_pesquisa_paralelo', String(n)); },
+      paralelo: Number(load('jt_pesquisa_ritmo')) || P.PARALELO,
+      onParalelo: function (n) { store('jt_pesquisa_ritmo', String(n)); },
       onLote: function (n) { store('jt_pesquisa_porconsulta', String(n)); toast(t('limit', {n: fmtInt(n)})); },
       onHeaders: function (h) { store('jt_pesquisa_rota', JSON.stringify(h)); },
       onProgresso: function (feitas) {
@@ -258,7 +270,11 @@
       state.consultas += res.consultas || 0;
       render();
       done(state.stop || res.faltam.length ? 'stopped' : 'finished');
-      if (res.semSeg) showAlert(t('segWarn', {n: fmtInt(res.semSeg), m: res.erroSeg || '—'}), null, 'warn');
+      if (res.revistas) $('#statusText').textContent += t('revInfo', {r: fmtInt(res.revistas), a: fmtInt(res.achadasRevisao)});
+      // Nada de esconder recusa: avisa, com o motivo, e oferece pesquisar só essas de novo.
+      var recusadas = state.results.filter(function (r) { return r.err; }).map(function (r) { return r.w; });
+      if (recusadas.length) showAlert(t('errWarn', {n: fmtInt(recusadas.length), m: res.erro || '—'}), recusadas, 'warn', t('retry'));
+      else if (res.semSeg) showAlert(t('segWarn', {n: fmtInt(res.semSeg), m: res.erroSeg || '—'}), null, 'warn');
     }).catch(function (e) {
       render();
       setRunning(false);
@@ -361,12 +377,14 @@
       '<div class="tk-tile"><small>' + esc(t('no')) + '</small><b>' + fmtInt(s.no) + '</b><span>' + fmtPct(s.no, s.total) + '</span></div>';
     tiles += k ? '<div class="tk-tile hero"><small>' + esc(t('topShift')) + '</small><b>' + (s.top || '—') + '</b><span>' +
       (s.top ? esc(SHIFT_HOURS[s.top] + ' · ' + fmtInt(s.topCount) + ' · ' + t('ofYes', {p: fmtPct(s.topCount, s.yes)})) : '&nbsp;') + '</span></div>'
-      : '<div class="tk-tile"><small>' + esc(t('noneTile')) + '</small><b>' + fmtInt(s.none) + '</b><span>' + fmtPct(s.none, s.total) + '</span></div>';
+      : '<div class="tk-tile"><small>' + esc(t('noneTile')) + '</small><b>' + fmtInt(s.none) + '</b><span>' + fmtPct(s.none, s.total) +
+        (s.err ? ' · ' + esc(t('errNote', {n: fmtInt(s.err)})) : '') + '</span></div>';
     tiles += '</div>';
     var charts = '<div class="tk-charts"><div class="tk-chart"><h4>' + esc(t('chartYesNo')) + '</h4><div class="tk-donut">' + donut(s.yes, s.no) +
       '<div><div class="tk-legend"><span><i class="sw bg-yes"></i>' + esc(t('yes')) + ' · <b>' + fmtInt(s.yes) + '</b> (' + fmtPct(s.yes, s.total) + ')</span></div>' +
       '<div class="tk-legend"><span><i class="sw bg-no"></i>' + esc(t('no')) + ' · <b>' + fmtInt(s.no) + '</b> (' + fmtPct(s.no, s.total) + ')</span></div>' +
-      (s.none ? '<p class="muted small">' + esc(t('none', {n: fmtInt(s.none)})) + '</p>' : '') + '</div></div></div>';
+      (s.none ? '<p class="muted small">' + esc(t('none', {n: fmtInt(s.none)})) + '</p>' : '') +
+      (s.err ? '<p class="small tk-noimg">' + esc(t('errNote', {n: fmtInt(s.err)})) + '</p>' : '') + '</div></div></div>';
     if (k) {
       charts += '<div class="tk-chart"><h4>' + esc(t('chartShift')) + '</h4>' + columns(SHIFTS.map(function (x) {
         return {label: x + ' · ' + SHIFT_HOURS[x], value: s.shifts[x], cls: 'f-' + x.toLowerCase(), tip: x + ' (' + SHIFT_HOURS[x] + '): ' + fmtInt(s.shifts[x]) + ' · ' + fmtPct(s.shifts[x], s.yes)};

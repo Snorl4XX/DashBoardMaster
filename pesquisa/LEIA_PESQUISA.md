@@ -1,4 +1,4 @@
-# J&T · Pesquisa no Rastreamento — V1.5
+# J&T · Pesquisa no Rastreamento — V1.6
 
 App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto da coluna "Descrição da etapa de bipagem" (JMS › Operação › Consulta do pacote › Rastreamento do pacote). O app:
 
@@ -11,8 +11,16 @@ App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto d
 
 **Por que demora:** o JMS responde **uma remessa por consulta**, e cada remessa precisa de **2 consultas** (rastreamento + Informação básica). 5000 remessas = 10 mil consultas. No Apps Script, cada pacote de consultas ainda espera a consulta mais lenta dele.
 
-**Novo na V1.5 — cerca de 3× mais rápida no Apps Script:**
-- A página mantém **6 chamadas ao servidor ao mesmo tempo** (200 remessas cada). Quando uma volta, a próxima sai na hora, sem esperar as outras. Cada chamada faz de 20 a 40 consultas ao JMS ao mesmo tempo.
+**Novo na V1.6 — nada de "sem rastreamento" falso:**
+- Quando o JMS recebe consultas demais ao mesmo tempo, ele pode **recusar** ou **responder vazio**. Antes, essas remessas apareciam como "Sem rastreamento no JMS" sem aviso nenhum (por exemplo, 125 de 125).
+- Agora:
+  - uma remessa recusada é consultada de novo (até 3 vezes) antes de desistir;
+  - **no fim, as que voltaram vazias ou recusadas são conferidas de novo, devagar**. Se muitas aparecerem nessa conferência, o app guarda um ritmo mais lento para as próximas pesquisas;
+  - "Consulta recusada pelo JMS" conta separado de "Sem rastreamento", com um aviso com o motivo e o botão **Tentar de novo essas remessas**.
+- Começa mais leve (4 chamadas, 10 consultas ao mesmo tempo em cada uma) e acelera até 40 enquanto o JMS aguenta.
+
+**Na V1.5 — cerca de 3× mais rápida no Apps Script:**
+- A página mantém **várias chamadas ao servidor ao mesmo tempo** (200 remessas cada; 4 na V1.6). Quando uma volta, a próxima sai na hora, sem esperar as outras. Cada chamada faz de 20 a 40 consultas ao JMS ao mesmo tempo.
 - Botão **"Trazer os códigos de segmento"**: desligado, a pesquisa fica cerca de **2× mais rápida** (só o rastreamento).
 - No fim, a tela mostra quantas consultas foram feitas e quantas por segundo. Se continuar lento, é o JMS demorando para responder.
 - No modelo do Apps Script (consultas levando de 0,5 s a 3 s), 5000 remessas caem de cerca de 8 min para cerca de 2,6 min (1,3 min sem os segmentos). No computador (Node.js), 2500 remessas levaram 12 s no teste.
@@ -134,11 +142,13 @@ Regras:
 - **Uma aba "Tem" e uma "Não tem" para cada bloco**, com filtro. As duas têm as colunas dos códigos de segmento (quando o botão dos segmentos está ligado).
 
 ## Consultas ao JMS
-- A tela mantém **6 chamadas ao servidor do app ao mesmo tempo**, com 200 remessas cada. O contador anda a cada chamada que volta.
-- Em cada chamada, o servidor faz as consultas ao JMS **ao mesmo tempo**: começa com 20 e sobe até 40 enquanto o JMS responde sem falhas (até 240 consultas ao mesmo tempo no total). Se o JMS pedir para ir mais devagar (HTTP 429 ou "muitas consultas"), cai pela metade e espera um pouco. O ritmo aprendido fica guardado no navegador.
+- A tela mantém **4 chamadas ao servidor do app ao mesmo tempo**, com 200 remessas cada. O contador anda a cada chamada que volta.
+- Em cada chamada, o servidor faz as consultas ao JMS **ao mesmo tempo**: começa com 10 e sobe até 40 enquanto o JMS responde sem falhas (até 160 consultas ao mesmo tempo no total). Se o JMS pedir para ir mais devagar (HTTP 429 ou "muitas consultas"), cai pela metade e espera um pouco. O ritmo aprendido fica guardado no navegador.
   - Rastreamento do pacote: o JMS devolve só a primeira remessa de cada consulta, então o app manda uma remessa por consulta, como a tela do JMS;
   - Informação básica (`getOrderDetail`): uma consulta por remessa, para os códigos de segmento. Desligue **"Trazer os códigos de segmento"** para pesquisar cerca de 2× mais rápido.
-- Se o JMS recusar ou cortar, o app aprende o limite sozinho e nenhuma remessa se perde. Uma falha passageira volta para a fila.
+- Se o JMS recusar ou cortar, o app aprende o limite sozinho e nenhuma remessa se perde. Uma falha passageira volta para a fila; uma remessa recusada é tentada de novo até 3 vezes.
+- **Conferência no fim:** as remessas que voltaram vazias ou recusadas são consultadas de novo, devagar (2 chamadas, 10 consultas ao mesmo tempo). O JMS sobrecarregado às vezes responde vazio; a conferência pega essas. A linha do fim diz quantas foram conferidas e quantas apareceram.
+- O que o JMS recusou mesmo assim aparece como **"Consulta recusada pelo JMS"** (separado de "Sem rastreamento"), com o motivo e o botão **Tentar de novo essas remessas**.
 - Se a Informação básica falhar, a pesquisa termina do mesmo jeito e a tela avisa quantas remessas ficaram sem os segmentos.
 - **Parar** interrompe a pesquisa; o que já veio fica na tela.
 - Se a pesquisa parar com erro, o botão **Continuar** retoma de onde parou.

@@ -7,8 +7,8 @@
  *     TEMPO e devolve só os campos que a pesquisa usa.
  *
  * buscarBipes: o JMS responde UMA remessa por consulta ao Rastreamento, e cada remessa ainda tem a Informação básica (segmentos):
- * são 2 consultas por remessa. Para não esperar, a página mantém 6 chamadas ao servidor ao mesmo tempo, cada uma com 200
- * remessas (até 400 consultas), e cada chamada faz 20 a 40 consultas ao JMS ao mesmo tempo. Quando uma chamada volta, a
+ * são 2 consultas por remessa. Para não esperar, a página mantém 4 chamadas ao servidor ao mesmo tempo, cada uma com 200
+ * remessas (até 400 consultas), e cada chamada faz de 10 a 40 consultas ao JMS ao mesmo tempo. Quando uma chamada volta, a
  * próxima sai na hora (não espera as outras) — no Apps Script, cada pacote do fetchAll espera a consulta mais lenta dele, então
  * pacotes menores em várias chamadas andam bem mais rápido que um pacote grande.
  *   - Só as primeiras vieram (a tela do JMS consulta uma remessa por vez): o resto volta em grupos desse tamanho e o limite é
@@ -18,8 +18,11 @@
  *     responder, o limite era esse. Vazio do tamanho das que responderam (ou pequeno): as remessas não existem no JMS.
  *   - Recusa na 1ª vez: testa uma vez os cabeçalhos de rota do DashMaster antes de concluir que é o tamanho.
  *   - Falha passageira (rede, 429, 5xx, tempo do Google): a consulta volta para a fila (até 5 vezes).
- *   - Ritmo: cada chamada começa com 20 consultas ao mesmo tempo e sobe até 40 enquanto o JMS responde sem falhas. Se o JMS pedir
- *     para ir mais devagar (ou falhar muito), cai pela metade e a chamada espera um pouco.
+ *   - Ritmo: cada chamada começa com 10 consultas ao mesmo tempo e sobe até 40 enquanto o JMS responde sem falhas. Se o JMS pedir
+ *     para ir mais devagar (ou recusar/falhar muito), cai pela metade e a chamada espera um pouco.
+ *   - Uma remessa sozinha recusada (o JMS sobrecarregado): de novo, até 3 vezes, antes de marcar "consulta recusada".
+ *   - Conferência no fim: as remessas que voltaram vazias ou recusadas são consultadas de novo, devagar (o JMS sobrecarregado às
+ *     vezes responde vazio). Se muitas aparecerem nessa conferência, o ritmo guardado cai pela metade.
  */
 (function (root, factory) {
   var api = factory(root.Rastreio || (typeof require === 'function' ? require('./rastreio.js') : null));
@@ -30,7 +33,7 @@
 
   // As mesmas variantes do DashMaster para o Rastreamento do pacote (JmsApi.gs, rota TRACKING).
   var ROUTE_VARIANTS = [{routename: 'trackingExpress'}, {routename: 'waybillTracking'}, {routename: 'packageTracking'}];
-  var POR_CHAMADA = 200, CHAMADAS = 6, TENTATIVAS = 5, PARALELO = 20, PARALELO_MAX = 40, PARALELO_MIN = 3;
+  var POR_CHAMADA = 200, CHAMADAS = 4, TENTATIVAS = 5, RECUSAS = 3, PARALELO = 10, PARALELO_MAX = 40, PARALELO_MIN = 3, REVISAO = {chamadas: 2, paralelo: 10};
   function wait(ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); }
 
   /** Erro da chamada ao servidor (não do JMS): sem token, sem autorização ou arquivo antigo param a pesquisa. */
@@ -69,7 +72,7 @@
     var lote = Math.max(1, Math.floor(o.lote || 100)), porChamada = Math.max(1, o.porChamada || POR_CHAMADA), minProbe = o.minProbe || 8;
     var nChamadas = Math.max(1, Math.floor(o.chamadas || CHAMADAS));
     var map = {}, segs = {}, segFila = [], segTent = {}, fila = [], provado = 0, erro = '', erroSeg = '', testouRota = !!o.headers;
-    var sondando = false, consultas = 0;
+    var sondando = false, consultas = 0, revisando = false;
     var comSeg = o.segmentos !== false;
     for (var i = 0; i < list.length; i += lote) fila.push({list: list.slice(i, i + lote)});
     if (comSeg) segFila = list.slice();
@@ -152,7 +155,8 @@
       if (!grupos.length && !segList.length) return null;
       var pedidos = grupos.map(pedido).concat(segList.map(function (w) { return {url: R.ORDER_URL, body: R.orderPayload(w, o.pais), headers: estado.headers || {}}; }));
       var passageiras = 0, devagar = false;
-      var anota = function (e) { if (e.kind === 'temp') passageiras++; if (e.limite) devagar = true; };
+      // Falha passageira ou recusa: sinal de que o JMS não está dando conta (o ritmo cai).
+      var anota = function (e) { if (e.kind === 'temp' || e.kind === 'refused') passageiras++; if (e.limite) devagar = true; };
       consultas += pedidos.length;
       return consultar(api, pedidos, o.espera, estado.paralelo).then(function (resps) {
         var info = {completo: 0, prefixos: []}, recusados = [], auth = null;
@@ -192,8 +196,9 @@
         }
         // Ritmo: mais consultas ao mesmo tempo enquanto o JMS aguenta; menos (e uma pausa) quando reclama.
         var antes = estado.paralelo, pausa = 0;
-        if (devagar || passageiras > pedidos.length * 0.05) { estado.paralelo = Math.max(PARALELO_MIN, Math.floor(antes / 2)); pausa = o.espera === undefined ? 3000 : o.espera; }
-        else if (!passageiras) estado.paralelo = Math.min(PARALELO_MAX, Math.ceil(antes * 1.25));
+        // Poucas falhas soltas (ex.: uma remessa que o JMS sempre recusa) não derrubam o ritmo.
+        if (devagar || (passageiras >= 5 && passageiras > pedidos.length * 0.05)) { estado.paralelo = Math.max(PARALELO_MIN, Math.floor(antes / 2)); pausa = o.espera === undefined ? 3000 : o.espera; }
+        else if (!passageiras && !revisando) estado.paralelo = Math.min(PARALELO_MAX, Math.ceil(antes * 1.25));
         if (estado.paralelo !== antes && o.onParalelo) o.onParalelo(estado.paralelo);
         var segue = pausa ? wait(pausa) : Promise.resolve();
         if (!recusados.length) return segue;
@@ -201,7 +206,11 @@
         if (sondando) { recusados.forEach(function (x) { fila.push(x.g); }); return segue; }
         var depois = function () {
           if (auth) throw auth;
-          recusados.forEach(function (x) { recusar(x.g, x.e); });
+          recusados.forEach(function (x) {
+            // Uma remessa só, recusada: pode ser o JMS sobrecarregado — de novo, antes de desistir dela.
+            if (x.g.list.length === 1 && (x.g.rec = (x.g.rec || 0) + 1) < RECUSAS) { erro = x.e.message; fila.push(x.g); return; }
+            recusar(x.g, x.e);
+          });
         };
         if (testouRota) return segue.then(depois);
         return segue.then(function () { return testarRotas(recusados[0].g); }).then(function (ok) {
@@ -212,25 +221,49 @@
         });
       });
     };
-    // Até `chamadas` chamadas ao mesmo tempo: quando uma volta, a próxima sai na hora.
-    return new Promise(function (ok, ko) {
-      var ativas = 0, falhou = false;
-      var fim = function () { ok({map: map, segs: segs, erro: erro, erroSeg: erroSeg, lote: lote, headers: estado.headers, paralelo: estado.paralelo, consultas: consultas}); };
-      var puxar = function () {
-        if (falhou) return;
-        while (ativas < nChamadas && !(o.parar && o.parar())) {
-          var p = chamada();
-          if (!p) break;
-          ativas++;
-          p.then(function () {
-            ativas--;
-            if (o.onProgresso) o.onProgresso(feitas(), list.length);
-            puxar();
-          }, function (e) { falhou = true; ko(e); });
-        }
-        if (!ativas) fim();
-      };
-      puxar();
+    // Até `limite` chamadas ao mesmo tempo: quando uma volta, a próxima sai na hora.
+    var rodar = function (limite) {
+      return new Promise(function (ok, ko) {
+        var ativas = 0, falhou = false;
+        var puxar = function () {
+          if (falhou) return;
+          while (ativas < limite && !(o.parar && o.parar())) {
+            var p = chamada();
+            if (!p) break;
+            ativas++;
+            p.then(function () {
+              ativas--;
+              if (o.onProgresso) o.onProgresso(feitas(), list.length);
+              puxar();
+            }, function (e) { falhou = true; ko(e); });
+          }
+          if (!ativas) ok();
+        };
+        puxar();
+      });
+    };
+    var revistas = 0, achadasRevisao = 0;
+    return rodar(nChamadas).then(function () {
+      if ((o.parar && o.parar()) || o.revisar === false) return;
+      // Conferência: vazias ou recusadas voltam, devagar. O JMS sobrecarregado às vezes responde vazio.
+      var rever = list.filter(function (w) { return map[w] === null || (map[w] && !map[w].length); });
+      if (!rever.length) return;
+      revistas = rever.length;
+      rever.forEach(function (w) { delete map[w]; if (comSeg && !segs[w]) { delete segs[w]; segFila.push(w); } });
+      fila = rever.map(function (w) { return {list: [w]}; });
+      var ritmo = estado.paralelo;
+      estado.paralelo = Math.min(ritmo, REVISAO.paralelo);
+      revisando = true; // na conferência o ritmo não sobe
+      return rodar(REVISAO.chamadas).then(function () {
+        revisando = false;
+        achadasRevisao = rever.filter(function (w) { return map[w] && map[w].length; }).length;
+        // Muitas apareceram só na conferência: o ritmo estava rápido demais para o JMS.
+        estado.paralelo = achadasRevisao > rever.length * 0.2 ? Math.max(PARALELO_MIN, Math.floor(ritmo / 2)) : ritmo;
+        if (estado.paralelo !== ritmo && o.onParalelo) o.onParalelo(estado.paralelo);
+      });
+    }).then(function () {
+      return {map: map, segs: segs, erro: erro, erroSeg: erroSeg, lote: lote, headers: estado.headers, paralelo: estado.paralelo, consultas: consultas,
+        revistas: revistas, achadasRevisao: achadasRevisao};
     });
   }
 
@@ -252,7 +285,8 @@
         if (d === null) r.err = true;
         results.push(r);
       });
-      return {results: results, faltam: faltam, erro: b.erro, erroSeg: b.erroSeg, consultas: b.consultas,
+      return {results: results, faltam: faltam, erro: b.erro, erroSeg: b.erroSeg, consultas: b.consultas, revistas: b.revistas, achadasRevisao: b.achadasRevisao,
+        recusadas: results.filter(function (r) { return r.err; }).length,
         semSeg: o && o.segmentos === false ? 0 : results.filter(function (r) { return r.ok && !r.seg; }).length, lote: b.lote, headers: b.headers, paralelo: b.paralelo};
     });
   }

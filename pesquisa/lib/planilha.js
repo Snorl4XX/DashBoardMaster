@@ -354,7 +354,8 @@
       var y = row([{v: 'Tem o padrão', s: S.yes}, {v: s.yes, s: S.int}, {v: pct(s.yes, s.total), s: S.pct}]);
       row([{v: 'Não tem o padrão', s: S.text}, {v: s.no, s: S.int}, {v: pct(s.no, s.total), s: S.pct}]);
       row([{v: 'Total pesquisado', s: S.label}, {v: s.total, s: S.intBold}, {v: s.total ? 1 : 0, s: S.pctBold}]);
-      if (s.none) row([{v: 'Dentro de "Não tem": ' + s.none + ' sem rastreamento no JMS (ou consulta recusada)', s: S.note}]);
+      if (s.none) row([{v: 'Dentro de "Não tem": ' + s.none + ' sem rastreamento no JMS', s: S.note}]);
+      if (s.err) row([{v: 'Dentro de "Não tem": ' + s.err + ' com consulta recusada pelo JMS (pesquise essas de novo)', s: S.note}]);
       resumo.charts.push({type: 'doughnut', title: name + ': tem × não tem o padrão', name: 'Remessas', cat: 'A' + y + ':A' + (y + 1), val: 'B' + y + ':B' + (y + 1),
         colors: [COLORS.yes, COLORS.no], at: [5, top - 1, 11, top + 15]});
       var last = R.length;

@@ -32,8 +32,13 @@ function apiFalsa(porta, token) {
       this.emVoo++;
       this.maxEmVoo = Math.max(this.maxEmVoo, this.emVoo);
       const fim = r => { this.emVoo--; return r; };
-      return Promise.all(pedidos.map(p => fetch(local(p.url), {method: 'POST', headers: Object.assign({'Content-Type': 'application/json', authtoken: token || TOKEN},
-        p.headers || {}), body: JSON.stringify(p.body)}).then(async r => ({status: r.status, text: await r.text()})))).then(fim);
+      // Como o servidor do app: no máximo `paralelo` consultas ao mesmo tempo.
+      const um = p => fetch(local(p.url), {method: 'POST', headers: Object.assign({'Content-Type': 'application/json', authtoken: token || TOKEN},
+        p.headers || {}), body: JSON.stringify(p.body)}).then(async r => ({status: r.status, text: await r.text()}));
+      const out = new Array(pedidos.length), par = Math.max(1, Math.min(100, (opcoes && opcoes.paralelo) || 50));
+      let prox = 0;
+      const trab = async () => { while (prox < pedidos.length) { const i = prox++; out[i] = await um(pedidos[i]); } };
+      return Promise.all(Array.from({length: Math.min(par, pedidos.length)}, trab)).then(() => out).then(fim);
     }
   };
 }
@@ -92,7 +97,7 @@ function request(porta, method, p, body, headers) {
   const r0 = await P.pesquisar(api, lista, PATS, {espera: 0});
   const kw0 = jms.estado.chamadas.filter(c => c.rota === 'keywordList');
   check(r0.results.length === 122 && !r0.faltam.length && r0.results.filter(x => x.p[0]).length === 80 && r0.results.filter(x => x.p[1]).length === 120 &&
-    r0.results.filter(x => !x.ok).length === 2 && kw0.map(c => c.n).join() === '100,22,2', 'pesquisa: 100 remessas por consulta (as que não voltaram são conferidas de novo), tem/não tem por bloco',
+    r0.results.filter(x => !x.ok).length === 2 && kw0.map(c => c.n).join() === '100,22,2,1,1', 'pesquisa: 100 remessas por consulta (as que não voltaram são conferidas de novo, e no fim mais uma vez, uma a uma), tem/não tem por bloco',
     kw0.map(c => c.n));
   check(r0.results[0].w === 'FIC000000000' && r0.results[1].p[0].t === '2026-09-09 15:00:00' && r0.results[2].p[1].t === '2026-09-09 14:36:12', 'na ordem colada, primeiro bipe');
   const limites = async (opts, n) => {
@@ -113,7 +118,7 @@ function request(porta, method, p, body, headers) {
   const rb = await P.pesquisar(apiFalsa(jb.porta), fake, PATS, {espera: 0, onLote: x => lotesB.push(x)});
   const cb = jb.estado.chamadas.filter(x => x.rota === 'keywordList').length;
   await jb.fechar();
-  check(rb.results.length === 300 && rb.results.every(x => !x.ok) && cb <= 100 && !lotesB.length, 'remessas coladas erradas: "sem rastreamento", poucas consultas, limite igual', cb);
+  check(rb.results.length === 300 && rb.results.every(x => !x.ok) && cb <= 400 && !lotesB.length, 'remessas coladas erradas: "sem rastreamento", poucas consultas, limite igual', cb);
   const jr = await criar({rota: 'trackingExpress'}), heads = [];
   const rr = await P.pesquisar(apiFalsa(jr.porta), WS(20), PATS, {espera: 0, onHeaders: h => heads.push(h)});
   await jr.fechar();
@@ -138,8 +143,8 @@ function request(porta, method, p, body, headers) {
   const kw1 = j1.estado.chamadas.filter(c => c.rota === 'keywordList'), od1 = j1.estado.chamadas.filter(c => c.rota === 'getOrderDetail');
   await j1.fechar();
   check(r1.results.filter(x => x.p[1]).length === 2500 && !r1.faltam.length && lotes1.join() === '1' && Math.max(...api1.chamadas) <= 400 &&
-    api1.maxEmVoo === 6 && prog1[prog1.length - 1] === 2500 && prog1.every((x, i) => !i || x >= prog1[i - 1]) && kw1.length === 2500 && od1.length === 2500 &&
-    r1.consultas === 5000, 'JMS devolve uma remessa por consulta: aprende sozinho; 6 chamadas ao servidor ao mesmo tempo, até 400 consultas cada',
+    api1.maxEmVoo === 4 && prog1[prog1.length - 1] === 2500 && prog1.every((x, i) => !i || x >= prog1[i - 1]) && kw1.length === 2500 && od1.length === 2500 &&
+    r1.consultas === 5000, 'JMS devolve uma remessa por consulta: aprende sozinho; 4 chamadas ao servidor ao mesmo tempo, até 400 consultas cada',
     {chamadas: api1.chamadas.length, max: Math.max(...api1.chamadas), emVoo: api1.maxEmVoo, lotes1});
   // Informação básica: bloco "3 Segmentos" sem o 3º.
   const sg = r1.results.slice(0, 3).map(x => x.seg);
@@ -151,15 +156,36 @@ function request(porta, method, p, body, headers) {
   const r1b = await P.pesquisar(api1b, WS(2500), PATS, {espera: 0, lote: 1, onProgresso: f => prog1b.push(f), onParalelo: n => pars.push(n)});
   await j1b.fechar();
   check(r1b.results.filter(x => x.p[1]).length === 2500 && api1b.chamadas.length === 13 && api1b.chamadas.every(n => n <= 400) && prog1b.length === 13 &&
-    api1b.paralelos[0] === 20 && Math.max(...api1b.paralelos) === 40 && pars.join() === '25,32,40' && r1b.paralelo === 40,
-    'começando com 1 por consulta: 200 remessas por chamada; consultas ao mesmo tempo sobem de 20 para 40 enquanto o JMS responde bem',
+    api1b.paralelos[0] === 10 && Math.max(...api1b.paralelos) === 40 && pars.join() === '13,17,22,28,35,40' && r1b.paralelo === 40,
+    'começando com 1 por consulta: 200 remessas por chamada; consultas ao mesmo tempo sobem de 10 para 40 enquanto o JMS responde bem',
     {chamadas: api1b.chamadas, paralelos: api1b.paralelos, pars});
   // Cabeçalho de rota exigido, com 6 chamadas ao mesmo tempo: uma testa, as outras esperam o resultado; nada fica como "recusada".
   const jr6 = await criar({rota: 'waybillTracking'}), api6 = apiFalsa(jr6.porta), heads6 = [];
   const r6 = await P.pesquisar(api6, WS(1500), PATS, {espera: 0, lote: 1, onHeaders: h => heads6.push(h)});
   await jr6.fechar();
-  check(r6.results.filter(x => x.p[1]).length === 1500 && !r6.results.some(x => x.err) && heads6.length === 1 && heads6[0].routename === 'waybillTracking' && api6.maxEmVoo === 6,
+  check(r6.results.filter(x => x.p[1]).length === 1500 && !r6.results.some(x => x.err) && heads6.length === 1 && heads6[0].routename === 'waybillTracking' && api6.maxEmVoo === 4,
     'cabeçalho de rota com várias chamadas ao mesmo tempo: achado uma vez e usado por todas', {heads6, err: r6.results.filter(x => x.err).length});
+  // O JMS não dá conta (consultas demais ao mesmo tempo): responde vazio ou recusa. Nada pode virar "sem rastreamento" calado.
+  const ocup = async modo => {
+    const j = await criar({ocupado: 30, ocupadoModo: modo, atraso: 15}), a = apiFalsa(j.porta), ps = [];
+    const r = await P.pesquisar(a, WS(300), PATS, {espera: 0, lote: 1, paralelo: 40, onParalelo: n => ps.push(n)});
+    const oc = j.estado.ocupadas || 0;
+    await j.fechar();
+    return {r, ps, oc};
+  };
+  const ov = await ocup('vazio'), orc = await ocup('recusa');
+  check(ov.oc > 0 && ov.r.results.filter(x => x.p[1]).length === 300 && !ov.r.results.some(x => x.err || !x.ok) && ov.r.revistas > 0 &&
+    ov.r.achadasRevisao === ov.r.revistas && ov.ps.length && ov.ps[ov.ps.length - 1] < 40,
+    'JMS sobrecarregado responde VAZIO: a conferência no fim (devagar) acha todas e o ritmo guardado cai',
+    {oc: ov.oc, revistas: ov.r.revistas, achadas: ov.r.achadasRevisao, ps: ov.ps, semDados: ov.r.results.filter(x => !x.ok).length});
+  check(orc.oc > 0 && orc.r.results.filter(x => x.p[1]).length === 300 && !orc.r.results.some(x => x.err || !x.ok) && orc.ps[0] < 40,
+    'JMS sobrecarregado RECUSA ("sistema ocupado"): tenta de novo mais devagar e acha todas', {oc: orc.oc, ps: orc.ps, recusadas: orc.r.recusadas});
+  const jrc = await criar({recusa: ['FIC000000007']});
+  const rrc = await P.pesquisar(apiFalsa(jrc.porta), WS(20), PATS, {espera: 0, lote: 1});
+  await jrc.fechar();
+  const smr = R.summary(rrc.results, 1);
+  check(rrc.recusadas === 1 && rrc.results[7].err && /bloqueada/.test(rrc.erro) && smr.err === 1 && smr.none === 0 && smr.yes === 19,
+    'remessa sempre recusada: conta como "consulta recusada" (com o motivo), não como "sem rastreamento"', {recusadas: rrc.recusadas, erro: rrc.erro, smr});
   // O JMS pede para ir mais devagar (429 ou "muitas consultas"): cai pela metade, espera e tenta de novo; nada se perde.
   let lim = 0;
   const apiLim = {consultar: (ps, op) => api.consultar(ps, op).then(rs2 => rs2.map((r, i) => (lim < 30 && i % 5 === 0 ? (lim++, i % 10 ? {status: 429, text: ''}
@@ -227,7 +253,7 @@ function request(porta, method, p, body, headers) {
     JSON.parse(fs.readFileSync(path.join(cfg.dados, 'credenciais.json'), 'utf8')).JMS_AUTHTOKEN === TOKEN,
     'token salvo só pelo computador do app (pela rede: recusado); "authtoken:", aspas e espaços saem');
   const home = await request(porta, 'GET', '/');
-  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.5\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
+  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.6\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
     ['rastreio.js', 'pesquisa.js', 'planilha.js', 'app.js', 'app.css'].every(f => home.text.indexOf(f) >= 0), 'página do app (Node.js)');
   const libs = await Promise.all(['/rastreio.js', '/pesquisa.js', '/planilha.js', '/app.js'].map(f => request(porta, 'GET', f)));
   check(libs.every(r => r.status === 200 && /javascript/.test(r.headers['content-type'])) && libs.every(r => { try { new Function(r.text); return true; } catch (e) { return false; } }),

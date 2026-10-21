@@ -7,7 +7,8 @@
  *        código de três segmentos (terminalDispatchCode) e dados de cliente FICTÍCIOS (que o app não pode devolver à página)
  * Opções: reject (recusa acima de N remessas), silent (vazio acima de N), trunc (só as N primeiras — trunc: 1 = como a tela do
  *   JMS, uma remessa por consulta), token (AuthToken aceito), rota (Routename exigido no keywordList), semOrder (Informação básica
- *   recusada), atraso (ms).
+ *   recusada), ocupado (acima de N consultas ao mesmo tempo, o JMS "não dá conta"), ocupadoModo ('vazio' = responde sem dados;
+ *   senão recusa com "sistema ocupado"), recusa (remessas sempre recusadas), atraso (ms).
  */
 const http = require('http');
 
@@ -53,6 +54,13 @@ function criar(opts) {
         const kws = body.keywordList || [];
         if (body.trackingTypeEnum !== 'WAYBILL') { json({code: 500, msg: 'parâmetro inválido', fail: true}); return; }
         if (opts.rota && req.headers.routename !== opts.rota) { json({code: 500, msg: 'rota inválida', fail: true}); return; }
+        if (opts.recusa && kws.some(w => opts.recusa.indexOf(w) >= 0)) { json({code: 500, msg: 'remessa bloqueada (fictício)', fail: true}); return; }
+        if (opts.ocupado && estado.agora > opts.ocupado) {
+          estado.ocupadas = (estado.ocupadas || 0) + 1;
+          if (opts.ocupadoModo === 'vazio') json({code: 1, msg: 'ok', succ: true, data: []});
+          else json({code: 500, msg: 'Sistema ocupado (fictício)', fail: true});
+          return;
+        }
         if (opts.reject && kws.length > opts.reject) { json({code: 500, msg: 'máximo ' + opts.reject, fail: true}); return; }
         if (opts.silent && kws.length > opts.silent) { json({code: 1, msg: 'ok', succ: true, data: []}); return; }
         const take = opts.trunc ? kws.slice(0, opts.trunc) : kws;

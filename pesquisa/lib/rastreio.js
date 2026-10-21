@@ -101,13 +101,14 @@
    * turnos e horas do primeiro bipe, turno que mais ocorreu (empate: o primeiro de T1, T2, T3) e quem mais escaneou.
    */
   function summary(results, k) {
-    var s = {total: 0, yes: 0, no: 0, none: 0, shifts: {T1: 0, T2: 0, T3: 0}, hours: [], top: '', topCount: 0, scanners: []};
+    var s = {total: 0, yes: 0, no: 0, none: 0, err: 0, shifts: {T1: 0, T2: 0, T3: 0}, hours: [], top: '', topCount: 0, scanners: []};
     var by = {};
     for (var i = 0; i < 24; i++) s.hours.push(0);
     (results || []).forEach(function (r) {
       s.total++;
       var h = r && r.p && r.p[k];
-      if (!h) { s.no++; if (!r || !r.ok) s.none++; return; }
+      // Sem rastreamento (o JMS respondeu vazio) e consulta recusada (o JMS não respondeu) contam separado.
+      if (!h) { s.no++; if (r && r.err) s.err++; else if (!r || !r.ok) s.none++; return; }
       s.yes++;
       if (s.shifts[h.shift] !== undefined) s.shifts[h.shift]++;
       var hr = hourOf(h.t);
