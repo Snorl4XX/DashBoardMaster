@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.13.1',
+  VERSION: '4.14.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -47,8 +47,10 @@ const APP_CONFIG = Object.freeze({
   // atualização (nem os resumos rodavam). Com o teto, sobra tempo para atualizar todos os painéis o dia inteiro.
   GROUPED_WORKSPACE_MIN_PER_DAY: 90,   // Recebimento (RECEBIMENTO_MIN_POR_DIA muda; 0 = sem teto)
   SEND_WORKSPACE_MIN_PER_DAY: 150,     // Expedição (EXPEDICAO_MIN_POR_DIA muda; 0 = sem teto)
-  TRIP_BATCH: 100,                     // remessas por consulta no Rastreamento do pacote (o robô aprende um limite menor sozinho)
-  TRIP_PARALLEL: 4,                    // consultas de rastreamento em paralelo
+  // V4.14: o JMS devolve UMA remessa por consulta ao Rastreamento do pacote (como a tela dele). Com 100 por consulta e 4 ao mesmo
+  // tempo, saíam 4 remessas por rodada e os IDs de viagem de saída do SC→DC nunca terminavam ("Sem informação" em quase tudo).
+  TRIP_BATCH: 1,                       // remessas por consulta no Rastreamento do pacote (EXPEDICAO_IDS_LOTE muda)
+  TRIP_PARALLEL: 30,                   // consultas de rastreamento ao mesmo tempo (EXPEDICAO_IDS_PARALELO muda, até 50)
   MAX_REPORT_DETAIL_ROWS: 60000,
   MAX_PDF_DETAIL_ROWS: 1500,
   DEFAULT_CENTER_CODE: '30001',

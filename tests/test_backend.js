@@ -1906,12 +1906,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(covA && covA.total === tA.n.sent && covA.done === tA.n.sent - miss && covA.found === Object.keys(tA.t).filter(w => tA.t[w].trip).length,
     'Expedição: IDs de viagem consultados (remessa sem bipe de carregamento na base fica para nova tentativa)', covA);
   const dfA = cA.dayFilesMap_('send_flow', D19, D19)[D19], trips1 = cA.__state.tripCalls;
-  // Nova tarefa do dia: só as remessas sem bipe de carregamento são consultadas de novo (1 vez); o arquivo regravado
-  // com os IDs mantém a data do download (o intervalo de atualização do detalhe continua valendo).
+  // Nova tarefa do dia: só as remessas sem bipe de carregamento são consultadas de novo (V4.14: uma por consulta, como o JMS
+  // responde); o arquivo regravado com os IDs mantém a data do download (o intervalo de atualização do detalhe continua valendo).
   cA.enqueueJobs_([['TRIPS', 'send_flow', D19, 0]], {reset: true});
   runAll(cA, 4);
   const dfA2 = cA.dayFilesMap_('send_flow', D19, D19)[D19];
-  check(cA.__state.tripCalls - trips1 === 1 && dfA2.createdAt === dfA.createdAt && exact(cA, dA[D19], D19).trip === 0,
+  check(cA.__state.tripCalls - trips1 === miss && miss > 0 && dfA2.createdAt === dfA.createdAt && exact(cA, dA[D19], D19).trip === 0,
     'Expedição: nova consulta só das remessas sem ID; arquivo do dia mantém a data do download', {calls: cA.__state.tripCalls - trips1, a: dfA.createdAt, b: dfA2.createdAt});
 
   // 2b. Dia fechado com remessas chegando: só a situação é atualizada (sem baixar "Enviados" de novo).
@@ -1985,13 +1985,29 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
 
   // 5. Rastreamento com limite por consulta: aprende sozinho.
   // (V4.1: o SC→DC também consulta o rastreamento e o limite aprendido é o mesmo — recusa: fica entre a metade e o limite)
+  // (V4.14: o padrão é 1 remessa por consulta; aqui parte de um lote de 100 aprendido antes, para exercitar o aprendizado)
   [['tripLimit', {tripLimit: 20}, n => n === 20], ['tripReject', {tripReject: 10}, n => n >= 5 && n <= 10]].forEach(([nm, o, ok]) => {
-    const dL = sfDays(), cL = freshCtx(dL, o, SF);
+    const dL = sfDays(), cL = freshCtx(dL, o, Object.assign({JMS_TRIP_BATCH: '100'}, SF));
     cL.queueHistory(D19, D19, true);
     runAll(cL, 12);
     check(ok(Number(cL.__state.props.JMS_TRIP_BATCH)) && exact(cL, dL[D19], D19).trip === 0,
       'Expedição: ' + nm + ' → remessas por consulta dentro do limite do JMS, IDs exatos', cL.__state.props.JMS_TRIP_BATCH);
   });
+  // V4.14: JMS real — uma remessa por consulta. Com o padrão (1 por consulta, várias ao mesmo tempo) todos os IDs saem.
+  const d1 = sfDays(), c1 = freshCtx(d1, {tripLimit: 1}, SF);
+  c1.queueHistory(D19, D19, true);
+  runAll(c1, 12);
+  const e1 = exact(c1, d1[D19], D19);
+  check(e1.trip === 0 && !c1.__state.props.JMS_TRIP_BATCH && c1.__state.tripMaxPar > 4,
+    'Expedição: JMS com 1 remessa por consulta → uma por consulta, várias ao mesmo tempo, IDs exatos',
+    {trip: e1.trip, lote: c1.__state.props.JMS_TRIP_BATCH, par: c1.__state.tripMaxPar});
+  // V4.14: JMS ocupado (só 6 consultas por vez): as que falham voltam para a fila, o ritmo cai e todos os IDs saem.
+  const dBz = sfDays(), cBz = freshCtx(dBz, {tripLimit: 1, tripBusy: 6}, SF);
+  cBz.queueHistory(D19, D19, true);
+  runAll(cBz, 12);
+  const eBz = exact(cBz, dBz[D19], D19);
+  check(eBz.trip === 0 && cBz.__state.tripBusyHits > 0,
+    'Expedição: JMS ocupado → consultas recusadas voltam para a fila, ritmo menor, IDs exatos', {trip: eBz.trip, hits: cBz.__state.tripBusyHits});
 
   // 6. Tempo acabando: grava as unidades prontas e a execução seguinte continua da próxima.
   const dT = sfDays(), cT = freshCtx(dT, null, Object.assign({JMS_PARALLEL: '1', JMS_DETAIL_MAX_OFFSET: '150'}, SF));
@@ -3137,7 +3153,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // Como nas telas do usuário (painel principal depois da separação): estado interno de versões anteriores misturado
   // com as configurações nas Propriedades do script — mais de 50.
   const old = {GOOGLE_PLAN_AUTO: 'gmail', GROUPED_LAYOUT_ARRIVAL_FLOW: 'v1x', GROUPED_LAYOUT_LOT_FLOW: 'v1y', JMS_TRIP_BATCH: '50',
-    MIGRATION_V41: '2026-10-05T00:00:00Z', QUEUE_HINT_V37: '{"s":"IDLE","at":1}', STAMP_WRONG_SEND: '{"t":1,"d":{}}', V37_INSTALLED_AT: '2026-09-20T00:00:00Z'};
+    MIGRATION_V41: '2026-10-05T00:00:00Z', MIGRATION_V414: '2026-10-21T00:00:00Z', QUEUE_HINT_V37: '{"s":"IDLE","at":1}', STAMP_WRONG_SEND: '{"t":1,"d":{}}', V37_INSTALLED_AT: '2026-09-20T00:00:00Z'};
   ['ARRIVAL_FLOW', 'SEND_FLOW', 'LOT_FLOW', 'NO_MOVE', 'NO_MOVE_HIST'].forEach(ind => { for (let d = 0; d < 9; d++) old['GROUPED_PROG_' + ind + '_' + ago(d)] = '{"at":"x","units":' + d + '}'; });
   old['GROUPED_PROG_LOT_FLOW_' + ago(40)] = '{"units":1}';
   old['GROUPED_PLANDATA_ARRIVAL_FLOW_' + ago(1)] = '{"v":1}';
@@ -3404,6 +3420,19 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cov8 = c8.tripCoverage_('sc_dc', Y, Y)[Y];
   check(cov8.found === Object.values(want).filter(Boolean).length && c8.getArchivedRange_('sc_dc', Y, Y).rows.every(r => want[r.shipment] === tid(r)),
     'depois da migração: IDs de saída de volta no painel', cov8);
+  // Migração V4.14: lote antigo aprendido (100 por consulta) apagado — volta a 1 por consulta — e dias sem todos os IDs na fila.
+  const map14 = c8.loadTripMap_('sc_dc', Y);
+  Object.keys(map14.ids).forEach(w => { delete map14.ids[w]; map14.miss[w] = 3; });
+  c8.saveTripMap_('sc_dc', Y, map14, days8[Y].dc.length);
+  c8.setProp_('JMS_TRIP_BATCH', '100');
+  delete c8.__state.props.MIGRATION_V414;
+  const q414 = c8.migrateToV414_();
+  check(q414 >= 1 && c8.pendingJobs_().some(j => j.type === 'TRIPS' && j.indicator === 'sc_dc' && j.date === Y && j.page === 1) &&
+    !c8.getProp_('JMS_TRIP_BATCH', '') && c8.tripBatch_() === 1 && c8.migrateToV414_() === 0,
+    'migração V4.14: lote antigo apagado (1 remessa por consulta) e os dias sem todos os IDs voltam para a fila uma vez', [q414, c8.pendingJobs_().map(j => j.type + ' ' + j.indicator + ' ' + j.date + ' ' + j.page)]);
+  runAll(c8);
+  check(c8.tripCoverage_('sc_dc', Y, Y)[Y].found === Object.values(want).filter(Boolean).length,
+    'depois da migração V4.14: IDs de saída de volta', c8.tripCoverage_('sc_dc', Y, Y)[Y]);
 }
 
 // ---------- V4.7: Fluxo de Lotes retirado; Atualizar atualiza TODOS os painéis de uma vez ----------

@@ -151,8 +151,9 @@ function createContext(opts) {
       base64Encode: bytes => Buffer.from(bytes).toString('base64')
     },
     UrlFetchApp: {
-      fetch: (url, req) => opts.jms(url, req, state),
-      fetchAll: reqs => reqs.map(r => opts.jms(r.url, r, state))
+      fetch: (url, req) => { state.fetchIdx = 0; return opts.jms(url, req, state); },
+      // fetchIdx: posição do pedido no fetchAll (o JMS falso pode recusar quem passa de N consultas ao mesmo tempo).
+      fetchAll: reqs => reqs.map((r, i) => { state.fetchIdx = i; return opts.jms(r.url, r, state); })
     },
     ScriptApp: {
       getProjectTriggers: () => state.triggers.map(h => ({getHandlerFunction: () => h})),
@@ -439,6 +440,12 @@ function fakeJms(dayData, options) {
         state.tripCalls = (state.tripCalls || 0) + 1;
         // options.tripLimit: o JMS só devolve as primeiras N remessas da consulta; options.tripReject: recusa acima de N.
         if (options.tripReject && body.keywordList.length > options.tripReject) return respond(200, {code: 500, msg: '单次查询最多' + options.tripReject + '条', fail: true});
+        // options.tripBusy: JMS ocupado — num fetchAll, as consultas além das primeiras N falham.
+        state.tripMaxPar = Math.max(state.tripMaxPar || 0, (state.fetchIdx || 0) + 1);
+        if (options.tripBusy && (state.fetchIdx || 0) >= options.tripBusy) {
+          state.tripBusyHits = (state.tripBusyHits || 0) + 1;
+          return respond(200, {code: 500, msg: '系统繁忙', fail: true});
+        }
         const kws = options.tripLimit ? body.keywordList.slice(0, options.tripLimit) : body.keywordList;
         const all = {}, allDc = {};
         Object.keys(dayData).forEach(k => ((dayData[k].sf || {}).routes || []).forEach(r => r.sent.forEach(x => { all[x.billcode] = x; })));

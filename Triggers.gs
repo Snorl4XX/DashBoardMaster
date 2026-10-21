@@ -24,7 +24,7 @@ function syncHourly() {
   }
   // Antes da revalidação: com os 3 últimos dias já no DAY_STATUS, o indicador novo ainda é reconhecido como novo.
   let history = 0;
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4125_(); migrateToV4126_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4125_(); migrateToV4126_(); migrateToV414_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
   // V4.6: modo diário (padrão) — só a agenda (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h); nada de revalidar.
   const queued = (dailyMode_() ? runAgenda_() : queueRecentRefresh_()) + history;
   return {ok: true, queued: queued, worker: processSyncQueue({budgetMs: 240000})};

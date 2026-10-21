@@ -502,6 +502,8 @@ function refreshSendFlags_(job, deadline, cfg, routes) {
  */
 const TRIP_MAX_MISS_ = 3;
 const TRIP_RETRY_MS_ = 90 * 60000, TRIP_GRACE_MS_ = 60 * 60000;
+// V4.14: consultas ao mesmo tempo no Rastreamento (o ritmo cai pela metade quando o JMS não dá conta e volta a subir).
+const TRIP_PARALLEL_MAX_ = 50, TRIP_PARALLEL_MIN_ = 4;
 /** kind: 'viagens' (IDs de viagem, padrão) ou 'bipagens' (V4.4, Triagem errada: lote e login da Consulta das bipagens). */
 function lookupMapKey_(indicator, kind) { return indicator + ':' + (kind || 'viagens'); }
 function tripMapKey_(indicator) { return lookupMapKey_(indicator, 'viagens'); }
@@ -576,7 +578,7 @@ function stripStaleTrips_(indicator, x) {
   else if (x.cols && x.dict && x.cols.tripId) { x.dict.tripId = ['']; x.cols.tripId = new Array(x.n || 0).fill(0); }
   return x;
 }
-/** Remessas por consulta: EXPEDICAO_IDS_LOTE (manual) > limite aprendido > padrão (100). */
+/** Remessas por consulta: EXPEDICAO_IDS_LOTE (manual) > limite aprendido > padrão (1: o JMS devolve uma por consulta). */
 function tripBatch_() {
   const forced = Number(getProp_('EXPEDICAO_IDS_LOTE', ''));
   if (forced >= 1) return Math.min(500, Math.floor(forced));
@@ -680,13 +682,15 @@ function runTripJob_(job, deadline) {
   };
   todo.sort((a, b) => tripOrderKey_(a) - tripOrderKey_(b));
   const endpoint = endpointFor_(cfg, 'trips');
-  const parallel = Math.max(1, Math.min(8, Number(getProp_('EXPEDICAO_IDS_PARALELO', '')) || APP_CONFIG.TRIP_PARALLEL));
+  const parallel = Math.max(1, Math.min(TRIP_PARALLEL_MAX_, Number(getProp_('EXPEDICAO_IDS_PARALELO', '')) || APP_CONFIG.TRIP_PARALLEL));
   const ctx = {trips: cfg.trips, center: centerName_(), centerId: distributeId_()};
-  let batch = tripBatch_(), k = 0, changed = 0, slowest = 5000, lastError = '';
+  // V4.14: começa com metade e sobe enquanto o JMS responde tudo (não chega com 30 consultas de uma vez num JMS ocupado).
+  let batch = tripBatch_(), k = 0, changed = 0, slowest = 5000, lastError = '', par = Math.max(1, Math.min(parallel, Math.ceil(parallel / 2)));
+  const requeued = {};
   while (k < todo.length) {
     if (Date.now() + slowest + 20000 > deadline) break;
     const groups = [];
-    for (let g = 0; g < parallel && k < todo.length; g++) { groups.push(todo.slice(k, k + batch)); k += batch; }
+    for (let g = 0; g < par && k < todo.length; g++) { groups.push(todo.slice(k, k + batch)); k += batch; }
     const t0 = Date.now();
     let responses;
     try { responses = fetchAll_(groups.map(list => jmsRequestObject_(endpoint, tripPayload_(list)))); }
@@ -696,14 +700,31 @@ function runTripJob_(job, deadline) {
       responses = groups.map(() => null);
     }
     slowest = Math.max(slowest, Date.now() - t0);
-    groups.forEach((list, gi) => {
-      let json;
+    // Primeiro, o que cada consulta respondeu.
+    const parsed = groups.map((list, gi) => {
       try {
         if (!responses[gi]) throw new Error('sem resposta');
-        json = parseJmsResponse_(responses[gi], endpoint);
+        return {json: parseJmsResponse_(responses[gi], endpoint)};
       } catch (e) {
         const m = String(e && e.message || e);
         if (errorKind_(m) === 'QUOTA' || /Sessão do JMS/.test(m)) throw e;
+        return {err: m};
+      }
+    });
+    // V4.14: muitas falhas na mesma rodada = o JMS não dá conta de tantas consultas ao mesmo tempo. Elas voltam para a fila (uma
+    // vez) e as rodadas seguintes vão com a metade; rodada sem falha sobe de novo, até o limite.
+    const falhas = parsed.filter(x => x.err).length;
+    const sobrecarga = falhas >= Math.max(3, Math.ceil(groups.length * 0.2));
+    if (sobrecarga) { par = Math.max(TRIP_PARALLEL_MIN_, Math.floor(par / 2)); Utilities.sleep(1500); }
+    else if (!falhas && par < parallel) par = Math.min(parallel, Math.ceil(par * 1.25));
+    groups.forEach((list, gi) => {
+      let json = parsed[gi].json;
+      if (!json) {
+        if (sobrecarga && list.every(w => !requeued[w])) {
+          lastError = parsed[gi].err.slice(0, 300);
+          list.forEach(w => { requeued[w] = 1; todo.push(w); });
+          return;
+        }
         // De novo, sozinha (jmsPost_ também testa os cabeçalhos de rota alternativos); recusa de novo = lote menor.
         try { json = jmsPost_(endpoint, tripPayload_(list), 2); }
         catch (e2) {
@@ -833,6 +854,29 @@ function migrateToV4125_() {
   });
   setProp_('MIGRATION_V4125', new Date().toISOString());
   if (n) logSync_('INFO', 'sc_dc', '', 'V4.12.5: ' + n + ' dia(s) na fila para buscar de novo os IDs de viagem de saída que faltavam.');
+  return n;
+}
+/**
+ * V4.14: o JMS devolve UMA remessa por consulta ao Rastreamento do pacote. Com 100 por consulta e 4 consultas de cada vez, os IDs de
+ * viagem de saída (SC→DC) e os IDs da Expedição andavam 4 remessas por rodada e ficavam quase todos em "Sem informação". Agora
+ * vão 1 por consulta e 30 ao mesmo tempo. Uma vez: os dias com remessas ainda sem ID voltam para a fila (page 1: as que já
+ * tinham sido abandonadas também) — SC→DC dos últimos 31 dias; Expedição dos dias com detalhe.
+ */
+function migrateToV414_() {
+  if (getProp_('MIGRATION_V414', '')) return 0;
+  // Lote aprendido nas versões antigas (mais de 1 por consulta): com o JMS devolvendo uma só, as outras ficavam "sem bipe".
+  if (Number(getProp_('JMS_TRIP_BATCH', '')) > 1) deleteProp_('JMS_TRIP_BATCH');
+  let n = 0;
+  const to = isoToday_();
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].trips).forEach(k => {
+    const cfg = INDICATORS[k], from = addDaysIso_(to, cfg.grouped ? -((cfg.detail && cfg.detail.days) || 7) : -31);
+    const cov = tripCoverage_(k, from, to);
+    const jobs = Object.keys(dayFilesMap_(k, from, to)).sort().reverse()
+      .filter(d => !cov[d] || !(cov[d].total > 0) || cov[d].found < cov[d].total).map(d => ['TRIPS', k, d, 1]);
+    if (jobs.length) n += enqueueJobs_(jobs, {reset: true});
+  });
+  setProp_('MIGRATION_V414', new Date().toISOString());
+  if (n) logSync_('INFO', 'sc_dc', '', 'V4.14: ' + n + ' dia(s) na fila para buscar os IDs de viagem que faltavam (1 remessa por consulta, 30 ao mesmo tempo).');
   return n;
 }
 /** IDs de viagem consultados por dia (painel): {data: {consultadas, comId, remessas}}. */

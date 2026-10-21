@@ -1,8 +1,41 @@
-# J&T DASHMASTER V4.13.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.14 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.14 — SC→DC e Expedição: IDs de viagem de saída aparecem
+**Pedido:** no filtro de IDs de viagem do SC→DC quase tudo aparecia como "Sem informação". Seguir as instruções do PDF da Expedição SC→DC: em Indicadores de Negócios > Prazo > Taxa de expedição no prazo SC→HUB, abrir cada remessa de "Qtd expedidos fora do prazo" no Rastreamento do pacote e pegar o número do pedido da linha "A encomenda expressa está [SP GRU] sendo enviada, para…" (Tipo de bipagem "Encomenda carregada", J&T Tracking Code 50). Esse é o **ID de viagem de saída**, que fica no lugar do ID de chegada nos cartões, gráficos e tabela.
+
+### Por que não aparecia
+- A regra para achar o ID já era a do PDF. O problema era a **velocidade**.
+- O painel mandava 100 remessas por consulta, 4 consultas de cada vez. Só que o JMS devolve **uma remessa por consulta**, como na própria tela dele.
+- Então saíam umas 4 remessas por rodada, e a fila nunca terminava. Quando o JMS devolvia uma remessa que não era a primeira da lista, as outras ainda eram marcadas como "sem bipe" e não eram consultadas de novo.
+
+### O que mudou
+- **Uma remessa por consulta, 30 consultas ao mesmo tempo.** Quando o JMS não dá conta (muitas falhas na mesma rodada), o ritmo cai pela metade e as remessas que falharam voltam para a fila. Quando tudo dá certo, o ritmo volta a subir, até 30.
+- **Dias sem todos os IDs voltam para a fila uma vez:** os últimos 31 dias do SC→DC e os dias com detalhe da Expedição. As marcas antigas de "sem bipe" são apagadas.
+- O lote antigo que o painel tinha aprendido (mais de 1 por consulta) também é apagado.
+
+### Quanto demora
+- **Node.js:** sem limite do Google. Umas 50 mil remessas levam poucos minutos, conforme o JMS responde.
+- **Apps Script (conta Gmail):** o Google libera cerca de **20 mil consultas por dia** para todos os painéis juntos, e cada remessa é uma consulta. Muitas remessas terminam em alguns dias. Os dias mais recentes vêm primeiro.
+- No painel, o selo **"IDs de viagem de saída: X de Y remessas"** mostra o andamento.
+
+### Como instalar
+- **Apps Script:** troque `Config.gs`, `Expedicao.gs` e `Triggers.gs` pelos do pacote. Depois **Implantar → Gerenciar implantações → ✏️ → Nova versão**. A fila dos IDs começa sozinha na próxima execução.
+- **Node.js:** extraia o ZIP por cima e reinicie o `iniciar`.
+
+### Propriedades (opcionais)
+| Propriedade | Para quê |
+|---|---|
+| `EXPEDICAO_IDS_PARALELO` | Consultas ao mesmo tempo no Rastreamento do pacote (padrão **30**, máximo 50). Diminua se o JMS reclamar. |
+| `EXPEDICAO_IDS_LOTE` | Remessas por consulta (padrão **1**, como o JMS responde). Não precisa mexer. |
+
+**Testes:** 647 verificações do servidor e 60 do Node.js (JMS simulado, com remessas fictícias). Entre elas:
+- JMS que devolve uma remessa por consulta;
+- JMS ocupado, que recusa quem passa de 6 consultas ao mesmo tempo;
+- a migração dos dias sem ID.
 
 ## V4.13.1 — Pesquisa no Rastreamento sai do painel
 **Pedido:** a Pesquisa no Rastreamento é um app de pesquisa e fica separada do dashboard.
@@ -1281,8 +1314,8 @@ Na conta Gmail, `EXPEDICAO_MIN_POR_DIA` = 30 consulta mais IDs por dia, mas sobr
 |---|---|
 | `EXPEDICAO_MIN_POR_DIA` | Teto diário da Expedição em minutos (conta Gmail: 20; Google Workspace: sem teto; `0` = sem teto) |
 | `DETAIL_DAYS_SEND_FLOW` | Dias com detalhe (conta Gmail: 3; Workspace: 7) |
-| `EXPEDICAO_IDS_LOTE` | Remessas por consulta no Rastreamento do pacote (padrão 100; o limite do JMS é aprendido sozinho) |
-| `EXPEDICAO_IDS_PARALELO` | Consultas de rastreamento em paralelo (padrão 4) |
+| `EXPEDICAO_IDS_LOTE` | Remessas por consulta no Rastreamento do pacote (V4.14: padrão 1, como o JMS responde) |
+| `EXPEDICAO_IDS_PARALELO` | Consultas de rastreamento ao mesmo tempo (V4.14: padrão 30, máximo 50; o ritmo se ajusta sozinho) |
 | `JMS_ROUTENAME_SEND` / `JMS_ROUTENAMELIST_SEND` | Cabeçalhos de rota da tela (padrão Routename `SendOutMonitor`) |
 | `JMS_ROUTENAME_TRACKING` / `JMS_ROUTENAMELIST_TRACKING` | Cabeçalhos do Rastreamento do pacote (padrão: nenhum) |
 
