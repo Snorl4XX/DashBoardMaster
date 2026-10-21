@@ -6,7 +6,8 @@
  *  - texto padrão → comparação sem maiúsculas, acentos e espaços nos colchetes ("*" vale qualquer trecho);
  *  - bipes de uma remessa → o PRIMEIRO bipe com o texto (horário, turno, origem, quem escaneou, imagem);
  *  - totais de um bloco (tem / não tem, turnos, horas, quem mais escaneou);
- *  - respostas do JMS (erros, token vencido).
+ *  - respostas do JMS (erros, token vencido);
+ *  - "Informação básica" da remessa → códigos de segmento (bloco "3 Segmentos" do JMS, sem o 3º).
  */
 (function (root, factory) {
   var api = factory();
@@ -16,6 +17,8 @@
   'use strict';
 
   var KEYWORD_URL = 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList';
+  // "Informação básica" do Rastreamento do pacote (uma remessa por consulta): tem o código de três segmentos.
+  var ORDER_URL = 'https://gw.jtjms-br.com/operatingplatform/order/getOrderDetail';
   var SHIFTS = ['T1', 'T2', 'T3'];
   var SHIFT_HOURS = {T1: '06:00–13:59', T2: '14:00–21:59', T3: '22:00–05:59'};
 
@@ -159,10 +162,21 @@
     return [];
   }
   function keywordPayload(list, country) { return {keywordList: list, trackingTypeEnum: 'WAYBILL', countryId: String(country || '1')}; }
+  function orderPayload(w, country) { return {waybillNo: w, countryId: String(country || '1')}; }
+  /**
+   * Bloco "3 Segmentos" da Informação básica: terminalDispatchCode "XA,101-01,900" → Código de primeiro segmento "XA" e Código
+   * de dois segmentos "101-01". O 3º ("900", o campo "3 Segmentos") fica de fora (pedido). → {s1, s2}
+   */
+  function segmentosDe(json) {
+    var d = json && json.data, det = d && (d.details || d);
+    var cod = det && det.terminalDispatchCode !== undefined && det.terminalDispatchCode !== null ? String(det.terminalDispatchCode) : '';
+    var p = cod.split(',');
+    return {s1: (p[0] || '').trim(), s2: (p[1] || '').trim()};
+  }
 
   return {
-    KEYWORD_URL: KEYWORD_URL, SHIFTS: SHIFTS, SHIFT_HOURS: SHIFT_HOURS,
+    KEYWORD_URL: KEYWORD_URL, ORDER_URL: ORDER_URL, SHIFTS: SHIFTS, SHIFT_HOURS: SHIFT_HOURS,
     hourOf: hourOf, shiftOf: shiftOf, parseWaybills: parseWaybills, norm: norm, matcher: matcher, hit: hit,
-    summary: summary, parseJms: parseJms, recordsOf: recordsOf, keywordPayload: keywordPayload
+    summary: summary, parseJms: parseJms, recordsOf: recordsOf, keywordPayload: keywordPayload, orderPayload: orderPayload, segmentosDe: segmentosDe
   };
 });

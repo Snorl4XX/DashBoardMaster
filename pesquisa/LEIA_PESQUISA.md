@@ -1,17 +1,19 @@
-# J&T · Pesquisa no Rastreamento — V1.2
+# J&T · Pesquisa no Rastreamento — V1.3
 
 App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto da coluna "Descrição da etapa de bipagem" (JMS › Operação › Consulta do pacote › Rastreamento do pacote). O app:
 
 - conta quantas remessas **têm** e quantas **não têm** o texto;
 - mostra o **turno** em que o primeiro bipe com o texto aconteceu;
+- traz os **códigos de segmento** de cada remessa (bloco "3 Segmentos" da Informação básica);
 - baixa uma **planilha J&T (.xlsx)** com gráficos.
 
 *Feito por Caike Oliveira.*
 
-**Novo na V1.2:**
-- A busca de fotos saiu. A coluna **Imagem** só diz se a linha tem "Ver imagem" no JMS (**Tem imagem no JMS** ou **NÃO TEM IMAGEM!**).
-- O token das Propriedades do script ficou mais fácil de acertar: o app aceita o nome com espaço ou minúsculas e o valor com "authtoken:", aspas ou quebra de linha.
-- O passo 1 da tela diz o que está errado: nome da propriedade, arquivos de versões diferentes, falta de autorização do Google ou token vencido.
+**Novo na V1.3:**
+- Pesquisa **1000 remessas por vez**. Antes andava de 4 em 4 porque o JMS devolve só uma remessa por consulta (a tela do JMS também consulta uma por vez). Agora o app aprende isso na primeira rodada e faz as consultas ao mesmo tempo.
+- **Códigos de segmento** da Informação básica do JMS (bloco "3 Segmentos"): **Código de primeiro segmento** e **Código de dois segmentos**, nas tabelas e na planilha. O valor de "3 Segmentos" fica de fora.
+
+**Na V1.2:** a busca de fotos saiu (a coluna **Imagem** diz **Tem imagem no JMS** ou **NÃO TEM IMAGEM!**), e o passo 1 da tela diz o que está errado com o token.
 
 ## Duas formas de usar (escolha uma)
 
@@ -20,7 +22,7 @@ App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto d
 | Abre em | qualquer lugar, pelo link `…/exec` | `http://localhost:3200` (e na rede, pelo IP do computador) |
 | Precisa | uma conta Google (nada para rodar no computador) | o `node.exe` (o mesmo do DashMaster) e um atalho — sem `.bat` |
 | AuthToken | Propriedades do script (`JMS_AUTHTOKEN`) | o mesmo do DashMaster deste computador, sozinho |
-| Limite | cota diária do Google (cerca de 20 mil consultas por dia) | sem cota |
+| Limite | cota diária do Google: cerca de 20 mil consultas por dia numa conta comum, ou seja, **cerca de 10 mil remessas por dia** (cada remessa = 2 consultas) | sem cota |
 
 A tela e a planilha são iguais nas duas. Nas duas, o app puxa direto do JMS **como o DashMaster**: o AuthToken fica no servidor, e ninguém cola token na página.
 
@@ -110,24 +112,35 @@ Regras:
 ## O que aparece
 - **Cartões:** pesquisadas, têm, não têm, e quantas estão sem rastreamento no JMS (bloco 1) ou o turno que mais ocorreu (bloco 2). Os turnos são T1 06:00–13:59, T2 14:00–21:59 e T3 22:00–05:59.
 - **Gráficos:** tem × não tem. No bloco 2, também por turno, por hora e quem mais escaneou.
-- **Tabelas "Tem" e "Não tem":** remessa, Tempo de digitalização, turno, origem (o `[SP GRU]`), quem escaneou (`escaneador [Nome]`), imagem (**Tem imagem no JMS** ou **NÃO TEM IMAGEM!**), tipo de bipagem e descrição.
+- **Tabelas "Tem" e "Não tem":**
+  - remessa;
+  - **Código de primeiro segmento** e **Código de dois segmentos** (Informação básica → "3 Segmentos"; ex.: `XA,101-01,900` vira `XA` e `101-01`);
+  - só na "Tem": Tempo de digitalização, turno, origem (o `[SP GRU]`), quem escaneou (`escaneador [Nome]`), imagem (**Tem imagem no JMS** ou **NÃO TEM IMAGEM!**), tipo de bipagem e descrição.
+- **Localizar:** procura por remessa, segmento ou escaneador.
 - **Copiar remessas:** copia as remessas da aba aberta, para colar no JMS.
 
 ## Planilha
 - **Resumo:** as tabelas de cada bloco, com os gráficos do próprio Excel ao lado.
-- **Uma aba "Tem" e uma "Não tem" para cada bloco**, com filtro.
+- **Uma aba "Tem" e uma "Não tem" para cada bloco**, com filtro. As duas têm as colunas dos códigos de segmento.
 
 ## Consultas ao JMS
-- As remessas vão ao Rastreamento do pacote várias por consulta (100 no começo).
-- Se o JMS recusar ou cortar, o app aprende o limite sozinho e nenhuma remessa se perde.
+- A tela manda as remessas ao servidor do app **1000 por vez**. O contador anda de 1000 em 1000.
+- O servidor faz as consultas ao JMS **ao mesmo tempo** (25 por vez):
+  - Rastreamento do pacote: várias remessas por consulta. O JMS devolve só a primeira de cada consulta, então o app aprende isso na primeira rodada e passa a mandar uma remessa por consulta;
+  - Informação básica (`getOrderDetail`): uma consulta por remessa, para os códigos de segmento.
+- Se o JMS recusar ou cortar, o app aprende o limite sozinho e nenhuma remessa se perde. Uma falha passageira volta para a fila.
+- Se a Informação básica falhar, a pesquisa termina do mesmo jeito e a tela avisa quantas remessas ficaram sem os segmentos.
 - **Parar** interrompe a pesquisa; o que já veio fica na tela.
 - Se a pesquisa parar com erro, o botão **Continuar** retoma de onde parou.
 
 ## Para a TI
 - Toda a pesquisa roda na página: `lib/rastreio.js` (regras), `lib/pesquisa.js` (consultas) e `lib/planilha.js` (.xlsx com gráficos).
-- O servidor só consulta o **Rastreamento do pacote** (`podTracking/inner/query/keywordList`) com o **token dele**, como o DashMaster. Qualquer outro endereço é recusado. A página não guarda o token: só o campo **Salvar neste computador** (Node.js) manda o token, uma vez, ao servidor local.
-  - Node.js: `server.js`, rotas `api/estado`, `api/jms` e `api/token` (só de `localhost`). O token vem do banco do DashMaster (`node/dados/dashmaster.db`, tabela `props`, só leitura) ou de `dados/credenciais.json`.
-  - Apps Script: `Codigo.gs`, funções `estado`, `jms` e `testarConexao`. O token vem das Propriedades do script.
+- O servidor só consulta o **Rastreamento do pacote** (`podTracking/inner/query/keywordList`) e a **Informação básica** (`order/getOrderDetail`), com o **token dele**, como o DashMaster. Qualquer outro endereço é recusado.
+  - Até 2500 consultas por chamada, 25 ao mesmo tempo.
+  - Devolve à página só os campos que a pesquisa usa: as linhas do rastreamento e o `terminalDispatchCode`. Nome, endereço e telefone do cliente não saem do servidor.
+  - A página não guarda o token: só o campo **Salvar neste computador** (Node.js) manda o token, uma vez, ao servidor local.
+  - Node.js: `server.js`, rotas `api/estado`, `api/consultar` e `api/token` (só de `localhost`). O token vem do banco do DashMaster (`node/dados/dashmaster.db`, tabela `props`, só leitura) ou de `dados/credenciais.json`.
+  - Apps Script: `Codigo.gs`, funções `estado`, `consultar` (com `UrlFetchApp.fetchAll`) e `testarConexao`. O token vem das Propriedades do script.
 - As propriedades são as mesmas do DashMaster:
   - `JMS_AUTHTOKEN`;
   - se usar: `JMS_AUTH_MODE`, `JMS_COOKIE`, `JMS_AUTHORIZATION`, `JMS_LANG`, `JMS_LANGTYPE`, `JMS_TIMEZONE`, `JMS_COUNTRY_ID`, `JMS_ROUTENAME_TRACKING`, `JMS_ROUTENAMELIST_TRACKING`, `JMS_EXTRA_HEADERS_JSON`;

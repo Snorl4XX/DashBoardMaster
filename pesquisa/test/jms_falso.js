@@ -3,8 +3,11 @@
  * JMS FALSO para os testes da Pesquisa (dados FICTÍCIOS: remessas FIC…, operadores fictícios).
  * Responde como as capturas do Rastreamento do pacote:
  *   POST /operatingplatform/podTracking/inner/query/keywordList   {keywordList, trackingTypeEnum: 'WAYBILL', countryId}
- * Opções: reject (recusa acima de N remessas), silent (vazio acima de N), trunc (só as N primeiras), token (AuthToken aceito),
- *   rota (Routename exigido), atraso (ms).
+ *   POST /operatingplatform/order/getOrderDetail                  {waybillNo, countryId} — Informação básica (data.details), com o
+ *        código de três segmentos (terminalDispatchCode) e dados de cliente FICTÍCIOS (que o app não pode devolver à página)
+ * Opções: reject (recusa acima de N remessas), silent (vazio acima de N), trunc (só as N primeiras — trunc: 1 = como a tela do
+ *   JMS, uma remessa por consulta), token (AuthToken aceito), rota (Routename exigido no keywordList), semOrder (Informação básica
+ *   recusada), atraso (ms).
  */
 const http = require('http');
 
@@ -26,6 +29,8 @@ function bipes(w, i) {
     waybillTrackingContent: '[SP GRU] A verificação do problema foi realizada, o escaneador é [FIC01-PROBLEMA FICTICIO], a causa do problema [Erro.de.triagem]'});
   return d.sort((a, b) => (a.scanTime < b.scanTime ? 1 : -1));
 }
+/** Código de três segmentos fictício da remessa i ("XA,101-01,900": 1º segmento, dois segmentos e o 3º). */
+function segmento(i) { return ['XA,101-01,900', 'XB,202-02,', 'XC - SP,303-03,901'][i % 3]; }
 function remessas(n) { const out = {}; for (let i = 0; i < n; i++) out['FIC' + String(i).padStart(9, '0')] = i; return out; }
 
 function criar(opts) {
@@ -52,10 +57,17 @@ function criar(opts) {
           data: take.filter(w => conhecidas[w] !== undefined).map(w => ({keyword: w, details: bipes(w, conhecidas[w]), codes: null}))});
         return;
       }
+      if (/order\/getOrderDetail$/.test(rota)) {
+        if (opts.semOrder) { json({code: 500, msg: 'consulta não permitida', fail: true}); return; }
+        if (conhecidas[body.waybillNo] === undefined) { json({code: 500, msg: 'pedido não encontrado', fail: true}); return; }
+        json({code: 1, msg: '1:Solicitação concluída', succ: true, fail: false, data: {waybillNo: body.waybillNo, details: {id: 'FIC-ID', waybillId: body.waybillNo,
+          terminalDispatchCode: segmento(conhecidas[body.waybillNo]), receiverName: 'CLIENTE FICTICIO', receiverMobile: '00000000000', senderName: 'LOJA FICTICIA'}}});
+        return;
+      }
       json({code: 404, msg: 'rota desconhecida', fail: true}, 404);
     });
   });
   return new Promise(ok => server.listen(0, '127.0.0.1', () => ok({server, porta: server.address().port, estado, fechar: () => new Promise(f => server.close(f))})));
 }
 
-module.exports = {criar, bipes, remessas, TOKEN};
+module.exports = {criar, bipes, remessas, segmento, TOKEN};

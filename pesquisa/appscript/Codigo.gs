@@ -4,9 +4,10 @@
  * Cola as remessas, pesquisa no JMS (Rastreamento do pacote) um texto da "Descrição da etapa de bipagem", conta quem tem e
  * quem não tem, mostra o turno do primeiro bipe e baixa a planilha J&T com gráficos.
  * Toda a pesquisa roda na página (App.html). Aqui fica só:
- *   - jms(url, body, headers): consulta o Rastreamento do pacote com o AuthToken das Propriedades do script, como o DashMaster
- *     (JMS_AUTHTOKEN e, se usar, JMS_AUTH_MODE / JMS_COOKIE / JMS_AUTHORIZATION / JMS_ROUTENAME_TRACKING /
- *     JMS_EXTRA_HEADERS_JSON / JMS_COUNTRY_ID — os mesmos nomes e valores do DashMaster);
+ *   - consultar(pedidos): até 2500 consultas ao Rastreamento do pacote e à Informação básica (getOrderDetail) DE UMA VEZ, 25 ao
+ *     mesmo tempo, com o AuthToken das Propriedades do script, como o DashMaster (JMS_AUTHTOKEN e, se usar, JMS_AUTH_MODE /
+ *     JMS_COOKIE / JMS_AUTHORIZATION / JMS_ROUTENAME_TRACKING / JMS_EXTRA_HEADERS_JSON / JMS_COUNTRY_ID — os mesmos nomes e
+ *     valores do DashMaster). Devolve só os campos que a pesquisa usa (nada de nome, endereço ou telefone do cliente);
  *   - estado(): se o token está cadastrado (nunca mostra o valor);
  *   - testarConexao(): para rodar no editor (▶ Executar) e ver no Registro de execução o que o JMS respondeu.
  *
@@ -16,8 +17,13 @@
  * implantação → App da Web · Executar como: Eu · Quem pode acessar: Qualquer pessoa. O link que aparece (termina em /exec)
  * é o link da Pesquisa. Trocou o código? Implantar → Gerenciar implantações → ✏️ → Versão: Nova versão → Implantar.
  */
-var VERSAO = '1.2.0';
+var VERSAO = '1.3.0';
 var KEYWORD_URL_ = 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList';
+// "Informação básica" (uma remessa por consulta): o bloco "3 Segmentos" é o campo terminalDispatchCode.
+var ORDER_URL_ = 'https://gw.jtjms-br.com/operatingplatform/order/getOrderDetail';
+var PARALELO_ = 25, MAX_PEDIDOS_ = 2500, PRAZO_MS_ = 280000;
+// Campos de cada bipe que a pesquisa usa (o resto não volta para a página).
+var CAMPOS_BIPE_ = ['billCode', 'waybillNo', 'scanTime', 'scanTypeName', 'scanNetworkName', 'scanByName', 'imgType', 'code', 'waybillTrackingContent'];
 // Variantes de cabeçalho de rota do Rastreamento do pacote: as mesmas do DashMaster (JMS_ROUTE_AUTO_TRACKING = 1, 2 ou 3).
 var ROTAS_TRACKING_ = ['trackingExpress', 'waybillTracking', 'packageTracking'];
 var CHAVES_ = ['JMS_AUTHTOKEN', 'JMS_AUTH_MODE', 'JMS_COOKIE', 'JMS_AUTHORIZATION', 'JMS_LANG', 'JMS_LANGTYPE', 'JMS_TIMEZONE', 'JMS_COUNTRY_ID',
@@ -106,29 +112,82 @@ function estado() {
     tamanho: c.JMS_AUTHTOKEN ? c.JMS_AUTHTOKEN.length : 0, nomes: c.ok ? [] : c.nomes.slice(0, 20)};
 }
 
-/** Consulta ao Rastreamento do pacote pela página, com o AuthToken das Propriedades do script. Devolve {status, text}. */
-function jms(url, body, headers) {
-  if (String(url || '') !== KEYWORD_URL_) throw new Error('Endereço do JMS não permitido: o app só consulta o Rastreamento do pacote.');
-  var c = credenciais_();
-  if (!c.ok) throw new Error('Falta o AuthToken do JMS: no editor do Apps Script, Configurações do projeto → Propriedades do script → JMS_AUTHTOKEN (o mesmo do DashMaster).');
-  return chamarJms_(c, body, headers);
-}
-function chamarJms_(c, body, headers) {
+/** Pedido ao JMS (UrlFetchApp) com os cabeçalhos do DashMaster. */
+function requisicao_(c, url, body, headers) {
   var b = {};
   Object.keys(body || {}).forEach(function (k) { b[k] = body[k]; });
   if (c.JMS_COUNTRY_ID) b.countryId = String(c.JMS_COUNTRY_ID);
-  var req = {method: 'post', headers: cabecalhos_(c, headers), contentType: 'application/json;charset=UTF-8', payload: JSON.stringify(b),
+  return {url: url, method: 'post', headers: cabecalhos_(c, headers), contentType: 'application/json;charset=UTF-8', payload: JSON.stringify(b),
     muteHttpExceptions: true, followRedirects: false};
-  var resp;
-  try { resp = UrlFetchApp.fetch(KEYWORD_URL_, req); }
-  catch (e) {
-    var m = String(e && e.message || e).slice(0, 200);
-    // Sem a autorização do dono para acessar a internet (UrlFetchApp): não é falha do JMS.
-    if (/permiss|authoriz|autoriza/i.test(m)) {
-      throw new Error('O Google ainda não autorizou o app a falar com o JMS: no editor, escolha testarConexao, clique em ▶ Executar e aceite; depois Implantar → Gerenciar implantações → ✏️ → Nova versão. (' + m + ')');
-    }
-    return {status: 0, text: 'Falha de rede ao consultar o JMS: ' + m};
+}
+/** Sem a autorização do dono para acessar a internet (UrlFetchApp): não é falha do JMS. */
+function autorizacao_(e) {
+  var m = String(e && e.message || e).slice(0, 200);
+  if (/permiss|authoriz|autoriza/i.test(m)) {
+    throw new Error('O Google ainda não autorizou o app a falar com o JMS: no editor, escolha testarConexao, clique em ▶ Executar e aceite; depois Implantar → Gerenciar implantações → ✏️ → Nova versão. (' + m + ')');
   }
+  return m;
+}
+/** Só o que a pesquisa usa: as linhas do rastreamento (campos de CAMPOS_BIPE_) e o código de três segmentos. */
+function enxugar_(url, text) {
+  var j;
+  try { j = JSON.parse(text); } catch (e) { return String(text || '').slice(0, 2000); }
+  if (!j || typeof j !== 'object') return String(text || '').slice(0, 2000);
+  var out = {code: j.code, msg: j.msg || j.message, fail: j.fail, succ: j.succ};
+  if (url === KEYWORD_URL_) {
+    var lista = Array.isArray(j.data) ? j.data : j.data && Array.isArray(j.data.records) ? j.data.records : [];
+    out.data = lista.map(function (it) {
+      return {keyword: String(it && (it.keyword || it.waybillNo || it.billCode) || ''), details: (it && Array.isArray(it.details) ? it.details : []).map(function (d) {
+        var x = {};
+        CAMPOS_BIPE_.forEach(function (k) { if (d && d[k] !== undefined && d[k] !== null) x[k] = d[k]; });
+        return x;
+      })};
+    });
+  } else {
+    var d = j.data && (j.data.details || j.data);
+    out.data = {details: {terminalDispatchCode: d && d.terminalDispatchCode !== undefined ? d.terminalDispatchCode : null}};
+  }
+  return JSON.stringify(out);
+}
+
+/**
+ * Várias consultas de uma vez, pela página: pedidos = [{url, body, headers}] (Rastreamento do pacote ou Informação básica).
+ * Faz 25 ao mesmo tempo (UrlFetchApp.fetchAll). Devolve [{status, text}] na mesma ordem. O que não couber no tempo do Google
+ * volta com status 0 (a página manda de novo).
+ */
+function consultar(pedidos) {
+  if (!Array.isArray(pedidos) || !pedidos.length || pedidos.length > MAX_PEDIDOS_) throw new Error('Mande de 1 a ' + MAX_PEDIDOS_ + ' consultas por vez.');
+  pedidos.forEach(function (p) {
+    if (!p || (p.url !== KEYWORD_URL_ && p.url !== ORDER_URL_)) throw new Error('Endereço do JMS não permitido: o app só consulta o Rastreamento do pacote e a Informação básica.');
+  });
+  var c = credenciais_();
+  if (!c.ok) throw new Error('Falta o AuthToken do JMS: no editor do Apps Script, Configurações do projeto → Propriedades do script → JMS_AUTHTOKEN (o mesmo do DashMaster).');
+  var inicio = Date.now(), out = [];
+  for (var i = 0; i < pedidos.length; i += PARALELO_) {
+    var parte = pedidos.slice(i, i + PARALELO_);
+    if (Date.now() - inicio > PRAZO_MS_) {
+      parte.forEach(function () { out.push({status: 0, text: 'Tempo do Google esgotado nesta rodada (a consulta volta para a fila).'}); });
+      continue;
+    }
+    var reqs = parte.map(function (p) { return requisicao_(c, p.url, p.body, p.headers); }), resps;
+    try { resps = UrlFetchApp.fetchAll(reqs); }
+    catch (e) {
+      autorizacao_(e);
+      // Uma falhou (rede): as outras, uma de cada vez.
+      resps = reqs.map(function (r) { try { return UrlFetchApp.fetch(r.url, r); } catch (e2) { return {erro: autorizacao_(e2)}; } });
+    }
+    resps.forEach(function (r, k) {
+      out.push(r && r.getResponseCode ? {status: r.getResponseCode(), text: enxugar_(parte[k].url, r.getContentText('UTF-8'))}
+        : {status: 0, text: 'Falha de rede ao consultar o JMS: ' + String(r && r.erro || 'sem resposta')});
+    });
+  }
+  return out;
+}
+/** Uma consulta (editor: testarConexao). */
+function chamarJms_(c, url, body, headers) {
+  var req = requisicao_(c, url, body, headers), resp;
+  try { resp = UrlFetchApp.fetch(url, req); }
+  catch (e) { return {status: 0, text: 'Falha de rede ao consultar o JMS: ' + autorizacao_(e)}; }
   return {status: resp.getResponseCode(), text: resp.getContentText('UTF-8')};
 }
 
@@ -158,12 +217,16 @@ function testarConexao() {
   var corpo = {keywordList: ['TESTE0000000000'], trackingTypeEnum: 'WAYBILL', countryId: '1'};
   var tentativas = [{}].concat(ROTAS_TRACKING_.map(function (n) { return {routename: n}; })), certo = null;
   for (var i = 0; i < tentativas.length && !certo; i++) {
-    var h = tentativas[i], r = resumoJms_(chamarJms_(c, corpo, h));
+    var h = tentativas[i], r = resumoJms_(chamarJms_(c, KEYWORD_URL_, corpo, h));
     linhas.push((h.routename ? 'Com Routename ' + h.routename : 'Sem Routename') + ': ' + r.texto + (r.ok ? ' → OK' : ''));
     if (r.ok) certo = h;
     if (c.JMS_ROUTENAME_TRACKING) break; // a propriedade manda: as variantes dariam o mesmo pedido
   }
   linhas.push(certo ? 'OK: o JMS aceitou o AuthToken.' : 'O JMS recusou. Se a mensagem fala de token/login, gere um AuthToken novo no JMS e troque JMS_AUTHTOKEN.');
+  if (certo) {
+    // Informação básica (segmentos): a remessa de teste não existe, então só mostra se o JMS respondeu.
+    linhas.push('Informação básica (segmentos): ' + resumoJms_(chamarJms_(c, ORDER_URL_, {waybillNo: 'TESTE0000000000', countryId: '1'}, certo)).texto);
+  }
   console.log(linhas.join('\n'));
   return linhas.join('\n');
 }

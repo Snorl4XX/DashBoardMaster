@@ -7,7 +7,7 @@ const vm = require('vm');
 const zlib = require('zlib');
 const http = require('http');
 const ROOT = path.join(__dirname, '..');
-const {criar, bipes, TOKEN} = require('./jms_falso');
+const {criar, bipes, segmento, TOKEN} = require('./jms_falso');
 
 // O servidor do app lê o endereço do JMS (simulado) ao carregar: definir antes do require.
 let jmsPorta = 0;
@@ -20,12 +20,16 @@ function check(cond, name, extra) { if (!cond) { console.error('FALHOU: ' + name
 const WS = n => Array.from({length: n}, (_, i) => 'FIC' + String(i).padStart(9, '0'));
 const PATS = ['A encomenda expressa está [ SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
 
-/** "Servidor" para os testes da página: fala direto com o JMS falso (como o api/jms do app). */
+/** "Servidor" para os testes da página: fala direto com o JMS falso (como o api/consultar do app). `chamadas` = pedidos por chamada. */
 function apiFalsa(porta, token) {
-  const local = u => u.replace(/^https:\/\/[^/]+/, 'http://127.0.0.1:' + porta);
+  const local = u => u.replace(/^https:\/\/[^/]+/, 'http://127.0.0.1:' + porta), chamadas = [];
   return {
-    jms: (url, body, headers) => fetch(local(url), {method: 'POST', headers: Object.assign({'Content-Type': 'application/json', authtoken: token || TOKEN},
-      headers || {}), body: JSON.stringify(body)}).then(async r => ({status: r.status, text: await r.text()}))
+    chamadas,
+    consultar: pedidos => {
+      chamadas.push(pedidos.length);
+      return Promise.all(pedidos.map(p => fetch(local(p.url), {method: 'POST', headers: Object.assign({'Content-Type': 'application/json', authtoken: token || TOKEN},
+        p.headers || {}), body: JSON.stringify(p.body)}).then(async r => ({status: r.status, text: await r.text()}))));
+    }
   };
 }
 function unzip(bytes) {
@@ -118,27 +122,58 @@ function request(porta, method, p, body, headers) {
   try { await P.pesquisar(apiFalsa(jms.porta, 'TOKEN-VENCIDO'), WS(10), PATS, {espera: 0}); } catch (e) { eTok = e; }
   check(eTok && eTok.kind === 'auth' && /AuthToken/.test(eTok.message), 'token vencido: a pesquisa para com o aviso', eTok && eTok.message);
   let parou = 0;
-  const rp = await P.pesquisar(api, WS(500), PATS, {espera: 0, paralelo: 1, parar: () => ++parou > 2});
+  const rp = await P.pesquisar(api, WS(500), PATS, {espera: 0, porRodada: 100, parar: () => ++parou > 2});
   check(rp.results.length === 200 && rp.faltam.length === 300 && rp.faltam[0] === 'FIC000000200', 'Parar: o que foi pesquisado fica; o resto pode continuar depois', rp.results.length);
   let eVazio = '';
   try { await P.pesquisar(api, WS(3), ['', ' '], {}); } catch (e) { eVazio = e.message; }
   check(/texto padrão/.test(eVazio), 'sem padrão: aviso');
+  // Como a tela do JMS: uma remessa por consulta. Antes: 4 consultas por vez = "de 4 em 4". Agora: 1000 remessas por rodada.
+  const j1 = await criar({trunc: 1}), api1 = apiFalsa(j1.porta), lotes1 = [], prog1 = [];
+  const r1 = await P.pesquisar(api1, WS(2500), PATS, {espera: 0, onLote: x => lotes1.push(x), onProgresso: f => prog1.push(f)});
+  const kw1 = j1.estado.chamadas.filter(c => c.rota === 'keywordList'), od1 = j1.estado.chamadas.filter(c => c.rota === 'getOrderDetail');
+  await j1.fechar();
+  check(r1.results.filter(x => x.p[1]).length === 2500 && !r1.faltam.length && lotes1.join() === '1' && api1.chamadas.length === 4 &&
+    Math.max(...api1.chamadas) <= 2500 && prog1.join() === '10,1010,2010,2500' && kw1.length === 2500 && od1.length === 2500,
+    'JMS devolve uma remessa por consulta: aprende na 1ª rodada e pesquisa 1000 por vez (4 chamadas para 2500 remessas)', {chamadas: api1.chamadas, prog1, lotes1});
+  // Informação básica: bloco "3 Segmentos" sem o 3º.
+  const sg = r1.results.slice(0, 3).map(x => x.seg);
+  check(sg[0].s1 === 'XA' && sg[0].s2 === '101-01' && sg[1].s1 === 'XB' && sg[1].s2 === '202-02' && sg[2].s1 === 'XC - SP' && sg[2].s2 === '303-03' &&
+    JSON.stringify(sg).indexOf('900') < 0 && JSON.stringify(sg).indexOf('901') < 0 && r1.semSeg === 0,
+    'segmentos de cada remessa: Código de primeiro segmento e Código de dois segmentos (o 3º fica de fora)', sg);
+  check(R.segmentosDe({data: {details: {terminalDispatchCode: 'XA,101-01,'}}}).s2 === '101-01' && R.segmentosDe({data: null}).s1 === '' &&
+    R.segmentosDe({data: {terminalDispatchCode: 'XB,202-02,9'}}).s1 === 'XB', 'segmentos: código com o 3º vazio, sem dados ou fora de "details"');
+  const js = await criar({semOrder: true});
+  const rs = await P.pesquisar(apiFalsa(js.porta), WS(12), PATS, {espera: 0});
+  await js.fechar();
+  check(rs.results.filter(x => x.p[1]).length === 12 && rs.semSeg === 12 && rs.results.every(x => x.seg === null) && /não permitida/.test(rs.erroSeg),
+    'Informação básica recusada: a pesquisa termina e avisa quantas ficaram sem segmentos', rs.erroSeg);
+  const rn = await P.pesquisar(api, WS(5), PATS, {espera: 0, segmentos: false});
+  check(rn.results.every(x => x.seg === null) && rn.semSeg === 5, 'sem a Informação básica quando desligada');
+  // Falha passageira numa consulta: volta para a fila, nada se perde.
+  let falhou = 0;
+  const apiInst = {consultar: ps => api.consultar(ps).then(rs2 => rs2.map((r, i) => (i === 0 && falhou++ < 2 ? {status: 503, text: ''} : r)))};
+  const ri = await P.pesquisar(apiInst, WS(150), PATS, {espera: 0});
+  check(ri.results.filter(x => x.p[1]).length === 150 && falhou === 3, 'consulta com falha passageira (503) volta para a fila', falhou);
 
   // ---------- 3. Planilha (planilha.js) ----------
   const rAll = await P.pesquisar(api, WS(30), ['O expresso chegou [SP GRU]', 'chegou [SP GRU] A parada anterior foi []'], {espera: 0});
   const book = X.rastreioBook({patterns: ['O expresso chegou [SP GRU]', 'chegou [SP GRU] A parada anterior foi []'], results: rAll.results,
     summaries: [R.summary(rAll.results, 0), R.summary(rAll.results, 1)], at: new Date(2026, 9, 21, 9, 5)});
   const tem2 = book.sheets[3];
+  const nao1 = book.sheets[2];
   check(book.sheets.map(s => s.name).join('|') === 'Resumo|Bloco 1 - Tem|Bloco 1 - Não tem|Bloco 2 - Tem|Bloco 2 - Não tem' && tem2.rows[3][1].v === 'FIC000000000' &&
-    tem2.rows[2].length === 10 && /^Imagem/.test(tem2.rows[2][8].v) && tem2.rows[3][8].v === 'Tem imagem no JMS' && !tem2.images && tem2.filter === 'A3:J3',
-    'aba Tem: remessa, horário, turno, origem, escaneador, tipo, descrição, imagem (só texto) e linhas', tem2.rows[2].map(c => c.v));
+    tem2.rows[2].length === 12 && /^Código de primeiro segmento/.test(tem2.rows[2][2].v) && /^Código de dois segmentos/.test(tem2.rows[2][3].v) &&
+    tem2.rows[3][2].v === 'XA' && tem2.rows[3][3].v === '101-01' && /^Imagem/.test(tem2.rows[2][10].v) && tem2.rows[3][10].v === 'Tem imagem no JMS' &&
+    !tem2.images && tem2.filter === 'A3:L3' && nao1.rows[2].length === 5 && /^Código de primeiro segmento/.test(nao1.rows[2][2].v),
+    'abas Tem e Não tem: remessa, códigos de segmento, horário, turno, origem, escaneador, tipo, descrição, imagem (texto) e linhas', tem2.rows[2].map(c => c.v));
   const z = unzip(await X.build(book)), names = Object.keys(z);
   const charts = names.filter(n => /^xl\/charts\/chart\d+\.xml$/.test(n));
   check(charts.length === 5 && !names.some(n => /^xl\/media\//.test(n)) && !/<xdr:pic>/.test(names.filter(n => /drawing\d+\.xml$/.test(n)).map(n => z[n].toString()).join('')) &&
     names.filter(n => /\.(xml|rels)$/.test(n)).every(n => wellFormed(z[n].toString())), 'planilha: 5 gráficos do Excel, sem fotos; XML bem formado', charts.length);
   const semFoto = X.rastreioBook({patterns: ['', 'chegou'], results: [{w: 'FIC1', ok: true, p: [null, {t: '2026-09-09 10:00:00', shift: 'T1', img: true, n: 1}]},
     {w: 'FIC2', ok: true, p: [null, {t: '2026-09-09 10:00:00', shift: 'T1', img: false, n: 1}]}], summaries: [R.summary([], 0), R.summary([], 1)]});
-  check(semFoto.sheets[1].rows[3][8].v === 'Tem imagem no JMS' && semFoto.sheets[1].rows[4][8].v === 'NÃO TEM IMAGEM!', 'coluna Imagem: "Tem imagem no JMS" ou "NÃO TEM IMAGEM!"');
+  check(semFoto.sheets[1].rows[3][10].v === 'Tem imagem no JMS' && semFoto.sheets[1].rows[4][10].v === 'NÃO TEM IMAGEM!' && semFoto.sheets[1].rows[3][2].v === '',
+    'coluna Imagem: "Tem imagem no JMS" ou "NÃO TEM IMAGEM!"; sem segmentos, célula vazia');
 
   // ---------- 4. Servidor do app (server.js) ----------
   process.env.PESQUISA_JMS_URL = 'http://127.0.0.1:' + jms.porta;
@@ -151,7 +186,8 @@ function request(porta, method, p, body, headers) {
   const porta = srv.address().port;
   const api2 = (fn, body, h) => request(porta, 'POST', '/api/' + fn, body, h).then(r => Object.assign(JSON.parse(r.text), {status: r.status}));
   // Token do servidor, como o DashMaster: sem DashMaster, o app pede o token só no computador dele e guarda nele.
-  const e0 = await api2('estado', {}), j0 = await api2('jms', {url: R.KEYWORD_URL, body: R.keywordPayload(['FIC000000001'])});
+  const kwPed = ws => ({url: R.KEYWORD_URL, body: R.keywordPayload(ws)});
+  const e0 = await api2('estado', {}), j0 = await api2('consultar', {pedidos: [kwPed(['FIC000000001'])]});
   check(e0.ok && e0.result.fonte === '' && e0.result.local === true && !j0.ok && /Falta o AuthToken/.test(j0.error), 'sem token no servidor: a página avisa (passo 1)', [e0, j0.error]);
   const tRede = await api2('token', {token: TOKEN}, {'X-Forwarded-For': '10.0.0.9'});
   const tOk = await api2('token', {token: ' authtoken: "' + TOKEN + '"\n'}), e1 = await api2('estado', {});
@@ -159,20 +195,31 @@ function request(porta, method, p, body, headers) {
     JSON.parse(fs.readFileSync(path.join(cfg.dados, 'credenciais.json'), 'utf8')).JMS_AUTHTOKEN === TOKEN,
     'token salvo só pelo computador do app (pela rede: recusado); "authtoken:", aspas e espaços saem');
   const home = await request(porta, 'GET', '/');
-  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.2\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
+  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.3\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
     ['rastreio.js', 'pesquisa.js', 'planilha.js', 'app.js', 'app.css'].every(f => home.text.indexOf(f) >= 0), 'página do app (Node.js)');
   const libs = await Promise.all(['/rastreio.js', '/pesquisa.js', '/planilha.js', '/app.js'].map(f => request(porta, 'GET', f)));
   check(libs.every(r => r.status === 200 && /javascript/.test(r.headers['content-type'])) && libs.every(r => { try { new Function(r.text); return true; } catch (e) { return false; } }),
     'scripts da página entregues e sem erro de sintaxe');
   const antesJ = jms.estado.chamadas.length;
-  const pj = await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: R.keywordPayload(['FIC000000001']), token: 'TOKEN-DA-PAGINA', headers: {routename: 'trackingExpress', cookie: 'x', authtoken: 'y'}});
-  const ch = jms.estado.chamadas[antesJ];
-  check(pj.status === 200 && JSON.parse(pj.text).ok && JSON.parse(JSON.parse(pj.text).result.text).data[0].keyword === 'FIC000000001' && ch.headers.authtoken === TOKEN &&
-    ch.headers.routename === 'trackingExpress' && !ch.headers.cookie, 'api/jms: consulta o JMS com o token DO SERVIDOR (o que a página mandar é ignorado; extras só os de rota)');
+  const pj = await request(porta, 'POST', '/api/consultar', {token: 'TOKEN-DA-PAGINA', pedidos: [Object.assign(kwPed(['FIC000000001']), {headers: {routename: 'trackingExpress', cookie: 'x', authtoken: 'y'}}),
+    {url: R.ORDER_URL, body: R.orderPayload('FIC000000001')}]});
+  const ch = jms.estado.chamadas[antesJ], pjr = JSON.parse(pj.text).result || [];
+  const kwTxt = pjr[0] && pjr[0].text, odTxt = pjr[1] && pjr[1].text, det0 = JSON.parse(kwTxt).data[0].details[0];
+  check(pj.status === 200 && JSON.parse(kwTxt).data[0].keyword === 'FIC000000001' && ch.headers.authtoken === TOKEN && ch.headers.routename === 'trackingExpress' && !ch.headers.cookie,
+    'api/consultar: consulta o JMS com o token DO SERVIDOR (o que a página mandar é ignorado; extras só os de rota)');
+  check(det0.scanTime && det0.waybillTrackingContent && det0.scanNetworkId === undefined && det0.originalScanTypeCode === undefined &&
+    R.segmentosDe(JSON.parse(odTxt)).s1 === 'XB' && !/FICTICI|00000000000/.test(odTxt) && odTxt.length < 200,
+    'só os campos que a pesquisa usa voltam para a página (nada de nome ou telefone do cliente)', odTxt);
+  const muitos = await api2('consultar', {pedidos: Array.from({length: 2501}, () => kwPed(['FIC1']))});
   const outras = ['https://outro.example/x', 'https://gw.jtjms-br.com/operatingplatform/abnormalPieceScanList/pageList', 'https://gw.jtjms-br.com/ficticio/user/updatePassword',
     R.KEYWORD_URL + '?x=1'];
-  const recusas = await Promise.all(outras.map(u => request(porta, 'POST', '/api/jms', {url: u, body: {}}).then(r => JSON.parse(r.text))));
-  check(recusas.every(r => !r.ok && /só consulta o Rastreamento do pacote/.test(r.error)), 'com o token do servidor, só o Rastreamento do pacote (nada que grave ou apague)');
+  const recusas = await Promise.all(outras.map(u => api2('consultar', {pedidos: [kwPed(['FIC1']), {url: u, body: {}}]})));
+  check(!muitos.ok && /2500/.test(muitos.error) && recusas.every(r => !r.ok && /só consulta o Rastreamento do pacote e a Informação básica/.test(r.error)),
+    'com o token do servidor, só o Rastreamento do pacote e a Informação básica (nada que grave ou apague); no máximo 2500 por chamada');
+  // 1000 remessas numa chamada: o servidor faz as consultas ao mesmo tempo (25 por vez).
+  const t0 = Date.now(), mil = await api2('consultar', {pedidos: WS(1000).map(w => kwPed([w]))});
+  check(mil.ok && mil.result.length === 1000 && mil.result.every((r, i) => JSON.parse(r.text).data[0].keyword === WS(1000)[i]), 'api/consultar: 1000 consultas numa chamada, na mesma ordem',
+    Date.now() - t0);
   // Com o DashMaster neste computador: o MESMO token dele (banco dashmaster.db, tela Configurações), sem colar nada.
   let sqliteOk = true;
   try { require('node:sqlite'); } catch (e) { sqliteOk = false; }
@@ -185,7 +232,7 @@ function request(porta, method, p, body, headers) {
     db.close();
     const cfgDm = Object.assign({}, cfg, {dashmaster: path.join(tmp, 'dm')});
     fs.writeFileSync(path.join(cfg.dados, 'credenciais.json'), JSON.stringify({JMS_AUTHTOKEN: 'TOKEN-VELHO-DO-APP'}));
-    const cDm = S.credenciais(cfgDm), rDm = await S.jms({url: R.KEYWORD_URL, body: R.keywordPayload(['FIC000000003'])}, cfgDm);
+    const cDm = S.credenciais(cfgDm), rDm = (await S.consultar([kwPed(['FIC000000003'])], cfgDm))[0];
     check(cDm.fonte === 'dashmaster' && cDm.JMS_AUTHTOKEN === TOKEN && rDm.status === 200 && JSON.parse(rDm.text).data[0].keyword === 'FIC000000003',
       'usa o mesmo AuthToken do DashMaster deste computador (o dele vale mais que o salvo no app)', cDm.fonte);
     fs.writeFileSync(path.join(cfg.dados, 'credenciais.json'), JSON.stringify({JMS_AUTHTOKEN: TOKEN}));
@@ -197,18 +244,18 @@ function request(porta, method, p, body, headers) {
   const hr3 = S.cabecalhos({JMS_AUTHTOKEN: 'A', JMS_ROUTENAME_TRACKING: 'NONE', JMS_EXTRA_HEADERS_JSON: '{"X-Ficticio":"1","authtoken":"NAO"}'}, {routename: 'trackingExpress'});
   check(hr1.Routename === 'rotaFicticia' && hr2.Routename === 'packageTracking' && !hr3.Routename && hr3['X-Ficticio'] === '1' && hr3.AuthToken === 'A',
     'propriedades do DashMaster: JMS_ROUTENAME_TRACKING manda, JMS_ROUTE_AUTO_TRACKING aprendido, JMS_EXTRA_HEADERS_JSON', [hr1, hr2, hr3]);
-  const csrf = await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: {}}, {Origin: 'http://outro-site.example'});
-  const get = await request(porta, 'GET', '/api/jms');
-  const form = await request(porta, 'POST', '/api/jms', 'url=x', {'Content-Type': 'application/x-www-form-urlencoded'});
+  const csrf = await request(porta, 'POST', '/api/consultar', {pedidos: [kwPed(['FIC1'])]}, {Origin: 'http://outro-site.example'});
+  const get = await request(porta, 'GET', '/api/consultar');
+  const form = await request(porta, 'POST', '/api/consultar', 'url=x', {'Content-Type': 'application/x-www-form-urlencoded'});
   check(csrf.status === 403 && get.status === 405 && form.status === 415, 'outro site não usa o app (CSRF); só POST com JSON');
-  const fotosApi = await request(porta, 'POST', '/api/fotos', {urls: []}), modeloApi = await request(porta, 'POST', '/api/modelo', {acao: 'ler'});
-  check(fotosApi.status === 404 && modeloApi.status === 404, 'fotos e "Ver imagem" saíram do app');
+  const fotosApi = await request(porta, 'POST', '/api/fotos', {urls: []}), jmsApi = await request(porta, 'POST', '/api/jms', {url: R.KEYWORD_URL, body: {}});
+  check(fotosApi.status === 404 && jmsApi.status === 404, 'rotas antigas (fotos, api/jms) saíram');
   // A página inteira pelo servidor do app (api de verdade, em vez da falsa).
   const viaApp = {
-    jms: (url, body, headers) => request(porta, 'POST', '/api/jms', {url, body, headers}).then(r => { const j = JSON.parse(r.text); if (!j.ok) throw new Error(j.error); return j.result; })
+    consultar: pedidos => request(porta, 'POST', '/api/consultar', {pedidos}).then(r => { const j = JSON.parse(r.text); if (!j.ok) throw new Error(j.error); return j.result; })
   };
   const rv = await P.pesquisar(viaApp, WS(15), PATS, {espera: 0});
-  check(rv.results.filter(x => x.p[1]).length === 15, 'pesquisa pelo servidor do app');
+  check(rv.results.filter(x => x.p[1]).length === 15 && rv.results[0].seg.s1 === 'XA' && rv.results[0].seg.s2 === '101-01', 'pesquisa e segmentos pelo servidor do app');
   await new Promise(ok => srv.close(ok));
 
   // ---------- 5. Versão Apps Script ----------
@@ -227,18 +274,22 @@ function request(porta, method, p, body, headers) {
       setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }})},
     console: {log: () => {}},
     UrlFetchApp: {
-      // JMS de mentira: aceita só o token fictício e, se `exigeRota`, só esse Routename.
+      // JMS de mentira: aceita só o token fictício e, se `exigeRota`, só esse Routename. Informação básica com dados de cliente fictícios.
       fetch: (url, req) => {
         fetched.push({url, req});
         const ok = req.headers.AuthToken === TOKEN && (!gctx.exigeRota || req.headers.Routename === gctx.exigeRota);
-        return {getResponseCode: () => 200, getContentText: () => ok ? '{"code":1,"data":[]}' : req.headers.AuthToken === TOKEN ? '{"code":500,"msg":"rota inválida"}' : '{"code":401,"msg":"token失效"}'};
-      }
+        const bom = url === R.ORDER_URL ? '{"code":1,"data":{"waybillNo":"FIC1","details":{"terminalDispatchCode":"XA,101-01,900","receiverName":"CLIENTE FICTICIO"}}}'
+          : '{"code":1,"data":[{"keyword":"FIC1","details":[{"scanTime":"2026-09-09 10:00:00","scanNetworkId":9,"waybillTrackingContent":"FICTICIO"}]}]}';
+        return {getResponseCode: () => 200, getContentText: () => ok ? bom : req.headers.AuthToken === TOKEN ? '{"code":500,"msg":"rota inválida"}' : '{"code":401,"msg":"token失效"}'};
+      },
+      fetchAll: reqs => { gctx.fetchAlls = (gctx.fetchAlls || 0) + 1; return reqs.map(r => gctx.UrlFetchApp.fetch(r.url, r)); }
     }
   };
+  const kwG = (body, headers) => ({url: R.KEYWORD_URL, body: body || {keywordList: ['FIC1']}, headers: headers || {}});
   vm.createContext(gctx);
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'appscript', 'Codigo.gs'), 'utf8'), gctx);
   let gErr = '', gTok = '';
-  try { gctx.jms(R.KEYWORD_URL, {}, {}); } catch (e) { gTok = e.message; }
+  try { gctx.consultar([kwG()]); } catch (e) { gTok = e.message; }
   const est0 = gctx.estado();
   check(est0.fonte === '' && est0.versao === S.VERSAO && est0.nomes.length === 0 && /Propriedades do script → JMS_AUTHTOKEN/.test(gTok) && !fetched.length &&
     /FALTA O TOKEN[\s\S]*nenhuma propriedade/.test(gctx.testarConexao()), 'Apps Script sem JMS_AUTHTOKEN: avisa onde cadastrar', gTok);
@@ -248,7 +299,7 @@ function request(porta, method, p, body, headers) {
     Object.keys(props).forEach(x => { delete props[x]; });
     props[k] = apelidos[k];
     const e = gctx.estado();
-    gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {});
+    gctx.consultar([kwG()]);
     return e.fonte === 'propriedades' && e.chave === k && e.tamanho === TOKEN.length && JSON.stringify(e).indexOf(TOKEN) < 0 && fetched[fetched.length - 1].req.headers.AuthToken === TOKEN;
   });
   check(lidos.every(Boolean), 'Apps Script: aceita o token com espaço no nome, "AuthToken", minúsculas, "authtoken:", aspas e quebra de linha', lidos);
@@ -258,16 +309,24 @@ function request(porta, method, p, body, headers) {
   delete props.OUTRA_COISA;
   fetched.length = 0;
   props.JMS_AUTHTOKEN = TOKEN;
-  const gj = gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {routename: 'trackingExpress', authtoken: 'x', cookie: 'y'});
-  const gr = fetched[0];
-  check(gctx.estado().fonte === 'propriedades' && gj.status === 200 && gr.req.headers.AuthToken === TOKEN && gr.req.headers.Routename === 'trackingExpress' &&
-    !gr.req.headers.Cookie && gr.req.method === 'post' && JSON.parse(gr.req.payload).keywordList[0] === 'FIC1' && gr.req.followRedirects === false,
-    'Apps Script jms(): consulta o JMS com o JMS_AUTHTOKEN das Propriedades do script, como o DashMaster');
-  let gGrava = '';
-  try { gctx.jms('https://outro.example/x', {}, {}); } catch (e) { gErr = e.message; }
-  try { gctx.jms('https://gw.jtjms-br.com/ficticio/user/updatePassword', {}, {}); } catch (e) { gGrava = e.message; }
-  check(/não permitido/.test(gErr) && /só consulta o Rastreamento do pacote/.test(gGrava) && typeof gctx.fotos === 'undefined' && typeof gctx.modelo === 'undefined',
-    'Apps Script: só o Rastreamento do pacote; fotos e "Ver imagem" saíram');
+  const gj = gctx.consultar([kwG(null, {routename: 'trackingExpress', authtoken: 'x', cookie: 'y'}), {url: R.ORDER_URL, body: R.orderPayload('FIC1')}]);
+  const gr = fetched[0], gdet = JSON.parse(gj[0].text).data[0].details[0];
+  check(gctx.estado().fonte === 'propriedades' && gj[0].status === 200 && gr.req.headers.AuthToken === TOKEN && gr.req.headers.Routename === 'trackingExpress' &&
+    !gr.req.headers.Cookie && gr.req.method === 'post' && JSON.parse(gr.req.payload).keywordList[0] === 'FIC1' && gr.req.followRedirects === false &&
+    gdet.waybillTrackingContent === 'FICTICIO' && gdet.scanNetworkId === undefined && R.segmentosDe(JSON.parse(gj[1].text)).s2 === '101-01' && !/CLIENTE/.test(gj[1].text),
+    'Apps Script consultar(): JMS_AUTHTOKEN das Propriedades do script, como o DashMaster; só os campos da pesquisa voltam', gj);
+  fetched.length = 0;
+  gctx.fetchAlls = 0;
+  const g60 = gctx.consultar(Array.from({length: 60}, (_, i) => kwG({keywordList: ['FIC' + i]})));
+  check(g60.length === 60 && gctx.fetchAlls === 3 && fetched.map(f => JSON.parse(f.req.payload).keywordList[0]).join() === Array.from({length: 60}, (_, i) => 'FIC' + i).join(),
+    'Apps Script consultar(): 25 consultas ao mesmo tempo (UrlFetchApp.fetchAll), na mesma ordem', gctx.fetchAlls);
+  let gGrava = '', gMuitos = '';
+  try { gctx.consultar([kwG(), {url: 'https://outro.example/x', body: {}}]); } catch (e) { gErr = e.message; }
+  try { gctx.consultar([{url: 'https://gw.jtjms-br.com/ficticio/user/updatePassword', body: {}}]); } catch (e) { gGrava = e.message; }
+  try { gctx.consultar(Array.from({length: 2501}, () => kwG())); } catch (e) { gMuitos = e.message; }
+  check(/não permitido/.test(gErr) && /só consulta o Rastreamento do pacote e a Informação básica/.test(gGrava) && /2500/.test(gMuitos) &&
+    typeof gctx.fotos === 'undefined' && typeof gctx.modelo === 'undefined' && typeof gctx.jms === 'undefined',
+    'Apps Script: só o Rastreamento do pacote e a Informação básica; no máximo 2500 por chamada; funções antigas saíram');
   const tc1 = gctx.testarConexao();
   gctx.exigeRota = 'waybillTracking';
   const tc2 = gctx.testarConexao();
@@ -281,16 +340,16 @@ function request(porta, method, p, body, headers) {
   const fetchOk = gctx.UrlFetchApp.fetch;
   gctx.UrlFetchApp.fetch = () => { throw new Error('Exception: Você não tem permissão para chamar UrlFetchApp.fetch. Permissões necessárias: https://www.googleapis.com/auth/script.external_request'); };
   let gAut = '';
-  try { gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {}); } catch (e) { gAut = e.message; }
+  try { gctx.consultar([kwG()]); } catch (e) { gAut = e.message; }
   gctx.UrlFetchApp.fetch = () => { throw new Error('Address unavailable'); };
-  const gRede = gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1']}, {});
+  const gRede = gctx.consultar([kwG()])[0];
   gctx.UrlFetchApp.fetch = fetchOk;
   let kRede = '';
   try { R.parseJms(gRede.status, gRede.text); } catch (e) { kRede = e.message; }
   check(/ainda não autorizou[\s\S]*testarConexao/.test(gAut) && /HTTP 0: Falha de rede ao consultar o JMS: Address unavailable/.test(kRede),
     'Apps Script sem autorização do Google: diz o que fazer (não confunde com JMS fora do ar)', [gAut, kRede]);
   props.JMS_COUNTRY_ID = '7';
-  gctx.jms(R.KEYWORD_URL, {keywordList: ['FIC1'], countryId: '1'}, {});
+  gctx.consultar([kwG({keywordList: ['FIC1'], countryId: '1'})]);
   check(JSON.parse(fetched[fetched.length - 1].req.payload).countryId === '7', 'Apps Script: JMS_COUNTRY_ID do DashMaster vale');
   delete props.JMS_COUNTRY_ID;
   check(gctx.doGet({}).n === 'Index' && /conteúdo App/.test(gctx.include('App')), 'Apps Script doGet() e include()');

@@ -5,7 +5,7 @@
  */
 (function () {
   'use strict';
-  var VERSAO_PAGINA = '1.2.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
+  var VERSAO_PAGINA = '1.3.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
   var BOOT = window.__PESQUISA__ || {}, R = window.Rastreio, P = window.Pesquisa, X = window.Planilha, PAGE = 100;
   var SHIFTS = R.SHIFTS, SHIFT_HOURS = R.SHIFT_HOURS;
   var DEFAULTS = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
@@ -36,16 +36,17 @@
       run: 'Pesquisar no JMS', stop: 'Parar', download: 'Baixar planilha (.xlsx)', clear: 'Limpar',
       madeBy: 'Feito por Caike Oliveira', count: '{n} remessa(s)', dup: '{n} repetida(s) ignorada(s)', bad: '{n} linha(s) que não parecem remessa',
       noWaybills: 'Cole pelo menos uma remessa.', noPattern: 'Digite o texto padrão de pelo menos um bloco.',
-      progress: 'Pesquisando no JMS… {done} de {total} remessas',
+      progress: 'Pesquisando no JMS (1.000 por vez)… {done} de {total} remessas',
+      segWarn: '{n} remessa(s) ficaram sem os códigos de segmento (Informação básica do JMS: {m}).',
       finished: 'Pronto: {total} remessa(s) em {sec} s.',
       stopped: 'Pesquisa parada: {done} de {total} remessas.', failed: 'A pesquisa parou', resume: 'Continuar',
-      limit: 'O JMS aceita {n} remessas por consulta (aprendido).',
+      limit: 'O JMS devolve {n} remessa(s) por consulta (aprendido): o app faz as consultas ao mesmo tempo.',
       searched: 'Pesquisadas', yes: 'Tem o padrão', no: 'Não tem o padrão', none: '{n} sem rastreamento no JMS', noneTile: 'Sem rastreamento no JMS',
       topShift: 'Turno que mais ocorreu', ofYes: '{p} das que têm o padrão', noHits: 'Nenhuma remessa tem o padrão.', remessas: 'remessas', partial: 'parcial',
       chartYesNo: 'Tem × não tem o padrão', chartShift: 'Remessas por turno do primeiro bipe', chartHour: 'Remessas por hora do primeiro bipe',
-      chartBy: 'Quem mais escaneou (primeiro bipe, 10 mais)', tabYes: 'Tem ({n})', tabNo: 'Não tem ({n})', find: 'Localizar remessa ou escaneador',
+      chartBy: 'Quem mais escaneou (primeiro bipe, 10 mais)', tabYes: 'Tem ({n})', tabNo: 'Não tem ({n})', find: 'Localizar remessa, segmento ou escaneador',
       copy: 'Copiar remessas', copied: '{n} remessa(s) copiada(s).', rows: '{a}–{b} de {n}', first: 'Primeiro bipe com o padrão',
-      cWaybill: 'Remessa', cTime: 'Tempo de digitalização', cShift: 'Turno', cOrigin: 'Origem', cBy: 'Quem escaneou', cType: 'Tipo de bipagem',
+      cWaybill: 'Remessa', cSeg1: 'Código de primeiro segmento', cSeg2: 'Código de dois segmentos', cTime: 'Tempo de digitalização', cShift: 'Turno', cOrigin: 'Origem', cBy: 'Quem escaneou', cType: 'Tipo de bipagem',
       cDesc: 'Descrição da etapa de bipagem', cImg: 'Imagem', cLines: 'Linhas', cWhy: 'Situação no rastreamento',
       noImg: 'NÃO TEM IMAGEM!', hasImg: 'Tem imagem no JMS',
       whyNone: 'Sem rastreamento no JMS', whyErr: 'Consulta recusada pelo JMS', whyNo: 'Nenhuma linha com o padrão',
@@ -70,12 +71,12 @@
       block2: '模块2 · 最多的班次', block2Q: '包含这一行的第一条扫描发生在哪个班次？', hint: '复制“扫描描述”列的文字。大小写、重音和 [ ] 内的空格不影响；* 代表任意文字。留空则不使用该模块。',
       run: '在 JMS 中查询', stop: '停止', download: '下载表格 (.xlsx)', clear: '清空', madeBy: '由 Caike Oliveira 制作',
       count: '{n} 个运单', dup: '忽略 {n} 个重复', bad: '{n} 行不像运单号', noWaybills: '请至少粘贴一个运单号。', noPattern: '请至少填写一个模块的关键字。',
-      progress: '正在查询 JMS… {done} / {total}', finished: '完成：{total} 个运单，用时 {sec} 秒。',
-      stopped: '已停止：{done} / {total}。', failed: '查询停止', resume: '继续', limit: 'JMS 每次最多查询 {n} 个运单（已学习）。',
+      progress: '正在查询 JMS（每次 1000 个）… {done} / {total}', segWarn: '{n} 个运单没有段码（JMS 基本信息：{m}）。', finished: '完成：{total} 个运单，用时 {sec} 秒。',
+      stopped: '已停止：{done} / {total}。', failed: '查询停止', resume: '继续', limit: 'JMS 每次查询返回 {n} 个运单（已学习），程序会同时发送多个查询。',
       searched: '已查询', yes: '有关键字', no: '无关键字', none: '{n} 个在 JMS 无轨迹', noneTile: 'JMS 无轨迹', topShift: '最多的班次', ofYes: '占有关键字的 {p}',
       noHits: '没有运单包含该关键字。', remessas: '运单', partial: '部分', chartYesNo: '有/无关键字', chartShift: '第一条扫描的班次分布', chartHour: '第一条扫描的小时分布',
-      chartBy: '扫描最多的人员（前10）', tabYes: '有 ({n})', tabNo: '无 ({n})', find: '查找运单或扫描员', copy: '复制运单号', copied: '已复制 {n} 个运单号。',
-      rows: '{a}–{b} / {n}', first: '包含关键字的第一条扫描', cWaybill: '运单号', cTime: '扫描时间', cShift: '班次', cOrigin: '网点', cBy: '扫描员', cType: '扫描类型',
+      chartBy: '扫描最多的人员（前10）', tabYes: '有 ({n})', tabNo: '无 ({n})', find: '查找运单、段码或扫描员', copy: '复制运单号', copied: '已复制 {n} 个运单号。',
+      rows: '{a}–{b} / {n}', first: '包含关键字的第一条扫描', cWaybill: '运单号', cSeg1: '一段码', cSeg2: '二段码', cTime: '扫描时间', cShift: '班次', cOrigin: '网点', cBy: '扫描员', cType: '扫描类型',
       cDesc: '扫描描述', cImg: '图片', cLines: '行数', cWhy: '轨迹情况', noImg: '无图片！', hasImg: 'JMS 有图片',
       whyNone: 'JMS 无轨迹', whyErr: 'JMS 拒绝查询', whyNo: '没有包含关键字的行', xlsxOk: '表格已下载。', xlsxBusy: '正在生成表格…'}
   };
@@ -115,9 +116,8 @@
       .then(function (j) { if (!j.ok) throw new Error(j.error || 'Erro no servidor.'); return j.result; });
   }
   var api = {
-    jms: function (url, body, headers) {
-      return GAS ? gas('jms', [url, body === undefined ? null : body, headers || {}]) : http('jms', {url: url, body: body === undefined ? null : body, headers: headers || {}});
-    },
+    /** Várias consultas ao JMS de uma vez: [{url, body, headers}] → [{status, text}]. */
+    consultar: function (pedidos) { return GAS ? gas('consultar', [pedidos]) : http('consultar', {pedidos: pedidos}); },
     estado: function () { return GAS ? gas('estado', []) : http('estado', {}); },
     token: function (v) { return http('token', {token: v}); }
   };
@@ -171,8 +171,8 @@
     var tenta = function (i) {
       if (i >= lista.length) { falha(primeiro.message, t('testAll')); return; }
       var h = lista[i];
-      return api.jms(R.KEYWORD_URL, R.keywordPayload(['TESTE0000000000']), h).then(function (r) {
-        R.parseJms(r.status, r.text);
+      return api.consultar([{url: R.KEYWORD_URL, body: R.keywordPayload(['TESTE0000000000']), headers: h}]).then(function (r) {
+        R.parseJms(r[0].status, r[0].text);
         store('jt_pesquisa_rota', h.routename ? JSON.stringify(h) : null);
         box.innerHTML = '<div class="alert ok"><div><b>' + esc(t('testOk')) + (h.routename ? esc(t('testRoute', {r: h.routename})) : '') + '</b></div></div>';
       }, function (e) {
@@ -211,7 +211,7 @@
     var box = $('#alertBox');
     if (!msg) { box.className = 'alert hidden'; box.innerHTML = ''; return; }
     box.className = 'alert' + (kind ? ' ' + kind : '');
-    box.innerHTML = '<div><b>' + esc(t('failed')) + '</b>' + esc(msg) + '</div>' + (resume ? '<button type="button" class="btn btn-light" id="resumeBtn">' + esc(t('resume')) + '</button>' : '');
+    box.innerHTML = '<div>' + (kind === 'warn' ? '' : '<b>' + esc(t('failed')) + '</b>') + esc(msg) + '</div>' + (resume ? '<button type="button" class="btn btn-light" id="resumeBtn">' + esc(t('resume')) + '</button>' : '');
     if (resume) $('#resumeBtn').addEventListener('click', function () { showAlert(''); run(resume); });
   }
   function start() {
@@ -232,10 +232,11 @@
     state.stop = false;
     setRunning(true);
     progress(state.results.length, state.list.length, 'progress');
-    var antes = state.results.slice(), lote = Number(load('jt_pesquisa_lote')) || 100;
+    // V1.3: o limite aprendido antes (consultas uma depois da outra) não vale mais: chave nova.
+    var antes = state.results.slice(), lote = Number(load('jt_pesquisa_porconsulta')) || 100;
     var parar = function () { return state.stop; };
-    P.pesquisar(api, list, state.pats, {lote: lote, paralelo: 4, headers: rota(), parar: parar,
-      onLote: function (n) { store('jt_pesquisa_lote', String(n)); toast(t('limit', {n: fmtInt(n)})); },
+    P.pesquisar(api, list, state.pats, {lote: lote, porRodada: P.POR_RODADA, headers: rota(), parar: parar,
+      onLote: function (n) { store('jt_pesquisa_porconsulta', String(n)); toast(t('limit', {n: fmtInt(n)})); },
       onHeaders: function (h) { store('jt_pesquisa_rota', JSON.stringify(h)); },
       onProgresso: function (feitas) { progress(antes.length + feitas, state.list.length, 'progress'); }
     }).then(function (res) {
@@ -244,6 +245,7 @@
       state.results = state.list.filter(function (w) { return byW[w]; }).map(function (w) { return byW[w]; });
       render();
       done(state.stop || res.faltam.length ? 'stopped' : 'finished');
+      if (res.semSeg) showAlert(t('segWarn', {n: fmtInt(res.semSeg), m: res.erroSeg || '—'}), null, 'warn');
     }).catch(function (e) {
       render();
       setRunning(false);
@@ -378,7 +380,8 @@
     return state.results.filter(function (r) {
       var h = r.p && r.p[k];
       if (yes !== !!h) return false;
-      return !q || r.w.indexOf(q) >= 0 || (h && String(h.by || '').toUpperCase().indexOf(q) >= 0);
+      var seg = r.seg ? (r.seg.s1 + ' ' + r.seg.s2).toUpperCase() : '';
+      return !q || r.w.indexOf(q) >= 0 || seg.indexOf(q) >= 0 || (h && String(h.by || '').toUpperCase().indexOf(q) >= 0);
     });
   }
   function imgCell(h) { return h.img ? esc(t('hasImg')) : '<span class="tk-noimg">' + esc(t('noImg')) + '</span>'; }
@@ -388,15 +391,15 @@
     if (state.page[k] > pages) state.page[k] = pages;
     var a = (state.page[k] - 1) * PAGE, part = list.slice(a, a + PAGE);
     var th = function (key) { return '<th>' + esc(t(key)) + '</th>'; };
-    $('thead', box).innerHTML = '<tr><th class="num">#</th>' + (yes ? ['cWaybill', 'cTime', 'cShift', 'cOrigin', 'cBy', 'cImg', 'cType', 'cDesc', 'cLines'].map(th).join('')
-      : ['cWaybill', 'cWhy'].map(th).join('')) + '</tr>';
+    $('thead', box).innerHTML = '<tr><th class="num">#</th>' + (yes ? ['cWaybill', 'cSeg1', 'cSeg2', 'cTime', 'cShift', 'cOrigin', 'cBy', 'cImg', 'cType', 'cDesc', 'cLines'].map(th).join('')
+      : ['cWaybill', 'cSeg1', 'cSeg2', 'cWhy'].map(th).join('')) + '</tr>';
     $('tbody', box).innerHTML = part.length ? part.map(function (r, i) {
-      var n = '<td class="num">' + (a + i + 1) + '</td><td>' + esc(r.w) + '</td>';
+      var n = '<td class="num">' + (a + i + 1) + '</td><td>' + esc(r.w) + '</td><td>' + esc(r.seg ? r.seg.s1 : '') + '</td><td>' + esc(r.seg ? r.seg.s2 : '') + '</td>';
       if (!yes) return '<tr>' + n + '<td>' + esc(r.err ? t('whyErr') : !r.ok ? t('whyNone') : t('whyNo')) + '</td></tr>';
       var h = r.p[k], sc = h.shift && h.shift !== 'N/A' ? '<span class="tk-pill bg-' + h.shift.toLowerCase() + '">' + h.shift + '</span>' : esc(h.shift);
       return '<tr>' + n + '<td>' + esc(fmtTime(h.t)) + '</td><td>' + sc + '</td><td>' + esc(h.origin) + '</td><td>' + esc(h.by) + '</td><td>' + imgCell(h) + '</td>' +
         '<td>' + esc(h.type) + '</td><td class="desc" title="' + esc(h.desc) + '">' + esc(h.desc) + '</td><td class="num">' + fmtInt(h.n) + '</td></tr>';
-    }).join('') : '<tr><td colspan="10" class="tk-empty">' + esc(yes ? t('noHits') : '—') + '</td></tr>';
+    }).join('') : '<tr><td colspan="12" class="tk-empty">' + esc(yes ? t('noHits') : '—') + '</td></tr>';
     $('.tk-note', box).textContent = list.length ? t('rows', {a: fmtInt(a + 1), b: fmtInt(a + part.length), n: fmtInt(list.length)}) : '';
     var pg = '';
     if (pages > 1) {
