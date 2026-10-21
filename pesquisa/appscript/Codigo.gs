@@ -17,7 +17,7 @@
  * implantação → App da Web · Executar como: Eu · Quem pode acessar: Qualquer pessoa. O link que aparece (termina em /exec)
  * é o link da Pesquisa. Trocou o código? Implantar → Gerenciar implantações → ✏️ → Versão: Nova versão → Implantar.
  */
-var VERSAO = '1.4.0';
+var VERSAO = '1.5.0';
 var KEYWORD_URL_ = 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList';
 // "Informação básica" (uma remessa por consulta): o bloco "3 Segmentos" é o campo terminalDispatchCode.
 var ORDER_URL_ = 'https://gw.jtjms-br.com/operatingplatform/order/getOrderDetail';

@@ -5,7 +5,7 @@
  */
 (function () {
   'use strict';
-  var VERSAO_PAGINA = '1.4.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
+  var VERSAO_PAGINA = '1.5.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
   var BOOT = window.__PESQUISA__ || {}, R = window.Rastreio, P = window.Pesquisa, X = window.Planilha, PAGE = 100;
   var SHIFTS = R.SHIFTS, SHIFT_HOURS = R.SHIFT_HOURS;
   var DEFAULTS = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
@@ -36,9 +36,10 @@
       run: 'Pesquisar no JMS', stop: 'Parar', download: 'Baixar planilha (.xlsx)', clear: 'Limpar',
       madeBy: 'Feito por Caike Oliveira', count: '{n} remessa(s)', dup: '{n} repetida(s) ignorada(s)', bad: '{n} linha(s) que não parecem remessa',
       noWaybills: 'Cole pelo menos uma remessa.', noPattern: 'Digite o texto padrão de pelo menos um bloco.',
-      progress: 'Pesquisando no JMS (1.000 por vez)… {done} de {total} remessas',
+      progress: 'Pesquisando no JMS… {done} de {total} remessas',
+      withSeg: 'Trazer os códigos de segmento (Informação básica). Desligado, a pesquisa fica cerca de 2× mais rápida.',
       segWarn: '{n} remessa(s) ficaram sem os códigos de segmento (Informação básica do JMS: {m}).', eta: ' · faltam ~{t}',
-      finished: 'Pronto: {total} remessa(s) em {sec} s.',
+      finished: 'Pronto: {total} remessa(s) em {sec} s · {q} consultas ao JMS ({v} por segundo).',
       stopped: 'Pesquisa parada: {done} de {total} remessas.', failed: 'A pesquisa parou', resume: 'Continuar',
       limit: 'O JMS devolve {n} remessa(s) por consulta (aprendido): o app faz as consultas ao mesmo tempo.',
       searched: 'Pesquisadas', yes: 'Tem o padrão', no: 'Não tem o padrão', none: '{n} sem rastreamento no JMS', noneTile: 'Sem rastreamento no JMS',
@@ -71,7 +72,7 @@
       block2: '模块2 · 最多的班次', block2Q: '包含这一行的第一条扫描发生在哪个班次？', hint: '复制“扫描描述”列的文字。大小写、重音和 [ ] 内的空格不影响；* 代表任意文字。留空则不使用该模块。',
       run: '在 JMS 中查询', stop: '停止', download: '下载表格 (.xlsx)', clear: '清空', madeBy: '由 Caike Oliveira 制作',
       count: '{n} 个运单', dup: '忽略 {n} 个重复', bad: '{n} 行不像运单号', noWaybills: '请至少粘贴一个运单号。', noPattern: '请至少填写一个模块的关键字。',
-      progress: '正在查询 JMS（每次 1000 个）… {done} / {total}', segWarn: '{n} 个运单没有段码（JMS 基本信息：{m}）。', eta: ' · 约剩 {t}', finished: '完成：{total} 个运单，用时 {sec} 秒。',
+      progress: '正在查询 JMS… {done} / {total}', withSeg: '获取段码（基本信息）。关闭后查询速度约快 2 倍。', segWarn: '{n} 个运单没有段码（JMS 基本信息：{m}）。', eta: ' · 约剩 {t}', finished: '完成：{total} 个运单，用时 {sec} 秒 · JMS 查询 {q} 次（每秒 {v} 次）。',
       stopped: '已停止：{done} / {total}。', failed: '查询停止', resume: '继续', limit: 'JMS 每次查询返回 {n} 个运单（已学习），程序会同时发送多个查询。',
       searched: '已查询', yes: '有关键字', no: '无关键字', none: '{n} 个在 JMS 无轨迹', noneTile: 'JMS 无轨迹', topShift: '最多的班次', ofYes: '占有关键字的 {p}',
       noHits: '没有运单包含该关键字。', remessas: '运单', partial: '部分', chartYesNo: '有/无关键字', chartShift: '第一条扫描的班次分布', chartHour: '第一条扫描的小时分布',
@@ -221,7 +222,9 @@
     if (!p.list.length) { toast(t('noWaybills'), 'error'); return; }
     if (!pats[0] && !pats[1]) { toast(t('noPattern'), 'error'); return; }
     store('jt_pesquisa_p1', pats[0]); store('jt_pesquisa_p2', pats[1]);
-    state.list = p.list; state.pats = pats; state.results = [];
+    state.list = p.list; state.pats = pats; state.results = []; state.consultas = 0;
+    state.comSeg = $('#withSeg').checked;
+    store('jt_pesquisa_seg', state.comSeg ? '1' : '0');
     state.tab = {0: 'yes', 1: 'yes'}; state.page = {0: 1, 1: 1}; state.find = {0: '', 1: ''};
     state.started = Date.now();
     showAlert('');
@@ -236,7 +239,8 @@
     // O JMS devolve uma remessa por consulta ao Rastreamento (como a tela dele): já começa assim, sem rodada perdida.
     var antes = state.results.slice(), lote = Number(load('jt_pesquisa_porconsulta')) || 1;
     var parar = function () { return state.stop; }, t0 = Date.now(), base = antes.length;
-    P.pesquisar(api, list, state.pats, {lote: lote, porRodada: P.POR_RODADA, headers: rota(), parar: parar,
+    P.pesquisar(api, list, state.pats, {lote: lote, porChamada: P.POR_CHAMADA, chamadas: P.CHAMADAS, headers: rota(), parar: parar,
+      segmentos: state.comSeg,
       paralelo: Number(load('jt_pesquisa_paralelo')) || P.PARALELO,
       onParalelo: function (n) { store('jt_pesquisa_paralelo', String(n)); },
       onLote: function (n) { store('jt_pesquisa_porconsulta', String(n)); toast(t('limit', {n: fmtInt(n)})); },
@@ -251,6 +255,7 @@
       var byW = {};
       antes.concat(res.results).forEach(function (r) { byW[r.w] = r; });
       state.results = state.list.filter(function (w) { return byW[w]; }).map(function (w) { return byW[w]; });
+      state.consultas += res.consultas || 0;
       render();
       done(state.stop || res.faltam.length ? 'stopped' : 'finished');
       if (res.semSeg) showAlert(t('segWarn', {n: fmtInt(res.semSeg), m: res.erroSeg || '—'}), null, 'warn');
@@ -264,10 +269,11 @@
   }
   function done(key) {
     setRunning(false);
-    var sec = Math.round((Date.now() - state.started) / 1000);
+    var seg = Math.max(0.001, (Date.now() - state.started) / 1000), sec = Math.round(seg);
     $('#barFill').style.width = '100%';
+    // Velocidade no fim: quantas consultas ao JMS e quantas por segundo (para saber se a demora é do JMS).
     $('#statusText').textContent = key === 'stopped' ? t('stopped', {done: fmtInt(state.results.length), total: fmtInt(state.list.length)})
-      : t(key, {total: fmtInt(state.results.length), sec: sec});
+      : t(key, {total: fmtInt(state.results.length), sec: sec, q: fmtInt(state.consultas), v: fmtInt(Math.round(state.consultas / seg))});
     render();
   }
 
@@ -399,10 +405,13 @@
     if (state.page[k] > pages) state.page[k] = pages;
     var a = (state.page[k] - 1) * PAGE, part = list.slice(a, a + PAGE);
     var th = function (key) { return '<th>' + esc(t(key)) + '</th>'; };
-    $('thead', box).innerHTML = '<tr><th class="num">#</th>' + (yes ? ['cWaybill', 'cSeg1', 'cSeg2', 'cTime', 'cShift', 'cOrigin', 'cBy', 'cImg', 'cType', 'cDesc', 'cLines'].map(th).join('')
-      : ['cWaybill', 'cSeg1', 'cSeg2', 'cWhy'].map(th).join('')) + '</tr>';
+    // Colunas dos segmentos só quando a pesquisa trouxe os segmentos.
+    var cs = state.comSeg !== false ? ['cSeg1', 'cSeg2'] : [];
+    $('thead', box).innerHTML = '<tr><th class="num">#</th>' + (yes ? ['cWaybill'].concat(cs, ['cTime', 'cShift', 'cOrigin', 'cBy', 'cImg', 'cType', 'cDesc', 'cLines']).map(th).join('')
+      : ['cWaybill'].concat(cs, ['cWhy']).map(th).join('')) + '</tr>';
     $('tbody', box).innerHTML = part.length ? part.map(function (r, i) {
-      var n = '<td class="num">' + (a + i + 1) + '</td><td>' + esc(r.w) + '</td><td>' + esc(r.seg ? r.seg.s1 : '') + '</td><td>' + esc(r.seg ? r.seg.s2 : '') + '</td>';
+      var n = '<td class="num">' + (a + i + 1) + '</td><td>' + esc(r.w) + '</td>' +
+        (cs.length ? '<td>' + esc(r.seg ? r.seg.s1 : '') + '</td><td>' + esc(r.seg ? r.seg.s2 : '') + '</td>' : '');
       if (!yes) return '<tr>' + n + '<td>' + esc(r.err ? t('whyErr') : !r.ok ? t('whyNone') : t('whyNo')) + '</td></tr>';
       var h = r.p[k], sc = h.shift && h.shift !== 'N/A' ? '<span class="tk-pill bg-' + h.shift.toLowerCase() + '">' + h.shift + '</span>' : esc(h.shift);
       return '<tr>' + n + '<td>' + esc(fmtTime(h.t)) + '</td><td>' + sc + '</td><td>' + esc(h.origin) + '</td><td>' + esc(h.by) + '</td><td>' + imgCell(h) + '</td>' +
@@ -448,7 +457,8 @@
     var btn = $('#xlsxBtn');
     btn.disabled = true;
     toast(t('xlsxBusy'));
-    var book = X.rastreioBook({patterns: state.pats, results: state.results, summaries: [R.summary(state.results, 0), R.summary(state.results, 1)], at: new Date()});
+    var book = X.rastreioBook({patterns: state.pats, results: state.results, summaries: [R.summary(state.results, 0), R.summary(state.results, 1)], at: new Date(),
+      segmentos: state.comSeg !== false});
     X.build(book).then(function (bytes) {
       var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
       var name = 'JT_Pesquisa_Rastreamento_' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + 'h' + p(d.getMinutes()) + '.xlsx';
@@ -473,6 +483,7 @@
     $('#tkVersion').textContent = 'V' + (BOOT.versao || '');
     $('#pat1').value = load('jt_pesquisa_p1') !== null ? load('jt_pesquisa_p1') : DEFAULTS[0];
     $('#pat2').value = load('jt_pesquisa_p2') !== null ? load('jt_pesquisa_p2') : DEFAULTS[1];
+    $('#withSeg').checked = load('jt_pesquisa_seg') !== '0';
     store('jt_pesquisa_modelo', null); // da V1.1 (fotos), que saiu
     carregarAcesso();
     $('#testBtn').addEventListener('click', testar);

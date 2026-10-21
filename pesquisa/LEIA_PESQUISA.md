@@ -1,4 +1,4 @@
-# J&T · Pesquisa no Rastreamento — V1.4
+# J&T · Pesquisa no Rastreamento — V1.5
 
 App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto da coluna "Descrição da etapa de bipagem" (JMS › Operação › Consulta do pacote › Rastreamento do pacote). O app:
 
@@ -9,10 +9,15 @@ App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto d
 
 *Feito por Caike Oliveira.*
 
-**Novo na V1.4 — mais rápida (cerca de 2,5× nos testes):**
-- Faz **50 consultas ao mesmo tempo** e sobe sozinha até **100** enquanto o JMS responde bem. Se o JMS pedir para ir mais devagar, cai pela metade, espera um pouco e continua, sem perder remessa.
-- Já começa com uma remessa por consulta (como o JMS responde), sem a primeira rodada perdida.
-- A barra mostra **quanto tempo falta**.
+**Por que demora:** o JMS responde **uma remessa por consulta**, e cada remessa precisa de **2 consultas** (rastreamento + Informação básica). 5000 remessas = 10 mil consultas. No Apps Script, cada pacote de consultas ainda espera a consulta mais lenta dele.
+
+**Novo na V1.5 — cerca de 3× mais rápida no Apps Script:**
+- A página mantém **6 chamadas ao servidor ao mesmo tempo** (200 remessas cada). Quando uma volta, a próxima sai na hora, sem esperar as outras. Cada chamada faz de 20 a 40 consultas ao JMS ao mesmo tempo.
+- Botão **"Trazer os códigos de segmento"**: desligado, a pesquisa fica cerca de **2× mais rápida** (só o rastreamento).
+- No fim, a tela mostra quantas consultas foram feitas e quantas por segundo. Se continuar lento, é o JMS demorando para responder.
+- No modelo do Apps Script (consultas levando de 0,5 s a 3 s), 5000 remessas caem de cerca de 8 min para cerca de 2,6 min (1,3 min sem os segmentos). No computador (Node.js), 2500 remessas levaram 12 s no teste.
+
+**Na V1.4:** o ritmo se ajusta sozinho (cai pela metade se o JMS pedir para ir mais devagar) e a barra mostra quanto tempo falta.
 
 **Na V1.3:**
 - Pesquisa **1000 remessas por vez**. Antes andava de 4 em 4 porque o JMS devolve só uma remessa por consulta (a tela do JMS também consulta uma por vez). Agora o app aprende isso na primeira rodada e faz as consultas ao mesmo tempo.
@@ -27,7 +32,7 @@ App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto d
 | Abre em | qualquer lugar, pelo link `…/exec` | `http://localhost:3200` (e na rede, pelo IP do computador) |
 | Precisa | uma conta Google (nada para rodar no computador) | o `node.exe` (o mesmo do DashMaster) e um atalho — sem `.bat` |
 | AuthToken | Propriedades do script (`JMS_AUTHTOKEN`) | o mesmo do DashMaster deste computador, sozinho |
-| Limite | cota diária do Google: cerca de 20 mil consultas por dia numa conta comum, ou seja, **cerca de 10 mil remessas por dia** (cada remessa = 2 consultas) | sem cota |
+| Limite | cota diária do Google: cerca de 20 mil consultas por dia numa conta comum, ou seja, **cerca de 10 mil remessas por dia** (cada remessa = 2 consultas; 20 mil sem os segmentos) | sem cota, e mais rápido |
 
 A tela e a planilha são iguais nas duas. Nas duas, o app puxa direto do JMS **como o DashMaster**: o AuthToken fica no servidor, e ninguém cola token na página.
 
@@ -126,13 +131,13 @@ Regras:
 
 ## Planilha
 - **Resumo:** as tabelas de cada bloco, com os gráficos do próprio Excel ao lado.
-- **Uma aba "Tem" e uma "Não tem" para cada bloco**, com filtro. As duas têm as colunas dos códigos de segmento.
+- **Uma aba "Tem" e uma "Não tem" para cada bloco**, com filtro. As duas têm as colunas dos códigos de segmento (quando o botão dos segmentos está ligado).
 
 ## Consultas ao JMS
-- A tela manda as remessas ao servidor do app **1000 por vez**. O contador anda de 1000 em 1000.
-- O servidor faz as consultas ao JMS **ao mesmo tempo**: começa com 50 e sobe até 100 enquanto o JMS responde sem falhas. Se o JMS pedir para ir mais devagar (HTTP 429 ou "muitas consultas"), cai pela metade e espera um pouco. O ritmo aprendido fica guardado no navegador.
+- A tela mantém **6 chamadas ao servidor do app ao mesmo tempo**, com 200 remessas cada. O contador anda a cada chamada que volta.
+- Em cada chamada, o servidor faz as consultas ao JMS **ao mesmo tempo**: começa com 20 e sobe até 40 enquanto o JMS responde sem falhas (até 240 consultas ao mesmo tempo no total). Se o JMS pedir para ir mais devagar (HTTP 429 ou "muitas consultas"), cai pela metade e espera um pouco. O ritmo aprendido fica guardado no navegador.
   - Rastreamento do pacote: o JMS devolve só a primeira remessa de cada consulta, então o app manda uma remessa por consulta, como a tela do JMS;
-  - Informação básica (`getOrderDetail`): uma consulta por remessa, para os códigos de segmento.
+  - Informação básica (`getOrderDetail`): uma consulta por remessa, para os códigos de segmento. Desligue **"Trazer os códigos de segmento"** para pesquisar cerca de 2× mais rápido.
 - Se o JMS recusar ou cortar, o app aprende o limite sozinho e nenhuma remessa se perde. Uma falha passageira volta para a fila.
 - Se a Informação básica falhar, a pesquisa termina do mesmo jeito e a tela avisa quantas remessas ficaram sem os segmentos.
 - **Parar** interrompe a pesquisa; o que já veio fica na tela.

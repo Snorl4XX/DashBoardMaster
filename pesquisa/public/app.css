@@ -85,6 +85,8 @@ textarea.input{height:auto;min-height:120px;padding:10px 12px;resize:vertical;fo
 .tk-setup{display:grid;gap:4px}
 .tk-setup .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
 .tk-setup .row .input{flex:0 1 420px}
+.check{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;color:var(--ink-2)}
+.check input{width:16px;height:16px;margin-top:1px;flex:none;accent-color:var(--red)}
 .tk-hintbox{margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--soft);font-size:12.5px;color:var(--ink-2)}
 .tk-hintbox p{margin:2px 0}
 #testResult .alert{margin-top:10px}

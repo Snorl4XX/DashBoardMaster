@@ -320,7 +320,7 @@
   function two(pt, zh) { return zh ? pt + '\n' + zh : pt; }
   function pct(n, d) { return d ? n / d : 0; }
   /** Códigos de segmento da Informação básica (bloco "3 Segmentos", sem o 3º). */
-  function segCells(r) { return [{v: r.seg ? r.seg.s1 : '', s: S.center}, {v: r.seg ? r.seg.s2 : '', s: S.center}]; }
+  function segCells(r, com) { return com ? [{v: r.seg ? r.seg.s1 : '', s: S.center}, {v: r.seg ? r.seg.s2 : '', s: S.center}] : []; }
   var SEG_HEAD = [{v: two('Código de primeiro segmento', '一段码'), s: S.header}, {v: two('Código de dois segmentos', '二段码'), s: S.header}];
   /** Coluna "Imagem": se a linha tem "Ver imagem" no JMS. */
   function imageCell(h) { return h.img ? {v: 'Tem imagem no JMS', s: S.text} : {v: 'NÃO TEM IMAGEM!', s: S.noimg}; }
@@ -393,8 +393,9 @@
     return {title: title, sheets: sheets};
   }
   function hitsSheet(name, title, pat, data, k) {
+    var com = data.segmentos !== false;
     var rows = [[{v: 'J&T EXPRESS · ' + title, s: S.title}], [{v: 'Padrão: ' + pat + ' · horário, origem e escaneador do PRIMEIRO bipe com o padrão', s: S.subtitle}],
-      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}].concat(SEG_HEAD, [{v: two('Tempo de digitalização', '扫描时间'), s: S.header}, {v: two('Turno', '班次'), s: S.header},
+      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}].concat(com ? SEG_HEAD : [], [{v: two('Tempo de digitalização', '扫描时间'), s: S.header}, {v: two('Turno', '班次'), s: S.header},
         {v: two('Origem', '网点'), s: S.header}, {v: two('Quem escaneou', '扫描员'), s: S.header}, {v: two('Tipo de bipagem', '扫描类型'), s: S.header},
         {v: two('Descrição da etapa de bipagem', '扫描描述'), s: S.header}, {v: two('Imagem', '图片'), s: S.header},
         {v: two('Linhas com o padrão', '匹配行数'), s: S.header}])];
@@ -403,24 +404,28 @@
       var h = r.p && r.p[k];
       if (!h) return;
       var t = serial(h.t);
-      rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}].concat(segCells(r), [t === null ? {v: h.t, s: S.text} : {v: t, s: S.date}, {v: h.shift, s: S.center},
+      rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}].concat(segCells(r, com), [t === null ? {v: h.t, s: S.text} : {v: t, s: S.date}, {v: h.shift, s: S.center},
         {v: h.origin, s: S.text}, {v: h.by, s: S.text}, {v: h.type, s: S.text}, {v: h.desc, s: S.text}, imageCell(h), {v: h.n, s: S.int}]));
     });
     if (!n) rows.push([{v: 'Nenhuma remessa com o padrão.', s: S.note}]);
-    return {name: name, cols: [7, 18, 14, 14, 21, 8, 16, 30, 24, 70, 20, 11], rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:L1', 'A2:L2'], freeze: 'C4',
-      filter: n ? 'A3:L3' : ''};
+    var z = colName(com ? 12 : 10);
+    return {name: name, cols: [7, 18].concat(com ? [14, 14] : [], [21, 8, 16, 30, 24, 70, 20, 11]), rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:' + z + '1', 'A2:' + z + '2'],
+      freeze: 'C4', filter: n ? 'A3:' + z + '3' : ''};
   }
   function missSheet(name, title, pat, data, k) {
+    var com = data.segmentos !== false;
     var rows = [[{v: 'J&T EXPRESS · ' + title, s: S.title}], [{v: 'Padrão: ' + pat, s: S.subtitle}],
-      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}].concat(SEG_HEAD, [{v: two('Situação no rastreamento', '轨迹情况'), s: S.header}])];
+      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}].concat(com ? SEG_HEAD : [], [{v: two('Situação no rastreamento', '轨迹情况'), s: S.header}])];
     var n = 0;
     data.results.forEach(function (r) {
       if (r.p && r.p[k]) return;
       var why = r.err ? 'Consulta recusada pelo JMS (tente de novo)' : !r.ok ? 'Sem rastreamento no JMS' : 'Nenhuma linha com o padrão';
-      rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}].concat(segCells(r), [{v: why, s: r.ok ? S.text : S.noimg}]));
+      rows.push([{v: ++n, s: S.int}, {v: r.w, s: S.text}].concat(segCells(r, com), [{v: why, s: r.ok ? S.text : S.noimg}]));
     });
     if (!n) rows.push([{v: 'Todas as remessas têm o padrão.', s: S.note}]);
-    return {name: name, cols: [7, 20, 14, 14, 46], rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:E1', 'A2:E2'], freeze: 'C4', filter: n ? 'A3:E3' : ''};
+    var z = colName(com ? 5 : 3);
+    return {name: name, cols: [7, 20].concat(com ? [14, 14] : [], [46]), rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:' + z + '1', 'A2:' + z + '2'], freeze: 'C4',
+      filter: n ? 'A3:' + z + '3' : ''};
   }
 
   return {build: build, parts: parts, zip: zip, crc32: crc32, serial: serial, rastreioBook: rastreioBook, STYLE: S};
