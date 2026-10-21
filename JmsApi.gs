@@ -61,7 +61,7 @@ function credentialSignature_() {
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
  * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS | NOMOVE
- *          | SCANQUERY | UNSEAL | ABNORMAL_SCAN
+ *          | SCANQUERY | UNSEAL
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -90,10 +90,6 @@ const JMS_ROUTES_ = [
   // recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_TRACKING / JMS_ROUTENAMELIST_TRACKING mandam).
   {key: 'TRACKING', pattern: /\/podTracking\/inner\/query\/keywordList(?:\?|$)/, name: 'NONE', list: 'NONE',
     alt: [{name: 'trackingExpress', list: 'NONE'}, {name: 'waybillTracking', list: 'NONE'}, {name: 'packageTracking', list: 'NONE'}]},
-  // V4.13: Rastreamento do pacote, bloco "Lista registrada de pacote problemático" (foto do bipe de pacote problemático na
-  // Pesquisa no Rastreamento). Cabeçalhos de rota não capturados: primeiro sem eles; se o JMS recusar, as variantes de `alt`.
-  {key: 'ABNORMAL_SCAN', pattern: /\/abnormalPieceScanList\/pageList(?:\?|$)/, name: 'NONE', list: 'NONE',
-    alt: [{name: 'trackingExpress', list: 'NONE'}]},
   // Fluxo de Lotes (Dispositivo inteligente > Materiais ecológicos > Estatística de Criação Recorrente de Eco Bag). Os cabeçalhos de
   // rota não aparecem na captura: primeiro sem eles; se o JMS recusar, as variantes de `alt` são testadas sozinhas.
   {key: 'LOTS', pattern: /\/bigdataReport\/detail\/sdploopbagBuildbag\w+(?:\?|$)/, name: 'NONE', list: 'NONE',

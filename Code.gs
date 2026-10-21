@@ -5,11 +5,9 @@
  * google.script.run entregar null ao dashboard).
  *
  * Parâmetros opcionais do link: ?lang=zh | ?lang=pt, ?ind=sorting_error, ?view=results
- * V4.13: ?page=rastreio abre a Pesquisa no Rastreamento do pacote (Rastreio.gs / PesquisaRastreio.html).
  */
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (p.page === 'rastreio') return rastreioPage_(p);
   const view = HtmlService.createTemplateFromFile('Index');
   view.boot = JSON.stringify({
     lang: p.lang === 'zh' || p.lang === 'pt' ? p.lang : '',
@@ -85,7 +83,7 @@ function getAppBootstrap() {
   return safeReturn_({
     app: {name: APP_CONFIG.APP_NAME, nameZh: APP_CONFIG.APP_NAME_ZH, version: APP_CONFIG.VERSION, red: APP_CONFIG.RED,
       panel: panelName_(), updateMode: dailyMode_() ? 'diario' : 'continuo', updateHour: updateHour_(), updateHours: updateHours_(),
-        updateHoursSc: updateHoursSc_(), trackingUrl: webAppUrl_('rastreio')},
+        updateHoursSc: updateHoursSc_()},
     center: centerName_(), catalog: getPublicCatalog_(), shiftColors: SHIFT_COLORS,
     today: isoToday_(), historyStart: getProp_('DATA_START_DATE', '') || earliest || '',
     latestByIndicator: latest, lastUpdated: lastUpdated, initialized: initialized,

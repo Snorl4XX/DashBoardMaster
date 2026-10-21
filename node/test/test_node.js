@@ -209,16 +209,6 @@ function firstDiff(a, b, p) {
   const cfgPage = await request(port, 'GET', '/config');
   check(cfgPage.status === 200 && /Salvar e testar a conexão/.test(cfgPage.text) && !badScripts(cfgPage.text).length && !badScripts(page.text).length,
     'scripts da tela Configurações e do painel sem erro de sintaxe (os botões funcionam)', badScripts(cfgPage.text).map(x => x.slice(0, 80)));
-  // V4.13: Pesquisa no Rastreamento do pacote (?page=rastreio) — página própria, função liberada e link no menu do painel.
-  const trk = await request(port, 'GET', '/?page=rastreio');
-  check(trk.status === 200 && /<title>Pesquisa no Rastreamento/.test(trk.text) && /window\.JTPlanilha/.test(trk.text) && /trackMatcher/.test(trk.text) &&
-    !/<\?!?=/.test(trk.text) && !badScripts(trk.text).length, 'página da Pesquisa no Rastreamento montada, scripts sem erro', badScripts(trk.text).map(x => x.slice(0, 80)));
-  const trkRun = await request(port, 'POST', '/api/run', {fn: 'pesquisarRastreio', args: [['FICTICIO000001', 'FICTICIO000002'], ['está [SP GRU] sendo enviada', '']]});
-  const trkJson = JSON.parse(trkRun.text);
-  check(trkRun.status === 200 && trkJson.ok && trkJson.result.results.length === 2 && trkJson.result.results.every(r => !r.ok && r.p[0] === null),
-    'pesquisarRastreio liberada para a página (remessas fictícias: sem rastreamento)', trkRun.text.slice(0, 300));
-  const bootTrk = JSON.parse((await request(port, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []})).text);
-  check(/^http:\/\/127\.0\.0\.1:\d+\/\?page=rastreio$/.test(bootTrk.result.app.trackingUrl), 'link da pesquisa no menu do painel', bootTrk.result.app.trackingUrl);
 
   // ---------- 5. Segurança das chamadas ----------
   const deny = await request(port, 'POST', '/api/run', {fn: 'setupProject', args: []});

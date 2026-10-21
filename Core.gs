@@ -1012,79 +1012,6 @@ function JTCoreFactory_() {
     return out;
   }
 
-  // ---------- V4.13: Pesquisa no Rastreamento do pacote ----------
-  /**
-   * Texto comparável da "Descrição da etapa de bipagem": sem acento, minúsculo, espaços únicos e sem espaço colado nos
-   * colchetes ("A encomenda expressa está [ SP GRU] sendo enviada" = "…está [SP GRU] sendo enviada").
-   */
-  function trackNorm(s) {
-    var t = String(s === null || s === undefined ? '' : s);
-    if (t.normalize) t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    return t.toLowerCase().replace(/\s+/g, ' ').replace(/\[\s+/g, '[').replace(/\s+\]/g, ']').trim();
-  }
-  /** Padrão digitado → função (descrição → tem/não tem). "*" vale qualquer trecho: "está [*] sendo enviada". Vazio → null. */
-  function trackMatcher(pattern) {
-    var parts = trackNorm(pattern).split('*').map(function (p) { return p.trim(); }).filter(function (p) { return p; });
-    if (!parts.length) return null;
-    return function (text) {
-      var t = trackNorm(text), at = 0;
-      for (var i = 0; i < parts.length; i++) {
-        var j = t.indexOf(parts[i], at);
-        if (j < 0) return false;
-        at = j + parts[i].length;
-      }
-      return true;
-    };
-  }
-  /**
-   * Um padrão numa remessa: o PRIMEIRO bipe (o mais antigo; o JMS manda do mais novo para o mais antigo) cuja descrição tem o
-   * texto — Tempo de digitalização, turno, origem (a base do bipe, o "[SP GRU]" da descrição), quem escaneou ("escaneador
-   * [Nome]"), tipo de bipagem, descrição, se a linha tem "Ver imagem" (imgType) e quantas linhas tinham o texto.
-   * null = nenhuma linha com o padrão.
-   */
-  function trackHit(details, match) {
-    var hits = (details || []).filter(function (d) { return d && match(d.waybillTrackingContent); });
-    if (!hits.length) return null;
-    var key = function (d) { return blank(d.scanTime) ? '9999' : String(d.scanTime); };
-    var d = hits[0];
-    hits.forEach(function (x) { if (key(x) <= key(d)) d = x; });
-    var text = String(d.waybillTrackingContent || '');
-    var by = String(d.scanByName || '').trim(), origin = String(d.scanNetworkName || '').trim(), m;
-    if (!by && (m = text.match(/escaneador (?:[eé] )?\[([^\]]+)\]/i))) by = m[1].trim();
-    if (!origin && (m = text.match(/\[([^\]]+)\]/))) origin = m[1].trim();
-    return {t: String(d.scanTime || ''), shift: shiftOf(d.scanTime), origin: origin, by: by, type: String(d.scanTypeName || '').trim(),
-      desc: text, img: isNum(d.imgType) && Number(d.imgType) > 0, code: isNum(d.code) ? Number(d.code) : null, n: hits.length};
-  }
-  /**
-   * Totais de um bloco da pesquisa (`k` = 0 ou 1): tem / não tem (as remessas sem rastreamento no JMS contam em "não tem" e
-   * também em `none`), turnos e horas do primeiro bipe, turno que mais ocorreu (empate: o primeiro de T1, T2, T3) e quem mais
-   * escaneou.
-   */
-  function trackSummary(results, k) {
-    var s = {total: 0, yes: 0, no: 0, none: 0, shifts: {T1: 0, T2: 0, T3: 0}, hours: [], top: '', topCount: 0, scanners: [], origins: []};
-    var by = {}, from = {};
-    for (var i = 0; i < 24; i++) s.hours.push(0);
-    (results || []).forEach(function (r) {
-      s.total++;
-      var h = r && r.p && r.p[k];
-      if (!h) { s.no++; if (!r || !r.ok) s.none++; return; }
-      s.yes++;
-      if (s.shifts[h.shift] !== undefined) s.shifts[h.shift]++;
-      var hr = hourOf(h.t);
-      if (hr !== null) s.hours[hr]++;
-      var b = h.by || 'N/A', o = h.origin || 'N/A';
-      by[b] = (by[b] || 0) + 1; from[o] = (from[o] || 0) + 1;
-    });
-    SHIFTS.forEach(function (t) { if (s.shifts[t] > s.topCount) { s.top = t; s.topCount = s.shifts[t]; } });
-    var rank = function (map) {
-      return Object.keys(map).map(function (l) { return {label: l, value: map[l]}; })
-        .sort(function (a, b) { return b.value - a.value || compareText(a.label, b.label); });
-    };
-    s.scanners = rank(by); s.origins = rank(from);
-    s.pct = s.total ? s.yes / s.total * 100 : null;
-    return s;
-  }
-
   // ---------- tradução de valores vindos do JMS ----------
   var VALUE_ZH_PT = {
     '上环节建包异常': 'Erro de ensacamento na etapa anterior', '一段码异常': 'Erro no 1º segmento', '人为因素': 'Fator humano',
@@ -1127,8 +1054,7 @@ function JTCoreFactory_() {
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
     computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
-    encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText, median: median,
-    trackNorm: trackNorm, trackMatcher: trackMatcher, trackHit: trackHit, trackSummary: trackSummary
+    encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText, median: median
   };
 }
 
