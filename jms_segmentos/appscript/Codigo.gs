@@ -7,10 +7,11 @@
  *   - aba "Resumo Segmentos": quantas remessas em cada código (2 tabelas) e 2 gráficos.
  * O 3º código (campo "3 Segmentos") fica de fora.
  *
- * Muitas remessas: 40 consultas ao mesmo tempo (o ritmo cai quando o JMS fica cheio); o que falha é consultado de novo
- * (até 4 vezes) e, no fim, as que ficaram com erro ganham mais 2 rodadas, devagar. "Não encontrada no JMS" só quando o JMS
- * responde sem dados em todas as tentativas (ou na última rodada). Cada execução roda até 4,5 min (o Google para em 6) e a pesquisa continua sozinha
- * 1 minuto depois, até acabar.
+ * Muitas remessas: 20 consultas ao mesmo tempo no começo (o ritmo sobe quando o JMS responde bem e cai quando ele fica cheio
+ * ou lento); o que falha é consultado de novo (até 4 vezes) e, no fim, as que ficaram com erro ganham mais 2 rodadas, devagar.
+ * "Não encontrada no JMS" só quando o JMS responde sem dados em todas as tentativas (ou na última rodada). O menu consulta por
+ * 1,5 min e o resto segue sozinho, em segundo plano, por gatilho (cada execução começa rodadas novas só até 4 min; o Google
+ * para em 6). O andamento (e qualquer erro) aparece na coluna F da aba Segmentos, com a hora, a cada 10 segundos.
  *
  * Instalação (uma vez):
  *  1. Abra a Planilha Google das remessas → Extensões → Apps Script.
@@ -20,16 +21,25 @@
  *  5. Abra a aba das remessas → menu JMS Segmentos → 🩺 Testar conexão com o JMS.
  * Usar: abra a aba das remessas → menu JMS Segmentos → ▶ Pesquisar remessas desta aba.
  */
-var VERSAO = '1.0.0';
+var VERSAO = '1.1.0';
 var ORDER_URL_ = 'https://gw.jtjms-br.com/operatingplatform/order/getOrderDetail';
 var ABA_RESULTADO_ = 'Segmentos', ABA_RESUMO_ = 'Resumo Segmentos';
 var CAMPO1_ = 'Código de primeiro segmento', CAMPO2_ = 'Código de dois segmentos';
 var CABECALHO_ = ['Remessa', CAMPO1_, CAMPO2_, 'Situação'];
 var NA_FILA_ = 'Na fila', OK_ = 'OK', SEM_CODIGO_ = 'Sem código no JMS', NAO_ENCONTRADA_ = 'Não encontrada no JMS', ERRO_ = 'Erro: ';
-// Ritmo: consultas ao mesmo tempo (sobe quando dá certo, cai pela metade quando o JMS falha muito), tentativas por remessa e
-// rodadas extras (devagar) para as que ficaram com erro. PRAZO_MS_: quanto cada execução roda (o Google para em 6 min).
-var PARALELO_ = 40, PARALELO_MIN_ = 8, PARALELO_MAX_ = 60, PARALELO_EXTRA_ = 10, TENTATIVAS_ = 4, RODADAS_EXTRAS_ = 2;
-var PRAZO_MS_ = 270000, GRAVAR_MS_ = 40000, PAUSA_MS_ = 2000, TOP_GRAFICO_ = 15;
+// Ritmo: consultas ao mesmo tempo (sobe quando dá certo, cai pela metade quando o JMS falha muito ou demora), tentativas por
+// remessa e rodadas extras (devagar) para as que ficaram com erro.
+var PARALELO_ = 20, PARALELO_MIN_ = 5, PARALELO_MAX_ = 50, PARALELO_EXTRA_ = 10, TENTATIVAS_ = 4, RODADAS_EXTRAS_ = 2;
+// Tempo: o Google para a execução em 6 min, contando o tempo das janelas abertas. O menu consulta por PRAZO_MENU_MS_ e deixa o
+// resto para o gatilho; cada execução começa rodadas novas só até PRAZO_MS_ e nunca uma que possa passar de LIMITE_MS_. Se o
+// Google parar uma execução assim mesmo, o gatilho de segurança (SEGURANCA_MS_ depois do começo) continua de onde ela parou.
+var PRAZO_MENU_MS_ = 90000, PRAZO_MS_ = 240000, LIMITE_MS_ = 330000, SEGURANCA_MS_ = 390000;
+// Rodada mais lenta que LENTO_MS_: JMS sobrecarregado (o ritmo cai). O andamento vai para a planilha a cada GRAVAR_MS_.
+var LENTO_MS_ = 20000, GRAVAR_MS_ = 10000, PAUSA_MS_ = 2000, TOP_GRAFICO_ = 15;
+// JMS sem responder nenhuma remessa em RUINS_MAX_ rodadas seguidas: pausa de PAUSA_JMS_MS_ e tenta de novo, até PAUSAS_MAX_
+// vezes; depois para e avisa (cada consulta gasta a cota diária do Google). Erro inesperado ou execução parada pelo Google no
+// meio: tenta de novo sozinha até ERROS_MAX_ vezes seguidas.
+var RUINS_MAX_ = 6, PAUSA_JMS_MS_ = 300000, PAUSAS_MAX_ = 3, ERROS_MAX_ = 3;
 // Cabeçalho de rota (Routename) que o JMS pode exigir: testados em ordem até um ser aceito; o que funcionar fica guardado.
 // A propriedade do script JMS_ROUTENAME (opcional) manda.
 var ROTAS_ = ['trackingExpress', 'NENHUM', 'waybillTracking', 'packageTracking'];
@@ -51,6 +61,8 @@ function onOpen() {
 }
 
 function agora_() { return Date.now(); }
+function hora_() { return Utilities.formatDate(new Date(), FUSO_, 'HH:mm:ss'); }
+function seg_(ms) { return String(Math.round((Number(ms) || 0) / 100) / 10).replace('.', ',') + ' s'; }
 function fmt_(n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
 function normal_(v) {
   return String(v === null || v === undefined ? '' : v).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -100,7 +112,9 @@ function pedido_(tok, rota, w) {
   return {url: ORDER_URL_, method: 'post', headers: h, contentType: 'application/json;charset=UTF-8',
     payload: JSON.stringify({waybillNo: w, countryId: '1'}), muteHttpExceptions: true, followRedirects: false};
 }
-function cota_(m) { return /too many times|quota|cota/i.test(m); }
+/** Cota diária de consultas do Google. A de largura de banda é por minuto: essa só pede calma (banda_). */
+function cota_(m) { return !banda_(m) && /too many times|for one day|muitas vezes|em um dia|quota|cota/i.test(m); }
+function banda_(m) { return /bandwidth|largura de banda/i.test(m); }
 function semAutorizacao_(m) {
   if (/permiss|authoriz|autoriza/i.test(m)) {
     throw new Error('O Google ainda não autorizou o script a falar com o JMS: use de novo o menu JMS Segmentos e aceite a autorização. (' + m.slice(0, 160) + ')');
@@ -108,7 +122,9 @@ function semAutorizacao_(m) {
 }
 /**
  * Consulta várias remessas ao mesmo tempo (UrlFetchApp.fetchAll). → [{status, text}] na mesma ordem, ou {cota: mensagem} quando
- * acabou a cota diária de consultas do Google.
+ * acabou a cota diária de consultas do Google. Falha de rede (tempo esgotado, endereço indisponível) derruba a rodada toda: ela
+ * volta com status 0 e é consultada de novo depois. Uma de cada vez, não: cada uma pode levar 1 min e a execução passaria dos
+ * 6 min do Google sem gravar nada.
  */
 function buscar_(tok, rota, lista) {
   var reqs = lista.map(function (w) { return pedido_(tok, rota, w); });
@@ -118,17 +134,8 @@ function buscar_(tok, rota, lista) {
     var m = String(e && e.message || e);
     if (cota_(m)) return {cota: m};
     semAutorizacao_(m);
-    // Uma falhou na rede e derrubou todas: de novo, uma de cada vez.
-    var out = [];
-    for (var i = 0; i < reqs.length; i++) {
-      try { var x = UrlFetchApp.fetch(reqs[i].url, reqs[i]); out.push({status: x.getResponseCode(), text: x.getContentText('UTF-8')}); }
-      catch (e2) {
-        var m2 = String(e2 && e2.message || e2);
-        if (cota_(m2)) return {cota: m2};
-        out.push({status: 0, text: 'Falha de rede ao consultar o JMS: ' + m2.slice(0, 120)});
-      }
-    }
-    return out;
+    if (banda_(m)) Utilities.sleep(PAUSA_MS_ * 5);
+    return reqs.map(function () { return {status: 0, text: 'Falha de rede ao consultar o JMS: ' + m.slice(0, 120)}; });
   }
 }
 /**
@@ -166,11 +173,10 @@ function descobrirRota_(tok, w) {
     var r = buscar_(tok, ROTAS_[i], [w]);
     if (r.cota) return {cota: r.cota};
     var c = classificar_(r[0]);
-    if (c.tipo !== 'auth') {
-      PropertiesService.getDocumentProperties().setProperty('SEG_ROTA', ROTAS_[i]);
-      return {nome: ROTAS_[i]};
-    }
-    ultima = c.msg;
+    if (c.tipo === 'auth') { ultima = c.msg; continue; }
+    // JMS sem responder: usa esta por enquanto, sem guardar (a próxima pesquisa testa de novo).
+    if (c.tipo !== 'passageira') PropertiesService.getDocumentProperties().setProperty('SEG_ROTA', ROTAS_[i]);
+    return {nome: ROTAS_[i]};
   }
   return {auth: ultima};
 }
@@ -223,11 +229,16 @@ function prepararResultado_(ss, lista) {
   estiloCabecalho_(res.getRange(1, 1, 1, 4).setValues([CABECALHO_]));
   res.getRange(2, 1, lista.length, 4).setValues(lista.map(function (w) { return [w, '', '', NA_FILA_]; }));
   res.getRange(1, 6).setValue('Andamento da pesquisa').setFontWeight('bold');
+  res.getRange(3, 6).setFontColor('#666666');
   res.setFrozenRows(1);
   [160, 220, 210, 300, 20, 520].forEach(function (px, i) { res.setColumnWidth(i + 1, px); });
   return res;
 }
-function andamento_(res, texto) { res.getRange(2, 6).setValue(texto); }
+/** Andamento em F2; detalhe (ritmo, tempo da última rodada, último erro do JMS) em F3. */
+function andamento_(res, texto, detalhe) {
+  res.getRange(2, 6).setValue(texto);
+  if (detalhe !== undefined) res.getRange(3, 6).setValue(detalhe);
+}
 function contar_(dados) {
   var c = {total: dados.length, ok: 0, sem: 0, nao: 0, erro: 0, fila: 0};
   dados.forEach(function (l) {
@@ -243,9 +254,9 @@ function textoContagem_(c) {
 }
 function lerJob_() { try { return JSON.parse(PropertiesService.getDocumentProperties().getProperty('SEG_JOB') || 'null'); } catch (e) { return null; } }
 function salvarJob_(job) { PropertiesService.getDocumentProperties().setProperty('SEG_JOB', JSON.stringify(job)); }
-function agendar_() {
+function agendar_(ms) {
   apagarGatilhos_();
-  ScriptApp.newTrigger('continuarSozinho').timeBased().after(60 * 1000).create();
+  ScriptApp.newTrigger('continuarSozinho').timeBased().after(ms || 60 * 1000).create();
 }
 function apagarGatilhos_() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'continuarSozinho') ScriptApp.deleteTrigger(t); });
@@ -291,58 +302,91 @@ function resumo_(ss, dados) {
 // ---------- A pesquisa ----------
 
 /**
- * Consulta as remessas "Na fila" da aba Segmentos até acabar ou até PRAZO_MS_; grava o andamento na própria aba. Acabou o tempo:
- * continua sozinha em 1 minuto. Acabou a fila: as que ficaram com erro ganham até RODADAS_EXTRAS_ rodadas devagar; depois, o
- * resumo e os gráficos. → {parada: '' | 'tempo' | 'parado' | 'auth' | 'cota' | 'token', contagem}
+ * Consulta as remessas "Na fila" da aba Segmentos até acabar ou até o prazo desta execução, gravando na própria aba logo depois
+ * da 1ª rodada e a cada GRAVAR_MS_. Acabou o tempo: continua sozinha em 1 minuto. Acabou a fila: as que ficaram com erro ganham
+ * até RODADAS_EXTRAS_ rodadas devagar; depois, o resumo e os gráficos. Erro inesperado: grava o que veio, mostra o erro na
+ * coluna F e tenta de novo sozinha. inicioExec: quando a execução começou (o Google conta os 6 min daí, com as janelas abertas).
+ * → {parada: '' | 'tempo' | 'parado' | 'auth' | 'cota' | 'token' | 'jms' | 'erro' | 'mortas' | 'autorizacao', contagem}
  */
-function rodar_(ss, comTela) {
+function rodar_(ss, comTela, inicioExec, prazo) {
   var res = ss.getSheetByName(ABA_RESULTADO_), dp = PropertiesService.getDocumentProperties();
   if (!res || res.getLastRow() < 2) return {parada: 'vazio'};
+  inicioExec = inicioExec || agora_();
+  var fim = Math.min(agora_() + (prazo || PRAZO_MS_), inicioExec + PRAZO_MS_);
   var job = lerJob_() || {origem: '', extras: 0};
+  // A execução anterior não chegou ao fim: o Google a parou no meio (o JMS demorou demais). Conta as seguidas.
+  if (job.rodando) job.mortas = (job.mortas || 0) + 1;
+  job.rodando = true;
+  salvarJob_(job);
+  agendar_(Math.max(60000, inicioExec + SEGURANCA_MS_ - agora_())); // segurança: se o Google parar esta execução, segue daqui
   var faixa = res.getRange(2, 1, res.getLastRow() - 1, 4), dados = faixa.getValues(), fila = [];
   dados.forEach(function (l, i) { l[0] = textoRemessa_(l[0]); if (l[3] === NA_FILA_ || l[3] === '') { l[3] = NA_FILA_; fila.push(i); } });
-  var tok = token_(), parada = '', motivo = '', inicio = agora_(), gravou = inicio;
-  var paralelo = job.extras ? PARALELO_EXTRA_ : PARALELO_, tent = {}, vazias = {}, rota = rotaGuardada_();
-  if (!tok) parada = 'token';
-  else if (!rota && fila.length) {
-    var d = descobrirRota_(tok, dados[fila[0]][0]);
-    if (d.cota) { parada = 'cota'; motivo = d.cota; }
-    else if (d.auth !== undefined) { parada = 'auth'; motivo = d.auth; }
-    else rota = {nome: d.nome, fixa: false};
+  var tok = token_(), parada = '', motivo = '', rota = rotaGuardada_(), tent = {}, vazias = {};
+  var paralelo = job.extras ? PARALELO_EXTRA_ : job.mortas ? PARALELO_MIN_ : job.paralelo || PARALELO_;
+  var gravou = 0, sujo = null, feitas = 0, durUlt = 0, ultimoErro = '';
+  function marcar(i, linha) { dados[i] = linha; feitas++; sujo = sujo ? [Math.min(sujo[0], i), Math.max(sujo[1], i)] : [i, i]; }
+  function detalhe() {
+    return 'Detalhes: ' + paralelo + ' consultas ao mesmo tempo · última rodada ' + seg_(durUlt) +
+      (ultimoErro ? ' · último erro do JMS: ' + ultimoErro : '') + ' · versão ' + VERSAO;
   }
-  while (fila.length && !parada) {
-    if (agora_() - inicio > PRAZO_MS_) { parada = 'tempo'; break; }
-    if (dp.getProperty('SEG_PARAR')) { parada = 'parado'; break; }
-    var lote = fila.splice(0, paralelo);
-    var resps = buscar_(tok, rota.nome, lote.map(function (i) { return dados[i][0]; }));
-    if (resps.cota) { fila = lote.concat(fila); parada = 'cota'; motivo = resps.cota; break; }
-    var falhas = 0;
-    for (var k = 0; k < lote.length; k++) {
-      var i = lote[k], w = dados[i][0], c = classificar_(resps[k]);
-      if (c.tipo === 'auth') { parada = 'auth'; motivo = c.msg; continue; } // fica "Na fila"
-      if (c.tipo === 'ok') { dados[i] = [w, c.s1, c.s2, OK_]; continue; }
-      if (c.tipo === 'semcodigo') { dados[i] = [w, '', '', SEM_CODIGO_]; continue; }
-      if (c.tipo === 'vazio') vazias[i] = (vazias[i] || 0) + 1; else falhas++;
-      tent[i] = (tent[i] || 0) + 1;
-      if (tent[i] < TENTATIVAS_) { fila.push(i); continue; }
-      // O JMS cheio também responde sem dados: "não encontrada" só com todas as tentativas sem dados ou, na última rodada
-      // (depois de 2 rodadas extras sem conseguir), com alguma. O resto fica com erro e volta numa rodada extra, devagar.
-      var nao = vazias[i] === TENTATIVAS_ || ((job.extras || 0) >= RODADAS_EXTRAS_ && vazias[i] >= 1);
-      dados[i] = [w, '', '', nao ? NAO_ENCONTRADA_ : ERRO_ + (vazias[i] ? 'JMS ocupado (respondeu sem dados)' : c.msg)];
+  try {
+    if ((job.mortas || 0) >= ERROS_MAX_) parada = 'mortas';
+    else if (!tok) parada = 'token';
+    else if (!rota && fila.length) {
+      var d = descobrirRota_(tok, dados[fila[0]][0]);
+      if (d.cota) { parada = 'cota'; motivo = d.cota; }
+      else if (d.auth !== undefined) { parada = 'auth'; motivo = d.auth; }
+      else rota = {nome: d.nome, fixa: false};
     }
-    if (parada === 'auth') {
-      if (!rota.fixa) dp.deleteProperty('SEG_ROTA');
-      break;
+    while (fila.length && !parada) {
+      // Rodada nova só se ela couber nos 6 min do Google (pode demorar mais que a anterior).
+      if (agora_() > fim || agora_() + Math.max(durUlt * 1.5, 5000) > inicioExec + LIMITE_MS_) { parada = 'tempo'; break; }
+      if (dp.getProperty('SEG_PARAR')) { parada = 'parado'; break; }
+      var lote = fila.splice(0, paralelo), t0 = agora_();
+      var resps = buscar_(tok, rota.nome, lote.map(function (i) { return dados[i][0]; }));
+      durUlt = agora_() - t0;
+      if (resps.cota) { fila = lote.concat(fila); parada = 'cota'; motivo = resps.cota; break; }
+      var falhas = 0;
+      for (var k = 0; k < lote.length; k++) {
+        var i = lote[k], w = dados[i][0], c = classificar_(resps[k]);
+        if (c.tipo === 'auth') { parada = 'auth'; motivo = c.msg; continue; } // fica "Na fila"
+        if (c.tipo === 'ok') { marcar(i, [w, c.s1, c.s2, OK_]); continue; }
+        if (c.tipo === 'semcodigo') { marcar(i, [w, '', '', SEM_CODIGO_]); continue; }
+        if (c.tipo === 'vazio') vazias[i] = (vazias[i] || 0) + 1; else { falhas++; ultimoErro = c.msg; }
+        tent[i] = (tent[i] || 0) + 1;
+        if (tent[i] < TENTATIVAS_) { fila.push(i); continue; }
+        // O JMS cheio também responde sem dados: "não encontrada" só com todas as tentativas sem dados ou, na última rodada
+        // (depois de 2 rodadas extras sem conseguir), com alguma. O resto fica com erro e volta numa rodada extra, devagar.
+        var nao = vazias[i] === TENTATIVAS_ || ((job.extras || 0) >= RODADAS_EXTRAS_ && vazias[i] >= 1);
+        marcar(i, [w, '', '', nao ? NAO_ENCONTRADA_ : ERRO_ + (vazias[i] ? 'JMS ocupado (respondeu sem dados)' : c.msg)]);
+      }
+      if (parada === 'auth') {
+        if (!rota.fixa) dp.deleteProperty('SEG_ROTA');
+        break;
+      }
+      // Nenhuma remessa da rodada teve resposta: RUINS_MAX_ rodadas assim seguidas (contando as execuções anteriores) = pausa.
+      job.ruins = falhas === lote.length ? (job.ruins || 0) + 1 : 0;
+      if (job.ruins >= RUINS_MAX_) { parada = 'jms'; motivo = ultimoErro; }
+      else if (falhas > lote.length * 0.25 || durUlt > LENTO_MS_) { paralelo = Math.max(PARALELO_MIN_, Math.floor(paralelo / 2)); Utilities.sleep(PAUSA_MS_); }
+      else if (!falhas && !job.extras && durUlt < LENTO_MS_ / 2) paralelo = Math.min(PARALELO_MAX_, Math.ceil(paralelo * 1.25));
+      // Na tela logo depois da 1ª rodada e a cada GRAVAR_MS_ (só as linhas que mudaram).
+      if (!gravou || agora_() - gravou > GRAVAR_MS_) {
+        if (sujo) res.getRange(2 + sujo[0], 1, sujo[1] - sujo[0] + 1, 4).setValues(dados.slice(sujo[0], sujo[1] + 1));
+        sujo = null;
+        andamento_(res, textoContagem_(contar_(dados)) + ' Consultando... (atualizado às ' + hora_() + ')', detalhe());
+        SpreadsheetApp.flush();
+        gravou = agora_();
+      }
     }
-    if (falhas > lote.length * 0.25) { paralelo = Math.max(PARALELO_MIN_, Math.floor(paralelo / 2)); Utilities.sleep(PAUSA_MS_); }
-    else if (!falhas && !job.extras) paralelo = Math.min(PARALELO_MAX_, Math.ceil(paralelo * 1.25));
-    if (agora_() - gravou > GRAVAR_MS_) {
-      faixa.setValues(dados);
-      andamento_(res, textoContagem_(contar_(dados)) + ' Consultando...');
-      SpreadsheetApp.flush();
-      gravou = agora_();
-    }
+  } catch (e) {
+    motivo = String(e && e.message || e).slice(0, 300);
+    parada = /autorizou o script/.test(motivo) ? 'autorizacao' : 'erro';
+    console.error('JMS Segmentos ' + VERSAO + ': ' + (e && e.stack || motivo));
   }
+  job.rodando = false;
+  job.paralelo = paralelo;
+  if (parada !== 'mortas') job.mortas = 0;
+  if (feitas) { job.erros = 0; job.pausas = 0; }
   faixa.setValues(dados);
   var cont = contar_(dados), texto = textoContagem_(cont);
   if (!parada) {
@@ -352,36 +396,58 @@ function rodar_(ss, comTela) {
       erros.forEach(function (i) { dados[i][3] = NA_FILA_; });
       faixa.setValues(dados);
       job.extras = (job.extras || 0) + 1;
-      salvarJob_(job);
       agendar_();
       texto += ' ' + fmt_(erros.length) + ' ficaram com erro (JMS ocupado): nova rodada, devagar, em 1 minuto (sozinha).';
     } else {
       apagarGatilhos_();
-      resumo_(ss, dados);
-      texto = 'Pronto às ' + Utilities.formatDate(new Date(), FUSO_, 'HH:mm') + '. ' + texto + ' Gráficos na aba "' + ABA_RESUMO_ + '".' +
+      var graficos = ' Gráficos na aba "' + ABA_RESUMO_ + '".';
+      try { resumo_(ss, dados); }
+      catch (e) { graficos = ' Não consegui montar os gráficos (' + String(e && e.message || e).slice(0, 160) + '): use ⏩ Continuar para tentar de novo.'; }
+      texto = 'Pronto às ' + Utilities.formatDate(new Date(), FUSO_, 'HH:mm') + '. ' + texto + graficos +
         (erros.length ? ' Ainda com erro: ' + fmt_(erros.length) + ' — use ⏩ Continuar / consultar as que faltaram.' : '');
     }
   } else if (parada === 'tempo') {
     agendar_();
-    texto += ' Continua sozinha em 1 minuto (pode fechar a planilha).';
+    texto += ' A pesquisa segue sozinha, em segundo plano: a próxima parte começa em cerca de 1 minuto e esta coluna é atualizada' +
+      ' a cada ' + GRAVAR_MS_ / 1000 + ' segundos enquanto ela roda. Pode fechar a planilha.';
+  } else if (parada === 'jms' && (job.pausas || 0) < PAUSAS_MAX_) {
+    job.pausas = (job.pausas || 0) + 1;
+    job.ruins = 0;
+    agendar_(PAUSA_JMS_MS_);
+    texto = '⚠ ' + texto + ' O JMS não está respondendo (' + motivo + '). Pausa ' + job.pausas + ' de ' + PAUSAS_MAX_ +
+      ': tenta de novo sozinha em ' + PAUSA_JMS_MS_ / 60000 + ' minutos.';
+  } else if (parada === 'erro' && (job.erros || 0) + 1 < ERROS_MAX_) {
+    job.erros = (job.erros || 0) + 1;
+    agendar_();
+    texto = '⚠ ' + texto + ' Deu erro: ' + motivo + '. O que já veio está guardado; tenta de novo sozinha em 1 minuto.';
   } else {
     apagarGatilhos_();
-    texto += {
+    texto = (parada === 'parado' ? '' : '⚠ ') + texto + {
       parado: ' Parada por você. Para seguir: ⏩ Continuar / consultar as que faltaram.',
       auth: ' O JMS recusou o AuthToken (' + motivo + '). Pegue um AuthToken novo no JMS → 🔑 Colocar AuthToken do JMS → ⏩ Continuar.',
       token: ' Falta o AuthToken: 🔑 Colocar AuthToken do JMS → ⏩ Continuar.',
-      cota: ' Acabou a cota de consultas do Google por hoje (conta Gmail: cerca de 20 mil por dia). Amanhã: ⏩ Continuar.'
+      cota: ' Acabou a cota de consultas do Google por hoje (conta Gmail: cerca de 20 mil por dia). Amanhã: ⏩ Continuar.',
+      jms: ' Parei: o JMS não respondeu nem depois de ' + PAUSAS_MAX_ + ' pausas (' + motivo + '). Use 🩺 Testar conexão com o JMS e,' +
+        ' quando ele responder, ⏩ Continuar.',
+      mortas: ' Parei: o Google interrompeu a pesquisa ' + ERROS_MAX_ + ' vezes seguidas no meio (o JMS está demorando demais para' +
+        ' responder). Use 🩺 Testar conexão com o JMS e depois ⏩ Continuar.',
+      erro: ' Parei depois de ' + ERROS_MAX_ + ' erros seguidos: ' + motivo + '. O que já veio está guardado. Para seguir: ⏩ Continuar.',
+      autorizacao: ' ' + motivo
     }[parada];
   }
-  andamento_(res, texto);
+  salvarJob_(job);
+  andamento_(res, texto, detalhe());
   SpreadsheetApp.flush();
   if (comTela) ss.toast(texto, 'JMS Segmentos', 15);
   return {parada: parada, contagem: cont};
 }
 
-/** Menu ▶: pesquisa as remessas da aba aberta (o resultado vai para a aba "Segmentos"). */
+/**
+ * Menu ▶: pesquisa as remessas da aba aberta (o resultado vai para a aba "Segmentos"). Consulta por PRAZO_MENU_MS_ com a
+ * planilha aberta; o resto segue sozinho por gatilho.
+ */
 function pesquisar() {
-  var ss = SpreadsheetApp.getActive(), sh = ss.getActiveSheet(), ui = SpreadsheetApp.getUi();
+  var inicio = agora_(), ss = SpreadsheetApp.getActive(), sh = ss.getActiveSheet(), ui = SpreadsheetApp.getUi();
   if ([ABA_RESULTADO_, ABA_RESUMO_].indexOf(sh.getName()) >= 0) { aviso_('Abra a aba que tem as remessas e clique de novo em ▶ Pesquisar.'); return null; }
   if (!token_()) { aviso_('Falta o AuthToken do JMS: menu JMS Segmentos → 🔑 Colocar AuthToken do JMS.'); return null; }
   var lido = lerRemessas_(sh);
@@ -400,15 +466,16 @@ function pesquisar() {
     dp.deleteProperty('SEG_PARAR');
     salvarJob_({origem: sh.getName(), total: lido.lista.length, extras: 0});
     ss.setActiveSheet(res);
-    andamento_(res, 'Começando: ' + fmt_(lido.lista.length) + ' remessas da aba "' + sh.getName() + '".');
+    andamento_(res, 'Começando: ' + fmt_(lido.lista.length) + ' remessas da aba "' + sh.getName() + '". Os resultados aparecem aqui em' +
+      ' alguns segundos.', 'Versão ' + VERSAO);
     SpreadsheetApp.flush();
-    return rodar_(ss, true);
+    return rodar_(ss, true, inicio, PRAZO_MENU_MS_);
   } finally { trava.releaseLock(); }
 }
 
 /** Menu ⏩: segue a pesquisa e consulta de novo as que ficaram com erro ou "Não encontrada no JMS". */
 function continuar() {
-  var ss = SpreadsheetApp.getActive(), res = ss.getSheetByName(ABA_RESULTADO_);
+  var inicio = agora_(), ss = SpreadsheetApp.getActive(), res = ss.getSheetByName(ABA_RESULTADO_);
   if (!res || res.getLastRow() < 2) { aviso_('Ainda não tem pesquisa. Abra a aba das remessas e use ▶ Pesquisar remessas desta aba.'); return null; }
   var trava = LockService.getDocumentLock();
   if (!trava.tryLock(3000)) { aviso_('Já tem uma pesquisa rodando. Espere terminar ou use ⏹ Parar.'); return null; }
@@ -422,7 +489,8 @@ function continuar() {
     faixa.setValues(dados);
     PropertiesService.getDocumentProperties().deleteProperty('SEG_PARAR');
     var job = lerJob_() || {origem: '', total: dados.length};
-    job.extras = 0;
+    // Recomeça do zero o ritmo e as contas de erros, pausas e execuções paradas pelo Google.
+    job.extras = 0; job.rodando = false; job.mortas = 0; job.erros = 0; job.pausas = 0; job.ruins = 0; job.paralelo = 0;
     salvarJob_(job);
     if (!contar_(dados).fila) {
       resumo_(ss, dados);
@@ -431,16 +499,17 @@ function continuar() {
       return {parada: '', contagem: contar_(dados)};
     }
     ss.setActiveSheet(res);
-    return rodar_(ss, true);
+    return rodar_(ss, true, inicio, PRAZO_MENU_MS_);
   } finally { trava.releaseLock(); }
 }
 
-/** Gatilho de 1 minuto (criado sozinho): segue a pesquisa sem ninguém clicar. */
+/** Gatilho (criado sozinho): segue a pesquisa sem ninguém clicar. */
 function continuarSozinho() {
+  var inicio = agora_();
   apagarGatilhos_();
   var trava = LockService.getDocumentLock();
   if (!trava.tryLock(10000)) { agendar_(); return null; }
-  try { return rodar_(SpreadsheetApp.getActive(), false); } finally { trava.releaseLock(); }
+  try { return rodar_(SpreadsheetApp.getActive(), false, inicio, PRAZO_MS_); } finally { trava.releaseLock(); }
 }
 
 /** Menu ⏹: a pesquisa para depois da consulta em andamento (nada se perde). */
@@ -451,36 +520,42 @@ function parar() {
 }
 
 /**
- * Menu 🩺: testa o AuthToken com a 1ª remessa da aba aberta (ou uma fictícia) e mostra o que o JMS respondeu, sem mostrar o
- * token. Guarda o Routename que o JMS aceitou.
+ * Menu 🩺: testa o AuthToken com a 1ª remessa da aba aberta (ou uma fictícia) e mostra o que o JMS respondeu e quanto demorou,
+ * sem mostrar o token. Guarda o Routename que o JMS aceitou. Falha de rede não é culpa do Routename: não testa os outros.
  */
 function testarConexao() {
-  var tok = token_(), linhas = ['JMS Segmentos ' + VERSAO];
+  var inicio = agora_(), tok = token_(), linhas = ['JMS Segmentos ' + VERSAO];
   if (!tok) { aviso_('Falta o AuthToken: menu JMS Segmentos → 🔑 Colocar AuthToken do JMS.'); return 'sem token'; }
   linhas.push('AuthToken guardado: ' + tok.length + ' caracteres.');
   var sh = SpreadsheetApp.getActive().getActiveSheet();
   var lido = [ABA_RESULTADO_, ABA_RESUMO_].indexOf(sh.getName()) < 0 ? lerRemessas_(sh) : {lista: []};
   var w = lido.lista[0] || 'TESTE0000000000';
   linhas.push(lido.lista.length ? 'Remessa de teste: ' + w + ' (a 1ª da aba "' + sh.getName() + '").' : 'Remessa de teste fictícia (abra a aba das remessas para testar com uma de verdade).');
-  var fixa = rotaGuardada_(), rotas = fixa && fixa.fixa ? [fixa.nome] : ROTAS_, certo = '';
+  var fixa = rotaGuardada_(), rotas = fixa && fixa.fixa ? [fixa.nome] : ROTAS_, certo = '', falhou = '';
   var diz = {ok: 'OK', semcodigo: 'OK (remessa sem código no JMS)', vazio: 'OK (o JMS não trouxe dados desta remessa)'};
   for (var i = 0; i < rotas.length && !certo; i++) {
-    var r, c;
-    for (var t = 0; t < 3; t++) { // JMS ocupado: tenta de novo
+    var r, c, rede = false, t0;
+    for (var t = 0; t < 3; t++) { // JMS ocupado: tenta de novo (até 2 min no total)
+      t0 = agora_();
       r = buscar_(tok, rotas[i], [w]);
       if (r.cota) break;
       c = classificar_(r[0]);
-      if (c.tipo !== 'passageira') break;
+      rede = !r[0].status;
+      if (c.tipo !== 'passageira' || agora_() - inicio > 120000) break;
       Utilities.sleep(1000);
     }
-    if (r.cota) { linhas.push('Acabou a cota de consultas do Google por hoje.'); break; }
-    linhas.push((rotas[i] === 'NENHUM' ? 'Sem Routename' : 'Routename ' + rotas[i]) + ': ' + (diz[c.tipo] || (c.tipo === 'auth' ? 'recusado (' + c.msg + ')' : c.msg)));
+    if (r.cota) { linhas.push('Acabou a cota de consultas do Google por hoje.'); falhou = 'cota'; break; }
+    linhas.push((rotas[i] === 'NENHUM' ? 'Sem Routename' : 'Routename ' + rotas[i]) + ': ' +
+      (diz[c.tipo] || (c.tipo === 'auth' ? 'recusado (' + c.msg + ')' : 'sem resposta (' + c.msg + ')')) + ' — em ' + seg_(agora_() - t0) + '.');
     if (c.tipo === 'auth') continue;
+    if (c.tipo === 'passageira') { falhou = c.msg; if (rede || agora_() - inicio > 120000) break; continue; }
     certo = rotas[i];
     if (c.tipo === 'ok') linhas.push(CAMPO1_ + ': ' + c.s1 + ' · ' + CAMPO2_ + ': ' + c.s2);
   }
   if (certo && !(fixa && fixa.fixa)) PropertiesService.getDocumentProperties().setProperty('SEG_ROTA', certo);
-  linhas.push(certo ? 'Conexão OK: o JMS aceitou o AuthToken.' : 'O JMS recusou o AuthToken: pegue um novo no JMS e use 🔑 Colocar AuthToken do JMS.');
+  linhas.push(certo ? 'Conexão OK: o JMS aceitou o AuthToken.' : falhou === 'cota' ? 'Use ⏩ Continuar amanhã.' :
+    falhou ? 'O JMS não respondeu (' + falhou + '). Tente de novo em alguns minutos; se continuar, mande um print desta janela.' :
+    'O JMS recusou o AuthToken: pegue um novo no JMS e use 🔑 Colocar AuthToken do JMS.');
   var texto = linhas.join('\n');
   console.log(texto);
   aviso_(texto);

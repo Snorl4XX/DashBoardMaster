@@ -30,13 +30,24 @@ Usar
 1. Abra a aba das remessas (com o cabeçalho "Remessa" em cima da coluna; sem
    cabeçalho, clique numa célula da coluna das remessas).
 2. Menu JMS Segmentos > Pesquisar remessas desta aba > Sim.
-3. Acompanhe na aba "Segmentos" (coluna F, "Andamento da pesquisa").
-   Muitas remessas: cada execução roda uns 4,5 minutos e a pesquisa continua
-   sozinha 1 minuto depois, até acabar (pode fechar a planilha).
+3. Acompanhe na aba "Segmentos" (coluna F, "Andamento da pesquisa"). Os
+   valores aparecem em alguns segundos e a coluna F mostra a hora da última
+   atualização. O menu consulta por 1,5 minuto; o resto segue sozinho, em
+   segundo plano, em partes de até 4 minutos com 1 minuto entre elas, até
+   acabar (pode fechar a planilha). Na célula F3: o ritmo, quanto o JMS
+   demorou na última rodada e o último erro dele.
 4. No fim: tabela na aba "Segmentos" e gráficos na aba "Resumo Segmentos".
 
 Se der problema
 ---------------
+- Qualquer erro aparece na coluna F da aba "Segmentos", começando com ⚠.
+  Mande um print das células F2 e F3.
+- Ficou parado em "Começando" (versão 1.0.0): cole o Codigo.gs novo (1.1.0)
+  no Apps Script, salve, volte para a planilha e use o menu Continuar. O que
+  está "Na fila" é consultado; não precisa pesquisar de novo.
+- "O JMS não está respondendo": a pesquisa espera 5 minutos e tenta de novo
+  sozinha (até 3 vezes). Se parar, use Testar conexão com o JMS e, quando
+  ele responder, o menu Continuar.
 - "O JMS recusou o AuthToken": pegue um AuthToken novo no JMS > menu Colocar
   AuthToken do JMS > menu Continuar. O que já veio fica guardado.
 - Sobrou remessa com erro ou "Não encontrada": menu Continuar / consultar as

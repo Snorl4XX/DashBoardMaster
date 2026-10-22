@@ -28,7 +28,7 @@ function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 10139
 // ---------- Google falso ----------
 function criarGoogle(o) {
   o = Object.assign({token: 'tok-ficticio-1', rota: 'trackingExpress', falha: 0, redeFalha: 0, seed: 7}, o || {});
-  const g = {relogio: 1.7e12, chamadas: 0, gatilhos: [], alertas: [], toasts: [], formatos: [], props: {script: {}, doc: {}}, o, ui: {resposta: 'YES', prompt: ''}};
+  const g = {relogio: 1.7e12, chamadas: 0, lotes: 0, pedidos: 0, errosLog: [], gatilhos: [], alertas: [], toasts: [], formatos: [], props: {script: {}, doc: {}}, o, ui: {resposta: 'YES', prompt: ''}};
   const rnd = rng(o.seed);
   let travado = false;
 
@@ -93,6 +93,10 @@ function criarGoogle(o) {
       return out;
     }
     setValues(v) {
+      if (g.o.falhaGravar > 0 && this.f.nome === 'Segmentos' && this.r > 1 && this.c === 1) {
+        g.o.falhaGravar--;
+        throw new Error('Serviço Planilhas falhou ao acessar o documento');
+      }
       if (v.length !== this.nr || v.some(l => l.length !== this.nc)) throw new Error('Tamanho dos dados não confere com o intervalo');
       for (let i = 0; i < this.nr; i++) { const L = this.f.cel[this.r - 1 + i] = this.f.cel[this.r - 1 + i] || []; for (let j = 0; j < this.nc; j++) L[this.c - 1 + j] = v[i][j]; }
       return semFim(this);
@@ -122,11 +126,13 @@ function criarGoogle(o) {
   }
   g.planilha = planilha;
   g.ctx = vm.createContext({
-    console: {log: () => {}},
+    console: {log: () => {}, error: m => { g.errosLog.push(String(m)); }},
     SpreadsheetApp: {getActive: () => planilha, getUi: () => ui, flush: () => {}},
     UrlFetchApp: {
       fetchAll: reqs => {
-        g.relogio += 1200;
+        g.lotes++; g.pedidos += reqs.length;
+        g.relogio += o.demora || 1200;
+        if (o.antesDoLote) o.antesDoLote(reqs); // JMS travado: o Google desiste depois de `demora` e lança o erro
         if (rnd() < o.redeFalha) throw new Error('Address unavailable: https://gw.jtjms-br.com');
         return reqs.map(jms);
       },
@@ -159,6 +165,7 @@ function criarGoogle(o) {
   };
   g.resultado = () => { const f = g.aba('Segmentos'); return f.getRange(2, 1, f.getLastRow() - 1, 4).getValues(); };
   g.andamento = () => String(g.aba('Segmentos').getRange(2, 6).getValues()[0][0]);
+  g.detalhes = () => String(g.aba('Segmentos').getRange(3, 6).getValues()[0][0]);
   return g;
 }
 function remessa(i) { return '777' + String(i).padStart(12, '0'); }
@@ -190,6 +197,9 @@ function conferir(g, lista, nome) {
   check(cl(200, {code: 135010037, msg: 'token失效，请重新登录', succ: false}).tipo === 'auth' && cl(401, '').tipo === 'auth' && cl(200, '<html>login').tipo === 'auth',
     'token recusado = parar');
   check(g.ctx.limparToken_(' authToken: "abc-123-xyz-ficticio"\n') === 'abc-123-xyz-ficticio', 'limpa o AuthToken colado');
+  check(g.ctx.cota_('Service invoked too many times for one day: urlfetch.') && g.ctx.cota_('Serviço chamado muitas vezes em um dia: urlfetch.') &&
+    !g.ctx.cota_('Bandwidth quota exceeded: https://gw.jtjms-br.com') && !g.ctx.cota_('Timeout: https://gw.jtjms-br.com'),
+    'cota do dia (inglês e português) não se confunde com largura de banda nem com tempo esgotado');
 }
 
 // 2) Muitas remessas: 12.000 numa aba com título, cabeçalho "Nº da Remessa" na linha 2, números, repetidas e lixo.
@@ -216,7 +226,8 @@ for (let i = 1; i <= N; i++) LISTA.push(remessa(i));
   const ini = g.relogio;
   const r1 = g.ctx.pesquisar();
   check(g.relogio - ini < 300000 && r1.parada === 'tempo' && g.gatilhos.length === 1, '1ª execução para antes dos 6 min e agenda a continuação', {s: (g.relogio - ini) / 1000, r1});
-  check(/Continua sozinha em 1 minuto/.test(g.andamento()), 'andamento na aba Segmentos', g.andamento());
+  check(/segue sozinha, em segundo plano/.test(g.andamento()) && /^Detalhes: \d+ consultas ao mesmo tempo/.test(g.detalhes()),
+    'andamento e detalhes na aba Segmentos', [g.andamento(), g.detalhes()]);
   const ex = g.esperarGatilhos();
   check(ex.maior < 300000 && !g.gatilhos.length, 'continua sozinha até acabar (' + (ex.n + 1) + ' execuções, nenhuma passa de 5 min)', ex);
   conferir(g, LISTA, '12.000 remessas com JMS falhando 20%: todas com os 2 códigos certos, "Não encontrada" só nas que não existem');
@@ -289,6 +300,110 @@ for (let i = 1; i <= N; i++) LISTA.push(remessa(i));
   g.ctx.pesquisar();
   check(/Abra a aba que tem as remessas/.test(g.alertas.pop()), 'na aba Segmentos: pede a aba das remessas');
   conferir(g, LISTA.slice(0, 50), '50 remessas sem cabeçalho');
+}
+
+// 6) Os valores aparecem na planilha enquanto a pesquisa roda; o menu consulta só 1,5 min e o gatilho de segurança fica armado.
+{
+  const lista = LISTA.slice(0, 5000);
+  const g = criarGoogle({falha: 0.02});
+  g.props.script.JMS_AUTHTOKEN = 'tok-ficticio-1';
+  g.props.doc.SEG_ROTA = 'trackingExpress';
+  let visto = null;
+  g.o.aoChamar = n => {
+    if (n === 400) visto = {ok: g.ctx.contar_(g.resultado()).ok, a: g.andamento(), seguranca: g.gatilhos.includes('continuarSozinho')};
+  };
+  g.novaAba('Base', [['Remessa']].concat(lista.map(w => [w])));
+  const ini = g.relogio;
+  const r = g.ctx.pesquisar();
+  check(visto && visto.ok > 15 && /Consultando\.\.\. \(atualizado às/.test(visto.a), 'os valores aparecem na planilha enquanto a pesquisa roda', visto);
+  check(visto && visto.seguranca, 'gatilho de segurança armado durante a execução (se o Google parar no meio, continua)');
+  check(r.parada === 'tempo' && g.relogio - ini < 100000 && g.gatilhos.length === 1, 'menu: consulta por 1,5 min e deixa o resto para o gatilho',
+    {s: (g.relogio - ini) / 1000, r});
+  g.o.aoChamar = null;
+  g.esperarGatilhos();
+  conferir(g, lista, '5.000 remessas pelo menu + gatilhos');
+}
+
+// 7) JMS travado (cada rodada leva 65 s e o Google desiste com "Timeout"): nenhuma execução passa dos 6 min, a tela mostra o
+//    erro, para sozinha depois de 3 pausas sem gastar a cota e, quando o JMS volta, ⏩ Continuar termina tudo.
+{
+  const lista = LISTA.slice(0, 3000);
+  const g = criarGoogle({demora: 65000});
+  g.props.script.JMS_AUTHTOKEN = 'tok-ficticio-1';
+  g.props.doc.SEG_ROTA = 'trackingExpress';
+  g.o.antesDoLote = () => { throw new Error('Timeout: https://gw.jtjms-br.com/operatingplatform/order/getOrderDetail'); };
+  g.novaAba('Base', [['Remessa']].concat(lista.map(w => [w])));
+  const ini = g.relogio;
+  const r = g.ctx.pesquisar();
+  check(r.parada === 'tempo' && g.relogio - ini < 300000 && g.gatilhos.length === 1 && !/^Começando/.test(g.andamento()) && /Timeout/.test(g.detalhes()),
+    'JMS travado: o menu volta antes dos 6 min e mostra o andamento e o erro do JMS', {s: (g.relogio - ini) / 1000, r, a: g.andamento(), d: g.detalhes()});
+  const ex = g.esperarGatilhos();
+  check(ex.maior < 330000 && !g.gatilhos.length, 'JMS travado: nenhuma execução chega perto dos 6 min e a pesquisa para sozinha', ex);
+  check(/^⚠/.test(g.andamento()) && /não respondeu nem depois de 3 pausas/.test(g.andamento()) && /Timeout/.test(g.andamento()),
+    'JMS travado: avisa na coluna F com o erro', g.andamento());
+  check(g.pedidos < 300, 'JMS travado: não gasta a cota do Google (' + g.pedidos + ' consultas)', g.pedidos);
+  check(g.ctx.contar_(g.resultado()).fila === lista.length, 'JMS travado: as remessas continuam "Na fila" (nenhuma vira erro)');
+  delete g.o.antesDoLote;
+  g.o.demora = 1200;
+  g.ctx.continuar();
+  g.esperarGatilhos();
+  conferir(g, lista, 'JMS voltou: ⏩ Continuar completa tudo');
+}
+
+// 8) Erro inesperado no meio (o Google falhou ao gravar na planilha): grava o que veio, mostra o erro e tenta de novo sozinha.
+{
+  const lista = LISTA.slice(0, 3000);
+  const g = criarGoogle({falha: 0.05});
+  g.props.script.JMS_AUTHTOKEN = 'tok-ficticio-1';
+  g.props.doc.SEG_ROTA = 'trackingExpress';
+  g.o.aoChamar = n => { if (n === 300) g.o.falhaGravar = 1; };
+  g.novaAba('Base', [['Remessa']].concat(lista.map(w => [w])));
+  const r = g.ctx.pesquisar();
+  const c = g.ctx.contar_(g.resultado());
+  check(r.parada === 'erro' && g.gatilhos.length === 1 && /Deu erro: Serviço Planilhas falhou/.test(g.andamento()) && c.ok > 200 && g.errosLog.length === 1,
+    'erro inesperado: grava o que veio, mostra o erro na coluna F e agenda nova tentativa', {r, c, a: g.andamento()});
+  g.o.aoChamar = null;
+  g.esperarGatilhos();
+  conferir(g, lista, 'depois do erro, continua sozinha e completa tudo');
+}
+
+// 9) O Google parou uma execução no meio (tempo máximo): a seguinte continua de onde parou, mais devagar; 3 seguidas, para e avisa.
+{
+  const lista = LISTA.slice(0, 2000);
+  const g = criarGoogle({demora: 30000});
+  g.props.script.JMS_AUTHTOKEN = 'tok-ficticio-1';
+  g.props.doc.SEG_ROTA = 'trackingExpress';
+  g.novaAba('Base', [['Remessa']].concat(lista.map(w => [w])));
+  g.ctx.pesquisar();
+  g.o.demora = 1200;
+  const antes = g.ctx.contar_(g.resultado()).fila;
+  let j = g.ctx.lerJob_();
+  j.rodando = true; // não chegou ao fim
+  g.ctx.salvarJob_(j);
+  g.relogio += 60000;
+  g.ctx.continuarSozinho();
+  j = g.ctx.lerJob_();
+  check(g.ctx.contar_(g.resultado()).fila < antes && j.mortas === 0 && !j.rodando, 'execução parada pelo Google: a seguinte continua de onde parou', {antes, j});
+  j.rodando = true;
+  j.mortas = 2;
+  g.ctx.salvarJob_(j);
+  const r = g.ctx.continuarSozinho();
+  check(r.parada === 'mortas' && !g.gatilhos.length && /interrompeu a pesquisa 3 vezes/.test(g.andamento()), '3 execuções seguidas paradas pelo Google: para e avisa', {r, a: g.andamento()});
+  g.ctx.continuar();
+  g.esperarGatilhos();
+  conferir(g, lista, 'depois, ⏩ Continuar completa tudo');
+}
+
+// 10) 🩺 Testar conexão sem rede: não diz "Conexão OK", não testa os outros Routenames nem guarda nenhum, e volta em ~2 min.
+{
+  const g = criarGoogle({demora: 65000});
+  g.props.script.JMS_AUTHTOKEN = 'tok-ficticio-1';
+  g.o.antesDoLote = () => { throw new Error('Address unavailable: https://gw.jtjms-br.com'); };
+  g.novaAba('Base', [['Remessa'], [remessa(1)]]);
+  const ini = g.relogio;
+  const t = g.ctx.testarConexao();
+  check(!/Conexão OK/.test(t) && /O JMS não respondeu/.test(t) && /Address unavailable/.test(t) && /em 65 s/.test(t) && g.relogio - ini < 200000 &&
+    !g.props.doc.SEG_ROTA && !/waybillTracking/.test(t), 'testar conexão sem rede: avisa, mostra o tempo e não guarda Routename', t);
 }
 
 console.log('\n' + oks + ' ok, ' + falhas + ' falha(s)');
