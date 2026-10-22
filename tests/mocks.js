@@ -446,6 +446,13 @@ function fakeJms(dayData, options) {
           state.tripBusyHits = (state.tripBusyHits || 0) + 1;
           return respond(200, {code: 500, msg: '系统繁忙', fail: true});
         }
+        // options.tripEmpty (V4.14.1): JMS ocupado que responde "concluído" SEM os bipes — as consultas além das primeiras N de
+        // um fetchAll. tripEmptyMode 'details': a remessa vem com a lista de bipes vazia; senão, nenhuma remessa.
+        if (options.tripEmpty && (state.fetchIdx || 0) >= options.tripEmpty) {
+          state.tripEmptyHits = (state.tripEmptyHits || 0) + 1;
+          const vazio = options.tripEmptyMode === 'details' ? body.keywordList.map(w => ({keyword: w, details: [], codes: null})) : [];
+          return respond(200, {code: 1, msg: '1:Solicitação concluída', data: vazio, succ: true, fail: false});
+        }
         const kws = options.tripLimit ? body.keywordList.slice(0, options.tripLimit) : body.keywordList;
         const all = {}, allDc = {};
         Object.keys(dayData).forEach(k => ((dayData[k].sf || {}).routes || []).forEach(r => r.sent.forEach(x => { all[x.billcode] = x; })));

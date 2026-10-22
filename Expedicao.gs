@@ -504,16 +504,18 @@ const TRIP_MAX_MISS_ = 3;
 const TRIP_RETRY_MS_ = 90 * 60000, TRIP_GRACE_MS_ = 60 * 60000;
 // V4.14: consultas ao mesmo tempo no Rastreamento (o ritmo cai pela metade quando o JMS não dá conta e volta a subir).
 const TRIP_PARALLEL_MAX_ = 50, TRIP_PARALLEL_MIN_ = 4;
+// V4.14.1: começa com 10; conferência do fim com 5; vazia em 5 execuções = falha; até 3 consultas sozinhas por execução.
+const TRIP_PARALLEL_START_ = 10, TRIP_REVIEW_PAR_ = 5, TRIP_MAX_EMPTY_ = 5, TRIP_PROBES_ = 3;
 /** kind: 'viagens' (IDs de viagem, padrão) ou 'bipagens' (V4.4, Triagem errada: lote e login da Consulta das bipagens). */
 function lookupMapKey_(indicator, kind) { return indicator + ':' + (kind || 'viagens'); }
 function tripMapKey_(indicator) { return lookupMapKey_(indicator, 'viagens'); }
-function emptyTripMap_() { return {v: 1, ids: {}, miss: {}, last: {}}; }
+function emptyTripMap_() { return {v: 1, ids: {}, miss: {}, last: {}, empty: {}}; }
 function loadTripMap_(indicator, date, kind) {
   const df = dayFilesMap_(lookupMapKey_(indicator, kind), date, date)[date];
   if (!df) return emptyTripMap_();
   try {
     const x = JSON.parse(Utilities.ungzip(DriveApp.getFileById(df.fileId).getBlob()).getDataAsString('UTF-8'));
-    return x && x.ids ? Object.assign(emptyTripMap_(), x, {miss: x.miss || {}, last: x.last || {}}) : emptyTripMap_();
+    return x && x.ids ? Object.assign(emptyTripMap_(), x, {miss: x.miss || {}, last: x.last || {}, empty: x.empty || {}}) : emptyTripMap_();
   } catch (e) { return emptyTripMap_(); }
 }
 function saveTripMap_(indicator, date, map, total, kind, done) {
@@ -650,7 +652,7 @@ function runTripJob_(job, deadline) {
   const marked = !mode || ds.tripSrc === mode;
   const map = loadTripMap_(job.indicator, job.date);
   // V4.6: tarefa com page 1 (migração/Atualizar) consulta de novo as remessas que antes vieram sem a linha de carregamento.
-  if (job.page === 1) { map.miss = {}; map.last = {}; }
+  if (job.page === 1) { map.miss = {}; map.last = {}; map.empty = {}; }
   const W = ds.dict[wk], cW = ds.cols[wk];
   const D = ds.dict.destination || [], cD = ds.cols.destination, E = ds.dict.eventTime || [], cE = ds.cols.eventTime;
   const info = {}, todo = [], nowMs = Date.now();
@@ -684,10 +686,40 @@ function runTripJob_(job, deadline) {
   const endpoint = endpointFor_(cfg, 'trips');
   const parallel = Math.max(1, Math.min(TRIP_PARALLEL_MAX_, Number(getProp_('EXPEDICAO_IDS_PARALELO', '')) || APP_CONFIG.TRIP_PARALLEL));
   const ctx = {trips: cfg.trips, center: centerName_(), centerId: distributeId_()};
-  // V4.14: começa com metade e sobe enquanto o JMS responde tudo (não chega com 30 consultas de uma vez num JMS ocupado).
-  let batch = tripBatch_(), k = 0, changed = 0, slowest = 5000, lastError = '', par = Math.max(1, Math.min(parallel, Math.ceil(parallel / 2)));
-  const requeued = {};
-  while (k < todo.length) {
+  // V4.14.1: começa com 10 ao mesmo tempo (como a Pesquisa no Rastreamento) e sobe enquanto o JMS responde tudo.
+  let batch = tripBatch_(), k = 0, changed = 0, slowest = 5000, lastError = '', par = Math.max(1, Math.min(parallel, TRIP_PARALLEL_START_));
+  let review = false, probes = TRIP_PROBES_;
+  /**
+   * V4.14.1: com muitas consultas ao mesmo tempo, o JMS RECUSA ou RESPONDE VAZIO (sem nenhum bipe). Isso não é "remessa sem
+   * bipe de carregamento" — toda remessa da lista foi bipada na base. Até a V4.14 contava como falha: depois de 3, a remessa
+   * nunca mais era consultada e o ID ficava vazio na tabela. Agora ela é conferida de novo no fim, devagar; vazia de novo,
+   * fica para a próxima execução (só conta como falha depois de TRIP_MAX_EMPTY_ execuções vazias).
+   */
+  const revisar = [], inReview = {}, requeued = {};
+  const vazia = (w, why) => {
+    if (why) lastError = String(why).slice(0, 300);
+    if (!review && !inReview[w]) { inReview[w] = 1; revisar.push(w); return; }
+    map.empty[w] = (map.empty[w] || 0) + 1;
+    if (map.empty[w] >= TRIP_MAX_EMPTY_) { delete map.empty[w]; fail(w); }
+  };
+  const gotOf = json => {
+    const got = {};
+    recordsOf_(json).forEach(item => {
+      const kw = String(item && (item.keyword || item.waybillNo || item.billCode) || '').trim();
+      if (kw) got[kw] = item;
+    });
+    return got;
+  };
+  const hasScans = item => !!(item && Array.isArray(item.details) && item.details.length);
+  while (true) {
+    if (k >= todo.length) {
+      if (review || !revisar.length) break;
+      // Conferência no fim: as remessas que voltaram vazias ou recusadas, de novo e devagar (ritmo parado).
+      review = true;
+      par = Math.min(par, TRIP_REVIEW_PAR_);
+      revisar.forEach(w => todo.push(w));
+      revisar.length = 0;
+    }
     if (Date.now() + slowest + 20000 > deadline) break;
     const groups = [];
     for (let g = 0; g < par && k < todo.length; g++) { groups.push(todo.slice(k, k + batch)); k += batch; }
@@ -704,46 +736,48 @@ function runTripJob_(job, deadline) {
     const parsed = groups.map((list, gi) => {
       try {
         if (!responses[gi]) throw new Error('sem resposta');
-        return {json: parseJmsResponse_(responses[gi], endpoint)};
+        const json = parseJmsResponse_(responses[gi], endpoint), got = gotOf(json);
+        return {json: json, got: got, empty: !list.some(w => hasScans(got[w]))};
       } catch (e) {
         const m = String(e && e.message || e);
         if (errorKind_(m) === 'QUOTA' || /Sessão do JMS/.test(m)) throw e;
         return {err: m};
       }
     });
-    // V4.14: muitas falhas na mesma rodada = o JMS não dá conta de tantas consultas ao mesmo tempo. Elas voltam para a fila (uma
-    // vez) e as rodadas seguintes vão com a metade; rodada sem falha sobe de novo, até o limite.
-    const falhas = parsed.filter(x => x.err).length;
+    // Muitas recusas ou respostas vazias na mesma rodada = o JMS não dá conta de tantas consultas ao mesmo tempo: as rodadas
+    // seguintes vão com a metade; rodada sem nenhuma sobe de novo, até o limite. Na conferência do fim o ritmo não muda.
+    const falhas = parsed.filter(x => x.err || x.empty).length;
     const sobrecarga = falhas >= Math.max(3, Math.ceil(groups.length * 0.2));
-    if (sobrecarga) { par = Math.max(TRIP_PARALLEL_MIN_, Math.floor(par / 2)); Utilities.sleep(1500); }
-    else if (!falhas && par < parallel) par = Math.min(parallel, Math.ceil(par * 1.25));
+    if (sobrecarga) { if (!review) par = Math.max(TRIP_PARALLEL_MIN_, Math.floor(par / 2)); Utilities.sleep(1500); }
+    else if (!falhas && !review && par < parallel) par = Math.min(parallel, Math.ceil(par * 1.25));
     groups.forEach((list, gi) => {
-      let json = parsed[gi].json;
+      let json = parsed[gi].json, got = parsed[gi].got;
       if (!json) {
-        if (sobrecarga && list.every(w => !requeued[w])) {
+        const single = list.length === 1;
+        // Várias remessas numa consulta (EXPEDICAO_IDS_LOTE ou lote aprendido): a recusa pode ser o tamanho do lote — volta
+        // para a fila uma vez e depois vai sozinha; recusada de novo = lote menor (como até a V4.14).
+        if (!single && sobrecarga && list.every(w => !requeued[w])) {
           lastError = parsed[gi].err.slice(0, 300);
           list.forEach(w => { requeued[w] = 1; todo.push(w); });
           return;
         }
-        // De novo, sozinha (jmsPost_ também testa os cabeçalhos de rota alternativos); recusa de novo = lote menor.
-        try { json = jmsPost_(endpoint, tripPayload_(list), 2); }
+        // Uma remessa recusada com o JMS ocupado: conferência do fim. Senão, de novo sozinha (jmsPost_ também testa os
+        // cabeçalhos de rota alternativos), poucas vezes por execução.
+        if (single && ((sobrecarga && !review) || probes <= 0)) { vazia(list[0], parsed[gi].err); return; }
+        if (single) probes--;
+        try { json = jmsPost_(endpoint, tripPayload_(list), 2); got = gotOf(json); }
         catch (e2) {
           const m2 = String(e2 && e2.message || e2);
           if (errorKind_(m2) !== 'OTHER' || /Sessão do JMS/.test(m2)) throw e2;
-          lastError = m2.slice(0, 300);
-          if (list.length > 1) {
+          if (!single) {
+            lastError = m2.slice(0, 300);
             learnTripBatch_(job.indicator, Math.ceil(list.length / 2), 'o JMS recusou ' + list.length + ' remessas numa consulta');
             batch = tripBatch_();
             list.forEach(w => todo.push(w));
-          } else fail(list[0]);
+          } else vazia(list[0], m2);
           return;
         }
       }
-      const got = {};
-      recordsOf_(json).forEach(item => {
-        const kw = String(item && (item.keyword || item.waybillNo || item.billCode) || '').trim();
-        if (kw) got[kw] = item;
-      });
       const nGot = list.filter(w => got[w]).length;
       if (!nGot && list.length > 1) {
         learnTripBatch_(job.indicator, Math.ceil(list.length / 2), 'consulta com ' + list.length + ' remessas voltou vazia');
@@ -760,8 +794,10 @@ function runTripJob_(job, deadline) {
       }
       list.forEach((w, x) => {
         const item = got[w];
-        if (!item) { if (!(prefix && x >= nGot)) fail(w); return; }
-        const id = pickTripId_(item.details || [], Object.assign({route: info[w].route, time: info[w].time}, ctx));
+        if (prefix && x >= nGot) return;
+        if (!hasScans(item)) { vazia(w, 'o JMS respondeu sem nenhum bipe da remessa'); return; }
+        const id = pickTripId_(item.details, Object.assign({route: info[w].route, time: info[w].time}, ctx));
+        delete map.empty[w];
         if (id === null) { fail(w); return; }
         map.ids[w] = id;
         delete map.miss[w];
@@ -866,6 +902,25 @@ function migrateToV414_() {
   if (getProp_('MIGRATION_V414', '')) return 0;
   // Lote aprendido nas versões antigas (mais de 1 por consulta): com o JMS devolvendo uma só, as outras ficavam "sem bipe".
   if (Number(getProp_('JMS_TRIP_BATCH', '')) > 1) deleteProp_('JMS_TRIP_BATCH');
+  const n = requeueMissingTrips_();
+  setProp_('MIGRATION_V414', new Date().toISOString());
+  if (n) logSync_('INFO', 'sc_dc', '', 'V4.14: ' + n + ' dia(s) na fila para buscar os IDs de viagem que faltavam (1 remessa por consulta, 30 ao mesmo tempo).');
+  return n;
+}
+/**
+ * V4.14.1: na V4.14, resposta vazia ou recusada do JMS (consultas demais ao mesmo tempo) contava como "sem bipe de
+ * carregamento" e a remessa era abandonada — o ID de viagem ficava vazio na tabela. Uma vez: os dias com remessas sem ID
+ * voltam para a fila sem essas marcas (page 1).
+ */
+function migrateToV4141_() {
+  if (getProp_('MIGRATION_V4141', '')) return 0;
+  const n = requeueMissingTrips_();
+  setProp_('MIGRATION_V4141', new Date().toISOString());
+  if (n) logSync_('INFO', 'sc_dc', '', 'V4.14.1: ' + n + ' dia(s) na fila para buscar de novo os IDs de viagem que ficaram vazios.');
+  return n;
+}
+/** Dias com remessas sem ID de viagem (SC→DC: 31 dias; Expedição: os dias com detalhe) de volta na fila, do zero (page 1). */
+function requeueMissingTrips_() {
   let n = 0;
   const to = isoToday_();
   Object.keys(INDICATORS).filter(k => INDICATORS[k].trips).forEach(k => {
@@ -875,8 +930,6 @@ function migrateToV414_() {
       .filter(d => !cov[d] || !(cov[d].total > 0) || cov[d].found < cov[d].total).map(d => ['TRIPS', k, d, 1]);
     if (jobs.length) n += enqueueJobs_(jobs, {reset: true});
   });
-  setProp_('MIGRATION_V414', new Date().toISOString());
-  if (n) logSync_('INFO', 'sc_dc', '', 'V4.14: ' + n + ' dia(s) na fila para buscar os IDs de viagem que faltavam (1 remessa por consulta, 30 ao mesmo tempo).');
   return n;
 }
 /** IDs de viagem consultados por dia (painel): {data: {consultadas, comId, remessas}}. */

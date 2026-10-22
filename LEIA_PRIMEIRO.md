@@ -1,8 +1,30 @@
-# J&T DASHMASTER V4.14 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.14.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.14.1 — ID de viagem de saída na tabela do SC→DC
+**Pedido:** no painel principal, a coluna "ID viagem de saída" da tabela do SC→DC continuava vazia.
+
+### Por que ficava vazia
+- Com muitas consultas ao mesmo tempo, o JMS às vezes **recusa** ou **responde vazio** (diz "concluído", mas sem nenhum bipe). É o mesmo que aparecia no app Pesquisa no Rastreamento.
+- A V4.14 tratava essa resposta vazia como "remessa sem o bipe Encomenda carregada". Depois de 3 vezes, a remessa não era mais consultada, e o ID ficava vazio na tabela, no gráfico e no filtro.
+
+### O que mudou
+- Resposta vazia ou recusada **não conta mais** como "sem bipe". Toda remessa da lista foi bipada na base, então resposta sem nenhum bipe é falha do JMS.
+- Essas remessas são **conferidas de novo no fim, devagar** (5 consultas ao mesmo tempo). Se vierem vazias de novo, ficam para a próxima execução. Só contam como "sem bipe" depois de 5 execuções seguidas vazias.
+- As consultas começam com **10 ao mesmo tempo** (como o app Pesquisa) e sobem até 30 enquanto o JMS responde tudo. Quando aparecem muitas respostas vazias ou recusas, o ritmo cai pela metade.
+- **Uma vez, na primeira execução:** os dias com remessas sem ID voltam para a fila, sem as marcas falsas de "sem bipe". São os últimos 31 dias do SC→DC e os dias com detalhe da Expedição.
+
+### Como instalar
+- **Apps Script:** troque `Config.gs`, `Expedicao.gs` e `Triggers.gs`. Depois **Implantar → Gerenciar implantações → ✏️ → Nova versão**.
+- **Node.js:** extraia o ZIP por cima e reinicie o `iniciar`.
+- Depois de instalar, o selo **"IDs de viagem de saída: X de Y remessas"** mostra o andamento. Para um dia específico, o botão **Atualizar** consulta na hora.
+
+**Testes:** 652 verificações do servidor e 60 do Node.js. Entre elas:
+- JMS que responde vazio quando passa de 6 consultas ao mesmo tempo: todos os IDs saem e nenhuma remessa é marcada "sem bipe" à toa. Na V4.14, o mesmo teste deixava 1.086 remessas sem ID.
+- O painel do SC→DC no navegador (Node.js, com o JMS falso respondendo vazio em 84 de 378 consultas) mostra o ID de viagem de saída na tabela.
 
 ## V4.14 — SC→DC e Expedição: IDs de viagem de saída aparecem
 **Pedido:** no filtro de IDs de viagem do SC→DC quase tudo aparecia como "Sem informação". Seguir as instruções do PDF da Expedição SC→DC: em Indicadores de Negócios > Prazo > Taxa de expedição no prazo SC→HUB, abrir cada remessa de "Qtd expedidos fora do prazo" no Rastreamento do pacote e pegar o número do pedido da linha "A encomenda expressa está [SP GRU] sendo enviada, para…" (Tipo de bipagem "Encomenda carregada", J&T Tracking Code 50). Esse é o **ID de viagem de saída**, que fica no lugar do ID de chegada nos cartões, gráficos e tabela.

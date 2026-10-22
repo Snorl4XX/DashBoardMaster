@@ -2008,6 +2008,18 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const eBz = exact(cBz, dBz[D19], D19);
   check(eBz.trip === 0 && cBz.__state.tripBusyHits > 0,
     'Expedição: JMS ocupado → consultas recusadas voltam para a fila, ritmo menor, IDs exatos', {trip: eBz.trip, hits: cBz.__state.tripBusyHits});
+  // V4.14.1: JMS ocupado que responde "concluído" SEM os bipes (como na Pesquisa no Rastreamento). Antes contava como "sem bipe"
+  // e a remessa era abandonada: o ID ficava vazio na tabela. Agora é conferida de novo no fim, devagar.
+  [['vazio', {tripLimit: 1, tripEmpty: 6}], ['bipes vazios', {tripLimit: 1, tripEmpty: 6, tripEmptyMode: 'details'}]].forEach(([nm, o]) => {
+    const dE = sfDays(), cE = freshCtx(dE, o, SF);
+    cE.queueHistory(D19, D19, true);
+    runAll(cE, 12);
+    const eE = exact(cE, dE[D19], D19), mE = cE.loadTripMap_('send_flow', D19);
+    const falsas = Object.keys(mE.miss).filter(w => mE.ids[w] === undefined && (dE[D19].sf.routes || []).some(r => r.sent.some(x => x.billcode === w && x.trip !== null)));
+    check(eE.trip === 0 && cE.__state.tripEmptyHits > 0 && !falsas.length,
+      'Expedição: JMS respondendo ' + nm + ' com consultas demais → conferidas de novo, IDs exatos, nenhuma marcada "sem bipe" à toa',
+      {trip: eE.trip, hits: cE.__state.tripEmptyHits, falsas: falsas.length});
+  });
 
   // 6. Tempo acabando: grava as unidades prontas e a execução seguinte continua da próxima.
   const dT = sfDays(), cT = freshCtx(dT, null, Object.assign({JMS_PARALLEL: '1', JMS_DETAIL_MAX_OFFSET: '150'}, SF));
@@ -3153,7 +3165,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // Como nas telas do usuário (painel principal depois da separação): estado interno de versões anteriores misturado
   // com as configurações nas Propriedades do script — mais de 50.
   const old = {GOOGLE_PLAN_AUTO: 'gmail', GROUPED_LAYOUT_ARRIVAL_FLOW: 'v1x', GROUPED_LAYOUT_LOT_FLOW: 'v1y', JMS_TRIP_BATCH: '50',
-    MIGRATION_V41: '2026-10-05T00:00:00Z', MIGRATION_V414: '2026-10-21T00:00:00Z', QUEUE_HINT_V37: '{"s":"IDLE","at":1}', STAMP_WRONG_SEND: '{"t":1,"d":{}}', V37_INSTALLED_AT: '2026-09-20T00:00:00Z'};
+    MIGRATION_V41: '2026-10-05T00:00:00Z', MIGRATION_V414: '2026-10-21T00:00:00Z', MIGRATION_V4141: '2026-10-22T00:00:00Z', QUEUE_HINT_V37: '{"s":"IDLE","at":1}', STAMP_WRONG_SEND: '{"t":1,"d":{}}', V37_INSTALLED_AT: '2026-09-20T00:00:00Z'};
   ['ARRIVAL_FLOW', 'SEND_FLOW', 'LOT_FLOW', 'NO_MOVE', 'NO_MOVE_HIST'].forEach(ind => { for (let d = 0; d < 9; d++) old['GROUPED_PROG_' + ind + '_' + ago(d)] = '{"at":"x","units":' + d + '}'; });
   old['GROUPED_PROG_LOT_FLOW_' + ago(40)] = '{"units":1}';
   old['GROUPED_PLANDATA_ARRIVAL_FLOW_' + ago(1)] = '{"v":1}';
@@ -3433,6 +3445,31 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   runAll(c8);
   check(c8.tripCoverage_('sc_dc', Y, Y)[Y].found === Object.values(want).filter(Boolean).length,
     'depois da migração V4.14: IDs de saída de volta', c8.tripCoverage_('sc_dc', Y, Y)[Y]);
+  // Migração V4.14.1: as remessas abandonadas pela V4.14 (resposta vazia do JMS contada como "sem bipe") voltam, uma vez.
+  const map141 = c8.loadTripMap_('sc_dc', Y);
+  Object.keys(map141.ids).forEach(w => { delete map141.ids[w]; map141.miss[w] = 3; });
+  c8.saveTripMap_('sc_dc', Y, map141, days8[Y].dc.length);
+  delete c8.__state.props.MIGRATION_V4141;
+  const q4141 = c8.migrateToV4141_();
+  check(q4141 >= 1 && c8.pendingJobs_().some(j => j.type === 'TRIPS' && j.indicator === 'sc_dc' && j.date === Y && j.page === 1) && c8.migrateToV4141_() === 0,
+    'migração V4.14.1: dias com remessas sem ID voltam para a fila uma vez, sem as marcas de "sem bipe"', q4141);
+  runAll(c8);
+  check(c8.tripCoverage_('sc_dc', Y, Y)[Y].found === Object.values(want).filter(Boolean).length &&
+    c8.getArchivedRange_('sc_dc', Y, Y).rows.every(r => want[r.shipment] === tid(r)),
+    'depois da migração V4.14.1: IDs de saída de volta na tabela', c8.tripCoverage_('sc_dc', Y, Y)[Y]);
+  // V4.14.1 (SC→DC, painel principal): JMS respondendo vazio com consultas demais → os IDs de saída chegam na tabela do painel.
+  const daysE = {[Y]: makeDay(Y, 62)};
+  const cDE = freshCtx(daysE, {tripLimit: 1, tripEmpty: 5, tripEmptyMode: 'details'}, {DATA_START_DATE: Y, MODO_ATUALIZACAO: 'diario'});
+  cDE.refreshNow('sc_dc', Y, Y);
+  cDE.refreshDetailsNow('sc_dc', Y, Y);
+  const wantE = {};
+  daysE[Y].dc.forEach((x, i) => { wantE[x.waybillNo] = dcDepartureTrip(i) || ''; });
+  const dashE = cDE.getDashboardData('sc_dc', {from: Y, to: Y});
+  const rowsE = C.decodeDataset(dashE.dataset);
+  check(cDE.__state.tripEmptyHits > 0 && rowsE.length === daysE[Y].dc.length && rowsE.every(r => (wantE[r.shipment] || '') === (r.tripId === 'N/A' ? '' : String(r.tripId || ''))) &&
+    rowsE.some(r => r.tripId && r.tripId !== 'N/A'),
+    'SC→DC com JMS respondendo vazio: tabela do painel com o ID de viagem de saída de cada remessa',
+    {hits: cDE.__state.tripEmptyHits, rows: rowsE.length, com: rowsE.filter(r => r.tripId && r.tripId !== 'N/A').length});
 }
 
 // ---------- V4.7: Fluxo de Lotes retirado; Atualizar atualiza TODOS os painéis de uma vez ----------
