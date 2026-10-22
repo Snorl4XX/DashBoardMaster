@@ -1,0 +1,51 @@
+JMS SEGMENTOS NO APPS SCRIPT (Planilha Google)
+==============================================
+
+Projeto separado: não cole no projeto do DashMaster nem no da Pesquisa.
+
+O que faz
+---------
+Pega as remessas de uma aba, consulta cada uma no JMS (Informação básica >
+3 Segmentos) e escreve só os 2 códigos, com a remessa de cada um:
+- aba "Segmentos": Remessa | Código de primeiro segmento | Código de dois
+  segmentos | Situação
+- aba "Resumo Segmentos": quantas remessas em cada código (2 tabelas) e
+  2 gráficos.
+O 3º código (campo "3 Segmentos") fica de fora.
+
+Instalar (uma vez)
+------------------
+1. Abra a Planilha Google que tem as remessas.
+2. Extensões > Apps Script.
+3. Apague o que estiver em Código.gs, cole o arquivo Codigo.gs inteiro e
+   clique em Salvar.
+4. Volte para a planilha e aperte F5. Aparece o menu "JMS Segmentos".
+5. Menu JMS Segmentos > Colocar AuthToken do JMS. Na 1ª vez o Google pede
+   autorização: Continuar > escolha sua conta > Avançado > Acessar > Permitir.
+   Depois clique de novo no menu e cole o AuthToken.
+6. Abra a aba das remessas > menu JMS Segmentos > Testar conexão com o JMS.
+
+Usar
+----
+1. Abra a aba das remessas (com o cabeçalho "Remessa" em cima da coluna; sem
+   cabeçalho, clique numa célula da coluna das remessas).
+2. Menu JMS Segmentos > Pesquisar remessas desta aba > Sim.
+3. Acompanhe na aba "Segmentos" (coluna F, "Andamento da pesquisa").
+   Muitas remessas: cada execução roda uns 4,5 minutos e a pesquisa continua
+   sozinha 1 minuto depois, até acabar (pode fechar a planilha).
+4. No fim: tabela na aba "Segmentos" e gráficos na aba "Resumo Segmentos".
+
+Se der problema
+---------------
+- "O JMS recusou o AuthToken": pegue um AuthToken novo no JMS > menu Colocar
+  AuthToken do JMS > menu Continuar. O que já veio fica guardado.
+- Sobrou remessa com erro ou "Não encontrada": menu Continuar / consultar as
+  que faltaram.
+- Parar no meio: menu Parar. Para seguir depois: menu Continuar.
+- Conta Gmail: o Google deixa cerca de 20 mil consultas por dia. Se acabar, a
+  pesquisa para e avisa; no dia seguinte use o menu Continuar.
+
+Teste (para quem mexe no código)
+--------------------------------
+node jms_segmentos/appscript/teste/teste_appscript.js
+(Google e JMS de mentira, tudo fictício.)
