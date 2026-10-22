@@ -1,72 +1,52 @@
-APP JMS - CÓDIGOS DOS SEGMENTOS (versão corrigida)
-==================================================
+APP JMS - CÓDIGOS DOS SEGMENTOS
+================================
 
 O que o app faz
 ---------------
 1. Abre uma janela Chromium local para entrar no JMS normalmente.
 2. Captura uma consulta de teste feita pelo usuário em Operação > Consulta do
    pacote > Rastreamento do pacote.
-3. Carrega uma planilha, deixa escolher a aba e a coluna com as remessas.
+3. No site JMS Segmentos, permite carregar uma planilha, escolher uma aba e a
+   coluna com as remessas. Também aceita colar remessas manualmente.
 4. Consulta cada remessa no JMS usando a sessão autenticada local.
 5. Em Informação Básica > 3 Segmentos, retorna somente:
    - Código de primeiro segmento
    - Código de dois segmentos
    O valor do terceiro segmento não é incluído.
-6. Mostra os 2 códigos em gráficos e tabelas, com a remessa de cada um.
-7. Baixa uma planilha Excel: aba Resultado (remessa e os 2 códigos), aba
-   Resumo (quantas remessas em cada código, com gráficos) e aba Sem código
-   (remessas que ficaram sem código e o motivo).
-
-O que estava errado (e foi corrigido)
--------------------------------------
-- O agente nem abria o Chromium: o código usava o Playwright "síncrono" dentro
-  do servidor, e isso dá o erro "Playwright Sync API inside the asyncio loop".
-  Sem navegador não tinha captura, e sem captura não vinha nenhum dado.
-  Agora o navegador roda separado do servidor.
-- A consulta de teste só era vista na primeira aba e às vezes nem era
-  percebida. Agora vale qualquer aba do Chromium.
-- As remessas eram consultadas uma por vez, sem nova tentativa. Com muitas
-  remessas o JMS fica cheio, responde vazio ou recusa, e a remessa ficava sem
-  dados para sempre (e a recusa aparecia como "sessão expirada").
-  Agora são 8 consultas ao mesmo tempo; o que falha é consultado de novo
-  (até 4 vezes) e, no fim de cada bloco, o que ainda faltou é conferido de
-  novo, devagar. "Não encontrada no JMS" só depois de todas as tentativas.
-- Se a sessão do JMS vencer no meio, a pesquisa para, guarda o que já veio e
-  mostra o botão "Consultar as que faltaram" (entre de novo no JMS,
-  consulte 1 remessa e clique no botão).
-- A página do app mostrava colunas que não existiam (tabela vazia). Foi
-  refeita: http://127.0.0.1:8765 agora é o app completo.
+6. Divide listas em blocos de até 1.000 remessas e consolida os resultados.
+7. Baixa uma planilha simples com uma aba e três colunas: remessa e os códigos do primeiro e do segundo segmento.
 
 Como instalar e abrir no Windows
 -------------------------------
 1. Extraia o ZIP para uma pasta do computador.
-2. Instale Python 3.10 ou superior, marcando "Add Python to PATH".
+2. Instale Python 3.10 ou superior, marcando “Add Python to PATH”.
 3. Execute instalar.bat. Na primeira instalação é necessária internet para
    instalar os pacotes e o Chromium.
-4. Após a instalação, execute iniciar.bat. Ele abre http://127.0.0.1:8765.
+4. Após a instalação, execute iniciar.bat.
+5. O agente local fica disponível em http://127.0.0.1:8765.
 
-Como usar
----------
-1. Clique em "Abrir sessão do JMS", faça login no Chromium que abrir e
-   consulte 1 remessa em Operação > Consulta do pacote > Rastreamento do
-   pacote. Espere aparecer "Consulta capturada".
-2. Escolha a planilha (.xlsx, .xlsm, .csv ou .tsv, até 25 MB). O app escolhe a
-   aba e a coluna "Remessa" sozinho; troque se precisar.
-3. Clique em "Consultar remessas". A barra mostra quantas foram e quanto falta.
-4. Ao terminar, veja os gráficos e as tabelas e clique em
-   "Baixar planilha Excel".
-5. Se sobrar remessa com erro, clique em "Consultar as que faltaram".
+Como usar com o site JMS Segmentos
+---------------------------------
+1. Mantenha o agente local iniciado e abra o site privado JMS Segmentos.
+2. Clique em “Testar conexão” e permita o acesso local no navegador, se pedido.
+3. Clique em “Abrir sessão JMS”, faça login e consulte uma remessa de teste no
+   menu Operação > Consulta do pacote > Rastreamento do pacote.
+4. No site, carregue um arquivo .xlsx, .xlsm, .csv ou .tsv (até 25 MB).
+5. Escolha a aba e a coluna das remessas. Se preferir, cole a lista no campo
+   manual. Clique em “Pesquisar remessas”.
+6. Ao terminar, clique em “Baixar planilha Excel”.
 
 Privacidade e limites
 ---------------------
 - A autenticação e o perfil do Chromium ficam neste computador. Não cole
-  senha, cookie ou token em lugar nenhum.
-- A planilha é lida só pelo agente local em 127.0.0.1. Nada vai para outro
-  servidor.
-- O agente aceita até 1.000 remessas por chamada; a página manda em blocos e
-  junta tudo. Remessas repetidas contam uma vez.
-- O site externo JMS Segmentos (se você usa) continua funcionando com este
-  agente, mas o código dele não veio no ZIP. Use a página
-  http://127.0.0.1:8765, que é a versão corrigida.
+  senha, cookie ou token no site.
+- A planilha é enviada somente ao agente local em 127.0.0.1 para leitura; o
+  arquivo, as remessas e os resultados não são enviados ao servidor do site.
+- O agente consulta no máximo 1.000 remessas por bloco e consolida a pesquisa.
+  Remessas duplicadas são removidas.
+- A planilha importada é mantida apenas em memória local do agente enquanto ele
+  estiver aberto. O app não mantém histórico de consultas.
+- Se a sessão do JMS expirar, entre novamente no Chromium e faça outra consulta
+  de teste para capturar a chamada atualizada.
 - Se o menu ou endpoint do JMS mudar, o agente precisará de ajuste. Os códigos
   vêm de data.details.terminalDispatchCode na resposta de getOrderDetail.
