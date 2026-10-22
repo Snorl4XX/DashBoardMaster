@@ -291,6 +291,110 @@
     });
   }
 
-  return {buscarBipes: buscarBipes, pesquisar: pesquisar, ROUTE_VARIANTS: ROUTE_VARIANTS, POR_CHAMADA: POR_CHAMADA, CHAMADAS: CHAMADAS, PARALELO: PARALELO,
-    PARALELO_MAX: PARALELO_MAX};
+  /**
+   * V1.7 — só os códigos de segmento (Informação básica, getOrderDetail): uma consulta por remessa, com o mesmo motor da pesquisa
+   * (várias chamadas ao mesmo tempo, ritmo que se ajusta, falha passageira volta para a fila, recusa tentada de novo). Nenhuma
+   * falha para a pesquisa inteira (só o AuthToken recusado). No fim, as que vieram sem código ou recusadas são conferidas de novo,
+   * devagar: o JMS ocupado às vezes responde sem os dados.
+   * o: {porChamada, chamadas, paralelo, pais, headers, espera, revisar (false = sem conferência), onParalelo(n), onProgresso(feitas,
+   * total), parar()}.
+   * → {segs: remessa → {s1, s2} (com código) | {s1: '', s2: '', sem: true} (o JMS respondeu sem código) | null (recusada), erro,
+   *    consultas, revistas, achadasRevisao, paralelo}. Remessas fora de segs: a pesquisa parou antes.
+   */
+  function buscarSegmentos(api, list, o) {
+    o = o || {};
+    var estado = {paralelo: Math.max(PARALELO_MIN, Math.min(PARALELO_MAX, Math.floor(o.paralelo || PARALELO)))};
+    var porChamada = Math.max(1, o.porChamada || POR_CHAMADA), nChamadas = Math.max(1, Math.floor(o.chamadas || CHAMADAS));
+    var segs = {}, fila = list.slice(), tent = {}, rec = {}, erro = '', consultas = 0, revisando = false;
+    var pedido = function (w) { return {url: R.ORDER_URL, body: R.orderPayload(w, o.pais), headers: o.headers || {}}; };
+    var feitas = function () { return Object.keys(segs).length; };
+    var chamada = function () {
+      var lote = fila.splice(0, porChamada);
+      if (!lote.length) return null;
+      var passageiras = 0, devagar = false, auth = null;
+      consultas += lote.length;
+      return consultar(api, lote.map(pedido), o.espera, estado.paralelo).then(function (resps) {
+        lote.forEach(function (w, i) {
+          var json;
+          try { json = ler(resps[i]); }
+          catch (e) {
+            if (e.kind === 'auth') { auth = auth || e; fila.push(w); return; }
+            if (e.kind === 'temp' || e.kind === 'refused') passageiras++;
+            if (e.limite) devagar = true;
+            erro = e.message;
+            // Falha passageira: de novo (até TENTATIVAS); recusa: de novo (até RECUSAS) — o JMS sobrecarregado também recusa.
+            if (e.kind === 'temp' ? (tent[w] = (tent[w] || 0) + 1) < TENTATIVAS : (rec[w] = (rec[w] || 0) + 1) < RECUSAS) fila.push(w);
+            else segs[w] = null;
+            return;
+          }
+          var s = R.segmentosDe(json);
+          segs[w] = s.s1 || s.s2 ? s : {s1: '', s2: '', sem: true};
+        });
+        if (auth) throw auth;
+        var antes = estado.paralelo, pausa = 0;
+        if (devagar || (passageiras >= 5 && passageiras > lote.length * 0.05)) { estado.paralelo = Math.max(PARALELO_MIN, Math.floor(antes / 2)); pausa = o.espera === undefined ? 3000 : o.espera; }
+        else if (!passageiras && !revisando) estado.paralelo = Math.min(PARALELO_MAX, Math.ceil(antes * 1.25));
+        if (estado.paralelo !== antes && o.onParalelo) o.onParalelo(estado.paralelo);
+        return pausa ? wait(pausa) : null;
+      });
+    };
+    var rodar = function (limite) {
+      return new Promise(function (ok, ko) {
+        var ativas = 0, falhou = false;
+        var puxar = function () {
+          if (falhou) return;
+          while (ativas < limite && !(o.parar && o.parar())) {
+            var p = chamada();
+            if (!p) break;
+            ativas++;
+            p.then(function () { ativas--; if (o.onProgresso) o.onProgresso(feitas(), list.length); puxar(); }, function (e) { falhou = true; ko(e); });
+          }
+          if (!ativas) ok();
+        };
+        puxar();
+      });
+    };
+    var revistas = 0, achadasRevisao = 0;
+    return rodar(nChamadas).then(function () {
+      if ((o.parar && o.parar()) || o.revisar === false) return;
+      // Conferência: sem código ou recusadas voltam, devagar.
+      var rever = list.filter(function (w) { return segs[w] === null || (segs[w] && segs[w].sem); });
+      if (!rever.length) return;
+      revistas = rever.length;
+      rever.forEach(function (w) { delete segs[w]; tent[w] = 0; rec[w] = 0; });
+      fila = rever.slice();
+      var ritmo = estado.paralelo;
+      estado.paralelo = Math.min(ritmo, REVISAO.paralelo);
+      revisando = true;
+      return rodar(REVISAO.chamadas).then(function () {
+        revisando = false;
+        achadasRevisao = rever.filter(function (w) { return segs[w] && !segs[w].sem; }).length;
+        estado.paralelo = achadasRevisao > rever.length * 0.2 ? Math.max(PARALELO_MIN, Math.floor(ritmo / 2)) : ritmo;
+        if (estado.paralelo !== ritmo && o.onParalelo) o.onParalelo(estado.paralelo);
+      });
+    }).then(function () {
+      return {segs: segs, erro: erro, consultas: consultas, revistas: revistas, achadasRevisao: achadasRevisao, paralelo: estado.paralelo};
+    });
+  }
+  /**
+   * Pesquisa só dos códigos de segmento. → {results: [{w, seg: {s1, s2} | null, sem (o JMS não tem o código), err (recusada)}], faltam,
+   * erro, consultas, revistas, achadasRevisao, comCodigo, semCodigo, recusadas, paralelo} (results na ordem colada).
+   */
+  function pesquisarSegmentos(api, list, o) {
+    if (!list.length) return Promise.reject(new Error('Cole pelo menos uma remessa.'));
+    return buscarSegmentos(api, list, o).then(function (b) {
+      var results = [], faltam = [];
+      list.forEach(function (w) {
+        var s = b.segs[w];
+        if (s === undefined) { faltam.push(w); return; }
+        results.push(s === null ? {w: w, seg: null, err: true} : s.sem ? {w: w, seg: null, sem: true} : {w: w, seg: {s1: s.s1, s2: s.s2}});
+      });
+      return {results: results, faltam: faltam, erro: b.erro, consultas: b.consultas, revistas: b.revistas, achadasRevisao: b.achadasRevisao, paralelo: b.paralelo,
+        comCodigo: results.filter(function (r) { return r.seg; }).length, semCodigo: results.filter(function (r) { return r.sem; }).length,
+        recusadas: results.filter(function (r) { return r.err; }).length};
+    });
+  }
+
+  return {buscarBipes: buscarBipes, pesquisar: pesquisar, buscarSegmentos: buscarSegmentos, pesquisarSegmentos: pesquisarSegmentos, ROUTE_VARIANTS: ROUTE_VARIANTS,
+    POR_CHAMADA: POR_CHAMADA, CHAMADAS: CHAMADAS, PARALELO: PARALELO, PARALELO_MAX: PARALELO_MAX};
 });

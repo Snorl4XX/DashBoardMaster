@@ -56,9 +56,28 @@
     </section>
 
     <!-- Pesquisa -->
-    <section class="card tk-input" aria-label="Pesquisa">
+    <section class="card tk-input" id="inputCard" aria-label="Pesquisa">
+      <div class="tk-mode">
+        <span class="label" id="modeLabel" data-i18n="modeLabel">O que pesquisar</span>
+        <div class="seg" role="tablist" aria-labelledby="modeLabel" id="modeSeg">
+          <button type="button" role="tab" data-modo="texto" aria-selected="true" data-i18n="modeText">Texto no rastreamento</button>
+          <button type="button" role="tab" data-modo="seg" aria-selected="false" data-i18n="modeSeg">Só os códigos de segmento</button>
+        </div>
+      </div>
       <div>
         <label class="label" for="waybills" data-i18n="waybills">2 · Remessas (uma por linha)</label>
+        <div class="tk-import">
+          <label class="btn btn-light" for="fileInput">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V9m0 0l-4 4m4-4l4 4M5 4h14"/></svg><span data-i18n="import">Importar de planilha (.xlsx ou .csv)</span>
+          </label>
+          <input type="file" id="fileInput" class="sr-file" accept=".xlsx,.csv,.tsv,.txt">
+          <div class="tk-import-pick hidden" id="importPick">
+            <select class="input" id="sheetSel" data-i18n-aria="importSheet" aria-label="Aba"></select>
+            <select class="input" id="colSel" data-i18n-aria="importCol" aria-label="Coluna"></select>
+            <button type="button" class="btn btn-red" id="importUse"></button>
+          </div>
+          <div class="tk-count" id="importInfo" aria-live="polite"></div>
+        </div>
         <textarea class="input" id="waybills" spellcheck="false" autocomplete="off" data-i18n-placeholder="waybillsPh" placeholder="Cole aqui as remessas, uma por linha"></textarea>
         <div class="tk-count" id="wbCount" aria-live="polite"></div>
       </div>
@@ -73,7 +92,8 @@
           <h3 data-i18n="block2Q">Em que turno aconteceu o primeiro bipe com esta linha?</h3>
           <input type="text" class="input" id="pat2" autocomplete="off" aria-label="Texto padrão do bloco 2">
         </div>
-        <label class="check"><input type="checkbox" id="withSeg" checked><span data-i18n="withSeg">Trazer os códigos de segmento (Informação básica). Desligado, a pesquisa fica cerca de 2× mais rápida.</span></label>
+        <div class="tk-seginfo" data-i18n="segInfo">Informação básica › 3 Segmentos: traz o Código de primeiro segmento e o Código de dois segmentos de cada remessa. O valor de "3 Segmentos" fica de fora.</div>
+        <label class="check tk-withseg"><input type="checkbox" id="withSeg" checked><span data-i18n="withSeg">Trazer os códigos de segmento (Informação básica). Desligado, a pesquisa fica cerca de 2× mais rápida.</span></label>
         <div class="tk-hint" data-i18n="hint">Copie o texto da coluna "Descrição da etapa de bipagem". Maiúsculas, acentos e espaços dentro dos [ ] não importam; * vale qualquer trecho (ex.: "está [*] sendo enviada"). Deixe um bloco vazio para não usar.</div>
         <div class="tk-actions">
           <button type="button" class="btn btn-red" id="runBtn">

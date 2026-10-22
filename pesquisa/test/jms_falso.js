@@ -8,7 +8,8 @@
  * Opções: reject (recusa acima de N remessas), silent (vazio acima de N), trunc (só as N primeiras — trunc: 1 = como a tela do
  *   JMS, uma remessa por consulta), token (AuthToken aceito), rota (Routename exigido no keywordList), semOrder (Informação básica
  *   recusada), ocupado (acima de N consultas ao mesmo tempo, o JMS "não dá conta"), ocupadoModo ('vazio' = responde sem dados;
- *   senão recusa com "sistema ocupado"), recusa (remessas sempre recusadas), atraso (ms).
+ *   senão recusa com "sistema ocupado"), ocupadoOrder (o mesmo na Informação básica), semCodigo (remessas sem o código de três
+ *   segmentos), recusa (remessas sempre recusadas), atraso (ms).
  */
 const http = require('http');
 
@@ -70,6 +71,18 @@ function criar(opts) {
       }
       if (/order\/getOrderDetail$/.test(rota)) {
         if (opts.semOrder) { json({code: 500, msg: 'consulta não permitida', fail: true}); return; }
+        // V1.7: Informação básica com o JMS ocupado (acima de N consultas ao mesmo tempo): responde sem os dados ou recusa.
+        if (opts.ocupadoOrder && estado.agora > opts.ocupadoOrder) {
+          estado.ocupadasOrder = (estado.ocupadasOrder || 0) + 1;
+          if (opts.ocupadoModo === 'vazio') json({code: 1, msg: 'ok', succ: true, data: null});
+          else json({code: 500, msg: 'Sistema ocupado (fictício)', fail: true});
+          return;
+        }
+        // Remessas que de fato não têm o código de três segmentos no JMS.
+        if (opts.semCodigo && opts.semCodigo.indexOf(body.waybillNo) >= 0) {
+          json({code: 1, msg: '1:Solicitação concluída', succ: true, data: {waybillNo: body.waybillNo, details: {id: 'FIC-ID', terminalDispatchCode: null}}});
+          return;
+        }
         if (conhecidas[body.waybillNo] === undefined) { json({code: 500, msg: 'pedido não encontrado', fail: true}); return; }
         json({code: 1, msg: '1:Solicitação concluída', succ: true, fail: false, data: {waybillNo: body.waybillNo, details: {id: 'FIC-ID', waybillId: body.waybillNo,
           terminalDispatchCode: segmento(conhecidas[body.waybillNo]), receiverName: 'CLIENTE FICTICIO', receiverMobile: '00000000000', senderName: 'LOJA FICTICIA'}}});

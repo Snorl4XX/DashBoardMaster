@@ -1,4 +1,4 @@
-# J&T · Pesquisa no Rastreamento — V1.6
+# J&T · Pesquisa no Rastreamento — V1.7
 
 App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto da coluna "Descrição da etapa de bipagem" (JMS › Operação › Consulta do pacote › Rastreamento do pacote). O app:
 
@@ -7,7 +7,25 @@ App de pesquisa, **separado do DashMaster**. Você cola as remessas e um texto d
 - traz os **códigos de segmento** de cada remessa (bloco "3 Segmentos" da Informação básica);
 - baixa uma **planilha J&T (.xlsx)** com gráficos.
 
+E tem o modo **"Só os códigos de segmento"**: só o Código de primeiro segmento e o Código de dois segmentos de cada remessa, sem texto nenhum.
+
 *Feito por Caike Oliveira.*
+
+**Novo na V1.7 — modo "Só os códigos de segmento":**
+- No topo do quadro 2, em **O que pesquisar**, escolha **Só os códigos de segmento**. Os blocos de texto somem: o app consulta só a Informação básica (bloco "3 Segmentos") de cada remessa.
+- **Importar de planilha (.xlsx ou .csv):** escolha o arquivo do Excel. O app acha sozinho a aba e a coluna das remessas (cabeçalho "Remessa", "Waybill", "Nº do pedido"… ou a coluna com mais números de remessa). Você pode trocar a aba e a coluna. Depois clique em **Usar estas remessas**.
+- **Resultado:**
+  - cartões: pesquisadas, com os códigos, sem código no JMS e consulta recusada;
+  - um gráfico para o Código de primeiro segmento e outro para o Código de dois segmentos;
+  - a tabela Remessa · Código de primeiro segmento · Código de dois segmentos · Situação, com as abas Todas / Com código / Sem código, busca e "Copiar remessas".
+- **Planilha (.xlsx):** aba **Resumo** com a contagem de cada código e os gráficos do Excel; aba **Segmentos** com uma linha por remessa e filtro.
+- **Feito para muitas remessas:** o mesmo motor da pesquisa de texto, sem nada que pare tudo no meio:
+  - várias chamadas ao mesmo tempo, com um ritmo que se ajusta;
+  - uma falha passageira volta para a fila, e uma recusa é tentada de novo;
+  - **no fim, as que vieram sem código ou recusadas são conferidas de novo, devagar** (o JMS ocupado às vezes responde sem os dados);
+  - a planilha sempre baixa. A remessa sem código aparece como **"Sem código no JMS"**, e a recusada como **"Consulta recusada pelo JMS"**, com o botão **Tentar de novo essas remessas**.
+  - Só o AuthToken recusado para a pesquisa, com o motivo. O que já veio fica na tela, e o botão **Continuar** segue de onde parou.
+- No teste (JMS simulado que responde vazio quando recebe consultas demais), 1.500 remessas saíram todas com o código certo. Sem a conferência do fim, 63 teriam ficado "sem código" à toa.
 
 **Por que demora:** o JMS responde **uma remessa por consulta**, e cada remessa precisa de **2 consultas** (rastreamento + Informação básica). 5000 remessas = 10 mil consultas. No Apps Script, cada pacote de consultas ainda espera a consulta mais lenta dele.
 
@@ -120,6 +138,8 @@ No editor, **testarConexao** mostra no Registro de execução:
 3. **Bloco 1 · Tem ou não tem:** o texto. Exemplo: `A encomenda expressa está [SP GRU] sendo enviada`.
 4. **Bloco 2 · Turno que mais ocorreu:** outro texto. Exemplo: `O expresso chegou [SP GRU] A parada anterior foi`.
 5. Clique em **Pesquisar no JMS**. Depois que terminar, clique em **Baixar planilha (.xlsx)**.
+
+Só os códigos de segmento: em **O que pesquisar**, escolha **Só os códigos de segmento**, importe a planilha (ou cole as remessas) e clique em **Pesquisar no JMS**.
 
 Regras:
 - Vale **sempre o primeiro bipe** (o mais antigo) que tem o texto.

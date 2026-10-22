@@ -23,7 +23,7 @@ const path = require('path');
 const os = require('os');
 const zlib = require('zlib');
 
-const VERSAO = '1.6.0';
+const VERSAO = '1.7.0';
 const DEFAULTS = {
   porta: 3200,         // 3200: não briga com o DashMaster (3000) nem com o painel do sorter (3100)
   host: '0.0.0.0',     // 0.0.0.0 = abre para a rede (todos usam o AuthToken deste computador); 127.0.0.1 = só neste computador

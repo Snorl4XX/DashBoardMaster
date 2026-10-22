@@ -233,6 +233,65 @@ function request(porta, method, p, body, headers) {
   check(semFoto.sheets[1].rows[3][10].v === 'Tem imagem no JMS' && semFoto.sheets[1].rows[4][10].v === 'NÃO TEM IMAGEM!' && semFoto.sheets[1].rows[3][2].v === '',
     'coluna Imagem: "Tem imagem no JMS" ou "NÃO TEM IMAGEM!"; sem segmentos, célula vazia');
 
+  // ---------- 3b. V1.7: só os códigos de segmento ----------
+  // Muitas remessas, JMS que responde sem os dados (ou recusa) com consultas demais, remessas que de fato não têm o código e
+  // uma que não existe. O app que travava: 25 por chamada, uma de cada vez, parava tudo na 1ª falha e não baixava com 1 sem código.
+  const segEsperado = w => R.segmentosDe({data: {details: {terminalDispatchCode: segmento(Number(w.slice(3)))}}});
+  for (const modo of ['vazio', 'recusa']) {
+    const jSeg = await criar({quantas: 3000, ocupadoOrder: 25, ocupadoModo: modo, atraso: 5, semCodigo: ['FIC000000010', 'FIC000000020']});
+    const wsSeg = WS(1500).concat(['NAOEXISTE0001']), progSeg = [];
+    const rSeg = await P.pesquisarSegmentos(apiFalsa(jSeg.porta), wsSeg, {espera: 0, onProgresso: a => progSeg.push(a)});
+    await jSeg.fechar();
+    const certos = rSeg.results.filter(r => r.seg && r.seg.s1 === segEsperado(r.w).s1 && r.seg.s2 === segEsperado(r.w).s2).length;
+    check(rSeg.results.length === 1501 && !rSeg.faltam.length && certos === 1498 && rSeg.semCodigo === 2 && rSeg.recusadas === 1 &&
+      rSeg.results.filter(r => r.sem).map(r => r.w).join() === 'FIC000000010,FIC000000020' && rSeg.results[1500].err && jSeg.estado.ocupadasOrder > 0 &&
+      rSeg.results.map(r => r.w).join() === wsSeg.join() && progSeg.length > 3,
+      'só os códigos de segmento: 1.500 remessas com o JMS ocupado (' + modo + ') — todas com o código certo; sem código e inexistente separadas',
+      {certos, sem: rSeg.semCodigo, rec: rSeg.recusadas, ocupadas: jSeg.estado.ocupadasOrder, revistas: rSeg.revistas});
+  }
+  // AuthToken recusado: para (não marca tudo como "sem código") e diz o motivo.
+  const jSegT = await criar({token: 'OUTRO-TOKEN'});
+  let segAuth = null;
+  try { await P.pesquisarSegmentos(apiFalsa(jSegT.porta), WS(30), {espera: 0}); } catch (e) { segAuth = e; }
+  await jSegT.fechar();
+  check(segAuth && segAuth.kind === 'auth' && /AuthToken/.test(segAuth.message), 'só segmentos: AuthToken recusado para a pesquisa com o motivo', segAuth && segAuth.message);
+  // Planilha do modo: Resumo (situação, contagem dos dois códigos, 2 gráficos) + aba Segmentos.
+  const rSeg2 = await P.pesquisarSegmentos(api, WS(40).concat(['NAOEXISTE0002']), {espera: 0, revisar: false});
+  const bookSeg = X.segmentosBook({results: rSeg2.results, at: new Date(2026, 9, 22, 10, 0)});
+  const zSeg = unzip(await X.build(bookSeg)), nSeg = Object.keys(zSeg), abaSeg = bookSeg.sheets[1];
+  check(bookSeg.sheets.map(s => s.name).join('|') === 'Resumo|Segmentos' && abaSeg.rows.length === 3 + 41 && abaSeg.rows[3][1].v === 'FIC000000000' &&
+    abaSeg.rows[3][2].v === 'XA' && abaSeg.rows[3][3].v === '101-01' && /recusada/.test(abaSeg.rows[43][4].v) && abaSeg.filter === 'A3:E3' &&
+    nSeg.filter(n => /^xl\/charts\/chart\d+\.xml$/.test(n)).length === 2 && nSeg.filter(n => /\.(xml|rels)$/.test(n)).every(n => wellFormed(zSeg[n].toString())),
+    'planilha dos segmentos: Resumo com 2 gráficos do Excel e aba com remessa, 1º e 2º segmento e situação', abaSeg.rows[2].map(c => c.v));
+  // Remessas de uma aba do Excel: textos compartilhados, texto com formatação, número gravado como 8,8E+14 e cabeçalho "Remessa".
+  const sx = s => '<si>' + s + '</si>';
+  const enc = new TextEncoder(), arqs = [
+    {name: '[Content_Types].xml', text: '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>'},
+    {name: 'xl/workbook.xml', text: '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Capa" sheetId="1" r:id="rId1"/>' +
+      '<sheet name="Base &amp; remessas" sheetId="2" r:id="rId2"/></sheets></workbook>'},
+    {name: 'xl/_rels/workbook.xml.rels', text: '<Relationships><Relationship Id="rId1" Type="ws" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="ws" Target="/xl/worksheets/sheet2.xml"/></Relationships>'},
+    {name: 'xl/sharedStrings.xml', text: '<sst>' + sx('<t>Data</t>') + sx('<t>Remessa</t>') + sx('<r><t>FIC0000</t></r><r><t xml:space="preserve">00001</t></r>') + sx('<t>Obs &amp; nota</t>') + '</sst>'},
+    {name: 'xl/worksheets/sheet1.xml', text: '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Relatório</t></is></c></row></sheetData></worksheet>'},
+    {name: 'xl/worksheets/sheet2.xml', text: '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="D1" t="s"><v>3</v></c></row>' +
+      '<row r="2"><c r="A2"><v>46316</v></c><c r="B2" t="s"><v>2</v></c></row>' +
+      '<row r="3"><c r="A3"><v>46316</v></c><c r="B3"><v>8.88002517578525E+14</v></c><c r="C3"/></row>' +
+      '<row r="5"><c r="B5" t="inlineStr"><is><t>FIC000000002</t></is></c></row></sheetData></worksheet>'}
+  ].map(f => ({name: f.name, bytes: enc.encode(f.text)}));
+  const abasX = await X.lerPlanilha(X.zip(arqs));
+  const achX = X.acharColuna(abasX[1].linhas), colX = X.coluna(abasX[1].linhas, achX.col, achX.cab);
+  check(abasX.map(a => a.nome).join('|') === 'Capa|Base & remessas' && achX.col === 1 && achX.cab === 0 && colX.join() === 'FIC000000001,888002517578525,FIC000000002' &&
+    abasX[1].linhas[0][3] === 'Obs & nota' && abasX[0].linhas[0][0] === 'Relatório',
+    'importar de uma aba do Excel: acha a aba e a coluna "Remessa"; número 8,8E+14 vira a remessa inteira', {achX, colX});
+  const csvX = X.lerTexto('﻿data;remessa;obs\r\n2026-10-01;"FIC000000003";"a; b"\r\n2026-10-01;FIC000000004;\r\n', 'lista.csv');
+  const achC = X.acharColuna(csvX[0].linhas);
+  check(achC.col === 1 && X.coluna(csvX[0].linhas, achC.col, achC.cab).join() === 'FIC000000003,FIC000000004' && csvX[0].linhas[1][2] === 'a; b',
+    'importar de CSV (separador ;, aspas): coluna das remessas', csvX[0].linhas);
+  const semCab = X.acharColuna([['x', 'FIC000000005'], ['y', 'FIC000000006'], ['z', '']]);
+  check(semCab.col === 1 && semCab.cab === -1, 'sem cabeçalho: a coluna com mais valores com cara de remessa', semCab);
+  let naoXlsx = '';
+  try { await X.lerPlanilha(new Uint8Array([1, 2, 3, 4])); } catch (e) { naoXlsx = e.message; }
+  check(/não é uma planilha \.xlsx/.test(naoXlsx), 'arquivo que não é .xlsx: diz o que fazer', naoXlsx);
+
   // ---------- 4. Servidor do app (server.js) ----------
   process.env.PESQUISA_JMS_URL = 'http://127.0.0.1:' + jms.porta;
   const os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pesquisa-'));
@@ -253,7 +312,7 @@ function request(porta, method, p, body, headers) {
     JSON.parse(fs.readFileSync(path.join(cfg.dados, 'credenciais.json'), 'utf8')).JMS_AUTHTOKEN === TOKEN,
     'token salvo só pelo computador do app (pela rede: recusado); "authtoken:", aspas e espaços saem');
   const home = await request(porta, 'GET', '/');
-  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.6\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
+  check(home.status === 200 && /window\.__PESQUISA__ = \{"versao":"1\.7\.0","plataforma":"node"\}/.test(home.text) && !/__PESQUISA_BOOT__/.test(home.text) &&
     ['rastreio.js', 'pesquisa.js', 'planilha.js', 'app.js', 'app.css'].every(f => home.text.indexOf(f) >= 0), 'página do app (Node.js)');
   const libs = await Promise.all(['/rastreio.js', '/pesquisa.js', '/planilha.js', '/app.js'].map(f => request(porta, 'GET', f)));
   check(libs.every(r => r.status === 200 && /javascript/.test(r.headers['content-type'])) && libs.every(r => { try { new Function(r.text); return true; } catch (e) { return false; } }),

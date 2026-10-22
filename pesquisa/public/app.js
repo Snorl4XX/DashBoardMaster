@@ -5,7 +5,7 @@
  */
 (function () {
   'use strict';
-  var VERSAO_PAGINA = '1.6.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
+  var VERSAO_PAGINA = '1.7.0'; // igual ao VERSAO do Codigo.gs e do server.js (os testes conferem)
   var BOOT = window.__PESQUISA__ || {}, R = window.Rastreio, P = window.Pesquisa, X = window.Planilha, PAGE = 100;
   var SHIFTS = R.SHIFTS, SHIFT_HOURS = R.SHIFT_HOURS;
   var DEFAULTS = ['A encomenda expressa está [SP GRU] sendo enviada', 'O expresso chegou [SP GRU] A parada anterior foi'];
@@ -54,7 +54,18 @@
       cDesc: 'Descrição da etapa de bipagem', cImg: 'Imagem', cLines: 'Linhas', cWhy: 'Situação no rastreamento',
       noImg: 'NÃO TEM IMAGEM!', hasImg: 'Tem imagem no JMS',
       whyNone: 'Sem rastreamento no JMS', whyErr: 'Consulta recusada pelo JMS', whyNo: 'Nenhuma linha com o padrão',
-      xlsxOk: 'Planilha baixada.', xlsxBusy: 'Montando a planilha…'},
+      xlsxOk: 'Planilha baixada.', xlsxBusy: 'Montando a planilha…',
+      modeLabel: 'O que pesquisar', modeText: 'Texto no rastreamento', modeSeg: 'Só os códigos de segmento',
+      segInfo: 'Informação básica › 3 Segmentos: traz o Código de primeiro segmento e o Código de dois segmentos de cada remessa. O valor de "3 Segmentos" fica de fora.',
+      import: 'Importar de planilha (.xlsx ou .csv)', importSheet: 'Aba', importCol: 'Coluna', importUse: 'Usar estas remessas ({n})', importBusy: 'Lendo {f}…',
+      importInfo: '{f}: escolha a aba e a coluna das remessas.', importDone: '{n} remessa(s) da aba "{a}" no campo de remessas.',
+      importErr: 'Não consegui ler o arquivo: {m}', importNone: 'Nenhuma remessa nesta coluna.', colOpt: 'Coluna {c}',
+      segKicker: 'Códigos de segmento · Informação básica › 3 Segmentos', segTitle: 'Código de primeiro segmento e Código de dois segmentos',
+      segOk: 'Com os códigos', segNone: 'Sem código no JMS', segErr: 'Consulta recusada', segChart1: 'Código de primeiro segmento', segChart2: 'Código de dois segmentos',
+      segTop: '(15 mais)', segTabAll: 'Todas ({n})', segTabOk: 'Com código ({n})', segTabNo: 'Sem código ({n})', segFind: 'Localizar remessa ou código',
+      segEmpty: 'Nenhuma remessa com código.', cSit: 'Situação', segWhyOk: 'Com os códigos', segWhyNone: 'Sem código no JMS', segWhyErr: 'Consulta recusada pelo JMS',
+      segErrWarn: '{n} remessa(s) ficaram sem resposta do JMS. Motivo: {m} Elas aparecem como "Consulta recusada pelo JMS".',
+      segNoneNote: 'Sem código no JMS: o JMS respondeu sem o bloco "3 Segmentos", mesmo na conferência do fim.'},
     zh: {title: '轨迹关键字查询', subtitle: 'JMS › 运营 › 包裹查询 › 包裹轨迹 · 始终取包含关键字的第一条扫描',
       step1: '1 · JMS 连接', tokenTitle: '直接从 JMS 获取（与看板相同）', tokenPh: '在此粘贴 AuthToken', save: '保存在此电脑',
       test: '测试连接', testBusy: '正在测试 JMS…', testOk: 'JMS 已接受服务器的 AuthToken。',
@@ -83,11 +94,19 @@
       chartBy: '扫描最多的人员（前10）', tabYes: '有 ({n})', tabNo: '无 ({n})', find: '查找运单、段码或扫描员', copy: '复制运单号', copied: '已复制 {n} 个运单号。',
       rows: '{a}–{b} / {n}', first: '包含关键字的第一条扫描', cWaybill: '运单号', cSeg1: '一段码', cSeg2: '二段码', cTime: '扫描时间', cShift: '班次', cOrigin: '网点', cBy: '扫描员', cType: '扫描类型',
       cDesc: '扫描描述', cImg: '图片', cLines: '行数', cWhy: '轨迹情况', noImg: '无图片！', hasImg: 'JMS 有图片',
-      whyNone: 'JMS 无轨迹', whyErr: 'JMS 拒绝查询', whyNo: '没有包含关键字的行', xlsxOk: '表格已下载。', xlsxBusy: '正在生成表格…'}
+      whyNone: 'JMS 无轨迹', whyErr: 'JMS 拒绝查询', whyNo: '没有包含关键字的行', xlsxOk: '表格已下载。', xlsxBusy: '正在生成表格…',
+      modeLabel: '查询内容', modeText: '轨迹关键字', modeSeg: '仅段码', segInfo: '基本信息 › 三段码：获取每个运单的一段码和二段码（不含三段码）。',
+      import: '从表格导入 (.xlsx 或 .csv)', importSheet: '工作表', importCol: '列', importUse: '使用这些运单（{n}）', importBusy: '正在读取 {f}…',
+      importInfo: '{f}：请选择工作表和运单号所在的列。', importDone: '已将工作表“{a}”的 {n} 个运单放入运单框。', importErr: '无法读取文件：{m}', importNone: '该列没有运单号。', colOpt: '第 {c} 列',
+      segKicker: '段码 · 基本信息 › 三段码', segTitle: '一段码和二段码', segOk: '有段码', segNone: 'JMS 无段码', segErr: '查询被拒', segChart1: '一段码', segChart2: '二段码',
+      segTop: '（前15）', segTabAll: '全部 ({n})', segTabOk: '有段码 ({n})', segTabNo: '无段码 ({n})', segFind: '查找运单或段码', segEmpty: '没有带段码的运单。', cSit: '状态',
+      segWhyOk: '有段码', segWhyNone: 'JMS 无段码', segWhyErr: 'JMS 拒绝查询', segErrWarn: '{n} 个运单 JMS 未响应。原因：{m}', segNoneNote: 'JMS 无段码：最后核对时 JMS 仍未返回三段码信息。'}
   };
   var lang = 'pt';
   var state = {list: [], pats: ['', ''], results: [], running: false, stop: false, started: 0, acesso: null, acessoErro: '',
-    tab: {0: 'yes', 1: 'yes'}, page: {0: 1, 1: 1}, find: {0: '', 1: ''}};
+    tab: {0: 'yes', 1: 'yes'}, page: {0: 1, 1: 1}, find: {0: '', 1: ''},
+    // V1.7: modo 'texto' (rastreamento) ou 'seg' (só os códigos de segmento); resModo = de que modo são os resultados na tela.
+    modo: 'texto', resModo: 'texto', segTab: 'all', segPage: 1, segFind: '', planilha: null};
 
   function $(s, el) { return (el || document).querySelector(s); }
   function $$(s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); }
@@ -225,7 +244,16 @@
     var p = R.parseWaybills($('#waybills').value), pats = [$('#pat1').value.trim(), $('#pat2').value.trim()];
     if (state.acesso && !state.acesso.fonte) { toast(t('tokNeed'), 'error'); return; }
     if (!p.list.length) { toast(t('noWaybills'), 'error'); return; }
+    if (state.modo === 'seg') {
+      state.list = p.list; state.results = []; state.consultas = 0; state.resModo = 'seg';
+      state.segTab = 'all'; state.segPage = 1; state.segFind = '';
+      showAlert('');
+      $('#results').innerHTML = '';
+      run(p.list);
+      return;
+    }
     if (!pats[0] && !pats[1]) { toast(t('noPattern'), 'error'); return; }
+    state.resModo = 'texto';
     store('jt_pesquisa_p1', pats[0]); store('jt_pesquisa_p2', pats[1]);
     state.list = p.list; state.pats = pats; state.results = []; state.consultas = 0;
     state.comSeg = $('#withSeg').checked;
@@ -250,20 +278,12 @@
     list.forEach(function (w) { agora[w] = 1; });
     var antes = state.results.filter(function (r) { return !agora[r.w]; }), lote = Number(load('jt_pesquisa_porconsulta')) || 1;
     var parar = function () { return state.stop; }, t0 = Date.now(), base = antes.length;
-    // V1.6: ritmo guardado com chave nova (o da V1.5 começava rápido demais para o JMS).
-    P.pesquisar(api, list, state.pats, {lote: lote, porChamada: P.POR_CHAMADA, chamadas: P.CHAMADAS, headers: rota(), parar: parar,
-      segmentos: state.comSeg,
-      paralelo: Number(load('jt_pesquisa_ritmo')) || P.PARALELO,
-      onParalelo: function (n) { store('jt_pesquisa_ritmo', String(n)); },
-      onLote: function (n) { store('jt_pesquisa_porconsulta', String(n)); toast(t('limit', {n: fmtInt(n)})); },
-      onHeaders: function (h) { store('jt_pesquisa_rota', JSON.stringify(h)); },
-      onProgresso: function (feitas) {
-        progress(antes.length + feitas, state.list.length, 'progress');
-        // Quanto falta, pela velocidade desta pesquisa.
-        var feito = antes.length + feitas - base, resta = state.list.length - antes.length - feitas, seg = (Date.now() - t0) / 1000;
-        if (feito > 0 && resta > 0) $('#statusText').textContent += t('eta', {t: fmtDur(resta * seg / feito)});
-      }
-    }).then(function (res) {
+    var onProgresso = function (feitas) {
+      progress(antes.length + feitas, state.list.length, 'progress');
+      var feito = antes.length + feitas - base, resta = state.list.length - antes.length - feitas, seg = (Date.now() - t0) / 1000;
+      if (feito > 0 && resta > 0) $('#statusText').textContent += t('eta', {t: fmtDur(resta * seg / feito)});
+    };
+    var junta = function (res) {
       var byW = {};
       antes.concat(res.results).forEach(function (r) { byW[r.w] = r; });
       state.results = state.list.filter(function (w) { return byW[w]; }).map(function (w) { return byW[w]; });
@@ -271,17 +291,44 @@
       render();
       done(state.stop || res.faltam.length ? 'stopped' : 'finished');
       if (res.revistas) $('#statusText').textContent += t('revInfo', {r: fmtInt(res.revistas), a: fmtInt(res.achadasRevisao)});
+    };
+    var falhou = function (e) {
+      render();
+      setRunning(false);
+      var tem = {};
+      state.results.forEach(function (r) { tem[r.w] = 1; });
+      var falta = state.list.filter(function (w) { return !tem[w]; });
+      showAlert(e.message, e.kind === 'auth' ? null : falta.length ? falta : null);
+      if (e.kind === 'auth') carregarAcesso();
+    };
+    // V1.7: só os códigos de segmento — uma consulta à Informação básica por remessa; nenhuma falha para a pesquisa inteira.
+    if (state.resModo === 'seg') {
+      P.pesquisarSegmentos(api, list, {porChamada: P.POR_CHAMADA, chamadas: P.CHAMADAS, headers: rota(), parar: parar,
+        paralelo: Number(load('jt_pesquisa_ritmo_seg')) || P.PARALELO,
+        onParalelo: function (n) { store('jt_pesquisa_ritmo_seg', String(n)); },
+        onProgresso: onProgresso
+      }).then(function (res) {
+        junta(res);
+        var recusadas = state.results.filter(function (r) { return r.err; }).map(function (r) { return r.w; });
+        if (recusadas.length) showAlert(t('segErrWarn', {n: fmtInt(recusadas.length), m: res.erro || '—'}), recusadas, 'warn', t('retry'));
+      }).catch(falhou);
+      return;
+    }
+    // V1.6: ritmo guardado com chave nova (o da V1.5 começava rápido demais para o JMS).
+    P.pesquisar(api, list, state.pats, {lote: lote, porChamada: P.POR_CHAMADA, chamadas: P.CHAMADAS, headers: rota(), parar: parar,
+      segmentos: state.comSeg,
+      paralelo: Number(load('jt_pesquisa_ritmo')) || P.PARALELO,
+      onParalelo: function (n) { store('jt_pesquisa_ritmo', String(n)); },
+      onLote: function (n) { store('jt_pesquisa_porconsulta', String(n)); toast(t('limit', {n: fmtInt(n)})); },
+      onHeaders: function (h) { store('jt_pesquisa_rota', JSON.stringify(h)); },
+      onProgresso: onProgresso
+    }).then(function (res) {
+      junta(res);
       // Nada de esconder recusa: avisa, com o motivo, e oferece pesquisar só essas de novo.
       var recusadas = state.results.filter(function (r) { return r.err; }).map(function (r) { return r.w; });
       if (recusadas.length) showAlert(t('errWarn', {n: fmtInt(recusadas.length), m: res.erro || '—'}), recusadas, 'warn', t('retry'));
       else if (res.semSeg) showAlert(t('segWarn', {n: fmtInt(res.semSeg), m: res.erroSeg || '—'}), null, 'warn');
-    }).catch(function (e) {
-      render();
-      setRunning(false);
-      var falta = state.list.filter(function (w) { return !state.results.some(function (r) { return r.w === w; }); });
-      showAlert(e.message, e.kind === 'auth' ? null : falta.length ? falta : null);
-      if (e.kind === 'auth') carregarAcesso();
-    });
+    }).catch(falhou);
   }
   function done(key) {
     setRunning(false);
@@ -362,6 +409,7 @@
     var host = $('#results');
     if (!state.results.length) { host.innerHTML = ''; $('#xlsxBtn').disabled = true; return; }
     $('#xlsxBtn').disabled = state.running;
+    if (state.resModo === 'seg') { host.innerHTML = segHtml(); renderSegTable(); wireSeg(); return; }
     var html = '';
     [0, 1].forEach(function (k) { if (state.pats[k]) html += blockHtml(k); });
     host.innerHTML = html;
@@ -469,17 +517,165 @@
     ta.remove();
   }
 
+  // ------------------------------------------------------------------ V1.7: resultado do modo "só os códigos de segmento"
+  function segResumo() {
+    var res = state.results, com = res.filter(function (r) { return r.seg; });
+    var conta = function (k) {
+      var m = {};
+      com.forEach(function (r) { var v = r.seg[k] || '—'; m[v] = (m[v] || 0) + 1; });
+      return Object.keys(m).map(function (v) { return {label: v, value: m[v]}; }).sort(function (a, b) { return b.value - a.value || (a.label < b.label ? -1 : 1); });
+    };
+    return {total: res.length, com: com.length, sem: res.filter(function (r) { return r.sem; }).length, err: res.filter(function (r) { return r.err; }).length,
+      s1: conta('s1'), s2: conta('s2')};
+  }
+  function segHtml() {
+    var s = segResumo(), partial = state.running ? ' · ' + t('partial') : '';
+    var tile = function (k, v, hero, extra) {
+      return '<div class="tk-tile' + (hero ? ' hero' : '') + '"><small>' + esc(t(k)) + '</small><b>' + fmtInt(v) + '</b><span>' + (extra || fmtPct(v, s.total)) + '</span></div>';
+    };
+    var chart = function (key, list) {
+      var top = list.slice(0, 15);
+      return '<div class="tk-chart wide"><h4>' + esc(t(key)) + (list.length > 15 ? ' ' + esc(t('segTop')) : '') + '</h4>' +
+        (top.length ? hbars(top) : '<p class="muted small">' + esc(t('segEmpty')) + '</p>') + '</div>';
+    };
+    return '<section class="card" id="blockSeg" aria-label="' + esc(t('segKicker')) + '"><div class="section-head"><div><span class="kicker">' + esc(t('segKicker')) + partial +
+      '</span><h2>' + esc(t('segTitle')) + '</h2>' + (s.sem ? '<p class="muted small">' + esc(t('segNoneNote')) + '</p>' : '') + '</div></div>' +
+      '<div class="tk-tiles">' + tile('searched', s.total, false, esc(t('remessas'))) + tile('segOk', s.com, true) + tile('segNone', s.sem) + tile('segErr', s.err) + '</div>' +
+      '<div class="tk-charts">' + chart('segChart1', s.s1) + chart('segChart2', s.s2) + '</div>' +
+      '<div class="tk-tabs"><div class="seg" role="tablist">' +
+      [['all', 'segTabAll', s.total], ['ok', 'segTabOk', s.com], ['no', 'segTabNo', s.sem + s.err]].map(function (x) {
+        return '<button type="button" role="tab" data-tab="' + x[0] + '" aria-selected="' + (state.segTab === x[0]) + '">' + esc(t(x[1], {n: fmtInt(x[2])})) + '</button>';
+      }).join('') + '</div>' +
+      '<label class="find"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg><input type="text" class="tk-find" autocomplete="off" placeholder="' + esc(t('segFind')) + '" value="' + esc(state.segFind) + '"></label>' +
+      '<button type="button" class="btn btn-light tk-copy">' + esc(t('copy')) + '</button></div>' +
+      '<div class="table-scroll"><table class="data-table"><thead></thead><tbody></tbody></table></div>' +
+      '<div class="table-foot"><span class="note tk-note"></span><div class="pager tk-pager"></div></div></section>';
+  }
+  function segRows() {
+    var q = state.segFind.trim().toUpperCase();
+    return state.results.filter(function (r) {
+      if (state.segTab === 'ok' && !r.seg) return false;
+      if (state.segTab === 'no' && r.seg) return false;
+      return !q || r.w.indexOf(q) >= 0 || (r.seg && (r.seg.s1 + ' ' + r.seg.s2).toUpperCase().indexOf(q) >= 0);
+    });
+  }
+  function renderSegTable() {
+    var box = $('#blockSeg'), list = segRows(), pages = Math.max(1, Math.ceil(list.length / PAGE));
+    if (state.segPage > pages) state.segPage = pages;
+    var a = (state.segPage - 1) * PAGE, part = list.slice(a, a + PAGE);
+    $('thead', box).innerHTML = '<tr><th class="num">#</th>' + ['cWaybill', 'cSeg1', 'cSeg2', 'cSit'].map(function (k) { return '<th>' + esc(t(k)) + '</th>'; }).join('') + '</tr>';
+    $('tbody', box).innerHTML = part.length ? part.map(function (r, i) {
+      var sit = r.seg ? esc(t('segWhyOk')) : '<span class="tk-noimg">' + esc(t(r.err ? 'segWhyErr' : 'segWhyNone')) + '</span>';
+      return '<tr><td class="num">' + (a + i + 1) + '</td><td>' + esc(r.w) + '</td><td>' + esc(r.seg ? r.seg.s1 : '') + '</td><td>' + esc(r.seg ? r.seg.s2 : '') + '</td><td>' + sit + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="tk-empty">—</td></tr>';
+    $('.tk-note', box).textContent = list.length ? t('rows', {a: fmtInt(a + 1), b: fmtInt(a + part.length), n: fmtInt(list.length)}) : '';
+    var pg = '';
+    if (pages > 1) {
+      pg += '<button type="button" data-p="' + (state.segPage - 1) + '"' + (state.segPage <= 1 ? ' disabled' : '') + ' aria-label="Anterior">‹</button>';
+      pg += '<span>' + state.segPage + ' / ' + pages + '</span>';
+      pg += '<button type="button" data-p="' + (state.segPage + 1) + '"' + (state.segPage >= pages ? ' disabled' : '') + ' aria-label="Próxima">›</button>';
+    }
+    $('.tk-pager', box).innerHTML = pg;
+    $$('.tk-pager button', box).forEach(function (b) { b.addEventListener('click', function () { state.segPage = Number(b.getAttribute('data-p')); renderSegTable(); }); });
+  }
+  function wireSeg() {
+    var box = $('#blockSeg');
+    $$('.seg button', box).forEach(function (b) {
+      b.addEventListener('click', function () {
+        state.segTab = b.getAttribute('data-tab'); state.segPage = 1;
+        $$('.seg button', box).forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+        renderSegTable();
+      });
+    });
+    $('.tk-find', box).addEventListener('input', function (e) { state.segFind = e.target.value; state.segPage = 1; renderSegTable(); });
+    $('.tk-copy', box).addEventListener('click', function () {
+      var text = segRows().map(function (r) { return r.w; }).join('\n'), n = text ? text.split('\n').length : 0;
+      var ok = function () { toast(t('copied', {n: fmtInt(n)}), 'success'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, function () { copyOld(text); ok(); });
+      else { copyOld(text); ok(); }
+    });
+  }
+
+  // ------------------------------------------------------------------ V1.7: importar remessas de uma aba (.xlsx) ou de um CSV
+  function importar(file) {
+    if (!file) return;
+    var info = $('#importInfo');
+    info.textContent = t('importBusy', {f: file.name});
+    $('#importPick').classList.add('hidden');
+    var csv = /\.(csv|tsv|txt)$/i.test(file.name);
+    var ler = csv ? file.text().then(function (txt) { return X.lerTexto(txt, file.name); }) : file.arrayBuffer().then(function (b) { return X.lerPlanilha(new Uint8Array(b)); });
+    ler.then(function (abas) {
+      state.planilha = {nome: file.name, abas: abas.filter(function (a) { return a.linhas.some(function (l) { return l.some(Boolean); }); })};
+      if (!state.planilha.abas.length) throw new Error(t('importNone'));
+      // Primeiro a aba com mais remessas.
+      var melhor = 0, max = -1;
+      state.planilha.abas.forEach(function (a, i) { a.achado = X.acharColuna(a.linhas); if (a.achado.n > max) { max = a.achado.n; melhor = i; } });
+      $('#sheetSel').innerHTML = state.planilha.abas.map(function (a, i) { return '<option value="' + i + '">' + esc(a.nome) + '</option>'; }).join('');
+      $('#sheetSel').value = String(melhor);
+      $('#sheetSel').disabled = state.planilha.abas.length < 2;
+      preencherColunas();
+      $('#importPick').classList.remove('hidden');
+      info.textContent = t('importInfo', {f: file.name});
+    }).catch(function (e) {
+      state.planilha = null;
+      info.textContent = '';
+      toast(t('importErr', {m: String(e && e.message || e)}), 'error');
+    });
+  }
+  function abaAtual() { return state.planilha && state.planilha.abas[Number($('#sheetSel').value) || 0]; }
+  function preencherColunas() {
+    var aba = abaAtual();
+    if (!aba) return;
+    var cab = aba.achado.cab, largura = aba.linhas.reduce(function (m, l) { return Math.max(m, l.length); }, 0), opts = '';
+    for (var c = 0; c < largura; c++) {
+      var nome = cab >= 0 ? (aba.linhas[cab] || [])[c] : '', amostra = nome || (aba.linhas[0] || [])[c] || '';
+      opts += '<option value="' + c + '">' + esc(X.colName(c + 1) + (amostra ? ' · ' + String(amostra).slice(0, 28) : '')) + '</option>';
+    }
+    $('#colSel').innerHTML = opts;
+    $('#colSel').value = String(aba.achado.col);
+    contarImport();
+  }
+  function remessasImport() {
+    var aba = abaAtual();
+    if (!aba) return [];
+    var col = Number($('#colSel').value) || 0, cab = col === aba.achado.col ? aba.achado.cab : -1;
+    return R.parseWaybills(X.coluna(aba.linhas, col, cab).join('\n')).list;
+  }
+  function contarImport() { $('#importUse').textContent = t('importUse', {n: fmtInt(remessasImport().length)}); }
+  function usarImport() {
+    var list = remessasImport(), aba = abaAtual();
+    if (!list.length) { toast(t('importNone'), 'error'); return; }
+    $('#waybills').value = list.join('\n');
+    updateCount();
+    $('#importPick').classList.add('hidden');
+    $('#importInfo').textContent = t('importDone', {n: fmtInt(list.length), a: aba.nome});
+    state.planilha = null;
+    $('#fileInput').value = '';
+  }
+  function setModo(m) {
+    state.modo = m === 'seg' ? 'seg' : 'texto';
+    store('jt_pesquisa_modo', state.modo);
+    $('#inputCard').classList.toggle('modo-seg', state.modo === 'seg');
+    $$('#modeSeg button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-modo') === state.modo)); });
+    // Resultado de outro modo na tela: sai (o botão da planilha baixaria o modo errado).
+    if (!state.running && state.results.length && state.resModo !== state.modo) {
+      state.results = []; state.list = [];
+      $('#statusBox').classList.add('hidden'); showAlert(''); render();
+    }
+  }
+
   // ------------------------------------------------------------------ planilha
   function download() {
     if (!state.results.length) return;
     var btn = $('#xlsxBtn');
     btn.disabled = true;
     toast(t('xlsxBusy'));
-    var book = X.rastreioBook({patterns: state.pats, results: state.results, summaries: [R.summary(state.results, 0), R.summary(state.results, 1)], at: new Date(),
+    var seg = state.resModo === 'seg';
+    var book = seg ? X.segmentosBook({results: state.results, at: new Date()}) : X.rastreioBook({patterns: state.pats, results: state.results, summaries: [R.summary(state.results, 0), R.summary(state.results, 1)], at: new Date(),
       segmentos: state.comSeg !== false});
     X.build(book).then(function (bytes) {
       var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
-      var name = 'JT_Pesquisa_Rastreamento_' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + 'h' + p(d.getMinutes()) + '.xlsx';
+      var name = (seg ? 'JT_Codigos_Segmento_' : 'JT_Pesquisa_Rastreamento_') + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + 'h' + p(d.getMinutes()) + '.xlsx';
       var url = URL.createObjectURL(new Blob([bytes], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})), a = document.createElement('a');
       a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
@@ -492,6 +688,8 @@
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'pt-BR';
     $$('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
     $$('[data-i18n-placeholder]').forEach(function (el) { el.setAttribute('placeholder', t(el.getAttribute('data-i18n-placeholder'))); });
+    $$('[data-i18n-aria]').forEach(function (el) { el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria'))); });
+    if (state.planilha) contarImport();
     $$('.lang-btn').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-lang') === lang)); });
     updateCount(); renderSetup(); render();
   }
@@ -511,6 +709,12 @@
       api.token(v).then(function () { $('#tokenInput').value = ''; toast(t('tokSaved'), 'success'); return carregarAcesso(); }, function (e) { toast(e.message, 'error'); });
     });
     $('#waybills').addEventListener('input', updateCount);
+    $$('#modeSeg button').forEach(function (b) { b.addEventListener('click', function () { if (!state.running) setModo(b.getAttribute('data-modo')); }); });
+    setModo(load('jt_pesquisa_modo'));
+    $('#fileInput').addEventListener('change', function (e) { importar(e.target.files && e.target.files[0]); });
+    $('#sheetSel').addEventListener('change', preencherColunas);
+    $('#colSel').addEventListener('change', contarImport);
+    $('#importUse').addEventListener('click', usarImport);
     $('#runBtn').addEventListener('click', start);
     $('#stopBtn').addEventListener('click', function () { state.stop = true; });
     $('#xlsxBtn').addEventListener('click', download);

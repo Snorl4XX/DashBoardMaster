@@ -429,5 +429,184 @@
       filter: n ? 'A3:' + z + '3' : ''};
   }
 
-  return {build: build, parts: parts, zip: zip, crc32: crc32, serial: serial, rastreioBook: rastreioBook, STYLE: S};
+  /**
+   * V1.7 — livro do modo "só os códigos de segmento": Resumo (situação, contagem por Código de primeiro segmento e por Código de
+   * dois segmentos, com gráficos) + aba "Segmentos" com uma linha por remessa. data = {results: [{w, seg: {s1, s2} | null, sem, err}], at}
+   */
+  function segmentosBook(data) {
+    var res = data.results || [], at = data.at || new Date(), total = res.length;
+    var com = res.filter(function (r) { return r.seg; }), sem = res.filter(function (r) { return r.sem; }).length, err = res.filter(function (r) { return r.err; }).length;
+    var title = 'J&T EXPRESS · Códigos de segmento (Informação básica › 3 Segmentos)';
+    var sub = 'gerado em ' + stamp(at) + ' · ' + total.toLocaleString('pt-BR') + ' remessa(s) pesquisada(s) · Código de primeiro segmento e Código de dois segmentos';
+    var resumo = {name: 'Resumo', tabSelected: true, cols: [30, 14, 12, 4, 4, 12, 12, 12, 12, 12, 12, 12, 12], rows: [[{v: title, s: S.title}], [{v: sub, s: S.subtitle}]],
+      heights: {1: 30}, merges: ['A1:M1', 'A2:M2'], charts: []};
+    var R = resumo.rows, row = function (cells) { R.push(cells || []); return R.length; };
+    row();
+    row([{v: 'Situação', s: S.section}]);
+    var h0 = row([{v: two('Situação', '状态'), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}, {v: '%', s: S.header}]);
+    resumo.heights[h0] = 28;
+    row([{v: 'Com os códigos', s: S.yes}, {v: com.length, s: S.int}, {v: pct(com.length, total), s: S.pct}]);
+    row([{v: 'Sem código no JMS', s: S.text}, {v: sem, s: S.int}, {v: pct(sem, total), s: S.pct}]);
+    row([{v: 'Consulta recusada pelo JMS', s: err ? S.noimg : S.text}, {v: err, s: S.int}, {v: pct(err, total), s: S.pct}]);
+    row([{v: 'Total pesquisado', s: S.label}, {v: total, s: S.intBold}, {v: total ? 1 : 0, s: S.pctBold}]);
+    var conta = function (k) {
+      var m = {};
+      com.forEach(function (r) { var v = r.seg[k] || '(vazio)'; m[v] = (m[v] || 0) + 1; });
+      return Object.keys(m).map(function (v) { return {v: v, n: m[v]}; }).sort(function (a, b) { return b.n - a.n || (a.v < b.v ? -1 : 1); });
+    };
+    [['s1', 'Código de primeiro segmento', '一段码'], ['s2', 'Código de dois segmentos', '二段码']].forEach(function (x) {
+      var lista = conta(x[0]);
+      row();
+      var top = row([{v: x[1], s: S.section}]);
+      var hh = row([{v: two(x[1], x[2]), s: S.header}, {v: two('Remessas', '运单数'), s: S.header}, {v: '%', s: S.header}]);
+      resumo.heights[hh] = 28;
+      lista.forEach(function (it) { row([{v: it.v, s: S.text}, {v: it.n, s: S.int}, {v: pct(it.n, com.length), s: S.pct}]); });
+      if (!lista.length) row([{v: 'Nenhuma remessa com código.', s: S.note}]);
+      var n = Math.min(15, lista.length);
+      if (n) {
+        resumo.charts.push({type: 'bar', title: x[1] + (lista.length > n ? ' (15 mais)' : ''), name: 'Remessas', cat: 'A' + (hh + 1) + ':A' + (hh + n),
+          val: 'B' + (hh + 1) + ':B' + (hh + n), colors: [COLORS.yes], gap: 40, at: [5, top - 1, 13, top - 1 + Math.max(12, n + 6)]});
+        // O próximo quadro começa depois do gráfico, para não ficar por baixo dele.
+        while (R.length < top - 1 + Math.max(12, n + 6) + 1) row();
+      }
+    });
+    var rows = [[{v: 'J&T EXPRESS · Códigos de segmento por remessa', s: S.title}], [{v: 'Informação básica › 3 Segmentos (o valor de "3 Segmentos" fica de fora)', s: S.subtitle}],
+      [{v: '#', s: S.header}, {v: two('Remessa', '运单号'), s: S.header}].concat(SEG_HEAD, [{v: two('Situação', '状态'), s: S.header}])];
+    res.forEach(function (r, i) {
+      rows.push([{v: i + 1, s: S.int}, {v: r.w, s: S.text}, {v: r.seg ? r.seg.s1 : '', s: S.center}, {v: r.seg ? r.seg.s2 : '', s: S.center},
+        r.seg ? {v: 'Com os códigos', s: S.text} : {v: r.err ? 'Consulta recusada pelo JMS (pesquise de novo)' : 'Sem código no JMS', s: S.noimg}]);
+    });
+    var lista = {name: 'Segmentos', cols: [8, 22, 16, 16, 40], rows: rows, heights: {1: 28, 3: 30}, merges: ['A1:E1', 'A2:E2'], freeze: 'C4', filter: total ? 'A3:E3' : ''};
+    return {title: title, sheets: [resumo, lista]};
+  }
+
+  // ------------------------------------------------------------------ leitura (V1.7: remessas de uma aba do Excel ou de um CSV)
+  function inflar(bytes) {
+    if (typeof DecompressionStream === 'function' && typeof Response === 'function') {
+      return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer().then(function (b) { return new Uint8Array(b); });
+    }
+    return Promise.reject(new Error('Este navegador não abre .xlsx. No Excel, salve a aba como CSV e importe o CSV.'));
+  }
+  /** Arquivos de um ZIP (.xlsx), pelo diretório central: nome → {method, data}. */
+  function lerZip(bytes) {
+    var u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), fim = -1;
+    for (var i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { fim = i; break; }
+    if (fim < 0) throw new Error('O arquivo não é uma planilha .xlsx. Uma planilha antiga (.xls)? No Excel, salve como .xlsx ou CSV.');
+    var n = dv.getUint16(fim + 10, true), at = dv.getUint32(fim + 16, true), out = {}, dec = new TextDecoder('utf-8');
+    for (var k = 0; k < n && at + 46 <= u8.length && dv.getUint32(at, true) === 0x02014b50; k++) {
+      var method = dv.getUint16(at + 10, true), csize = dv.getUint32(at + 20, true), nlen = dv.getUint16(at + 28, true);
+      var elen = dv.getUint16(at + 30, true), clen = dv.getUint16(at + 32, true), off = dv.getUint32(at + 42, true);
+      var nome = dec.decode(u8.subarray(at + 46, at + 46 + nlen)), ini = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
+      out[nome] = {method: method, data: u8.subarray(ini, ini + csize)};
+      at += 46 + nlen + elen + clen;
+    }
+    return out;
+  }
+  function textoZip(z, nome) {
+    var f = z[nome];
+    if (!f) return Promise.resolve('');
+    return (f.method === 8 ? inflar(f.data) : Promise.resolve(f.data)).then(function (b) { return new TextDecoder('utf-8').decode(b); });
+  }
+  function xmlTexto(s) {
+    return String(s).replace(/&#x([0-9a-f]+);/gi, function (_, h) { return String.fromCharCode(parseInt(h, 16)); })
+      .replace(/&#(\d+);/g, function (_, d) { return String.fromCharCode(Number(d)); })
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  }
+  function colNum(s) { var n = 0; for (var i = 0; i < s.length; i++) n = n * 26 + s.charCodeAt(i) - 64; return n; }
+  /** Número gravado pelo Excel ("8.88002517578525E+14") como na tela: 888002517578525. */
+  function numTexto(v) {
+    if (!/e/i.test(v)) return v;
+    var n = Number(v);
+    return isFinite(n) && Math.round(n) === n && Math.abs(n) < 1e21 ? String(n) : v;
+  }
+  function linhasXml(xml, ss) {
+    var rows = [];
+    (String(xml).match(/<row\b[^>]*\/>|<row\b[\s\S]*?<\/row>/g) || []).forEach(function (rx) {
+      var rm = rx.match(/^<row\b[^>]*?\br="(\d+)"/), ri = rm ? Number(rm[1]) - 1 : rows.length, cells = [];
+      rx.replace(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g, function (_, attrs, inner) {
+        var r = (attrs.match(/\br="([A-Z]+)\d+"/) || [])[1], tipo = (attrs.match(/\bt="(\w+)"/) || [])[1] || '', v = '';
+        if (inner) {
+          if (tipo === 'inlineStr') { inner.replace(/<t\b[^>]*>([\s\S]*?)<\/t>/g, function (_, x) { v += x; }); v = xmlTexto(v); }
+          else {
+            var m = inner.match(/<v>([\s\S]*?)<\/v>/);
+            v = m ? xmlTexto(m[1]) : '';
+            if (tipo === 's') v = ss[Number(v)] || '';
+            else if (tipo === '' || tipo === 'n') v = numTexto(v);
+          }
+        }
+        cells[r ? colNum(r) - 1 : cells.length] = String(v).trim();
+        return '';
+      });
+      for (var j = 0; j < cells.length; j++) if (cells[j] === undefined) cells[j] = '';
+      rows[ri] = cells;
+    });
+    for (var i = 0; i < rows.length; i++) if (!rows[i]) rows[i] = [];
+    return rows;
+  }
+  /** Abas de um .xlsx: bytes → Promise<[{nome, linhas: [[texto]]}]> (na ordem das abas). */
+  function lerPlanilha(bytes) {
+    var z;
+    try { z = lerZip(bytes); } catch (e) { return Promise.reject(e); }
+    if (!z['xl/workbook.xml']) return Promise.reject(new Error('O arquivo não é uma planilha .xlsx do Excel.'));
+    return Promise.all([textoZip(z, 'xl/workbook.xml'), textoZip(z, 'xl/_rels/workbook.xml.rels'), textoZip(z, 'xl/sharedStrings.xml')]).then(function (t) {
+      var alvo = {}, ss = [];
+      (t[1].match(/<Relationship\b[^>]*>/g) || []).forEach(function (r) {
+        var id = (r.match(/\bId="([^"]+)"/) || [])[1], tg = (r.match(/\bTarget="([^"]+)"/) || [])[1];
+        if (id && tg) alvo[id] = tg.charAt(0) === '/' ? tg.slice(1) : 'xl/' + tg.replace(/^\.\//, '');
+      });
+      (t[2].replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').match(/<si\b[\s\S]*?<\/si>|<si\/>/g) || []).forEach(function (si) {
+        var s = '';
+        si.replace(/<t\b[^>]*>([\s\S]*?)<\/t>/g, function (_, x) { s += x; return ''; });
+        ss.push(xmlTexto(s));
+      });
+      var abas = (t[0].match(/<sheet\b[^>]*>/g) || []).map(function (s) {
+        return {nome: xmlTexto((s.match(/\bname="([^"]*)"/) || [])[1] || 'Aba'), arq: alvo[(s.match(/\br:id="([^"]+)"/) || [])[1]]};
+      }).filter(function (a) { return a.arq && z[a.arq]; });
+      if (!abas.length) throw new Error('Não achei nenhuma aba com dados neste arquivo.');
+      return Promise.all(abas.map(function (a) { return textoZip(z, a.arq); })).then(function (xs) {
+        return abas.map(function (a, i) { return {nome: a.nome, linhas: linhasXml(xs[i], ss)}; });
+      });
+    });
+  }
+  /** CSV/TSV (separador ; , ou tabulação, o que aparecer mais na 1ª linha) → [{nome, linhas}]. */
+  function lerTexto(texto, nome) {
+    var s = String(texto || '').replace(/^﻿/, ''), l1 = s.split(/\r?\n/)[0] || '';
+    var sep = [';', ',', '\t'].map(function (c) { return {c: c, n: l1.split(c).length}; }).sort(function (a, b) { return b.n - a.n; })[0].c;
+    var linhas = [], cel = '', linha = [], q = false;
+    for (var i = 0; i < s.length; i++) {
+      var c = s[i];
+      if (q) { if (c === '"' && s[i + 1] === '"') { cel += '"'; i++; } else if (c === '"') q = false; else cel += c; continue; }
+      if (c === '"') q = true;
+      else if (c === sep) { linha.push(cel.trim()); cel = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && s[i + 1] === '\n') i++; linha.push(cel.trim()); linhas.push(linha); linha = []; cel = ''; }
+      else cel += c;
+    }
+    if (cel || linha.length) { linha.push(cel.trim()); linhas.push(linha); }
+    return [{nome: nome || 'Arquivo', linhas: linhas}];
+  }
+  /**
+   * Coluna das remessas numa aba: a do cabeçalho "Remessa"/"Waybill"/"运单"/"Nº do pedido"… ou, sem cabeçalho conhecido, a que tem
+   * mais valores com cara de remessa. → {col, cab (linha do cabeçalho, -1 = sem), n (valores com cara de remessa)}
+   */
+  var CAB_RE = /remessa|waybill|运单|n[º°o]?\.?\s*(do\s*)?pedido|encomenda|bill\s*code|tracking|rastreio/i;
+  function pareceRemessa(v) { var s = String(v || '').trim().toUpperCase(); return /^[A-Z0-9-]{8,40}$/.test(s) && /\d{6}/.test(s); }
+  function acharColuna(linhas) {
+    var conta = function (col, de) { var n = 0; for (var i = de; i < linhas.length; i++) if (pareceRemessa((linhas[i] || [])[col])) n++; return n; };
+    for (var r = 0; r < Math.min(5, linhas.length); r++) {
+      var cab = linhas[r] || [];
+      for (var c = 0; c < cab.length; c++) if (CAB_RE.test(cab[c] || '') && !pareceRemessa(cab[c])) return {col: c, cab: r, n: conta(c, r + 1)};
+    }
+    var largura = linhas.reduce(function (m, l) { return Math.max(m, (l || []).length); }, 0), melhor = {col: 0, cab: -1, n: -1};
+    for (var k = 0; k < largura; k++) { var n = conta(k, 0); if (n > melhor.n) melhor = {col: k, cab: -1, n: n}; }
+    return melhor;
+  }
+  /** Valores de uma coluna (sem o cabeçalho), na ordem. */
+  function coluna(linhas, col, cab) {
+    var out = [];
+    for (var i = cab + 1; i < linhas.length; i++) { var v = String((linhas[i] || [])[col] || '').trim(); if (v) out.push(v); }
+    return out;
+  }
+
+  return {build: build, parts: parts, zip: zip, crc32: crc32, serial: serial, rastreioBook: rastreioBook, segmentosBook: segmentosBook, STYLE: S,
+    lerPlanilha: lerPlanilha, lerTexto: lerTexto, acharColuna: acharColuna, coluna: coluna, colName: colName};
 });
