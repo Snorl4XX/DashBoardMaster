@@ -20,8 +20,10 @@
  *  4. Menu JMS Segmentos → 🔑 Colocar AuthToken do JMS (na 1ª vez o Google pede autorização) e cole o AuthToken.
  *  5. Abra a aba das remessas → menu JMS Segmentos → 🩺 Testar conexão com o JMS.
  * Usar: abra a aba das remessas → menu JMS Segmentos → ▶ Pesquisar remessas desta aba.
+ * Pelo editor do Apps Script (▶ Executar) não há janelas: continuar, parar e testarConexao funcionam e as mensagens saem no
+ * Registro de execução; o AuthToken pode ir em ⚙️ Configurações do projeto → Propriedades do script → JMS_AUTHTOKEN.
  */
-var VERSAO = '1.1.0';
+var VERSAO = '1.1.1';
 var ORDER_URL_ = 'https://gw.jtjms-br.com/operatingplatform/order/getOrderDetail';
 var ABA_RESULTADO_ = 'Segmentos', ABA_RESUMO_ = 'Resumo Segmentos';
 var CAMPO1_ = 'Código de primeiro segmento', CAMPO2_ = 'Código de dois segmentos';
@@ -50,7 +52,9 @@ var APELIDOS_TOKEN_ = ['JMSAUTHTOKEN', 'AUTHTOKEN', 'JMSTOKEN', 'TOKENJMS', 'TOK
 var FUSO_ = 'America/Sao_Paulo';
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('JMS Segmentos')
+  var ui = ui_();
+  if (!ui) { console.log('O menu "JMS Segmentos" aparece na planilha: volte para a aba da planilha e aperte F5.'); return; }
+  ui.createMenu('JMS Segmentos')
     .addItem('▶ Pesquisar remessas desta aba', 'pesquisar')
     .addItem('⏩ Continuar / consultar as que faltaram', 'continuar')
     .addItem('⏹ Parar', 'parar')
@@ -67,7 +71,14 @@ function fmt_(n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3
 function normal_(v) {
   return String(v === null || v === undefined ? '' : v).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
-function aviso_(texto) { var ui = SpreadsheetApp.getUi(); ui.alert('JMS Segmentos', texto, ui.ButtonSet.OK); }
+/** Tela da planilha, ou null quando a função roda pelo ▶ Executar do editor ou por gatilho (aí o Google não deixa abrir janelas). */
+function ui_() { try { return SpreadsheetApp.getUi(); } catch (e) { return null; } }
+/** Mensagem no Registro de execução e, com a planilha aberta pelo menu, numa janela. */
+function aviso_(texto) {
+  console.log('JMS Segmentos: ' + texto);
+  var ui = ui_();
+  if (ui) ui.alert('JMS Segmentos', texto, ui.ButtonSet.OK);
+}
 
 // ---------- AuthToken (Propriedades do script; nunca aparece na planilha) ----------
 
@@ -88,7 +99,15 @@ function token_() {
   return '';
 }
 function colocarToken() {
-  var ui = SpreadsheetApp.getUi();
+  var ui = ui_();
+  if (!ui) { // pelo editor: não dá para abrir a janela de colar
+    var atual = token_();
+    console.log('JMS Segmentos: ' + (atual ? 'o AuthToken já está guardado (' + atual.length + ' caracteres); só troque se o JMS recusar. ' :
+      'ainda não tem AuthToken guardado. ') + 'Para colocar ou trocar: na planilha (aperte F5), menu JMS Segmentos → 🔑 Colocar AuthToken do' +
+      ' JMS. Ou aqui no editor: ⚙️ Configurações do projeto → Propriedades do script → Adicionar propriedade do script → nome' +
+      ' JMS_AUTHTOKEN, valor = o AuthToken → Salvar.');
+    return atual ? 'já guardado' : 'sem token';
+  }
   var r = ui.prompt('JMS Segmentos · AuthToken', 'Cole o AuthToken do JMS. Ele fica guardado só neste projeto e não aparece de novo.', ui.ButtonSet.OK_CANCEL);
   if (r.getSelectedButton() !== ui.Button.OK) return;
   var t = limparToken_(r.getResponseText());
@@ -438,7 +457,8 @@ function rodar_(ss, comTela, inicioExec, prazo) {
   salvarJob_(job);
   andamento_(res, texto, detalhe());
   SpreadsheetApp.flush();
-  if (comTela) ss.toast(texto, 'JMS Segmentos', 15);
+  console.log('JMS Segmentos: ' + texto);
+  if (comTela) { try { ss.toast(texto, 'JMS Segmentos', 15); } catch (e) { /* sem a planilha aberta */ } }
   return {parada: parada, contagem: cont};
 }
 
@@ -447,7 +467,7 @@ function rodar_(ss, comTela, inicioExec, prazo) {
  * planilha aberta; o resto segue sozinho por gatilho.
  */
 function pesquisar() {
-  var inicio = agora_(), ss = SpreadsheetApp.getActive(), sh = ss.getActiveSheet(), ui = SpreadsheetApp.getUi();
+  var inicio = agora_(), ss = SpreadsheetApp.getActive(), sh = ss.getActiveSheet(), ui = ui_();
   if ([ABA_RESULTADO_, ABA_RESUMO_].indexOf(sh.getName()) >= 0) { aviso_('Abra a aba que tem as remessas e clique de novo em ▶ Pesquisar.'); return null; }
   if (!token_()) { aviso_('Falta o AuthToken do JMS: menu JMS Segmentos → 🔑 Colocar AuthToken do JMS.'); return null; }
   var lido = lerRemessas_(sh);
@@ -455,9 +475,20 @@ function pesquisar() {
     aviso_('Não achei remessas nesta aba. Deixe o cabeçalho "Remessa" em cima da coluna (ou clique numa célula da coluna das remessas) e tente de novo.');
     return null;
   }
-  var resp = ui.alert('JMS Segmentos', 'Achei ' + fmt_(lido.lista.length) + ' remessas na aba "' + sh.getName() + '", ' + lido.titulo +
-    ' (repetidas contam uma vez).\n\nPesquisar no JMS agora? O resultado vai para a aba "' + ABA_RESULTADO_ + '".', ui.ButtonSet.YES_NO);
-  if (resp !== ui.Button.YES) return null;
+  var achei = 'Achei ' + fmt_(lido.lista.length) + ' remessas na aba "' + sh.getName() + '", ' + lido.titulo + ' (repetidas contam uma vez).';
+  if (ui) {
+    var resp = ui.alert('JMS Segmentos', achei + '\n\nPesquisar no JMS agora? O resultado vai para a aba "' + ABA_RESULTADO_ + '".', ui.ButtonSet.YES_NO);
+    if (resp !== ui.Button.YES) return null;
+  } else {
+    // Pelo editor não dá para confirmar: só começa se não houver pesquisa na aba Segmentos para perder.
+    var antiga = ss.getSheetByName(ABA_RESULTADO_);
+    if (antiga && antiga.getLastRow() >= 2) {
+      aviso_('Já tem uma pesquisa na aba "' + ABA_RESULTADO_ + '". Para seguir com ela: escolha a função continuar e clique em ▶ Executar.' +
+        ' Para começar outra: na planilha, menu JMS Segmentos → ▶ Pesquisar remessas desta aba (lá ele pede confirmação).');
+      return null;
+    }
+    console.log('JMS Segmentos: ' + achei + ' Pesquisando (resultado na aba "' + ABA_RESULTADO_ + '").');
+  }
   var trava = LockService.getDocumentLock();
   if (!trava.tryLock(3000)) { aviso_('Já tem uma pesquisa rodando. Espere terminar ou use ⏹ Parar.'); return null; }
   try {
@@ -516,7 +547,9 @@ function continuarSozinho() {
 function parar() {
   PropertiesService.getDocumentProperties().setProperty('SEG_PARAR', '1');
   apagarGatilhos_();
-  SpreadsheetApp.getActive().toast('A pesquisa para em alguns segundos. Para seguir depois: ⏩ Continuar.', 'JMS Segmentos', 8);
+  var msg = 'A pesquisa para em alguns segundos. Para seguir depois: ⏩ Continuar.';
+  console.log('JMS Segmentos: ' + msg);
+  try { SpreadsheetApp.getActive().toast(msg, 'JMS Segmentos', 8); } catch (e) { /* sem a planilha aberta */ }
 }
 
 /**
@@ -524,7 +557,7 @@ function parar() {
  * sem mostrar o token. Guarda o Routename que o JMS aceitou. Falha de rede não é culpa do Routename: não testa os outros.
  */
 function testarConexao() {
-  var inicio = agora_(), tok = token_(), linhas = ['JMS Segmentos ' + VERSAO];
+  var inicio = agora_(), tok = token_(), linhas = ['Versão ' + VERSAO];
   if (!tok) { aviso_('Falta o AuthToken: menu JMS Segmentos → 🔑 Colocar AuthToken do JMS.'); return 'sem token'; }
   linhas.push('AuthToken guardado: ' + tok.length + ' caracteres.');
   var sh = SpreadsheetApp.getActive().getActiveSheet();
@@ -557,7 +590,6 @@ function testarConexao() {
     falhou ? 'O JMS não respondeu (' + falhou + '). Tente de novo em alguns minutos; se continuar, mande um print desta janela.' :
     'O JMS recusou o AuthToken: pegue um novo no JMS e use 🔑 Colocar AuthToken do JMS.');
   var texto = linhas.join('\n');
-  console.log(texto);
   aviso_(texto);
   return texto;
 }

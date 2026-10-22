@@ -42,7 +42,14 @@ Se der problema
 ---------------
 - Qualquer erro aparece na coluna F da aba "Segmentos", começando com ⚠.
   Mande um print das células F2 e F3.
-- Ficou parado em "Começando" (versão 1.0.0): cole o Codigo.gs novo (1.1.0)
+- "Cannot call SpreadsheetApp.getUi() from this context" (versão 1.1.0 ou
+  anterior): a função foi executada pelo botão Executar do editor do Apps
+  Script, onde não dá para abrir janelas. Use o menu JMS Segmentos na
+  planilha. Da versão 1.1.1 em diante isso não dá erro: pelo editor,
+  continuar, parar e testarConexao funcionam e as mensagens saem no Registro
+  de execução. O AuthToken também pode ser colocado no editor: Configurações
+  do projeto > Propriedades do script > JMS_AUTHTOKEN.
+- Ficou parado em "Começando" (versão 1.0.0): cole o Codigo.gs novo (1.1.1)
   no Apps Script, salve, volte para a planilha e use o menu Continuar. O que
   está "Na fila" é consultado; não precisa pesquisar de novo.
 - "O JMS não está respondendo": a pesquisa espera 5 minutos e tenta de novo

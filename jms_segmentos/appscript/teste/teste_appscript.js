@@ -28,7 +28,7 @@ function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 10139
 // ---------- Google falso ----------
 function criarGoogle(o) {
   o = Object.assign({token: 'tok-ficticio-1', rota: 'trackingExpress', falha: 0, redeFalha: 0, seed: 7}, o || {});
-  const g = {relogio: 1.7e12, chamadas: 0, lotes: 0, pedidos: 0, errosLog: [], gatilhos: [], alertas: [], toasts: [], formatos: [], props: {script: {}, doc: {}}, o, ui: {resposta: 'YES', prompt: ''}};
+  const g = {relogio: 1.7e12, chamadas: 0, lotes: 0, pedidos: 0, errosLog: [], logs: [], semUi: false, gatilhos: [], alertas: [], toasts: [], formatos: [], props: {script: {}, doc: {}}, o, ui: {resposta: 'YES', prompt: ''}};
   const rnd = rng(o.seed);
   let travado = false;
 
@@ -126,8 +126,11 @@ function criarGoogle(o) {
   }
   g.planilha = planilha;
   g.ctx = vm.createContext({
-    console: {log: () => {}, error: m => { g.errosLog.push(String(m)); }},
-    SpreadsheetApp: {getActive: () => planilha, getUi: () => ui, flush: () => {}},
+    console: {log: m => { g.logs.push(String(m)); }, error: m => { g.errosLog.push(String(m)); }},
+    SpreadsheetApp: {
+      getActive: () => planilha, flush: () => {},
+      getUi: () => { if (g.semUi) throw new Error('Cannot call SpreadsheetApp.getUi() from this context.'); return ui; }
+    },
     UrlFetchApp: {
       fetchAll: reqs => {
         g.lotes++; g.pedidos += reqs.length;
@@ -404,6 +407,37 @@ for (let i = 1; i <= N; i++) LISTA.push(remessa(i));
   const t = g.ctx.testarConexao();
   check(!/Conexão OK/.test(t) && /O JMS não respondeu/.test(t) && /Address unavailable/.test(t) && /em 65 s/.test(t) && g.relogio - ini < 200000 &&
     !g.props.doc.SEG_ROTA && !/waybillTracking/.test(t), 'testar conexão sem rede: avisa, mostra o tempo e não guarda Routename', t);
+}
+
+// 11) Pelo ▶ Executar do editor do Apps Script (sem janelas): nada dá "Cannot call SpreadsheetApp.getUi()"; as mensagens vão
+//     para o Registro de execução; ▶ Pesquisar não apaga uma pesquisa que já existe; ⏩ Continuar termina.
+{
+  const lista = LISTA.slice(0, 1500);
+  const g = criarGoogle();
+  g.semUi = true;
+  g.ctx.onOpen();
+  check(!g.menu && /aperte F5/.test(g.logs.pop()), 'editor: onOpen não dá erro e explica que o menu é na planilha');
+  check(g.ctx.colocarToken() === 'sem token' && /Propriedades do script/.test(g.logs.pop()), 'editor: colocarToken sem token explica onde colocar');
+  g.props.script.JMS_AUTHTOKEN = 'tok-ficticio-1';
+  const lt = (g.ctx.colocarToken(), g.logs.pop());
+  check(/já está guardado \(14 caracteres\)/.test(lt) && !lt.includes('tok-ficticio'), 'editor: colocarToken com token guardado avisa sem mostrar o token', lt);
+  g.novaAba('Base', [['Remessa']].concat(lista.map(w => [w])));
+  const t = g.ctx.testarConexao();
+  check(/Conexão OK/.test(t) && g.logs.some(l => /Conexão OK/.test(l)), 'editor: testarConexao funciona e o resultado sai no registro');
+  const r = g.ctx.pesquisar();
+  check(r && r.parada === '' && g.ctx.contar_(g.resultado()).fila === 0 && g.logs.some(l => /^JMS Segmentos: Pronto/.test(l)),
+    'editor: pesquisar sem pesquisa anterior roda e avisa no registro', r);
+  g.relogio += 1;
+  g.ctx.parar();
+  check(/A pesquisa para/.test(g.logs.pop()), 'editor: parar funciona');
+  g.aba('Segmentos').cel[1][3] = 'Na fila';
+  g.planilha.ativa = g.aba('Base');
+  const antes = JSON.stringify(g.resultado());
+  check(g.ctx.pesquisar() === null && JSON.stringify(g.resultado()) === antes && /escolha a função continuar/.test(g.logs.pop()),
+    'editor: pesquisar não apaga a pesquisa que já existe e manda usar continuar');
+  g.ctx.continuar();
+  g.esperarGatilhos();
+  conferir(g, lista, 'editor: continuar termina a pesquisa');
 }
 
 console.log('\n' + oks + ' ok, ' + falhas + ' falha(s)');
