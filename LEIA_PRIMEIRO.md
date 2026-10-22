@@ -1,8 +1,50 @@
-# J&T DASHMASTER V4.14.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.15 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.15 — Todos os IDs de viagem localizados; "NÃO TEM ID" só para quem realmente não tem
+**Pedido:** o painel não puxava todos os IDs de viagem. Gráficos e filtros mostravam "Sem informação" no lugar dos IDs. Puxar e localizar todos os IDs, e colocar **NÃO TEM ID** só nas remessas que realmente não têm.
+
+### Análise: onde o ID se perdia
+1. **Dois carregamentos na base, um sem número:** o painel pegava o mais perto do horário, mesmo sem o número do pedido. Agora vale o carregamento **que tem o número**.
+2. **Nome da base com outra grafia** ("SP GRU", "SP-GRU", "SPGRU"): agora é a mesma base. Se a base aparecer no JMS com outro nome e outro código, vale o carregamento **para a próxima parada da lista** feito no **horário de expedição** (até 20 min de diferença). O carregamento de outra base nunca entra.
+3. **O JMS devolvia a remessa com outro número** (pedido filho pelo pedido-mãe, letras minúsculas): a resposta era ignorada. Agora, numa consulta de uma remessa, vale a única remessa devolvida com bipes.
+4. **Remessas abandonadas:** respostas vazias e erros antigos tinham marcado remessas como "sem bipe". Agora **todos os dias** do SC→DC voltam para a fila uma vez, não só os últimos 31.
+5. **"Sem informação" misturava duas coisas:** remessa ainda não consultada e remessa sem ID de verdade. Agora são separadas.
+
+### O que aparece no painel
+| Situação | Tabela e filtro | Gráfico e cartão de ofensor |
+|---|---|---|
+| ID achado no Rastreamento do pacote | o ID | o ID |
+| Consultada e sem o bipe "Encomenda carregada" com o número do pedido na base | **NÃO TEM ID** | fica de fora (não é um ID) |
+| Ainda não consultada | **AGUARDANDO CONSULTA** | fica de fora |
+
+- "NÃO TEM ID" só vale depois da resposta final do JMS: remessa expedida há 12 h ou mais, ou dia de 2 dias atrás ou mais. Antes disso, a remessa é consultada de novo, porque o bipe pode ainda não ter aparecido.
+- O título do gráfico e o selo mostram as três contas: **com ID · NÃO TEM ID · aguardando consulta**.
+- Vale para o SC→DC e para a Expedição.
+
+### Diagnóstico remessa por remessa
+Rode `diagnosticarViagensSCDC()` (Node.js: Configurações → Executar função; Apps Script: no editor). Para o último dia fechado, ou para a data que você passar, ele:
+- mostra quantas remessas têm ID, quantas estão como NÃO TEM ID e quantas aguardam;
+- consulta **uma por uma** até 12 remessas sem ID e diz o motivo de cada uma: resposta vazia do JMS, sem "Encomenda carregada" na base (e em quais bases ela foi carregada), ou carregada sem o número do pedido;
+- avisa se a nossa base aparece no JMS com outro nome (aí é só ajustar `JMS_CENTER_NAME`).
+
+Número de remessa não aparece no texto.
+
+### Como instalar
+- **Apps Script:** troque `Config.gs`, `Core.gs`, `Expedicao.gs`, `Triggers.gs` e `Client.html`. Depois **Implantar → Gerenciar implantações → ✏️ → Nova versão**. Os dias entram na fila sozinhos na próxima execução.
+- **Node.js:** extraia o ZIP por cima e reinicie o `iniciar`.
+
+**Testes:** 660 verificações do servidor e 60 do Node.js. Entre elas:
+- as regras novas do bipe;
+- remessa devolvida com outro número;
+- "NÃO TEM ID" na tabela e no filtro, e fora do gráfico e do cartão;
+- a migração de um dia de 40 dias atrás;
+- o diagnóstico.
+
+No navegador (Node.js, dados fictícios), o filtro mostra os IDs e "NÃO TEM ID", sem nenhum "Sem informação".
 
 ## V4.14.1 — ID de viagem de saída na tabela do SC→DC
 **Pedido:** no painel principal, a coluna "ID viagem de saída" da tabela do SC→DC continuava vazia.

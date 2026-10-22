@@ -164,11 +164,11 @@
       okWhyLearning: 'O painel está procurando o código desta opção no JMS (tentativa de hora em hora).',
       okWhyUnsupported: 'O JMS não respondeu aos códigos testados para esta opção (nova tentativa em 6 h). Mande o Payload do getBreakageRateData com a opção escolhida (sem AuthToken e sem Cookie).',
       amountSumSub: '{n} remessas com valor · média {avg}', amountMaxSub: 'Remessa {w}', amountShare: 'do valor total',
-      routesOfficial: 'Número oficial de cada rota (tabela principal do JMS)', tripCov: 'IDs consultados no Rastreamento do pacote: {a} de {b} remessas ({c} com ID)',
+      routesOfficial: 'Número oficial de cada rota (tabela principal do JMS)', tripCov: 'Rastreamento do pacote: {c} com ID · {n} NÃO TEM ID · {p} aguardando consulta (de {b} remessas)',
       tripCovNone: 'IDs de viagem: consulta no Rastreamento do pacote depois do download do dia', tcOfficial: 'número oficial do JMS',
-      tripBadge: 'IDs de viagem de saída: {f} de {b} remessas',
+      tripBadge: 'IDs de viagem de saída: {f} de {b} remessas · {n} NÃO TEM ID',
       tripBadgeWait: 'As remessas sem ID são consultadas de novo no Rastreamento do pacote (de hora em hora no Node.js; nos horários da agenda no Google) por até 3 dias: as que saem da base depois aparecem sozinhas. O botão Atualizar consulta na hora.',
-      tripBadgeDone: 'Todas as remessas do período já foram consultadas no Rastreamento do pacote. Sem ID = sem o bipe "Encomenda carregada" na base.',
+      tripBadgeDone: 'Todas as remessas do período já foram consultadas no Rastreamento do pacote. NÃO TEM ID = a remessa não tem o bipe "Encomenda carregada" com o número do pedido na base.',
       scanBadge: 'Sacas pela Consulta das bipagens: {f} de {t} · ainda sem saca: {l}',
       scanBadgeHint: 'Sem operador: {o} · {g} remessa(s) sem o bipe "Encomenda inserida em lote" na {b} (não há saca para pegar) · {q} dia(s) na fila da consulta',
       scanWait: 'Sem saca: {l} · Consulta das bipagens ainda não rodou', scanWaitHint: 'Sem operador: {o}. A consulta roda depois da lista do dia (ou no botão Atualizar).',
@@ -338,11 +338,11 @@
       okWhyLearning: '看板正在查找 JMS 中该选项的代码（每小时尝试一次）。',
       okWhyUnsupported: 'JMS 未响应该选项已测试的代码（6 小时后重试）。请发送选择该选项时 getBreakageRateData 的 Payload（不含 AuthToken 和 Cookie）。',
       amountSumSub: '{n} 票有金额 · 平均 {avg}', amountMaxSub: '运单 {w}', amountShare: '占总金额',
-      routesOfficial: '各线路官方数字（JMS主表）', tripCov: '包裹轨迹已查询车次号：{a} / {b} 票（{c} 票有车次号）',
+      routesOfficial: '各线路官方数字（JMS主表）', tripCov: '包裹轨迹：{c} 票有车次号 · {n} 票无车次号（NÃO TEM ID） · {p} 票等待查询（共 {b} 票）',
       tripCovNone: '车次号：当日明细下载完成后在包裹轨迹查询', tcOfficial: 'JMS官方数字',
-      tripBadge: '发件车次号：{f} / {b} 票',
+      tripBadge: '发件车次号：{f} / {b} 票 · {n} 票无车次号',
       tripBadgeWait: '没有车次号的运单会在包裹轨迹中再次查询（Node.js 每小时一次；Google 按计划时间），最多 3 天：之后发出的运单会自动显示。点击“更新”立即查询。',
-      tripBadgeDone: '该期间所有运单都已在包裹轨迹查询。无车次号 = 本网点没有“装车发件”扫描。',
+      tripBadgeDone: '该期间所有运单都已在包裹轨迹查询。NÃO TEM ID（无车次号）= 本网点没有带单号的“装车发件”扫描。',
       scanBadge: '扫描记录查询补全包号：{f} / {t} · 仍无包号：{l}',
       scanBadgeHint: '无操作员：{o} · {g} 票在 {b} 没有“建包扫描”记录（无包号可取）· 查询队列 {q} 天',
       scanWait: '无包号：{l} · 扫描记录查询尚未运行', scanWaitHint: '无操作员：{o}。当日明细下载后（或点击“更新”）运行查询。',
@@ -1435,7 +1435,8 @@
     if (tc) {
       var tA = 0, tB = 0, tF = 0;
       Object.keys(tc).forEach(function (d) { if (d < state.from || d > state.to) return; tA += Number(tc[d].done) || 0; tB += Number(tc[d].total) || 0; tF += Number(tc[d].found) || 0; });
-      if (tB) html += badge(tA >= tB ? 'ok' : 'warn', tA >= tB ? 'check' : 'history', t('tripBadge', {f: fmtInt(tF), b: fmtInt(tB)}), t(tA >= tB ? 'tripBadgeDone' : 'tripBadgeWait'));
+      if (tB) html += badge(tA >= tB ? 'ok' : 'warn', tA >= tB ? 'check' : 'history', t('tripBadge', {f: fmtInt(tF), b: fmtInt(tB), n: fmtInt(Math.max(0, Math.min(tA, tB) - tF))}),
+        t(tA >= tB ? 'tripBadgeDone' : 'tripBadgeWait'));
     }
     $('#coverageBadges').innerHTML = html;
   }
@@ -2049,7 +2050,7 @@
         list = Core.countBy(rows, dim);
         total = colQty(rows);
       }
-      var g = list.filter(function (x) { return x.label !== 'N/A' && x.value > 0; })[0], pct = g && total ? g.value / total * 100 : null;
+      var g = list.filter(function (x) { return !Core.noValue(x.label) && x.value > 0; })[0], pct = g && total ? g.value / total * 100 : null;
       var label = c.topCardLabels && c.topCardLabels[dim] ? L(c.topCardLabels[dim]) : t('topOffender', {dim: L(dimLabel(dim))});
       var sub = g ? fmtInt(g.value) + ' ' + esc(tx(c, 'shipments')) + ' · <b>' + fmtPct(pct, 1) + '</b> ' + esc(t('participation')) +
         '<br><span class="mc-note">' + esc(official ? t('tcOfficial') : partial ? t('tcPartial') : tx(c, 'distinctShipments')) + '</span>'
@@ -2074,7 +2075,9 @@
   function tripCoverageText() {
     var cov = (state.data.meta && state.data.meta.tripCoverage) || {}, a = 0, b = 0, f = 0, any = false;
     Object.keys(cov).forEach(function (d) { if (d < state.from || d > state.to) return; any = true; a += Number(cov[d].done) || 0; b += Number(cov[d].total) || 0; f += Number(cov[d].found) || 0; });
-    return any ? t('tripCov', {a: fmtInt(Math.min(a, b)), b: fmtInt(b), c: fmtInt(f)}) : t('tripCovNone');
+    // V4.15: com ID · consultadas sem ID de verdade ("NÃO TEM ID") · ainda aguardando a consulta.
+    a = Math.min(a, b);
+    return any ? t('tripCov', {b: fmtInt(b), c: fmtInt(f), n: fmtInt(Math.max(0, a - f)), p: fmtInt(b - a)}) : t('tripCovNone');
   }
   /**
    * Cartões T1 / T2 / T3: quantidade recebida em cada turno (horário de descarregamento do veículo de chegada)

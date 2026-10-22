@@ -470,7 +470,8 @@ function fakeJms(dayData, options) {
             waybillTrackingContent: 'A encomenda expressa está [SP GRU] sendo enviada, para [' + x.sendNextStation + '], escaneador [EQUIPAMENTO FICTICIO], o número do pedido [' + dep + '], número do voo []'});
           det.push({billCode: w, waybillNo: w, scanTime: x.dispatchTime.slice(0, 11) + '23:59:00', scanTypeName: 'Encomenda carregada', scanNetworkName: 'DC GRU-SP',
             scanNetworkId: 2620, nextStopName: 'F FICTICIO-SP', remark2: 'SRTRFIC' + w.slice(-3), code: 1, originalScanTypeCode: 50});
-          return {keyword: w, details: det.reverse(), codes: null};
+          // options.tripKeyword (V4.15): o JMS devolve a remessa com outro número (ex.: pedido-mãe, minúsculas).
+          return {keyword: options.tripKeyword ? options.tripKeyword(w) : w, details: det.reverse(), codes: null};
         });
         const data = dcData.concat(kws.filter(w => all[w]).map(w => {
           const x = all[w], det = [];

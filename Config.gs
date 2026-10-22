@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.14.1',
+  VERSION: '4.15.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -586,6 +586,8 @@ const ALL_INDICATORS_ = Object.freeze({
       client: ['orderSourceName'], route: ['arrivalShipmentName', 'lastCenterName'], reason: ['isTimely']
     },
     labels: {tripId: {pt: 'ID viagem de saída', zh: '发件车次号'}, route: {pt: 'Rota do veículo de chegada', zh: '到件车辆线路'}},
+    // V4.15: remessa ainda não consultada no Rastreamento do pacote (as consultadas sem ID mostram "NÃO TEM ID").
+    naLabel: {text: {pt: 'AGUARDANDO CONSULTA', zh: '等待查询'}, fields: ['tripId']},
     filters: ['receiptShift', 'expeditionShift', 'tripId', 'interval', 'route'],
     topCards: ['tripId'],
     hideShiftCards: true,
@@ -924,7 +926,9 @@ const ALL_INDICATORS_ = Object.freeze({
     // Singular para "Maior rota" / "Menor rota" nos quadros dos gráficos.
     labelsOne: {destination: {pt: 'Rota', zh: '线路'}, login: {pt: 'Login', zh: '操作员'}, interval: {pt: 'Intervalo', zh: '时间段'},
       tripId: {pt: 'ID de viagem', zh: '车次号'}},
-    // V3.23: filtro "IDs Viagem" (ID de viagem do Rastreamento do pacote; remessa ainda não consultada = "Sem informação").
+    // V3.23: filtro "IDs Viagem" (ID de viagem do Rastreamento do pacote). V4.15: ainda não consultada = "AGUARDANDO CONSULTA";
+    // consultada sem ID de verdade = "NÃO TEM ID".
+    naLabel: {text: {pt: 'AGUARDANDO CONSULTA', zh: '等待查询'}, fields: ['tripId']},
     filters: ['destination', 'interval', 'shift', 'tripId'],
     // Cartões "que mais mandou": login, rota e intervalo (lista Enviados).
     topCards: ['login', 'destination', 'interval'],

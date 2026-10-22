@@ -506,6 +506,9 @@ const TRIP_RETRY_MS_ = 90 * 60000, TRIP_GRACE_MS_ = 60 * 60000;
 const TRIP_PARALLEL_MAX_ = 50, TRIP_PARALLEL_MIN_ = 4;
 // V4.14.1: começa com 10; conferência do fim com 5; vazia em 5 execuções = falha; até 3 consultas sozinhas por execução.
 const TRIP_PARALLEL_START_ = 10, TRIP_REVIEW_PAR_ = 5, TRIP_MAX_EMPTY_ = 5, TRIP_PROBES_ = 3;
+// V4.15: sem o bipe de carregamento numa remessa expedida há 12 h+ (ou num dia de 2+ dias atrás), a resposta é final:
+// "NÃO TEM ID". Carregamento sem a base reconhecida: vale o que foi feito até 20 min do horário de expedição da lista.
+const TRIP_FINAL_MS_ = 12 * 3600000, TRIP_TIME_MATCH_MS_ = 20 * 60000;
 /** kind: 'viagens' (IDs de viagem, padrão) ou 'bipagens' (V4.4, Triagem errada: lote e login da Consulta das bipagens). */
 function lookupMapKey_(indicator, kind) { return indicator + ':' + (kind || 'viagens'); }
 function tripMapKey_(indicator) { return lookupMapKey_(indicator, 'viagens'); }
@@ -553,17 +556,15 @@ function applyTripMapToDs_(ds, map, mode) {
   const D = ds.dict.tripId, idx = new Map();
   D.forEach((v, j) => { if (!idx.has(v)) idx.set(v, j); });
   const slot = v => { let j = idx.get(v); if (j === undefined) { j = D.length; D.push(v); idx.set(v, j); } return j; };
-  const W = ds.dict[wk], cW = ds.cols[wk], cT = ds.cols.tripId;
+  const W = ds.dict[wk], cW = ds.cols[wk], cT = ds.cols.tripId, miss = map.miss || {};
   let n = 0;
   for (let i = 0; i < ds.n; i++) {
-    const id = map.ids[W[cW[i]]];
-    if (id === undefined || id === '') {
-      if (!mode) continue;
-      const j0 = slot('');
-      if (cT[i] !== j0) { cT[i] = j0; n++; }
-      continue;
-    }
-    const j = slot(id);
+    const w = W[cW[i]], id = map.ids[w];
+    // V4.15: consultada e sem ID de verdade (sem o bipe de carregamento depois das tentativas, ou o bipe sem o número do
+    // pedido) = "NÃO TEM ID". Ainda não consultada: vazia (o painel mostra "Aguardando consulta").
+    const v = id ? id : id === '' || (miss[w] || 0) >= TRIP_MAX_MISS_ ? JTCore_.NO_TRIP_ID : null;
+    if (v === null && !mode) continue;
+    const j = slot(v === null ? '' : v);
     if (cT[i] !== j) { cT[i] = j; n++; }
   }
   if (mode) ds.tripSrc = mode;
@@ -603,28 +604,41 @@ function tripPayload_(list) { return {keywordList: list, trackingTypeEnum: 'WAYB
  */
 function pickTripId_(details, o) {
   const up = s => String(s === null || s === undefined ? '' : s).trim().toUpperCase();
+  // V4.15: nome da base sem espaços/pontuação ("SP GRU", "SP-GRU" e "SPGRU" são a mesma).
+  const key = s => up(s).replace(/[^A-Z0-9]/g, '');
   const codes = (o.trips && o.trips.loadCodes) || [1], orig = (o.trips && o.trips.loadOriginalCodes) || [50];
   // V4.6: a linha também é reconhecida pelo texto, como no material do usuário — Tipo de bipagem "Encomenda carregada" e
   // Descrição "A encomenda expressa está [SP GRU] sendo enviada, para […]" (o código pode vir com outra grafia ou vazio).
   const text = d => up(d.waybillTrackingContent);
   const isLoad = d => codes.indexOf(Number(d.code)) >= 0 || orig.indexOf(Number(d.originalScanTypeCode)) >= 0 ||
     /ENCOMENDA CARREGADA/.test(up(d.scanTypeName)) || /\] SENDO ENVIADA/.test(text(d));
-  const atBase = d => up(d.scanNetworkName) === up(o.center) || (!!o.centerId && Number(d.scanNetworkId) === Number(o.centerId)) ||
+  const atBase = d => key(d.scanNetworkName) === key(o.center) || (!!o.centerId && Number(d.scanNetworkId) === Number(o.centerId)) ||
     (!d.scanNetworkName && text(d).indexOf('[' + up(o.center) + '] SENDO ENVIADA') >= 0);
-  const here = (details || []).filter(d => d && isLoad(d) && atBase(d));
-  if (!here.length) return null;
-  const same = here.filter(d => up(d.nextStopName) === up(o.route));
-  const pool = same.length ? same : here;
   const at = s => Date.parse(String(s || '').replace(' ', 'T'));
   const t0 = at(o.time);
   const dist = d => { const t = at(d.scanTime); return Number.isFinite(t) && Number.isFinite(t0) ? Math.abs(t - t0) : Infinity; };
-  let best = pool[0];
-  pool.forEach(d => { if (dist(d) < dist(best)) best = d; });
-  const id = String(best.remark2 === null || best.remark2 === undefined ? '' : best.remark2).trim();
-  if (id) return id;
-  // Sem o campo remark2: o "número do pedido [ID]" da descrição da etapa.
-  const m = String(best.waybillTrackingContent || '').match(/n[úu]mero do pedido \[([^\]]+)\]/i);
-  return m ? m[1].trim() : '';
+  // "Número do pedido": o campo remark2 ou, sem ele, o "número do pedido [ID]" da descrição da etapa.
+  const idOf = d => {
+    const id = String(d.remark2 === null || d.remark2 === undefined ? '' : d.remark2).trim();
+    if (id) return id;
+    const m = String(d.waybillTrackingContent || '').match(/n[úu]mero do pedido \[([^\]$]+)\]/i);
+    return m ? m[1].trim() : '';
+  };
+  const loads = (details || []).filter(d => d && isLoad(d));
+  let here = loads.filter(atBase);
+  // V4.15: nenhum carregamento com o nome/código da base (a base aparece no JMS com outro nome/código): vale o carregamento
+  // PARA A PRÓXIMA PARADA DA LISTA feito no horário de expedição (até 20 min de diferença) — é o bipe da nossa expedição. O
+  // carregamento de outra base (para nós) nunca entra: a próxima parada dele é a nossa base.
+  if (!here.length && key(o.route)) here = loads.filter(d => dist(d) <= TRIP_TIME_MATCH_MS_ && key(d.nextStopName) === key(o.route));
+  if (!here.length) return null;
+  const same = here.filter(d => key(d.nextStopName) === key(o.route));
+  const pool = same.length ? same : here;
+  // V4.15: entre os carregamentos, o que tem o número do pedido (antes: o mais perto do horário, mesmo sem número).
+  const withId = pool.filter(d => idOf(d));
+  const cand = withId.length ? withId : pool;
+  let best = cand[0];
+  cand.forEach(d => { if (dist(d) < dist(best)) best = d; });
+  return idOf(best);
 }
 /** Ordem espalhada (amostra do dia inteiro enquanto a consulta não termina): por um código da remessa. */
 function tripOrderKey_(w) {
@@ -652,7 +666,11 @@ function runTripJob_(job, deadline) {
   const marked = !mode || ds.tripSrc === mode;
   const map = loadTripMap_(job.indicator, job.date);
   // V4.6: tarefa com page 1 (migração/Atualizar) consulta de novo as remessas que antes vieram sem a linha de carregamento.
-  if (job.page === 1) { map.miss = {}; map.last = {}; map.empty = {}; }
+  // V4.15: e as que vieram "carregada sem número" (a regra nova procura o carregamento que tem o número do pedido).
+  if (job.page === 1) {
+    map.miss = {}; map.last = {}; map.empty = {};
+    Object.keys(map.ids).forEach(w => { if (!map.ids[w]) delete map.ids[w]; });
+  }
   const W = ds.dict[wk], cW = ds.cols[wk];
   const D = ds.dict.destination || [], cD = ds.cols.destination, E = ds.dict.eventTime || [], cE = ds.cols.eventTime;
   const info = {}, todo = [], nowMs = Date.now();
@@ -674,13 +692,15 @@ function runTripJob_(job, deadline) {
    * Consulta sem o bipe de carregamento (V4.12.5): só conta como falha 1 h depois da expedição. Sem horário de expedição na
    * lista (SC→DC: ainda não saiu da base quando a lista foi baixada), nunca conta — volta para a fila enquanto o dia é recente.
    */
+  const oldDay = job.date <= addDaysIso_(isoToday_(), -2);
   const fail = w => {
+    const t = wall(info[w] && info[w].time), ago = Number.isFinite(t) && Number.isFinite(nowWall) ? nowWall - t : NaN;
     if (mode) {
       map.last[w] = nowMs;
-      const t = wall(info[w] && info[w].time);
-      if (!Number.isFinite(t) || (Number.isFinite(nowWall) && nowWall - t < TRIP_GRACE_MS_)) return;
+      if (!oldDay && !(ago >= TRIP_GRACE_MS_)) return;
     }
-    map.miss[w] = (map.miss[w] || 0) + 1;
+    // V4.15: expedida há 12 h+ ou dia de 2+ dias atrás — o bipe não vai mais aparecer: resposta final ("NÃO TEM ID").
+    map.miss[w] = oldDay || ago >= TRIP_FINAL_MS_ ? TRIP_MAX_MISS_ : (map.miss[w] || 0) + 1;
   };
   todo.sort((a, b) => tripOrderKey_(a) - tripOrderKey_(b));
   const endpoint = endpointFor_(cfg, 'trips');
@@ -702,15 +722,23 @@ function runTripJob_(job, deadline) {
     map.empty[w] = (map.empty[w] || 0) + 1;
     if (map.empty[w] >= TRIP_MAX_EMPTY_) { delete map.empty[w]; fail(w); }
   };
-  const gotOf = json => {
-    const got = {};
-    recordsOf_(json).forEach(item => {
-      const kw = String(item && (item.keyword || item.waybillNo || item.billCode) || '').trim();
-      if (kw) got[kw] = item;
+  const hasScans = item => !!(item && Array.isArray(item.details) && item.details.length);
+  const norm = w => String(w === null || w === undefined ? '' : w).trim().toUpperCase();
+  // Remessas da consulta → o que o JMS devolveu. V4.15: número comparado sem diferença de maiúsculas/espaços; consulta de UMA
+  // remessa usa a única remessa devolvida com bipes, mesmo com outro número (pedido filho "-001" devolvido pelo pedido-mãe).
+  const gotOf = (json, list) => {
+    const by = {}, got = {}, recs = recordsOf_(json);
+    recs.forEach(item => {
+      const kw = norm(item && (item.keyword || item.waybillNo || item.billCode));
+      if (kw && !hasScans(by[kw])) by[kw] = item;
     });
+    list.forEach(w => { if (by[norm(w)]) got[w] = by[norm(w)]; });
+    if (list.length === 1 && !hasScans(got[list[0]])) {
+      const withScans = recs.filter(hasScans);
+      if (withScans.length === 1) got[list[0]] = withScans[0];
+    }
     return got;
   };
-  const hasScans = item => !!(item && Array.isArray(item.details) && item.details.length);
   while (true) {
     if (k >= todo.length) {
       if (review || !revisar.length) break;
@@ -736,7 +764,7 @@ function runTripJob_(job, deadline) {
     const parsed = groups.map((list, gi) => {
       try {
         if (!responses[gi]) throw new Error('sem resposta');
-        const json = parseJmsResponse_(responses[gi], endpoint), got = gotOf(json);
+        const json = parseJmsResponse_(responses[gi], endpoint), got = gotOf(json, list);
         return {json: json, got: got, empty: !list.some(w => hasScans(got[w]))};
       } catch (e) {
         const m = String(e && e.message || e);
@@ -765,7 +793,7 @@ function runTripJob_(job, deadline) {
         // cabeçalhos de rota alternativos), poucas vezes por execução.
         if (single && ((sobrecarga && !review) || probes <= 0)) { vazia(list[0], parsed[gi].err); return; }
         if (single) probes--;
-        try { json = jmsPost_(endpoint, tripPayload_(list), 2); got = gotOf(json); }
+        try { json = jmsPost_(endpoint, tripPayload_(list), 2); got = gotOf(json, list); }
         catch (e2) {
           const m2 = String(e2 && e2.message || e2);
           if (errorKind_(m2) !== 'OTHER' || /Sessão do JMS/.test(m2)) throw e2;
@@ -810,8 +838,9 @@ function runTripJob_(job, deadline) {
   // "Consultadas" = com resposta final: com ID, ou sem o bipe depois de todas as tentativas. As outras voltam para a fila.
   const settled = Object.keys(map.ids).length + Object.keys(map.miss).filter(w => map.ids[w] === undefined && map.miss[w] >= TRIP_MAX_MISS_).length;
   saveTripMap_(job.indicator, job.date, map, total, undefined, settled);
-  // SC→DC: o arquivo antigo (com o ID de chegada) é regravado já na primeira vez, mesmo sem ID novo.
-  if ((changed || !marked) && (applyTripMapToDs_(ds, map, mode) || !marked)) {
+  // SC→DC: o arquivo antigo (com o ID de chegada) é regravado já na primeira vez, mesmo sem ID novo. V4.15: também quando só
+  // muda a situação de uma remessa (consultada sem ID → "NÃO TEM ID").
+  if (applyTripMapToDs_(ds, map, mode) || !marked) {
     // Mesmo arquivo do dia com os IDs; a data do download não muda (o intervalo de atualização do detalhe continua valendo).
     saveDayDataset_(job.indicator, job.date, ds, df.expectedPages, df.expectedRecords, {skipTrips: true, keepCreatedAt: df.createdAt});
   }
@@ -919,12 +948,27 @@ function migrateToV4141_() {
   if (n) logSync_('INFO', 'sc_dc', '', 'V4.14.1: ' + n + ' dia(s) na fila para buscar de novo os IDs de viagem que ficaram vazios.');
   return n;
 }
-/** Dias com remessas sem ID de viagem (SC→DC: 31 dias; Expedição: os dias com detalhe) de volta na fila, do zero (page 1). */
-function requeueMissingTrips_() {
+/**
+ * V4.15 (pedido: puxar e localizar todos os IDs de viagem): regra nova do bipe (base sem diferença de grafia, o carregamento
+ * com o número do pedido, o carregamento no horário de expedição) e "NÃO TEM ID" para quem realmente não tem. Uma vez: TODOS os
+ * dias do SC→DC com remessas sem ID (não só os últimos 31) e os dias com detalhe da Expedição voltam para a fila, do zero.
+ */
+function migrateToV415_() {
+  if (getProp_('MIGRATION_V415', '')) return 0;
+  const n = requeueMissingTrips_(true);
+  setProp_('MIGRATION_V415', new Date().toISOString());
+  if (n) logSync_('INFO', 'sc_dc', '', 'V4.15: ' + n + ' dia(s) na fila para localizar os IDs de viagem que faltavam (sem ID de verdade = "NÃO TEM ID").');
+  return n;
+}
+/**
+ * Dias com remessas sem ID de viagem (SC→DC: 31 dias, ou todos com `all`; Expedição: os dias com detalhe) de volta na fila,
+ * do zero (page 1).
+ */
+function requeueMissingTrips_(all) {
   let n = 0;
   const to = isoToday_();
   Object.keys(INDICATORS).filter(k => INDICATORS[k].trips).forEach(k => {
-    const cfg = INDICATORS[k], from = addDaysIso_(to, cfg.grouped ? -((cfg.detail && cfg.detail.days) || 7) : -31);
+    const cfg = INDICATORS[k], from = cfg.grouped ? addDaysIso_(to, -((cfg.detail && cfg.detail.days) || 7)) : all ? '' : addDaysIso_(to, -31);
     const cov = tripCoverage_(k, from, to);
     const jobs = Object.keys(dayFilesMap_(k, from, to)).sort().reverse()
       .filter(d => !cov[d] || !(cov[d].total > 0) || cov[d].found < cov[d].total).map(d => ['TRIPS', k, d, 1]);
@@ -1552,55 +1596,109 @@ function diagnosticarExpedicao(date) {
 }
 
 /**
- * Diagnóstico do ID de viagem de SAÍDA do SC→DC (V4.1). Rode em Executar função (Node.js) ou no editor (Apps Script).
- * Pega algumas remessas da lista "Qtd expedidos fora do prazo" do dia, consulta o Rastreamento do pacote e mostra, para cada
- * uma, o ID de chegada (tabela secundária, não usado mais) e o ID de saída achado na linha "Encomenda carregada" (J&T Tracking
- * Code 50) da nossa base. Número de remessa não aparece. `date` (opcional, AAAA-MM-DD): padrão = último dia fechado.
+ * Diagnóstico do ID de viagem de SAÍDA do SC→DC (V4.1; V4.15: análise remessa por remessa). Rode em Executar função (Node.js)
+ * ou no editor (Apps Script). Mostra, para o dia: quantas remessas do painel têm ID, quantas "NÃO TEM ID" e quantas aguardam a
+ * consulta; depois consulta SOZINHA (como a tela do JMS) cada remessa sem ID de uma amostra e explica o motivo — o JMS
+ * respondeu vazio, não há "Encomenda carregada" na base (e em quais bases a remessa foi carregada), ou o bipe veio sem o
+ * número do pedido. Número de remessa não aparece. `date` (opcional, AAAA-MM-DD): padrão = último dia fechado.
  */
 function diagnosticarViagensSCDC(date) {
   const key = 'sc_dc', cfg = activeCfg_(key);
   const d = isIso_(date) ? date : lastClosedDate_(key);
-  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, amostra: []};
+  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, amostra: [], motivos: {}};
   const add = x => lines.push(x);
   const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
   const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
+  const up = s => String(s === null || s === undefined ? '' : s).trim().toUpperCase();
+  const keyOf = s => up(s).replace(/[^A-Z0-9]/g, '');
   const cred = authConfigSafe_();
   add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — SC → DC: ID de viagem de SAÍDA (Rastreamento do pacote) — dia ' + humanDatePt_(d));
   add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · base: ' + centerName_() + ' (id ' + distributeId_() + ')');
   (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === 'TRACKING' || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
+  // 1. O que o painel tem do dia.
   let sample = [];
-  try {
-    const r = fetchDetailPage_(key, d, 1, 20);
-    add('Lista "Qtd expedidos fora do prazo" (tabela secundária): ' + fmt(r.total) + ' remessa(s) · ' + r.records.length + ' na 1ª página');
-    sample = r.records.slice(0, 8);
-  } catch (e) { add('Lista do dia: ERRO — ' + err(e)); }
-  if (sample.length) {
-    const rows = sample.map(x => ({raw: x, row: normalizeDetailRow_(key, x, d) || {}}));
-    const ws = rows.map(x => String(x.row.shipment || '').trim()).filter(Boolean);
+  const df = dayFilesMap_(key, d, d)[d], map = loadTripMap_(key, d);
+  if (df) {
     try {
-      const json = jmsPost_(endpointFor_(cfg, 'trips'), tripPayload_(ws), 2);
-      const got = {};
-      recordsOf_(json).forEach(item => { const kw = String(item && (item.keyword || item.waybillNo) || '').trim(); if (kw) got[kw] = item; });
-      let found = 0;
-      rows.forEach((x, i) => {
-        const w = String(x.row.shipment || '').trim(), item = got[w], det = (item && item.details) || [];
-        const id = item ? pickTripId_(det, {trips: cfg.trips, center: centerName_(), centerId: distributeId_(), route: x.row.destination, time: x.row.eventTime}) : null;
-        const arrival = String(fieldReader_(x.raw)(['arrivalShipmentNo']).value || '').trim();
-        if (id) found++;
-        add('  remessa ' + (i + 1) + ': ' + det.length + ' bipe(s) · ID chegada (tabela secundária) ' + (arrival || '—') + ' → ID de SAÍDA ' +
-          (!item ? 'não veio na consulta' : id === null ? 'SEM linha "Encomenda carregada" na ' + centerName_() : id || '(carregada sem número do pedido)') +
-          (x.row.destination ? ' · próxima parada ' + x.row.destination : ''));
-        out.amostra.push({bipes: det.length, chegada: arrival, saida: id});
-      });
-      add('Resultado: ' + found + ' de ' + rows.length + ' remessa(s) com ID de saída. Lote atual: ' + tripBatch_() + ' remessa(s) por consulta.');
-    } catch (e) { add('Rastreamento do pacote: ERRO — ' + err(e) + ' (sem os IDs de saída o resto do painel funciona)'); }
+      const ds = loadDetailFile_(df.fileId), wk = tripWaybillCol_(ds), seen = {};
+      const D = ds.dict.destination || [], cD = ds.cols.destination, E = ds.dict.eventTime || [], cE = ds.cols.eventTime;
+      let com = 0, nao = 0, esp = 0;
+      const sem = [];
+      for (let i = 0; wk && i < ds.n; i++) {
+        const w = ds.dict[wk][ds.cols[wk][i]];
+        if (!w || seen[w]) continue;
+        seen[w] = 1;
+        const id = map.ids[w];
+        if (id) { com++; continue; }
+        if (id === '' || (map.miss[w] || 0) >= TRIP_MAX_MISS_) nao++; else esp++;
+        sem.push({w: w, route: cD ? D[cD[i]] : '', time: cE ? E[cE[i]] : '', antes: id === '' || (map.miss[w] || 0) >= TRIP_MAX_MISS_ ? 'NÃO TEM ID' : 'aguardando'});
+      }
+      add('No painel: ' + fmt(com + nao + esp) + ' remessa(s) · ' + fmt(com) + ' com ID · ' + fmt(nao) + ' NÃO TEM ID · ' + fmt(esp) + ' aguardando consulta' +
+        (Object.keys(map.empty || {}).length ? ' (' + fmt(Object.keys(map.empty).length) + ' com resposta vazia do JMS, consultadas de novo na próxima vez)' : ''));
+      out.painel = {comId: com, naoTemId: nao, aguardando: esp};
+      // Espalhada pelo dia (não só as primeiras).
+      sem.sort((a, b) => tripOrderKey_(a.w) - tripOrderKey_(b.w));
+      sample = sem.slice(0, 12);
+    } catch (e) { add('Arquivo do dia: ERRO ao ler — ' + err(e)); }
+  } else add('No painel: o dia ainda não foi baixado.');
+  if (!sample.length) {
+    try {
+      const r = fetchDetailPage_(key, d, 1, 20);
+      add('Lista "Qtd expedidos fora do prazo" no JMS: ' + fmt(r.total) + ' remessa(s). Nenhuma sem ID no painel: amostra da 1ª página.');
+      sample = r.records.slice(0, 6).map(x => { const row = normalizeDetailRow_(key, x, d) || {}; return {w: String(row.shipment || '').trim(), route: row.destination, time: row.eventTime, antes: '—'}; })
+        .filter(x => x.w);
+    } catch (e) { add('Lista do dia: ERRO — ' + err(e)); }
   }
+  // 2. Cada remessa da amostra consultada SOZINHA (o JMS devolve uma por consulta), com o motivo.
+  if (sample.length) {
+    add('Remessas sem ID consultadas agora, uma por vez (' + sample.length + '):');
+    const endpoint = endpointFor_(cfg, 'trips'), ctx = {trips: cfg.trips, center: centerName_(), centerId: distributeId_()};
+    const isLoad = x => Number(x.code) === 1 || Number(x.originalScanTypeCode) === 50 || /ENCOMENDA CARREGADA/.test(up(x.scanTypeName));
+    const bases = {};
+    sample.forEach((x, i) => {
+      let motivo = '', texto = '';
+      try {
+        const json = jmsPost_(endpoint, tripPayload_([x.w]), 2), recs = recordsOf_(json);
+        const item = recs.filter(r => up(r && (r.keyword || r.waybillNo || r.billCode)) === up(x.w))[0] || (recs.length === 1 ? recs[0] : null);
+        const det = (item && item.details) || [];
+        if (!det.length) { motivo = 'vazia'; texto = 'o JMS respondeu sem nenhum bipe → consultada de novo na próxima vez (não é "NÃO TEM ID")'; }
+        else {
+          const id = pickTripId_(det, Object.assign({route: x.route, time: x.time}, ctx));
+          const loads = det.filter(isLoad);
+          loads.forEach(l => { const b = String(l.scanNetworkName || '?'); bases[b] = (bases[b] || 0) + 1; });
+          const atBase = det.filter(b => keyOf(b.scanNetworkName) === keyOf(centerName_()) || Number(b.scanNetworkId) === Number(distributeId_()));
+          const tipos = Array.from(new Set(atBase.map(b => String(b.scanTypeName || b.code || '?')))).slice(0, 6).join(', ');
+          if (id) { motivo = 'achado'; texto = 'ID de saída ' + id + (x.antes !== '—' ? ' (estava "' + x.antes + '"; a fila da V4.15 atualiza o painel)' : ''); }
+          else if (id === '') { motivo = 'semNumero'; texto = '"Encomenda carregada" na base SEM o número do pedido → NÃO TEM ID'; }
+          else {
+            motivo = 'semCarregamento';
+            texto = 'sem "Encomenda carregada" na base ' + centerName_() + ' → NÃO TEM ID · ' + det.length + ' bipe(s)' +
+              (loads.length ? ' · carregada em: ' + loads.map(l => String(l.scanNetworkName || '?') + ' ' + String(l.scanTime || '').slice(5, 16)).slice(0, 4).join('; ') : ' · nenhum carregamento') +
+              (tipos ? ' · bipes na base: ' + tipos : ' · nenhum bipe na base');
+          }
+          out.amostra.push({bipes: det.length, carregamentos: loads.length, saida: id, antes: x.antes});
+        }
+      } catch (e) { motivo = 'erro'; texto = 'ERRO — ' + err(e); }
+      out.motivos[motivo] = (out.motivos[motivo] || 0) + 1;
+      add('  remessa ' + (i + 1) + (x.route ? ' (próxima parada ' + x.route + ')' : '') + ': ' + texto);
+    });
+    const m = out.motivos;
+    add('Resumo: ' + fmt(m.achado || 0) + ' com ID achado · ' + fmt((m.semCarregamento || 0) + (m.semNumero || 0)) + ' NÃO TEM ID · ' +
+      fmt(m.vazia || 0) + ' resposta vazia · ' + fmt(m.erro || 0) + ' erro.');
+    const outras = Object.keys(bases).filter(b => keyOf(b) !== keyOf(centerName_())).sort((a, b) => bases[b] - bases[a]);
+    if ((m.semCarregamento || 0) && outras.length) {
+      add('Bases onde as remessas sem ID foram carregadas: ' + outras.slice(0, 5).map(b => b + ' (' + bases[b] + ')').join(', ') +
+        '. Se uma delas for a nossa base com outro nome, ajuste JMS_CENTER_NAME (hoje "' + centerName_() + '").');
+    }
+    if (m.achado) add('IDs achados agora que o painel ainda não tinha: rode a fila (ou clique em Atualizar no painel) — a V4.15 consulta de novo todos os dias sem ID.');
+  }
+  // 3. Situação dos últimos dias.
   try {
-    const back = addDaysIso_(isoToday_(), -3), cov = tripCoverage_(key, back, isoToday_());
-    add('IDs de saída consultados nos últimos dias:');
+    const back = addDaysIso_(isoToday_(), -6), cov = tripCoverage_(key, back, isoToday_());
+    add('IDs de saída nos últimos dias (com ID · NÃO TEM ID · aguardando):');
     dateRangeIso_(back, isoToday_()).forEach(x => {
       const c = cov[x];
-      add('  ' + humanDatePt_(x) + ': ' + (c ? fmt(c.done) + ' de ' + fmt(c.total) + ' remessas consultadas (' + fmt(c.found) + ' com ID)' : 'ainda não consultado'));
+      add('  ' + humanDatePt_(x) + ': ' + (c ? fmt(c.found) + ' · ' + fmt(Math.max(0, Math.min(c.done, c.total) - c.found)) + ' · ' + fmt(Math.max(0, c.total - c.done)) + ' (de ' + fmt(c.total) + ')' : 'ainda não consultado'));
     });
     out.cobertura = cov;
   } catch (e) { add('Cobertura: ERRO ao ler — ' + err(e)); }

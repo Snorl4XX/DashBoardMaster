@@ -1855,7 +1855,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       const x = tr.t[r.waybill];
       if (!x) { extra++; return; }
       if (r.column !== c.sendState_(x.transit, x.undelivered)) st++;
-      if ((r.tripId === 'N/A' ? '' : r.tripId) !== (x.trip === null ? '' : x.trip)) trip++;
+      // V4.15: sem o bipe de carregamento na base = "NÃO TEM ID" (dia antigo: a resposta é final).
+      if ((r.tripId === 'N/A' ? '' : r.tripId) !== (x.trip === null || x.trip === '' ? 'NÃO TEM ID' : x.trip)) trip++;
     });
     return {rows: rows.length, sent: tr.n.sent, st: st, trip: trip, extra: extra, n: tr.n};
   };
@@ -1902,17 +1903,22 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(aggP && aggE && aggP.T1 === tA.n.T1 && aggP.T2 === tA.n.T2 && aggP.T3 === tA.n.T3 && aggE.T1 === tA.n.T1 && aggE.total === tA.n.sent &&
     aggT.total === tA.n.transit && aggU.total === tA.n.und,
     'Expedição: turnos pela lista de cada rota por horário (sem esperar o download) = turnos do detalhe; listas pelas situações', {aggP, aggE});
+  // V4.15: dia de 2+ dias atrás — remessa consultada sem o bipe de carregamento na base é resposta final ("NÃO TEM ID").
   const covA = cA.tripCoverage_('send_flow', D19, D19)[D19], miss = Object.keys(tA.t).filter(w => tA.t[w].trip === null).length;
-  check(covA && covA.total === tA.n.sent && covA.done === tA.n.sent - miss && covA.found === Object.keys(tA.t).filter(w => tA.t[w].trip).length,
-    'Expedição: IDs de viagem consultados (remessa sem bipe de carregamento na base fica para nova tentativa)', covA);
+  check(covA && covA.total === tA.n.sent && covA.done === tA.n.sent && miss > 0 && covA.found === Object.keys(tA.t).filter(w => tA.t[w].trip).length,
+    'Expedição: IDs de viagem consultados; dia antigo sem o bipe de carregamento = resposta final (NÃO TEM ID)', covA);
   const dfA = cA.dayFilesMap_('send_flow', D19, D19)[D19], trips1 = cA.__state.tripCalls;
-  // Nova tarefa do dia: só as remessas sem bipe de carregamento são consultadas de novo (V4.14: uma por consulta, como o JMS
-  // responde); o arquivo regravado com os IDs mantém a data do download (o intervalo de atualização do detalhe continua valendo).
+  // Nova tarefa do dia: nada a consultar de novo; a página 1 (migração/Atualizar) consulta de novo as remessas sem ID (uma por
+  // consulta) e o arquivo regravado mantém a data do download (o intervalo de atualização do detalhe continua valendo).
   cA.enqueueJobs_([['TRIPS', 'send_flow', D19, 0]], {reset: true});
   runAll(cA, 4);
-  const dfA2 = cA.dayFilesMap_('send_flow', D19, D19)[D19];
-  check(cA.__state.tripCalls - trips1 === miss && miss > 0 && dfA2.createdAt === dfA.createdAt && exact(cA, dA[D19], D19).trip === 0,
-    'Expedição: nova consulta só das remessas sem ID; arquivo do dia mantém a data do download', {calls: cA.__state.tripCalls - trips1, a: dfA.createdAt, b: dfA2.createdAt});
+  const calls0 = cA.__state.tripCalls - trips1;
+  cA.enqueueJobs_([['TRIPS', 'send_flow', D19, 1]], {reset: true});
+  runAll(cA, 4);
+  const dfA2 = cA.dayFilesMap_('send_flow', D19, D19)[D19], noId = Object.keys(tA.t).filter(w => !tA.t[w].trip).length;
+  check(calls0 === 0 && cA.__state.tripCalls - trips1 === noId && dfA2.createdAt === dfA.createdAt && exact(cA, dA[D19], D19).trip === 0,
+    'Expedição: dia já consultado não repete; página 1 consulta só as remessas sem ID; arquivo do dia mantém a data do download',
+    {calls0, calls: cA.__state.tripCalls - trips1, noId, a: dfA.createdAt, b: dfA2.createdAt});
 
   // 2b. Dia fechado com remessas chegando: só a situação é atualizada (sem baixar "Enviados" de novo).
   {
@@ -2871,7 +2877,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const want = {};
   dcList.forEach((x, i) => { want[x.waybillNo] = dcDepartureTrip(i) || ''; });
   const rows41 = c41.getArchivedRange_('sc_dc', D19, D19).rows;
-  const tid = r => (r.tripId === 'N/A' ? '' : String(r.tripId || ''));
+  // V4.15: "NÃO TEM ID" (consultada, sem ID de verdade) conta como sem ID nestas comparações.
+  const tid = r => (r.tripId === 'N/A' || r.tripId === 'NÃO TEM ID' ? '' : String(r.tripId || ''));
   const wrong = rows41.filter(r => want[r.shipment] !== tid(r));
   check(rows41.length === dcList.length && !wrong.length, 'cada remessa com o ID da linha "Encomenda carregada" (código 50) da SP GRU', wrong.slice(0, 3).map(r => [want[r.shipment], r.tripId]));
   check(!rows41.some(r => /^SETR2260|^SRTRFIC/.test(tid(r))), 'nunca o ID da viagem de chegada nem o carregamento em outra base');
@@ -2888,8 +2895,16 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const d41 = c41.getDashboardData('sc_dc', {from: D19, to: D19});
   const cov41 = d41.meta.tripCoverage && d41.meta.tripCoverage[D19];
   const nFound = Object.values(want).filter(Boolean).length;
-  check(cov41 && cov41.total === dcList.length && cov41.done === nFound && cov41.found === nFound,
-    'cobertura no painel: remessas com resposta e quantas com ID (sem bipe de carregamento fica para nova tentativa)', cov41);
+  // V4.15: dia de 2+ dias atrás — a remessa sem o bipe de carregamento na base é resposta final: "NÃO TEM ID" (tabela e filtro),
+  // fora do gráfico e do cartão de ofensor.
+  check(cov41 && cov41.total === dcList.length && cov41.done === dcList.length && cov41.found === nFound && nFound < dcList.length,
+    'cobertura no painel: todas consultadas; com ID e "NÃO TEM ID" (dia antigo sem o bipe = resposta final)', cov41);
+  const rowsD41 = c41.JTCore_.decodeDataset(d41.dataset), semId = dcList.filter((x, i) => !dcDepartureTrip(i)).length;
+  const facet41 = (c41.JTCore_.facets(rowsD41, {}, ['tripId']).tripId || []).map(o => o.value);
+  check(rowsD41.filter(r => r.tripId === 'NÃO TEM ID').length === semId && !rowsD41.some(r => !r.tripId || r.tripId === 'N/A') &&
+    facet41.indexOf('NÃO TEM ID') >= 0 && facet41.indexOf('N/A') < 0 && ch41.labels.indexOf('NÃO TEM ID') < 0 && card.label !== 'NÃO TEM ID',
+    'SC→DC: quem realmente não tem ID mostra "NÃO TEM ID" na tabela e no filtro (nenhum "Sem informação"); fora do gráfico e do cartão',
+    {semId, facet: facet41.slice(0, 6)});
   const fT = c41.JTCore_.applyFilters(c41.JTCore_.decodeDataset(d41.dataset), {tripId: [top]});
   check(fT.length === cnt[top], 'filtro "ID viagem de saída" pelo ID de saída');
   // Arquivo antigo (V4.0) com o ID de CHEGADA: o painel nunca mostra; a migração põe o dia na fila e troca pelo de saída.
@@ -2924,10 +2939,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const st41c = c41c.getDayStatus_('sc_dc', D19), pz = c41c.publicPauses_();
   check(st41c.summary === 'COMPLETE' && st41c.details === 'COMPLETE' && !st41c.error && pz.some(p => p.route === 'TRACKING') && !pz.some(p => p.route === 'SC_DC'),
     'rastreamento recusado: taxa e lista do SC→DC completas, só os IDs esperam', {st: st41c, pz: pz.map(p => p.route)});
-  // Diagnóstico: amostra com o ID de chegada e o de saída.
-  const dg = c41.diagnosticarViagensSCDC(D19);
-  check(dg.amostra.length && dg.amostra.every((x, i) => x.saida === (dcDepartureTrip(i) || null) || (dcDepartureTrip(i) === null && x.saida === null)) &&
-    /ID de SAÍDA/.test(dg.texto) && !/4440\d{8}/.test(dg.texto), 'diagnosticarViagensSCDC: chegada → saída, sem número de remessa', dg.texto.slice(0, 600));
+  // V4.15: diagnóstico remessa por remessa — as sem ID do painel, consultadas uma por vez, com o motivo (e onde foram carregadas).
+  const dg = c41.diagnosticarViagensSCDC(D19), semId41 = dcList.filter((x, i) => !dcDepartureTrip(i)).length;
+  check(dg.painel && dg.painel.naoTemId === semId41 && dg.painel.aguardando === 0 && dg.amostra.length === Math.min(12, semId41) &&
+    dg.amostra.every(x => x.saida === null && x.antes === 'NÃO TEM ID') && (dg.motivos.semCarregamento || 0) === dg.amostra.length &&
+    /carregada em: DC GRU-SP/.test(dg.texto) && /Bases onde as remessas sem ID foram carregadas/.test(dg.texto) && !/4440\d{8}/.test(dg.texto),
+    'diagnosticarViagensSCDC: remessas sem ID consultadas uma por vez, com o motivo e as bases do carregamento, sem número de remessa', dg.texto.slice(0, 900));
 }
 
 // ---------- V4.2: painel separado dos fluxos (PAINEIS / PAINEIS_FORA) ----------
@@ -3396,6 +3413,18 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     scanTime: '2026-10-06 13:58:23'}].concat(det.slice(0, 2));
   check(c6.pickTripId_(det2, o) === 'SETRFIC00000002', 'sem código e sem remark2: a linha e o ID saem da descrição da etapa');
   check(c6.pickTripId_(det.slice(0, 2), o) === null, 'sem carregamento na SP GRU: sem ID (não pega o de outra base nem o de chegada)');
+  // V4.15: análise para localizar todos os IDs.
+  const semNum = Object.assign({}, det[2], {remark2: '', waybillTrackingContent: 'A encomenda expressa está [$[scanNetworkName]] sendo enviada, para [$[nextStopName]], o número do pedido [$[remark2]]', scanTime: '2026-10-06 13:58:30'});
+  check(c6.pickTripId_([semNum, Object.assign({}, det[2], {scanTime: '2026-10-06 14:40:00'})].concat(det.slice(0, 2)), o) === 'SETRFIC00000001',
+    'V4.15: dois carregamentos na base — vale o que tem o número do pedido (antes: o mais perto do horário, mesmo sem número)');
+  check(c6.pickTripId_([semNum].concat(det.slice(0, 2)), o) === '', 'V4.15: carregamento na base só sem número (modelo "$[remark2]" não é ID) → sem ID ("NÃO TEM ID")');
+  check(c6.pickTripId_([Object.assign({}, det[2], {scanNetworkName: 'SP-GRU', scanNetworkId: 1})].concat(det.slice(0, 2)), o) === 'SETRFIC00000001',
+    'V4.15: nome da base com outra grafia ("SP-GRU") é a mesma base');
+  const outroNome = Object.assign({}, det[2], {scanNetworkName: 'SP GRU SORTER FICTICIO', scanNetworkId: 4242});
+  check(c6.pickTripId_([outroNome].concat(det.slice(0, 2)), o) === 'SETRFIC00000001' &&
+    c6.pickTripId_([Object.assign({}, outroNome, {scanTime: '2026-10-06 16:30:00'})].concat(det.slice(0, 2)), o) === null &&
+    c6.pickTripId_([Object.assign({}, outroNome, {nextStopName: 'SP GRU'})].concat(det.slice(0, 2)), o) === null,
+    'V4.15: base com outro nome/código no JMS — vale o carregamento PARA A PRÓXIMA PARADA no horário de expedição (até 20 min); fora disso, não');
   // Fila: os IDs vêm logo depois da lista do mesmo dia, antes das listas dos dias antigos; perto do limite, continuam.
   const today = c6.isoToday_(), Y = c6.addDaysIso_(today, -1), OLD = c6.addDaysIso_(today, -9);
   const c7 = freshCtx({[Y]: makeDay(Y, 61)}, null, {DATA_START_DATE: OLD});
@@ -3415,7 +3444,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const x8 = c8.refreshDetailsNow('sc_dc', Y, Y);
   const want = {};
   days8[Y].dc.forEach((x, i) => { want[x.waybillNo] = dcDepartureTrip(i) || ''; });
-  const rows8 = c8.getArchivedRange_('sc_dc', Y, Y).rows, tid = r => (r.tripId === 'N/A' ? '' : String(r.tripId || ''));
+  const rows8 = c8.getArchivedRange_('sc_dc', Y, Y).rows, tid = r => (r.tripId === 'N/A' || r.tripId === 'NÃO TEM ID' ? '' : String(r.tripId || ''));
   check(r8.updated === 1 && r8.detailsQueued === 1 && x8.done >= 2 && x8.pending === 0 && rows8.length === days8[Y].dc.length && rows8.every(r => want[r.shipment] === tid(r)),
     'Atualizar no SC→DC: lista e IDs de viagem de saída na hora', {r8, x8: {done: x8.done, pending: x8.pending}});
   check(c8.refreshDetailsNow('wrong_send', Y, Y).done === 0 && c8.refreshDetailsNow('arrival_flow', Y, Y).skipped === true,
@@ -3457,6 +3486,35 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(c8.tripCoverage_('sc_dc', Y, Y)[Y].found === Object.values(want).filter(Boolean).length &&
     c8.getArchivedRange_('sc_dc', Y, Y).rows.every(r => want[r.shipment] === tid(r)),
     'depois da migração V4.14.1: IDs de saída de volta na tabela', c8.tripCoverage_('sc_dc', Y, Y)[Y]);
+  // V4.15: o JMS devolve a remessa com outro número (pedido filho "-001" pelo pedido-mãe, minúsculas): a consulta de UMA remessa
+  // usa a única remessa devolvida com bipes — o ID chega mesmo assim.
+  const daysK = {[Y]: makeDay(Y, 63)};
+  const cK = freshCtx(daysK, {tripLimit: 1, tripKeyword: w => 'x' + w.toLowerCase()}, {DATA_START_DATE: Y, MODO_ATUALIZACAO: 'diario'});
+  cK.refreshNow('sc_dc', Y, Y);
+  cK.refreshDetailsNow('sc_dc', Y, Y);
+  const wantK = {};
+  daysK[Y].dc.forEach((x, i) => { wantK[x.waybillNo] = dcDepartureTrip(i) || ''; });
+  const covK = cK.tripCoverage_('sc_dc', Y, Y)[Y];
+  check(covK && covK.found === Object.values(wantK).filter(Boolean).length && cK.getArchivedRange_('sc_dc', Y, Y).rows.every(r => wantK[r.shipment] === tid(r)),
+    'V4.15: remessa devolvida pelo JMS com outro número (consulta de uma) → ID de saída achado', covK);
+  // V4.15: migração — TODOS os dias do SC→DC com remessas sem ID (não só os últimos 31) voltam para a fila, do zero.
+  const OLD40 = c8.addDaysIso_(c8.isoToday_(), -40);
+  const daysO = {[OLD40]: makeDay(OLD40, 64)};
+  const cO = freshCtx(daysO, null, {DATA_START_DATE: OLD40});
+  cO.queueHistory(OLD40, OLD40, true);
+  runAll(cO);
+  const mapO = cO.loadTripMap_('sc_dc', OLD40);
+  Object.keys(mapO.ids).forEach(w => { delete mapO.ids[w]; mapO.miss[w] = 3; });
+  cO.saveTripMap_('sc_dc', OLD40, mapO, daysO[OLD40].dc.length);
+  delete cO.__state.props.MIGRATION_V415;
+  const q415 = cO.migrateToV415_();
+  check(q415 >= 1 && cO.pendingJobs_().some(j => j.type === 'TRIPS' && j.indicator === 'sc_dc' && j.date === OLD40 && j.page === 1) && cO.migrateToV415_() === 0,
+    'migração V4.15: dia de 40 dias atrás com remessas sem ID volta para a fila uma vez', q415);
+  runAll(cO);
+  const rowsO = cO.getArchivedRange_('sc_dc', OLD40, OLD40).rows, wantO = {};
+  daysO[OLD40].dc.forEach((x, i) => { wantO[x.waybillNo] = dcDepartureTrip(i) || 'NÃO TEM ID'; });
+  check(rowsO.length && rowsO.every(r => r.tripId === wantO[r.shipment]),
+    'depois da migração V4.15: cada remessa com o ID de saída; as que realmente não têm o bipe = "NÃO TEM ID"', rowsO.slice(0, 3).map(r => r.tripId));
   // V4.14.1 (SC→DC, painel principal): JMS respondendo vazio com consultas demais → os IDs de saída chegam na tabela do painel.
   const daysE = {[Y]: makeDay(Y, 62)};
   const cDE = freshCtx(daysE, {tripLimit: 1, tripEmpty: 5, tripEmptyMode: 'details'}, {DATA_START_DATE: Y, MODO_ATUALIZACAO: 'diario'});
@@ -3466,7 +3524,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   daysE[Y].dc.forEach((x, i) => { wantE[x.waybillNo] = dcDepartureTrip(i) || ''; });
   const dashE = cDE.getDashboardData('sc_dc', {from: Y, to: Y});
   const rowsE = C.decodeDataset(dashE.dataset);
-  check(cDE.__state.tripEmptyHits > 0 && rowsE.length === daysE[Y].dc.length && rowsE.every(r => (wantE[r.shipment] || '') === (r.tripId === 'N/A' ? '' : String(r.tripId || ''))) &&
+  check(cDE.__state.tripEmptyHits > 0 && rowsE.length === daysE[Y].dc.length && rowsE.every(r => (wantE[r.shipment] || '') === (r.tripId === 'N/A' || r.tripId === 'NÃO TEM ID' ? '' : String(r.tripId || ''))) &&
     rowsE.some(r => r.tripId && r.tripId !== 'N/A'),
     'SC→DC com JMS respondendo vazio: tabela do painel com o ID de viagem de saída de cada remessa',
     {hits: cDE.__state.tripEmptyHits, rows: rowsE.length, com: rowsE.filter(r => r.tripId && r.tripId !== 'N/A').length});

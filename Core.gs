@@ -14,6 +14,13 @@ function JTCoreFactory_() {
   var SHIFTS = ['T1', 'T2', 'T3'];
   var SHIFT_KEYS = {shift: 1, receiptShift: 1, expeditionShift: 1, shiftExp: 1};
   var CHRONO_KEYS = {interval: 1, idealTime: 1, date: 1};
+  /**
+   * V4.15: remessa consultada no Rastreamento do pacote que realmente não tem o ID de viagem (sem o bipe "Encomenda carregada"
+   * na base, ou o bipe sem o número do pedido). Aparece na tabela e no filtro; fica fora do ranking (gráficos e cartão de
+   * ofensor), como "Sem informação".
+   */
+  var NO_TRIP_ID = 'NÃO TEM ID';
+  function noValue(label) { return label === 'N/A' || label === NO_TRIP_ID; }
   var COLLATOR = (function () { try { return new Intl.Collator('pt-BR', {numeric: true, sensitivity: 'base'}); } catch (e) { return null; } })();
 
   function pad2(n) { n = Number(n); return (n < 10 ? '0' : '') + n; }
@@ -740,7 +747,7 @@ function JTCoreFactory_() {
       var cats = [], per = {};
       SHIFTS.forEach(function (s) {
         per[s] = countBy(rows.filter(function (r) { return r.shift === s; }), shiftDim)
-          .filter(function (x) { return !(def.hideNA && x.label === 'N/A'); }).slice(0, def.top || 4);
+          .filter(function (x) { return !(def.hideNA && noValue(x.label)); }).slice(0, def.top || 4);
         per[s].forEach(function (x) { if (cats.indexOf(x.label) < 0) cats.push(x.label); });
       });
       base.type = 'bar'; base.grouped = true; base.labels = cats; base.dim = shiftDim;
@@ -775,12 +782,14 @@ function JTCoreFactory_() {
       base.others = 0;
       return base;
     }
-    var top = groups.filter(function (g) { return !((def.key === 'interval' || def.hideNA) && g.label === 'N/A'); }).slice(0, def.top || 10);
+    var shown = groups.filter(function (g) { return !((def.key === 'interval' && g.label === 'N/A') || (def.hideNA && noValue(g.label))); });
+    var top = shown.slice(0, def.top || 10);
     // order 'num' (Sem Movimentação: Aging 1, 2, 3… 30 dias): na ordem do número, não da quantidade.
     if (def.order === 'num') top.sort(function (a, b) { return (Number(a.label) || 0) - (Number(b.label) || 0); });
     base.labels = top.map(function (g) { return g.label; });
     base.datasets = [{label: 'qty', data: top.map(function (g) { return g.value; })}];
-    base.others = groups.length - top.length;
+    // "Top N de M": M sem os valores que ficam fora do gráfico ("Sem informação", "NÃO TEM ID").
+    base.others = shown.length - top.length;
     return base;
   }
   function numOrNull(v) { if (v === null || v === undefined || v === '') return null; var n = Number(v); return isFinite(n) ? n : null; }
@@ -807,7 +816,7 @@ function JTCoreFactory_() {
       (groups[l] || (groups[l] = [])).push(v);
     });
     var list = Object.keys(groups).map(function (l) { return {label: l, value: aggOf(def.agg, groups[l]), n: groups[l].length}; })
-      .filter(function (g) { return g.value !== null && !(def.hideNA && g.label === 'N/A'); });
+      .filter(function (g) { return g.value !== null && !(def.hideNA && noValue(g.label)); });
     // Turnos sem tempo também aparecem (coluna vazia), na ordem T1, T2, T3.
     if (def.allShifts && SHIFT_KEYS[def.key]) SHIFTS.forEach(function (sh) { if (!groups[sh]) list.push({label: sh, value: 0, n: 0}); });
     if (SHIFT_KEYS[def.key]) list.sort(function (a, b) { return compareText(a.label, b.label); });
@@ -886,7 +895,7 @@ function JTCoreFactory_() {
       x.part = shiftPart(inRange, goal, shiftShares(opts.partRows, opts.agg, [x.shift], opts.only)).rate;
     });
     var tops = (cfg.topCards || []).map(function (k) {
-      var g = countBy(rows, k).filter(function (x) { return x.label !== 'N/A'; })[0];
+      var g = countBy(rows, k).filter(function (x) { return !noValue(x.label); })[0];
       return {key: k, label: g ? g.label : null, qty: g ? g.value : null, pct: g && detailTotal ? g.value / detailTotal * 100 : null};
     });
     // Filtro de turno: a taxa vira a parte do(s) turno(s) na taxa oficial; a meta continua avaliada no dia.
@@ -1045,7 +1054,7 @@ function JTCoreFactory_() {
   }
 
   return {
-    SHIFTS: SHIFTS, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
+    SHIFTS: SHIFTS, NO_TRIP_ID: NO_TRIP_ID, noValue: noValue, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentPair: segmentPair, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
     dockVersion: dockVersion, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
