@@ -481,6 +481,15 @@ function request(porta, method, p, body, headers) {
   gctx.consultar([kwG({keywordList: ['FIC1'], countryId: '1'})]);
   check(JSON.parse(fetched[fetched.length - 1].req.payload).countryId === '7', 'Apps Script: JMS_COUNTRY_ID do DashMaster vale');
   delete props.JMS_COUNTRY_ID;
+  // V1.7: só os códigos de segmento pelo Codigo.gs (o mesmo caminho da página publicada no Apps Script).
+  const rotaAntes = gctx.exigeRota;
+  gctx.exigeRota = null;
+  props.JMS_AUTHTOKEN = TOKEN;
+  const apiG = {consultar: (ps, op) => Promise.resolve().then(() => gctx.consultar(ps, op))};
+  const rG = await P.pesquisarSegmentos(apiG, ['FIC000000001', 'FIC000000002', 'FIC000000003'], {espera: 0});
+  gctx.exigeRota = rotaAntes;
+  check(rG.results.length === 3 && rG.results.every(r => r.seg && r.seg.s1 === 'XA' && r.seg.s2 === '101-01') && rG.comCodigo === 3,
+    'Apps Script: modo "só os códigos de segmento" pelo Codigo.gs (Código de primeiro e de dois segmentos)', rG.results);
   check(gctx.doGet({}).n === 'Index' && /conteúdo App/.test(gctx.include('App')), 'Apps Script doGet() e include()');
   const appJs = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
   check((appJs.match(/var VERSAO_PAGINA = '([^']+)'/) || [])[1] === S.VERSAO && gctx.VERSAO === S.VERSAO, 'mesma versão na página, no Codigo.gs e no server.js (a página avisa se misturar)');
