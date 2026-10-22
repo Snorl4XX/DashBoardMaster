@@ -4,3 +4,5 @@ node/config.json
 node_modules/
 # Pacotes gerados por tools/gerar_paineis.js (painel principal / painel dos fluxos).
 dist/
+# Cache do Python (testes do jms_segmentos).
+__pycache__/
