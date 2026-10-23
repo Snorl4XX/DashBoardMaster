@@ -4,6 +4,26 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## Painel no Netlify — sem instalar nada no computador (a partir da V4.15)
+
+Para quem não pode instalar programas (notebook da empresa travado): a **tela** do painel fica num site grátis do Netlify e
+os **dados** continuam vindo deste projeto do Apps Script (a busca do JMS e os gatilhos não mudam). Tudo pelo navegador.
+
+1. Neste projeto do Apps Script: **Arquivo +** → **Script** → nome **Api** → cole o arquivo **`Api.gs`** → Salvar.
+2. **Configurações do projeto → Propriedades do script:** crie **`SENHA_PAINEL`** com a senha da equipe (recomendado; sem ela,
+   quem tiver o link abre o painel).
+3. **Implantar → Gerenciar implantações → ✏️ → Versão: Nova versão → Quem pode acessar: Qualquer pessoa → Implantar.**
+   Copie a URL do App da Web (termina em `/exec`).
+4. No ZIP **`JT_DASHMASTER_V4_15_NETLIFY.zip`**, pasta `dashmaster-netlify`: abra **`link-apps-script.txt`** no Bloco de Notas,
+   cole a URL depois de `principal =` e salve.
+5. Crie uma conta grátis em **app.netlify.com**, abra **app.netlify.com/drop** e arraste a pasta `dashmaster-netlify`.
+   O link `https://….netlify.app` é o painel (pede a senha uma vez em cada navegador).
+
+Como funciona: a página (`index.html`) é o mesmo Index/Client/Styles/Mascot, já montado. O `google.script.run` virou um pedido ao
+link `/exec` (`doPost` do `Api.gs`), que só responde as funções que a página usa e confere a `SENHA_PAINEL`. O projeto dos fluxos
+(Recebimento e Expedição em outro Apps Script): repita 1 a 3 nele, cole o link em `fluxos =` e abra `/fluxos.html`.
+Gerar a pasta de novo: `node tools/gerar_paineis.js`. Testes: `node tests/test_netlify.js`.
+
 ## V4.15 — Todos os IDs de viagem localizados; "NÃO TEM ID" só para quem realmente não tem
 **Pedido:** o painel não puxava todos os IDs de viagem. Gráficos e filtros mostravam "Sem informação" no lugar dos IDs. Puxar e localizar todos os IDs, e colocar **NÃO TEM ID** só nas remessas que realmente não têm.
 

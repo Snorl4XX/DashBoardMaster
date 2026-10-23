@@ -315,7 +315,9 @@ function firstDiff(a, b, p) {
   const redirects = fs.readFileSync(path.join(srv3.tmp, 'link-netlify', '_redirects'), 'utf8');
   check(/^\/\*  https:\/\/painel\.exemplo\.ts\.net\/:splat  200!$/m.test(redirects) && fs.existsSync(path.join(srv3.tmp, 'link-netlify', 'index.html')),
     'pasta link-netlify pronta para arrastar no Netlify (repassa para o link público)', redirects);
-  check(/https:\/\/jt-teste\.netlify\.app  \(link do Netlify\)/.test(srv3.out()), 'janela mostra o link do Netlify');
+  // As linhas dos endereços chegam logo depois de "no ar.": espera um pouco por elas.
+  for (let i = 0; i < 50 && !/\(link do Netlify\)/.test(srv3.out()); i++) await new Promise(r => setTimeout(r, 100));
+  check(/https:\/\/jt-teste\.netlify\.app  \(link do Netlify\)/.test(srv3.out()), 'janela mostra o link do Netlify', srv3.out().slice(-600));
   // Chamada que passa do tempo de espera: responde "ainda processando" (202) e a página pergunta de novo.
   const first = await request(port3, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, viaNetlify);
   const pend = JSON.parse(first.text);

@@ -154,7 +154,7 @@ function publicFunctions() {
   const names = new Set();
   const re = /^function ([A-Za-z0-9]+)\s*\(/gm;
   let m;
-  while ((m = re.exec(main.source))) if (!/_$/.test(m[1]) && m[1] !== 'doGet' && m[1] !== 'include') names.add(m[1]);
+  while ((m = re.exec(main.source))) if (!/_$/.test(m[1]) && m[1] !== 'doGet' && m[1] !== 'doPost' && m[1] !== 'include') names.add(m[1]);
   const first = Object.keys(FN_HELP).filter(n => names.has(n));
   const rest = Array.from(names).filter(n => !FN_HELP[n]).sort();
   return first.concat(rest).map(n => ({nome: n, desc: FN_HELP[n] || ''}));

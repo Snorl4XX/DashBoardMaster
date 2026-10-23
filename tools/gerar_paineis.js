@@ -10,6 +10,9 @@
  * V4.7: também o pacote da versão Node.js (JT_DASHMASTER_<versão>_NODE.zip, pasta "dashmaster/"): TODOS os painéis num
  * servidor só (sem cota do Google), com a pasta node (instalador da Oracle Cloud, link público e o passo a passo).
  *
+ * Netlify: também a página do painel para um site do Netlify (JT_DASHMASTER_<versão>_NETLIFY.zip, pasta "dashmaster-netlify/"):
+ * a mesma tela, já montada, pedindo os dados ao Apps Script (Api.gs) pelo link /exec — nada instalado no computador.
+ *
  * Uso: node tools/gerar_paineis.js [pasta de saída]   (padrão: dist/)
  */
 const fs = require('fs');
@@ -19,7 +22,7 @@ const {zip} = require('../node/lib/report');
 const ROOT = path.join(__dirname, '..');
 const FLOWS = 'arrival_flow,send_flow';
 
-const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
+const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
 const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
 
 const PACKAGES = [
@@ -161,11 +164,196 @@ function buildNode(outDir, opts) {
   return {zip: zipPath, files: files.map(f => f.name)};
 }
 
+// ------------------------------------------------------------------ Netlify
+// google.script.run do navegador → POST no link /exec do Apps Script (Api.gs). O link fica em link-apps-script.txt (a pessoa
+// cola com o Bloco de Notas antes de arrastar a pasta no Netlify). Texto puro no corpo: sem pré-verificação de CORS.
+const NETLIFY_BRIDGE = String.raw`<script>
+(function () {
+  var painel = document.documentElement.getAttribute('data-painel') || 'principal';
+  var KEY = 'jt_senha_' + painel;
+  var LINK_MSG = 'Falta o link do Apps Script: abra o arquivo link-apps-script.txt (no Bloco de Notas), cole o link do App da Web ' +
+    '(termina em /exec) e arraste a pasta de novo no Netlify.';
+  var REDE_MSG = 'Não consegui falar com o Apps Script. Confira o link em link-apps-script.txt e se a implantação do App da Web ' +
+    'está com "Quem pode acessar: Qualquer pessoa".';
+  var JSON_MSG = 'O Apps Script não respondeu como esperado. Confira se o arquivo Api.gs foi colado no projeto e se a implantação ' +
+    'foi atualizada (Implantar → Gerenciar implantações → editar → Nova versão), com "Quem pode acessar: Qualquer pessoa".';
+  var link = fetch('link-apps-script.txt', {cache: 'no-store'}).then(function (r) { return r.ok ? r.text() : ''; }, function () { return ''; })
+    .then(function (t) {
+      var o = {};
+      String(t || '').split(/\r?\n/).forEach(function (l) { var m = l.match(/^\s*(principal|fluxos)\s*=\s*(\S*)/); if (m) o[m[1]] = m[2]; });
+      var url = (o[painel] || o.principal || '').trim();
+      return /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+\//.test(url) ? url : '';
+    });
+  function lerSenha() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
+  function guardarSenha(v) { try { if (v) localStorage.setItem(KEY, v); else localStorage.removeItem(KEY); } catch (e) { /* só nesta visita */ } }
+  var senhaAtual = lerSenha(), pedindo = null;
+  /** Pergunta a senha uma vez (vários pedidos ao mesmo tempo esperam a mesma resposta). */
+  function pedirSenha(erro) {
+    if (pedindo) return pedindo;
+    pedindo = new Promise(function (resolve) {
+      var box = document.createElement('div');
+      box.setAttribute('style', 'position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:rgba(10,12,16,.72);font:15px system-ui,sans-serif');
+      box.innerHTML = '<form style="background:#fff;color:#1f2430;border-radius:14px;padding:24px;width:min(92vw,340px);display:grid;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.35)">' +
+        '<b style="font-size:18px">Painel J&amp;T</b><label for="jtSenha">Senha do painel</label>' +
+        '<input id="jtSenha" type="password" autocomplete="current-password" style="font-size:16px;padding:10px;border:1px solid #c9ccd3;border-radius:8px">' +
+        '<span id="jtSenhaErro" style="color:#c62828;font-size:13px"></span>' +
+        '<button style="background:#E60012;color:#fff;border:0;border-radius:8px;padding:11px;font-weight:700;font-size:15px">Entrar</button></form>';
+      document.body.appendChild(box);
+      box.querySelector('#jtSenhaErro').textContent = erro || '';
+      var input = box.querySelector('#jtSenha');
+      input.focus();
+      box.querySelector('form').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        if (!input.value) return;
+        senhaAtual = input.value;
+        guardarSenha(senhaAtual);
+        box.remove();
+        pedindo = null;
+        resolve();
+      });
+    });
+    return pedindo;
+  }
+  function chamar(url, fn, args, tentativa) {
+    var enviada = senhaAtual;
+    return fetch(url, {method: 'POST', redirect: 'follow', credentials: 'omit', headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({fn: fn, args: args, senha: enviada})})
+      .then(function (r) { return r.text(); }, function () { throw new Error(REDE_MSG); })
+      .then(function (t) {
+        var j;
+        try { j = JSON.parse(t); } catch (e) { throw new Error(JSON_MSG); }
+        if (j && j.senha && tentativa < 5) {
+          // Outro pedido já trocou a senha: tenta com a nova antes de perguntar.
+          if (senhaAtual && senhaAtual !== enviada) return chamar(url, fn, args, tentativa + 1);
+          if (enviada) { senhaAtual = ''; guardarSenha(''); }
+          return pedirSenha(enviada ? 'Senha incorreta.' : '').then(function () { return chamar(url, fn, args, tentativa + 1); });
+        }
+        return j;
+      });
+  }
+  function runner(ok, fail) {
+    return new Proxy({}, {get: function (_, name) {
+      if (name === 'withSuccessHandler') return function (fn) { return runner(fn, fail); };
+      if (name === 'withFailureHandler') return function (fn) { return runner(ok, fn); };
+      if (name === 'withUserObject') return function () { return runner(ok, fail); };
+      if (typeof name !== 'string') return undefined;
+      return function () {
+        var args = Array.prototype.slice.call(arguments);
+        var onFail = function (e) { if (fail) fail(e); else if (window.console) console.error(e); };
+        link.then(function (url) {
+          if (!url) throw new Error(LINK_MSG);
+          return chamar(url, name, args, 0);
+        }).then(function (j) {
+          if (j && j.ok) { if (ok) ok(j.result); } else onFail(new Error(j && j.error || 'Erro no Apps Script.'));
+        }).catch(function (e) { onFail(e instanceof Error ? e : new Error(String(e))); });
+      };
+    }});
+  }
+  window.google = window.google || {};
+  window.google.script = {run: runner(null, null), host: {close: function () {}, setHeight: function () {}, setWidth: function () {}}};
+  window.__PLATAFORMA__ = 'netlify';
+})();
+</script>`;
+
+const NETLIFY_LINK_TXT = `# J&T DashMaster no Netlify: link do Apps Script
+#
+# 1. No Apps Script: Implantar > Gerenciar implantacoes > copie a URL do App da Web (termina em /exec).
+# 2. Cole o link depois do sinal de igual, na linha "principal" (sem aspas), e salve.
+# 3. Arraste a pasta inteira no Netlify (app.netlify.com/drop, ou na aba Deploys do seu projeto).
+
+principal = 
+
+# So se Recebimento e Expedicao ficam em OUTRO projeto do Apps Script (pagina fluxos.html):
+fluxos = 
+`;
+
+const NETLIFY_LEIA = v => `J&T DASHMASTER ${v} NO NETLIFY
+================================
+
+A tela do painel fica no Netlify (gratis). Os dados continuam vindo do seu
+Apps Script (a busca do JMS roda la, como hoje). Nada e instalado no computador.
+
+1. No Apps Script do painel: Arquivo + > Script > nome Api > cole o Api.gs >
+   Salvar. Em Configuracoes do projeto > Propriedades do script, crie
+   SENHA_PAINEL com a senha da equipe (recomendado).
+2. Implantar > Gerenciar implantacoes > editar (lapis) > Versao: Nova versao >
+   Quem pode acessar: Qualquer pessoa > Implantar. Copie a URL (termina em /exec).
+3. Nesta pasta: botao direito em link-apps-script.txt > Abrir com > Bloco de
+   Notas > cole a URL depois de "principal =" > Salvar.
+4. Abra app.netlify.com/drop (com sua conta do Netlify) e arraste esta pasta.
+   O link https://....netlify.app e o painel.
+
+Paginas: index.html = painel principal; fluxos.html = projeto dos fluxos
+(Recebimento e Expedicao), se ele for outro projeto do Apps Script.
+`;
+
+/** Monta o Index.html como o doGet fazia, mas estático: o boot vem do endereço da página e o google.script.run vira pedido ao /exec. */
+function netlifyPage(root, info, painel) {
+  const read = n => fs.readFileSync(path.join(root, n), 'utf8');
+  const boot = '(function () { var p = new URLSearchParams(location.search), ind = p.get("ind") || "", lang = p.get("lang") || "";' +
+    ' var IND = ' + JSON.stringify(info.indicators) + ';' +
+    ' return {lang: lang === "zh" || lang === "pt" ? lang : "", indicator: IND.indexOf(ind) >= 0 ? ind : "", view: p.get("view") === "results" ? "results" : "dashboard"}; })()';
+  let html = read('Index.html');
+  const parts = [
+    [/<\?!=\s*include\('Styles'\);?\s*\?>/, () => read('Styles.html')],
+    [/<\?!=\s*include\('Mascot'\);?\s*\?>/, () => read('Mascot.html')],
+    [/<\?!=\s*boot\s*\?>/, () => boot],
+    [/<\?!=\s*coreSource_\(\);?\s*\?>/, () => info.core],
+    [/<\?!=\s*include\('Client'\);?\s*\?>/, () => read('Client.html')]
+  ];
+  parts.forEach(([re, fn]) => {
+    if (!re.test(html)) throw new Error('Index.html sem ' + re + ' (o gerador do Netlify precisa ser atualizado).');
+    const text = fn();
+    html = html.replace(re, () => text);
+  });
+  if (/<\?/.test(html.replace(/<\?xml[^>]*\?>/g, ''))) throw new Error('Index.html tem marcas do Apps Script que o gerador do Netlify não conhece.');
+  html = html.replace(/<html([^>]*)>/i, (m, a) => '<html' + a + ' data-painel="' + painel + '">');
+  const head = '\n  <title>' + info.appName.replace(/&/g, '&amp;') + (painel === 'fluxos' ? ' · Fluxo operacional' : '') + '</title>\n' +
+    '  <meta name="viewport" content="width=device-width, initial-scale=1">\n' + NETLIFY_BRIDGE + '\n';
+  // Logo depois do <meta charset> (ele tem que ficar nos primeiros bytes da página).
+  if (!/<meta charset="UTF-8">/i.test(html)) throw new Error('Index.html sem <meta charset="UTF-8">.');
+  return html.replace(/<meta charset="UTF-8">/i, m => m + head);
+}
+
+/** Pasta e ZIP do site do Netlify. Devolve {dir, zip, files}. */
+function buildNetlify(outDir, opts) {
+  opts = opts || {};
+  const root = opts.root || ROOT;
+  const {createContext} = require(path.join(root, 'tests', 'mocks.js'));
+  const ctx = createContext({quiet: true, root});
+  // INDICATORS e APP_CONFIG são const no Config.gs: não ficam no objeto global, só no escopo do script.
+  const vm = require('vm');
+  const info = {core: ctx.coreSource_(), indicators: vm.runInContext('Object.keys(INDICATORS)', ctx),
+    appName: String(vm.runInContext('APP_CONFIG.APP_NAME', ctx) || 'J&T Express')};
+  if (info.core.indexOf('</script') >= 0) throw new Error('Core.gs não pode conter </script.');
+  const version = versionOf(fs.readFileSync(path.join(root, 'Config.gs'), 'utf8'));
+  const parts = version.split('.');
+  const tag = 'V' + (parts[2] && parts[2] !== '0' ? parts.slice(0, 3) : parts.slice(0, 2)).join('_');
+  const dir = path.join(outDir, 'dashmaster-netlify');
+  fs.rmSync(dir, {recursive: true, force: true});
+  fs.mkdirSync(dir, {recursive: true});
+  const files = [];
+  const put = (name, data) => {
+    fs.writeFileSync(path.join(dir, name), data);
+    files.push({name: 'dashmaster-netlify/' + name, data: Buffer.from(data)});
+  };
+  put('index.html', netlifyPage(root, info, 'principal'));
+  put('fluxos.html', netlifyPage(root, info, 'fluxos'));
+  put('link-apps-script.txt', NETLIFY_LINK_TXT.replace(/\n/g, '\r\n'));
+  put('LEIA-ME.txt', NETLIFY_LEIA(version).replace(/\n/g, '\r\n'));
+  put('Api.gs', fs.readFileSync(path.join(root, 'Api.gs'), 'utf8'));
+  const zipPath = path.join(outDir, 'JT_DASHMASTER_' + tag + '_NETLIFY.zip');
+  fs.writeFileSync(zipPath, zip(files));
+  return {dir, zip: zipPath, files: files.map(f => f.name)};
+}
+
 if (require.main === module) {
   const out = path.resolve(process.argv[2] || path.join(ROOT, 'dist'));
   build(out).forEach(r => console.log(r.id + ': ' + r.dir + '\n  ' + r.zip + '\n  ' + r.line));
   const n = buildNode(out);
   console.log('node: ' + n.zip + ' (' + n.files.length + ' arquivos)');
+  const w = buildNetlify(out);
+  console.log('netlify: ' + w.zip + ' (' + w.files.length + ' arquivos)');
 }
 
-module.exports = {build, buildNode, PACKAGES, FLOWS};
+module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, FLOWS};
