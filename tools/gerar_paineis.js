@@ -147,7 +147,7 @@ function buildNode(outDir, opts) {
   GS_ORDER.forEach(f => add(f + '.gs'));
   HTML.forEach(f => add(f + '.html'));
   ['appsscript.json', 'LEIA_PRIMEIRO.md'].forEach(add);
-  const skip = /^node\/(test|dados|node_modules)(\/|$)|^node\/config\.json$|^node\/.*\.log$/;
+  const skip = /^node\/(test|dados|node_modules|link-netlify)(\/|$)|^node\/config\.json$|^node\/.*\.log$/;
   (function walk(rel) {
     fs.readdirSync(path.join(root, rel), {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name)).forEach(d => {
       const r = rel + '/' + d.name;

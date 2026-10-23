@@ -139,6 +139,7 @@ O valor salvo não aparece de novo nesta tela.</p>
         stat('Última execução da fila', escH(s.agendador.ultima || '—')) +
         stat('Agora', escH(s.agendador.rodando ? 'rodando ' + s.agendador.rodando : 'parada, esperando a próxima')) +
         stat('Link público', s.linkPublico ? '<a href="' + escH(s.linkPublico) + '">' + escH(s.linkPublico.replace(/^https?:[/][/]/, '')) + '</a>' : 'não configurado') +
+        stat('Link do Netlify', s.linkNetlify ? '<a href="' + escH(s.linkNetlify) + '">' + escH(s.linkNetlify.replace(/^https?:[/][/]/, '')) + '</a>' : 'não configurado') +
         stat('Senha do painel', s.senhaPainel ? 'sim' : (s.linkPublico ? 'não: defina "senha"' : 'não'), s.senhaPainel ? 'ok' : (s.linkPublico ? 'bad' : ''));
       $('#addrs').innerHTML = 'Endereços do painel: ' + s.enderecos.map(function (a) { return '<a href="' + escH(a) + '">' + escH(a) + '</a>'; }).join(' · ');
       $('#start').value = s.dataInicial || '';

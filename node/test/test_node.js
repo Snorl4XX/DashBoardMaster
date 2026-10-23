@@ -138,7 +138,9 @@ function firstDiff(a, b, p) {
   const srv = await startServer({porta: port, navegadorPdf: process.env.DASHMASTER_TEST_BROWSER || ''}, {DASHMASTER_JMS_URL: 'http://127.0.0.1:' + jport});
   const api = async (fn, args) => {
     const r = await request(port, 'POST', '/api/run', {fn, args: args || []});
-    const j = JSON.parse(r.text);
+    let j = JSON.parse(r.text);
+    // Chamada demorada (> esperaApiMs): pergunta de novo, como a página faz.
+    while (j.ok && j.pendente) j = JSON.parse((await request(port, 'GET', '/api/resultado?id=' + j.pendente)).text);
     if (!j.ok) throw new Error(fn + ': ' + j.error);
     return j.result;
   };
@@ -300,6 +302,34 @@ function firstDiff(a, b, p) {
   const evil = await request(port2, 'POST', '/entrar', 'senha=segredo-teste&volta=%2F%2Fevil.example', {'Content-Type': 'application/x-www-form-urlencoded'});
   check(evil.headers.location === '/', 'não redireciona para outro site depois do login');
   srv2.child.kill();
+
+  // ---------- 10. Link do Netlify (grátis) repassando para o link público (Tailscale) ----------
+  const viaNetlify = {Origin: 'https://jt-teste.netlify.app', 'X-Forwarded-Host': 'painel.exemplo.ts.net', 'X-Forwarded-Proto': 'https'};
+  const noNetlify = await request(port, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, viaNetlify);
+  check(noNetlify.status === 403 && /linkNetlify.*jt-teste\.netlify\.app/.test(JSON.parse(noNetlify.text).error),
+    'pelo Netlify sem "linkNetlify": diz o que colocar no config.json', noNetlify.text);
+  check(!fs.existsSync(path.join(srv.tmp, 'link-netlify')), 'sem link público: nada de pasta para o Netlify');
+  const port3 = await freePort();
+  const srv3 = await startServer({porta: port3, linkPublico: 'https://painel.exemplo.ts.net/', linkNetlify: 'https://jt-teste.netlify.app'},
+    {DASHMASTER_ESPERA_API_MS: '1'});
+  const redirects = fs.readFileSync(path.join(srv3.tmp, 'link-netlify', '_redirects'), 'utf8');
+  check(/^\/\*  https:\/\/painel\.exemplo\.ts\.net\/:splat  200!$/m.test(redirects) && fs.existsSync(path.join(srv3.tmp, 'link-netlify', 'index.html')),
+    'pasta link-netlify pronta para arrastar no Netlify (repassa para o link público)', redirects);
+  check(/https:\/\/jt-teste\.netlify\.app  \(link do Netlify\)/.test(srv3.out()), 'janela mostra o link do Netlify');
+  // Chamada que passa do tempo de espera: responde "ainda processando" (202) e a página pergunta de novo.
+  const first = await request(port3, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, viaNetlify);
+  const pend = JSON.parse(first.text);
+  check(first.status === 202 && pend.ok && /^[0-9a-f]{32}$/.test(pend.pendente), 'chamada demorada responde "ainda processando"', first.text);
+  let fim = pend, polls = 0;
+  while (fim.ok && fim.pendente && polls < 200) { fim = JSON.parse((await request(port3, 'GET', '/api/resultado?id=' + fim.pendente)).text); polls++; }
+  check(fim.ok && fim.result && typeof fim.result === 'object', 'depois de perguntar de novo, chega o resultado', {polls, fim: JSON.stringify(fim).slice(0, 200)});
+  const gone = await request(port3, 'GET', '/api/resultado?id=' + pend.pendente);
+  check(gone.status === 404, 'resultado entregue não fica guardado');
+  const otherNetlify = await request(port3, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, Object.assign({}, viaNetlify, {Origin: 'https://outro.netlify.app'}));
+  check(otherNetlify.status === 403, 'outro site do Netlify continua bloqueado');
+  const cfgNetlify = await request(port3, 'GET', '/config/api/estado', undefined, viaNetlify);
+  check(cfgNetlify.status === 401, 'Configurações não abrem pelo link do Netlify');
+  srv3.child.kill();
 
   srv.child.kill();
   cleanup();

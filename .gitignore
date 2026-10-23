@@ -1,6 +1,8 @@
 # Versão Node.js: banco, arquivos baixados do JMS e configuração local (senhas) ficam só no computador.
 node/dados/
 node/config.json
+# Pasta que o servidor cria para arrastar no Netlify (tem o link do Tailscale de quem rodou).
+node/link-netlify/
 node_modules/
 # Pacotes gerados por tools/gerar_paineis.js (painel principal / painel dos fluxos).
 dist/

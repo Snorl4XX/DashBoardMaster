@@ -81,8 +81,26 @@ const POLYFILL = `<script>
             if (r.status === 401) throw new Error('Sessão expirada: recarregue a página e entre com a senha.');
             return r.json().catch(function () { throw new Error('Resposta inválida do servidor (HTTP ' + r.status + ').'); });
           })
-          .then(function (j) { if (j && j.ok) { if (ok) ok(j.result); } else onFail(new Error(j && j.error || 'Erro no servidor.')); })
+          .then(function (j) { done(j, 0); })
           .catch(function (e) { onFail(e instanceof Error ? e : new Error(String(e))); });
+        // Chamada demorada: o servidor responde {pendente} e a página pergunta de novo até ter o resultado.
+        function done(j, falhas) {
+          if (j && j.ok && j.pendente) { wait(j.pendente, falhas); return; }
+          if (j && j.ok) { if (ok) ok(j.result); } else onFail(new Error(j && j.error || 'Erro no servidor.'));
+        }
+        function wait(id, falhas) {
+          fetch('api/resultado?id=' + encodeURIComponent(id), {credentials: 'same-origin', cache: 'no-store'})
+            .then(function (r) {
+              if (r.status === 401) throw new Error('Sessão expirada: recarregue a página e entre com a senha.');
+              if (r.status >= 500) throw Object.assign(new Error('O painel demorou para responder (HTTP ' + r.status + ').'), {retry: true});
+              return r.json();
+            })
+            .then(function (j) { done(j, 0); })
+            .catch(function (e) {
+              if (e && e.retry && falhas < 5) setTimeout(function () { wait(id, falhas + 1); }, 3000);
+              else onFail(e instanceof Error ? e : new Error(String(e)));
+            });
+        }
       };
     }});
   }
@@ -235,6 +253,10 @@ async function readJson(req) {
 }
 async function readForm(req) { return Object.fromEntries(new URLSearchParams(await readBody(req, 64 * 1024))); }
 function baseUrl(req) {
+  // Pelo Netlify, os links de arquivo (relatórios) ficam no endereço do Netlify.
+  if (req.headers.origin && sameOrigin(req)) {
+    try { return new URL(String(req.headers.origin)).origin; } catch (e) { /* segue abaixo */ }
+  }
   const proto = String(req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')).split(',')[0].trim();
   return proto + '://' + String(req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + cfg.porta)).split(',')[0].trim();
 }
@@ -249,8 +271,18 @@ function sameOrigin(req) {
   try { host = new URL(o).host.toLowerCase(); } catch (e) { return false; }
   const first = v => String(v || '').split(',')[0].trim().toLowerCase();
   const ok = [first(req.headers.host), first(req.headers['x-forwarded-host'])];
-  if (cfg.linkPublico) { try { ok.push(new URL(cfg.linkPublico).host.toLowerCase()); } catch (e) { /* link inválido no config */ } }
+  [cfg.linkPublico, cfg.linkNetlify].forEach(link => {
+    if (link) { try { ok.push(new URL(link).host.toLowerCase()); } catch (e) { /* link inválido no config */ } }
+  });
   return ok.some(h => h && h === host);
+}
+/** Mensagem de "origem não permitida": pelo Netlify sem o linkNetlify no config.json, diz o que fazer. */
+function originError(req) {
+  let host = '';
+  try { host = new URL(String(req.headers.origin || '')).host.toLowerCase(); } catch (e) { /* sem Origin */ }
+  return /\.netlify\.app$/.test(host)
+    ? 'Origem não permitida: coloque "linkNetlify": "https://' + host + '" no config.json e abra o painel de novo (feche a janela preta e abra o atalho DashMaster).'
+    : 'Origem não permitida.';
 }
 /**
  * Endereço de quem tenta a senha (limite de tentativas). Direto da rede: o do próprio socket. Pelo túnel (socket local):
@@ -266,7 +298,7 @@ function isSecure(req) { return String(req.headers['x-forwarded-proto'] || '').i
 function safeBack(v, def) { const s = String(v || ''); return /^\/(?!\/)[^\s]*$/.test(s) ? s : def; }
 
 function addresses() {
-  const out = (cfg.linkPublico ? [cfg.linkPublico] : []).concat(['http://localhost:' + cfg.porta]);
+  const out = [cfg.linkNetlify, cfg.linkPublico].filter(Boolean).concat(['http://localhost:' + cfg.porta]);
   if (cfg.host === '127.0.0.1' || cfg.host === 'localhost') return out;
   Object.values(os.networkInterfaces()).forEach(list => (list || []).forEach(a => {
     if (a.family === 'IPv4' && !a.internal) out.push('http://' + a.address + ':' + cfg.porta);
@@ -300,7 +332,7 @@ async function configApi(req, res, name) {
     const last = sched.last.processSyncQueue;
     sendJson(res, 200, {
       ok: true, versaoPainel: panelVersion(), versaoServidor: SERVER_VERSION, token: !!all.JMS_AUTHTOKEN,
-      senhaPainel: !!cfg.senha, senhaConfig: !!cfg.senhaConfig, linkPublico: cfg.linkPublico,
+      senhaPainel: !!cfg.senha, senhaConfig: !!cfg.senhaConfig, linkPublico: cfg.linkPublico, linkNetlify: cfg.linkNetlify,
       dataInicial: all.DATA_START_DATE || '', fila, filaTexto,
       agendador: {rodando: sched.running, pendentes: sched.pending.slice(),
         ultima: last ? new Date(last).toLocaleString('pt-BR') + ' · ' + sched.lastSummary : ''},
@@ -354,6 +386,30 @@ async function configApi(req, res, name) {
   sendJson(res, 404, {ok: false, error: 'Não encontrado.'});
 }
 
+// ------------------------------------------------------------------ chamadas demoradas
+// O Netlify (e outros proxies) cortam a resposta em ~30 s, mas "Atualizar" pode levar minutos. Depois de esperaApiMs sem
+// terminar, a página recebe {pendente: id} e pergunta de novo em /api/resultado (cada pergunta espera mais um pouco).
+const PENDING = new Map();
+const PENDING_TTL = 15 * 60000;
+async function answerOrWait(res, job, id) {
+  let timer;
+  const wait = new Promise(resolve => { timer = setTimeout(() => resolve(null), cfg.esperaApiMs); });
+  const r = await Promise.race([job, wait]);
+  clearTimeout(timer);
+  if (r) {
+    if (id) PENDING.delete(id);
+    if (r.ok) send(res, 200, '{"ok":true,"result":' + r.json + '}', {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+    else sendJson(res, 200, {ok: false, error: r.error});
+    return;
+  }
+  if (!id) {
+    id = require('crypto').randomBytes(16).toString('hex');
+    PENDING.set(id, {id, job, exp: Date.now() + PENDING_TTL});
+    PENDING.forEach((v, k) => { if (v.exp < Date.now()) PENDING.delete(k); });
+  }
+  sendJson(res, 202, {ok: true, pendente: id});
+}
+
 async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname.replace(/\/+$/, '') || '/';
@@ -371,7 +427,7 @@ async function handle(req, res) {
   // ----- entrar / sair do painel
   if (p === '/entrar') {
     if (req.method === 'POST') {
-      if (!sameOrigin(req)) { send(res, 403, 'Origem não permitida.'); return; }
+      if (!sameOrigin(req)) { send(res, 403, originError(req), {'Content-Type': 'text/plain; charset=utf-8'}); return; }
       const f = await readForm(req);
       if (!auth.allowAttempt(clientIp(req))) { sendHtml(req, res, 429, pages.loginPage({title: 'Painel J&T', text: 'Muitas tentativas. Espere 1 minuto.', action: 'entrar', back: f.volta})); return; }
       if (auth.check(cfg.senha, f.senha || '')) {
@@ -445,16 +501,19 @@ async function handle(req, res) {
   }
   if (p === '/api/run') {
     if (req.method !== 'POST') { sendJson(res, 405, {ok: false, error: 'Use POST.'}); return; }
-    if (!sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
+    if (!sameOrigin(req)) { sendJson(res, 403, {ok: false, error: originError(req)}); return; }
     const body = await readJson(req);
     const fn = String(body.fn || '');
     if (!allowed(fn)) { sendJson(res, 403, {ok: false, error: 'Função não permitida: ' + fn}); return; }
-    try {
-      const out = await web.run({fn, args: Array.isArray(body.args) ? body.args : []}, {timeoutMs: 6 * 60000, baseUrl: baseUrl(req)});
-      send(res, 200, '{"ok":true,"result":' + out.json + '}', {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
-    } catch (e) {
-      sendJson(res, 200, {ok: false, error: nodeText(e.message)});
-    }
+    const job = web.run({fn, args: Array.isArray(body.args) ? body.args : []}, {timeoutMs: 6 * 60000, baseUrl: baseUrl(req)})
+      .then(out => ({ok: true, json: out.json}), e => ({ok: false, error: nodeText(e.message)}));
+    await answerOrWait(res, job, null);
+    return;
+  }
+  if (p === '/api/resultado') {
+    const item = PENDING.get(String(url.searchParams.get('id') || ''));
+    if (!item) { sendJson(res, 404, {ok: false, error: 'O resultado expirou. Clique de novo.'}); return; }
+    await answerOrWait(res, item.job, item.id);
     return;
   }
   const file = p.match(/^\/arquivo\/([A-Za-z0-9_-]+)$/);
@@ -473,6 +532,26 @@ async function handle(req, res) {
   send(res, 404, 'Não encontrado.', {'Content-Type': 'text/plain; charset=utf-8'});
 }
 
+/**
+ * Pasta para o Netlify (grátis): arrastada em app.netlify.com/drop, vira um link https://….netlify.app que repassa tudo para
+ * o linkPublico (Tailscale Funnel). O painel continua rodando aqui; o Netlify só repassa.
+ */
+function writeNetlifyFolder() {
+  if (!/^https:\/\//.test(cfg.linkPublico)) return '';
+  const dir = path.join(cfg.configDir, 'link-netlify');
+  try {
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(path.join(dir, '_redirects'), '# Gerado pelo J&T DashMaster: o link do Netlify repassa tudo para o painel neste computador (Tailscale).\n' +
+      '/*  ' + cfg.linkPublico + '/:splat  200!\n');
+    fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><meta charset="utf-8"><title>Painel J&amp;T</title>' +
+      '<p>O Netlify não está repassando para o painel. Arraste de novo a pasta link-netlify no projeto do Netlify.</p>\n');
+    return dir;
+  } catch (e) {
+    log('aviso', 'Não consegui criar a pasta link-netlify: ' + e.message);
+    return '';
+  }
+}
+
 const server = http.createServer((req, res) => {
   handle(req, res).catch(e => {
     const status = e && e.status || 500;
@@ -488,9 +567,14 @@ server.on('error', e => {
   process.exit(1);
 });
 server.listen(cfg.porta, cfg.host, () => {
+  const netlifyDir = writeNetlifyFolder();
   log('info', 'J&T DashMaster (Node.js ' + SERVER_VERSION + ', painel ' + panelVersion() + ') no ar.');
-  addresses().forEach(a => log('info', '  Painel: ' + a + (a === cfg.linkPublico ? '  (link público)' : '')));
+  addresses().forEach(a => log('info', '  Painel: ' + a + (a === cfg.linkPublico ? '  (link público)' : a === cfg.linkNetlify ? '  (link do Netlify)' : '')));
   if (cfg.linkPublico && !cfg.senha) log('aviso', 'Há link público e o painel está sem senha: defina "senha" no config.json.');
+  if (netlifyDir && !cfg.linkNetlify) {
+    log('info', '  Link no Netlify (grátis): arraste a pasta ' + netlifyDir + ' em https://app.netlify.com/drop e coloque o link que ' +
+      'aparecer em "linkNetlify" no config.json.');
+  }
   log('info', '  Configurações (AuthToken, histórico, diagnósticos): http://localhost:' + cfg.porta + '/config');
   if (!props.getProperty('JMS_AUTHTOKEN')) log('aviso', 'AuthToken do JMS ainda não cadastrado: abra Configurações.');
   if (cfg.agendador === false) log('aviso', 'Agendador desligado: a fila do JMS só roda pela tela Configurações.');

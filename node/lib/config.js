@@ -30,7 +30,10 @@ const DEFAULTS = {
   // false = não roda a fila sozinho (só para testes/manutenção).
   agendador: true,
   // Link público do painel (ex.: https://computador.nome.ts.net, do Tailscale Funnel). Só para mostrar na janela e em Configurações.
-  linkPublico: ''
+  linkPublico: '',
+  // Link do Netlify que repassa para o linkPublico (ex.: https://jt-dashmaster.netlify.app). Com ele, o painel aceita as
+  // chamadas que chegam por esse endereço.
+  linkNetlify: ''
 };
 
 function configPath() {
@@ -58,6 +61,10 @@ function loadConfig(opts) {
   cfg.filesDir = path.join(cfg.dataDir, 'arquivos');
   cfg.porta = Number(cfg.porta) || DEFAULTS.porta;
   cfg.linkPublico = String(cfg.linkPublico || '').trim().replace(/\/+$/, '');
+  cfg.linkNetlify = String(cfg.linkNetlify || '').trim().replace(/\/+$/, '');
+  cfg.configDir = base;
+  // Quanto tempo uma chamada da página espera antes de responder "ainda processando" (o Netlify corta em ~30 s).
+  cfg.esperaApiMs = Number(process.env.DASHMASTER_ESPERA_API_MS) > 0 ? Number(process.env.DASHMASTER_ESPERA_API_MS) : 20000;
   cfg.filaCadaSegundos = Math.max(15, Number(cfg.filaCadaSegundos) || DEFAULTS.filaCadaSegundos);
   cfg.trabalhadores = Math.max(1, Math.min(8, Number(cfg.trabalhadores) || DEFAULTS.trabalhadores));
   if (process.env.DASHMASTER_SEM_AGENDADOR === '1') cfg.agendador = false;

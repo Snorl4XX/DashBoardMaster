@@ -91,6 +91,7 @@ O arquivo é criado na primeira vez que o servidor abre. Edite-o com o Bloco de 
 | `trabalhadores` | `3` | Quantas consultas do painel rodam ao mesmo tempo |
 | `navegadorPdf` | vazio | Caminho do Edge/Chrome para o PDF. Vazio = procura sozinho |
 | `linkPublico` | vazio | O link público do painel (seção 5), para aparecer na janela e em Configurações |
+| `linkNetlify` | vazio | O link do Netlify que repassa para o link público (seção 5.1). Sem ele, as chamadas que chegam pelo Netlify são recusadas |
 
 Para abrir o painel de fora da base, veja a seção 5 (link público).
 
@@ -125,6 +126,26 @@ Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.
 - **Cloudflare Tunnel:** link fixo, mas precisa de conta e de um domínio próprio. Sem domínio, o link `trycloudflare.com` muda toda vez que reinicia e serve só para teste.
 - **Servidor na nuvem, grátis (Oracle Cloud "Always Free"):** passo a passo em **`ORACLE_CLOUD.md`**, com o instalador `instalar-oracle.sh` (Ubuntu) e o `link-publico.sh` (Tailscale Funnel no Linux).
 
+
+### 5.1 Link no Netlify (grátis)
+
+O Netlify não roda o painel: ele só dá um endereço `https://….netlify.app` que **repassa** para o link do Tailscale. O painel
+continua no seu computador (que precisa ficar ligado).
+
+1. Faça a seção 5 e coloque o link do Tailscale em `"linkPublico"` no `config.json`. Abra o painel de novo.
+   - A janela preta mostra: **"Link no Netlify (grátis): arraste a pasta …\node\link-netlify …"**. O servidor cria essa pasta sozinho.
+2. Abra https://app.netlify.com e crie uma conta grátis (Google, GitHub ou e-mail).
+3. Abra https://app.netlify.com/drop e **arraste a pasta `link-netlify`** para a página. Espere aparecer o link `https://….netlify.app`.
+4. Para trocar o nome do link: no projeto do Netlify, **Project configuration → Change project name** (ex.: `jt-dashmaster-gru`).
+5. No `config.json`, coloque o link em `"linkNetlify"` (ex.: `"https://jt-dashmaster-gru.netlify.app"`) e abra o painel de novo.
+6. Teste no celular com 4G: o link do Netlify abre o painel e pede a senha.
+
+Se o link do Tailscale mudar, abra o painel de novo (a pasta é refeita) e, no projeto do Netlify, em **Deploys**, arraste a
+pasta `link-netlify` outra vez.
+
+**Como funciona:** o arquivo `_redirects` da pasta manda o Netlify repassar tudo para o link do Tailscale. O Netlify corta
+respostas que demoram mais de ~30 s; por isso, quando uma chamada da página (como **Atualizar**) passa de 20 s, o servidor
+responde "ainda processando" e a página pergunta de novo até ter o resultado. Computador desligado: o link do Netlify mostra erro.
 
 ## 6. Atualizar para uma versão nova do painel
 
