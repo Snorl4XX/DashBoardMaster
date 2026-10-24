@@ -409,6 +409,11 @@ check(cI.__state.fetches.length === 1 && cI.pendingJobs_().every(j => j.attempts
 check(ctx.publicJmsError_('Detalhe retornou 14013 registros, mas o resumo tem 4012 erros: payload do detalhe sem filtro.') === 'Detalhe bloqueado: retorno maior que o resumo',
   'número "401" dentro da mensagem não é erro de autenticação');
 check(!/HTTP 403|permissão/.test(ctx.publicJmsError_('JMS informou 4031 registros no resumo, mas entregou 4029 em sc_sc 2026-09-19')), 'número "403" idem');
+// V4.15.1: a mensagem da cota vem no idioma da conta Google.
+check(['Serviço chamado muitas vezes no mesmo dia: urlfetch.', 'Falha de rede ao consultar o JMS: Serviço chamado muitas vezes no mesmo dia: urlfetch.',
+  'Servicio invocado demasiadas veces en un día: urlfetch.'].every(m => ctx.errorKind_(m) === 'QUOTA') &&
+  /Cota diária de consultas externas do Google \(UrlFetch\) esgotada/.test(ctx.publicJmsError_('Serviço chamado muitas vezes no mesmo dia: urlfetch.')),
+  'cota do Google em português/espanhol reconhecida (não vira "falha de rede")');
 check(ctx.errorKind_('HTTP 401 em x') === 'AUTH' && ctx.errorKind_('Sessão do JMS expirada') === 'AUTH' && ctx.errorKind_('Service invoked too many times for one day: urlfetch.') === 'QUOTA' &&
   ctx.errorKind_('Detalhe retornou 4013 registros') === 'OTHER', 'classificação dos erros da fila');
 
@@ -3247,6 +3252,22 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   cQ2.updateDayStatus_('wrong_send', D19, {error: 'Cota diária do Google esgotada ao consultar o JMS: Service invoked too many times for one day: urlfetch.'});
   check(cQ2.lastErrorFor_('wrong_send', D19, D19) === null, 'erro antigo da cota no dia não vira o aviso vermelho');
   cQ2.UrlFetchApp.fetch = realFetch; cQ2.UrlFetchApp.fetchAll = realAll;
+  // (a2) V4.15.1: a mesma cota com a mensagem em PORTUGUÊS (conta Google em português). Antes virava "Falha de rede", sem pausa,
+  // e a fila tentava de novo a cada hora com o aviso vermelho. Agora: pausa, sem erro no dia, e a fila espera o dia seguinte
+  // (a cota é da conta: outros projetos do Apps Script gastam e o contador daqui não vê).
+  const cPT = freshCtx({[D19]: makeDay(D19, 75)}, null, {COTA_GOOGLE: 'gmail'});
+  const realPT = cPT.UrlFetchApp.fetch, realPTAll = cPT.UrlFetchApp.fetchAll;
+  const boomPT = () => { throw new Error('Serviço chamado muitas vezes no mesmo dia: urlfetch.'); };
+  cPT.UrlFetchApp.fetch = boomPT; cPT.UrlFetchApp.fetchAll = boomPT;
+  cPT.queueHistory(D19, D19, true);
+  runAll(cPT, 2);
+  const stPT = cPT.allTabRows_('STATUS').filter(r => r[8]);
+  check(cPT.publicPauses_().some(p => p.kind === 'QUOTA') && !stPT.some(r => /urlfetch|Cota diária|Falha de rede/i.test(String(r[8]))) &&
+    cPT.pendingJobs_().length > 0 && cPT.pendingJobs_().every(j => j.attempts === 0),
+    'cota em português: pausa, nenhum erro vermelho no dia, nenhuma tentativa gasta', {p: cPT.publicPauses_(), st: stPT.map(r => r[8])});
+  check(Number(cPT.__state.props['URLFETCH_' + today]) >= 20000 && cPT.fetchBudgetMode_() === 'stop',
+    'cota recusada pelo Google: contador de hoje no limite, a fila espera o dia seguinte', cPT.__state.props['URLFETCH_' + today]);
+  cPT.UrlFetchApp.fetch = realPT; cPT.UrlFetchApp.fetchAll = realPTAll;
   // (b) Contagem: cada consulta externa conta no contador do dia.
   const cC = freshCtx({[D19]: makeDay(D19, 72)}, null, {COTA_GOOGLE: 'gmail'});
   cC.queueHistory(D19, D19, true);

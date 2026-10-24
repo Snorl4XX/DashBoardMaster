@@ -4,6 +4,28 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.15.1 — Cota do Google em português: sem o aviso vermelho de "Falha de rede"
+
+**O que aparecia:** "Erro de sincronização: Falha de rede ao consultar o JMS: Serviço chamado muitas vezes no mesmo dia: urlfetch."
+
+**Causa:** a cota diária de consultas externas do Google (UrlFetch) acabou. O painel já sabia tratar a cota (pausa e aviso no topo),
+mas só reconhecia a mensagem em inglês ("Service invoked too many times"). Com a conta Google em português, a cota virava
+"falha de rede": sem pausa, a fila tentava de novo a cada hora e o painel mostrava o erro vermelho.
+
+**Agora:**
+- A mensagem em português (e em espanhol) é reconhecida como cota: a fila pausa, o dia não ganha erro e o aviso do topo diz
+  que a cota acabou e que volta sozinho no dia seguinte. Erros antigos gravados com essa mensagem também somem.
+- Quando o Google recusa por cota, o contador de hoje vai para o limite e a fila espera o dia seguinte (antes, tentava de novo).
+
+**Por que a cota acaba:** ela é da **conta Google** (20 mil consultas por dia no Gmail, 100 mil no Workspace) e soma **todos os
+projetos do Apps Script dessa conta**: o painel principal, o projeto dos fluxos (se estiver na mesma conta), a Pesquisa no
+Rastreamento e o JMS Segmentos. O painel conta só as consultas dele (`diagnosticoCompleto` mostra quantas). Para não faltar:
+deixe a Pesquisa e o JMS Segmentos (que consultam milhares de remessas) em **outra conta Google**. Se a conta for Gmail, não use
+`COTA_GOOGLE = workspace` nas Propriedades do script.
+
+**Atualizar:** troque `Config.gs`, `Utils.gs` e `JmsApi.gs` (ou todos os arquivos) e faça Implantar → Gerenciar implantações →
+✏️ → Nova versão.
+
 ## Painel no Netlify — sem instalar nada no computador (a partir da V4.15)
 
 Para quem não pode instalar programas (notebook da empresa travado): a **tela** do painel fica num site grátis do Netlify e

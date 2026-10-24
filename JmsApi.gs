@@ -256,7 +256,10 @@ function urlFetch_(req) {
   try { return UrlFetchApp.fetch(req.url, req); }
   catch (e) {
     const m = String(e && e.message || e).slice(0, 200);
-    if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m);
+    if (errorKind_(m) === 'QUOTA') {
+      noteFetchQuotaHit_(m);
+      throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m);
+    }
     throw new Error('Falha de rede ao consultar o JMS: ' + m);
   }
 }
@@ -264,7 +267,8 @@ function urlFetch_(req) {
 /** Várias consultas de uma vez (UrlFetchApp.fetchAll), contadas na cota do dia (V4.4.2). */
 function fetchAll_(reqs) {
   noteFetches_(reqs.length);
-  return UrlFetchApp.fetchAll(reqs);
+  try { return UrlFetchApp.fetchAll(reqs); }
+  catch (e) { noteFetchQuotaHit_(String(e && e.message || e)); throw e; }
 }
 
 function isRetryable_(e) {
