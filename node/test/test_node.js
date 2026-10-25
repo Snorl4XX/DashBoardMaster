@@ -333,6 +333,37 @@ function firstDiff(a, b, p) {
   check(cfgNetlify.status === 401, 'Configurações não abrem pelo link do Netlify');
   srv3.child.kill();
 
+  // Erro ao abrir: pelo atalho do Windows a janela fica aberta com o motivo (aqui o Windows e a espera são simulados).
+  const tmpErr = fs.mkdtempSync(path.join(os.tmpdir(), 'dm-node-erro-'));
+  const fakeWindows = path.join(tmpErr, 'janela-windows.js');
+  fs.writeFileSync(fakeWindows, "Object.defineProperty(process, 'platform', {value: 'win32'});\nprocess.stdout.isTTY = true;\n" +
+    "Atomics.wait = function () { process.stderr.write('ESPEROU ' + arguments[3] + '\\n'); return 'timed-out'; };\n");
+  const startFails = (configText, env, preload) => new Promise(resolve => {
+    const file = path.join(fs.mkdtempSync(path.join(tmpErr, 'cfg-')), 'config.json');
+    fs.writeFileSync(file, configText);
+    const child = spawn(process.execPath, (preload ? ['-r', preload] : []).concat(path.join(__dirname, '..', 'server.js')), {
+      env: Object.assign({}, process.env, {DASHMASTER_CONFIG: file, DASHMASTER_SEM_AGENDADOR: '1'}, env || {}), stdio: ['ignore', 'pipe', 'pipe']});
+    children.push(child);
+    let out = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.on('data', d => { out += d; });
+    const timer = setTimeout(() => { child.kill(); resolve({code: 'parado', out}); }, 30000);
+    child.on('exit', code => { clearTimeout(timer); resolve({code, out}); });
+  });
+  const badCfg = await startFails('{"porta": 3000,,}');
+  check(badCfg.code === 1 && /\[erro\] Não consegui iniciar: config\.json inválido/.test(badCfg.out) && !/ESPEROU/.test(badCfg.out),
+    'config.json inválido: mostra o motivo e sai (fora do Windows, sem esperar)', badCfg.out);
+  const badCfgWin = await startFails('{"porta": 3000,,}', {}, fakeWindows);
+  check(badCfgWin.code === 1 && /config\.json inválido/.test(badCfgWin.out) && /O painel NÃO está no ar/.test(badCfgWin.out) &&
+    /feche no X/.test(badCfgWin.out) && /ESPEROU 1800000/.test(badCfgWin.out), 'atalho do Windows: a janela fica aberta com o erro', badCfgWin.out);
+  const badCfgBat = await startFails('{"porta": 3000,,}', {DASHMASTER_SEM_PAUSA: '1'}, fakeWindows);
+  check(badCfgBat.code === 1 && /config\.json inválido/.test(badCfgBat.out) && !/ESPEROU/.test(badCfgBat.out),
+    'pelo iniciar.bat (que já segura a janela): sai sem esperar', badCfgBat.out);
+  const busy = await startFails(JSON.stringify({host: '127.0.0.1', porta: port, pastaDados: path.join(tmpErr, 'dados'), pastaCodigo: ROOT}), {}, fakeWindows);
+  check(busy.code === 1 && /A porta \d+ já está em uso/.test(busy.out) && /ESPEROU 1800000/.test(busy.out),
+    'porta em uso (painel já aberto): a janela mostra o motivo', busy.out);
+  check(fs.readFileSync(path.join(tmpErr, 'dados', 'servidor.log'), 'utf8').includes('já está em uso'), 'o motivo também fica no servidor.log');
+
   srv.child.kill();
   cleanup();
   console.log('OK: ' + passed + ' verificações da versão Node.js passaram (' + Math.round((Date.now() - t0) / 1000) + ' s; JMS simulado por HTTP).');

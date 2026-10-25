@@ -5,11 +5,26 @@
  * Uso: node server.js   (ou iniciar.bat no Windows). Configuração em node/config.json.
  */
 process.env.TZ = 'America/Sao_Paulo';
+
+/**
+ * Erro que impede o painel de abrir. Pelo atalho do Windows (node.exe server.js), a janela fecharia na hora, sem dar para
+ * ler o motivo: ali ela fica aberta (até o X ou 30 min). Pelo iniciar.bat (DASHMASTER_SEM_PAUSA) e fora do Windows, sai na hora.
+ */
+function stopOnError(message, log) {
+  if (log) log('erro', message);
+  else console.error('[erro] ' + message);
+  if (process.platform === 'win32' && process.stdout.isTTY && !process.env.DASHMASTER_SEM_PAUSA) {
+    console.error('\nO painel NÃO está no ar. Tire um print desta janela para pedir ajuda (sem o AuthToken).\n' +
+      'Esta janela fica aberta para você ler: feche no X.');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30 * 60000);
+  }
+  process.exit(1);
+}
+
 const [MAJOR, MINOR] = process.versions.node.split('.').map(Number);
 if (MAJOR < 22 || (MAJOR === 22 && MINOR < 13)) {
-  console.error('\nEste servidor precisa do Node.js 22.13 ou mais novo (você tem ' + process.version + ').\n' +
-    'Baixe a versão LTS em https://nodejs.org e rode de novo.\n');
-  process.exit(1);
+  stopOnError('Este servidor precisa do Node.js 22.13 ou mais novo (você tem ' + process.version + ').\n' +
+    'Baixe a versão LTS em https://nodejs.org e rode de novo.');
 }
 require('./lib/quiet');
 const http = require('http');
@@ -27,7 +42,8 @@ const {safeId} = require('./lib/drive');
 const SERVER_VERSION = require('./package.json').version;
 
 // ------------------------------------------------------------------ início
-const cfg = loadConfig();
+let cfg;
+try { cfg = loadConfig(); } catch (e) { stopOnError('Não consegui iniciar: ' + (e && e.message || e)); }
 const log = makeLogger(cfg.dataDir);
 let main;
 try {
@@ -35,8 +51,7 @@ try {
   const setup = main.bootstrap();
   if (setup) log('info', 'Banco criado em ' + cfg.dbFile);
 } catch (e) {
-  log('erro', 'Não consegui iniciar: ' + (e && e.stack || e));
-  process.exit(1);
+  stopOnError('Não consegui iniciar: ' + (e && e.stack || e), log);
 }
 const props = main.props();
 const web = new Pool(cfg, cfg.trabalhadores, 'painel', main.db, log);
@@ -562,9 +577,9 @@ const server = http.createServer((req, res) => {
 });
 server.keepAliveTimeout = 65000;
 server.on('error', e => {
-  if (e.code === 'EADDRINUSE') log('erro', 'A porta ' + cfg.porta + ' já está em uso: o servidor já está aberto em outra janela? Feche-a ou troque "porta" no config.json.');
-  else log('erro', 'Servidor: ' + (e && e.stack || e));
-  process.exit(1);
+  stopOnError(e.code === 'EADDRINUSE'
+    ? 'A porta ' + cfg.porta + ' já está em uso: o servidor já está aberto em outra janela? Feche-a ou troque "porta" no config.json.'
+    : 'Servidor: ' + (e && e.stack || e), log);
 });
 server.listen(cfg.porta, cfg.host, () => {
   const netlifyDir = writeNetlifyFolder();

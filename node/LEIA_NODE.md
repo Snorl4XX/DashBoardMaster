@@ -39,7 +39,7 @@ O único limite que sobra é o do próprio JMS (100 linhas por página).
 ### Sem permissão de administrador (computador da empresa)
 Se o Windows bloquear o instalador do Node.js ou os arquivos `.bat`:
 1. **Node.js sem instalar:** em https://nodejs.org/dist/latest-v22.x/ baixe o arquivo que termina em `-win-x64.zip`. Abra o ZIP, copie só o **`node.exe`** e cole na pasta `node` do painel.
-2. **Atalho no lugar do `iniciar.bat`:** na Área de Trabalho, botão direito → **Novo → Atalho** → cole `"C:\dashmaster\node\node.exe" "C:\dashmaster\node\server.js"` (troque pelo caminho da sua pasta) → nome **DashMaster**. Dois cliques abrem a janela do servidor.
+2. **Atalho no lugar do `iniciar.bat`:** na Área de Trabalho, botão direito → **Novo → Atalho** → cole `"C:\dashmaster\node\node.exe" "C:\dashmaster\node\server.js"` (troque pelo caminho da sua pasta) → nome **DashMaster**. Dois cliques abrem a janela do servidor. Se der erro ao abrir, a janela não fecha: mostra o motivo (linha `[erro]`) e "O painel NÃO está no ar"; feche no X depois de ler.
 3. **Aviso do Firewall pedindo administrador:** clique em **Cancelar**. O painel funciona neste computador e pelo link público; só não abre pelo IP para outros computadores da rede.
 4. **Abrir sozinho:** **Windows + R** → `shell:startup` → cole o atalho nessa pasta.
 
@@ -168,11 +168,12 @@ Se você trocar só os `.gs`/`.html`, o servidor recarrega sozinho em poucos seg
 
 | Mensagem | O que fazer |
 |---|---|
+| Navegador: "Não é possível acessar esse site" / `ERR_CONNECTION_REFUSED` em `localhost:3000` | O servidor não está aberto. Abra o atalho **DashMaster** (ou o `iniciar.bat`) e deixe a janela preta aberta, com "no ar". Se ela mostrar "O painel NÃO está no ar", o motivo está na linha `[erro]` logo acima |
 | "precisa do Node.js 22.13 ou mais novo" | Instale a versão LTS de https://nodejs.org |
 | "A porta 3000 já está em uso" | O servidor já está aberto em outra janela. Feche-a ou troque `porta` no `config.json` |
 | Outro computador não abre o painel | Firewall do Windows: permita o Node.js em redes privadas. Confira o IP na janela preta |
 | "Sessão do JMS expirada…" | Novo AuthToken em Configurações |
-| "Falha de rede ao consultar o JMS" (e o JMS abre no navegador) | A empresa usa proxy: no `iniciar.bat`, tire o `rem` das linhas `set HTTPS_PROXY=…` e `set NODE_USE_ENV_PROXY=1` e coloque o endereço do proxy |
+| "Falha de rede ao consultar o JMS" (e o JMS abre no navegador) | A empresa usa proxy: no `iniciar.bat`, tire o `rem` das linhas `set HTTPS_PROXY=…` e `set NODE_USE_ENV_PROXY=1` e coloque o endereço do proxy. Com o atalho (sem `.bat`): menu Iniciar → **Editar as variáveis de ambiente para sua conta** (sem administrador) → crie `HTTPS_PROXY` e `NODE_USE_ENV_PROXY` = `1` e abra o atalho de novo |
 | PDF não sai | Use o Excel ou informe `navegadorPdf` com o caminho do `msedge.exe` |
 
 Se a página ficar em branco, abra a janela preta: o erro aparece lá e também em `node/dados/servidor.log`.
