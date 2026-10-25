@@ -1,0 +1,16 @@
+# Só neste computador: o app escuta em 127.0.0.1 (outras máquinas da rede não abrem) e não manda estatísticas de uso.
+[server]
+address = "127.0.0.1"
+port = 8501
+headless = false
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+primaryColor = "#E60012"

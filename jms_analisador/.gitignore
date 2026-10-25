@@ -1,0 +1,5 @@
+# Modelo do "Ver imagem" aprendido neste computador (sem token, mas é do usuário).
+dados_locais/
+__pycache__/
+.pytest_cache/
+*.xlsx
