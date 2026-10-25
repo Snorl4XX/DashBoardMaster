@@ -42,6 +42,7 @@ Se o Windows bloquear o instalador do Node.js ou os arquivos `.bat`:
 2. **Atalho no lugar do `iniciar.bat`:** na Área de Trabalho, botão direito → **Novo → Atalho** → cole `"C:\dashmaster\node\node.exe" "C:\dashmaster\node\server.js"` (troque pelo caminho da sua pasta) → nome **DashMaster**. Dois cliques abrem a janela do servidor. Se der erro ao abrir, a janela não fecha: mostra o motivo (linha `[erro]`) e "O painel NÃO está no ar"; feche no X depois de ler.
 3. **Aviso do Firewall pedindo administrador:** clique em **Cancelar**. O painel funciona neste computador e pelo link público; só não abre pelo IP para outros computadores da rede.
 4. **Abrir sozinho:** **Windows + R** → `shell:startup` → cole o atalho nessa pasta.
+5. **"O Controle de Aplicativo Inteligente bloqueou um arquivo que pode não ser seguro":** o Windows marcou os arquivos como vindos da internet. Botão direito → **Propriedades** → marque **Desbloquear** → OK: no ZIP do painel (antes de extrair; se já extraiu, extraia de novo por cima), no `node.exe` e no atalho (ou crie o atalho de novo). Não desligue o Controle de Aplicativo Inteligente: desligado, ele só volta reinstalando o Windows.
 
 ### Abrir sozinho quando o Windows ligar
 
