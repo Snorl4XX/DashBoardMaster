@@ -7,8 +7,9 @@
  * e os ZIPs JT_DASHMASTER_<versão>_PRINCIPAL.zip e JT_DASHMASTER_<versão>_FLUXOS.zip.
  * Os pacotes só diferem na linha PACOTE_PAINEIS_ do Config.gs (e no LEIA_ESTE_PAINEL.md).
  *
- * V4.7: também o pacote da versão Node.js (JT_DASHMASTER_<versão>_NODE.zip, pasta "dashmaster/"): TODOS os painéis num
- * servidor só (sem cota do Google), com a pasta node (instalador da Oracle Cloud, link público e o passo a passo).
+ * V4.7: também o pacote da versão Node.js (JT_DASHMASTER_<versão>_NODE.zip, pasta "dashmaster/"): os painéis num servidor só
+ * (sem cota do Google), com a pasta node (instalador da Oracle Cloud, link público e o passo a passo). V4.15.2 (pedido): os
+ * mesmos painéis do pacote principal, sem Recebimento e Expedição (fluxo operacional).
  *
  * Netlify: também a página do painel para um site do Netlify (JT_DASHMASTER_<versão>_NETLIFY.zip, pasta "dashmaster-netlify/"):
  * a mesma tela, já montada, pedindo os dados ao Apps Script (Api.gs) pelo link /exec — nada instalado no computador.
@@ -21,6 +22,9 @@ const {zip} = require('../node/lib/report');
 
 const ROOT = path.join(__dirname, '..');
 const FLOWS = 'arrival_flow,send_flow';
+const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
+// V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição).
+const NODE_PACOTE = {so: '', fora: FLOWS, nome: ''};
 
 const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
 const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
@@ -98,6 +102,12 @@ function fileList() {
 
 function versionOf(config) { const m = config.match(/VERSION:\s*'([^']+)'/); return m ? m[1] : '?'; }
 
+/** Linha PACOTE_PAINEIS_ do Config.gs de um pacote ({so, fora, nome}). */
+function pacoteLine(pacote) {
+  return 'const PACOTE_PAINEIS_ = ' + JSON.stringify(pacote).replace(/"/g, "'").replace(/,'/g, ", '").replace(/':/g, "': ")
+    .replace(/^\{/, '{').replace(/'(so|fora|nome)': /g, '$1: ') + ';';
+}
+
 /** Monta os pacotes em `outDir`. Devolve [{id, dir, zip}]. */
 function build(outDir, opts) {
   opts = opts || {};
@@ -105,8 +115,7 @@ function build(outDir, opts) {
   const extra = fs.readdirSync(root).filter(f => /\.gs$/.test(f) && GS_ORDER.indexOf(f.slice(0, -3)) < 0).map(f => f.slice(0, -3));
   if (extra.length) throw new Error('Arquivo .gs fora da lista do gerador: ' + extra.join(', ') + ' (inclua em GS_ORDER).');
   const config = fs.readFileSync(path.join(root, 'Config.gs'), 'utf8');
-  const lineRe = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
-  if (!lineRe.test(config)) throw new Error('Config.gs sem a linha PACOTE_PAINEIS_ (o gerador não sabe separar os painéis).');
+  if (!PACOTE_RE.test(config)) throw new Error('Config.gs sem a linha PACOTE_PAINEIS_ (o gerador não sabe separar os painéis).');
   const version = versionOf(config);
   // 4.4.0 → V4_4; 4.4.1 → V4_4_1 (correção com nome próprio, para não confundir com o ZIP anterior).
   const parts = version.split('.');
@@ -118,12 +127,11 @@ function build(outDir, opts) {
     fs.mkdirSync(dir, {recursive: true});
     const files = [];
     const put = (name, data) => { fs.writeFileSync(path.join(dir, name), data); files.push({name, data: Buffer.from(data)}); };
-    const line = 'const PACOTE_PAINEIS_ = ' + JSON.stringify(pkg.pacote).replace(/"/g, "'").replace(/,'/g, ", '").replace(/':/g, "': ")
-      .replace(/^\{/, '{').replace(/'(so|fora|nome)': /g, '$1: ') + ';';
+    const line = pacoteLine(pkg.pacote);
     put('LEIA_ESTE_PAINEL.md', pkg.readme(version));
     GS_ORDER.forEach(f => {
       let text = fs.readFileSync(path.join(root, f + '.gs'), 'utf8');
-      if (f === 'Config') text = text.replace(lineRe, line);
+      if (f === 'Config') text = text.replace(PACOTE_RE, line);
       put(f + '.gs', text);
     });
     HTML.forEach(f => put(f + '.html', fs.readFileSync(path.join(root, f + '.html'), 'utf8')));
@@ -136,8 +144,9 @@ function build(outDir, opts) {
 }
 
 /**
- * Pacote da versão Node.js: os arquivos do repositório como estão (Config.gs com todos os painéis — sem cota, o Recebimento e
- * a Expedição cabem no mesmo servidor) e a pasta node, sem os testes, os dados e o config.json de quem gerou.
+ * Pacote da versão Node.js: os arquivos do repositório e a pasta node, sem os testes, os dados e o config.json de quem gerou.
+ * V4.15.2 (pedido): Config.gs com a linha do pacote principal (sem Recebimento e Expedição). A Propriedade PAINEIS_FORA,
+ * preenchida em Configurações, vale mais que o pacote (ex.: "nenhum" traz os dois de volta).
  */
 function buildNode(outDir, opts) {
   opts = opts || {};
@@ -145,11 +154,12 @@ function buildNode(outDir, opts) {
   const config = fs.readFileSync(path.join(root, 'Config.gs'), 'utf8');
   const parts = versionOf(config).split('.');
   const tag = 'V' + (parts[2] && parts[2] !== '0' ? parts.slice(0, 3) : parts.slice(0, 2)).join('_');
+  if (!PACOTE_RE.test(config)) throw new Error('Config.gs sem a linha PACOTE_PAINEIS_ (o gerador não sabe separar os painéis).');
   const files = [];
-  const add = rel => files.push({name: 'dashmaster/' + rel.split(path.sep).join('/'), data: fs.readFileSync(path.join(root, rel))});
-  GS_ORDER.forEach(f => add(f + '.gs'));
+  const add = (rel, data) => files.push({name: 'dashmaster/' + rel.split(path.sep).join('/'), data: data || fs.readFileSync(path.join(root, rel))});
+  GS_ORDER.forEach(f => add(f + '.gs', f === 'Config' ? Buffer.from(config.replace(PACOTE_RE, pacoteLine(NODE_PACOTE))) : null));
   HTML.forEach(f => add(f + '.html'));
-  ['appsscript.json', 'LEIA_PRIMEIRO.md'].forEach(add);
+  ['appsscript.json', 'LEIA_PRIMEIRO.md'].forEach(f => add(f));
   const skip = /^node\/(test|dados|node_modules|link-netlify)(\/|$)|^node\/config\.json$|^node\/.*\.log$/;
   (function walk(rel) {
     fs.readdirSync(path.join(root, rel), {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name)).forEach(d => {

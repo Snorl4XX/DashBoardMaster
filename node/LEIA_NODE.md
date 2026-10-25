@@ -58,6 +58,8 @@ Para rodar mesmo **sem ninguém entrar no Windows**, use o **Agendador de Tarefa
 
 ## 3. Uso no dia a dia
 
+**Painéis (V4.15.2):** o pacote do Node.js vem sem **Recebimento** e **Expedição** (fluxo operacional), como o painel principal do Google. Para trazer de volta: Configurações → Propriedades → `PAINEIS_FORA` = `nenhum`.
+
 | O que fazer | Onde |
 |---|---|
 | **AuthToken venceu** (o painel avisa que o JMS não aceita o token) | Gere um novo no JMS → **Configurações → AuthToken do JMS** → Salvar. A fila recomeça sozinha. |

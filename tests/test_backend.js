@@ -3025,6 +3025,35 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   fsM.rmSync(out, {recursive: true, force: true});
 }
 
+// ---------- V4.15.2 (pedido): pacote do Node.js sem Recebimento e Expedição (fluxo operacional) ----------
+{
+  const os = require('os'), pathM = require('path'), fsM = require('fs'), vmM = require('vm'), zlibM = require('zlib');
+  const {buildNode} = require('../tools/gerar_paineis');
+  const out = fsM.mkdtempSync(pathM.join(os.tmpdir(), 'jt-node-'));
+  const zipBuf = fsM.readFileSync(buildNode(out).zip), dir = pathM.join(out, 'extraido');
+  // Extrai o ZIP (cabeçalhos locais + deflate) como ficaria em C:\dashmaster.
+  for (let i = 0; zipBuf.readUInt32LE(i) === 0x04034b50;) {
+    const size = zipBuf.readUInt32LE(i + 18), nameLen = zipBuf.readUInt16LE(i + 26), start = i + 30 + nameLen + zipBuf.readUInt16LE(i + 28);
+    const file = pathM.join(dir, zipBuf.slice(i + 30, i + 30 + nameLen).toString('utf8'));
+    fsM.mkdirSync(pathM.dirname(file), {recursive: true});
+    fsM.writeFileSync(file, zlibM.inflateRawSync(zipBuf.slice(start, start + size)));
+    i = start + size;
+  }
+  const root = pathM.join(dir, 'dashmaster');
+  const keysOf = c => vmM.runInContext('Object.keys(INDICATORS)', c);
+  const ctxNode = props => createContext({root, props: Object.assign({}, baseProps, props || {}), jms: fakeJms({}), quiet: true});
+  const full = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
+  check(keysOf(ctxNode()).length === full.length - 2 && keysOf(ctxNode()).every(k => k !== 'arrival_flow' && k !== 'send_flow'),
+    'pacote Node.js: sem Recebimento e Expedição, sem precisar de propriedade', keysOf(ctxNode()));
+  check(keysOf(ctxNode({PAINEIS_FORA: 'nenhum'})).length === full.length, 'pacote Node.js: PAINEIS_FORA = nenhum traz os dois de volta');
+  const noLine = t => t.replace(/^const PACOTE_PAINEIS_ = .*$/m, '');
+  const cfgRepo = fsM.readFileSync(pathM.join(__dirname, '..', 'Config.gs'), 'utf8'), cfgNode = fsM.readFileSync(pathM.join(root, 'Config.gs'), 'utf8');
+  check(noLine(cfgNode) === noLine(cfgRepo) && /^const PACOTE_PAINEIS_ = \{so: '', fora: 'arrival_flow,send_flow', nome: ''\};$/m.test(cfgNode),
+    'pacote Node.js: só a linha do pacote muda no Config.gs');
+  check(fsM.existsSync(pathM.join(root, 'node', 'server.js')) && !fsM.existsSync(pathM.join(root, 'node', 'test')), 'pacote Node.js com o servidor e sem os testes');
+  fsM.rmSync(out, {recursive: true, force: true});
+}
+
 // ---------- V4.4: Triagem errada — lote e login vazios pela Consulta das bipagens (tempo real), como o PDF ----------
 {
   const {scanHash} = require('./mocks');

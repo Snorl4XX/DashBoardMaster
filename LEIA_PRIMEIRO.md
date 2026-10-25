@@ -4,6 +4,17 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.15.2 — Versão Node.js sem Recebimento e Expedição
+
+**Pedido:** tirar os painéis **Recebimento: fluxo operacional** e **Expedição: fluxo operacional** do painel no Node.js.
+
+- O ZIP `JT_DASHMASTER_V4_15_2_NODE.zip` já vem sem os dois (como o painel principal do Google): não aparecem no menu nem
+  nos Resultados e não entram na fila do JMS. Os outros painéis não mudam.
+- Os dias já baixados deles ficam guardados em `node\dados` (nada é apagado).
+- Para trazer de volta: Configurações (`http://localhost:3000/config`) → Propriedades → `PAINEIS_FORA` = `nenhum`.
+- Instalar: feche a janela preta do painel, extraia o ZIP em `C:\` (Substituir) e abra o atalho DashMaster.
+- Apps Script: nada muda (o pacote principal já era sem os fluxos).
+
 ## V4.15.1 — Cota do Google em português: sem o aviso vermelho de "Falha de rede"
 
 **O que aparecia:** "Erro de sincronização: Falha de rede ao consultar o JMS: Serviço chamado muitas vezes no mesmo dia: urlfetch."
