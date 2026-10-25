@@ -12,15 +12,30 @@ Ele faz três pesquisas (escolha uma ou mais):
 
 Gráficos: **quantas vezes cada valor repete** (quem escaneou, origem, ID de viagem, saca, segmento...), tem/não tem, turno, hora do bipe, segmentos, prazo da avaria.
 
-## Instalar (uma vez)
+## Instalar e abrir (sem `.bat` e sem administrador)
 
-1. Instale o **Python 3.10 ou mais novo** (https://www.python.org/downloads/). Na instalação, marque **"Add Python to PATH"**.
-2. Copie a pasta `jms_analisador` para o computador (ex.: `C:\jms_analisador`).
-3. Dois cliques em **`instalar.bat`** (precisa de internet só nesta vez).
+Não precisa de `.bat`: quem instala e abre o app é o **`iniciar.py`**. Na primeira vez ele instala sozinho o que falta (precisa de internet, alguns minutos); depois abre o navegador em `http://localhost:8501`.
 
-## Abrir
+**1. Python 3.10 ou mais novo, sem administrador**
+- Em https://www.python.org/downloads/ baixe o instalador. Na primeira tela:
+  - **desmarque** "Use admin privileges when installing py.exe";
+  - **marque** "Add python.exe to PATH";
+  - clique em **Install Now**. Ele instala na pasta do seu usuário, sem pedir administrador.
+- **Se o instalador também for bloqueado:** na mesma página, em *Windows*, baixe o **"Windows embeddable package (64-bit)"** (um ZIP). Extraia dentro da pasta do app, numa pasta `python` (fica `C:\jms_analisador\python\python.exe`). Nos passos abaixo, use esse `python.exe`. O `iniciar.py` arruma o resto sozinho (libera os pacotes e instala o pip).
 
-Dois cliques em **`iniciar.bat`**. O navegador abre em `http://localhost:8501`. Deixe a janela preta aberta enquanto usa; para fechar o app, feche a janela.
+**2. A pasta do app:** se veio num ZIP, antes de extrair clique com o botão direito no ZIP → **Propriedades** → marque **Desbloquear** → OK. Depois extraia em `C:\jms_analisador`.
+
+**3. Abrir** (use o jeito que o seu Windows deixar):
+
+| Jeito | Como |
+|---|---|
+| **cmd** | Abra o cmd e digite: `cd /d C:\jms_analisador` e depois `py iniciar.py`. Se `py` não for reconhecido, use `python iniciar.py`. Com o Python embeddable: `C:\jms_analisador\python\python.exe iniciar.py` |
+| **Atalho** (dois cliques todo dia) | Área de Trabalho → botão direito → **Novo → Atalho** → cole `"CAMINHO-DO-PYTHON.EXE" "C:\jms_analisador\iniciar.py"` → nome **JMS Analisador** → Concluir. Para saber o caminho do Python, digite no cmd: `py -c "import sys; print(sys.executable)"` (ou `where python`). |
+| **Dois cliques no `iniciar.py`** | Funciona quando o Windows abre arquivos `.py` com o Python. |
+
+Deixe a janela preta aberta enquanto usa; para fechar o app, feche a janela. Se der erro, a janela **não fecha sozinha**: ela mostra o motivo. Se o app já estiver aberto, o `iniciar.py` só abre o navegador nele.
+
+Os `.bat` (`instalar.bat`, `iniciar.bat`) continuam na pasta para computadores que deixam rodá-los; eles só chamam o `iniciar.py`.
 
 > Quer testar antes, sem token? Ligue **Modo demonstração** na barra lateral e clique em **Usar 60 remessas de exemplo**. Os dados são fictícios e nada é consultado na internet.
 
@@ -83,7 +98,7 @@ py jms_cli.py --remessas lista.xlsx --avaria --base "SP GRU" --prazo 6 --deslacr
 py jms_cli.py --demo --segmentos --avaria
 ```
 
-Sem `JMS_AUTHTOKEN`, o app pede o token (não aparece ao digitar). `py jms_cli.py --help` mostra todas as opções. Também dá para usar `pesquisar_cmd.bat` com as mesmas opções.
+Sem `JMS_AUTHTOKEN`, o app pede o token (não aparece ao digitar). `py jms_cli.py --help` mostra todas as opções. Antes da primeira vez pelo cmd, rode `py iniciar.py` uma vez (ele instala os pacotes).
 
 ## Configurações avançadas (barra lateral)
 
@@ -101,6 +116,7 @@ Sem `JMS_AUTHTOKEN`, o app pede o token (não aparece ao digitar). `py jms_cli.p
 ## Para quem mexe no código
 
 ```
+iniciar.py        instala o que falta e abre a tela (sem .bat)
 app.py            tela (Streamlit)
 jms_cli.py        modo cmd
 jmslib/cliente.py consultas ao JMS (AuthToken, tentativas, token vencido, cabeçalhos de rota)

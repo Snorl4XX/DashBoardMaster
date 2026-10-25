@@ -1,6 +1,6 @@
 """JMS Analisador · J&T — tela local (http://localhost:8501).
 
-Abrir no Windows: dois cliques em iniciar.bat (ou, no cmd: py -m streamlit run app.py).
+Abrir no Windows: no cmd, "py iniciar.py" (ou atalho para python.exe + iniciar.py; não precisa de .bat).
 O AuthToken fica só na memória deste programa: não é gravado em arquivo nem enviado para outro lugar além do JMS.
 """
 

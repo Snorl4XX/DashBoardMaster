@@ -2,7 +2,8 @@
 [server]
 address = "127.0.0.1"
 port = 8501
-headless = false
+# headless: sem a pergunta de e-mail do Streamlit na 1ª vez (o iniciar.py abre o navegador sozinho).
+headless = true
 maxUploadSize = 50
 
 [browser]
