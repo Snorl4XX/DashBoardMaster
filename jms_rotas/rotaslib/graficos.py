@@ -19,6 +19,13 @@ def _layout(fig: go.Figure, titulo: str, altura: int) -> go.Figure:
     return fig
 
 
+def _passo(teto: float) -> float:
+    """Passo "redondo" do eixo (1, 2, 5, 10, 20, 50...) para umas 5 marcas inteiras."""
+    bruto = max(1.0, teto / 5)
+    base = 10 ** math.floor(math.log10(bruto))
+    return next(m * base for m in (1, 2, 5, 10) if m * base >= bruto)
+
+
 def _vazio(titulo: str) -> go.Figure:
     fig = go.Figure()
     fig.add_annotation(text="Nenhum pacote errado", showarrow=False, font={"size": 14})
@@ -57,10 +64,10 @@ def barras(contagem: pd.DataFrame, titulo: str, *, horizontal: bool = True, core
                                cliponaxis=False, customdata=valores, hovertemplate=dica))
         fig.update_yaxes(autorange="reversed", automargin=True, type="category")
         # Contagem: marcas inteiras no eixo (sem 0,5).
-        fig.update_xaxes(range=[0, teto * 1.3], gridcolor="rgba(128,128,128,0.18)", dtick=max(1, math.ceil(teto / 5)))
+        fig.update_xaxes(range=[0, teto * 1.3], gridcolor="rgba(128,128,128,0.18)", dtick=_passo(teto))
         return _layout(fig, titulo, max(240, 34 * len(valores) + 90))
     fig = go.Figure(go.Bar(x=valores, y=qtd, marker_color=marcas, text=textos, textposition="outside", cliponaxis=False,
                            customdata=valores, hovertemplate=dica))
     fig.update_xaxes(type="category")
-    fig.update_yaxes(range=[0, teto * 1.15], gridcolor="rgba(128,128,128,0.18)", dtick=max(1, math.ceil(teto / 5)))
+    fig.update_yaxes(range=[0, teto * 1.15], gridcolor="rgba(128,128,128,0.18)", dtick=_passo(teto))
     return _layout(fig, titulo, 330)

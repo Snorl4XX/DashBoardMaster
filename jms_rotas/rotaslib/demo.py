@@ -12,34 +12,29 @@ from typing import Any
 
 from . import config
 from .cliente import ErroJMS
+from .docas import Rota, Rotas, carregar_linhas, montar_rotas
 from .tabelas import chave
 
-# Nome da base → (Código de dois segmentos, Nome de mecanismo final), como na rotinha.
+# Nome da base → (Código de dois segmentos, Nome de mecanismo final, Estado), no formato da rotinha.
 ROTINHA_DEMO = {
-    "OUR -PE": ("551-01", "DC SNS-PE"), "ITAP-BA": ("543-00", "BA FEC"), "CAM -BA": ("530-00", "BA FEC"),
-    "F BRR 02-BA": ("459-00", "BA SBA"), "SDR-SP": ("375-02", "DC SBN-SP"), "S-IPRG-SP": ("101-03", "SP BRE"),
-    "F S-VLMNA-SP": ("101-07", "SP BRE"), "PTN -MG": ("312-04", "MG BHZ"), "F BHZ 14-MG": ("312-09", "MG BHZ"),
-    "F MRL 02-AM": ("690-01", "AM MAO"), "RJ-CPN": ("210-05", "RJ DQC"), "F SCA-RJ": ("211-02", "RJ DQC"),
-    "F CWB 12-PR": ("801-01", "PR CWB"), "F S-SAP 02-SP": ("120-02", "F S-SAP 02-SP"), "S-SRAF-SP": ("121-07", "S-SRAF-SP"),
-    "CGT 02-SP": ("122-01", "CGT 02-SP"), "F VLMT-SP": ("123-04", "F VLMT-SP"),
+    "S-IPRG-SP": ("354-00", "SP BRE", "SP"), "F LIN-SP": ("415-03", "DC BAU-SP", "SP"), "F MRL 02-AM": ("834-00", "AM MAO", "AM"),
+    "CANA -BA": ("512-00", "BA FEC", "BA"), "OUR -PE": ("551-01", "DC SNS-PE", "PE"), "F BRR 02-BA": ("456-00", "BA SBA", "BA"),
+    "F SCA-RJ": ("C533-00", "RJ SJM", "RJ"), "AUI -MG": ("942-00", "BA VDC", "MG"), "PTN -MG": ("A123-06", "DC QDF 001", "MG"),
+    "DIQ -MG": ("A187-14", "DC NSR 001-MG", "MG"), "F CWB 12-PR": ("E430-00", "PR SJS", "PR"),
+    "CGT 02-SP": ("402-00", "DC GRU-SP", "SP"), "TBT-SP": ("402-01", "DC GRU-SP", "SP"), "S-SRAF-SP": ("404-00", "SP GRU", "SP"),
+    "S-PENHA-SP": ("404-02", "DC GRU-SP", "SP"), "F VLMT-SP": ("404-10", "DC S-MOO 02-SP", "SP"),
+    "F GRJ 02-SP": ("378-05", "DC SSZ-SP", "SP"), "SSZ-SP": ("378-00", "SP GRU", "SP"), "S-CRDR-SP": ("430-00", "SP GRU", "SP"),
+    "F S-MOOCA-SP": ("430-06", "SP GRU", "SP"), "CAJ-PB": ("622-10", "DC MVF-RN", "PB"),
 }
-# Rota do caminhão (próxima parada) → destinos que podem ir nele.
-ROTAS_DEMO = {
-    "SP BRE": ["SP BRE", "DC SBN-SP"], "BA FEC": ["BA FEC", "BA SBA", "DC SNS-PE"], "RJ DQC": ["RJ DQC"],
-    "MG BHZ": ["MG BHZ"], "PR CWB": ["PR CWB"], "F S-SAP 02-SP": ["F S-SAP 02-SP"], "S-SRAF-SP": ["S-SRAF-SP"],
-    "CGT 02-SP": ["CGT 02-SP"], "F VLMT-SP": ["F VLMT-SP"],
-}
+TRONCAL_DEMO = ["SP BRE", "BA FEC", "RJ SJM", "MG CGE", "DC TBT-SP", "PR SJS"]
+SECUNDARIA_DEMO = ["S-SRAF-SP", "S-PENHA-SP", "F VLMT-SP", "DC SSZ-SP", "DC S-MOO 02-SP", "S-SRAF-SP"]
 _PESSOAS = ["OPERADOR DEMO 01", "OPERADOR DEMO 02", "OPERADOR DEMO 03", "OPERADOR DEMO 04", "OPERADOR DEMO 05"]
 _CIDADES = {"SP": "São Paulo", "BA": "Salvador", "PE": "Ouricuri", "MG": "Belo Horizonte", "RJ": "Rio de Janeiro",
             "PR": "Curitiba", "AM": "Manaus"}
 
 
-def rotinha_demo() -> dict[str, tuple[str, str, str]]:
-    return {chave(b): (b, s, d) for b, (s, d) in ROTINHA_DEMO.items()}
-
-
-def rotas_demo() -> dict[str, set[str]]:
-    return {chave(r): {chave(d) for d in ds} for r, ds in ROTAS_DEMO.items()}
+def rotinha_demo() -> dict[str, tuple[str, str, str, str]]:
+    return {chave(b): (b, seg, dest, uf) for b, (seg, dest, uf) in ROTINHA_DEMO.items()}
 
 
 def _rnd(*partes: str) -> random.Random:
@@ -63,11 +58,9 @@ class JMSFicticio:
         rnd = _rnd(tipo, dia)
         base = datetime.strptime(dia, "%Y-%m-%d")
         if tipo == config.TRONCAL:
-            destinos = ["SP BRE", "BA FEC", "RJ DQC", "MG BHZ", "PR CWB", "SP BRE"]
-            prefixo = "DKGX" + base.strftime("%y%m%d")
+            destinos, prefixo = TRONCAL_DEMO, "DKGX" + base.strftime("%y%m%d")
         else:
-            destinos = ["F S-SAP 02-SP", "S-SRAF-SP", "CGT 02-SP", "F VLMT-SP", "F S-SAP 02-SP", "S-SRAF-SP", "CGT 02-SP"]
-            prefixo = "SRTR2260" + base.strftime("%d")
+            destinos, prefixo = SECUNDARIA_DEMO, "SRTR2260" + base.strftime("%d")
         saida = []
         for i, destino in enumerate(destinos):
             sai = base + timedelta(hours=rnd.choice([1, 3, 5, 8, 11, 15, 17, 19, 22]), minutes=rnd.randint(0, 59))
@@ -98,14 +91,23 @@ class JMSFicticio:
             return []
         rnd = _rnd("pacotes", ident)
         destino = viagem["endName"]
-        certas = [b for b, (_, d) in ROTINHA_DEMO.items() if d in ROTAS_DEMO.get(destino, [destino])]
+        rotas = Rotas(montar_rotas(carregar_linhas()))
+        caminhao = rotas.do_caminhao(destino)
+
+        def certa(b: str) -> bool:
+            seg, dest, uf = ROTINHA_DEMO[b]
+            r, _ = rotas.esperada(b, seg, dest, uf)
+            return isinstance(r, Rota) and r is caminhao
+
+        certas = [b for b in ROTINHA_DEMO if certa(b)]
         erradas = [b for b in ROTINHA_DEMO if b not in certas]
         inicio = datetime.strptime(viagem["actualDepartureTime"], "%Y-%m-%d %H:%M:%S") - timedelta(hours=8)
         quantidade = rnd.randint(60, 260) if tipo == config.TRONCAL else rnd.randint(15, 70)
         saida = []
         for n in range(quantidade):
             sorte = rnd.random()
-            base_destino = "F XYZ 09-SP" if sorte < 0.01 else rnd.choice(erradas) if sorte < 0.08 else rnd.choice(certas or erradas)
+            base_destino = ("F XYZ 09-SP" if sorte < 0.01 else rnd.choice(erradas) if sorte < 0.08
+                            else destino if not certas else rnd.choice(certas))
             uf = base_destino.rsplit("-", 1)[-1]
             saida.append({
                 "billCode": f"8880026{rnd.randint(10000000, 99999999)}", "networkName": config.BASE_NOME,

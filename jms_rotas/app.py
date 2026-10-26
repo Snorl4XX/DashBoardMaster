@@ -1,21 +1,21 @@
 """JMS Rotas · Expedição errada (J&T) — painel separado, em http://localhost:8502.
 
 Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA. Um robô em segundo plano lê no JMS os caminhões do dia (Concluído：已完成 e
-Em trânsito：在途), abre o carregamento de cada um ("página 2") e confere cada pacote com a rotinha e a tabela de rotas.
+Em trânsito：在途), abre o carregamento de cada um ("página 2") e confere cada pacote com a rotinha e a tabela de docas.
 Abrir: no cmd, "py iniciar.py" (ou atalho para python.exe + iniciar.py). O AuthToken fica só na memória deste programa.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import date, datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
-from rotaslib import __version__, analise, config, graficos, tabelas
+from rotaslib import __version__, analise, config, docas, graficos, tabelas
 from rotaslib.cliente import ClienteJMS
-from rotaslib.demo import JMSFicticio, rotas_demo, rotinha_demo
+from rotaslib.demo import JMSFicticio, rotinha_demo
 from rotaslib.monitor import Ajustes, Monitor
 from rotaslib.planilha import gerar_planilha
 
@@ -43,55 +43,57 @@ def obter_monitor() -> Monitor:
 
 
 class Planilhas:
-    """Rotinha e tabela de rotas do usuário, guardadas em dados_locais/ para não precisar enviar toda vez."""
+    """Rotinha (enviada pelo usuário) e tabela de docas, guardadas em dados_locais/ para não precisar enviar toda vez."""
+
+    ARQUIVO_DOCAS = PASTA_LOCAL / "tabela_rotas_docas.csv"
 
     def __init__(self) -> None:
         self.rotinha: dict = {}
-        self.rotas: dict = {}
         self.nome_rotinha = ""
-        self.nome_rotas = ""
+        self.linhas_docas: list[dict[str, str]] = []
+        self.rotas = docas.Rotas([])
         self.versao = 0
         self.carregar()
 
-    def _arquivo(self, prefixo: str) -> Path | None:
-        achados = sorted(PASTA_LOCAL.glob(f"{prefixo}.*")) if PASTA_LOCAL.exists() else []
-        return next((a for a in achados if a.suffix != ".json"), None)
+    def _arquivo_rotinha(self) -> Path | None:
+        achados = sorted(PASTA_LOCAL.glob("rotinha.*")) if PASTA_LOCAL.exists() else []
+        return achados[0] if achados else None
 
-    def carregar(self) -> None:
-        a = self._arquivo("rotinha")
+    def carregar(self, base_nome: str = config.BASE_NOME) -> None:
+        a = self._arquivo_rotinha()
         if a:
             try:
                 self.rotinha, self.nome_rotinha = tabelas.ler_rotinha(a.name, a.read_bytes()), a.name
             except (OSError, ValueError):
-                pass
-        b = self._arquivo("rotas")
-        if b:
-            try:
-                ajuste = json.loads((PASTA_LOCAL / "rotas.json").read_text(encoding="utf-8")) if (PASTA_LOCAL / "rotas.json").exists() else {}
-                self.rotas, _ = tabelas.ler_rotas(b.name, b.read_bytes(), ajuste.get("modo"), ajuste.get("col_rota"),
-                                                  ajuste.get("col_destino"), ajuste.get("aba"))
-                self.nome_rotas = b.name
-            except (OSError, ValueError):
-                pass
+                self.rotinha, self.nome_rotinha = {}, ""
+        self.linhas_docas = docas.carregar_linhas(self.ARQUIVO_DOCAS)
+        self.rotas = docas.Rotas(docas.montar_rotas(self.linhas_docas), base_nome)
         self.versao += 1
 
-    def salvar(self, prefixo: str, nome: str, conteudo: bytes, ajuste: dict | None = None) -> None:
+    @property
+    def docas_do_usuario(self) -> bool:
+        return self.ARQUIVO_DOCAS.exists()
+
+    def salvar_rotinha(self, nome: str, conteudo: bytes) -> None:
         PASTA_LOCAL.mkdir(exist_ok=True)
-        for antigo in PASTA_LOCAL.glob(f"{prefixo}.*"):
+        for antigo in PASTA_LOCAL.glob("rotinha.*"):
             antigo.unlink(missing_ok=True)
-        (PASTA_LOCAL / f"{prefixo}{Path(nome).suffix.lower()}").write_bytes(conteudo)
-        if ajuste is not None:
-            (PASTA_LOCAL / f"{prefixo}.json").write_text(json.dumps(ajuste), encoding="utf-8")
+        (PASTA_LOCAL / f"rotinha{Path(nome).suffix.lower()}").write_bytes(conteudo)
         self.carregar()
 
-    def esquecer(self, prefixo: str) -> None:
-        for antigo in PASTA_LOCAL.glob(f"{prefixo}.*"):
+    def esquecer_rotinha(self) -> None:
+        for antigo in PASTA_LOCAL.glob("rotinha.*"):
             antigo.unlink(missing_ok=True)
-        if prefixo == "rotinha":
-            self.rotinha, self.nome_rotinha = {}, ""
-        else:
-            self.rotas, self.nome_rotas = {}, ""
+        self.rotinha, self.nome_rotinha = {}, ""
         self.versao += 1
+
+    def salvar_docas(self, linhas: list[dict[str, str]]) -> None:
+        docas.salvar_linhas(linhas, self.ARQUIVO_DOCAS)
+        self.carregar()
+
+    def restaurar_docas(self) -> None:
+        self.ARQUIVO_DOCAS.unlink(missing_ok=True)
+        self.carregar()
 
 
 @st.cache_resource
@@ -105,7 +107,7 @@ planilhas = obter_planilhas()
 
 def referencias(demo: bool) -> analise.Referencias:
     if demo and not planilhas.rotinha:
-        return analise.Referencias(rotinha_demo(), planilhas.rotas or rotas_demo())
+        return analise.Referencias(rotinha_demo(), planilhas.rotas)
     return analise.Referencias(planilhas.rotinha, planilhas.rotas)
 
 
@@ -113,7 +115,7 @@ def referencias(demo: bool) -> analise.Referencias:
 with st.sidebar:
     st.markdown("### 1 · Conexão com o JMS")
     demo = st.toggle("Modo demonstração (sem AuthToken)", key="demo",
-                     help="JMS de mentira com dados fictícios, rotinha e tabela de rotas de exemplo. Nada é consultado na internet.")
+                     help="JMS de mentira com dados fictícios e uma rotinha de exemplo (a tabela de docas é a de 24/10). Nada é consultado na internet.")
     st.text_input("AuthToken", type="password", key="token", disabled=demo,
                   help="No JMS: F12 → aba Rede → clique em qualquer consulta → Cabeçalhos de solicitação → authtoken.")
 
@@ -156,59 +158,27 @@ with st.sidebar:
     st.markdown("### 3 · Planilhas")
     with st.expander(f"Rotinha {'✅ ' + str(len(planilhas.rotinha)) + ' bases' if planilhas.rotinha else '(não enviada)'}",
                      expanded=not planilhas.rotinha and not demo):
-        st.caption("Colunas \"Nome da base\", \"Código de dois segmentos\" (SEGMENTOS) e \"Nome de mecanismo final\" (DESTINO). "
-                   "Sem esses nomes, vale A, B e C (como o PROCV).")
+        st.caption("Colunas \"Nome da base\", \"Código de dois segmentos\" (SEGMENTOS), \"Nome de mecanismo final\" (DESTINO) "
+                   "e \"Estado\". Sem esses nomes, valem A, B, C e D (como o PROCV).")
         arq = st.file_uploader("Planilha rotinha", type=["xlsx", "xlsm", "csv", "tsv", "txt"], key="up_rotinha")
         if arq is not None and st.button("Usar esta rotinha"):
             try:
                 tabelas.ler_rotinha(arq.name, arq.getvalue())
-                planilhas.salvar("rotinha", arq.name, arq.getvalue())
+                planilhas.salvar_rotinha(arq.name, arq.getvalue())
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
         if planilhas.nome_rotinha:
             st.caption(f"Em uso: {planilhas.nome_rotinha}")
             if st.button("Esquecer a rotinha"):
-                planilhas.esquecer("rotinha")
+                planilhas.esquecer_rotinha()
                 st.rerun()
 
-    with st.expander(f"Tabela de rotas {'✅ ' + str(len(planilhas.rotas)) + ' rotas' if planilhas.rotas else '(não enviada)'}",
-                     expanded=not planilhas.rotas and not demo):
-        st.caption("Para cada rota do caminhão (próxima parada), os destinos que podem ir nele. Sem a tabela, o pacote só "
-                   "é certo quando o DESTINO é a própria próxima parada.")
-        arq_r = st.file_uploader("Tabela de rotas", type=["xlsx", "xlsm", "csv", "tsv", "txt"], key="up_rotas")
-        if arq_r is not None:
-            try:
-                abas = tabelas.ler_tabelas(arq_r.name, arq_r.getvalue())
-                aba = st.selectbox("Aba", list(abas))
-                sug = tabelas.analisar_rotas(abas[aba])
-                modo = st.radio("Formato", [tabelas.MODO_LINHAS, tabelas.MODO_COLUNAS],
-                                index=0 if sug["modo"] == tabelas.MODO_LINHAS else 1,
-                                format_func=lambda m: "Uma linha por rota e destino" if m == tabelas.MODO_LINHAS
-                                else "Cada coluna é uma rota (destinos embaixo)")
-                col_r = col_d = 0
-                if modo == tabelas.MODO_LINHAS:
-                    nomes = sug["colunas"]
-                    col_r = st.selectbox("Coluna da rota", range(len(nomes)), index=min(sug["col_rota"], len(nomes) - 1),
-                                         format_func=lambda i: nomes[i])
-                    col_d = st.selectbox("Coluna dos destinos", range(len(nomes)), index=min(sug["col_destino"], len(nomes) - 1),
-                                         format_func=lambda i: nomes[i])
-                previa = tabelas.montar_rotas(abas[aba], sug["cabecalho"], modo, col_r, col_d)
-                st.caption(f"{len(previa)} rota(s). Ex.: " + "; ".join(f"{r} → {', '.join(sorted(d)[:3])}"
-                                                                     for r, d in list(previa.items())[:2]))
-                if st.button("Usar esta tabela de rotas", disabled=not previa):
-                    planilhas.salvar("rotas", arq_r.name, arq_r.getvalue(),
-                                     {"modo": modo, "col_rota": col_r, "col_destino": col_d, "aba": aba})
-                    st.rerun()
-            except ValueError as exc:
-                st.error(str(exc))
-        if planilhas.nome_rotas:
-            st.caption(f"Em uso: {planilhas.nome_rotas}")
-            if st.button("Esquecer a tabela de rotas"):
-                planilhas.esquecer("rotas")
-                st.rerun()
+    st.caption(f"Tabela de docas: {len(planilhas.rotas)} rotas "
+               f"({'editada por você' if planilhas.docas_do_usuario else 'a de 24/10, dos prints'}). Para mudar, abra "
+               "**🗂️ TABELA DE DOCAS** no topo.")
     if demo and not planilhas.rotinha:
-        st.caption("Modo demonstração: usando a rotinha e a tabela de rotas de exemplo.")
+        st.caption("Modo demonstração: usando uma rotinha de exemplo (envie a sua para usar a real).")
     st.divider()
     st.caption(f"JMS Rotas v{__version__} · roda só neste computador (127.0.0.1). O AuthToken fica na memória do app e vai "
                "só para o JMS.")
@@ -217,12 +187,15 @@ with st.sidebar:
 # ---------------------------------------------------------------------- topo
 st.markdown(
     """<div class="jt-topo"><div class="jt-marca">J&amp;T</div><div><h1>Expedição errada · tempo real</h1>
-    <p>Caminhões do dia (Concluído：已完成 · Em trânsito：在途) · pacote conferido com a rotinha e a tabela de rotas</p></div></div>""",
+    <p>Caminhões do dia (Concluído：已完成 · Em trânsito：在途) · pacote conferido com a rotinha e a tabela de docas</p></div></div>""",
     unsafe_allow_html=True,
 )
-painel = st.radio("Painel", [config.TRONCAL, config.SECUNDARIA], horizontal=True, label_visibility="collapsed",
-                  format_func=lambda t: f"🚛 {config.NOMES[t].upper()} · {config.NOMES_ZH[t]}" if t == config.TRONCAL
-                  else f"🚐 {config.NOMES[t].upper()} · {config.NOMES_ZH[t]}", key="painel")
+DOCAS = "docas"
+_NOMES_PAINEL = {config.TRONCAL: f"🚛 ROTA TRONCAL · {config.NOMES_ZH[config.TRONCAL]}",
+                 config.SECUNDARIA: f"🚐 ROTA SECUNDÁRIA · {config.NOMES_ZH[config.SECUNDARIA]}",
+                 DOCAS: "🗂️ TABELA DE DOCAS · 装车码头"}
+painel = st.radio("Painel", list(_NOMES_PAINEL), horizontal=True, label_visibility="collapsed",
+                  format_func=_NOMES_PAINEL.get, key="painel")
 
 
 @st.fragment(run_every=3)
@@ -267,9 +240,7 @@ def mostrar_painel(tipo: str) -> None:
         st.info("Nenhuma viagem ainda. Cole o AuthToken (ou ligue o Modo demonstração) e clique em **Iniciar**.")
         return
     if not planilhas.rotinha and not demo_ativo:
-        st.warning("Sem a rotinha, o DESTINO do pacote é a própria Base Destino. Envie a rotinha na barra lateral.")
-    if not planilhas.rotas and not demo_ativo:
-        st.warning("Sem a tabela de rotas: o pacote só é certo quando o DESTINO é a própria próxima parada do caminhão.")
+        st.warning("Envie a rotinha na barra lateral: sem ela não dá para saber o segmento e o destino de cada pacote.")
 
     # Filtros (os destinos filtram os erros, como pedido).
     f1, f2, f3, f4 = st.columns(4)
@@ -315,12 +286,13 @@ def mostrar_painel(tipo: str) -> None:
                         key=f"g_turno_{tipo}", config={"displaylogo": False})
     with g2:
         st.plotly_chart(graficos.barras(analise.contar(filtrado["situacao"], ordem=list(config.CORES_SITUACAO)),
-                                        "Situação de todos os pacotes", horizontal=False, cores=config.CORES_SITUACAO),
+                                        "Situação de todos os pacotes", cores=config.CORES_SITUACAO),
                         key=f"g_sit_{tipo}", config={"displaylogo": False})
     pares = [("base_escaneamento", "Base de escaneamento (segmento afetado)", 10), ("base_destino", "Bases de destino mais afetadas", 15),
              ("segmento", "Segmentos mais afetados (Código de dois segmentos)", 15), ("digitalizado_por", "Logins (Digitalizado por)", 15),
              ("id_viagem", "ID de viagem mais afetado", 15), ("lote", "Número do lote (sacas com mais erro)", 15),
-             ("destino", "DESTINOS errados que entraram (Nome de mecanismo final)", 15), ("rota", "Rotas (caminhões) com mais erro", 15)]
+             ("destino", "DESTINOS errados que entraram (Nome de mecanismo final)", 15), ("rota", "Rotas (caminhões) com mais erro", 15),
+             ("rota_certa", "Para onde os errados deveriam ir (rota certa)", 15), ("doca_certa", "Doca certa dos errados", 15)]
     for i in range(0, len(pares), 2):
         cols = st.columns(2)
         for col, (coluna, titulo, topo) in zip(cols, pares[i:i + 2]):
@@ -350,5 +322,43 @@ def mostrar_painel(tipo: str) -> None:
                            file_name=f"Expedicao_errada_{config.NOMES[tipo].replace(' ', '_')}_{datetime.now():%Y%m%d_%H%M}.xlsx")
 
 
-situacao_do_robo()
-mostrar_painel(painel)
+def mostrar_docas() -> None:
+    """Tabela de docas editável (atualize quando as docas mudarem; a de 24/10 vem com o app)."""
+    st.markdown("#### Tabela de rotas das docas · 装车码头")
+    st.caption("Uma linha por rota. **nivel1** = 1º nível (一段码) e **nivel2** = 2º nível (二段码), separados por vírgula. "
+               "O pacote vai na rota cujo 2º nível tem o Código de dois segmentos dele; sem 2º nível, pelo DESTINO ou pelos "
+               "códigos do 1º nível (ex.: SNS → BA FEC, VDC → RJ SJM) e, por último, pelo estado.")
+    origem = "editada por você" if planilhas.docas_do_usuario else "a de 24/10 (prints), que vem com o app"
+    st.info(f"Em uso: {origem} · {len(planilhas.rotas)} rotas.")
+    editada = st.data_editor(pd.DataFrame(planilhas.linhas_docas, columns=docas.CAMPOS), num_rows="dynamic", hide_index=True,
+                             key="editor_docas", height=640,
+                             column_config={"tipo": st.column_config.SelectboxColumn(options=["troncal", "secundaria"], required=True),
+                                            "nivel2": st.column_config.TextColumn(width="large"),
+                                            "observacoes": st.column_config.TextColumn(width="large")})
+    c1, c2, c3 = st.columns(3)
+    if c1.button("💾 Salvar a tabela", type="primary"):
+        planilhas.salvar_docas(editada.fillna("").astype(str).to_dict("records"))
+        st.success("Tabela salva. Os painéis já usam a nova tabela.")
+        st.rerun()
+    if c2.button("↩️ Voltar para a de 24/10", disabled=not planilhas.docas_do_usuario):
+        planilhas.restaurar_docas()
+        st.rerun()
+    c3.download_button("⬇️ Baixar a tabela (.csv)", (PASTA_LOCAL / "tabela_rotas_docas.csv" if planilhas.docas_do_usuario
+                       else docas.ARQUIVO_PADRAO).read_bytes(), file_name="tabela_rotas_docas.csv", mime="text/csv")
+
+    st.markdown("#### Testar uma Base Destino")
+    t1, t2 = st.columns(2)
+    base_teste = t1.text_input("Base Destino", "CANA -BA")
+    caminhao_teste = t2.text_input("Próxima parada do caminhão", "SP BRE")
+    if base_teste:
+        ref = referencias(bool(ss.get("demo")))
+        r = analise.classificar(base_teste, caminhao_teste, ref)
+        st.write(f"**{r['situacao']}** · SEGMENTO {r['segmento'] or '—'} · DESTINO {r['destino'] or '—'} · rota certa "
+                 f"**{r['rota_certa'] or '—'}**" + (f" (doca {r['doca_certa']})" if r["doca_certa"] else "") + f" · {r['regra']}")
+
+
+if painel == DOCAS:
+    mostrar_docas()
+else:
+    situacao_do_robo()
+    mostrar_painel(painel)

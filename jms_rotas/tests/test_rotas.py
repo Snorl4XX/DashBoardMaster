@@ -8,9 +8,9 @@ from openpyxl import Workbook, load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rotaslib import analise, config, tabelas  # noqa: E402
+from rotaslib import analise, config, docas, tabelas  # noqa: E402
 from rotaslib.cliente import ClienteJMS, ErroJMS, linha_de_carregamento  # noqa: E402
-from rotaslib.demo import JMSFicticio, rotas_demo, rotinha_demo  # noqa: E402
+from rotaslib.demo import JMSFicticio, rotinha_demo  # noqa: E402
 from rotaslib.monitor import Ajustes, Monitor  # noqa: E402
 from rotaslib.planilha import gerar_planilha  # noqa: E402
 
@@ -105,26 +105,81 @@ def test_token_vencido():
     assert e.value.tipo == "auth" and len(s.pedidos) == 1
 
 
-def test_regra_com_tabela_de_rotas():
-    ref = analise.Referencias(
-        rotinha={tabelas.chave("OUR -PE"): ("OUR -PE", "551-01", "DC SNS-PE"), tabelas.chave("SDR-SP"): ("SDR-SP", "375-02", "DC SBN-SP"),
-                 tabelas.chave("F S-SAP 02-SP"): ("F S-SAP 02-SP", "120-02", "F S-SAP 02-SP")},
-        rotas={tabelas.chave("BA FEC"): {tabelas.chave("BA FEC"), tabelas.chave("DC SNS-PE")}})
-    assert analise.classificar("OUR -PE", "BA FEC", ref)[2] == config.CORRETO
-    assert analise.classificar("SDR-SP", "BA FEC", ref)[2] == config.ERRADO          # pacote de SP no caminhão da BA
-    assert analise.classificar("XYZ-SP", "BA FEC", ref)[2] == config.SEM_ROTINHA      # #N/A no PROCV
-    assert analise.classificar("SDR-SP", "SP BRE", ref)[2] == config.ROTA_FORA       # rota que não está na tabela
-    assert analise.classificar("F S-SAP 02-SP", "F S-SAP 02-SP", ref)[2] == config.CORRETO
-    seg, dest, _, _ = analise.classificar("OUR -PE", "BA FEC", ref)
-    assert (seg, dest) == ("551-01", "DC SNS-PE")
+# Linhas reais da rotinha (formato: base, Código de dois segmentos, Nome de mecanismo final, Estado).
+ROTINHA = {tabelas.chave(b): (b, seg, dest, uf) for b, seg, dest, uf in [
+    ("S-IPRG-SP", "354-00", "SP BRE", "SP"), ("PTN -MG", "A123-06", "DC QDF 001", "MG"), ("F MRL 02-AM", "834-00", "AM MAO", "AM"),
+    ("S-SRAF-SP", "404-00", "SP GRU", "SP"), ("CGT 02-SP", "402-00", "DC GRU-SP", "SP"), ("OUR -PE", "551-01", "DC SNS-PE", "PE"),
+    ("CANA -BA", "512-00", "BA FEC", "BA"), ("AUI -MG", "942-00", "BA VDC", "MG"), ("DIQ -MG", "A187-14", "DC NSR 001-MG", "MG"),
+    ("F SDR-SP", "375-02", "DC SBN-SP", "SP"), ("CAJ-PB", "622-10", "DC MVF-RN", "PB"), ("PA DEVOLUCAO-GRU-SP", "488-00", "SP GRU", "SP"),
+    ("F IMP-ES", "404-00", "ES SRR", "ES"), ("DC PCS-PI", "640-00", "DC PCS-PI", "PI"), ("F S-VLANA-SP", "358-12", "SP BRE", "SP"),
+]}
 
 
-def test_regra_sem_tabela_de_rotas_e_segmento_na_tabela():
-    ref = analise.Referencias(rotinha={tabelas.chave("S-SRAF-SP"): ("S-SRAF-SP", "121-07", "S-SRAF-SP")})
-    assert analise.classificar("S-SRAF-SP", "F S-SAP 02-SP", ref)[2] == config.ERRADO
-    assert analise.classificar("S-SRAF-SP", "S-SRAF-SP", ref)[2] == config.CORRETO
-    ref.rotas = {tabelas.chave("F S-SAP 02-SP"): {"121-07"}}  # tabela de rotas com segmentos
-    assert analise.classificar("S-SRAF-SP", "F S-SAP 02-SP", ref)[2] == config.CORRETO
+def _ref():
+    return analise.Referencias(ROTINHA, docas.Rotas(docas.montar_rotas(docas.carregar_linhas())))
+
+
+def test_tabela_de_docas_de_24_10():
+    rotas = docas.montar_rotas(docas.carregar_linhas())
+    nomes = {r.nome: r for r in rotas}
+    assert len([r for r in rotas if r.tipo == "troncal"]) == 21 and len([r for r in rotas if r.tipo == "secundaria"]) == 18
+    assert nomes["SP BRE"].docas == ["21", "22"] and {"NAT", "PPB", "MA", "XAP"} <= nomes["SP BRE"].nivel1
+    assert nomes["PE JGS"].nivel1 == {"PE", "BYE"}  # "DC—BYE"
+    assert nomes["DC TBT-SP"].docas == ["23"] and "402-04" in nomes["DC TBT-SP"].nivel2
+    assert {"378-04", "395-05", "381-21"} <= nomes["DC GRU-SP"].nivel2
+    assert nomes["F S-SAP 02-SP"].nivel2 == {"404-12"} and nomes["DC S-MOO 02-SP"].docas == ["11", "12"]
+
+
+def test_casos_dos_pdfs():
+    ref = _ref()
+    # Caminhão SP GRU → SP BRE (troncal, PDF parte 03).
+    assert analise.classificar("S-IPRG-SP", "SP BRE", ref)["situacao"] == config.CORRETO
+    assert analise.classificar("F MRL 02-AM", "SP BRE", ref)["situacao"] == config.CORRETO  # AM vai pela SP BRE
+    r = analise.classificar("PTN -MG", "SP BRE", ref)
+    assert r["situacao"] == config.ERRADO and r["rota_certa"] == "MG CGE" and r["doca_certa"] == "19"
+    assert analise.classificar("SDR-SP", "SP BRE", ref)["situacao"] == config.SEM_ROTINHA
+    # Caminhão SP GRU → F S-SAP 02-SP (secundária, PDF parte 06).
+    assert analise.classificar("F S-SAP 02-SP", "F S-SAP 02-SP", ref)["situacao"] == config.CORRETO
+    r = analise.classificar("S-SRAF-SP", "F S-SAP 02-SP", ref)
+    assert r["situacao"] == config.ERRADO and r["rota_certa"] == "S-SRAF-SP" and r["doca_certa"] == "15, 16"
+    r = analise.classificar("CGT 02-SP", "F S-SAP 02-SP", ref)
+    assert r["situacao"] == config.ERRADO and r["rota_certa"] == "DC TBT-SP" and r["doca_certa"] == "23"
+
+
+def test_ordem_da_regra():
+    ref = _ref()
+    assert analise.classificar("OUR -PE", "BA FEC", ref)["situacao"] == config.CORRETO        # SNS no 1º nível da BA FEC
+    assert analise.classificar("AUI -MG", "RJ SJM", ref)["situacao"] == config.CORRETO        # BA VDC → VDC → RJ SJM
+    assert analise.classificar("DIQ -MG", "RS NSR", ref)["rota_certa"] == "MG CGE"            # DC NSR 001-MG não é RS NSR
+    assert analise.classificar("F SDR-SP", "DC SBN-SP", ref)["situacao"] == config.CORRETO    # 375-02 → SBN (doca 08)
+    assert analise.classificar("CANA -BA", "PI THE", ref)["rota_certa"] == "BA FEC"           # caminhão "PI THE" = rota THE
+    assert analise.classificar("DC PCS-PI", "PI THE", ref)["situacao"] == config.CORRETO      # estado PI → THE
+    assert analise.classificar("F IMP-ES", "S-SRAF-SP", ref)["rota_certa"] == "ES SRR"       # 404-00 do ES não é o de GRU
+    # O DESTINO da rotinha vem antes do código da base: F S-VLANA-SP segue na SP BRE (a rota DC S-VLANA-SP está reservada).
+    assert analise.classificar("F S-VLANA-SP", "SP BRE", ref)["situacao"] == config.CORRETO
+    assert analise.classificar("CAJ-PB", "SP BRE", ref)["situacao"] == config.SEM_ROTA_CERTA
+    assert analise.classificar("CANA -BA", "SC BLU", ref)["situacao"] == config.ROTA_FORA
+    r = analise.classificar("PA DEVOLUCAO-GRU-SP", "SP BRE", ref)
+    assert r["situacao"] == config.ERRADO and r["rota_certa"].startswith(docas.FICA_NA_BASE)
+
+
+def test_codigos_dos_nomes():
+    assert docas.codigos("DC SNS-PE") == ("SNS", "PE")
+    assert docas.codigos("BA VDC") == ("VDC", "BA")
+    assert docas.codigos("PI THE") == ("THE", "PI")
+    assert docas.codigos("F S-VLANA-SP") == ("VLANA", "SP")
+    assert docas.codigos("DC NSR 001-MG") == ("NSR", "MG")
+    assert docas.codigos("DC AUG -TO") == ("AUG", "TO")
+
+
+def test_tabela_de_docas_salva_pelo_usuario(tmp_path):
+    linhas = docas.carregar_linhas()
+    linhas.append({"tipo": "troncal", "linha_dws": "9", "docas": "50", "doca_original": "", "rota": "RN NAT", "nivel1": "RN",
+                   "nivel2": "", "observacoes": "nova"})
+    arquivo = tmp_path / "tabela.csv"
+    docas.salvar_linhas(linhas, arquivo)
+    ref = analise.Referencias(ROTINHA, docas.Rotas(docas.montar_rotas(docas.carregar_linhas(arquivo))))
+    assert analise.classificar("CAJ-PB", "RN NAT", ref)["situacao"] == config.CORRETO  # DC MVF-RN → estado RN → nova rota
 
 
 def _xlsx(linhas, aba="Sheet0"):
@@ -140,20 +195,9 @@ def _xlsx(linhas, aba="Sheet0"):
 def test_rotinha_com_cabecalho_e_sem_cabecalho():
     r = tabelas.ler_rotinha("rotinhas.xlsx", _xlsx([["Nome da base", "Código de dois segmentos", "Nome de mecanismo final", "Estado"],
                                                     ["CANA -BA", "512-00", "BA FEC", "BA"], ["CANA -BA", "999", "X", "BA"]]))
-    assert r[tabelas.chave("CANA-BA")] == ("CANA -BA", "512-00", "BA FEC")  # como o PROCV: a primeira linha
-    r = tabelas.ler_rotinha("r.csv", "F IPR-GO;601-01;GO GYN\nPER -BA;507-00;BA FEC\n".encode())
-    assert r[tabelas.chave("PER -BA")][1:] == ("507-00", "BA FEC")
-
-
-def test_tabela_de_rotas_nos_dois_formatos():
-    linhas = _xlsx([["Rota", "Destinos"], ["BA FEC", "BA FEC, BA SBA"], ["", "DC SNS-PE"], ["SP BRE", "SP BRE"]])
-    rotas, sug = tabelas.ler_rotas("rotas.xlsx", linhas)
-    assert sug["modo"] == tabelas.MODO_LINHAS
-    assert rotas[tabelas.chave("BA FEC")] == {"BA FEC", "BA SBA", "DC SNS-PE"}  # célula mesclada: continua na rota de cima
-    colunas = _xlsx([["BA FEC", "SP BRE"], ["BA SBA", "DC SBN-SP"], ["DC SNS-PE", ""]])
-    rotas, sug = tabelas.ler_rotas("rotas.xlsx", colunas)
-    assert sug["modo"] == tabelas.MODO_COLUNAS
-    assert rotas[tabelas.chave("SP BRE")] == {"DC SBN-SP"}
+    assert r[tabelas.chave("CANA-BA")] == ("CANA -BA", "512-00", "BA FEC", "BA")  # como o PROCV: a primeira linha
+    r = tabelas.ler_rotinha("r.csv", "F IPR-GO;601-01;GO GYN;GO\nPER -BA;507-00;BA FEC;BA\n".encode())
+    assert r[tabelas.chave("PER -BA")][1:] == ("507-00", "BA FEC", "BA")
 
 
 def test_monitor_le_so_concluido_e_em_transito_e_nao_repete(tmp_path):
@@ -188,7 +232,7 @@ def test_cartoes_e_planilha(tmp_path):
     m.cliente, m.ajustes = JMSFicticio(), Ajustes(dia="2026-10-26")
     m.rodada(config.SECUNDARIA)
     f = m.foto(config.SECUNDARIA)
-    df = analise.tabela_pacotes(f, analise.Referencias(rotinha_demo(), rotas_demo()))
+    df = analise.tabela_pacotes(f, analise.Referencias(rotinha_demo(), docas.Rotas(docas.montar_rotas(docas.carregar_linhas()))))
     vg = analise.tabela_viagens(f, df)
     n = analise.cartoes(df, vg)
     assert n["errados"] == int((df["situacao"] == config.ERRADO).sum()) > 0
@@ -200,5 +244,6 @@ def test_cartoes_e_planilha(tmp_path):
     ws = wb["Errados 错发明细"]
     assert ws["A1"].value == "ID de Viagem" and ws["A2"].value == "车次号" and ws["A1"].fill.fgColor.rgb.endswith("E60012")
     assert ws.max_row == n["errados"] + 2
-    assert [c.value for c in ws[1]][12:15] == ["Turno", "SEGMENTOS (Código de dois segmentos)", "DESTINOS (Nome de mecanismo final)"]
-    assert len(wb["Resumo 汇总"]._charts) == 9
+    assert [c.value for c in ws[1]][12:18] == ["Turno", "SEGMENTOS (Código de dois segmentos)", "DESTINOS (Nome de mecanismo final)",
+                                                "Rota do caminhão", "Rota certa (tabela de docas)", "Doca certa"]
+    assert len(wb["Resumo 汇总"]._charts) == 10

@@ -59,8 +59,10 @@ COR_NEUTRA = "#9CA3AF"
 CORRETO = "CORRETO"
 ERRADO = "ERRADO"
 SEM_ROTINHA = "BASE FORA DA ROTINHA"
-ROTA_FORA = "ROTA FORA DA TABELA"
-CORES_SITUACAO = {CORRETO: COR_BOM, ERRADO: COR_CRITICO, SEM_ROTINHA: COR_ALERTA, ROTA_FORA: COR_NEUTRA}
+ROTA_FORA = "CAMINHÃO FORA DA TABELA"
+SEM_ROTA_CERTA = "DESTINO SEM ROTA NA TABELA"
+CORES_SITUACAO = {CORRETO: COR_BOM, ERRADO: COR_CRITICO, SEM_ROTINHA: COR_ALERTA, ROTA_FORA: COR_NEUTRA,
+                  SEM_ROTA_CERTA: "#6B7280"}
 SEM_INFO = "NÃO TÊM INFORMAÇÕES"
 
 COLUNAS: dict[str, tuple[str, str]] = {
@@ -80,6 +82,8 @@ COLUNAS: dict[str, tuple[str, str]] = {
     "segmento": ("SEGMENTOS (Código de dois segmentos)", "二段码"),
     "destino": ("DESTINOS (Nome de mecanismo final)", "最终机构名称"),
     "rota": ("Rota do caminhão", "车辆线路"),
+    "rota_certa": ("Rota certa (tabela de docas)", "应装线路"),
+    "doca_certa": ("Doca certa", "应装码头"),
     "situacao": ("Situação", "判定"),
     "regra": ("Como foi conferido", "判定依据"),
     "origem": ("Origem", "始发网点"),
@@ -102,7 +106,7 @@ COLUNAS: dict[str, tuple[str, str]] = {
 
 COLUNAS_PACOTES = ["id_viagem", "linha", "status", "remessa", "lote", "base_escaneamento", "proxima_parada", "base_destino",
                    "municipio_destino", "tipo_bipagem", "digitalizado_por", "tempo_digitalizacao", "turno", "segmento", "destino",
-                   "rota", "situacao", "regra"]
+                   "rota", "rota_certa", "doca_certa", "situacao", "regra"]
 COLUNAS_VIAGENS = ["id_viagem", "linha", "status", "origem", "destino_viagem", "saida_planejada", "saida_real", "chegada_real",
                    "placa", "transportadora", "bipados", "baixados", "errados", "pct_erro", "consulta"]
 

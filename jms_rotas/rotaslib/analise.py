@@ -1,11 +1,10 @@
 """Regra certo/errado e as contagens dos painéis.
 
-Para cada pacote do carregamento: Base Destino → rotinha → SEGMENTOS e DESTINO. A rota do caminhão é a "Próxima parada".
-- Com tabela de rotas: CORRETO se o DESTINO (ou o segmento, ou a própria Base Destino) está entre os destinos da rota;
-  senão ERRADO. Rota que não está na tabela: ROTA FORA DA TABELA (não conta como erro), a não ser que o DESTINO seja a
-  própria próxima parada.
-- Sem tabela de rotas: CORRETO só quando o DESTINO (ou a Base Destino) é a própria próxima parada.
-- Base Destino que não está na rotinha: BASE FORA DA ROTINHA (não conta como erro; aparece para completar a rotinha).
+Para cada pacote do carregamento: Base Destino → rotinha → SEGMENTOS (Código de dois segmentos), DESTINO (Nome de
+mecanismo final) e Estado. A tabela de docas (docas.py) diz a ROTA CERTA do pacote; a rota do caminhão é a "Próxima
+parada". CORRETO quando as duas são a mesma rota; ERRADO quando não são (ex.: pacote do RJ no caminhão da SP BRE).
+Não contam como erro (aparecem para completar as tabelas): BASE FORA DA ROTINHA, CAMINHÃO FORA DA TABELA (próxima parada
+que não está na tabela de docas) e DESTINO SEM ROTA NA TABELA.
 """
 
 from __future__ import annotations
@@ -18,13 +17,14 @@ from typing import Any
 import pandas as pd
 
 from . import config
+from .docas import FICA_NA_BASE, Rota, Rotas
 from .tabelas import chave
 
 
 @dataclass
 class Referencias:
-    rotinha: dict[str, tuple[str, str, str]] = field(default_factory=dict)  # chave da base → (base, segmento, destino)
-    rotas: dict[str, set[str]] = field(default_factory=dict)                # chave da rota → destinos aceitos
+    rotinha: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)  # base → (base, segmento, destino, estado)
+    rotas: Rotas | None = None
 
 
 def texto(valor: Any) -> str:
@@ -59,33 +59,38 @@ def status_da_viagem(viagem: dict[str, Any]) -> str:
     return config.STATUS.get(codigo, str(codigo))
 
 
-def classificar(base_destino: str, proxima_parada: str, ref: Referencias) -> tuple[str, str, str, str]:
-    """→ (segmento, destino, situação, regra)."""
+def classificar(base_destino: str, proxima_parada: str, ref: Referencias) -> dict[str, str]:
+    """→ segmento, destino, rota_certa, doca_certa, situacao, regra."""
+    saida = {"segmento": "", "destino": "", "rota_certa": "", "doca_certa": "", "situacao": "", "regra": ""}
     achado = ref.rotinha.get(chave(base_destino)) if ref.rotinha else None
+    if achado:
+        saida["segmento"], saida["destino"] = achado[1], achado[2]
+    if chave(base_destino) == chave(proxima_parada):
+        return {**saida, "rota_certa": proxima_parada, "situacao": config.CORRETO, "regra": "Base Destino = próxima parada"}
     if ref.rotinha and not achado:
-        return "", "", config.SEM_ROTINHA, "Base Destino não está na rotinha"
-    segmento, destino = (achado[1], achado[2]) if achado else ("", base_destino)
-    rota = chave(proxima_parada)
-    iguais = {chave(destino), chave(base_destino)}
-    if ref.rotas:
-        aceitos = ref.rotas.get(rota)
-        if aceitos is None:
-            if rota in iguais:
-                return segmento, destino, config.CORRETO, "Destino = próxima parada (rota fora da tabela)"
-            return segmento, destino, config.ROTA_FORA, "Rota não está na tabela de rotas"
-        if aceitos & (iguais | {chave(segmento)}):
-            return segmento, destino, config.CORRETO, "Tabela de rotas"
-        return segmento, destino, config.ERRADO, "Tabela de rotas"
-    if rota in iguais:
-        return segmento, destino, config.CORRETO, "Sem tabela de rotas: destino = próxima parada"
-    return segmento, destino, config.ERRADO, "Sem tabela de rotas: destino = próxima parada"
+        return {**saida, "situacao": config.SEM_ROTINHA, "regra": "Base Destino não está na rotinha"}
+    if ref.rotas is None or not len(ref.rotas):
+        return {**saida, "situacao": config.ROTA_FORA, "regra": "Sem tabela de docas"}
+    destino = saida["destino"] or base_destino
+    certa, motivo = ref.rotas.esperada(base_destino, saida["segmento"], destino, achado[3] if achado else "")
+    if isinstance(certa, Rota):
+        saida["rota_certa"], saida["doca_certa"] = certa.nome, ", ".join(certa.docas)
+    elif certa == FICA_NA_BASE:
+        saida["rota_certa"] = f"{FICA_NA_BASE} ({destino})"
+    caminhao = ref.rotas.do_caminhao(proxima_parada)
+    if certa is None:
+        return {**saida, "situacao": config.SEM_ROTA_CERTA, "regra": "Destino sem rota na tabela de docas"}
+    if caminhao is None:
+        return {**saida, "situacao": config.ROTA_FORA, "regra": f"Próxima parada {proxima_parada} não está na tabela de docas"}
+    if certa is caminhao:
+        return {**saida, "situacao": config.CORRETO, "regra": motivo}
+    return {**saida, "situacao": config.ERRADO, "regra": f"Era para {saida['rota_certa']} ({motivo})"}
 
 
 def linha_do_pacote(registro: dict[str, Any], viagem: dict[str, Any], ref: Referencias) -> dict[str, Any]:
     tempo = re.sub(r"\.\d+$", "", texto(registro.get("scanTime")))
     proxima = texto(registro.get("nextStation")) or texto(viagem.get("endName"))
     base_destino = texto(registro.get("destsite"))
-    segmento, destino, situacao, regra = classificar(base_destino, proxima, ref)
     return {
         "id_viagem": texto(viagem.get("shipmentNo")),
         "linha": texto(viagem.get("shipmentName") or viagem.get("lineName") or viagem.get("vehiclelineName")),
@@ -100,11 +105,8 @@ def linha_do_pacote(registro: dict[str, Any], viagem: dict[str, Any], ref: Refer
         "digitalizado_por": texto(registro.get("scanUser")),
         "tempo_digitalizacao": tempo,
         "turno": turno_de(tempo),
-        "segmento": segmento,
-        "destino": destino,
         "rota": proxima,
-        "situacao": situacao,
-        "regra": regra,
+        **classificar(base_destino, proxima, ref),
     }
 
 
@@ -193,6 +195,8 @@ def cartoes(df: pd.DataFrame, viagens: pd.DataFrame) -> dict[str, Any]:
         "pct_erro": round(total_err / len(df) * 100, 2) if len(df) else 0.0,
         "fora_rotinha": int((df["situacao"] == config.SEM_ROTINHA).sum()) if not df.empty else 0,
         "rota_fora": int((df["situacao"] == config.ROTA_FORA).sum()) if not df.empty else 0,
+        "sem_rota_certa": int((df["situacao"] == config.SEM_ROTA_CERTA).sum()) if not df.empty else 0,
+        "rota_certa": topo("rota_certa"),
         "turnos": turnos,
         "base_escaneamento": topo("base_escaneamento"),
         "base_destino": topo("base_destino"),

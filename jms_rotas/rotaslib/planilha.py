@@ -33,7 +33,7 @@ _CENTRO = Alignment(horizontal="center", vertical="center", wrap_text=True)
 _DATAS = {"tempo_digitalizacao", "saida_planejada", "saida_real", "chegada_real"}
 _LARGURAS = {"remessa": 18, "linha": 26, "status": 13, "lote": 17, "base_escaneamento": 14, "proxima_parada": 16,
              "base_destino": 16, "municipio_destino": 20, "tipo_bipagem": 20, "digitalizado_por": 28, "tempo_digitalizacao": 20,
-             "turno": 8, "segmento": 14, "destino": 18, "rota": 16, "situacao": 22, "regra": 34, "id_viagem": 18,
+             "turno": 8, "segmento": 14, "destino": 18, "rota": 16, "rota_certa": 22, "doca_certa": 10, "situacao": 24, "regra": 40, "id_viagem": 18,
              "origem": 14, "destino_viagem": 16, "saida_planejada": 20, "saida_real": 20, "chegada_real": 20, "placa": 10,
              "transportadora": 22, "bipados": 12, "baixados": 10, "errados": 10, "pct_erro": 9, "consulta": 30}
 
@@ -170,7 +170,9 @@ def gerar_planilha(tipo: str, pacotes: pd.DataFrame, viagens: pd.DataFrame, nume
         ("Segmento mais afetado · 二段码", f"{n['segmento'][0]} ({n['segmento'][1]})"),
         ("ID de viagem mais afetado · 车次号", f"{n['id_viagem'][0]} ({n['id_viagem'][1]})"),
         ("Lote (saca) mais afetado · 包号", f"{n['lote'][0]} ({n['lote'][1]})"),
-        ("Base destino fora da rotinha · 未匹配网点", n["fora_rotinha"]), ("Rota fora da tabela · 未匹配线路", n["rota_fora"]),
+        ("Rota certa mais comum dos errados · 应装线路", f"{n['rota_certa'][0]} ({n['rota_certa'][1]})"),
+        ("Base destino fora da rotinha · 未匹配网点", n["fora_rotinha"]), ("Caminhão fora da tabela de docas · 未匹配线路", n["rota_fora"]),
+        ("Destino sem rota na tabela de docas · 无线路", n["sem_rota_certa"]),
     ]
     for rot, val in pares:
         fmt = "0.0%" if isinstance(val, float) else None
@@ -187,6 +189,7 @@ def gerar_planilha(tipo: str, pacotes: pd.DataFrame, viagens: pd.DataFrame, nume
         ("Logins (Digitalizado por) · 扫描人", contar(errados["digitalizado_por"], topo=15), "barra"),
         ("ID de viagem mais afetado · 车次号", contar(errados["id_viagem"], topo=15), "barra"),
         ("Número do lote (sacas com mais erro) · 包号", contar(errados["lote"], topo=15), "barra"),
+        ("Para onde os errados deveriam ir (rota certa) · 应装线路", contar(errados["rota_certa"], topo=15), "barra"),
         ("Situação de todos os pacotes · 判定", contar(pacotes["situacao"], ordem=list(config.CORES_SITUACAO)), "situacao"),
     ]
     for titulo, df, forma in blocos:
