@@ -1,29 +1,50 @@
-/* Painel (Rota Troncal ou Rota Secundária): pede os números ao app a cada minuto e desenha cartões, gráficos e a tabela.
- * Os filtros do topo valem para tudo; a situação e a busca valem só para a tabela. Os filtros ficam no endereço da página. */
+/* Painel (Rota Troncal ou Rota Secundária), no layout do painel principal: menu lateral, topo, dia, filtros, cartões, gráficos e
+ * a tabela. Pede os números ao app; enquanto o app busca no JMS confere a cada 5 s, parado recarrega a cada minuto.
+ * Os filtros ficam no endereço da página (dá para mandar o link já filtrado). */
 (function () {
   'use strict';
-  var G = window.Graficos, fmt = G.fmt, pct = G.pct;
-  var tipo = /secundaria\/?$/.test(location.pathname) ? 'secundaria' : 'troncal';
+  var G = window.Graficos, esc = G.esc, fmtInt = G.fmtInt, fmtPct = G.fmtPct;
   var $ = function (id) { return document.getElementById(id); };
+  var tipo = /secundaria\/?$/.test(location.pathname) ? 'secundaria' : 'troncal';
+  var NOME = {troncal: {pt: 'Rota Troncal', zh: '干线'}, secundaria: {pt: 'Rota Secundária', zh: '支线'}};
   var q = new URLSearchParams(location.search);
-  var estado = {dia: q.get('dia') || '', turno: q.get('turno') || '', rota: q.get('rota') || '', destino: q.get('destino') || '',
-    situacao: q.get('situacao') || '', busca: '', pagina: 1, tamanho: 100, total: 0, carregando: false, hoje: ''};
+  var st = {dia: q.get('dia') || '', hoje: '', turno: q.get('turno') || '', rota: q.get('rota') || '', destino: q.get('destino') || '',
+    segmento: q.get('segmento') || '', login: q.get('login') || '', situacao: q.get('situacao') || '', busca: '', pagina: 1, tamanho: 50,
+    ordem: '', direcao: 'asc', carregando: false, ultimaBusca: 0, ultimaCarga: 0, resumo: null};
+  var FILTROS = ['turno', 'rota', 'destino', 'segmento', 'login'];
 
-  document.title = (tipo === 'troncal' ? 'Rota Troncal' : 'Rota Secundária') + ' · Expedição Incorreta';
-  $('titulo').textContent = tipo === 'troncal' ? 'Rota Troncal' : 'Rota Secundária';
-  $('aba-' + tipo).setAttribute('aria-current', 'page');
-  ['troncal', 'secundaria'].forEach(function (t) { $('aba-' + t).href = t + (estado.dia ? '?dia=' + estado.dia : ''); });
+  var I = {
+    alert: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>',
+    box: '<path d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8M12 13v8"/>',
+    gauge: '<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/>',
+    trip: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+    seg: '<path d="M4 6h16M4 12h10M4 18h6"/>',
+    base: '<path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><path d="M9 9h6"/>',
+    dest: '<path d="M3 21V8l9-5 9 5v13"/><path d="M9 21v-6h6v6"/>',
+    lot: '<path d="M3 8l9-5 9 5-9 5-9-5zm0 0v8l9 5 9-5V8M12 13v8"/>',
+    login: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
+    shift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    route: '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h4c5 0 1-12 6-12"/>',
+    check: '<path d="M5 12l5 5L20 7"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>'
+  };
+  var svg = function (k) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + I[k] + '</svg>'; };
+  var dataBr = function (d) { return d ? d.split('-').reverse().join('/') : ''; };
+  var hora = function (ms) { return ms ? new Date(ms).toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'}) : '—'; };
+  function somaDias(d, n) { var x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); }
 
+  // ---------------------------------------------------------------- endereço, pedidos
   function params(extra) {
-    var p = new URLSearchParams({tipo: tipo, dia: estado.dia});
-    ['turno', 'rota', 'destino'].forEach(function (k) { if (estado[k]) p.set(k, estado[k]); });
-    Object.keys(extra || {}).forEach(function (k) { if (extra[k] !== '' && extra[k] !== undefined) p.set(k, extra[k]); });
+    var p = new URLSearchParams({tipo: tipo, dia: st.dia});
+    FILTROS.forEach(function (k) { if (st[k]) p.set(k, st[k]); });
+    Object.keys(extra || {}).forEach(function (k) { if (extra[k] !== '' && extra[k] !== undefined && extra[k] !== null) p.set(k, extra[k]); });
     return p.toString();
   }
   function guardarNoEndereco() {
     var p = new URLSearchParams();
-    ['dia', 'turno', 'rota', 'destino', 'situacao'].forEach(function (k) { if (estado[k] && !(k === 'dia' && estado.dia === estado.hoje)) p.set(k, estado[k]); });
+    if (st.dia && st.dia !== st.hoje) p.set('dia', st.dia);
+    FILTROS.concat(['situacao']).forEach(function (k) { if (st[k]) p.set(k, st[k]); });
     history.replaceState(null, '', location.pathname + (p.toString() ? '?' + p : ''));
+    ['troncal', 'secundaria'].forEach(function (t) { $('nav-' + t).href = t + (st.dia && st.dia !== st.hoje ? '?dia=' + st.dia : ''); });
   }
   function pedir(url, opcoes) {
     return fetch(url, opcoes).then(function (r) {
@@ -31,181 +52,272 @@
       return r.json();
     });
   }
-  function opcoes(sel, lista, atual, todos) {
-    var el = $(sel);
-    el.textContent = '';
-    var o = document.createElement('option'); o.value = ''; o.textContent = todos; el.appendChild(o);
-    var itens = lista.slice();
-    if (atual && itens.indexOf(atual) < 0) itens.unshift(atual);
-    itens.forEach(function (v) { var x = document.createElement('option'); x.value = v; x.textContent = v; el.appendChild(x); });
-    el.value = atual || '';
-  }
-  function texto(id, v) { $(id).textContent = v; }
 
-  // ---------------------------------------------------------------- topo e avisos
-  function hora(ms) { return ms ? new Date(ms).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : ''; }
-  function mostrarBusca(e) {
-    var b = e.busca, ponto = $('ponto');
-    estado.hoje = e.hoje;
-    texto('base', ' · ' + e.base);
-    ponto.className = 'ponto' + (b.rodando ? ' rodando' : b.authVencido || (b.ultimo && !b.ultimo.ok) ? ' parado' : '');
-    var t;
-    if (b.rodando) t = b.etapa;
-    else if (b.ultimo) t = (b.ultimo.ok ? 'Atualizado às ' : 'Última tentativa às ') + hora(b.ultimo.quando) + (b.ultimo.dia !== estado.dia ? ' (' + b.ultimo.dia.split('-').reverse().join('/') + ')' : '') +
-      ' · busca a cada ' + e.minutos + ' min';
-    else t = 'Esperando a primeira busca no JMS…';
-    texto('busca-texto', t);
-    $('buscar').disabled = b.rodando;
+  // ---------------------------------------------------------------- menu lateral e topo
+  function mostrarEstado(e) {
+    var b = e.busca, dot = $('syncDot');
+    st.hoje = e.hoje;
+    $('brandCenter').textContent = e.base; $('eyebrowCenter').textContent = e.base;
+    $('appVersion').textContent = 'v' + e.versao;
+    dot.className = 'sync-dot' + (b.rodando ? ' run' : b.authVencido || (b.ultimo && !b.ultimo.ok) ? ' bad' : !b.ultimo ? ' warn' : '');
+    $('lastSync').textContent = b.ultimo ? 'Atualizado no JMS: ' + hora(b.ultimo.quando) : 'Esperando a primeira busca no JMS';
+    $('queueLine').textContent = b.rodando ? b.etapa : b.authVencido ? 'Parado: AuthToken do JMS vencido' : 'Busca a cada ' + e.minutos + ' min';
+    $('refreshBtn').classList.toggle('spin', b.rodando);
+    $('refreshBtn').disabled = b.rodando;
+    $('progress').classList.toggle('on', b.rodando || st.carregando);
   }
-  function aviso(lista, forte, titulo, corpo) {
-    var d = document.createElement('div'); d.className = 'aviso' + (forte ? ' forte' : '');
-    var b = document.createElement('b'); b.textContent = titulo;
-    d.appendChild(b); d.appendChild(document.createTextNode(corpo));
-    lista.appendChild(d);
+  function mostrarMenu(menu) {
+    ['troncal', 'secundaria'].forEach(function (t) {
+      var el = $('rate-' + t), n = menu ? menu[t] : null;
+      el.className = 'nav-rate' + (n === null || n === undefined ? '' : n > 0 ? ' bad' : ' good');
+      el.innerHTML = '<i></i>' + (n === null || n === undefined ? '–' : esc(fmtInt(n)));
+      el.title = n ? fmtInt(n) + ' pacotes no caminhão errado' : 'Nenhum pacote no caminhão errado';
+    });
+  }
+
+  // ---------------------------------------------------------------- avisos e selos
+  function alerta(lista, warn, titulo, texto) {
+    return lista + '<div class="alert' + (warn ? ' warn' : '') + '" role="' + (warn ? 'status' : 'alert') + '">' + svg('alert') +
+      '<div><b>' + esc(titulo) + '</b><span>' + esc(texto) + '</span></div></div>';
   }
   function mostrarAvisos(r) {
-    var el = $('avisos'), e = r.estado;
-    el.textContent = '';
-    if (e.busca.authVencido) aviso(el, true, 'AuthToken do JMS vencido.', ' Pegue um novo no JMS e cole em Configurações (no computador do app). Os números abaixo são da última busca que deu certo.');
-    else if (e.busca.ultimo && !e.busca.ultimo.ok) aviso(el, true, 'A última busca no JMS falhou:', ' ' + e.busca.ultimo.msg);
-    e.planilhas.erros.forEach(function (m) { aviso(el, true, 'Planilha:', ' ' + m); });
-    var t = r.totais, p = r.pendencias;
-    var ex = function (l) { return l.slice(0, 5).map(function (i) { return i.nome + ' (' + fmt(i.qtd) + ')'; }).join(', '); };
-    var pac = function (n) { return fmt(n) + (n === 1 ? ' pacote' : ' pacotes'); };
-    if (t.semRegra) aviso(el, false, pac(t.semRegra) + ' de rota fora da planilha de rotas:', ' ' + ex(p.semRegra) + '. Inclua a rota na planilha rotas.xlsx.');
-    if (t.semRotinha) aviso(el, false, pac(t.semRotinha) + ' com Base Destino fora da rotinha:', ' ' + ex(p.semRotinha) + '. Inclua a base na rotinha.');
-    if (t.semCodigo) aviso(el, false, pac(t.semCodigo) + ' com DESTINO sem código de 1º nível:', ' ' + ex(p.semCodigo) + '. Complete a aba "Códigos 1º nível" da planilha rotas.xlsx.');
-    if (!t.pacotes && !e.busca.rodando && r.viagens.total === 0) aviso(el, false, 'Sem dados deste dia ainda.', ' Clique em "Buscar agora" para buscar no JMS.');
+    var e = r.estado, t = r.totais, p = r.pendencias, h = '';
+    var ex = function (l) { return l.slice(0, 5).map(function (i) { return i.nome + ' (' + fmtInt(i.qtd) + ')'; }).join(', '); };
+    var pac = function (n) { return fmtInt(n) + (n === 1 ? ' pacote' : ' pacotes'); };
+    if (e.busca.authVencido) h = alerta(h, false, 'AuthToken do JMS vencido.', 'Pegue um novo no JMS e cole no DashMaster ou na tela Configurações deste app. Os números abaixo são da última busca que deu certo.');
+    else if (e.busca.ultimo && !e.busca.ultimo.ok) h = alerta(h, false, 'A última busca no JMS falhou.', e.busca.ultimo.msg);
+    e.planilhas.erros.forEach(function (m) { h = alerta(h, false, 'Planilha', m); });
+    if (t.semRegra) h = alerta(h, true, pac(t.semRegra) + ' de rota fora da planilha de rotas', ex(p.semRegra) + '. Inclua a rota na planilha rotas.xlsx.');
+    if (t.semRotinha) h = alerta(h, true, pac(t.semRotinha) + ' com Base Destino fora da rotinha', ex(p.semRotinha) + '. Inclua a base na rotinha.');
+    if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com DESTINO sem código de 1º nível', ex(p.semCodigo) + '. Complete a aba "Códigos 1º nível" da planilha rotas.xlsx.');
+    if (!t.pacotes && !e.busca.rodando && !r.viagens.total) h = alerta(h, true, 'Sem dados deste dia ainda.', 'Clique em Atualizar para buscar no JMS.');
+    $('alerts').innerHTML = h;
+    var b = [];
+    b.push('<span class="badge ' + (r.viagens.total ? 'ok' : 'warn') + '">' + svg(r.viagens.total ? 'check' : 'alert') + '<span>Viagens: ' + fmtInt(r.viagens.total) +
+      ' · ' + fmtInt(r.viagens.comCarga) + ' com carregamento</span></span>');
+    b.push('<span class="badge ' + (t.pacotes ? 'ok' : 'warn') + '">' + svg(t.pacotes ? 'check' : 'alert') + '<span>Conferidos: ' + fmtInt(t.pacotes) + ' pacotes</span></span>');
+    if (r.viagens.comErro) b.push('<span class="badge warn">' + svg('alert') + '<span>' + fmtInt(r.viagens.comErro) + ' viagens com erro na busca</span></span>');
+    $('badges').innerHTML = b.join('');
   }
 
-  // ---------------------------------------------------------------- cartões e gráficos
-  function mostrarResumo(r) {
-    var t = r.totais;
-    texto('k-errados', fmt(t.errados));
-    texto('k-taxa', pct(t.taxa) + ' dos pacotes conferidos');
-    texto('k-pacotes', fmt(t.pacotes));
-    texto('k-viagens', fmt(r.viagens.total) + ' viagens · ' + fmt(r.viagens.comCarga) + ' com carregamento');
-    r.turnos.forEach(function (x) {
-      texto('k-' + x.turno, fmt(x.errados));
-      texto('k-' + x.turno + 'd', pct(x.participacao) + ' dos erros · ' + fmt(x.pacotes) + ' pacotes');
+  // ---------------------------------------------------------------- filtros
+  function opcoes(id, lista, atual, todos, rotulo) {
+    var el = $('f-' + id), itens = lista.slice();
+    if (atual && itens.indexOf(atual) < 0) itens.unshift(atual);
+    el.innerHTML = '<option value="">' + esc(todos) + '</option>' + itens.map(function (v) {
+      return '<option value="' + esc(v) + '">' + esc(rotulo ? rotulo(v) : v) + '</option>';
+    }).join('');
+    el.value = atual || '';
+  }
+  function marcarFiltros() { FILTROS.forEach(function (k) { $('dd-' + k).classList.toggle('has-value', !!st[k]); }); }
+
+  // ---------------------------------------------------------------- cartões
+  function kpi(cls, rotulo, valor, sub, foot, extraCls) {
+    return '<div class="kpi ' + (cls || '') + '"><span class="kpi-label">' + rotulo + '</span><div class="kpi-value' + (extraCls ? ' ' + extraCls : '') + '">' + valor + '</div>' +
+      (sub ? '<div class="kpi-sub">' + sub + '</div>' : '') + (foot ? '<div class="kpi-foot">' + foot + '</div>' : '') + '</div>';
+  }
+  var barra = function (pct, cor) { return '<div class="bar"><i style="width:' + Math.max(0, Math.min(100, pct)).toFixed(1) + '%;background:' + cor + '"></i></div>'; };
+  function mostrarCartoes(r) {
+    var t = r.totais, m = r.maisAfetados, tn = {};
+    r.turnos.forEach(function (x) { tn[x.turno] = x; });
+    var partes = ['T1', 'T2', 'T3'].map(function (s) { return '<span><i style="background:' + G.corTurno(s) + '"></i>' + s + ' <b>' + fmtInt(tn[s].errados) + '</b></span>'; }).join(' + ');
+    var h = '<div class="kpi kpi-hero"><div class="kpi-body"><span class="kpi-label">' + svg('alert') + 'Pacotes no caminhão errado · ' + esc(dataBr(r.dia)) + '</span>' +
+      '<div class="kpi-value">' + fmtInt(t.errados) + '</div>' +
+      '<div class="kpi-sub"><b>' + fmtPct(t.taxa, 2) + '</b> dos ' + fmtInt(t.pacotes) + ' pacotes conferidos</div>' +
+      '<div class="kpi-sub hero-parts">Por turno: ' + partes + ' = <b>' + fmtInt(t.errados) + '</b></div>' +
+      '<div class="hero-row">' + (t.errados ? '<span class="status-pill bad">' + svg('x') + 'Com pacote errado</span>' : '<span class="status-pill good">' + svg('check') + 'Nenhum pacote errado</span>') +
+      '<span class="hero-goal">' + esc(NOME[tipo].pt) + ' · ' + esc(NOME[tipo].zh) + '</span></div></div></div>';
+    h += kpi('', svg('box') + 'Pacotes conferidos', fmtInt(t.pacotes), 'em <b>' + fmtInt(r.viagens.total) + '</b> viagens · <b>' + fmtInt(r.viagens.comCarga) + '</b> com carregamento');
+    h += kpi(t.errados ? 'bad' : '', svg('gauge') + 'Taxa de erro', fmtPct(t.taxa, 2), 'pacotes errados ÷ conferidos');
+    ['T1', 'T2', 'T3'].forEach(function (s) {
+      var x = tn[s], horas = {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'}[s];
+      h += kpi('shift-kpi', '<i style="background:' + G.corTurno(s) + '"></i>' + s + ' · ' + horas, fmtInt(x.errados),
+        '<b>' + fmtPct(x.participacao, 1) + '</b> participação<br>Pacotes do turno: <span class="part">' + fmtInt(x.pacotes) + '</span>', barra(x.participacao, G.corTurno(s)));
     });
-    var m = r.maisAfetados;
-    var um = function (id, item, det) { texto(id, item ? item.nome : '–'); texto(id + '-d', item ? fmt(item.qtd) + ' errados' + (det ? ' · ' + det : '') : 'Nenhum erro'); };
-    um('m-segmento', m.segmento); um('m-base', m.baseDestino); um('m-destino', m.destino); um('m-viagem', m.viagem, m.viagem && m.viagem.rota);
-    var cores = {T1: 'var(--s1)', T2: 'var(--s2)', T3: 'var(--s3)'};
-    G.rosca($('g-turnos'), r.turnos.map(function (x) {
-      return {rotulo: x.turno, valor: x.errados, cor: cores[x.turno], detalhe: pct(x.participacao)};
-    }), {valor: fmt(t.errados), rotulo: 'errados'});
-    G.barras($('g-segmentos'), r.top.segmentos, t.errados);
-    G.barras($('g-bases'), r.top.basesDestino, t.errados);
-    G.barras($('g-destinos'), r.top.destinos, t.errados);
-    G.barras($('g-logins'), r.top.logins, t.errados);
-    G.barras($('g-viagens'), r.top.viagens, t.errados);
-    G.barras($('g-lotes'), r.top.lotes, t.errados);
-    G.barras($('g-rotas'), r.top.rotas, t.errados);
-    opcoes('f-rota', r.opcoes.rotas, estado.rota, 'Todas');
-    opcoes('f-destino', r.opcoes.destinos, estado.destino, 'Todos');
+    var um = function (icone, rotulo, it, extra, cls) {
+      var tot = t.errados || 0;
+      return kpi(cls || '', svg(icone) + rotulo, it ? esc(it.nome) : '—',
+        it ? '<b>' + fmtInt(it.qtd) + '</b> errados · <b>' + fmtPct(tot ? it.qtd / tot * 100 : 0, 1) + '</b> participação' + (extra ? '<br>' + esc(extra) : '') : 'Nenhum erro',
+        it ? barra(tot ? it.qtd / tot * 100 : 0, 'var(--red)') : '', 'text');
+    };
+    h += um('seg', 'Segmento mais afetado', m.segmento);
+    h += um('base', 'Base destino mais afetada', m.baseDestino);
+    h += um('dest', 'Destino mais afetado', m.destino);
+    h += um('trip', 'ID de viagem mais afetado', m.viagem, m.viagem && m.viagem.rota, 'span2');
+    h += um('lot', 'Lote / saca mais afetado', m.lote);
+    h += um('login', 'Login mais afetado', m.login);
+    $('kpiGrid').innerHTML = h;
+  }
+
+  // ---------------------------------------------------------------- gráficos
+  function mostrarGraficos(r) {
+    var tot = r.totais.errados, grid = $('chartsGrid');
+    var sub = function (k, nome) {
+      var d = r.distintos[k] || 0, n = r.top[k].length;
+      return 'Pacotes no caminhão errado por ' + nome + (d > n ? ' · top ' + n + ' de ' + fmtInt(d) : '') + ' · ' + fmtInt(tot) + ' errados';
+    };
+    G.cartao(grid, {key: 'turnos', icone: I.shift, titulo: {pt: 'Participação por turno', zh: '班次占比'}, tipo: 'rosca',
+      sub: 'Pacotes no caminhão errado em cada turno (tempo de digitalização) · ' + fmtInt(tot) + ' errados',
+      itens: r.turnos.map(function (x) { return {nome: x.turno, qtd: x.errados}; }), total: tot, distintos: 3, rotulo: {pt: 'Turno', um: 'turno', zh: '班次'}});
+    var colunas = [
+      ['segmentos', I.seg, {pt: 'Segmentos mais afetados', zh: '二段码'}, 'segmento (código de dois segmentos)', {pt: 'SEGMENTOS', um: 'segmento', zh: '二段码'}],
+      ['basesDestino', I.base, {pt: 'Bases destino mais afetadas', zh: '目的网点'}, 'base destino', {pt: 'Base Destino', um: 'base destino', zh: '目的网点'}],
+      ['destinos', I.dest, {pt: 'Destinos mais afetados', zh: '末端机构'}, 'DESTINO (nome de mecanismo final)', {pt: 'DESTINO', um: 'destino', zh: '末端机构'}],
+      ['logins', I.login, {pt: 'Logins mais ofensores', zh: '扫描人'}, 'login (digitalizado por)', {pt: 'Login', um: 'login', zh: '扫描人'}],
+      ['viagens', I.trip, {pt: 'IDs de viagem mais afetados', zh: '车次号'}, 'ID de viagem', {pt: 'ID de viagem', um: 'ID de viagem', zh: '车次号'}],
+      ['lotes', I.lot, {pt: 'Lotes / sacas com mais erro', zh: '包号'}, 'número do lote', {pt: 'Número do lote', um: 'lote', zh: '包号'}],
+      ['rotas', I.route, {pt: 'Rotas com mais erro', zh: '下一站'}, 'rota (próxima parada)', {pt: 'Rota', um: 'rota', zh: '下一站'}]
+    ];
+    colunas.forEach(function (c) {
+      G.cartao(grid, {key: c[0], icone: c[1], titulo: c[2], tipo: 'colunas', sub: sub(c[0], c[3]), total: tot, distintos: r.distintos[c[0]] || 0,
+        rotulo: c[4], id: c[0] === 'viagens', itens: r.top[c[0]].map(function (i) { return {nome: i.nome, qtd: i.qtd, extra: i.rota || ''}; })});
+    });
   }
 
   // ---------------------------------------------------------------- tabela
   function mostrarTabela(t) {
-    estado.total = t.total;
-    var cab = $('t-cab'), corpo = $('t-corpo');
-    cab.textContent = ''; corpo.textContent = '';
-    var tr = document.createElement('tr');
-    t.colunas.forEach(function (c) { var th = document.createElement('th'); th.textContent = c[1]; tr.appendChild(th); });
-    cab.appendChild(tr);
-    t.linhas.forEach(function (l) {
-      var r = document.createElement('tr');
-      if (l.situacao === 'errado') r.className = 'errado';
-      t.colunas.forEach(function (c) {
-        var td = document.createElement('td');
+    var head = '<tr>' + t.colunas.map(function (c) {
+      var ord = t.ordem === c[0] ? (t.direcao === 'desc' ? 'descending' : 'ascending') : '';
+      return '<th class="sortable" data-k="' + c[0] + '"' + (ord ? ' aria-sort="' + ord + '"' : '') + '>' + esc(c[1]) + ' <span class="sort">' +
+        (ord === 'descending' ? '↓' : ord ? '↑' : '↕') + '</span><small>' + esc(c[2]) + '</small></th>';
+    }).join('') + '</tr>';
+    var corpo = t.linhas.map(function (l) {
+      return '<tr' + (l.situacao === 'errado' ? ' class="errado"' : '') + '>' + t.colunas.map(function (c) {
+        var v = l[c[0]];
         if (c[0] === 'situacaoTexto') {
-          var s = document.createElement('span'), i = document.createElement('i');
-          s.className = 'selo ' + (l.situacao === 'errado' ? 'errado' : l.situacao === 'certo' ? 'certo' : 'outro');
-          i.textContent = l.situacao === 'errado' ? '✕' : l.situacao === 'certo' ? '✓' : '!';
-          s.appendChild(i); s.appendChild(document.createTextNode(l[c[0]]));
-          td.appendChild(s);
-        } else td.textContent = l[c[0]];
-        if (c[0] === 'billCode' || c[0] === 'horario') td.className = 'num';
-        r.appendChild(td);
+          var cls = l.situacao === 'errado' ? 'errado' : l.situacao === 'certo' ? 'certo' : 'outro';
+          return '<td><span class="sit ' + cls + '">' + (cls === 'errado' ? '✕ ' : cls === 'certo' ? '✓ ' : '! ') + esc(v) + '</span></td>';
+        }
+        return '<td' + (c[0] === 'billCode' || c[0] === 'horario' ? ' class="num"' : '') + ' title="' + esc(v) + '">' + esc(v) + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+    var tab = $('dataTable');
+    tab.querySelector('thead').innerHTML = head;
+    tab.querySelector('tbody').innerHTML = corpo || '<tr class="empty-row"><td colspan="' + t.colunas.length + '">Nenhum pacote neste recorte.</td></tr>';
+    Array.prototype.forEach.call(tab.querySelectorAll('th[data-k]'), function (th) {
+      th.addEventListener('click', function () {
+        var k = th.getAttribute('data-k');
+        st.direcao = st.ordem === k && st.direcao === 'asc' ? 'desc' : 'asc';
+        st.ordem = k; st.pagina = 1;
+        carregarTabela();
       });
-      corpo.appendChild(r);
     });
-    if (!t.linhas.length) {
-      var v = document.createElement('tr'), td = document.createElement('td');
-      td.colSpan = t.colunas.length; td.className = 'vazio'; td.textContent = 'Nenhum pacote neste recorte.';
-      v.appendChild(td); corpo.appendChild(v);
-    }
-    var ini = t.total ? (t.pagina - 1) * t.tamanho + 1 : 0, fim = Math.min(t.total, t.pagina * t.tamanho);
-    texto('t-info', fmt(ini) + '–' + fmt(fim) + ' de ' + fmt(t.total));
-    $('t-ant').disabled = t.pagina <= 1;
-    $('t-prox').disabled = fim >= t.total;
+    $('tableCount').textContent = fmtInt(t.total) + (t.total === 1 ? ' pacote' : ' pacotes');
+    var paginas = Math.max(1, Math.ceil(t.total / t.tamanho)), p = t.pagina, nums = [];
+    for (var i = 1; i <= paginas; i++) if (i === 1 || i === paginas || Math.abs(i - p) <= 1) nums.push(i);
+    var hp = '<button type="button" data-p="' + (p - 1) + '"' + (p <= 1 ? ' disabled' : '') + ' aria-label="Página anterior">‹</button>', prev = 0;
+    nums.forEach(function (n) {
+      if (n - prev > 1) hp += '<span>…</span>';
+      hp += '<button type="button" data-p="' + n + '"' + (n === p ? ' class="active" aria-current="page"' : '') + '>' + n + '</button>';
+      prev = n;
+    });
+    hp += '<button type="button" data-p="' + (p + 1) + '"' + (p >= paginas ? ' disabled' : '') + ' aria-label="Próxima página">›</button>';
+    $('pager').innerHTML = hp;
+    Array.prototype.forEach.call($('pager').querySelectorAll('button[data-p]'), function (b) {
+      b.addEventListener('click', function () { st.pagina = Number(b.getAttribute('data-p')); carregarTabela(); });
+    });
   }
   function carregarTabela() {
-    return pedir('api/tabela?' + params({situacao: estado.situacao, busca: estado.busca, pagina: estado.pagina, tamanho: estado.tamanho})).then(mostrarTabela);
+    return pedir('api/tabela?' + params({situacao: st.situacao, busca: st.busca, pagina: st.pagina, tamanho: st.tamanho, ordem: st.ordem, direcao: st.direcao}))
+      .then(mostrarTabela).catch(function () {});
   }
 
-  // ---------------------------------------------------------------- carregar
+  // ---------------------------------------------------------------- carregar tudo
   function carregar() {
-    if (estado.carregando) return Promise.resolve();
-    estado.carregando = true;
-    document.querySelector('.pagina').style.opacity = '.7';
+    if (st.carregando) return Promise.resolve();
+    st.carregando = true;
+    $('app').classList.add('is-loading');
+    $('progress').classList.add('on');
     return pedir('api/painel?' + params()).then(function (r) {
-      if (!estado.dia) { estado.dia = r.dia; $('f-dia').value = r.dia; }
-      mostrarBusca(r.estado); mostrarAvisos(r); mostrarResumo(r);
+      st.resumo = r;
+      if (!st.dia) { st.dia = r.dia; $('dia').value = r.dia; }
+      mostrarEstado(r.estado); mostrarMenu(r.menu);
+      $('pageSubtitle').textContent = NOME[tipo].zh + ' · Pacotes no caminhão errado · ' + r.estado.base + ' · ' + dataBr(r.dia);
+      Array.prototype.forEach.call(document.querySelectorAll('#presets .chip'), function (c) {
+        c.classList.toggle('active', somaDias(st.hoje, Number(c.getAttribute('data-d'))) === st.dia);
+      });
+      opcoes('rota', r.opcoes.rotas, st.rota, 'Todas');
+      opcoes('destino', r.opcoes.destinos, st.destino, 'Todos');
+      opcoes('segmento', r.opcoes.segmentos, st.segmento, 'Todos');
+      opcoes('login', r.opcoes.logins, st.login, 'Todos');
+      marcarFiltros();
+      mostrarAvisos(r); mostrarCartoes(r); mostrarGraficos(r);
       guardarNoEndereco();
+      st.ultimaCarga = Date.now();
       return carregarTabela();
     }).catch(function (e) {
-      if (String(e && e.message) !== 'senha') texto('busca-texto', 'Sem conexão com o app: ' + e.message);
+      if (String(e && e.message) !== 'senha') $('lastSync').textContent = 'Sem conexão com o app: ' + e.message;
     }).then(function () {
-      estado.carregando = false;
-      document.querySelector('.pagina').style.opacity = '';
+      st.carregando = false;
+      $('app').classList.remove('is-loading');
+      $('progress').classList.remove('on');
+      $('bootScreen').classList.add('done');
     });
   }
 
   // ---------------------------------------------------------------- eventos
-  $('f-dia').value = estado.dia;
-  $('t-situacao').value = estado.situacao;
-  $('f-dia').addEventListener('change', function () { estado.dia = this.value; estado.pagina = 1; carregar(); });
-  $('f-turno').value = estado.turno;
-  $('f-turno').addEventListener('change', function () { estado.turno = this.value; estado.pagina = 1; carregar(); });
-  $('f-rota').addEventListener('change', function () { estado.rota = this.value; estado.pagina = 1; carregar(); });
-  $('f-destino').addEventListener('change', function () { estado.destino = this.value; estado.pagina = 1; carregar(); });
-  $('limpar').addEventListener('click', function () {
-    estado.turno = estado.rota = estado.destino = ''; estado.pagina = 1; $('f-turno').value = ''; carregar();
+  document.title = NOME[tipo].pt + ' · Expedição Incorreta';
+  $('pageTitle').textContent = NOME[tipo].pt;
+  $('nav-' + tipo).classList.add('active');
+  $('nav-' + tipo).setAttribute('aria-current', 'page');
+  $('painelSelect').value = tipo;
+  $('dia').value = st.dia;
+  $('t-situacao').value = st.situacao;
+  $('f-turno').value = st.turno;
+  $('painelSelect').addEventListener('change', function () { location.href = this.value + (st.dia && st.dia !== st.hoje ? '?dia=' + st.dia : ''); });
+  $('applyBtn').addEventListener('click', function () { st.dia = $('dia').value || st.hoje; st.pagina = 1; carregar(); });
+  $('dia').addEventListener('change', function () { st.dia = this.value || st.hoje; st.pagina = 1; carregar(); });
+  Array.prototype.forEach.call(document.querySelectorAll('#presets .chip'), function (c) {
+    c.addEventListener('click', function () { st.dia = somaDias(st.hoje, Number(c.getAttribute('data-d'))); $('dia').value = st.dia; st.pagina = 1; carregar(); });
   });
-  $('t-situacao').addEventListener('change', function () { estado.situacao = this.value; estado.pagina = 1; guardarNoEndereco(); carregarTabela(); });
+  FILTROS.forEach(function (k) {
+    $('f-' + k).addEventListener('change', function () { st[k] = this.value; st.pagina = 1; carregar(); });
+  });
+  $('t-situacao').addEventListener('change', function () { st.situacao = this.value; st.pagina = 1; guardarNoEndereco(); carregarTabela(); });
   var espera = null;
-  $('t-busca').addEventListener('input', function () {
+  $('tableFind').addEventListener('input', function () {
     var v = this.value;
     clearTimeout(espera);
-    espera = setTimeout(function () { estado.busca = v; estado.pagina = 1; carregarTabela(); }, 300);
+    espera = setTimeout(function () { st.busca = v; st.pagina = 1; carregarTabela(); }, 300);
   });
-  $('t-ant').addEventListener('click', function () { if (estado.pagina > 1) { estado.pagina--; carregarTabela(); } });
-  $('t-prox').addEventListener('click', function () { estado.pagina++; carregarTabela(); });
-  $('excel').addEventListener('click', function () {
-    location.href = 'api/excel?' + params({situacao: estado.situacao, busca: estado.busca});
+  $('excelBtn').addEventListener('click', function () {
+    location.href = 'api/excel?' + params({situacao: st.situacao, busca: st.busca});
   });
-  $('buscar').addEventListener('click', function () {
-    $('buscar').disabled = true;
-    pedir('api/buscar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({dia: estado.dia})})
-      .then(function (r) { if (r.estado) mostrarBusca(r.estado); if (r.error) alert(r.error); })
-      .catch(function () {});
+  $('refreshBtn').addEventListener('click', function () {
+    $('refreshBtn').disabled = true;
+    pedir('api/buscar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({dia: st.dia})})
+      .then(function (r) { if (r.estado) mostrarEstado(r.estado); if (r.error) alert(r.error); }).catch(function () {});
   });
+  function tema() {
+    var b = $('themeBtn'), dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    b.setAttribute('aria-pressed', String(dark));
+    b.title = dark ? 'Tema claro' : 'Tema escuro'; b.setAttribute('aria-label', b.title);
+  }
+  $('themeBtn').addEventListener('click', function () {
+    var dark = document.documentElement.getAttribute('data-theme') !== 'dark';
+    if (dark) document.documentElement.setAttribute('data-theme', 'dark'); else document.documentElement.removeAttribute('data-theme');
+    try { localStorage.setItem('jt_theme', dark ? 'dark' : 'light'); } catch (e) { /* só nesta visita */ }
+    tema(); G.cores();
+    if (st.resumo) mostrarGraficos(st.resumo);
+  });
+  tema();
+  function menu(abrir) {
+    $('sidebar').classList.toggle('open', abrir);
+    $('scrim').hidden = !abrir;
+    $('menuBtn').setAttribute('aria-expanded', String(abrir));
+  }
+  $('menuBtn').addEventListener('click', function () { menu(!$('sidebar').classList.contains('open')); });
+  $('scrim').addEventListener('click', function () { menu(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') menu(false); });
 
-  carregar();
-  // Enquanto busca no JMS, confere a cada 5 s; parado, a cada minuto (sem mexer nos filtros nem na página da tabela).
-  var ultimaBusca = 0;
+  // Gráficos só depois de a biblioteca chegar (ou falhar): sem ela, tabelas.
+  (window.__chartLibs || Promise.resolve(false)).then(function () { G.cores(); carregar(); });
   setInterval(function () {
     if (document.visibilityState !== 'visible') return;
     pedir('api/estado').then(function (e) {
-      mostrarBusca(e);
+      mostrarEstado(e);
       var fim = e.busca.ultimo ? e.busca.ultimo.quando : 0;
-      if (fim !== ultimaBusca || Date.now() - (estado.ultimaCarga || 0) > 60000) {
-        ultimaBusca = fim; estado.ultimaCarga = Date.now();
-        carregar();
-      }
+      if ((fim && fim !== st.ultimaBusca) || Date.now() - st.ultimaCarga > 60000) { st.ultimaBusca = fim; carregar(); }
     }).catch(function () {});
   }, 5000);
 })();

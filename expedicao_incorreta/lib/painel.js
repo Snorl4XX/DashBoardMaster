@@ -14,19 +14,23 @@ function turnoDe(horario) {
   const h = Number(m[1]);
   return h >= 6 && h < 14 ? 'T1' : h >= 14 && h < 22 ? 'T2' : 'T3';
 }
+/** [campo, título, título em chinês] — o título em chinês aparece embaixo, como na tabela do painel principal. */
 const COLUNAS = [
-  ['turno', 'Turno'], ['situacaoTexto', 'Situação'], ['shipmentNo', 'ID de viagem'], ['nomeViagem', 'Viagem'],
-  ['billCode', 'Número de pedido JMS'], ['packageCode', 'Número do lote'], ['baseEscaneamento', 'Base de escaneamento'],
-  ['proximaParada', 'Próxima parada'], ['baseDestino', 'Base Destino'], ['municipio', 'Município de Destino'],
-  ['segmento', 'SEGMENTOS'], ['destino', 'DESTINO'], ['tipoBipagem', 'Tipo de bipagem'], ['digitalizadoPor', 'Digitalizado por'],
-  ['horario', 'Tempo de digitalização']
+  ['turno', 'Turno', '班次'], ['situacaoTexto', 'Situação', '状态'], ['shipmentNo', 'ID de viagem', '车次号'], ['nomeViagem', 'Viagem', '线路'],
+  ['billCode', 'Número de pedido JMS', '运单号'], ['packageCode', 'Número do lote', '包号'], ['baseEscaneamento', 'Base de escaneamento', '扫描网点'],
+  ['proximaParada', 'Próxima parada', '下一站'], ['baseDestino', 'Base Destino', '目的网点'], ['municipio', 'Município de Destino', '目的城市'],
+  ['segmento', 'SEGMENTOS', '二段码'], ['destino', 'DESTINO', '末端机构'], ['tipoBipagem', 'Tipo de bipagem', '扫描类型'],
+  ['digitalizadoPor', 'Digitalizado por', '扫描人'], ['horario', 'Tempo de digitalização', '扫描时间']
 ];
 
+/** Os n mais frequentes (quantidade de linhas por valor do campo). A lista guarda em .distintos quantos valores existem ao todo. */
 function topDe(linhas, campo, n, extra) {
   const m = new Map();
   linhas.forEach(l => { const k = l[campo] || '(vazio)'; m.set(k, (m.get(k) || 0) + 1); });
-  return Array.from(m, ([nome, qtd]) => Object.assign({nome, qtd}, extra ? extra(nome) : {}))
+  const lista = Array.from(m, ([nome, qtd]) => Object.assign({nome, qtd}, extra ? extra(nome) : {}))
     .sort((a, b) => b.qtd - a.qtd || String(a.nome).localeCompare(String(b.nome))).slice(0, n || 10);
+  lista.distintos = m.size;
+  return lista;
 }
 
 class Painel {
@@ -53,6 +57,7 @@ class Painel {
   filtrar(linhas, f) {
     const busca = String(f.busca || '').trim().toUpperCase();
     return linhas.filter(l => (!f.turno || l.turno === f.turno) && (!f.rota || l.rota === f.rota) && (!f.destino || l.destino === f.destino) &&
+      (!f.segmento || l.segmento === f.segmento) && (!f.login || l.digitalizadoPor === f.login) &&
       (!f.situacao || l.situacao === f.situacao) && (!f.viagem || l.shipmentNo === f.viagem) &&
       (!busca || [l.billCode, l.packageCode, l.shipmentNo, l.baseDestino, l.digitalizadoPor, l.nomeViagem].some(v => String(v || '').toUpperCase().indexOf(busca) >= 0)));
   }
@@ -73,18 +78,22 @@ class Painel {
       logins: topDe(errados, 'digitalizadoPor'), viagens: topDe(errados, 'shipmentNo', 10, nomeViagem), lotes: topDe(errados, 'packageCode'),
       rotas: topDe(errados, 'rota')
     };
+    const distintos = {};
+    Object.keys(top).forEach(k => { distintos[k] = top[k].distintos; });
     const viagens = Array.from(tudo.viagens.values());
     return {
       tipo, dia,
       totais: {pacotes: linhas.length, errados: cont.errado, certos: cont.certo, semRotinha: cont.sem_rotinha, semCodigo: cont.sem_codigo,
         semRegra: cont.sem_regra, taxa: linhas.length ? cont.errado / linhas.length * 100 : 0},
-      turnos, top,
+      turnos, top, distintos,
       maisAfetados: {segmento: top.segmentos[0] || null, baseDestino: top.basesDestino[0] || null, viagem: top.viagens[0] || null,
-        destino: top.destinos[0] || null},
+        destino: top.destinos[0] || null, lote: top.lotes[0] || null, login: top.logins[0] || null},
       viagens: {total: viagens.length, comCarga: viagens.filter(v => v.contagem > 0).length, comErro: viagens.filter(v => v.erro).length},
       opcoes: {
         rotas: Array.from(new Set(tudo.linhas.map(l => l.rota).filter(Boolean))).sort(),
-        destinos: Array.from(new Set(tudo.linhas.map(l => l.destino).filter(Boolean))).sort()
+        destinos: Array.from(new Set(tudo.linhas.map(l => l.destino).filter(Boolean))).sort(),
+        segmentos: Array.from(new Set(tudo.linhas.map(l => l.segmento).filter(Boolean))).sort(),
+        logins: Array.from(new Set(tudo.linhas.map(l => l.digitalizadoPor).filter(Boolean))).sort()
       },
       // Exemplos do que não deu para conferir (para completar as planilhas).
       pendencias: {
@@ -94,11 +103,17 @@ class Painel {
       }
     };
   }
-  /** Página da tabela. */
-  tabela(tipo, dia, f, pagina, tamanho) {
-    const linhas = this.filtrar(this.linhas(tipo, dia).linhas, f);
+  /** Pacotes errados do dia (sem filtros), para o menu lateral. */
+  errados(tipo, dia) { return this.linhas(tipo, dia).linhas.filter(l => l.situacao === 'errado').length; }
+  /** Página da tabela. ordem = coluna (de COLUNAS) e direção ('asc' | 'desc'). */
+  tabela(tipo, dia, f, pagina, tamanho, ordem, direcao) {
+    let linhas = this.filtrar(this.linhas(tipo, dia).linhas, f);
+    if (ordem && COLUNAS.some(c => c[0] === ordem)) {
+      const sinal = direcao === 'desc' ? -1 : 1;
+      linhas = linhas.slice().sort((a, b) => sinal * String(a[ordem] || '').localeCompare(String(b[ordem] || ''), 'pt-BR', {numeric: true}));
+    }
     const tam = Math.min(500, Math.max(10, Number(tamanho) || 100)), pag = Math.max(1, Number(pagina) || 1);
-    return {total: linhas.length, pagina: pag, tamanho: tam, colunas: COLUNAS,
+    return {total: linhas.length, pagina: pag, tamanho: tam, colunas: COLUNAS, ordem: ordem || '', direcao: direcao === 'desc' ? 'desc' : 'asc',
       linhas: linhas.slice((pag - 1) * tam, pag * tam).map(l => {
         const o = {situacao: l.situacao};
         COLUNAS.forEach(([k]) => { o[k] = l[k] === undefined || l[k] === null ? '' : l[k]; });

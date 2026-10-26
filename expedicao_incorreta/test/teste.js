@@ -159,6 +159,8 @@ function abasRotas(semcodComCodigo) {
 
   const pag = await local('GET', '/troncal');
   conferir(pag.status === 200 && /Expedição Incorreta/.test(pag.texto) && /painel\.js/.test(pag.texto), 'página do painel abre');
+  conferir(/class="sidebar"/.test(pag.texto) && /kpi-grid/.test(pag.texto) && /chart\.js@4\.4\.4/.test(pag.texto) && !/maomao|mascot/i.test(pag.texto),
+    'mesmo layout do painel principal (menu lateral, cartões, Chart.js), sem o mascote');
   conferir((await remoto('GET', '/config')).status === 403 && (await remoto('GET', '/config/api/estado')).status === 403,
     'Configurações não abrem de fora (link público)');
   let est = (await local('GET', '/config/api/estado')).json;
@@ -189,6 +191,8 @@ function abasRotas(semcodComCodigo) {
     'mais afetados: segmento, base destino, DESTINO, ID de viagem, lote e login', r.top);
   conferir(r.maisAfetados.segmento.nome === '902-00' && r.maisAfetados.viagem.nome === 'DKTESTE0001', 'cartões dos mais afetados');
   conferir(r.pendencias.semRotinha[0].nome === 'BASE FORA-XX' && r.pendencias.semCodigo[0].nome === 'WW SEMCOD', 'pendências apontam o que completar nas planilhas');
+  conferir(r.menu.troncal === 3 && r.menu.secundaria === 2 && r.opcoes.segmentos.indexOf('902-00') >= 0 && r.opcoes.logins.length === 2 &&
+    r.distintos.segmentos === 2 && r.maisAfetados.lote.nome === 'LT-ERRO', 'menu lateral com os errados de cada rota; opções de segmento e login', r.menu);
   let s = await painel('secundaria');
   conferir(s.totais.pacotes === 5 && s.totais.errados === 2 && s.totais.certos === 2 && s.totais.semRegra === 1,
     'secundária: segmento de fora da rota é erro (mesmo destino) e rota sem regra fica à parte', s.totais);
@@ -205,6 +209,13 @@ function abasRotas(semcodComCodigo) {
     t.linhas[0].shipmentNo && t.linhas[0].segmento && t.linhas[0].destino && /^T[123]$/.test(t.linhas[0].turno), 'tabela dos errados com turno, ID de viagem, SEGMENTOS e DESTINO', t);
   t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&tamanho=10&pagina=2')).json;
   conferir(t.total === 128 && t.linhas.length === 10 && t.pagina === 2, 'tabela com todos os dados, em páginas', {total: t.total, n: t.linhas.length});
+  t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&ordem=horario&direcao=desc&tamanho=5')).json;
+  conferir(t.ordem === 'horario' && t.direcao === 'desc' && t.linhas[0].horario >= t.linhas[1].horario && t.linhas[0].horario === DIA + ' 23:10:00',
+    'tabela ordena pela coluna clicada', t.linhas.map(l => l.horario));
+  f = await painel('troncal', '&segmento=902-00');
+  conferir(f.totais.errados === 2 && f.totais.pacotes === 122, 'filtro de segmento', f.totais);
+  f = await painel('troncal', '&login=' + encodeURIComponent('OPERADOR DOIS'));
+  conferir(f.totais.errados === 2, 'filtro de login', f.totais);
   t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&busca=LT-ERRO')).json;
   conferir(t.total === 2, 'busca na tabela (lote)', t.total);
   const x = await local('GET', '/api/excel?tipo=troncal&dia=' + DIA + '&situacao=errado');

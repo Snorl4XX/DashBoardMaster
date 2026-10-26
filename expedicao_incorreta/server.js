@@ -39,7 +39,7 @@ const {Coletor, hojeSp} = require('./lib/coletor');
 const {Painel} = require('./lib/painel');
 const {escreverXlsx} = require('./lib/xlsx');
 
-const VERSAO = '1.0.0';
+const VERSAO = require('./package.json').version;
 const DEFAULTS = {
   porta: 3300,            // 3300: não briga com o DashMaster (3000), o sorter (3100) nem a pesquisa (3200)
   host: '0.0.0.0',        // 0.0.0.0 = abre para a rede; 127.0.0.1 = só neste computador
@@ -205,7 +205,8 @@ async function lerJson(req) {
 }
 function filtros(u) {
   const g = k => String(u.searchParams.get(k) || '').slice(0, 120);
-  return {turno: g('turno'), rota: g('rota'), destino: g('destino'), situacao: g('situacao'), viagem: g('viagem'), busca: g('busca')};
+  return {turno: g('turno'), rota: g('rota'), destino: g('destino'), segmento: g('segmento'), login: g('login'), situacao: g('situacao'),
+    viagem: g('viagem'), busca: g('busca')};
 }
 function diaDe(u) {
   const d = String(u.searchParams.get('dia') || '');
@@ -248,8 +249,13 @@ async function tratar(req, res) {
   if (p === '/' ) return enviar(res, 302, '', 'text/plain', {Location: './troncal'});
   if (p === '/troncal' || p === '/secundaria') return arquivo(res, 'painel.html');
   if (p === '/api/estado') return json(res, 200, estadoPublico());
-  if (p === '/api/painel') return json(res, 200, Object.assign(painel.resumo(tipoDe(u), diaDe(u), filtros(u)), {estado: estadoPublico()}));
-  if (p === '/api/tabela') return json(res, 200, painel.tabela(tipoDe(u), diaDe(u), filtros(u), u.searchParams.get('pagina'), u.searchParams.get('tamanho')));
+  if (p === '/api/painel') {
+    const dia = diaDe(u);
+    return json(res, 200, Object.assign(painel.resumo(tipoDe(u), dia, filtros(u)), {estado: estadoPublico(),
+      menu: {troncal: painel.errados('troncal', dia), secundaria: painel.errados('secundaria', dia)}}));
+  }
+  if (p === '/api/tabela') return json(res, 200, painel.tabela(tipoDe(u), diaDe(u), filtros(u), u.searchParams.get('pagina'), u.searchParams.get('tamanho'),
+    u.searchParams.get('ordem'), u.searchParams.get('direcao')));
   if (p === '/api/excel') {
     const tipo = tipoDe(u), dia = diaDe(u), linhas = painel.planilha(tipo, dia, filtros(u));
     const nome = 'expedicao_' + (tipo === 'troncal' ? 'troncal' : 'secundaria') + '_' + dia + '.xlsx';

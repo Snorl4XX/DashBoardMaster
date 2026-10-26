@@ -10,7 +10,7 @@
   }
   function resultado(id, linhas, ok) {
     var el = $(id);
-    el.classList.remove('oculto');
+    el.classList.remove('hidden');
     el.textContent = (ok === false ? '✕ ' : ok ? '✓ ' : '') + [].concat(linhas).join('\n');
   }
   function info(id, pares) {
@@ -23,9 +23,9 @@
     });
   }
   function chips(titulo, lista, explica) {
-    var box = document.createElement('div'); box.className = 'secao';
-    var h = document.createElement('p'); h.className = 'sub'; h.textContent = titulo + ' (' + lista.length + '): ' + explica;
-    var l = document.createElement('div'); l.className = 'lista-chips';
+    var box = document.createElement('div'); box.style.cssText = 'display:grid;gap:8px;margin-top:4px';
+    var h = document.createElement('p'); h.className = 'muted small'; h.style.margin = '0'; h.textContent = titulo + ' (' + lista.length + '): ' + explica;
+    var l = document.createElement('div'); l.className = 'chips-list';
     lista.forEach(function (x) { var s = document.createElement('span'); s.textContent = x; l.appendChild(s); });
     box.appendChild(h); box.appendChild(l);
     return box;
@@ -37,7 +37,8 @@
       $('token-fonte').textContent = t.fonte === 'app' ? 'Em uso: o AuthToken colado neste app.' :
         t.fonte === 'dashmaster' ? 'Em uso: o AuthToken do DashMaster deste computador (o mesmo que você cola lá). Se colar um aqui, este app passa a usar o daqui.' :
           'Nenhum AuthToken: cole abaixo (ou cadastre no DashMaster deste computador).';
-      $('apagar-token').classList.toggle('oculto', !t.temProprio);
+      $('apagar-token').classList.toggle('hidden', !t.temProprio);
+      $('brandCenter').textContent = e.config.nomeBase; $('eyebrowCenter').textContent = e.config.nomeBase; $('appVersion').textContent = 'v' + e.versao;
       if (!$('dia-busca').value) $('dia-busca').value = e.hoje;
       var b = e.busca;
       info('busca-info', [
@@ -48,7 +49,7 @@
         ['Pacotes da secundária', e.jms.pacotesSecundaria ? 'endereço "' + e.jms.pacotesSecundaria + '/scan/page"' : 'ainda não testado']
       ]);
       if (b.erros && b.erros.length) resultado('busca-erros', ['Viagens com erro na última busca:'].concat(b.erros));
-      else $('busca-erros').classList.add('oculto');
+      else $('busca-erros').classList.add('hidden');
       var p = e.planilhas;
       info('plan-info', [
         ['Rotinha', p.rotinha ? p.arquivoRotinha + ' · ' + fmt(p.rotinha.bases) + ' bases · ' + fmt(p.rotinha.destinos) + ' destinos' +
