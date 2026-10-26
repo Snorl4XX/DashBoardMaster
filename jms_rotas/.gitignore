@@ -1,0 +1,5 @@
+# Planilhas do usuário (rotinha, rotas) e o cache das viagens: ficam só no computador.
+dados_locais/
+__pycache__/
+.pytest_cache/
+*.xlsx
