@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configurações · Expedição Incorreta</title>
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<header class="topo"><div class="topo-in">
+  <span class="marca">J&amp;T · Expedição Incorreta<small>Configurações</small></span>
+  <nav class="abas" aria-label="Painéis"><a href="troncal">Rota Troncal</a><a href="secundaria">Rota Secundária</a></nav>
+</div></header>
+<main class="pagina config">
+  <div><h1>Configurações</h1><p class="sub">Esta tela só abre no computador do app. Ninguém de fora consegue abrir.</p></div>
+
+  <section class="cartao secao" aria-labelledby="s-token">
+    <h2 id="s-token">AuthToken do JMS</h2>
+    <p class="sub" id="token-fonte">…</p>
+    <label for="token" class="sub">Cole o valor do AuthToken (F12 › Rede › item do gw.jtjms-br.com › Cabeçalhos › authtoken):</label>
+    <textarea id="token" autocomplete="off" spellcheck="false" placeholder="Cole aqui só o valor"></textarea>
+    <div class="linha-botoes">
+      <button type="button" class="botao principal" id="salvar-token">Salvar e testar</button>
+      <button type="button" class="botao" id="testar">Testar a conexão</button>
+      <button type="button" class="botao" id="apagar-token">Usar o do DashMaster</button>
+    </div>
+    <div class="resultado oculto" id="token-res"></div>
+  </section>
+
+  <section class="cartao secao" aria-labelledby="s-busca">
+    <h2 id="s-busca">Busca no JMS</h2>
+    <dl class="info" id="busca-info"></dl>
+    <div class="linha-botoes">
+      <label class="sub">Dia <input type="date" id="dia-busca" class="botao" style="font-weight:400"></label>
+      <button type="button" class="botao principal" id="buscar">Buscar este dia agora</button>
+      <button type="button" class="botao" id="buscar-tudo" title="Busca a lista de pacotes de todas as viagens de novo, mesmo sem mudança">Buscar tudo de novo</button>
+    </div>
+    <div class="resultado oculto" id="busca-erros"></div>
+  </section>
+
+  <section class="cartao secao" aria-labelledby="s-planilhas">
+    <h2 id="s-planilhas">Planilhas</h2>
+    <dl class="info" id="plan-info"></dl>
+    <div class="linha-botoes">
+      <label class="botao">Enviar rotinha (.xlsx)<input type="file" accept=".xlsx" id="up-rotinha" class="oculto"></label>
+      <label class="botao">Enviar planilha de rotas (.xlsx)<input type="file" accept=".xlsx" id="up-rotas" class="oculto"></label>
+      <a class="botao" href="config/api/rotas.xlsx" style="text-decoration:none">Baixar a planilha de rotas atual</a>
+    </div>
+    <div class="resultado oculto" id="plan-res"></div>
+    <div id="pendentes"></div>
+  </section>
+
+  <section class="cartao secao" aria-labelledby="s-end">
+    <h2 id="s-end">Endereços dos painéis</h2>
+    <dl class="info" id="end-info"></dl>
+  </section>
+
+  <section class="cartao secao" aria-labelledby="s-log">
+    <h2 id="s-log">Registro</h2>
+    <div class="resultado" id="registro"></div>
+  </section>
+</main>
+<script src="config.js"></script>
+</body>
+</html>

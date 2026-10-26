@@ -1,0 +1,16 @@
+{
+  "name": "jt-expedicao-incorreta",
+  "version": "1.0.0",
+  "private": true,
+  "description": "J&T Expedição Incorreta: pacotes no caminhão errado (rota troncal e secundária), conferidos com a rotinha e a tabela de rotas.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/teste.js",
+    "zip": "node gerar-zip.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "UNLICENSED"
+}

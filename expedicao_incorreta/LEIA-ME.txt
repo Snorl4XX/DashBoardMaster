@@ -1,0 +1,84 @@
+J&T · EXPEDIÇÃO INCORRETA (app separado do DashMaster)
+=====================================================
+
+O que faz
+---------
+Mostra, quase em tempo real, os pacotes colocados no caminhão errado (ex.: pacote do RJ dentro do caminhão para SP BRE).
+Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
+
+1. Pega no JMS os caminhões que SAEM da base no dia (Consulta de viagens troncais e Consulta de Viagens Secundárias).
+2. Em cada viagem, abre a linha "SP GRU · Bipe de carregamento" (Info / Registros de carga e descarga) e pega a lista de
+   pacotes: pedido, lote, próxima parada, Base Destino, digitalizado por e tempo de digitalização.
+3. Procura a Base Destino na planilha rotinha → SEGMENTOS (Código de dois segmentos) e DESTINO (Nome de mecanismo final),
+   igual ao seu PROCV.
+4. Confere com a planilha de rotas (as tabelas vermelhas das docas): o DESTINO do pacote tem de ser de um código de
+   1º nível da rota do caminhão e, quando a rota lista segmentos (2º nível), o SEGMENTOS tem de estar na lista.
+   Se não for → ERRADO.
+5. Busca de novo a cada 10 minutos (só baixa de novo a lista das viagens que mudaram).
+
+Não mexe no DashMaster: pasta, porta (3300) e link próprios.
+
+Instalar (no computador onde já roda o DashMaster, sem administrador)
+---------------------------------------------------------------------
+1. No ZIP: botão direito > Propriedades > marque "Desbloquear" > OK.
+2. Botão direito no ZIP > Extrair tudo... > destino C:\  > Extrair. Fica a pasta C:\expedicao_incorreta.
+3. Atalho na Área de Trabalho (botão direito > Novo > Atalho), cole com as aspas:
+     "C:\dashmaster\node\node.exe" "C:\expedicao_incorreta\server.js"
+   Nome: Expedição Incorreta. (Usa o mesmo node.exe do DashMaster.)
+4. Dois cliques no atalho. A janela preta mostra "no ar". Deixe aberta.
+   Na 1ª vez ela cria as pastas "dados" e "planilhas" dentro de C:\expedicao_incorreta.
+5. Abra http://localhost:3300/config
+   - AuthToken: se o DashMaster está neste computador, o app já usa o mesmo AuthToken dele. Clique em "Testar a conexão".
+     (Sem DashMaster: cole o AuthToken e clique em "Salvar e testar".)
+   - Planilhas: clique em "Enviar rotinha (.xlsx)" e escolha a sua rotinhas.xlsx.
+     (Ou copie a rotinhas.xlsx para C:\expedicao_incorreta\planilhas.)
+   - Clique em "Buscar este dia agora".
+6. Painéis: http://localhost:3300/troncal e http://localhost:3300/secundaria
+
+Planilha de rotas (C:\expedicao_incorreta\planilhas\rotas.xlsx)
+---------------------------------------------------------------
+Vem preenchida com as tabelas de 24/10 (troncal e secundária). Duas abas:
+- "Rotas": Tipo | Rota (Próxima parada) | 1º Nível (códigos) | 2º Nível (segmentos, opcional) | Observação.
+  Quando as docas mudarem, mude aqui. Duas linhas da mesma rota = qualquer uma vale.
+- "Códigos 1º nível": cada código > os DESTINOS da rotinha (Nome de mecanismo final) que ele representa.
+  Os códigos marcados "A CONFIRMAR" ainda não têm destino: preencha (tem uma sugestão na observação).
+  Enquanto isso, os pacotes desses destinos aparecem como "Destino sem código" (não contam como erro).
+Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
+
+Situações na tabela
+-------------------
+Errado               pacote fora da rota do caminhão (conta como erro)
+Certo                pacote da rota
+Base fora da rotinha a Base Destino não está na rotinha (inclua a base)
+Destino sem código   o DESTINO não está em nenhum código da aba "Códigos 1º nível"
+Rota sem regra       a próxima parada não está na aba "Rotas"
+
+Turnos (pelo tempo de digitalização): T1 06h-14h · T2 14h-22h · T3 22h-06h.
+
+Link para a equipe (Tailscale, o mesmo do DashMaster)
+-----------------------------------------------------
+1. Atalho na Área de Trabalho, cole com as aspas:
+     "C:\Program Files\Tailscale\tailscale.exe" funnel --https=8443 3300
+   Nome: Link da expedição. Dois cliques: a janela mostra o link https://....ts.net:8443
+2. Senha (recomendado): abra C:\expedicao_incorreta\config.json no Bloco de Notas, escreva a senha em "senha",
+   cole o link em "linkPublico", salve e abra o atalho do app de novo.
+3. Ligar sozinho: Windows + R > shell:startup > cole os dois atalhos nessa pasta.
+
+config.json (criado na 1ª vez)
+------------------------------
+porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base) · minutos 10 (busca automática) ·
+viagemGrande 3000 / minutosViagemGrande 30 (viagem grande baixa no máximo a cada 30 min) · dashmaster (pasta do DashMaster;
+"nao" = não usar o AuthToken dele). Mudou? Feche a janela preta e abra o atalho de novo.
+
+Se der problema
+---------------
+- Painel avisa "AuthToken do JMS vencido": pegue um novo no JMS e cole no DashMaster ou em Configurações deste app.
+- "A porta 3300 já está em uso": o app já está aberto em outra janela.
+- Janela mostra "O painel NÃO está no ar": leia a linha [erro] e mande um print (sem o AuthToken).
+- "Falha de rede ao consultar o JMS" e o JMS abre no navegador: a empresa usa proxy (veja o LEIA_NODE do DashMaster:
+  variáveis HTTPS_PROXY e NODE_USE_ENV_PROXY da sua conta).
+
+Teste (para quem mexe no código)
+--------------------------------
+node test/teste.js   (JMS de mentira e planilhas fictícias)
+node gerar-zip.js    (gera dist/EXPEDICAO_INCORRETA_V<versão>.zip)

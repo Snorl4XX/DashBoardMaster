@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expedição Incorreta</title>
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<header class="topo"><div class="topo-in">
+  <span class="marca">J&amp;T · Expedição Incorreta<small id="base"></small></span>
+  <nav class="abas" aria-label="Painéis">
+    <a href="troncal" id="aba-troncal">Rota Troncal</a>
+    <a href="secundaria" id="aba-secundaria">Rota Secundária</a>
+  </nav>
+  <div class="situacao-busca" aria-live="polite">
+    <span><span class="ponto" id="ponto"></span><span id="busca-texto">Carregando…</span></span>
+    <button type="button" class="botao" id="buscar">Buscar agora</button>
+  </div>
+</div></header>
+
+<main class="pagina">
+  <div>
+    <h1 id="titulo">Rota Troncal</h1>
+    <p class="sub" id="subtitulo">Pacotes bipados no carregamento de cada caminhão que saiu da base, conferidos com a rotinha e a tabela de rotas.</p>
+  </div>
+
+  <form class="filtros" id="filtros" onsubmit="return false">
+    <label>Dia<input type="date" id="f-dia"></label>
+    <label>Turno<select id="f-turno"><option value="">Todos</option><option>T1</option><option>T2</option><option>T3</option></select></label>
+    <label>Rota (próxima parada)<select id="f-rota"><option value="">Todas</option></select></label>
+    <label>DESTINO<select id="f-destino"><option value="">Todos</option></select></label>
+    <button type="button" class="botao" id="limpar">Limpar filtros</button>
+  </form>
+
+  <div class="avisos" id="avisos"></div>
+
+  <section class="cartoes" aria-label="Resumo">
+    <div class="cartao kpi destaque"><div class="rotulo">Pacotes no caminhão errado</div><div class="valor heroi" id="k-errados">–</div>
+      <div class="detalhe" id="k-taxa"></div></div>
+    <div class="cartao kpi"><div class="rotulo">Pacotes conferidos</div><div class="valor" id="k-pacotes">–</div><div class="detalhe" id="k-viagens"></div></div>
+    <div class="cartao kpi"><div class="rotulo"><span class="chave" style="background:var(--s1)"></span>T1 · 06h–14h</div><div class="valor" id="k-T1">–</div><div class="detalhe" id="k-T1d"></div></div>
+    <div class="cartao kpi"><div class="rotulo"><span class="chave" style="background:var(--s2)"></span>T2 · 14h–22h</div><div class="valor" id="k-T2">–</div><div class="detalhe" id="k-T2d"></div></div>
+    <div class="cartao kpi"><div class="rotulo"><span class="chave" style="background:var(--s3)"></span>T3 · 22h–06h</div><div class="valor" id="k-T3">–</div><div class="detalhe" id="k-T3d"></div></div>
+  </section>
+  <section class="cartoes" aria-label="Mais afetados">
+    <div class="cartao kpi"><div class="rotulo">Segmento mais afetado</div><div class="valor texto" id="m-segmento">–</div><div class="detalhe" id="m-segmento-d"></div></div>
+    <div class="cartao kpi"><div class="rotulo">Base destino mais afetada</div><div class="valor texto" id="m-base">–</div><div class="detalhe" id="m-base-d"></div></div>
+    <div class="cartao kpi"><div class="rotulo">DESTINO mais afetado</div><div class="valor texto" id="m-destino">–</div><div class="detalhe" id="m-destino-d"></div></div>
+    <div class="cartao kpi"><div class="rotulo">ID de viagem mais afetado</div><div class="valor texto" id="m-viagem">–</div><div class="detalhe" id="m-viagem-d"></div></div>
+  </section>
+
+  <section class="graficos" aria-label="Gráficos">
+    <div class="cartao grafico"><h2>Turnos</h2><p class="sub">Pacotes no caminhão errado em cada turno (tempo de digitalização)</p><div id="g-turnos"></div></div>
+    <div class="cartao grafico"><h2>Segmentos mais afetados</h2><p class="sub">SEGMENTOS (código de dois segmentos) dos pacotes errados</p><div id="g-segmentos"></div></div>
+    <div class="cartao grafico"><h2>Bases destino mais afetadas</h2><p class="sub">Base Destino dos pacotes errados</p><div id="g-bases"></div></div>
+    <div class="cartao grafico"><h2>DESTINOS mais afetados</h2><p class="sub">Nome de mecanismo final (rotinha) dos pacotes errados</p><div id="g-destinos"></div></div>
+    <div class="cartao grafico"><h2>Logins</h2><p class="sub">Digitalizado por — quem bipou os pacotes errados</p><div id="g-logins"></div></div>
+    <div class="cartao grafico"><h2>IDs de viagem mais afetados</h2><p class="sub">Número do ID e nome da viagem</p><div id="g-viagens"></div></div>
+    <div class="cartao grafico"><h2>Lotes com mais erro</h2><p class="sub">Número do lote (saca) com mais pacotes errados</p><div id="g-lotes"></div></div>
+    <div class="cartao grafico"><h2>Rotas com mais erro</h2><p class="sub">Próxima parada do caminhão</p><div id="g-rotas"></div></div>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-tabela">
+    <div class="barra-tabela">
+      <h2 id="t-tabela">Todos os pacotes</h2>
+      <select id="t-situacao" aria-label="Situação">
+        <option value="">Todas as situações</option><option value="errado">Errado</option><option value="certo">Certo</option>
+        <option value="sem_rotinha">Base fora da rotinha</option><option value="sem_codigo">Destino sem código</option><option value="sem_regra">Rota sem regra</option>
+      </select>
+      <input type="search" id="t-busca" placeholder="Buscar pedido, lote, ID, base, login…" aria-label="Buscar na tabela">
+      <span class="espaco"></span>
+      <button type="button" class="botao" id="excel">Baixar Excel</button>
+    </div>
+    <div class="tabela-caixa"><table><thead id="t-cab"></thead><tbody id="t-corpo"></tbody></table></div>
+    <div class="paginacao"><span id="t-info"></span><button type="button" class="botao" id="t-ant">Anterior</button><button type="button" class="botao" id="t-prox">Próxima</button></div>
+  </section>
+</main>
+<div class="dica oculto" id="dica" role="tooltip"></div>
+<script src="graficos.js"></script>
+<script src="painel.js"></script>
+</body>
+</html>

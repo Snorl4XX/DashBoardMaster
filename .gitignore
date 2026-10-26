@@ -8,3 +8,8 @@ node_modules/
 dist/
 # Cache do Python (testes do jms_segmentos).
 __pycache__/
+# App Expedição Incorreta: banco, configuração e planilhas do computador (a rotinha é da pessoa); pacote gerado.
+expedicao_incorreta/dados/
+expedicao_incorreta/config.json
+expedicao_incorreta/planilhas/
+expedicao_incorreta/dist/
