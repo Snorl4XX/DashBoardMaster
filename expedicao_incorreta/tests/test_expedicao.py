@@ -669,3 +669,138 @@ def test_lista_de_pacotes_com_codigo_dispensa_o_rastreio(tmp_path, falso, monkey
     assert c["feitos"] == c["total"]
     assert any("Lista de pacotes do JMS" in l and "terminalDispatchCode" in l for l in app.ultimas)
     app.banco.fechar()
+
+
+# ------------------------------------------------------------------ base de dados em planilha
+from expedicao.base_planilha import COLUNAS as COLUNAS_BASE, BasePlanilha, ler_segmentos  # noqa: E402
+
+
+def _base(tmp_path, regras, pacotes):
+    b = _banco_com_viagem(tmp_path, pacotes)
+    painel = Painel(b, regras, {"concluido": {"4"}, "em_transito": {"3"}})
+    logs = []
+    cfg = {"statusCodigos": {"concluido": {"4"}, "em_transito": {"3"}}}
+    base = BasePlanilha(pasta=tmp_path / "base_de_dados", pasta_planilhas=tmp_path / "planilhas", banco=b, painel=painel, regras=regras,
+                        cfg=cfg, log=lambda n, t: logs.append(t))
+    return b, painel, base, logs
+
+
+def test_base_escreve_a_planilha_do_dia(tmp_path, regras):
+    openpyxl = pytest.importorskip("openpyxl")
+    b, painel, base, _ = _base(tmp_path, regras, [_pacote("A1", "DC SBC-SP", "08:00:00"), _pacote("R1", "DC NIT-RJ", "15:00:00")])
+    b.salvar_segmento("R1", {"s1": "RJ", "s2": "220-10", "s3": "001"}, "")
+    assert base.escrever(HOJE)
+    wb = openpyxl.load_workbook(base.arquivo(HOJE))
+    ws = wb["Pacotes"]
+    assert ws.freeze_panes == "A3" and ws.auto_filter.ref.startswith("A2:")
+    assert [c.value for c in ws[1]] == [c[1] for c in COLUNAS_BASE] and ws["A2"].value == "日期"
+    linhas = {r[9]: r for r in ws.iter_rows(min_row=3, values_only=True)}
+    assert linhas["R1"][3] == "Errado" and linhas["R1"][5] == "RJ SJM" and linhas["R1"][17] == "JMS"
+    assert linhas["A1"][3] == "Sem 3 Segmentos" and linhas["A1"][14] is None
+    assert wb["Viagens"]["B3"].value == "T1"
+    assert b.escrita(HOJE)["R1"] == ("RJ", "220-10")
+    b.fechar()
+
+
+def test_base_le_o_segmento_preenchido_na_planilha(tmp_path, regras):
+    openpyxl = pytest.importorskip("openpyxl")
+    b, painel, base, logs = _base(tmp_path, regras, [_pacote("A1", "DC SBC-SP", "08:00:00"), _pacote("A2", "DC XYZ-SP", "09:00:00"),
+                                                     _pacote("R1", "DC NIT-RJ", "15:00:00")])
+    b.salvar_segmento("R1", {"s1": "RJ", "s2": "220-10"}, "")
+    base.escrever(HOJE)
+    assert base.importar_edicoes(HOJE) == 0  # o próprio app escreveu: nada a ler
+    # A pessoa abre no Excel, preenche A1 (pacote de MG no caminhão da SP BRE) e salva.
+    arq = base.arquivo(HOJE)
+    wb = openpyxl.load_workbook(arq)
+    ws = wb["Pacotes"]
+    for linha in ws.iter_rows(min_row=3):
+        if linha[9].value == "A1":
+            linha[14].value, linha[15].value = "mg", "300-04"
+    time.sleep(0.01)
+    wb.save(arq)
+    assert base.importar_edicoes(HOJE) == 1
+    assert base.importar_edicoes(HOJE) == 0  # o mesmo arquivo não é lido duas vezes
+    assert any("preenchido por você" in t for t in logs)
+    l = {x["billCode"]: x for x in painel.linhas_dia("troncal", HOJE)["linhas"]}
+    assert (l["A1"]["situacao"], l["A1"]["rotaCerta"], l["A1"]["fonteSegmento"], l["A1"]["seg3"]) == ("errado", "MG CGE", "Planilha", "(planilha)")
+    assert l["A1"]["planilha"] and not l["A1"]["jms"]
+    assert "A1" not in b.fila_segmentos(HOJE)  # preenchido: não consulta mais no JMS
+    resumo = painel.resumo("troncal", HOJE, HOJE, {})
+    assert resumo["segmentos"]["planilha"] == 1
+    # Reescrita: a planilha mostra a fonte e o que a pessoa preencheu continua lá.
+    assert base.escrever(HOJE)
+    ws = openpyxl.load_workbook(arq)["Pacotes"]
+    linha = next(r for r in ws.iter_rows(min_row=3, values_only=True) if r[9] == "A1")
+    assert (linha[3], linha[14], linha[15], linha[17]) == ("Errado", "MG", "300-04", "Planilha")
+    b.fechar()
+
+
+def test_base_aberta_no_excel_espera(tmp_path, regras, monkeypatch):
+    from expedicao import base_planilha
+    b, painel, base, logs = _base(tmp_path, regras, [_pacote("A1", "DC SBC-SP", "08:00:00")])
+
+    def trancado(*a):
+        raise PermissionError("aberto")
+    monkeypatch.setattr(base_planilha.os, "replace", trancado)
+    assert base.escrever(HOJE) is False and base.escrever(HOJE) is False
+    assert base.abertas == {HOJE} and sum("aberta no Excel" in t for t in logs) == 1
+    assert not list((tmp_path / "base_de_dados").glob(".*.tmp"))
+    monkeypatch.undo()
+    base.marcar(HOJE)
+    base.escrito_em.clear()
+    base.rodada()
+    assert base.arquivo(HOJE).exists() and not base.abertas
+    b.fechar()
+
+
+def test_planilha_de_segmentos(tmp_path, regras):
+    pesquisa = escrever_xlsx([{"nome": "Segmentos", "linhas": [
+        ["Remessa", "Código de primeiro segmento", "Código de dois segmentos", "Situação"],
+        ["JTA001", "MG", "300-04", "Com código"], ["JTA002", "", "", "Sem código"], ["total", "", "", ""]]}])
+    assert ler_segmentos(pesquisa) == [("JTA001", "MG", "300-04", "")]
+    juntos = escrever_xlsx([{"nome": "x", "linhas": [["Número de pedido JMS", "3 Segmentos"], ["运单号", "三段码"], ["JTR001", "RJ,220-10,001"]]}])
+    assert ler_segmentos(juntos) == [("JTR001", "RJ", "220-10", "001")]
+    with pytest.raises(ValueError):
+        ler_segmentos(escrever_xlsx([{"nome": "x", "linhas": [["Nome", "Idade"], ["a", 1]]}]))
+    b, painel, base, logs = _base(tmp_path, regras, [_pacote("JTA001", "DC SBC-SP", "08:00:00")])
+    base.arquivo_segmentos.parent.mkdir(parents=True, exist_ok=True)
+    base.arquivo_segmentos.write_bytes(pesquisa)
+    assert base.importar_segmentos() == 1 and base.importar_segmentos() == 0
+    l = painel.linhas_dia("troncal", HOJE)["linhas"][0]
+    assert (l["situacao"], l["fonteSegmento"]) == ("errado", "Planilha")
+    b.fechar()
+
+
+def test_servidor_planilha_de_segmentos_e_base(servidor):
+    app, c = servidor
+    assert app.coletor.coletar([HOJE]).result(timeout=60)["ok"]
+    assert c.pedir("/config/api/base.xlsx?dia=2026-01-01")[0] == 404
+    app.base.rodada()
+    st, h, corpo = c.pedir(f"/config/api/base.xlsx?dia={HOJE}")
+    assert st == 200 and h["Content-Disposition"] == f'attachment; filename="expedicao_{HOJE}.xlsx"'
+    assert [a["nome"] for a in ler_xlsx(corpo)] == ["Pacotes", "Viagens"]
+    ruim = escrever_xlsx([{"nome": "x", "linhas": [["Nome"], ["a"]]}])
+    st, _, corpo = c.pedir("/config/api/planilha?nome=segmentos", ruim, tipo="application/octet-stream")
+    assert st == 400 and "não achei as colunas" in json.loads(corpo)["error"]
+    remessa = app.banco.pacotes_dia("troncal", HOJE)[0]["billCode"]
+    boa = escrever_xlsx([{"nome": "x", "linhas": [["Remessa", "Código de primeiro segmento", "Código de dois segmentos"], [remessa, "AM", "690-01"]]}])
+    st, _, corpo = c.pedir("/config/api/planilha?nome=segmentos", boa, tipo="application/octet-stream")
+    assert st == 200 and json.loads(corpo)["remessas"] == 1
+    st, _, corpo = c.pedir("/config/api/estado")
+    e = json.loads(corpo)
+    assert e["base"]["planilhas"] == 1 and e["base"]["segmentosXlsx"] and e["base"]["pasta"].endswith("base_de_dados")
+
+
+def test_cabecalho_do_rastreio_do_dashmaster():
+    cred = {"JMS_AUTHTOKEN": "x", "JMS_ROUTE_AUTO_TRACKING": "2", "JMS_EXTRA_HEADERS_JSON": '{"X-Teste": "1", "AuthToken": "outro"}'}
+    props = Props()
+    j = Jms(credenciais=lambda: cred, props=props)
+    h = j.cabecalhos("rastreio")
+    assert h["Routename"] == "waybillTracking" and h["X-Teste"] == "1" and h["AuthToken"] == "x"
+    assert "Routename" not in j.cabecalhos("troncal")
+    props.set("ROUTE_AUTO_RASTREIO", "1")  # o que este app aprendeu vale mais
+    assert j.cabecalhos("rastreio")["Routename"] == "trackingExpress"
+    cred["JMS_ROUTENAME_TRACKING"], cred["JMS_ROUTENAMELIST_TRACKING"] = "packageTracking", "运营>轨迹"
+    h = j.cabecalhos("rastreio")
+    assert h["Routename"] == "packageTracking" and h["Routernamelist"].startswith("%E8%BF%90")
+    assert j.trocar_rota("rastreio", "/x", None, ErroJms("recusou", recusa=True)) is None  # fixo: não troca

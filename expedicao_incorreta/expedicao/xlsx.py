@@ -189,6 +189,7 @@ _ESTILOS = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 
 
 def _aba_xml(aba: dict) -> str:
+    cab = max(1, int(aba.get("cabecalho") or 1))  # linhas de cabeçalho (ex.: português em cima, mandarim embaixo)
     cols = "".join(f'<col min="{i + 1}" max="{i + 1}" width="{w}" customWidth="1"/>' for i, w in enumerate(aba.get("larguras") or []))
     partes = []
     for r, linha in enumerate(aba.get("linhas") or []):
@@ -196,21 +197,26 @@ def _aba_xml(aba: dict) -> str:
         for c, v in enumerate(linha):
             if v is None or v == "":
                 continue
-            ref, s = f"{col_nome(c + 1)}{r + 1}", ' s="1"' if r == 0 else ""
+            ref, s = f"{col_nome(c + 1)}{r + 1}", ' s="1"' if r < cab else ""
             if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
                 celulas.append(f'<c r="{ref}"{s}><v>{v}</v></c>')
             else:
                 celulas.append(f'<c r="{ref}"{s} t="inlineStr"><is><t xml:space="preserve">{_esc(v)}</t></is></c>')
         partes.append(f'<row r="{r + 1}">{"".join(celulas)}</row>')
+    linhas = aba.get("linhas") or []
+    largura = max((len(l) for l in linhas[:cab]), default=0)
+    filtro = (f'<autoFilter ref="A{cab}:{col_nome(largura)}{max(cab, len(linhas))}"/>'
+              if aba.get("filtro") and largura else "")
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+            f'<sheetViews><sheetView workbookViewId="0"><pane ySplit="{cab}" topLeftCell="A{cab + 1}" activePane="bottomLeft" state="frozen"/>'
             "</sheetView></sheetViews>" + (f"<cols>{cols}</cols>" if cols else "") + "<sheetData>" + "".join(partes) +
-            "</sheetData></worksheet>")
+            "</sheetData>" + filtro + "</worksheet>")
 
 
 def escrever_xlsx(abas: list[dict]) -> bytes:
-    """abas = [{"nome", "linhas": [[...]], "larguras": [n...]}]. A 1ª linha de cada aba é o cabeçalho e fica fixa no topo.
+    """abas = [{"nome", "linhas": [[...]], "larguras": [n...], "cabecalho": 1, "filtro": False}]. As primeiras "cabecalho" linhas
+    de cada aba (padrão 1) são o cabeçalho vermelho e ficam fixas no topo; "filtro" põe o filtro do Excel na última delas.
 
     Texto vai como inlineStr (sem sharedStrings); números como número. Data fixa nos arquivos do ZIP: o mesmo conteúdo
     gera o mesmo arquivo.

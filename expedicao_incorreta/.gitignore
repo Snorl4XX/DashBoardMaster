@@ -2,5 +2,6 @@
 config.json
 dados/
 planilhas/
+base_de_dados/
 demo/
 __pycache__/

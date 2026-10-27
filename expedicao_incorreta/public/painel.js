@@ -130,6 +130,10 @@
       var todos = sg.jms >= sg.total;
       b.push('<span class="badge ' + (todos ? 'ok' : 'warn') + '" title="Pacotes que o JMS já respondeu no bloco 3 Segmentos (Rastreamento do pacote).">' +
         svg(todos ? 'check' : 'alert') + '<span>3 Segmentos no JMS: ' + fmtPct(sg.jms / sg.total * 100, sg.jms >= sg.total || !sg.jms ? 0 : 1) + '</span></span>');
+      if (sg.planilha) {
+        b.push('<span class="badge ok" title="Pacotes com o 1º e o 2º segmento preenchidos na planilha (base de dados ou planilha de segmentos).">' +
+          svg('check') + '<span>' + fmtInt(sg.planilha) + ' pela planilha</span></span>');
+      }
       if (sg.pelaBase) {
         b.push('<span class="badge" title="Pacotes ainda sem a consulta no JMS que usam o 1º e o 2º segmento já vistos na mesma Base Destino. A consulta continua e troca pelo código exato.">' +
           svg('base') + '<span>' + fmtInt(sg.pelaBase) + ' pela Base Destino</span></span>');

@@ -42,6 +42,7 @@ Não mexe no DashMaster: tem pasta, porta (3300) e link próprios.
      - Depois de 300 respostas seguidas sem bloqueio, acelera aos poucos.
      - O ritmo que funcionou fica guardado. O registro mostra o título da página que o JMS devolveu.
    - **Se a lista de pacotes do JMS já trouxer o código** (campo `terminalDispatchCode`), o app usa direto, sem consultar.
+   - **Com o DashMaster neste computador**, usa o mesmo cabeçalho do Rastreamento do pacote que ele (e a Pesquisa) já usam.
 4. **Conferência:** compara com a **planilha de rotas do SC** (as tabelas vermelhas das docas) e acha o **DESTINO CORRETO** do pacote:
    - **Destino correto:** as rotas que levam o código de 1º nível. Ex.: VDC › RJ SJM.
    - **Linha com segmento:** se uma linha cita o segmento (2º nível), ela vence a linha geral. Ex.: SP 395-05 vai na DC GRU-SP, não na SP BRE.
@@ -49,6 +50,52 @@ Não mexe no DashMaster: tem pasta, porta (3300) e link próprios.
    - **Resultado:** se a Próxima parada (o caminhão) é diferente do destino correto, o pacote é **ERRADO**.
 5. **Busca automática:** de novo a cada 10 minutos. Só baixa de novo a lista das viagens que mudaram. Viagem concluída e já conferida não é consultada de novo.
 6. **Histórico:** guarda todos os dias. O dia anterior é buscado de novo a cada 60 minutos (e logo que o app abre), para ficar salvo completo.
+7. **Base de dados em planilha:** tudo o que vem do JMS vai para uma planilha por dia, e o que você preencher nela volta para o painel (veja abaixo).
+
+## Base de dados em planilha (`base_de_dados\`)
+
+O app escreve o que pega no JMS em **uma planilha por dia**: `base_de_dados\expedicao_AAAA-MM-DD.xlsx` (as duas rotas).
+
+- **Aba "Pacotes":** uma linha por pacote do painel (viagens Concluído e Em Trânsito). Colunas:
+  - Dia, Rota, Turno, Situação, Próxima parada, Destino correto;
+  - ID de viagem, Viagem, Status;
+  - Número de pedido JMS, Número do lote, Base de escaneamento, Base Destino, Município de Destino;
+  - **Código de primeiro segmento**, **Código de dois segmentos**, 3 Segmentos, **Fonte do segmento**;
+  - Tipo de bipagem, Digitalizado por, Tempo de digitalização.
+- **Aba "Viagens":** as viagens do dia (status, horários, placa, transportadora, pacotes bipados).
+- **Formato:** cabeçalho vermelho J&T, português em cima e mandarim embaixo, com filtro.
+- **Quando atualiza:** sempre que o JMS traz novidade (no máximo 1 vez por minuto por dia).
+
+**Fonte do segmento:**
+
+| Fonte | De onde veio o 1º e o 2º segmento |
+|---|---|
+| **JMS** | Rastreamento do pacote (ou a lista de pacotes do JMS). |
+| **Planilha** | Você preencheu (nesta planilha ou na planilha de segmentos). |
+| **Base Destino** | Código de outra remessa da mesma Base Destino, até a consulta chegar. |
+| vazio | Ainda sem código: "Sem 3 Segmentos". |
+
+### Preencher os segmentos que faltam
+
+1. Abra a planilha do dia no Excel (Configurações › **Baixar a planilha de hoje**, ou direto na pasta `base_de_dados`).
+2. Filtre a **Situação** "Sem 3 Segmentos" (ou a Fonte vazia).
+3. Preencha **Código de primeiro segmento** e **Código de dois segmentos** (pode usar PROCV com a sua rotinha) e **salve**.
+4. Em até 15 segundos o painel mostra esses pacotes conferidos, com a Fonte **Planilha**.
+   - Esses pacotes não são mais consultados no JMS.
+   - Para corrigir um código que veio do JMS, é só escrever outro por cima: o seu vale.
+
+- **Não mude o cabeçalho nem as outras colunas:** elas vêm do JMS e são reescritas.
+- **Com a planilha aberta no Excel**, o app não consegue reescrevê-la: ele espera você fechar. O que você salvou continua valendo, e o painel continua atualizando.
+
+### Planilha de segmentos (várias remessas de uma vez)
+
+Em Configurações › **Enviar planilha de segmentos (.xlsx)**, ou salvando o arquivo como `planilhas\segmentos.xlsx`.
+
+- **Colunas aceitas:**
+  - a remessa: "Número de pedido JMS" ou "Remessa";
+  - os códigos: "Código de primeiro segmento" e "Código de dois segmentos", ou "3 Segmentos" com os três juntos (`SP,395-01,012`).
+- **Serve, por exemplo, a planilha da Pesquisa no Rastreamento** no modo "Só os códigos de segmento".
+- **Vale para qualquer dia**, inclusive pacotes que ainda vão chegar. O app lê de novo sempre que o arquivo muda.
 
 ## Instalar e abrir (Windows, sem administrador)
 
@@ -190,6 +237,7 @@ A tela Configurações nunca abre pelo link nem de outro computador: só no comp
 | `viagemGrande` / `minutosViagemGrande` | 3000 / 30 | Viagem grande baixa a lista no máximo a cada 30 min. |
 | `dashmaster` | vazio | Pasta do DashMaster para usar o mesmo AuthToken (vazio = procura em `C:\dashmaster`; `"nao"` = não usar). |
 | `linkPublico` | vazio | Link do Tailscale (só para aparecer na janela e em Configurações). |
+| `pastaBase` | `base_de_dados` | Pasta da base de dados em planilha (uma por dia). |
 
 Mudou o `config.json`? Feche a janela preta e abra o app de novo.
 
@@ -220,6 +268,7 @@ Mudou o `config.json`? Feche a janela preta e abra o app de novo.
 | `expedicao/jms.py` | Consultas, ritmo, Routename e erros. |
 | `expedicao/regras.py` | Conferência pela planilha de rotas. |
 | `expedicao/painel.py` | Cartões, gráficos, tabela e Excel. |
+| `expedicao/base_planilha.py` | Base de dados em planilha (escreve o dia, lê o que você preencheu). |
 | `expedicao/banco.py` | SQLite. |
 | `expedicao/xlsx.py` | Lê e escreve .xlsx sem bibliotecas. |
 | `expedicao/demo.py` | JMS de mentira. |

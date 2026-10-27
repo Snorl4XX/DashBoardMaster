@@ -41,6 +41,9 @@ CREATE INDEX IF NOT EXISTS pacotes_so_dia ON pacotes (dia);
 -- usa o da mesma base (versão Python).
 CREATE TABLE IF NOT EXISTS segmentos_base (base TEXT NOT NULL, s1 TEXT NOT NULL, s2 TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
   em INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (base, s1, s2));
+-- O que o app escreveu nas colunas de segmento da planilha de cada dia (base_de_dados/): o que estiver diferente na planilha
+-- foi a pessoa que preencheu.
+CREATE TABLE IF NOT EXISTS base_escrita (dia TEXT NOT NULL, billCode TEXT NOT NULL, s1 TEXT, s2 TEXT, PRIMARY KEY (dia, billCode));
 """
 # Quanto da base o código mais visto precisa ter para valer para os outros pacotes dela.
 DOMINANTE = 0.8
@@ -68,6 +71,9 @@ class Banco:
             # 1.2: status da viagem quando a lista de pacotes foi conferida (viagem concluída e conferida não muda mais).
             if not any(c["name"] == "estadoBusca" for c in self.db.execute("PRAGMA table_info(viagens)")):
                 self.db.execute("ALTER TABLE viagens ADD COLUMN estadoBusca TEXT")
+            # De onde veio o "3 Segmentos": jms (Rastreamento do pacote ou lista de pacotes) ou planilha (preenchido pela pessoa).
+            if not any(c["name"] == "fonte" for c in self.db.execute("PRAGMA table_info(segmentos)")):
+                self.db.execute("ALTER TABLE segmentos ADD COLUMN fonte TEXT NOT NULL DEFAULT 'jms'")
             # Dias buscados pela versão 1.1 (antes desta tabela) contam como buscados.
             self.db.execute("INSERT OR IGNORE INTO buscas (dia, em) SELECT DISTINCT dia, 0 FROM viagens")
             # Banco que veio sem a tabela por Base Destino (versão Node.js): monta com o que o JMS já respondeu.
@@ -154,7 +160,7 @@ class Banco:
 
     def pacotes_dia(self, tipo: str, dia: str) -> list[dict]:
         """Pacotes do dia com o "3 Segmentos" da remessa (vazio enquanto não foi consultado)."""
-        return self._todos("""SELECT p.*, s.s1 AS seg1, s.s2 AS seg2, s.s3 AS seg3, s.billCode AS segFeito FROM pacotes p
+        return self._todos("""SELECT p.*, s.s1 AS seg1, s.s2 AS seg2, s.s3 AS seg3, s.billCode AS segFeito, s.fonte AS segFonte FROM pacotes p
                               LEFT JOIN segmentos s ON s.billCode = p.billCode AND s.erro = '' WHERE p.tipo = ? AND p.dia = ?""",
                            tipo, dia)
 
@@ -173,24 +179,42 @@ class Banco:
         """Guarda o "3 Segmentos" da remessa (r = {s1, s2, s3, centro}) ou o erro da consulta."""
         self.salvar_segmentos([(bill_code, r, erro)])
 
-    def salvar_segmentos(self, lista: list[tuple]) -> None:
-        """Vários de uma vez: [(billCode, {s1, s2, s3, centro} | None, erro)]. O código certo também conta para a Base Destino."""
+    def salvar_segmentos(self, lista: list[tuple], fonte: str = "jms") -> None:
+        """Vários de uma vez: [(billCode, {s1, s2, s3, centro} | None, erro)]. O código certo também conta para a Base Destino.
+        fonte = "jms" ou "planilha" (preenchido pela pessoa na planilha)."""
         em = agora_ms()
         with self.trava:
             for bill_code, r, erro in lista:
                 o = r or {}
                 s1, s2 = _s(o.get("s1")).strip(), _s(o.get("s2")).strip()
                 antes = self.db.execute("SELECT s1, s2, erro FROM segmentos WHERE billCode = ?", (str(bill_code),)).fetchone()
-                self.db.execute("""INSERT INTO segmentos (billCode, s1, s2, s3, centro, em, erro) VALUES (?, ?, ?, ?, ?, ?, ?)
+                self.db.execute("""INSERT INTO segmentos (billCode, s1, s2, s3, centro, em, erro, fonte) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                                    ON CONFLICT (billCode) DO UPDATE SET s1 = excluded.s1, s2 = excluded.s2, s3 = excluded.s3,
-                                     centro = excluded.centro, em = excluded.em, erro = excluded.erro""",
-                                (str(bill_code), s1, s2, _s(o.get("s3")).strip(), _s(o.get("centro")), em, erro or ""))
+                                     centro = excluded.centro, em = excluded.em, erro = excluded.erro, fonte = excluded.fonte""",
+                                (str(bill_code), s1, s2, _s(o.get("s3")).strip(), _s(o.get("centro")), em, erro or "", fonte))
                 ja_contou = antes is not None and not antes["erro"] and (antes["s1"], antes["s2"]) == (s1, s2)
                 if s1 and not erro and not ja_contou:
                     self.db.execute("""INSERT INTO segmentos_base (base, s1, s2, n, em)
                                        SELECT baseDestino, ?, ?, 1, ? FROM pacotes WHERE billCode = ? AND baseDestino <> '' LIMIT 1
                                        ON CONFLICT (base, s1, s2) DO UPDATE SET n = n + 1, em = excluded.em""",
                                     (s1, s2, em, str(bill_code)))
+
+    def guardar_escrita(self, dia: str, linhas: list[tuple]) -> None:
+        """O que foi escrito nas colunas de segmento da planilha do dia: [(billCode, s1, s2)]."""
+        with self.trava:
+            self.db.execute("BEGIN")
+            try:
+                self.db.execute("DELETE FROM base_escrita WHERE dia = ?", (dia,))
+                self.db.executemany("INSERT OR REPLACE INTO base_escrita (dia, billCode, s1, s2) VALUES (?, ?, ?, ?)",
+                                    [(dia, b, s1, s2) for b, s1, s2 in linhas])
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+
+    def escrita(self, dia: str) -> dict[str, tuple[str, str]]:
+        """billCode → (s1, s2) que o app escreveu na planilha do dia."""
+        return {r["billCode"]: (r["s1"] or "", r["s2"] or "") for r in self._todos("SELECT billCode, s1, s2 FROM base_escrita WHERE dia = ?", dia)}
 
     def segmentos_por_base(self) -> dict[str, tuple[str, str]]:
         """Base Destino → (1º, 2º segmento) que o JMS deu para ela. Só vale quando um código domina a base (≥ 80%)."""

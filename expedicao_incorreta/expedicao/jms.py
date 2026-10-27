@@ -185,12 +185,22 @@ class Jms:
         """Nova busca: as variantes de Routename podem ser testadas de novo (uma vez por grupo em cada busca)."""
         self.testou_rota = {}
 
-    def rota_cabecalho(self, grupo: str) -> str:
+    def _fixo(self, grupo: str) -> str:
+        """Cabeçalho de rota escolhido à mão: o deste app (ROUTENAME_<GRUPO>) ou, no Rastreamento do pacote, o do DashMaster."""
         fixo = self.props.get("ROUTENAME_" + grupo.upper())
+        if not fixo and grupo == "rastreio":
+            fixo = (self.credenciais() or {}).get("JMS_ROUTENAME_TRACKING")
+        return str(fixo or "")
+
+    def rota_cabecalho(self, grupo: str) -> str:
+        fixo = self._fixo(grupo)
         if fixo:
-            return "" if str(fixo).upper() == "NONE" else fixo
+            return "" if fixo.upper() == "NONE" else fixo
+        aprendido = self.props.get("ROUTE_AUTO_" + grupo.upper())
+        if aprendido is None and grupo == "rastreio":  # o que o DashMaster já aprendeu (1, 2 ou 3 = as mesmas variantes)
+            aprendido = (self.credenciais() or {}).get("JMS_ROUTE_AUTO_TRACKING")
         try:
-            i = int(self.props.get("ROUTE_AUTO_" + grupo.upper()) or 0)
+            i = int(aprendido or 0)
         except ValueError:
             i = 0
         lista = ROTAS_CABECALHO[grupo]
@@ -209,6 +219,19 @@ class Jms:
         nome = variante if variante is not None else self.rota_cabecalho(grupo)
         if nome:
             h["Routename"] = _ascii(nome)
+        lista = str(c.get("JMS_ROUTENAMELIST_TRACKING") or "") if grupo == "rastreio" else ""
+        if lista and lista.upper() != "NONE":
+            h["Routernamelist"] = _ascii(lista)
+        try:  # cabeçalhos extras do DashMaster (JMS_EXTRA_HEADERS_JSON), sem trocar os de acesso e de rota
+            extra = json.loads(c.get("JMS_EXTRA_HEADERS_JSON") or "null")
+        except ValueError:
+            extra = None
+        if isinstance(extra, dict):
+            proibidos = {"authtoken", "authorization", "cookie", "host", "accept", "content-type", "content-length", "routename",
+                         "routenamelist", "routernamelist"}
+            for k, v in extra.items():
+                if k.lower() not in proibidos and re.fullmatch(r"[A-Za-z0-9-]+", str(k)) and v is not None and not isinstance(v, (dict, list)):
+                    h[k] = _ascii(v)
         return h
 
     # ---------------------------------------------------------------- uma consulta
@@ -292,8 +315,7 @@ class Jms:
         raise erro
 
     def trocar_rota(self, grupo: str, caminho: str, corpo: dict | None, erro: ErroJms) -> dict | None:
-        fixo = self.props.get("ROUTENAME_" + grupo.upper())
-        if self.testou_rota.get(grupo) or fixo:
+        if self.testou_rota.get(grupo) or self._fixo(grupo):
             return None
         self.testou_rota[grupo] = True
         atual, lista = self.rota_cabecalho(grupo), ROTAS_CABECALHO[grupo]

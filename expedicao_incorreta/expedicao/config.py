@@ -116,4 +116,5 @@ def ler_config(arquivo: Path | None = None, padroes: dict | None = None) -> dict
     pasta = arq.parent
     c["dados"] = str((pasta / (c.get("pastaDados") or "dados")).resolve())
     c["planilhas"] = str((pasta / (c.get("pastaPlanilhas") or "planilhas")).resolve())
+    c["base"] = str((pasta / (c.get("pastaBase") or "base_de_dados")).resolve())
     return c

@@ -65,6 +65,17 @@
         ['Planilha de rotas', p.rotas ? 'rotas.xlsx · ' + p.rotas.troncal + ' rotas troncais · ' + p.rotas.secundaria + ' secundárias' : 'falta'],
         ['Pasta da planilha', e.config.planilhas]
       ]);
+      var bd = e.base;
+      if (bd) {
+        info('base-info', [
+          ['Pasta', bd.pasta],
+          ['Planilhas', fmt(bd.planilhas) + (bd.planilhas === 1 ? ' dia' : ' dias') + (bd.hoje ? ' · a de hoje: expedicao_' + e.hoje + '.xlsx' : ' · a de hoje sai depois da primeira busca')],
+          ['Última escrita', bd.ultima ? hora(bd.ultima.quando) + ' · ' + br(bd.ultima.dia) + ' · ' + fmt(bd.ultima.pacotes) + ' pacotes' : '—'],
+          ['Esperando', bd.abertas.length ? 'aberta no Excel: ' + bd.abertas.map(br).join(', ') + ' (o app atualiza quando fechar)' :
+            bd.pendentes.length ? 'atualizar ' + bd.pendentes.map(br).join(', ') + ' (no máximo 1 vez por minuto)' : 'nada'],
+          ['Planilha de segmentos', bd.segmentosXlsx ? 'planilhas/segmentos.xlsx (lida quando muda)' : 'nenhuma (opcional)']
+        ]);
+      }
       var erros = p.erros.concat(p.rotas ? p.rotas.avisos : []);
       if (erros.length) resultado('plan-res', erros, false);
       info('end-info', e.enderecos.map(function (a, i) { return [i === 0 ? 'Neste computador' : /ts\.net|https:/.test(a) ? 'Link público' : 'Na rede', a]; }));
@@ -105,6 +116,16 @@
     });
   }
   enviar($('up-rotas'), 'rotas');
+  $('up-segmentos').addEventListener('change', function () {
+    var input = this, f = input.files[0];
+    if (!f) return;
+    resultado('base-res', 'Lendo ' + f.name + '…');
+    f.arrayBuffer().then(function (buf) { return post('config/api/planilha?nome=segmentos', buf, 'application/octet-stream'); })
+      .then(function (r) {
+        resultado('base-res', r.ok ? fmt(r.remessas) + ' remessas com o segmento. O painel e as planilhas do dia já usam.' : r.error, r.ok);
+        input.value = ''; carregar();
+      });
+  });
   carregar();
   setInterval(function () { if (document.visibilityState === 'visible') carregar(); }, 5000);
 })();

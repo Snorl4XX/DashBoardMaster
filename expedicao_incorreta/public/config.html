@@ -87,6 +87,19 @@
         <div class="saida hidden" id="plan-res"></div>
       </section>
 
+      <section class="card conf" aria-labelledby="s-base">
+        <div class="section-head"><div><span class="kicker">Base de dados</span><h2 id="s-base">Planilhas do JMS (uma por dia)</h2></div></div>
+        <p class="muted small">O app escreve o que pega no JMS numa planilha por dia. Você pode preencher ou corrigir as colunas
+          <b>Código de primeiro segmento</b> e <b>Código de dois segmentos</b> e salvar: o painel mostra o que estiver lá.
+          Também dá para enviar uma planilha só com a remessa e os códigos (ex.: a da Pesquisa no Rastreamento, "Só os códigos de segmento").</p>
+        <dl class="info" id="base-info"></dl>
+        <div class="row">
+          <a class="btn btn-light" href="config/api/base.xlsx" id="baixar-base">Baixar a planilha de hoje</a>
+          <label class="btn btn-light">Enviar planilha de segmentos (.xlsx)<input type="file" accept=".xlsx" id="up-segmentos"></label>
+        </div>
+        <div class="saida hidden" id="base-res"></div>
+      </section>
+
       <section class="card conf" aria-labelledby="s-end">
         <div class="section-head"><div><span class="kicker">Link</span><h2 id="s-end">Endereços dos painéis</h2></div></div>
         <dl class="info" id="end-info"></dl>

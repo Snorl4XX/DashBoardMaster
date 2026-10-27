@@ -35,6 +35,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import VERSAO
 from .banco import Banco
+from .base_planilha import BasePlanilha, ler_segmentos
 from .coletor import Coletor, agora_sp, dias_da_agenda, dias_entre, hoje_sp, ms, soma_dias
 from .config import MAX_DIAS, PASTA_APP, arquivo_config, ler_config
 from .jms import Jms
@@ -50,7 +51,9 @@ TIPOS_ARQ = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf
 SEGURANCA = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "SAMEORIGIN"}
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 LARGURAS_EXCEL = [7, 22, 20, 26, 18, 30, 18, 18, 18, 18, 20, 20, 12, 14, 10, 20, 30, 20]
-CHAVES_DM = ["JMS_AUTHTOKEN", "JMS_COOKIE", "JMS_AUTHORIZATION", "JMS_LANG", "JMS_LANGTYPE", "JMS_TIMEZONE", "JMS_COUNTRY_ID"]
+# Do DashMaster: o acesso e, para o Rastreamento do pacote, o cabeçalho de rota que ele já sabe que o JMS aceita (como a Pesquisa).
+CHAVES_DM = ["JMS_AUTHTOKEN", "JMS_COOKIE", "JMS_AUTHORIZATION", "JMS_LANG", "JMS_LANGTYPE", "JMS_TIMEZONE", "JMS_COUNTRY_ID",
+             "JMS_ROUTENAME_TRACKING", "JMS_ROUTENAMELIST_TRACKING", "JMS_ROUTE_AUTO_TRACKING", "JMS_EXTRA_HEADERS_JSON"]
 # Pedido que veio por túnel/proxy (Tailscale Funnel, Cloudflare…): não é "deste computador".
 _TUNEL = re.compile(r"^(x-forwarded-|x-real-ip$|forwarded$|via$|true-client-ip$|cf-|tailscale-|x-ngrok|ngrok-)")
 
@@ -108,9 +111,16 @@ class App:
         self.jms = Jms(base=jms_url or os.environ.get("EXPEDICAO_JMS_URL"), credenciais=self.credenciais, props=self.banco, log=self.log,
                        tempo=60, por_segundo=cfg["consultasPorSegundo"], segundos_por_remessa=cfg["segundosPorRemessa"])
         self.painel = Painel(self.banco, self.regras, cfg["statusCodigos"], cfg["segmentoPelaBase"])
-        self.coletor = Coletor(banco=self.banco, jms=self.jms, cfg=cfg, log=self.log, ao_mudar=self.painel.invalidar)
+        self.base = BasePlanilha(pasta=cfg["base"], pasta_planilhas=cfg["planilhas"], banco=self.banco, painel=self.painel,
+                                 regras=self.regras, cfg=cfg, log=self.log)
+        self.coletor = Coletor(banco=self.banco, jms=self.jms, cfg=cfg, log=self.log, ao_mudar=self.ao_mudar)
         self.servidor: ThreadingHTTPServer | None = None
         self._parar = threading.Event()
+
+    def ao_mudar(self, tipo: str, dia: str) -> None:
+        """O coletor trouxe novidade do JMS: o painel recalcula e a planilha do dia (base de dados) é reescrita."""
+        self.painel.invalidar(tipo, dia)
+        self.base.marcar(dia)
 
     # ---------------------------------------------------------------- registro (janela + dados/expedicao.log)
     def log(self, nivel: str, texto) -> None:
@@ -231,7 +241,7 @@ class App:
         busca["erros"], busca["dias"] = list(busca["erros"]), list(busca["dias"])
         return {"versao": VERSAO, "config": config, "enderecos": self.enderecos(),
                 "token": {"fonte": c["fonte"], "temProprio": bool(self.banco.get("JMS_AUTHTOKEN")), "dashmaster": bool(self.credenciais_dashmaster())},
-                "planilhas": r, "busca": busca, "registro": list(self.ultimas)[-60:], "hoje": hoje, "salvos": self.banco.dias_salvos(),
+                "planilhas": r, "base": self.base.resumo(), "busca": busca, "registro": list(self.ultimas)[-60:], "hoje": hoje, "salvos": self.banco.dias_salvos(),
                 "segmentosHoje": {**self.banco.contar_segmentos(hoje), "basesConhecidas": len(self.banco.segmentos_por_base()),
                                   "pelaBase": cfg["segmentoPelaBase"], "ritmo": self.ritmo_segmentos()},
                 "status": {"concluido": sorted(cfg["statusCodigos"]["concluido"]), "emTransito": sorted(cfg["statusCodigos"]["em_transito"])},
@@ -359,6 +369,12 @@ class App:
             return req.arquivo("config.html")
         if p == "/config/api/estado":
             return req.json(200, self.estado_config())
+        if p == "/config/api/base.xlsx":
+            dia = qs.get("dia") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(qs.get("dia") or "")) else hoje_sp()
+            arq = self.base.arquivo(dia)
+            if not arq.exists():
+                return req.enviar(404, f"Ainda não tem a planilha de {dia} (o app escreve depois da primeira busca do dia).")
+            return req.enviar(200, arq.read_bytes(), XLSX, {"Content-Disposition": f'attachment; filename="{arq.name}"'})
         if req.command != "POST" and p != "/config/api/rotas.xlsx":
             return req.enviar(405, "Use POST.")
         if p == "/config/api/token":
@@ -384,6 +400,18 @@ class App:
                 return req.json(200, {"ok": False, "error": "Já está buscando. Espere terminar."})
             self.coletor.coletar(dia, forcar=bool(b.get("forcar")))
             return req.json(200, {"ok": True})
+        if p == "/config/api/planilha" and qs.get("nome") == "segmentos":
+            dados = req.ler_corpo()
+            try:
+                n = len(ler_segmentos(dados))
+            except Exception as e:  # noqa: BLE001 - planilha do usuário: o motivo vai para a tela
+                return req.json(400, {"ok": False, "error": f"Não usei o arquivo: {e}"})
+            if not n:
+                return req.json(400, {"ok": False, "error": "Não usei o arquivo: nenhuma remessa com o Código de primeiro segmento."})
+            self.base.arquivo_segmentos.parent.mkdir(parents=True, exist_ok=True)
+            self.base.arquivo_segmentos.write_bytes(dados)
+            self.base.importar_segmentos(forcar=True)
+            return req.json(200, {"ok": True, "remessas": n})
         if p == "/config/api/planilha":
             nome, dados = qs.get("nome"), req.ler_corpo()
             if nome != "rotas":
@@ -476,6 +504,7 @@ class App:
 
     def encerrar(self) -> None:
         self._parar.set()
+        self.base.parar()
         if self.servidor:
             self.servidor.shutdown()
             self.servidor.server_close()
@@ -590,6 +619,8 @@ def main(argv: list[str] | None = None, ao_abrir=None) -> int:
     if demo:
         app.log("info", "MODO DEMONSTRAÇÃO: JMS de mentira, nada é consultado na internet (dados em demo/).")
     app.anunciar()
+    app.log("info", f"  Base de dados (uma planilha por dia): {cfg['base']}")
+    app.base.iniciar()
     if os.environ.get("EXPEDICAO_SEM_AGENDADOR") != "1":
         app.iniciar_agenda()
     if ao_abrir:
@@ -602,6 +633,7 @@ def main(argv: list[str] | None = None, ao_abrir=None) -> int:
     finally:
         app.log("info", "Encerrando…")
         app._parar.set()
+        app.base.parar()
         servidor.server_close()
         app.banco.fechar()
         if demo:

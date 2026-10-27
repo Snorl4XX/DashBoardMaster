@@ -78,6 +78,9 @@ def _ordem_padrao(linhas: list[dict]) -> list[dict]:
 
 
 PELA_BASE = "(pela Base Destino)"
+DA_PLANILHA = "(planilha)"
+# De onde veio o 1º e o 2º segmento do pacote (coluna "Fonte do segmento" da planilha do dia).
+FONTES = {"jms": "JMS", "planilha": "Planilha", "base": "Base Destino"}
 
 
 class Painel:
@@ -124,14 +127,19 @@ class Painel:
             v = viagens.get(p["shipmentNo"])
             if not v:
                 continue
+            planilha = p["segFeito"] is not None and p["segFonte"] == "planilha"
             inferido = not p["seg1"] and p["baseDestino"] in por_base
             if inferido:
                 s1, s2 = por_base[p["baseDestino"]]
                 p = {**p, "seg1": s1, "seg2": s2, "seg3": PELA_BASE}
+            elif planilha and p["seg1"] and not p["seg3"]:
+                p = {**p, "seg3": DA_PLANILHA}
+            fonte = "base" if inferido else ("planilha" if planilha else "jms") if p["seg1"] else ""
             r = self.regras.conferir(tipo, p, v["destino"])
             l = {**p, **r, "situacaoTexto": SITUACOES[r["situacao"]], "turno": turno_de(p["horario"]), "nomeViagem": v["nome"] or "",
                  "destinoViagem": v["destino"] or "", "status": v["status"], "statusViagem": STATUS[v["status"]],
-                 "packageCode": lote(p["packageCode"]), "jms": p["segFeito"] is not None, "pelaBase": inferido}
+                 "packageCode": lote(p["packageCode"]), "jms": p["segFeito"] is not None and not planilha, "pelaBase": inferido,
+                 "planilha": planilha and bool(p["seg1"]), "fonteSegmento": FONTES.get(fonte, ""), "dia": dia, "tipo": tipo}
             # O que falta na planilha de rotas, para o aviso.
             if r["situacao"] == "sem_codigo":
                 l["pendente"] = "código " + r["codigo1"] + (" " + r["segmento"] if r["segmento"] else "")
@@ -224,7 +232,8 @@ class Painel:
             "turnos": self.turnos(linhas), "top": top, "distintos": distintos, "anterior": self.anterior(tipo, de, ate, f),
             "seg2": {"codigos": CODIGOS_SEG2, "errados": len(errados2)},
             # Quantos pacotes o JMS já respondeu (com ou sem código) no "3 Segmentos".
-            "segmentos": {"jms": sum(1 for l in linhas if l["jms"]), "total": len(linhas), "pelaBase": sum(1 for l in linhas if l["pelaBase"])},
+            "segmentos": {"jms": sum(1 for l in linhas if l["jms"]), "total": len(linhas), "pelaBase": sum(1 for l in linhas if l["pelaBase"]),
+                          "planilha": sum(1 for l in linhas if l["planilha"])},
             "maisAfetados": {"viagem": (top["viagens"] or [None])[0], "proximaParada": (top["proximasParadas"] or [None])[0],
                              "lote": (top["lotes"] or [None])[0], "baseDestino": (top["basesDestino"] or [None])[0],
                              "login": (top["logins"] or [None])[0], "codigo1": (top["codigos1"] or [None])[0],
