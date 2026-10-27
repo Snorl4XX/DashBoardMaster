@@ -107,7 +107,7 @@ class App:
         self.regras = Regras(cfg["planilhas"])
         self.jms = Jms(base=jms_url or os.environ.get("EXPEDICAO_JMS_URL"), credenciais=self.credenciais, props=self.banco, log=self.log,
                        tempo=60, por_segundo=cfg["consultasPorSegundo"], segundos_por_remessa=cfg["segundosPorRemessa"])
-        self.painel = Painel(self.banco, self.regras, cfg["statusCodigos"])
+        self.painel = Painel(self.banco, self.regras, cfg["statusCodigos"], cfg["segmentoPelaBase"])
         self.coletor = Coletor(banco=self.banco, jms=self.jms, cfg=cfg, log=self.log, ao_mudar=self.painel.invalidar)
         self.servidor: ThreadingHTTPServer | None = None
         self._parar = threading.Event()
@@ -220,7 +220,7 @@ class App:
                 "minutosDiaAnterior": cfg["minutosDiaAnterior"], "hoje": hoje_sp(), "maxDias": MAX_DIAS,
                 "busca": {"rodando": e["rodando"], "etapa": e["etapa"], "dia": e["dia"], "dias": list(e["dias"]), "inicio": e["inicio"],
                           "fim": e["fim"], "ultimo": e["ultimo"], "authVencido": e["authVencido"], "errosViagens": len(e["erros"]),
-                          "avisoSegmentos": e["avisoSegmentos"], "segundosPorRemessa": cfg["segundosPorRemessa"]},
+                          "avisoSegmentos": e["avisoSegmentos"], "segundosPorRemessa": self.jms.s_por_remessa},
                 "planilhas": {"erros": r["erros"], "rotas": bool(r["rotas"])}}
 
     def estado_config(self) -> dict:
@@ -232,12 +232,20 @@ class App:
         return {"versao": VERSAO, "config": config, "enderecos": self.enderecos(),
                 "token": {"fonte": c["fonte"], "temProprio": bool(self.banco.get("JMS_AUTHTOKEN")), "dashmaster": bool(self.credenciais_dashmaster())},
                 "planilhas": r, "busca": busca, "registro": list(self.ultimas)[-60:], "hoje": hoje, "salvos": self.banco.dias_salvos(),
-                "segmentosHoje": self.banco.contar_segmentos(hoje),
+                "segmentosHoje": {**self.banco.contar_segmentos(hoje), "basesConhecidas": len(self.banco.segmentos_por_base()),
+                                  "pelaBase": cfg["segmentoPelaBase"], "ritmo": self.ritmo_segmentos()},
                 "status": {"concluido": sorted(cfg["statusCodigos"]["concluido"]), "emTransito": sorted(cfg["statusCodigos"]["em_transito"])},
                 "viagensHoje": [{"tipo": t, "status": [{"estado": x["estado"], "n": x["n"], "status": status_de(x["estado"], cfg["statusCodigos"])}
                                                        for x in self.banco.status_dia(t, hoje)]} for t in TIPOS],
                 "jms": {"pacotesSecundaria": self.banco.get("PACOTES_SECUNDARIA") or "", "routeTroncal": self.banco.get("ROUTE_AUTO_TRONCAL") or "",
                         "routeSecundaria": self.banco.get("ROUTE_AUTO_SECUNDARIA") or ""}}
+
+    def ritmo_segmentos(self) -> str:
+        s, cfg = self.jms.s_por_remessa, self.cfg
+        txt = f"1 remessa a cada {s:g} s" if s > 0 else f"{cfg['consultasSegmentos']} remessas ao mesmo tempo"
+        if s > self.jms.s_minimo:
+            txt += f" (mais devagar depois de um bloqueio do JMS; volta aos poucos para {cfg['segundosPorRemessa']:g} s)"
+        return txt
 
     def testar(self) -> dict:
         """Teste rápido: uma página de viagens de cada rota."""
@@ -423,6 +431,8 @@ class App:
         for a in self.enderecos():
             self.log("info", f"  Painéis: {a}")
         self.log("info", f"  Configurações (AuthToken e planilhas): http://localhost:{cfg['porta']}/config")
+        if cfg.get("avisoConfig"):
+            self.log("info", cfg["avisoConfig"])
         r = self.regras.resumo()
         for m in r["erros"]:
             self.log("aviso", m)

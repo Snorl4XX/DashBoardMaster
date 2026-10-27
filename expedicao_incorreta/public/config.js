@@ -52,7 +52,9 @@
           ' min (guarda o dia anterior completo)' : ' · ontem: desligado')],
         ['3 Segmentos no JMS', e.segmentosHoje && e.segmentosHoje.total ?
           'hoje: ' + fmt(e.segmentosHoje.feitos) + ' de ' + fmt(e.segmentosHoje.total) + ' pacotes conferidos' + (e.segmentosHoje.comErro ? ' · ' + fmt(e.segmentosHoje.comErro) +
-          ' com erro (tenta de novo em 30 min)' : '') + ' · ritmo: 1 remessa a cada ' + e.config.segundosPorRemessa + ' s' : 'hoje ainda sem pacotes'],
+          ' com erro (tenta de novo em 30 min)' : '') + ' · ritmo: ' + (e.segmentosHoje.ritmo || '1 remessa a cada ' + e.config.segundosPorRemessa + ' s') +
+          (e.segmentosHoje.pelaBase ? ' · ' + fmt(e.segmentosHoje.basesConhecidas) + ' Bases Destino com o código (os outros pacotes delas usam esse código até a consulta)' : '')
+          : 'hoje ainda sem pacotes'],
         ['Dias guardados', e.salvos && e.salvos.n ? e.salvos.n + (e.salvos.n === 1 ? ' dia' : ' dias') + ' (de ' + br(e.salvos.de) + ' a ' + br(e.salvos.ate) + ')' : 'nenhum ainda'],
         ['Pacotes da secundária', e.jms.pacotesSecundaria ? 'endereço "' + e.jms.pacotesSecundaria + '/scan/page"' : 'ainda não testado']
       ]);

@@ -22,11 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from expedicao import coletor as coletor_mod  # noqa: E402
 from expedicao import jms as jms_mod  # noqa: E402
 from expedicao.banco import Banco  # noqa: E402
-from expedicao.coletor import TZ_SP, dias_da_agenda, dias_entre, em_paralelo  # noqa: E402
+from expedicao.coletor import TZ_SP, dias_da_agenda, dias_entre, em_paralelo, segmento_da_lista  # noqa: E402
 from expedicao.config import ler_config  # noqa: E402
 from expedicao.demo import JmsFalso  # noqa: E402
 from expedicao.jms import ErroJms, Jms, q, segmentos_de  # noqa: E402
-from expedicao.painel import COLUNAS, turno_de  # noqa: E402
+from expedicao.painel import COLUNAS, PELA_BASE, Painel, turno_de  # noqa: E402
 from expedicao.regras import Regras, ler_rotas, norm, norm_codigo, norm_seg  # noqa: E402
 from expedicao.rotas_padrao import CAB_ROTAS, abas_padrao  # noqa: E402
 from expedicao.servidor import App, limpar_token, periodo  # noqa: E402
@@ -181,7 +181,8 @@ def test_q_como_a_tela_do_jms():
 def test_segmentos_de():
     assert segmentos_de({"data": {"details": {"terminalDispatchCode": "AL,560-12,020", "destinationDistributeName": " MT CGB "}}}) == \
         {"s1": "AL", "s2": "560-12", "s3": "020", "centro": "MT CGB"}
-    assert segmentos_de({"data": None}) == {"s1": "", "s2": "", "s3": "", "centro": ""}
+    assert segmentos_de({"data": None}) == {"s1": "", "s2": "", "s3": "", "centro": "", "campos": ["data"]}
+    assert segmentos_de({"data": {"details": {"waybillNo": "1"}}})["campos"] == ["waybillNo"]
 
 
 def test_jms_token(falso):
@@ -316,7 +317,9 @@ def test_coletor_e_painel(tmp_path, falso, monkeypatch):
     assert abs(sum(x["participacao"] for x in r["turnos"]) - 100) < 1e-6
     assert r["anterior"]["buscado"] and r["anterior"]["de"] == ONTEM
     assert r["viagens"]["foraDoStatus"] > 0  # as que ainda não saíram ficam de fora
-    assert r["segmentos"] == {"jms": t["pacotes"], "total": t["pacotes"]}
+    assert r["segmentos"]["jms"] == r["segmentos"]["total"] == t["pacotes"]
+    # O JMS respondeu sem código para alguns: eles usam o código da Base Destino (e não ficam "Sem 3 Segmentos").
+    assert r["segmentos"]["pelaBase"] >= 1 and r["pendencias"]["semSegmento"]["jmsSemCodigo"] < r["segmentos"]["pelaBase"] + 5
     assert r["pendencias"]["semCodigo"][0]["nome"].startswith("código XYZ")
     assert r["maisAfetados"]["viagem"]["qtd"] == r["top"]["viagens"][0]["qtd"]
     assert len(r["opcoes"]["rotas"]) >= 21
@@ -348,6 +351,7 @@ def test_coletor_bloqueio_do_rastreio_pausa(tmp_path, falso, monkeypatch):
     u = app.coletor.coletar([HOJE]).result(timeout=60)
     assert u["ok"]
     assert "bloqueou" in app.coletor.estado["avisoSegmentos"] and app.coletor.pausa_segmentos > time.time()
+    assert app.jms.s_por_remessa == 5 and app.banco.get("RITMO_3SEG") == "5"  # desacelerou e guardou
     assert app.banco.contar_segmentos(HOJE)["feitos"] == 0
     r = app.painel.resumo("troncal", HOJE, HOJE, {})
     assert r["totais"]["semSegmento"] == r["totais"]["pacotes"] and r["pendencias"]["semSegmento"]["naoConsultados"] > 0
@@ -389,7 +393,9 @@ def test_periodo_e_token(monkeypatch):
 def test_config(tmp_path):
     arq = tmp_path / "config.json"
     cfg = ler_config(arq)
-    assert json.loads(arq.read_text(encoding="utf-8"))["porta"] == 3300 and cfg["segundosPorRemessa"] == 30
+    novo = json.loads(arq.read_text(encoding="utf-8"))
+    assert novo["porta"] == 3300 and novo["versaoConfig"] == 2 and cfg["segundosPorRemessa"] == 2 and cfg["segmentoPelaBase"]
+    assert cfg["avisoConfig"] == ""
     arq.write_text(json.dumps({"minutos": 1, "minutosDiaAnterior": 5, "segundosPorRemessa": 0, "porta": "x", "status": {"concluido": ["4", 9]}}),
                    encoding="utf-8")
     cfg = ler_config(arq)
@@ -541,3 +547,125 @@ def test_banco_compativel_com_o_node(tmp_path):
     assert b.buscados("2026-10-01", "2026-10-01") == {"2026-10-01"}
     assert "estadoBusca" in b.viagem("troncal", "T1")
     b.fechar()
+
+
+# ------------------------------------------------------------------ 3 Segmentos mais rápido e pela Base Destino
+def test_config_antigo_sai_dos_30_segundos(tmp_path):
+    arq = tmp_path / "config.json"
+    arq.write_text(json.dumps({"porta": 3300, "senha": "x", "segundosPorRemessa": 30, "consultasSegmentos": 3}), encoding="utf-8")
+    cfg = ler_config(arq)
+    assert cfg["segundosPorRemessa"] == 2 and cfg["segmentoPelaBase"] and "30 s" in cfg["avisoConfig"]
+    gravado = json.loads(arq.read_text(encoding="utf-8"))
+    assert gravado == {"porta": 3300, "senha": "x", "segundosPorRemessa": 2, "consultasSegmentos": 3, "segmentoPelaBase": True, "versaoConfig": 2}
+    assert ler_config(arq)["avisoConfig"] == ""  # só uma vez
+    # Quem escolheu outro ritmo (ou desligou o segmento pela base) fica com o seu.
+    arq.write_text(json.dumps({"segundosPorRemessa": 45, "segmentoPelaBase": False}), encoding="utf-8")
+    cfg = ler_config(arq)
+    assert cfg["segundosPorRemessa"] == 45 and cfg["segmentoPelaBase"] is False and cfg["avisoConfig"] == ""
+    arq.write_text(json.dumps({"segundosPorRemessa": 30, "versaoConfig": 2}), encoding="utf-8")
+    assert ler_config(arq)["segundosPorRemessa"] == 30
+
+
+def test_ritmo_adaptavel():
+    props = Props()
+    j = Jms(credenciais=lambda: {}, props=props, segundos_por_remessa=2)
+    assert j.s_por_remessa == 2
+    assert j.desacelerar() == 5 and j.desacelerar() == 10 and props["RITMO_3SEG"] == "10"
+    assert Jms(credenciais=lambda: {}, props=props, segundos_por_remessa=2).s_por_remessa == 10  # lembra depois de reabrir
+    for _ in range(20):
+        j.acelerar()
+    assert j.s_por_remessa == 2 and "RITMO_3SEG" not in props
+    for _ in range(10):
+        j.desacelerar()
+    assert j.s_por_remessa == 60
+    zero = Jms(credenciais=lambda: {}, props=Props(), segundos_por_remessa=0)
+    assert zero.desacelerar() == 5
+    for _ in range(10):
+        zero.acelerar()
+    assert zero.s_por_remessa == 0  # volta a várias ao mesmo tempo
+
+
+def test_segmento_da_lista():
+    assert segmento_da_lista({"terminalDispatchCode": "SP,395-05,012"}) == {"s1": "SP", "s2": "395-05", "s3": "012"}
+    assert segmento_da_lista({"orderFirstCode": "GRU", "orderSecondCode": "GRU,404-12"}) == {"s1": "GRU", "s2": "404-12", "s3": ""}
+    assert segmento_da_lista({"billCode": "1", "terminalDispatchCode": ""}) is None
+    assert segmento_da_lista({"threeSegmentCode": "SP"}) is None
+
+
+def _pacote(bill, base, hora, proxima="SP BRE"):
+    return {"billCode": bill, "packageCode": "B1", "baseEscaneamento": "SP GRU", "proximaParada": proxima, "baseDestino": base,
+            "municipio": "", "tipoBipagem": "Bipe de carregamento", "digitalizadoPor": "ana", "horario": f"{HOJE} {hora}"}
+
+
+def _banco_com_viagem(tmp_path, pacotes):
+    b = Banco(tmp_path / "e.db")
+    b.salvar_viagem({"tipo": "troncal", "shipmentNo": "T1", "dia": HOJE, "nome": "SP GRU-SP BRE", "destino": "SP BRE", "estado": "4"})
+    b.trocar_pacotes("troncal", "T1", HOJE, pacotes)
+    return b
+
+
+def test_fila_uma_remessa_de_cada_base_primeiro(tmp_path):
+    b = _banco_com_viagem(tmp_path, [_pacote("A1", "BASE A", "08:00:00"), _pacote("A2", "BASE A", "09:00:00"), _pacote("A3", "BASE A", "07:00:00"),
+                                     _pacote("B1", "BASE B", "10:00:00"), _pacote("C1", "BASE C", "11:00:00"), _pacote("C2", "BASE C", "06:00:00")])
+    # Base A tem mais pacotes: a remessa mais recente dela primeiro; depois C (2) e B (1); depois o resto, do mais recente.
+    assert b.fila_segmentos(HOJE) == ["A2", "C1", "B1", "A1", "A3", "C2"]
+    b.salvar_segmento("A2", {"s1": "SP", "s2": "395-01"}, "")
+    assert b.fila_segmentos(HOJE) == ["C1", "B1", "A1", "A3", "C2"]  # base A já conhecida: só no resto
+    assert b.fila_segmentos(HOJE, 2) == ["C1", "B1"]
+    b.salvar_segmento("C1", None, "recusou")
+    assert "C1" not in b.fila_segmentos(HOJE)  # com erro: espera 30 min
+    b.fechar()
+
+
+def test_segmento_pela_base_destino(tmp_path, regras):
+    b = _banco_com_viagem(tmp_path, [_pacote("A1", "DC SBC-SP", "08:00:00"), _pacote("A2", "DC SBC-SP", "09:00:00"),
+                                     _pacote("R1", "DC NIT-RJ", "10:00:00"), _pacote("R2", "DC NIT-RJ", "11:00:00"),
+                                     _pacote("X1", "BASE NOVA", "12:00:00")])
+    b.salvar_segmento("A1", {"s1": "SP", "s2": "395-01", "s3": "012"}, "")
+    b.salvar_segmento("R1", {"s1": "RJ", "s2": "220-10", "s3": "001"}, "")
+    b.salvar_segmento("A1", {"s1": "SP", "s2": "395-01", "s3": "012"}, "")  # a mesma resposta de novo não conta duas vezes
+    assert b.segmentos_por_base() == {"DC SBC-SP": ("SP", "395-01"), "DC NIT-RJ": ("RJ", "220-10")}
+    linhas = {l["billCode"]: l for l in Painel(b, regras, {"concluido": {"4"}, "em_transito": {"3"}}).linhas_dia("troncal", HOJE)["linhas"]}
+    assert (linhas["A2"]["situacao"], linhas["A2"]["seg3"], linhas["A2"]["pelaBase"], linhas["A2"]["jms"]) == ("certo", PELA_BASE, True, False)
+    assert (linhas["R2"]["situacao"], linhas["R2"]["rotaCerta"]) == ("errado", "RJ SJM")  # RJ no caminhão da SP BRE
+    assert (linhas["A1"]["seg3"], linhas["A1"]["pelaBase"]) == ("012", False)
+    assert linhas["X1"]["situacao"] == "sem_segmento"
+    desligado = Painel(b, regras, {"concluido": {"4"}, "em_transito": {"3"}}, pela_base=False).linhas_dia("troncal", HOJE)["linhas"]
+    assert {l["billCode"]: l["situacao"] for l in desligado}["A2"] == "sem_segmento"
+    # Base com dois códigos sem um dominante: não vale para as outras.
+    b.trocar_pacotes("troncal", "T1", HOJE, [_pacote(f"M{i}", "BASE MISTA", "08:00:00") for i in range(5)])
+    b.salvar_segmento("M0", {"s1": "SP", "s2": "395-01"}, "")
+    b.salvar_segmento("M1", {"s1": "GRU", "s2": "381-02"}, "")
+    assert "BASE MISTA" not in b.segmentos_por_base()
+    b.fechar()
+
+
+def test_banco_antigo_monta_os_segmentos_por_base(tmp_path):
+    b = _banco_com_viagem(tmp_path, [_pacote("A1", "DC SBC-SP", "08:00:00")])
+    b.salvar_segmento("A1", {"s1": "SP", "s2": "395-01"}, "")
+    b.db.execute("DELETE FROM segmentos_base")  # como um banco da versão Node.js
+    b.fechar()
+    b = Banco(tmp_path / "e.db")
+    assert b.segmentos_por_base() == {"DC SBC-SP": ("SP", "395-01")}
+    b.fechar()
+
+
+def test_lista_de_pacotes_com_codigo_dispensa_o_rastreio(tmp_path, falso, monkeypatch):
+    """Se a lista de pacotes do JMS já traz o terminalDispatchCode, o app não consulta o Rastreamento do pacote."""
+    monkeypatch.setattr(coletor_mod, "agora_sp", lambda: AGORA)
+    original = falso._pagina
+
+    def com_codigo(itens, atual, tamanho):
+        r = original(itens, atual, tamanho)
+        for x in r["data"]["records"]:
+            if "_seg" not in x and "billCode" in x:
+                x["terminalDispatchCode"] = falso.segmento(x["billCode"]) or None
+        return r
+    monkeypatch.setattr(falso, "_pagina", com_codigo)
+    app = montar(tmp_path, falso)
+    assert app.coletor.coletar([HOJE]).result(timeout=60)["ok"]
+    assert falso.pedidos.get("/operatingplatform/order/getOrderDetail", 0) <= 10  # só os sem código na lista
+    c = app.banco.contar_segmentos(HOJE)
+    assert c["feitos"] == c["total"]
+    assert any("Lista de pacotes do JMS" in l and "terminalDispatchCode" in l for l in app.ultimas)
+    app.banco.fechar()

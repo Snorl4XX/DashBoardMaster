@@ -37,7 +37,13 @@ CREATE TABLE IF NOT EXISTS segmentos (billCode TEXT PRIMARY KEY, s1 TEXT, s2 TEX
   em INTEGER NOT NULL DEFAULT 0, erro TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS pacotes_remessa ON pacotes (billCode);
 CREATE INDEX IF NOT EXISTS pacotes_so_dia ON pacotes (dia);
+-- 1º e 2º segmento que o JMS já deu para cada Base Destino (n = quantas remessas): o pacote que ainda não foi consultado
+-- usa o da mesma base (versão Python).
+CREATE TABLE IF NOT EXISTS segmentos_base (base TEXT NOT NULL, s1 TEXT NOT NULL, s2 TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
+  em INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (base, s1, s2));
 """
+# Quanto da base o código mais visto precisa ter para valer para os outros pacotes dela.
+DOMINANTE = 0.8
 
 
 def agora_ms() -> int:
@@ -64,6 +70,12 @@ class Banco:
                 self.db.execute("ALTER TABLE viagens ADD COLUMN estadoBusca TEXT")
             # Dias buscados pela versão 1.1 (antes desta tabela) contam como buscados.
             self.db.execute("INSERT OR IGNORE INTO buscas (dia, em) SELECT DISTINCT dia, 0 FROM viagens")
+            # Banco que veio sem a tabela por Base Destino (versão Node.js): monta com o que o JMS já respondeu.
+            if self.db.execute("SELECT COUNT(*) FROM segmentos_base").fetchone()[0] == 0:
+                self.db.execute("""INSERT INTO segmentos_base (base, s1, s2, n, em)
+                                   SELECT p.baseDestino, s.s1, s.s2, COUNT(DISTINCT p.billCode), MAX(s.em) FROM segmentos s
+                                   JOIN pacotes p ON p.billCode = s.billCode
+                                   WHERE s.erro = '' AND s.s1 <> '' AND p.baseDestino <> '' GROUP BY p.baseDestino, s.s1, s.s2""")
 
     # ---------------------------------------------------------------- ajudantes
     def _um(self, sql: str, *args) -> dict | None:
@@ -159,11 +171,57 @@ class Banco:
 
     def salvar_segmento(self, bill_code: str, r: dict | None, erro: str) -> None:
         """Guarda o "3 Segmentos" da remessa (r = {s1, s2, s3, centro}) ou o erro da consulta."""
-        o = r or {}
-        self._rodar("""INSERT INTO segmentos (billCode, s1, s2, s3, centro, em, erro) VALUES (?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT (billCode) DO UPDATE SET s1 = excluded.s1, s2 = excluded.s2, s3 = excluded.s3,
-                         centro = excluded.centro, em = excluded.em, erro = excluded.erro""",
-                    str(bill_code), _s(o.get("s1")), _s(o.get("s2")), _s(o.get("s3")), _s(o.get("centro")), agora_ms(), erro or "")
+        self.salvar_segmentos([(bill_code, r, erro)])
+
+    def salvar_segmentos(self, lista: list[tuple]) -> None:
+        """Vários de uma vez: [(billCode, {s1, s2, s3, centro} | None, erro)]. O código certo também conta para a Base Destino."""
+        em = agora_ms()
+        with self.trava:
+            for bill_code, r, erro in lista:
+                o = r or {}
+                s1, s2 = _s(o.get("s1")).strip(), _s(o.get("s2")).strip()
+                antes = self.db.execute("SELECT s1, s2, erro FROM segmentos WHERE billCode = ?", (str(bill_code),)).fetchone()
+                self.db.execute("""INSERT INTO segmentos (billCode, s1, s2, s3, centro, em, erro) VALUES (?, ?, ?, ?, ?, ?, ?)
+                                   ON CONFLICT (billCode) DO UPDATE SET s1 = excluded.s1, s2 = excluded.s2, s3 = excluded.s3,
+                                     centro = excluded.centro, em = excluded.em, erro = excluded.erro""",
+                                (str(bill_code), s1, s2, _s(o.get("s3")).strip(), _s(o.get("centro")), em, erro or ""))
+                ja_contou = antes is not None and not antes["erro"] and (antes["s1"], antes["s2"]) == (s1, s2)
+                if s1 and not erro and not ja_contou:
+                    self.db.execute("""INSERT INTO segmentos_base (base, s1, s2, n, em)
+                                       SELECT baseDestino, ?, ?, 1, ? FROM pacotes WHERE billCode = ? AND baseDestino <> '' LIMIT 1
+                                       ON CONFLICT (base, s1, s2) DO UPDATE SET n = n + 1, em = excluded.em""",
+                                    (s1, s2, em, str(bill_code)))
+
+    def segmentos_por_base(self) -> dict[str, tuple[str, str]]:
+        """Base Destino → (1º, 2º segmento) que o JMS deu para ela. Só vale quando um código domina a base (≥ 80%)."""
+        por_base: dict[str, list] = {}
+        for r in self._todos("SELECT base, s1, s2, n, em FROM segmentos_base"):
+            por_base.setdefault(r["base"], []).append(r)
+        out = {}
+        for base, lista in por_base.items():
+            melhor = max(lista, key=lambda r: (r["n"], r["em"]))
+            if melhor["n"] >= DOMINANTE * sum(r["n"] for r in lista):
+                out[base] = (melhor["s1"], melhor["s2"])
+        return out
+
+    def fila_segmentos(self, dia: str, limite: int = 500) -> list[str]:
+        """Remessas do dia que faltam no "3 Segmentos" (ou com erro há mais de 30 min), na ordem de consulta:
+        1. uma de cada Base Destino que o JMS ainda não deu, a base com mais pacotes primeiro (o resto da base vem por ela);
+        2. as outras, do bipe mais recente para o mais antigo."""
+        faltam = self._todos("""SELECT p.billCode, MAX(p.baseDestino) AS base, MAX(p.horario) AS h FROM pacotes p
+                                LEFT JOIN segmentos s ON s.billCode = p.billCode
+                                WHERE p.dia = ? AND (s.billCode IS NULL OR (s.erro <> '' AND s.em < ?)) GROUP BY p.billCode""",
+                             dia, agora_ms() - 30 * 60000)
+        conhecidas = self.segmentos_por_base()
+        por_base: dict[str, list] = {}
+        for r in faltam:
+            if r["base"] and r["base"] not in conhecidas:
+                por_base.setdefault(r["base"], []).append(r)
+        primeiro = [max(lista, key=lambda r: r["h"] or "")["billCode"]
+                    for lista in sorted(por_base.values(), key=lambda lista: -len(lista))]
+        vistos = set(primeiro)
+        resto = [r["billCode"] for r in sorted(faltam, key=lambda r: r["h"] or "", reverse=True) if r["billCode"] not in vistos]
+        return (primeiro + resto)[:limite]
 
     def dias_com_pacotes(self) -> list[str]:
         """Dias com pacotes guardados, do mais novo ao mais antigo."""

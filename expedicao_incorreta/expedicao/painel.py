@@ -77,11 +77,15 @@ def _ordem_padrao(linhas: list[dict]) -> list[dict]:
     return sorted(por_hora, key=lambda l: l["situacao"] != "errado")
 
 
-class Painel:
-    """codigos = códigos de status do JMS (status.py, do config.json)."""
+PELA_BASE = "(pela Base Destino)"
 
-    def __init__(self, banco, regras, codigos: dict) -> None:
-        self.banco, self.regras, self.codigos = banco, regras, codigos
+
+class Painel:
+    """codigos = códigos de status do JMS (status.py, do config.json). pela_base = o pacote ainda sem o "3 Segmentos" usa o 1º e
+    o 2º segmento que o JMS deu para outras remessas da mesma Base Destino (a coluna 3 Segmentos mostra "(pela Base Destino)")."""
+
+    def __init__(self, banco, regras, codigos: dict, pela_base: bool = True) -> None:
+        self.banco, self.regras, self.codigos, self.pela_base = banco, regras, codigos, pela_base
         self.cache: dict[str, dict] = {}
         self._trava = threading.Lock()
 
@@ -115,14 +119,19 @@ class Painel:
             else:
                 fora += 1
         linhas = []
+        por_base = self.banco.segmentos_por_base() if self.pela_base else {}
         for p in self.banco.pacotes_dia(tipo, dia):
             v = viagens.get(p["shipmentNo"])
             if not v:
                 continue
+            inferido = not p["seg1"] and p["baseDestino"] in por_base
+            if inferido:
+                s1, s2 = por_base[p["baseDestino"]]
+                p = {**p, "seg1": s1, "seg2": s2, "seg3": PELA_BASE}
             r = self.regras.conferir(tipo, p, v["destino"])
             l = {**p, **r, "situacaoTexto": SITUACOES[r["situacao"]], "turno": turno_de(p["horario"]), "nomeViagem": v["nome"] or "",
                  "destinoViagem": v["destino"] or "", "status": v["status"], "statusViagem": STATUS[v["status"]],
-                 "packageCode": lote(p["packageCode"]), "jms": p["segFeito"] is not None}
+                 "packageCode": lote(p["packageCode"]), "jms": p["segFeito"] is not None, "pelaBase": inferido}
             # O que falta na planilha de rotas, para o aviso.
             if r["situacao"] == "sem_codigo":
                 l["pendente"] = "código " + r["codigo1"] + (" " + r["segmento"] if r["segmento"] else "")
@@ -215,7 +224,7 @@ class Painel:
             "turnos": self.turnos(linhas), "top": top, "distintos": distintos, "anterior": self.anterior(tipo, de, ate, f),
             "seg2": {"codigos": CODIGOS_SEG2, "errados": len(errados2)},
             # Quantos pacotes o JMS já respondeu (com ou sem código) no "3 Segmentos".
-            "segmentos": {"jms": sum(1 for l in linhas if l["jms"]), "total": len(linhas)},
+            "segmentos": {"jms": sum(1 for l in linhas if l["jms"]), "total": len(linhas), "pelaBase": sum(1 for l in linhas if l["pelaBase"])},
             "maisAfetados": {"viagem": (top["viagens"] or [None])[0], "proximaParada": (top["proximasParadas"] or [None])[0],
                              "lote": (top["lotes"] or [None])[0], "baseDestino": (top["basesDestino"] or [None])[0],
                              "login": (top["logins"] or [None])[0], "codigo1": (top["codigos1"] or [None])[0],

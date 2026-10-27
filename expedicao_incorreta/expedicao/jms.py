@@ -18,7 +18,9 @@ RASTREAMENTO DO PACOTE — Informação básica (uma remessa por consulta)
 Cabeçalhos como o DashMaster: AuthToken, Lang/Langtype PT, Timezone GMT-0300 e, se o JMS pedir, Routename (testa as
 variantes uma vez e guarda a que for aceita).
 
-Ritmo: Rastreamento do pacote (3 Segmentos) = 1 remessa a cada "segundos_por_remessa" (pedido: 30 s); o resto = no máximo
+Ritmo: Rastreamento do pacote (3 Segmentos) = 1 remessa a cada "segundos_por_remessa" (padrão 2 s; a versão Node.js usava
+30 s). Se o JMS bloquear, o coletor chama desacelerar() (o dobro, até 60 s); depois de muitas respostas sem bloqueio,
+acelerar() volta aos poucos ao ritmo do config.json. O ritmo aprendido fica guardado (RITMO_3SEG). O resto = no máximo
 "por_segundo" consultas por segundo, somando todas. Quando o JMS bloqueia (página em vez de dados, ou HTTP 429) o erro vem
 com bloqueio=True, com o título da página na mensagem.
 """
@@ -104,8 +106,11 @@ def segmentos_de(resposta: dict | None) -> dict:
     det = (d["details"] if isinstance(d.get("details"), dict) else d) if isinstance(d, dict) else None
     cod = str(det["terminalDispatchCode"]) if det and det.get("terminalDispatchCode") is not None else ""
     p = [x.strip() for x in cod.split(",")]
-    return {"s1": p[0] if len(p) > 0 else "", "s2": p[1] if len(p) > 1 else "", "s3": p[2] if len(p) > 2 else "",
-            "centro": str(det["destinationDistributeName"]).strip() if det and det.get("destinationDistributeName") else ""}
+    out = {"s1": p[0] if len(p) > 0 else "", "s2": p[1] if len(p) > 1 else "", "s3": p[2] if len(p) > 2 else "",
+           "centro": str(det["destinationDistributeName"]).strip() if det and det.get("destinationDistributeName") else ""}
+    if not out["s1"]:  # para o registro dizer o que veio no lugar (só os nomes dos campos)
+        out["campos"] = sorted(det) if isinstance(det, dict) else sorted(resposta) if isinstance(resposta, dict) else []
+    return out
 
 
 def pagina_(resposta: dict | None) -> dict:
@@ -137,9 +142,17 @@ class Jms:
         self.tempo = tempo
         self.testou_rota: dict[str, bool] = {}
         self.por_segundo = float(por_segundo) if por_segundo and float(por_segundo) > 0 else 5.0
-        self.s_por_remessa = float(segundos_por_remessa) if segundos_por_remessa is not None and float(segundos_por_remessa) >= 0 else 30.0
+        self.s_minimo = float(segundos_por_remessa) if segundos_por_remessa is not None and float(segundos_por_remessa) >= 0 else 2.0
+        self.s_por_remessa = self.s_minimo
+        try:  # ritmo que já funcionou (depois de um bloqueio): não volta direto para o mais rápido
+            aprendido = float(self.props.get("RITMO_3SEG") or 0)
+        except (TypeError, ValueError):
+            aprendido = 0.0
+        if aprendido > self.s_minimo:
+            self.s_por_remessa = min(60.0, aprendido)
         self._proxima: dict[str, float] = {}
         self._trava = threading.Lock()
+        self._trava_rota = threading.Lock()
         self._abrir = urllib.request.build_opener(_SemRedirecionar).open
 
     # ---------------------------------------------------------------- ritmo e cabeçalhos
@@ -153,6 +166,20 @@ class Jms:
             self._proxima[k] = quando + passo
         if quando > agora:
             time.sleep(quando - agora)
+
+    def desacelerar(self) -> float:
+        """O JMS bloqueou o Rastreamento do pacote: o dobro do intervalo (pelo menos 5 s, no máximo 60 s). → novo intervalo"""
+        self.s_por_remessa = min(60.0, max(5.0, self.s_por_remessa * 2))
+        self.props.set("RITMO_3SEG", f"{self.s_por_remessa:g}")
+        return self.s_por_remessa
+
+    def acelerar(self) -> float:
+        """Muitas respostas sem bloqueio: 25% mais rápido, até o ritmo do config.json. → novo intervalo"""
+        if self.s_por_remessa > self.s_minimo:
+            novo = self.s_por_remessa * 0.75
+            self.s_por_remessa = self.s_minimo if novo < max(self.s_minimo, 0.5) else novo
+            self.props.set("RITMO_3SEG", f"{self.s_por_remessa:g}" if self.s_por_remessa > self.s_minimo else None)
+        return self.s_por_remessa
 
     def nova_rodada(self) -> None:
         """Nova busca: as variantes de Routename podem ser testadas de novo (uma vez por grupo em cada busca)."""
@@ -244,6 +271,7 @@ class Jms:
     def pedir(self, grupo: str, caminho: str, corpo: dict | None = None) -> dict:
         """Consulta com até 3 tentativas (rede) e, se o JMS recusar, as outras variantes de Routename (uma vez por grupo)."""
         erro: ErroJms | None = None
+        usada = self.rota_cabecalho(grupo)
         for t in range(3):
             try:
                 return self.uma_vez(grupo, caminho, corpo)
@@ -254,7 +282,11 @@ class Jms:
                 _pausa(0.8 * (t + 1))
         assert erro is not None
         if erro.recusa or (erro.status == 401 and not erro.sem_token):
-            resposta = self.trocar_rota(grupo, caminho, corpo, erro)
+            # Várias consultas ao mesmo tempo: uma testa as variantes; as outras esperam e usam a que ela achou.
+            with self._trava_rota:
+                if self.rota_cabecalho(grupo) != usada:
+                    return self.uma_vez(grupo, caminho, corpo)
+                resposta = self.trocar_rota(grupo, caminho, corpo, erro)
             if resposta is not None:
                 return resposta
         raise erro

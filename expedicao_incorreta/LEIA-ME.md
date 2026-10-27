@@ -29,8 +29,19 @@ Não mexe no DashMaster: tem pasta, porta (3300) e link próprios.
    - **3 Segmentos**.
 
    É uma consulta por remessa, só na primeira vez (fica guardado). A conferência é **só pelo JMS**.
-   - **Ritmo:** 1 remessa a cada 30 s (cerca de 2.600 por dia). Hoje primeiro, depois os dias anteriores, até 1 min antes da busca seguinte (o resto continua nela).
-   - **Se o JMS bloquear:** o app pausa 15 min. O registro mostra o título da página que o JMS devolveu.
+   - **Ritmo:** 1 remessa a cada 2 s (cerca de 1.800 por hora). Hoje primeiro, depois os dias anteriores, até 1 min antes da busca seguinte (o resto continua nela).
+     - A versão Node.js ia a 1 a cada 30 s (cerca de 120 por hora): quase todo pacote ficava "Sem 3 Segmentos".
+     - O `config.json` antigo, com 30, é atualizado sozinho na primeira vez. O registro avisa.
+   - **Ordem:** em cada dia, primeiro **uma remessa de cada Base Destino** que o JMS ainda não deu (a base com mais pacotes primeiro). Depois o resto, do bipe mais recente para o mais antigo.
+   - **Pela Base Destino:** o 1º e o 2º segmento são os da Base Destino (o mesmo que a rotinha mostra).
+     - O pacote ainda não consultado usa o código que o JMS deu para outra remessa da mesma base.
+     - Na tabela, a coluna "3 Segmentos" mostra **(pela Base Destino)**. Quando a consulta dele chega, vale o código exato.
+     - Só vale quando um código domina a base (80% ou mais das remessas dela).
+     - Para desligar: `"segmentoPelaBase": false` no `config.json`.
+   - **Se o JMS bloquear:** o app pausa 15 min e volta mais devagar (o dobro do intervalo, até 1 a cada 60 s).
+     - Depois de 300 respostas seguidas sem bloqueio, acelera aos poucos.
+     - O ritmo que funcionou fica guardado. O registro mostra o título da página que o JMS devolveu.
+   - **Se a lista de pacotes do JMS já trouxer o código** (campo `terminalDispatchCode`), o app usa direto, sem consultar.
 4. **Conferência:** compara com a **planilha de rotas do SC** (as tabelas vermelhas das docas) e acha o **DESTINO CORRETO** do pacote:
    - **Destino correto:** as rotas que levam o código de 1º nível. Ex.: VDC › RJ SJM.
    - **Linha com segmento:** se uma linha cita o segmento (2º nível), ela vence a linha geral. Ex.: SP 395-05 vai na DC GRU-SP, não na SP BRE.
@@ -130,7 +141,7 @@ Os gráficos usam o Chart.js da internet, como na versão Node.js. Sem internet,
 |---|---|
 | **Errado** | Pacote fora da rota do caminhão (conta como erro). A coluna "Destino correto" diz onde devia ir. |
 | **Certo** | Pacote da rota. |
-| **Sem 3 Segmentos** | O JMS ainda não respondeu (ou não tem o Código de primeiro segmento). |
+| **Sem 3 Segmentos** | O JMS ainda não respondeu (ou não tem o Código de primeiro segmento) e a Base Destino do pacote ainda não tem código conhecido. |
 | **Código fora da tabela** | O código do pacote não está em nenhuma rota da aba "Rotas" (inclua). |
 | **Rota sem regra** | A próxima parada não está na aba "Rotas". |
 
@@ -171,7 +182,8 @@ A tela Configurações nunca abre pelo link nem de outro computador: só no comp
 | `minutos` | 10 | Busca automática de hoje (mínimo 2). |
 | `minutosDiaAnterior` | 60 | Busca de ontem (0 = desliga). |
 | `status` | `{"concluido": [4], "emTransito": [3]}` | Códigos do Status no JMS. Configurações mostra quantas viagens de hoje estão em cada código. |
-| `segundosPorRemessa` | 30 | 3 Segmentos: 1 remessa a cada tantos segundos. |
+| `segundosPorRemessa` | 2 | 3 Segmentos: no mínimo tantos segundos entre uma remessa e outra (desacelera sozinho se o JMS bloquear). 0 = várias ao mesmo tempo. |
+| `segmentoPelaBase` | `true` | Pacote ainda sem o 3 Segmentos usa o 1º e o 2º segmento da mesma Base Destino. |
 | `consultasSegmentos` | 3 | 3 Segmentos ao mesmo tempo, só se `segundosPorRemessa` for 0. |
 | `consultasPorSegundo` | 5 | Viagens e bipes: ritmo máximo das consultas ao JMS. |
 | `consultasAoMesmoTempo` | 4 | Viagens conferidas ao mesmo tempo. |
@@ -185,9 +197,13 @@ Mudou o `config.json`? Feche a janela preta e abra o app de novo.
 
 - **"AuthToken do JMS vencido":** pegue um novo no JMS e cole no DashMaster ou em Configurações deste app.
 - **"A porta 3300 já está em uso":** o app (ou a versão Node.js) já está aberto em outra janela.
-- **"O JMS bloqueou as consultas do Rastreamento do pacote":** o app pausa 15 min e continua sozinho.
+- **"O JMS bloqueou as consultas do Rastreamento do pacote":** o app pausa 15 min e continua sozinho, mais devagar.
   - Se acontecer sempre, aumente `segundosPorRemessa` no `config.json`.
   - Mande um print da linha do registro com "página:".
+- **Muitos pacotes "Sem 3 Segmentos":** veja em Configurações › Busca no JMS a linha "3 Segmentos no JMS" e, no Registro, as linhas "3 segmentos:".
+  - "com erro (… último: …)": o JMS recusou a consulta. O motivo aparece ali.
+  - "voltou do JMS sem o código": o JMS respondeu, mas sem o `terminalDispatchCode`. A linha mostra os campos que vieram.
+  - Mande um print dessas linhas (sem o AuthToken).
 - **A janela mostra "O painel NÃO está no ar":** leia a linha `[erro]` e mande um print (sem o AuthToken).
 - **"Falha de rede ao consultar o JMS", mas o JMS abre no navegador:** a empresa usa proxy.
   - O Python já usa o proxy fixo do Windows (Configurações › Rede › Proxy › "Usar um servidor proxy").

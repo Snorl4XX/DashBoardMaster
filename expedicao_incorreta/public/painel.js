@@ -109,8 +109,8 @@
     var ss = p.semSegmento;
     var spr = e.busca.segundosPorRemessa;
     if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta o Rastreamento do pacote ' +
-      (spr > 0 ? '1 remessa a cada ' + fmtInt(spr) + ' s (cerca de ' + fmtInt(Math.round(86400 / spr * 0.9)) + ' por dia), para o JMS não bloquear' : 'sem pausa') +
-      ': hoje primeiro, depois os dias anteriores. Eles entram na conta quando o JMS responder.');
+      (spr > 0 ? '1 remessa a cada ' + String(spr).replace('.', ',') + ' s (cerca de ' + fmtInt(Math.round(86400 / spr * 0.9)) + ' por dia), para o JMS não bloquear' : 'sem pausa') +
+      ': hoje primeiro (uma remessa de cada Base Destino, depois as mais recentes), depois os dias anteriores. Eles entram na conta quando o JMS responder.');
     if (ss.jmsSemCodigo) h = alerta(h, true, pac(ss.jmsSemCodigo) + ' sem código no 3 Segmentos do JMS', 'O Rastreamento do pacote não tem o Código de primeiro segmento: não dá para conferir.');
     if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com código fora da tabela de rotas', ex(p.semCodigo) +
       '. Inclua o código na rota certa da aba "Rotas" da planilha rotas.xlsx.');
@@ -130,6 +130,10 @@
       var todos = sg.jms >= sg.total;
       b.push('<span class="badge ' + (todos ? 'ok' : 'warn') + '" title="Pacotes que o JMS já respondeu no bloco 3 Segmentos (Rastreamento do pacote).">' +
         svg(todos ? 'check' : 'alert') + '<span>3 Segmentos no JMS: ' + fmtPct(sg.jms / sg.total * 100, sg.jms >= sg.total || !sg.jms ? 0 : 1) + '</span></span>');
+      if (sg.pelaBase) {
+        b.push('<span class="badge" title="Pacotes ainda sem a consulta no JMS que usam o 1º e o 2º segmento já vistos na mesma Base Destino. A consulta continua e troca pelo código exato.">' +
+          svg('base') + '<span>' + fmtInt(sg.pelaBase) + ' pela Base Destino</span></span>');
+      }
     }
     if (r.viagens.comErro) b.push('<span class="badge warn">' + svg('alert') + '<span>' + fmtInt(r.viagens.comErro) + ' viagens com erro na busca</span></span>');
     $('badges').innerHTML = b.join('');

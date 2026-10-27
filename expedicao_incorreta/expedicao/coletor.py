@@ -91,6 +91,19 @@ def eh_descarga(r: dict) -> bool:
     return t == "2" or bool(re.search(r"descarreg|卸", t, re.I))
 
 
+def segmento_da_lista(x: dict) -> dict | None:
+    """Código de segmentos que o JMS às vezes manda junto na lista de pacotes. → {s1, s2, s3} ou None (não veio)."""
+    for k in ("terminalDispatchCode", "threeSegmentCode", "threeSegmentsCode"):
+        partes = [p.strip() for p in texto(x.get(k)).split(",")]
+        if len(partes) >= 2 and partes[0]:
+            return {"s1": partes[0], "s2": partes[1], "s3": partes[2] if len(partes) > 2 else ""}
+    s1 = texto(x.get("orderFirstCode") or x.get("firstSegmentCode"))
+    s2 = texto(x.get("orderSecondCode") or x.get("secondSegmentCode") or x.get("twoSegmentCode"))
+    if s1 and s2:
+        return {"s1": s1, "s2": s2.split(",")[-1].strip(), "s3": ""}
+    return None
+
+
 def em_paralelo(itens: list, n: int, fn) -> None:
     """fn(item, índice) em n itens ao mesmo tempo; o primeiro erro para os outros trabalhadores (não pegam item novo) e sobe."""
     itens = list(itens)
@@ -138,6 +151,9 @@ class Coletor:
         self.atual: Future | None = None
         self.pendentes: set[str] = set()
         self.pausa_segmentos = 0.0
+        self.ok_seguidos = 0
+        self._avisou_sem_codigo = False
+        self._campos_vistos: set[str] = set()
         self._trava = threading.Lock()
 
     def _mudou(self, tipo: str, dia: str) -> None:
@@ -233,9 +249,12 @@ class Coletor:
             self._mudou(tipo, dia)
 
     def buscar_segmentos(self) -> None:
-        """"3 Segmentos" das remessas que ainda não têm (uma consulta por remessa, no ritmo do jms.py: com "segundosPorRemessa",
-        uma de cada vez), do dia mais novo para o mais antigo, até o tempo desta busca acabar. O painel é atualizado a cada lote.
-          - Bloqueio do JMS (página em vez de dados, HTTP 429): para e pausa 15 min. A remessa não é marcada com erro.
+        """"3 Segmentos" das remessas que ainda não têm (uma consulta por remessa, no ritmo do jms.py), do dia mais novo para o
+        mais antigo, até o tempo desta busca acabar. O painel é atualizado a cada lote. Em cada dia, primeiro uma remessa de
+        cada Base Destino que o JMS ainda não deu (as outras da base usam o código dela, se "segmentoPelaBase"), depois o resto,
+        do bipe mais recente para o mais antigo.
+          - Bloqueio do JMS (página em vez de dados, HTTP 429): desacelera (o dobro do intervalo), para e pausa 15 min. A remessa
+            não é marcada com erro. Depois de 300 respostas seguidas sem bloqueio, acelera um pouco.
           - JMS recusando as 20 primeiras sem nenhum acerto: para e avisa. Token vencido: para tudo.
         """
         e, cfg = self.estado, self.cfg
@@ -244,29 +263,41 @@ class Coletor:
         # Até 1 min antes da próxima busca automática (contando do começo desta), para não atrasar as viagens.
         inicio = (e["inicio"] or ms()) / 1000
         fim = max(time.time() + 60, inicio + max(2, (cfg.get("minutos") or 10) - 1) * 60)
-        ao_mesmo_tempo = 1 if cfg["segundosPorRemessa"] > 0 else cfg.get("consultasSegmentos") or 3
-        c = {"ok": 0, "falhas": 0, "ultimo_erro": "", "parar": ""}
+        c = {"ok": 0, "falhas": 0, "sem_codigo": 0, "ultimo_erro": "", "parar": ""}
         e["tipo"] = ""
         e["avisoSegmentos"] = ""
         for dia in self.banco.dias_com_pacotes():
             total = self.banco.contar_segmentos(dia)
             feitos = {"n": total["feitos"]}
             br = "/".join(reversed(dia.split("-")))
-            lote = self.banco.sem_segmento(dia, 500)
+            lote = self.banco.fila_segmentos(dia, 500)
             while lote and not c["parar"]:
                 if time.time() >= fim:
                     c["parar"] = "tempo"
                     break
+                # Com intervalo entre as remessas, uma de cada vez; sem intervalo, várias ao mesmo tempo.
+                ao_mesmo_tempo = 1 if self.jms.s_por_remessa > 0 else cfg.get("consultasSegmentos") or 3
 
                 def uma(b: str, _k: int) -> None:
                     if c["parar"] or time.time() >= fim:
                         return
                     try:
-                        self.banco.salvar_segmento(b, self.jms.segmentos(b), "")
+                        r = self.jms.segmentos(b)
+                        self.banco.salvar_segmento(b, r, "")
                         with self._trava:
                             c["ok"] += 1
                             feitos["n"] += 1
                             e["segmentos"] += 1
+                            self.ok_seguidos += 1
+                            if self.ok_seguidos >= 300:
+                                self.ok_seguidos = 0
+                                self.jms.acelerar()
+                            if not r.get("s1"):
+                                c["sem_codigo"] += 1
+                                if not self._avisou_sem_codigo:
+                                    self._avisou_sem_codigo = True
+                                    self.log("aviso", f"3 segmentos: a remessa {b} voltou do JMS sem o código (terminalDispatchCode). "
+                                                      f"Campos que vieram: {', '.join(r.get('campos') or []) or 'nenhum'}.")
                     except Exception as err:
                         if getattr(err, "bloqueio", False):
                             c["parar"], c["ultimo_erro"] = "bloqueio", str(err)
@@ -287,12 +318,15 @@ class Coletor:
                 if not c["parar"] and time.time() >= fim:
                     c["parar"] = "tempo"
                 if not c["parar"]:
-                    lote = self.banco.sem_segmento(dia, 500)
+                    lote = self.banco.fila_segmentos(dia, 500)
             if c["parar"]:
                 break
         if c["parar"] == "bloqueio":
+            self.ok_seguidos = 0
+            novo = self.jms.desacelerar()
             self.pausa_segmentos = time.time() + 15 * 60
-            e["avisoSegmentos"] = "O JMS bloqueou as consultas do Rastreamento do pacote. O app pausa 15 min e continua. " + c["ultimo_erro"]
+            e["avisoSegmentos"] = (f"O JMS bloqueou as consultas do Rastreamento do pacote. O app pausa 15 min e continua mais devagar "
+                                   f"(1 remessa a cada {novo:g} s). " + c["ultimo_erro"])
             self.log("aviso", e["avisoSegmentos"])
         elif c["parar"] == "recusa":
             e["avisoSegmentos"] = (f"O JMS recusou o Rastreamento do pacote (3 segmentos): {c['ultimo_erro']} "
@@ -300,7 +334,11 @@ class Coletor:
             self.log("aviso", e["avisoSegmentos"])
         if c["ok"] or c["falhas"]:
             self.log("info", f"3 segmentos: {c['ok']} pacotes conferidos no JMS" +
-                     (f", {c['falhas']} com erro (tenta de novo em 30 min)" if c["falhas"] else "") +
+                     (f" ({c['sem_codigo']} sem código)" if c["sem_codigo"] else "") +
+                     (f", {c['falhas']} com erro (tenta de novo em 30 min; último: {c['ultimo_erro']})" if c["falhas"] else "") +
+                     f" · {len(self.banco.segmentos_por_base())} Bases Destino conhecidas · ritmo: " +
+                     (f"1 remessa a cada {self.jms.s_por_remessa:g} s" if self.jms.s_por_remessa > 0 else
+                      f"{cfg.get('consultasSegmentos') or 3} ao mesmo tempo") +
                      (". O resto continua na próxima busca." if c["parar"] == "tempo" else "."))
 
     def listar_viagens(self, tipo: str, dia: str) -> tuple[list[dict], bool]:
@@ -371,6 +409,10 @@ class Coletor:
         descarga = next((r for r in regs if eh_descarga(r)), None)
         pacotes = self.baixar_pacotes(tipo, v, n, texto(descarga.get("scanNetworkCode")) if descarga else v["codigoDestino"])
         self.banco.trocar_pacotes(tipo, v["shipmentNo"], dia, pacotes)
+        # Se a lista do JMS já traz o código de segmentos, nem precisa consultar o Rastreamento do pacote.
+        da_lista = [(p["billCode"], p["_seg"], "") for p in pacotes if p.get("_seg")]
+        if da_lista:
+            self.banco.salvar_segmentos(da_lista)
         self.banco.marcar_viagem(tipo, v["shipmentNo"], n, "", v["estado"])
         with self._trava:
             self.estado["pacotes"] += len(pacotes)
@@ -408,6 +450,10 @@ class Coletor:
         while p <= paginas and p <= MAX_PAGINAS:
             r = self.jms.pacotes(tipo, v["shipmentNo"], rede, n, p, cfg["tamanhoPagina"], variante)
             paginas = r["paginas"]
+            if r["registros"] and tipo not in self._campos_vistos and isinstance(r["registros"][0], dict):
+                self._campos_vistos.add(tipo)  # para conferir o que o JMS manda (só os nomes, uma vez)
+                self.log("info", f"Lista de pacotes do JMS ({'troncal' if tipo == 'troncal' else 'secundária'}): campos "
+                                 + ", ".join(sorted(r["registros"][0])) + ".")
             for x in r["registros"]:
                 x = x if isinstance(x, dict) else {}
                 # Só o bipe de carregamento da nossa base (o endereço "unloading" da secundária pode trazer outros bipes).
@@ -422,7 +468,8 @@ class Coletor:
                               "baseDestino": texto(x.get("destsite")), "municipio": texto(x.get("destsiteCity")),
                               "tipoBipagem": texto(x.get("scanTypeName")) or (
                                   "Bipe de carregamento" if texto(x.get("scanType")) == "1" else texto(x.get("scanType"))),
-                              "digitalizadoPor": texto(x.get("scanUser")), "horario": re.sub(r"\.\d+$", "", texto(x.get("scanTime")))})
+                              "digitalizadoPor": texto(x.get("scanUser")), "horario": re.sub(r"\.\d+$", "", texto(x.get("scanTime"))),
+                              "_seg": segmento_da_lista(x)})
             if not r["registros"]:
                 break
             p += 1
