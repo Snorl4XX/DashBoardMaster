@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Entrar · Expedição Incorreta</title>
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('jt_theme'); } catch (e) {}
+      if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
+    })();
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <main class="login">
+    <form class="card" method="post" action="entrar">
+      <div class="brand-mark big" aria-hidden="true">J&amp;T</div>
+      <div><span class="kicker">Expedição Incorreta</span><h2 style="margin:2px 0 0;font-size:18px">Senha do painel</h2></div>
+      <input type="password" id="senha" name="senha" aria-label="Senha do painel" autocomplete="current-password" autofocus required>
+      <button class="btn btn-red" type="submit">Entrar</button>
+      <span class="made-by">Feito por Caike Oliveira</span>
+    </form>
+  </main>
+</body>
+</html>

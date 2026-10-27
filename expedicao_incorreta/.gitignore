@@ -1,0 +1,6 @@
+# Criados pelo app no computador de quem usa: configuração (senha), banco com o AuthToken, registro e planilhas.
+config.json
+dados/
+planilhas/
+demo/
+__pycache__/

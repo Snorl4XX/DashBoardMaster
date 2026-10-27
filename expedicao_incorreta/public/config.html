@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Configurações · Expedição Incorreta</title>
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('jt_theme'); } catch (e) {}
+      if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
+    })();
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Menu">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">J&amp;T</div>
+        <div class="brand-copy"><strong>EXPRESS</strong><small><span id="brandCenter">SP GRU</span> · Expedição Incorreta</small></div>
+      </div>
+      <nav class="side-nav" aria-label="Painéis">
+        <div class="nav-label">Painéis</div>
+        <a class="nav-item" href="troncal">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8h12v8H2zM14 11h4l3 3v2h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span>
+          <span class="nav-copy"><b>Rota Troncal</b><small>干线 · caminhão errado</small></span>
+        </a>
+        <a class="nav-item" href="secundaria">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h4c5 0 1-12 6-12"/></svg></span>
+          <span class="nav-copy"><b>Rota Secundária</b><small>支线 · caminhão errado</small></span>
+        </a>
+        <div class="nav-label">Sistema</div>
+        <a class="nav-item active" href="config" aria-current="page">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
+          <span class="nav-copy"><b>Configurações</b><small>设置 · só neste computador</small></span>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="version" id="appVersion"></span>
+        <span class="made-by">Feito por Caike Oliveira</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="title-wrap">
+          <div class="eyebrow"><span>J&amp;T EXPRESS</span><span class="dot-sep"></span><span id="eyebrowCenter">SP GRU</span></div>
+          <h1>Configurações</h1>
+          <p>设置 · Esta tela só abre no computador do app. Ninguém de fora consegue abrir.</p>
+        </div>
+      </header>
+
+      <section class="card conf" aria-labelledby="s-token">
+        <div class="section-head"><div><span class="kicker">Acesso</span><h2 id="s-token">AuthToken do JMS</h2></div></div>
+        <p class="muted small" id="token-fonte">…</p>
+        <label for="token" class="muted small">Cole só o valor do AuthToken (JMS › F12 › Rede › item do gw.jtjms-br.com › Cabeçalhos › authtoken):</label>
+        <textarea id="token" autocomplete="off" spellcheck="false" placeholder="Cole aqui só o valor"></textarea>
+        <div class="row">
+          <button type="button" class="btn btn-red" id="salvar-token">Salvar e testar</button>
+          <button type="button" class="btn btn-light" id="testar">Testar a conexão</button>
+          <button type="button" class="btn btn-light" id="apagar-token">Usar o do DashMaster</button>
+        </div>
+        <div class="saida hidden" id="token-res"></div>
+      </section>
+
+      <section class="card conf" aria-labelledby="s-busca">
+        <div class="section-head"><div><span class="kicker">JMS</span><h2 id="s-busca">Busca no JMS</h2></div></div>
+        <dl class="info" id="busca-info"></dl>
+        <div class="row">
+          <input type="date" id="dia-busca" aria-label="Dia">
+          <button type="button" class="btn btn-red" id="buscar">Buscar este dia agora</button>
+          <button type="button" class="btn btn-light" id="buscar-tudo" title="Baixa a lista de pacotes de todas as viagens de novo, mesmo sem mudança">Buscar tudo de novo</button>
+        </div>
+        <div class="saida hidden" id="busca-erros"></div>
+      </section>
+
+      <section class="card conf" aria-labelledby="s-planilhas">
+        <div class="section-head"><div><span class="kicker">Regras</span><h2 id="s-planilhas">Planilha de rotas do SC</h2></div></div>
+        <dl class="info" id="plan-info"></dl>
+        <div class="row">
+          <label class="btn btn-light">Enviar planilha de rotas (.xlsx)<input type="file" accept=".xlsx" id="up-rotas"></label>
+          <a class="btn btn-light" href="config/api/rotas.xlsx">Baixar a planilha de rotas atual</a>
+        </div>
+        <div class="saida hidden" id="plan-res"></div>
+      </section>
+
+      <section class="card conf" aria-labelledby="s-end">
+        <div class="section-head"><div><span class="kicker">Link</span><h2 id="s-end">Endereços dos painéis</h2></div></div>
+        <dl class="info" id="end-info"></dl>
+      </section>
+
+      <section class="card conf" aria-labelledby="s-log">
+        <div class="section-head"><div><span class="kicker">Registro</span><h2 id="s-log">O que o app fez</h2></div></div>
+        <div class="saida" id="registro"></div>
+      </section>
+
+      <footer class="foot">J&amp;T Expedição Incorreta<span class="made-by">Feito por Caike Oliveira</span></footer>
+    </main>
+  </div>
+  <script src="config.js"></script>
+</body>
+</html>
