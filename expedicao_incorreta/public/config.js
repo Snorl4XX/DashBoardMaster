@@ -59,6 +59,9 @@
         }).join(' | ')],
         ['Busca automática', 'hoje a cada ' + e.config.minutos + ' min' + (e.config.minutosDiaAnterior ? ' · ontem a cada ' + e.config.minutosDiaAnterior +
           ' min (guarda o dia anterior completo)' : ' · ontem: desligado')],
+        ['3 Segmentos no JMS', !e.config.consultarSegmentos ? 'desligado no config.json (confere só pela rotinha)' : e.segmentosHoje && e.segmentosHoje.total ?
+          'hoje: ' + fmt(e.segmentosHoje.feitos) + ' de ' + fmt(e.segmentosHoje.total) + ' pacotes conferidos' + (e.segmentosHoje.comErro ? ' · ' + fmt(e.segmentosHoje.comErro) +
+          ' com erro (tenta de novo em 30 min)' : '') + ' · ' + e.config.consultasSegmentos + ' consultas ao mesmo tempo' : 'hoje ainda sem pacotes'],
         ['Dias guardados', e.salvos && e.salvos.n ? e.salvos.n + (e.salvos.n === 1 ? ' dia' : ' dias') + ' (de ' + br(e.salvos.de) + ' a ' + br(e.salvos.ate) + ')' : 'nenhum ainda'],
         ['Pacotes da secundária', e.jms.pacotesSecundaria ? 'endereço "' + e.jms.pacotesSecundaria + '/scan/page"' : 'ainda não testado']
       ]);
@@ -75,10 +78,11 @@
       if (erros.length) resultado('plan-res', erros, false);
       var pend = $('pendentes');
       pend.textContent = '';
+      // Só valem para os pacotes que o JMS ainda não deu o 3 Segmentos (conferidos pela rotinha).
       if (p.rotas && p.rotas.codigosSemDestino.length) pend.appendChild(chips('Códigos de 1º nível sem DESTINO', p.rotas.codigosSemDestino,
-        'na aba "Códigos 1º nível" da planilha rotas.xlsx, escreva os DESTINOS (Nome de mecanismo final da rotinha) de cada código.'));
+        'só para a conferência pela rotinha (sem o 3 Segmentos do JMS): na aba "Códigos 1º nível" da planilha rotas.xlsx, escreva os DESTINOS de cada código.'));
       if (p.rotas && p.rotas.destinosSemCodigo.length) pend.appendChild(chips('DESTINOS da rotinha sem código', p.rotas.destinosSemCodigo,
-        'os pacotes desses destinos aparecem como "Destino sem código" (não contam como erro) até entrarem num código.'));
+        'sem o 3 Segmentos do JMS, o app acha o código pelo nome (sigla da base ou do estado). Estes não deram: entram como "Destino fora da tabela" até o JMS responder.'));
       info('end-info', e.enderecos.map(function (a, i) { return [i === 0 ? 'Neste computador' : /ts\.net|https:/.test(a) ? 'Link público' : 'Na rede', a]; }));
       $('registro').textContent = e.registro.slice().reverse().join('\n');
     });

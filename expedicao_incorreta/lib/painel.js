@@ -19,11 +19,12 @@ function turnoDe(horario) {
 }
 /** [campo, título, título em chinês] — o título em chinês aparece embaixo, como na tabela do painel principal. */
 const COLUNAS = [
-  ['turno', 'Turno', '班次'], ['situacaoTexto', 'Situação', '状态'], ['shipmentNo', 'ID de viagem', '车次号'], ['nomeViagem', 'Viagem', '线路'],
-  ['statusViagem', 'Status', '车次状态'],
+  ['turno', 'Turno', '班次'], ['situacaoTexto', 'Situação', '状态'], ['proximaParada', 'Próxima parada', '下一站'], ['rotaCerta', 'Rota certa', '应走线路'],
+  ['shipmentNo', 'ID de viagem', '车次号'], ['nomeViagem', 'Viagem', '线路'], ['statusViagem', 'Status', '车次状态'],
   ['billCode', 'Número de pedido JMS', '运单号'], ['packageCode', 'Número do lote', '包号'], ['baseEscaneamento', 'Base de escaneamento', '扫描网点'],
-  ['proximaParada', 'Próxima parada', '下一站'], ['baseDestino', 'Base Destino', '目的网点'], ['municipio', 'Município de Destino', '目的城市'],
-  ['segmento', 'SEGMENTOS', '二段码'], ['destino', 'DESTINO', '末端机构'], ['tipoBipagem', 'Tipo de bipagem', '扫描类型'],
+  ['baseDestino', 'Base Destino', '目的网点'],
+  ['municipio', 'Município de Destino', '目的城市'], ['codigo1', '1º segmento', '一段码'], ['segmento', 'SEGMENTOS', '二段码'],
+  ['destino', 'DESTINO', '末端机构'], ['fonte', 'Conferido por', '依据'], ['tipoBipagem', 'Tipo de bipagem', '扫描类型'],
   ['digitalizadoPor', 'Digitalizado por', '扫描人'], ['horario', 'Tempo de digitalização', '扫描时间']
 ];
 
@@ -65,8 +66,11 @@ class Painel {
       const v = viagens.get(p.shipmentNo);
       if (!v) return;
       const r = this.regras.conferir(tipo, p, v.destino);
-      linhas.push(Object.assign({}, p, r, {situacaoTexto: SITUACOES[r.situacao], turno: turnoDe(p.horario), nomeViagem: v.nome || '',
-        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status]}));
+      const l = Object.assign({}, p, r, {situacaoTexto: SITUACOES[r.situacao], turno: turnoDe(p.horario), nomeViagem: v.nome || '',
+        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status], jms: !!p.seg1});
+      // O que falta na planilha de rotas, para o aviso.
+      if (r.situacao === 'sem_codigo') l.pendente = (r.codigo1 ? 'código ' + r.codigo1 + (r.segmento ? ' ' + r.segmento : '') : r.destino || p.baseDestino || '(vazio)');
+      linhas.push(l);
     });
     linhas.sort(ordemPadrao);
     return this.guardar(chave, {versao: this.regras.versao, linhas, viagens, fora});
@@ -105,7 +109,7 @@ class Painel {
     const top = {
       segmentos: topDe(errados, 'segmento'), basesDestino: topDe(errados, 'baseDestino'), destinos: topDe(errados, 'destino'),
       logins: topDe(errados, 'digitalizadoPor'), viagens: topDe(errados, 'shipmentNo', 10, nomeViagem), lotes: topDe(errados, 'packageCode'),
-      rotas: topDe(errados, 'rota')
+      rotas: topDe(errados, 'rota'), rotasCertas: topDe(errados, 'rotaCerta')
     };
     const distintos = {};
     Object.keys(top).forEach(k => { distintos[k] = top[k].distintos; });
@@ -116,8 +120,10 @@ class Painel {
       totais: {pacotes: linhas.length, errados: cont.errado, certos: cont.certo, semRotinha: cont.sem_rotinha, semCodigo: cont.sem_codigo,
         semRegra: cont.sem_regra, taxa: linhas.length ? cont.errado / linhas.length * 100 : 0},
       turnos, top, distintos,
+      // Quantos pacotes já têm o "3 Segmentos" do JMS (o resto foi conferido pela rotinha).
+      segmentos: {jms: linhas.filter(l => l.jms).length, total: linhas.length},
       maisAfetados: {segmento: top.segmentos[0] || null, baseDestino: top.basesDestino[0] || null, viagem: top.viagens[0] || null,
-        destino: top.destinos[0] || null, lote: top.lotes[0] || null, login: top.logins[0] || null},
+        destino: top.destinos[0] || null, lote: top.lotes[0] || null, login: top.logins[0] || null, rotaCerta: top.rotasCertas[0] || null},
       viagens: {total: viagens.length, comCarga: viagens.filter(v => v.contagem > 0).length, comErro: viagens.filter(v => v.erro).length,
         concluidas: viagens.filter(v => v.status === 'concluido').length, emTransito: viagens.filter(v => v.status === 'em_transito').length,
         foraDoStatus: tudo.fora},
@@ -132,7 +138,7 @@ class Painel {
       pendencias: {
         semRegra: topDe(linhas.filter(l => l.situacao === 'sem_regra'), 'proximaParada', 8),
         semRotinha: topDe(linhas.filter(l => l.situacao === 'sem_rotinha'), 'baseDestino', 8),
-        semCodigo: topDe(linhas.filter(l => l.situacao === 'sem_codigo'), 'destino', 8)
+        semCodigo: topDe(linhas.filter(l => l.situacao === 'sem_codigo'), 'pendente', 8)
       }
     };
   }

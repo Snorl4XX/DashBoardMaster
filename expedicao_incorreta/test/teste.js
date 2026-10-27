@@ -2,7 +2,7 @@
 /**
  * Teste do app Expedição Incorreta com um JMS de mentira (test/jms_falso.js) e planilhas fictícias (nada de dado real).
  * Liga o servidor de verdade (server.js) numa pasta temporária e confere: busca no JMS (troncal e secundária), conferência
- * com a rotinha e a planilha de rotas, Status (só Concluído e Em Trânsito), números do painel, filtros (Status, Base Destino da
+ * com o "3 Segmentos" do JMS, a rotinha e a planilha de rotas (regras em detalhe também), Status (só Concluído e Em Trânsito), números do painel, filtros (Status, Base Destino da
  * tabela de rotas…), tabela, Excel, período de vários dias (e busca dos dias que faltam), nova busca só do que mudou, viagem
  * concluída sem consulta nova, viagem grande, troca de planilha, senha, AuthToken (do DashMaster e próprio) e AuthToken vencido.
  * Uso: node test/teste.js   (dentro da pasta expedicao_incorreta)
@@ -19,7 +19,7 @@ const {escreverXlsx, lerXlsx, zip} = require('../lib/xlsx');
 const {Regras, norm} = require('../lib/regras');
 const {turnoDe} = require('../lib/painel');
 const {codigosStatus, statusDe} = require('../lib/status');
-const {somaDias, diasEntre, diasDaAgenda} = require('../lib/coletor');
+const {Coletor, somaDias, diasEntre, diasDaAgenda} = require('../lib/coletor');
 const {Banco} = require('../lib/db');
 
 const DIA = '2026-10-20', DIA_ANTES = '2026-10-19';
@@ -128,6 +128,62 @@ function abasRotas(semcodComCodigo) {
     !bv.buscados('2026-10-01', '2026-10-02').has('2026-10-02') && bv.diasSalvos().n === 1, 'banco da versão 1.1 atualiza sozinho (dias antigos continuam salvos)');
   bv.fechar();
 
+  // Conferência: "3 Segmentos" do JMS e, sem ele, a rotinha (nome da rota, aba de códigos, sigla da base ou do estado, Estado).
+  const pastaRegras = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-regras-'));
+  fs.writeFileSync(path.join(pastaRegras, 'rotas.xlsx'), escreverXlsx([
+    {nome: 'Rotas', linhas: [['Tipo', 'Rota (Próxima parada)', '1º Nível (códigos)', '2º Nível (segmentos, opcional)', 'Observação'],
+      ['Troncal', 'XX NORTE', 'NO, XA', '', ''], ['Troncal', 'YY SUL', 'SU', '', ''], ['Troncal', 'YY SUL', 'NO', '901-07', ''], ['Troncal', 'XX CENTRO', 'CE1', '', ''],
+      ['Secundária', 'BASE LOCAL A-ZZ', 'LOC', '903-01', ''], ['Secundária', 'BASE LOCAL C-ZZ', 'NO', '901-09', '']]},
+    {nome: 'Códigos 1º nível', linhas: [['Código 1º nível', 'Destinos', 'Observação'], ['CE1', 'ZZ ESPECIAL', ''], ['NO', 'XX NORTE', '']]}]));
+  fs.writeFileSync(path.join(pastaRegras, 'rotinhas.xlsx'), escreverXlsx([{nome: 'Sheet0', linhas: [CAB_ROTINHA,
+    ['BASE N1-XX', '901-00', 'XX NORTE', 'XX'], ['BASE MIX-XA', '950-00', 'DC ABC-XA', 'QQ'], ['BASE ESP-ZZ', '960-00', 'ZZ ESPECIAL', 'ZZ'],
+    ['BASE EST-SU', '970-00', 'DC QWE-RT', 'SU']]}]));
+  const R = new Regras(pastaRegras);
+  const cf = (o, parada) => R.conferir('troncal', Object.assign({proximaParada: parada || 'XX NORTE'}, o), '');
+  const casos = [
+    [{baseDestino: 'BASE N1-XX', seg1: 'NO', seg2: '901-00'}, 'certo', 'XX NORTE', 'JMS (3 segmentos)', 'JMS: código da rota do caminhão'],
+    [{baseDestino: 'BASE N1-XX', seg1: 'NO', seg2: '901-07'}, 'errado', 'YY SUL', 'JMS (3 segmentos)', 'JMS: linha que cita o segmento vence a geral'],
+    [{baseDestino: 'BASE N1-XX', seg1: 'NO', seg2: '901-09'}, 'errado', 'BASE LOCAL C-ZZ (secundária)', 'JMS (3 segmentos)', 'JMS: segmento de uma rota secundária'],
+    [{baseDestino: 'BASE N1-XX', seg1: 'SU', seg2: '902-00'}, 'errado', 'YY SUL', 'JMS (3 segmentos)', 'JMS: código de outra rota'],
+    [{baseDestino: 'BASE NADA', seg1: 'QQ', seg2: '999-00', centroJms: 'YY SUL'}, 'errado', 'YY SUL', 'JMS (3 segmentos)', 'JMS: código fora da tabela, vale o centro de destino'],
+    [{baseDestino: 'BASE N1-XX', seg1: 'QQ', seg2: '999-00'}, 'certo', 'XX NORTE', 'Rotinha', 'código fora da tabela: Nome de mecanismo final = nome da rota'],
+    [{baseDestino: 'BASE MIX-XA'}, 'certo', 'XX NORTE', 'Rotinha', 'sem JMS: sigla do estado no nome (DC ABC-XA → XA)'],
+    [{baseDestino: 'BASE ESP-ZZ'}, 'errado', 'XX CENTRO', 'Rotinha', 'sem JMS: aba "Códigos 1º nível"'],
+    [{baseDestino: 'BASE EST-SU'}, 'errado', 'YY SUL', 'Rotinha', 'sem JMS: coluna Estado da rotinha'],
+    [{baseDestino: 'BASE NADA'}, 'sem_rotinha', '', '', 'sem JMS e base fora da rotinha'],
+    [{baseDestino: 'BASE NADA', seg1: 'QQ', seg2: '999-00'}, 'sem_codigo', '', '', 'código do JMS fora da tabela e nada na rotinha'],
+    [{baseDestino: 'XX NORTE', seg1: 'SU', seg2: '902-00'}, 'certo', 'XX NORTE', 'Base Destino = parada', 'Base Destino igual à parada do caminhão']
+  ];
+  casos.forEach(([p, sit, certa, fonte, nome]) => {
+    const x = cf(p);
+    conferir(x.situacao === sit && x.rotaCerta === certa && x.fonte === fonte, 'conferência — ' + nome, x);
+  });
+  conferir(cf({baseDestino: 'BASE N1-XX', seg1: 'NO', seg2: '901-07'}, 'YY SUL').situacao === 'certo' && cf({baseDestino: 'BASE N1-XX'}, 'ROTA X').situacao === 'sem_regra' &&
+    cf({baseDestino: 'BASE MIX-XA'}).codigo1 === 'XA' && cf({baseDestino: 'BASE N1-XX', seg1: 'dc-no', seg2: '901 - 00'}).situacao === 'certo',
+    'conferência — caminhão certo pelo segmento, parada fora da tabela, código achado e códigos escritos de outro jeito');
+
+  // "3 Segmentos" na busca: uma consulta por remessa e guardado; JMS recusando tudo para depois de 20 tentativas; token vencido para tudo.
+  const bs = new Banco(path.join(pastaRegras, 'seg.db'));
+  bs.trocarPacotes('troncal', 'DKSEG1', '2026-10-21', [0, 1, 2, 3, 4].map(i => ({billCode: 'WOK' + i})));
+  let chamadas = 0;
+  const colOk = new Coletor({banco: bs, cfg: {consultasSegmentos: 3}, log: () => {}, jms: {segmentos: async w => { chamadas++; return {s1: 'NO', s2: '901-00', s3: '1', centro: ''}; }}});
+  await colOk.buscarSegmentos('2026-10-21');
+  await colOk.buscarSegmentos('2026-10-21');
+  conferir(chamadas === 5 && bs.contarSegmentos('2026-10-21').feitos === 5 && bs.pacotesDia('troncal', '2026-10-21')[0].seg1 === 'NO',
+    '3 Segmentos: uma consulta por remessa, guardada (a busca seguinte não consulta de novo)', chamadas);
+  bs.trocarPacotes('troncal', 'DKSEG2', '2026-10-22', Array.from({length: 30}, (_, i) => ({billCode: 'WNAO' + i})));
+  chamadas = 0;
+  const colNao = new Coletor({banco: bs, cfg: {consultasSegmentos: 3}, log: () => {}, jms: {segmentos: async () => {
+    chamadas++; throw Object.assign(new Error('O JMS recusou a consulta (código 9: sem permissão).'), {recusa: true});
+  }}});
+  await colNao.buscarSegmentos('2026-10-22');
+  conferir(chamadas >= 20 && chamadas <= 22 && /recusou a Informação básica/.test(colNao.estado.avisoSegmentos) && bs.contarSegmentos('2026-10-22').comErro === chamadas,
+    '3 Segmentos: JMS recusando tudo para depois de 20 tentativas e avisa (a conferência segue pela rotinha)', {chamadas, aviso: colNao.estado.avisoSegmentos});
+  bs.trocarPacotes('troncal', 'DKSEG3', '2026-10-23', [{billCode: 'WAUTH'}]);
+  const colAuth = new Coletor({banco: bs, cfg: {}, log: () => {}, jms: {segmentos: async () => { throw Object.assign(new Error('token失效'), {auth: true}); }}});
+  conferir(await colAuth.buscarSegmentos('2026-10-23').then(() => false, e => !!e.auth), '3 Segmentos: AuthToken vencido para a busca');
+  bs.fechar();
+
   // Planilha de rotas padrão (tabelas vermelhas de 24/10), criada na primeira vez.
   const pastaPadrao = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-padrao-'));
   const padrao = new Regras(pastaPadrao), resPadrao = padrao.resumo();
@@ -228,6 +284,12 @@ function abasRotas(semcodComCodigo) {
     'filtro Base Destino: as bases da tabela de rotas (troncal e secundária)', r.opcoes.rotas);
   est = (await local('GET', '/config/api/estado')).json;
   conferir(est.salvos.n === 1 && est.salvos.de === DIA && est.busca.ultimo.dias.join() === DIA, 'o dia buscado fica salvo', est.salvos);
+  const segPed = jms.estado.segmentosPedidos, esperadas = new Set();
+  [['troncal', ['DKTESTE0001', 'DKTESTE0002', 'DKTESTE0006']], ['secundaria', ['SRTESTE0001', 'SRTESTE0002']]].forEach(([tp, ids]) =>
+    ids.forEach(id => jms.estado.dados[tp].pacotes[id].forEach(x => esperadas.add(x.billCode))));
+  conferir(Object.keys(segPed).length === esperadas.size && Object.keys(segPed).every(w => esperadas.has(w)) && Object.values(segPed).every(n => n === 1) &&
+    r.segmentos.jms === 129 && r.segmentos.total === 130,
+    '3 Segmentos: cada pacote do dia consultado uma vez no JMS (sem código: conferido pela rotinha)', {n: Object.keys(segPed).length, seg: r.segmentos});
   const tn = {};
   r.turnos.forEach(x => { tn[x.turno] = x; });
   conferir(tn.T1.errados === 0 && tn.T2.errados === 2 && tn.T3.errados === 1 && Math.abs(tn.T2.participacao - 66.67) < 0.1 && tn.T1.pacotes === 125,
@@ -237,9 +299,15 @@ function abasRotas(semcodComCodigo) {
     r.top.lotes[0].nome === 'LT-ERRO' && r.top.logins[0].nome === 'OPERADOR DOIS' && r.top.logins[0].qtd === 2,
     'mais afetados: segmento, base destino, DESTINO, ID de viagem, lote e login', r.top);
   conferir(r.maisAfetados.segmento.nome === '902-00' && r.maisAfetados.viagem.nome === 'DKTESTE0001', 'cartões dos mais afetados');
-  conferir(r.pendencias.semRotinha[0].nome === 'BASE FORA-XX' && r.pendencias.semCodigo[0].nome === 'WW SEMCOD', 'pendências apontam o que completar nas planilhas');
+  conferir(r.pendencias.semRotinha[0].nome === 'BASE FORA-XX' && r.pendencias.semCodigo[0].nome === 'código WW 904-00', 'pendências apontam o que completar nas planilhas',
+    r.pendencias);
+  conferir(r.top.rotasCertas[0].nome === 'YY SUL' && r.top.rotasCertas[0].qtd === 2 && r.maisAfetados.rotaCerta.nome === 'YY SUL',
+    'para onde os errados deviam ir (rota certa)', r.top.rotasCertas);
   conferir(r.menu.troncal === 3 && r.menu.secundaria === 2 && r.opcoes.segmentos.indexOf('902-00') >= 0 && r.opcoes.logins.length === 2 &&
     r.distintos.segmentos === 2 && r.maisAfetados.lote.nome === 'LT-ERRO', 'menu lateral com os errados de cada rota; opções de segmento e login', r.menu);
+  const ts = (await local('GET', '/api/tabela?tipo=secundaria&dia=' + DIA + '&situacao=errado')).json;
+  conferir(ts.linhas.some(l => l.baseDestino === 'BASE NORTE A-XX' && l.rotaCerta === 'XX NORTE (troncal)') &&
+    ts.linhas.some(l => l.baseDestino === 'BASE LOCAL B-ZZ' && l.rotaCerta === 'BASE LOCAL B-ZZ'), 'secundária: rota certa (inclusive de outra tabela)', ts.linhas);
   let s = await painel('secundaria');
   conferir(s.totais.pacotes === 5 && s.totais.errados === 2 && s.totais.certos === 2 && s.totais.semRegra === 1,
     'secundária: segmento de fora da rota é erro (mesmo destino) e rota sem regra fica à parte', s.totais);
@@ -259,9 +327,10 @@ function abasRotas(semcodComCodigo) {
   f = await painel('troncal', '&destino=' + encodeURIComponent('XX NORTE'));
   conferir(f.totais.errados === 1, 'filtro de DESTINO', f.totais);
   let t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&situacao=errado')).json;
-  conferir(t.total === 3 && t.colunas.length === 16 && t.linhas.every(l => l.situacao === 'errado' && l.situacaoTexto === 'Errado' && l.statusViagem === 'Em Trânsito：在途') &&
+  conferir(t.total === 3 && t.colunas.length === 19 && t.linhas.every(l => l.situacao === 'errado' && l.situacaoTexto === 'Errado' && l.statusViagem === 'Em Trânsito：在途' &&
+    l.fonte === 'JMS (3 segmentos)' && ((l.codigo1 === 'SU' && l.rotaCerta === 'YY SUL') || (l.codigo1 === 'NO' && l.rotaCerta === 'XX NORTE'))) &&
     t.linhas[0].shipmentNo && t.linhas[0].segmento && t.linhas[0].destino && /^T[123]$/.test(t.linhas[0].turno),
-    'tabela dos errados com turno, ID de viagem, Status, SEGMENTOS e DESTINO', t);
+    'tabela dos errados com turno, ID de viagem, Status, rota certa, 1º segmento, SEGMENTOS, DESTINO e "conferido por"', t);
   t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&tamanho=10&pagina=2')).json;
   conferir(t.total === 130 && t.linhas.length === 10 && t.pagina === 2, 'tabela com todos os dados, em páginas', {total: t.total, n: t.linhas.length});
   t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&ordem=horario&direcao=desc&tamanho=5')).json;
@@ -276,7 +345,7 @@ function abasRotas(semcodComCodigo) {
   const x = await local('GET', '/api/excel?tipo=troncal&dia=' + DIA + '&situacao=errado');
   const xl = lerXlsx(x.buf)[0];
   conferir(x.status === 200 && /attachment; filename="expedicao_troncal_2026-10-20\.xlsx"/.test(x.headers['content-disposition']) &&
-    xl.linhas.length === 4 && xl.linhas[0][0] === 'Turno' && xl.linhas[0][4] === 'Status' && xl.linhas[0][11] === 'SEGMENTOS', 'Excel da tabela (com os filtros)', xl.linhas[0]);
+    xl.linhas.length === 4 && xl.linhas[0][0] === 'Turno' && xl.linhas[0][3] === 'Rota certa' && xl.linhas[0][6] === 'Status' && xl.linhas[0][13] === 'SEGMENTOS', 'Excel da tabela (com os filtros)', xl.linhas[0]);
 
   // ---------- 4b. Período de vários dias ----------
   const periodo = async extra => (await local('GET', '/api/painel?tipo=troncal&de=' + DIA_ANTES + '&ate=' + DIA + (extra || ''))).json;
@@ -309,6 +378,7 @@ function abasRotas(semcodComCodigo) {
   const reg1 = reg('DKTESTE0001'), reg6 = reg('DKTESTE0006'), reg4 = reg('DKTESTE0004');
   await buscar();
   conferir(paginasTroncal() === antes, 'nova busca sem mudança: não baixa a lista de pacotes de novo', {antes, depois: paginasTroncal()});
+  conferir(Object.values(jms.estado.segmentosPedidos).every(n => n === 1), 'nova busca: não consulta o 3 Segmentos de novo');
   conferir(reg('DKTESTE0001') === reg1 + 1 && reg('DKTESTE0006') === reg6 && reg('DKTESTE0004') === reg4,
     'viagem concluída já conferida não é consultada de novo; em trânsito é', jms.estado.registrosPedidos);
   jms.estado.dados.troncal.pacotes.DKTESTE0001.push(pac('DKTESTE0001', 7, 'BASE SUL A-YY', 'XX NORTE', DIA + ' 16:00:00'));

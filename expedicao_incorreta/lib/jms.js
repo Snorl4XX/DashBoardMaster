@@ -12,6 +12,10 @@
  *   pacotes:   GET  /transportation/tmsBranchTrackingDetail/loading/scan/page?… (como a troncal) ou, se o JMS recusar,
  *              …/unloading/scan/page?… (o endereço da captura). O que funcionar fica guardado.
  * ("trackingDeatil" está escrito assim mesmo no JMS.)
+ * RASTREAMENTO DO PACOTE — Informação básica (uma remessa por consulta)
+ *   3 Segmentos: POST /operatingplatform/order/getOrderDetail {waybillNo, countryId} → details.terminalDispatchCode
+ *                "AL,560-12,020" (Código de primeiro segmento, Código de dois segmentos, 3 Segmentos) e
+ *                details.destinationDistributeName (centro de destino, ex.: "MT CGB"). Só esses campos são usados.
  *
  * Cabeçalhos como o DashMaster: AuthToken, Lang/Langtype PT, Timezone GMT-0300 e, se o JMS pedir, Routename (testa as
  * variantes uma vez e guarda a que for aceita).
@@ -21,7 +25,8 @@ const AUTH_RE = /token|登录|登陆|login|expired|expirad|过期|失效|会话|
 
 const ROTAS_CABECALHO = {
   troncal: ['', 'tmsShipment', 'trackingDeatil', 'transportTaskManage'],
-  secundaria: ['', 'branchTrackingDetail', 'tmsBranchTrackingDetail', 'brancTaskTrackSearch']
+  secundaria: ['', 'branchTrackingDetail', 'tmsBranchTrackingDetail', 'brancTaskTrackSearch'],
+  rastreio: ['', 'trackingExpress', 'waybillTracking', 'packageTracking']
 };
 
 class ErroJms extends Error {
@@ -157,6 +162,18 @@ class Jms {
       scanNetworkCode: codigoRede, countNum: total}));
     return pagina_(json);
   }
+  /** Bloco "3 Segmentos" de uma remessa (Rastreamento do pacote › Informação básica). → {s1, s2, s3, centro} */
+  async segmentos(remessa) {
+    return segmentosDe(await this.pedir('rastreio', '/operatingplatform/order/getOrderDetail', {waybillNo: String(remessa), countryId: '1'}));
+  }
+}
+
+/** Informação básica → {s1, s2, s3, centro}: o bloco "3 Segmentos" (terminalDispatchCode) e o centro de destino. */
+function segmentosDe(json) {
+  const d = json && json.data, det = d && typeof d === 'object' ? (d.details && typeof d.details === 'object' ? d.details : d) : null;
+  const cod = det && det.terminalDispatchCode !== undefined && det.terminalDispatchCode !== null ? String(det.terminalDispatchCode) : '';
+  const p = cod.split(',').map(x => x.trim());
+  return {s1: p[0] || '', s2: p[1] || '', s3: p[2] || '', centro: det && det.destinationDistributeName ? String(det.destinationDistributeName).trim() : ''};
 }
 
 /** {data: {records, pages, total}} → {registros, paginas, total} */
@@ -168,4 +185,4 @@ function pagina_(json) {
   return {registros, paginas, total};
 }
 
-module.exports = {Jms, ErroJms, JMS, ROTAS_CABECALHO, q};
+module.exports = {Jms, ErroJms, JMS, ROTAS_CABECALHO, q, segmentosDe};

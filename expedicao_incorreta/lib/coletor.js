@@ -7,6 +7,8 @@
  *   - Só busca de novo os pacotes de uma viagem quando a quantidade bipada mudou (o JMS não muda a lista sem mudar o número).
  *     Viagem concluída já conferida depois de concluída não é consultada de novo (a carga não muda mais).
  *   - Viagem grande (mais de "viagemGrande" pacotes) busca no máximo a cada "minutosViagemGrande" minutos.
+ *   - Depois das viagens, o bloco "3 Segmentos" (Rastreamento do pacote › Informação básica) de cada remessa nova: uma
+ *     consulta por remessa, guardada para sempre (o código não muda). É com ele que a conferência sabe a rota certa.
  *   - AuthToken vencido para tudo e avisa; erro numa viagem não para as outras.
  */
 const {statusDe} = require('./status');
@@ -58,7 +60,7 @@ class Coletor {
   constructor(o) {
     Object.assign(this, o);
     this.estado = {rodando: false, dia: '', dias: [], tipo: '', etapa: 'Ainda não buscou.', viagens: 0, feitas: 0, pacotes: 0, inicio: 0, fim: 0,
-      erros: [], ultimo: null, authVencido: false};
+      segmentos: 0, erros: [], ultimo: null, authVencido: false, avisoSegmentos: ''};
     this.atual = null;
     this.pendentes = new Set();
   }
@@ -73,19 +75,21 @@ class Coletor {
     const o = opcoes || {}, tipos = o.tipos || ['troncal', 'secundaria'];
     this.atual = (async () => {
       const e = this.estado, feitos = [];
-      Object.assign(e, {rodando: true, dia: lista[0] || '', dias: lista, inicio: Date.now(), fim: 0, viagens: 0, feitas: 0, pacotes: 0, erros: [],
-        etapa: 'Começando…'});
+      Object.assign(e, {rodando: true, dia: lista[0] || '', dias: lista, inicio: Date.now(), fim: 0, viagens: 0, feitas: 0, pacotes: 0, segmentos: 0,
+        erros: [], etapa: 'Começando…'});
       if (this.jms.novaRodada) this.jms.novaRodada();
       let ok = true, msg = '';
       try {
         for (const dia of lista) {
           e.dia = dia;
           for (const tipo of tipos) await this.coletarTipo(tipo, dia, o.forcar);
+          if (this.cfg.consultarSegmentos !== false) await this.buscarSegmentos(dia);
           if (tipos.length > 1) this.banco.marcarDia(dia);
           feitos.push(dia);
         }
         e.authVencido = false;
-        msg = e.viagens + ' viagens, ' + e.pacotes + ' pacotes novos ou atualizados' + (e.erros.length ? ' · ' + e.erros.length + ' com erro' : '');
+        msg = e.viagens + ' viagens, ' + e.pacotes + ' pacotes novos ou atualizados' + (e.segmentos ? ', ' + e.segmentos + ' conferidos no JMS (3 segmentos)' : '') +
+          (e.erros.length ? ' · ' + e.erros.length + ' com erro' : '');
       } catch (err) {
         ok = false;
         msg = String(err && err.message || err);
@@ -130,6 +134,43 @@ class Coletor {
       }
     });
     if (mudou && this.aoMudar) this.aoMudar(tipo, dia);
+  }
+  /**
+   * "3 Segmentos" de cada remessa do dia que ainda não tem (uma consulta por remessa, "consultasSegmentos" ao mesmo tempo).
+   * O painel é atualizado a cada lote. Se o JMS recusar as 20 primeiras sem nenhum acerto, para e avisa (a conferência
+   * continua pela rotinha).
+   */
+  async buscarSegmentos(dia) {
+    const e = this.estado, cfg = this.cfg, total = this.banco.contarSegmentos(dia);
+    let feitos = total.feitos, ok = 0, falhas = 0, ultimoErro = '';
+    const falta = total.total - total.feitos;
+    if (falta <= 0) return;
+    e.tipo = '';
+    e.avisoSegmentos = '';
+    for (let lote = this.banco.semSegmento(dia, 2000); lote.length; lote = this.banco.semSegmento(dia, 2000)) {
+      let parar = false;
+      await emParalelo(lote, cfg.consultasSegmentos || 10, async b => {
+        if (parar) return;
+        try {
+          this.banco.salvarSegmento(b, await this.jms.segmentos(b), '');
+          ok++; feitos++; e.segmentos++;
+        } catch (err) {
+          if (err && err.auth && !err.recusa) throw err;
+          falhas++;
+          ultimoErro = String(err && err.message || err).slice(0, 200);
+          this.banco.salvarSegmento(b, null, ultimoErro);
+          if (!ok && falhas >= 20) parar = true;
+        }
+        e.etapa = 'Conferindo no JMS (3 segmentos): ' + feitos + ' de ' + total.total + ' pacotes…';
+      });
+      if (this.aoMudar) { this.aoMudar('troncal', dia); this.aoMudar('secundaria', dia); }
+      if (parar) {
+        e.avisoSegmentos = 'O JMS recusou a Informação básica (3 segmentos): ' + ultimoErro + ' A conferência segue pela rotinha.';
+        this.log('aviso', e.avisoSegmentos);
+        return;
+      }
+    }
+    this.log('info', dia + ' · 3 segmentos: ' + ok + ' pacotes conferidos no JMS' + (falhas ? ', ' + falhas + ' com erro (tenta de novo em 30 min)' : '') + '.');
   }
   /** Viagens do dia que saem da nossa base (filtro do JMS e conferido aqui também). lista.mudou = alguma viagem nova ou com
    * status, nome ou destino diferente (o painel recalcula). */

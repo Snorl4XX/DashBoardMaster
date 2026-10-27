@@ -4,6 +4,8 @@
  * pacotes, com as mesmas respostas das capturas ({code: 1, data: {records, total, pages}}).
  *   - Viagens com Status (shipmentState) 4 = Concluído, 3 = Em Trânsito, 1 = carregando e 5 = cancelada.
  *   - O dia principal tem várias viagens; os outros dias, uma viagem troncal concluída com 2 pacotes.
+ *   - Informação básica (getOrderDetail): o "3 Segmentos" vem da Base Destino do pacote (SEGMENTOS_FALSOS); base sem
+ *     código → terminalDispatchCode null.
  *   - AuthToken errado → "token失效，请重新登录".
  *   - A troncal só aceita o cabeçalho Routename "tmsShipment" (o app tem de descobrir).
  *   - A secundária recusa "loading/scan/page" e responde em "unloading/scan/page" (como a captura).
@@ -12,8 +14,15 @@
 const http = require('http');
 
 const BASE = '30001';
+/** Base Destino → "3 Segmentos" e centro de destino que o JMS de mentira devolve. */
+const SEGMENTOS_FALSOS = {
+  'BASE NORTE A-XX': ['NO,901-00,100', 'XX NORTE'], 'BASE NORTE B-XX': ['NO,901-01,101', 'XX NORTE'], 'BASE SUL A-YY': ['SU,902-00,200', 'YY SUL'],
+  'BASE LOCAL A-ZZ': ['LOC,903-01,300', 'ZZ LOCAL'], 'BASE LOCAL B-ZZ': ['LOC,903-02,301', 'ZZ LOCAL'], 'BASE SEMCOD-WW': ['WW,904-00,400', 'WW SEMCOD'],
+  'BASE FORA-XX': [null, '']
+};
 function pac(id, i, baseDestino, proxima, hora, extra) {
-  return Object.assign({billCode: '7000' + String(id).replace(/\D/g, '').slice(-4) + String(i).padStart(5, '0'), networkName: 'SP GRU', networkCode: BASE,
+  // Remessa única por viagem (como no JMS): troncal começa com 7000, secundária com 7090.
+  return Object.assign({billCode: '70' + (id[0] === 'S' ? '9' : '0') + '0' + String(id).replace(/\D/g, '').slice(-4) + String(i).padStart(5, '0'), networkName: 'SP GRU', networkCode: BASE,
     nextStation: proxima, packageCode: 'LT-' + id.slice(-2) + '-' + (i % 3), scanTime: hora, scanType: '1', scanUser: 'OPERADOR ' + (i % 2 ? 'UM' : 'DOIS'),
     total: '0', destsite: baseDestino, destsiteCity: 'Cidade Teste', deliveryOutNetworkCode: null, outNetworkCode: null}, extra || {});
 }
@@ -69,7 +78,14 @@ function outroDia(dia) {
 
 function criar(dia) {
   const estado = {token: 'TOKEN-FICTICIO-DE-TESTE', dados: dados(dia), outros: {}, pedidos: {}, registrosPedidos: {}, diasPedidos: [],
-    exigeRotaTroncal: 'tmsShipment', recusarLoadingSecundaria: true};
+    segmentosPedidos: {}, recusarSegmentos: false, exigeRotaTroncal: 'tmsShipment', recusarLoadingSecundaria: true};
+  /** O pacote (de qualquer dia já pedido) com esta remessa. */
+  const pacoteDe = w => {
+    for (const dd of [estado.dados].concat(Object.values(estado.outros))) {
+      for (const tipo of ['troncal', 'secundaria']) for (const lista of Object.values(dd[tipo].pacotes)) { const x = lista.find(p => p.billCode === w); if (x) return x; }
+    }
+    return null;
+  };
   const doDia = d => d === dia ? estado.dados : (estado.outros[d] = estado.outros[d] || outroDia(d));
   // Viagem de qualquer dia já pedido (os registros e pacotes vêm só pelo ID).
   const daViagem = (tipo, id) => [estado.dados].concat(Object.values(estado.outros)).find(x => x[tipo].viagens.some(v => v.shipmentNo === id)) || estado.dados;
@@ -111,6 +127,14 @@ function criar(dia) {
         const lista = doDia(String(b.startDepartureTime || '').slice(0, 10)).secundaria.viagens.filter(v => !b.startCode || v.startCode === b.startCode);
         return resp(pagina(lista, new URLSearchParams({size: b.size, current: b.current})));
       }
+      if (p === '/operatingplatform/order/getOrderDetail' && req.method === 'POST') {
+        const w = String(JSON.parse(Buffer.concat(partes).toString('utf8') || '{}').waybillNo || '');
+        estado.segmentosPedidos[w] = (estado.segmentosPedidos[w] || 0) + 1;
+        if (estado.recusarSegmentos) return resp({code: 135010099, msg: 'Sem permissão para Rastreamento do pacote', succ: false, fail: true});
+        const x = pacoteDe(w), sg = x && SEGMENTOS_FALSOS[x.destsite] || [null, ''];
+        return resp({code: 1, msg: '1:Solicitação concluída', succ: true, fail: false,
+          data: {waybillNo: w, details: {waybillNo: w, terminalDispatchCode: sg[0], destinationDistributeName: sg[1], receiverCityName: 'Cidade Teste'}}});
+      }
       const m = /^\/transportation\/(trackingDeatil|tmsBranchTrackingDetail)\/(loading|unloading)\/scan\/(list|page)$/.exec(p);
       if (m) {
         const tipo = m[1] === 'trackingDeatil' ? 'troncal' : 'secundaria', id = q.get('shipmentNo');
@@ -128,4 +152,4 @@ function criar(dia) {
   return {servidor, estado};
 }
 
-module.exports = {criar, pac};
+module.exports = {criar, pac, SEGMENTOS_FALSOS};

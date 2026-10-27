@@ -1,7 +1,8 @@
 'use strict';
 /**
  * Banco local (SQLite do próprio Node.js, arquivo dados/expedicao.db): viagens de cada dia, pacotes do bipe de carregamento de
- * cada viagem, os dias já buscados e as propriedades do app (AuthToken próprio, cabeçalho aceito pelo JMS…). Nada é apagado:
+ * cada viagem, o bloco "3 Segmentos" de cada remessa (consultado uma vez só), os dias já buscados e as propriedades do app
+ * (AuthToken próprio, cabeçalho aceito pelo JMS…). Nada é apagado:
  * os dias anteriores ficam guardados. A conferência (certo/errado) não fica gravada: é feita na hora com as planilhas atuais,
  * então mudar a planilha de rotas muda o painel na hora.
  */
@@ -34,6 +35,9 @@ class Banco {
         PRIMARY KEY (tipo, shipmentNo, billCode, packageCode));
       CREATE INDEX IF NOT EXISTS pacotes_dia ON pacotes (tipo, dia);
       CREATE TABLE IF NOT EXISTS buscas (dia TEXT PRIMARY KEY, em INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS segmentos (billCode TEXT PRIMARY KEY, s1 TEXT, s2 TEXT, s3 TEXT, centro TEXT,
+        em INTEGER NOT NULL DEFAULT 0, erro TEXT NOT NULL DEFAULT '');
+      CREATE INDEX IF NOT EXISTS pacotes_remessa ON pacotes (billCode);
     `);
     // 1.2: status da viagem quando a lista de pacotes foi conferida (viagem concluída e conferida não muda mais).
     if (!this.db.prepare('PRAGMA table_info(viagens)').all().some(c => c.name === 'estadoBusca')) this.db.exec('ALTER TABLE viagens ADD COLUMN estadoBusca TEXT');
@@ -56,7 +60,18 @@ class Banco {
       viagensDia: this.db.prepare('SELECT * FROM viagens WHERE tipo = ? AND dia = ? ORDER BY COALESCE(partida, partidaPrevista), shipmentNo'),
       apagarPacotes: this.db.prepare('DELETE FROM pacotes WHERE tipo = ? AND shipmentNo = ?'),
       inserirPacote: this.db.prepare('INSERT OR REPLACE INTO pacotes (' + CAMPOS_PACOTE.join(', ') + ') VALUES (' + CAMPOS_PACOTE.map(() => '?').join(', ') + ')'),
-      pacotesDia: this.db.prepare('SELECT * FROM pacotes WHERE tipo = ? AND dia = ?'),
+      // Com o "3 Segmentos" da remessa (vazio enquanto não foi consultado).
+      pacotesDia: this.db.prepare(`SELECT p.*, s.s1 AS seg1, s.s2 AS seg2, s.centro AS centroJms FROM pacotes p
+        LEFT JOIN segmentos s ON s.billCode = p.billCode AND s.erro = '' WHERE p.tipo = ? AND p.dia = ?`),
+      semSegmento: this.db.prepare(`SELECT DISTINCT p.billCode FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode
+        WHERE p.dia = ? AND (s.billCode IS NULL OR (s.erro <> '' AND s.em < ?)) LIMIT ?`),
+      salvarSegmento: this.db.prepare(`INSERT INTO segmentos (billCode, s1, s2, s3, centro, em, erro) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (billCode) DO UPDATE SET s1 = excluded.s1, s2 = excluded.s2, s3 = excluded.s3, centro = excluded.centro, em = excluded.em,
+          erro = excluded.erro`),
+      contarSegmentos: this.db.prepare(`SELECT COUNT(DISTINCT p.billCode) AS total,
+          COUNT(DISTINCT CASE WHEN s.billCode IS NOT NULL AND s.erro = '' THEN p.billCode END) AS feitos,
+          COUNT(DISTINCT CASE WHEN s.erro <> '' THEN p.billCode END) AS comErro
+        FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode WHERE p.dia = ?`),
       contarDia: this.db.prepare('SELECT COUNT(*) AS n FROM pacotes WHERE tipo = ? AND dia = ?'),
       statusDia: this.db.prepare('SELECT estado, COUNT(*) AS n FROM viagens WHERE tipo = ? AND dia = ? GROUP BY estado ORDER BY n DESC'),
       marcarDia: this.db.prepare('INSERT INTO buscas (dia, em) VALUES (?, ?) ON CONFLICT (dia) DO UPDATE SET em = excluded.em'),
@@ -90,6 +105,15 @@ class Banco {
     } catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
   pacotesDia(tipo, dia) { return this.st.pacotesDia.all(tipo, dia); }
+  /** Remessas do dia ainda sem o "3 Segmentos" (ou com erro há mais de 30 min). */
+  semSegmento(dia, limite) { return this.st.semSegmento.all(dia, Date.now() - 30 * 60000, limite || 2000).map(r => r.billCode); }
+  /** Guarda o "3 Segmentos" da remessa (r = {s1, s2, s3, centro}) ou o erro da consulta. */
+  salvarSegmento(billCode, r, erro) {
+    const o = r || {};
+    this.st.salvarSegmento.run(String(billCode), o.s1 || '', o.s2 || '', o.s3 || '', o.centro || '', Date.now(), erro || '');
+  }
+  /** {total, feitos, comErro}: remessas do dia e quantas já têm o "3 Segmentos". */
+  contarSegmentos(dia) { return this.st.contarSegmentos.get(dia); }
   contarDia(tipo, dia) { return this.st.contarDia.get(tipo, dia).n; }
   /** Quantas viagens do dia em cada código de status do JMS. → [{estado, n}] */
   statusDia(tipo, dia) { return this.st.statusDia.all(tipo, dia); }

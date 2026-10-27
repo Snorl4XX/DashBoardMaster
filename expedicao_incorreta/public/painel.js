@@ -105,8 +105,11 @@
     else if (e.busca.ultimo && !e.busca.ultimo.ok) h = alerta(h, false, 'A última busca no JMS falhou.', e.busca.ultimo.msg);
     e.planilhas.erros.forEach(function (m) { h = alerta(h, false, 'Planilha', m); });
     if (t.semRegra) h = alerta(h, true, pac(t.semRegra) + ' de rota fora da planilha de rotas', ex(p.semRegra) + '. Inclua a rota na planilha rotas.xlsx.');
-    if (t.semRotinha) h = alerta(h, true, pac(t.semRotinha) + ' com Base Destino fora da rotinha', ex(p.semRotinha) + '. Inclua a base na rotinha.');
-    if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com DESTINO sem código de 1º nível', ex(p.semCodigo) + '. Complete a aba "Códigos 1º nível" da planilha rotas.xlsx.');
+    if (e.busca.avisoSegmentos) h = alerta(h, true, 'Conferência no JMS (3 segmentos) parada.', e.busca.avisoSegmentos);
+    if (t.semRotinha) h = alerta(h, true, pac(t.semRotinha) + ' sem o 3 Segmentos do JMS e com Base Destino fora da rotinha', ex(p.semRotinha) +
+      '. Espere a conferência no JMS ou inclua a base na rotinha.');
+    if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com destino fora da tabela de rotas', ex(p.semCodigo) +
+      '. Inclua o código na aba "Rotas" da planilha rotas.xlsx (ou o DESTINO na aba "Códigos 1º nível").');
     if (r.semBusca.length && !e.busca.rodando) {
       h = alerta(h, true, r.semBusca.length === r.dias ? (r.dias === 1 ? 'Sem dados deste dia ainda.' : 'Sem dados deste período ainda.') :
         r.semBusca.length + (r.semBusca.length === 1 ? ' dia ainda não buscado: ' : ' dias ainda não buscados: ') + r.semBusca.slice(0, 8).map(dataBr).join(', ') +
@@ -118,6 +121,12 @@
       (st.status ? '' : ' · ' + fmtInt(v.concluidas) + ' concluídas · ' + fmtInt(v.emTransito) + ' em trânsito') + '</span></span>');
     b.push('<span class="badge">' + svg('box') + '<span>' + fmtInt(v.comCarga) + ' com carregamento</span></span>');
     b.push('<span class="badge ' + (t.pacotes ? 'ok' : 'warn') + '">' + svg(t.pacotes ? 'check' : 'alert') + '<span>Conferidos: ' + fmtInt(t.pacotes) + ' pacotes</span></span>');
+    var sg = r.segmentos;
+    if (sg.total) {
+      var todos = sg.jms >= sg.total;
+      b.push('<span class="badge ' + (todos ? 'ok' : 'warn') + '" title="Pacotes com o bloco 3 Segmentos do JMS (Rastreamento do pacote). O resto foi conferido pela rotinha.">' +
+        svg(todos ? 'check' : 'alert') + '<span>3 Segmentos no JMS: ' + fmtPct(sg.jms / sg.total * 100, sg.jms >= sg.total || !sg.jms ? 0 : 1) + '</span></span>');
+    }
     if (r.viagens.comErro) b.push('<span class="badge warn">' + svg('alert') + '<span>' + fmtInt(r.viagens.comErro) + ' viagens com erro na busca</span></span>');
     $('badges').innerHTML = b.join('');
   }
@@ -166,7 +175,8 @@
     h += um('seg', 'Segmento mais afetado', m.segmento);
     h += um('base', 'Base destino do pacote mais afetada', m.baseDestino);
     h += um('dest', 'Destino mais afetado', m.destino);
-    h += um('trip', 'ID de viagem mais afetado', m.viagem, m.viagem && m.viagem.rota, 'span2');
+    h += um('trip', 'ID de viagem mais afetado', m.viagem, m.viagem && m.viagem.rota);
+    h += um('route', 'Para onde mais deviam ir', m.rotaCerta);
     h += um('lot', 'Lote / saca mais afetado', m.lote);
     h += um('login', 'Login mais afetado', m.login);
     $('kpiGrid').innerHTML = h;
@@ -189,7 +199,8 @@
       ['logins', I.login, {pt: 'Logins mais ofensores', zh: '扫描人'}, 'login (digitalizado por)', {pt: 'Login', um: 'login', zh: '扫描人'}],
       ['viagens', I.trip, {pt: 'IDs de viagem mais afetados', zh: '车次号'}, 'ID de viagem', {pt: 'ID de viagem', um: 'ID de viagem', zh: '车次号'}],
       ['lotes', I.lot, {pt: 'Lotes / sacas com mais erro', zh: '包号'}, 'número do lote', {pt: 'Número do lote', um: 'lote', zh: '包号'}],
-      ['rotas', I.route, {pt: 'Base Destino (rota) com mais erro', zh: '目的网点'}, 'Base Destino da rota (tabela de rotas)', {pt: 'Base Destino (rota)', um: 'rota', zh: '目的网点'}]
+      ['rotas', I.route, {pt: 'Base Destino (rota) com mais erro', zh: '目的网点'}, 'Base Destino da rota (tabela de rotas)', {pt: 'Base Destino (rota)', um: 'rota', zh: '目的网点'}],
+      ['rotasCertas', I.route, {pt: 'Para onde deviam ir', zh: '应走线路'}, 'rota certa (pelo 3 Segmentos do JMS ou pela rotinha)', {pt: 'Rota certa', um: 'rota certa', zh: '应走线路'}]
     ];
     colunas.forEach(function (c) {
       G.cartao(grid, {key: c[0], icone: c[1], titulo: c[2], tipo: 'colunas', sub: sub(c[0], c[3]), total: tot, distintos: r.distintos[c[0]] || 0,

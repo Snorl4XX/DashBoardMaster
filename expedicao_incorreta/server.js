@@ -53,6 +53,8 @@ const DEFAULTS = {
   minutos: 10,            // de quanto em quanto tempo busca no JMS (dia de hoje)
   minutosDiaAnterior: 60, // de quanto em quanto tempo busca ontem de novo, para guardar o dia anterior completo (0 = não busca)
   status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
+  consultarSegmentos: true, // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote › Informação básica), uma vez por pacote
+  consultasSegmentos: 10,   // quantas dessas consultas ao mesmo tempo
   tamanhoPagina: 100,     // pacotes por consulta ao JMS
   tamanhoPaginaViagens: 50,
   consultasAoMesmoTempo: 4,
@@ -74,12 +76,14 @@ function lerConfig() {
     catch (e) { throw new Error('config.json inválido (' + e.message + '). Corrija o arquivo ou apague-o para recriar.'); }
   } else fs.writeFileSync(arq, JSON.stringify(DEFAULTS, null, 2) + '\n');
   const c = Object.assign({}, DEFAULTS, bruto);
-  ['porta', 'minutos', 'tamanhoPagina', 'tamanhoPaginaViagens', 'consultasAoMesmoTempo', 'viagemGrande', 'minutosViagemGrande'].forEach(k => {
+  ['porta', 'minutos', 'tamanhoPagina', 'tamanhoPaginaViagens', 'consultasAoMesmoTempo', 'viagemGrande', 'minutosViagemGrande', 'consultasSegmentos'].forEach(k => {
     c[k] = Number(c[k]) > 0 ? Number(c[k]) : DEFAULTS[k];
   });
   if (process.env.EXPEDICAO_PORTA) c.porta = Number(process.env.EXPEDICAO_PORTA);
   c.codigoBase = String(c.codigoBase).trim(); c.nomeBase = String(c.nomeBase).trim();
   c.minutos = Math.max(2, c.minutos);
+  c.consultasSegmentos = Math.min(50, c.consultasSegmentos);
+  c.consultarSegmentos = !/^(false|nao|não|0)$/i.test(String(c.consultarSegmentos));
   c.minutosDiaAnterior = Number(c.minutosDiaAnterior) > 0 ? Math.max(c.minutos, Number(c.minutosDiaAnterior)) : 0;
   c.statusCodigos = codigosStatus(c.status);
   if (!c.statusCodigos.concluido.size && !c.statusCodigos.em_transito.size) throw new Error('"status" do config.json sem nenhum código.');
@@ -237,7 +241,7 @@ function estadoPublico() {
   return {versao: VERSAO, base: cfg.nomeBase, codigoBase: cfg.codigoBase, minutos: cfg.minutos, minutosDiaAnterior: cfg.minutosDiaAnterior,
     hoje: hojeSp(), maxDias: MAX_DIAS,
     busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, dias: e.dias, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
-      errosViagens: e.erros.length},
+      errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos},
     planilhas: {erros: r.erros, rotinha: !!r.rotinha, rotas: !!r.rotas}};
 }
 
@@ -282,7 +286,7 @@ async function tratar(req, res) {
     const tipo = tipoDe(u), {de, ate} = periodoDe(u), linhas = painel.planilha(tipo, de, ate, filtros(u));
     const nome = 'expedicao_' + (tipo === 'troncal' ? 'troncal' : 'secundaria') + '_' + de + (ate !== de ? '_a_' + ate : '') + '.xlsx';
     return enviar(res, 200, escreverXlsx([{nome: tipo === 'troncal' ? 'Rota troncal' : 'Rota secundária', linhas,
-      larguras: [7, 18, 20, 30, 18, 18, 18, 18, 20, 20, 20, 12, 16, 20, 30, 20]}]),
+      larguras: [7, 20, 20, 22, 18, 30, 18, 18, 18, 18, 20, 20, 10, 12, 16, 18, 20, 30, 20]}]),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {'Content-Disposition': 'attachment; filename="' + nome + '"'});
   }
   if (p === '/api/buscar' && req.method === 'POST') {
@@ -303,6 +307,7 @@ async function tratarConfig(req, res, u) {
     return json(res, 200, {versao: VERSAO, config: Object.assign({}, cfg, {senha: cfg.senha ? 'definida' : '', statusCodigos: undefined}), enderecos: enderecos(),
       token: {fonte: c.fonte, temProprio: !!banco.get('JMS_AUTHTOKEN'), dashmaster: !!credenciaisDashmaster()},
       planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
+      segmentosHoje: cfg.consultarSegmentos ? banco.contarSegmentos(hojeSp()) : null,
       status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
       viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),
       jms: {pacotesSecundaria: banco.get('PACOTES_SECUNDARIA') || '', routeTroncal: banco.get('ROUTE_AUTO_TRONCAL') || '',

@@ -10,11 +10,15 @@ Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
    com PDD de saída = SP GRU (fixo) e Status Concluído：已完成 ou Em Trânsito：在途 (os outros ficam de fora).
 2. Em cada viagem, abre a linha "SP GRU · Bipe de carregamento" (Info / Registros de carga e descarga) e pega a lista de
    pacotes: pedido, lote, próxima parada, Base Destino, digitalizado por e tempo de digitalização.
-3. Procura a Base Destino na planilha rotinha → SEGMENTOS (Código de dois segmentos) e DESTINO (Nome de mecanismo final),
-   igual ao seu PROCV.
-4. Confere com a planilha de rotas (as tabelas vermelhas das docas): o DESTINO do pacote tem de ser de um código de
-   1º nível da rota do caminhão e, quando a rota lista segmentos (2º nível), o SEGMENTOS tem de estar na lista.
-   Se não for → ERRADO.
+3. Consulta cada pacote no Rastreamento do pacote > Informação básica, bloco "3 Segmentos" (Código de primeiro
+   segmento = 1º nível; Código de dois segmentos = 2º nível). Uma consulta por pacote, só na primeira vez (fica guardado).
+4. Confere com a planilha de rotas (as tabelas vermelhas das docas) e acha a ROTA CERTA do pacote:
+   - as rotas que levam o código de 1º nível do pacote; se uma linha cita o segmento (2º nível), ela vence a linha geral
+     (ex.: SP 395-05 vai na DC GRU-SP, não na SP BRE);
+   - sem o "3 Segmentos" (ou código fora da tabela), usa a rotinha, como no PDF "como analisar": Base Destino >
+     Nome de mecanismo final (ex.: PR SJS). Se é o nome de uma rota, é ela; senão pelos códigos do nome: aba
+     "Códigos 1º nível", sigla da base (BA VDC > VDC) ou do estado (DC MCZ-AL > AL > SE AJU), ou a coluna Estado.
+   Rota do caminhão (Próxima parada) diferente da rota certa → ERRADO.
 5. Busca de novo a cada 10 minutos (só baixa de novo a lista das viagens que mudaram).
 6. Guarda todos os dias. O dia anterior é buscado de novo a cada 60 minutos (e logo que o app abre), para ficar salvo
    completo: viagens que chegaram depois, pacotes bipados no fim da noite.
@@ -53,17 +57,17 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Duas abas:
 - "Rotas": Tipo | Rota (Próxima parada) | 1º Nível (códigos) | 2º Nível (segmentos, opcional) | Observação.
   Quando as docas mudarem, mude aqui. Duas linhas da mesma rota = qualquer uma vale.
 - "Códigos 1º nível": cada código > os DESTINOS da rotinha (Nome de mecanismo final) que ele representa.
-  Os códigos marcados "A CONFIRMAR" ainda não têm destino: preencha (tem uma sugestão na observação).
-  Enquanto isso, os pacotes desses destinos aparecem como "Destino sem código" (não contam como erro).
+  Só é usada nos pacotes que o JMS ainda não deu o "3 Segmentos" (a conferência pela rotinha).
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
 
 Situações na tabela
 -------------------
-Errado               pacote fora da rota do caminhão (conta como erro)
-Certo                pacote da rota
-Base fora da rotinha a Base Destino não está na rotinha (inclua a base)
-Destino sem código   o DESTINO não está em nenhum código da aba "Códigos 1º nível"
-Rota sem regra       a próxima parada não está na aba "Rotas"
+Errado                 pacote fora da rota do caminhão (conta como erro). A coluna "Rota certa" diz onde devia ir.
+Certo                  pacote da rota
+Base fora da rotinha   sem o "3 Segmentos" do JMS e a Base Destino não está na rotinha
+Destino fora da tabela o código do pacote não está em nenhuma rota da aba "Rotas" (inclua)
+Rota sem regra         a próxima parada não está na aba "Rotas"
+A coluna "Conferido por" diz de onde veio a rota certa: JMS (3 segmentos), Rotinha ou Base Destino = parada.
 
 Turnos (pelo tempo de digitalização): T1 06h-14h · T2 14h-22h · T3 22h-06h.
 
@@ -80,7 +84,8 @@ config.json (criado na 1ª vez)
 ------------------------------
 porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 10 (busca automática
 de hoje) · minutosDiaAnterior 60 (busca de ontem; 0 = desliga) · status {"concluido": [4], "emTransito": [3]} (códigos do
-Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) ·
+Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultarSegmentos true
+(false = confere só pela rotinha) · consultasSegmentos 10 (consultas do "3 Segmentos" ao mesmo tempo) ·
 viagemGrande 3000 / minutosViagemGrande 30 (viagem grande baixa no máximo a cada 30 min) · dashmaster (pasta do DashMaster;
 "nao" = não usar o AuthToken dele). Mudou? Feche a janela preta e abra o atalho de novo.
 
