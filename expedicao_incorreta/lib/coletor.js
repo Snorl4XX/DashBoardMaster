@@ -9,8 +9,8 @@
  *   - Viagem grande (mais de "viagemGrande" pacotes) busca no máximo a cada "minutosViagemGrande" minutos.
  *   - Depois das viagens, o bloco "3 Segmentos" (Rastreamento do pacote › Informação básica) de cada remessa que ainda não
  *     tem: uma consulta por remessa, guardada para sempre (o código não muda). A conferência é só por ele (destino correto).
- *     Do dia mais novo para o mais antigo, no ritmo do lib/jms.js e por no máximo "minutos" − 2 min em cada busca (o resto
- *     fica para a próxima: as viagens continuam atualizadas). Se o JMS bloquear, pausa 5 min e volta mais devagar.
+ *     Do dia mais novo para o mais antigo, 1 remessa a cada "segundosPorRemessa" (lib/jms.js), até 1 min antes da próxima
+ *     busca (o resto continua nela: as viagens continuam atualizadas). Se o JMS bloquear, pausa 15 min.
  *   - AuthToken vencido para tudo e avisa; erro numa viagem não para as outras.
  */
 const {statusDe} = require('./status');
@@ -138,16 +138,18 @@ class Coletor {
     if (mudou && this.aoMudar) this.aoMudar(tipo, dia);
   }
   /**
-   * "3 Segmentos" das remessas que ainda não têm (uma consulta por remessa, "consultasSegmentos" ao mesmo tempo, no ritmo
-   * do JMS), do dia mais novo para o mais antigo, até o tempo desta busca acabar. O painel é atualizado a cada lote.
-   *   - Bloqueio do JMS (página em vez de dados, HTTP 429): para, pausa 5 min e o ritmo cai pela metade. A remessa não é
-   *     marcada com erro (tenta de novo depois).
+   * "3 Segmentos" das remessas que ainda não têm (uma consulta por remessa, no ritmo do lib/jms.js: com "segundosPorRemessa",
+   * uma de cada vez), do dia mais novo para o mais antigo, até o tempo desta busca acabar. O painel é atualizado a cada lote.
+   *   - Bloqueio do JMS (página em vez de dados, HTTP 429): para e pausa 15 min. A remessa não é marcada com erro (tenta
+   *     de novo depois).
    *   - JMS recusando as 20 primeiras sem nenhum acerto: para e avisa. Token vencido: para tudo.
    */
   async buscarSegmentos() {
     const e = this.estado, cfg = this.cfg;
     if (this.pausaSegmentos && Date.now() < this.pausaSegmentos) return;
-    const fim = Date.now() + Math.max(2, (cfg.minutos || 10) - 2) * 60000, br = d => d.split('-').reverse().join('/');
+    // Até 1 min antes da próxima busca automática (contando do começo desta), para não atrasar as viagens.
+    const fim = Math.max(Date.now() + 60000, (e.inicio || Date.now()) + Math.max(2, (cfg.minutos || 10) - 1) * 60000), br = d => d.split('-').reverse().join('/');
+    const aoMesmoTempo = cfg.segundosPorRemessa > 0 ? 1 : cfg.consultasSegmentos || 3;
     let ok = 0, falhas = 0, ultimoErro = '', parar = '';
     e.tipo = '';
     e.avisoSegmentos = '';
@@ -156,7 +158,7 @@ class Coletor {
       let feitos = total.feitos;
       for (let lote = this.banco.semSegmento(dia, 500); lote.length && !parar; lote = this.banco.semSegmento(dia, 500)) {
         if (Date.now() >= fim) { parar = 'tempo'; break; }
-        await emParalelo(lote, cfg.consultasSegmentos || 3, async b => {
+        await emParalelo(lote, aoMesmoTempo, async b => {
           if (parar || Date.now() >= fim) return;
           try {
             this.banco.salvarSegmento(b, await this.jms.segmentos(b), '');
@@ -177,10 +179,8 @@ class Coletor {
       if (parar) break;
     }
     if (parar === 'bloqueio') {
-      this.pausaSegmentos = Date.now() + 5 * 60000;
-      const ritmo = this.jms.devagar ? this.jms.devagar() : 1;
-      e.avisoSegmentos = 'O JMS bloqueou as consultas por um tempo (consultas demais seguidas). O app pausa 5 min e volta mais devagar (' +
-        ritmo + ' por segundo). ' + ultimoErro;
+      this.pausaSegmentos = Date.now() + 15 * 60000;
+      e.avisoSegmentos = 'O JMS bloqueou as consultas do Rastreamento do pacote. O app pausa 15 min e continua. ' + ultimoErro;
       this.log('aviso', e.avisoSegmentos);
     } else if (parar === 'recusa') {
       e.avisoSegmentos = 'O JMS recusou o Rastreamento do pacote (3 segmentos): ' + ultimoErro + ' Os pacotes ficam "Sem 3 Segmentos" até a próxima busca.';

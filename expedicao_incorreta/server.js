@@ -54,7 +54,8 @@ const DEFAULTS = {
   minutosDiaAnterior: 60, // de quanto em quanto tempo busca ontem de novo, para guardar o dia anterior completo (0 = não busca)
   status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
   consultasSegmentos: 3,   // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote): quantas consultas ao mesmo tempo
-  consultasPorSegundo: 5,  // no máximo tantas consultas ao JMS por segundo, somando todas (mais que isso o JMS bloqueia)
+  consultasPorSegundo: 5,  // viagens e bipes: no máximo tantas consultas ao JMS por segundo, somando todas
+  segundosPorRemessa: 30,  // "3 Segmentos" (Rastreamento do pacote): 1 remessa a cada tantos segundos (mais rápido o JMS bloqueia)
   tamanhoPagina: 100,     // pacotes por consulta ao JMS
   tamanhoPaginaViagens: 50,
   consultasAoMesmoTempo: 4,
@@ -84,6 +85,8 @@ function lerConfig() {
   c.codigoBase = String(c.codigoBase).trim(); c.nomeBase = String(c.nomeBase).trim();
   c.minutos = Math.max(2, c.minutos);
   c.consultasSegmentos = Math.min(50, c.consultasSegmentos);
+  c.segundosPorRemessa = bruto.segundosPorRemessa !== undefined && bruto.segundosPorRemessa !== '' && Number(bruto.segundosPorRemessa) >= 0
+    ? Number(bruto.segundosPorRemessa) : DEFAULTS.segundosPorRemessa;
   c.minutosDiaAnterior = Number(c.minutosDiaAnterior) > 0 ? Math.max(c.minutos, Number(c.minutosDiaAnterior)) : 0;
   c.statusCodigos = codigosStatus(c.status);
   if (!c.statusCodigos.concluido.size && !c.statusCodigos.em_transito.size) throw new Error('"status" do config.json sem nenhum código.');
@@ -163,7 +166,8 @@ let banco, regras, jms, coletor, painel;
 try {
   banco = new Banco(path.join(cfg.dados, 'expedicao.db'));
   regras = new Regras(cfg.planilhas);
-  jms = new Jms({base: process.env.EXPEDICAO_JMS_URL, credenciais, props: banco, log, tempoMs: 60000, porSegundo: cfg.consultasPorSegundo});
+  jms = new Jms({base: process.env.EXPEDICAO_JMS_URL, credenciais, props: banco, log, tempoMs: 60000, porSegundo: cfg.consultasPorSegundo,
+    segundosPorRemessa: cfg.segundosPorRemessa});
   painel = new Painel(banco, regras, cfg.statusCodigos);
   coletor = new Coletor({banco, jms, cfg, log, aoMudar: (tipo, dia) => painel.invalidar(tipo, dia)});
 } catch (e) { pararComErro('Não consegui iniciar: ' + (e && e.stack || e)); }
@@ -241,7 +245,7 @@ function estadoPublico() {
   return {versao: VERSAO, base: cfg.nomeBase, codigoBase: cfg.codigoBase, minutos: cfg.minutos, minutosDiaAnterior: cfg.minutosDiaAnterior,
     hoje: hojeSp(), maxDias: MAX_DIAS,
     busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, dias: e.dias, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
-      errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos, porSegundo: jms.porSegundo},
+      errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos, segundosPorRemessa: cfg.segundosPorRemessa},
     planilhas: {erros: r.erros, rotas: !!r.rotas}};
 }
 
@@ -308,7 +312,7 @@ async function tratarConfig(req, res, u) {
     const c = credenciais(), r = regras.resumo();
     return json(res, 200, {versao: VERSAO, config: Object.assign({}, cfg, {senha: cfg.senha ? 'definida' : '', statusCodigos: undefined}), enderecos: enderecos(),
       token: {fonte: c.fonte, temProprio: !!banco.get('JMS_AUTHTOKEN'), dashmaster: !!credenciaisDashmaster()},
-      planilhas: r, busca: Object.assign({}, coletor.estado, {porSegundoAtual: jms.porSegundo}), registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
+      planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
       segmentosHoje: banco.contarSegmentos(hojeSp()),
       status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
       viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),

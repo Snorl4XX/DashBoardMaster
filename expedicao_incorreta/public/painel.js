@@ -107,9 +107,10 @@
     if (t.semRegra) h = alerta(h, true, pac(t.semRegra) + ' de rota fora da planilha de rotas', ex(p.semRegra) + '. Inclua a rota na planilha rotas.xlsx.');
     if (e.busca.avisoSegmentos) h = alerta(h, false, 'Conferência no JMS (3 segmentos) parada.', e.busca.avisoSegmentos);
     var ss = p.semSegmento;
-    if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta no Rastreamento do pacote aos poucos (' +
-      (e.busca.porSegundo || 5) + ' por segundo, para o JMS não bloquear): hoje primeiro, depois os dias anteriores. Eles entram na conta quando o JMS responder.' +
-      (e.busca.rodando ? '' : ' Para adiantar, clique em Atualizar.'));
+    var spr = e.busca.segundosPorRemessa;
+    if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta o Rastreamento do pacote ' +
+      (spr > 0 ? '1 remessa a cada ' + fmtInt(spr) + ' s (cerca de ' + fmtInt(Math.round(86400 / spr * 0.9)) + ' por dia), para o JMS não bloquear' : 'sem pausa') +
+      ': hoje primeiro, depois os dias anteriores. Eles entram na conta quando o JMS responder.');
     if (ss.jmsSemCodigo) h = alerta(h, true, pac(ss.jmsSemCodigo) + ' sem código no 3 Segmentos do JMS', 'O Rastreamento do pacote não tem o Código de primeiro segmento: não dá para conferir.');
     if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com código fora da tabela de rotas', ex(p.semCodigo) +
       '. Inclua o código na rota certa da aba "Rotas" da planilha rotas.xlsx.');

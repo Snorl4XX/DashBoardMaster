@@ -13,9 +13,9 @@ Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
 3. Procura cada remessa no Rastreamento do pacote > Informação básica, bloco "3 Segmentos": Código de primeiro
    segmento (1º nível), Código de dois segmentos (2º nível) e 3 Segmentos. Uma consulta por remessa, só na primeira vez
    (fica guardado). A conferência é SÓ pelo JMS.
-   Ritmo: no máximo 5 consultas por segundo ao JMS (somando tudo), hoje primeiro e depois os dias anteriores, até
-   8 minutos por busca (o resto continua na busca seguinte). Se o JMS bloquear (consultas demais), o app pausa 5 min
-   e volta mais devagar.
+   Ritmo: 1 remessa a cada 30 segundos (cerca de 2.600 por dia), hoje primeiro e depois os dias anteriores, até 1 min
+   antes da busca seguinte (o resto continua nela). Se o JMS bloquear mesmo assim, o app pausa 15 min. O registro
+   mostra o título da página que o JMS devolveu.
 4. Confere com a planilha de rotas do SC (as tabelas vermelhas das docas) e acha o DESTINO CORRETO do pacote:
    as rotas que levam o código de 1º nível (ex.: VDC > RJ SJM). Se uma linha cita o segmento (2º nível), ela vence a
    linha geral (ex.: SP 395-05 vai na DC GRU-SP, não na SP BRE). Vale para a troncal e a secundária.
@@ -91,7 +91,8 @@ config.json (criado na 1ª vez)
 porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 10 (busca automática
 de hoje) · minutosDiaAnterior 60 (busca de ontem; 0 = desliga) · status {"concluido": [4], "emTransito": [3]} (códigos do
 Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultasSegmentos 10
-(consultas do "3 Segmentos" ao mesmo tempo) · consultasPorSegundo 5 (ritmo máximo das consultas ao JMS) ·
+(consultas do "3 Segmentos" ao mesmo tempo) · consultasPorSegundo 5 (viagens e bipes: ritmo máximo das consultas ao JMS) · segundosPorRemessa 30
+(3 Segmentos: 1 remessa a cada tantos segundos) ·
 viagemGrande 3000 / minutosViagemGrande 30 (viagem grande baixa no máximo a cada 30 min) · dashmaster (pasta do DashMaster;
 "nao" = não usar o AuthToken dele). Mudou? Feche a janela preta e abra o atalho de novo.
 
@@ -99,8 +100,8 @@ Se der problema
 ---------------
 - Painel avisa "AuthToken do JMS vencido": pegue um novo no JMS e cole no DashMaster ou em Configurações deste app.
 - "A porta 3300 já está em uso": o app já está aberto em outra janela.
-- "O JMS bloqueou as consultas por um tempo": consultas demais seguidas. O app pausa 5 min e volta mais devagar,
-  sozinho. Se acontecer sempre, diminua "consultasPorSegundo" no config.json (ex.: 3).
+- "O JMS bloqueou as consultas do Rastreamento do pacote": o app pausa 15 min e continua sozinho. Se acontecer sempre,
+  aumente "segundosPorRemessa" no config.json e mande um print da linha do registro com "página:".
 - Janela mostra "O painel NÃO está no ar": leia a linha [erro] e mande um print (sem o AuthToken).
 - "Falha de rede ao consultar o JMS" e o JMS abre no navegador: a empresa usa proxy (veja o LEIA_NODE do DashMaster:
   variáveis HTTPS_PROXY e NODE_USE_ENV_PROXY da sua conta).

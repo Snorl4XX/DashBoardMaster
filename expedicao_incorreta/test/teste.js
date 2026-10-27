@@ -196,26 +196,30 @@ function abasRotas(comWW) {
   const colAuth = new Coletor({banco: bs, cfg: {}, log: () => {}, jms: {segmentos: async () => { throw Object.assign(new Error('token失效'), {auth: true}); }}});
   conferir(await colAuth.buscarSegmentos().then(() => false, e => !!e.auth), '3 Segmentos: AuthToken vencido para a busca');
   bs.fechar();
-  // Bloqueio do JMS (página em vez de dados): não é erro do pacote nem token vencido; pausa 5 min e o ritmo cai pela metade.
+  // Bloqueio do JMS (página em vez de dados): não é erro do pacote nem token vencido; pausa 15 min.
   const bb = new Banco(path.join(pastaRegras, 'bloqueio.db'));
   bb.trocarPacotes('troncal', 'DKSEG4', '2026-10-24', Array.from({length: 10}, (_, i) => ({billCode: 'WBLOQ' + i})));
-  let pedidosBloq = 0, ritmo = 8;
+  let pedidosBloq = 0;
   const colBloq = new Coletor({banco: bb, cfg: {consultasSegmentos: 2}, log: () => {}, jms: {
-    devagar: () => { ritmo = Math.max(1, Math.floor(ritmo / 2)); return ritmo; },
     segmentos: async () => { pedidosBloq++; throw Object.assign(new Error('O JMS devolveu uma página em vez de dados.'), {auth: true, bloqueio: true}); }}});
   await colBloq.buscarSegmentos();
   const pedidos1 = pedidosBloq;
   await colBloq.buscarSegmentos();
-  conferir(pedidos1 >= 1 && pedidos1 <= 2 && pedidosBloq === pedidos1 && ritmo === 4 && /bloqueou/.test(colBloq.estado.avisoSegmentos) &&
-    bb.contarSegmentos('2026-10-24').comErro === 0, '3 Segmentos: bloqueio do JMS pausa (sem marcar erro nem token vencido) e reduz o ritmo',
-    {pedidos1, pedidosBloq, ritmo, aviso: colBloq.estado.avisoSegmentos});
+  conferir(pedidos1 >= 1 && pedidos1 <= 2 && pedidosBloq === pedidos1 && /bloqueou.*pausa 15 min/.test(colBloq.estado.avisoSegmentos) &&
+    colBloq.pausaSegmentos - Date.now() > 14 * 60000 && bb.contarSegmentos('2026-10-24').comErro === 0,
+    '3 Segmentos: bloqueio do JMS pausa 15 min (sem marcar erro nem token vencido)',
+    {pedidos1, pedidosBloq, aviso: colBloq.estado.avisoSegmentos});
   bb.fechar();
   // Ritmo: no máximo N consultas por segundo, somando todas.
   const {Jms} = require('../lib/jms');
   const jr = new Jms({credenciais: () => ({}), props: {get: () => null, set: () => {}}, porSegundo: 20}), tr = Date.now();
   for (let i = 0; i < 6; i++) await jr.vez();
-  conferir(Date.now() - tr >= 240 && jr.devagar() === 10 && new Jms({credenciais: () => ({}), props: {get: () => null}}).porSegundo === 5,
-    'JMS: no máximo N consultas por segundo (padrão 5) e metade do ritmo no bloqueio', Date.now() - tr);
+  const padraoJms = new Jms({credenciais: () => ({}), props: {get: () => null}});
+  conferir(Date.now() - tr >= 240 && padraoJms.porSegundo === 5 && padraoJms.msPorRemessa === 30000,
+    'JMS: viagens no máximo N consultas por segundo (padrão 5); 3 Segmentos 1 remessa a cada 30 s (padrão)', Date.now() - tr);
+  const jr2 = new Jms({credenciais: () => ({}), props: {get: () => null}, porSegundo: 1000, segundosPorRemessa: 0.06}), tr2 = Date.now();
+  await jr2.vez('rastreio'); await jr2.vez('rastreio'); await jr2.vez('rastreio'); await jr2.vez('troncal');
+  conferir(Date.now() - tr2 >= 115 && Date.now() - tr2 < 400, 'JMS: o ritmo do 3 Segmentos é separado do das viagens', Date.now() - tr2);
 
   // Planilha de rotas padrão (tabelas vermelhas de 24/10), criada na primeira vez.
   const pastaPadrao = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-padrao-'));
@@ -255,7 +259,7 @@ function abasRotas(comWW) {
   const porta = await portaLivre();
   const cfgArq = path.join(pasta, 'config.json');
   fs.writeFileSync(cfgArq, JSON.stringify({porta, host: '127.0.0.1', senha: 'senha-teste', viagemGrande: 100, minutosViagemGrande: 30,
-    dashmaster: dmDb, tamanhoPagina: 100, consultasPorSegundo: 1000}));
+    dashmaster: dmDb, tamanhoPagina: 100, consultasPorSegundo: 1000, segundosPorRemessa: 0}));
   const filho = spawn(process.execPath, [SERVER], {env: Object.assign({}, process.env, {EXPEDICAO_CONFIG: cfgArq, EXPEDICAO_JMS_URL: 'http://127.0.0.1:' + portaJms,
     EXPEDICAO_SEM_AGENDADOR: '1'}), stdio: ['ignore', 'pipe', 'pipe']});
   filhos.push(filho);
@@ -470,7 +474,7 @@ function abasRotas(comWW) {
   jms.estado.bloquearSegmentos = true;
   e = await buscar({dia: '2026-10-18'});
   const pend = (await local('GET', '/api/painel?tipo=troncal&dia=2026-10-18')).json;
-  conferir(e.busca.ultimo.ok && !e.busca.authVencido && /bloqueou/.test(e.busca.avisoSegmentos) && pend.pendencias.semSegmento.naoConsultados === 2 &&
+  conferir(e.busca.ultimo.ok && !e.busca.authVencido && /bloqueou/.test(e.busca.avisoSegmentos) && /HTTP 403 · página: "Request blocked\."/.test(e.busca.avisoSegmentos) && pend.pendencias.semSegmento.naoConsultados === 2 &&
     pend.totais.errados === 0, 'bloqueio do JMS no 3 Segmentos: a busca termina, sem "token vencido", e os pacotes esperam', {busca: e.busca, p: pend.pendencias});
   jms.estado.bloquearSegmentos = false;
 
