@@ -6,7 +6,8 @@ O que faz
 Mostra, quase em tempo real, os pacotes colocados no caminhão errado (ex.: pacote do RJ dentro do caminhão para SP BRE).
 Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
 
-1. Pega no JMS os caminhões que SAEM da base no dia (Consulta de viagens troncais e Consulta de Viagens Secundárias).
+1. Pega no JMS os caminhões que SAEM da base no dia (Consulta de viagens troncais e Consulta de Viagens Secundárias),
+   com PDD de saída = SP GRU (fixo) e Status Concluído：已完成 ou Em Trânsito：在途 (os outros ficam de fora).
 2. Em cada viagem, abre a linha "SP GRU · Bipe de carregamento" (Info / Registros de carga e descarga) e pega a lista de
    pacotes: pedido, lote, próxima parada, Base Destino, digitalizado por e tempo de digitalização.
 3. Procura a Base Destino na planilha rotinha → SEGMENTOS (Código de dois segmentos) e DESTINO (Nome de mecanismo final),
@@ -15,6 +16,17 @@ Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
    1º nível da rota do caminhão e, quando a rota lista segmentos (2º nível), o SEGMENTOS tem de estar na lista.
    Se não for → ERRADO.
 5. Busca de novo a cada 10 minutos (só baixa de novo a lista das viagens que mudaram).
+6. Guarda todos os dias. O dia anterior é buscado de novo a cada 60 minutos (e logo que o app abre), para ficar salvo
+   completo: viagens que chegaram depois, pacotes bipados no fim da noite.
+
+No painel
+---------
+- Data inicial e Data final (até 31 dias) e os atalhos Hoje, Ontem, Últimos 7 dias e Este mês.
+  Dia ainda não buscado aparece no aviso: clique em Atualizar e o app busca os dias que faltam
+  (dias antes de ontem que já estão salvos não são buscados de novo).
+- PDD de saída: SP GRU, fixo.
+- Filtros: Status (Concluído：已完成 / Em Trânsito：在途), Base Destino (as bases da tabela de rotas do SC:
+  21 da troncal, 18 da secundária), Turno, Destino, Segmentos e Login. Valem para cartões, gráficos, tabela e Excel.
 
 Não mexe no DashMaster: pasta, porta (3300) e link próprios.
 
@@ -66,7 +78,9 @@ Link para a equipe (Tailscale, o mesmo do DashMaster)
 
 config.json (criado na 1ª vez)
 ------------------------------
-porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base) · minutos 10 (busca automática) ·
+porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 10 (busca automática
+de hoje) · minutosDiaAnterior 60 (busca de ontem; 0 = desliga) · status {"concluido": [4], "emTransito": [3]} (códigos do
+Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) ·
 viagemGrande 3000 / minutosViagemGrande 30 (viagem grande baixa no máximo a cada 30 min) · dashmaster (pasta do DashMaster;
 "nao" = não usar o AuthToken dele). Mudou? Feche a janela preta e abra o atalho de novo.
 

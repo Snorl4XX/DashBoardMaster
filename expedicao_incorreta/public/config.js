@@ -40,12 +40,26 @@
       $('apagar-token').classList.toggle('hidden', !t.temProprio);
       $('brandCenter').textContent = e.config.nomeBase; $('eyebrowCenter').textContent = e.config.nomeBase; $('appVersion').textContent = 'v' + e.versao;
       if (!$('dia-busca').value) $('dia-busca').value = e.hoje;
-      var b = e.busca;
+      $('dia-busca').max = e.hoje;
+      var b = e.busca, br = function (d) { return d ? d.split('-').reverse().join('/') : ''; };
+      var diasUlt = b.ultimo ? (b.ultimo.dias && b.ultimo.dias.length ? b.ultimo.dias : [b.ultimo.dia]) : [];
+      var codigos = function (l) { return l.length ? 'código ' + l.join(', ') : 'sem código'; };
+      var nomes = {concluido: 'concluídas', em_transito: 'em trânsito'};
       info('busca-info', [
-        ['Situação', b.rodando ? b.etapa : b.authVencido ? 'Parado: AuthToken vencido' : b.etapa],
-        ['Última busca', b.ultimo ? hora(b.ultimo.quando) + ' · dia ' + b.ultimo.dia.split('-').reverse().join('/') + ' · ' + (b.ultimo.ok ? 'ok' : 'falhou') + ' · ' + b.ultimo.msg : '—'],
-        ['Base', e.config.nomeBase + ' (código ' + e.config.codigoBase + ')'],
-        ['Busca automática', 'a cada ' + e.config.minutos + ' min (dia de hoje)'],
+        ['Situação', b.rodando ? (b.dias && b.dias.length > 1 ? br(b.dia) + ' · ' : '') + b.etapa : b.authVencido ? 'Parado: AuthToken vencido' : b.etapa],
+        ['Última busca', b.ultimo ? hora(b.ultimo.quando) + ' · ' + (diasUlt.length > 1 ? 'dias ' : 'dia ') + diasUlt.map(br).join(', ') + ' · ' +
+          (b.ultimo.ok ? 'ok' : 'falhou') + ' · ' + b.ultimo.msg : '—'],
+        ['PDD de saída (fixo)', e.config.nomeBase + ' (código ' + e.config.codigoBase + ')'],
+        ['Status no painel', 'Concluído：已完成 (' + codigos(e.status.concluido) + ') e Em Trânsito：在途 (' + codigos(e.status.emTransito) + '). Os outros ficam de fora.'],
+        ['Viagens de hoje', e.viagensHoje.map(function (t) {
+          var tot = 0, por = {}, outros = [];
+          t.status.forEach(function (x) { tot += x.n; if (x.status) por[x.status] = (por[x.status] || 0) + x.n; else outros.push('código ' + (x.estado || 'vazio') + ': ' + x.n); });
+          return (t.tipo === 'troncal' ? 'troncal ' : 'secundária ') + tot + (tot ? ' (' + ['concluido', 'em_transito'].map(function (k) { return (por[k] || 0) + ' ' + nomes[k]; })
+            .concat(outros.length ? ['fora do painel: ' + outros.join(', ')] : []).join(' · ') + ')' : '');
+        }).join(' | ')],
+        ['Busca automática', 'hoje a cada ' + e.config.minutos + ' min' + (e.config.minutosDiaAnterior ? ' · ontem a cada ' + e.config.minutosDiaAnterior +
+          ' min (guarda o dia anterior completo)' : ' · ontem: desligado')],
+        ['Dias guardados', e.salvos && e.salvos.n ? e.salvos.n + (e.salvos.n === 1 ? ' dia' : ' dias') + ' (de ' + br(e.salvos.de) + ' a ' + br(e.salvos.ate) + ')' : 'nenhum ainda'],
         ['Pacotes da secundária', e.jms.pacotesSecundaria ? 'endereço "' + e.jms.pacotesSecundaria + '/scan/page"' : 'ainda não testado']
       ]);
       if (b.erros && b.erros.length) resultado('busca-erros', ['Viagens com erro na última busca:'].concat(b.erros));

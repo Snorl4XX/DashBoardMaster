@@ -12,7 +12,7 @@ const {zip} = require('./lib/xlsx');
 const {version} = require('./package.json');
 
 const ARQUIVOS = ['server.js', 'package.json', 'LEIA-ME.txt',
-  'lib/coletor.js', 'lib/db.js', 'lib/jms.js', 'lib/painel.js', 'lib/quieto.js', 'lib/regras.js', 'lib/rotas_padrao.js', 'lib/xlsx.js',
+  'lib/coletor.js', 'lib/db.js', 'lib/jms.js', 'lib/painel.js', 'lib/quieto.js', 'lib/regras.js', 'lib/rotas_padrao.js', 'lib/status.js', 'lib/xlsx.js',
   'public/painel.html', 'public/painel.js', 'public/graficos.js', 'public/config.html', 'public/config.js', 'public/entrar.html', 'public/estilo.css'];
 
 function gerar(saida) {

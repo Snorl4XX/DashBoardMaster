@@ -2,8 +2,9 @@
 /**
  * Teste do app Expedição Incorreta com um JMS de mentira (test/jms_falso.js) e planilhas fictícias (nada de dado real).
  * Liga o servidor de verdade (server.js) numa pasta temporária e confere: busca no JMS (troncal e secundária), conferência
- * com a rotinha e a planilha de rotas, números do painel, filtros, tabela, Excel, nova busca só do que mudou, viagem grande,
- * troca de planilha, senha, AuthToken (do DashMaster e próprio) e AuthToken vencido.
+ * com a rotinha e a planilha de rotas, Status (só Concluído e Em Trânsito), números do painel, filtros (Status, Base Destino da
+ * tabela de rotas…), tabela, Excel, período de vários dias (e busca dos dias que faltam), nova busca só do que mudou, viagem
+ * concluída sem consulta nova, viagem grande, troca de planilha, senha, AuthToken (do DashMaster e próprio) e AuthToken vencido.
  * Uso: node test/teste.js   (dentro da pasta expedicao_incorreta)
  */
 process.env.TZ = 'America/Sao_Paulo';
@@ -17,8 +18,11 @@ const {criar, pac} = require('./jms_falso');
 const {escreverXlsx, lerXlsx, zip} = require('../lib/xlsx');
 const {Regras, norm} = require('../lib/regras');
 const {turnoDe} = require('../lib/painel');
+const {codigosStatus, statusDe} = require('../lib/status');
+const {somaDias, diasEntre, diasDaAgenda} = require('../lib/coletor');
+const {Banco} = require('../lib/db');
 
-const DIA = '2026-10-20';
+const DIA = '2026-10-20', DIA_ANTES = '2026-10-19';
 const SERVER = path.join(__dirname, '..', 'server.js');
 let passou = 0;
 const filhos = [], servidores = [];
@@ -95,6 +99,35 @@ function abasRotas(semcodComCodigo) {
   const lidoWps = lerXlsx(wps)[0].linhas;
   conferir(lidoWps.length === 2 && lidoWps[0][1] === 'Código de dois' && lidoWps[1][0] === 'F & G-SP' && lidoWps[1][1] === 42 && lidoWps[1][2] === 'em linha',
     'Excel do WPS: sharedStrings, texto em pedaços, célula vazia e linhas só de formatação', lidoWps);
+  // Status do JMS: 4 = Concluído, 3 = Em Trânsito; os outros ficam de fora. Códigos trocáveis no config.json.
+  const cods = codigosStatus(undefined), cods2 = codigosStatus({concluido: ['9', 4], emTransito: 2});
+  conferir(statusDe(4, cods) === 'concluido' && statusDe('3', cods) === 'em_transito' && statusDe(1, cods) === '' && statusDe(null, cods) === '' &&
+    statusDe('9', cods2) === 'concluido' && statusDe(2, cods2) === 'em_transito' && statusDe(3, cods2) === '', 'status: Concluído (4) e Em Trânsito (3); config.json troca os códigos');
+  conferir(somaDias('2026-10-31', 1) === '2026-11-01' && somaDias('2026-03-01', -1) === '2026-02-28' && diasEntre('2026-02-27', '2026-03-02').length === 4 &&
+    diasEntre(DIA, DIA).length === 1, 'contas de dias (virada de mês)');
+  // Busca automática: hoje sempre; ontem ao abrir, quando o dia vira e depois a cada 60 min.
+  const as = t => new Date(t + '-03:00').getTime(), agora = as('2026-10-20T10:00:00');
+  conferir(diasDaAgenda({ontem: '', ontemEm: 0}, agora, 60).join() === '2026-10-19,2026-10-20' &&
+    diasDaAgenda({ontem: '2026-10-19', ontemEm: agora - 30 * 60000}, agora, 60).join() === '2026-10-20' &&
+    diasDaAgenda({ontem: '2026-10-19', ontemEm: agora - 61 * 60000}, agora, 60).join() === '2026-10-19,2026-10-20' &&
+    diasDaAgenda({ontem: '2026-10-19', ontemEm: agora - 60000}, as('2026-10-21T00:05:00'), 60).join() === '2026-10-20,2026-10-21' &&
+    diasDaAgenda({ontem: '', ontemEm: 0}, agora, 0).join() === '2026-10-20', 'agenda: ontem ao abrir, na virada do dia e a cada 60 min (0 = desligado)');
+  // Banco da versão 1.1 (sem a coluna estadoBusca e sem a tabela de dias): abre, ganha as duas e os dias que já tinha contam como buscados.
+  const dbVelho = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'exp-db-')), 'expedicao.db');
+  {
+    const {DatabaseSync} = require('node:sqlite'), v = new DatabaseSync(dbVelho);
+    v.exec(`CREATE TABLE viagens (tipo TEXT NOT NULL, shipmentNo TEXT NOT NULL, dia TEXT NOT NULL, nome TEXT, origem TEXT, destino TEXT, codigoDestino TEXT,
+      partidaPrevista TEXT, partida TEXT, chegada TEXT, estado TEXT, placa TEXT, transportadora TEXT, contagem INTEGER NOT NULL DEFAULT -1,
+      buscadoEm INTEGER NOT NULL DEFAULT 0, erro TEXT, PRIMARY KEY (tipo, shipmentNo));
+      INSERT INTO viagens (tipo, shipmentNo, dia, estado) VALUES ('troncal', 'DKVELHA0001', '2026-10-01', '4');`);
+    v.close();
+  }
+  const bv = new Banco(dbVelho);
+  bv.marcarViagem('troncal', 'DKVELHA0001', 5, '', '4');
+  conferir(bv.viagem('troncal', 'DKVELHA0001').estadoBusca === '4' && bv.buscados('2026-10-01', '2026-10-02').has('2026-10-01') &&
+    !bv.buscados('2026-10-01', '2026-10-02').has('2026-10-02') && bv.diasSalvos().n === 1, 'banco da versão 1.1 atualiza sozinho (dias antigos continuam salvos)');
+  bv.fechar();
+
   // Planilha de rotas padrão (tabelas vermelhas de 24/10), criada na primeira vez.
   const pastaPadrao = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-padrao-'));
   const padrao = new Regras(pastaPadrao), resPadrao = padrao.resumo();
@@ -161,14 +194,21 @@ function abasRotas(semcodComCodigo) {
   conferir(pag.status === 200 && /Expedição Incorreta/.test(pag.texto) && /painel\.js/.test(pag.texto), 'página do painel abre');
   conferir(/class="sidebar"/.test(pag.texto) && /kpi-grid/.test(pag.texto) && /chart\.js@4\.4\.4/.test(pag.texto) && !/maomao|mascot/i.test(pag.texto),
     'mesmo layout do painel principal (menu lateral, cartões, Chart.js), sem o mascote');
+  conferir(/PDD de saída/.test(pag.texto) && /id="de"/.test(pag.texto) && /id="ate"/.test(pag.texto) && /Concluído：已完成/.test(pag.texto) &&
+    /Em Trânsito：在途/.test(pag.texto) && /id="f-rota"[\s\S]{0,80}Todas/.test(pag.texto) && />Base Destino</.test(pag.texto),
+    'tela: PDD de saída fixo, data inicial e final, filtros Status (Concluído e Em Trânsito) e Base Destino');
+  const ep = (await local('GET', '/api/estado')).json;
+  conferir(ep.base === 'SP GRU' && ep.codigoBase === '30001' && ep.minutosDiaAnterior === 60 && ep.maxDias === 31, 'PDD de saída SP GRU (30001) e busca de ontem a cada 60 min', ep);
   conferir((await remoto('GET', '/config')).status === 403 && (await remoto('GET', '/config/api/estado')).status === 403,
     'Configurações não abrem de fora (link público)');
   let est = (await local('GET', '/config/api/estado')).json;
   conferir(est.token.fonte === 'dashmaster' && est.planilhas.rotinha.bases === 6 && est.planilhas.rotinha.repetidas === 1 && est.planilhas.rotas.troncal === 2,
     'usa o AuthToken do DashMaster; rotinha (base repetida: vale a 1ª) e rotas carregadas', est);
+  conferir(est.status.concluido.join() === '4' && est.status.emTransito.join() === '3' && est.viagensHoje.length === 2 && est.salvos.n === 0,
+    'Configurações mostram os códigos de status e os dias guardados', {status: est.status, salvos: est.salvos});
   conferir(JSON.stringify(est).indexOf('TOKEN-FICTICIO') < 0, 'o AuthToken nunca aparece na tela Configurações');
   const teste = (await local('POST', '/config/api/testar')).json;
-  conferir(teste.ok && /troncal: ok, o JMS respondeu/i.test(teste.linhas[0]) && /secundária: ok, o JMS respondeu \(2 viagens/i.test(teste.linhas[1]), 'testar conexão: o JMS responde nas duas rotas', teste);
+  conferir(teste.ok && /troncal: ok, o JMS respondeu/i.test(teste.linhas[0]) && /secundária: ok, o JMS respondeu \(0 viagens hoje/i.test(teste.linhas[1]), 'testar conexão: o JMS responde nas duas rotas', teste);
   est = (await local('GET', '/config/api/estado')).json;
   conferir(est.jms.routeTroncal === '1', 'troncal: descobre e guarda o cabeçalho Routename aceito', est.jms);
 
@@ -178,12 +218,19 @@ function abasRotas(semcodComCodigo) {
   est = (await local('GET', '/config/api/estado')).json;
   conferir(est.jms.pacotesSecundaria === 'unloading', 'secundária: usa o endereço que o JMS aceitou (unloading, como a captura) e guarda', est.jms);
   let r = await painel('troncal');
-  conferir(r.totais.pacotes === 128 && r.totais.errados === 3 && r.totais.certos === 123 && r.totais.semCodigo === 1 && r.totais.semRotinha === 1 &&
-    r.totais.semRegra === 0, 'troncal: 128 pacotes, 3 no caminhão errado, 1 destino sem código, 1 base fora da rotinha', r.totais);
-  conferir(r.viagens.total === 3 && r.viagens.comCarga === 2, 'troncal: só as viagens que saem da nossa base (a de outra base fica fora)', r.viagens);
+  conferir(r.totais.pacotes === 130 && r.totais.errados === 3 && r.totais.certos === 125 && r.totais.semCodigo === 1 && r.totais.semRotinha === 1 &&
+    r.totais.semRegra === 0, 'troncal: 130 pacotes, 3 no caminhão errado, 1 destino sem código, 1 base fora da rotinha', r.totais);
+  conferir(r.viagens.total === 4 && r.viagens.comCarga === 3 && r.viagens.concluidas === 2 && r.viagens.emTransito === 2 && r.viagens.foraDoStatus === 1,
+    'troncal: só as viagens que saem da nossa base, Concluído ou Em Trânsito (a de outra base e a carregando ficam fora)', r.viagens);
+  conferir(!jms.estado.registrosPedidos.DKTESTE0005 && !jms.estado.registrosPedidos.SRTESTE0003 && jms.estado.registrosPedidos.DKTESTE0006 === 1,
+    'viagem carregando (status 1) e cancelada (status 5) nem são consultadas', jms.estado.registrosPedidos);
+  conferir(r.opcoes.rotas.join() === 'XX NORTE,YY SUL' && (await painel('secundaria')).opcoes.rotas.join() === 'BASE LOCAL A-ZZ,BASE LOCAL B-ZZ',
+    'filtro Base Destino: as bases da tabela de rotas (troncal e secundária)', r.opcoes.rotas);
+  est = (await local('GET', '/config/api/estado')).json;
+  conferir(est.salvos.n === 1 && est.salvos.de === DIA && est.busca.ultimo.dias.join() === DIA, 'o dia buscado fica salvo', est.salvos);
   const tn = {};
   r.turnos.forEach(x => { tn[x.turno] = x; });
-  conferir(tn.T1.errados === 0 && tn.T2.errados === 2 && tn.T3.errados === 1 && Math.abs(tn.T2.participacao - 66.67) < 0.1 && tn.T1.pacotes === 123,
+  conferir(tn.T1.errados === 0 && tn.T2.errados === 2 && tn.T3.errados === 1 && Math.abs(tn.T2.participacao - 66.67) < 0.1 && tn.T1.pacotes === 125,
     'turnos: T2 com 2 erros (67%), T3 com 1', r.turnos);
   conferir(r.top.segmentos[0].nome === '902-00' && r.top.segmentos[0].qtd === 2 && r.top.basesDestino[0].nome === 'BASE SUL A-YY' &&
     r.top.destinos[0].nome === 'YY SUL' && r.top.viagens[0].nome === 'DKTESTE0001' && r.top.viagens[0].rota === 'GRU-XX NORTE-0600-1' &&
@@ -198,22 +245,30 @@ function abasRotas(semcodComCodigo) {
     'secundária: segmento de fora da rota é erro (mesmo destino) e rota sem regra fica à parte', s.totais);
 
   // ---------- 4. Filtros, tabela e Excel ----------
-  let f = await painel('troncal', '&turno=T2');
+  let f = await painel('troncal', '&status=concluido');
+  conferir(f.totais.pacotes === 2 && f.totais.errados === 0 && f.viagens.total === 2 && f.menu.troncal === 0 && f.menu.secundaria === 2,
+    'Status Concluído：已完成: só as viagens concluídas (cartões e menu)', {t: f.totais, v: f.viagens, m: f.menu});
+  f = await painel('troncal', '&status=em_transito');
+  conferir(f.totais.pacotes === 128 && f.totais.errados === 3 && f.viagens.total === 2, 'Status Em Trânsito：在途: só as viagens em trânsito', f.totais);
+  f = await painel('troncal', '&status=outro');
+  conferir(f.totais.pacotes === 130, 'status desconhecido = Concluído + Em Trânsito', f.totais);
+  f = await painel('troncal', '&turno=T2');
   conferir(f.totais.errados === 2 && f.totais.pacotes === 2, 'filtro de turno vale para os números', f.totais);
   f = await painel('troncal', '&rota=' + encodeURIComponent('YY SUL'));
-  conferir(f.totais.errados === 1 && f.totais.pacotes === 121 && f.opcoes.rotas.length === 2, 'filtro de rota (próxima parada)', f.totais);
+  conferir(f.totais.errados === 1 && f.totais.pacotes === 123 && f.opcoes.rotas.length === 2, 'filtro Base Destino (rota do caminhão)', f.totais);
   f = await painel('troncal', '&destino=' + encodeURIComponent('XX NORTE'));
   conferir(f.totais.errados === 1, 'filtro de DESTINO', f.totais);
   let t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&situacao=errado')).json;
-  conferir(t.total === 3 && t.colunas.length === 15 && t.linhas.every(l => l.situacao === 'errado' && l.situacaoTexto === 'Errado') &&
-    t.linhas[0].shipmentNo && t.linhas[0].segmento && t.linhas[0].destino && /^T[123]$/.test(t.linhas[0].turno), 'tabela dos errados com turno, ID de viagem, SEGMENTOS e DESTINO', t);
+  conferir(t.total === 3 && t.colunas.length === 16 && t.linhas.every(l => l.situacao === 'errado' && l.situacaoTexto === 'Errado' && l.statusViagem === 'Em Trânsito：在途') &&
+    t.linhas[0].shipmentNo && t.linhas[0].segmento && t.linhas[0].destino && /^T[123]$/.test(t.linhas[0].turno),
+    'tabela dos errados com turno, ID de viagem, Status, SEGMENTOS e DESTINO', t);
   t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&tamanho=10&pagina=2')).json;
-  conferir(t.total === 128 && t.linhas.length === 10 && t.pagina === 2, 'tabela com todos os dados, em páginas', {total: t.total, n: t.linhas.length});
+  conferir(t.total === 130 && t.linhas.length === 10 && t.pagina === 2, 'tabela com todos os dados, em páginas', {total: t.total, n: t.linhas.length});
   t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&ordem=horario&direcao=desc&tamanho=5')).json;
   conferir(t.ordem === 'horario' && t.direcao === 'desc' && t.linhas[0].horario >= t.linhas[1].horario && t.linhas[0].horario === DIA + ' 23:10:00',
     'tabela ordena pela coluna clicada', t.linhas.map(l => l.horario));
   f = await painel('troncal', '&segmento=902-00');
-  conferir(f.totais.errados === 2 && f.totais.pacotes === 122, 'filtro de segmento', f.totais);
+  conferir(f.totais.errados === 2 && f.totais.pacotes === 124, 'filtro de segmento', f.totais);
   f = await painel('troncal', '&login=' + encodeURIComponent('OPERADOR DOIS'));
   conferir(f.totais.errados === 2, 'filtro de login', f.totais);
   t = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&busca=LT-ERRO')).json;
@@ -221,33 +276,70 @@ function abasRotas(semcodComCodigo) {
   const x = await local('GET', '/api/excel?tipo=troncal&dia=' + DIA + '&situacao=errado');
   const xl = lerXlsx(x.buf)[0];
   conferir(x.status === 200 && /attachment; filename="expedicao_troncal_2026-10-20\.xlsx"/.test(x.headers['content-disposition']) &&
-    xl.linhas.length === 4 && xl.linhas[0][0] === 'Turno' && xl.linhas[0][10] === 'SEGMENTOS', 'Excel da tabela (com os filtros)', xl.linhas[0]);
+    xl.linhas.length === 4 && xl.linhas[0][0] === 'Turno' && xl.linhas[0][4] === 'Status' && xl.linhas[0][11] === 'SEGMENTOS', 'Excel da tabela (com os filtros)', xl.linhas[0]);
+
+  // ---------- 4b. Período de vários dias ----------
+  const periodo = async extra => (await local('GET', '/api/painel?tipo=troncal&de=' + DIA_ANTES + '&ate=' + DIA + (extra || ''))).json;
+  let pr = await periodo();
+  conferir(pr.de === DIA_ANTES && pr.ate === DIA && pr.dia === '' && pr.dias === 2 && pr.semBusca.join() === DIA_ANTES && pr.totais.pacotes === 130,
+    'período: junta os dias e aponta o dia ainda não buscado', {de: pr.de, ate: pr.ate, semBusca: pr.semBusca, t: pr.totais});
+  const n0 = jms.estado.diasPedidos.length;
+  const pb = (await local('POST', '/api/buscar', {de: DIA_ANTES, ate: DIA})).json;
+  await esperar(50); await terminar();
+  conferir(pb.ok && pb.dias.join() === DIA_ANTES && jms.estado.diasPedidos.slice(n0).join() === DIA_ANTES,
+    'Atualizar no período: busca só o dia que falta (dia fechado já salvo não é buscado de novo)', {pb, pedidos: jms.estado.diasPedidos.slice(n0)});
+  pr = await periodo();
+  conferir(pr.semBusca.length === 0 && pr.totais.pacotes === 132 && pr.totais.errados === 4 && pr.viagens.total === 5 && pr.viagens.concluidas === 3 &&
+    pr.menu.troncal === 4, 'período de 2 dias: pacotes, errados e viagens somados', {t: pr.totais, v: pr.viagens, m: pr.menu});
+  pr = await periodo('&status=concluido');
+  conferir(pr.totais.pacotes === 4 && pr.totais.errados === 1, 'período com Status Concluído', pr.totais);
+  conferir((await local('POST', '/api/buscar', {de: DIA_ANTES, ate: DIA})).json.dias.length === 0, 'período já salvo: Atualizar não busca de novo');
+  const xp = await local('GET', '/api/excel?tipo=troncal&de=' + DIA_ANTES + '&ate=' + DIA);
+  conferir(/filename="expedicao_troncal_2026-10-19_a_2026-10-20\.xlsx"/.test(xp.headers['content-disposition']) && lerXlsx(xp.buf)[0].linhas.length === 133,
+    'Excel do período', xp.headers['content-disposition']);
+  pr = (await local('GET', '/api/painel?tipo=troncal&de=2026-01-01&ate=' + DIA)).json;
+  const inv = (await local('GET', '/api/painel?tipo=troncal&de=' + DIA + '&ate=' + DIA_ANTES)).json;
+  conferir(pr.de === '2026-09-20' && pr.ate === DIA && pr.dias === 31 && inv.de === DIA_ANTES && inv.ate === DIA,
+    'período de no máximo 31 dias; data inicial depois da final é trocada', {de: pr.de, inv: [inv.de, inv.ate]});
 
   // ---------- 5. Nova busca: só o que mudou ----------
   const paginasTroncal = () => jms.estado.pedidos['/transportation/trackingDeatil/loading/scan/page'] || 0;
+  const reg = id => jms.estado.registrosPedidos[id] || 0;
   let antes = paginasTroncal();
+  const reg1 = reg('DKTESTE0001'), reg6 = reg('DKTESTE0006'), reg4 = reg('DKTESTE0004');
   await buscar();
   conferir(paginasTroncal() === antes, 'nova busca sem mudança: não baixa a lista de pacotes de novo', {antes, depois: paginasTroncal()});
+  conferir(reg('DKTESTE0001') === reg1 + 1 && reg('DKTESTE0006') === reg6 && reg('DKTESTE0004') === reg4,
+    'viagem concluída já conferida não é consultada de novo; em trânsito é', jms.estado.registrosPedidos);
   jms.estado.dados.troncal.pacotes.DKTESTE0001.push(pac('DKTESTE0001', 7, 'BASE SUL A-YY', 'XX NORTE', DIA + ' 16:00:00'));
   antes = paginasTroncal();
   await buscar();
   r = await painel('troncal');
-  conferir(paginasTroncal() === antes + 1 && r.totais.pacotes === 129 && r.totais.errados === 4, 'viagem com pacote novo: baixa só ela (1 página)', {req: paginasTroncal() - antes, t: r.totais});
+  conferir(paginasTroncal() === antes + 1 && r.totais.pacotes === 131 && r.totais.errados === 4, 'viagem com pacote novo: baixa só ela (1 página)', {req: paginasTroncal() - antes, t: r.totais});
   jms.estado.dados.troncal.pacotes.DKTESTE0002.push(pac('DKTESTE0002', 121, 'BASE SUL A-YY', 'YY SUL', DIA + ' 11:00:00'));
   antes = paginasTroncal();
   await buscar();
   r = await painel('troncal');
-  conferir(paginasTroncal() === antes && r.totais.pacotes === 129, 'viagem grande: espera o intervalo para baixar de novo', {req: paginasTroncal() - antes});
+  conferir(paginasTroncal() === antes && r.totais.pacotes === 131, 'viagem grande: espera o intervalo para baixar de novo', {req: paginasTroncal() - antes});
   await buscar({forcar: true});
   r = await painel('troncal');
-  conferir(r.totais.pacotes === 130 && paginasTroncal() > antes, '"Buscar tudo de novo" baixa mesmo assim (3 páginas de 50)', r.totais);
+  conferir(r.totais.pacotes === 132 && paginasTroncal() > antes, '"Buscar tudo de novo" baixa mesmo assim (3 páginas de 50)', r.totais);
+  // Em Trânsito → Concluído: confere mais uma vez e depois não consulta mais.
+  jms.estado.dados.troncal.viagens.find(v => v.shipmentNo === 'DKTESTE0001').shipmentState = 4;
+  const regA = reg('DKTESTE0001');
+  await buscar();
+  r = await painel('troncal');
+  const regB = reg('DKTESTE0001');
+  await buscar();
+  conferir(regB === regA + 1 && reg('DKTESTE0001') === regB && r.viagens.concluidas === 3 && r.totais.pacotes === 132,
+    'viagem que chegou (Em Trânsito → Concluído): confere uma última vez e passa para Concluído', {regA, regB, agora: reg('DKTESTE0001'), v: r.viagens});
 
   // ---------- 6. Troca da planilha de rotas pela tela ----------
   const ruim = await local('POST', '/config/api/planilha?nome=rotas', Buffer.from('isto não é xlsx'), {'Content-Type': 'application/octet-stream'});
   conferir(ruim.status === 400 && /Não usei/.test(ruim.json.error), 'arquivo que não é planilha é recusado (a planilha atual continua)');
   const boa = await local('POST', '/config/api/planilha?nome=rotas', escreverXlsx(abasRotas(true)), {'Content-Type': 'application/octet-stream'});
   r = await painel('troncal');
-  conferir(boa.json.ok && r.totais.semCodigo === 0 && r.totais.certos === 125, 'planilha de rotas nova vale na hora (destino ganhou código)', r.totais);
+  conferir(boa.json.ok && r.totais.semCodigo === 0 && r.totais.certos === 127, 'planilha de rotas nova vale na hora (destino ganhou código)', r.totais);
   const baixada = await local('GET', '/config/api/rotas.xlsx');
   conferir(lerXlsx(baixada.buf)[1].linhas[1][1] === 'XX NORTE, WW SEMCOD', 'baixar a planilha de rotas atual');
 
@@ -261,14 +353,14 @@ function abasRotas(semcodComCodigo) {
   const ck = String(certa.headers['set-cookie'] || '').split(';')[0];
   conferir(certa.status === 303 && /^exp_sessao=/.test(ck), 'senha certa: entra');
   const comCk = await remoto('GET', '/api/painel?tipo=troncal&dia=' + DIA, undefined, {Cookie: ck});
-  conferir(comCk.status === 200 && comCk.json.totais.pacotes === 130, 'com a senha, o painel abre de fora');
+  conferir(comCk.status === 200 && comCk.json.totais.pacotes === 132, 'com a senha, o painel abre de fora');
 
   // ---------- 8. AuthToken próprio e AuthToken vencido ----------
   jms.estado.token = 'TOKEN-NOVO-FICTICIO';
   e = await buscar();
   conferir(e.busca.ultimo.ok === false && e.busca.authVencido, 'AuthToken vencido: a busca para e avisa', e.busca);
   r = await painel('troncal');
-  conferir(r.totais.pacotes === 130 && r.estado.busca.authVencido, 'AuthToken vencido: o painel continua com os números da última busca');
+  conferir(r.totais.pacotes === 132 && r.estado.busca.authVencido, 'AuthToken vencido: o painel continua com os números da última busca');
   const novo = (await local('POST', '/config/api/token', {authtoken: 'authtoken: TOKEN-NOVO-FICTICIO'})).json;
   est = (await local('GET', '/config/api/estado')).json;
   conferir(novo.ok && est.token.fonte === 'app' && !est.busca.authVencido, 'AuthToken colado no app: limpa "authtoken:", testa e passa a valer', novo);

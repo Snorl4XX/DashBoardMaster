@@ -1,8 +1,9 @@
 'use strict';
 /**
- * Banco local (SQLite do próprio Node.js, arquivo dados/expedicao.db): viagens do dia, pacotes do bipe de carregamento de
- * cada viagem e as propriedades do app (AuthToken próprio, cabeçalho aceito pelo JMS…). A conferência (certo/errado) não fica
- * gravada: é feita na hora com as planilhas atuais, então mudar a planilha de rotas muda o painel na hora.
+ * Banco local (SQLite do próprio Node.js, arquivo dados/expedicao.db): viagens de cada dia, pacotes do bipe de carregamento de
+ * cada viagem, os dias já buscados e as propriedades do app (AuthToken próprio, cabeçalho aceito pelo JMS…). Nada é apagado:
+ * os dias anteriores ficam guardados. A conferência (certo/errado) não fica gravada: é feita na hora com as planilhas atuais,
+ * então mudar a planilha de rotas muda o painel na hora.
  */
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +33,12 @@ class Banco {
         horario TEXT, dia TEXT NOT NULL,
         PRIMARY KEY (tipo, shipmentNo, billCode, packageCode));
       CREATE INDEX IF NOT EXISTS pacotes_dia ON pacotes (tipo, dia);
+      CREATE TABLE IF NOT EXISTS buscas (dia TEXT PRIMARY KEY, em INTEGER NOT NULL DEFAULT 0);
     `);
+    // 1.2: status da viagem quando a lista de pacotes foi conferida (viagem concluída e conferida não muda mais).
+    if (!this.db.prepare('PRAGMA table_info(viagens)').all().some(c => c.name === 'estadoBusca')) this.db.exec('ALTER TABLE viagens ADD COLUMN estadoBusca TEXT');
+    // Dias buscados pela versão 1.1 (antes desta tabela) contam como buscados.
+    this.db.exec('INSERT OR IGNORE INTO buscas (dia, em) SELECT DISTINCT dia, 0 FROM viagens');
     this.st = {
       get: this.db.prepare('SELECT v FROM props WHERE k = ?'),
       set: this.db.prepare('INSERT INTO props (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v'),
@@ -43,7 +49,8 @@ class Banco {
         ON CONFLICT (tipo, shipmentNo) DO UPDATE SET dia = excluded.dia, nome = excluded.nome, origem = excluded.origem, destino = excluded.destino,
           codigoDestino = excluded.codigoDestino, partidaPrevista = excluded.partidaPrevista, partida = excluded.partida, chegada = excluded.chegada,
           estado = excluded.estado, placa = excluded.placa, transportadora = excluded.transportadora`),
-      marcar: this.db.prepare('UPDATE viagens SET contagem = ?, buscadoEm = ?, erro = ? WHERE tipo = ? AND shipmentNo = ?'),
+      marcar: this.db.prepare('UPDATE viagens SET contagem = ?, buscadoEm = ?, erro = ?, estadoBusca = ? WHERE tipo = ? AND shipmentNo = ?'),
+      marcarEstado: this.db.prepare('UPDATE viagens SET estadoBusca = ? WHERE tipo = ? AND shipmentNo = ?'),
       erroViagem: this.db.prepare('UPDATE viagens SET erro = ? WHERE tipo = ? AND shipmentNo = ?'),
       reiniciar: this.db.prepare('UPDATE viagens SET contagem = -1, buscadoEm = 0 WHERE tipo = ? AND shipmentNo = ?'),
       viagensDia: this.db.prepare('SELECT * FROM viagens WHERE tipo = ? AND dia = ? ORDER BY COALESCE(partida, partidaPrevista), shipmentNo'),
@@ -51,7 +58,10 @@ class Banco {
       inserirPacote: this.db.prepare('INSERT OR REPLACE INTO pacotes (' + CAMPOS_PACOTE.join(', ') + ') VALUES (' + CAMPOS_PACOTE.map(() => '?').join(', ') + ')'),
       pacotesDia: this.db.prepare('SELECT * FROM pacotes WHERE tipo = ? AND dia = ?'),
       contarDia: this.db.prepare('SELECT COUNT(*) AS n FROM pacotes WHERE tipo = ? AND dia = ?'),
-      dias: this.db.prepare('SELECT DISTINCT dia FROM viagens WHERE tipo = ? ORDER BY dia DESC LIMIT 60')
+      statusDia: this.db.prepare('SELECT estado, COUNT(*) AS n FROM viagens WHERE tipo = ? AND dia = ? GROUP BY estado ORDER BY n DESC'),
+      marcarDia: this.db.prepare('INSERT INTO buscas (dia, em) VALUES (?, ?) ON CONFLICT (dia) DO UPDATE SET em = excluded.em'),
+      buscados: this.db.prepare('SELECT dia FROM buscas WHERE dia BETWEEN ? AND ?'),
+      diasSalvos: this.db.prepare('SELECT COUNT(*) AS n, MIN(dia) AS de, MAX(dia) AS ate FROM buscas')
     };
   }
   get(k) { const r = this.st.get.get(String(k)); return r ? r.v : null; }
@@ -61,7 +71,10 @@ class Banco {
     this.st.salvarViagem.run(v.tipo, v.shipmentNo, v.dia, v.nome || '', v.origem || '', v.destino || '', v.codigoDestino || '', v.partidaPrevista || '',
       v.partida || '', v.chegada || '', String(v.estado === undefined || v.estado === null ? '' : v.estado), v.placa || '', v.transportadora || '');
   }
-  marcarViagem(tipo, id, contagem, erro) { this.st.marcar.run(contagem, Date.now(), erro || '', tipo, id); }
+  /** Lista de pacotes conferida agora (contagem do bipe e o status da viagem nesse momento). */
+  marcarViagem(tipo, id, contagem, erro, estado) { this.st.marcar.run(contagem, Date.now(), erro || '', String(estado === undefined || estado === null ? '' : estado), tipo, id); }
+  /** Conferiu e nada mudou: só guarda o status (não mexe em buscadoEm, que segura a viagem grande). */
+  marcarEstado(tipo, id, estado) { this.st.marcarEstado.run(String(estado === undefined || estado === null ? '' : estado), tipo, id); }
   erroViagem(tipo, id, erro) { this.st.erroViagem.run(erro || '', tipo, id); }
   /** A viagem passou para outro dia: a lista de pacotes é baixada de novo (com o dia novo). */
   reiniciarViagem(tipo, id) { this.st.reiniciar.run(tipo, id); }
@@ -78,7 +91,14 @@ class Banco {
   }
   pacotesDia(tipo, dia) { return this.st.pacotesDia.all(tipo, dia); }
   contarDia(tipo, dia) { return this.st.contarDia.get(tipo, dia).n; }
-  dias(tipo) { return this.st.dias.all(tipo).map(r => r.dia); }
+  /** Quantas viagens do dia em cada código de status do JMS. → [{estado, n}] */
+  statusDia(tipo, dia) { return this.st.statusDia.all(tipo, dia); }
+  /** O dia foi buscado inteiro (as duas rotas). */
+  marcarDia(dia) { this.st.marcarDia.run(dia, Date.now()); }
+  /** Dias do período que já foram buscados. → Set */
+  buscados(de, ate) { return new Set(this.st.buscados.all(de, ate).map(r => r.dia)); }
+  /** {n, de, ate}: quantos dias estão guardados. */
+  diasSalvos() { return this.st.diasSalvos.get(); }
   fechar() { try { this.db.close(); } catch (e) { /* já fechado */ } }
 }
 

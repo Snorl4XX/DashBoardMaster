@@ -1,17 +1,41 @@
 'use strict';
 /**
- * Busca no JMS, para um dia: as viagens que SAEM da nossa base (troncal e secundária), o "Bipe de carregamento" da nossa
- * base em cada uma (Info / Registros de carga e descarga) e a lista de pacotes desse bipe. Grava tudo no banco.
+ * Busca no JMS, dia a dia: as viagens que SAEM da nossa base (PDD de saída fixo: troncal e secundária), o "Bipe de
+ * carregamento" da nossa base em cada uma (Info / Registros de carga e descarga) e a lista de pacotes desse bipe. Grava tudo
+ * no banco (os dias anteriores ficam guardados).
+ *   - Só as viagens com Status Concluído ou Em Trânsito (lib/status.js); as outras ainda não saíram ou foram canceladas.
  *   - Só busca de novo os pacotes de uma viagem quando a quantidade bipada mudou (o JMS não muda a lista sem mudar o número).
+ *     Viagem concluída já conferida depois de concluída não é consultada de novo (a carga não muda mais).
  *   - Viagem grande (mais de "viagemGrande" pacotes) busca no máximo a cada "minutosViagemGrande" minutos.
  *   - AuthToken vencido para tudo e avisa; erro numa viagem não para as outras.
  */
+const {statusDe} = require('./status');
+
 const MAX_PAGINAS = 5000;
 
 function hojeSp(dt) {
   const d = dt || new Date();
   const p = n => String(n).padStart(2, '0');
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+/** 'AAAA-MM-DD' + n dias. */
+function somaDias(dia, n) {
+  const [a, m, d] = dia.split('-').map(Number), x = new Date(Date.UTC(a, m - 1, d + n));
+  return x.toISOString().slice(0, 10);
+}
+/** Todos os dias de 'de' até 'ate' (inclusive). */
+function diasEntre(de, ate) {
+  const out = [];
+  for (let d = de; d <= ate && out.length < 400; d = somaDias(d, 1)) out.push(d);
+  return out;
+}
+/** Dias da busca automática: hoje sempre; ontem logo que o dia vira (ou o app abre) e depois a cada "minutosOntem" minutos,
+ * para guardar o dia anterior completo (viagens que chegaram depois, pacotes bipados no fim da noite).
+ * mem = {ontem, ontemEm}: o último "ontem" buscado com sucesso e quando. */
+function diasDaAgenda(mem, agora, minutosOntem) {
+  const hoje = hojeSp(new Date(agora)), ontem = somaDias(hoje, -1);
+  if (minutosOntem > 0 && (mem.ontem !== ontem || agora - mem.ontemEm >= minutosOntem * 60000)) return [ontem, hoje];
+  return [hoje];
 }
 function texto(v) { return v === null || v === undefined ? '' : String(v).trim(); }
 /** Linha de "Bipe de carregamento" (o JMS manda loadingTypeName "1"). */
@@ -33,32 +57,49 @@ class Coletor {
   /** {banco, jms, cfg, log(nivel, texto), aoMudar(tipo, dia)} */
   constructor(o) {
     Object.assign(this, o);
-    this.estado = {rodando: false, dia: '', tipo: '', etapa: 'Ainda não buscou.', viagens: 0, feitas: 0, pacotes: 0, inicio: 0, fim: 0,
+    this.estado = {rodando: false, dia: '', dias: [], tipo: '', etapa: 'Ainda não buscou.', viagens: 0, feitas: 0, pacotes: 0, inicio: 0, fim: 0,
       erros: [], ultimo: null, authVencido: false};
     this.atual = null;
+    this.pendentes = new Set();
   }
-  /** Busca o dia (todas as rotas). Se já estiver buscando, devolve a mesma busca. */
-  coletar(dia, opcoes) {
-    if (this.atual) return this.atual;
+  /** Busca um ou mais dias (todas as rotas), um de cada vez. Se já estiver buscando, os dias novos entram na fila e a busca
+   * atual é devolvida. */
+  coletar(dias, opcoes) {
+    const lista = Array.from(new Set([].concat(dias).filter(Boolean))).sort();
+    if (this.atual) {
+      lista.forEach(d => { if (this.estado.dias.indexOf(d) < 0) this.pendentes.add(d); });
+      return this.atual;
+    }
     const o = opcoes || {}, tipos = o.tipos || ['troncal', 'secundaria'];
     this.atual = (async () => {
-      const e = this.estado;
-      Object.assign(e, {rodando: true, dia, inicio: Date.now(), fim: 0, viagens: 0, feitas: 0, pacotes: 0, erros: [], etapa: 'Começando…'});
+      const e = this.estado, feitos = [];
+      Object.assign(e, {rodando: true, dia: lista[0] || '', dias: lista, inicio: Date.now(), fim: 0, viagens: 0, feitas: 0, pacotes: 0, erros: [],
+        etapa: 'Começando…'});
       if (this.jms.novaRodada) this.jms.novaRodada();
       let ok = true, msg = '';
       try {
-        for (const tipo of tipos) await this.coletarTipo(tipo, dia, o.forcar);
+        for (const dia of lista) {
+          e.dia = dia;
+          for (const tipo of tipos) await this.coletarTipo(tipo, dia, o.forcar);
+          if (tipos.length > 1) this.banco.marcarDia(dia);
+          feitos.push(dia);
+        }
         e.authVencido = false;
         msg = e.viagens + ' viagens, ' + e.pacotes + ' pacotes novos ou atualizados' + (e.erros.length ? ' · ' + e.erros.length + ' com erro' : '');
       } catch (err) {
         ok = false;
         msg = String(err && err.message || err);
         if (err && err.auth) e.authVencido = true;
-        this.log('erro', 'Busca de ' + dia + ' parou: ' + msg);
+        this.log('erro', 'Busca de ' + e.dia + ' parou: ' + msg);
       } finally {
         Object.assign(e, {rodando: false, fim: Date.now(), tipo: '', etapa: ok ? 'Pronto.' : 'Parou: ' + msg});
-        e.ultimo = {quando: Date.now(), dia, ok, msg};
+        e.ultimo = {quando: Date.now(), dia: e.dia, dias: feitos, ok, msg};
         this.atual = null;
+        if (this.pendentes.size) {
+          const prox = Array.from(this.pendentes);
+          this.pendentes.clear();
+          setImmediate(() => this.coletar(prox).catch(() => {}));
+        }
       }
       return e.ultimo;
     })();
@@ -68,10 +109,12 @@ class Coletor {
     const e = this.estado, cfg = this.cfg, nomeTipo = tipo === 'troncal' ? 'troncal' : 'secundária';
     e.tipo = tipo;
     e.etapa = 'Viagens da rota ' + nomeTipo + '…';
-    const viagens = await this.listarViagens(tipo, dia);
+    const todas = await this.listarViagens(tipo, dia), viagens = todas.filter(v => statusDe(v.estado, cfg.statusCodigos));
     e.viagens += viagens.length;
-    this.log('info', dia + ' · rota ' + nomeTipo + ': ' + viagens.length + ' viagens saindo de ' + cfg.nomeBase + '.');
-    let mudou = false;
+    const conc = viagens.filter(v => statusDe(v.estado, cfg.statusCodigos) === 'concluido').length;
+    this.log('info', dia + ' · rota ' + nomeTipo + ': ' + todas.length + ' viagens saindo de ' + cfg.nomeBase + ' · ' + conc + ' concluídas e ' +
+      (viagens.length - conc) + ' em trânsito' + (todas.length > viagens.length ? ' (' + (todas.length - viagens.length) + ' em outro status ficam de fora)' : '') + '.');
+    let mudou = todas.mudou;
     await emParalelo(viagens, cfg.consultasAoMesmoTempo, async v => {
       try {
         if (await this.coletarViagem(tipo, dia, v, forcar)) mudou = true;
@@ -88,9 +131,11 @@ class Coletor {
     });
     if (mudou && this.aoMudar) this.aoMudar(tipo, dia);
   }
-  /** Viagens do dia que saem da nossa base (filtro do JMS e conferido aqui também). */
+  /** Viagens do dia que saem da nossa base (filtro do JMS e conferido aqui também). lista.mudou = alguma viagem nova ou com
+   * status, nome ou destino diferente (o painel recalcula). */
   async listarViagens(tipo, dia) {
     const cfg = this.cfg, vistas = new Set(), lista = [];
+    lista.mudou = false;
     for (let p = 1, paginas = 1; p <= paginas && p <= 100; p++) {
       const r = await this.jms.viagens(tipo, dia, cfg.codigoBase, p, cfg.tamanhoPaginaViagens);
       paginas = r.paginas;
@@ -104,8 +149,12 @@ class Coletor {
           partida: texto(t.actualDepartureTime || t.appDepartureTime), chegada: texto(t.actualArrivalTime || t.appArrivalTime),
           estado: texto(t.shipmentState), placa: texto(t.plateNumber), transportadora: texto(t.carrierShortName || t.carrierName)};
         const antes = this.banco.viagem(tipo, id);
+        if (!antes || antes.dia !== dia || antes.estado !== v.estado || antes.nome !== v.nome || antes.destino !== v.destino) lista.mudou = true;
         this.banco.salvarViagem(v);
-        if (antes && antes.dia !== dia) this.banco.reiniciarViagem(tipo, id);
+        if (antes && antes.dia !== dia) {
+          this.banco.reiniciarViagem(tipo, id);
+          if (this.aoMudar) this.aoMudar(tipo, antes.dia); // saiu do outro dia
+        }
         lista.push(v);
       });
       if (!r.registros.length) break;
@@ -115,19 +164,25 @@ class Coletor {
   /** Uma viagem: o bipe de carregamento da nossa base e, se a quantidade mudou, a lista de pacotes. → true se gravou pacotes. */
   async coletarViagem(tipo, dia, v, forcar) {
     const cfg = this.cfg, antes = this.banco.viagem(tipo, v.shipmentNo);
+    const mesmoDia = antes && antes.buscadoEm > 0;
+    // Concluída e já conferida depois de concluída: a carga não muda mais.
+    if (!forcar && mesmoDia && !antes.erro && statusDe(v.estado, cfg.statusCodigos) === 'concluido' && antes.estadoBusca === v.estado) return false;
     const regs = await this.jms.registros(tipo, v.shipmentNo);
     const nossa = r => texto(r.scanNetworkCode) === String(cfg.codigoBase) || (!texto(r.scanNetworkCode) && texto(r.scanNetworkName) === cfg.nomeBase);
     const carga = regs.find(r => ehCarga(r) && nossa(r));
-    if (!carga) { this.banco.marcarViagem(tipo, v.shipmentNo, antes && antes.contagem > 0 ? antes.contagem : 0, ''); return false; }
+    if (!carga) { this.banco.marcarViagem(tipo, v.shipmentNo, antes && antes.contagem > 0 ? antes.contagem : 0, '', v.estado); return false; }
     const n = Number(carga.scanWaybillNum) || Number(carga.scanWaybillSingleNum) || 0;
-    const mesmoDia = antes && antes.buscadoEm > 0;
-    if (!forcar && mesmoDia && antes.contagem === n && !antes.erro) return false;
+    if (!forcar && mesmoDia && antes.contagem === n && !antes.erro) { this.banco.marcarEstado(tipo, v.shipmentNo, v.estado); return false; }
     if (!forcar && mesmoDia && n > cfg.viagemGrande && Date.now() - antes.buscadoEm < cfg.minutosViagemGrande * 60000) return false;
-    if (n === 0) { this.banco.trocarPacotes(tipo, v.shipmentNo, dia, []); this.banco.marcarViagem(tipo, v.shipmentNo, 0, ''); return mesmoDia && antes.contagem > 0; }
+    if (n === 0) {
+      this.banco.trocarPacotes(tipo, v.shipmentNo, dia, []);
+      this.banco.marcarViagem(tipo, v.shipmentNo, 0, '', v.estado);
+      return mesmoDia && antes.contagem > 0;
+    }
     const descarga = regs.find(ehDescarga);
     const pacotes = await this.baixarPacotes(tipo, v, n, descarga ? texto(descarga.scanNetworkCode) : v.codigoDestino);
     this.banco.trocarPacotes(tipo, v.shipmentNo, dia, pacotes);
-    this.banco.marcarViagem(tipo, v.shipmentNo, n, '');
+    this.banco.marcarViagem(tipo, v.shipmentNo, n, '', v.estado);
     this.estado.pacotes += pacotes.length;
     return true;
   }
@@ -177,4 +232,4 @@ class Coletor {
   }
 }
 
-module.exports = {Coletor, hojeSp, ehCarga, ehDescarga, emParalelo};
+module.exports = {Coletor, hojeSp, somaDias, diasEntre, diasDaAgenda, ehCarga, ehDescarga, emParalelo};

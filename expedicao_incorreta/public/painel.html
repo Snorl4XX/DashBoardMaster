@@ -107,20 +107,32 @@
       </header>
       <div class="progress" id="progress" aria-hidden="true"><span></span></div>
 
-      <!-- Barra do painel e do dia -->
-      <section class="card toolbar" aria-label="Dia">
+      <!-- Barra do painel, do PDD de saída (fixo) e do período -->
+      <section class="card toolbar" aria-label="Período">
         <div class="field field-indicator">
           <label for="painelSelect">Painel</label>
           <div class="select-wrap"><select id="painelSelect"><option value="troncal">Rota Troncal · 干线</option><option value="secundaria">Rota Secundária · 支线</option></select></div>
         </div>
-        <div class="field field-date">
-          <label for="dia">Dia</label>
-          <input type="date" id="dia">
+        <div class="field field-fixo">
+          <span class="field-label" id="pddLabel">PDD de saída</span>
+          <div class="fixo" role="note" aria-labelledby="pddLabel" title="Filtro fixo: só os caminhões que saem da nossa base">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            <b id="pddNome">SP GRU</b><small>fixo</small>
+          </div>
         </div>
-        <div class="presets" id="presets" role="group" aria-label="Atalhos de dia">
-          <button type="button" class="chip" data-d="0">Hoje</button>
-          <button type="button" class="chip" data-d="-1">Ontem</button>
-          <button type="button" class="chip" data-d="-2">Anteontem</button>
+        <div class="field field-date">
+          <label for="de">Data inicial</label>
+          <input type="date" id="de">
+        </div>
+        <div class="field field-date">
+          <label for="ate">Data final</label>
+          <input type="date" id="ate">
+        </div>
+        <div class="presets" id="presets" role="group" aria-label="Atalhos de período">
+          <button type="button" class="chip" data-p="hoje">Hoje</button>
+          <button type="button" class="chip" data-p="ontem">Ontem</button>
+          <button type="button" class="chip" data-p="7">Últimos 7 dias</button>
+          <button type="button" class="chip" data-p="mes">Este mês</button>
         </div>
         <button class="btn btn-dark" type="button" id="applyBtn">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg><span>Aplicar</span>
@@ -139,10 +151,12 @@
             <div class="badges" id="badges"></div>
           </div>
           <div class="filter-grid">
+            <div class="dd" id="dd-status"><label class="dd-label" for="f-status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>Status</label>
+              <div class="select-wrap"><select id="f-status"><option value="">Concluído + Em Trânsito</option><option value="concluido">Concluído：已完成</option><option value="em_transito">Em Trânsito：在途</option></select></div></div>
+            <div class="dd" id="dd-rota"><label class="dd-label" for="f-rota"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><path d="M9 9h6"/></svg>Base Destino</label>
+              <div class="select-wrap"><select id="f-rota" title="Bases da tabela de rotas do SC"><option value="">Todas</option></select></div></div>
             <div class="dd" id="dd-turno"><label class="dd-label" for="f-turno"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Turno</label>
               <div class="select-wrap"><select id="f-turno"><option value="">Todos</option><option value="T1">T1 · 06h–14h</option><option value="T2">T2 · 14h–22h</option><option value="T3">T3 · 22h–06h</option></select></div></div>
-            <div class="dd" id="dd-rota"><label class="dd-label" for="f-rota"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h4c5 0 1-12 6-12"/></svg>Rota (próxima parada)</label>
-              <div class="select-wrap"><select id="f-rota"><option value="">Todas</option></select></div></div>
             <div class="dd" id="dd-destino"><label class="dd-label" for="f-destino"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>Destino</label>
               <div class="select-wrap"><select id="f-destino"><option value="">Todos</option></select></div></div>
             <div class="dd" id="dd-segmento"><label class="dd-label" for="f-segmento"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg>Segmentos</label>
@@ -182,7 +196,7 @@
         </section>
       </section>
 
-      <footer class="foot">Fonte: JMS (viagens e bipes de carregamento) · rotinha e tabela de rotas<span class="made-by">Feito por Caike Oliveira</span></footer>
+      <footer class="foot">Fonte: JMS (viagens Concluído e Em Trânsito saindo da base, e os bipes de carregamento) · rotinha e tabela de rotas<span class="made-by">Feito por Caike Oliveira</span></footer>
     </main>
   </div>
 

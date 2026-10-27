@@ -1,6 +1,7 @@
-/* Painel (Rota Troncal ou Rota Secundária), no layout do painel principal: menu lateral, topo, dia, filtros, cartões, gráficos e
- * a tabela. Pede os números ao app; enquanto o app busca no JMS confere a cada 5 s, parado recarrega a cada minuto.
- * Os filtros ficam no endereço da página (dá para mandar o link já filtrado). */
+/* Painel (Rota Troncal ou Rota Secundária), no layout do painel principal: menu lateral, topo, período (data inicial e final),
+ * filtros, cartões, gráficos e a tabela. PDD de saída é fixo (a nossa base). Pede os números ao app; enquanto o app busca no
+ * JMS confere a cada 5 s, parado recarrega a cada minuto. Período e filtros ficam no endereço da página (dá para mandar o link
+ * já filtrado). */
 (function () {
   'use strict';
   var G = window.Graficos, esc = G.esc, fmtInt = G.fmtInt, fmtPct = G.fmtPct;
@@ -8,10 +9,11 @@
   var tipo = /secundaria\/?$/.test(location.pathname) ? 'secundaria' : 'troncal';
   var NOME = {troncal: {pt: 'Rota Troncal', zh: '干线'}, secundaria: {pt: 'Rota Secundária', zh: '支线'}};
   var q = new URLSearchParams(location.search);
-  var st = {dia: q.get('dia') || '', hoje: '', turno: q.get('turno') || '', rota: q.get('rota') || '', destino: q.get('destino') || '',
-    segmento: q.get('segmento') || '', login: q.get('login') || '', situacao: q.get('situacao') || '', busca: '', pagina: 1, tamanho: 50,
-    ordem: '', direcao: 'asc', carregando: false, ultimaBusca: 0, ultimaCarga: 0, resumo: null};
-  var FILTROS = ['turno', 'rota', 'destino', 'segmento', 'login'];
+  var st = {de: q.get('de') || q.get('dia') || '', ate: q.get('ate') || q.get('dia') || '', hoje: '', status: q.get('status') || '',
+    turno: q.get('turno') || '', rota: q.get('rota') || '', destino: q.get('destino') || '', segmento: q.get('segmento') || '', login: q.get('login') || '',
+    situacao: q.get('situacao') || '', busca: '', pagina: 1, tamanho: 50, ordem: '', direcao: 'asc', carregando: false, ultimaBusca: 0, ultimaCarga: 0,
+    resumo: null};
+  var FILTROS = ['status', 'rota', 'turno', 'destino', 'segmento', 'login'];
 
   var I = {
     alert: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>',
@@ -29,22 +31,35 @@
   };
   var svg = function (k) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + I[k] + '</svg>'; };
   var dataBr = function (d) { return d ? d.split('-').reverse().join('/') : ''; };
+  /** "20/10/2026" ou "19/10 a 20/10/2026" */
+  function periodoTxt(de, ate) {
+    if (!de) return '';
+    if (!ate || de === ate) return dataBr(de);
+    return (de.slice(0, 4) === ate.slice(0, 4) ? dataBr(de).slice(0, 5) : dataBr(de)) + ' a ' + dataBr(ate);
+  }
   var hora = function (ms) { return ms ? new Date(ms).toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'}) : '—'; };
-  function somaDias(d, n) { var x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); }
+  function somaDias(d, n) { var x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); }
+  /** Atalhos de período → [de, ate] */
+  function atalho(k) {
+    var h = st.hoje;
+    return k === 'hoje' ? [h, h] : k === 'ontem' ? [somaDias(h, -1), somaDias(h, -1)] : k === '7' ? [somaDias(h, -6), h] : [h.slice(0, 8) + '01', h];
+  }
+  var ehHoje = function () { return (!st.de || st.de === st.hoje) && (!st.ate || st.ate === st.hoje); };
+  var periodoUrl = function () { return ehHoje() ? '' : '?de=' + st.de + '&ate=' + st.ate; };
 
   // ---------------------------------------------------------------- endereço, pedidos
   function params(extra) {
-    var p = new URLSearchParams({tipo: tipo, dia: st.dia});
+    var p = new URLSearchParams({tipo: tipo, de: st.de, ate: st.ate});
     FILTROS.forEach(function (k) { if (st[k]) p.set(k, st[k]); });
     Object.keys(extra || {}).forEach(function (k) { if (extra[k] !== '' && extra[k] !== undefined && extra[k] !== null) p.set(k, extra[k]); });
     return p.toString();
   }
   function guardarNoEndereco() {
     var p = new URLSearchParams();
-    if (st.dia && st.dia !== st.hoje) p.set('dia', st.dia);
+    if (!ehHoje()) { p.set('de', st.de); p.set('ate', st.ate); }
     FILTROS.concat(['situacao']).forEach(function (k) { if (st[k]) p.set(k, st[k]); });
     history.replaceState(null, '', location.pathname + (p.toString() ? '?' + p : ''));
-    ['troncal', 'secundaria'].forEach(function (t) { $('nav-' + t).href = t + (st.dia && st.dia !== st.hoje ? '?dia=' + st.dia : ''); });
+    ['troncal', 'secundaria'].forEach(function (t) { $('nav-' + t).href = t + periodoUrl(); });
   }
   function pedir(url, opcoes) {
     return fetch(url, opcoes).then(function (r) {
@@ -57,11 +72,13 @@
   function mostrarEstado(e) {
     var b = e.busca, dot = $('syncDot');
     st.hoje = e.hoje;
-    $('brandCenter').textContent = e.base; $('eyebrowCenter').textContent = e.base;
+    $('brandCenter').textContent = e.base; $('eyebrowCenter').textContent = e.base; $('pddNome').textContent = e.base;
+    $('de').max = e.hoje; $('ate').max = e.hoje;
     $('appVersion').textContent = 'v' + e.versao;
     dot.className = 'sync-dot' + (b.rodando ? ' run' : b.authVencido || (b.ultimo && !b.ultimo.ok) ? ' bad' : !b.ultimo ? ' warn' : '');
     $('lastSync').textContent = b.ultimo ? 'Atualizado no JMS: ' + hora(b.ultimo.quando) : 'Esperando a primeira busca no JMS';
-    $('queueLine').textContent = b.rodando ? b.etapa : b.authVencido ? 'Parado: AuthToken do JMS vencido' : 'Busca a cada ' + e.minutos + ' min';
+    $('queueLine').textContent = b.rodando ? (b.dias && b.dias.length > 1 ? dataBr(b.dia) + ' · ' : '') + b.etapa :
+      b.authVencido ? 'Parado: AuthToken do JMS vencido' : 'Hoje a cada ' + e.minutos + ' min' + (e.minutosDiaAnterior ? ' · ontem a cada ' + e.minutosDiaAnterior + ' min' : '');
     $('refreshBtn').classList.toggle('spin', b.rodando);
     $('refreshBtn').disabled = b.rodando;
     $('progress').classList.toggle('on', b.rodando || st.carregando);
@@ -71,7 +88,7 @@
       var el = $('rate-' + t), n = menu ? menu[t] : null;
       el.className = 'nav-rate' + (n === null || n === undefined ? '' : n > 0 ? ' bad' : ' good');
       el.innerHTML = '<i></i>' + (n === null || n === undefined ? '–' : esc(fmtInt(n)));
-      el.title = n ? fmtInt(n) + ' pacotes no caminhão errado' : 'Nenhum pacote no caminhão errado';
+      el.title = (n ? fmtInt(n) + ' pacotes no caminhão errado' : 'Nenhum pacote no caminhão errado') + ' no período';
     });
   }
 
@@ -90,11 +107,16 @@
     if (t.semRegra) h = alerta(h, true, pac(t.semRegra) + ' de rota fora da planilha de rotas', ex(p.semRegra) + '. Inclua a rota na planilha rotas.xlsx.');
     if (t.semRotinha) h = alerta(h, true, pac(t.semRotinha) + ' com Base Destino fora da rotinha', ex(p.semRotinha) + '. Inclua a base na rotinha.');
     if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com DESTINO sem código de 1º nível', ex(p.semCodigo) + '. Complete a aba "Códigos 1º nível" da planilha rotas.xlsx.');
-    if (!t.pacotes && !e.busca.rodando && !r.viagens.total) h = alerta(h, true, 'Sem dados deste dia ainda.', 'Clique em Atualizar para buscar no JMS.');
+    if (r.semBusca.length && !e.busca.rodando) {
+      h = alerta(h, true, r.semBusca.length === r.dias ? (r.dias === 1 ? 'Sem dados deste dia ainda.' : 'Sem dados deste período ainda.') :
+        r.semBusca.length + (r.semBusca.length === 1 ? ' dia ainda não buscado: ' : ' dias ainda não buscados: ') + r.semBusca.slice(0, 8).map(dataBr).join(', ') +
+          (r.semBusca.length > 8 ? '…' : '') + '.', 'Clique em Atualizar para buscar no JMS.');
+    }
     $('alerts').innerHTML = h;
-    var b = [];
-    b.push('<span class="badge ' + (r.viagens.total ? 'ok' : 'warn') + '">' + svg(r.viagens.total ? 'check' : 'alert') + '<span>Viagens: ' + fmtInt(r.viagens.total) +
-      ' · ' + fmtInt(r.viagens.comCarga) + ' com carregamento</span></span>');
+    var b = [], v = r.viagens;
+    b.push('<span class="badge ' + (v.total ? 'ok' : 'warn') + '">' + svg(v.total ? 'check' : 'alert') + '<span>Viagens: ' + fmtInt(v.total) +
+      (st.status ? '' : ' · ' + fmtInt(v.concluidas) + ' concluídas · ' + fmtInt(v.emTransito) + ' em trânsito') + '</span></span>');
+    b.push('<span class="badge">' + svg('box') + '<span>' + fmtInt(v.comCarga) + ' com carregamento</span></span>');
     b.push('<span class="badge ' + (t.pacotes ? 'ok' : 'warn') + '">' + svg(t.pacotes ? 'check' : 'alert') + '<span>Conferidos: ' + fmtInt(t.pacotes) + ' pacotes</span></span>');
     if (r.viagens.comErro) b.push('<span class="badge warn">' + svg('alert') + '<span>' + fmtInt(r.viagens.comErro) + ' viagens com erro na busca</span></span>');
     $('badges').innerHTML = b.join('');
@@ -121,12 +143,13 @@
     var t = r.totais, m = r.maisAfetados, tn = {};
     r.turnos.forEach(function (x) { tn[x.turno] = x; });
     var partes = ['T1', 'T2', 'T3'].map(function (s) { return '<span><i style="background:' + G.corTurno(s) + '"></i>' + s + ' <b>' + fmtInt(tn[s].errados) + '</b></span>'; }).join(' + ');
-    var h = '<div class="kpi kpi-hero"><div class="kpi-body"><span class="kpi-label">' + svg('alert') + 'Pacotes no caminhão errado · ' + esc(dataBr(r.dia)) + '</span>' +
+    var h = '<div class="kpi kpi-hero"><div class="kpi-body"><span class="kpi-label">' + svg('alert') + 'Pacotes no caminhão errado · ' + esc(periodoTxt(r.de, r.ate)) + '</span>' +
       '<div class="kpi-value">' + fmtInt(t.errados) + '</div>' +
       '<div class="kpi-sub"><b>' + fmtPct(t.taxa, 2) + '</b> dos ' + fmtInt(t.pacotes) + ' pacotes conferidos</div>' +
       '<div class="kpi-sub hero-parts">Por turno: ' + partes + ' = <b>' + fmtInt(t.errados) + '</b></div>' +
       '<div class="hero-row">' + (t.errados ? '<span class="status-pill bad">' + svg('x') + 'Com pacote errado</span>' : '<span class="status-pill good">' + svg('check') + 'Nenhum pacote errado</span>') +
-      '<span class="hero-goal">' + esc(NOME[tipo].pt) + ' · ' + esc(NOME[tipo].zh) + '</span></div></div></div>';
+      '<span class="hero-goal">' + esc(NOME[tipo].pt) + ' · ' + esc(NOME[tipo].zh) + (st.status ? ' · ' + esc(st.status === 'concluido' ? 'Concluído' : 'Em Trânsito') : '') +
+      '</span></div></div></div>';
     h += kpi('', svg('box') + 'Pacotes conferidos', fmtInt(t.pacotes), 'em <b>' + fmtInt(r.viagens.total) + '</b> viagens · <b>' + fmtInt(r.viagens.comCarga) + '</b> com carregamento');
     h += kpi(t.errados ? 'bad' : '', svg('gauge') + 'Taxa de erro', fmtPct(t.taxa, 2), 'pacotes errados ÷ conferidos');
     ['T1', 'T2', 'T3'].forEach(function (s) {
@@ -141,7 +164,7 @@
         it ? barra(tot ? it.qtd / tot * 100 : 0, 'var(--red)') : '', 'text');
     };
     h += um('seg', 'Segmento mais afetado', m.segmento);
-    h += um('base', 'Base destino mais afetada', m.baseDestino);
+    h += um('base', 'Base destino do pacote mais afetada', m.baseDestino);
     h += um('dest', 'Destino mais afetado', m.destino);
     h += um('trip', 'ID de viagem mais afetado', m.viagem, m.viagem && m.viagem.rota, 'span2');
     h += um('lot', 'Lote / saca mais afetado', m.lote);
@@ -161,12 +184,12 @@
       itens: r.turnos.map(function (x) { return {nome: x.turno, qtd: x.errados}; }), total: tot, distintos: 3, rotulo: {pt: 'Turno', um: 'turno', zh: '班次'}});
     var colunas = [
       ['segmentos', I.seg, {pt: 'Segmentos mais afetados', zh: '二段码'}, 'segmento (código de dois segmentos)', {pt: 'SEGMENTOS', um: 'segmento', zh: '二段码'}],
-      ['basesDestino', I.base, {pt: 'Bases destino mais afetadas', zh: '目的网点'}, 'base destino', {pt: 'Base Destino', um: 'base destino', zh: '目的网点'}],
+      ['basesDestino', I.base, {pt: 'Bases destino dos pacotes', zh: '目的网点'}, 'base destino do pacote', {pt: 'Base Destino do pacote', um: 'base destino', zh: '目的网点'}],
       ['destinos', I.dest, {pt: 'Destinos mais afetados', zh: '末端机构'}, 'DESTINO (nome de mecanismo final)', {pt: 'DESTINO', um: 'destino', zh: '末端机构'}],
       ['logins', I.login, {pt: 'Logins mais ofensores', zh: '扫描人'}, 'login (digitalizado por)', {pt: 'Login', um: 'login', zh: '扫描人'}],
       ['viagens', I.trip, {pt: 'IDs de viagem mais afetados', zh: '车次号'}, 'ID de viagem', {pt: 'ID de viagem', um: 'ID de viagem', zh: '车次号'}],
       ['lotes', I.lot, {pt: 'Lotes / sacas com mais erro', zh: '包号'}, 'número do lote', {pt: 'Número do lote', um: 'lote', zh: '包号'}],
-      ['rotas', I.route, {pt: 'Rotas com mais erro', zh: '下一站'}, 'rota (próxima parada)', {pt: 'Rota', um: 'rota', zh: '下一站'}]
+      ['rotas', I.route, {pt: 'Base Destino (rota) com mais erro', zh: '目的网点'}, 'Base Destino da rota (tabela de rotas)', {pt: 'Base Destino (rota)', um: 'rota', zh: '目的网点'}]
     ];
     colunas.forEach(function (c) {
       G.cartao(grid, {key: c[0], icone: c[1], titulo: c[2], tipo: 'colunas', sub: sub(c[0], c[3]), total: tot, distintos: r.distintos[c[0]] || 0,
@@ -230,13 +253,14 @@
     $('progress').classList.add('on');
     return pedir('api/painel?' + params()).then(function (r) {
       st.resumo = r;
-      if (!st.dia) { st.dia = r.dia; $('dia').value = r.dia; }
+      st.de = r.de; st.ate = r.ate; $('de').value = r.de; $('ate').value = r.ate;
       mostrarEstado(r.estado); mostrarMenu(r.menu);
-      $('pageSubtitle').textContent = NOME[tipo].zh + ' · Pacotes no caminhão errado · ' + r.estado.base + ' · ' + dataBr(r.dia);
+      $('pageSubtitle').textContent = NOME[tipo].zh + ' · Pacotes no caminhão errado · PDD de saída ' + r.estado.base + ' · ' + periodoTxt(r.de, r.ate);
       Array.prototype.forEach.call(document.querySelectorAll('#presets .chip'), function (c) {
-        c.classList.toggle('active', somaDias(st.hoje, Number(c.getAttribute('data-d'))) === st.dia);
+        var p = atalho(c.getAttribute('data-p'));
+        c.classList.toggle('active', p[0] === st.de && p[1] === st.ate);
       });
-      opcoes('rota', r.opcoes.rotas, st.rota, 'Todas');
+      opcoes('rota', r.opcoes.rotas, st.rota, 'Todas (' + r.opcoes.rotas.length + ' da tabela de rotas)');
       opcoes('destino', r.opcoes.destinos, st.destino, 'Todos');
       opcoes('segmento', r.opcoes.segmentos, st.segmento, 'Todos');
       opcoes('login', r.opcoes.logins, st.login, 'Todos');
@@ -261,14 +285,24 @@
   $('nav-' + tipo).classList.add('active');
   $('nav-' + tipo).setAttribute('aria-current', 'page');
   $('painelSelect').value = tipo;
-  $('dia').value = st.dia;
+  $('de').value = st.de; $('ate').value = st.ate;
   $('t-situacao').value = st.situacao;
   $('f-turno').value = st.turno;
-  $('painelSelect').addEventListener('change', function () { location.href = this.value + (st.dia && st.dia !== st.hoje ? '?dia=' + st.dia : ''); });
-  $('applyBtn').addEventListener('click', function () { st.dia = $('dia').value || st.hoje; st.pagina = 1; carregar(); });
-  $('dia').addEventListener('change', function () { st.dia = this.value || st.hoje; st.pagina = 1; carregar(); });
+  $('f-status').value = st.status;
+  $('painelSelect').addEventListener('change', function () { location.href = this.value + periodoUrl(); });
+  // Data inicial depois da final (ou o contrário): a outra acompanha.
+  function lerDatas(mudou) {
+    var de = $('de').value || st.hoje, ate = $('ate').value || st.hoje;
+    if (de > ate) { if (mudou === 'de') ate = de; else de = ate; }
+    st.de = de; st.ate = ate; $('de').value = de; $('ate').value = ate; st.pagina = 1;
+  }
+  $('applyBtn').addEventListener('click', function () { lerDatas('de'); carregar(); });
+  ['de', 'ate'].forEach(function (id) { $(id).addEventListener('change', function () { lerDatas(id); carregar(); }); });
   Array.prototype.forEach.call(document.querySelectorAll('#presets .chip'), function (c) {
-    c.addEventListener('click', function () { st.dia = somaDias(st.hoje, Number(c.getAttribute('data-d'))); $('dia').value = st.dia; st.pagina = 1; carregar(); });
+    c.addEventListener('click', function () {
+      var p = atalho(c.getAttribute('data-p'));
+      st.de = p[0]; st.ate = p[1]; $('de').value = p[0]; $('ate').value = p[1]; st.pagina = 1; carregar();
+    });
   });
   FILTROS.forEach(function (k) {
     $('f-' + k).addEventListener('change', function () { st[k] = this.value; st.pagina = 1; carregar(); });
@@ -285,8 +319,15 @@
   });
   $('refreshBtn').addEventListener('click', function () {
     $('refreshBtn').disabled = true;
-    pedir('api/buscar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({dia: st.dia})})
-      .then(function (r) { if (r.estado) mostrarEstado(r.estado); if (r.error) alert(r.error); }).catch(function () {});
+    pedir('api/buscar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({de: st.de, ate: st.ate})})
+      .then(function (r) {
+        if (r.estado) mostrarEstado(r.estado);
+        if (r.error) alert(r.error);
+        else if (r.dias && !r.dias.length) {
+          $('alerts').insertAdjacentHTML('afterbegin', alerta('', true, 'Esse período já está salvo.', 'Os dias antes de ontem ficam fechados. ' +
+            'Para buscar um deles de novo: Configurações › Buscar este dia agora (no computador do app).'));
+        }
+      }).catch(function () {});
   });
   function tema() {
     var b = $('themeBtn'), dark = document.documentElement.getAttribute('data-theme') === 'dark';

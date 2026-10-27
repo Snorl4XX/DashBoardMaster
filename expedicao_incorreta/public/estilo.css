@@ -126,6 +126,12 @@ a{color:inherit}
 .field label,.dd-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);font-weight:800}
 .field-indicator{flex:1 1 250px}
 .field-date{flex:0 1 165px}
+.field-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);font-weight:800}
+.field-fixo{flex:0 1 170px;min-width:140px}
+.fixo{display:flex;align-items:center;gap:8px;height:42px;border:1px dashed var(--field-line-2);border-radius:12px;background:var(--soft-2);padding:0 12px;font-size:13.5px;color:var(--ink-2);cursor:default}
+.fixo svg{width:15px;height:15px;color:var(--red);flex:none}
+.fixo b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fixo small{margin-left:auto;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
 .select-wrap{position:relative}
 .select-wrap::after{content:"";position:absolute;right:13px;top:50%;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:translateY(-70%) rotate(45deg);pointer-events:none}
 select,input[type=date],.find input{width:100%;height:42px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 12px;font-size:13.5px;outline:none;transition:border-color .18s,box-shadow .18s}
@@ -155,7 +161,7 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .badge.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn-line)}
 .badge.bad{background:var(--bad-bg);color:var(--bad);border-color:var(--bad-line)}
 .badge span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.filter-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;margin-top:14px}
+.filter-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
 .dd{position:relative;display:flex;flex-direction:column;gap:6px;min-width:0}
 .dd-label{display:flex;align-items:center;gap:6px}
 .dd-label svg{width:14px;height:14px;color:var(--red)}

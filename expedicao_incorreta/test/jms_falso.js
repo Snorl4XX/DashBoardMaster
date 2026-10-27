@@ -2,6 +2,8 @@
 /**
  * JMS de mentira para os testes (tudo fictício): viagens troncais e secundárias, registros de carga e descarga e as listas de
  * pacotes, com as mesmas respostas das capturas ({code: 1, data: {records, total, pages}}).
+ *   - Viagens com Status (shipmentState) 4 = Concluído, 3 = Em Trânsito, 1 = carregando e 5 = cancelada.
+ *   - O dia principal tem várias viagens; os outros dias, uma viagem troncal concluída com 2 pacotes.
  *   - AuthToken errado → "token失效，请重新登录".
  *   - A troncal só aceita o cabeçalho Routename "tmsShipment" (o app tem de descobrir).
  *   - A secundária recusa "loading/scan/page" e responde em "unloading/scan/page" (como a captura).
@@ -30,32 +32,54 @@ function dados(dia) {
   const s1 = [pac('SRTESTE0001', 0, 'BASE LOCAL A-ZZ', 'BASE LOCAL A-ZZ', d('05:00:00')), pac('SRTESTE0001', 1, 'BASE LOCAL A-ZZ', 'BASE LOCAL A-ZZ', d('05:01:00')),
     pac('SRTESTE0001', 2, 'BASE LOCAL B-ZZ', 'BASE LOCAL A-ZZ', d('05:02:00')), pac('SRTESTE0001', 3, 'BASE NORTE A-XX', 'BASE LOCAL A-ZZ', d('14:30:00'))];
   const s2 = [pac('SRTESTE0002', 0, 'BASE LOCAL B-ZZ', 'ROTA NOVA-ZZ', d('09:00:00'))];
-  const viagem = (id, start, endName, endCode) => ({id: 'id' + id, shipmentNo: id, shipmentName: 'GRU-' + endName + '-0600-1', startCode: start,
-    startName: start === BASE ? 'SP GRU' : 'OUTRA BASE', endName, endCode, plannedDepartureTime: d('06:00:00'), actualDepartureTime: d('06:05:00'),
-    shipmentState: 4, plateNumber: 'TST0A00', carrierName: 'TRANSPORTADORA TESTE'});
+  const t6 = [pac('DKTESTE0006', 0, 'BASE SUL A-YY', 'YY SUL', d('08:00:00')), pac('DKTESTE0006', 1, 'BASE SUL A-YY', 'YY SUL', d('08:01:00'))];
+  // Carregando (status 1) e cancelada (status 5): têm pacotes errados, mas não entram no painel nem são consultadas.
+  const t5 = [pac('DKTESTE0005', 0, 'BASE SUL A-YY', 'XX NORTE', d('09:00:00'))];
+  const s3 = [pac('SRTESTE0003', 0, 'BASE NORTE A-XX', 'BASE LOCAL A-ZZ', d('09:00:00'))];
   return {
     troncal: {
-      viagens: [viagem('DKTESTE0001', BASE, 'XX NORTE', '111'), viagem('DKTESTE0002', BASE, 'YY SUL', '222'),
-        viagem('DKOUTRA0003', '99999', 'XX NORTE', '111'), viagem('DKTESTE0004', BASE, 'XX NORTE', '111')],
-      pacotes: {DKTESTE0001: t1, DKTESTE0002: t2, DKTESTE0004: []},
+      viagens: [viagem(dia, 'DKTESTE0001', BASE, 'XX NORTE', '111', 3), viagem(dia, 'DKTESTE0002', BASE, 'YY SUL', '222', 3),
+        viagem(dia, 'DKOUTRA0003', '99999', 'XX NORTE', '111', 4), viagem(dia, 'DKTESTE0004', BASE, 'XX NORTE', '111', 4),
+        viagem(dia, 'DKTESTE0005', BASE, 'XX NORTE', '111', 1), viagem(dia, 'DKTESTE0006', BASE, 'YY SUL', '222', 4)],
+      pacotes: {DKTESTE0001: t1, DKTESTE0002: t2, DKTESTE0004: [], DKTESTE0005: t5, DKTESTE0006: t6},
       registros: {DKTESTE0004: [{jobCode: 'DKTESTE0004', loadingTypeName: '2', scanNetworkCode: '111', scanNetworkName: 'XX NORTE', scanWaybillNum: 9}]}
     },
     secundaria: {
-      viagens: [viagem('SRTESTE0001', BASE, 'BASE LOCAL A-ZZ', '777001'), viagem('SRTESTE0002', BASE, 'ROTA NOVA-ZZ', '777002')],
-      pacotes: {SRTESTE0001: s1, SRTESTE0002: s2},
+      viagens: [viagem(dia, 'SRTESTE0001', BASE, 'BASE LOCAL A-ZZ', '777001', 4), viagem(dia, 'SRTESTE0002', BASE, 'ROTA NOVA-ZZ', '777002', 4),
+        viagem(dia, 'SRTESTE0003', BASE, 'BASE LOCAL A-ZZ', '777001', 5)],
+      pacotes: {SRTESTE0001: s1, SRTESTE0002: s2, SRTESTE0003: s3},
       registros: {}
     }
   };
 }
+function viagem(dia, id, start, endName, endCode, status) {
+  return {id: 'id' + id, shipmentNo: id, shipmentName: 'GRU-' + endName + '-0600-1', startCode: start, startName: start === BASE ? 'SP GRU' : 'OUTRA BASE',
+    endName, endCode, plannedDepartureTime: dia + ' 06:00:00', actualDepartureTime: dia + ' 06:05:00',
+    actualArrivalTime: status === 4 ? dia + ' 12:00:00' : null, shipmentState: status, plateNumber: 'TST0A00', carrierName: 'TRANSPORTADORA TESTE'};
+}
+/** Outro dia: uma viagem troncal concluída (1 pacote certo e 1 errado). */
+function outroDia(dia) {
+  const id = 'DK' + dia.replace(/-/g, '');
+  return {
+    troncal: {viagens: [viagem(dia, id, BASE, 'XX NORTE', '111', 4)],
+      pacotes: {[id]: [pac(id, 0, 'BASE NORTE A-XX', 'XX NORTE', dia + ' 07:00:00'), pac(id, 1, 'BASE SUL A-YY', 'XX NORTE', dia + ' 07:05:00')]}, registros: {}},
+    secundaria: {viagens: [], pacotes: {}, registros: {}}
+  };
+}
 
 function criar(dia) {
-  const estado = {token: 'TOKEN-FICTICIO-DE-TESTE', dados: dados(dia), pedidos: {}, exigeRotaTroncal: 'tmsShipment', recusarLoadingSecundaria: true};
+  const estado = {token: 'TOKEN-FICTICIO-DE-TESTE', dados: dados(dia), outros: {}, pedidos: {}, registrosPedidos: {}, diasPedidos: [],
+    exigeRotaTroncal: 'tmsShipment', recusarLoadingSecundaria: true};
+  const doDia = d => d === dia ? estado.dados : (estado.outros[d] = estado.outros[d] || outroDia(d));
+  // Viagem de qualquer dia já pedido (os registros e pacotes vêm só pelo ID).
+  const daViagem = (tipo, id) => [estado.dados].concat(Object.values(estado.outros)).find(x => x[tipo].viagens.some(v => v.shipmentNo === id)) || estado.dados;
   const conta = k => { estado.pedidos[k] = (estado.pedidos[k] || 0) + 1; };
   const registrosDe = (tipo, id) => {
-    const r = estado.dados[tipo].registros[id];
+    estado.registrosPedidos[id] = (estado.registrosPedidos[id] || 0) + 1;
+    const dd = daViagem(tipo, id), r = dd[tipo].registros[id];
     if (r) return r;
-    const n = (estado.dados[tipo].pacotes[id] || []).length;
-    const v = estado.dados[tipo].viagens.find(x => x.shipmentNo === id) || {};
+    const n = (dd[tipo].pacotes[id] || []).length;
+    const v = dd[tipo].viagens.find(x => x.shipmentNo === id) || {};
     return [{jobCode: id, loadingTypeName: '1', scanNetworkCode: BASE, scanNetworkName: 'SP GRU', scanWaybillNum: n, scanWaybillSingleNum: n},
       {jobCode: id, loadingTypeName: '2', scanNetworkCode: v.endCode, scanNetworkName: v.endName, scanWaybillNum: n}];
   };
@@ -76,13 +100,15 @@ function criar(dia) {
         return resp({code: 10403, msg: 'Sem permissão para este menu', succ: false, fail: true});
       }
       if (p === '/transportation/tmsShipment/page') {
-        const lista = estado.dados.troncal.viagens.filter(v => !q.get('startCode') || v.startCode === q.get('startCode') || v.shipmentNo === 'DKOUTRA0003');
         if (!/^\d{4}-\d{2}-\d{2} 00:00:00$/.test(q.get('startDateTime') || '')) return resp({code: 0, msg: 'data inválida'});
+        const d = q.get('startDateTime').slice(0, 10);
+        if (Number(q.get('current')) === 1) estado.diasPedidos.push(d);
+        const lista = doDia(d).troncal.viagens.filter(v => !q.get('startCode') || v.startCode === q.get('startCode') || v.shipmentNo === 'DKOUTRA0003');
         return resp(pagina(lista, q));
       }
       if (p === '/transportation/tmsBranchTrackingDetail/page' && req.method === 'POST') {
         const b = JSON.parse(Buffer.concat(partes).toString('utf8') || '{}');
-        const lista = estado.dados.secundaria.viagens.filter(v => !b.startCode || v.startCode === b.startCode);
+        const lista = doDia(String(b.startDepartureTime || '').slice(0, 10)).secundaria.viagens.filter(v => !b.startCode || v.startCode === b.startCode);
         return resp(pagina(lista, new URLSearchParams({size: b.size, current: b.current})));
       }
       const m = /^\/transportation\/(trackingDeatil|tmsBranchTrackingDetail)\/(loading|unloading)\/scan\/(list|page)$/.exec(p);
@@ -91,9 +117,10 @@ function criar(dia) {
         if (m[3] === 'list') return resp({code: 1, msg: '请求成功', data: registrosDe(tipo, id), succ: true, fail: false});
         if (tipo === 'secundaria' && m[2] === 'loading' && estado.recusarLoadingSecundaria) return resp({code: 404, msg: 'Not Found'}, 404);
         if (tipo === 'troncal' && m[2] !== 'loading') return resp({code: 404, msg: 'Not Found'}, 404);
-        const esperado = tipo === 'troncal' || m[2] === 'loading' ? BASE : (estado.dados.secundaria.viagens.find(v => v.shipmentNo === id) || {}).endCode;
+        const dd = daViagem(tipo, id);
+        const esperado = tipo === 'troncal' || m[2] === 'loading' ? BASE : (dd.secundaria.viagens.find(v => v.shipmentNo === id) || {}).endCode;
         if (q.get('scanNetworkCode') !== esperado) return resp(pagina([], q));
-        return resp(pagina(estado.dados[tipo].pacotes[id] || [], q));
+        return resp(pagina(dd[tipo].pacotes[id] || [], q));
       }
       resp({code: 404, msg: 'Not Found'}, 404);
     });

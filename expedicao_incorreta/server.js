@@ -5,9 +5,12 @@
  * -------------------------------------------------------
  * Confere, quase em tempo real, se os pacotes bipados no carregamento de cada caminhão que SAI da base pertencem à rota do
  * caminhão (ex.: pacote do RJ dentro do caminhão para SP BRE). Dois painéis: Rota Troncal e Rota Secundária.
- *   - Busca no JMS (lib/coletor.js, lib/jms.js): viagens do dia → Bipe de carregamento da base → lista de pacotes.
+ *   - Busca no JMS (lib/coletor.js, lib/jms.js): viagens do dia (PDD de saída = a nossa base, fixo; Status Concluído ou
+ *     Em Trânsito) → Bipe de carregamento da base → lista de pacotes. Hoje a cada "minutos"; ontem a cada "minutosDiaAnterior"
+ *     (o dia anterior fica guardado completo). Os dias ficam no banco: o painel abre qualquer período já buscado.
  *   - Confere (lib/regras.js): Base Destino → planilha rotinha (SEGMENTOS e DESTINO) → planilha de rotas.
- *   - Painel (public/): cartões por turno, mais afetados, gráficos e a tabela com tudo; Excel da tabela.
+ *   - Painel (public/): período (data inicial e final), filtros Status e Base Destino (bases da tabela de rotas), cartões por
+ *     turno, mais afetados, gráficos e a tabela com tudo; Excel da tabela.
  *
  * Node.js 22.13 ou mais novo, sem instalar pacotes. Configuração: config.json (criado na primeira vez, ao lado deste arquivo).
  * Uso: node server.js — no Windows, por um atalho: "C:\dashmaster\node\node.exe" "C:\expedicao_incorreta\server.js"
@@ -35,7 +38,8 @@ const crypto = require('crypto');
 const {Banco} = require('./lib/db');
 const {Jms} = require('./lib/jms');
 const {Regras, lerRotinha, lerRotas, TIPOS} = require('./lib/regras');
-const {Coletor, hojeSp} = require('./lib/coletor');
+const {Coletor, hojeSp, somaDias, diasEntre, diasDaAgenda} = require('./lib/coletor');
+const {STATUS, codigosStatus, statusDe} = require('./lib/status');
 const {Painel} = require('./lib/painel');
 const {escreverXlsx} = require('./lib/xlsx');
 
@@ -47,6 +51,8 @@ const DEFAULTS = {
   codigoBase: '30001',    // a nossa base (os caminhões que SAEM daqui)
   nomeBase: 'SP GRU',
   minutos: 10,            // de quanto em quanto tempo busca no JMS (dia de hoje)
+  minutosDiaAnterior: 60, // de quanto em quanto tempo busca ontem de novo, para guardar o dia anterior completo (0 = não busca)
+  status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
   tamanhoPagina: 100,     // pacotes por consulta ao JMS
   tamanhoPaginaViagens: 50,
   consultasAoMesmoTempo: 4,
@@ -56,6 +62,7 @@ const DEFAULTS = {
   linkPublico: ''         // link do Tailscale (só para aparecer na janela e em Configurações)
 };
 const MAX_CORPO = 25 * 1024 * 1024;
+const MAX_DIAS = 31; // período máximo do painel
 
 // ------------------------------------------------------------------ configuração
 function arquivoConfig() { return process.env.EXPEDICAO_CONFIG ? path.resolve(process.env.EXPEDICAO_CONFIG) : path.join(__dirname, 'config.json'); }
@@ -73,6 +80,9 @@ function lerConfig() {
   if (process.env.EXPEDICAO_PORTA) c.porta = Number(process.env.EXPEDICAO_PORTA);
   c.codigoBase = String(c.codigoBase).trim(); c.nomeBase = String(c.nomeBase).trim();
   c.minutos = Math.max(2, c.minutos);
+  c.minutosDiaAnterior = Number(c.minutosDiaAnterior) > 0 ? Math.max(c.minutos, Number(c.minutosDiaAnterior)) : 0;
+  c.statusCodigos = codigosStatus(c.status);
+  if (!c.statusCodigos.concluido.size && !c.statusCodigos.em_transito.size) throw new Error('"status" do config.json sem nenhum código.');
   const pasta = path.dirname(arq);
   c.dados = path.resolve(pasta, c.pastaDados || 'dados');
   c.planilhas = path.resolve(pasta, c.pastaPlanilhas || 'planilhas');
@@ -150,7 +160,7 @@ try {
   banco = new Banco(path.join(cfg.dados, 'expedicao.db'));
   regras = new Regras(cfg.planilhas);
   jms = new Jms({base: process.env.EXPEDICAO_JMS_URL, credenciais, props: banco, log, tempoMs: 60000});
-  painel = new Painel(banco, regras);
+  painel = new Painel(banco, regras, cfg.statusCodigos);
   coletor = new Coletor({banco, jms, cfg, log, aoMudar: (tipo, dia) => painel.invalidar(tipo, dia)});
 } catch (e) { pararComErro('Não consegui iniciar: ' + (e && e.stack || e)); }
 
@@ -205,19 +215,28 @@ async function lerJson(req) {
 }
 function filtros(u) {
   const g = k => String(u.searchParams.get(k) || '').slice(0, 120);
-  return {turno: g('turno'), rota: g('rota'), destino: g('destino'), segmento: g('segmento'), login: g('login'), situacao: g('situacao'),
-    viagem: g('viagem'), busca: g('busca')};
+  return {status: STATUS[g('status')] ? g('status') : '', turno: g('turno'), rota: g('rota'), destino: g('destino'), segmento: g('segmento'),
+    login: g('login'), situacao: g('situacao'), viagem: g('viagem'), busca: g('busca')};
 }
-function diaDe(u) {
-  const d = String(u.searchParams.get('dia') || '');
-  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : hojeSp();
+/** Período pedido: de/ate (ou dia). Até hoje, no máximo MAX_DIAS dias. → {de, ate} */
+function periodo(de, ate, dia) {
+  const ok = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d) : '';
+  const hoje = hojeSp();
+  let a = ok(de) || ok(dia) || hoje, b = ok(ate) || ok(dia) || a;
+  if (a > b) [a, b] = [b, a];
+  if (b > hoje) b = hoje;
+  if (a > b) a = b;
+  if (diasEntre(a, b).length > MAX_DIAS) a = somaDias(b, -(MAX_DIAS - 1));
+  return {de: a, ate: b};
 }
+function periodoDe(u) { return periodo(u.searchParams.get('de'), u.searchParams.get('ate'), u.searchParams.get('dia')); }
 function tipoDe(u) { const t = String(u.searchParams.get('tipo') || ''); return TIPOS.indexOf(t) >= 0 ? t : 'troncal'; }
 /** Situação para o topo do painel (sem nada de credencial). */
 function estadoPublico() {
   const e = coletor.estado, r = regras.resumo();
-  return {versao: VERSAO, base: cfg.nomeBase, minutos: cfg.minutos, hoje: hojeSp(),
-    busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
+  return {versao: VERSAO, base: cfg.nomeBase, codigoBase: cfg.codigoBase, minutos: cfg.minutos, minutosDiaAnterior: cfg.minutosDiaAnterior,
+    hoje: hojeSp(), maxDias: MAX_DIAS,
+    busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, dias: e.dias, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
       errosViagens: e.erros.length},
     planilhas: {erros: r.erros, rotinha: !!r.rotinha, rotas: !!r.rotas}};
 }
@@ -250,24 +269,28 @@ async function tratar(req, res) {
   if (p === '/troncal' || p === '/secundaria') return arquivo(res, 'painel.html');
   if (p === '/api/estado') return json(res, 200, estadoPublico());
   if (p === '/api/painel') {
-    const dia = diaDe(u);
-    return json(res, 200, Object.assign(painel.resumo(tipoDe(u), dia, filtros(u)), {estado: estadoPublico(),
-      menu: {troncal: painel.errados('troncal', dia), secundaria: painel.errados('secundaria', dia)}}));
+    const {de, ate} = periodoDe(u), f = filtros(u);
+    return json(res, 200, Object.assign(painel.resumo(tipoDe(u), de, ate, f), {estado: estadoPublico(),
+      menu: {troncal: painel.errados('troncal', de, ate, f.status), secundaria: painel.errados('secundaria', de, ate, f.status)}}));
   }
-  if (p === '/api/tabela') return json(res, 200, painel.tabela(tipoDe(u), diaDe(u), filtros(u), u.searchParams.get('pagina'), u.searchParams.get('tamanho'),
-    u.searchParams.get('ordem'), u.searchParams.get('direcao')));
+  if (p === '/api/tabela') {
+    const {de, ate} = periodoDe(u);
+    return json(res, 200, painel.tabela(tipoDe(u), de, ate, filtros(u), u.searchParams.get('pagina'), u.searchParams.get('tamanho'),
+      u.searchParams.get('ordem'), u.searchParams.get('direcao')));
+  }
   if (p === '/api/excel') {
-    const tipo = tipoDe(u), dia = diaDe(u), linhas = painel.planilha(tipo, dia, filtros(u));
-    const nome = 'expedicao_' + (tipo === 'troncal' ? 'troncal' : 'secundaria') + '_' + dia + '.xlsx';
+    const tipo = tipoDe(u), {de, ate} = periodoDe(u), linhas = painel.planilha(tipo, de, ate, filtros(u));
+    const nome = 'expedicao_' + (tipo === 'troncal' ? 'troncal' : 'secundaria') + '_' + de + (ate !== de ? '_a_' + ate : '') + '.xlsx';
     return enviar(res, 200, escreverXlsx([{nome: tipo === 'troncal' ? 'Rota troncal' : 'Rota secundária', linhas,
-      larguras: [7, 18, 20, 30, 18, 18, 18, 20, 20, 20, 12, 16, 20, 30, 20]}]),
+      larguras: [7, 18, 20, 30, 18, 18, 18, 18, 20, 20, 20, 12, 16, 20, 30, 20]}]),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {'Content-Disposition': 'attachment; filename="' + nome + '"'});
   }
   if (p === '/api/buscar' && req.method === 'POST') {
-    const b = await lerJson(req), dia = /^\d{4}-\d{2}-\d{2}$/.test(String(b.dia || '')) ? b.dia : hojeSp();
-    if (dia > hojeSp()) return json(res, 400, {ok: false, error: 'Esse dia ainda não chegou.'});
-    if (!coletor.estado.rodando) coletor.coletar(dia).catch(() => {});
-    return json(res, 200, {ok: true, estado: estadoPublico()});
+    // Hoje e ontem sempre; os outros dias do período só se ainda não foram buscados (dias fechados ficam como estão).
+    const b = await lerJson(req), {de, ate} = periodo(b.de, b.ate, b.dia), ontem = somaDias(hojeSp(), -1), buscados = banco.buscados(de, ate);
+    const dias = diasEntre(de, ate).filter(d => d >= ontem || !buscados.has(d));
+    if (dias.length) coletor.coletar(dias).catch(() => {});
+    return json(res, 200, {ok: true, dias, estado: estadoPublico()});
   }
   return enviar(res, 404, 'Não encontrado.');
 }
@@ -277,9 +300,11 @@ async function tratarConfig(req, res, u) {
   if (p === '/config') return arquivo(res, 'config.html');
   if (p === '/config/api/estado') {
     const c = credenciais(), r = regras.resumo();
-    return json(res, 200, {versao: VERSAO, config: Object.assign({}, cfg, {senha: cfg.senha ? 'definida' : ''}), enderecos: enderecos(),
+    return json(res, 200, {versao: VERSAO, config: Object.assign({}, cfg, {senha: cfg.senha ? 'definida' : '', statusCodigos: undefined}), enderecos: enderecos(),
       token: {fonte: c.fonte, temProprio: !!banco.get('JMS_AUTHTOKEN'), dashmaster: !!credenciaisDashmaster()},
-      planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(),
+      planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
+      status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
+      viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),
       jms: {pacotesSecundaria: banco.get('PACOTES_SECUNDARIA') || '', routeTroncal: banco.get('ROUTE_AUTO_TRONCAL') || '',
         routeSecundaria: banco.get('ROUTE_AUTO_SECUNDARIA') || ''}});
   }
@@ -300,6 +325,7 @@ async function tratarConfig(req, res, u) {
   if (p === '/config/api/testar') return json(res, 200, await testar());
   if (p === '/config/api/buscar') {
     const b = await lerJson(req), dia = /^\d{4}-\d{2}-\d{2}$/.test(String(b.dia || '')) ? b.dia : hojeSp();
+    if (dia > hojeSp()) return json(res, 400, {ok: false, error: 'Esse dia ainda não chegou.'});
     if (coletor.estado.rodando) return json(res, 200, {ok: false, error: 'Já está buscando. Espere terminar.'});
     coletor.coletar(dia, {forcar: !!b.forcar}).catch(() => {});
     return json(res, 200, {ok: true});
@@ -370,9 +396,15 @@ servidor.listen(cfg.porta, cfg.host, () => {
   if (r.rotinha) log('info', 'Rotinha: ' + r.rotinha.bases + ' bases. Rotas: ' + (r.rotas ? r.rotas.troncal + ' troncais e ' + r.rotas.secundaria + ' secundárias.' : '—'));
   if (!credenciais().fonte) log('aviso', 'Falta o AuthToken do JMS: abra Configurações (ou cadastre no DashMaster deste computador).');
   if (process.env.EXPEDICAO_SEM_AGENDADOR === '1') return;
-  log('info', 'Busca no JMS a cada ' + cfg.minutos + ' min. Deixe esta janela aberta.');
+  log('info', 'Busca no JMS: hoje a cada ' + cfg.minutos + ' min' + (cfg.minutosDiaAnterior ? '; ontem a cada ' + cfg.minutosDiaAnterior +
+    ' min (guarda o dia anterior completo)' : '') + '. Deixe esta janela aberta.');
   // Com AuthToken vencido tenta do mesmo jeito (uma consulta): volta sozinho quando o token for trocado aqui ou no DashMaster.
-  const rodar = () => { if (credenciais().fonte) coletor.coletar(hojeSp()).catch(() => {}); };
+  const agenda = {ontem: '', ontemEm: 0};
+  const rodar = () => {
+    if (!credenciais().fonte || coletor.estado.rodando) return;
+    const dias = diasDaAgenda(agenda, Date.now(), cfg.minutosDiaAnterior);
+    coletor.coletar(dias).then(u => { if (u.ok && dias.length > 1) Object.assign(agenda, {ontem: dias[0], ontemEm: Date.now()}); }).catch(() => {});
+  };
   setTimeout(rodar, 3000);
   setInterval(rodar, cfg.minutos * 60000);
 });
