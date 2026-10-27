@@ -8,7 +8,7 @@
  *     Viagem concluída já conferida depois de concluída não é consultada de novo (a carga não muda mais).
  *   - Viagem grande (mais de "viagemGrande" pacotes) busca no máximo a cada "minutosViagemGrande" minutos.
  *   - Depois das viagens, o bloco "3 Segmentos" (Rastreamento do pacote › Informação básica) de cada remessa nova: uma
- *     consulta por remessa, guardada para sempre (o código não muda). É com ele que a conferência sabe a rota certa.
+ *     consulta por remessa, guardada para sempre (o código não muda). A conferência é só por ele (destino correto).
  *   - AuthToken vencido para tudo e avisa; erro numa viagem não para as outras.
  */
 const {statusDe} = require('./status');
@@ -83,7 +83,7 @@ class Coletor {
         for (const dia of lista) {
           e.dia = dia;
           for (const tipo of tipos) await this.coletarTipo(tipo, dia, o.forcar);
-          if (this.cfg.consultarSegmentos !== false) await this.buscarSegmentos(dia);
+          await this.buscarSegmentos(dia);
           if (tipos.length > 1) this.banco.marcarDia(dia);
           feitos.push(dia);
         }
@@ -137,8 +137,8 @@ class Coletor {
   }
   /**
    * "3 Segmentos" de cada remessa do dia que ainda não tem (uma consulta por remessa, "consultasSegmentos" ao mesmo tempo).
-   * O painel é atualizado a cada lote. Se o JMS recusar as 20 primeiras sem nenhum acerto, para e avisa (a conferência
-   * continua pela rotinha).
+   * O painel é atualizado a cada lote. Se o JMS recusar as 20 primeiras sem nenhum acerto, para e avisa (tenta de novo na
+   * próxima busca).
    */
   async buscarSegmentos(dia) {
     const e = this.estado, cfg = this.cfg, total = this.banco.contarSegmentos(dia);
@@ -165,7 +165,7 @@ class Coletor {
       });
       if (this.aoMudar) { this.aoMudar('troncal', dia); this.aoMudar('secundaria', dia); }
       if (parar) {
-        e.avisoSegmentos = 'O JMS recusou a Informação básica (3 segmentos): ' + ultimoErro + ' A conferência segue pela rotinha.';
+        e.avisoSegmentos = 'O JMS recusou o Rastreamento do pacote (3 segmentos): ' + ultimoErro + ' Os pacotes ficam "Sem 3 Segmentos" até a próxima busca.';
         this.log('aviso', e.avisoSegmentos);
         return;
       }

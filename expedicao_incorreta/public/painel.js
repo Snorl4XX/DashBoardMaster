@@ -10,10 +10,10 @@
   var NOME = {troncal: {pt: 'Rota Troncal', zh: '干线'}, secundaria: {pt: 'Rota Secundária', zh: '支线'}};
   var q = new URLSearchParams(location.search);
   var st = {de: q.get('de') || q.get('dia') || '', ate: q.get('ate') || q.get('dia') || '', hoje: '', status: q.get('status') || '',
-    turno: q.get('turno') || '', rota: q.get('rota') || '', destino: q.get('destino') || '', segmento: q.get('segmento') || '', login: q.get('login') || '',
+    turno: q.get('turno') || '', rota: q.get('rota') || '', destino: q.get('destino') || '', codigo: q.get('codigo') || '', login: q.get('login') || '',
     situacao: q.get('situacao') || '', busca: '', pagina: 1, tamanho: 50, ordem: '', direcao: 'asc', carregando: false, ultimaBusca: 0, ultimaCarga: 0,
     resumo: null};
-  var FILTROS = ['status', 'rota', 'turno', 'destino', 'segmento', 'login'];
+  var FILTROS = ['status', 'rota', 'turno', 'destino', 'codigo', 'login'];
 
   var I = {
     alert: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>',
@@ -105,11 +105,13 @@
     else if (e.busca.ultimo && !e.busca.ultimo.ok) h = alerta(h, false, 'A última busca no JMS falhou.', e.busca.ultimo.msg);
     e.planilhas.erros.forEach(function (m) { h = alerta(h, false, 'Planilha', m); });
     if (t.semRegra) h = alerta(h, true, pac(t.semRegra) + ' de rota fora da planilha de rotas', ex(p.semRegra) + '. Inclua a rota na planilha rotas.xlsx.');
-    if (e.busca.avisoSegmentos) h = alerta(h, true, 'Conferência no JMS (3 segmentos) parada.', e.busca.avisoSegmentos);
-    if (t.semRotinha) h = alerta(h, true, pac(t.semRotinha) + ' sem o 3 Segmentos do JMS e com Base Destino fora da rotinha', ex(p.semRotinha) +
-      '. Espere a conferência no JMS ou inclua a base na rotinha.');
-    if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com destino fora da tabela de rotas', ex(p.semCodigo) +
-      '. Inclua o código na aba "Rotas" da planilha rotas.xlsx (ou o DESTINO na aba "Códigos 1º nível").');
+    if (e.busca.avisoSegmentos) h = alerta(h, false, 'Conferência no JMS (3 segmentos) parada.', e.busca.avisoSegmentos);
+    var ss = p.semSegmento;
+    if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', e.busca.rodando ?
+      'O app está consultando no Rastreamento do pacote. Eles entram na conta quando o JMS responder.' : 'Clique em Atualizar para consultar no Rastreamento do pacote.');
+    if (ss.jmsSemCodigo) h = alerta(h, true, pac(ss.jmsSemCodigo) + ' sem código no 3 Segmentos do JMS', 'O Rastreamento do pacote não tem o Código de primeiro segmento: não dá para conferir.');
+    if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com código fora da tabela de rotas', ex(p.semCodigo) +
+      '. Inclua o código na rota certa da aba "Rotas" da planilha rotas.xlsx.');
     if (r.semBusca.length && !e.busca.rodando) {
       h = alerta(h, true, r.semBusca.length === r.dias ? (r.dias === 1 ? 'Sem dados deste dia ainda.' : 'Sem dados deste período ainda.') :
         r.semBusca.length + (r.semBusca.length === 1 ? ' dia ainda não buscado: ' : ' dias ainda não buscados: ') + r.semBusca.slice(0, 8).map(dataBr).join(', ') +
@@ -124,7 +126,7 @@
     var sg = r.segmentos;
     if (sg.total) {
       var todos = sg.jms >= sg.total;
-      b.push('<span class="badge ' + (todos ? 'ok' : 'warn') + '" title="Pacotes com o bloco 3 Segmentos do JMS (Rastreamento do pacote). O resto foi conferido pela rotinha.">' +
+      b.push('<span class="badge ' + (todos ? 'ok' : 'warn') + '" title="Pacotes que o JMS já respondeu no bloco 3 Segmentos (Rastreamento do pacote).">' +
         svg(todos ? 'check' : 'alert') + '<span>3 Segmentos no JMS: ' + fmtPct(sg.jms / sg.total * 100, sg.jms >= sg.total || !sg.jms ? 0 : 1) + '</span></span>');
     }
     if (r.viagens.comErro) b.push('<span class="badge warn">' + svg('alert') + '<span>' + fmtInt(r.viagens.comErro) + ' viagens com erro na busca</span></span>');
@@ -149,22 +151,38 @@
   }
   var barra = function (pct, cor) { return '<div class="bar"><i style="width:' + Math.max(0, Math.min(100, pct)).toFixed(1) + '%;background:' + cor + '"></i></div>'; };
   function mostrarCartoes(r) {
-    var t = r.totais, m = r.maisAfetados, tn = {};
+    var t = r.totais, m = r.maisAfetados, a = r.anterior, tn = {}, ta = {};
     r.turnos.forEach(function (x) { tn[x.turno] = x; });
-    var partes = ['T1', 'T2', 'T3'].map(function (s) { return '<span><i style="background:' + G.corTurno(s) + '"></i>' + s + ' <b>' + fmtInt(tn[s].errados) + '</b></span>'; }).join(' + ');
-    var h = '<div class="kpi kpi-hero"><div class="kpi-body"><span class="kpi-label">' + svg('alert') + 'Pacotes no caminhão errado · ' + esc(periodoTxt(r.de, r.ate)) + '</span>' +
+    a.turnos.forEach(function (x) { ta[x.turno] = x; });
+    var umDia = r.de === r.ate, nomeAnt = umDia ? 'Dia anterior' : 'Período anterior';
+    // Quantidade de erro do dia: cada turno com a quantidade e a participação, e a comparação com o dia anterior.
+    var partes = ['T1', 'T2', 'T3'].map(function (s) {
+      return '<span><i style="background:' + G.corTurno(s) + '"></i>' + s + ' <b>' + fmtInt(tn[s].errados) + '</b> (' + fmtPct(tn[s].participacao, 1) + ')</span>';
+    }).join(' + ');
+    var dif = t.errados - a.errados, comp;
+    if (!a.buscado) comp = '<span class="hero-goal">' + esc(nomeAnt) + ': ainda não buscado</span>';
+    else {
+      var pctDif = a.errados ? ' (' + (dif > 0 ? '+' : '') + fmtPct(dif / a.errados * 100, 1) + ')' : '';
+      comp = '<span class="status-pill ' + (dif > 0 ? 'bad' : 'good') + '">' + svg(dif > 0 ? 'x' : 'check') + (dif > 0 ? '▲ +' : dif < 0 ? '▼ ' : '= ') +
+        fmtInt(dif) + pctDif + ' vs ' + esc(nomeAnt.toLowerCase()) + '</span>';
+    }
+    var h = '<div class="kpi kpi-hero"><div class="kpi-body"><span class="kpi-label">' + svg('alert') + 'Quantidade de erro ' + (umDia ? 'do dia' : 'do período') + ' · ' +
+      esc(periodoTxt(r.de, r.ate)) + '</span>' +
       '<div class="kpi-value">' + fmtInt(t.errados) + '</div>' +
       '<div class="kpi-sub"><b>' + fmtPct(t.taxa, 2) + '</b> dos ' + fmtInt(t.pacotes) + ' pacotes conferidos</div>' +
       '<div class="kpi-sub hero-parts">Por turno: ' + partes + ' = <b>' + fmtInt(t.errados) + '</b></div>' +
-      '<div class="hero-row">' + (t.errados ? '<span class="status-pill bad">' + svg('x') + 'Com pacote errado</span>' : '<span class="status-pill good">' + svg('check') + 'Nenhum pacote errado</span>') +
-      '<span class="hero-goal">' + esc(NOME[tipo].pt) + ' · ' + esc(NOME[tipo].zh) + (st.status ? ' · ' + esc(st.status === 'concluido' ? 'Concluído' : 'Em Trânsito') : '') +
-      '</span></div></div></div>';
-    h += kpi('', svg('box') + 'Pacotes conferidos', fmtInt(t.pacotes), 'em <b>' + fmtInt(r.viagens.total) + '</b> viagens · <b>' + fmtInt(r.viagens.comCarga) + '</b> com carregamento');
-    h += kpi(t.errados ? 'bad' : '', svg('gauge') + 'Taxa de erro', fmtPct(t.taxa, 2), 'pacotes errados ÷ conferidos');
+      '<div class="hero-row">' + comp + '<span class="hero-goal">' + esc(NOME[tipo].pt) + ' · ' + esc(NOME[tipo].zh) +
+      (st.status ? ' · ' + esc(st.status === 'concluido' ? 'Concluído' : 'Em Trânsito') : '') + '</span></div></div></div>';
+    h += kpi(a.buscado && a.errados ? 'bad' : '', svg('shift') + esc(nomeAnt) + ' · ' + esc(periodoTxt(a.de, a.ate)), a.buscado ? fmtInt(a.errados) : '—',
+      a.buscado ? ['T1', 'T2', 'T3'].map(function (s) { return s + ' <b>' + fmtInt(ta[s].errados) + '</b>'; }).join(' · ') + '<br><b>' + fmtPct(a.taxa, 2) +
+        '</b> dos ' + fmtInt(a.pacotes) + ' pacotes' : 'Ainda não buscado: escolha o dia e clique em Atualizar');
+    h += kpi(t.errados ? 'bad' : '', svg('gauge') + 'Taxa de erro', fmtPct(t.taxa, 2), '<b>' + fmtInt(t.pacotes) + '</b> pacotes conferidos em <b>' +
+      fmtInt(r.viagens.total) + '</b> viagens');
     ['T1', 'T2', 'T3'].forEach(function (s) {
       var x = tn[s], horas = {T1: '06h–14h', T2: '14h–22h', T3: '22h–06h'}[s];
       h += kpi('shift-kpi', '<i style="background:' + G.corTurno(s) + '"></i>' + s + ' · ' + horas, fmtInt(x.errados),
-        '<b>' + fmtPct(x.participacao, 1) + '</b> participação<br>Pacotes do turno: <span class="part">' + fmtInt(x.pacotes) + '</span>', barra(x.participacao, G.corTurno(s)));
+        '<b>' + fmtPct(x.participacao, 1) + '</b> participação<br>' + esc(nomeAnt) + ': <span class="part">' + (a.buscado ? fmtInt(ta[s].errados) : '—') + '</span>',
+        barra(x.participacao, G.corTurno(s)));
     });
     var um = function (icone, rotulo, it, extra, cls) {
       var tot = t.errados || 0;
@@ -172,13 +190,11 @@
         it ? '<b>' + fmtInt(it.qtd) + '</b> errados · <b>' + fmtPct(tot ? it.qtd / tot * 100 : 0, 1) + '</b> participação' + (extra ? '<br>' + esc(extra) : '') : 'Nenhum erro',
         it ? barra(tot ? it.qtd / tot * 100 : 0, 'var(--red)') : '', 'text');
     };
-    h += um('seg', 'Segmento mais afetado', m.segmento);
-    h += um('base', 'Base destino do pacote mais afetada', m.baseDestino);
-    h += um('dest', 'Destino mais afetado', m.destino);
-    h += um('trip', 'ID de viagem mais afetado', m.viagem, m.viagem && m.viagem.rota);
-    h += um('route', 'Para onde mais deviam ir', m.rotaCerta);
-    h += um('lot', 'Lote / saca mais afetado', m.lote);
-    h += um('login', 'Login mais afetado', m.login);
+    h += um('trip', 'ID de viagem mais ofensor', m.viagem, m.viagem && m.viagem.rota);
+    h += um('route', 'Próxima parada mais ofensora', m.proximaParada);
+    h += um('lot', 'Saca mais ofensora', m.lote);
+    h += um('base', 'Base Destino com mais erro', m.baseDestino, '', 'span2');
+    h += um('login', 'Login mais ofensor', m.login, '', 'span2');
     $('kpiGrid').innerHTML = h;
   }
 
@@ -189,23 +205,18 @@
       var d = r.distintos[k] || 0, n = r.top[k].length;
       return 'Pacotes no caminhão errado por ' + nome + (d > n ? ' · top ' + n + ' de ' + fmtInt(d) : '') + ' · ' + fmtInt(tot) + ' errados';
     };
-    G.cartao(grid, {key: 'turnos', icone: I.shift, titulo: {pt: 'Participação por turno', zh: '班次占比'}, tipo: 'rosca',
-      sub: 'Pacotes no caminhão errado em cada turno (tempo de digitalização) · ' + fmtInt(tot) + ' errados',
-      itens: r.turnos.map(function (x) { return {nome: x.turno, qtd: x.errados}; }), total: tot, distintos: 3, rotulo: {pt: 'Turno', um: 'turno', zh: '班次'}});
-    var colunas = [
-      ['segmentos', I.seg, {pt: 'Segmentos mais afetados', zh: '二段码'}, 'segmento (código de dois segmentos)', {pt: 'SEGMENTOS', um: 'segmento', zh: '二段码'}],
-      ['basesDestino', I.base, {pt: 'Bases destino dos pacotes', zh: '目的网点'}, 'base destino do pacote', {pt: 'Base Destino do pacote', um: 'base destino', zh: '目的网点'}],
-      ['destinos', I.dest, {pt: 'Destinos mais afetados', zh: '末端机构'}, 'DESTINO (nome de mecanismo final)', {pt: 'DESTINO', um: 'destino', zh: '末端机构'}],
-      ['logins', I.login, {pt: 'Logins mais ofensores', zh: '扫描人'}, 'login (digitalizado por)', {pt: 'Login', um: 'login', zh: '扫描人'}],
-      ['viagens', I.trip, {pt: 'IDs de viagem mais afetados', zh: '车次号'}, 'ID de viagem', {pt: 'ID de viagem', um: 'ID de viagem', zh: '车次号'}],
-      ['lotes', I.lot, {pt: 'Lotes / sacas com mais erro', zh: '包号'}, 'número do lote', {pt: 'Número do lote', um: 'lote', zh: '包号'}],
-      ['rotas', I.route, {pt: 'Base Destino (rota) com mais erro', zh: '目的网点'}, 'Base Destino da rota (tabela de rotas)', {pt: 'Base Destino (rota)', um: 'rota', zh: '目的网点'}],
-      ['rotasCertas', I.route, {pt: 'Para onde deviam ir', zh: '应走线路'}, 'rota certa (pelo 3 Segmentos do JMS ou pela rotinha)', {pt: 'Rota certa', um: 'rota certa', zh: '应走线路'}]
-    ];
-    colunas.forEach(function (c) {
+    var coluna = function (c) {
       G.cartao(grid, {key: c[0], icone: c[1], titulo: c[2], tipo: 'colunas', sub: sub(c[0], c[3]), total: tot, distintos: r.distintos[c[0]] || 0,
         rotulo: c[4], id: c[0] === 'viagens', itens: r.top[c[0]].map(function (i) { return {nome: i.nome, qtd: i.qtd, extra: i.rota || ''}; })});
-    });
+    };
+    coluna(['proximasParadas', I.route, {pt: 'Próxima parada: maiores ofensores', zh: '下一站'}, 'Próxima parada (caminhão)', {pt: 'Próxima parada', um: 'próxima parada', zh: '下一站'}]);
+    coluna(['viagens', I.trip, {pt: 'IDs de viagem mais ofensores', zh: '车次号'}, 'ID de viagem', {pt: 'ID de viagem', um: 'ID de viagem', zh: '车次号'}]);
+    G.cartao(grid, {key: 'turnos', icone: I.shift, titulo: {pt: 'Turnos', zh: '班次占比'}, tipo: 'rosca',
+      sub: 'Pacotes no caminhão errado em cada turno (tempo de digitalização) · ' + fmtInt(tot) + ' errados',
+      itens: r.turnos.map(function (x) { return {nome: x.turno, qtd: x.errados}; }), total: tot, distintos: 3, rotulo: {pt: 'Turno', um: 'turno', zh: '班次'}});
+    coluna(['lotes', I.lot, {pt: 'Sacas ofensoras', zh: '包号'}, 'número do lote (sem lote = VOLUMOSO)', {pt: 'Número do lote', um: 'saca', zh: '包号'}]);
+    coluna(['logins', I.login, {pt: 'Logins ofensores', zh: '扫描人'}, 'login (digitalizado por)', {pt: 'Login', um: 'login', zh: '扫描人'}]);
+    coluna(['basesDestino', I.base, {pt: 'Base Destino com mais erro', zh: '目的网点'}, 'Base Destino do pacote', {pt: 'Base Destino', um: 'base destino', zh: '目的网点'}]);
   }
 
   // ---------------------------------------------------------------- tabela
@@ -273,7 +284,7 @@
       });
       opcoes('rota', r.opcoes.rotas, st.rota, 'Todas (' + r.opcoes.rotas.length + ' da tabela de rotas)');
       opcoes('destino', r.opcoes.destinos, st.destino, 'Todos');
-      opcoes('segmento', r.opcoes.segmentos, st.segmento, 'Todos');
+      opcoes('codigo', r.opcoes.codigos, st.codigo, 'Todos');
       opcoes('login', r.opcoes.logins, st.login, 'Todos');
       marcarFiltros();
       mostrarAvisos(r); mostrarCartoes(r); mostrarGraficos(r);

@@ -1,4 +1,4 @@
-/* Configurações: AuthToken, busca no JMS, planilhas (rotinha e rotas) e o registro. Tudo por config/api/… (só neste computador). */
+/* Configurações: AuthToken, busca no JMS, planilha de rotas e o registro. Tudo por config/api/… (só neste computador). */
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
@@ -22,15 +22,6 @@
       dl.appendChild(dt); dl.appendChild(dd);
     });
   }
-  function chips(titulo, lista, explica) {
-    var box = document.createElement('div'); box.style.cssText = 'display:grid;gap:8px;margin-top:4px';
-    var h = document.createElement('p'); h.className = 'muted small'; h.style.margin = '0'; h.textContent = titulo + ' (' + lista.length + '): ' + explica;
-    var l = document.createElement('div'); l.className = 'chips-list';
-    lista.forEach(function (x) { var s = document.createElement('span'); s.textContent = x; l.appendChild(s); });
-    box.appendChild(h); box.appendChild(l);
-    return box;
-  }
-
   function carregar() {
     return fetch('config/api/estado').then(function (r) { return r.json(); }).then(function (e) {
       var t = e.token;
@@ -59,7 +50,7 @@
         }).join(' | ')],
         ['Busca automática', 'hoje a cada ' + e.config.minutos + ' min' + (e.config.minutosDiaAnterior ? ' · ontem a cada ' + e.config.minutosDiaAnterior +
           ' min (guarda o dia anterior completo)' : ' · ontem: desligado')],
-        ['3 Segmentos no JMS', !e.config.consultarSegmentos ? 'desligado no config.json (confere só pela rotinha)' : e.segmentosHoje && e.segmentosHoje.total ?
+        ['3 Segmentos no JMS', e.segmentosHoje && e.segmentosHoje.total ?
           'hoje: ' + fmt(e.segmentosHoje.feitos) + ' de ' + fmt(e.segmentosHoje.total) + ' pacotes conferidos' + (e.segmentosHoje.comErro ? ' · ' + fmt(e.segmentosHoje.comErro) +
           ' com erro (tenta de novo em 30 min)' : '') + ' · ' + e.config.consultasSegmentos + ' consultas ao mesmo tempo' : 'hoje ainda sem pacotes'],
         ['Dias guardados', e.salvos && e.salvos.n ? e.salvos.n + (e.salvos.n === 1 ? ' dia' : ' dias') + ' (de ' + br(e.salvos.de) + ' a ' + br(e.salvos.ate) + ')' : 'nenhum ainda'],
@@ -69,20 +60,11 @@
       else $('busca-erros').classList.add('hidden');
       var p = e.planilhas;
       info('plan-info', [
-        ['Rotinha', p.rotinha ? p.arquivoRotinha + ' · ' + fmt(p.rotinha.bases) + ' bases · ' + fmt(p.rotinha.destinos) + ' destinos' +
-          (p.rotinha.repetidas ? ' · ' + p.rotinha.repetidas + ' bases repetidas (vale a 1ª, como o PROCV)' : '') : 'falta'],
         ['Planilha de rotas', p.rotas ? 'rotas.xlsx · ' + p.rotas.troncal + ' rotas troncais · ' + p.rotas.secundaria + ' secundárias' : 'falta'],
-        ['Pasta das planilhas', e.config.planilhas]
+        ['Pasta da planilha', e.config.planilhas]
       ]);
       var erros = p.erros.concat(p.rotas ? p.rotas.avisos : []);
       if (erros.length) resultado('plan-res', erros, false);
-      var pend = $('pendentes');
-      pend.textContent = '';
-      // Só valem para os pacotes que o JMS ainda não deu o 3 Segmentos (conferidos pela rotinha).
-      if (p.rotas && p.rotas.codigosSemDestino.length) pend.appendChild(chips('Códigos de 1º nível sem DESTINO', p.rotas.codigosSemDestino,
-        'só para a conferência pela rotinha (sem o 3 Segmentos do JMS): na aba "Códigos 1º nível" da planilha rotas.xlsx, escreva os DESTINOS de cada código.'));
-      if (p.rotas && p.rotas.destinosSemCodigo.length) pend.appendChild(chips('DESTINOS da rotinha sem código', p.rotas.destinosSemCodigo,
-        'sem o 3 Segmentos do JMS, o app acha o código pelo nome (sigla da base ou do estado). Estes não deram: entram como "Destino fora da tabela" até o JMS responder.'));
       info('end-info', e.enderecos.map(function (a, i) { return [i === 0 ? 'Neste computador' : /ts\.net|https:/.test(a) ? 'Link público' : 'Na rede', a]; }));
       $('registro').textContent = e.registro.slice().reverse().join('\n');
     });
@@ -120,7 +102,6 @@
         .then(function (r) { resultado('plan-res', r.ok ? 'Planilha trocada. O painel já usa a nova.' : r.error, r.ok); input.value = ''; carregar(); });
     });
   }
-  enviar($('up-rotinha'), 'rotinha');
   enviar($('up-rotas'), 'rotas');
   carregar();
   setInterval(function () { if (document.visibilityState === 'visible') carregar(); }, 5000);

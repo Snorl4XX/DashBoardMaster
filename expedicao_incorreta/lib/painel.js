@@ -1,13 +1,14 @@
 'use strict';
 /**
- * Números do painel de um período (um dia ou vários; troncal ou secundária): confere cada pacote com as planilhas
- * (lib/regras.js) e soma por turno, segmento, base destino, destino, login, ID de viagem e lote. Só entram as viagens com
- * Status Concluído ou Em Trânsito (lib/status.js). Os filtros (status, Base Destino da rota, turno, destino, segmento, login,
+ * Números do painel de um período (um dia ou vários; troncal ou secundária): confere cada pacote pelo "3 Segmentos" do JMS
+ * e a planilha de rotas (lib/regras.js) e soma por turno, Próxima parada, ID de viagem, saca (lote; sem lote = VOLUMOSO),
+ * login e Base Destino, com a comparação com o dia (período) anterior. Só entram as viagens com Status Concluído ou Em
+ * Trânsito (lib/status.js). Os filtros (status, Base Destino da rota, turno, destino correto, código de 1º segmento, login,
  * situação, busca) valem para tudo: cartões, gráficos e tabela mostram sempre o mesmo recorte.
  */
 const {SITUACOES} = require('./regras');
 const {STATUS, statusDe} = require('./status');
-const {diasEntre} = require('./coletor');
+const {diasEntre, somaDias} = require('./coletor');
 
 const TURNOS = ['T1', 'T2', 'T3'];
 /** T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59 (como o DashMaster), pelo "Tempo de digitalização". */
@@ -19,14 +20,15 @@ function turnoDe(horario) {
 }
 /** [campo, título, título em chinês] — o título em chinês aparece embaixo, como na tabela do painel principal. */
 const COLUNAS = [
-  ['turno', 'Turno', '班次'], ['situacaoTexto', 'Situação', '状态'], ['proximaParada', 'Próxima parada', '下一站'], ['rotaCerta', 'Rota certa', '应走线路'],
+  ['turno', 'Turno', '班次'], ['situacaoTexto', 'Situação', '状态'], ['proximaParada', 'Próxima parada', '下一站'], ['rotaCerta', 'Destino correto', '应走线路'],
   ['shipmentNo', 'ID de viagem', '车次号'], ['nomeViagem', 'Viagem', '线路'], ['statusViagem', 'Status', '车次状态'],
   ['billCode', 'Número de pedido JMS', '运单号'], ['packageCode', 'Número do lote', '包号'], ['baseEscaneamento', 'Base de escaneamento', '扫描网点'],
-  ['baseDestino', 'Base Destino', '目的网点'],
-  ['municipio', 'Município de Destino', '目的城市'], ['codigo1', '1º segmento', '一段码'], ['segmento', 'SEGMENTOS', '二段码'],
-  ['destino', 'DESTINO', '末端机构'], ['fonte', 'Conferido por', '依据'], ['tipoBipagem', 'Tipo de bipagem', '扫描类型'],
+  ['baseDestino', 'Base Destino', '目的网点'], ['municipio', 'Município de Destino', '目的城市'], ['codigo1', 'Código de primeiro segmento', '一段码'],
+  ['segmento', 'Código de dois segmentos', '二段码'], ['seg3', '3 Segmentos', '三段码'], ['tipoBipagem', 'Tipo de bipagem', '扫描类型'],
   ['digitalizadoPor', 'Digitalizado por', '扫描人'], ['horario', 'Tempo de digitalização', '扫描时间']
 ];
+/** Lote vazio (ou "--") = pacote fora de saca: VOLUMOSO. */
+const lote = v => { const t = String(v === null || v === undefined ? '' : v).trim(); return !t || /^-+$/.test(t) ? 'VOLUMOSO' : t; };
 
 /** Os n mais frequentes (quantidade de linhas por valor do campo). A lista guarda em .distintos quantos valores existem ao todo. */
 function topDe(linhas, campo, n, extra) {
@@ -67,9 +69,10 @@ class Painel {
       if (!v) return;
       const r = this.regras.conferir(tipo, p, v.destino);
       const l = Object.assign({}, p, r, {situacaoTexto: SITUACOES[r.situacao], turno: turnoDe(p.horario), nomeViagem: v.nome || '',
-        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status], jms: !!p.seg1});
+        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status], packageCode: lote(p.packageCode),
+        jms: p.segFeito !== null && p.segFeito !== undefined});
       // O que falta na planilha de rotas, para o aviso.
-      if (r.situacao === 'sem_codigo') l.pendente = (r.codigo1 ? 'código ' + r.codigo1 + (r.segmento ? ' ' + r.segmento : '') : r.destino || p.baseDestino || '(vazio)');
+      if (r.situacao === 'sem_codigo') l.pendente = 'código ' + r.codigo1 + (r.segmento ? ' ' + r.segmento : '');
       linhas.push(l);
     });
     linhas.sort(ordemPadrao);
@@ -89,10 +92,26 @@ class Painel {
   filtrar(linhas, f) {
     const busca = String(f.busca || '').trim().toUpperCase();
     return linhas.filter(l => (!f.status || l.status === f.status) && (!f.turno || l.turno === f.turno) && (!f.rota || l.rota === f.rota) &&
-      (!f.destino || l.destino === f.destino) &&
-      (!f.segmento || l.segmento === f.segmento) && (!f.login || l.digitalizadoPor === f.login) &&
+      (!f.destino || l.rotaCerta === f.destino) && (!f.codigo || l.codigo1 === f.codigo) && (!f.login || l.digitalizadoPor === f.login) &&
       (!f.situacao || l.situacao === f.situacao) && (!f.viagem || l.shipmentNo === f.viagem) &&
-      (!busca || [l.billCode, l.packageCode, l.shipmentNo, l.baseDestino, l.digitalizadoPor, l.nomeViagem].some(v => String(v || '').toUpperCase().indexOf(busca) >= 0)));
+      (!busca || [l.billCode, l.packageCode, l.shipmentNo, l.baseDestino, l.digitalizadoPor, l.nomeViagem, l.proximaParada, l.rotaCerta]
+        .some(v => String(v || '').toUpperCase().indexOf(busca) >= 0)));
+  }
+  /** Erros por turno de um conjunto de linhas já filtradas. */
+  turnos(linhas) {
+    const errados = linhas.filter(l => l.situacao === 'errado');
+    return TURNOS.map(t => {
+      const pac = linhas.filter(l => l.turno === t).length, err = errados.filter(l => l.turno === t).length;
+      return {turno: t, pacotes: pac, errados: err, participacao: errados.length ? err / errados.length * 100 : 0, taxa: pac ? err / pac * 100 : 0};
+    });
+  }
+  /** O dia (ou período do mesmo tamanho) anterior, com os mesmos filtros: erros, turnos e se já foi buscado. */
+  anterior(tipo, de, ate, f) {
+    const n = diasEntre(de, ate).length, a = somaDias(de, -n), b = somaDias(de, -1);
+    const linhas = this.filtrar(this.linhas(tipo, a, b).linhas, Object.assign({}, f, {situacao: ''}));
+    const errados = linhas.filter(l => l.situacao === 'errado').length;
+    return {de: a, ate: b, errados, pacotes: linhas.length, taxa: linhas.length ? errados / linhas.length * 100 : 0, turnos: this.turnos(linhas),
+      buscado: this.banco.buscados(a, b).size > 0};
   }
   /** Cartões, gráficos e as opções dos filtros do período. */
   resumo(tipo, de, ate, f) {
@@ -101,15 +120,11 @@ class Painel {
     const cont = {};
     Object.keys(SITUACOES).forEach(k => { cont[k] = 0; });
     linhas.forEach(l => { cont[l.situacao]++; });
-    const turnos = TURNOS.map(t => {
-      const pac = linhas.filter(l => l.turno === t).length, err = errados.filter(l => l.turno === t).length;
-      return {turno: t, pacotes: pac, errados: err, participacao: errados.length ? err / errados.length * 100 : 0, taxa: pac ? err / pac * 100 : 0};
-    });
+    const turnos = this.turnos(linhas);
     const nomeViagem = id => ({rota: (tudo.viagens.get(id) || {}).nome || ''});
     const top = {
-      segmentos: topDe(errados, 'segmento'), basesDestino: topDe(errados, 'baseDestino'), destinos: topDe(errados, 'destino'),
-      logins: topDe(errados, 'digitalizadoPor'), viagens: topDe(errados, 'shipmentNo', 10, nomeViagem), lotes: topDe(errados, 'packageCode'),
-      rotas: topDe(errados, 'rota'), rotasCertas: topDe(errados, 'rotaCerta')
+      proximasParadas: topDe(errados, 'proximaParada'), viagens: topDe(errados, 'shipmentNo', 10, nomeViagem), lotes: topDe(errados, 'packageCode'),
+      logins: topDe(errados, 'digitalizadoPor'), basesDestino: topDe(errados, 'baseDestino')
     };
     const distintos = {};
     Object.keys(top).forEach(k => { distintos[k] = top[k].distintos; });
@@ -117,28 +132,29 @@ class Painel {
     const dias = diasEntre(de, ate), buscados = this.banco.buscados(de, ate);
     return {
       tipo, de, ate, dia: de === ate ? de : '', dias: dias.length, semBusca: dias.filter(d => !buscados.has(d)),
-      totais: {pacotes: linhas.length, errados: cont.errado, certos: cont.certo, semRotinha: cont.sem_rotinha, semCodigo: cont.sem_codigo,
+      totais: {pacotes: linhas.length, errados: cont.errado, certos: cont.certo, semSegmento: cont.sem_segmento, semCodigo: cont.sem_codigo,
         semRegra: cont.sem_regra, taxa: linhas.length ? cont.errado / linhas.length * 100 : 0},
-      turnos, top, distintos,
-      // Quantos pacotes já têm o "3 Segmentos" do JMS (o resto foi conferido pela rotinha).
+      turnos, top, distintos, anterior: this.anterior(tipo, de, ate, f),
+      // Quantos pacotes o JMS já respondeu (com ou sem código) no "3 Segmentos".
       segmentos: {jms: linhas.filter(l => l.jms).length, total: linhas.length},
-      maisAfetados: {segmento: top.segmentos[0] || null, baseDestino: top.basesDestino[0] || null, viagem: top.viagens[0] || null,
-        destino: top.destinos[0] || null, lote: top.lotes[0] || null, login: top.logins[0] || null, rotaCerta: top.rotasCertas[0] || null},
+      maisAfetados: {viagem: top.viagens[0] || null, proximaParada: top.proximasParadas[0] || null, lote: top.lotes[0] || null,
+        baseDestino: top.basesDestino[0] || null, login: top.logins[0] || null},
       viagens: {total: viagens.length, comCarga: viagens.filter(v => v.contagem > 0).length, comErro: viagens.filter(v => v.erro).length,
         concluidas: viagens.filter(v => v.status === 'concluido').length, emTransito: viagens.filter(v => v.status === 'em_transito').length,
         foraDoStatus: tudo.fora},
       opcoes: {
         // Base Destino: as bases da tabela de rotas do SC (desta rota: troncal ou secundária).
         rotas: this.regras.rotas ? Array.from(new Set(this.regras.rotas.regras[tipo].map(r => r.rota))).sort((a, b) => a.localeCompare(b, 'pt-BR')) : [],
-        destinos: Array.from(new Set(tudo.linhas.map(l => l.destino).filter(Boolean))).sort(),
-        segmentos: Array.from(new Set(tudo.linhas.map(l => l.segmento).filter(Boolean))).sort(),
+        destinos: Array.from(new Set(tudo.linhas.map(l => l.rotaCerta).filter(Boolean))).sort(),
+        codigos: Array.from(new Set(tudo.linhas.map(l => l.codigo1).filter(Boolean))).sort(),
         logins: Array.from(new Set(tudo.linhas.map(l => l.digitalizadoPor).filter(Boolean))).sort()
       },
-      // Exemplos do que não deu para conferir (para completar as planilhas).
+      // O que não deu para conferir (para completar a planilha de rotas ou esperar o JMS).
       pendencias: {
         semRegra: topDe(linhas.filter(l => l.situacao === 'sem_regra'), 'proximaParada', 8),
-        semRotinha: topDe(linhas.filter(l => l.situacao === 'sem_rotinha'), 'baseDestino', 8),
-        semCodigo: topDe(linhas.filter(l => l.situacao === 'sem_codigo'), 'pendente', 8)
+        semCodigo: topDe(linhas.filter(l => l.situacao === 'sem_codigo'), 'pendente', 8),
+        semSegmento: {naoConsultados: linhas.filter(l => l.situacao === 'sem_segmento' && !l.jms).length,
+          jmsSemCodigo: linhas.filter(l => l.situacao === 'sem_segmento' && l.jms).length}
       }
     };
   }

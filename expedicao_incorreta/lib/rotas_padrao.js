@@ -6,8 +6,7 @@
  *
  * Aba "Rotas": uma linha por grupo de códigos. Rota = a Próxima parada do caminhão. 1º Nível = códigos aceitos;
  * 2º Nível (opcional) = só estes segmentos. Duas linhas da mesma rota = qualquer uma vale (ex.: DC TBT-SP, SP antigo e GRU novo).
- * Aba "Códigos 1º nível": cada código → os DESTINOS da rotinha (coluna "Nome de mecanismo final") que ele representa.
- * Código sem destino = "A CONFIRMAR" (os pacotes desse destino aparecem como "Destino sem código", não como erro).
+ * Os códigos são comparados com o bloco "3 Segmentos" de cada remessa no JMS (Código de primeiro e de dois segmentos).
  */
 const seg = (pre, nums) => nums.map(n => pre + '-' + String(n).padStart(2, '0'));
 
@@ -61,42 +60,13 @@ const ROTAS = [
   ['Secundária', 'F S-PENHA 03-SP', 'GRU', '404-06', 'Doca 24']
 ];
 
-/**
- * Código de 1º nível → destinos ("Nome de mecanismo final" da rotinha). Os códigos que a tabela usa e que não dá para ligar
- * com certeza a um destino da rotinha ficam vazios, com uma sugestão na observação, para quem conhece confirmar.
- */
-const CODIGOS = [
-  ['GO', 'GO GYN', ''], ['SC', 'SC BNU', ''], ['SC1', '', 'A CONFIRMAR · sugestão: DC CCM-SC'],
-  ['RS', 'RS NSR', ''], ['RS1', '', 'A CONFIRMAR · sugestão: DC CPO-RS, DC CXJ01, DC NHG-RS, DC PEL-RS, DC PFB-RS, DC RIA-RS'],
-  ['SBN', 'DC SBN-SP', ''], ['CE', 'CE FOR', ''],
-  ['RJ', 'RJ SJM', ''], ['RJ1', '', 'A CONFIRMAR · sugestão: DC SQR-RJ'], ['VDC', 'BA VDC', ''], ['CDG', 'DC CDG-RJ', ''],
-  ['SE', 'SE AJU', ''], ['AL', 'DC MCZ-AL', ''],
-  ['PR', 'PR SJS', ''], ['PR1', '', 'A CONFIRMAR · sugestão: DC GPB-PR, DC MGF-PR, DC PGZ-PR'], ['CAC', 'DC CAC-PR', ''],
-  ['PE', 'PE JGS', ''], ['BYE', 'DC BYE-PB', ''],
-  ['BA', 'BA FEC', ''], ['SBA', 'BA SBA', ''], ['SNS', 'DC SNS-PE, PE SNS', ''],
-  ['MG', 'MG CGE', ''], ['MG1', '', 'A CONFIRMAR · sugestão: DC CUV 001, DC GVR 001, DC MTC-MG, DC QDF 001, DC TFL 001, DC VAG 001, DC NSR 001-MG, F DC UBE-MG'],
-  ['CHV', 'MG CHV, DC CHV-MG', ''],
-  ['PA', 'PA ANA', ''],
-  ['AC', 'AC RBR', ''], ['AM', 'AM MAO, DC MAO-AM', ''], ['BAU', 'DC BAU-SP', ''], ['BVB', '', 'A CONFIRMAR'],
-  ['JDF', 'DC JDF-MG', ''], ['LDB', 'DC LDB-PR', ''], ['MIA', '', 'A CONFIRMAR'], ['MRB', 'PA MRB', ''], ['RO', 'RO PVH', ''],
-  ['SJP', 'DC SJP-SP', ''], ['SOD', '', 'A CONFIRMAR'], ['SP', 'SP BRE', ''], ['SP1', '', 'A CONFIRMAR · sugestão: SN RAO'],
-  ['STM', 'PA STM', ''], ['TO', 'TO PMW', ''], ['VCP', '', 'A CONFIRMAR'], ['XAP', 'DC XAP-SC', ''], ['BJE', 'DC BJE-PI', ''],
-  ['MA', 'MA SLZ', ''], ['PPB', '', 'A CONFIRMAR · sugestão: DC PPY-MG'], ['NAT', 'DC NAT-RN', ''],
-  ['MS', 'MS CGR', ''], ['MT', 'MT CGB', ''], ['JPN', 'DC JPN-RO', ''], ['PI', 'PI THE', ''], ['IMP', 'DC IMP-MA', ''],
-  ['ES', 'ES SRR', ''], ['NE', '', 'A CONFIRMAR · sugestão: SP RBP'], ['NE1', '', 'A CONFIRMAR'], ['DF', 'DF BSB', ''],
-  ['GRU', 'SP GRU, DC GRU-SP, DC SSZ-SP', 'Bases de Guarulhos (rota secundária e DC TBT/DC GRU)'],
-  ['MOO', 'DC S-MOO 02-SP', ''], ['VLANA', '', 'A CONFIRMAR'], ['NOD', '', 'A CONFIRMAR']
-];
-
 const CAB_ROTAS = ['Tipo', 'Rota (Próxima parada)', '1º Nível (códigos)', '2º Nível (segmentos, opcional)', 'Observação'];
-const CAB_CODIGOS = ['Código 1º nível', 'Destinos (Nome de mecanismo final da rotinha)', 'Observação'];
 
 /** Abas da planilha de rotas padrão, prontas para lib/xlsx.js → escreverXlsx. */
 function abasPadrao() {
   return [
-    {nome: 'Rotas', linhas: [CAB_ROTAS].concat(ROTAS), larguras: [12, 22, 48, 60, 50]},
-    {nome: 'Códigos 1º nível', linhas: [CAB_CODIGOS].concat(CODIGOS), larguras: [16, 60, 70]}
+    {nome: 'Rotas', linhas: [CAB_ROTAS].concat(ROTAS), larguras: [12, 22, 48, 60, 50]}
   ];
 }
 
-module.exports = {abasPadrao, CAB_ROTAS, CAB_CODIGOS};
+module.exports = {abasPadrao, CAB_ROTAS};

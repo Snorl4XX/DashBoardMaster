@@ -61,7 +61,7 @@ class Banco {
       apagarPacotes: this.db.prepare('DELETE FROM pacotes WHERE tipo = ? AND shipmentNo = ?'),
       inserirPacote: this.db.prepare('INSERT OR REPLACE INTO pacotes (' + CAMPOS_PACOTE.join(', ') + ') VALUES (' + CAMPOS_PACOTE.map(() => '?').join(', ') + ')'),
       // Com o "3 Segmentos" da remessa (vazio enquanto não foi consultado).
-      pacotesDia: this.db.prepare(`SELECT p.*, s.s1 AS seg1, s.s2 AS seg2, s.centro AS centroJms FROM pacotes p
+      pacotesDia: this.db.prepare(`SELECT p.*, s.s1 AS seg1, s.s2 AS seg2, s.s3 AS seg3, s.billCode AS segFeito FROM pacotes p
         LEFT JOIN segmentos s ON s.billCode = p.billCode AND s.erro = '' WHERE p.tipo = ? AND p.dia = ?`),
       semSegmento: this.db.prepare(`SELECT DISTINCT p.billCode FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode
         WHERE p.dia = ? AND (s.billCode IS NULL OR (s.erro <> '' AND s.em < ?)) LIMIT ?`),

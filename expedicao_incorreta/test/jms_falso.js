@@ -37,7 +37,7 @@ function dados(dia) {
   t1.push(pac('DKTESTE0001', 6, 'BASE FORA-XX', 'XX NORTE', d('23:10:00')));
   const t2 = [];
   for (let i = 0; i < 120; i++) t2.push(pac('DKTESTE0002', i, 'BASE SUL A-YY', 'YY SUL', d('10:' + String(i % 60).padStart(2, '0') + ':00')));
-  t2.push(pac('DKTESTE0002', 120, 'BASE NORTE B-XX', 'YY SUL', d('02:00:00')));
+  t2.push(pac('DKTESTE0002', 120, 'BASE NORTE B-XX', 'YY SUL', d('02:00:00'), {packageCode: null})); // fora de saca: VOLUMOSO
   const s1 = [pac('SRTESTE0001', 0, 'BASE LOCAL A-ZZ', 'BASE LOCAL A-ZZ', d('05:00:00')), pac('SRTESTE0001', 1, 'BASE LOCAL A-ZZ', 'BASE LOCAL A-ZZ', d('05:01:00')),
     pac('SRTESTE0001', 2, 'BASE LOCAL B-ZZ', 'BASE LOCAL A-ZZ', d('05:02:00')), pac('SRTESTE0001', 3, 'BASE NORTE A-XX', 'BASE LOCAL A-ZZ', d('14:30:00'))];
   const s2 = [pac('SRTESTE0002', 0, 'BASE LOCAL B-ZZ', 'ROTA NOVA-ZZ', d('09:00:00'))];

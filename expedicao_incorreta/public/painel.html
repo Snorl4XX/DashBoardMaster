@@ -157,10 +157,10 @@
               <div class="select-wrap"><select id="f-rota" title="Bases da tabela de rotas do SC"><option value="">Todas</option></select></div></div>
             <div class="dd" id="dd-turno"><label class="dd-label" for="f-turno"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Turno</label>
               <div class="select-wrap"><select id="f-turno"><option value="">Todos</option><option value="T1">T1 · 06h–14h</option><option value="T2">T2 · 14h–22h</option><option value="T3">T3 · 22h–06h</option></select></div></div>
-            <div class="dd" id="dd-destino"><label class="dd-label" for="f-destino"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>Destino</label>
+            <div class="dd" id="dd-destino"><label class="dd-label" for="f-destino"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.3 7-12a7 7 0 0 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>Destino correto</label>
               <div class="select-wrap"><select id="f-destino"><option value="">Todos</option></select></div></div>
-            <div class="dd" id="dd-segmento"><label class="dd-label" for="f-segmento"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg>Segmentos</label>
-              <div class="select-wrap"><select id="f-segmento"><option value="">Todos</option></select></div></div>
+            <div class="dd" id="dd-codigo"><label class="dd-label" for="f-codigo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg>Código de 1º segmento</label>
+              <div class="select-wrap"><select id="f-codigo"><option value="">Todos</option></select></div></div>
             <div class="dd" id="dd-login"><label class="dd-label" for="f-login"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>Login</label>
               <div class="select-wrap"><select id="f-login"><option value="">Todos</option></select></div></div>
           </div>
@@ -179,7 +179,7 @@
             <div class="table-tools">
               <div class="select-wrap"><select id="t-situacao" aria-label="Situação">
                 <option value="">Todas as situações</option><option value="errado">Errado</option><option value="certo">Certo</option>
-                <option value="sem_rotinha">Base fora da rotinha</option><option value="sem_codigo">Destino sem código</option><option value="sem_regra">Rota sem regra</option>
+                <option value="sem_segmento">Sem 3 Segmentos</option><option value="sem_codigo">Código fora da tabela</option><option value="sem_regra">Rota sem regra</option>
               </select></div>
               <label class="find">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
@@ -196,7 +196,7 @@
         </section>
       </section>
 
-      <footer class="foot">Fonte: JMS (viagens Concluído e Em Trânsito saindo da base, e os bipes de carregamento) · rotinha e tabela de rotas<span class="made-by">Feito por Caike Oliveira</span></footer>
+      <footer class="foot">Fonte: JMS (viagens Concluído e Em Trânsito saindo da base, bipes de carregamento e o 3 Segmentos de cada remessa) · tabela de rotas do SC<span class="made-by">Feito por Caike Oliveira</span></footer>
     </main>
   </div>
 

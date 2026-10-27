@@ -8,9 +8,9 @@
  *   - Busca no JMS (lib/coletor.js, lib/jms.js): viagens do dia (PDD de saída = a nossa base, fixo; Status Concluído ou
  *     Em Trânsito) → Bipe de carregamento da base → lista de pacotes. Hoje a cada "minutos"; ontem a cada "minutosDiaAnterior"
  *     (o dia anterior fica guardado completo). Os dias ficam no banco: o painel abre qualquer período já buscado.
- *   - Confere (lib/regras.js): Base Destino → planilha rotinha (SEGMENTOS e DESTINO) → planilha de rotas.
- *   - Painel (public/): período (data inicial e final), filtros Status e Base Destino (bases da tabela de rotas), cartões por
- *     turno, mais afetados, gráficos e a tabela com tudo; Excel da tabela.
+ *   - Confere (lib/regras.js), só pelo JMS: "3 Segmentos" de cada remessa (Rastreamento do pacote) → planilha de rotas.
+ *   - Painel (public/): período (data inicial e final), filtros Status e Base Destino (bases da tabela de rotas), erro do dia
+ *     por turno comparado com o dia anterior, mais ofensores, gráficos e a tabela com tudo (turno e destino correto); Excel.
  *
  * Node.js 22.13 ou mais novo, sem instalar pacotes. Configuração: config.json (criado na primeira vez, ao lado deste arquivo).
  * Uso: node server.js — no Windows, por um atalho: "C:\dashmaster\node\node.exe" "C:\expedicao_incorreta\server.js"
@@ -37,7 +37,7 @@ const os = require('os');
 const crypto = require('crypto');
 const {Banco} = require('./lib/db');
 const {Jms} = require('./lib/jms');
-const {Regras, lerRotinha, lerRotas, TIPOS} = require('./lib/regras');
+const {Regras, lerRotas, TIPOS} = require('./lib/regras');
 const {Coletor, hojeSp, somaDias, diasEntre, diasDaAgenda} = require('./lib/coletor');
 const {STATUS, codigosStatus, statusDe} = require('./lib/status');
 const {Painel} = require('./lib/painel');
@@ -53,8 +53,7 @@ const DEFAULTS = {
   minutos: 10,            // de quanto em quanto tempo busca no JMS (dia de hoje)
   minutosDiaAnterior: 60, // de quanto em quanto tempo busca ontem de novo, para guardar o dia anterior completo (0 = não busca)
   status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
-  consultarSegmentos: true, // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote › Informação básica), uma vez por pacote
-  consultasSegmentos: 10,   // quantas dessas consultas ao mesmo tempo
+  consultasSegmentos: 10,  // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote): quantas consultas ao mesmo tempo
   tamanhoPagina: 100,     // pacotes por consulta ao JMS
   tamanhoPaginaViagens: 50,
   consultasAoMesmoTempo: 4,
@@ -83,7 +82,6 @@ function lerConfig() {
   c.codigoBase = String(c.codigoBase).trim(); c.nomeBase = String(c.nomeBase).trim();
   c.minutos = Math.max(2, c.minutos);
   c.consultasSegmentos = Math.min(50, c.consultasSegmentos);
-  c.consultarSegmentos = !/^(false|nao|não|0)$/i.test(String(c.consultarSegmentos));
   c.minutosDiaAnterior = Number(c.minutosDiaAnterior) > 0 ? Math.max(c.minutos, Number(c.minutosDiaAnterior)) : 0;
   c.statusCodigos = codigosStatus(c.status);
   if (!c.statusCodigos.concluido.size && !c.statusCodigos.em_transito.size) throw new Error('"status" do config.json sem nenhum código.');
@@ -219,7 +217,7 @@ async function lerJson(req) {
 }
 function filtros(u) {
   const g = k => String(u.searchParams.get(k) || '').slice(0, 120);
-  return {status: STATUS[g('status')] ? g('status') : '', turno: g('turno'), rota: g('rota'), destino: g('destino'), segmento: g('segmento'),
+  return {status: STATUS[g('status')] ? g('status') : '', turno: g('turno'), rota: g('rota'), destino: g('destino'), codigo: g('codigo'),
     login: g('login'), situacao: g('situacao'), viagem: g('viagem'), busca: g('busca')};
 }
 /** Período pedido: de/ate (ou dia). Até hoje, no máximo MAX_DIAS dias. → {de, ate} */
@@ -242,7 +240,7 @@ function estadoPublico() {
     hoje: hojeSp(), maxDias: MAX_DIAS,
     busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, dias: e.dias, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
       errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos},
-    planilhas: {erros: r.erros, rotinha: !!r.rotinha, rotas: !!r.rotas}};
+    planilhas: {erros: r.erros, rotas: !!r.rotas}};
 }
 
 // ------------------------------------------------------------------ rotas HTTP
@@ -286,13 +284,17 @@ async function tratar(req, res) {
     const tipo = tipoDe(u), {de, ate} = periodoDe(u), linhas = painel.planilha(tipo, de, ate, filtros(u));
     const nome = 'expedicao_' + (tipo === 'troncal' ? 'troncal' : 'secundaria') + '_' + de + (ate !== de ? '_a_' + ate : '') + '.xlsx';
     return enviar(res, 200, escreverXlsx([{nome: tipo === 'troncal' ? 'Rota troncal' : 'Rota secundária', linhas,
-      larguras: [7, 20, 20, 22, 18, 30, 18, 18, 18, 18, 20, 20, 10, 12, 16, 18, 20, 30, 20]}]),
+      larguras: [7, 22, 20, 26, 18, 30, 18, 18, 18, 18, 20, 20, 12, 14, 10, 20, 30, 20]}]),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {'Content-Disposition': 'attachment; filename="' + nome + '"'});
   }
   if (p === '/api/buscar' && req.method === 'POST') {
-    // Hoje e ontem sempre; os outros dias do período só se ainda não foram buscados (dias fechados ficam como estão).
+    // Hoje e ontem sempre; os outros dias do período só se ainda não foram buscados ou têm pacote sem o "3 Segmentos".
     const b = await lerJson(req), {de, ate} = periodo(b.de, b.ate, b.dia), ontem = somaDias(hojeSp(), -1), buscados = banco.buscados(de, ate);
-    const dias = diasEntre(de, ate).filter(d => d >= ontem || !buscados.has(d));
+    const dias = diasEntre(de, ate).filter(d => {
+      if (d >= ontem || !buscados.has(d)) return true;
+      const c = banco.contarSegmentos(d);
+      return c.total > c.feitos;
+    });
     if (dias.length) coletor.coletar(dias).catch(() => {});
     return json(res, 200, {ok: true, dias, estado: estadoPublico()});
   }
@@ -307,7 +309,7 @@ async function tratarConfig(req, res, u) {
     return json(res, 200, {versao: VERSAO, config: Object.assign({}, cfg, {senha: cfg.senha ? 'definida' : '', statusCodigos: undefined}), enderecos: enderecos(),
       token: {fonte: c.fonte, temProprio: !!banco.get('JMS_AUTHTOKEN'), dashmaster: !!credenciaisDashmaster()},
       planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
-      segmentosHoje: cfg.consultarSegmentos ? banco.contarSegmentos(hojeSp()) : null,
+      segmentosHoje: banco.contarSegmentos(hojeSp()),
       status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
       viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),
       jms: {pacotesSecundaria: banco.get('PACOTES_SECUNDARIA') || '', routeTroncal: banco.get('ROUTE_AUTO_TRONCAL') || '',
@@ -338,13 +340,12 @@ async function tratarConfig(req, res, u) {
   if (p === '/config/api/planilha') {
     const nome = u.searchParams.get('nome'), buf = await lerCorpo(req);
     try {
-      if (nome === 'rotinha') { lerRotinha(buf); fs.writeFileSync(path.join(cfg.planilhas, 'rotinhas.xlsx'), buf); }
-      else if (nome === 'rotas') { lerRotas(buf); fs.writeFileSync(regras.arquivoRotas(), buf); }
+      if (nome === 'rotas') { lerRotas(buf); fs.writeFileSync(regras.arquivoRotas(), buf); }
       else return json(res, 400, {ok: false, error: 'Planilha desconhecida.'});
     } catch (e) { return json(res, 400, {ok: false, error: 'Não usei o arquivo: ' + e.message}); }
     regras.atualizar(true);
     painel.invalidar();
-    log('info', 'Planilha ' + (nome === 'rotinha' ? 'rotinha' : 'de rotas') + ' trocada pela tela Configurações.');
+    log('info', 'Planilha de rotas trocada pela tela Configurações.');
     return json(res, 200, {ok: true, planilhas: regras.resumo()});
   }
   if (p === '/config/api/rotas.xlsx') {
@@ -398,7 +399,7 @@ servidor.listen(cfg.porta, cfg.host, () => {
   log('info', '  Configurações (AuthToken e planilhas): http://localhost:' + cfg.porta + '/config');
   const r = regras.resumo();
   r.erros.forEach(m => log('aviso', m));
-  if (r.rotinha) log('info', 'Rotinha: ' + r.rotinha.bases + ' bases. Rotas: ' + (r.rotas ? r.rotas.troncal + ' troncais e ' + r.rotas.secundaria + ' secundárias.' : '—'));
+  if (r.rotas) log('info', 'Planilha de rotas: ' + r.rotas.troncal + ' rotas troncais e ' + r.rotas.secundaria + ' secundárias.');
   if (!credenciais().fonte) log('aviso', 'Falta o AuthToken do JMS: abra Configurações (ou cadastre no DashMaster deste computador).');
   if (process.env.EXPEDICAO_SEM_AGENDADOR === '1') return;
   log('info', 'Busca no JMS: hoje a cada ' + cfg.minutos + ' min' + (cfg.minutosDiaAnterior ? '; ontem a cada ' + cfg.minutosDiaAnterior +
