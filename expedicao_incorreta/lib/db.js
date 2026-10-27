@@ -38,6 +38,7 @@ class Banco {
       CREATE TABLE IF NOT EXISTS segmentos (billCode TEXT PRIMARY KEY, s1 TEXT, s2 TEXT, s3 TEXT, centro TEXT,
         em INTEGER NOT NULL DEFAULT 0, erro TEXT NOT NULL DEFAULT '');
       CREATE INDEX IF NOT EXISTS pacotes_remessa ON pacotes (billCode);
+      CREATE INDEX IF NOT EXISTS pacotes_so_dia ON pacotes (dia);
     `);
     // 1.2: status da viagem quando a lista de pacotes foi conferida (viagem concluída e conferida não muda mais).
     if (!this.db.prepare('PRAGMA table_info(viagens)').all().some(c => c.name === 'estadoBusca')) this.db.exec('ALTER TABLE viagens ADD COLUMN estadoBusca TEXT');
@@ -76,7 +77,8 @@ class Banco {
       statusDia: this.db.prepare('SELECT estado, COUNT(*) AS n FROM viagens WHERE tipo = ? AND dia = ? GROUP BY estado ORDER BY n DESC'),
       marcarDia: this.db.prepare('INSERT INTO buscas (dia, em) VALUES (?, ?) ON CONFLICT (dia) DO UPDATE SET em = excluded.em'),
       buscados: this.db.prepare('SELECT dia FROM buscas WHERE dia BETWEEN ? AND ?'),
-      diasSalvos: this.db.prepare('SELECT COUNT(*) AS n, MIN(dia) AS de, MAX(dia) AS ate FROM buscas')
+      diasSalvos: this.db.prepare('SELECT COUNT(*) AS n, MIN(dia) AS de, MAX(dia) AS ate FROM buscas'),
+      diasComPacotes: this.db.prepare('SELECT DISTINCT dia FROM pacotes ORDER BY dia DESC')
     };
   }
   get(k) { const r = this.st.get.get(String(k)); return r ? r.v : null; }
@@ -112,6 +114,8 @@ class Banco {
     const o = r || {};
     this.st.salvarSegmento.run(String(billCode), o.s1 || '', o.s2 || '', o.s3 || '', o.centro || '', Date.now(), erro || '');
   }
+  /** Dias com pacotes guardados, do mais novo ao mais antigo. */
+  diasComPacotes() { return this.st.diasComPacotes.all().map(r => r.dia); }
   /** {total, feitos, comErro}: remessas do dia e quantas já têm o "3 Segmentos". */
   contarSegmentos(dia) { return this.st.contarSegmentos.get(dia); }
   contarDia(tipo, dia) { return this.st.contarDia.get(tipo, dia).n; }

@@ -131,6 +131,8 @@ function criar(dia) {
         const w = String(JSON.parse(Buffer.concat(partes).toString('utf8') || '{}').waybillNo || '');
         estado.segmentosPedidos[w] = (estado.segmentosPedidos[w] || 0) + 1;
         if (estado.recusarSegmentos) return resp({code: 135010099, msg: 'Sem permissão para Rastreamento do pacote', succ: false, fail: true});
+        // Bloqueio por consultas demais: página HTML com 403 (como o firewall do JMS).
+        if (estado.bloquearSegmentos) { res.writeHead(403, {'Content-Type': 'text/html'}); return res.end('<html><body>Request blocked.</body></html>'); }
         const x = pacoteDe(w), sg = x && SEGMENTOS_FALSOS[x.destsite] || [null, ''];
         return resp({code: 1, msg: '1:Solicitação concluída', succ: true, fail: false,
           data: {waybillNo: w, details: {waybillNo: w, terminalDispatchCode: sg[0], destinationDistributeName: sg[1], receiverCityName: 'Cidade Teste'}}});

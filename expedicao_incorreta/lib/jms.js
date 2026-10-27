@@ -19,6 +19,10 @@
  *
  * Cabeçalhos como o DashMaster: AuthToken, Lang/Langtype PT, Timezone GMT-0300 e, se o JMS pedir, Routename (testa as
  * variantes uma vez e guarda a que for aceita).
+ *
+ * Ritmo: no máximo "porSegundo" consultas por segundo, somando todas (o JMS bloqueia o computador por um tempo quando recebe
+ * consultas demais seguidas: devolve uma página em vez de dados, ou HTTP 429). Nesse bloqueio o erro vem com {bloqueio: true}
+ * e devagar() reduz o ritmo pela metade.
  */
 const JMS = 'https://gw.jtjms-br.com';
 const AUTH_RE = /token|登录|登陆|login|expired|expirad|过期|失效|会话|session|sess[aã]o|unauthori|未授权|认证/i;
@@ -51,6 +55,19 @@ class Jms {
     this.log = opcoes.log || (() => {});
     this.tempoMs = opcoes.tempoMs || 60000;
     this.testouRota = {};
+    this.porSegundo = Number(opcoes.porSegundo) > 0 ? Number(opcoes.porSegundo) : 5;
+    this.proxima = 0;
+  }
+  /** Espera a vez da próxima consulta (no máximo porSegundo por segundo, somando todas). */
+  async vez() {
+    const agora = Date.now(), quando = Math.max(agora, this.proxima);
+    this.proxima = quando + 1000 / this.porSegundo;
+    if (quando > agora) await new Promise(r => setTimeout(r, quando - agora));
+  }
+  /** O JMS bloqueou: metade do ritmo (no mínimo 1 por segundo). → o ritmo novo */
+  devagar() {
+    this.porSegundo = Math.max(1, Math.floor(this.porSegundo / 2));
+    return this.porSegundo;
   }
   cabecalhos(grupo, variante) {
     const c = this.credenciais() || {};
@@ -76,6 +93,7 @@ class Jms {
     if (!c.JMS_AUTHTOKEN && !c.JMS_COOKIE && !c.JMS_AUTHORIZATION) {
       throw new ErroJms('Falta o AuthToken do JMS: cole em Configurações.', {auth: true, semToken: true});
     }
+    await this.vez();
     const headers = this.cabecalhos(grupo, variante);
     const opts = {method: corpo ? 'POST' : 'GET', headers, redirect: 'manual', signal: AbortSignal.timeout(this.tempoMs)};
     if (corpo) {
@@ -87,11 +105,15 @@ class Jms {
     catch (e) { throw new ErroJms('Falha de rede ao consultar o JMS: ' + String(e && (e.cause && e.cause.code || e.message) || e).slice(0, 160), {rede: true}); }
     const st = resp.status;
     if (st >= 300 && st < 400) throw new ErroJms('O JMS mandou para a tela de login (sessão vencida).', {auth: true, status: st});
-    if (st === 429 || st >= 500) throw new ErroJms('JMS indisponível agora (HTTP ' + st + ').', {rede: true, status: st});
+    if (st === 429) throw new ErroJms('O JMS pediu para esperar (HTTP 429: consultas demais seguidas).', {bloqueio: true, status: st});
+    if (st >= 500) throw new ErroJms('JMS indisponível agora (HTTP ' + st + ').', {rede: true, status: st});
     let json = null;
     try { json = JSON.parse(text); } catch (e) { /* abaixo */ }
     if (!json || typeof json !== 'object') {
-      if (/^\s*</.test(text || '')) throw new ErroJms('O JMS devolveu uma página em vez de dados (sessão vencida ou bloqueada).', {auth: true, status: st});
+      // Página em vez de dados: quase sempre o bloqueio por consultas demais (o token vencido responde com dados: "token失效").
+      if (/^\s*</.test(text || '')) {
+        throw new ErroJms('O JMS devolveu uma página em vez de dados (bloqueio por consultas demais seguidas, ou sessão vencida).', {auth: true, bloqueio: true, status: st});
+      }
       throw new ErroJms('Resposta do JMS sem dados (HTTP ' + st + ').', {recusa: true, status: st});
     }
     const code = json.code === undefined || json.code === null ? null : Number(json.code);

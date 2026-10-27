@@ -150,7 +150,9 @@ class Painel {
         foraDoStatus: tudo.fora},
       opcoes: {
         // Base Destino: as bases da tabela de rotas do SC (desta rota: troncal ou secundária).
-        rotas: this.regras.rotas ? Array.from(new Set(this.regras.rotas.regras[tipo].map(r => r.rota))).sort((a, b) => a.localeCompare(b, 'pt-BR')) : [],
+        // (mais as da outra tabela que aparecem nos caminhões deste painel, ex.: DC GRU-SP como viagem secundária)
+        rotas: this.regras.rotas ? Array.from(new Set(this.regras.rotas.regras[tipo].map(r => r.rota)
+          .concat(tudo.linhas.filter(l => l.situacao !== 'sem_regra').map(l => l.rota)))).sort((a, b) => a.localeCompare(b, 'pt-BR')) : [],
         destinos: Array.from(new Set(tudo.linhas.map(l => l.rotaCerta).filter(Boolean))).sort(),
         codigos: Array.from(new Set(tudo.linhas.map(l => l.codigo1).filter(Boolean))).sort(),
         logins: Array.from(new Set(tudo.linhas.map(l => l.digitalizadoPor).filter(Boolean))).sort()

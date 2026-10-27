@@ -53,7 +53,8 @@ const DEFAULTS = {
   minutos: 10,            // de quanto em quanto tempo busca no JMS (dia de hoje)
   minutosDiaAnterior: 60, // de quanto em quanto tempo busca ontem de novo, para guardar o dia anterior completo (0 = não busca)
   status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
-  consultasSegmentos: 10,  // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote): quantas consultas ao mesmo tempo
+  consultasSegmentos: 3,   // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote): quantas consultas ao mesmo tempo
+  consultasPorSegundo: 5,  // no máximo tantas consultas ao JMS por segundo, somando todas (mais que isso o JMS bloqueia)
   tamanhoPagina: 100,     // pacotes por consulta ao JMS
   tamanhoPaginaViagens: 50,
   consultasAoMesmoTempo: 4,
@@ -75,7 +76,8 @@ function lerConfig() {
     catch (e) { throw new Error('config.json inválido (' + e.message + '). Corrija o arquivo ou apague-o para recriar.'); }
   } else fs.writeFileSync(arq, JSON.stringify(DEFAULTS, null, 2) + '\n');
   const c = Object.assign({}, DEFAULTS, bruto);
-  ['porta', 'minutos', 'tamanhoPagina', 'tamanhoPaginaViagens', 'consultasAoMesmoTempo', 'viagemGrande', 'minutosViagemGrande', 'consultasSegmentos'].forEach(k => {
+  ['porta', 'minutos', 'tamanhoPagina', 'tamanhoPaginaViagens', 'consultasAoMesmoTempo', 'viagemGrande', 'minutosViagemGrande', 'consultasSegmentos',
+    'consultasPorSegundo'].forEach(k => {
     c[k] = Number(c[k]) > 0 ? Number(c[k]) : DEFAULTS[k];
   });
   if (process.env.EXPEDICAO_PORTA) c.porta = Number(process.env.EXPEDICAO_PORTA);
@@ -161,7 +163,7 @@ let banco, regras, jms, coletor, painel;
 try {
   banco = new Banco(path.join(cfg.dados, 'expedicao.db'));
   regras = new Regras(cfg.planilhas);
-  jms = new Jms({base: process.env.EXPEDICAO_JMS_URL, credenciais, props: banco, log, tempoMs: 60000});
+  jms = new Jms({base: process.env.EXPEDICAO_JMS_URL, credenciais, props: banco, log, tempoMs: 60000, porSegundo: cfg.consultasPorSegundo});
   painel = new Painel(banco, regras, cfg.statusCodigos);
   coletor = new Coletor({banco, jms, cfg, log, aoMudar: (tipo, dia) => painel.invalidar(tipo, dia)});
 } catch (e) { pararComErro('Não consegui iniciar: ' + (e && e.stack || e)); }
@@ -239,7 +241,7 @@ function estadoPublico() {
   return {versao: VERSAO, base: cfg.nomeBase, codigoBase: cfg.codigoBase, minutos: cfg.minutos, minutosDiaAnterior: cfg.minutosDiaAnterior,
     hoje: hojeSp(), maxDias: MAX_DIAS,
     busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, dias: e.dias, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
-      errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos},
+      errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos, porSegundo: jms.porSegundo},
     planilhas: {erros: r.erros, rotas: !!r.rotas}};
 }
 
@@ -290,13 +292,11 @@ async function tratar(req, res) {
   if (p === '/api/buscar' && req.method === 'POST') {
     // Hoje e ontem sempre; os outros dias do período só se ainda não foram buscados ou têm pacote sem o "3 Segmentos".
     const b = await lerJson(req), {de, ate} = periodo(b.de, b.ate, b.dia), ontem = somaDias(hojeSp(), -1), buscados = banco.buscados(de, ate);
-    const dias = diasEntre(de, ate).filter(d => {
-      if (d >= ontem || !buscados.has(d)) return true;
-      const c = banco.contarSegmentos(d);
-      return c.total > c.feitos;
-    });
-    if (dias.length) coletor.coletar(dias).catch(() => {});
-    return json(res, 200, {ok: true, dias, estado: estadoPublico()});
+    const dias = diasEntre(de, ate).filter(d => d >= ontem || !buscados.has(d));
+    // Pacotes sem o "3 Segmentos" no período: a busca consulta (do dia mais novo para o mais antigo).
+    const segmentos = diasEntre(de, ate).some(d => { const c = banco.contarSegmentos(d); return c.total > c.feitos; });
+    if (dias.length || segmentos) coletor.coletar(dias).catch(() => {});
+    return json(res, 200, {ok: true, dias, segmentos, estado: estadoPublico()});
   }
   return enviar(res, 404, 'Não encontrado.');
 }
@@ -308,7 +308,7 @@ async function tratarConfig(req, res, u) {
     const c = credenciais(), r = regras.resumo();
     return json(res, 200, {versao: VERSAO, config: Object.assign({}, cfg, {senha: cfg.senha ? 'definida' : '', statusCodigos: undefined}), enderecos: enderecos(),
       token: {fonte: c.fonte, temProprio: !!banco.get('JMS_AUTHTOKEN'), dashmaster: !!credenciaisDashmaster()},
-      planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
+      planilhas: r, busca: Object.assign({}, coletor.estado, {porSegundoAtual: jms.porSegundo}), registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
       segmentosHoje: banco.contarSegmentos(hojeSp()),
       status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
       viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),

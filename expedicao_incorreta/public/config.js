@@ -33,12 +33,12 @@
       if (!$('dia-busca').value) $('dia-busca').value = e.hoje;
       $('dia-busca').max = e.hoje;
       var b = e.busca, br = function (d) { return d ? d.split('-').reverse().join('/') : ''; };
-      var diasUlt = b.ultimo ? (b.ultimo.dias && b.ultimo.dias.length ? b.ultimo.dias : [b.ultimo.dia]) : [];
+      var diasUlt = b.ultimo ? (b.ultimo.dias && b.ultimo.dias.length ? b.ultimo.dias : [b.ultimo.dia]).filter(Boolean) : [];
       var codigos = function (l) { return l.length ? 'código ' + l.join(', ') : 'sem código'; };
       var nomes = {concluido: 'concluídas', em_transito: 'em trânsito'};
       info('busca-info', [
         ['Situação', b.rodando ? (b.dias && b.dias.length > 1 ? br(b.dia) + ' · ' : '') + b.etapa : b.authVencido ? 'Parado: AuthToken vencido' : b.etapa],
-        ['Última busca', b.ultimo ? hora(b.ultimo.quando) + ' · ' + (diasUlt.length > 1 ? 'dias ' : 'dia ') + diasUlt.map(br).join(', ') + ' · ' +
+        ['Última busca', b.ultimo ? hora(b.ultimo.quando) + ' · ' + (diasUlt.length ? (diasUlt.length > 1 ? 'dias ' : 'dia ') + diasUlt.map(br).join(', ') : 'só 3 Segmentos') + ' · ' +
           (b.ultimo.ok ? 'ok' : 'falhou') + ' · ' + b.ultimo.msg : '—'],
         ['PDD de saída (fixo)', e.config.nomeBase + ' (código ' + e.config.codigoBase + ')'],
         ['Status no painel', 'Concluído：已完成 (' + codigos(e.status.concluido) + ') e Em Trânsito：在途 (' + codigos(e.status.emTransito) + '). Os outros ficam de fora.'],
@@ -52,7 +52,7 @@
           ' min (guarda o dia anterior completo)' : ' · ontem: desligado')],
         ['3 Segmentos no JMS', e.segmentosHoje && e.segmentosHoje.total ?
           'hoje: ' + fmt(e.segmentosHoje.feitos) + ' de ' + fmt(e.segmentosHoje.total) + ' pacotes conferidos' + (e.segmentosHoje.comErro ? ' · ' + fmt(e.segmentosHoje.comErro) +
-          ' com erro (tenta de novo em 30 min)' : '') + ' · ' + e.config.consultasSegmentos + ' consultas ao mesmo tempo' : 'hoje ainda sem pacotes'],
+          ' com erro (tenta de novo em 30 min)' : '') + ' · ritmo: ' + b.porSegundoAtual + ' por segundo' : 'hoje ainda sem pacotes'],
         ['Dias guardados', e.salvos && e.salvos.n ? e.salvos.n + (e.salvos.n === 1 ? ' dia' : ' dias') + ' (de ' + br(e.salvos.de) + ' a ' + br(e.salvos.ate) + ')' : 'nenhum ainda'],
         ['Pacotes da secundária', e.jms.pacotesSecundaria ? 'endereço "' + e.jms.pacotesSecundaria + '/scan/page"' : 'ainda não testado']
       ]);

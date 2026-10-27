@@ -7,8 +7,10 @@
  *   - Só busca de novo os pacotes de uma viagem quando a quantidade bipada mudou (o JMS não muda a lista sem mudar o número).
  *     Viagem concluída já conferida depois de concluída não é consultada de novo (a carga não muda mais).
  *   - Viagem grande (mais de "viagemGrande" pacotes) busca no máximo a cada "minutosViagemGrande" minutos.
- *   - Depois das viagens, o bloco "3 Segmentos" (Rastreamento do pacote › Informação básica) de cada remessa nova: uma
- *     consulta por remessa, guardada para sempre (o código não muda). A conferência é só por ele (destino correto).
+ *   - Depois das viagens, o bloco "3 Segmentos" (Rastreamento do pacote › Informação básica) de cada remessa que ainda não
+ *     tem: uma consulta por remessa, guardada para sempre (o código não muda). A conferência é só por ele (destino correto).
+ *     Do dia mais novo para o mais antigo, no ritmo do lib/jms.js e por no máximo "minutos" − 2 min em cada busca (o resto
+ *     fica para a próxima: as viagens continuam atualizadas). Se o JMS bloquear, pausa 5 min e volta mais devagar.
  *   - AuthToken vencido para tudo e avisa; erro numa viagem não para as outras.
  */
 const {statusDe} = require('./status');
@@ -83,17 +85,17 @@ class Coletor {
         for (const dia of lista) {
           e.dia = dia;
           for (const tipo of tipos) await this.coletarTipo(tipo, dia, o.forcar);
-          await this.buscarSegmentos(dia);
           if (tipos.length > 1) this.banco.marcarDia(dia);
           feitos.push(dia);
         }
+        await this.buscarSegmentos();
         e.authVencido = false;
         msg = e.viagens + ' viagens, ' + e.pacotes + ' pacotes novos ou atualizados' + (e.segmentos ? ', ' + e.segmentos + ' conferidos no JMS (3 segmentos)' : '') +
           (e.erros.length ? ' · ' + e.erros.length + ' com erro' : '');
       } catch (err) {
         ok = false;
         msg = String(err && err.message || err);
-        if (err && err.auth) e.authVencido = true;
+        if (err && err.auth && !err.bloqueio) e.authVencido = true;
         this.log('erro', 'Busca de ' + e.dia + ' parou: ' + msg);
       } finally {
         Object.assign(e, {rodando: false, fim: Date.now(), tipo: '', etapa: ok ? 'Pronto.' : 'Parou: ' + msg});
@@ -136,41 +138,58 @@ class Coletor {
     if (mudou && this.aoMudar) this.aoMudar(tipo, dia);
   }
   /**
-   * "3 Segmentos" de cada remessa do dia que ainda não tem (uma consulta por remessa, "consultasSegmentos" ao mesmo tempo).
-   * O painel é atualizado a cada lote. Se o JMS recusar as 20 primeiras sem nenhum acerto, para e avisa (tenta de novo na
-   * próxima busca).
+   * "3 Segmentos" das remessas que ainda não têm (uma consulta por remessa, "consultasSegmentos" ao mesmo tempo, no ritmo
+   * do JMS), do dia mais novo para o mais antigo, até o tempo desta busca acabar. O painel é atualizado a cada lote.
+   *   - Bloqueio do JMS (página em vez de dados, HTTP 429): para, pausa 5 min e o ritmo cai pela metade. A remessa não é
+   *     marcada com erro (tenta de novo depois).
+   *   - JMS recusando as 20 primeiras sem nenhum acerto: para e avisa. Token vencido: para tudo.
    */
-  async buscarSegmentos(dia) {
-    const e = this.estado, cfg = this.cfg, total = this.banco.contarSegmentos(dia);
-    let feitos = total.feitos, ok = 0, falhas = 0, ultimoErro = '';
-    const falta = total.total - total.feitos;
-    if (falta <= 0) return;
+  async buscarSegmentos() {
+    const e = this.estado, cfg = this.cfg;
+    if (this.pausaSegmentos && Date.now() < this.pausaSegmentos) return;
+    const fim = Date.now() + Math.max(2, (cfg.minutos || 10) - 2) * 60000, br = d => d.split('-').reverse().join('/');
+    let ok = 0, falhas = 0, ultimoErro = '', parar = '';
     e.tipo = '';
     e.avisoSegmentos = '';
-    for (let lote = this.banco.semSegmento(dia, 2000); lote.length; lote = this.banco.semSegmento(dia, 2000)) {
-      let parar = false;
-      await emParalelo(lote, cfg.consultasSegmentos || 10, async b => {
-        if (parar) return;
-        try {
-          this.banco.salvarSegmento(b, await this.jms.segmentos(b), '');
-          ok++; feitos++; e.segmentos++;
-        } catch (err) {
-          if (err && err.auth && !err.recusa) throw err;
-          falhas++;
-          ultimoErro = String(err && err.message || err).slice(0, 200);
-          this.banco.salvarSegmento(b, null, ultimoErro);
-          if (!ok && falhas >= 20) parar = true;
-        }
-        e.etapa = 'Conferindo no JMS (3 segmentos): ' + feitos + ' de ' + total.total + ' pacotes…';
-      });
-      if (this.aoMudar) { this.aoMudar('troncal', dia); this.aoMudar('secundaria', dia); }
-      if (parar) {
-        e.avisoSegmentos = 'O JMS recusou o Rastreamento do pacote (3 segmentos): ' + ultimoErro + ' Os pacotes ficam "Sem 3 Segmentos" até a próxima busca.';
-        this.log('aviso', e.avisoSegmentos);
-        return;
+    for (const dia of this.banco.diasComPacotes()) {
+      const total = this.banco.contarSegmentos(dia);
+      let feitos = total.feitos;
+      for (let lote = this.banco.semSegmento(dia, 500); lote.length && !parar; lote = this.banco.semSegmento(dia, 500)) {
+        if (Date.now() >= fim) { parar = 'tempo'; break; }
+        await emParalelo(lote, cfg.consultasSegmentos || 3, async b => {
+          if (parar || Date.now() >= fim) return;
+          try {
+            this.banco.salvarSegmento(b, await this.jms.segmentos(b), '');
+            ok++; feitos++; e.segmentos++;
+          } catch (err) {
+            if (err && err.bloqueio) { parar = 'bloqueio'; ultimoErro = String(err.message || err); return; }
+            if (err && err.auth && !err.recusa) throw err;
+            falhas++;
+            ultimoErro = String(err && err.message || err).slice(0, 200);
+            this.banco.salvarSegmento(b, null, ultimoErro);
+            if (!ok && falhas >= 20) parar = 'recusa';
+          }
+          e.etapa = 'Conferindo no JMS (3 segmentos) · ' + br(dia) + ': ' + feitos + ' de ' + total.total + ' pacotes…';
+        });
+        if (this.aoMudar) { this.aoMudar('troncal', dia); this.aoMudar('secundaria', dia); }
+        if (!parar && Date.now() >= fim) parar = 'tempo';
       }
+      if (parar) break;
     }
-    this.log('info', dia + ' · 3 segmentos: ' + ok + ' pacotes conferidos no JMS' + (falhas ? ', ' + falhas + ' com erro (tenta de novo em 30 min)' : '') + '.');
+    if (parar === 'bloqueio') {
+      this.pausaSegmentos = Date.now() + 5 * 60000;
+      const ritmo = this.jms.devagar ? this.jms.devagar() : 1;
+      e.avisoSegmentos = 'O JMS bloqueou as consultas por um tempo (consultas demais seguidas). O app pausa 5 min e volta mais devagar (' +
+        ritmo + ' por segundo). ' + ultimoErro;
+      this.log('aviso', e.avisoSegmentos);
+    } else if (parar === 'recusa') {
+      e.avisoSegmentos = 'O JMS recusou o Rastreamento do pacote (3 segmentos): ' + ultimoErro + ' Os pacotes ficam "Sem 3 Segmentos" até a próxima busca.';
+      this.log('aviso', e.avisoSegmentos);
+    }
+    if (ok || falhas) {
+      this.log('info', '3 segmentos: ' + ok + ' pacotes conferidos no JMS' + (falhas ? ', ' + falhas + ' com erro (tenta de novo em 30 min)' : '') +
+        (parar === 'tempo' ? '. O resto continua na próxima busca.' : '.'));
+    }
   }
   /** Viagens do dia que saem da nossa base (filtro do JMS e conferido aqui também). lista.mudou = alguma viagem nova ou com
    * status, nome ou destino diferente (o painel recalcula). */

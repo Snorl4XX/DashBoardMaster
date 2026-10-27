@@ -107,8 +107,9 @@
     if (t.semRegra) h = alerta(h, true, pac(t.semRegra) + ' de rota fora da planilha de rotas', ex(p.semRegra) + '. Inclua a rota na planilha rotas.xlsx.');
     if (e.busca.avisoSegmentos) h = alerta(h, false, 'Conferência no JMS (3 segmentos) parada.', e.busca.avisoSegmentos);
     var ss = p.semSegmento;
-    if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', e.busca.rodando ?
-      'O app está consultando no Rastreamento do pacote. Eles entram na conta quando o JMS responder.' : 'Clique em Atualizar para consultar no Rastreamento do pacote.');
+    if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta no Rastreamento do pacote aos poucos (' +
+      (e.busca.porSegundo || 5) + ' por segundo, para o JMS não bloquear): hoje primeiro, depois os dias anteriores. Eles entram na conta quando o JMS responder.' +
+      (e.busca.rodando ? '' : ' Para adiantar, clique em Atualizar.'));
     if (ss.jmsSemCodigo) h = alerta(h, true, pac(ss.jmsSemCodigo) + ' sem código no 3 Segmentos do JMS', 'O Rastreamento do pacote não tem o Código de primeiro segmento: não dá para conferir.');
     if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com código fora da tabela de rotas', ex(p.semCodigo) +
       '. Inclua o código na rota certa da aba "Rotas" da planilha rotas.xlsx.');
@@ -354,7 +355,7 @@
       .then(function (r) {
         if (r.estado) mostrarEstado(r.estado);
         if (r.error) alert(r.error);
-        else if (r.dias && !r.dias.length) {
+        else if (r.dias && !r.dias.length && !r.segmentos) {
           $('alerts').insertAdjacentHTML('afterbegin', alerta('', true, 'Esse período já está salvo.', 'Os dias antes de ontem ficam fechados. ' +
             'Para buscar um deles de novo: Configurações › Buscar este dia agora (no computador do app).'));
         }

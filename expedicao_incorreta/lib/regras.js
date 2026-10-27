@@ -2,7 +2,8 @@
 /**
  * Regras: a planilha de rotas do SC (o que cada caminhão leva: códigos de 1º nível e, às vezes, só alguns segmentos de 2º
  * nível). A conferência é só pelo JMS: o bloco "3 Segmentos" de cada remessa (Rastreamento do pacote › Informação básica).
- *   1. Rota do caminhão = Próxima parada do pacote (sem ela, o destino da viagem) → linha da planilha de rotas.
+ *   1. Rota do caminhão = Próxima parada do pacote (sem ela, o destino da viagem) → linha da planilha de rotas, na tabela do
+ *      mesmo tipo ou na outra (ex.: o JMS lança caminhões para DC GRU-SP como viagem secundária e a tabela é a troncal).
  *   2. Destino correto = as rotas que recebem o Código de primeiro segmento da remessa (ex.: VDC → RJ SJM). A linha que cita
  *      o Código de dois segmentos vence a linha geral, nas duas tabelas (ex.: SP 395-05 → DC GRU-SP, não SP BRE). Sem linha
  *      específica: a geral do mesmo tipo (troncal ou secundária); se não houver, a do outro tipo.
@@ -111,6 +112,15 @@ class Regras {
     return melhor;
   }
   /**
+   * Rota do caminhão: nome igual (tipo do painel, depois o outro tipo); senão o parecido, na mesma ordem. → regra | null
+   */
+  rotaDoCaminhao(tipo, parada) {
+    const outro = TIPOS.find(t => t !== tipo), n = norm(parada);
+    if (!n || !this.rotas) return null;
+    for (const t of [tipo, outro]) { const r = this.rotas.regras[t].find(x => x.rotaNorm === n); if (r) return r; }
+    return this.acharRegra(tipo, parada) || this.acharRegra(outro, parada);
+  }
+  /**
    * Rotas que recebem o pacote com este código de 1º nível e este segmento. A linha que cita o segmento vence a linha
    * geral, nas duas tabelas; sem ela, a geral do mesmo tipo e, se não houver, a do outro tipo. → [{regra, tipo}]
    */
@@ -131,7 +141,7 @@ class Regras {
    * destinoViagem = destino da viagem (quando o pacote não tem Próxima parada).
    */
   conferir(tipo, p, destinoViagem) {
-    const regra = this.acharRegra(tipo, p.proximaParada) || this.acharRegra(tipo, destinoViagem);
+    const regra = this.rotaDoCaminhao(tipo, p.proximaParada) || this.rotaDoCaminhao(tipo, destinoViagem);
     const s1 = normCodigo(p.seg1), s2 = normSeg(p.seg2);
     const certas = this.rotasPara(tipo, s1, s2);
     const out = {rota: regra ? regra.rota : String(p.proximaParada || destinoViagem || ''), codigo1: s1, segmento: s2,
