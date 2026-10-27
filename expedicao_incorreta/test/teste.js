@@ -120,6 +120,20 @@ function abasRotas(comWW) {
   conferir(bv.viagem('troncal', 'DKVELHA0001').estadoBusca === '4' && bv.buscados('2026-10-01', '2026-10-02').has('2026-10-01') &&
     !bv.buscados('2026-10-01', '2026-10-02').has('2026-10-02') && bv.diasSalvos().n === 1, 'banco da versão 1.1 atualiza sozinho (dias antigos continuam salvos)');
   bv.fechar();
+  // 1.8: o que a 1.7 gravou como "sem código" (resposta vazia do JMS) volta para a fila uma vez.
+  const dbMig = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'exp-mig-')), 'expedicao.db');
+  const bm = new Banco(dbMig);
+  bm.trocarPacotes('troncal', 'DKMIG1', '2026-10-05', [{billCode: 'WMIG1'}]);
+  bm.salvarSegmento('WMIG1', {s1: '', s2: '', s3: ''}, '');
+  bm.db.exec("DELETE FROM props WHERE k = 'SEGMENTOS_VAZIOS_1_8'");
+  bm.fechar();
+  const bm2 = new Banco(dbMig);
+  const filaMig = bm2.semSegmento('2026-10-05');
+  bm2.salvarSegmento('WMIG1', {s1: '', s2: '', s3: ''}, '');
+  bm2.fechar();
+  const bm3 = new Banco(dbMig);
+  conferir(filaMig.join() === 'WMIG1' && bm3.semSegmento('2026-10-05').length === 0, 'resposta vazia gravada até a 1.7 volta para a fila (uma vez só)', filaMig);
+  bm3.fechar();
 
   // Conferência só pelo "3 Segmentos" do JMS: código de 1º nível + código de dois segmentos → rotas da tabela.
   const pastaRegras = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-regras-'));
@@ -284,6 +298,8 @@ function abasRotas(comWW) {
   };
   const buscar = async (corpo) => { const r = await local('POST', '/config/api/buscar', Object.assign({dia: DIA}, corpo || {})); await esperar(50); return Object.assign(await terminar(), {resp: r.json}); };
   const painel = async (tipo, extra) => (await local('GET', '/api/painel?tipo=' + tipo + '&dia=' + DIA + (extra || ''))).json;
+  // Remessa de mentira com "3 Segmentos" NO,901-00,100 (BASE NORTE A-XX).
+  const t1Remessa = () => jms.estado.dados.troncal.pacotes.DKTESTE0001[0].billCode;
 
   const pag = await local('GET', '/troncal');
   conferir(pag.status === 200 && /Expedição Incorreta/.test(pag.texto) && /painel\.js/.test(pag.texto), 'página do painel abre');
@@ -339,8 +355,15 @@ function abasRotas(comWW) {
     'ofensores: próxima parada, ID de viagem, sacas (sem lote = VOLUMOSO), logins e Base Destino', r.top);
   conferir(r.maisAfetados.viagem.nome === 'DKTESTE0001' && r.maisAfetados.proximaParada.nome === 'XX NORTE' && r.maisAfetados.lote.nome === 'LT-ERRO' &&
     r.maisAfetados.baseDestino.nome === 'BASE SUL A-YY', 'cartões dos mais ofensores');
-  conferir(r.pendencias.semCodigo[0].nome === 'código WW 904-00' && r.pendencias.semSegmento.jmsSemCodigo === 1 && r.pendencias.semSegmento.naoConsultados === 0,
-    'pendências: código fora da tabela e pacote sem código no JMS', r.pendencias);
+  conferir(r.pendencias.semCodigo[0].nome === 'código WW 904-00' && r.pendencias.semSegmento.jmsSemCodigo === 1 && r.pendencias.semSegmento.naoConsultados === 0 &&
+    r.pendencias.semSegmento.comErro === 0, 'pendências: código fora da tabela e pacote sem código no JMS', r.pendencias);
+  const tsem = (await local('GET', '/api/tabela?tipo=troncal&dia=' + DIA + '&situacao=sem_segmento')).json;
+  conferir(tsem.total === 1 && tsem.linhas[0].situacaoTexto === 'Sem 3 Segmentos · JMS sem código', 'tabela diz o motivo do "Sem 3 Segmentos"', tsem.linhas);
+  const diag = (await local('POST', '/config/api/testar-segmentos', {remessa: t1Remessa()})).json;
+  conferir(diag.ok && /HTTP 200 · dados \(JSON\)/.test(diag.linhas.join(' | ')) && /Informação básica: sim · 3 Segmentos: NO,901-00,100/.test(diag.linhas.join(' | ')),
+    'Testar o 3 Segmentos: mostra o que o JMS responde', diag);
+  conferir((await local('POST', '/config/api/testar-segmentos', {})).json.linhas.length >= 2 && (await local('POST', '/config/api/testar-segmentos', {remessa: 'x;'})).status === 400 &&
+    (await remoto('POST', '/config/api/testar-segmentos', {})).status === 403, 'Testar o 3 Segmentos: remessa mais recente, remessa inválida e só neste computador');
   conferir(r.anterior.de === DIA_ANTES && r.anterior.ate === DIA_ANTES && !r.anterior.buscado && r.anterior.errados === 0 && r.anterior.turnos.length === 3,
     'dia anterior ainda não buscado', r.anterior);
   conferir(r.menu.troncal === 3 && r.menu.secundaria === 2 && r.opcoes.codigos.join() === 'NO,SU,WW' && r.opcoes.destinos.join() === 'XX NORTE,YY SUL' &&
@@ -420,10 +443,10 @@ function abasRotas(comWW) {
   const paginasTroncal = () => jms.estado.pedidos['/transportation/trackingDeatil/loading/scan/page'] || 0;
   const reg = id => jms.estado.registrosPedidos[id] || 0;
   let antes = paginasTroncal();
-  const reg1 = reg('DKTESTE0001'), reg6 = reg('DKTESTE0006'), reg4 = reg('DKTESTE0004');
+  const reg1 = reg('DKTESTE0001'), reg6 = reg('DKTESTE0006'), reg4 = reg('DKTESTE0004'), segAntes = JSON.stringify(jms.estado.segmentosPedidos);
   await buscar();
   conferir(paginasTroncal() === antes, 'nova busca sem mudança: não baixa a lista de pacotes de novo', {antes, depois: paginasTroncal()});
-  conferir(Object.values(jms.estado.segmentosPedidos).every(n => n === 1), 'nova busca: não consulta o 3 Segmentos de novo');
+  conferir(JSON.stringify(jms.estado.segmentosPedidos) === segAntes, 'nova busca: não consulta o 3 Segmentos de novo');
   conferir(reg('DKTESTE0001') === reg1 + 1 && reg('DKTESTE0006') === reg6 && reg('DKTESTE0004') === reg4,
     'viagem concluída já conferida não é consultada de novo; em trânsito é', jms.estado.registrosPedidos);
   jms.estado.dados.troncal.pacotes.DKTESTE0001.push(pac('DKTESTE0001', 7, 'BASE SUL A-YY', 'XX NORTE', DIA + ' 16:00:00'));
@@ -470,12 +493,26 @@ function abasRotas(comWW) {
   const comCk = await remoto('GET', '/api/painel?tipo=troncal&dia=' + DIA, undefined, {Cookie: ck});
   conferir(comCk.status === 200 && comCk.json.totais.pacotes === 132, 'com a senha, o painel abre de fora');
 
+  // ---------- 7a. JMS ocupado: responde sem a Informação básica (não é "sem código": tenta de novo) ----------
+  jms.estado.segmentosVazios = true;
+  e = await buscar({dia: '2026-10-16'});
+  const vaz = (await local('GET', '/api/painel?tipo=troncal&dia=2026-10-16')).json;
+  const tvaz = (await local('GET', '/api/tabela?tipo=troncal&dia=2026-10-16')).json;
+  const dvaz = (await local('POST', '/config/api/testar-segmentos', {remessa: tvaz.linhas[0].billCode})).json;
+  conferir(e.busca.ultimo.ok && vaz.pendencias.semSegmento.comErro === 2 && /resposta vazia/.test(vaz.pendencias.semSegmento.erros[0].nome) &&
+    tvaz.linhas.every(l => l.situacaoTexto === 'Sem 3 Segmentos · erro no JMS') && !dvaz.ok && /Informação básica: não \(resposta vazia\)/.test(dvaz.linhas.join(' | ')),
+    'JMS ocupado (resposta vazia): erro no JMS, tenta de novo (não vira "sem código")', {p: vaz.pendencias.semSegmento, d: dvaz});
+  jms.estado.segmentosVazios = false;
+
   // ---------- 7b. Bloqueio do JMS no 3 Segmentos (servidor de verdade) ----------
   jms.estado.bloquearSegmentos = true;
   e = await buscar({dia: '2026-10-18'});
   const pend = (await local('GET', '/api/painel?tipo=troncal&dia=2026-10-18')).json;
   conferir(e.busca.ultimo.ok && !e.busca.authVencido && /bloqueou/.test(e.busca.avisoSegmentos) && /HTTP 403 · página: "Request blocked\."/.test(e.busca.avisoSegmentos) && pend.pendencias.semSegmento.naoConsultados === 2 &&
     pend.totais.errados === 0, 'bloqueio do JMS no 3 Segmentos: a busca termina, sem "token vencido", e os pacotes esperam', {busca: e.busca, p: pend.pendencias});
+  const dbloq = (await local('POST', '/config/api/testar-segmentos', {remessa: t1Remessa()})).json;
+  conferir(!dbloq.ok && /HTTP 403 · página \(não são dados\)/.test(dbloq.linhas.join(' | ')) && /Página: "Request blocked\."/.test(dbloq.linhas.join(' | ')),
+    'Testar o 3 Segmentos: mostra a página de bloqueio', dbloq);
   jms.estado.bloquearSegmentos = false;
 
   // ---------- 8. AuthToken próprio e AuthToken vencido ----------

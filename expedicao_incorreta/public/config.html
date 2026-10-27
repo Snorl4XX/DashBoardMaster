@@ -75,6 +75,12 @@
           <button type="button" class="btn btn-light" id="buscar-tudo" title="Baixa a lista de pacotes de todas as viagens de novo, mesmo sem mudança">Buscar tudo de novo</button>
         </div>
         <div class="saida hidden" id="busca-erros"></div>
+        <p class="muted small" style="margin:6px 0 0">Testar o 3 Segmentos: consulta uma remessa no Rastreamento do pacote e mostra o que o JMS responde (sem dados de cliente). Vazio = a remessa mais recente.</p>
+        <div class="row">
+          <input type="text" id="remessa-teste" aria-label="Remessa para testar" placeholder="Remessa (opcional)" autocomplete="off" style="max-width:220px;height:42px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 12px">
+          <button type="button" class="btn btn-light" id="testar-segmentos">Testar o 3 Segmentos</button>
+        </div>
+        <div class="saida hidden" id="segmentos-res"></div>
       </section>
 
       <section class="card conf" aria-labelledby="s-planilhas">

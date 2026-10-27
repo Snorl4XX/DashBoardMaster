@@ -313,7 +313,7 @@ async function tratarConfig(req, res, u) {
     return json(res, 200, {versao: VERSAO, config: Object.assign({}, cfg, {senha: cfg.senha ? 'definida' : '', statusCodigos: undefined}), enderecos: enderecos(),
       token: {fonte: c.fonte, temProprio: !!banco.get('JMS_AUTHTOKEN'), dashmaster: !!credenciaisDashmaster()},
       planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
-      segmentosHoje: banco.contarSegmentos(hojeSp()),
+      segmentosHoje: Object.assign(banco.contarSegmentos(hojeSp()), {semCodigo: banco.semCodigoDia(hojeSp()), erros: banco.errosSegmentos(hojeSp())}),
       status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
       viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),
       jms: {pacotesSecundaria: banco.get('PACOTES_SECUNDARIA') || '', routeTroncal: banco.get('ROUTE_AUTO_TRONCAL') || '',
@@ -334,6 +334,27 @@ async function tratarConfig(req, res, u) {
     return json(res, 200, {ok: true});
   }
   if (p === '/config/api/testar') return json(res, 200, await testar());
+  if (p === '/config/api/testar-segmentos') {
+    // Uma remessa (a digitada ou a mais recente guardada) no Rastreamento do pacote: o que o JMS responde.
+    const b = await lerJson(req), digitada = String(b.remessa || '').trim().toUpperCase();
+    if (digitada && !/^[A-Z0-9-]{6,40}$/.test(digitada)) return json(res, 400, {ok: false, error: 'Remessa inválida.'});
+    const remessa = digitada || banco.umaRemessa();
+    if (!remessa) return json(res, 200, {ok: false, linhas: ['Ainda não há pacotes guardados: digite uma remessa.']});
+    const d = await jms.diagnostico(remessa);
+    const linhas = ['Remessa ' + d.remessa + ' · Routename: ' + d.routename];
+    if (d.erro) linhas.push(d.erro);
+    else {
+      linhas.push('HTTP ' + d.http + ' · ' + d.resposta + (d.conteudo ? ' (' + d.conteudo + ')' : ''));
+      if (d.pagina !== undefined) linhas.push('Página: "' + (d.pagina || '(sem texto)') + '"');
+      if (d.resposta === 'dados (JSON)') {
+        linhas.push('JMS: código ' + (d.code || '—') + (d.msg ? ' · ' + d.msg : ''));
+        linhas.push('Informação básica: ' + (d.informacaoBasica ? 'sim' : 'não (resposta vazia)') + ' · 3 Segmentos: ' + (d.terminalDispatchCode || '(vazio)'));
+      }
+    }
+    const ok = !d.erro && d.resposta === 'dados (JSON)' && !!d.terminalDispatchCode;
+    log(ok ? 'info' : 'aviso', 'Teste do 3 Segmentos: ' + linhas.join(' | '));
+    return json(res, 200, {ok, linhas});
+  }
   if (p === '/config/api/buscar') {
     const b = await lerJson(req), dia = /^\d{4}-\d{2}-\d{2}$/.test(String(b.dia || '')) ? b.dia : hojeSp();
     if (dia > hojeSp()) return json(res, 400, {ok: false, error: 'Esse dia ainda não chegou.'});

@@ -44,6 +44,12 @@ class Banco {
     if (!this.db.prepare('PRAGMA table_info(viagens)').all().some(c => c.name === 'estadoBusca')) this.db.exec('ALTER TABLE viagens ADD COLUMN estadoBusca TEXT');
     // Dias buscados pela versão 1.1 (antes desta tabela) contam como buscados.
     this.db.exec('INSERT OR IGNORE INTO buscas (dia, em) SELECT DISTINCT dia, 0 FROM viagens');
+    // 1.8: até a 1.7 a resposta vazia do JMS (JMS ocupado) era gravada como "sem código" e nunca mais consultada: volta para a fila.
+    const ja = this.db.prepare("SELECT v FROM props WHERE k = 'SEGMENTOS_VAZIOS_1_8'").get();
+    if (!ja) {
+      this.db.exec("UPDATE segmentos SET erro = 'Consultar de novo (resposta vazia até a 1.7)', em = 0 WHERE s1 = '' AND erro = ''");
+      this.db.exec("INSERT INTO props (k, v) VALUES ('SEGMENTOS_VAZIOS_1_8', '1')");
+    }
     this.st = {
       get: this.db.prepare('SELECT v FROM props WHERE k = ?'),
       set: this.db.prepare('INSERT INTO props (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v'),
@@ -62,8 +68,13 @@ class Banco {
       apagarPacotes: this.db.prepare('DELETE FROM pacotes WHERE tipo = ? AND shipmentNo = ?'),
       inserirPacote: this.db.prepare('INSERT OR REPLACE INTO pacotes (' + CAMPOS_PACOTE.join(', ') + ') VALUES (' + CAMPOS_PACOTE.map(() => '?').join(', ') + ')'),
       // Com o "3 Segmentos" da remessa (vazio enquanto não foi consultado).
-      pacotesDia: this.db.prepare(`SELECT p.*, s.s1 AS seg1, s.s2 AS seg2, s.s3 AS seg3, s.billCode AS segFeito FROM pacotes p
-        LEFT JOIN segmentos s ON s.billCode = p.billCode AND s.erro = '' WHERE p.tipo = ? AND p.dia = ?`),
+      pacotesDia: this.db.prepare(`SELECT p.*, s.s1 AS seg1, s.s2 AS seg2, s.s3 AS seg3, s.billCode AS segFeito, s.erro AS segErro FROM pacotes p
+        LEFT JOIN segmentos s ON s.billCode = p.billCode WHERE p.tipo = ? AND p.dia = ?`),
+      errosSegmentos: this.db.prepare(`SELECT s.erro AS erro, COUNT(DISTINCT p.billCode) AS n FROM pacotes p JOIN segmentos s ON s.billCode = p.billCode
+        WHERE p.dia = ? AND s.erro <> '' GROUP BY s.erro ORDER BY n DESC LIMIT 3`),
+      semCodigoDia: this.db.prepare(`SELECT COUNT(DISTINCT p.billCode) AS n FROM pacotes p JOIN segmentos s ON s.billCode = p.billCode
+        WHERE p.dia = ? AND s.erro = '' AND s.s1 = ''`),
+      umaRemessa: this.db.prepare('SELECT billCode FROM pacotes ORDER BY dia DESC, horario DESC LIMIT 1'),
       semSegmento: this.db.prepare(`SELECT DISTINCT p.billCode FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode
         WHERE p.dia = ? AND (s.billCode IS NULL OR (s.erro <> '' AND s.em < ?)) LIMIT ?`),
       salvarSegmento: this.db.prepare(`INSERT INTO segmentos (billCode, s1, s2, s3, centro, em, erro) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -114,6 +125,11 @@ class Banco {
     const o = r || {};
     this.st.salvarSegmento.run(String(billCode), o.s1 || '', o.s2 || '', o.s3 || '', o.centro || '', Date.now(), erro || '');
   }
+  /** Para a tela Configurações: as mensagens de erro mais comuns do 3 Segmentos no dia e quantos o JMS respondeu sem código. */
+  errosSegmentos(dia) { return this.st.errosSegmentos.all(dia); }
+  semCodigoDia(dia) { return this.st.semCodigoDia.get(dia).n; }
+  /** A remessa mais recente guardada (para o teste do 3 Segmentos). */
+  umaRemessa() { const r = this.st.umaRemessa.get(); return r ? r.billCode : ''; }
   /** Dias com pacotes guardados, do mais novo ao mais antigo. */
   diasComPacotes() { return this.st.diasComPacotes.all().map(r => r.dia); }
   /** {total, feitos, comErro}: remessas do dia e quantas já têm o "3 Segmentos". */

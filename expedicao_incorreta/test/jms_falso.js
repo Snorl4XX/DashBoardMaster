@@ -133,6 +133,8 @@ function criar(dia) {
         if (estado.recusarSegmentos) return resp({code: 135010099, msg: 'Sem permissão para Rastreamento do pacote', succ: false, fail: true});
         // Bloqueio por consultas demais: página HTML com 403 (como o firewall do JMS).
         if (estado.bloquearSegmentos) { res.writeHead(403, {'Content-Type': 'text/html'}); return res.end('<html><body>Request blocked.</body></html>'); }
+        // JMS ocupado: responde "concluída" mas sem a Informação básica.
+        if (estado.segmentosVazios) return resp({code: 1, msg: '1:Solicitação concluída', succ: true, fail: false, data: {waybillNo: w}});
         const x = pacoteDe(w), sg = x && SEGMENTOS_FALSOS[x.destsite] || [null, ''];
         return resp({code: 1, msg: '1:Solicitação concluída', succ: true, fail: false,
           data: {waybillNo: w, details: {waybillNo: w, terminalDispatchCode: sg[0], destinationDistributeName: sg[1], receiverCityName: 'Cidade Teste'}}});

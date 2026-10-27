@@ -71,7 +71,8 @@ Situações na tabela
 -------------------
 Errado                 pacote fora da rota do caminhão (conta como erro). A coluna "Destino correto" diz onde devia ir.
 Certo                  pacote da rota
-Sem 3 Segmentos        o JMS ainda não respondeu (ou não tem o Código de primeiro segmento)
+Sem 3 Segmentos        · aguardando: ainda não consultado · erro no JMS: a consulta deu erro (tenta de novo em 30 min)
+                       · JMS sem código: o Rastreamento do pacote não tem o Código de primeiro segmento
 Código fora da tabela  o código do pacote não está em nenhuma rota da aba "Rotas" (inclua)
 Rota sem regra         a próxima parada não está na aba "Rotas"
 
@@ -100,6 +101,8 @@ Se der problema
 ---------------
 - Painel avisa "AuthToken do JMS vencido": pegue um novo no JMS e cole no DashMaster ou em Configurações deste app.
 - "A porta 3300 já está em uso": o app já está aberto em outra janela.
+- Muitos "Sem 3 Segmentos": Configurações > Testar o 3 Segmentos. Mostra o que o JMS responde para uma remessa
+  (HTTP, se veio dado ou página, a mensagem do JMS e o código). Mande um print (sem o AuthToken).
 - "O JMS bloqueou as consultas do Rastreamento do pacote": o app pausa 15 min e continua sozinho. Se acontecer sempre,
   aumente "segundosPorRemessa" no config.json e mande um print da linha do registro com "página:".
 - Janela mostra "O painel NÃO está no ar": leia a linha [erro] e mande um print (sem o AuthToken).

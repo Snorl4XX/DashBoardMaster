@@ -111,6 +111,8 @@
     if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta o Rastreamento do pacote ' +
       (spr > 0 ? '1 remessa a cada ' + fmtInt(spr) + ' s (cerca de ' + fmtInt(Math.round(86400 / spr * 0.9)) + ' por dia), para o JMS não bloquear' : 'sem pausa') +
       ': hoje primeiro, depois os dias anteriores. Eles entram na conta quando o JMS responder.');
+    if (ss.comErro) h = alerta(h, true, pac(ss.comErro) + ' com erro na consulta do 3 Segmentos', ex(ss.erros) +
+      '. O app tenta de novo a cada 30 min. Para ver o que o JMS responde: Configurações › Testar o 3 Segmentos.');
     if (ss.jmsSemCodigo) h = alerta(h, true, pac(ss.jmsSemCodigo) + ' sem código no 3 Segmentos do JMS', 'O Rastreamento do pacote não tem o Código de primeiro segmento: não dá para conferir.');
     if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com código fora da tabela de rotas', ex(p.semCodigo) +
       '. Inclua o código na rota certa da aba "Rotas" da planilha rotas.xlsx.');

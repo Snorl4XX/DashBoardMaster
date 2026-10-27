@@ -50,6 +50,10 @@
         }).join(' | ')],
         ['Busca automática', 'hoje a cada ' + e.config.minutos + ' min' + (e.config.minutosDiaAnterior ? ' · ontem a cada ' + e.config.minutosDiaAnterior +
           ' min (guarda o dia anterior completo)' : ' · ontem: desligado')],
+        ['Erros do 3 Segmentos (hoje)', e.segmentosHoje && e.segmentosHoje.erros.length ? e.segmentosHoje.erros.map(function (x) { return x.erro + ' (' + fmt(x.n) + ')'; }).join(' · ') :
+          'nenhum'],
+        ['Sem código no JMS (hoje)', e.segmentosHoje ? fmt(e.segmentosHoje.semCodigo) + ' pacotes (o JMS respondeu sem o Código de primeiro segmento)' : '—'],
+        ['Aviso do 3 Segmentos', b.avisoSegmentos || 'nenhum'],
         ['3 Segmentos no JMS', e.segmentosHoje && e.segmentosHoje.total ?
           'hoje: ' + fmt(e.segmentosHoje.feitos) + ' de ' + fmt(e.segmentosHoje.total) + ' pacotes conferidos' + (e.segmentosHoje.comErro ? ' · ' + fmt(e.segmentosHoje.comErro) +
           ' com erro (tenta de novo em 30 min)' : '') + ' · ritmo: 1 remessa a cada ' + e.config.segundosPorRemessa + ' s' : 'hoje ainda sem pacotes'],
@@ -85,6 +89,13 @@
     post('config/api/testar').then(function (r) { resultado('token-res', r.linhas, r.ok); });
   });
   $('apagar-token').addEventListener('click', function () { post('config/api/token/apagar').then(carregar); });
+  $('testar-segmentos').addEventListener('click', function () {
+    resultado('segmentos-res', 'Testando…');
+    post('config/api/testar-segmentos', {remessa: $('remessa-teste').value.trim()}).then(function (r) {
+      resultado('segmentos-res', r.linhas || [r.error], r.ok);
+      carregar();
+    });
+  });
   function buscar(forcar) {
     post('config/api/buscar', {dia: $('dia-busca').value, forcar: forcar}).then(function (r) {
       if (!r.ok) alert(r.error);

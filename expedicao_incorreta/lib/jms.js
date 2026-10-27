@@ -184,7 +184,39 @@ class Jms {
   }
   /** Bloco "3 Segmentos" de uma remessa (Rastreamento do pacote › Informação básica). → {s1, s2, s3, centro} */
   async segmentos(remessa) {
-    return segmentosDe(await this.pedir('rastreio', '/operatingplatform/order/getOrderDetail', {waybillNo: String(remessa), countryId: '1'}));
+    const json = await this.pedir('rastreio', '/operatingplatform/order/getOrderDetail', {waybillNo: String(remessa), countryId: '1'});
+    // Sem a Informação básica: o JMS ocupado também responde vazio (o app JMS Segmentos tenta de novo). Não é "sem código".
+    if (!detalheDe(json)) throw new ErroJms('O JMS respondeu sem a Informação básica (resposta vazia).', {vazio: true});
+    return segmentosDe(json);
+  }
+  /**
+   * Teste de uma remessa (tela Configurações): uma consulta, sem tentar de novo, e o que o JMS respondeu. Só HTTP, tipo de
+   * resposta, código e mensagem do JMS, título da página e o "3 Segmentos": nenhum dado de cliente.
+   */
+  async diagnostico(remessa) {
+    const c = this.credenciais() || {}, out = {remessa: String(remessa), routename: this.rotaCabecalho('rastreio') || '(nenhum)'};
+    if (!c.JMS_AUTHTOKEN && !c.JMS_COOKIE && !c.JMS_AUTHORIZATION) return Object.assign(out, {erro: 'Falta o AuthToken do JMS.'});
+    // Conta como uma consulta do 3 Segmentos: a próxima espera o ritmo normal.
+    this.proxima.rastreio = Math.max(this.proxima.rastreio || 0, Date.now() + this.msPorRemessa);
+    const headers = Object.assign(this.cabecalhos('rastreio'), {'Content-Type': 'application/json;charset=UTF-8'});
+    let resp, text;
+    try {
+      resp = await fetch(this.base + '/operatingplatform/order/getOrderDetail', {method: 'POST', headers, redirect: 'manual', signal: AbortSignal.timeout(this.tempoMs),
+        body: JSON.stringify({waybillNo: String(remessa), countryId: String(c.JMS_COUNTRY_ID || '1')})});
+      text = await resp.text();
+    } catch (e) { return Object.assign(out, {erro: 'Falha de rede: ' + String(e && (e.cause && e.cause.code || e.message) || e).slice(0, 160)}); }
+    out.http = resp.status;
+    out.conteudo = String(resp.headers.get('content-type') || '').split(';')[0];
+    let json = null;
+    try { json = JSON.parse(text); } catch (e) { /* página ou texto */ }
+    if (!json || typeof json !== 'object') {
+      out.resposta = /^\s*</.test(text || '') ? 'página (não são dados)' : 'texto (não são dados)';
+      out.pagina = resumoPagina(text || '');
+      return out;
+    }
+    const det = detalheDe(json);
+    return Object.assign(out, {resposta: 'dados (JSON)', code: json.code === undefined ? '' : String(json.code), msg: String(json.msg || '').slice(0, 160),
+      informacaoBasica: !!det, terminalDispatchCode: det ? (det.terminalDispatchCode === null || det.terminalDispatchCode === undefined ? '' : String(det.terminalDispatchCode)) : ''});
   }
 }
 
@@ -196,8 +228,15 @@ function resumoPagina(html) {
 }
 
 /** Informação básica → {s1, s2, s3, centro}: o bloco "3 Segmentos" (terminalDispatchCode) e o centro de destino. */
+/** A Informação básica da resposta: data.details (como na tela) ou o próprio data, se já tem o campo. null = resposta vazia. */
+function detalheDe(json) {
+  const d = json && json.data;
+  if (!d || typeof d !== 'object') return null;
+  if (d.details && typeof d.details === 'object') return d.details;
+  return 'terminalDispatchCode' in d ? d : null;
+}
 function segmentosDe(json) {
-  const d = json && json.data, det = d && typeof d === 'object' ? (d.details && typeof d.details === 'object' ? d.details : d) : null;
+  const det = detalheDe(json);
   const cod = det && det.terminalDispatchCode !== undefined && det.terminalDispatchCode !== null ? String(det.terminalDispatchCode) : '';
   const p = cod.split(',').map(x => x.trim());
   return {s1: p[0] || '', s2: p[1] || '', s3: p[2] || '', centro: det && det.destinationDistributeName ? String(det.destinationDistributeName).trim() : ''};
@@ -212,4 +251,4 @@ function pagina_(json) {
   return {registros, paginas, total};
 }
 
-module.exports = {Jms, ErroJms, JMS, ROTAS_CABECALHO, q, segmentosDe};
+module.exports = {Jms, ErroJms, JMS, ROTAS_CABECALHO, q, segmentosDe, detalheDe};

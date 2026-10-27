@@ -70,9 +70,11 @@ class Painel {
       const v = viagens.get(p.shipmentNo);
       if (!v) return;
       const r = this.regras.conferir(tipo, p, v.destino);
-      const l = Object.assign({}, p, r, {situacaoTexto: SITUACOES[r.situacao], turno: turnoDe(p.horario), nomeViagem: v.nome || '',
-        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status], packageCode: lote(p.packageCode),
-        jms: p.segFeito !== null && p.segFeito !== undefined});
+      // JMS respondeu = consultado sem erro. "Sem 3 Segmentos" diz o motivo: aguardando a consulta, erro na consulta ou sem código.
+      const consultado = p.segFeito !== null && p.segFeito !== undefined, jms = consultado && !p.segErro;
+      const motivo = r.situacao !== 'sem_segmento' ? '' : !consultado ? ' · aguardando' : p.segErro ? ' · erro no JMS' : ' · JMS sem código';
+      const l = Object.assign({}, p, r, {situacaoTexto: SITUACOES[r.situacao] + motivo, turno: turnoDe(p.horario), nomeViagem: v.nome || '',
+        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status], packageCode: lote(p.packageCode), jms});
       // O que falta na planilha de rotas, para o aviso.
       if (r.situacao === 'sem_codigo') l.pendente = 'código ' + r.codigo1 + (r.segmento ? ' ' + r.segmento : '');
       linhas.push(l);
@@ -161,8 +163,10 @@ class Painel {
       pendencias: {
         semRegra: topDe(linhas.filter(l => l.situacao === 'sem_regra'), 'proximaParada', 8),
         semCodigo: topDe(linhas.filter(l => l.situacao === 'sem_codigo'), 'pendente', 8),
-        semSegmento: {naoConsultados: linhas.filter(l => l.situacao === 'sem_segmento' && !l.jms).length,
-          jmsSemCodigo: linhas.filter(l => l.situacao === 'sem_segmento' && l.jms).length}
+        semSegmento: {naoConsultados: linhas.filter(l => l.situacao === 'sem_segmento' && (l.segFeito === null || l.segFeito === undefined)).length,
+          comErro: linhas.filter(l => l.situacao === 'sem_segmento' && l.segErro).length,
+          jmsSemCodigo: linhas.filter(l => l.situacao === 'sem_segmento' && l.jms).length,
+          erros: topDe(linhas.filter(l => l.situacao === 'sem_segmento' && l.segErro), 'segErro', 3)}
       }
     };
   }
