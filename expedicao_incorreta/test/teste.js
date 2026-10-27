@@ -17,7 +17,7 @@ const {spawn, spawnSync} = require('child_process');
 const {criar, pac} = require('./jms_falso');
 const {escreverXlsx, lerXlsx, zip} = require('../lib/xlsx');
 const {Regras, norm} = require('../lib/regras');
-const {turnoDe} = require('../lib/painel');
+const {Painel, turnoDe} = require('../lib/painel');
 const {codigosStatus, statusDe} = require('../lib/status');
 const {Coletor, somaDias, diasEntre, diasDaAgenda} = require('../lib/coletor');
 const {Banco} = require('../lib/db');
@@ -147,6 +147,28 @@ function abasRotas(comWW) {
   conferir(cf({seg1: 'NO', seg2: '901-00', seg3: '100'}).seg3 === '100' && cf({seg1: 'NO', seg2: '901-07'}, 'YY SUL').situacao === 'certo' &&
     cf({seg1: 'NO', seg2: '901-00'}, 'ROTA X').situacao === 'sem_regra' && cf({seg1: 'NO', seg2: '901-00'}, 'ROTA X').rotaCerta === 'XX NORTE' &&
     cf({seg1: 'dc-no', seg2: '901 - 00'}).situacao === 'certo', 'conferência — caminhão certo pelo segmento, parada fora da tabela e códigos escritos de outro jeito');
+  // Gráficos e cartões do 1º e do 2º segmento (o 2º só com 1º segmento GRU, MOO, SP, SP1 ou SBN).
+  fs.writeFileSync(path.join(pastaRegras, 'rotas.xlsx'), escreverXlsx([
+    {nome: 'Rotas', linhas: [['Tipo', 'Rota (Próxima parada)', '1º Nível (códigos)', '2º Nível (segmentos, opcional)', 'Observação'],
+      ['Troncal', 'XX BRE', 'SP, TO', '', ''], ['Troncal', 'DC XX-GRU', 'GRU', '381-00', ''], ['Troncal', 'DC XX-GRU', 'SP', '395-05', ''],
+      ['Troncal', 'XX SJM', 'RJ, VDC', '', ''], ['Troncal', 'XX SBN', 'SBN', '375-00', '']]}]));
+  const RP = new Regras(pastaRegras), segs = [];
+  [['GRU', '381-00', 3], ['SP', '395-05', 2], ['VDC', '501-03', 4], ['SBN', '375-00', 1], ['TO', '700-00', 5]].forEach(([s1, s2, n]) => {
+    for (let i = 0; i < n; i++) segs.push({seg1: s1, seg2: s2});
+  });
+  const bancoFalso = {
+    viagensDia: () => [{shipmentNo: 'DKSEGS1', estado: '4', nome: 'GRU-XX BRE', destino: 'XX BRE', contagem: segs.length}],
+    pacotesDia: () => segs.map((x, i) => Object.assign({shipmentNo: 'DKSEGS1', billCode: 'WSEG' + i, segFeito: 'WSEG' + i, proximaParada: 'XX BRE',
+      packageCode: 'LT-1', baseDestino: 'BASE TESTE', digitalizadoPor: 'OPERADOR TESTE', horario: DIA + ' 10:00:00'}, x)),
+    buscados: () => new Set()
+  };
+  const rs = new Painel(bancoFalso, RP, codigosStatus()).resumo('troncal', DIA, DIA, {});
+  conferir(rs.totais.errados === 10 && rs.top.codigos1[0].nome === 'VDC' && rs.top.codigos1[0].qtd === 4 && rs.top.codigos1.length === 4 &&
+    rs.maisAfetados.codigo1.nome === 'VDC', 'gráfico e cartão do 1º segmento (todos os códigos dos errados)', rs.top.codigos1);
+  conferir(rs.seg2.errados === 6 && rs.seg2.codigos.join() === 'GRU,MOO,SP,SP1,SBN' &&
+    rs.top.segmentos2.map(i => i.nome + ':' + i.qtd + ':' + i.rota).join(' | ') === '381-00:3:1º segmento GRU | 395-05:2:1º segmento SP | 375-00:1:1º segmento SBN' &&
+    rs.maisAfetados.segmento2.nome === '381-00', 'gráfico e cartão do 2º segmento: só 1º segmento GRU, MOO, SP, SP1 ou SBN (VDC fica fora)', rs.top.segmentos2);
+
   // "3 Segmentos" na busca: uma consulta por remessa e guardado; JMS recusando tudo para depois de 20 tentativas; token vencido para tudo.
   const bs = new Banco(path.join(pastaRegras, 'seg.db'));
   bs.trocarPacotes('troncal', 'DKSEG1', '2026-10-21', [0, 1, 2, 3, 4].map(i => ({billCode: 'WOK' + i})));

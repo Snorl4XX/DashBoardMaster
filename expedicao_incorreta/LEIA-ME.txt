@@ -31,8 +31,11 @@ No painel
   21 da troncal, 18 da secundária), Turno, Destino correto, Código de 1º segmento e Login.
   Valem para cartões, gráficos, tabela e Excel.
 - Cartões: quantidade de erro do dia com a participação de cada turno e a comparação com o dia anterior; dia anterior;
-  taxa de erro; T1, T2 e T3; ID de viagem, Próxima parada, saca, Base Destino e login mais ofensores.
-- Gráficos: Próxima parada, IDs de viagem, Turnos, Sacas (sem lote = VOLUMOSO), Logins e Base Destino.
+  taxa de erro; T1, T2 e T3; ID de viagem, Próxima parada, saca, Base Destino, login, 1º segmento e 2º segmento
+  mais ofensores.
+- Gráficos: Próxima parada, IDs de viagem, Turnos, Sacas (sem lote = VOLUMOSO), Logins, Base Destino, 1º segmento
+  (Código de primeiro segmento) e 2º segmento (Código de dois segmentos, só dos pacotes com 1º segmento GRU, MOO, SP,
+  SP1 ou SBN).
 - Tabela: todos os pacotes, com Turno e Destino correto (e o 3 Segmentos de cada um).
 
 Não mexe no DashMaster: pasta, porta (3300) e link próprios.

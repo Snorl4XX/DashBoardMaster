@@ -27,6 +27,8 @@ const COLUNAS = [
   ['segmento', 'Código de dois segmentos', '二段码'], ['seg3', '3 Segmentos', '三段码'], ['tipoBipagem', 'Tipo de bipagem', '扫描类型'],
   ['digitalizadoPor', 'Digitalizado por', '扫描人'], ['horario', 'Tempo de digitalização', '扫描时间']
 ];
+/** O gráfico e o cartão do 2º segmento só contam os pacotes com um destes códigos de 1º segmento (pedido). */
+const CODIGOS_SEG2 = ['GRU', 'MOO', 'SP', 'SP1', 'SBN'];
 /** Lote vazio (ou "--") = pacote fora de saca: VOLUMOSO. */
 const lote = v => { const t = String(v === null || v === undefined ? '' : v).trim(); return !t || /^-+$/.test(t) ? 'VOLUMOSO' : t; };
 
@@ -122,9 +124,13 @@ class Painel {
     linhas.forEach(l => { cont[l.situacao]++; });
     const turnos = this.turnos(linhas);
     const nomeViagem = id => ({rota: (tudo.viagens.get(id) || {}).nome || ''});
+    // 2º segmento: só dos errados com 1º segmento GRU, MOO, SP, SP1 ou SBN (com os 1º segmentos de cada um, para o detalhe).
+    const errados2 = errados.filter(l => CODIGOS_SEG2.indexOf(l.codigo1) >= 0);
+    const primeiros = s2 => ({rota: '1º segmento ' + Array.from(new Set(errados2.filter(l => (l.segmento || '(vazio)') === s2).map(l => l.codigo1))).join(', ')});
     const top = {
       proximasParadas: topDe(errados, 'proximaParada'), viagens: topDe(errados, 'shipmentNo', 10, nomeViagem), lotes: topDe(errados, 'packageCode'),
-      logins: topDe(errados, 'digitalizadoPor'), basesDestino: topDe(errados, 'baseDestino')
+      logins: topDe(errados, 'digitalizadoPor'), basesDestino: topDe(errados, 'baseDestino'), codigos1: topDe(errados, 'codigo1'),
+      segmentos2: topDe(errados2, 'segmento', 10, primeiros)
     };
     const distintos = {};
     Object.keys(top).forEach(k => { distintos[k] = top[k].distintos; });
@@ -134,11 +140,11 @@ class Painel {
       tipo, de, ate, dia: de === ate ? de : '', dias: dias.length, semBusca: dias.filter(d => !buscados.has(d)),
       totais: {pacotes: linhas.length, errados: cont.errado, certos: cont.certo, semSegmento: cont.sem_segmento, semCodigo: cont.sem_codigo,
         semRegra: cont.sem_regra, taxa: linhas.length ? cont.errado / linhas.length * 100 : 0},
-      turnos, top, distintos, anterior: this.anterior(tipo, de, ate, f),
+      turnos, top, distintos, anterior: this.anterior(tipo, de, ate, f), seg2: {codigos: CODIGOS_SEG2, errados: errados2.length},
       // Quantos pacotes o JMS já respondeu (com ou sem código) no "3 Segmentos".
       segmentos: {jms: linhas.filter(l => l.jms).length, total: linhas.length},
       maisAfetados: {viagem: top.viagens[0] || null, proximaParada: top.proximasParadas[0] || null, lote: top.lotes[0] || null,
-        baseDestino: top.basesDestino[0] || null, login: top.logins[0] || null},
+        baseDestino: top.basesDestino[0] || null, login: top.logins[0] || null, codigo1: top.codigos1[0] || null, segmento2: top.segmentos2[0] || null},
       viagens: {total: viagens.length, comCarga: viagens.filter(v => v.contagem > 0).length, comErro: viagens.filter(v => v.erro).length,
         concluidas: viagens.filter(v => v.status === 'concluido').length, emTransito: viagens.filter(v => v.status === 'em_transito').length,
         foraDoStatus: tudo.fora},
@@ -182,4 +188,4 @@ class Painel {
   }
 }
 
-module.exports = {Painel, turnoDe, COLUNAS, TURNOS};
+module.exports = {Painel, turnoDe, COLUNAS, TURNOS, CODIGOS_SEG2};

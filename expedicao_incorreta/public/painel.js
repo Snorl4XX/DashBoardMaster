@@ -184,8 +184,8 @@
         '<b>' + fmtPct(x.participacao, 1) + '</b> participação<br>' + esc(nomeAnt) + ': <span class="part">' + (a.buscado ? fmtInt(ta[s].errados) : '—') + '</span>',
         barra(x.participacao, G.corTurno(s)));
     });
-    var um = function (icone, rotulo, it, extra, cls) {
-      var tot = t.errados || 0;
+    var um = function (icone, rotulo, it, extra, cls, total) {
+      var tot = total === undefined ? t.errados || 0 : total;
       return kpi(cls || '', svg(icone) + rotulo, it ? esc(it.nome) : '—',
         it ? '<b>' + fmtInt(it.qtd) + '</b> errados · <b>' + fmtPct(tot ? it.qtd / tot * 100 : 0, 1) + '</b> participação' + (extra ? '<br>' + esc(extra) : '') : 'Nenhum erro',
         it ? barra(tot ? it.qtd / tot * 100 : 0, 'var(--red)') : '', 'text');
@@ -193,8 +193,10 @@
     h += um('trip', 'ID de viagem mais ofensor', m.viagem, m.viagem && m.viagem.rota);
     h += um('route', 'Próxima parada mais ofensora', m.proximaParada);
     h += um('lot', 'Saca mais ofensora', m.lote);
-    h += um('base', 'Base Destino com mais erro', m.baseDestino, '', 'span2');
-    h += um('login', 'Login mais ofensor', m.login, '', 'span2');
+    h += um('base', 'Base Destino com mais erro', m.baseDestino);
+    h += um('login', 'Login mais ofensor', m.login);
+    h += um('seg', '1º segmento mais ofensor', m.codigo1);
+    h += um('seg', '2º segmento mais ofensor · ' + r.seg2.codigos.join(', '), m.segmento2, m.segmento2 && m.segmento2.rota, '', r.seg2.errados);
     $('kpiGrid').innerHTML = h;
   }
 
@@ -217,6 +219,13 @@
     coluna(['lotes', I.lot, {pt: 'Sacas ofensoras', zh: '包号'}, 'número do lote (sem lote = VOLUMOSO)', {pt: 'Número do lote', um: 'saca', zh: '包号'}]);
     coluna(['logins', I.login, {pt: 'Logins ofensores', zh: '扫描人'}, 'login (digitalizado por)', {pt: 'Login', um: 'login', zh: '扫描人'}]);
     coluna(['basesDestino', I.base, {pt: 'Base Destino com mais erro', zh: '目的网点'}, 'Base Destino do pacote', {pt: 'Base Destino', um: 'base destino', zh: '目的网点'}]);
+    coluna(['codigos1', I.seg, {pt: '1º segmento', zh: '一段码'}, 'Código de primeiro segmento', {pt: '1º segmento', um: '1º segmento', zh: '一段码'}]);
+    // 2º segmento: só os errados com 1º segmento GRU, MOO, SP, SP1 ou SBN (a % é sobre eles).
+    var t2 = r.seg2.errados, d2 = r.distintos.segmentos2 || 0, n2 = r.top.segmentos2.length;
+    G.cartao(grid, {key: 'segmentos2', icone: I.seg, titulo: {pt: '2º segmento (' + r.seg2.codigos.join(', ') + ')', zh: '二段码'}, tipo: 'colunas',
+      sub: 'Pacotes no caminhão errado com 1º segmento ' + r.seg2.codigos.join(', ') + ', por Código de dois segmentos' + (d2 > n2 ? ' · top ' + n2 + ' de ' + fmtInt(d2) : '') +
+        ' · ' + fmtInt(t2) + ' errados desses códigos', total: t2, distintos: d2, rotulo: {pt: '2º segmento', um: '2º segmento', zh: '二段码'},
+      itens: r.top.segmentos2.map(function (i) { return {nome: i.nome, qtd: i.qtd, extra: i.rota || ''}; })});
   }
 
   // ---------------------------------------------------------------- tabela
