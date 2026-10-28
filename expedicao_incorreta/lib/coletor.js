@@ -9,7 +9,8 @@
  *   - Viagem grande (mais de "viagemGrande" pacotes) busca no máximo a cada "minutosViagemGrande" minutos.
  *   - Depois das viagens, o bloco "3 Segmentos" (Rastreamento do pacote › Informação básica) de cada remessa que ainda não
  *     tem: uma consulta por remessa, guardada para sempre (o código não muda). A conferência é só por ele (destino correto).
- *     Só dos dias desta busca (a automática é só hoje): hoje primeiro, 1 remessa a cada "segundosPorRemessa" (lib/jms.js),
+ *     Só dos dias desta busca (a automática é só hoje): hoje primeiro, uma remessa por vez (espera a resposta e pausa
+ *     "segundosPorRemessa", lib/jms.js),
  *     até 1 min antes da próxima busca (o resto continua nela). Se o JMS bloquear, pausa 15 min.
  *   - AuthToken vencido para tudo e avisa; erro numa viagem não para as outras.
  */
@@ -131,7 +132,7 @@ class Coletor {
   }
   /**
    * "3 Segmentos" das remessas destes dias que ainda não têm (uma consulta por remessa, no ritmo do lib/jms.js: com
-   * "segundosPorRemessa", uma de cada vez), hoje primeiro, até o tempo desta busca acabar. O painel é atualizado a cada lote.
+   * "segundosPorRemessa", uma de cada vez, esperando a resposta e a pausa), hoje primeiro, até o tempo desta busca acabar. O painel é atualizado a cada lote.
    * Os dias que não estão na busca ficam como foram salvos.
    *   - Bloqueio do JMS (página em vez de dados, HTTP 429): para e pausa 15 min. A remessa não é marcada com erro (tenta
    *     de novo depois).

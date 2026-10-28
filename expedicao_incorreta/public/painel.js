@@ -109,7 +109,8 @@
     var ss = p.semSegmento;
     var spr = e.busca.segundosPorRemessa;
     if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta o Rastreamento do pacote ' +
-      (spr > 0 ? '1 remessa a cada ' + fmtInt(spr) + ' s (cerca de ' + fmtInt(Math.round(86400 / spr * 0.9)) + ' por dia), para o JMS não bloquear' : 'sem pausa') +
+      (spr > 0 ? 'uma remessa por vez: espera a resposta e pausa ' + fmtInt(spr) + ' s antes da próxima (cerca de ' +
+        fmtInt(Math.round(86400 / (spr + 2) * 0.9 / 100) * 100) + ' por dia), para o JMS não bloquear' : 'sem pausa') +
       ', só os pacotes de hoje. Eles entram na conta quando o JMS responder.');
     if (ss.naoConsultadosAntes) h = alerta(h, true, pac(ss.naoConsultadosAntes) + ' de dias anteriores ficaram sem o 3 Segmentos',
       'O app só busca o dia de hoje: os dias que passaram ficam como foram salvos e esses pacotes não entram na conta.');

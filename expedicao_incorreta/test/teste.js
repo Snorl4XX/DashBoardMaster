@@ -235,8 +235,32 @@ function abasRotas(comWW) {
   conferir(Date.now() - tr >= 240 && padraoJms.porSegundo === 5 && padraoJms.msPorRemessa === 30000,
     'JMS: viagens no máximo N consultas por segundo (padrão 5); 3 Segmentos 1 remessa a cada 30 s (padrão)', Date.now() - tr);
   const jr2 = new Jms({credenciais: () => ({}), props: {get: () => null}, porSegundo: 1000, segundosPorRemessa: 0.06}), tr2 = Date.now();
-  await jr2.vez('rastreio'); await jr2.vez('rastreio'); await jr2.vez('rastreio'); await jr2.vez('troncal');
+  (await jr2.vez('rastreio'))(); (await jr2.vez('rastreio'))(); (await jr2.vez('rastreio'))(); await jr2.vez('troncal');
   conferir(Date.now() - tr2 >= 115 && Date.now() - tr2 < 400, 'JMS: o ritmo do 3 Segmentos é separado do das viagens', Date.now() - tr2);
+
+  // 3 Segmentos remessa por remessa: a próxima só sai depois da resposta desta e da pausa (mesmo pedindo várias juntas).
+  {
+    const marcas = [];
+    let abertas = 0, maxAbertas = 0;
+    const lento = http.createServer((req, res) => {
+      abertas++; maxAbertas = Math.max(maxAbertas, abertas);
+      const ini = Date.now();
+      req.resume();
+      setTimeout(() => {
+        abertas--; marcas.push({ini, fim: Date.now()});
+        res.writeHead(200, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({code: 1, data: {details: {terminalDispatchCode: 'NO,901-00,100'}}}));
+      }, 120);
+    });
+    await new Promise(r => lento.listen(0, '127.0.0.1', r));
+    const jl = new Jms({base: 'http://127.0.0.1:' + lento.address().port, credenciais: () => ({JMS_AUTHTOKEN: 'TOKEN-FICTICIO-DE-TESTE'}),
+      props: {get: () => null, set: () => {}}, porSegundo: 1000, segundosPorRemessa: 0.08});
+    const resps = await Promise.all(['W1', 'W2', 'W3'].map(w => jl.segmentos(w)));
+    lento.close();
+    const pausas = marcas.slice(1).map((m, i) => m.ini - marcas[i].fim);
+    conferir(resps.every(r => r.s1 === 'NO') && maxAbertas === 1 && marcas.length === 3 && pausas.every(p => p >= 75),
+      '3 Segmentos: uma remessa por vez; espera a resposta e pausa antes da próxima', {maxAbertas, pausas});
+  }
 
   // Planilha de rotas padrão (tabelas vermelhas de 24/10), criada na primeira vez.
   const pastaPadrao = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-padrao-'));

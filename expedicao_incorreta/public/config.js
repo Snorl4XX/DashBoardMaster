@@ -55,7 +55,7 @@
         ['Aviso do 3 Segmentos', b.avisoSegmentos || 'nenhum'],
         ['3 Segmentos no JMS', e.segmentosHoje && e.segmentosHoje.total ?
           'hoje: ' + fmt(e.segmentosHoje.feitos) + ' de ' + fmt(e.segmentosHoje.total) + ' pacotes conferidos' + (e.segmentosHoje.comErro ? ' · ' + fmt(e.segmentosHoje.comErro) +
-          ' com erro (tenta de novo em 30 min)' : '') + ' · ritmo: 1 remessa a cada ' + e.config.segundosPorRemessa + ' s' : 'hoje ainda sem pacotes'],
+          ' com erro (tenta de novo em 30 min)' : '') + ' · ritmo: uma remessa por vez, espera a resposta e pausa ' + e.config.segundosPorRemessa + ' s' : 'hoje ainda sem pacotes'],
         ['Dias guardados', e.salvos && e.salvos.n ? e.salvos.n + (e.salvos.n === 1 ? ' dia' : ' dias') + ' (de ' + br(e.salvos.de) + ' a ' + br(e.salvos.ate) + ')' : 'nenhum ainda'],
         ['Pacotes da secundária', e.jms.pacotesSecundaria ? 'endereço "' + e.jms.pacotesSecundaria + '/scan/page"' : 'ainda não testado']
       ]);

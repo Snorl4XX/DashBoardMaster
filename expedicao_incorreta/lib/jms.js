@@ -20,8 +20,9 @@
  * Cabeçalhos como o DashMaster: AuthToken, Lang/Langtype PT, Timezone GMT-0300 e, se o JMS pedir, Routename (testa as
  * variantes uma vez e guarda a que for aceita).
  *
- * Ritmo: Rastreamento do pacote (3 Segmentos) = 1 remessa a cada "segundosPorRemessa" (pedido: 30 s); o resto = no máximo
- * "porSegundo" consultas por segundo, somando todas. Quando o JMS bloqueia (página em vez de dados, ou HTTP 429) o erro vem
+ * Ritmo: Rastreamento do pacote (3 Segmentos) = uma remessa por vez: manda, espera a resposta do JMS (até "tempoMs") e
+ * pausa "segundosPorRemessa" (pedido: 30 s) antes da próxima; o resto = no máximo "porSegundo" consultas por segundo,
+ * somando todas. Quando o JMS bloqueia (página em vez de dados, ou HTTP 429) o erro vem
  * com {bloqueio: true}, com o título da página na mensagem.
  */
 const JMS = 'https://gw.jtjms-br.com';
@@ -58,13 +59,28 @@ class Jms {
     this.porSegundo = Number(opcoes.porSegundo) > 0 ? Number(opcoes.porSegundo) : 5;
     this.msPorRemessa = opcoes.segundosPorRemessa !== undefined && Number(opcoes.segundosPorRemessa) >= 0 ? Number(opcoes.segundosPorRemessa) * 1000 : 30000;
     this.proxima = {};
+    this.filaRastreio = Promise.resolve();
   }
-  /** Espera a vez da próxima consulta: Rastreamento do pacote, 1 remessa a cada msPorRemessa; o resto, porSegundo (somando). */
+  /**
+   * Espera a vez da próxima consulta. → função "pronto", chamada quando a resposta chega.
+   * Rastreamento do pacote: uma remessa por vez; a próxima espera a resposta desta e depois msPorRemessa.
+   * O resto: no máximo porSegundo consultas por segundo (somando).
+   */
   async vez(grupo) {
+    if (grupo === 'rastreio' && this.msPorRemessa > 0) {
+      const antes = this.filaRastreio;
+      let soltar;
+      this.filaRastreio = new Promise(r => { soltar = r; });
+      await antes;
+      const espera = (this.proxima.rastreio || 0) - Date.now();
+      if (espera > 0) await new Promise(r => setTimeout(r, espera));
+      return () => { this.proxima.rastreio = Date.now() + this.msPorRemessa; soltar(); };
+    }
     const k = grupo === 'rastreio' ? 'rastreio' : 'geral', passo = k === 'rastreio' ? this.msPorRemessa : 1000 / this.porSegundo;
     const agora = Date.now(), quando = Math.max(agora, this.proxima[k] || 0);
     this.proxima[k] = quando + passo;
     if (quando > agora) await new Promise(r => setTimeout(r, quando - agora));
+    return () => {};
   }
   cabecalhos(grupo, variante) {
     const c = this.credenciais() || {};
@@ -90,16 +106,18 @@ class Jms {
     if (!c.JMS_AUTHTOKEN && !c.JMS_COOKIE && !c.JMS_AUTHORIZATION) {
       throw new ErroJms('Falta o AuthToken do JMS: cole em Configurações.', {auth: true, semToken: true});
     }
-    await this.vez(grupo);
-    const headers = this.cabecalhos(grupo, variante);
-    const opts = {method: corpo ? 'POST' : 'GET', headers, redirect: 'manual', signal: AbortSignal.timeout(this.tempoMs)};
-    if (corpo) {
-      headers['Content-Type'] = 'application/json;charset=UTF-8';
-      opts.body = JSON.stringify(c.JMS_COUNTRY_ID ? Object.assign({}, corpo, {countryId: String(c.JMS_COUNTRY_ID)}) : corpo);
-    }
+    const pronto = await this.vez(grupo);
     let resp, text;
-    try { resp = await fetch(this.base + caminho, opts); text = await resp.text(); }
-    catch (e) { throw new ErroJms('Falha de rede ao consultar o JMS: ' + String(e && (e.cause && e.cause.code || e.message) || e).slice(0, 160), {rede: true}); }
+    try {
+      const headers = this.cabecalhos(grupo, variante);
+      const opts = {method: corpo ? 'POST' : 'GET', headers, redirect: 'manual', signal: AbortSignal.timeout(this.tempoMs)};
+      if (corpo) {
+        headers['Content-Type'] = 'application/json;charset=UTF-8';
+        opts.body = JSON.stringify(c.JMS_COUNTRY_ID ? Object.assign({}, corpo, {countryId: String(c.JMS_COUNTRY_ID)}) : corpo);
+      }
+      try { resp = await fetch(this.base + caminho, opts); text = await resp.text(); }
+      catch (e) { throw new ErroJms('Falha de rede ao consultar o JMS: ' + String(e && (e.cause && e.cause.code || e.message) || e).slice(0, 160), {rede: true}); }
+    } finally { pronto(); } // a pausa até a próxima remessa começa aqui, com a resposta na mão
     const st = resp.status;
     if (st >= 300 && st < 400) throw new ErroJms('O JMS mandou para a tela de login (sessão vencida).', {auth: true, status: st});
     if (st === 429) throw new ErroJms('O JMS pediu para esperar (HTTP 429: consultas demais seguidas).', {bloqueio: true, status: st});
@@ -196,8 +214,9 @@ class Jms {
   async diagnostico(remessa) {
     const c = this.credenciais() || {}, out = {remessa: String(remessa), routename: this.rotaCabecalho('rastreio') || '(nenhum)'};
     if (!c.JMS_AUTHTOKEN && !c.JMS_COOKIE && !c.JMS_AUTHORIZATION) return Object.assign(out, {erro: 'Falta o AuthToken do JMS.'});
-    // Conta como uma consulta do 3 Segmentos: a próxima espera o ritmo normal.
-    this.proxima.rastreio = Math.max(this.proxima.rastreio || 0, Date.now() + this.msPorRemessa);
+    // Conta como uma consulta do 3 Segmentos: a próxima remessa espera a pausa normal depois desta resposta.
+    const pausa = () => { this.proxima.rastreio = Math.max(this.proxima.rastreio || 0, Date.now() + this.msPorRemessa); };
+    pausa();
     const headers = Object.assign(this.cabecalhos('rastreio'), {'Content-Type': 'application/json;charset=UTF-8'});
     let resp, text;
     try {
@@ -205,6 +224,7 @@ class Jms {
         body: JSON.stringify({waybillNo: String(remessa), countryId: String(c.JMS_COUNTRY_ID || '1')})});
       text = await resp.text();
     } catch (e) { return Object.assign(out, {erro: 'Falha de rede: ' + String(e && (e.cause && e.cause.code || e.message) || e).slice(0, 160)}); }
+    finally { pausa(); }
     out.http = resp.status;
     out.conteudo = String(resp.headers.get('content-type') || '').split(';')[0];
     let json = null;

@@ -54,7 +54,7 @@ const DEFAULTS = {
   status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
   consultasSegmentos: 3,   // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote): quantas consultas ao mesmo tempo
   consultasPorSegundo: 5,  // viagens e bipes: no máximo tantas consultas ao JMS por segundo, somando todas
-  segundosPorRemessa: 30,  // "3 Segmentos" (Rastreamento do pacote): 1 remessa a cada tantos segundos (mais rápido o JMS bloqueia)
+  segundosPorRemessa: 30,  // "3 Segmentos" (Rastreamento do pacote): uma remessa por vez; espera a resposta e pausa tantos segundos
   tamanhoPagina: 100,     // pacotes por consulta ao JMS
   tamanhoPaginaViagens: 50,
   consultasAoMesmoTempo: 4,
