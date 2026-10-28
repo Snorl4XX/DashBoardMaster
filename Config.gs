@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.15.2',
+  VERSION: '4.16.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -255,6 +255,70 @@ const DOCKS_EXPEDICAO = Object.freeze({
  * "BA FEC" → doca 18 · "SP BRE" → docas 21/22 · "DC SSZ-SP" → doca 14 · "MG BHZ" (BHZ fora da lista) → MG → doca 19.
  */
 const DOCKS_PROXIMA_PARADA = Object.freeze(Object.assign({}, DOCKS_EXPEDICAO, {source: 'destination'}));
+
+/**
+ * V4.16 (pedido, Expedição SC → DC): ESTEIRAS pelas tabelas de 24/10 — "10月24日干线装车码头进行调整" (troncal, linhas de desvio
+ * do DWS 7, 4, 2 e 3) e "Ajuste das Docas de Carregamento das Rotas Regionais" (Last Mile, linhas 6 e 5). As duas tabelas
+ * repetem os números de doca (doca 05 é GO GYN na troncal e F S-PQBOTU-SP na Last Mile): por isso o painel mostra a
+ * "Esteira (número)" = linha de desvio do DWS, e não a doca. A esteira sai da PRÓXIMA PARADA (nome da rota, de uma parada
+ * da linha, o código da base no nome ou o código), como as docas do SC → SC.
+ */
+const ESTEIRA_TABLE_2026_10_24_ = [
+  // ---------- troncal ----------
+  {dock: 'DOCA 05', line: 7, route: 'GO GYN', codes: ['GO']},
+  {dock: 'DOCA 06', line: 7, route: 'SC BNU', codes: ['SC', 'SC1']},
+  {dock: 'DOCA 07', line: 7, route: 'RS NSR', codes: ['RS', 'RS1']},
+  {dock: 'DOCA 08', line: 7, route: 'SBN', codes: ['SBN'].concat(DOCK_SUB_('SBN', ['375-00', '375-01', '375-02', '375-03', '375-04', '375-05',
+    '375-06', '375-07', '375-08', '375-09', '375-10'])), stops: ['DC SBN', 'DC SBN-SP']},
+  {dock: 'DOCA 09', line: 7, route: 'CE FOR', codes: ['CE']},
+  {dock: 'DOCA 10', line: 7, route: 'RJ SJM', codes: ['RJ', 'RJ1', 'VDC', 'CDG'], stops: ['BA VDC', 'DC CDG-RJ']},
+  {dock: 'DOCA 15', line: 4, route: 'SE AJU', codes: ['SE', 'AL', 'MCZ'], stops: ['DC MCZ-AL']},
+  {dock: 'DOCA 16', line: 4, route: 'PR SJS', codes: ['PR', 'PR1', 'CAC'], stops: ['DC CAC']},
+  {dock: 'DOCA 17', line: 4, route: 'PE JGS', codes: ['PE', 'BYE', 'DC-BYE'], stops: ['DC BYE-PB']},
+  {dock: 'DOCA 18', line: 4, route: 'BA FEC', codes: ['BA', 'SBA', 'SNS'], stops: ['DC SNS-PE', 'DC SBA-BA']},
+  {dock: 'DOCA 19', line: 4, route: 'MG CGE', codes: ['MG', 'MG1', 'CHV']},
+  {dock: 'DOCA 20', line: 4, route: 'PA ANA', codes: ['PA']},
+  {dock: 'DOCA 21/22', line: 2, route: 'SP BRE', codes: ['AC', 'AM', 'BAU', 'BVB', 'JDF', 'LDB', 'MIA', 'MRB', 'RO', 'SJP', 'SOD', 'SP', 'SP1',
+    'STM', 'TO', 'VCP', 'XAP', 'BJE', 'MA', 'PPB', 'NAT', 'BRE'], prefixes: ['BRE - '], stops: DOCK_STOPS_SP_BRE_.filter(x => x !== 'DC CDG-RJ')},
+  {dock: 'DOCA 23', line: 2, route: 'DC TBT-SP', codes: DOCK_SUB_('SP', ['402-01', '402-03', '402-05', '421-00'])
+    .concat(DOCK_SUB_('GRU', ['402-00', '402-01', '402-02', '402-03', '402-04', '402-05', '402-06', '402-07', '402-08'])), stops: ['DC TBT']},
+  {dock: 'DOCA 44', line: 3, route: 'DC GRU-SP', codes: DOCK_SUB_('SP', ['395-05', '395-06', '395-07', '381-04'])
+    .concat(DOCK_SUB_('GRU', ['381-00', '381-01', '381-02', '381-03', '381-04', '381-05', '381-11', '381-13', '381-14', '381-15', '381-18', '381-19',
+      '381-20', '381-21', '378-04'])), stops: ['DC GRU']},
+  {dock: 'DOCA 43', line: 3, route: 'MS CGR', codes: ['MS']},
+  {dock: 'DOCA 42', line: 3, route: 'MT CGB', codes: ['MT', 'JPN'], stops: ['DC JPN']},
+  {dock: 'DOCA 41', line: 3, route: 'THE', codes: ['PI', 'IMP'], stops: ['PI THE', 'DC IMP-MA']},
+  {dock: 'DOCA 40', line: 3, route: 'ES SRR', codes: ['ES']},
+  {dock: 'DOCA 39', line: 3, route: 'SP RBP', codes: ['NE', 'NE1']},
+  {dock: 'DOCA 38', line: 3, route: 'DF BSB', codes: ['DF']},
+  // ---------- Last Mile (rotas regionais) ----------
+  {dock: 'DOCA 01', line: 6, route: 'DC S-VLANA-SP', codes: ['VLANA']},
+  {dock: 'DOCA 02', line: 6, route: 'F S-JBO-SP', codes: ['GRU 404-11']},
+  {dock: 'DOCA 03', line: 6, route: 'F S-SAP 02-SP', codes: ['GRU 404-12']},
+  {dock: 'DOCA 04', line: 6, route: 'F S-MGUE 02-SP', codes: ['GRU 404-08']},
+  {dock: 'DOCA 05', line: 6, route: 'F S-PQBOTU-SP', codes: ['GRU 404-09']},
+  {dock: 'DOCA 06', line: 6, route: 'F VLMT-SP', codes: ['GRU 404-10']},
+  {dock: 'DOCA 07', line: 6, route: 'S-MGUE-SP', codes: ['GRU 404-01']},
+  {dock: 'DOCA 08/09', line: 6, route: 'DC SSZ-SP', codes: DOCK_SUB_('GRU', ['378-00', '378-01', '378-02', '378-03', '378-05', '378-06']), stops: ['DC SSZ']},
+  {dock: 'DOCA 10', line: 6, route: 'S-MGUE 02-SP', codes: ['GRU 404-13']},
+  {dock: 'DOCA 11/12', line: 5, route: 'DC S-MOO 02-SP', codes: ['MOO'].concat(DOCK_SUB_('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01',
+    '430-05', '430-07', '430-08', '430-09']), DOCK_SUB_('MOO', ['430-00', '430-01', '430-02', '430-03', '430-04', '430-05', '430-06', '430-07', '430-08',
+    '430-09'])), stops: ['DC MOOCA2', 'DC MOOCA']},
+  {dock: 'DOCA 13', line: 5, route: 'S-PENHA-SP', codes: ['GRU 404-02']},
+  {dock: 'DOCA 14', line: 5, route: 'F S-PENHA 02-SP', codes: ['GRU 404-07']},
+  {dock: 'DOCA 15/16', line: 5, route: 'S-SRAF-SP', codes: ['GRU 404-00']},
+  {dock: 'DOCA 17/18', line: 5, route: 'DC NOD-SP', codes: ['NOD']},
+  {dock: 'DOCA 19', line: 5, route: 'S-SAPOP-SP', codes: ['GRU 404-03']},
+  {dock: 'DOCA 20', line: 5, route: 'F S-MGUE-SP', codes: ['GRU 404-04']},
+  {dock: 'DOCA 22', line: 5, route: 'F S-PENHA-SP', codes: ['GRU 404-05']},
+  {dock: 'DOCA 24', line: 5, route: 'F S-PENHA 03-SP', codes: ['GRU 404-06']}
+];
+/** Esteiras do SC → DC: a tabela de 24/10 vale para todo o histórico do painel (o valor mostrado é "Esteira N"). */
+const ESTEIRAS_SC_DC = Object.freeze({
+  source: 'destination', show: 'line', linePrefix: 'Esteira ',
+  versions: [{from: '', entries: ESTEIRA_TABLE_2026_10_24_}],
+  fallback: 'SEM ESTEIRA'
+});
 
 /** Cores fixas por turno (validadas para daltonismo). A cor segue o turno em todos os gráficos. */
 const SHIFT_COLORS = Object.freeze({T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7', 'N/A': '#9CA3AF'});
@@ -585,10 +649,13 @@ const ALL_INDICATORS_ = Object.freeze({
       destination: ['sendNextStation'], lot: ['sendPackageCode'],
       client: ['orderSourceName'], route: ['arrivalShipmentName', 'lastCenterName'], reason: ['isTimely']
     },
-    labels: {tripId: {pt: 'ID viagem de saída', zh: '发件车次号'}, route: {pt: 'Rota do veículo de chegada', zh: '到件车辆线路'}},
+    labels: {tripId: {pt: 'ID viagem de saída', zh: '发件车次号'}, route: {pt: 'Rota do veículo de chegada', zh: '到件车辆线路'},
+      destination: {pt: 'Próxima parada', zh: '下一站'}, dock: {pt: 'Esteira', zh: '摆轮线路'}, dockDest: {pt: 'Rota de carregamento', zh: '装车线路'}},
+    // V4.16 (pedido): esteira (linha de desvio do DWS) pela próxima parada, tabelas de 24/10 (troncal e Last Mile).
+    docks: ESTEIRAS_SC_DC,
     // V4.15: remessa ainda não consultada no Rastreamento do pacote (as consultadas sem ID mostram "NÃO TEM ID").
     naLabel: {text: {pt: 'AGUARDANDO CONSULTA', zh: '等待查询'}, fields: ['tripId']},
-    filters: ['receiptShift', 'expeditionShift', 'tripId', 'interval', 'route'],
+    filters: ['receiptShift', 'expeditionShift', 'tripId', 'interval', 'destination', 'dock', 'route'],
     topCards: ['tripId'],
     hideShiftCards: true,
     charts: [
@@ -596,10 +663,13 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'expeditionShift', type: 'doughnut', title: {pt: 'Turno que fez a expedição', zh: '发件班次'}},
       {key: 'tripId', type: 'bar', horizontal: true, top: 10, hideNA: true, trips: true,
         title: {pt: 'IDs de viagem de saída mais ofensores', zh: '高频发件车次号'}},
-      {key: 'route', type: 'bar', horizontal: true, top: 10, title: {pt: 'Rotas com mais ofensores', zh: '高频线路'}}
+      // V4.16 (pedido): as rotas pela PRÓXIMA PARADA (antes: rota do veículo de chegada) e as esteiras.
+      {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Rotas com mais ofensores (próxima parada)', zh: '高频下一站'}},
+      {key: 'dock', type: 'bar', horizontal: true, top: 10, title: {pt: 'Esteiras com mais ofensores', zh: '高频摆轮线路'}}
     ],
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Número de pedido JMS', 'JMS运单号'],
+      ['destination', 'Próxima parada', '下一站'], ['dock', 'Esteira', '摆轮线路'],
       ['route', 'Rota veículo de chegada', '到件车辆线路'], ['tripId', 'ID viagem de saída', '发件车次号'],
       ['receiptTime', 'Horário descarregamento veículo de chegada', '到件车辆卸车时间'],
       ['expeditionTime', 'Horário de expedição', '发件时间']

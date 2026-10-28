@@ -1,8 +1,27 @@
-# J&T DASHMASTER V4.15 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.16 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.16 — Expedição SC → DC: rotas pela próxima parada e esteiras
+
+**Pedido (arquivo "ALTERAÇÕES"):** no painel **Expedição SC → DC**, o gráfico "Rotas com mais ofensores" pela coluna
+**Próxima parada** e as rotas pelas tabelas de 24/10, chamando de **"Esteira (número)"** no lugar da doca.
+
+- O gráfico **Rotas com mais ofensores (próxima parada)** conta as remessas pela próxima parada (antes: rota do veículo de chegada).
+- Gráfico novo **Esteiras com mais ofensores**, filtros **Próxima parada** e **Esteira** e as colunas **Próxima parada** e
+  **Esteira** na tabela (e no relatório).
+- Esteira = linha de desvio do DWS das tabelas de 24/10: troncal (esteiras 7, 4, 2 e 3) e Last Mile (esteiras 6 e 5). As duas
+  tabelas repetem os números de doca, por isso o painel mostra a esteira. Ex.: S-MGUE-SP → Esteira 6; DC S-MOO 02-SP →
+  Esteira 5; RJ SJM → Esteira 7; DC TBT-SP → Esteira 2. Próxima parada fora das tabelas = SEM ESTEIRA.
+- Vale para todo o histórico do SC → DC, sem baixar nada de novo (a próxima parada já está gravada). Tabela em
+  `ESTEIRA_TABLE_2026_10_24_` no Config.gs.
+- Os outros painéis (Envio Errado, SC → SC, Falta de Bipagem na Expedição) continuam com as docas da tabela de 11/10.
+
+**Atualizar:** Node.js — feche a janela preta do painel, extraia o ZIP `JT_DASHMASTER_V4_16_NODE.zip` em `C:\` (Substituir) e
+abra o atalho DashMaster. Apps Script — troque `Config.gs` e `Core.gs` (ou todos os arquivos) e faça Implantar → Gerenciar
+implantações → ✏️ → Nova versão.
 
 ## V4.15.2 — Versão Node.js sem Recebimento e Expedição
 

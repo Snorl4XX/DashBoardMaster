@@ -4257,4 +4257,40 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'Falta de Bipagem na Expedição: dias já baixados usam o 1º + 2º segmento guardado (sem baixar de novo)');
 }
 
+// ---------- V4.16: Expedição SC → DC — rotas pela próxima parada e esteiras (tabelas de 24/10, troncal e Last Mile) ----------
+{
+  const EST = vm.runInContext('ESTEIRAS_SC_DC', ctx);
+  const casosEst = {'S-MGUE-SP': ['S-MGUE-SP', 'Esteira 6'], 'F S-MGUE-SP': ['F S-MGUE-SP', 'Esteira 5'], 'DC SSZ-SP': ['DC SSZ-SP', 'Esteira 6'],
+    'DC S-MOO 02-SP': ['DC S-MOO 02-SP', 'Esteira 5'], 'S-PENHA-SP': ['S-PENHA-SP', 'Esteira 5'], 'DC NOD-SP': ['DC NOD-SP', 'Esteira 5'],
+    'RJ SJM': ['RJ SJM', 'Esteira 7'], 'BA VDC': ['RJ SJM', 'Esteira 7'], 'DC MCZ-AL': ['SE AJU', 'Esteira 4'], 'DC TBT-SP': ['DC TBT-SP', 'Esteira 2'],
+    'DC GRU-SP': ['DC GRU-SP', 'Esteira 3'], 'SP BRE': ['SP BRE', 'Esteira 2'], 'PA STM': ['SP BRE', 'Esteira 2'], 'MT CGB': ['MT CGB', 'Esteira 3'],
+    'XX YYY': ['XX', 'SEM ESTEIRA'], '': ['', 'SEM ESTEIRA']};
+  const rowsEst = C.applyDocks(Object.keys(casosEst).map(v => ({destination: v, date: '2026-10-28'})), EST);
+  check(rowsEst.every(r => r.dockDest === casosEst[r.destination][0] && r.dock === casosEst[r.destination][1]),
+    'SC → DC: esteira (linha do DWS) pela próxima parada, tabelas de 24/10 da troncal e da Last Mile', rowsEst.map(r => r.destination + '→' + r.dockDest + '/' + r.dock));
+  const oldDay = C.applyDocks([{destination: 'S-MGUE-SP', date: '2026-09-01'}], EST)[0];
+  check(oldDay.dock === 'Esteira 6' && C.applyDocks([{destination: 'BA FEC', date: '2026-10-28'}], DPP)[0].dock !== 'Esteira 4',
+    'SC → DC: a tabela de 24/10 vale para todo o histórico do painel; as docas do SC → SC e do Envio Errado não mudam');
+  const DSC = C.addDays(ctx.isoToday_(), -2), dSC = makeDay(DSC, 77);
+  const pars = ['S-MGUE-SP', 'DC SSZ-SP', 'DC S-MOO 02-SP', 'RJ SJM'];
+  dSC.dc = dSC.dc.map((r, i) => Object.assign({}, r, {sendNextStation: pars[i % 4]}));
+  const cDC = freshCtx({[DSC]: dSC}, null, {DATA_START_DATE: DSC});
+  cDC.queueHistory(DSC, DSC, true);
+  runAll(cDC);
+  const catDC = cDC.getPublicCatalog_().filter(x => x.key === 'sc_dc')[0];
+  const chartKeys = catDC.charts.map(c => c.key), tabKeys = catDC.table.map(c => c[0]);
+  check(chartKeys.indexOf('destination') >= 0 && chartKeys.indexOf('dock') >= 0 && chartKeys.indexOf('route') < 0 &&
+    catDC.charts.filter(c => c.key === 'destination')[0].title.pt === 'Rotas com mais ofensores (próxima parada)' &&
+    catDC.filters.some(f => f.key === 'dock') && catDC.filters.some(f => f.key === 'destination') && tabKeys.indexOf('destination') >= 0 &&
+    tabKeys.indexOf('dock') >= 0 && catDC.labels.dock.pt === 'Esteira',
+    'SC → DC: gráfico das rotas pela próxima parada, gráfico/filtro/coluna "Esteira"', {chartKeys, tabKeys});
+  const rowsDC = C.applyDocks(C.decodeDataset(cDC.getDashboardData('sc_dc', {from: DSC, to: DSC}).dataset), catDC.docks);
+  const espDC = {'S-MGUE-SP': 'Esteira 6', 'DC SSZ-SP': 'Esteira 6', 'DC S-MOO 02-SP': 'Esteira 5', 'RJ SJM': 'Esteira 7'};
+  check(rowsDC.length > 0 && rowsDC.every(r => r.dock === espDC[r.destination]), 'SC → DC: a esteira sai da próxima parada já gravada (sem baixar de novo)',
+    rowsDC.slice(0, 4).map(r => r.destination + '→' + r.dock));
+  const repDC = cDC.computeDashboard_('sc_dc', {from: DSC, to: DSC, filters: {dock: ['Esteira 5']}});
+  check(repDC.rows.length > 0 && repDC.rows.every(r => r.dock === 'Esteira 5' && r.destination === 'DC S-MOO 02-SP'),
+    'SC → DC: relatório com filtro de esteira', repDC.rows.length);
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

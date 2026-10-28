@@ -212,6 +212,8 @@ function JTCoreFactory_() {
    */
   function applyDocks(rows, docks) {
     if (!docks || !rows) return rows;
+    // V4.16: docks.show 'line' = mostra a linha de desvio do DWS ("Esteira 6") no lugar da doca (SC → DC).
+    var valor = function (e) { return docks.show === 'line' ? (e.line ? (docks.linePrefix || '') + e.line : docks.fallback) : e.dock || docks.fallback; };
     var ixs = {}, memo = {};
     var indexFor = function (vi) { return ixs[vi] || (ixs[vi] = dockIndex(vi < 0 ? docks : docks.versions[vi])); };
     var bySource = docks.source && docks.source !== 'segment';
@@ -222,7 +224,7 @@ function JTCoreFactory_() {
         key = vi + '\u0001' + v;
         m = memo[key];
         if (!m) {
-          if (ix.entries) { var es = entryForStop(v, ix); m = es ? [es.route, es.dock || docks.fallback] : ['', docks.fallback]; }
+          if (ix.entries) { var es = entryForStop(v, ix); m = es ? [es.route, es.dock ? valor(es) : docks.fallback] : ['', docks.fallback]; }
           else { var d = stopDestination(v, ix); m = [d, d ? (ix.byDest[d.toUpperCase()] || docks.fallback) : docks.fallback]; }
           memo[key] = m;
         }
@@ -233,7 +235,7 @@ function JTCoreFactory_() {
         if (!m) {
           var legacy = !raw && !blank(r.segment), src = legacy ? r.segment : raw;
           if (legacy && String(r.segment).trim().toUpperCase() === 'BRE') m = ['', ''];
-          else if (ix.entries) { var ec = entryForCode(src, ix); m = ec ? [ec.route, ec.dock || docks.fallback] : ['', docks.fallback]; }
+          else if (ix.entries) { var ec = entryForCode(src, ix); m = ec ? [ec.route, ec.dock ? valor(ec) : docks.fallback] : ['', docks.fallback]; }
           else { var dest = destinationOf(src, ix); m = [dest, dest ? (ix.byDest[dest.toUpperCase()] || docks.fallback) : docks.fallback]; }
           memo[key] = m;
         }
