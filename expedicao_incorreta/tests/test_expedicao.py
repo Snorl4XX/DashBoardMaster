@@ -869,3 +869,70 @@ def test_google_abre_espaco_perto_do_limite(tmp_path, falso, google, monkeypatch
     assert "Pacotes 2026-10-20" not in abas and aba_pacotes(HOJE) in abas and aba_pacotes(ONTEM) in abas  # hoje e ontem ficam
     assert any("perto do limite" in t for t in app.ultimas)
     app.banco.fechar()
+
+
+# ------------------------------------------------------------------ link público (Tailscale)
+from expedicao import tailscale as ts_mod  # noqa: E402
+
+
+@pytest.fixture
+def ts_falso(tmp_path, monkeypatch):
+    estado = tmp_path / "ts.json"
+    estado.write_text(json.dumps({"conectado": True, "liberado": False, "funnel": {}}), encoding="utf-8")
+    monkeypatch.setenv("TAILSCALE_FALSO", str(estado))
+    monkeypatch.setenv("EXPEDICAO_TAILSCALE", f'"{sys.executable}" "{Path(__file__).parent / "tailscale_falso.py"}"')
+    monkeypatch.setattr(ts_mod.Tailscale, "TEMPO_LIGAR", 2)
+
+    def mudar(**k):
+        d = json.loads(estado.read_text(encoding="utf-8"))
+        d.update(k)
+        estado.write_text(json.dumps(d), encoding="utf-8")
+    return mudar
+
+
+def test_tailscale_nao_instalado(monkeypatch):
+    monkeypatch.setattr(ts_mod, "achar", lambda: None)
+    e = ts_mod.Tailscale(3300).estado()
+    assert not e["instalado"] and "não instalado" in e["mensagem"]
+    assert not ts_mod.Tailscale(3300).ligar()["ok"]
+
+
+def test_tailscale_liga_o_link(ts_falso):
+    t = ts_mod.Tailscale(3300)
+    ts_falso(conectado=False)
+    assert not t.estado()["conectado"] and "entre na sua conta" in t.ligar()["mensagem"]
+    ts_falso(conectado=True)
+    e = t.estado()
+    assert e["conectado"] and e["nome"] == "pc-expedicao.tail1234.ts.net" and not e["ligado"]
+    r = t.ligar()  # primeira vez: o Tailscale pede para liberar o Funnel na conta
+    assert not r["ok"] and r["liberar"] == "https://login.tailscale.com/f/funnel?node=nFake123CNTRL"
+    ts_falso(liberado=True)
+    r = t.ligar()
+    assert r["ok"] and r["link"] == "https://pc-expedicao.tail1234.ts.net:8443"
+    assert t.estado()["ligado"] and t.ligar()["mensagem"].startswith("O link público já estava ligado")
+    assert t.desligar()["ok"] and not t.estado()["ligado"]
+    assert ts_mod.Tailscale(3300, 443).estado()["link"] == "https://pc-expedicao.tail1234.ts.net"
+    assert ts_mod.Tailscale(3300, 1234).porta_publica == 8443  # o Funnel só aceita 443, 8443 e 10000
+
+
+def test_servidor_link_publico_e_senha(servidor, ts_falso):
+    app, c = servidor
+    ts_falso(liberado=True)
+    app.banco.set("SENHA_PAINEL", None)
+    app.cfg["senha"] = ""
+    fora = {"X-Forwarded-For": "200.1.2.3", "Tailscale-Funnel-Request": "?1"}
+    assert c.pedir("/api/estado", cabecalhos=fora)[0] == 200  # sem senha: abre
+    r = json.loads(c.pedir("/config/api/link/ligar", {})[2])
+    assert r["ok"] and r["link"].endswith(":8443")
+    e = json.loads(c.pedir("/config/api/estado")[2])
+    assert e["link"]["ligado"] and not e["link"]["senha"] and any(a.endswith(":8443/troncal") for a in e["enderecos"])
+    assert json.loads(c.pedir("/config/api/senha", {"senha": "12"})[2])["ok"] is False
+    assert json.loads(c.pedir("/config/api/senha", {"senha": "expedicao2026"})[2])["senha"]
+    assert c.pedir("/api/estado", cabecalhos=fora)[0] == 401  # agora pede a senha
+    assert c.pedir("/api/estado")[0] == 200  # neste computador, não
+    st, h, _ = c.pedir("/entrar", "senha=expedicao2026", cabecalhos=fora, tipo="application/x-www-form-urlencoded")
+    assert st == 303
+    c.cookie = h["Set-Cookie"].split(";")[0]
+    assert c.pedir("/api/estado", cabecalhos=fora)[0] == 200
+    assert c.pedir("/config/api/estado", cabecalhos=fora)[0] == 403  # Configurações nunca pelo link
+    assert json.loads(c.pedir("/config/api/link/desligar", {})[2])["ok"]

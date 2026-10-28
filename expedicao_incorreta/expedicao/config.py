@@ -31,7 +31,8 @@ DEFAULTS = {
     "viagemGrande": 3000,       # viagem com mais pacotes que isto…
     "minutosViagemGrande": 30,  # …busca a lista de novo no máximo a cada 30 min
     "dashmaster": "",           # pasta do DashMaster para usar o mesmo AuthToken (vazio = procura em C:\\dashmaster; "nao" = não usar)
-    "linkPublico": "",          # link do Tailscale (só para aparecer na janela e em Configurações)
+    "linkPublico": "",          # outro link público (só para aparecer na janela e em Configurações)
+    "portaLink": 8443,          # porta do link do Tailscale Funnel (443, 8443 ou 10000; o DashMaster costuma usar a 443)
     "googleDias": 15,           # Google Planilha: quantos dias ficam nela (limite do Google: 10 milhões de células)
     "googleMinutos": 3,         # Google Planilha: o dia que mudou é reescrito no máximo a cada tantos minutos
     "googleLinhasPorEnvio": 5000,  # Google Planilha: linhas por envio (dia grande vai em partes)

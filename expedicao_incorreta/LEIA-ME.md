@@ -228,20 +228,41 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba **"Rotas"**:
 - **Salvou a planilha com o app aberto?** O painel já usa a nova. Também dá para enviar pela tela Configurações.
 - **Os códigos:** separe por vírgula. Pode escrever `404 - 12` (com espaços) ou `DC—BYE`.
 
-## Link para a equipe (Tailscale, o mesmo do DashMaster)
+## Link público para qualquer pessoa (Tailscale)
 
-1. **Link:** crie um atalho na Área de Trabalho e cole, com as aspas:
-   ```
-   "C:\Program Files\Tailscale\tailscale.exe" funnel --https=8443 3300
-   ```
-   Dois cliques: a janela mostra o link `https://....ts.net:8443`.
-2. **Senha (recomendado):** abra o `config.json` no Bloco de Notas.
-   - Escreva a senha em `"senha"`.
-   - Cole o link em `"linkPublico"`.
-   - Salve e abra o app de novo.
+Um link `https://<computador>.<rede>.ts.net:8443/troncal` que qualquer pessoa abre no celular ou em outro computador, sem instalar nada.
+Usa o **Tailscale Funnel** deste computador (o mesmo Tailscale do DashMaster).
 
-O painel aberto pelo link lê da Google Planilha, igual ao do computador. A tela Configurações nunca abre pelo link nem de outro
-computador: só no computador do app.
+**Precisa:**
+- **Tailscale instalado e conectado** neste computador (ícone perto do relógio). Se ainda não tem: tailscale.com/download.
+- **O computador ligado, com o app aberto:** o link aponta para ele.
+
+**Criar o link (pela tela, sem digitar comando):**
+1. Abra `http://localhost:3300/config` › **Link público (Tailscale)** › **Criar link público**.
+2. **Só na primeira vez**, o Tailscale pede para liberar o Funnel na sua conta:
+   - a tela mostra **"Abrir a página do Tailscale para liberar o Funnel"**;
+   - abra, entre na conta do Tailscale e clique em liberar (**Enable**);
+   - volte e clique de novo em **Criar link público**.
+3. Aparece o link, com os botões **Copiar o link**, **Abrir o link** e **Desligar o link**.
+   - O link fica ligado mesmo depois de reiniciar o computador (até você clicar em Desligar).
+4. **Senha (recomendado):** na mesma seção, digite uma senha e clique em **Salvar a senha**.
+   - Quem abrir pelo link digita a senha uma vez (o navegador lembra por 30 dias).
+   - Neste computador o painel abre sem senha.
+
+**Segurança:**
+- A tela **Configurações nunca abre pelo link** nem de outro computador: só no computador do app.
+- O AuthToken do JMS e a senha da Google Planilha não aparecem no painel.
+- **Sem senha, qualquer pessoa com o link vê o painel**, com os logins e as remessas.
+
+O painel aberto pelo link lê da Google Planilha, igual ao do computador.
+
+**Pelo cmd (se preferir):** o mesmo que o botão faz.
+```
+"C:\Program Files\Tailscale\tailscale.exe" funnel --bg --https=8443 3300
+```
+- Ver o link: `tailscale funnel status`.
+- Desligar: `tailscale funnel --https=8443 off`.
+- O Funnel só aceita as portas 443, 8443 e 10000. O DashMaster costuma usar a 443; este app usa a 8443 (`portaLink` no config.json).
 
 ## config.json (criado na 1ª vez)
 
@@ -249,7 +270,7 @@ computador: só no computador do app.
 |---|---|---|
 | `porta` | 3300 | Porta dos painéis. |
 | `host` | `0.0.0.0` | `0.0.0.0` abre para a rede da empresa; `127.0.0.1` = só neste computador. |
-| `senha` | vazio | Senha dos painéis para quem abre de fora (vazio = sem senha). |
+| `senha` | vazio | Senha dos painéis para quem abre de fora (vazio = sem senha). A da tela Configurações › Link público vale mais. |
 | `codigoBase` / `nomeBase` | `30001` / `SP GRU` | A nossa base (PDD de saída). |
 | `minutos` | 10 | Busca automática de hoje (mínimo 2). |
 | `minutosDiaAnterior` | 60 | Busca de ontem (0 = desliga). |
@@ -261,7 +282,8 @@ computador: só no computador do app.
 | `consultasAoMesmoTempo` | 4 | Viagens conferidas ao mesmo tempo. |
 | `viagemGrande` / `minutosViagemGrande` | 3000 / 30 | Viagem grande baixa a lista no máximo a cada 30 min. |
 | `dashmaster` | vazio | Pasta do DashMaster para usar o mesmo AuthToken (vazio = procura em `C:\dashmaster`; `"nao"` = não usar). |
-| `linkPublico` | vazio | Link do Tailscale (só para aparecer na janela e em Configurações). |
+| `portaLink` | 8443 | Porta do link público do Tailscale (443, 8443 ou 10000). |
+| `linkPublico` | vazio | Outro link público (só para aparecer na janela e em Configurações). |
 | `googleDias` | 15 | Google Planilha: quantos dias ficam nela (os mais antigos continuam no computador). |
 | `googleMinutos` | 3 | Google Planilha: o dia que mudou é reescrito no máximo a cada tantos minutos. |
 | `googleLinhasPorEnvio` | 5000 | Google Planilha: linhas por envio (dia grande vai em partes). |
@@ -298,6 +320,7 @@ Mudou o `config.json`? Feche a janela preta e abra o app de novo.
 | `expedicao/painel.py` | Cartões, gráficos, tabela e Excel. |
 | `expedicao/sincronia.py` | Google Planilha: escreve os dias, lê para o painel e guarda o que você mudou. |
 | `expedicao/google.py` | Conversa com o App da Web do Apps Script. |
+| `expedicao/tailscale.py` | Link público: chama o Tailscale deste computador (Funnel). |
 | `google/Codigo.gs` | O código que fica na Google Planilha (Apps Script). |
 | `expedicao/banco.py` | SQLite. |
 | `expedicao/xlsx.py` | Lê e escreve .xlsx sem bibliotecas. |

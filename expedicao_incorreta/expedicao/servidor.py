@@ -37,6 +37,7 @@ from . import VERSAO
 from .banco import Banco
 from .google import ErroGoogle
 from .sincronia import FonteDados, Sincronizador
+from .tailscale import Tailscale
 from .coletor import Coletor, agora_sp, dias_da_agenda, dias_entre, hoje_sp, ms, soma_dias
 from .config import MAX_DIAS, PASTA_APP, arquivo_config, ler_config
 from .jms import Jms
@@ -118,6 +119,8 @@ class App:
         self.painel = Painel(self.banco, self.regras, cfg["statusCodigos"], cfg["segmentoPelaBase"], dados=FonteDados(self.banco, self.google))
         self.google.painel = self.painel
         self.coletor = Coletor(banco=self.banco, jms=self.jms, cfg=cfg, log=self.log, ao_mudar=self.ao_mudar)
+        self.tailscale = Tailscale(cfg["porta"], cfg.get("portaLink") or 8443)
+        self._link = {"em": 0.0, "estado": {}}
         self.servidor: ThreadingHTTPServer | None = None
         self._parar = threading.Event()
 
@@ -212,8 +215,12 @@ class App:
             self.banco.set("SEGREDO_SESSAO", s)
         return s
 
+    def senha_painel(self) -> str:
+        """Senha para abrir o painel de fora (link público): a da tela Configurações; sem ela, a do config.json."""
+        return str(self.banco.get("SENHA_PAINEL") or self.cfg["senha"] or "")
+
     def marca_senha(self) -> str:
-        return hmac.new(self.segredo().encode(), str(self.cfg["senha"]).encode(), hashlib.sha256).hexdigest()[:40]
+        return hmac.new(self.segredo().encode(), self.senha_painel().encode(), hashlib.sha256).hexdigest()[:40]
 
     @staticmethod
     def cookies(req: BaseHTTPRequestHandler) -> dict:
@@ -225,7 +232,7 @@ class App:
         return o
 
     def liberado(self, req: BaseHTTPRequestHandler) -> bool:
-        return not self.cfg["senha"] or self.local(req) or hmac.compare_digest(self.cookies(req).get("exp_sessao", ""), self.marca_senha())
+        return not self.senha_painel() or self.local(req) or hmac.compare_digest(self.cookies(req).get("exp_sessao", ""), self.marca_senha())
 
     # ---------------------------------------------------------------- situação
     def estado_publico(self) -> dict:
@@ -241,12 +248,12 @@ class App:
     def estado_config(self) -> dict:
         c, r, cfg, hoje = self.credenciais(), self.regras.resumo(), self.cfg, hoje_sp()
         config = {k: v for k, v in cfg.items() if k != "statusCodigos"}
-        config["senha"] = "definida" if cfg["senha"] else ""
+        config["senha"] = "definida" if self.senha_painel() else ""
         busca = dict(self.coletor.estado)
         busca["erros"], busca["dias"] = list(busca["erros"]), list(busca["dias"])
         return {"versao": VERSAO, "config": config, "enderecos": self.enderecos(),
                 "token": {"fonte": c["fonte"], "temProprio": bool(self.banco.get("JMS_AUTHTOKEN")), "dashmaster": bool(self.credenciais_dashmaster())},
-                "planilhas": r, "google": self.google.resumo(), "busca": busca, "registro": list(self.ultimas)[-60:], "hoje": hoje, "salvos": self.banco.dias_salvos(),
+                "planilhas": r, "google": self.google.resumo(), "link": {**self.link_estado(), "senha": bool(self.senha_painel())}, "busca": busca, "registro": list(self.ultimas)[-60:], "hoje": hoje, "salvos": self.banco.dias_salvos(),
                 "segmentosHoje": {**self.banco.contar_segmentos(hoje), "basesConhecidas": len(self.banco.segmentos_por_base()),
                                   "pelaBase": cfg["segmentoPelaBase"], "ritmo": self.ritmo_segmentos()},
                 "status": {"concluido": sorted(cfg["statusCodigos"]["concluido"]), "emTransito": sorted(cfg["statusCodigos"]["em_transito"])},
@@ -261,6 +268,12 @@ class App:
         if s > self.jms.s_minimo:
             txt += f" (mais devagar depois de um bloqueio do JMS; volta aos poucos para {cfg['segundosPorRemessa']:g} s)"
         return txt
+
+    def link_estado(self, forcar: bool = False) -> dict:
+        """Situação do link público (Tailscale). Pergunta ao Tailscale no máximo a cada 30 s (a tela atualiza a cada 5 s)."""
+        if forcar or time.time() - self._link["em"] >= 30:
+            self._link = {"em": time.time(), "estado": self.tailscale.estado()}
+        return self._link["estado"]
 
     def testar(self) -> dict:
         """Teste rápido: uma página de viagens de cada rota."""
@@ -294,6 +307,8 @@ class App:
             except OSError:
                 pass
             lista += [f"http://{ip}:{porta}" for ip in dict.fromkeys(ips) if ip and not ip.startswith(("127.", "0."))]
+        if self._link["estado"].get("ligado"):
+            lista.append(self._link["estado"]["link"] + "/troncal")
         if self.cfg.get("linkPublico"):
             lista.append(str(self.cfg["linkPublico"]).rstrip("/"))
         return lista
@@ -310,7 +325,7 @@ class App:
         if p == "/entrar" and req.command == "POST":
             corpo = req.ler_corpo(4096).decode("utf-8", "replace")
             senha = (parse_qs(corpo).get("senha") or [""])[0]
-            if self.cfg["senha"] and hmac.compare_digest(senha.encode(), str(self.cfg["senha"]).encode()):
+            if self.senha_painel() and hmac.compare_digest(senha.encode(), self.senha_painel().encode()):
                 return req.enviar(303, b"", "text/plain", {"Location": "./troncal",
                                                            "Set-Cookie": f"exp_sessao={self.marca_senha()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"})
             return req.arquivo("entrar.html")
@@ -415,6 +430,25 @@ class App:
                 return req.json(200, {"ok": False, "linhas": [f"Não conectou: {e}"]})
             return req.json(200, {"ok": True, "linhas": [f"Conectado: {r.get('nome')}.", f"Abas: {', '.join(r.get('abas') or [])}.",
                                                          "O app começa a escrever os dias em até 1 minuto."]})
+        if p == "/config/api/link/ligar":
+            r = self.tailscale.ligar()
+            self.link_estado(forcar=True)
+            if r.get("ok"):
+                self.log("info", f"Link público ligado: {r['link']}/troncal")
+            return req.json(200, r)
+        if p == "/config/api/link/desligar":
+            r = self.tailscale.desligar()
+            self.link_estado(forcar=True)
+            if r.get("ok"):
+                self.log("info", "Link público desligado.")
+            return req.json(200, r)
+        if p == "/config/api/senha":
+            senha = str(req.ler_json().get("senha") or "").strip()
+            if senha and len(senha) < 4:
+                return req.json(400, {"ok": False, "error": "Use uma senha com 4 letras ou números, pelo menos."})
+            self.banco.set("SENHA_PAINEL", senha or None)
+            self.log("info", "Senha do link público " + ("definida." if senha else "apagada (o link abre sem senha)."))
+            return req.json(200, {"ok": True, "senha": bool(self.senha_painel())})
         if p == "/config/api/google/desligar":
             self.google.desligar()
             return req.json(200, {"ok": True})
@@ -631,6 +665,14 @@ def main(argv: list[str] | None = None, ao_abrir=None) -> int:
     g = app.google.resumo()
     app.log("info", "  Google Planilha (banco de dados): " + ("ligada" if g["ativo"] else "desligada (configure em Configurações)") + ".")
     app.google.iniciar()
+
+    def anunciar_link() -> None:
+        e = app.link_estado(forcar=True)
+        if e.get("ligado"):
+            app.log("info", f"  Link público (Tailscale): {e['link']}/troncal" + ("" if app.senha_painel() else "  ← sem senha!"))
+        elif e.get("conectado"):
+            app.log("info", "  Link público: desligado (Configurações › Link público › Criar link público).")
+    threading.Thread(target=anunciar_link, daemon=True).start()
     if os.environ.get("EXPEDICAO_SEM_AGENDADOR") != "1":
         app.iniciar_agenda()
     if ao_abrir:

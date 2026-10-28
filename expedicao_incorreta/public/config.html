@@ -115,6 +115,25 @@
         <dl class="info" id="g-info"></dl>
       </section>
 
+      <section class="card conf" aria-labelledby="s-link">
+        <div class="section-head"><div><span class="kicker">Link para a equipe</span><h2 id="s-link">Link público (Tailscale)</h2></div></div>
+        <p class="muted small">Um link <b>https://…ts.net</b> que qualquer pessoa abre no celular ou em outro computador, sem instalar nada.
+          Usa o Tailscale deste computador (o mesmo do DashMaster). O computador precisa ficar ligado com o app aberto.</p>
+        <dl class="info" id="link-info"></dl>
+        <div class="row">
+          <button type="button" class="btn btn-red" id="link-ligar">Criar link público</button>
+          <button type="button" class="btn btn-light hidden" id="link-copiar">Copiar o link</button>
+          <a class="btn btn-light hidden" id="link-abrir" target="_blank" rel="noopener">Abrir o link</a>
+          <button type="button" class="btn btn-light hidden" id="link-desligar">Desligar o link</button>
+        </div>
+        <div class="saida hidden" id="link-res"></div>
+        <label for="link-senha" class="muted small">Senha para abrir o painel pelo link (recomendado; deixe vazio para abrir sem senha):</label>
+        <input type="password" id="link-senha" autocomplete="new-password">
+        <div class="row">
+          <button type="button" class="btn btn-light" id="link-senha-salvar">Salvar a senha</button>
+        </div>
+      </section>
+
       <section class="card conf" aria-labelledby="s-end">
         <div class="section-head"><div><span class="kicker">Link</span><h2 id="s-end">Endereços dos painéis</h2></div></div>
         <dl class="info" id="end-info"></dl>

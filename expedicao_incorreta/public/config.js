@@ -85,6 +85,17 @@
       }
       var erros = p.erros.concat(p.rotas ? p.rotas.avisos : []);
       if (erros.length) resultado('plan-res', erros, false);
+      var lk = e.link || {};
+      info('link-info', [
+        ['Tailscale', !lk.instalado ? 'não instalado (tailscale.com/download)' : lk.conectado ? 'conectado · ' + lk.nome : 'instalado, mas desconectado: abra o Tailscale e entre na conta'],
+        ['Link', lk.ligado ? lk.link + '/troncal' : 'desligado'],
+        ['Senha do link', lk.senha ? 'definida (quem abre pelo link digita a senha uma vez)' : 'SEM SENHA: qualquer pessoa com o link vê o painel']
+      ]);
+      $('link-ligar').classList.toggle('hidden', !!lk.ligado);
+      $('link-ligar').disabled = !lk.conectado;
+      ['link-copiar', 'link-abrir', 'link-desligar'].forEach(function (id) { $(id).classList.toggle('hidden', !lk.ligado); });
+      if (lk.ligado) $('link-abrir').href = lk.link + '/troncal';
+      $('link-copiar').setAttribute('data-link', lk.ligado ? lk.link + '/troncal' : '');
       info('end-info', e.enderecos.map(function (a, i) { return [i === 0 ? 'Neste computador' : /ts\.net|https:/.test(a) ? 'Link público' : 'Na rede', a]; }));
       $('registro').textContent = e.registro.slice().reverse().join('\n');
     });
@@ -123,6 +134,37 @@
     });
   }
   enviar($('up-rotas'), 'rotas');
+  $('link-ligar').addEventListener('click', function () {
+    $('link-ligar').disabled = true;
+    resultado('link-res', 'Pedindo o link ao Tailscale (até 30 s)…');
+    post('config/api/link/ligar').then(function (r) {
+      var el = $('link-res');
+      resultado('link-res', r.ok ? [r.mensagem, r.link + '/troncal'] : r.mensagem, r.ok);
+      if (r.liberar) {
+        var a = document.createElement('a');
+        a.href = r.liberar; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Abrir a página do Tailscale para liberar o Funnel';
+        el.appendChild(document.createElement('br')); el.appendChild(a);
+      }
+      carregar();
+    });
+  });
+  $('link-desligar').addEventListener('click', function () {
+    if (!confirm('Desligar o link público? Quem estiver com o link não abre mais o painel.')) return;
+    post('config/api/link/desligar').then(function (r) { resultado('link-res', r.mensagem, r.ok); carregar(); });
+  });
+  $('link-copiar').addEventListener('click', function () {
+    var l = $('link-copiar').getAttribute('data-link');
+    (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(function () {
+      resultado('link-res', 'Link copiado: ' + l, true);
+    }, function () { window.prompt('Copie o link:', l); });
+  });
+  $('link-senha-salvar').addEventListener('click', function () {
+    post('config/api/senha', {senha: $('link-senha').value}).then(function (r) {
+      resultado('link-res', r.ok ? (r.senha ? 'Senha salva: quem abrir pelo link digita a senha uma vez.' : 'Senha apagada: o link abre sem senha.') : r.error, r.ok);
+      if (r.ok) $('link-senha').value = '';
+      carregar();
+    });
+  });
   $('g-salvar').addEventListener('click', function () {
     var url = $('g-url').value.trim(), senha = $('g-senha').value;
     if (!url || !senha) { resultado('g-res', 'Cole a URL e a SENHA.', false); return; }
