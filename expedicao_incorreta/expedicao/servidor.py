@@ -38,6 +38,7 @@ from .banco import Banco
 from .google import ErroGoogle
 from .sincronia import FonteDados, Sincronizador
 from .tailscale import Tailscale
+from .pesquisa import MAX_REMESSAS, Motor, Pesquisa, colunas_resultado, importar, ler_remessas, linhas_resultado
 from .coletor import Coletor, agora_sp, dias_da_agenda, dias_entre, hoje_sp, ms, soma_dias
 from .config import MAX_DIAS, PASTA_APP, arquivo_config, ler_config
 from .jms import Jms
@@ -120,9 +121,42 @@ class App:
         self.google.painel = self.painel
         self.coletor = Coletor(banco=self.banco, jms=self.jms, cfg=cfg, log=self.log, ao_mudar=self.ao_mudar)
         self.tailscale = Tailscale(cfg["porta"], cfg.get("portaLink") or 8443)
+        # Pesquisa no Rastreamento (Python): cliente do JMS só dela, sem a pausa do coletor (a pesquisa ajusta o próprio ritmo).
+        self.jms_pesquisa = Jms(base=jms_url or os.environ.get("EXPEDICAO_JMS_URL"), credenciais=self.credenciais, props=self.banco,
+                                log=self.log, tempo=60, por_segundo=500, segundos_por_remessa=0)
+        self.jms_pesquisa.s_minimo = self.jms_pesquisa.s_por_remessa = 0.0
+        self.pesquisa = Motor(jms=self.jms_pesquisa, banco=self.banco, log=self.log, ao_achar=self._segmentos_da_pesquisa,
+                              ao_terminar=self._pesquisa_terminou)
         self._link = {"em": 0.0, "estado": {}}
         self.servidor: ThreadingHTTPServer | None = None
         self._parar = threading.Event()
+
+    def _segmentos_da_pesquisa(self, achados: list) -> None:
+        """Códigos de segmento achados pela Pesquisa no Rastreamento: valem também para o painel da Expedição."""
+        self.banco.salvar_segmentos([(w, seg, "") for w, seg in achados], fonte="jms")
+        self.painel_local.invalidar()
+        self.painel.invalidar()
+        for d in self.google.dias_guardados()[:2]:
+            self.google.marcar(d)
+
+    def _pesquisa_terminou(self, p: Pesquisa) -> None:
+        """Resultado da pesquisa numa aba da Google Planilha (se ela estiver ligada)."""
+        if not self.google.ativo or not p.linhas():
+            return
+
+        def enviar() -> None:
+            aba = "Pesquisa " + p.id[:4] + "-" + p.id[4:6] + "-" + p.id[6:8] + " " + p.id[9:11] + "h" + p.id[11:13] + "m" + p.id[13:15]
+            cols = colunas_resultado(p)
+            try:
+                self.google.google.escrever(aba, [[c[1] for c in cols], [c[2] for c in cols]],
+                                            [[str(l.get(c[0], "") or "") for c in cols] for l in linhas_resultado(p)],
+                                            larguras=[18] * len(cols), por_envio=int(self.cfg.get("googleLinhasPorEnvio") or 5000))
+                p.planilha = aba
+                self.pesquisa.guardar(p)
+                self.log("info", f"Pesquisa {p.id}: resultado na Google Planilha, aba \"{aba}\".")
+            except Exception as e:  # noqa: BLE001 - a planilha não estraga a pesquisa
+                self.log("aviso", f"Pesquisa {p.id}: não consegui escrever na Google Planilha: {e}")
+        threading.Thread(target=enviar, daemon=True, name="pesquisa-planilha").start()
 
     def ao_mudar(self, tipo: str, dia: str) -> None:
         """O coletor trouxe novidade do JMS: o painel recalcula e o dia é reescrito na Google Planilha."""
@@ -320,7 +354,7 @@ class App:
         qs = {k: v[0] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
         self.regras.atualizar()
 
-        if p in ("/estilo.css", "/painel.js", "/config.js", "/graficos.js"):
+        if p in ("/estilo.css", "/painel.js", "/config.js", "/graficos.js", "/pesquisa.js"):
             return req.arquivo(p[1:])
         if p == "/entrar" and req.command == "POST":
             corpo = req.ler_corpo(4096).decode("utf-8", "replace")
@@ -341,6 +375,10 @@ class App:
             return req.arquivo("entrar.html")
         if p == "/":
             return req.enviar(302, b"", "text/plain", {"Location": "./troncal"})
+        if p == "/pesquisa":
+            return req.arquivo("pesquisa.html")
+        if p.startswith("/api/pesquisa/"):
+            return self.tratar_pesquisa(req, p, qs)
         if p in ("/troncal", "/secundaria"):
             return req.arquivo("painel.html")
         if p == "/api/estado":
@@ -376,6 +414,118 @@ class App:
                 self.coletor.coletar(dias)
             return req.json(200, {"ok": True, "dias": dias, "segmentos": segmentos, "estado": self.estado_publico()})
         return req.enviar(404, "Não encontrado.")
+
+    # ---------------------------------------------------------------- Pesquisa no Rastreamento
+    def tratar_pesquisa(self, req: "_Pedido", p: str, qs: dict) -> None:
+        motor = self.pesquisa
+        if p == "/api/pesquisa/estado":
+            atual = motor.atual
+            return req.json(200, {"atual": atual.andamento() if atual else None, "lista": motor.lista(), "google": self.google.ativo,
+                                  "maxRemessas": MAX_REMESSAS, "hoje": hoje_sp()})
+        if p == "/api/pesquisa/sem-segmento":
+            dia = qs.get("dia") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(qs.get("dia") or "")) else hoje_sp()
+            return req.json(200, {"dia": dia, "remessas": self.banco.sem_codigo_dia(dia)})
+        if p in ("/api/pesquisa/resultado", "/api/pesquisa/excel", "/api/pesquisa/remessas"):
+            pq = motor.abrir(qs.get("id"))
+            if not pq:
+                return req.json(404, {"ok": False, "error": "Pesquisa não encontrada."})
+            linhas = self._filtrar_pesquisa(pq, qs.get("aba") or "todas", qs.get("busca") or "")
+            if p == "/api/pesquisa/remessas":
+                return req.json(200, {"remessas": [l["remessa"] for l in linhas]})
+            cols = colunas_resultado(pq)
+            if p == "/api/pesquisa/excel":
+                return self._excel_pesquisa(req, pq, cols)
+            try:
+                pagina = max(1, int(qs.get("pagina") or 1))
+                tamanho = min(500, max(10, int(qs.get("tamanho") or 100)))
+            except ValueError:
+                pagina, tamanho = 1, 100
+            return req.json(200, {"resumo": pq.resumo(), "planilha": pq.planilha, "colunas": cols,
+                                  "total": len(linhas), "pagina": pagina, "tamanho": tamanho,
+                                  "linhas": linhas[(pagina - 1) * tamanho:pagina * tamanho]})
+        if req.command != "POST":
+            return req.enviar(405, "Use POST.")
+        if p == "/api/pesquisa/importar":
+            try:
+                return req.json(200, {"ok": True, **importar(req.ler_corpo(), str(qs.get("nome") or ""))})
+            except Exception as e:  # noqa: BLE001 - planilha do usuário: o motivo vai para a tela
+                return req.json(400, {"ok": False, "error": f"Não consegui ler a planilha: {e}"})
+        if p == "/api/pesquisa/parar":
+            motor.parar()
+            return req.json(200, {"ok": True})
+        b = req.ler_json()
+        try:
+            if p == "/api/pesquisa/iniciar":
+                remessas, dup, ruim = ler_remessas(b.get("remessas") or "")
+                pq = motor.iniciar(Pesquisa(remessas, str(b.get("modo") or "texto"), list(b.get("padroes") or []),
+                                            bool(b.get("segmentos", True)), str(b.get("origem") or "")[:80]))
+                return req.json(200, {"ok": True, "id": pq.id, "remessas": len(remessas), "repetidas": dup, "invalidas": ruim})
+            if p == "/api/pesquisa/continuar":
+                pq = motor.abrir(b.get("id"))
+                if not pq:
+                    return req.json(404, {"ok": False, "error": "Pesquisa não encontrada."})
+                motor.iniciar(pq)
+                return req.json(200, {"ok": True, "id": pq.id})
+            if p == "/api/pesquisa/recusadas":
+                pq = motor.abrir(b.get("id"))
+                if not pq:
+                    return req.json(404, {"ok": False, "error": "Pesquisa não encontrada."})
+                ws = [l["remessa"] for l in pq.linhas() if l["recusada"] or l["situacaoSeg"] == "recusada"]
+                nova = motor.iniciar(Pesquisa(ws, pq.modo, pq.padroes, pq.segmentos, "recusadas da pesquisa " + pq.id))
+                return req.json(200, {"ok": True, "id": nova.id, "remessas": len(ws)})
+        except ValueError as e:
+            return req.json(400, {"ok": False, "error": str(e)})
+        return req.enviar(404, "Não encontrado.")
+
+    @staticmethod
+    def _filtrar_pesquisa(pq: Pesquisa, aba: str, busca: str) -> list[dict]:
+        linhas = linhas_resultado(pq)
+        bruto = {l["remessa"]: l for l in pq.linhas()}
+        m = re.fullmatch(r"b([12])(tem|nao)", aba)
+        if m:
+            k = int(m.group(1)) - 1
+            linhas = [l for l in linhas if bool(bruto[l["remessa"]]["blocos"][k]) == (m.group(2) == "tem")]
+        elif aba in ("com", "sem", "recusadas") and pq.modo == "segmentos":
+            alvo = {"com": "com", "sem": "sem", "recusadas": "recusada"}[aba]
+            linhas = [l for l in linhas if bruto[l["remessa"]]["situacaoSeg"] == alvo]
+        elif aba == "recusadas":
+            linhas = [l for l in linhas if bruto[l["remessa"]]["recusada"] or bruto[l["remessa"]]["situacaoSeg"] == "recusada"]
+        elif aba == "semRastreio":
+            linhas = [l for l in linhas if not bruto[l["remessa"]]["rastreio"] and not bruto[l["remessa"]]["recusada"]]
+        t = str(busca or "").strip().upper()
+        if t:
+            linhas = [l for l in linhas if any(t in str(v).upper() for v in (l["remessa"], l["s1"], l["s2"], l.get("b1por"), l.get("b2por")))]
+        return linhas
+
+    def _excel_pesquisa(self, req: "_Pedido", pq: Pesquisa, cols: list) -> None:
+        cab = [[c[1] for c in cols], [c[2] for c in cols]]
+        todas = linhas_resultado(pq)
+        corpo = lambda ls: cab + [[l.get(c[0], "") for c in cols] for l in ls]  # noqa: E731
+        r = pq.resumo()
+        resumo = [["Pesquisa", "Valor"], ["数据", "数值"], ["Remessas pesquisadas", r["pesquisadas"]],
+                  ["Modo", "Só os códigos de segmento" if pq.modo == "segmentos" else "Texto no rastreamento"]]
+        if pq.modo == "texto":
+            resumo += [["Sem rastreamento no JMS", r["semRastreio"]], ["Consulta recusada pelo JMS", r["recusadas"]]]
+            for k, b in enumerate(r["blocos"]):
+                if b:
+                    resumo += [[f"Bloco {k + 1}: texto", pq.padroes[k]], [f"Bloco {k + 1}: tem", b["tem"]], [f"Bloco {k + 1}: não tem", b["naoTem"]],
+                               *[[f"Bloco {k + 1}: {t}", b["turnos"][t]] for t in ("T1", "T2", "T3")]]
+        if pq.segmentos:
+            resumo += [["Com os códigos de segmento", r["seg"]["com"]], ["Sem código no JMS", r["seg"]["sem"]],
+                       ["Segmento: consulta recusada", r["seg"]["recusadas"]]]
+            resumo += [["", ""], ["Código de primeiro segmento", "Remessas"]] + [[x["nome"], x["qtd"]] for x in r["seg"]["s1"]]
+            resumo += [["", ""], ["Código de dois segmentos", "Remessas"]] + [[x["nome"], x["qtd"]] for x in r["seg"]["s2"]]
+        abas = [{"nome": "Resumo", "linhas": resumo, "larguras": [34, 40], "cabecalho": 2},
+                {"nome": "Resultado", "linhas": corpo(todas), "larguras": [18] * len(cols), "cabecalho": 2, "filtro": True}]
+        if pq.modo == "texto":
+            for k in range(2):
+                if pq.padroes[k]:
+                    abas.append({"nome": f"Bloco {k + 1} - Tem", "linhas": corpo(self._filtrar_pesquisa(pq, f"b{k + 1}tem", "")),
+                                 "larguras": [18] * len(cols), "cabecalho": 2, "filtro": True})
+                    abas.append({"nome": f"Bloco {k + 1} - Não tem", "linhas": corpo(self._filtrar_pesquisa(pq, f"b{k + 1}nao", "")),
+                                 "larguras": [18] * len(cols), "cabecalho": 2, "filtro": True})
+        nome = f"pesquisa_rastreamento_{pq.id}.xlsx"
+        return req.enviar(200, escrever_xlsx(abas), XLSX, {"Content-Disposition": f'attachment; filename="{nome}"'})
 
     @staticmethod
     def filtros(qs: dict) -> dict:

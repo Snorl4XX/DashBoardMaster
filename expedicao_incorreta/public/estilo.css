@@ -376,3 +376,20 @@ label.btn input[type=file]{display:none}
 .conf details{margin:4px 0 14px}
 .conf details summary{cursor:pointer}
 .conf details ol{margin:8px 0 0 18px;padding:0;line-height:1.7}
+/* Pesquisa no Rastreamento */
+#remessas{min-height:150px}
+.pq-input{width:100%;height:40px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 12px;outline:none;margin:4px 0 10px;font:inherit;color:inherit}
+.pq-input:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}
+.pq-modos{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 12px}
+.pq-modos .chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.pq-modos input{accent-color:var(--red)}
+.pq-check{display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 12px;cursor:pointer}
+.pq-check input{accent-color:var(--red);width:16px;height:16px}
+.pq-importar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:12px}
+.pq-importar .field{min-width:220px}
+.pq-historico{min-width:260px;margin-left:auto}
+.pq-andamento{margin-top:14px}
+.pq-barra{height:10px;border-radius:999px;background:var(--soft-2);overflow:hidden;margin-bottom:6px}
+.pq-barra i{display:block;height:100%;width:0;background:linear-gradient(90deg,#F5222F,#C4000F);border-radius:999px;transition:width .4s}
+.data-table td.pq-ruim{color:var(--bad);font-weight:700}
+@media (max-width:720px){.pq-historico{margin-left:0;width:100%}}

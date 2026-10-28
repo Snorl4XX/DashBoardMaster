@@ -83,7 +83,7 @@
           legend: {display: false},
           tooltip: {callbacks: {
             title: function (tt) { var it = spec.itens[tt[0].dataIndex]; return it.nome + (it.extra ? ' · ' + it.extra : ''); },
-            label: function (ctx) { return ' ' + fmtInt(ctx.raw) + ' pacotes errados · ' + fmtPct(pcts[ctx.dataIndex], 2); }
+            label: function (ctx) { return ' ' + fmtInt(ctx.raw) + ' ' + (spec.unidade || 'pacotes errados') + ' · ' + fmtPct(pcts[ctx.dataIndex], 2); }
           }},
           datalabels: {anchor: 'end', align: 'end', clip: false, padding: 0, labels: {
             count: {color: RED, font: {weight: '800', size: 13}, formatter: function (v) { return fmtInt(v); },
@@ -124,8 +124,8 @@
         responsive: true, maintainAspectRatio: false, cutout: '60%', animation: {duration: 650}, layout: {padding: 10},
         plugins: {
           legend: {display: false},
-          centerText: {text: fmtInt(total), sub: 'errados'},
-          tooltip: {callbacks: {label: function (ctx) { return ' ' + ctx.label + ': ' + fmtInt(ctx.raw) + ' errados · ' + fmtPct(total ? ctx.raw / total * 100 : 0, 2); }}},
+          centerText: {text: fmtInt(total), sub: spec.unidadeCurta || 'errados'},
+          tooltip: {callbacks: {label: function (ctx) { return ' ' + ctx.label + ': ' + fmtInt(ctx.raw) + ' ' + (spec.unidadeCurta || 'errados') + ' · ' + fmtPct(total ? ctx.raw / total * 100 : 0, 2); }}},
           datalabels: {color: '#fff', font: {weight: '800', size: 14}, display: function (ctx) { return total && dv(ctx) / total >= 0.05; },
             formatter: function (v) { return fmtPct(total ? v / total * 100 : 0, 0); }}
         }
@@ -139,7 +139,7 @@
       return '<div class="pl-row"><i style="background:' + cor + '"></i><span class="pl-name">' + esc(it.nome) +
         (SHIFT_HOURS[it.nome] ? '<small>' + SHIFT_HOURS[it.nome] + '</small>' : '') + '</span><b>' + esc(fmtInt(data[i])) + '</b><em>' + esc(fmtPct(pct, 2)) + '</em>' +
         '<span class="pl-bar"><span style="width:' + pct.toFixed(2) + '%;background:' + cor + '"></span></span></div>';
-    }).join('') + '<div class="pl-total"><span>Pacotes errados</span><b>' + esc(fmtInt(total)) + '</b></div>';
+    }).join('') + '<div class="pl-total"><span>' + esc(spec.totalTexto || 'Pacotes errados') + '</span><b>' + esc(fmtInt(total)) + '</b></div>';
   }
   function tabela(spec) {
     var max = Math.max.apply(null, spec.itens.map(function (i) { return i.qtd; }).concat([1]));
@@ -212,7 +212,7 @@
     stats.innerHTML = temDados ? cartoes(spec) : '';
     if (!temDados) {
       destruir(spec.key);
-      body.innerHTML = '<div class="chart-wrap"><div class="chart-empty"><div><b>Nenhum pacote errado</b>neste dia e com estes filtros.</div></div></div>';
+      body.innerHTML = '<div class="chart-wrap"><div class="chart-empty"><div>' + (spec.vazio || '<b>Nenhum pacote errado</b>neste dia e com estes filtros.') + '</div></div></div>';
       return;
     }
     if (vista === 'table' || !window.Chart) {

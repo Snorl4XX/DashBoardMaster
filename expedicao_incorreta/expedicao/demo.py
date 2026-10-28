@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import threading
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -106,6 +107,7 @@ class JmsFalso:
         self.agora = agora or agora_sp
         self.recusar_loading_secundaria = recusar_loading_secundaria
         self.bloquear_rastreio = False  # testes: o Rastreamento devolve uma página (bloqueio)
+        self.ocupado = 0  # testes: as próximas N consultas ao Rastreamento do pacote respondem "sistema ocupado"
         self.pedidos: dict[str, int] = {}
         self._trava = threading.Lock()
         self._cache: dict[tuple, tuple] = {}
@@ -146,14 +148,39 @@ class JmsFalso:
         dia = f"{sid[1:5]}-{sid[5:7]}-{sid[7:9]}"
         return next((v for v in self.viagens(tipo, dia) if v["shipmentNo"] == sid), None)
 
-    def segmento(self, remessa: str) -> str | None:
+    def pacote(self, remessa: str) -> tuple[dict, dict] | None:
+        """(viagem, pacote) da remessa (o dia vem no próprio número: 88/89 + AAMMDD…)."""
+        if not re.fullmatch(r"8[89]\d{6}\d+", remessa):
+            return None
         dia = f"20{remessa[2:4]}-{remessa[4:6]}-{remessa[6:8]}"
         for tipo in ("troncal", "secundaria"):
             for v in self.viagens(tipo, dia):
                 for p in v["_pacotes"]:
                     if p["billCode"] == remessa:
-                        return p["_seg"]
+                        return v, p
         return None
+
+    def bipes(self, remessa: str) -> list[dict]:
+        """Rastreamento do pacote de uma remessa (do mais novo para o mais antigo, como o JMS)."""
+        achado = self.pacote(remessa)
+        if not achado:
+            return []
+        v, p = achado
+        bipe = p["_bipe"]
+        chegou = bipe - timedelta(hours=3, minutes=int(remessa[-2:]) % 50)
+        d = [{"billCode": remessa, "waybillNo": remessa, "scanTime": chegou.strftime("%Y-%m-%d %H:%M:%S"), "scanTypeName": "Encomenda recebida",
+              "scanNetworkName": BASE[1], "scanByName": "RECEBEDOR DEMO", "imgType": 8, "code": 2,
+              "waybillTrackingContent": f"O expresso chegou [{BASE[1]}] A parada anterior foi [SP SPO], escaneador [RECEBEDOR DEMO], o número do pedido []"},
+             {"billCode": remessa, "waybillNo": remessa, "scanTime": bipe.strftime("%Y-%m-%d %H:%M:%S"), "scanTypeName": "Encomenda carregada",
+              "scanNetworkName": BASE[1], "scanByName": p["scanUser"], "imgType": 0 if int(remessa[-1]) % 4 == 0 else 8, "code": 1,
+              "nextStopName": v["endName"],
+              "waybillTrackingContent": f"A encomenda expressa está [{BASE[1]}] sendo enviada, para [{v['endName']}], escaneador [{p['scanUser']}], "
+                                        f"o número do pedido [{v['shipmentNo']}], número do voo []"}]
+        return sorted(d, key=lambda x: x["scanTime"], reverse=True)
+
+    def segmento(self, remessa: str) -> str | None:
+        achado = self.pacote(remessa)
+        return achado[1]["_seg"] if achado else None
 
     # ---------------------------------------------------------------- respostas
     @staticmethod
@@ -202,6 +229,16 @@ class JmsFalso:
                 return self._enviar(req, {"code": 500, "msg": "系统繁忙", "fail": True})
             v = self._viagem(q.get("shipmentNo", ""))
             return self._enviar(req, self._pagina(v["_pacotes"] if v else [], q.get("current"), q.get("size")))
+        if caminho == "/operatingplatform/podTracking/inner/query/keywordList":
+            with self._trava:
+                if self.ocupado > 0:
+                    self.ocupado -= 1
+                    return self._enviar(req, {"code": 500, "msg": "系统繁忙，请稍后再试", "fail": True})
+            if corpo.get("trackingTypeEnum") != "WAYBILL":
+                return self._enviar(req, {"code": 500, "msg": "parâmetro inválido", "fail": True})
+            kws = [str(x).upper() for x in (corpo.get("keywordList") or [])][:1]  # o JMS devolve só a primeira remessa
+            dados = [{"keyword": w, "details": self.bipes(w)} for w in kws if self.pacote(w)]
+            return self._enviar(req, {"code": 1, "msg": "1:Solicitação concluída", "succ": True, "data": dados})
         if caminho == "/operatingplatform/order/getOrderDetail":
             if self.bloquear_rastreio:
                 return self._enviar(req, "<html><head><title>Acesso negado · WAF</title></head><body>bloqueado</body></html>", 200, "text/html")

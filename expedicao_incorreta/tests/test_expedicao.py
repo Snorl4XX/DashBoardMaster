@@ -5,6 +5,7 @@ Rodar na pasta do app:  py -m pytest -q tests
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 import threading
@@ -936,3 +937,139 @@ def test_servidor_link_publico_e_senha(servidor, ts_falso):
     assert c.pedir("/api/estado", cabecalhos=fora)[0] == 200
     assert c.pedir("/config/api/estado", cabecalhos=fora)[0] == 403  # Configurações nunca pelo link
     assert json.loads(c.pedir("/config/api/link/desligar", {})[2])["ok"]
+
+
+# ------------------------------------------------------------------ Pesquisa no Rastreamento (Python)
+from expedicao import pesquisa as pq_mod  # noqa: E402
+from expedicao.pesquisa import Pesquisa, importar, ler_remessas, matcher, primeiro_bipe, resumo_bloco  # noqa: E402
+
+
+def test_pesquisa_regras():
+    assert ler_remessas("88001, 88001;JT0002\n x \n\tJT0003") == (["88001", "JT0002", "JT0003"], 1, 1)
+    casa = matcher("A encomenda expressa está [ SP GRU] sendo enviada")
+    assert casa("A ENCOMENDA expressa esta [SP GRU ] sendo   enviada, para [MG CGE]")
+    assert not casa("A encomenda expressa está [SP BRE] sendo enviada")
+    assert matcher("está [*] sendo enviada")("A encomenda expressa está [RJ SJM] sendo enviada")
+    assert matcher("  ") is None
+    bipes = [{"scanTime": "2026-10-27 15:00:00", "waybillTrackingContent": "chegou [SP GRU], escaneador [B]", "scanNetworkName": "SP GRU", "imgType": 0},
+             {"scanTime": "2026-10-27 07:00:00", "waybillTrackingContent": "chegou [SP GRU], escaneador [Ana Lima]", "scanNetworkName": "", "imgType": 8,
+              "scanTypeName": "Encomenda recebida"}]
+    h = primeiro_bipe(bipes, matcher("chegou [sp gru]"))
+    assert (h["t"], h["turno"], h["por"], h["origem"], h["img"], h["n"]) == ("2026-10-27 07:00:00", "T1", "Ana Lima", "SP GRU", True, 2)
+    assert primeiro_bipe(bipes, matcher("saiu")) is None
+    res = [{"rastreio": True, "blocos": [h, None]}, {"rastreio": False, "blocos": [None, None]}, {"recusada": True, "blocos": [None, None]}]
+    s = resumo_bloco(res, 0)
+    assert (s["tem"], s["naoTem"], s["semRastreio"], s["recusadas"], s["maisTurno"], s["horas"][7]) == (1, 2, 1, 1, "T1", 1)
+
+
+def test_pesquisa_importar_planilha():
+    openpyxl = pytest.importorskip("openpyxl")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Dados"
+    ws.append(["Data", "Nº do pedido", "Obs"])
+    for i in range(5):
+        ws.append(["2026-10-27", 8826102700001000 + i, "x"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    r = importar(buf.getvalue(), "lista.xlsx")
+    aba = r["abas"][r["sugerida"]]
+    col = aba["colunas"][aba["sugerida"]]
+    assert col["titulo"] == "Nº do pedido" and col["quantas"] == 5 and col["remessas"][0] == "8826102700001000"
+    csv_ = "remessa;cidade\nJT0000000000001;SP\nJT0000000000002;RJ\nJT0000000000001;SP\n".encode("utf-8")
+    r = importar(csv_, "lista.csv")
+    assert r["abas"][0]["colunas"][r["abas"][0]["sugerida"]]["remessas"] == ["JT0000000000001", "JT0000000000002"]
+
+
+def _app_pesquisa(tmp_path, falso, monkeypatch):
+    monkeypatch.setattr(coletor_mod, "agora_sp", lambda: AGORA)
+    monkeypatch.setattr(pq_mod.Motor, "espera", 0.01, raising=False)
+    app = montar(tmp_path, falso)
+    app.pesquisa.espera = 0.01
+    assert app.coletor.coletar([ONTEM]).result(timeout=60)["ok"]
+    return app
+
+
+def _esperar(app, pq, tempo=60):
+    fim = time.time() + tempo
+    while app.pesquisa.rodando() and time.time() < fim:
+        time.sleep(0.05)
+    assert not app.pesquisa.rodando()
+    return pq
+
+
+def test_pesquisa_texto_e_segmentos(tmp_path, falso, monkeypatch):
+    app = _app_pesquisa(tmp_path, falso, monkeypatch)
+    ws = [p["billCode"] for p in app.banco.pacotes_dia("troncal", ONTEM)][:120] + ["9999999999999", "JTX000000001"]
+    pq = _esperar(app, app.pesquisa.iniciar(Pesquisa(ws, "texto", ["A encomenda expressa está [SP GRU] sendo enviada", "O expresso chegou [SP GRU]"], True)))
+    assert pq.estado == "pronta" and pq.feitas() == len(ws)
+    r = pq.resumo()
+    b1 = r["blocos"][0]
+    assert (b1["tem"], b1["semRastreio"], b1["recusadas"]) == (120, 2, 0) and sum(b1["turnos"].values()) == 120
+    assert r["semRastreio"] == 2 and r["seg"]["com"] >= 115 and r["seg"]["com"] + r["seg"]["sem"] == len(ws)
+    l = next(x for x in pq.linhas() if x["remessa"] == ws[0])
+    assert l["blocos"][0]["origem"] == "SP GRU" and l["blocos"][0]["tipo"] == "Encomenda carregada" and l["s1"]
+    assert pq.revistas >= 2  # as que vieram vazias foram conferidas de novo
+    # Guardada: abre de novo (depois de reiniciar o app também).
+    assert app.pesquisa.abrir(pq.id).resumo()["pesquisadas"] == len(ws) and app.pesquisa.lista()[0]["id"] == pq.id
+    assert pq_mod.Pesquisa.de_json(pq.para_json()).linhas() == pq.linhas()
+    app.banco.fechar()
+
+
+def test_pesquisa_jms_ocupado_e_token(tmp_path, falso, monkeypatch):
+    app = _app_pesquisa(tmp_path, falso, monkeypatch)
+    ws = [p["billCode"] for p in app.banco.pacotes_dia("troncal", ONTEM)][:60]
+    falso.ocupado = 25  # "sistema ocupado": o ritmo cai e as remessas voltam para a fila
+    pq = _esperar(app, app.pesquisa.iniciar(Pesquisa(ws, "texto", ["sendo enviada", ""], False)))
+    assert pq.estado == "pronta" and pq.resumo()["blocos"][0]["tem"] == 60 and pq.resumo()["recusadas"] == 0
+    assert pq.paralelo < 10
+    # Token vencido: para e avisa; com o token certo, Continuar termina.
+    app.banco.set("JMS_AUTHTOKEN", "vencido")
+    pq2 = _esperar(app, app.pesquisa.iniciar(Pesquisa(ws, "segmentos")))
+    assert pq2.estado == "erro" and "token" in pq2.erro.lower()
+    app.banco.set("JMS_AUTHTOKEN", falso.token)
+    _esperar(app, app.pesquisa.iniciar(app.pesquisa.abrir(pq2.id)))
+    assert pq2.estado == "pronta" and pq2.resumo()["seg"]["com"] >= 55
+    with pytest.raises(ValueError):
+        app.pesquisa.iniciar(Pesquisa([], "segmentos"))
+    with pytest.raises(ValueError):
+        app.pesquisa.iniciar(Pesquisa(ws, "texto", ["", ""]))
+    app.banco.fechar()
+
+
+def test_pesquisa_pela_tela(servidor, falso, google, monkeypatch):
+    app, c = servidor
+    monkeypatch.setattr(pq_mod.Motor, "espera", 0.01, raising=False)
+    assert app.coletor.coletar([HOJE]).result(timeout=60)["ok"]
+    app.google.configurar(google.url, SENHA_G)
+    # Remessas de hoje sem o 3 Segmentos (apaga alguns para ter o que buscar).
+    sem = [p["billCode"] for p in app.banco.pacotes_dia("troncal", HOJE)][:30]
+    with app.banco.trava:
+        app.banco.db.executemany("DELETE FROM segmentos WHERE billCode = ?", [(b,) for b in sem])
+    lista = json.loads(c.pedir("/api/pesquisa/sem-segmento")[2])["remessas"]
+    assert set(sem) <= set(lista)
+    st, _, corpo = c.pedir("/api/pesquisa/iniciar", {"remessas": "\n".join(lista + lista[:3] + ["x"]), "modo": "segmentos"})
+    r = json.loads(corpo)
+    assert r["ok"] and r["remessas"] == len(lista) and r["repetidas"] == 3 and r["invalidas"] == 1
+    assert json.loads(c.pedir("/api/pesquisa/iniciar", {"remessas": "88001", "modo": "segmentos"})[2])["ok"] in (True, False)
+    _esperar(app, app.pesquisa.atual)
+    e = json.loads(c.pedir("/api/pesquisa/estado")[2])
+    assert e["lista"] and e["google"]
+    res = json.loads(c.pedir(f"/api/pesquisa/resultado?id={r['id']}&aba=com&tamanho=10")[2])
+    assert res["resumo"]["seg"]["com"] >= 25 and len(res["linhas"]) == 10 and res["colunas"][0][1] == "Número de pedido JMS"
+    rem = json.loads(c.pedir(f"/api/pesquisa/remessas?id={r['id']}&aba=com")[2])["remessas"]
+    assert len(rem) == res["total"]
+    st, h, corpo = c.pedir(f"/api/pesquisa/excel?id={r['id']}")
+    assert st == 200 and [a["nome"] for a in ler_xlsx(corpo)] == ["Resumo", "Resultado"]
+    # Os códigos achados valem para o painel da Expedição.
+    assert len([b for b in sem if b not in app.banco.sem_codigo_dia(HOJE)]) >= 25
+    # E o resultado vai para a Google Planilha, numa aba "Pesquisa …".
+    fim = time.time() + 20
+    while not app.pesquisa.abrir(r["id"]).planilha and time.time() < fim:
+        time.sleep(0.2)
+    aba = app.pesquisa.abrir(r["id"]).planilha
+    assert aba.startswith("Pesquisa ") and aba in google.estado()
+    # Importar planilha pela tela.
+    st, _, corpo = c.pedir("/api/pesquisa/importar?nome=x.csv", b"remessa\nJT0000000000001\n", tipo="application/octet-stream")
+    assert json.loads(corpo)["abas"][0]["colunas"][0]["remessas"] == ["JT0000000000001"]
+    assert c.pedir("/pesquisa")[0] == 200 and c.pedir("/pesquisa.js")[0] == 200

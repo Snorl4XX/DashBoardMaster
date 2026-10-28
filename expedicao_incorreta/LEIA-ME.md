@@ -121,6 +121,45 @@ JMS  →  app no computador (busca)  →  Google Planilha (banco de dados)  → 
 
 **Mudou o `Codigo.gs`** (versão nova do app)? No Apps Script, cole o novo › Salvar › **Implantar › Gerenciar implantações › ✏️ › Versão: Nova versão › Implantar** (a URL continua a mesma).
 
+## Pesquisa no Rastreamento (em Python)
+
+A versão Python da "Pesquisa no Rastreamento". **Quem consulta o JMS é o Python** do app, no computador; a página só manda o pedido e mostra o andamento e o resultado. Na versão antiga, a busca rodava em JavaScript dentro da página.
+
+Abra pelo menu **Ferramentas › Pesquisa no Rastreamento** (`http://localhost:3300/pesquisa`, ou pelo link público, com a senha).
+
+**1 · Remessas** — três jeitos:
+- **Colar:** uma por linha, ou separadas por espaço, vírgula ou ponto e vírgula. As repetidas ficam de fora.
+- **Importar planilha (.xlsx ou .csv):**
+  - o app acha sozinho a aba e a coluna das remessas ("Remessa", "Nº do pedido"… ou a coluna com mais números de remessa);
+  - dá para trocar a aba e a coluna antes de clicar em **Usar estas remessas**.
+- **Pacotes de hoje sem 3 Segmentos:** as remessas dos caminhões de hoje (painel da Expedição) que ainda estão sem o código.
+
+**2 · O que buscar:**
+- **Texto no rastreamento:**
+  - **Bloco 1 · Tem ou não tem** e **Bloco 2 · Turno que mais ocorreu**: um texto da "Descrição da etapa de bipagem" (ex.: `A encomenda expressa está [SP GRU] sendo enviada`);
+  - `*` vale qualquer trecho; maiúsculas, acentos e espaços dentro dos colchetes não fazem diferença;
+  - vale sempre o **primeiro bipe** (o mais antigo) com o texto: horário, turno (T1/T2/T3), origem, quem escaneou, imagem, tipo de bipagem e descrição;
+  - opcional: **Trazer os códigos de segmento**.
+- **Só os códigos de segmento:** só o Código de primeiro segmento e o Código de dois segmentos (bloco "3 Segmentos" da Informação básica).
+
+**Resultado:**
+- **Cartões:** pesquisadas, tem / não tem, sem rastreamento no JMS, consulta recusada, com os códigos de segmento.
+- **Gráficos:** tem × não tem, turnos do primeiro bipe, por hora, quem mais escaneou, 1º e 2º segmento.
+- **Tabela:** filtro (Tem, Não tem, Sem rastreamento, Recusadas, Com código…), busca e **Copiar remessas** (para colar no JMS).
+- **Baixar Excel:** abas Resumo, Resultado e "Tem" / "Não tem" de cada bloco (cabeçalho J&T, português e mandarim, com filtro).
+- **Google Planilha** (se estiver ligada): o resultado vai sozinho para uma aba **"Pesquisa AAAA-MM-DD HHhMMmSS"**.
+- **No painel da Expedição:** os códigos de segmento achados também valem para os pacotes dos caminhões.
+- **Pesquisas anteriores:** as 30 últimas ficam guardadas no computador (reabra pela lista).
+
+**Como ele consulta o JMS** (o mesmo jeito da Pesquisa V1.7):
+- uma consulta por remessa no Rastreamento do pacote (`podTracking/inner/query/keywordList`) e uma na Informação básica (`order/getOrderDetail`);
+- começa com 10 consultas ao mesmo tempo e sobe até 40 enquanto o JMS responde bem. Se ele pedir para ir mais devagar (ou falhar muito), cai pela metade e espera 3 s;
+- falha passageira volta para a fila (até 5 vezes); recusa, até 3;
+- **no fim, as que vieram vazias ou recusadas são conferidas de novo, devagar** (o JMS ocupado às vezes responde vazio);
+- só o AuthToken vencido para a pesquisa: troque o token e clique em **Continuar** (segue de onde parou). **Parar** interrompe; o que já veio fica na tela;
+- **Tentar de novo as recusadas** abre uma pesquisa só com elas;
+- até 50.000 remessas por pesquisa, uma pesquisa de cada vez.
+
 ## Instalar e abrir (Windows, sem administrador)
 
 1. **Extrair:** no ZIP, botão direito › **Extrair tudo...** › destino `C:\`. Fica a pasta `C:\expedicao_incorreta`.
@@ -321,6 +360,7 @@ Mudou o `config.json`? Feche a janela preta e abra o app de novo.
 | `expedicao/sincronia.py` | Google Planilha: escreve os dias, lê para o painel e guarda o que você mudou. |
 | `expedicao/google.py` | Conversa com o App da Web do Apps Script. |
 | `expedicao/tailscale.py` | Link público: chama o Tailscale deste computador (Funnel). |
+| `expedicao/pesquisa.py` | Pesquisa no Rastreamento: a busca no JMS (Python), os blocos de texto, os turnos e o resultado. |
 | `google/Codigo.gs` | O código que fica na Google Planilha (Apps Script). |
 | `expedicao/banco.py` | SQLite. |
 | `expedicao/xlsx.py` | Lê e escreve .xlsx sem bibliotecas. |

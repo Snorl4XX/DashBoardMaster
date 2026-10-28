@@ -168,6 +168,12 @@ class Banco:
         return self._um("SELECT COUNT(*) AS n FROM pacotes WHERE tipo = ? AND dia = ?", tipo, dia)["n"]
 
     # ---------------------------------------------------------------- 3 Segmentos
+    def sem_codigo_dia(self, dia: str) -> list[str]:
+        """Remessas do dia (Expedição) ainda sem o Código de primeiro segmento (não consultadas, com erro ou sem código no JMS)."""
+        return [r["billCode"] for r in self._todos(
+            """SELECT DISTINCT p.billCode FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode
+               WHERE p.dia = ? AND (s.billCode IS NULL OR s.erro <> '' OR s.s1 = '') ORDER BY p.billCode""", dia)]
+
     def sem_segmento(self, dia: str, limite: int = 2000) -> list[str]:
         """Remessas do dia ainda sem o "3 Segmentos" (ou com erro há mais de 30 min)."""
         return [r["billCode"] for r in self._todos(
