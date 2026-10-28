@@ -4,7 +4,9 @@ Você cola (ou importa de planilha) as remessas; o Python consulta o JMS e a pá
   - Rastreamento do pacote: POST /operatingplatform/podTracking/inner/query/keywordList {keywordList: [remessa], trackingTypeEnum:
     "WAYBILL", countryId} → os bipes da remessa (o JMS devolve uma remessa por consulta, como a tela dele).
   - Informação básica: POST /operatingplatform/order/getOrderDetail {waybillNo, countryId} → bloco "3 Segmentos".
-Dois modos:
+Três modos:
+  - "completo" (planilha para análise): TODOS os bipes de cada remessa, sem precisar de texto, mais os códigos de segmento. Sai
+    uma linha por remessa (primeiro e último bipe, quantos bipes, segmentos) e outra aba com um bipe por linha.
   - "texto": até 2 blocos com um texto da "Descrição da etapa de bipagem" (ex.: "A encomenda expressa está [SP GRU] sendo
     enviada"; "*" vale qualquer trecho). Para cada remessa: tem ou não tem, e o PRIMEIRO bipe com o texto (horário, turno,
     origem, quem escaneou, imagem, tipo, descrição). Opcional: os códigos de segmento.
@@ -26,6 +28,7 @@ import threading
 import time
 import unicodedata
 import uuid
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .coletor import agora_sp
@@ -38,6 +41,11 @@ PARALELO, PARALELO_MIN, PARALELO_MAX = 10, 3, 40
 TENTATIVAS, RECUSAS = 5, 3
 REVISAO_PARALELO = 10
 MAX_REMESSAS = 50000
+MAX_COMPLETO = 10000  # "completo" guarda os bipes de cada remessa: limite menor (o banco e o Excel ficam leves)
+MAX_BIPES_REMESSA = 200
+MAX_DESC = 300
+MODOS = ("completo", "texto", "segmentos")
+NOME_MODO = {"completo": "Planilha para análise (todos os bipes)", "texto": "Texto no rastreamento", "segmentos": "Só os códigos de segmento"}
 # "Muitas consultas": o JMS pede para ir mais devagar (passageiro).
 LIMITE_RE = re.compile(r"频繁|限流|frequen|too many|rate.?limit|limite de requisi|muitas requisi|muitas consultas|请稍后|ocupado|busy|繁忙", re.I)
 SITUACAO_SEG = {"com": "Com código", "sem": "Sem código no JMS", "recusada": "Consulta recusada pelo JMS"}
@@ -107,6 +115,13 @@ def primeiro_bipe(detalhes: list[dict], casa) -> dict | None:
     if not achados:
         return None
     d = min(achados, key=lambda x: str(x.get("scanTime") or "9999"))
+    origem, por = _origem_por(d)
+    return {"t": str(d.get("scanTime") or ""), "turno": turno_de(d.get("scanTime")), "origem": origem, "por": por,
+            "tipo": str(d.get("scanTypeName") or "").strip(), "desc": str(d.get("waybillTrackingContent") or ""), "img": _tem_img(d),
+            "n": len(achados)}
+
+
+def _origem_por(d: dict) -> tuple[str, str]:
     texto = str(d.get("waybillTrackingContent") or "")
     por, origem = str(d.get("scanByName") or "").strip(), str(d.get("scanNetworkName") or "").strip()
     if not por:
@@ -115,12 +130,29 @@ def primeiro_bipe(detalhes: list[dict], casa) -> dict | None:
     if not origem:
         m = re.search(r"\[([^\]]+)\]", texto)
         origem = m.group(1).strip() if m else ""
+    return origem, por
+
+
+def _tem_img(d: dict) -> bool:
     try:
-        img = float(d.get("imgType")) > 0
+        return float(d.get("imgType")) > 0
     except (TypeError, ValueError):
-        img = False
-    return {"t": str(d.get("scanTime") or ""), "turno": turno_de(d.get("scanTime")), "origem": origem, "por": por,
-            "tipo": str(d.get("scanTypeName") or "").strip(), "desc": texto, "img": img, "n": len(achados)}
+        return False
+
+
+def bipes_compactos(detalhes: list[dict]) -> list[dict]:
+    """Todos os bipes da remessa, do mais antigo ao mais novo, só com o que interessa para a análise (modo "completo")."""
+    out = []
+    for d in sorted((x for x in detalhes or [] if isinstance(x, dict)), key=lambda x: str(x.get("scanTime") or "")):
+        origem, por = _origem_por(d)
+        out.append({"t": str(d.get("scanTime") or ""), "tipo": str(d.get("scanTypeName") or "").strip(), "base": origem, "por": por,
+                    "prox": str(d.get("nextStopName") or "").strip(), "img": _tem_img(d),
+                    "desc": str(d.get("waybillTrackingContent") or "")[:MAX_DESC]})
+    # Remessa com bipes demais: ficam os primeiros e os últimos (o meio raramente muda a análise).
+    if len(out) > MAX_BIPES_REMESSA:
+        metade = MAX_BIPES_REMESSA // 2
+        out = out[:metade] + out[-metade:]
+    return out
 
 
 def resumo_bloco(resultados: list[dict], k: int) -> dict:
@@ -205,8 +237,10 @@ class Pesquisa:
                  origem: str = "") -> None:
         self.id = agora_sp().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
         self.criada = int(time.time() * 1000)
-        self.modo = "segmentos" if modo == "segmentos" else "texto"
+        self.modo = modo if modo in MODOS else "texto"
         self.padroes = [str(p or "").strip() for p in (padroes or [])[:2]] + [""] * (2 - len((padroes or [])[:2]))
+        if self.modo != "texto":
+            self.padroes = ["", ""]
         self.segmentos = True if self.modo == "segmentos" else bool(segmentos)
         self.remessas = remessas
         self.origem = origem
@@ -235,6 +269,10 @@ class Pesquisa:
                 "porSegundo": round(self.consultas / seg, 1) if seg > 1 else None, "revistas": self.revistas,
                 "achadasRevisao": self.achadas_revisao, "origem": self.origem, "planilha": self.planilha}
 
+    def rastreia(self) -> bool:
+        """Este modo consulta o Rastreamento do pacote (os bipes)?"""
+        return self.modo in ("texto", "completo")
+
     def linhas(self) -> list[dict]:
         """Uma linha por remessa, na ordem colada (as que a pesquisa ainda não fez ficam de fora)."""
         out = []
@@ -246,16 +284,20 @@ class Pesquisa:
             sit_seg = "" if not self.segmentos else ("com" if seg and seg.get("s1") else "recusada" if r.get("segRecusada") else "sem")
             out.append({"remessa": w, "rastreio": bool(r.get("rastreio")), "recusada": bool(r.get("recusada")),
                         "blocos": r.get("blocos") or [None, None], "s1": (seg or {}).get("s1", ""), "s2": (seg or {}).get("s2", ""),
-                        "s3": (seg or {}).get("s3", ""), "situacaoSeg": sit_seg})
+                        "s3": (seg or {}).get("s3", ""), "situacaoSeg": sit_seg, "bipes": r.get("bipes") or [],
+                        "nBipes": int(r.get("nBipes") or 0)})
         return out
 
     def resumo(self) -> dict:
         linhas = self.linhas()
         r = {"andamento": self.andamento(), "pesquisadas": len(linhas)}
-        if self.modo == "texto":
-            r["blocos"] = [resumo_bloco(linhas, k) if self.padroes[k] else None for k in range(2)]
+        if self.rastreia():
             r["semRastreio"] = sum(1 for l in linhas if not l["rastreio"] and not l["recusada"])
             r["recusadas"] = sum(1 for l in linhas if l["recusada"])
+        if self.modo == "texto":
+            r["blocos"] = [resumo_bloco(linhas, k) if self.padroes[k] else None for k in range(2)]
+        if self.modo == "completo":
+            r["completo"] = resumo_completo(linhas)
         if self.segmentos:
             com = [l for l in linhas if l["situacaoSeg"] == "com"]
             r["seg"] = {"com": len(com), "sem": sum(1 for l in linhas if l["situacaoSeg"] == "sem"),
@@ -282,12 +324,37 @@ class Pesquisa:
         return p
 
 
-def _contar(linhas: list[dict], campo: str) -> list[dict]:
+def _contar(linhas: list[dict], campo) -> list[dict]:
+    """[{nome, qtd}] do mais comum ao menos; campo = chave da linha ou função (linha → valor)."""
     cont: dict[str, int] = {}
     for l in linhas:
-        k = l[campo] or "(vazio)"
+        k = (campo(l) if callable(campo) else l[campo]) or "(vazio)"
         cont[k] = cont.get(k, 0) + 1
     return [{"nome": n, "qtd": q} for n, q in sorted(cont.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+def resumo_completo(linhas: list[dict]) -> dict:
+    """Totais do modo "completo": última situação (tipo do último bipe), onde está (base do último bipe), turno do último bipe,
+    quantos bipes por remessa, total de bipes e remessas com algum bipe sem imagem."""
+    com = [l for l in linhas if l["bipes"]]
+    ult = lambda l: l["bipes"][-1]  # noqa: E731
+    faixa = lambda n: str(n) if n <= 5 else "6 a 10" if n <= 10 else "11 a 15" if n <= 15 else "16 a 20" if n <= 20 else "mais de 20"  # noqa: E731
+    ordem_faixa = ["1", "2", "3", "4", "5", "6 a 10", "11 a 15", "16 a 20", "mais de 20"]
+    por_faixa = {x["nome"]: x["qtd"] for x in _contar(com, lambda l: faixa(l["nBipes"] or len(l["bipes"])))}
+    turnos = {t: 0 for t in TURNOS}
+    horas = [0] * 24
+    for l in com:
+        t = turno_de(ult(l)["t"])
+        if t in turnos:
+            turnos[t] += 1
+        hr = _hora(ult(l)["t"])
+        if hr is not None:
+            horas[hr] += 1
+    return {"comRastreio": len(com), "bipes": sum(l["nBipes"] or len(l["bipes"]) for l in com),
+            "ultimoTipo": _contar(com, lambda l: ult(l)["tipo"]), "ultimaBase": _contar(com, lambda l: ult(l)["base"]),
+            "ultimoPor": _contar(com, lambda l: ult(l)["por"]), "turnos": turnos, "horas": horas,
+            "porQtd": [{"nome": k, "qtd": por_faixa[k]} for k in ordem_faixa if por_faixa.get(k)],
+            "semImagem": sum(1 for l in com if any(not b["img"] for b in l["bipes"]))}
 
 
 class Motor:
@@ -297,6 +364,7 @@ class Motor:
     def __init__(self, *, jms, banco, log, ao_achar=None, ao_terminar=None) -> None:
         self.jms, self.banco, self.log, self.ao_achar, self.ao_terminar = jms, banco, log, ao_achar, ao_terminar
         self.atual: Pesquisa | None = None
+        self._aberta: Pesquisa | None = None  # a última aberta do banco (a tela pede a mesma várias vezes: não relê o JSON)
         self._trava = threading.Lock()
         self.espera = 3.0  # pausa quando o JMS pede para ir mais devagar
         try:
@@ -312,15 +380,24 @@ class Motor:
         with self.banco.trava:
             self.banco.db.execute("INSERT OR REPLACE INTO pesquisas (id, criada, resumo, dados) VALUES (?, ?, ?, ?)",
                                   (p.id, p.criada, json.dumps(self._item(p), ensure_ascii=False), p.para_json()))
-            # Ficam as 30 mais novas.
+            # Ficam as 30 mais novas (das "completo", que guardam todos os bipes, só as 5 mais novas).
             self.banco.db.execute("DELETE FROM pesquisas WHERE id NOT IN (SELECT id FROM pesquisas ORDER BY criada DESC LIMIT 30)")
+            completas = [r[0] for r in self.banco.db.execute("SELECT id, resumo FROM pesquisas ORDER BY criada DESC")
+                         if json.loads(r[1]).get("modo") == "completo"]
+            for pid in completas[5:]:
+                self.banco.db.execute("DELETE FROM pesquisas WHERE id = ?", (pid,))
 
     def abrir(self, pid: str | None) -> Pesquisa | None:
         if self.atual and (not pid or self.atual.id == pid):
             return self.atual
+        if pid and self._aberta and self._aberta.id == pid:
+            return self._aberta
         r = self.banco._um("SELECT dados FROM pesquisas WHERE id = ?" if pid else "SELECT dados FROM pesquisas ORDER BY criada DESC LIMIT 1",
                            *([pid] if pid else []))
-        return Pesquisa.de_json(r["dados"]) if r else None
+        if not r:
+            return None
+        self._aberta = Pesquisa.de_json(r["dados"])
+        return self._aberta
 
     @staticmethod
     def _item(p: Pesquisa) -> dict:
@@ -344,8 +421,10 @@ class Motor:
                 raise ValueError("Já tem uma pesquisa rodando: espere terminar ou clique em Parar.")
             if not p.remessas:
                 raise ValueError("Cole pelo menos uma remessa.")
-            if len(p.remessas) > MAX_REMESSAS:
-                raise ValueError(f"No máximo {MAX_REMESSAS:,} remessas por pesquisa.".replace(",", "."))
+            maximo = MAX_COMPLETO if p.modo == "completo" else MAX_REMESSAS
+            if len(p.remessas) > maximo:
+                raise ValueError(f"No máximo {maximo:,} remessas por pesquisa".replace(",", ".") +
+                                 (" neste modo (divida em partes)." if p.modo == "completo" else "."))
             if p.modo == "texto" and not any(p.padroes):
                 raise ValueError("Digite o texto de pelo menos um bloco (ou escolha \"Só os códigos de segmento\").")
             self.atual = p
@@ -405,7 +484,7 @@ class Motor:
                 self.ao_terminar(p)
 
     def _rever(self, p: Pesquisa, r: dict) -> bool:
-        if p.modo == "texto" and (r.get("recusada") or not r.get("rastreio")):
+        if p.rastreia() and (r.get("recusada") or not r.get("rastreio")):
             return True
         return p.segmentos and not (r.get("seg") or {}).get("s1")
 
@@ -415,15 +494,15 @@ class Motor:
         for w in remessas:
             r = p.resultados.setdefault(w, {})
             r.update({"pronta": False, "tent": 0, "rec": 0, "segTent": 0, "segRec": 0})
-            if p.modo == "texto":
+            if p.rastreia():
                 tarefas.append((w, "bipes"))
             if p.segmentos:
                 tarefas.append((w, "seg"))
-        pendentes = {w: (1 if p.modo == "texto" else 0) + (1 if p.segmentos else 0) for w in remessas}
+        pendentes = {w: (1 if p.rastreia() else 0) + (1 if p.segmentos else 0) for w in remessas}
         fila = list(tarefas)
         guardado = time.time()
         while fila and not p.parar_pedido:
-            if time.time() - guardado >= 30:  # se o app fechar no meio, o Continuar segue daqui
+            if time.time() - guardado >= (90 if p.modo == "completo" else 30):  # se o app fechar no meio, o Continuar segue daqui
                 self.guardar(p)
                 guardado = time.time()
             n = max(1, p.paralelo)
@@ -452,13 +531,16 @@ class Motor:
                             fila.append((w, tipo))
                             continue
                         if tipo == "bipes":
-                            r.update({"recusada": True, "rastreio": False, "blocos": [None, None], "erroRastreio": str(e)[:200]})
+                            r.update({"recusada": True, "rastreio": False, "blocos": [None, None], "bipes": [], "nBipes": 0,
+                                      "erroRastreio": str(e)[:200]})
                         else:
                             r.update({"seg": None, "segRecusada": True, "erroSeg": str(e)[:200]})
                     else:
                         if tipo == "bipes":
                             r.update({"recusada": False, "rastreio": bool(dados), "nBipes": len(dados),
                                       "blocos": [primeiro_bipe(dados, c) if c else None for c in casas]})
+                            if p.modo == "completo":
+                                r["bipes"] = bipes_compactos(dados)
                         else:
                             r.update({"seg": dados if dados.get("s1") or dados.get("s2") else None, "segRecusada": False})
                     pendentes[w] -= 1
@@ -492,8 +574,10 @@ class Motor:
 def colunas_resultado(p: Pesquisa) -> list[list[str]]:
     """[campo, português, mandarim] das colunas do resultado (a mesma ordem na Google Planilha e no Excel)."""
     cols = [["remessa", "Número de pedido JMS", "运单号"]]
-    if p.modo == "texto":
+    if p.rastreia():
         cols.append(["rastreioTexto", "Rastreamento", "轨迹"])
+    if p.modo == "completo":
+        cols.append(["nBipes", "Quantidade de bipes", "扫描次数"])
     if p.segmentos:
         cols += [["s1", "Código de primeiro segmento", "一段码"], ["s2", "Código de dois segmentos", "二段码"], ["s3", "3 Segmentos", "三段码"],
                  ["situacaoSegTexto", "Situação do segmento", "段码状态"]]
@@ -505,7 +589,45 @@ def colunas_resultado(p: Pesquisa) -> list[list[str]]:
                          [f"b{n}turno", f"Bloco {n}: turno", "班次"], [f"b{n}origem", f"Bloco {n}: origem", "网点"],
                          [f"b{n}por", f"Bloco {n}: escaneado por", "扫描人"], [f"b{n}img", f"Bloco {n}: imagem", "图片"],
                          [f"b{n}tipo", f"Bloco {n}: tipo de bipagem", "扫描类型"], [f"b{n}desc", f"Bloco {n}: descrição", "描述"]]
+    if p.modo == "completo":
+        cols += [["pT", "Primeiro bipe: data e hora", "首次扫描时间"], ["pTipo", "Primeiro bipe: tipo de bipagem", "首次扫描类型"],
+                 ["pBase", "Primeiro bipe: base", "首次扫描网点"],
+                 ["uT", "Último bipe: data e hora", "最后扫描时间"], ["uTurno", "Último bipe: turno", "班次"],
+                 ["uTipo", "Último bipe: tipo de bipagem", "最后扫描类型"], ["uBase", "Último bipe: base", "最后扫描网点"],
+                 ["uPor", "Último bipe: escaneado por", "扫描人"], ["uProx", "Último bipe: próxima parada", "下一站"],
+                 ["uImg", "Último bipe: imagem", "图片"], ["uDesc", "Último bipe: descrição", "描述"],
+                 ["horas", "Horas do primeiro ao último bipe", "时长(小时)"], ["semImg", "Bipes sem imagem", "无图片扫描"]]
     return cols
+
+
+COLUNAS_BIPES = [["remessa", "Número de pedido JMS", "运单号"], ["n", "Ordem do bipe", "序号"], ["t", "Tempo de digitalização", "扫描时间"],
+                 ["dia", "Dia", "日期"], ["turno", "Turno", "班次"], ["tipo", "Tipo de bipagem", "扫描类型"], ["base", "Base", "扫描网点"],
+                 ["por", "Escaneado por", "扫描人"], ["prox", "Próxima parada", "下一站"], ["img", "Imagem", "图片"],
+                 ["s1", "Código de primeiro segmento", "一段码"], ["s2", "Código de dois segmentos", "二段码"],
+                 ["desc", "Descrição da etapa de bipagem", "描述"]]
+
+
+def _horas_entre(a: str, b: str) -> float | str:
+    try:
+        ta = datetime.strptime(a[:19], "%Y-%m-%d %H:%M:%S")
+        tb = datetime.strptime(b[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return ""
+    return round((tb - ta).total_seconds() / 3600, 1)
+
+
+def bipes_resultado(p: Pesquisa, remessas: list[str] | None = None) -> list[dict]:
+    """Modo "completo": um bipe por linha (do mais antigo ao mais novo de cada remessa), para tabela dinâmica e filtro."""
+    out = []
+    so = set(remessas) if remessas is not None else None
+    for l in p.linhas():
+        if so is not None and l["remessa"] not in so:
+            continue
+        for i, b in enumerate(l["bipes"], 1):
+            out.append({"remessa": l["remessa"], "n": i, "t": b["t"], "dia": b["t"][:10], "turno": turno_de(b["t"]), "tipo": b["tipo"],
+                        "base": b["base"], "por": b["por"], "prox": b["prox"], "img": "Tem imagem" if b["img"] else "Sem imagem",
+                        "s1": l["s1"], "s2": l["s2"], "desc": b["desc"]})
+    return out
 
 
 def linhas_resultado(p: Pesquisa) -> list[dict]:
@@ -514,6 +636,16 @@ def linhas_resultado(p: Pesquisa) -> list[dict]:
         d = {"remessa": l["remessa"], "s1": l["s1"], "s2": l["s2"], "s3": l["s3"],
              "rastreioTexto": "Consulta recusada pelo JMS" if l["recusada"] else "Tem rastreamento" if l["rastreio"] else "Sem rastreamento no JMS",
              "situacaoSegTexto": SITUACAO_SEG.get(l["situacaoSeg"], "")}
+        if p.modo == "completo":
+            bs = l["bipes"]
+            pr, ul = (bs[0], bs[-1]) if bs else ({}, {})
+            d.update({"nBipes": l["nBipes"] if bs else 0, "pT": pr.get("t", ""), "pTipo": pr.get("tipo", ""), "pBase": pr.get("base", ""),
+                      "uT": ul.get("t", ""), "uTurno": turno_de(ul["t"]) if bs else "", "uTipo": ul.get("tipo", ""),
+                      "uBase": ul.get("base", ""), "uPor": ul.get("por", ""), "uProx": ul.get("prox", ""),
+                      "uImg": ("Tem imagem" if ul["img"] else "Sem imagem") if bs else "", "uDesc": ul.get("desc", ""),
+                      "horas": _horas_entre(pr["t"], ul["t"]) if bs else "", "semImg": sum(1 for b in bs if not b["img"]) if bs else ""})
+            out.append(d)
+            continue
         for k in range(2):
             h, n = l["blocos"][k], k + 1
             d[f"b{n}tem"] = ("Tem" if h else "Não tem") if p.padroes[k] else ""

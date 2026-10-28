@@ -8,8 +8,11 @@
   var ICO = {
     box: '<path d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8M12 13v8"/>', check: '<path d="M5 12l5 5L20 7"/>',
     shift: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', login: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
-    seg: '<path d="M4 6h16M4 12h10M4 18h6"/>', alert: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>'
+    seg: '<path d="M4 6h16M4 12h10M4 18h6"/>', alert: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>',
+    pin: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2"/>',
+    list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>'
   };
+  var NOME_MODO = {completo: 'planilha p/ análise', texto: 'texto', segmentos: 'só segmentos'};
   var svg = function (k) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + ICO[k] + '</svg>'; };
   function pedir(url, opcoes) {
     return fetch(url, opcoes).then(function (r) {
@@ -82,7 +85,9 @@
   // ---------------------------------------------------------------- modo e botões
   function modoAtual() { return document.querySelector('input[name=modo]:checked').value; }
   function modo() {
-    $('blocos').classList.toggle('hidden', modoAtual() === 'segmentos');
+    $('blocos').classList.toggle('hidden', modoAtual() !== 'texto');
+    $('comSegLinha').classList.toggle('hidden', modoAtual() === 'segmentos');
+    $('notaCompleto').classList.toggle('hidden', modoAtual() !== 'completo');
     Array.prototype.forEach.call(document.querySelectorAll('.pq-modos .chip'), function (c) { c.classList.toggle('active', c.querySelector('input').checked); });
   }
   Array.prototype.forEach.call(document.querySelectorAll('input[name=modo]'), function (r) { r.addEventListener('change', modo); });
@@ -133,9 +138,10 @@
   function estado() {
     return pedir('api/pesquisa/estado').then(function (e) {
       var a = e.atual;
+      if (e.maxCompleto) $('maxCompleto').textContent = fmtInt(e.maxCompleto);
       $('historico').innerHTML = '<option value="">Pesquisas anteriores…</option>' + e.lista.map(function (x) {
         return '<option value="' + esc(x.id) + '">' + quando(x.criada) + ' · ' + fmtInt(x.total) + ' remessas · ' +
-          (x.modo === 'segmentos' ? 'só segmentos' : 'texto') + (x.estado !== 'pronta' ? ' · ' + x.estado : '') + (x.origem ? ' · ' + esc(x.origem) : '') + '</option>';
+          (NOME_MODO[x.modo] || x.modo) + (x.estado !== 'pronta' ? ' · ' + x.estado : '') + (x.origem ? ' · ' + esc(x.origem) : '') + '</option>';
       }).join('');
       if (!st.id && e.lista.length) abrir(e.lista[0].id);
       var mostrar = a && a.id === st.id ? a : null;
@@ -158,8 +164,15 @@
     carregar(true);
   }
   function abas(r) {
-    var a = r.andamento, op = [['todas', 'Todas']];
-    if (a.modo === 'texto') {
+    var a = r.andamento, op = [['todas', 'Todas as remessas']];
+    if (a.modo === 'completo') {
+      var c = r.completo;
+      op.push(['bipes', 'Todos os bipes, um por linha (' + fmtInt(c.bipes) + ')']);
+      c.ultimoTipo.slice(0, 12).forEach(function (u) { op.push(['u:' + u.nome, 'Último bipe: ' + u.nome + ' (' + fmtInt(u.qtd) + ')']); });
+      if (c.semImagem) op.push(['semImagem', 'Com bipe sem imagem (' + fmtInt(c.semImagem) + ')']);
+      op.push(['semRastreio', 'Sem rastreamento (' + fmtInt(r.semRastreio) + ')'], ['recusadas', 'Consulta recusada (' + fmtInt(r.recusadas) + ')']);
+      if (r.seg) op.push(['segSem', 'Sem código de segmento (' + fmtInt(r.seg.sem + r.seg.recusadas) + ')']);
+    } else if (a.modo === 'texto') {
       r.blocos.forEach(function (b, k) {
         if (b) op.push(['b' + (k + 1) + 'tem', 'Bloco ' + (k + 1) + ' · tem (' + fmtInt(b.tem) + ')'], ['b' + (k + 1) + 'nao', 'Bloco ' + (k + 1) + ' · não tem (' + fmtInt(b.naoTem) + ')']);
       });
@@ -167,8 +180,9 @@
     } else if (r.seg) {
       op.push(['com', 'Com código (' + fmtInt(r.seg.com) + ')'], ['sem', 'Sem código no JMS (' + fmtInt(r.seg.sem) + ')'], ['recusadas', 'Consulta recusada (' + fmtInt(r.seg.recusadas) + ')']);
     }
-    $('aba').innerHTML = op.map(function (o) { return '<option value="' + o[0] + '">' + esc(o[1]) + '</option>'; }).join('');
+    $('aba').innerHTML = op.map(function (o) { return '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>'; }).join('');
     $('aba').value = st.aba;
+    if ($('aba').value !== st.aba) { $('aba').value = 'todas'; }
   }
   function kpi(cls, rotulo, valor, sub) {
     return '<div class="kpi ' + (cls || '') + '"><span class="kpi-label">' + rotulo + '</span><div class="kpi-value">' + valor + '</div>' +
@@ -176,7 +190,16 @@
   }
   function cartoes(r) {
     var a = r.andamento, h = kpi('', svg('box') + 'Remessas pesquisadas', fmtInt(r.pesquisadas), 'de ' + fmtInt(a.total) + ' · ' + fmtInt(a.consultas) + ' consultas ao JMS');
-    if (a.modo === 'texto') {
+    if (a.modo === 'completo') {
+      var c = r.completo, u = c.ultimoTipo[0], b = c.ultimaBase[0];
+      h += kpi('', svg('list') + 'Com rastreamento', fmtInt(c.comRastreio), '<b>' + fmtPct(r.pesquisadas ? c.comRastreio / r.pesquisadas * 100 : 0, 1) + '</b> · ' +
+        fmtInt(c.bipes) + ' bipes (média ' + (c.comRastreio ? (c.bipes / c.comRastreio).toFixed(1).replace('.', ',') : '0') + ' por remessa)');
+      if (u) h += kpi('', svg('check') + 'Último bipe mais comum', esc(u.nome), fmtInt(u.qtd) + ' remessas · <b>' + fmtPct(u.qtd / c.comRastreio * 100, 1) + '</b>');
+      if (b) h += kpi('', svg('pin') + 'Onde mais estão', esc(b.nome), fmtInt(b.qtd) + ' remessas com o último bipe nessa base');
+      h += kpi(r.semRastreio ? 'bad' : '', svg('alert') + 'Sem rastreamento no JMS', fmtInt(r.semRastreio), 'o JMS não tem bipes dessas remessas');
+      h += kpi(r.recusadas ? 'bad' : '', svg('alert') + 'Consulta recusada pelo JMS', fmtInt(r.recusadas), r.recusadas ? 'use "Tentar de novo as recusadas"' : 'nenhuma');
+      h += kpi(c.semImagem ? 'bad' : '', svg('alert') + 'Com algum bipe sem imagem', fmtInt(c.semImagem), 'remessas com pelo menos um bipe sem foto no JMS');
+    } else if (a.modo === 'texto') {
       r.blocos.forEach(function (b, k) {
         if (!b) return;
         h += kpi('', svg('check') + 'Bloco ' + (k + 1) + ' · tem o texto', fmtInt(b.tem), '<b>' + fmtPct(b.pct || 0, 1) + '</b> · não tem: <b>' + fmtInt(b.naoTem) + '</b>' +
@@ -199,6 +222,22 @@
       G.cartao(grid, {key: key, icone: ICO.seg, titulo: titulo, tipo: 'colunas', sub: sub, total: total, distintos: itens.length, itens: itens.slice(0, 20),
         rotulo: rotulo, vazio: '<b>Nada para mostrar</b>nesta pesquisa.', unidade: 'remessas'});
     };
+    if (a.modo === 'completo') {
+      var c = r.completo;
+      colunas('ultTipo', {pt: 'Situação: tipo do último bipe', zh: '最后扫描类型'}, 'Top 20 de ' + fmtInt(c.ultimoTipo.length) + ' tipos de bipagem',
+        c.ultimoTipo, {pt: 'Tipo de bipagem', um: 'tipo', zh: '扫描类型'});
+      colunas('ultBase', {pt: 'Onde está: base do último bipe', zh: '最后扫描网点'}, 'Top 20 de ' + fmtInt(c.ultimaBase.length) + ' bases',
+        c.ultimaBase, {pt: 'Base', um: 'base', zh: '网点'});
+      G.cartao(grid, {key: 'ultTurno', icone: ICO.shift, titulo: {pt: 'Turno do último bipe', zh: '班次'}, tipo: 'rosca',
+        sub: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', itens: ['T1', 'T2', 'T3'].map(function (t) { return {nome: t, qtd: c.turnos[t]}; }), total: c.comRastreio,
+        distintos: 3, rotulo: {pt: 'Turno', um: 'turno', zh: '班次'}, vazio: '<b>Nenhuma remessa</b>com rastreamento.',
+        unidade: 'remessas', unidadeCurta: 'remessas', totalTexto: 'Remessas com rastreamento'});
+      colunas('ultHora', {pt: 'Último bipe por hora', zh: '小时'}, 'Hora do último bipe de cada remessa',
+        c.horas.map(function (q, hh) { return {nome: (hh < 10 ? '0' : '') + hh + 'h', qtd: q}; }).filter(function (i) { return i.qtd; }), {pt: 'Hora', um: 'hora', zh: '小时'});
+      colunas('porQtd', {pt: 'Bipes por remessa', zh: '扫描次数'}, 'Quantas vezes cada remessa foi bipada', c.porQtd, {pt: 'Bipes', um: 'faixa', zh: '次数'});
+      colunas('ultPor', {pt: 'Último bipe: quem escaneou', zh: '扫描人'}, 'Top 20 de ' + fmtInt(c.ultimoPor.length), c.ultimoPor,
+        {pt: 'Escaneado por', um: 'escaneador', zh: '扫描人'});
+    }
     if (a.modo === 'texto') {
       r.blocos.forEach(function (b, k) {
         if (!b) return;
@@ -231,7 +270,8 @@
         return '<td' + cls + ' title="' + esc(v) + '">' + esc(v.length > 90 ? v.slice(0, 88) + '…' : v) + '</td>';
       }).join('') + '</tr>';
     }).join('') || '<tr class="empty-row"><td colspan="' + r.colunas.length + '">Nenhuma remessa aqui.</td></tr>';
-    $('tableCount').textContent = fmtInt(r.total) + (r.total === 1 ? ' remessa' : ' remessas');
+    $('tabelaTitulo').textContent = r.unidade === 'bipes' ? 'Bipes (um por linha)' : 'Remessas';
+    $('tableCount').textContent = fmtInt(r.total) + (r.unidade === 'bipes' ? (r.total === 1 ? ' bipe' : ' bipes') : (r.total === 1 ? ' remessa' : ' remessas'));
     var paginas = Math.max(1, Math.ceil(r.total / r.tamanho)), p = r.pagina, hp = '', prev = 0;
     hp += '<button type="button" data-p="' + (p - 1) + '"' + (p <= 1 ? ' disabled' : '') + ' aria-label="Página anterior">‹</button>';
     for (var i = 1; i <= paginas; i++) {
@@ -250,7 +290,7 @@
   function carregar(tudo) {
     if (!st.id) return;
     st.ultimaCarga = Date.now();
-    var q = 'id=' + encodeURIComponent(st.id) + '&aba=' + st.aba + '&busca=' + encodeURIComponent(st.busca) + '&pagina=' + st.pagina + '&tamanho=' + st.tamanho;
+    var q = 'id=' + encodeURIComponent(st.id) + '&aba=' + encodeURIComponent(st.aba) + '&busca=' + encodeURIComponent(st.busca) + '&pagina=' + st.pagina + '&tamanho=' + st.tamanho;
     return pedir('api/pesquisa/resultado?' + q).then(function (r) {
       if (r.ok === false) return;
       $('resultado').classList.remove('hidden');
@@ -271,7 +311,7 @@
     espera = setTimeout(function () { st.busca = v; st.pagina = 1; carregar(false); }, 300);
   });
   $('copiar').addEventListener('click', function () {
-    pedir('api/pesquisa/remessas?id=' + encodeURIComponent(st.id) + '&aba=' + st.aba + '&busca=' + encodeURIComponent(st.busca)).then(function (r) {
+    pedir('api/pesquisa/remessas?id=' + encodeURIComponent(st.id) + '&aba=' + encodeURIComponent(st.aba) + '&busca=' + encodeURIComponent(st.busca)).then(function (r) {
       var t = r.remessas.join('\n');
       (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () {
         aviso(fmtInt(r.remessas.length) + ' remessas copiadas: cole no JMS.');

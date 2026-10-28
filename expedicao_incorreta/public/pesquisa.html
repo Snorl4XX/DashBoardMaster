@@ -116,16 +116,20 @@
       <section class="card conf" aria-labelledby="s-modo">
         <div class="section-head"><div><span class="kicker">2 · No JMS</span><h2 id="s-modo">O que buscar</h2></div></div>
         <div class="pq-modos" role="radiogroup" aria-label="Modo">
-          <label class="chip"><input type="radio" name="modo" value="texto" checked> Texto no rastreamento</label>
+          <label class="chip"><input type="radio" name="modo" value="completo" checked> Planilha para análise (todos os bipes)</label>
+          <label class="chip"><input type="radio" name="modo" value="texto"> Texto no rastreamento</label>
           <label class="chip"><input type="radio" name="modo" value="segmentos"> Só os códigos de segmento</label>
         </div>
+        <p class="muted small" id="notaCompleto">Traz <b>todos os bipes</b> de cada remessa (não precisa de texto) e os códigos de segmento. O Excel sai com as abas
+          <b>Resumo</b>, <b>Remessas</b> (uma linha por remessa: primeiro e último bipe, onde está, quantos bipes, segmentos) e <b>Bipes</b>
+          (um bipe por linha, para filtro e tabela dinâmica). Até <span id="maxCompleto">10.000</span> remessas por vez.</p>
         <div id="blocos">
           <label for="padrao1" class="muted small">Bloco 1 · Tem ou não tem (texto da "Descrição da etapa de bipagem"; <b>*</b> vale qualquer trecho):</label>
           <input type="text" id="padrao1" class="pq-input" placeholder="A encomenda expressa está [SP GRU] sendo enviada">
           <label for="padrao2" class="muted small">Bloco 2 · Turno que mais ocorreu (opcional):</label>
           <input type="text" id="padrao2" class="pq-input" placeholder="O expresso chegou [SP GRU] A parada anterior foi">
-          <label class="pq-check"><input type="checkbox" id="comSeg" checked> Trazer os códigos de segmento (3 Segmentos)</label>
         </div>
+        <label class="pq-check" id="comSegLinha"><input type="checkbox" id="comSeg" checked> Trazer os códigos de segmento (3 Segmentos)</label>
         <div class="row">
           <button type="button" class="btn btn-red" id="pesquisar">Pesquisar no JMS</button>
           <button type="button" class="btn btn-light hidden" id="parar">Parar</button>
@@ -145,12 +149,12 @@
         <section class="charts-grid" id="chartsGrid"></section>
         <section class="card table-card">
           <div class="section-head">
-            <div><span class="kicker">Resultado</span><h2>Remessas</h2></div>
+            <div><span class="kicker">Resultado</span><h2 id="tabelaTitulo">Remessas</h2></div>
             <div class="table-tools">
               <div class="select-wrap"><select id="aba" aria-label="Quais remessas"></select></div>
               <label class="find">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
-                <input type="text" id="busca" autocomplete="off" placeholder="Localizar remessa, segmento, escaneador…">
+                <input type="text" id="busca" autocomplete="off" placeholder="Localizar remessa, segmento, base, tipo de bipagem, escaneador…">
               </label>
               <button type="button" class="btn btn-light" id="copiar">Copiar remessas</button>
               <span class="count" id="tableCount">—</span>

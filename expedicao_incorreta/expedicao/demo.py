@@ -176,6 +176,14 @@ class JmsFalso:
               "nextStopName": v["endName"],
               "waybillTrackingContent": f"A encomenda expressa está [{BASE[1]}] sendo enviada, para [{v['endName']}], escaneador [{p['scanUser']}], "
                                         f"o número do pedido [{v['shipmentNo']}], número do voo []"}]
+        # Parte já chegou no destino (descarregada lá), para a planilha de análise ter "último bipe" variado.
+        chegada = bipe + timedelta(hours=4, minutes=int(remessa[-2:]))
+        if int(remessa[-1]) % 3 == 0 and chegada.replace(tzinfo=None) <= self.agora().replace(tzinfo=None):
+            d.append({"billCode": remessa, "waybillNo": remessa, "scanTime": chegada.strftime("%Y-%m-%d %H:%M:%S"),
+                      "scanTypeName": "Descarregamento de encomenda", "scanNetworkName": v["endName"], "scanByName": "DESCARREGADOR DEMO",
+                      "imgType": 8, "code": 3,
+                      "waybillTrackingContent": f"O expresso chegou [{v['endName']}] A parada anterior foi [{BASE[1]}], "
+                                                f"escaneador [DESCARREGADOR DEMO], o número do pedido [{v['shipmentNo']}]"})
         return sorted(d, key=lambda x: x["scanTime"], reverse=True)
 
     def segmento(self, remessa: str) -> str | None:

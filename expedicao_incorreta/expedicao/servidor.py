@@ -38,7 +38,8 @@ from .banco import Banco
 from .google import ErroGoogle
 from .sincronia import FonteDados, Sincronizador
 from .tailscale import Tailscale
-from .pesquisa import MAX_REMESSAS, Motor, Pesquisa, colunas_resultado, importar, ler_remessas, linhas_resultado
+from .pesquisa import (COLUNAS_BIPES, MAX_COMPLETO, MAX_REMESSAS, NOME_MODO, Motor, Pesquisa, bipes_resultado, colunas_resultado, importar,
+                       ler_remessas, linhas_resultado)
 from .coletor import Coletor, agora_sp, dias_da_agenda, dias_entre, hoje_sp, ms, soma_dias
 from .config import MAX_DIAS, PASTA_APP, arquivo_config, ler_config
 from .jms import Jms
@@ -128,6 +129,7 @@ class App:
         self.pesquisa = Motor(jms=self.jms_pesquisa, banco=self.banco, log=self.log, ao_achar=self._segmentos_da_pesquisa,
                               ao_terminar=self._pesquisa_terminou)
         self._link = {"em": 0.0, "estado": {}}
+        self._cache_bipes: tuple = (None, [])
         self.servidor: ThreadingHTTPServer | None = None
         self._parar = threading.Event()
 
@@ -421,7 +423,7 @@ class App:
         if p == "/api/pesquisa/estado":
             atual = motor.atual
             return req.json(200, {"atual": atual.andamento() if atual else None, "lista": motor.lista(), "google": self.google.ativo,
-                                  "maxRemessas": MAX_REMESSAS, "hoje": hoje_sp()})
+                                  "maxRemessas": MAX_REMESSAS, "maxCompleto": MAX_COMPLETO, "hoje": hoje_sp()})
         if p == "/api/pesquisa/sem-segmento":
             dia = qs.get("dia") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(qs.get("dia") or "")) else hoje_sp()
             return req.json(200, {"dia": dia, "remessas": self.banco.sem_codigo_dia(dia)})
@@ -429,18 +431,26 @@ class App:
             pq = motor.abrir(qs.get("id"))
             if not pq:
                 return req.json(404, {"ok": False, "error": "Pesquisa não encontrada."})
-            linhas = self._filtrar_pesquisa(pq, qs.get("aba") or "todas", qs.get("busca") or "")
-            if p == "/api/pesquisa/remessas":
-                return req.json(200, {"remessas": [l["remessa"] for l in linhas]})
-            cols = colunas_resultado(pq)
+            aba = str(qs.get("aba") or "todas")
             if p == "/api/pesquisa/excel":
-                return self._excel_pesquisa(req, pq, cols)
+                return self._excel_pesquisa(req, pq, colunas_resultado(pq))
+            if aba == "bipes" and pq.modo == "completo":  # um bipe por linha
+                cols, unidade = COLUNAS_BIPES, "bipes"
+                t = str(qs.get("busca") or "").strip().upper()
+                linhas = [b for b in self._bipes(pq) if not t or any(t in str(b[k]).upper() for k in ("remessa", "tipo", "base", "por", "prox"))]
+                if p == "/api/pesquisa/remessas":
+                    return req.json(200, {"remessas": list(dict.fromkeys(b["remessa"] for b in linhas))})
+            else:
+                cols, unidade = colunas_resultado(pq), "remessas"
+                linhas = self._filtrar_pesquisa(pq, aba, qs.get("busca") or "")
+                if p == "/api/pesquisa/remessas":
+                    return req.json(200, {"remessas": [l["remessa"] for l in linhas]})
             try:
                 pagina = max(1, int(qs.get("pagina") or 1))
                 tamanho = min(500, max(10, int(qs.get("tamanho") or 100)))
             except ValueError:
                 pagina, tamanho = 1, 100
-            return req.json(200, {"resumo": pq.resumo(), "planilha": pq.planilha, "colunas": cols,
+            return req.json(200, {"resumo": pq.resumo(), "planilha": pq.planilha, "colunas": cols, "unidade": unidade,
                                   "total": len(linhas), "pagina": pagina, "tamanho": tamanho,
                                   "linhas": linhas[(pagina - 1) * tamanho:pagina * tamanho]})
         if req.command != "POST":
@@ -477,6 +487,13 @@ class App:
             return req.json(400, {"ok": False, "error": str(e)})
         return req.enviar(404, "Não encontrado.")
 
+    def _bipes(self, pq: Pesquisa) -> list[dict]:
+        """Um bipe por linha (a tela pede página por página: a lista fica guardada até a pesquisa mudar)."""
+        chave = (pq.id, pq.feitas(), pq.estado)
+        if self._cache_bipes[0] != chave:
+            self._cache_bipes = (chave, bipes_resultado(pq))
+        return self._cache_bipes[1]
+
     @staticmethod
     def _filtrar_pesquisa(pq: Pesquisa, aba: str, busca: str) -> list[dict]:
         linhas = linhas_resultado(pq)
@@ -488,13 +505,20 @@ class App:
         elif aba in ("com", "sem", "recusadas") and pq.modo == "segmentos":
             alvo = {"com": "com", "sem": "sem", "recusadas": "recusada"}[aba]
             linhas = [l for l in linhas if bruto[l["remessa"]]["situacaoSeg"] == alvo]
+        elif aba == "segSem":
+            linhas = [l for l in linhas if bruto[l["remessa"]]["situacaoSeg"] in ("sem", "recusada")]
+        elif aba.startswith("u:") and pq.modo == "completo":  # pela situação (tipo do último bipe)
+            linhas = [l for l in linhas if bruto[l["remessa"]]["bipes"] and (l["uTipo"] or "(vazio)") == aba[2:]]
+        elif aba == "semImagem" and pq.modo == "completo":
+            linhas = [l for l in linhas if l.get("semImg")]
         elif aba == "recusadas":
             linhas = [l for l in linhas if bruto[l["remessa"]]["recusada"] or bruto[l["remessa"]]["situacaoSeg"] == "recusada"]
         elif aba == "semRastreio":
             linhas = [l for l in linhas if not bruto[l["remessa"]]["rastreio"] and not bruto[l["remessa"]]["recusada"]]
         t = str(busca or "").strip().upper()
         if t:
-            linhas = [l for l in linhas if any(t in str(v).upper() for v in (l["remessa"], l["s1"], l["s2"], l.get("b1por"), l.get("b2por")))]
+            linhas = [l for l in linhas if any(t in str(v).upper() for v in (l["remessa"], l["s1"], l["s2"], l.get("b1por"), l.get("b2por"),
+                                                                              l.get("uTipo"), l.get("uBase"), l.get("uPor"), l.get("uProx")))]
         return linhas
 
     def _excel_pesquisa(self, req: "_Pedido", pq: Pesquisa, cols: list) -> None:
@@ -502,10 +526,14 @@ class App:
         todas = linhas_resultado(pq)
         corpo = lambda ls: cab + [[l.get(c[0], "") for c in cols] for l in ls]  # noqa: E731
         r = pq.resumo()
-        resumo = [["Pesquisa", "Valor"], ["数据", "数值"], ["Remessas pesquisadas", r["pesquisadas"]],
-                  ["Modo", "Só os códigos de segmento" if pq.modo == "segmentos" else "Texto no rastreamento"]]
-        if pq.modo == "texto":
+        resumo = [["Pesquisa", "Valor"], ["数据", "数值"], ["Remessas pesquisadas", r["pesquisadas"]], ["Modo", NOME_MODO[pq.modo]]]
+        if pq.rastreia():
             resumo += [["Sem rastreamento no JMS", r["semRastreio"]], ["Consulta recusada pelo JMS", r["recusadas"]]]
+        if pq.modo == "completo":
+            c = r["completo"]
+            resumo += [["Com rastreamento", c["comRastreio"]], ["Bipes no total", c["bipes"]],
+                       ["Remessas com algum bipe sem imagem", c["semImagem"]]]
+        if pq.modo == "texto":
             for k, b in enumerate(r["blocos"]):
                 if b:
                     resumo += [[f"Bloco {k + 1}: texto", pq.padroes[k]], [f"Bloco {k + 1}: tem", b["tem"]], [f"Bloco {k + 1}: não tem", b["naoTem"]],
@@ -513,10 +541,31 @@ class App:
         if pq.segmentos:
             resumo += [["Com os códigos de segmento", r["seg"]["com"]], ["Sem código no JMS", r["seg"]["sem"]],
                        ["Segmento: consulta recusada", r["seg"]["recusadas"]]]
-            resumo += [["", ""], ["Código de primeiro segmento", "Remessas"]] + [[x["nome"], x["qtd"]] for x in r["seg"]["s1"]]
-            resumo += [["", ""], ["Código de dois segmentos", "Remessas"]] + [[x["nome"], x["qtd"]] for x in r["seg"]["s2"]]
-        abas = [{"nome": "Resumo", "linhas": resumo, "larguras": [34, 40], "cabecalho": 2},
-                {"nome": "Resultado", "linhas": corpo(todas), "larguras": [18] * len(cols), "cabecalho": 2, "filtro": True}]
+        tabela = lambda titulo, itens: [["", ""], [titulo, "Remessas"]] + [[x["nome"], x["qtd"]] for x in itens]  # noqa: E731
+        if pq.modo == "completo":
+            c = r["completo"]
+            resumo += tabela("Último bipe: tipo de bipagem (situação)", c["ultimoTipo"])
+            resumo += tabela("Último bipe: base (onde está)", c["ultimaBase"])
+            resumo += tabela("Último bipe: turno", [{"nome": t, "qtd": q} for t, q in c["turnos"].items()])
+            resumo += tabela("Quantidade de bipes por remessa", c["porQtd"])
+        if pq.segmentos:
+            resumo += tabela("Código de primeiro segmento", r["seg"]["s1"]) + tabela("Código de dois segmentos", r["seg"]["s2"])
+        abas = [{"nome": "Resumo", "linhas": resumo, "larguras": [40, 40], "cabecalho": 2},
+                {"nome": "Remessas" if pq.modo == "completo" else "Resultado", "linhas": corpo(todas), "larguras": [18] * len(cols),
+                 "cabecalho": 2, "filtro": True}]
+        if pq.modo == "completo":
+            # Um bipe por linha (o Excel aceita ~1 milhão de linhas por aba: o que passar vai para "Bipes (2)"…).
+            bipes = [[b[c[0]] for c in COLUNAS_BIPES] for b in self._bipes(pq)]
+            cab_b = [[c[1] for c in COLUNAS_BIPES], [c[2] for c in COLUNAS_BIPES]]
+            larg_b = [18, 8, 19, 11, 7, 24, 16, 22, 16, 12, 12, 12, 60]
+            por_aba = 1_000_000
+            for i in range(0, max(1, len(bipes)), por_aba):
+                abas.append({"nome": "Bipes" if i == 0 else f"Bipes ({i // por_aba + 1})", "linhas": cab_b + bipes[i:i + por_aba],
+                             "larguras": larg_b, "cabecalho": 2, "filtro": True})
+            for nome, aba in (("Sem rastreamento", "semRastreio"), ("Recusadas", "recusadas")):
+                ls = self._filtrar_pesquisa(pq, aba, "")
+                if ls:
+                    abas.append({"nome": nome, "linhas": corpo(ls), "larguras": [18] * len(cols), "cabecalho": 2, "filtro": True})
         if pq.modo == "texto":
             for k in range(2):
                 if pq.padroes[k]:
@@ -524,7 +573,7 @@ class App:
                                  "larguras": [18] * len(cols), "cabecalho": 2, "filtro": True})
                     abas.append({"nome": f"Bloco {k + 1} - Não tem", "linhas": corpo(self._filtrar_pesquisa(pq, f"b{k + 1}nao", "")),
                                  "larguras": [18] * len(cols), "cabecalho": 2, "filtro": True})
-        nome = f"pesquisa_rastreamento_{pq.id}.xlsx"
+        nome = f"{'analise_remessas' if pq.modo == 'completo' else 'pesquisa_rastreamento'}_{pq.id}.xlsx"
         return req.enviar(200, escrever_xlsx(abas), XLSX, {"Content-Disposition": f'attachment; filename="{nome}"'})
 
     @staticmethod

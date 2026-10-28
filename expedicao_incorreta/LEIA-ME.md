@@ -135,6 +135,20 @@ Abra pelo menu **Ferramentas › Pesquisa no Rastreamento** (`http://localhost:3
 - **Pacotes de hoje sem 3 Segmentos:** as remessas dos caminhões de hoje (painel da Expedição) que ainda estão sem o código.
 
 **2 · O que buscar:**
+- **Planilha para análise (todos os bipes)** — o padrão. Você joga as remessas, o app busca e gera a planilha:
+  - traz **todos os bipes** de cada remessa (não precisa de texto) e os códigos de segmento (pode desmarcar);
+  - até **10.000 remessas** por vez (mais que isso: divida em partes);
+  - **Baixar Excel** (`analise_remessas_….xlsx`):
+
+    | Aba | O que tem |
+    |---|---|
+    | **Resumo** | Totais; situação pelo último bipe; onde está (base do último bipe); turno; bipes por remessa; 1º e 2º segmento. |
+    | **Remessas** | Uma linha por remessa: rastreamento, quantidade de bipes, segmentos, primeiro bipe (data, tipo, base), último bipe (data, turno, tipo, base, escaneado por, próxima parada, imagem, descrição), horas do primeiro ao último bipe e bipes sem imagem. |
+    | **Bipes** | Um bipe por linha, do mais antigo ao mais novo: remessa, ordem, data e hora, dia, turno, tipo de bipagem, base, escaneado por, próxima parada, imagem, segmentos e descrição. Bom para filtro e **tabela dinâmica**. |
+    | **Sem rastreamento** / **Recusadas** | Só aparecem quando tem alguma. |
+
+  - Todas as abas com cabeçalho J&T (português e mandarim), filtro e cabeçalho fixo. O número do pedido vai como texto (não perde dígitos).
+  - Remessa com mais de 200 bipes: ficam os 100 primeiros e os 100 últimos (a quantidade de bipes mostra o total real).
 - **Texto no rastreamento:**
   - **Bloco 1 · Tem ou não tem** e **Bloco 2 · Turno que mais ocorreu**: um texto da "Descrição da etapa de bipagem" (ex.: `A encomenda expressa está [SP GRU] sendo enviada`);
   - `*` vale qualquer trecho; maiúsculas, acentos e espaços dentro dos colchetes não fazem diferença;
@@ -143,13 +157,17 @@ Abra pelo menu **Ferramentas › Pesquisa no Rastreamento** (`http://localhost:3
 - **Só os códigos de segmento:** só o Código de primeiro segmento e o Código de dois segmentos (bloco "3 Segmentos" da Informação básica).
 
 **Resultado:**
-- **Cartões:** pesquisadas, tem / não tem, sem rastreamento no JMS, consulta recusada, com os códigos de segmento.
-- **Gráficos:** tem × não tem, turnos do primeiro bipe, por hora, quem mais escaneou, 1º e 2º segmento.
-- **Tabela:** filtro (Tem, Não tem, Sem rastreamento, Recusadas, Com código…), busca e **Copiar remessas** (para colar no JMS).
-- **Baixar Excel:** abas Resumo, Resultado e "Tem" / "Não tem" de cada bloco (cabeçalho J&T, português e mandarim, com filtro).
+- **Cartões:**
+  - planilha para análise: com rastreamento (e total de bipes), último bipe mais comum, onde mais estão, sem rastreamento, recusadas, com bipe sem imagem, segmentos;
+  - texto: pesquisadas, tem / não tem, sem rastreamento no JMS, consulta recusada, com os códigos de segmento.
+- **Gráficos:**
+  - planilha para análise: tipo do último bipe, base do último bipe, turno e hora do último bipe, bipes por remessa, quem escaneou por último, 1º e 2º segmento;
+  - texto: tem × não tem, turnos do primeiro bipe, por hora, quem mais escaneou, 1º e 2º segmento.
+- **Tabela:** filtro (Todos os bipes um por linha, Último bipe: …, Tem, Não tem, Sem rastreamento, Recusadas, Com código…), busca e **Copiar remessas** (para colar no JMS).
+- **Baixar Excel:** planilha para análise: abas Resumo, Remessas e Bipes (acima). Texto: abas Resumo, Resultado e "Tem" / "Não tem" de cada bloco.
 - **Google Planilha** (se estiver ligada): o resultado vai sozinho para uma aba **"Pesquisa AAAA-MM-DD HHhMMmSS"**.
 - **No painel da Expedição:** os códigos de segmento achados também valem para os pacotes dos caminhões.
-- **Pesquisas anteriores:** as 30 últimas ficam guardadas no computador (reabra pela lista).
+- **Pesquisas anteriores:** as 30 últimas ficam guardadas no computador (reabra pela lista). Das "planilha para análise", que guardam todos os bipes, ficam as 5 últimas.
 
 **Como ele consulta o JMS** (o mesmo jeito da Pesquisa V1.7):
 - uma consulta por remessa no Rastreamento do pacote (`podTracking/inner/query/keywordList`) e uma na Informação básica (`order/getOrderDetail`);
@@ -158,7 +176,7 @@ Abra pelo menu **Ferramentas › Pesquisa no Rastreamento** (`http://localhost:3
 - **no fim, as que vieram vazias ou recusadas são conferidas de novo, devagar** (o JMS ocupado às vezes responde vazio);
 - só o AuthToken vencido para a pesquisa: troque o token e clique em **Continuar** (segue de onde parou). **Parar** interrompe; o que já veio fica na tela;
 - **Tentar de novo as recusadas** abre uma pesquisa só com elas;
-- até 50.000 remessas por pesquisa, uma pesquisa de cada vez.
+- até 50.000 remessas por pesquisa (10.000 na planilha para análise), uma pesquisa de cada vez.
 
 ## Instalar e abrir (Windows, sem administrador)
 
@@ -360,7 +378,7 @@ Mudou o `config.json`? Feche a janela preta e abra o app de novo.
 | `expedicao/sincronia.py` | Google Planilha: escreve os dias, lê para o painel e guarda o que você mudou. |
 | `expedicao/google.py` | Conversa com o App da Web do Apps Script. |
 | `expedicao/tailscale.py` | Link público: chama o Tailscale deste computador (Funnel). |
-| `expedicao/pesquisa.py` | Pesquisa no Rastreamento: a busca no JMS (Python), os blocos de texto, os turnos e o resultado. |
+| `expedicao/pesquisa.py` | Pesquisa no Rastreamento: a busca no JMS (Python), a planilha para análise (todos os bipes), os blocos de texto, os turnos e o resultado. |
 | `google/Codigo.gs` | O código que fica na Google Planilha (Apps Script). |
 | `expedicao/banco.py` | SQLite. |
 | `expedicao/xlsx.py` | Lê e escreve .xlsx sem bibliotecas. |

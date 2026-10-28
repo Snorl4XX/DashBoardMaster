@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime
+from urllib.parse import quote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -1073,3 +1074,91 @@ def test_pesquisa_pela_tela(servidor, falso, google, monkeypatch):
     st, _, corpo = c.pedir("/api/pesquisa/importar?nome=x.csv", b"remessa\nJT0000000000001\n", tipo="application/octet-stream")
     assert json.loads(corpo)["abas"][0]["colunas"][0]["remessas"] == ["JT0000000000001"]
     assert c.pedir("/pesquisa")[0] == 200 and c.pedir("/pesquisa.js")[0] == 200
+
+
+# ------------------------------------------------------------------ planilha para análise (todos os bipes)
+def test_pesquisa_bipes_compactos():
+    bipes = [{"scanTime": f"2026-10-27 {h:02d}:00:00", "scanTypeName": "Encomenda carregada", "scanNetworkName": "",
+              "waybillTrackingContent": f"A encomenda expressa está [SP GRU] sendo enviada, escaneador [Ana {h}]", "imgType": h % 2}
+             for h in range(23, -1, -1)]
+    b = pq_mod.bipes_compactos(bipes + ["lixo"])
+    assert [x["t"][11:13] for x in b[:3]] == ["00", "01", "02"]  # do mais antigo ao mais novo
+    assert b[0]["base"] == "SP GRU" and b[0]["por"] == "Ana 0" and b[0]["img"] is False and b[1]["img"] is True
+    muitos = [{"scanTime": f"2026-10-{1 + i // 100:02d} 00:00:{i % 60:02d}", "waybillTrackingContent": "x" * 1000} for i in range(450)]
+    b = pq_mod.bipes_compactos(muitos)
+    assert len(b) == pq_mod.MAX_BIPES_REMESSA and len(b[0]["desc"]) == pq_mod.MAX_DESC
+
+
+def test_pesquisa_completo(tmp_path, falso, monkeypatch):
+    app = _app_pesquisa(tmp_path, falso, monkeypatch)
+    ws = [p["billCode"] for p in app.banco.pacotes_dia("troncal", ONTEM)][:90] + ["9999999999999"]
+    pq = _esperar(app, app.pesquisa.iniciar(Pesquisa(ws, "completo", ["ignorado", ""])))
+    assert pq.estado == "pronta" and pq.padroes == ["", ""] and pq.segmentos
+    r = pq.resumo()
+    c = r["completo"]
+    assert c["comRastreio"] == 90 and r["semRastreio"] == 1 and r["recusadas"] == 0 and r["seg"]["com"] >= 85
+    tipos = {x["nome"]: x["qtd"] for x in c["ultimoTipo"]}
+    descarregadas = sum(1 for w in ws[:90] if int(w[-1]) % 3 == 0)
+    assert tipos == {"Encomenda carregada": 90 - descarregadas, "Descarregamento de encomenda": descarregadas}
+    assert c["bipes"] == 180 + descarregadas and sum(c["turnos"].values()) == 90 and sum(x["qtd"] for x in c["porQtd"]) == 90
+    assert c["ultimaBase"][0]["qtd"] >= 1 and sum(x["qtd"] for x in c["ultimaBase"]) == 90
+    linhas = {l["remessa"]: l for l in pq_mod.linhas_resultado(pq)}
+    l = linhas[ws[0]]
+    assert l["nBipes"] >= 2 and l["pT"] < l["uT"] and l["pTipo"] == "Encomenda recebida" and l["uTipo"] in tipos
+    assert isinstance(l["horas"], float) and l["horas"] > 0 and l["rastreioTexto"] == "Tem rastreamento" and l["s1"]
+    assert linhas["9999999999999"]["rastreioTexto"] == "Sem rastreamento no JMS" and linhas["9999999999999"]["nBipes"] == 0
+    bipes = pq_mod.bipes_resultado(pq)
+    assert len(bipes) == c["bipes"] and [b["n"] for b in bipes if b["remessa"] == ws[0]][:2] == [1, 2]
+    assert all(b["turno"] in ("T1", "T2", "T3") and b["dia"] for b in bipes)
+    campos = [x[0] for x in pq_mod.colunas_resultado(pq)]
+    assert campos[:3] == ["remessa", "rastreioTexto", "nBipes"] and "uBase" in campos and not any(x.startswith("b1") for x in campos)
+    # Guardada e reaberta: os bipes vêm junto.
+    assert pq_mod.Pesquisa.de_json(pq.para_json()).linhas() == pq.linhas()
+    # Limite menor neste modo.
+    monkeypatch.setattr(pq_mod, "MAX_COMPLETO", 10)
+    with pytest.raises(ValueError, match="10 remessas"):
+        app.pesquisa.iniciar(Pesquisa(ws, "completo"))
+    app.banco.fechar()
+
+
+def test_pesquisa_completo_guarda_so_5(tmp_path, falso, monkeypatch):
+    app = _app_pesquisa(tmp_path, falso, monkeypatch)
+    ws = [p["billCode"] for p in app.banco.pacotes_dia("troncal", ONTEM)][:3]
+    for i in range(7):
+        p = Pesquisa(ws, "completo" if i < 6 else "segmentos")
+        p.id, p.criada = f"p{i}", 1000 + i
+        app.pesquisa.guardar(p)
+    guardadas = [x["id"] for x in app.pesquisa.lista()]
+    assert guardadas == ["p6", "p5", "p4", "p3", "p2", "p1"]  # das "completo", ficam as 5 mais novas
+    app.banco.fechar()
+
+
+def test_pesquisa_completo_pela_tela(servidor, falso, monkeypatch):
+    app, c = servidor
+    monkeypatch.setattr(pq_mod.Motor, "espera", 0.01, raising=False)
+    assert app.coletor.coletar([ONTEM]).result(timeout=60)["ok"]
+    ws = [p["billCode"] for p in app.banco.pacotes_dia("troncal", ONTEM)][:40] + ["9999999999999"]
+    r = json.loads(c.pedir("/api/pesquisa/iniciar", {"remessas": "\n".join(ws), "modo": "completo"})[2])
+    assert r["ok"] and r["remessas"] == 41
+    _esperar(app, app.pesquisa.atual)
+    assert json.loads(c.pedir("/api/pesquisa/estado")[2])["maxCompleto"] == pq_mod.MAX_COMPLETO
+    res = json.loads(c.pedir(f"/api/pesquisa/resultado?id={r['id']}&tamanho=10")[2])
+    total_bipes = res["resumo"]["completo"]["bipes"]
+    assert res["unidade"] == "remessas" and res["total"] == 41 and res["colunas"][2][0] == "nBipes"
+    res = json.loads(c.pedir(f"/api/pesquisa/resultado?id={r['id']}&aba=bipes&tamanho=500")[2])
+    assert res["unidade"] == "bipes" and res["total"] == total_bipes and res["colunas"][-1][0] == "desc"
+    res = json.loads(c.pedir(f"/api/pesquisa/resultado?id={r['id']}&aba=bipes&busca={ws[0]}")[2])
+    assert res["total"] >= 2 and {l["remessa"] for l in res["linhas"]} == {ws[0]}
+    ult = json.loads(c.pedir(f"/api/pesquisa/resultado?id={r['id']}")[2])["resumo"]["completo"]["ultimoTipo"][0]
+    res_u = json.loads(c.pedir(f"/api/pesquisa/resultado?id={r['id']}&aba={quote('u:' + ult['nome'])}")[2])
+    assert res_u["total"] == ult["qtd"] and all(l["uTipo"] == ult["nome"] for l in res_u["linhas"])
+    sem = json.loads(c.pedir(f"/api/pesquisa/remessas?id={r['id']}&aba=semRastreio")[2])["remessas"]
+    assert sem == ["9999999999999"]
+    st, h, corpo = c.pedir(f"/api/pesquisa/excel?id={r['id']}")
+    abas = {a["nome"]: a["linhas"] for a in ler_xlsx(corpo)}
+    assert st == 200 and list(abas) == ["Resumo", "Remessas", "Bipes", "Sem rastreamento"]
+    assert len(abas["Remessas"]) == 2 + 41 and len(abas["Bipes"]) == 2 + total_bipes
+    assert abas["Bipes"][0][0] == "Número de pedido JMS" and abas["Bipes"][2][0] in ws
+    resumo = {l[0]: l[1] for l in abas["Resumo"] if l and l[0]}
+    assert resumo["Modo"] == "Planilha para análise (todos os bipes)" and int(float(resumo["Bipes no total"])) == total_bipes
+    assert "analise_remessas_" in h.get("Content-Disposition", "")
