@@ -65,15 +65,22 @@
         ['Planilha de rotas', p.rotas ? 'rotas.xlsx · ' + p.rotas.troncal + ' rotas troncais · ' + p.rotas.secundaria + ' secundárias' : 'falta'],
         ['Pasta da planilha', e.config.planilhas]
       ]);
-      var bd = e.base;
-      if (bd) {
-        info('base-info', [
-          ['Pasta', bd.pasta],
-          ['Planilhas', fmt(bd.planilhas) + (bd.planilhas === 1 ? ' dia' : ' dias') + (bd.hoje ? ' · a de hoje: expedicao_' + e.hoje + '.xlsx' : ' · a de hoje sai depois da primeira busca')],
-          ['Última escrita', bd.ultima ? hora(bd.ultima.quando) + ' · ' + br(bd.ultima.dia) + ' · ' + fmt(bd.ultima.pacotes) + ' pacotes' : '—'],
-          ['Esperando', bd.abertas.length ? 'aberta no Excel: ' + bd.abertas.map(br).join(', ') + ' (o app atualiza quando fechar)' :
-            bd.pendentes.length ? 'atualizar ' + bd.pendentes.map(br).join(', ') + ' (no máximo 1 vez por minuto)' : 'nada'],
-          ['Planilha de segmentos', bd.segmentosXlsx ? 'planilhas/segmentos.xlsx (lida quando muda)' : 'nenhuma (opcional)']
+      var g = e.google;
+      if (g) {
+        $('g-abrir').classList.toggle('hidden', !g.url);
+        if (g.url) $('g-abrir').href = g.url;
+        $('g-desligar').classList.toggle('hidden', !g.ativo);
+        var ue = g.ultimaEscrita;
+        info('g-info', [
+          ['Situação', !g.ativo ? 'Desligada: o painel usa o banco do computador.' : (g.ok === false ? 'Com problema: ' : '') + g.msg],
+          ['Planilha', g.planilha || '—'],
+          ['Dias na planilha', g.dias.length ? g.dias.map(br).join(', ') : 'nenhum ainda'],
+          ['Última escrita', ue ? hora(ue.quando) + ' · ' + br(ue.dia) + ' · ' + fmt(ue.pacotes) + ' pacotes e ' + fmt(ue.viagens) + ' viagens em ' +
+            String(ue.segundos).replace('.', ',') + ' s' : '—'],
+          ['Última leitura', g.ultimaLeitura ? hora(g.ultimaLeitura) : '—'],
+          ['Esperando', g.pendentes.length ? 'escrever ' + g.pendentes.map(br).join(', ') + ' (no máximo a cada ' + g.googleMinutos + ' min)' : 'nada'],
+          ['Aba Segmentos', fmt(g.segmentosAba) + ' remessas com o código'],
+          ['Células usadas', fmt(g.celulas) + ' de ' + fmt(g.limite) + ' (' + Math.round(g.celulas / g.limite * 100) + '%) · guarda os últimos ' + g.googleDias + ' dias']
         ]);
       }
       var erros = p.erros.concat(p.rotas ? p.rotas.avisos : []);
@@ -116,15 +123,19 @@
     });
   }
   enviar($('up-rotas'), 'rotas');
-  $('up-segmentos').addEventListener('change', function () {
-    var input = this, f = input.files[0];
-    if (!f) return;
-    resultado('base-res', 'Lendo ' + f.name + '…');
-    f.arrayBuffer().then(function (buf) { return post('config/api/planilha?nome=segmentos', buf, 'application/octet-stream'); })
-      .then(function (r) {
-        resultado('base-res', r.ok ? fmt(r.remessas) + ' remessas com o segmento. O painel e as planilhas do dia já usam.' : r.error, r.ok);
-        input.value = ''; carregar();
-      });
+  $('g-salvar').addEventListener('click', function () {
+    var url = $('g-url').value.trim(), senha = $('g-senha').value;
+    if (!url || !senha) { resultado('g-res', 'Cole a URL e a SENHA.', false); return; }
+    resultado('g-res', 'Testando a planilha…');
+    post('config/api/google', {url: url, senha: senha}).then(function (r) {
+      if (r.ok) { $('g-url').value = ''; $('g-senha').value = ''; }
+      resultado('g-res', r.linhas || [r.error], r.ok);
+      carregar();
+    });
+  });
+  $('g-desligar').addEventListener('click', function () {
+    if (!confirm('Desligar a Google Planilha? O painel volta a usar o banco do computador (a planilha não é apagada).')) return;
+    post('config/api/google/desligar').then(carregar);
   });
   carregar();
   setInterval(function () { if (document.visibilityState === 'visible') carregar(); }, 5000);

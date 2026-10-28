@@ -87,17 +87,32 @@
         <div class="saida hidden" id="plan-res"></div>
       </section>
 
-      <section class="card conf" aria-labelledby="s-base">
-        <div class="section-head"><div><span class="kicker">Base de dados</span><h2 id="s-base">Planilhas do JMS (uma por dia)</h2></div></div>
-        <p class="muted small">O app escreve o que pega no JMS numa planilha por dia. Você pode preencher ou corrigir as colunas
-          <b>Código de primeiro segmento</b> e <b>Código de dois segmentos</b> e salvar: o painel mostra o que estiver lá.
-          Também dá para enviar uma planilha só com a remessa e os códigos (ex.: a da Pesquisa no Rastreamento, "Só os códigos de segmento").</p>
-        <dl class="info" id="base-info"></dl>
+      <section class="card conf" aria-labelledby="s-google">
+        <div class="section-head"><div><span class="kicker">Banco de dados</span><h2 id="s-google">Google Planilha</h2></div></div>
+        <p class="muted small">O app busca no JMS e escreve tudo numa <b>Google Planilha</b> (uma aba "Pacotes" e uma "Viagens" por dia).
+          O painel lê da planilha: o que você mudar nela aparece no painel. Na aba <b>Segmentos</b> você cola a remessa e os códigos
+          (pode usar fórmulas, ex.: PROCV na rotinha).</p>
+        <details class="muted small">
+          <summary><b>Como ligar (uma vez)</b></summary>
+          <ol>
+            <li>Crie uma Google Planilha nova. Menu <b>Extensões › Apps Script</b>.</li>
+            <li>Apague o que tiver no Código.gs e cole o arquivo <a href="config/api/google/Codigo.gs">Codigo.gs</a> inteiro. Salve.</li>
+            <li>Engrenagem (Configurações do projeto) › <b>Propriedades do script</b> › Adicionar: <b>SENHA</b> = uma senha sua.</li>
+            <li><b>Implantar › Nova implantação</b> › tipo <b>App da Web</b> › Executar como: <b>Eu</b> › Quem pode acessar: <b>Qualquer pessoa</b> › Implantar e autorize.</li>
+            <li>Copie a URL do App da Web (termina em <b>/exec</b>), cole abaixo com a SENHA e clique em <b>Salvar e testar</b>.</li>
+          </ol>
+        </details>
+        <label for="g-url" class="muted small">URL do App da Web (termina em /exec):</label>
+        <input type="url" id="g-url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
+        <label for="g-senha" class="muted small">SENHA (a mesma das Propriedades do script):</label>
+        <input type="password" id="g-senha" autocomplete="off">
         <div class="row">
-          <a class="btn btn-light" href="config/api/base.xlsx" id="baixar-base">Baixar a planilha de hoje</a>
-          <label class="btn btn-light">Enviar planilha de segmentos (.xlsx)<input type="file" accept=".xlsx" id="up-segmentos"></label>
+          <button type="button" class="btn btn-red" id="g-salvar">Salvar e testar</button>
+          <a class="btn btn-light hidden" id="g-abrir" target="_blank" rel="noopener">Abrir a planilha</a>
+          <button type="button" class="btn btn-light hidden" id="g-desligar">Desligar</button>
         </div>
-        <div class="saida hidden" id="base-res"></div>
+        <div class="saida hidden" id="g-res"></div>
+        <dl class="info" id="g-info"></dl>
       </section>
 
       <section class="card conf" aria-labelledby="s-end">

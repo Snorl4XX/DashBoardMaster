@@ -369,3 +369,10 @@ label.btn input[type=file]{display:none}
 }
 @media (max-width:380px){.filter-grid,.kpi-grid{grid-template-columns:1fr}.kpi-hero,.kpi.span2{grid-column:auto}}
 @media print{.sidebar,.topbar .top-actions,.toolbar,.filters,.progress{display:none!important}.app{grid-template-columns:1fr}.card,.kpi{box-shadow:none}}
+/* Google Planilha (Configurações) */
+.conf input[type=url],.conf input[type=password]{width:100%;height:40px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 12px;outline:none;margin:4px 0 10px}
+.conf input[type=url]:focus,.conf input[type=password]:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}
+.conf label.muted{display:block;margin-top:4px}
+.conf details{margin:4px 0 14px}
+.conf details summary{cursor:pointer}
+.conf details ol{margin:8px 0 0 18px;padding:0;line-height:1.7}

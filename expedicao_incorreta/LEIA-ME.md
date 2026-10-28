@@ -50,52 +50,76 @@ Não mexe no DashMaster: tem pasta, porta (3300) e link próprios.
    - **Resultado:** se a Próxima parada (o caminhão) é diferente do destino correto, o pacote é **ERRADO**.
 5. **Busca automática:** de novo a cada 10 minutos. Só baixa de novo a lista das viagens que mudaram. Viagem concluída e já conferida não é consultada de novo.
 6. **Histórico:** guarda todos os dias. O dia anterior é buscado de novo a cada 60 minutos (e logo que o app abre), para ficar salvo completo.
-7. **Base de dados em planilha:** tudo o que vem do JMS vai para uma planilha por dia, e o que você preencher nela volta para o painel (veja abaixo).
+7. **Google Planilha (banco de dados):** tudo o que vem do JMS vai para uma Google Planilha, e o painel lê dela (veja abaixo).
 
-## Base de dados em planilha (`base_de_dados\`)
+## Google Planilha como banco de dados
 
-O app escreve o que pega no JMS em **uma planilha por dia**: `base_de_dados\expedicao_AAAA-MM-DD.xlsx` (as duas rotas).
+```
+JMS  →  app no computador (busca)  →  Google Planilha (banco de dados)  →  painel (link do Tailscale)
+```
 
-- **Aba "Pacotes":** uma linha por pacote do painel (viagens Concluído e Em Trânsito). Colunas:
-  - Dia, Rota, Turno, Situação, Próxima parada, Destino correto;
-  - ID de viagem, Viagem, Status;
+- **O app** busca no JMS (como antes) e escreve cada dia na Google Planilha:
+  - aba **"Pacotes AAAA-MM-DD"**: uma linha por pacote (viagens Concluído e Em Trânsito);
+  - aba **"Viagens AAAA-MM-DD"**: as viagens do dia.
+- **Colunas da aba Pacotes:**
+  - Dia, Rota, ID de viagem, Viagem, Status, Próxima parada;
   - Número de pedido JMS, Número do lote, Base de escaneamento, Base Destino, Município de Destino;
   - **Código de primeiro segmento**, **Código de dois segmentos**, 3 Segmentos, **Fonte do segmento**;
-  - Tipo de bipagem, Digitalizado por, Tempo de digitalização.
-- **Aba "Viagens":** as viagens do dia (status, horários, placa, transportadora, pacotes bipados).
-- **Formato:** cabeçalho vermelho J&T, português em cima e mandarim embaixo, com filtro.
-- **Quando atualiza:** sempre que o JMS traz novidade (no máximo 1 vez por minuto por dia).
+  - Tipo de bipagem, Digitalizado por, Tempo de digitalização, Turno, **Situação**, **Destino correto**.
+- **Formato:** cabeçalho vermelho J&T, português em cima e mandarim embaixo, com filtro. Tudo vai como texto (o "404-12" não vira data e o número do pedido não perde dígitos).
+- **O painel lê da planilha.** O selo **"Dados: Google Planilha"** mostra isso.
+  - Dia que ainda não está na planilha, ou planilha desligada ou fora do ar: o painel usa o banco do computador (selo "Dados: computador").
+- **Quando atualiza:** o dia que mudou é reescrito no máximo a cada 3 minutos (`googleMinutos`). O painel lê de novo quando a aba muda.
 
 **Fonte do segmento:**
 
 | Fonte | De onde veio o 1º e o 2º segmento |
 |---|---|
 | **JMS** | Rastreamento do pacote (ou a lista de pacotes do JMS). |
-| **Planilha** | Você preencheu (nesta planilha ou na planilha de segmentos). |
+| **JMS (sem código)** | O JMS respondeu, mas sem o código. |
+| **Planilha** | Você preencheu (na aba do dia ou na aba Segmentos). |
 | **Base Destino** | Código de outra remessa da mesma Base Destino, até a consulta chegar. |
 | vazio | Ainda sem código: "Sem 3 Segmentos". |
 
-### Preencher os segmentos que faltam
+### Preencher ou corrigir segmentos na planilha
 
-1. Abra a planilha do dia no Excel (Configurações › **Baixar a planilha de hoje**, ou direto na pasta `base_de_dados`).
-2. Filtre a **Situação** "Sem 3 Segmentos" (ou a Fonte vazia).
-3. Preencha **Código de primeiro segmento** e **Código de dois segmentos** (pode usar PROCV com a sua rotinha) e **salve**.
-4. Em até 15 segundos o painel mostra esses pacotes conferidos, com a Fonte **Planilha**.
-   - Esses pacotes não são mais consultados no JMS.
-   - Para corrigir um código que veio do JMS, é só escrever outro por cima: o seu vale.
+- **Na aba do dia:** escreva o "Código de primeiro segmento" e o "Código de dois segmentos" (por cima do que estiver lá).
+  - Em menos de 1 minuto o painel mostra o pacote conferido com o seu código (Fonte "Planilha").
+  - Esse pacote não é mais consultado no JMS.
+- **Na aba "Segmentos"** (ela é sua: o app nunca escreve nela):
+  - colunas: Número de pedido JMS, Código de primeiro segmento, Código de dois segmentos e 3 Segmentos (ou os três juntos, `SP,395-01,012`);
+  - **pode usar fórmulas** (ex.: PROCV na rotinha) ou colar a planilha da Pesquisa no Rastreamento;
+  - vale para qualquer dia, inclusive pacotes que ainda vão chegar.
+- **Não mude** o nome das abas nem o cabeçalho.
+- **Fórmulas só na aba Segmentos:** as abas dos dias são reescritas pelo app.
 
-- **Não mude o cabeçalho nem as outras colunas:** elas vêm do JMS e são reescritas.
-- **Com a planilha aberta no Excel**, o app não consegue reescrevê-la: ele espera você fechar. O que você salvou continua valendo, e o painel continua atualizando.
+### Ligar a Google Planilha (uma vez)
 
-### Planilha de segmentos (várias remessas de uma vez)
+1. Crie uma **Google Planilha** nova (ex.: "Expedição Incorreta · Banco de dados").
+2. Menu **Extensões › Apps Script**. Apague o que tiver no `Código.gs`.
+   - Cole o arquivo **`google\Codigo.gs`** desta pasta (ou baixe em Configurações › Google Planilha › Codigo.gs).
+   - Salve.
+3. Engrenagem (**Configurações do projeto**) › **Propriedades do script** › Adicionar: **`SENHA`** = uma senha sua.
+4. **Implantar › Nova implantação** › tipo **App da Web**:
+   - Executar como: **Eu**;
+   - Quem pode acessar: **Qualquer pessoa**;
+   - Implantar e autorize com a sua conta.
+   - Copie a **URL do App da Web** (termina em `/exec`).
+5. No app: `http://localhost:3300/config` › **Google Planilha** › cole a URL e a SENHA › **Salvar e testar**.
+   - Em até 1 minuto aparecem as abas de hoje e de ontem.
+   - O botão **Abrir a planilha** leva até ela.
 
-Em Configurações › **Enviar planilha de segmentos (.xlsx)**, ou salvando o arquivo como `planilhas\segmentos.xlsx`.
+**Segurança:**
+- A URL e a SENHA ficam só no banco do computador (`dados\`).
+- O **AuthToken do JMS nunca vai para o Google**: só os dados dos pacotes.
+- Sem a SENHA, o link do Apps Script não aceita nada.
 
-- **Colunas aceitas:**
-  - a remessa: "Número de pedido JMS" ou "Remessa";
-  - os códigos: "Código de primeiro segmento" e "Código de dois segmentos", ou "3 Segmentos" com os três juntos (`SP,395-01,012`).
-- **Serve, por exemplo, a planilha da Pesquisa no Rastreamento** no modo "Só os códigos de segmento".
-- **Vale para qualquer dia**, inclusive pacotes que ainda vão chegar. O app lê de novo sempre que o arquivo muda.
+**Limite do Google: 10 milhões de células por planilha.**
+- A planilha guarda os últimos **15 dias** (`googleDias`). Os mais antigos são apagados dela sozinhos e continuam no computador.
+- Se um dia for grande e a planilha chegar perto do limite, o app apaga antes os dias mais antigos (menos hoje e ontem) e avisa no registro.
+- Configurações › Google Planilha mostra as **Células usadas**.
+
+**Mudou o `Codigo.gs`** (versão nova do app)? No Apps Script, cole o novo › Salvar › **Implantar › Gerenciar implantações › ✏️ › Versão: Nova versão › Implantar** (a URL continua a mesma).
 
 ## Instalar e abrir (Windows, sem administrador)
 
@@ -216,7 +240,8 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba **"Rotas"**:
    - Cole o link em `"linkPublico"`.
    - Salve e abra o app de novo.
 
-A tela Configurações nunca abre pelo link nem de outro computador: só no computador do app.
+O painel aberto pelo link lê da Google Planilha, igual ao do computador. A tela Configurações nunca abre pelo link nem de outro
+computador: só no computador do app.
 
 ## config.json (criado na 1ª vez)
 
@@ -237,7 +262,10 @@ A tela Configurações nunca abre pelo link nem de outro computador: só no comp
 | `viagemGrande` / `minutosViagemGrande` | 3000 / 30 | Viagem grande baixa a lista no máximo a cada 30 min. |
 | `dashmaster` | vazio | Pasta do DashMaster para usar o mesmo AuthToken (vazio = procura em `C:\dashmaster`; `"nao"` = não usar). |
 | `linkPublico` | vazio | Link do Tailscale (só para aparecer na janela e em Configurações). |
-| `pastaBase` | `base_de_dados` | Pasta da base de dados em planilha (uma por dia). |
+| `googleDias` | 15 | Google Planilha: quantos dias ficam nela (os mais antigos continuam no computador). |
+| `googleMinutos` | 3 | Google Planilha: o dia que mudou é reescrito no máximo a cada tantos minutos. |
+| `googleLinhasPorEnvio` | 5000 | Google Planilha: linhas por envio (dia grande vai em partes). |
+| `googleReler` | 10 | Google Planilha: lê de novo as abas em uso a cada tantos minutos (além de quando mudam). |
 
 Mudou o `config.json`? Feche a janela preta e abra o app de novo.
 
@@ -268,13 +296,15 @@ Mudou o `config.json`? Feche a janela preta e abra o app de novo.
 | `expedicao/jms.py` | Consultas, ritmo, Routename e erros. |
 | `expedicao/regras.py` | Conferência pela planilha de rotas. |
 | `expedicao/painel.py` | Cartões, gráficos, tabela e Excel. |
-| `expedicao/base_planilha.py` | Base de dados em planilha (escreve o dia, lê o que você preencheu). |
+| `expedicao/sincronia.py` | Google Planilha: escreve os dias, lê para o painel e guarda o que você mudou. |
+| `expedicao/google.py` | Conversa com o App da Web do Apps Script. |
+| `google/Codigo.gs` | O código que fica na Google Planilha (Apps Script). |
 | `expedicao/banco.py` | SQLite. |
 | `expedicao/xlsx.py` | Lê e escreve .xlsx sem bibliotecas. |
 | `expedicao/demo.py` | JMS de mentira. |
 | `public/` | As telas (as mesmas da versão Node.js). |
 
-Testes (com o JMS de mentira):
+Testes (com o JMS de mentira e, se tiver o Node.js, o `Codigo.gs` numa Google Planilha de mentira):
 
 ```
 py -m pip install pytest

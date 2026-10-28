@@ -87,8 +87,11 @@ class Painel:
     """codigos = códigos de status do JMS (status.py, do config.json). pela_base = o pacote ainda sem o "3 Segmentos" usa o 1º e
     o 2º segmento que o JMS deu para outras remessas da mesma Base Destino (a coluna 3 Segmentos mostra "(pela Base Destino)")."""
 
-    def __init__(self, banco, regras, codigos: dict, pela_base: bool = True) -> None:
+    def __init__(self, banco, regras, codigos: dict, pela_base: bool = True, dados=None) -> None:
+        """dados = de onde vêm as viagens e os pacotes de cada dia (sincronia.FonteDados: a Google Planilha, com o banco do
+        computador para os dias que não estão nela). Sem ela, o banco do computador."""
         self.banco, self.regras, self.codigos, self.pela_base = banco, regras, codigos, pela_base
+        self.dados = dados or banco
         self.cache: dict[str, dict] = {}
         self._trava = threading.Lock()
 
@@ -115,7 +118,7 @@ class Painel:
             return c
         viagens: dict[str, dict] = {}
         fora = 0
-        for v in self.banco.viagens_dia(tipo, dia):
+        for v in self.dados.viagens_dia(tipo, dia):
             status = status_de(v["estado"], self.codigos)
             if status:
                 viagens[v["shipmentNo"]] = {**v, "status": status}
@@ -123,13 +126,14 @@ class Painel:
                 fora += 1
         linhas = []
         por_base = self.banco.segmentos_por_base() if self.pela_base else {}
-        for p in self.banco.pacotes_dia(tipo, dia):
+        for p in self.dados.pacotes_dia(tipo, dia):
             v = viagens.get(p["shipmentNo"])
             if not v:
                 continue
-            planilha = p["segFeito"] is not None and p["segFonte"] == "planilha"
-            inferido = not p["seg1"] and p["baseDestino"] in por_base
-            if inferido:
+            planilha = p["segFeito"] is not None and p.get("segFonte") == "planilha"
+            ja_pela_base = p.get("segFonte") == "base" and bool(p["seg1"])  # lido da planilha: já veio pela Base Destino
+            inferido = ja_pela_base or (not p["seg1"] and p["baseDestino"] in por_base)
+            if inferido and not ja_pela_base:
                 s1, s2 = por_base[p["baseDestino"]]
                 p = {**p, "seg1": s1, "seg2": s2, "seg3": PELA_BASE}
             elif planilha and p["seg1"] and not p["seg3"]:
@@ -226,6 +230,8 @@ class Painel:
             rotas = sorted(set(nomes), key=chave_texto)
         return {
             "tipo": tipo, "de": de, "ate": ate, "dia": de if de == ate else "", "dias": len(dias), "semBusca": [d for d in dias if d not in buscados],
+            # De onde o painel leu: 'google' (Google Planilha), 'local' (banco do computador) ou 'misto'.
+            "dados": self.dados.origem(dias) if hasattr(self.dados, "origem") else "local",
             "totais": {"pacotes": len(linhas), "errados": cont["errado"], "certos": cont["certo"], "semSegmento": cont["sem_segmento"],
                        "semCodigo": cont["sem_codigo"], "semRegra": cont["sem_regra"],
                        "taxa": cont["errado"] / len(linhas) * 100 if linhas else 0},

@@ -671,126 +671,6 @@ def test_lista_de_pacotes_com_codigo_dispensa_o_rastreio(tmp_path, falso, monkey
     app.banco.fechar()
 
 
-# ------------------------------------------------------------------ base de dados em planilha
-from expedicao.base_planilha import COLUNAS as COLUNAS_BASE, BasePlanilha, ler_segmentos  # noqa: E402
-
-
-def _base(tmp_path, regras, pacotes):
-    b = _banco_com_viagem(tmp_path, pacotes)
-    painel = Painel(b, regras, {"concluido": {"4"}, "em_transito": {"3"}})
-    logs = []
-    cfg = {"statusCodigos": {"concluido": {"4"}, "em_transito": {"3"}}}
-    base = BasePlanilha(pasta=tmp_path / "base_de_dados", pasta_planilhas=tmp_path / "planilhas", banco=b, painel=painel, regras=regras,
-                        cfg=cfg, log=lambda n, t: logs.append(t))
-    return b, painel, base, logs
-
-
-def test_base_escreve_a_planilha_do_dia(tmp_path, regras):
-    openpyxl = pytest.importorskip("openpyxl")
-    b, painel, base, _ = _base(tmp_path, regras, [_pacote("A1", "DC SBC-SP", "08:00:00"), _pacote("R1", "DC NIT-RJ", "15:00:00")])
-    b.salvar_segmento("R1", {"s1": "RJ", "s2": "220-10", "s3": "001"}, "")
-    assert base.escrever(HOJE)
-    wb = openpyxl.load_workbook(base.arquivo(HOJE))
-    ws = wb["Pacotes"]
-    assert ws.freeze_panes == "A3" and ws.auto_filter.ref.startswith("A2:")
-    assert [c.value for c in ws[1]] == [c[1] for c in COLUNAS_BASE] and ws["A2"].value == "日期"
-    linhas = {r[9]: r for r in ws.iter_rows(min_row=3, values_only=True)}
-    assert linhas["R1"][3] == "Errado" and linhas["R1"][5] == "RJ SJM" and linhas["R1"][17] == "JMS"
-    assert linhas["A1"][3] == "Sem 3 Segmentos" and linhas["A1"][14] is None
-    assert wb["Viagens"]["B3"].value == "T1"
-    assert b.escrita(HOJE)["R1"] == ("RJ", "220-10")
-    b.fechar()
-
-
-def test_base_le_o_segmento_preenchido_na_planilha(tmp_path, regras):
-    openpyxl = pytest.importorskip("openpyxl")
-    b, painel, base, logs = _base(tmp_path, regras, [_pacote("A1", "DC SBC-SP", "08:00:00"), _pacote("A2", "DC XYZ-SP", "09:00:00"),
-                                                     _pacote("R1", "DC NIT-RJ", "15:00:00")])
-    b.salvar_segmento("R1", {"s1": "RJ", "s2": "220-10"}, "")
-    base.escrever(HOJE)
-    assert base.importar_edicoes(HOJE) == 0  # o próprio app escreveu: nada a ler
-    # A pessoa abre no Excel, preenche A1 (pacote de MG no caminhão da SP BRE) e salva.
-    arq = base.arquivo(HOJE)
-    wb = openpyxl.load_workbook(arq)
-    ws = wb["Pacotes"]
-    for linha in ws.iter_rows(min_row=3):
-        if linha[9].value == "A1":
-            linha[14].value, linha[15].value = "mg", "300-04"
-    time.sleep(0.01)
-    wb.save(arq)
-    assert base.importar_edicoes(HOJE) == 1
-    assert base.importar_edicoes(HOJE) == 0  # o mesmo arquivo não é lido duas vezes
-    assert any("preenchido por você" in t for t in logs)
-    l = {x["billCode"]: x for x in painel.linhas_dia("troncal", HOJE)["linhas"]}
-    assert (l["A1"]["situacao"], l["A1"]["rotaCerta"], l["A1"]["fonteSegmento"], l["A1"]["seg3"]) == ("errado", "MG CGE", "Planilha", "(planilha)")
-    assert l["A1"]["planilha"] and not l["A1"]["jms"]
-    assert "A1" not in b.fila_segmentos(HOJE)  # preenchido: não consulta mais no JMS
-    resumo = painel.resumo("troncal", HOJE, HOJE, {})
-    assert resumo["segmentos"]["planilha"] == 1
-    # Reescrita: a planilha mostra a fonte e o que a pessoa preencheu continua lá.
-    assert base.escrever(HOJE)
-    ws = openpyxl.load_workbook(arq)["Pacotes"]
-    linha = next(r for r in ws.iter_rows(min_row=3, values_only=True) if r[9] == "A1")
-    assert (linha[3], linha[14], linha[15], linha[17]) == ("Errado", "MG", "300-04", "Planilha")
-    b.fechar()
-
-
-def test_base_aberta_no_excel_espera(tmp_path, regras, monkeypatch):
-    from expedicao import base_planilha
-    b, painel, base, logs = _base(tmp_path, regras, [_pacote("A1", "DC SBC-SP", "08:00:00")])
-
-    def trancado(*a):
-        raise PermissionError("aberto")
-    monkeypatch.setattr(base_planilha.os, "replace", trancado)
-    assert base.escrever(HOJE) is False and base.escrever(HOJE) is False
-    assert base.abertas == {HOJE} and sum("aberta no Excel" in t for t in logs) == 1
-    assert not list((tmp_path / "base_de_dados").glob(".*.tmp"))
-    monkeypatch.undo()
-    base.marcar(HOJE)
-    base.escrito_em.clear()
-    base.rodada()
-    assert base.arquivo(HOJE).exists() and not base.abertas
-    b.fechar()
-
-
-def test_planilha_de_segmentos(tmp_path, regras):
-    pesquisa = escrever_xlsx([{"nome": "Segmentos", "linhas": [
-        ["Remessa", "Código de primeiro segmento", "Código de dois segmentos", "Situação"],
-        ["JTA001", "MG", "300-04", "Com código"], ["JTA002", "", "", "Sem código"], ["total", "", "", ""]]}])
-    assert ler_segmentos(pesquisa) == [("JTA001", "MG", "300-04", "")]
-    juntos = escrever_xlsx([{"nome": "x", "linhas": [["Número de pedido JMS", "3 Segmentos"], ["运单号", "三段码"], ["JTR001", "RJ,220-10,001"]]}])
-    assert ler_segmentos(juntos) == [("JTR001", "RJ", "220-10", "001")]
-    with pytest.raises(ValueError):
-        ler_segmentos(escrever_xlsx([{"nome": "x", "linhas": [["Nome", "Idade"], ["a", 1]]}]))
-    b, painel, base, logs = _base(tmp_path, regras, [_pacote("JTA001", "DC SBC-SP", "08:00:00")])
-    base.arquivo_segmentos.parent.mkdir(parents=True, exist_ok=True)
-    base.arquivo_segmentos.write_bytes(pesquisa)
-    assert base.importar_segmentos() == 1 and base.importar_segmentos() == 0
-    l = painel.linhas_dia("troncal", HOJE)["linhas"][0]
-    assert (l["situacao"], l["fonteSegmento"]) == ("errado", "Planilha")
-    b.fechar()
-
-
-def test_servidor_planilha_de_segmentos_e_base(servidor):
-    app, c = servidor
-    assert app.coletor.coletar([HOJE]).result(timeout=60)["ok"]
-    assert c.pedir("/config/api/base.xlsx?dia=2026-01-01")[0] == 404
-    app.base.rodada()
-    st, h, corpo = c.pedir(f"/config/api/base.xlsx?dia={HOJE}")
-    assert st == 200 and h["Content-Disposition"] == f'attachment; filename="expedicao_{HOJE}.xlsx"'
-    assert [a["nome"] for a in ler_xlsx(corpo)] == ["Pacotes", "Viagens"]
-    ruim = escrever_xlsx([{"nome": "x", "linhas": [["Nome"], ["a"]]}])
-    st, _, corpo = c.pedir("/config/api/planilha?nome=segmentos", ruim, tipo="application/octet-stream")
-    assert st == 400 and "não achei as colunas" in json.loads(corpo)["error"]
-    remessa = app.banco.pacotes_dia("troncal", HOJE)[0]["billCode"]
-    boa = escrever_xlsx([{"nome": "x", "linhas": [["Remessa", "Código de primeiro segmento", "Código de dois segmentos"], [remessa, "AM", "690-01"]]}])
-    st, _, corpo = c.pedir("/config/api/planilha?nome=segmentos", boa, tipo="application/octet-stream")
-    assert st == 200 and json.loads(corpo)["remessas"] == 1
-    st, _, corpo = c.pedir("/config/api/estado")
-    e = json.loads(corpo)
-    assert e["base"]["planilhas"] == 1 and e["base"]["segmentosXlsx"] and e["base"]["pasta"].endswith("base_de_dados")
-
-
 def test_cabecalho_do_rastreio_do_dashmaster():
     cred = {"JMS_AUTHTOKEN": "x", "JMS_ROUTE_AUTO_TRACKING": "2", "JMS_EXTRA_HEADERS_JSON": '{"X-Teste": "1", "AuthToken": "outro"}'}
     props = Props()
@@ -804,3 +684,188 @@ def test_cabecalho_do_rastreio_do_dashmaster():
     h = j.cabecalhos("rastreio")
     assert h["Routename"] == "packageTracking" and h["Routernamelist"].startswith("%E8%BF%90")
     assert j.trocar_rota("rastreio", "/x", None, ErroJms("recusou", recusa=True)) is None  # fixo: não troca
+
+
+# ------------------------------------------------------------------ Google Planilha (banco de dados)
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+
+from expedicao.google import ErroGoogle, GooglePlanilha  # noqa: E402
+from expedicao.sincronia import COLUNAS_PACOTES, aba_pacotes, aba_viagens, segmentos_da_aba  # noqa: E402
+
+SENHA_G = "senha-teste"
+COL = {c[0]: i for i, c in enumerate(COLUNAS_PACOTES)}
+
+
+class GoogleFalso:
+    """tests/google_falso.js: o google/Codigo.gs de verdade, com uma Google Planilha simulada."""
+
+    def __init__(self):
+        if not shutil.which("node"):
+            pytest.skip("precisa do Node.js para rodar o Codigo.gs")
+        self.p = subprocess.Popen(["node", str(Path(__file__).parent / "google_falso.js"), SENHA_G], stdout=subprocess.PIPE, text=True)
+        linha = self.p.stdout.readline()
+        self.base = f"http://127.0.0.1:{linha.split()[1]}"
+        self.url = self.base + "/exec"
+
+    def _post(self, caminho, corpo):
+        req = urllib.request.Request(self.base + caminho, data=json.dumps(corpo).encode(), method="POST")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+
+    def editar(self, aba, linha, coluna, valor):
+        return self._post("/__editar", {"aba": aba, "linha": linha, "coluna": coluna, "valor": valor})
+
+    def aba(self, aba, linhas):
+        return self._post("/__aba", {"aba": aba, "linhas": linhas})
+
+    def estado(self):
+        with urllib.request.urlopen(self.base + "/__estado", timeout=30) as r:
+            return {a["nome"]: a for a in json.loads(r.read())["abas"]}
+
+    def parar(self):
+        self.p.kill()
+        self.p.wait()
+
+
+@pytest.fixture
+def google():
+    g = GoogleFalso()
+    yield g
+    g.parar()
+
+
+def test_google_cliente(google):
+    assert GooglePlanilha(google.url, "errada").configurado
+    with pytest.raises(ErroGoogle) as e:
+        GooglePlanilha(google.url, "errada").ping()
+    assert e.value.senha
+    g = GooglePlanilha(google.url, SENHA_G)
+    r = g.ping()
+    assert {"Leia-me", "Segmentos"} <= set(r["abas"]) and "Página1" not in r["abas"] and r["limite"] == 10_000_000
+    linhas = [["0123", "8826102700001012", "404-12", f"x{i}"] for i in range(5)]
+    w = g.escrever("Pacotes 2026-10-27", [["A", "B", "C", "D"], ["甲", "乙", "丙", "丁"]], linhas, por_envio=2)
+    assert w["linhas"] == 5 and w["versao"] > 0
+    lidas, versao, existe = g.ler("Pacotes 2026-10-27", por_vez=3)
+    assert existe and versao == w["versao"] and lidas[0] == ["A", "B", "C", "D"] and lidas[2:] == linhas  # texto intacto
+    est = google.estado()
+    assert est["Pacotes 2026-10-27"]["maxRows"] == 7 and est["Pacotes 2026-10-27"]["congeladas"] == 2  # sem linhas sobrando
+    assert g.ler("Pacotes 2000-01-01") == ([], 0, False)
+    assert g.apagar(["Pacotes 2026-10-27", "Segmentos"]) == ["Pacotes 2026-10-27"]  # a aba da pessoa fica
+
+
+def _app_google(tmp_path, falso, google, monkeypatch, **extra):
+    monkeypatch.setattr(coletor_mod, "agora_sp", lambda: AGORA)
+    app = montar(tmp_path, falso, **extra)
+    assert app.coletor.coletar([ONTEM, HOJE]).result(timeout=60)["ok"]
+    app.google.configurar(google.url, SENHA_G)
+    app.google.rodada()
+    return app
+
+
+def test_google_escreve_e_o_painel_le_da_planilha(tmp_path, falso, google, monkeypatch):
+    app = _app_google(tmp_path, falso, google, monkeypatch)
+    est = google.estado()
+    assert {aba_pacotes(HOJE), aba_viagens(HOJE), aba_pacotes(ONTEM), aba_viagens(ONTEM)} <= set(est)
+    folha = est[aba_pacotes(HOJE)]["linhas"]
+    assert folha[0] == [c[1] for c in COLUNAS_PACOTES] and folha[1] == [c[2] for c in COLUNAS_PACOTES]
+    local = app.painel_local.resumo("troncal", HOJE, HOJE, {})
+    tela = app.painel.resumo("troncal", HOJE, HOJE, {})
+    assert tela["dados"] == "google" and tela["totais"] == local["totais"] and tela["viagens"] == local["viagens"]
+    assert app.painel.resumo("troncal", "2026-10-20", HOJE, {})["dados"] == "misto"
+    n_tab = sum(len(app.painel_local.linhas_dia(t, HOJE)["linhas"]) for t in ("troncal", "secundaria"))
+    assert len(folha) - 2 == n_tab
+    # Número do pedido inteiro (texto) na planilha.
+    assert all(len(l[COL["billCode"]]) == 16 for l in folha[2:])
+    r = app.google.resumo()
+    assert r["ok"] and r["dias"] == [ONTEM, HOJE] and r["ultimaEscrita"]["pacotes"] > 0
+    app.banco.fechar()
+
+
+def test_google_edicao_a_mao_vai_para_o_painel(tmp_path, falso, google, monkeypatch):
+    app = _app_google(tmp_path, falso, google, monkeypatch)
+    folha = google.estado()[aba_pacotes(HOJE)]["linhas"]
+    i, linha = next((i, l) for i, l in enumerate(folha) if l[COL["situacao"]] == "Certo" and l[COL["rota"]] == "Troncal"
+                    and l[COL["proximaParada"]] == "SP BRE")
+    bill = linha[COL["billCode"]]
+    google.editar(aba_pacotes(HOJE), i + 1, COL["seg1"] + 1, "RJ")
+    google.editar(aba_pacotes(HOJE), i + 1, COL["seg2"] + 1, "220-10")
+    app.google.rodada()  # a aba mudou de versão: lê de novo
+    l = next(x for x in app.painel.linhas_dia("troncal", HOJE)["linhas"] if x["billCode"] == bill)
+    assert (l["situacao"], l["rotaCerta"], l["fonteSegmento"]) == ("errado", "RJ SJM", "Planilha")
+    assert bill not in app.banco.fila_segmentos(HOJE)  # guardado no computador: não consulta mais no JMS
+    assert any("mudado à mão" in t for t in app.ultimas)
+    # Na próxima escrita, a planilha mostra a situação nova e a fonte.
+    app.google.escrito_em.clear()
+    app.google.rodada()
+    nova = next(x for x in google.estado()[aba_pacotes(HOJE)]["linhas"] if x[COL["billCode"]] == bill)
+    assert (nova[COL["seg1"]], nova[COL["fonte"]], nova[COL["situacao"]], nova[COL["rotaCerta"]]) == ("RJ", "Planilha", "Errado", "RJ SJM")
+    app.banco.fechar()
+
+
+def test_google_aba_segmentos_da_pessoa(tmp_path, falso, google, monkeypatch):
+    app = _app_google(tmp_path, falso, google, monkeypatch)
+    bill = next(x["billCode"] for x in app.painel.linhas_dia("troncal", HOJE)["linhas"] if x["situacao"] == "certo")
+    google.aba("Segmentos", [["Número de pedido JMS", "Código de primeiro segmento", "Código de dois segmentos", "3 Segmentos"],
+                             ["运单号", "一段码", "二段码", "三段码"], [bill, "", "", "AM,690-01,007"], ["lixo", "", "", ""]])
+    app.google.rodada()
+    l = next(x for x in app.painel.linhas_dia("troncal", HOJE)["linhas"] if x["billCode"] == bill)
+    assert (l["codigo1"], l["segmento"], l["seg3"], l["fonteSegmento"], l["rotaCerta"]) == ("AM", "690-01", "007", "Planilha", "SP BRE")
+    assert app.google.resumo()["segmentosAba"] == 1
+    assert segmentos_da_aba([["Remessa", "1º segmento", "2º segmento"], ["JT0001", "sp", "395 - 05"]]) == {"JT0001": {"s1": "SP", "s2": "395-05", "s3": ""}}
+    app.banco.fechar()
+
+
+def test_google_fora_do_ar_e_desligada(tmp_path, falso, google, monkeypatch):
+    app = _app_google(tmp_path, falso, google, monkeypatch)
+    antes = app.painel.resumo("troncal", HOJE, HOJE, {})["totais"]
+    google.parar()
+    app.google.rodada()
+    assert app.google.estado["ok"] is False and any("Google Planilha" in t for t in app.ultimas)
+    app.painel.invalidar()
+    assert app.painel.resumo("troncal", HOJE, HOJE, {})["totais"] == antes  # continua com o que já tinha lido
+    app.google.desligar()
+    r = app.painel.resumo("troncal", HOJE, HOJE, {})
+    assert r["dados"] == "local" and r["totais"] == antes
+    app.banco.fechar()
+
+
+def test_google_apaga_dias_antigos(tmp_path, falso, google, monkeypatch):
+    app = _app_google(tmp_path, falso, google, monkeypatch, googleDias=3)
+    google.aba("Pacotes 2026-09-01", [["Dia"], ["2026-09-01"]])
+    app.google.apagou_em = 0
+    app.google.rodada()
+    abas = set(google.estado())
+    assert "Pacotes 2026-09-01" not in abas and {"Segmentos", "Leia-me", aba_pacotes(HOJE)} <= abas
+    app.banco.fechar()
+
+
+def test_servidor_google(servidor, google, monkeypatch):
+    app, c = servidor
+    st, _, corpo = c.pedir("/config/api/google", {"url": "http://outro.site/exec", "senha": "x"})
+    assert st == 400 and "script.google.com" in json.loads(corpo)["error"]
+    monkeypatch.setenv("EXPEDICAO_GOOGLE_LIVRE", "1")
+    st, _, corpo = c.pedir("/config/api/google", {"url": google.url, "senha": "errada"})
+    assert not json.loads(corpo)["ok"] and "Senha errada" in json.loads(corpo)["linhas"][0]
+    st, _, corpo = c.pedir("/config/api/google", {"url": google.url, "senha": SENHA_G})
+    assert json.loads(corpo)["ok"]
+    e = json.loads(c.pedir("/config/api/estado")[2])
+    assert e["google"]["ativo"] and e["google"]["planilha"].startswith("Expedição Incorreta")
+    assert "GOOGLE_SENHA" not in json.dumps(e) and SENHA_G not in json.dumps(e)  # a senha não volta para a tela
+    st, h, corpo = c.pedir("/config/api/google/Codigo.gs")
+    assert st == 200 and b"function doPost" in corpo
+    c.pedir("/config/api/google/desligar", {})
+    assert not json.loads(c.pedir("/config/api/estado")[2])["google"]["ativo"]
+
+
+def test_google_abre_espaco_perto_do_limite(tmp_path, falso, google, monkeypatch):
+    app = _app_google(tmp_path, falso, google, monkeypatch)
+    google.aba("Pacotes 2026-10-20", [["Dia"], ["2026-10-20"]])
+    google.aba("Viagens 2026-10-20", [["Dia"], ["2026-10-20"]])
+    app.google.rodada()
+    app.google.estado["limite"] = int((app.google.estado["celulas"] + 100) / 0.9)  # quase cheia
+    app.google._abrir_espaco(HOJE, 500)
+    abas = set(google.estado())
+    assert "Pacotes 2026-10-20" not in abas and aba_pacotes(HOJE) in abas and aba_pacotes(ONTEM) in abas  # hoje e ontem ficam
+    assert any("perto do limite" in t for t in app.ultimas)
+    app.banco.fechar()

@@ -35,7 +35,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import VERSAO
 from .banco import Banco
-from .base_planilha import BasePlanilha, ler_segmentos
+from .google import ErroGoogle
+from .sincronia import FonteDados, Sincronizador
 from .coletor import Coletor, agora_sp, dias_da_agenda, dias_entre, hoje_sp, ms, soma_dias
 from .config import MAX_DIAS, PASTA_APP, arquivo_config, ler_config
 from .jms import Jms
@@ -110,17 +111,21 @@ class App:
         self.regras = Regras(cfg["planilhas"])
         self.jms = Jms(base=jms_url or os.environ.get("EXPEDICAO_JMS_URL"), credenciais=self.credenciais, props=self.banco, log=self.log,
                        tempo=60, por_segundo=cfg["consultasPorSegundo"], segundos_por_remessa=cfg["segundosPorRemessa"])
-        self.painel = Painel(self.banco, self.regras, cfg["statusCodigos"], cfg["segmentoPelaBase"])
-        self.base = BasePlanilha(pasta=cfg["base"], pasta_planilhas=cfg["planilhas"], banco=self.banco, painel=self.painel,
-                                 regras=self.regras, cfg=cfg, log=self.log)
+        # Dois painéis com as mesmas regras: o "local" calcula com o banco do computador (é o que vai para a Google Planilha);
+        # o da tela lê da Google Planilha (e do computador para os dias que não estão nela).
+        self.painel_local = Painel(self.banco, self.regras, cfg["statusCodigos"], cfg["segmentoPelaBase"])
+        self.google = Sincronizador(banco=self.banco, painel_local=self.painel_local, regras=self.regras, cfg=cfg, log=self.log)
+        self.painel = Painel(self.banco, self.regras, cfg["statusCodigos"], cfg["segmentoPelaBase"], dados=FonteDados(self.banco, self.google))
+        self.google.painel = self.painel
         self.coletor = Coletor(banco=self.banco, jms=self.jms, cfg=cfg, log=self.log, ao_mudar=self.ao_mudar)
         self.servidor: ThreadingHTTPServer | None = None
         self._parar = threading.Event()
 
     def ao_mudar(self, tipo: str, dia: str) -> None:
-        """O coletor trouxe novidade do JMS: o painel recalcula e a planilha do dia (base de dados) é reescrita."""
+        """O coletor trouxe novidade do JMS: o painel recalcula e o dia é reescrito na Google Planilha."""
+        self.painel_local.invalidar(tipo, dia)
         self.painel.invalidar(tipo, dia)
-        self.base.marcar(dia)
+        self.google.marcar(dia)
 
     # ---------------------------------------------------------------- registro (janela + dados/expedicao.log)
     def log(self, nivel: str, texto) -> None:
@@ -241,7 +246,7 @@ class App:
         busca["erros"], busca["dias"] = list(busca["erros"]), list(busca["dias"])
         return {"versao": VERSAO, "config": config, "enderecos": self.enderecos(),
                 "token": {"fonte": c["fonte"], "temProprio": bool(self.banco.get("JMS_AUTHTOKEN")), "dashmaster": bool(self.credenciais_dashmaster())},
-                "planilhas": r, "base": self.base.resumo(), "busca": busca, "registro": list(self.ultimas)[-60:], "hoje": hoje, "salvos": self.banco.dias_salvos(),
+                "planilhas": r, "google": self.google.resumo(), "busca": busca, "registro": list(self.ultimas)[-60:], "hoje": hoje, "salvos": self.banco.dias_salvos(),
                 "segmentosHoje": {**self.banco.contar_segmentos(hoje), "basesConhecidas": len(self.banco.segmentos_por_base()),
                                   "pelaBase": cfg["segmentoPelaBase"], "ritmo": self.ritmo_segmentos()},
                 "status": {"concluido": sorted(cfg["statusCodigos"]["concluido"]), "emTransito": sorted(cfg["statusCodigos"]["em_transito"])},
@@ -369,13 +374,10 @@ class App:
             return req.arquivo("config.html")
         if p == "/config/api/estado":
             return req.json(200, self.estado_config())
-        if p == "/config/api/base.xlsx":
-            dia = qs.get("dia") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(qs.get("dia") or "")) else hoje_sp()
-            arq = self.base.arquivo(dia)
-            if not arq.exists():
-                return req.enviar(404, f"Ainda não tem a planilha de {dia} (o app escreve depois da primeira busca do dia).")
-            return req.enviar(200, arq.read_bytes(), XLSX, {"Content-Disposition": f'attachment; filename="{arq.name}"'})
-        if req.command != "POST" and p != "/config/api/rotas.xlsx":
+        if p == "/config/api/google/Codigo.gs":
+            return req.enviar(200, (PASTA_APP / "google" / "Codigo.gs").read_bytes(), "text/plain; charset=utf-8",
+                              {"Content-Disposition": 'attachment; filename="Codigo.gs"'})
+        if req.command != "POST" and p not in ("/config/api/rotas.xlsx",):
             return req.enviar(405, "Use POST.")
         if p == "/config/api/token":
             t = limpar_token(req.ler_json().get("authtoken"))
@@ -400,18 +402,22 @@ class App:
                 return req.json(200, {"ok": False, "error": "Já está buscando. Espere terminar."})
             self.coletor.coletar(dia, forcar=bool(b.get("forcar")))
             return req.json(200, {"ok": True})
-        if p == "/config/api/planilha" and qs.get("nome") == "segmentos":
-            dados = req.ler_corpo()
+        if p == "/config/api/google":
+            b = req.ler_json()
+            url, senha = str(b.get("url") or "").strip(), str(b.get("senha") or "")
+            if not re.fullmatch(r"https://script\.google(usercontent)?\.com/\S+", url) and not os.environ.get("EXPEDICAO_GOOGLE_LIVRE"):
+                return req.json(400, {"ok": False, "error": "Cole a URL do App da Web do Apps Script (começa com https://script.google.com/ e termina em /exec)."})
+            if not senha:
+                return req.json(400, {"ok": False, "error": "Digite a SENHA (a mesma das Propriedades do script)."})
             try:
-                n = len(ler_segmentos(dados))
-            except Exception as e:  # noqa: BLE001 - planilha do usuário: o motivo vai para a tela
-                return req.json(400, {"ok": False, "error": f"Não usei o arquivo: {e}"})
-            if not n:
-                return req.json(400, {"ok": False, "error": "Não usei o arquivo: nenhuma remessa com o Código de primeiro segmento."})
-            self.base.arquivo_segmentos.parent.mkdir(parents=True, exist_ok=True)
-            self.base.arquivo_segmentos.write_bytes(dados)
-            self.base.importar_segmentos(forcar=True)
-            return req.json(200, {"ok": True, "remessas": n})
+                r = self.google.configurar(url, senha)
+            except ErroGoogle as e:
+                return req.json(200, {"ok": False, "linhas": [f"Não conectou: {e}"]})
+            return req.json(200, {"ok": True, "linhas": [f"Conectado: {r.get('nome')}.", f"Abas: {', '.join(r.get('abas') or [])}.",
+                                                         "O app começa a escrever os dias em até 1 minuto."]})
+        if p == "/config/api/google/desligar":
+            self.google.desligar()
+            return req.json(200, {"ok": True})
         if p == "/config/api/planilha":
             nome, dados = qs.get("nome"), req.ler_corpo()
             if nome != "rotas":
@@ -423,6 +429,9 @@ class App:
             self.regras.arquivo_rotas().write_bytes(dados)
             self.regras.atualizar(True)
             self.painel.invalidar()
+            self.painel_local.invalidar()
+            for d in self.google.dias_guardados()[:2]:
+                self.google.marcar(d)  # a situação muda: reescreve hoje e ontem na Google Planilha
             self.log("info", "Planilha de rotas trocada pela tela Configurações.")
             return req.json(200, {"ok": True, "planilhas": self.regras.resumo()})
         if p == "/config/api/rotas.xlsx":
@@ -504,7 +513,7 @@ class App:
 
     def encerrar(self) -> None:
         self._parar.set()
-        self.base.parar()
+        self.google.parar()
         if self.servidor:
             self.servidor.shutdown()
             self.servidor.server_close()
@@ -619,8 +628,9 @@ def main(argv: list[str] | None = None, ao_abrir=None) -> int:
     if demo:
         app.log("info", "MODO DEMONSTRAÇÃO: JMS de mentira, nada é consultado na internet (dados em demo/).")
     app.anunciar()
-    app.log("info", f"  Base de dados (uma planilha por dia): {cfg['base']}")
-    app.base.iniciar()
+    g = app.google.resumo()
+    app.log("info", "  Google Planilha (banco de dados): " + ("ligada" if g["ativo"] else "desligada (configure em Configurações)") + ".")
+    app.google.iniciar()
     if os.environ.get("EXPEDICAO_SEM_AGENDADOR") != "1":
         app.iniciar_agenda()
     if ao_abrir:
@@ -633,7 +643,7 @@ def main(argv: list[str] | None = None, ao_abrir=None) -> int:
     finally:
         app.log("info", "Encerrando…")
         app._parar.set()
-        app.base.parar()
+        app.google.parar()
         servidor.server_close()
         app.banco.fechar()
         if demo:

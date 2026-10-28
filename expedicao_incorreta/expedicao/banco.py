@@ -41,7 +41,7 @@ CREATE INDEX IF NOT EXISTS pacotes_so_dia ON pacotes (dia);
 -- usa o da mesma base (versão Python).
 CREATE TABLE IF NOT EXISTS segmentos_base (base TEXT NOT NULL, s1 TEXT NOT NULL, s2 TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
   em INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (base, s1, s2));
--- O que o app escreveu nas colunas de segmento da planilha de cada dia (base_de_dados/): o que estiver diferente na planilha
+-- O que o app escreveu nas colunas de segmento da aba de cada dia na Google Planilha: o que estiver diferente na planilha
 -- foi a pessoa que preencheu.
 CREATE TABLE IF NOT EXISTS base_escrita (dia TEXT NOT NULL, billCode TEXT NOT NULL, s1 TEXT, s2 TEXT, PRIMARY KEY (dia, billCode));
 """

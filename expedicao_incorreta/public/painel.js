@@ -139,6 +139,10 @@
           svg('base') + '<span>' + fmtInt(sg.pelaBase) + ' pela Base Destino</span></span>');
       }
     }
+    var origem = {google: ['ok', 'check', 'Dados: Google Planilha'], misto: ['warn', 'alert', 'Dados: Google Planilha + computador'],
+      local: ['', 'box', 'Dados: computador']}[r.dados || 'local'];
+    b.push('<span class="badge ' + origem[0] + '" title="De onde o painel leu os pacotes deste período. Dia que ainda não está na Google Planilha vem do banco do computador.">' +
+      svg(origem[1]) + '<span>' + origem[2] + '</span></span>');
     if (r.viagens.comErro) b.push('<span class="badge warn">' + svg('alert') + '<span>' + fmtInt(r.viagens.comErro) + ' viagens com erro na busca</span></span>');
     $('badges').innerHTML = b.join('');
   }

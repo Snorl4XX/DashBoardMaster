@@ -32,9 +32,13 @@ DEFAULTS = {
     "minutosViagemGrande": 30,  # …busca a lista de novo no máximo a cada 30 min
     "dashmaster": "",           # pasta do DashMaster para usar o mesmo AuthToken (vazio = procura em C:\\dashmaster; "nao" = não usar)
     "linkPublico": "",          # link do Tailscale (só para aparecer na janela e em Configurações)
+    "googleDias": 15,           # Google Planilha: quantos dias ficam nela (limite do Google: 10 milhões de células)
+    "googleMinutos": 3,         # Google Planilha: o dia que mudou é reescrito no máximo a cada tantos minutos
+    "googleLinhasPorEnvio": 5000,  # Google Planilha: linhas por envio (dia grande vai em partes)
+    "googleReler": 10,          # Google Planilha: lê de novo as abas em uso a cada tantos minutos (além de quando mudam)
     "versaoConfig": 2,          # 2 = 3 Segmentos mais rápido e pela Base Destino (o app atualiza o config.json antigo)
 }
-_POSITIVOS = ["porta", "minutos", "tamanhoPagina", "tamanhoPaginaViagens", "consultasAoMesmoTempo", "viagemGrande", "minutosViagemGrande",
+_POSITIVOS = ["googleDias", "googleMinutos", "googleLinhasPorEnvio", "googleReler", "porta", "minutos", "tamanhoPagina", "tamanhoPaginaViagens", "consultasAoMesmoTempo", "viagemGrande", "minutosViagemGrande",
               "consultasSegmentos", "consultasPorSegundo"]
 
 
@@ -116,5 +120,4 @@ def ler_config(arquivo: Path | None = None, padroes: dict | None = None) -> dict
     pasta = arq.parent
     c["dados"] = str((pasta / (c.get("pastaDados") or "dados")).resolve())
     c["planilhas"] = str((pasta / (c.get("pastaPlanilhas") or "planilhas")).resolve())
-    c["base"] = str((pasta / (c.get("pastaBase") or "base_de_dados")).resolve())
     return c
