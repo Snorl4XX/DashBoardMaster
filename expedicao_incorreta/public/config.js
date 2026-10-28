@@ -48,8 +48,7 @@
           return (t.tipo === 'troncal' ? 'troncal ' : 'secundária ') + tot + (tot ? ' (' + ['concluido', 'em_transito'].map(function (k) { return (por[k] || 0) + ' ' + nomes[k]; })
             .concat(outros.length ? ['fora do painel: ' + outros.join(', ')] : []).join(' · ') + ')' : '');
         }).join(' | ')],
-        ['Busca automática', 'hoje a cada ' + e.config.minutos + ' min' + (e.config.minutosDiaAnterior ? ' · ontem a cada ' + e.config.minutosDiaAnterior +
-          ' min (guarda o dia anterior completo)' : ' · ontem: desligado')],
+        ['Busca automática', 'só o dia de hoje, a cada ' + e.config.minutos + ' min (viagens e 3 Segmentos). Os dias anteriores ficam como foram salvos.'],
         ['Erros do 3 Segmentos (hoje)', e.segmentosHoje && e.segmentosHoje.erros.length ? e.segmentosHoje.erros.map(function (x) { return x.erro + ' (' + fmt(x.n) + ')'; }).join(' · ') :
           'nenhum'],
         ['Sem código no JMS (hoje)', e.segmentosHoje ? fmt(e.segmentosHoje.semCodigo) + ' pacotes (o JMS respondeu sem o Código de primeiro segmento)' : '—'],

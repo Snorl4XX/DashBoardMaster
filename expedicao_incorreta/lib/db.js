@@ -88,8 +88,7 @@ class Banco {
       statusDia: this.db.prepare('SELECT estado, COUNT(*) AS n FROM viagens WHERE tipo = ? AND dia = ? GROUP BY estado ORDER BY n DESC'),
       marcarDia: this.db.prepare('INSERT INTO buscas (dia, em) VALUES (?, ?) ON CONFLICT (dia) DO UPDATE SET em = excluded.em'),
       buscados: this.db.prepare('SELECT dia FROM buscas WHERE dia BETWEEN ? AND ?'),
-      diasSalvos: this.db.prepare('SELECT COUNT(*) AS n, MIN(dia) AS de, MAX(dia) AS ate FROM buscas'),
-      diasComPacotes: this.db.prepare('SELECT DISTINCT dia FROM pacotes ORDER BY dia DESC')
+      diasSalvos: this.db.prepare('SELECT COUNT(*) AS n, MIN(dia) AS de, MAX(dia) AS ate FROM buscas')
     };
   }
   get(k) { const r = this.st.get.get(String(k)); return r ? r.v : null; }
@@ -130,8 +129,6 @@ class Banco {
   semCodigoDia(dia) { return this.st.semCodigoDia.get(dia).n; }
   /** A remessa mais recente guardada (para o teste do 3 Segmentos). */
   umaRemessa() { const r = this.st.umaRemessa.get(); return r ? r.billCode : ''; }
-  /** Dias com pacotes guardados, do mais novo ao mais antigo. */
-  diasComPacotes() { return this.st.diasComPacotes.all().map(r => r.dia); }
   /** {total, feitos, comErro}: remessas do dia e quantas já têm o "3 Segmentos". */
   contarSegmentos(dia) { return this.st.contarSegmentos.get(dia); }
   contarDia(tipo, dia) { return this.st.contarDia.get(tipo, dia).n; }

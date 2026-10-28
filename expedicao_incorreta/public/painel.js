@@ -78,7 +78,7 @@
     dot.className = 'sync-dot' + (b.rodando ? ' run' : b.authVencido || (b.ultimo && !b.ultimo.ok) ? ' bad' : !b.ultimo ? ' warn' : '');
     $('lastSync').textContent = b.ultimo ? 'Atualizado no JMS: ' + hora(b.ultimo.quando) : 'Esperando a primeira busca no JMS';
     $('queueLine').textContent = b.rodando ? (b.dias && b.dias.length > 1 ? dataBr(b.dia) + ' · ' : '') + b.etapa :
-      b.authVencido ? 'Parado: AuthToken do JMS vencido' : 'Hoje a cada ' + e.minutos + ' min' + (e.minutosDiaAnterior ? ' · ontem a cada ' + e.minutosDiaAnterior + ' min' : '');
+      b.authVencido ? 'Parado: AuthToken do JMS vencido' : 'Só hoje, a cada ' + e.minutos + ' min';
     $('refreshBtn').classList.toggle('spin', b.rodando);
     $('refreshBtn').disabled = b.rodando;
     $('progress').classList.toggle('on', b.rodando || st.carregando);
@@ -110,7 +110,9 @@
     var spr = e.busca.segundosPorRemessa;
     if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta o Rastreamento do pacote ' +
       (spr > 0 ? '1 remessa a cada ' + fmtInt(spr) + ' s (cerca de ' + fmtInt(Math.round(86400 / spr * 0.9)) + ' por dia), para o JMS não bloquear' : 'sem pausa') +
-      ': hoje primeiro, depois os dias anteriores. Eles entram na conta quando o JMS responder.');
+      ', só os pacotes de hoje. Eles entram na conta quando o JMS responder.');
+    if (ss.naoConsultadosAntes) h = alerta(h, true, pac(ss.naoConsultadosAntes) + ' de dias anteriores ficaram sem o 3 Segmentos',
+      'O app só busca o dia de hoje: os dias que passaram ficam como foram salvos e esses pacotes não entram na conta.');
     if (ss.comErro) h = alerta(h, true, pac(ss.comErro) + ' com erro na consulta do 3 Segmentos', ex(ss.erros) +
       '. O app tenta de novo a cada 30 min. Para ver o que o JMS responde: Configurações › Testar o 3 Segmentos.');
     if (ss.jmsSemCodigo) h = alerta(h, true, pac(ss.jmsSemCodigo) + ' sem código no 3 Segmentos do JMS', 'O Rastreamento do pacote não tem o Código de primeiro segmento: não dá para conferir.');
@@ -118,8 +120,9 @@
       '. Inclua o código na rota certa da aba "Rotas" da planilha rotas.xlsx.');
     if (r.semBusca.length && !e.busca.rodando) {
       h = alerta(h, true, r.semBusca.length === r.dias ? (r.dias === 1 ? 'Sem dados deste dia ainda.' : 'Sem dados deste período ainda.') :
-        r.semBusca.length + (r.semBusca.length === 1 ? ' dia ainda não buscado: ' : ' dias ainda não buscados: ') + r.semBusca.slice(0, 8).map(dataBr).join(', ') +
-          (r.semBusca.length > 8 ? '…' : '') + '.', 'Clique em Atualizar para buscar no JMS.');
+        r.semBusca.length + (r.semBusca.length === 1 ? ' dia sem dados salvos: ' : ' dias sem dados salvos: ') + r.semBusca.slice(0, 8).map(dataBr).join(', ') +
+          (r.semBusca.length > 8 ? '…' : '') + '.', r.semBusca.indexOf(st.hoje) >= 0 && r.semBusca.length === 1 ? 'Clique em Atualizar para buscar no JMS.' :
+          'O app só busca o dia de hoje: os dias anteriores aparecem aqui só se foram salvos no dia.');
     }
     $('alerts').innerHTML = h;
     var b = [], v = r.viagens;
@@ -164,7 +167,7 @@
       return '<span><i style="background:' + G.corTurno(s) + '"></i>' + s + ' <b>' + fmtInt(tn[s].errados) + '</b> (' + fmtPct(tn[s].participacao, 1) + ')</span>';
     }).join(' + ');
     var dif = t.errados - a.errados, comp;
-    if (!a.buscado) comp = '<span class="hero-goal">' + esc(nomeAnt) + ': ainda não buscado</span>';
+    if (!a.buscado) comp = '<span class="hero-goal">' + esc(nomeAnt) + ': sem dados salvos</span>';
     else {
       var pctDif = a.errados ? ' (' + (dif > 0 ? '+' : '') + fmtPct(dif / a.errados * 100, 1) + ')' : '';
       comp = '<span class="status-pill ' + (dif > 0 ? 'bad' : 'good') + '">' + svg(dif > 0 ? 'x' : 'check') + (dif > 0 ? '▲ +' : dif < 0 ? '▼ ' : '= ') +
@@ -179,7 +182,7 @@
       (st.status ? ' · ' + esc(st.status === 'concluido' ? 'Concluído' : 'Em Trânsito') : '') + '</span></div></div></div>';
     h += kpi(a.buscado && a.errados ? 'bad' : '', svg('shift') + esc(nomeAnt) + ' · ' + esc(periodoTxt(a.de, a.ate)), a.buscado ? fmtInt(a.errados) : '—',
       a.buscado ? ['T1', 'T2', 'T3'].map(function (s) { return s + ' <b>' + fmtInt(ta[s].errados) + '</b>'; }).join(' · ') + '<br><b>' + fmtPct(a.taxa, 2) +
-        '</b> dos ' + fmtInt(a.pacotes) + ' pacotes' : 'Ainda não buscado: escolha o dia e clique em Atualizar');
+        '</b> dos ' + fmtInt(a.pacotes) + ' pacotes' : 'Sem dados salvos (o app só busca o dia de hoje)');
     h += kpi(t.errados ? 'bad' : '', svg('gauge') + 'Taxa de erro', fmtPct(t.taxa, 2), '<b>' + fmtInt(t.pacotes) + '</b> pacotes conferidos em <b>' +
       fmtInt(r.viagens.total) + '</b> viagens');
     ['T1', 'T2', 'T3'].forEach(function (s) {
@@ -358,8 +361,8 @@
       .then(function (r) {
         if (r.estado) mostrarEstado(r.estado);
         if (r.error) alert(r.error);
-        else if (r.dias && !r.dias.length && !r.segmentos) {
-          $('alerts').insertAdjacentHTML('afterbegin', alerta('', true, 'Esse período já está salvo.', 'Os dias antes de ontem ficam fechados. ' +
+        else if (!r.hojeNoPeriodo) {
+          $('alerts').insertAdjacentHTML('afterbegin', alerta('', true, 'Atualizando só o dia de hoje.', 'Os dias anteriores ficam como foram salvos. ' +
             'Para buscar um deles de novo: Configurações › Buscar este dia agora (no computador do app).'));
         }
       }).catch(function () {});

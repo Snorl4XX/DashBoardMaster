@@ -13,23 +13,23 @@ Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
 3. Procura cada remessa no Rastreamento do pacote > Informação básica, bloco "3 Segmentos": Código de primeiro
    segmento (1º nível), Código de dois segmentos (2º nível) e 3 Segmentos. Uma consulta por remessa, só na primeira vez
    (fica guardado). A conferência é SÓ pelo JMS.
-   Ritmo: 1 remessa a cada 30 segundos (cerca de 2.600 por dia), hoje primeiro e depois os dias anteriores, até 1 min
-   antes da busca seguinte (o resto continua nela). Se o JMS bloquear mesmo assim, o app pausa 15 min. O registro
+   Ritmo: 1 remessa a cada 30 segundos (cerca de 2.600 por dia), só os pacotes de hoje, até 1 min antes da busca
+   seguinte (o resto continua nela). Se o JMS bloquear mesmo assim, o app pausa 15 min. O registro
    mostra o título da página que o JMS devolveu.
 4. Confere com a planilha de rotas do SC (as tabelas vermelhas das docas) e acha o DESTINO CORRETO do pacote:
    as rotas que levam o código de 1º nível (ex.: VDC > RJ SJM). Se uma linha cita o segmento (2º nível), ela vence a
    linha geral (ex.: SP 395-05 vai na DC GRU-SP, não na SP BRE). Vale para a troncal e a secundária.
    A rota do caminhão é procurada nas duas tabelas (o JMS lança, por exemplo, DC GRU-SP como viagem secundária).
    Próxima parada (o caminhão) diferente do destino correto → ERRADO.
-5. Busca de novo a cada 10 minutos (só baixa de novo a lista das viagens que mudaram).
-6. Guarda todos os dias. O dia anterior é buscado de novo a cada 60 minutos (e logo que o app abre), para ficar salvo
-   completo: viagens que chegaram depois, pacotes bipados no fim da noite.
+5. Busca SÓ O DIA DE HOJE, de novo a cada 10 minutos (só baixa de novo a lista das viagens que mudaram).
+6. Guarda todos os dias no banco, para você acompanhar depois. Os dias que passaram ficam como foram salvos: o app não
+   busca de novo (nem as viagens, nem o 3 Segmentos). O que ficou sem o 3 Segmentos aparece como "não consultado".
 
 No painel
 ---------
 - Data inicial e Data final (até 31 dias) e os atalhos Hoje, Ontem, Últimos 7 dias e Este mês.
-  Dia ainda não buscado aparece no aviso: clique em Atualizar e o app busca os dias que faltam
-  (dias antes de ontem que já estão salvos não são buscados de novo).
+  O botão Atualizar busca só o dia de hoje. Dia que não foi salvo aparece no aviso; para buscar um dia que passou:
+  Configurações > Buscar este dia agora (no computador do app).
 - PDD de saída: SP GRU, fixo.
 - Filtros: Status (Concluído：已完成 / Em Trânsito：在途), Base Destino (as bases da tabela de rotas do SC:
   21 da troncal, 18 da secundária), Turno, Destino correto, Código de 1º segmento e Login.
@@ -90,8 +90,8 @@ Link para a equipe (Tailscale, o mesmo do DashMaster)
 config.json (criado na 1ª vez)
 ------------------------------
 porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 10 (busca automática
-de hoje) · minutosDiaAnterior 60 (busca de ontem; 0 = desliga) · status {"concluido": [4], "emTransito": [3]} (códigos do
-Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultasSegmentos 10
+de hoje) · status {"concluido": [4], "emTransito": [3]} (códigos do
+Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultasSegmentos 3
 (consultas do "3 Segmentos" ao mesmo tempo) · consultasPorSegundo 5 (viagens e bipes: ritmo máximo das consultas ao JMS) · segundosPorRemessa 30
 (3 Segmentos: 1 remessa a cada tantos segundos) ·
 viagemGrande 3000 / minutosViagemGrande 30 (viagem grande baixa no máximo a cada 30 min) · dashmaster (pasta do DashMaster;

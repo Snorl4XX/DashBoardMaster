@@ -9,8 +9,8 @@
  *   - Viagem grande (mais de "viagemGrande" pacotes) busca no máximo a cada "minutosViagemGrande" minutos.
  *   - Depois das viagens, o bloco "3 Segmentos" (Rastreamento do pacote › Informação básica) de cada remessa que ainda não
  *     tem: uma consulta por remessa, guardada para sempre (o código não muda). A conferência é só por ele (destino correto).
- *     Do dia mais novo para o mais antigo, 1 remessa a cada "segundosPorRemessa" (lib/jms.js), até 1 min antes da próxima
- *     busca (o resto continua nela: as viagens continuam atualizadas). Se o JMS bloquear, pausa 15 min.
+ *     Só dos dias desta busca (a automática é só hoje): hoje primeiro, 1 remessa a cada "segundosPorRemessa" (lib/jms.js),
+ *     até 1 min antes da próxima busca (o resto continua nela). Se o JMS bloquear, pausa 15 min.
  *   - AuthToken vencido para tudo e avisa; erro numa viagem não para as outras.
  */
 const {statusDe} = require('./status');
@@ -32,14 +32,6 @@ function diasEntre(de, ate) {
   const out = [];
   for (let d = de; d <= ate && out.length < 400; d = somaDias(d, 1)) out.push(d);
   return out;
-}
-/** Dias da busca automática: hoje sempre; ontem logo que o dia vira (ou o app abre) e depois a cada "minutosOntem" minutos,
- * para guardar o dia anterior completo (viagens que chegaram depois, pacotes bipados no fim da noite).
- * mem = {ontem, ontemEm}: o último "ontem" buscado com sucesso e quando. */
-function diasDaAgenda(mem, agora, minutosOntem) {
-  const hoje = hojeSp(new Date(agora)), ontem = somaDias(hoje, -1);
-  if (minutosOntem > 0 && (mem.ontem !== ontem || agora - mem.ontemEm >= minutosOntem * 60000)) return [ontem, hoje];
-  return [hoje];
 }
 function texto(v) { return v === null || v === undefined ? '' : String(v).trim(); }
 /** Linha de "Bipe de carregamento" (o JMS manda loadingTypeName "1"). */
@@ -88,7 +80,7 @@ class Coletor {
           if (tipos.length > 1) this.banco.marcarDia(dia);
           feitos.push(dia);
         }
-        await this.buscarSegmentos();
+        await this.buscarSegmentos(feitos);
         e.authVencido = false;
         msg = e.viagens + ' viagens, ' + e.pacotes + ' pacotes novos ou atualizados' + (e.segmentos ? ', ' + e.segmentos + ' conferidos no JMS (3 segmentos)' : '') +
           (e.erros.length ? ' · ' + e.erros.length + ' com erro' : '');
@@ -138,13 +130,14 @@ class Coletor {
     if (mudou && this.aoMudar) this.aoMudar(tipo, dia);
   }
   /**
-   * "3 Segmentos" das remessas que ainda não têm (uma consulta por remessa, no ritmo do lib/jms.js: com "segundosPorRemessa",
-   * uma de cada vez), do dia mais novo para o mais antigo, até o tempo desta busca acabar. O painel é atualizado a cada lote.
+   * "3 Segmentos" das remessas destes dias que ainda não têm (uma consulta por remessa, no ritmo do lib/jms.js: com
+   * "segundosPorRemessa", uma de cada vez), hoje primeiro, até o tempo desta busca acabar. O painel é atualizado a cada lote.
+   * Os dias que não estão na busca ficam como foram salvos.
    *   - Bloqueio do JMS (página em vez de dados, HTTP 429): para e pausa 15 min. A remessa não é marcada com erro (tenta
    *     de novo depois).
    *   - JMS recusando as 20 primeiras sem nenhum acerto: para e avisa. Token vencido: para tudo.
    */
-  async buscarSegmentos() {
+  async buscarSegmentos(dias) {
     const e = this.estado, cfg = this.cfg;
     if (this.pausaSegmentos && Date.now() < this.pausaSegmentos) return;
     // Até 1 min antes da próxima busca automática (contando do começo desta), para não atrasar as viagens.
@@ -153,7 +146,9 @@ class Coletor {
     let ok = 0, falhas = 0, ultimoErro = '', parar = '';
     e.tipo = '';
     e.avisoSegmentos = '';
-    for (const dia of this.banco.diasComPacotes()) {
+    const hoje = hojeSp(), ordem = Array.from(new Set([].concat(dias || [hoje])))
+      .sort((a, b) => (a === hoje ? -1 : b === hoje ? 1 : b.localeCompare(a)));
+    for (const dia of ordem) {
       const total = this.banco.contarSegmentos(dia);
       let feitos = total.feitos;
       for (let lote = this.banco.semSegmento(dia, 500); lote.length && !parar; lote = this.banco.semSegmento(dia, 500)) {
@@ -292,4 +287,4 @@ class Coletor {
   }
 }
 
-module.exports = {Coletor, hojeSp, somaDias, diasEntre, diasDaAgenda, ehCarga, ehDescarga, emParalelo};
+module.exports = {Coletor, hojeSp, somaDias, diasEntre, ehCarga, ehDescarga, emParalelo};

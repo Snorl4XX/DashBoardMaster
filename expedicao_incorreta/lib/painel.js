@@ -8,7 +8,7 @@
  */
 const {SITUACOES} = require('./regras');
 const {STATUS, statusDe} = require('./status');
-const {diasEntre, somaDias} = require('./coletor');
+const {diasEntre, somaDias, hojeSp} = require('./coletor');
 
 const TURNOS = ['T1', 'T2', 'T3'];
 /** T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59 (como o DashMaster), pelo "Tempo de digitalização". */
@@ -56,8 +56,9 @@ class Painel {
   }
   /** Linhas conferidas de um dia, só das viagens Concluído ou Em Trânsito (guardadas até a busca ou as planilhas mudarem). */
   linhasDia(tipo, dia) {
-    const chave = tipo + '|' + dia, c = this.cache.get(chave);
-    if (c && c.versao === this.regras.versao) return c;
+    // Dia que já passou: o app não consulta mais (a busca é só hoje); o que ficou sem o "3 Segmentos" fica assim.
+    const chave = tipo + '|' + dia, c = this.cache.get(chave), passado = dia < hojeSp();
+    if (c && c.versao === this.regras.versao && c.passado === passado) return c;
     const viagens = new Map();
     let fora = 0;
     this.banco.viagensDia(tipo, dia).forEach(v => {
@@ -70,17 +71,19 @@ class Painel {
       const v = viagens.get(p.shipmentNo);
       if (!v) return;
       const r = this.regras.conferir(tipo, p, v.destino);
-      // JMS respondeu = consultado sem erro. "Sem 3 Segmentos" diz o motivo: aguardando a consulta, erro na consulta ou sem código.
+      // JMS respondeu = consultado sem erro. "Sem 3 Segmentos" diz o motivo: aguardando a consulta (hoje), não consultado (dia que
+      // passou), erro na consulta ou sem código.
       const consultado = p.segFeito !== null && p.segFeito !== undefined, jms = consultado && !p.segErro;
-      const motivo = r.situacao !== 'sem_segmento' ? '' : !consultado ? ' · aguardando' : p.segErro ? ' · erro no JMS' : ' · JMS sem código';
+      const motivo = r.situacao !== 'sem_segmento' ? '' : !consultado ? (passado ? ' · não consultado' : ' · aguardando') :
+        p.segErro ? ' · erro no JMS' : ' · JMS sem código';
       const l = Object.assign({}, p, r, {situacaoTexto: SITUACOES[r.situacao] + motivo, turno: turnoDe(p.horario), nomeViagem: v.nome || '',
-        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status], packageCode: lote(p.packageCode), jms});
+        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status], packageCode: lote(p.packageCode), jms, passado});
       // O que falta na planilha de rotas, para o aviso.
       if (r.situacao === 'sem_codigo') l.pendente = 'código ' + r.codigo1 + (r.segmento ? ' ' + r.segmento : '');
       linhas.push(l);
     });
     linhas.sort(ordemPadrao);
-    return this.guardar(chave, {versao: this.regras.versao, linhas, viagens, fora});
+    return this.guardar(chave, {versao: this.regras.versao, passado, linhas, viagens, fora});
   }
   /** Linhas do período de "de" até "ate" (junta os dias; o resultado fica guardado enquanto nenhum dia mudar). */
   linhas(tipo, de, ate) {
@@ -138,6 +141,7 @@ class Painel {
     Object.keys(top).forEach(k => { distintos[k] = top[k].distintos; });
     const viagens = Array.from(tudo.viagens.values()).filter(v => !f.status || v.status === f.status);
     const dias = diasEntre(de, ate), buscados = this.banco.buscados(de, ate);
+    const semConsulta = linhas.filter(l => l.situacao === 'sem_segmento' && (l.segFeito === null || l.segFeito === undefined));
     return {
       tipo, de, ate, dia: de === ate ? de : '', dias: dias.length, semBusca: dias.filter(d => !buscados.has(d)),
       totais: {pacotes: linhas.length, errados: cont.errado, certos: cont.certo, semSegmento: cont.sem_segmento, semCodigo: cont.sem_codigo,
@@ -163,7 +167,7 @@ class Painel {
       pendencias: {
         semRegra: topDe(linhas.filter(l => l.situacao === 'sem_regra'), 'proximaParada', 8),
         semCodigo: topDe(linhas.filter(l => l.situacao === 'sem_codigo'), 'pendente', 8),
-        semSegmento: {naoConsultados: linhas.filter(l => l.situacao === 'sem_segmento' && (l.segFeito === null || l.segFeito === undefined)).length,
+        semSegmento: {naoConsultados: semConsulta.filter(l => !l.passado).length, naoConsultadosAntes: semConsulta.filter(l => l.passado).length,
           comErro: linhas.filter(l => l.situacao === 'sem_segmento' && l.segErro).length,
           jmsSemCodigo: linhas.filter(l => l.situacao === 'sem_segmento' && l.jms).length,
           erros: topDe(linhas.filter(l => l.situacao === 'sem_segmento' && l.segErro), 'segErro', 3)}

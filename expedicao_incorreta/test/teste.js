@@ -19,7 +19,7 @@ const {escreverXlsx, lerXlsx, zip} = require('../lib/xlsx');
 const {Regras, norm} = require('../lib/regras');
 const {Painel, turnoDe} = require('../lib/painel');
 const {codigosStatus, statusDe} = require('../lib/status');
-const {Coletor, somaDias, diasEntre, diasDaAgenda} = require('../lib/coletor');
+const {Coletor, somaDias, diasEntre, hojeSp} = require('../lib/coletor');
 const {Banco} = require('../lib/db');
 
 const DIA = '2026-10-20', DIA_ANTES = '2026-10-19';
@@ -98,13 +98,6 @@ function abasRotas(comWW) {
     statusDe('9', cods2) === 'concluido' && statusDe(2, cods2) === 'em_transito' && statusDe(3, cods2) === '', 'status: Concluído (4) e Em Trânsito (3); config.json troca os códigos');
   conferir(somaDias('2026-10-31', 1) === '2026-11-01' && somaDias('2026-03-01', -1) === '2026-02-28' && diasEntre('2026-02-27', '2026-03-02').length === 4 &&
     diasEntre(DIA, DIA).length === 1, 'contas de dias (virada de mês)');
-  // Busca automática: hoje sempre; ontem ao abrir, quando o dia vira e depois a cada 60 min.
-  const as = t => new Date(t + '-03:00').getTime(), agora = as('2026-10-20T10:00:00');
-  conferir(diasDaAgenda({ontem: '', ontemEm: 0}, agora, 60).join() === '2026-10-19,2026-10-20' &&
-    diasDaAgenda({ontem: '2026-10-19', ontemEm: agora - 30 * 60000}, agora, 60).join() === '2026-10-20' &&
-    diasDaAgenda({ontem: '2026-10-19', ontemEm: agora - 61 * 60000}, agora, 60).join() === '2026-10-19,2026-10-20' &&
-    diasDaAgenda({ontem: '2026-10-19', ontemEm: agora - 60000}, as('2026-10-21T00:05:00'), 60).join() === '2026-10-20,2026-10-21' &&
-    diasDaAgenda({ontem: '', ontemEm: 0}, agora, 0).join() === '2026-10-20', 'agenda: ontem ao abrir, na virada do dia e a cada 60 min (0 = desligado)');
   // Banco da versão 1.1 (sem a coluna estadoBusca e sem a tabela de dias): abre, ganha as duas e os dias que já tinha contam como buscados.
   const dbVelho = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'exp-db-')), 'expedicao.db');
   {
@@ -194,21 +187,31 @@ function abasRotas(comWW) {
   bs.trocarPacotes('troncal', 'DKSEG1', '2026-10-21', [0, 1, 2, 3, 4].map(i => ({billCode: 'WOK' + i})));
   let chamadas = 0;
   const colOk = new Coletor({banco: bs, cfg: {consultasSegmentos: 3}, log: () => {}, jms: {segmentos: async w => { chamadas++; return {s1: 'NO', s2: '901-00', s3: '1', centro: ''}; }}});
-  await colOk.buscarSegmentos();
-  await colOk.buscarSegmentos();
+  await colOk.buscarSegmentos(['2026-10-21']);
+  await colOk.buscarSegmentos(['2026-10-21']);
   conferir(chamadas === 5 && bs.contarSegmentos('2026-10-21').feitos === 5 && bs.pacotesDia('troncal', '2026-10-21')[0].seg1 === 'NO',
     '3 Segmentos: uma consulta por remessa, guardada (a busca seguinte não consulta de novo)', chamadas);
   bs.trocarPacotes('troncal', 'DKSEG2', '2026-10-22', Array.from({length: 30}, (_, i) => ({billCode: 'WNAO' + i})));
   chamadas = 0;
+  await colOk.buscarSegmentos(['2026-10-21']);
+  conferir(chamadas === 0 && bs.contarSegmentos('2026-10-22').feitos === 0, '3 Segmentos: só os dias da busca (os pacotes de outros dias ficam como estão)', chamadas);
+  // Hoje primeiro, depois o dia pedido na mão.
+  bs.trocarPacotes('troncal', 'DKSEGH', hojeSp(), [{billCode: 'WHOJE'}]);
+  bs.trocarPacotes('troncal', 'DKSEGA', '2026-10-20', [{billCode: 'WANTES'}]);
+  const ordem = [];
+  await new Coletor({banco: bs, cfg: {consultasSegmentos: 1}, log: () => {}, jms: {segmentos: async w => { ordem.push(w); return {s1: 'NO', s2: '901-00', s3: '1', centro: ''}; }}})
+    .buscarSegmentos(['2026-10-20', hojeSp()]);
+  conferir(ordem.join() === 'WHOJE,WANTES', '3 Segmentos: hoje primeiro', ordem);
+  chamadas = 0;
   const colNao = new Coletor({banco: bs, cfg: {consultasSegmentos: 3}, log: () => {}, jms: {segmentos: async () => {
     chamadas++; throw Object.assign(new Error('O JMS recusou a consulta (código 9: sem permissão).'), {recusa: true});
   }}});
-  await colNao.buscarSegmentos();
+  await colNao.buscarSegmentos(['2026-10-22']);
   conferir(chamadas >= 20 && chamadas <= 22 && /recusou o Rastreamento do pacote/.test(colNao.estado.avisoSegmentos) && bs.contarSegmentos('2026-10-22').comErro === chamadas,
     '3 Segmentos: JMS recusando tudo para depois de 20 tentativas e avisa', {chamadas, aviso: colNao.estado.avisoSegmentos});
   bs.trocarPacotes('troncal', 'DKSEG3', '2026-10-23', [{billCode: 'WAUTH'}]);
   const colAuth = new Coletor({banco: bs, cfg: {}, log: () => {}, jms: {segmentos: async () => { throw Object.assign(new Error('token失效'), {auth: true}); }}});
-  conferir(await colAuth.buscarSegmentos().then(() => false, e => !!e.auth), '3 Segmentos: AuthToken vencido para a busca');
+  conferir(await colAuth.buscarSegmentos(['2026-10-23']).then(() => false, e => !!e.auth), '3 Segmentos: AuthToken vencido para a busca');
   bs.fechar();
   // Bloqueio do JMS (página em vez de dados): não é erro do pacote nem token vencido; pausa 15 min.
   const bb = new Banco(path.join(pastaRegras, 'bloqueio.db'));
@@ -216,9 +219,9 @@ function abasRotas(comWW) {
   let pedidosBloq = 0;
   const colBloq = new Coletor({banco: bb, cfg: {consultasSegmentos: 2}, log: () => {}, jms: {
     segmentos: async () => { pedidosBloq++; throw Object.assign(new Error('O JMS devolveu uma página em vez de dados.'), {auth: true, bloqueio: true}); }}});
-  await colBloq.buscarSegmentos();
+  await colBloq.buscarSegmentos(['2026-10-24']);
   const pedidos1 = pedidosBloq;
-  await colBloq.buscarSegmentos();
+  await colBloq.buscarSegmentos(['2026-10-24']);
   conferir(pedidos1 >= 1 && pedidos1 <= 2 && pedidosBloq === pedidos1 && /bloqueou.*pausa 15 min/.test(colBloq.estado.avisoSegmentos) &&
     colBloq.pausaSegmentos - Date.now() > 14 * 60000 && bb.contarSegmentos('2026-10-24').comErro === 0,
     '3 Segmentos: bloqueio do JMS pausa 15 min (sem marcar erro nem token vencido)',
@@ -273,7 +276,7 @@ function abasRotas(comWW) {
   const porta = await portaLivre();
   const cfgArq = path.join(pasta, 'config.json');
   fs.writeFileSync(cfgArq, JSON.stringify({porta, host: '127.0.0.1', senha: 'senha-teste', viagemGrande: 100, minutosViagemGrande: 30,
-    dashmaster: dmDb, tamanhoPagina: 100, consultasPorSegundo: 1000, segundosPorRemessa: 0}));
+    dashmaster: dmDb, tamanhoPagina: 100, consultasPorSegundo: 1000, segundosPorRemessa: 0, minutosDiaAnterior: 60}));
   const filho = spawn(process.execPath, [SERVER], {env: Object.assign({}, process.env, {EXPEDICAO_CONFIG: cfgArq, EXPEDICAO_JMS_URL: 'http://127.0.0.1:' + portaJms,
     EXPEDICAO_SEM_AGENDADOR: '1'}), stdio: ['ignore', 'pipe', 'pipe']});
   filhos.push(filho);
@@ -309,7 +312,8 @@ function abasRotas(comWW) {
     /Em Trânsito：在途/.test(pag.texto) && /id="f-rota"[\s\S]{0,80}Todas/.test(pag.texto) && />Base Destino</.test(pag.texto),
     'tela: PDD de saída fixo, data inicial e final, filtros Status (Concluído e Em Trânsito) e Base Destino');
   const ep = (await local('GET', '/api/estado')).json;
-  conferir(ep.base === 'SP GRU' && ep.codigoBase === '30001' && ep.minutosDiaAnterior === 60 && ep.maxDias === 31, 'PDD de saída SP GRU (30001) e busca de ontem a cada 60 min', ep);
+  conferir(ep.base === 'SP GRU' && ep.codigoBase === '30001' && !('minutosDiaAnterior' in ep) && ep.maxDias === 31,
+    'PDD de saída SP GRU (30001); busca só hoje (o "ontem a cada 60 min" de um config.json antigo é ignorado)', ep);
   conferir((await remoto('GET', '/config')).status === 403 && (await remoto('GET', '/config/api/estado')).status === 403,
     'Configurações não abrem de fora (link público)');
   let est = (await local('GET', '/config/api/estado')).json;
@@ -415,11 +419,17 @@ function abasRotas(comWW) {
   let pr = await periodo();
   conferir(pr.de === DIA_ANTES && pr.ate === DIA && pr.dia === '' && pr.dias === 2 && pr.semBusca.join() === DIA_ANTES && pr.totais.pacotes === 130,
     'período: junta os dias e aponta o dia ainda não buscado', {de: pr.de, ate: pr.ate, semBusca: pr.semBusca, t: pr.totais});
-  const n0 = jms.estado.diasPedidos.length;
+  // Atualizar busca só o dia de hoje: o dia que falta no período continua sem dados.
+  let n0 = jms.estado.diasPedidos.length;
   const pb = (await local('POST', '/api/buscar', {de: DIA_ANTES, ate: DIA})).json;
   await esperar(50); await terminar();
-  conferir(pb.ok && pb.dias.join() === DIA_ANTES && jms.estado.diasPedidos.slice(n0).join() === DIA_ANTES,
-    'Atualizar no período: busca só o dia que falta (dia fechado já salvo não é buscado de novo)', {pb, pedidos: jms.estado.diasPedidos.slice(n0)});
+  conferir(pb.ok && pb.dias.join() === hojeSp() && pb.hojeNoPeriodo === false && jms.estado.diasPedidos.slice(n0).join() === hojeSp() &&
+    (await periodo()).semBusca.join() === DIA_ANTES, 'Atualizar: busca só o dia de hoje (os dias do período ficam como foram salvos)',
+    {pb, pedidos: jms.estado.diasPedidos.slice(n0)});
+  // Configurações › Buscar este dia agora: busca um dia que passou (pedido na mão).
+  n0 = jms.estado.diasPedidos.length;
+  await buscar({dia: DIA_ANTES});
+  conferir(jms.estado.diasPedidos.slice(n0).join() === DIA_ANTES, 'Configurações: Buscar este dia agora busca o dia que passou', jms.estado.diasPedidos.slice(n0));
   pr = await periodo();
   conferir(pr.semBusca.length === 0 && pr.totais.pacotes === 132 && pr.totais.errados === 4 && pr.viagens.total === 5 && pr.viagens.concluidas === 3 &&
     pr.menu.troncal === 4, 'período de 2 dias: pacotes, errados e viagens somados', {t: pr.totais, v: pr.viagens, m: pr.menu});
@@ -430,7 +440,6 @@ function abasRotas(comWW) {
   conferir(comp2.de === '2026-10-17' && comp2.ate === '2026-10-18', 'período de 2 dias compara com os 2 dias anteriores', comp2);
   pr = await periodo('&status=concluido');
   conferir(pr.totais.pacotes === 4 && pr.totais.errados === 1, 'período com Status Concluído', pr.totais);
-  conferir((await local('POST', '/api/buscar', {de: DIA_ANTES, ate: DIA})).json.dias.length === 0, 'período já salvo: Atualizar não busca de novo');
   const xp = await local('GET', '/api/excel?tipo=troncal&de=' + DIA_ANTES + '&ate=' + DIA);
   conferir(/filename="expedicao_troncal_2026-10-19_a_2026-10-20\.xlsx"/.test(xp.headers['content-disposition']) && lerXlsx(xp.buf)[0].linhas.length === 133,
     'Excel do período', xp.headers['content-disposition']);
@@ -508,8 +517,12 @@ function abasRotas(comWW) {
   jms.estado.bloquearSegmentos = true;
   e = await buscar({dia: '2026-10-18'});
   const pend = (await local('GET', '/api/painel?tipo=troncal&dia=2026-10-18')).json;
-  conferir(e.busca.ultimo.ok && !e.busca.authVencido && /bloqueou/.test(e.busca.avisoSegmentos) && /HTTP 403 · página: "Request blocked\."/.test(e.busca.avisoSegmentos) && pend.pendencias.semSegmento.naoConsultados === 2 &&
-    pend.totais.errados === 0, 'bloqueio do JMS no 3 Segmentos: a busca termina, sem "token vencido", e os pacotes esperam', {busca: e.busca, p: pend.pendencias});
+  const tpend = (await local('GET', '/api/tabela?tipo=troncal&dia=2026-10-18')).json;
+  // Dia que passou: o app não consulta mais sozinho (a busca é só hoje).
+  conferir(e.busca.ultimo.ok && !e.busca.authVencido && /bloqueou/.test(e.busca.avisoSegmentos) && /HTTP 403 · página: "Request blocked\."/.test(e.busca.avisoSegmentos) &&
+    pend.pendencias.semSegmento.naoConsultadosAntes === 2 && pend.pendencias.semSegmento.naoConsultados === 0 && pend.totais.errados === 0 &&
+    tpend.linhas.every(l => l.situacaoTexto === 'Sem 3 Segmentos · não consultado'),
+    'bloqueio do JMS no 3 Segmentos: a busca termina, sem "token vencido"; os pacotes do dia que passou ficam sem consulta', {busca: e.busca, p: pend.pendencias});
   const dbloq = (await local('POST', '/config/api/testar-segmentos', {remessa: t1Remessa()})).json;
   conferir(!dbloq.ok && /HTTP 403 · página \(não são dados\)/.test(dbloq.linhas.join(' | ')) && /Página: "Request blocked\."/.test(dbloq.linhas.join(' | ')),
     'Testar o 3 Segmentos: mostra a página de bloqueio', dbloq);

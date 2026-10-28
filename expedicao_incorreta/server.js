@@ -6,8 +6,8 @@
  * Confere, quase em tempo real, se os pacotes bipados no carregamento de cada caminhão que SAI da base pertencem à rota do
  * caminhão (ex.: pacote do RJ dentro do caminhão para SP BRE). Dois painéis: Rota Troncal e Rota Secundária.
  *   - Busca no JMS (lib/coletor.js, lib/jms.js): viagens do dia (PDD de saída = a nossa base, fixo; Status Concluído ou
- *     Em Trânsito) → Bipe de carregamento da base → lista de pacotes. Hoje a cada "minutos"; ontem a cada "minutosDiaAnterior"
- *     (o dia anterior fica guardado completo). Os dias ficam no banco: o painel abre qualquer período já buscado.
+ *     Em Trânsito) → Bipe de carregamento da base → lista de pacotes. Só o dia de hoje, a cada "minutos"; os dias
+ *     ficam guardados no banco como foram salvos e o painel abre qualquer período já buscado.
  *   - Confere (lib/regras.js), só pelo JMS: "3 Segmentos" de cada remessa (Rastreamento do pacote) → planilha de rotas.
  *   - Painel (public/): período (data inicial e final), filtros Status e Base Destino (bases da tabela de rotas), erro do dia
  *     por turno comparado com o dia anterior, mais ofensores, gráficos e a tabela com tudo (turno e destino correto); Excel.
@@ -38,7 +38,7 @@ const crypto = require('crypto');
 const {Banco} = require('./lib/db');
 const {Jms} = require('./lib/jms');
 const {Regras, lerRotas, TIPOS} = require('./lib/regras');
-const {Coletor, hojeSp, somaDias, diasEntre, diasDaAgenda} = require('./lib/coletor');
+const {Coletor, hojeSp, somaDias, diasEntre} = require('./lib/coletor');
 const {STATUS, codigosStatus, statusDe} = require('./lib/status');
 const {Painel} = require('./lib/painel');
 const {escreverXlsx} = require('./lib/xlsx');
@@ -51,7 +51,6 @@ const DEFAULTS = {
   codigoBase: '30001',    // a nossa base (os caminhões que SAEM daqui)
   nomeBase: 'SP GRU',
   minutos: 10,            // de quanto em quanto tempo busca no JMS (dia de hoje)
-  minutosDiaAnterior: 60, // de quanto em quanto tempo busca ontem de novo, para guardar o dia anterior completo (0 = não busca)
   status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
   consultasSegmentos: 3,   // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote): quantas consultas ao mesmo tempo
   consultasPorSegundo: 5,  // viagens e bipes: no máximo tantas consultas ao JMS por segundo, somando todas
@@ -77,6 +76,7 @@ function lerConfig() {
     catch (e) { throw new Error('config.json inválido (' + e.message + '). Corrija o arquivo ou apague-o para recriar.'); }
   } else fs.writeFileSync(arq, JSON.stringify(DEFAULTS, null, 2) + '\n');
   const c = Object.assign({}, DEFAULTS, bruto);
+  delete c.minutosDiaAnterior; // até a 1.8 buscava ontem de novo; agora a busca é só hoje
   ['porta', 'minutos', 'tamanhoPagina', 'tamanhoPaginaViagens', 'consultasAoMesmoTempo', 'viagemGrande', 'minutosViagemGrande', 'consultasSegmentos',
     'consultasPorSegundo'].forEach(k => {
     c[k] = Number(c[k]) > 0 ? Number(c[k]) : DEFAULTS[k];
@@ -87,7 +87,6 @@ function lerConfig() {
   c.consultasSegmentos = Math.min(50, c.consultasSegmentos);
   c.segundosPorRemessa = bruto.segundosPorRemessa !== undefined && bruto.segundosPorRemessa !== '' && Number(bruto.segundosPorRemessa) >= 0
     ? Number(bruto.segundosPorRemessa) : DEFAULTS.segundosPorRemessa;
-  c.minutosDiaAnterior = Number(c.minutosDiaAnterior) > 0 ? Math.max(c.minutos, Number(c.minutosDiaAnterior)) : 0;
   c.statusCodigos = codigosStatus(c.status);
   if (!c.statusCodigos.concluido.size && !c.statusCodigos.em_transito.size) throw new Error('"status" do config.json sem nenhum código.');
   const pasta = path.dirname(arq);
@@ -242,7 +241,7 @@ function tipoDe(u) { const t = String(u.searchParams.get('tipo') || ''); return 
 /** Situação para o topo do painel (sem nada de credencial). */
 function estadoPublico() {
   const e = coletor.estado, r = regras.resumo();
-  return {versao: VERSAO, base: cfg.nomeBase, codigoBase: cfg.codigoBase, minutos: cfg.minutos, minutosDiaAnterior: cfg.minutosDiaAnterior,
+  return {versao: VERSAO, base: cfg.nomeBase, codigoBase: cfg.codigoBase, minutos: cfg.minutos,
     hoje: hojeSp(), maxDias: MAX_DIAS,
     busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, dias: e.dias, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
       errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos, segundosPorRemessa: cfg.segundosPorRemessa},
@@ -294,13 +293,10 @@ async function tratar(req, res) {
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {'Content-Disposition': 'attachment; filename="' + nome + '"'});
   }
   if (p === '/api/buscar' && req.method === 'POST') {
-    // Hoje e ontem sempre; os outros dias do período só se ainda não foram buscados ou têm pacote sem o "3 Segmentos".
-    const b = await lerJson(req), {de, ate} = periodo(b.de, b.ate, b.dia), ontem = somaDias(hojeSp(), -1), buscados = banco.buscados(de, ate);
-    const dias = diasEntre(de, ate).filter(d => d >= ontem || !buscados.has(d));
-    // Pacotes sem o "3 Segmentos" no período: a busca consulta (do dia mais novo para o mais antigo).
-    const segmentos = diasEntre(de, ate).some(d => { const c = banco.contarSegmentos(d); return c.total > c.feitos; });
-    if (dias.length || segmentos) coletor.coletar(dias).catch(() => {});
-    return json(res, 200, {ok: true, dias, segmentos, estado: estadoPublico()});
+    // Só o dia de hoje: os dias anteriores ficam como foram salvos.
+    const b = await lerJson(req), {de, ate} = periodo(b.de, b.ate, b.dia), hoje = hojeSp();
+    coletor.coletar([hoje]).catch(() => {});
+    return json(res, 200, {ok: true, dias: [hoje], hojeNoPeriodo: de <= hoje && ate >= hoje, estado: estadoPublico()});
   }
   return enviar(res, 404, 'Não encontrado.');
 }
@@ -427,15 +423,9 @@ servidor.listen(cfg.porta, cfg.host, () => {
   if (r.rotas) log('info', 'Planilha de rotas: ' + r.rotas.troncal + ' rotas troncais e ' + r.rotas.secundaria + ' secundárias.');
   if (!credenciais().fonte) log('aviso', 'Falta o AuthToken do JMS: abra Configurações (ou cadastre no DashMaster deste computador).');
   if (process.env.EXPEDICAO_SEM_AGENDADOR === '1') return;
-  log('info', 'Busca no JMS: hoje a cada ' + cfg.minutos + ' min' + (cfg.minutosDiaAnterior ? '; ontem a cada ' + cfg.minutosDiaAnterior +
-    ' min (guarda o dia anterior completo)' : '') + '. Deixe esta janela aberta.');
+  log('info', 'Busca no JMS: só o dia de hoje, a cada ' + cfg.minutos + ' min (os dias anteriores ficam salvos como estão). Deixe esta janela aberta.');
   // Com AuthToken vencido tenta do mesmo jeito (uma consulta): volta sozinho quando o token for trocado aqui ou no DashMaster.
-  const agenda = {ontem: '', ontemEm: 0};
-  const rodar = () => {
-    if (!credenciais().fonte || coletor.estado.rodando) return;
-    const dias = diasDaAgenda(agenda, Date.now(), cfg.minutosDiaAnterior);
-    coletor.coletar(dias).then(u => { if (u.ok && dias.length > 1) Object.assign(agenda, {ontem: dias[0], ontemEm: Date.now()}); }).catch(() => {});
-  };
+  const rodar = () => { if (credenciais().fonte && !coletor.estado.rodando) coletor.coletar([hojeSp()]).catch(() => {}); };
   setTimeout(rodar, 3000);
   setInterval(rodar, cfg.minutos * 60000);
 });
