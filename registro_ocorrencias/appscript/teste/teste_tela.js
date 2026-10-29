@@ -1,6 +1,9 @@
 /**
  * Teste da tela (PAGINA_, no fim do Codigo.gs) no navegador, falando com o Codigo.gs de verdade sobre o Google de mentira (google_falso.js).
- * A "foto" é uma imagem gerada aqui (faixas coloridas). Precisa do Playwright com Chromium.
+ * A "foto" é uma imagem gerada aqui (faixas coloridas); o QR Code e o código de barras de teste estão em teste/imagens.
+ * Precisa do Playwright com Chromium. O leitor de códigos (ZXing) vem do jsdelivr; sem internet, aponte ZXING_UMD para o
+ * arquivo umd/index.min.js do @zxing/library 0.21.3. A câmera ao vivo usa um vídeo do QR Code (precisa do ffmpeg; sem
+ * ffmpeg, essa parte é pulada).
  * Uso: node registro_ocorrencias/appscript/teste/teste_tela.js [pasta para os prints]
  */
 'use strict';
@@ -9,7 +12,9 @@ const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
 const {chromium} = require('playwright');
-const {criarGoogle, lerZip} = require('./google_falso');
+const {execFileSync} = require('child_process');
+const {criarGoogle} = require('./google_falso');
+const IMAGENS = path.join(__dirname, 'imagens');
 
 const PRINTS = process.argv[2] || '';
 let falhas = 0, oks = 0;
@@ -56,8 +61,10 @@ function tamanhoJpeg(b) {
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'ocorr-tela-')), HTML = path.join(pasta, 'pagina.html');
   fs.writeFileSync(HTML, g.ctx.PAGINA_);
   const navegador = await chromium.launch();
-  const abrir = async (opcoes) => {
-    const pg = await navegador.newPage(opcoes);
+  const abrir = async (opcoes, nav, antes) => {
+    const pg = await (nav || navegador).newPage(opcoes);
+    if (process.env.ZXING_UMD) await pg.route(/@zxing\/library@0\.21\.3\/umd\/index\.min\.js$/, r => r.fulfill({path: process.env.ZXING_UMD, contentType: 'text/javascript'}));
+    if (antes) await pg.addInitScript(antes);
     // google.script.run → Codigo.gs (pelo Node), como o Apps Script faz.
     await pg.exposeFunction('__gas', (fn, arg) => {
       try { return {valor: JSON.parse(JSON.stringify(g.ctx[fn](arg === null ? undefined : arg)))}; } catch (e) { return {erro: e.message}; }
@@ -65,7 +72,7 @@ function tamanhoJpeg(b) {
     await pg.addInitScript(() => {
       const criar = (ok, erro) => {
         const r = {withSuccessHandler: f => criar(f, erro), withFailureHandler: f => criar(ok, f)};
-        ['iniciar', 'listar', 'salvar', 'baixarExcel'].forEach(n => {
+        ['iniciar', 'listar', 'salvar'].forEach(n => {
           r[n] = arg => { window.__gas(n, arg === undefined ? null : arg).then(x => { if (x.erro) { if (erro) erro(new Error(x.erro)); } else if (ok) ok(x.valor); }); };
         });
         return r;
@@ -84,12 +91,15 @@ function tamanhoJpeg(b) {
   const hojeTela = await pg.textContent('#data');
   check(/^\d{2}:\d{2}:\d{2}$/.test(agora) && /^\d{2}\/\d{2}\/\d{4}$/.test(hojeTela) && /^T[123]$/.test(turno), 'data, hora e turno aparecem sozinhos', {agora, hojeTela, turno});
   check(await pg.$eval('#setor', i => i.type) === 'text' && (await pg.$$('input[type=radio], select')).length === 0, 'setor: campo para escrever, sem opções');
-  check(await pg.inputValue('#de') === g.ctx.iniciar().hoje && await pg.inputValue('#ate') === g.ctx.iniciar().hoje, 'Baixar planilha: período começa em hoje');
+  check(await pg.getAttribute('#abrirPlanilha', 'href') === 'https://docs.google.com/spreadsheets/d/PLANILHA-FICTICIA/edit' && await pg.isVisible('#abrirPlanilha') &&
+    await pg.getAttribute('#abrirPlanilha', 'target') === '_blank' && (await pg.$('#baixar')) === null, 'Abrir planilha (tempo real) no lugar do baixar');
+  check(await pg.evaluate(() => typeof window.ZXing === 'object' && typeof ZXing.MultiFormatReader === 'function'), 'leitor de códigos (ZXing) carregou');
   check(/Nenhum registro ainda/.test(await pg.textContent('#linhas')), 'tabela vazia no começo');
   if (PRINTS) await pg.screenshot({path: path.join(PRINTS, 'celular_vazio.png'), fullPage: true});
 
   await pg.fill('#nome', 'COLABORADOR TESTE');
   await pg.fill('#setor', 'Expedição');
+  await pg.fill('#codigo', 'LOTE-TESTE-77');
   await pg.fill('#descricao', 'Pacote de teste com a etiqueta rasgada.');
   await pg.click('#enviar');
   await pg.waitForSelector('.aviso.erro');
@@ -103,18 +113,19 @@ function tamanhoJpeg(b) {
   await pg.waitForSelector('.aviso.ok');
   const msg = await pg.textContent('#msg');
   const l = g.ss.abas.Registros.celulas[1];
-  check(/Registro enviado: \d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}:\d{2} · T[123]\./.test(msg) && l[3] === 'COLABORADOR TESTE' && l[4] === 'Expedição' && l[2] === turno,
+  check(/Registro enviado: \d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}:\d{2} · T[123]\./.test(msg) && l[3] === "'COLABORADOR TESTE" && l[4] === "'Expedição" && l[5] === "'LOTE-TESTE-77" && l[2] === turno,
     'enviou: mensagem com data, hora e turno; linha na planilha', msg);
   const jpg = Buffer.from(g.arquivos[0].blob.bytes), dim = tamanhoJpeg(jpg);
   check(g.arquivos[0].blob.tipo === 'image/jpeg' && dim && dim.largura === 1000 && dim.altura === 750 && jpg.length < 400000,
     'foto reduzida no celular antes de enviar (1600x1200 → 1000x750, JPEG)', {dim, bytes: jpg.length});
-  check(l[6].tipo === 'imagem' && /^data:image\/jpeg;base64,/.test(l[6].url) && l[9].length < 45000 && /^data:image\/jpeg;base64,/.test(l[9]),
-    'planilha: foto na célula e miniatura para a tabela do app', {mini: l[9].length});
+  check(l[7].tipo === 'imagem' && /^data:image\/jpeg;base64,/.test(l[7].url) && l[10].length < 45000 && /^data:image\/jpeg;base64,/.test(l[10]),
+    'planilha: foto na célula e miniatura para a tabela do app', {mini: l[10].length});
   const tab = await pg.$$eval('#linhas tr', trs => trs.map(tr => Array.from(tr.cells).map(c => c.textContent.trim())));
-  check(tab.length === 1 && /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/.test(tab[0][1]) && tab[0][3] === 'COLABORADOR TESTE' && tab[0][4] === 'Expedição' && tab[0][5] === 'Pacote de teste com a etiqueta rasgada.' &&
+  check(tab.length === 1 && /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/.test(tab[0][1]) && tab[0][3] === 'COLABORADOR TESTE' && tab[0][4] === 'Expedição' && tab[0][5] === 'LOTE-TESTE-77' &&
+    tab[0][6] === 'Pacote de teste com a etiqueta rasgada.' &&
     (await pg.$('#linhas tr.novo img.mini')) !== null, 'a tabela embaixo mostra o registro com a foto (destacado)', tab);
-  check(await pg.inputValue('#nome') === 'COLABORADOR TESTE' && await pg.inputValue('#descricao') === '' && await pg.isHidden('#previa'),
-    'depois de enviar: nome fica, descrição e foto limpam para o próximo');
+  check(await pg.inputValue('#nome') === 'COLABORADOR TESTE' && await pg.inputValue('#setor') === 'Expedição' && await pg.inputValue('#codigo') === '' &&
+    await pg.inputValue('#descricao') === '' && await pg.isHidden('#previa'), 'depois de enviar: nome e setor ficam; código, descrição e foto limpam para o próximo');
 
   for (const [setor, texto] of [['Recebimento', 'Volume de teste chegou molhado.'], ['DWS', 'Leitura de teste sem peso no DWS.']]) {
     await pg.fill('#setor', setor);
@@ -132,6 +143,35 @@ function tamanhoJpeg(b) {
   if (PRINTS) await pg.screenshot({path: path.join(PRINTS, 'celular_zoom.png')});
   await pg.keyboard.press('Escape');
   check(await pg.isHidden('#zoom'), 'Esc fecha a foto');
+
+  // Escanear com a câmera ao vivo bloqueada: lê pela foto do código.
+  const bloq = await abrir({viewport: {width: 390, height: 844}, deviceScaleFactor: 2}, null, () => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(Object.assign(new Error('bloqueada'), {name: 'NotAllowedError'}));
+  });
+  await bloq.click('#escanear');
+  await bloq.waitForFunction(() => /Tirar foto do código/.test(document.getElementById('scannerMsg').textContent));
+  check(await bloq.isVisible('#scannerFoto') && await bloq.isHidden('#scannerVideoCaixa') && /não foi liberada/.test(await bloq.textContent('#scannerMsg')),
+    'escanear sem câmera ao vivo: explica e oferece "Tirar foto do código"', await bloq.textContent('#scannerMsg'));
+  if (PRINTS) await bloq.screenshot({path: path.join(PRINTS, 'celular_escanear_foto.png')});
+  await bloq.setInputFiles('#fotoCodigo', {name: 'nada.png', mimeType: 'image/png', buffer: png(800, 600)});
+  await bloq.waitForFunction(() => /Não achei o código/.test(document.getElementById('scannerMsg').textContent));
+  check(await bloq.isVisible('#scanner') && await bloq.inputValue('#codigo') === '', 'foto sem código: avisa e deixa tentar de novo');
+  await bloq.setInputFiles('#fotoCodigo', path.join(IMAGENS, 'barras_remessa.png'));
+  await bloq.waitForFunction(() => document.getElementById('codigo').value !== '');
+  check(await bloq.inputValue('#codigo') === 'REMESSA-TESTE-0001' && await bloq.isHidden('#scanner') && /Lido: REMESSA-TESTE-0001/.test(await bloq.textContent('#codigoDica')),
+    'foto do código de barras: preenche o ID/remessa/lote sozinho', await bloq.inputValue('#codigo'));
+  await bloq.click('#escanear');
+  await bloq.waitForSelector('#scanner:not([hidden])');
+  await bloq.setInputFiles('#fotoCodigo', path.join(IMAGENS, 'qr_viagem.png'));
+  await bloq.waitForFunction(() => document.getElementById('codigo').value === 'VIAGEM-TESTE-0001');
+  check(true, 'foto do QR Code: preenche o ID/remessa/lote sozinho');
+  await bloq.fill('#codigo', 'VIAGEM-TESTE-0001-CORRIGIDO');
+  check(await bloq.inputValue('#codigo') === 'VIAGEM-TESTE-0001-CORRIGIDO' && !/Lido/.test(await bloq.textContent('#codigoDica')), 'depois de escanear dá para corrigir na mão');
+  await bloq.click('#escanear');
+  await bloq.waitForSelector('#scanner:not([hidden])');
+  await bloq.keyboard.press('Escape');
+  check(await bloq.isHidden('#scanner'), 'Esc fecha o leitor');
+  await bloq.close();
 
   // Outra pessoa enviou pelo outro celular: o botão Atualizar traz.
   g.ctx.salvar({nome: 'OUTRO TESTE', setor: 'Rejeito', descricao: 'Caixa de teste rejeitada.', foto: 'data:image/jpeg;base64,' + jpg.toString('base64'), miniatura: ''});
@@ -156,19 +196,20 @@ function tamanhoJpeg(b) {
     await pg.textContent('#msg'));
   g.ctx.salvar = salvarDeVerdade;
 
-  // Baixar planilha: Excel com as fotos.
-  const [baixado] = await Promise.all([pg.waitForEvent('download'), pg.click('#baixar')]);
-  const xlsx = path.join(PRINTS || pasta, baixado.suggestedFilename());
-  await baixado.saveAs(xlsx);
-  const z = lerZip(fs.readFileSync(xlsx)), midias = Object.keys(z).filter(n => /^xl\/media\//.test(n));
-  await pg.waitForSelector('#msgExcel .aviso.ok');
-  check(/^registro_ocorrencias_\d{4}-\d{2}-\d{2}\.xlsx$/.test(baixado.suggestedFilename()) && midias.length === 4 && z['xl/worksheets/sheet1.xml'] &&
-    /Planilha baixada: 4 registros e 4 fotos\./.test(await pg.textContent('#msgExcel')), 'Baixar planilha: baixa o Excel do dia com as 4 fotos', {nome: baixado.suggestedFilename(), midias});
-  if (PRINTS) await pg.screenshot({path: path.join(PRINTS, 'celular_baixou.png'), fullPage: true});
-  await pg.fill('#de', '2026-01-01'); await pg.fill('#ate', '2026-01-01');
-  await pg.click('#baixar');
-  await pg.waitForSelector('#msgExcel .aviso.erro');
-  check(/Nenhum registro nesse período/.test(await pg.textContent('#msgExcel')), 'Baixar planilha de um dia sem registros: avisa');
+  // Câmera ao vivo (Chromium com câmera de mentira mostrando o QR Code): lê sozinho.
+  let ffmpeg = true;
+  try { execFileSync('ffmpeg', ['-version'], {stdio: 'ignore'}); } catch (e) { ffmpeg = false; }
+  if (ffmpeg) {
+    const video = path.join(pasta, 'qr.y4m');
+    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-loop', '1', '-i', path.join(IMAGENS, 'qr_viagem.png'), '-t', '3', '-r', '10', '-pix_fmt', 'yuv420p', video]);
+    const camNav = await chromium.launch({args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--use-file-for-fake-video-capture=' + video]});
+    const cam = await abrir({viewport: {width: 390, height: 844}, deviceScaleFactor: 2}, camNav);
+    await cam.click('#escanear');
+    await cam.waitForFunction(() => document.getElementById('codigo').value !== '', null, {timeout: 20000});
+    check(await cam.inputValue('#codigo') === 'VIAGEM-TESTE-0001' && await cam.isHidden('#scanner') && await cam.evaluate(() => !document.getElementById('scannerVideo').srcObject),
+      'câmera ao vivo: lê o QR Code, preenche e desliga a câmera', await cam.inputValue('#codigo'));
+    await camNav.close();
+  } else console.log('(sem ffmpeg: o teste da câmera ao vivo foi pulado)');
 
   // ---------- computador e tema escuro ----------
   for (const [nome, opcoes] of [['computador', {viewport: {width: 1280, height: 900}, colorScheme: 'light'}], ['celular_escuro', {viewport: {width: 390, height: 844}, deviceScaleFactor: 2, colorScheme: 'dark'}]]) {

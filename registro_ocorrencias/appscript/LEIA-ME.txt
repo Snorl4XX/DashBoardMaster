@@ -6,6 +6,8 @@ O que faz
 O colaborador abre um link no celular e preenche:
   - Nome do colaborador
   - Setor (ele escreve; não tem lista de opções)
+  - ID de viagem, remessa ou lote: botão ESCANEAR (QR Code ou código de barras) preenche sozinho; ou ele digita.
+    Depois de escanear, dá para corrigir na mão.
   - Foto (o botão abre a câmera do celular)
   - Descrição do que está ocorrendo
 A DATA, a HORA e o TURNO são automáticos, pela hora do envio:
@@ -13,15 +15,21 @@ A DATA, a HORA e o TURNO são automáticos, pela hora do envio:
 
 Cada envio:
   - aparece na tabela embaixo do formulário (os 30 mais novos, com a foto);
-  - vira uma linha na aba "Registros" da Planilha Google: Data | Hora | Turno | Colaborador | Setor | Descrição |
-    Foto (a foto dentro da célula) | Link da foto | ID;
+  - vira NA HORA uma linha na aba "Registros" da Planilha Google (a planilha em tempo real): Data | Hora | Turno |
+    Colaborador | Setor | ID de viagem / remessa / lote | Descrição | Foto (a foto dentro da célula) | Link da foto | ID;
   - guarda a foto na pasta "Fotos - Registro de Ocorrências" do Google Drive, ao lado da planilha.
 
-Baixar a planilha: no app, no quadro "Registros", escolha De e Até (começa em hoje; até 31 dias) e clique em
-"Baixar planilha (Excel com fotos)". Vem um arquivo .xlsx com Data, Hora, Turno, Colaborador, Setor, Descrição,
-a FOTO dentro da planilha (coluna Foto, uma por linha), o link "Abrir foto" e o ID.
-Até 40 fotos no período, vem a foto em tamanho normal; mais que isso, vem a foto menor (para o arquivo não ficar
-pesado) e a foto grande continua no link "Abrir foto".
+Planilha em tempo real: no app, botão "Abrir planilha" (no quadro Registros). Abre a Planilha Google, que recebe cada
+envio na hora. Para a equipe abrir, compartilhe a planilha com ela (Compartilhar → adicionar os e-mails como Leitor).
+
+Excel com as fotos (se precisar mandar um arquivo): na Planilha Google, menu Registro de Ocorrências → Baixar Excel
+com fotos… → escolha De e Até (até 31 dias). Vem um .xlsx com as colunas da planilha e a FOTO dentro (coluna Foto, uma
+por linha). Até 40 fotos, tamanho normal; mais que isso, a foto menor (a grande continua no link "Abrir foto").
+O menu aparece quando a planilha é aberta (se não aparecer, recarregue a página da planilha).
+
+Escanear: abre a câmera ao vivo dentro do app e lê sozinho. Se a câmera ao vivo não abrir (o navegador ou o Google não
+liberou), o app mostra "Tirar foto do código": a pessoa tira a foto e o app lê o código na foto. O leitor de códigos
+vem da internet (biblioteca ZXing); sem internet, a pessoa digita o número.
 
 Arquivo: TUDO no Codigo.gs (o servidor e a tela do app). A pasta teste/ é só para conferir o código.
 
@@ -39,7 +47,7 @@ Instalação (uma vez, uns 10 minutos)
    Executar como: Eu. Quem pode acessar: Qualquer pessoa. Clique em Implantar.
    Copie o "URL do app da Web" (termina em /exec). Esse é o link do app.
 6. Abra o link no celular, preencha um teste e confira a linha na aba "Registros" da planilha.
-   Depois clique em "Baixar planilha (Excel com fotos)" e abra o arquivo no Excel.
+   Teste também o Escanear com uma etiqueta de remessa e o botão "Abrir planilha".
 7. Mande o link para a equipe. No celular, dá para criar um atalho: menu do navegador → Adicionar à tela inicial.
 
 Conta do Google da empresa: se "Qualquer pessoa" não aparecer, escolha "Qualquer pessoa em <empresa>": aí cada
@@ -49,12 +57,15 @@ Trocar o código depois (versão nova)
 ------------------------------------
 Cole o Codigo.gs novo no lugar do antigo (apague tudo e cole), salve e vá em Implantar → Gerenciar implantações → lápis (Editar) →
 Versão: Nova versão → Implantar. O link continua o mesmo.
+Vindo da versão 1.0 ou 1.1: a coluna "ID de viagem / remessa / lote" entra sozinha depois de Setor no primeiro envio
+(os registros antigos ficam com ela vazia). Se tiver um arquivo "Index" no Apps Script, apague (agora é tudo no Código.gs).
 
 Mudar turnos, foto obrigatória ou o Excel
 -----------------------------------------
 No começo do Codigo.gs, no bloco CONFIG:
   turnos: T1 de 6 até 14, T2 de 14 até 22, T3 de 22 até 6
   fotoObrigatoria: true (false = a foto passa a ser opcional)
+  codigoObrigatorio: false (true = não envia sem o ID de viagem / remessa / lote)
   ultimos: 30 (quantos registros a tabela do app mostra)
   maxDiasExcel: 31 (período máximo do Excel) · fotosGrandesExcel: 40 (até quantas fotos vêm em tamanho normal)
 Depois de mudar: salve e faça a "Nova versão" (acima).
@@ -62,8 +73,9 @@ Depois de mudar: salve e faça a "Nova versão" (acima).
 Se der problema
 ---------------
 - "Falta configurar": faça o passo 4 (função configurar) de novo.
-- O botão Baixar planilha não baixa nada no celular: abra o link no navegador (Chrome ou Safari), não dentro do
-  WhatsApp. Ou baixe pelo computador.
+- Escanear: se a câmera ao vivo não abrir, use "Tirar foto do código" (com o código inteiro e nítido na foto).
+  Abra o link no Chrome ou no Safari (não dentro do WhatsApp) e permita a câmera quando o navegador perguntar.
+- "Abrir planilha" mostra "Você precisa de permissão": a planilha não foi compartilhada com essa pessoa.
 - A célula Foto mostra "Foto no link ao lado": o Google não aceitou a imagem dentro da célula; a foto está no link
   "Abrir foto" da coluna ao lado (e na pasta do Drive).
 - O botão Tirar foto não abre a câmera: o navegador do celular precisa da permissão de câmera (ou escolha a foto da

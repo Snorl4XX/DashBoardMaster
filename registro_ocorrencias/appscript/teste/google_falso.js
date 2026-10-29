@@ -82,6 +82,7 @@ function criarGoogle(o) {
         setValues(v) { v.forEach((l, i) => l.forEach((x, j) => { cel(i, j)[col - 1 + j] = x; })); return semFim(r); },
         setValue(x) { if (x && x.tipo === 'imagem' && g.recusarImagem) throw new Error('Imagem inválida'); cel(0, 0)[col - 1] = x; return semFim(r); },
         setRichTextValue(x) { cel(0, 0)[col - 1] = x; return semFim(r); },
+        getValue() { return r.getValues()[0][0]; },
         getValues() { return grade(x => (typeof x === 'string' ? x.replace(/^'/, '') : x && x.tipo ? x.texto || '' : x === undefined || x === null ? '' : x)); },
         getRichTextValues() { return grade(x => ({getLinkUrl: () => (x && x.tipo === 'link' ? x.link : null), getText: () => (x && x.texto) || ''})); },
         getDisplayValues() {
@@ -102,11 +103,12 @@ function criarGoogle(o) {
       return semFim(r);
     }
     setRowHeight(l, h) { this.alturas[l] = h; }
+    insertColumnAfter(c) { this.celulas.forEach(l => { while (l.length < c) l.push(undefined); l.splice(c, 0, undefined); }); this.colunasInseridas = (this.colunasInseridas || 0) + 1; }
     hideColumns(c) { this.ocultas.push(c); }
     setColumnWidth(c, w) { this.larguras[c] = w; }
     setFrozenRows() {}
   }
-  const ss = {abas: {}, fuso: '', getId: () => 'PLANILHA-FICTICIA', getSheetByName(n) { return this.abas[n] || null; },
+  const ss = {abas: {}, fuso: '', getId: () => 'PLANILHA-FICTICIA', getUrl: () => 'https://docs.google.com/spreadsheets/d/PLANILHA-FICTICIA/edit', getSheetByName(n) { return this.abas[n] || null; },
     insertSheet(n) { return (this.abas[n] = new Aba(n)); }, setSpreadsheetTimeZone(f) { this.fuso = f; }};
   function pasta(nome, pai) {
     const p = {id: 'PASTA-' + (g.pastas.length + 1), nome, pai, lixo: false, getId() { return this.id; }, getName() { return this.nome; },
@@ -119,7 +121,11 @@ function criarGoogle(o) {
   const ctx = {
     console, Logger: {log: m => { g.log = m; }},
     SpreadsheetApp: {
-      getActiveSpreadsheet: () => (o.semAtiva ? null : ss), openById: id => (id === 'PLANILHA-FICTICIA' ? ss : null), flush() {},
+      getActiveSpreadsheet: () => (o.semAtiva ? null : ss),
+      getUi: () => ({
+        createMenu: nome => { const m = {nome, itens: [], addItem(t, f) { m.itens.push([t, f]); return m; }, addToUi() { g.menu = m; }}; return m; },
+        showModalDialog: (html, titulo) => { g.janela = {html: html.html, titulo}; }
+      }), openById: id => (id === 'PLANILHA-FICTICIA' ? ss : null), flush() {},
       newCellImage: () => { const b = {url: '', setSourceUrl(u) { b.url = u; return b; }, build: () => ({tipo: 'imagem', url: b.url})}; return b; },
       newRichTextValue: () => { const b = {t: '', l: '', setText(t) { b.t = t; return b; }, setLinkUrl(l) { b.l = l; return b; }, build: () => ({tipo: 'link', texto: b.t, link: b.l})}; return b; }
     },

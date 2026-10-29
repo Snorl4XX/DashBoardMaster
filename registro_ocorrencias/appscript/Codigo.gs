@@ -2,12 +2,15 @@
  * J&T · REGISTRO DE OCORRÊNCIAS — Apps Script de uma Planilha Google, TUDO NESTE ARQUIVO (a tela está no fim, em PAGINA_).
  * Projeto SEPARADO: não junte com o DashMaster nem com os outros apps.
  *
- * O colaborador abre o link no celular e preenche: nome, setor (escrito), foto e descrição. Data, hora e turno são
- * automáticos, pela hora do envio (T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59).
- *   - Cada envio vira uma linha na aba "Registros", com a foto dentro da célula e o link da foto (pasta do Google Drive
- *     "Fotos - Registro de Ocorrências", ao lado da planilha).
- *   - Embaixo do formulário, o app mostra a tabela com os últimos registros.
- *   - Botão "Baixar planilha": Excel (.xlsx) do período escolhido, com a foto de cada registro dentro da planilha.
+ * O colaborador abre o link no celular e preenche: nome, setor (escrito), ID de viagem / remessa / lote (escaneando o
+ * QR Code ou o código de barras, ou digitando), foto e descrição. Data, hora e turno são automáticos, pela hora do envio
+ * (T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59).
+ *   - Cada envio vira na hora uma linha na aba "Registros" (a planilha em tempo real), com a foto dentro da célula e o
+ *     link da foto (pasta do Google Drive "Fotos - Registro de Ocorrências", ao lado da planilha).
+ *   - Embaixo do formulário, o app mostra a tabela com os últimos registros e o botão "Abrir planilha".
+ *   - Na planilha, menu Registro de Ocorrências → Baixar Excel com fotos: arquivo .xlsx do período, com as fotos dentro.
+ *   - Escanear: câmera ao vivo, lida pelo leitor do celular (BarcodeDetector) ou pela biblioteca ZXing (jsdelivr); se a
+ *     câmera ao vivo não abrir, a pessoa tira uma foto do código e o app lê na foto.
  *
  * Instalação (uma vez):
  *  1. Crie uma Planilha Google nova → Extensões → Apps Script.
@@ -16,21 +19,23 @@
  *  4. Implantar → Nova implantação → App da Web: Executar como "Eu", Quem pode acessar "Qualquer pessoa" → Implantar.
  *     O link que termina em /exec é o do app.
  */
-var VERSAO = '1.1.0';
+var VERSAO = '1.2.0';
 var CONFIG = {
   titulo: 'Registro de Ocorrências',
   subtitulo: 'J&T Express · SP GRU',
   // Turno pela hora do envio: de "de" até antes de "ate" (o T3 passa da meia-noite).
   turnos: [{nome: 'T1', de: 6, ate: 14}, {nome: 'T2', de: 14, ate: 22}, {nome: 'T3', de: 22, ate: 6}],
   fotoObrigatoria: true,
+  codigoObrigatorio: false, // ID de viagem / remessa / lote: true = não envia sem
   ultimos: 30,           // quantos registros a tabela do app mostra
   maxDiasExcel: 31,      // período máximo do Excel
   fotosGrandesExcel: 40, // até tantas fotos o Excel leva a foto do Drive; mais que isso, a foto pequena (arquivo leve)
   fuso: 'America/Sao_Paulo'
 };
 var ABA_ = 'Registros', PASTA_FOTOS_ = 'Fotos - Registro de Ocorrências';
-var COLUNAS_ = ['Data', 'Hora', 'Turno', 'Colaborador', 'Setor', 'Descrição', 'Foto', 'Link da foto', 'ID', 'Miniatura (app)'];
-var COL_FOTO_ = 7, COL_LINK_ = 8, COL_MINI_ = 10;
+var COL_CODIGO_NOME_ = 'ID de viagem / remessa / lote';
+var COLUNAS_ = ['Data', 'Hora', 'Turno', 'Colaborador', 'Setor', COL_CODIGO_NOME_, 'Descrição', 'Foto', 'Link da foto', 'ID', 'Miniatura (app)'];
+var COL_CODIGO_ = 6, COL_FOTO_ = 8, COL_LINK_ = 9, COL_MINI_ = 11;
 var MAX_FOTO_ = 6 * 1024 * 1024, MAX_MINI_ = 45000; // foto em base64; miniatura cabe numa célula (limite 50.000)
 
 // ------------------------------------------------------------------ app da web
@@ -38,17 +43,29 @@ function doGet() {
   return HtmlService.createHtmlOutput(PAGINA_).setTitle(CONFIG.titulo).addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-/** Primeira tela: configuração do formulário e os últimos registros. */
+/** Primeira tela: configuração do formulário, o link da planilha e os últimos registros. */
 function iniciar() {
   return {versao: VERSAO, titulo: CONFIG.titulo, subtitulo: CONFIG.subtitulo, turnos: CONFIG.turnos, fotoObrigatoria: CONFIG.fotoObrigatoria,
-    fuso: CONFIG.fuso, hoje: Utilities.formatDate(agora_(), CONFIG.fuso, 'yyyy-MM-dd'), maxDiasExcel: CONFIG.maxDiasExcel, registros: listar_()};
+    codigoObrigatorio: CONFIG.codigoObrigatorio, fuso: CONFIG.fuso, planilhaUrl: planilha_().getUrl(), registros: listar_()};
+}
+
+/** Menu na planilha (o Google roda sozinho quando a planilha abre). */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('Registro de Ocorrências').addItem('Baixar Excel com fotos…', 'abrirExcel').addToUi();
+}
+/** Janela do menu: escolhe o período e baixa o Excel com as fotos. */
+function abrirExcel() {
+  var hoje = Utilities.formatDate(agora_(), CONFIG.fuso, 'yyyy-MM-dd');
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(JANELA_EXCEL_.replace(/__HOJE__/g, hoje)).setWidth(400).setHeight(300),
+    'Baixar Excel com fotos');
 }
 
 /** Últimos registros (o app atualiza a tabela de tempos em tempos). */
 function listar() { return listar_(); }
 
 /**
- * Envio do formulário: d = {nome, setor, descricao, foto (data URL JPEG/PNG), miniatura (data URL pequena)}.
+ * Envio do formulário: d = {nome, setor, codigo (ID de viagem / remessa / lote), descricao, foto (data URL JPEG/PNG),
+ * miniatura (data URL pequena)}.
  * → {ok, registro, registros}. Erro de preenchimento: Error com a mensagem para mostrar na tela.
  */
 function salvar(d) {
@@ -66,8 +83,8 @@ function salvar(d) {
   trava.waitLock(30000);
   try {
     var aba = aba_(planilha_()), linha = aba.getLastRow() + 1;
-    aba.getRange(linha, 1, 1, COLUNAS_.length).setValues([[agora, agora, turno, texto_(r.nome), texto_(r.setor), texto_(r.descricao), '', '', id,
-      r.miniatura]]);
+    aba.getRange(linha, 1, 1, COLUNAS_.length).setValues([[agora, agora, turno, texto_(r.nome), texto_(r.setor), texto_(r.codigo), texto_(r.descricao),
+      '', '', id, r.miniatura]]);
     if (link) {
       aba.getRange(linha, COL_LINK_).setRichTextValue(SpreadsheetApp.newRichTextValue().setText('Abrir foto').setLinkUrl(link).build());
       // Foto dentro da célula; se o Google recusar a imagem, fica só o link ao lado.
@@ -83,12 +100,12 @@ function salvar(d) {
   } finally {
     trava.releaseLock();
   }
-  return {ok: true, registro: {id: id, data: Utilities.formatDate(agora, CONFIG.fuso, 'dd/MM/yyyy'),
+  return {ok: true, registro: {id: id, codigo: r.codigo, data: Utilities.formatDate(agora, CONFIG.fuso, 'dd/MM/yyyy'),
     hora: Utilities.formatDate(agora, CONFIG.fuso, 'HH:mm:ss'), turno: turno}, registros: listar_()};
 }
 
 /**
- * Botão "Baixar planilha": p = {de, ate} ("aaaa-mm-dd"; vazio = hoje). → {nome, base64 (do .xlsx), linhas, fotos, pequenas}
+ * Menu da planilha → Baixar Excel com fotos: p = {de, ate} ("aaaa-mm-dd"; vazio = hoje). → {nome, base64 (do .xlsx), linhas, fotos, pequenas}
  * Até CONFIG.fotosGrandesExcel fotos, o Excel leva a foto do Drive; mais que isso, a foto pequena (para não ficar pesado).
  */
 function baixarExcel(p) {
@@ -130,11 +147,14 @@ function turnoDe(hora) {
 function validar_(d) {
   var nome = String(d.nome || '').replace(/\s+/g, ' ').trim();
   var setor = String(d.setor || '').replace(/\s+/g, ' ').trim();
+  var codigo = String(d.codigo || '').replace(/[\u0000-\u001F\u007F]/g, '').trim();
   var descricao = String(d.descricao || '').replace(/\r\n?/g, '\n').trim();
   if (nome.length < 2) throw new Error('Escreva o nome do colaborador.');
   if (nome.length > 80) throw new Error('O nome pode ter no máximo 80 letras.');
   if (setor.length < 2) throw new Error('Escreva o setor.');
   if (setor.length > 60) throw new Error('O setor pode ter no máximo 60 letras.');
+  if (!codigo && CONFIG.codigoObrigatorio) throw new Error('Escaneie ou digite o ID de viagem, remessa ou lote.');
+  if (codigo.length > 80) throw new Error('O ID de viagem, remessa ou lote pode ter no máximo 80 letras.');
   if (descricao.length < 3) throw new Error('Descreva o que está ocorrendo.');
   if (descricao.length > 1000) throw new Error('A descrição pode ter no máximo 1.000 letras.');
   var foto = null;
@@ -147,11 +167,12 @@ function validar_(d) {
   if (!foto && CONFIG.fotoObrigatoria) throw new Error('Tire a foto.');
   var mini = String(d.miniatura || '');
   if (!/^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+\/=]+$/.test(mini) || mini.length > MAX_MINI_) mini = '';
-  return {nome: nome, setor: setor, descricao: descricao, foto: foto, miniatura: foto ? mini : ''};
+  return {nome: nome, setor: setor, codigo: codigo, descricao: descricao, foto: foto, miniatura: foto ? mini : ''};
 }
 
-/** Texto do colaborador: começa com = + - @ vira texto (a planilha não executa como fórmula). */
-function texto_(v) { return /^[=+\-@]/.test(v) ? "'" + v : v; }
+/** Texto do colaborador sempre como texto: ' na frente (não aparece) — a planilha não executa =fórmula nem transforma
+ * remessa em número (888001234567890 → 8,88E+14) ou "10/29" em data. */
+function texto_(v) { return v ? "'" + v : ''; }
 /** Parte do nome do arquivo da foto: sem acento e sem símbolo. */
 function limpo_(v) {
   return String(v).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'sem-nome';
@@ -177,9 +198,14 @@ function aba_(ss) {
     aba.setFrozenRows(1);
     aba.getRange('A2:A').setNumberFormat('dd/mm/yyyy');
     aba.getRange('B2:B').setNumberFormat('hh:mm:ss');
-    aba.getRange('F2:F').setWrap(true);
-    [100, 80, 60, 180, 140, 320, 170, 100, 170].forEach(function (w, i) { aba.setColumnWidth(i + 1, w); });
+    aba.getRange('G2:G').setWrap(true);
+    [100, 80, 60, 180, 140, 190, 320, 170, 100, 170].forEach(function (w, i) { aba.setColumnWidth(i + 1, w); });
     aba.hideColumns(COL_MINI_);
+  } else if (String(aba.getRange(1, COL_CODIGO_).getValue()) !== COL_CODIGO_NOME_) {
+    // Planilha da versão 1.0/1.1 (sem a coluna do ID de viagem / remessa / lote): entra a coluna depois de Setor.
+    aba.insertColumnAfter(COL_CODIGO_ - 1);
+    aba.getRange(1, COL_CODIGO_).setValue(COL_CODIGO_NOME_);
+    aba.setColumnWidth(COL_CODIGO_, 190);
   }
   return aba;
 }
@@ -203,8 +229,8 @@ function listar_() {
   var qtd = Math.min(CONFIG.ultimos, ult - 1);
   var linhas = aba.getRange(ult - qtd + 1, 1, qtd, COLUNAS_.length).getDisplayValues();
   return linhas.reverse().map(function (v) {
-    return {data: v[0], hora: v[1], turno: v[2], nome: v[3], setor: v[4], descricao: v[5], id: v[8],
-      miniatura: /^data:image\/(?:jpeg|png);base64,/.test(v[9]) ? v[9] : ''};
+    return {data: v[0], hora: v[1], turno: v[2], nome: v[3], setor: v[4], codigo: v[5], descricao: v[6], id: v[9],
+      miniatura: /^data:image\/(?:jpeg|png);base64,/.test(v[10]) ? v[10] : ''};
   });
 }
 
@@ -228,15 +254,15 @@ function registrosDoPeriodo_(de, ate) {
     var k = dia(v[0]);
     if (!k || k < de || k > ate) return;
     var rt = links[i][0];
-    out.push({quando: v[0], turno: String(v[2]), nome: String(v[3]), setor: String(v[4]), descricao: String(v[5]),
-      linkFoto: rt && rt.getLinkUrl ? rt.getLinkUrl() || '' : '', id: String(v[8]), miniatura: String(v[9] || '')});
+    out.push({quando: v[0], turno: String(v[2]), nome: String(v[3]), setor: String(v[4]), codigo: String(v[5]), descricao: String(v[6]),
+      linkFoto: rt && rt.getLinkUrl ? rt.getLinkUrl() || '' : '', id: String(v[9]), miniatura: String(v[10] || '')});
   });
   return out;
 }
 
 // ------------------------------------------------------------------ Excel (.xlsx) com as fotos
-var XLSX_COLUNAS_ = [['Data', 12], ['Hora', 10], ['Turno', 7], ['Colaborador', 24], ['Setor', 18], ['Descrição', 50], ['Foto', 24],
-  ['Link da foto', 13], ['ID', 22]];
+var XLSX_COLUNAS_ = [['Data', 12], ['Hora', 10], ['Turno', 7], ['Colaborador', 24], ['Setor', 18], ['ID de viagem / remessa / lote', 26],
+  ['Descrição', 50], ['Foto', 24], ['Link da foto', 13], ['ID', 22]];
 var FOTO_W_ = 160, FOTO_H_ = 120, EMU_ = 9525; // caixa da foto em pixels; 1 pixel = 9525 EMU
 
 /** Monta o .xlsx (Office Open XML) dos registros, com cada foto presa na coluna Foto da sua linha. → {blob, fotos, pequenas} */
@@ -250,20 +276,20 @@ function xlsx_(regs) {
     var n = i + 2, foto = imagemExcel_(r, grandes), s = serial_(r.quando);
     var cel = [s === null ? celTexto_('A' + n, '', 4) : '<c r="A' + n + '" s="2"><v>' + s + '</v></c>',
       s === null ? celTexto_('B' + n, '', 4) : '<c r="B' + n + '" s="3"><v>' + s + '</v></c>',
-      celTexto_('C' + n, r.turno, 4), celTexto_('D' + n, r.nome, 5), celTexto_('E' + n, r.setor, 5), celTexto_('F' + n, r.descricao, 5),
-      celTexto_('G' + n, foto ? '' : (r.linkFoto ? 'Foto no link' : 'Sem foto'), 4),
-      r.linkFoto ? celTexto_('H' + n, 'Abrir foto', 6) : celTexto_('H' + n, '', 4), celTexto_('I' + n, r.id, 4)];
+      celTexto_('C' + n, r.turno, 4), celTexto_('D' + n, r.nome, 5), celTexto_('E' + n, r.setor, 5), celTexto_('F' + n, r.codigo, 4),
+      celTexto_('G' + n, r.descricao, 5), celTexto_('H' + n, foto ? '' : (r.linkFoto ? 'Foto no link' : 'Sem foto'), 4),
+      r.linkFoto ? celTexto_('I' + n, 'Abrir foto', 6) : celTexto_('I' + n, '', 4), celTexto_('J' + n, r.id, 4)];
     linhas.push('<row r="' + n + '"' + (foto ? ' ht="96" customHeight="1"' : '') + '>' + cel.join('') + '</row>');
     if (r.linkFoto) {
       relsPlan.push('<Relationship Id="rIdL' + n + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' +
         xml_(r.linkFoto) + '" TargetMode="External"/>');
-      linksXml.push('<hyperlink ref="H' + n + '" r:id="rIdL' + n + '"/>');
+      linksXml.push('<hyperlink ref="I' + n + '" r:id="rIdL' + n + '"/>');
     }
     if (!foto) return;
     fotos++; if (foto.pequena) pequenas++;
     var k = Math.min(FOTO_W_ / foto.w, FOTO_H_ / foto.h), cx = Math.round(foto.w * k) * EMU_, cy = Math.round(foto.h * k) * EMU_;
     midia.push({nome: 'xl/media/foto' + fotos + '.' + foto.ext, bytes: foto.bytes, tipo: foto.tipo});
-    anc.push('<xdr:oneCellAnchor><xdr:from><xdr:col>6</xdr:col><xdr:colOff>' + 4 * EMU_ + '</xdr:colOff><xdr:row>' + (n - 1) + '</xdr:row><xdr:rowOff>' + 4 * EMU_ +
+    anc.push('<xdr:oneCellAnchor><xdr:from><xdr:col>7</xdr:col><xdr:colOff>' + 4 * EMU_ + '</xdr:colOff><xdr:row>' + (n - 1) + '</xdr:row><xdr:rowOff>' + 4 * EMU_ +
       '</xdr:rowOff></xdr:from><xdr:ext cx="' + cx + '" cy="' + cy + '"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="' + (fotos + 1) + '" name="Foto ' + fotos +
       '"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rIdF' + fotos +
       '"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + cx + '" cy="' + cy +
@@ -283,7 +309,7 @@ function xlsx_(regs) {
     ['_rels/.rels', rels(['<Relationship Id="rId1" Type="' + REL + '/officeDocument" Target="xl/workbook.xml"/>'])],
     ['xl/workbook.xml', cab + '<workbook xmlns="' + NS + 'spreadsheetml/2006/main" xmlns:r="' + REL + '"><bookViews><workbookView/></bookViews><sheets>' +
       '<sheet name="Registros" sheetId="1" r:id="rId1"/></sheets>' + (regs.length ? '<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">' +
-      'Registros!$A$1:$I$' + ult + '</definedName></definedNames>' : '') + '</workbook>'],
+      'Registros!$A$1:$J$' + ult + '</definedName></definedNames>' : '') + '</workbook>'],
     ['xl/_rels/workbook.xml.rels', rels(['<Relationship Id="rId1" Type="' + REL + '/worksheet" Target="worksheets/sheet1.xml"/>',
       '<Relationship Id="rId2" Type="' + REL + '/styles" Target="styles.xml"/>'])],
     ['xl/styles.xml', cab + '<styleSheet xmlns="' + NS + 'spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/>' +
@@ -304,7 +330,7 @@ function xlsx_(regs) {
     ['xl/worksheets/sheet1.xml', cab + '<worksheet xmlns="' + NS + 'spreadsheetml/2006/main" xmlns:r="' + REL + '"><sheetViews><sheetView workbookViewId="0">' +
       '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>' +
       XLSX_COLUNAS_.map(function (c, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + c[1] + '" customWidth="1"/>'; }).join('') +
-      '</cols><sheetData>' + linhas.join('') + '</sheetData>' + (regs.length ? '<autoFilter ref="A1:I' + ult + '"/>' : '') +
+      '</cols><sheetData>' + linhas.join('') + '</sheetData>' + (regs.length ? '<autoFilter ref="A1:J' + ult + '"/>' : '') +
       (linksXml.length ? '<hyperlinks>' + linksXml.join('') + '</hyperlinks>' : '') +
       '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>' + (fotos ? '<drawing r:id="rIdD1"/>' : '') + '</worksheet>']
   ];
@@ -412,9 +438,9 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   .campo { margin-bottom: 16px; }
   label.rot { font-size: 14px; color: var(--texto); }
   .obrig { color: var(--vermelho); }
-  input[type=text], input[type=date], textarea { width: 100%; font: inherit; color: var(--texto); background: var(--campo); border: 1px solid var(--borda); border-radius: 10px; padding: 12px; }
+  input[type=text], textarea { width: 100%; font: inherit; color: var(--texto); background: var(--campo); border: 1px solid var(--borda); border-radius: 10px; padding: 12px; }
   textarea { resize: vertical; min-height: 104px; }
-  input[type=text]:focus, input[type=date]:focus, textarea:focus { outline: 2px solid var(--vermelho); outline-offset: 1px; border-color: transparent; }
+  input[type=text]:focus, textarea:focus { outline: 2px solid var(--vermelho); outline-offset: 1px; border-color: transparent; }
   .foto-btn { width: 100%; min-height: 120px; border: 2px dashed var(--borda); border-radius: 12px; background: var(--fundo); color: var(--texto); font: inherit; font-weight: 600; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; }
   .foto-btn:hover, .foto-btn:focus-visible { border-color: var(--vermelho); outline: none; }
   .foto-btn svg { width: 36px; height: 36px; color: var(--vermelho); }
@@ -428,13 +454,25 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   .aviso { border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; font-size: 15px; }
   .aviso.erro { background: var(--erro-claro); color: var(--erro); }
   .aviso.ok { background: var(--ok-claro); color: var(--ok); }
-  .baixar { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 12px; padding: 12px; border: 1px solid var(--borda); border-radius: 10px; background: var(--fundo); }
-  .baixar .rot { font-size: 13px; }
-  .data-campo { flex: 1 1 140px; min-width: 0; }
-  .data-campo input { padding: 10px; }
-  .baixar-btn { flex: 1 1 220px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--texto); border-color: var(--texto); color: var(--cartao); }
-  .baixar-btn svg { width: 18px; height: 18px; }
-  .baixar-btn:disabled { opacity: .6; cursor: wait; }
+  .codigo-linha { display: flex; gap: 8px; }
+  .codigo-linha input { flex: 1; min-width: 0; letter-spacing: .3px; }
+  .escanear-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; border-color: var(--vermelho); color: var(--vermelho); }
+  .escanear-btn svg { width: 20px; height: 20px; }
+  .dica { display: block; margin-top: 6px; font-size: 13px; color: var(--suave); }
+  .dica.ok { color: var(--ok); font-weight: 600; }
+  .dica.erro { color: var(--erro); }
+  .tempo-real { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: var(--fundo); border: 1px solid var(--borda); font-size: 14px; color: var(--suave); }
+  .planilha-btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; background: var(--texto); border-color: var(--texto); color: var(--cartao); }
+  .planilha-btn svg { width: 18px; height: 18px; }
+  .scanner { position: fixed; inset: 0; background: rgba(0, 0, 0, .92); display: grid; place-items: center; padding: 16px; z-index: 20; color: #fff; }
+  .scanner-in { width: 100%; max-width: 480px; text-align: center; }
+  .scanner h2 { margin: 0 0 12px; font-size: 18px; }
+  .scanner-video { position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: 62vh; background: #000; border-radius: 14px; overflow: hidden; margin: 0 auto; }
+  .scanner-video video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .mira { position: absolute; left: 10%; right: 10%; top: 30%; bottom: 30%; border: 3px solid #FF3B4A; border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .35); }
+  .scanner p { margin: 12px 0; font-size: 15px; }
+  .scanner-botoes { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .scanner-botoes .botao { flex: 1 1 160px; }
   .tab-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
   .tab-topo h2 { margin: 0; }
   .tab-topo small { color: var(--suave); font-weight: 400; font-size: 13px; }
@@ -487,6 +525,18 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       <input type="text" id="setor" name="setor" maxlength="60" autocapitalize="sentences" placeholder="Escreva o setor">
     </div>
     <div class="campo">
+      <label class="rot" for="codigo">ID de viagem, remessa ou lote <span class="obrig" id="codigoObrig" hidden>*</span></label>
+      <div class="codigo-linha">
+        <input type="text" id="codigo" name="codigo" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Escaneie ou digite">
+        <button type="button" class="botao escanear-btn" id="escanear">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+          <span>Escanear</span>
+        </button>
+      </div>
+      <small class="dica" id="codigoDica">Escaneie o QR Code ou o código de barras, ou digite o número.</small>
+      <input type="file" id="fotoCodigo" accept="image/*" capture="environment" hidden>
+    </div>
+    <div class="campo">
       <span class="rot">Foto <span class="obrig" id="fotoObrig">*</span></span>
       <input type="file" id="foto" accept="image/*" capture="environment" hidden>
       <button type="button" class="foto-btn" id="btnFoto">
@@ -511,19 +561,17 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       <h2 id="tabTitulo">Registros <small id="tabInfo"></small></h2>
       <button type="button" class="botao" id="atualizar">Atualizar</button>
     </div>
-    <div class="baixar">
-      <label class="data-campo"><span class="rot">De</span><input type="date" id="de"></label>
-      <label class="data-campo"><span class="rot">Até</span><input type="date" id="ate"></label>
-      <button type="button" class="botao baixar-btn" id="baixar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        <span id="baixarTexto">Baixar planilha (Excel com fotos)</span>
-      </button>
+    <div class="tempo-real">
+      <span>A planilha é preenchida na hora, a cada envio.</span>
+      <a class="botao planilha-btn" id="abrirPlanilha" target="_blank" rel="noopener" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+        Abrir planilha
+      </a>
     </div>
-    <div id="msgExcel" role="status" aria-live="polite"></div>
     <div class="tabela">
       <table>
-        <thead><tr><th>Foto</th><th>Data e hora</th><th>Turno</th><th>Colaborador</th><th>Setor</th><th>Descrição</th></tr></thead>
-        <tbody id="linhas"><tr><td colspan="6" class="vazio">Carregando…</td></tr></tbody>
+        <thead><tr><th>Foto</th><th>Data e hora</th><th>Turno</th><th>Colaborador</th><th>Setor</th><th>ID / remessa / lote</th><th>Descrição</th></tr></thead>
+        <tbody id="linhas"><tr><td colspan="7" class="vazio">Carregando…</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -534,12 +582,25 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   <div class="zoom-in"><img id="zoomImg" alt=""><br><button type="button" class="botao" id="zoomFechar">Fechar</button></div>
 </div>
 
+<div class="scanner" id="scanner" hidden role="dialog" aria-modal="true" aria-labelledby="scannerTitulo">
+  <div class="scanner-in">
+    <h2 id="scannerTitulo">Escanear QR Code ou código de barras</h2>
+    <div class="scanner-video" id="scannerVideoCaixa"><video id="scannerVideo" playsinline muted autoplay></video><div class="mira" aria-hidden="true"></div></div>
+    <p id="scannerMsg">Aponte a câmera para o código.</p>
+    <div class="scanner-botoes">
+      <button type="button" class="botao" id="scannerFoto">Tirar foto do código</button>
+      <button type="button" class="botao" id="scannerFechar">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var cfg = {fuso: 'America/Sao_Paulo', turnos: [], fotoObrigatoria: true};
-  var foto = null, enviando = false, baixando = false, novoId = '';
+  var foto = null, enviando = false, novoId = '';
 
   // ---------- servidor (google.script.run) ----------
   function chamar(fn, arg) {
@@ -622,9 +683,11 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   $('form').addEventListener('submit', function (ev) {
     ev.preventDefault();
     if (enviando) return;
-    var d = {nome: $('nome').value.replace(/\s+/g, ' ').trim(), setor: $('setor').value.replace(/\s+/g, ' ').trim(), descricao: $('descricao').value.trim(),
+    var d = {nome: $('nome').value.replace(/\s+/g, ' ').trim(), setor: $('setor').value.replace(/\s+/g, ' ').trim(), codigo: $('codigo').value.trim(),
+      descricao: $('descricao').value.trim(),
       foto: foto ? foto.grande : '', miniatura: foto ? foto.mini : ''};
     var falta = d.nome.length < 2 ? ['Escreva o nome do colaborador.', 'nome'] : d.setor.length < 2 ? ['Escreva o setor.', 'setor'] :
+      cfg.codigoObrigatorio && !d.codigo ? ['Escaneie ou digite o ID de viagem, remessa ou lote.', 'codigo'] :
       cfg.fotoObrigatoria && !foto ? ['Tire a foto.', 'btnFoto'] : d.descricao.length < 3 ? ['Descreva o que está ocorrendo.', 'descricao'] : null;
     if (falta) { aviso('erro', falta[0]); if (falta[1]) $(falta[1]).focus(); return; }
     enviando = true;
@@ -636,6 +699,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       aviso('ok', 'Registro enviado: ' + r.registro.data + ' às ' + r.registro.hora + ' · ' + r.registro.turno + '.');
       foto = null; mostrarFoto();
       $('descricao').value = ''; $('contador').textContent = '0/1000';
+      $('codigo').value = ''; dica('', 'Escaneie o QR Code ou o código de barras, ou digite o número.');
       mostrarLinhas(r.registros);
     }).catch(function (e) { aviso('erro', 'Não enviou: ' + textoErro(e)); })
       .then(function () { enviando = false; $('enviar').disabled = false; $('enviar').textContent = 'Enviar'; });
@@ -649,8 +713,9 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       var img = r.miniatura ? '<button type="button" class="mini-btn" data-foto="' + esc(r.id) + '" aria-label="Ver a foto de ' + esc(r.nome) + '"><img class="mini" src="' +
         esc(r.miniatura) + '" alt=""></button>' : '—';
       return '<tr' + (r.id && r.id === novoId ? ' class="novo"' : '') + '><td>' + img + '</td><td class="nw"><span class="dia">' + esc(r.data) + '</span> <span class="hr">' +
-        esc(r.hora) + '</span></td><td class="nw">' + esc(r.turno) + '</td><td>' + esc(r.nome) + '</td><td>' + esc(r.setor) + '</td><td class="desc">' + esc(r.descricao) + '</td></tr>';
-    }).join('') : '<tr><td colspan="6" class="vazio">Nenhum registro ainda.</td></tr>';
+        esc(r.hora) + '</span></td><td class="nw">' + esc(r.turno) + '</td><td>' + esc(r.nome) + '</td><td>' + esc(r.setor) + '</td><td class="nw">' + esc(r.codigo || '—') +
+        '</td><td class="desc">' + esc(r.descricao) + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="vazio">Nenhum registro ainda.</td></tr>';
     var fotos = {};
     lista.forEach(function (r) { fotos[r.id] = r.miniatura; });
     Array.prototype.forEach.call(document.querySelectorAll('[data-foto]'), function (b) {
@@ -661,34 +726,112 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     return chamar('listar').then(mostrarLinhas).catch(function (e) { aviso('erro', 'Não consegui atualizar a tabela: ' + textoErro(e)); });
   }
   $('atualizar').addEventListener('click', atualizar);
-  // ---------- baixar a planilha (Excel com as fotos) ----------
-  function baixarArquivo(nome, base64) {
-    var bin = atob(base64), bytes = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    var url = URL.createObjectURL(new Blob([bytes], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-    var a = document.createElement('a');
-    a.href = url; a.download = nome;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  // ---------- escanear: QR Code ou código de barras (câmera ao vivo ou foto do código) ----------
+  // Cada quadro da câmera vai para um canvas e é lido pelo leitor do próprio celular (BarcodeDetector, quando existe) ou
+  // pela biblioteca ZXing. Sem câmera ao vivo (permissão ou navegador), a pessoa tira uma foto do código.
+  var escaneando = false, stream = null, espera = 0, quadroCanvas = null, detector = null, zxRapido = null, zxCuidadoso = null;
+  function dica(tipo, texto) { $('codigoDica').className = 'dica' + (tipo ? ' ' + tipo : ''); $('codigoDica').textContent = texto; }
+  function prepararLeitores() {
+    if (!detector && 'BarcodeDetector' in window) { try { detector = new BarcodeDetector(); } catch (e) { detector = null; } }
+    if (!zxRapido && window.ZXing) {
+      zxRapido = new ZXing.MultiFormatReader(); zxRapido.setHints(new Map());
+      var dicas = new Map(); dicas.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      zxCuidadoso = new ZXing.MultiFormatReader(); zxCuidadoso.setHints(dicas);
+    }
+    return !!(detector || zxRapido);
   }
-  $('baixar').addEventListener('click', function () {
-    if (baixando) return;
-    baixando = true;
-    $('baixar').disabled = true; $('baixarTexto').textContent = 'Montando a planilha…';
-    avisoEm('msgExcel', '', '');
-    chamar('baixarExcel', {de: $('de').value, ate: $('ate').value}).then(function (r) {
-      if (!r.linhas) { avisoEm('msgExcel', 'erro', 'Nenhum registro nesse período.'); return; }
-      baixarArquivo(r.nome, r.base64);
-      avisoEm('msgExcel', 'ok', 'Planilha baixada: ' + r.linhas + (r.linhas === 1 ? ' registro' : ' registros') + ' e ' + r.fotos + (r.fotos === 1 ? ' foto' : ' fotos') + '.' +
-        (r.pequenas ? ' Período com muitas fotos: elas vieram menores (a foto grande abre no link "Abrir foto").' : ''));
-    }).catch(function (e) { avisoEm('msgExcel', 'erro', 'Não baixou: ' + textoErro(e)); })
-      .then(function () { baixando = false; $('baixar').disabled = false; $('baixarTexto').textContent = 'Baixar planilha (Excel com fotos)'; });
+  /** Lê o código num canvas. → Promise do texto ('' = não achou). */
+  function lerCanvas(c, cuidadoso) {
+    var zx = function () {
+      var r = cuidadoso ? zxCuidadoso : zxRapido;
+      if (!r) return '';
+      try { return r.decodeWithState(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(c)))).getText(); } catch (e) { return ''; }
+    };
+    if (!detector) return Promise.resolve(zx());
+    return detector.detect(c).then(function (l) { return l.length ? l[0].rawValue : zx(); }, zx);
+  }
+  function lido(texto) {
+    var t = String(texto || '').replace(/[\u0000-\u001F\u007F]/g, '').trim().slice(0, 80);
+    if (!t) return false;
+    fecharScanner();
+    $('codigo').value = t;
+    dica('ok', 'Lido: ' + t + ' (pode corrigir se precisar)');
+    if (navigator.vibrate) try { navigator.vibrate(80); } catch (e) { /* sem vibrar */ }
+    return true;
+  }
+  function pararCamera() {
+    escaneando = false;
+    clearTimeout(espera);
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    $('scannerVideo').srcObject = null;
+  }
+  function fecharScanner() { pararCamera(); $('scanner').hidden = true; }
+  function semCameraAoVivo(motivo) {
+    pararCamera();
+    $('scannerVideoCaixa').hidden = true;
+    $('scannerMsg').textContent = motivo + ' Toque em "Tirar foto do código": o app lê o código na foto.';
+  }
+  function proximoQuadro() {
+    if (!escaneando) return;
+    var v = $('scannerVideo');
+    if (v.readyState < 2 || !v.videoWidth) { espera = setTimeout(proximoQuadro, 200); return; }
+    var c = quadroCanvas || (quadroCanvas = document.createElement('canvas')), k = Math.min(1, 1280 / v.videoWidth);
+    c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    lerCanvas(c, false).then(function (t) { if (escaneando && !lido(t)) espera = setTimeout(proximoQuadro, 200); });
+  }
+  $('escanear').addEventListener('click', function () {
+    $('scanner').hidden = false; $('scannerVideoCaixa').hidden = false;
+    $('scannerMsg').textContent = 'Aponte a câmera para o código.';
+    $('scannerFechar').focus();
+    if (!prepararLeitores()) { semCameraAoVivo('O leitor de códigos não carregou (sem internet?). Digite o número.'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { semCameraAoVivo('Este navegador não abre a câmera ao vivo aqui.'); return; }
+    escaneando = true;
+    navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}}, audio: false}).then(function (s) {
+      if (!escaneando) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
+      stream = s;
+      var v = $('scannerVideo');
+      v.srcObject = s;
+      var tocar = v.play();
+      if (tocar && tocar.catch) tocar.catch(function () { /* o autoplay mostra assim mesmo */ });
+      proximoQuadro();
+    }).catch(function (e) {
+      if (!escaneando) return;
+      semCameraAoVivo(e && e.name === 'NotAllowedError' ? 'A câmera ao vivo não foi liberada aqui.' : 'A câmera ao vivo não abriu.');
+    });
   });
+  $('scannerFechar').addEventListener('click', fecharScanner);
+  $('scannerFoto').addEventListener('click', function () { prepararLeitores(); $('fotoCodigo').click(); });
+  // Foto do código: reduz (fica mais rápido) e procura com mais cuidado.
+  $('fotoCodigo').addEventListener('change', function () {
+    var arq = this.files && this.files[0], campo = this;
+    if (!arq) return;
+    pararCamera();
+    $('scannerVideoCaixa').hidden = true;
+    $('scannerMsg').textContent = 'Lendo o código na foto…';
+    carregar(arq).then(function (img) {
+      var k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+      var g = c.getContext('2d');
+      g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(img, 0, 0, c.width, c.height);
+      return lerCanvas(c, true);
+    }).then(function (t) {
+      if (!lido(t)) throw new Error('vazio');
+    }).catch(function () {
+      $('scannerMsg').textContent = 'Não achei o código nessa foto. Tire de novo mais perto e com o código inteiro na foto, ou cancele e digite.';
+    }).then(function () { campo.value = ''; });
+  });
+  $('codigo').addEventListener('input', function () { if ($('codigoDica').className !== 'dica') dica('', 'Escaneie o QR Code ou o código de barras, ou digite o número.'); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden && escaneando) fecharScanner(); });
 
   function fecharZoom() { $('zoom').hidden = true; $('zoomImg').src = ''; }
   $('zoomFechar').addEventListener('click', fecharZoom);
   $('zoom').addEventListener('click', function (e) { if (e.target === this) fecharZoom(); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$('zoom').hidden) fecharZoom(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!$('scanner').hidden) fecharScanner(); else if (!$('zoom').hidden) fecharZoom();
+  });
 
   // ---------- início ----------
   $('nome').value = lembrar('ocorr_nome');
@@ -699,14 +842,68 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     $('titulo').textContent = c.titulo; $('subtitulo').textContent = c.subtitulo;
     $('fotoObrig').hidden = !c.fotoObrigatoria;
     $('rodape').textContent = c.titulo + ' · versão ' + c.versao;
-    $('de').value = $('ate').value = c.hoje;
-    $('de').max = $('ate').max = c.hoje;
+    $('codigoObrig').hidden = !c.codigoObrigatorio;
+    if (c.planilhaUrl) { $('abrirPlanilha').href = c.planilhaUrl; $('abrirPlanilha').hidden = false; }
     relogio(); setInterval(relogio, 1000);
     mostrarLinhas(c.registros);
     setInterval(function () { if (!document.hidden && !enviando) atualizar(); }, 60000);
   }).catch(function (e) {
-    $('linhas').innerHTML = '<tr><td colspan="6" class="vazio">' + esc(textoErro(e)) + '</td></tr>';
+    $('linhas').innerHTML = '<tr><td colspan="7" class="vazio">' + esc(textoErro(e)) + '</td></tr>';
     aviso('erro', textoErro(e));
+  });
+})();
+</script>
+</body>
+</html>`;
+
+// ------------------------------------------------------------------ janela do menu da planilha: Baixar Excel com fotos
+var JANELA_EXCEL_ = String.raw`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  body { margin: 0; padding: 16px; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #1C1F24; background: #FFFFFF; }
+  p { margin: 0 0 12px; color: #5F6672; font-size: 13px; }
+  .datas { display: flex; gap: 10px; margin-bottom: 14px; }
+  .datas div { flex: 1; }
+  label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  input { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid #DDE0E5; border-radius: 8px; }
+  button { width: 100%; font: inherit; font-weight: 600; padding: 10px; border: 0; border-radius: 8px; background: #E60012; color: #FFFFFF; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: wait; }
+  #msg { margin-top: 12px; font-size: 14px; }
+  .ok { color: #1B7F3B; } .erro { color: #B3261E; }
+</style>
+</head>
+<body>
+<p>O Excel vem com a foto de cada registro dentro da planilha (até 31 dias).</p>
+<div class="datas">
+  <div><label for="de">De</label><input type="date" id="de" value="__HOJE__" max="__HOJE__"></div>
+  <div><label for="ate">Até</label><input type="date" id="ate" value="__HOJE__" max="__HOJE__"></div>
+</div>
+<button type="button" id="baixar">Baixar Excel com fotos</button>
+<div id="msg" role="status" aria-live="polite"></div>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function msg(tipo, t) { $('msg').className = tipo; $('msg').textContent = t; }
+  $('baixar').addEventListener('click', function () {
+    $('baixar').disabled = true; msg('', 'Montando o Excel…');
+    google.script.run.withSuccessHandler(function (r) {
+      $('baixar').disabled = false;
+      if (!r.linhas) { msg('erro', 'Nenhum registro nesse período.'); return; }
+      var bin = atob(r.base64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var url = URL.createObjectURL(new Blob([bytes], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+      var a = document.createElement('a');
+      a.href = url; a.download = r.nome;
+      document.body.appendChild(a); a.click(); a.remove();
+      msg('ok', 'Pronto: ' + r.linhas + (r.linhas === 1 ? ' registro' : ' registros') + ' e ' + r.fotos + (r.fotos === 1 ? ' foto.' : ' fotos.') +
+        (r.pequenas ? ' Muitas fotos: vieram menores (a grande abre no link "Abrir foto").' : ''));
+    }).withFailureHandler(function (e) {
+      $('baixar').disabled = false;
+      msg('erro', 'Não baixou: ' + String(e && e.message || e).replace(/^(Error|Exception):\s*/, ''));
+    }).baixarExcel({de: $('de').value, ate: $('ate').value});
   });
 })();
 </script>
