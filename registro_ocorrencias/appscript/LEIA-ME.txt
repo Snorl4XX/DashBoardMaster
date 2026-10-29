@@ -1,4 +1,4 @@
-J&T · REGISTRO DE OCORRÊNCIAS (异常登记) — versão 3.1, com PLANILHA GOOGLE · feito por Caike Oliveira
+J&T · REPORTE SETORIAL (部门报告) — versão 3.2, com PLANILHA GOOGLE · feito por Caike Oliveira
 (app separado: não junte com o DashMaster nem com os outros apps)
 =====================================================================================================
 
@@ -17,16 +17,21 @@ A DATA, a HORA e o TURNO aparecem na tela assim que ela abre e são gravados pel
 Botões no canto de cima:
   - 中文 / PT: troca a tela entre PORTUGUÊS e MANDARIM (fica guardado no celular; celular em chinês já abre em 中文).
   - Lua / sol: tema CLARO ou ESCURO (fica guardado no celular).
-No rodapé da tela: "Feito por Caike Oliveira" (em 中文: "由 Caike Oliveira 制作").
+No rodapé da tela: "Reporte setorial · Feito por Caike Oliveira" (em 中文: "部门报告 · 由 Caike Oliveira 制作").
 As mensagens que vêm do servidor (ex.: "Falta configurar") continuam em português.
 
-Cada envio vira NA HORA uma linha na aba "Ocorrências 异常登记" da Planilha Google (padrão J&T: cabeçalho vermelho,
+Cada envio vira NA HORA uma linha na aba "Reporte setorial 部门报告" da Planilha Google (padrão J&T: cabeçalho vermelho,
 cada título em português e em mandarim):
   Data 日期 | Hora 时间 | Turno 班次 | Colaborador 员工姓名 | Setor 部门 | ID de viagem / remessa / lote 车次号/运单号/批次号 |
   Descrição 异常描述 | Qtd. de fotos 照片数量 | Links das fotos 照片链接 | ID do registro 记录编号 | Foto 1 照片1 | Foto 2 照片2 | …
+SETOR e DESCRIÇÃO ficam nas DUAS LÍNGUAS, na mesma célula: o que o colaborador escreveu em cima e a tradução
+em mandarim embaixo (se ele escreveu em chinês, o português vai em cima e o chinês embaixo). Quem traduz é o Google
+Tradutor que já vem no Apps Script (LanguageApp): não precisa de chave nem cadastro. É tradução automática: pode sair
+com uma palavra estranha. Se o tradutor estiver fora do ar ou a cota do dia acabar, a célula fica só com o que foi
+escrito (o registro é salvo do mesmo jeito).
 Cada foto vai dentro da sua célula, uma coluna para cada (Foto 1, Foto 2, …). Quando um registro tem mais fotos que
 colunas, o app cria as colunas que faltam (com o cabeçalho vermelho). As fotos também ficam na pasta
-"Fotos - Registro de Ocorrências" do Google Drive, ao lado da planilha (os links estão na coluna "Links das fotos").
+"Fotos - Reporte setorial" do Google Drive, ao lado da planilha (os links estão na coluna "Links das fotos").
 A coluna "Miniatura (app)" fica escondida: é a foto pequena que a tabela do app mostra. Não apague.
 
 No app: a tabela embaixo do formulário mostra os 30 registros mais novos (1ª foto e "+2" quando tem mais) e o botão
@@ -39,17 +44,17 @@ Arquivo: TUDO no Codigo.gs (o servidor e a tela do app). A pasta teste/ é só p
 
 Instalação (uma vez, uns 10 minutos)
 -----------------------------------
-1. No Google Drive: Novo → Planilhas Google → Planilha em branco. Dê um nome (ex.: Registro de Ocorrências).
+1. No Google Drive: Novo → Planilhas Google → Planilha em branco. Dê um nome (ex.: Reporte setorial).
 2. Na planilha: Extensões → Apps Script.
 3. Apague tudo o que estiver em Código.gs, cole o arquivo Codigo.gs inteiro e clique em Salvar (disquete).
 4. No alto, escolha a função "configurar" e clique em Executar.
    O Google pede autorização: Revisar permissões → sua conta → "O Google não verificou este app" → Avançado →
    Acessar (não seguro) → Permitir. (O app é seu: ele só mexe nesta planilha e na pasta das fotos.)
-   Embaixo aparece "Pronto: aba Ocorrências 异常登记 e pasta ... no Drive". A planilha ganha a aba com o cabeçalho vermelho.
+   Embaixo aparece "Pronto: aba Reporte setorial 部门报告 e pasta ... no Drive". A planilha ganha a aba com o cabeçalho vermelho.
 5. No alto à direita: Implantar → Nova implantação → engrenagem → App da Web.
    Executar como: Eu. Quem pode acessar: Qualquer pessoa. Clique em Implantar.
    Copie o "URL do app da Web" (termina em /exec). Esse é o link do app.
-6. Abra o link no celular, preencha um teste com 2 ou 3 fotos e confira a linha na aba "Ocorrências 异常登记".
+6. Abra o link no celular, preencha um teste com 2 ou 3 fotos e confira a linha na aba "Reporte setorial 部门报告".
 7. Mande o link para a equipe. No celular: menu do navegador → Adicionar à tela inicial.
 
 Conta do Google da empresa: se "Qualquer pessoa" não aparecer, escolha "Qualquer pessoa em <empresa>": aí cada
@@ -61,7 +66,9 @@ Use o projeto do Apps Script que está DENTRO de uma Planilha Google (Extensões
 criado sozinho em script.google.com (o da versão do Feishu), crie a planilha e faça a Instalação acima.
 Cole o Codigo.gs novo no lugar do antigo, salve, rode "configurar" e vá em Implantar → Gerenciar implantações → lápis
 (Editar) → Versão: Nova versão → Implantar. O link continua o mesmo.
-- Vindo da 1.x: a aba antiga "Registros" fica como estava (histórico); os registros novos vão para "Ocorrências 异常登记".
+- Vindo da 1.x: a aba antiga "Registros" fica como estava (histórico); os registros novos vão para "Reporte setorial 部门报告".
+- Vindo da 3.0 ou 3.1: a aba "Ocorrências 异常登记" vira sozinha "Reporte setorial 部门报告", com os registros (os
+  antigos ficam sem a tradução; os novos já vêm nas duas línguas). A pasta das fotos continua a mesma.
 - Vindo da 2.0 (Feishu): as Propriedades do script FEISHU_APP_ID, FEISHU_APP_SECRET e FEISHU_PLANILHA não são mais
   usadas: pode apagar (Configurações do projeto → Propriedades do script). No Feishu, o app "Registro de Ocorrências"
   pode ser desativado.
@@ -74,7 +81,8 @@ No começo do Codigo.gs, no bloco CONFIG:
   colunasDeFoto: 3 (colunas de foto criadas no começo; o app cria mais quando precisar)
   codigoObrigatorio: false (true = não envia sem o ID de viagem / remessa / lote)
   ultimos: 30 (quantos registros a tabela do app mostra) · corCabecalho: '#E60012' (vermelho J&T)
-  tituloZh: '异常登记' (título da tela em mandarim) · autor: 'Caike Oliveira' (rodapé)
+  titulo: 'Reporte setorial' · tituloZh: '部门报告' (título da tela em mandarim) · autor: 'Caike Oliveira' (rodapé)
+  traduzir: true (false = setor e descrição só como foram escritos, sem a tradução)
 Depois de mudar: salve e faça a "Nova versão" (acima).
 
 Se der problema
@@ -90,4 +98,4 @@ Se der problema
 Cuidados
 --------
 Quem tem o link vê a tabela (nomes, descrições e fotos) e pode enviar registros. Mande o link só para a equipe.
-Não apague nem mude a ordem das colunas da aba "Ocorrências 异常登记" (o app escreve nelas).
+Não apague nem mude a ordem das colunas da aba "Reporte setorial 部门报告" (o app escreve nelas).

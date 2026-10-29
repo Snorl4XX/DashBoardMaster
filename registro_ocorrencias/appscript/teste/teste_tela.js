@@ -57,7 +57,7 @@ function tamanhoJpeg(b) {
 }
 
 (async () => {
-  const ABA = 'Ocorrências 异常登记';
+  const ABA = 'Reporte setorial 部门报告';
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'ocorr-tela-'));
   const navegador = await chromium.launch();
   /** Abre a tela do Codigo.gs de g; google.script.run → Codigo.gs (pelo Node), como o Apps Script faz. */
@@ -128,7 +128,7 @@ function tamanhoJpeg(b) {
     setorPh: document.getElementById('setor').placeholder, enviar: document.getElementById('enviar').textContent, horas: document.getElementById('turnoHoras').textContent,
     th: document.querySelector('[data-t="thFoto"]').textContent, rodape: document.getElementById('rodape').textContent, botao: document.getElementById('idioma').textContent,
     vazio: document.querySelector('#linhas td').textContent}));
-  check(zh.lang === 'zh-CN' && zh.h2 === '新建登记' && zh.titulo === '异常登记' && zh.setorPh === '填写部门' && zh.enviar === '提交' && /至/.test(zh.horas) && zh.th === '照片' &&
+  check(zh.lang === 'zh-CN' && zh.h2 === '新建登记' && zh.titulo === '部门报告' && zh.setorPh === '填写部门' && zh.enviar === '提交' && /至/.test(zh.horas) && zh.th === '照片' &&
     /由 Caike Oliveira 制作/.test(zh.rodape) && zh.botao === 'PT' && zh.vazio === '暂无记录。', 'botão de idioma: a tela inteira em mandarim', zh);
   await pg.click('#enviar');
   await pg.waitForSelector('.aviso.erro');
@@ -163,13 +163,14 @@ function tamanhoJpeg(b) {
   await pg.click('#enviar');
   await pg.waitForSelector('.aviso.ok');
   const msg = await pg.textContent('#msg'), a = g.ss.abas[ABA], l = a.celulas[1];
-  check(/Registro enviado: \d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}:\d{2} · T[123]\./.test(msg) && l[3] === "'COLABORADOR TESTE" && l[4] === "'Expedição" && l[5] === "'LOTE-TESTE-77" &&
+  check(/Registro enviado: \d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}:\d{2} · T[123]\./.test(msg) && l[3] === "'COLABORADOR TESTE" && l[4] === "'Expedição\n中:Expedição" && l[5] === "'LOTE-TESTE-77" &&
     l[2] === turno && l[7] === 3, 'enviou: linha na planilha com 3 fotos', msg);
   check([11, 12, 13].every(c => l[c] && l[c].tipo === 'imagem') && l[8].partes.length === 3 && g.arquivos.length === 3, 'planilha: cada foto na sua coluna (Foto 1 a 3) e os 3 links');
   const dims = g.arquivos.map(x => tamanhoJpeg(Buffer.from(x.blob.bytes)));
   check(dims[0].largura === 1000 && dims[0].altura === 750 && dims[1].largura === 750 && dims[1].altura === 1000, 'fotos reduzidas no celular (1000 px no lado maior), em pé e deitada', dims);
   const tab = await pg.$$eval('#linhas tr', trs => trs.map(tr => Array.from(tr.cells).map(c => c.textContent.trim())));
   check(tab.length === 1 && /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/.test(tab[0][1]) && tab[0][3] === 'COLABORADOR TESTE' && tab[0][5] === 'LOTE-TESTE-77' &&
+    tab[0][4] === 'Expedição\n中:Expedição' && /中:Pacote de teste/.test(tab[0][6]) &&
     (await pg.textContent('#linhas tr.novo .mais')) === '+2', 'a tabela mostra o registro com a 1ª foto e "+2"', tab);
   check(await pg.inputValue('#setor') === 'Expedição' && await pg.inputValue('#codigo') === '' && await pg.inputValue('#descricao') === '' &&
     (await pg.$$('#fotos .foto-item')).length === 0, 'depois de enviar: nome e setor ficam; código, descrição e fotos limpam');

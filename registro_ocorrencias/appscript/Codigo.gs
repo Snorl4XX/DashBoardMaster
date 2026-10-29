@@ -1,13 +1,14 @@
 /**
- * J&T · REGISTRO DE OCORRÊNCIAS (异常登记) — feito por Caike Oliveira.
+ * J&T · REPORTE SETORIAL (部门报告) — feito por Caike Oliveira.
  * Apps Script de uma Planilha Google, TUDO NESTE ARQUIVO (a tela está no fim, em PAGINA_). A tela tem Português e 中文.
  * Projeto SEPARADO: não junte com o DashMaster nem com os outros apps.
  *
  * O colaborador abre o link no celular e preenche: nome, setor (escrito), ID de viagem / remessa / lote (escaneando o
  * QR Code ou o código de barras, ou digitando), quantas fotos quiser e a descrição. Data, hora e turno são automáticos,
  * pela hora do envio (T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59) e aparecem na tela assim que ela abre.
- *   - Cada envio vira na hora uma linha na aba "Ocorrências 异常登记" (padrão J&T: cabeçalho vermelho, títulos em
- *     português e mandarim). Cada foto vai numa coluna (Foto 1, Foto 2, …), dentro da célula; quando um registro tem mais
+ *   - Cada envio vira na hora uma linha na aba "Reporte setorial 部门报告" (padrão J&T: cabeçalho vermelho, títulos em
+ *     português e mandarim). Setor e Descrição ficam nas duas línguas na mesma célula (português em cima e mandarim
+ *     embaixo), traduzidos pelo Google Tradutor do Apps Script (LanguageApp). Cada foto vai numa coluna (Foto 1, Foto 2, …), dentro da célula; quando um registro tem mais
  *     fotos que colunas, o app cria as colunas que faltam. As fotos também ficam numa pasta do Google Drive.
  *   - Embaixo do formulário, o app mostra os últimos registros e o botão "Abrir planilha".
  *   - Escanear: câmera ao vivo, lida pelo leitor do celular (BarcodeDetector) ou pela biblioteca ZXing (jsdelivr); se a
@@ -20,10 +21,10 @@
  *  4. Implantar → Nova implantação → App da Web: Executar como "Eu", Quem pode acessar "Qualquer pessoa" → Implantar.
  *     O link que termina em /exec é o do app.
  */
-var VERSAO = '3.1.0';
+var VERSAO = '3.2.0';
 var CONFIG = {
-  titulo: 'Registro de Ocorrências',
-  tituloZh: '异常登记',        // título da tela em mandarim
+  titulo: 'Reporte setorial',
+  tituloZh: '部门报告',        // título da tela em mandarim
   subtitulo: 'J&T Express · SP GRU',
   autor: 'Caike Oliveira',    // aparece no rodapé da tela
   // Turno pela hora do envio: de "de" até antes de "ate" (o T3 passa da meia-noite).
@@ -34,9 +35,10 @@ var CONFIG = {
   codigoObrigatorio: false, // ID de viagem / remessa / lote: true = não envia sem
   ultimos: 30,              // quantos registros a tabela do app mostra
   corCabecalho: '#E60012',  // vermelho J&T
+  traduzir: true,           // Setor e Descrição em português e mandarim na planilha (false = só o que foi escrito)
   fuso: 'America/Sao_Paulo'
 };
-var ABA_ = 'Ocorrências 异常登记', PASTA_FOTOS_ = 'Fotos - Registro de Ocorrências';
+var ABA_ = 'Reporte setorial 部门报告', ABA_ANTIGA_ = 'Ocorrências 异常登记', PASTA_FOTOS_ = 'Fotos - Reporte setorial';
 // Colunas fixas: [português, mandarim, largura]. Depois delas vêm as fotos, uma coluna por foto.
 var COLUNAS_ = [
   ['Data', '日期', 95], ['Hora', '时间', 80], ['Turno', '班次', 70], ['Colaborador', '员工姓名', 170], ['Setor', '部门', 130],
@@ -67,6 +69,7 @@ function listar() { return listar_(); }
  */
 function salvar(d) {
   var r = validar_(d || {});
+  var setor = bilingue_(r.setor), descricao = bilingue_(r.descricao); // traduz antes da trava (leva um instante)
   var agora = agora_();
   var turno = turnoDe(Number(Utilities.formatDate(agora, CONFIG.fuso, 'H')));
   var id = Utilities.formatDate(agora, CONFIG.fuso, 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4).toUpperCase();
@@ -85,7 +88,7 @@ function salvar(d) {
     var aba = aba_(planilha_());
     colunasDeFoto_(aba, r.fotos.length);
     var linha = aba.getLastRow() + 1;
-    aba.getRange(linha, 1, 1, COL_MINI_).setValues([[agora, agora, turno, texto_(r.nome), texto_(r.setor), texto_(r.codigo), texto_(r.descricao),
+    aba.getRange(linha, 1, 1, COL_MINI_).setValues([[agora, agora, turno, texto_(r.nome), texto_(setor), texto_(r.codigo), texto_(descricao),
       r.fotos.length, '', id, r.miniatura]]);
     if (links.length) {
       // "Foto 1  Foto 2 …": cada nome é o link da foto no Drive.
@@ -111,7 +114,7 @@ function salvar(d) {
     hora: Utilities.formatDate(agora, CONFIG.fuso, 'HH:mm:ss'), turno: turno}, registros: listar_()};
 }
 
-/** Rode uma vez pelo editor (▶ Executar): aba "Ocorrências 异常登记", pasta das fotos e fuso de São Paulo. */
+/** Rode uma vez pelo editor (▶ Executar): aba "Reporte setorial 部门报告", pasta das fotos e fuso de São Paulo. */
 function configurar() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw new Error('Abra o Apps Script pela planilha (Extensões → Apps Script) e rode de novo.');
@@ -161,6 +164,23 @@ function validar_(d) {
   return {nome: nome, setor: setor, codigo: codigo, descricao: descricao, fotos: fotos, miniatura: fotos.length ? mini : ''};
 }
 
+/**
+ * Texto do colaborador nas duas línguas, na mesma célula: português em cima e mandarim embaixo (Google Tradutor do
+ * Apps Script). Se veio escrito em chinês, a tradução para o português vai em cima. Sem tradução (cota do dia, erro ou
+ * tradução igual ao texto, como "DWS"), fica só o que foi escrito.
+ */
+function bilingue_(texto) {
+  if (!CONFIG.traduzir || !texto) return texto;
+  var chines = /[\u3400-\u9fff]/.test(texto);
+  try {
+    var trad = String(LanguageApp.translate(texto, chines ? 'zh-CN' : '', chines ? 'pt' : 'zh-CN') || '').trim();
+    if (!trad || trad.toLowerCase() === texto.toLowerCase()) return texto;
+    return chines ? trad + '\n' + texto : texto + '\n' + trad;
+  } catch (e) {
+    return texto;
+  }
+}
+
 /** Texto do colaborador sempre como texto: ' na frente (não aparece) — a planilha não executa =fórmula nem transforma
  * remessa em número (888001234567890 → 8,88E+14) ou "10/29" em data. */
 function texto_(v) { return v ? "'" + v : ''; }
@@ -185,10 +205,13 @@ function estiloCabecalho_(faixa) {
 }
 function tituloFoto_(n) { return 'Foto ' + n + '\n照片 ' + n; }
 
-/** Aba "Ocorrências 异常登记" (cria com o cabeçalho e o formato na primeira vez). */
+/** Aba "Reporte setorial 部门报告" (cria com o cabeçalho e o formato na primeira vez; a aba da versão 3.0/3.1 é renomeada). */
 function aba_(ss) {
   var aba = ss.getSheetByName(ABA_);
-  if (!aba) aba = ss.insertSheet(ABA_, 0);
+  if (!aba) {
+    var antiga = ss.getSheetByName(ABA_ANTIGA_);
+    if (antiga) { antiga.setName(ABA_); aba = antiga; } else aba = ss.insertSheet(ABA_, 0);
+  }
   if (aba.getLastRow() === 0) {
     var cab = COLUNAS_.map(function (c) { return c[0] + '\n' + c[1]; });
     for (var n = 1; n <= CONFIG.colunasDeFoto; n++) cab.push(tituloFoto_(n));
@@ -253,7 +276,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
 <head>
 <base target="_top">
 <meta charset="utf-8">
-<title>Registro de Ocorrências</title>
+<title>Reporte setorial</title>
 <style>
   :root {
     --vermelho: #E60012; --vermelho-escuro: #B8000E; --vermelho-claro: #FDECEE;
@@ -357,6 +380,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   td .dia, td .hr { display: block; }
   td .hr { color: var(--suave); }
   td.vazio { white-space: normal; }
+  td.bi { white-space: pre-line; min-width: 110px; }
   td.desc { min-width: 200px; max-width: 320px; white-space: pre-wrap; word-break: break-word; }
   tr.novo td { background: var(--vermelho-claro); }
   .mini { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--borda); cursor: zoom-in; display: block; }
@@ -380,7 +404,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
 <header class="topo">
   <div class="topo-in">
     <div class="marca" aria-hidden="true">J&amp;T</div>
-    <div class="topo-texto"><h1 id="titulo">Registro de Ocorrências</h1><p id="subtitulo">J&amp;T Express</p></div>
+    <div class="topo-texto"><h1 id="titulo">Reporte setorial</h1><p id="subtitulo">J&amp;T Express</p></div>
     <button type="button" class="tema-btn idioma-btn" id="idioma" lang="zh-CN" aria-label="切换为中文">中文</button>
     <button type="button" class="tema-btn" id="tema" aria-label="Usar tema escuro" aria-pressed="false">
       <svg id="iconeLua" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -432,6 +456,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     <div class="campo">
       <label class="rot" for="descricao"><span data-t="descricao">Descrição</span> <span class="obrig">*</span><span class="contador" id="contador">0/1000</span></label>
       <textarea id="descricao" name="descricao" maxlength="1000" placeholder="Descreva o que está ocorrendo" data-t-ph="descricaoPh" required></textarea>
+      <small class="dica" data-t="dicaTraducao">O setor e a descrição vão para a planilha em português e em mandarim.</small>
     </div>
     <div id="msg" role="status" aria-live="polite"></div>
     <button type="submit" class="botao enviar" id="enviar">Enviar</button>
@@ -457,7 +482,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     </div>
   </section>
 </main>
-<p class="rodape" id="rodape">Registro de Ocorrências · Feito por Caike Oliveira</p>
+<p class="rodape" id="rodape">Reporte setorial · Feito por Caike Oliveira</p>
 
 <div class="zoom" id="zoom" hidden role="dialog" aria-modal="true" aria-label="Foto do registro" data-t-aria="fotoRegistro">
   <div class="zoom-in"><img id="zoomImg" alt=""><br><button type="button" class="botao" id="zoomFechar" data-t="fechar">Fechar</button></div>
@@ -494,6 +519,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       fotos: 'Fotos', umaFoto: '1 foto', nFotos: '{n} fotos', tirarFoto: 'Tirar foto', tirarMais: 'Tirar mais uma foto', preparando: 'Preparando a foto…',
       limite: 'Limite de {n} fotos', galeria: 'Escolher da galeria', tirarFotoN: 'Tirar a foto {n}', fotoN: 'Foto {n}',
       dicaFotos: 'Pode pôr quantas fotos precisar: cada uma vai numa coluna da planilha. Toque no × para tirar uma foto.',
+      dicaTraducao: 'O setor e a descrição vão para a planilha em português e em mandarim.',
       descricao: 'Descrição', descricaoPh: 'Descreva o que está ocorrendo', enviar: 'Enviar', enviando: 'Enviando…', enviandoN: 'Enviando ({n} fotos)…',
       faltaNome: 'Escreva o nome do colaborador.', faltaSetor: 'Escreva o setor.', faltaCodigo: 'Escaneie ou digite o ID de viagem, remessa ou lote.',
       esperaFotos: 'Espere as fotos ficarem prontas.', faltaFoto: 'Tire a foto.', faltaDescricao: 'Descreva o que está ocorrendo.',
@@ -514,6 +540,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       fotos: '照片', umaFoto: '1 张照片', nFotos: '{n} 张照片', tirarFoto: '拍照', tirarMais: '再拍一张', preparando: '正在处理照片…',
       limite: '最多 {n} 张照片', galeria: '从相册选择', tirarFotoN: '删除第 {n} 张照片', fotoN: '照片 {n}',
       dicaFotos: '可以添加多张照片，每张照片放在表格的一列中。点 × 删除照片。',
+      dicaTraducao: '部门和异常描述会以葡萄牙语和中文两种语言写入表格。',
       descricao: '异常描述', descricaoPh: '描述发生了什么', enviar: '提交', enviando: '提交中…', enviandoN: '提交中（{n} 张照片）…',
       faltaNome: '请填写员工姓名。', faltaSetor: '请填写部门。', faltaCodigo: '请扫码或输入车次号、运单号或批次号。',
       esperaFotos: '请等待照片处理完成。', faltaFoto: '请拍照。', faltaDescricao: '请描述发生了什么。',
@@ -668,7 +695,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       var img = r.miniatura ? '<button type="button" class="mini-btn" data-foto="' + esc(r.id) + '" aria-label="' + esc(t('verFoto', {n: r.nome})) + '"><img class="mini" src="' +
         esc(r.miniatura) + '" alt="">' + mais + '</button>' : r.qtdFotos ? '<span class="na-planilha">' + esc(r.qtdFotos === 1 ? t('umaFoto') : t('nFotos', {n: r.qtdFotos})) + '</span>' : '—';
       return '<tr' + (r.id && r.id === novoId ? ' class="novo"' : '') + '><td>' + img + '</td><td class="nw"><span class="dia">' + esc(r.data) + '</span> <span class="hr">' +
-        esc(r.hora) + '</span></td><td class="nw">' + esc(r.turno) + '</td><td>' + esc(r.nome) + '</td><td>' + esc(r.setor) + '</td><td class="nw">' + esc(r.codigo || '—') +
+        esc(r.hora) + '</span></td><td class="nw">' + esc(r.turno) + '</td><td>' + esc(r.nome) + '</td><td class="bi">' + esc(r.setor) + '</td><td class="nw">' + esc(r.codigo || '—') +
         '</td><td class="desc">' + esc(r.descricao) + '</td></tr>';
     }).join('') : '<tr><td colspan="7" class="vazio">' + esc(t('nenhum')) + '</td></tr>';
     var fotos = {};
@@ -814,7 +841,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   pintarTema();
 
   function rodape() {
-    $('rodape').textContent = (idioma === 'zh' ? (cfg.tituloZh || '异常登记') : (cfg.titulo || 'Registro de Ocorrências')) + (cfg.versao ? ' · ' + t('versao') + ' ' + cfg.versao : '') +
+    $('rodape').textContent = (idioma === 'zh' ? (cfg.tituloZh || '部门报告') : (cfg.titulo || 'Reporte setorial')) + (cfg.versao ? ' · ' + t('versao') + ' ' + cfg.versao : '') +
       ' · ' + t('feitoPor', {a: cfg.autor || 'Caike Oliveira'});
   }
   function aplicarIdioma() {
@@ -822,7 +849,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function (el) { el.textContent = t(el.getAttribute('data-t')); });
     Array.prototype.forEach.call(document.querySelectorAll('[data-t-ph]'), function (el) { el.placeholder = t(el.getAttribute('data-t-ph')); });
     Array.prototype.forEach.call(document.querySelectorAll('[data-t-aria]'), function (el) { el.setAttribute('aria-label', t(el.getAttribute('data-t-aria'))); });
-    var titulo = idioma === 'zh' ? (cfg.tituloZh || '异常登记') : (cfg.titulo || 'Registro de Ocorrências');
+    var titulo = idioma === 'zh' ? (cfg.tituloZh || '部门报告') : (cfg.titulo || 'Reporte setorial');
     $('titulo').textContent = titulo; document.title = titulo;
     $('idioma').textContent = t('idiomaOutro');
     $('idioma').setAttribute('lang', idioma === 'zh' ? 'pt-BR' : 'zh-CN');

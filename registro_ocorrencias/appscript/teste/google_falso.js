@@ -1,5 +1,6 @@
 /**
- * Google de mentira para os testes do Registro de Ocorrências: planilha, Drive, propriedades, trava e Utilities.
+ * Google de mentira para os testes do Reporte setorial: planilha, Drive, propriedades, trava, Utilities e um tradutor de
+ * mentira (LanguageApp: para o mandarim devolve "中:" + texto; para o português, "PT:" + texto; "DWS" fica igual).
  * criarGoogle({semAtiva, recusarImagem (true ou função(coluna))}) roda o Codigo.gs de verdade num contexto separado → g (g.ctx = funções do Codigo.gs).
  * Como no Apps Script, os bytes vêm de -128 a 127 e Utilities.zip devolve um .zip de verdade (lerZip abre).
  */
@@ -59,7 +60,7 @@ function lerZip(buf) {
 
 function criarGoogle(o) {
   o = o || {};
-  const g = {props: {}, arquivos: [], pastas: [], trava: 0, formatos: {}, recusarImagem: o.recusarImagem || false};
+  const g = {props: {}, arquivos: [], pastas: [], trava: 0, formatos: {}, recusarImagem: o.recusarImagem || false, traducoes: [], semTraducao: !!o.semTraducao};
   function semFim(alvo) { // formatação que o teste não confere: devolve o próprio objeto
     return new Proxy(alvo, {get: (t, k) => (k in t ? t[k] : (typeof k === 'string' ? () => semFim(t) : undefined))});
   }
@@ -114,6 +115,7 @@ function criarGoogle(o) {
       return semFim(r);
     }
     setRowHeight(l, h) { this.alturas[l] = h; }
+    setName(n) { delete ss.abas[this.nome]; this.nome = n; ss.abas[n] = this; return this; }
     insertColumnAfter(c) { this.celulas.forEach(l => { while (l.length < c) l.push(undefined); l.splice(c, 0, undefined); }); this.colunasInseridas = (this.colunasInseridas || 0) + 1; }
     hideColumns(c) { this.ocultas.push(c); }
     setColumnWidth(c, w) { this.larguras[c] = w; }
@@ -165,7 +167,12 @@ function criarGoogle(o) {
       newBlob: (dados, tipo, nome) => new Blob(typeof dados === 'string' ? assinado(Buffer.from(dados, 'utf8')) : dados.slice(), tipo, nome),
       zip: (blobs, nome) => new Blob(assinado(zipar(blobs.map(b => ({nome: b.nome, dados: buffer(b.bytes)})))), 'application/zip', nome)
     },
-    HtmlService: {createHtmlOutput: html => semFim({html})}
+    HtmlService: {createHtmlOutput: html => semFim({html})},
+    LanguageApp: {translate: (texto, de, para) => {
+      g.traducoes.push({texto, de, para});
+      if (g.semTraducao) throw new Error('Service invoked too many times for one day: translate.');
+      return texto === 'DWS' ? 'DWS' : (para === 'zh-CN' ? '中:' : 'PT:') + texto;
+    }}
   };
   vm.createContext(ctx);
   vm.runInContext(CODIGO, ctx, {filename: 'Codigo.gs'});

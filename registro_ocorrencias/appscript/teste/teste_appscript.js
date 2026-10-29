@@ -1,5 +1,5 @@
 /**
- * Teste do Codigo.gs (Registro de Ocorrências → Planilha Google, padrão J&T) com Google de mentira (google_falso.js).
+ * Teste do Codigo.gs (Reporte setorial → Planilha Google, padrão J&T) com Google de mentira (google_falso.js).
  * Tudo fictício: planilha, nomes e fotos de teste.
  * Uso: node registro_ocorrencias/appscript/teste/teste_appscript.js
  */
@@ -26,7 +26,7 @@ const foto = n => 'data:image/jpeg;base64,' + jpegFalso(1000, 750, 'FOTO-FICTICI
 const MINI = 'data:image/jpeg;base64,' + jpegFalso(320, 240, 'MINI-FICTICIA').toString('base64');
 const BASE = {nome: 'COLABORADOR TESTE', setor: 'Recebimento', codigo: 'REMESSA-TESTE-0001', descricao: 'Pacote de teste com caixa amassada.',
   fotos: [foto(1)], miniatura: MINI};
-const ABA = 'Ocorrências 异常登记';
+const ABA = 'Reporte setorial 部门报告';
 const configurado = o => { const g = criarGoogle(o); g.ctx.configurar(); return g; };
 const aba = g => g.ss.abas[ABA];
 
@@ -46,11 +46,11 @@ const aba = g => g.ss.abas[ABA];
     'Foto 1\n照片 1', 'Foto 2\n照片 2', 'Foto 3\n照片 3'].join('|'), 'configurar: cabeçalho em português e mandarim, com Foto 1 a 3', cab);
   check(a.estilos.length === 1 && a.estilos[0].fundo === '#E60012' && a.estilos[0].nc === 14 && a.alturas[1] === 46, 'cabeçalho vermelho J&T (letra branca, negrito)', a.estilos);
   check(a.ocultas.join() === '11' && g.abaNaPosicao === 0 && g.ss.fuso === 'America/Sao_Paulo' && g.props.PLANILHA_ID === 'PLANILHA-FICTICIA' && /Implantar/.test(msg),
-    'configurar: miniatura escondida, aba "Ocorrências 异常登记" na frente, fuso de São Paulo');
+    'configurar: miniatura escondida, aba "Reporte setorial 部门报告" na frente, fuso de São Paulo');
   const pasta = g.pastas.find(p => p.id === g.props.FOTOS_ID);
-  check(pasta && pasta.nome === 'Fotos - Registro de Ocorrências' && pasta.pai === g.pastaDaPlanilha, 'pasta das fotos ao lado da planilha');
+  check(pasta && pasta.nome === 'Fotos - Reporte setorial' && pasta.pai === g.pastaDaPlanilha, 'pasta das fotos ao lado da planilha');
   g.ctx.configurar();
-  check(aba(g).celulas.length === 1 && g.pastas.filter(p => p.nome === 'Fotos - Registro de Ocorrências').length === 1, 'configurar de novo não duplica nada');
+  check(aba(g).celulas.length === 1 && g.pastas.filter(p => p.nome === 'Fotos - Reporte setorial').length === 1, 'configurar de novo não duplica nada');
   check(/Extensões/.test(erroDe(() => criarGoogle({semAtiva: true}).ctx.configurar())), 'configurar fora da planilha: explica onde abrir');
 }
 
@@ -62,9 +62,9 @@ const aba = g => g.ss.abas[ABA];
   const a = aba(g), l = a.celulas[1];
   check(r.ok && !r.aviso && r.registro.data === '29/10/2026' && r.registro.hora === '09:05:12' && r.registro.turno === 'T1' && r.registro.fotos === 1,
     'salvar: data, hora e turno automáticos pela hora do envio (9h → T1)', r.registro);
-  check(l[0] instanceof Date && l[2] === 'T1' && l[3] === "'COLABORADOR TESTE" && l[4] === "'Recebimento" && l[5] === "'REMESSA-TESTE-0001" &&
-    l[6] === "'Pacote de teste com caixa amassada." && l[7] === 1 && l[9] === r.registro.id && l[10] === MINI,
-    'salvar: linha com colaborador, setor, ID/remessa/lote, descrição, quantidade de fotos e ID (texto como texto)', l.slice(2, 11).map(x => (x && x.tipo) || String(x).slice(0, 30)));
+  check(l[0] instanceof Date && l[2] === 'T1' && l[3] === "'COLABORADOR TESTE" && l[4] === "'Recebimento\n中:Recebimento" && l[5] === "'REMESSA-TESTE-0001" &&
+    l[6] === "'Pacote de teste com caixa amassada.\n中:Pacote de teste com caixa amassada." && l[7] === 1 && l[9] === r.registro.id && l[10] === MINI,
+    'salvar: setor e descrição em português e mandarim (embaixo); nome e ID/remessa/lote como foram escritos', l.slice(2, 11).map(x => (x && x.tipo) || String(x).slice(0, 30)));
   check(l[11] && l[11].tipo === 'imagem' && l[11].url === foto(1) && a.alturas[2] === 120, 'a foto vai dentro da célula Foto 1');
   const arq = g.arquivos[0];
   check(g.arquivos.length === 1 && arq.blob.nome === '2026-10-29_09-05-12_T1_Recebimento_COLABORADOR-TESTE_foto1.jpg' && arq.pasta.id === g.props.FOTOS_ID,
@@ -145,6 +145,37 @@ const aba = g => g.ss.abas[ABA];
   check(sem.ok && aba(g).celulas[3][7] === 0 && aba(g).celulas[3][10] === '' && g.ctx.listar()[0].qtdFotos === 0, 'foto opcional (se mudar no CONFIG): salva sem foto');
 }
 
+// ---------- 6b. Tradução (português e mandarim) e aba da versão anterior ----------
+{
+  const g = configurado();
+  g.horario('2026-10-29T11:00:00');
+  g.ctx.salvar(Object.assign({}, BASE, {setor: '收货', descricao: '箱子破损'}));
+  g.ctx.salvar(Object.assign({}, BASE, {setor: 'DWS'}));
+  const a = aba(g);
+  check(a.celulas[1][4] === "'PT:收货\n收货" && a.celulas[1][6] === "'PT:箱子破损\n箱子破损" && g.traducoes.some(x => x.texto === '收货' && x.de === 'zh-CN' && x.para === 'pt'),
+    'escrito em chinês: o português vai em cima e o chinês embaixo', [a.celulas[1][4], a.celulas[1][6]]);
+  check(a.celulas[2][4] === "'DWS" && g.traducoes.some(x => x.texto === 'Recebimento' && x.de === '' && x.para === 'zh-CN') === false &&
+    g.traducoes.filter(x => x.texto === 'Pacote de teste com caixa amassada.').every(x => x.de === '' && x.para === 'zh-CN'),
+    'tradução igual ao texto (ex.: DWS): fica uma linha só; português → mandarim com o idioma de origem automático');
+  const ls = g.ctx.listar();
+  check(ls[0].setor === 'DWS' && ls[1].setor === 'PT:收货\n收货' && ls[1].descricao === 'PT:箱子破损\n箱子破损', 'a tabela do app mostra o texto nas duas línguas', ls[1]);
+  const q = configurado({semTraducao: true});
+  q.horario('2026-10-29T11:00:00');
+  const rq = q.ctx.salvar(Object.assign({}, BASE));
+  check(rq.ok && aba(q).celulas[1][4] === "'Recebimento" && aba(q).celulas[1][6] === "'Pacote de teste com caixa amassada.", 'tradutor fora do ar (cota do dia): salva só o que foi escrito');
+  const sem = configurado();
+  sem.ctx.CONFIG.traduzir = false;
+  sem.ctx.salvar(Object.assign({}, BASE));
+  check(sem.traducoes.length === 0 && aba(sem).celulas[1][4] === "'Recebimento", 'traduzir: false no CONFIG desliga a tradução');
+  // Planilha da 3.0/3.1: a aba "Ocorrências 异常登记" vira "Reporte setorial 部门报告", com os registros.
+  const v = criarGoogle();
+  v.props.PLANILHA_ID = 'PLANILHA-FICTICIA';
+  const antiga = v.ss.insertSheet('Ocorrências 异常登记', 0);
+  antiga.celulas.push(['Data\n日期', 'Hora\n时间'], [new Date('2026-10-28T10:00:00-03:00'), new Date('2026-10-28T10:00:00-03:00'), 'T1', "'ANTIGO TESTE", "'Recebimento", '', "'Registro antigo.", 0, '', 'ID-ANTIGO', '']);
+  const lv = v.ctx.listar();
+  check(v.ss.abas[ABA] === antiga && !v.ss.abas['Ocorrências 异常登记'] && lv.length === 1 && lv[0].nome === 'ANTIGO TESTE', 'aba da versão anterior é renomeada para "Reporte setorial 部门报告" e os registros continuam');
+}
+
 // ---------- 7. Tela, limite da tabela, tudo num arquivo ----------
 {
   const g = configurado();
@@ -152,7 +183,7 @@ const aba = g => g.ss.abas[ABA];
   for (let i = 0; i < 40; i++) { g.horario('2026-10-29T1' + (i % 10) + ':00:0' + (i % 10)); g.ctx.salvar(Object.assign({}, BASE, {fotos: [], nome: 'TESTE ' + i})); }
   const ini = g.ctx.iniciar();
   check(ini.registros.length === 30 && ini.registros[0].nome === 'TESTE 39' && ini.planilhaUrl === 'https://docs.google.com/spreadsheets/d/PLANILHA-FICTICIA/edit' &&
-    ini.fotosMax === 30 && ini.turnos.length === 3 && ini.autor === 'Caike Oliveira' && ini.tituloZh === '异常登记',
+    ini.fotosMax === 30 && ini.turnos.length === 3 && ini.autor === 'Caike Oliveira' && ini.titulo === 'Reporte setorial' && ini.tituloZh === '部门报告',
     'iniciar: link da planilha, limite de fotos, autor, título em mandarim e os 30 últimos registros', {n: ini.registros.length});
   const tela = g.ctx.doGet().html;
   check(/id="idioma"/.test(tela) && /Feito por Caike Oliveira/.test(tela) && /由 \{a\} 制作/.test(tela), 'tela: botão de idioma (Português / 中文) e "Feito por Caike Oliveira"');
@@ -165,5 +196,5 @@ const aba = g => g.ss.abas[ABA];
   check(fora.length === 1 && /cdn\.jsdelivr\.net\/npm\/@zxing\/library@0\.21\.3\/umd\/index\.min\.js/.test(fora[0]), 'de fora só o leitor de códigos (ZXing, versão fixa)', fora);
 }
 
-console.log('\n' + (falhas ? 'FALHOU: ' + falhas + ' de ' + (oks + falhas) : 'OK: ' + oks + ' verificações do Registro de Ocorrências passaram') + '.');
+console.log('\n' + (falhas ? 'FALHOU: ' + falhas + ' de ' + (oks + falhas) : 'OK: ' + oks + ' verificações do Reporte setorial passaram') + '.');
 process.exit(falhas ? 1 : 0);
