@@ -1,0 +1,69 @@
+J&T · REGISTRO DE OCORRÊNCIAS (app separado: não junte com o DashMaster nem com os outros apps)
+=============================================================================================
+
+O que faz
+---------
+O colaborador abre um link no celular e preenche:
+  - Nome do colaborador
+  - Setor: Recebimento, Expedição, Rejeito ou DWS
+  - Foto (o botão abre a câmera do celular)
+  - Descrição do que está ocorrendo
+A DATA, a HORA e o TURNO são automáticos, pela hora do envio:
+  T1 = 06:00 às 13:59 · T2 = 14:00 às 21:59 · T3 = 22:00 às 05:59 (ex.: enviou às 9h = T1).
+
+Cada envio:
+  - aparece na tabela embaixo do formulário (os 30 mais novos, com a foto);
+  - vira uma linha na aba "Registros" da Planilha Google: Data | Hora | Turno | Colaborador | Setor | Descrição |
+    Foto (a foto dentro da célula) | Link da foto | ID;
+  - guarda a foto na pasta "Fotos - Registro de Ocorrências" do Google Drive, ao lado da planilha.
+
+Arquivos: Codigo.gs e Index.html (os dois vão no Apps Script). A pasta teste/ é só para conferir o código.
+
+Instalação (uma vez, uns 10 minutos)
+-----------------------------------
+1. No Google Drive: Novo → Planilhas Google → Planilha em branco. Dê um nome (ex.: Registro de Ocorrências).
+2. Na planilha: Extensões → Apps Script.
+3. Apague tudo o que estiver em Código.gs, cole o arquivo Codigo.gs inteiro e clique em Salvar (disquete).
+4. Do lado esquerdo, em Arquivos, clique em + → HTML. Escreva o nome Index (sem o .html) e aperte Enter.
+   Apague o que vier escrito, cole o arquivo Index.html inteiro e clique em Salvar.
+5. No alto, escolha a função "configurar" e clique em Executar.
+   O Google pede autorização: Revisar permissões → escolha a sua conta → se aparecer "O Google não verificou este app",
+   clique em Avançado → Acessar (não seguro) → Permitir. (O app é seu: ele só mexe nesta planilha e na pasta das fotos.)
+   Embaixo aparece "Pronto: aba Registros e pasta ... no Drive".
+6. No alto à direita: Implantar → Nova implantação → engrenagem → App da Web.
+   Executar como: Eu. Quem pode acessar: Qualquer pessoa. Clique em Implantar.
+   Copie o "URL do app da Web" (termina em /exec). Esse é o link do app.
+7. Abra o link no celular, preencha um teste e confira a linha na aba "Registros" da planilha.
+8. Mande o link para a equipe. No celular, dá para criar um atalho: menu do navegador → Adicionar à tela inicial.
+
+Conta do Google da empresa: se "Qualquer pessoa" não aparecer, escolha "Qualquer pessoa em <empresa>": aí cada
+colaborador entra com a conta da empresa para abrir o link.
+
+Trocar o código depois (versão nova)
+------------------------------------
+Cole os arquivos novos no Apps Script, salve e vá em Implantar → Gerenciar implantações → lápis (Editar) →
+Versão: Nova versão → Implantar. O link continua o mesmo.
+
+Mudar setores, turnos ou a foto obrigatória
+-------------------------------------------
+No começo do Codigo.gs, no bloco CONFIG:
+  setores: ['Recebimento', 'Expedição', 'Rejeito', 'DWS']
+  turnos: T1 de 6 até 14, T2 de 14 até 22, T3 de 22 até 6
+  fotoObrigatoria: true (false = a foto passa a ser opcional)
+  ultimos: 30 (quantos registros a tabela do app mostra)
+Depois de mudar: salve e faça a "Nova versão" (acima).
+
+Se der problema
+---------------
+- "Falta configurar": faça o passo 5 (função configurar) de novo.
+- A célula Foto mostra "Foto no link ao lado": o Google não aceitou a imagem dentro da célula; a foto está no link
+  "Abrir foto" da coluna ao lado (e na pasta do Drive).
+- O botão Tirar foto não abre a câmera: o navegador do celular precisa da permissão de câmera (ou escolha a foto da
+  galeria na janela que abrir).
+- Mudou o código e o link não mudou nada: faltou a "Nova versão" na implantação.
+
+Cuidados
+--------
+Quem tem o link vê a tabela (nomes, descrições e fotos) e pode enviar registros. Mande o link só para a equipe.
+Não apague nem mude a ordem das colunas da aba "Registros" (o app escreve nelas). A última coluna (escondida) guarda a
+miniatura da foto para a tabela do app.
