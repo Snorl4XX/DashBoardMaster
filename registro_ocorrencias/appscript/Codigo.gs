@@ -1,5 +1,6 @@
 /**
- * J&T · REGISTRO DE OCORRÊNCIAS — Apps Script de uma Planilha Google, TUDO NESTE ARQUIVO (a tela está no fim, em PAGINA_).
+ * J&T · REGISTRO DE OCORRÊNCIAS (异常登记) — feito por Caike Oliveira.
+ * Apps Script de uma Planilha Google, TUDO NESTE ARQUIVO (a tela está no fim, em PAGINA_). A tela tem Português e 中文.
  * Projeto SEPARADO: não junte com o DashMaster nem com os outros apps.
  *
  * O colaborador abre o link no celular e preenche: nome, setor (escrito), ID de viagem / remessa / lote (escaneando o
@@ -19,10 +20,12 @@
  *  4. Implantar → Nova implantação → App da Web: Executar como "Eu", Quem pode acessar "Qualquer pessoa" → Implantar.
  *     O link que termina em /exec é o do app.
  */
-var VERSAO = '3.0.0';
+var VERSAO = '3.1.0';
 var CONFIG = {
   titulo: 'Registro de Ocorrências',
+  tituloZh: '异常登记',        // título da tela em mandarim
   subtitulo: 'J&T Express · SP GRU',
+  autor: 'Caike Oliveira',    // aparece no rodapé da tela
   // Turno pela hora do envio: de "de" até antes de "ate" (o T3 passa da meia-noite).
   turnos: [{nome: 'T1', de: 6, ate: 14}, {nome: 'T2', de: 14, ate: 22}, {nome: 'T3', de: 22, ate: 6}],
   fotoObrigatoria: true,    // pelo menos uma foto
@@ -50,7 +53,7 @@ function doGet() {
 
 /** Primeira tela: configuração do formulário, o link da planilha e os últimos registros. */
 function iniciar() {
-  return {versao: VERSAO, titulo: CONFIG.titulo, subtitulo: CONFIG.subtitulo, turnos: CONFIG.turnos, fotoObrigatoria: CONFIG.fotoObrigatoria,
+  return {versao: VERSAO, titulo: CONFIG.titulo, tituloZh: CONFIG.tituloZh, subtitulo: CONFIG.subtitulo, autor: CONFIG.autor, turnos: CONFIG.turnos, fotoObrigatoria: CONFIG.fotoObrigatoria,
     fotosMax: CONFIG.fotosMax, codigoObrigatorio: CONFIG.codigoObrigatorio, fuso: CONFIG.fuso, planilhaUrl: planilha_().getUrl(), registros: listar_()};
 }
 
@@ -283,6 +286,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   .tema-btn:hover { background: rgba(255, 255, 255, .24); }
   .tema-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
   .tema-btn svg { width: 22px; height: 22px; }
+  .idioma-btn { font: inherit; font-weight: 700; font-size: 15px; width: auto; min-width: 52px; padding: 0 10px; }
   main { max-width: 960px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
   .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 14px; box-shadow: var(--sombra); padding: 16px; min-width: 0; }
   .cartao h2 { margin: 0 0 12px; font-size: 17px; }
@@ -377,6 +381,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   <div class="topo-in">
     <div class="marca" aria-hidden="true">J&amp;T</div>
     <div class="topo-texto"><h1 id="titulo">Registro de Ocorrências</h1><p id="subtitulo">J&amp;T Express</p></div>
+    <button type="button" class="tema-btn idioma-btn" id="idioma" lang="zh-CN" aria-label="切换为中文">中文</button>
     <button type="button" class="tema-btn" id="tema" aria-label="Usar tema escuro" aria-pressed="false">
       <svg id="iconeLua" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <svg id="iconeSol" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
@@ -385,33 +390,33 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
 </header>
 <main>
   <form id="form" class="cartao" novalidate>
-    <h2>Novo registro</h2>
+    <h2 data-t="novoRegistro">Novo registro</h2>
     <div class="auto">
-      <div class="auto-item"><span class="rot">Data e hora</span><b id="agora">--:--:--</b><small><span id="data">--/--/----</span> · automático</small></div>
-      <div class="auto-item"><span class="rot">Turno</span><b><span class="turno-selo" id="turno">--</span></b><small id="turnoHoras">Automático</small></div>
+      <div class="auto-item"><span class="rot" data-t="dataHora">Data e hora</span><b id="agora">--:--:--</b><small><span id="data">--/--/----</span> · <span data-t="automatico">automático</span></small></div>
+      <div class="auto-item"><span class="rot" data-t="turno">Turno</span><b><span class="turno-selo" id="turno">--</span></b><small id="turnoHoras"></small></div>
     </div>
     <div class="campo">
-      <label class="rot" for="nome">Nome do colaborador <span class="obrig">*</span></label>
+      <label class="rot" for="nome"><span data-t="nome">Nome do colaborador</span> <span class="obrig">*</span></label>
       <input type="text" id="nome" name="nome" maxlength="80" autocomplete="name" autocapitalize="words" required>
     </div>
     <div class="campo">
-      <label class="rot" for="setor">Setor <span class="obrig">*</span></label>
-      <input type="text" id="setor" name="setor" maxlength="60" autocapitalize="sentences" placeholder="Escreva o setor">
+      <label class="rot" for="setor"><span data-t="setor">Setor</span> <span class="obrig">*</span></label>
+      <input type="text" id="setor" name="setor" maxlength="60" autocapitalize="sentences" placeholder="Escreva o setor" data-t-ph="setorPh">
     </div>
     <div class="campo">
-      <label class="rot" for="codigo">ID de viagem, remessa ou lote <span class="obrig" id="codigoObrig" hidden>*</span></label>
+      <label class="rot" for="codigo"><span data-t="codigo">ID de viagem, remessa ou lote</span> <span class="obrig" id="codigoObrig" hidden>*</span></label>
       <div class="codigo-linha">
-        <input type="text" id="codigo" name="codigo" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Escaneie ou digite">
+        <input type="text" id="codigo" name="codigo" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Escaneie ou digite" data-t-ph="codigoPh">
         <button type="button" class="botao escanear-btn" id="escanear">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-          <span>Escanear</span>
+          <span data-t="escanear">Escanear</span>
         </button>
       </div>
       <small class="dica" id="codigoDica">Escaneie o QR Code ou o código de barras, ou digite o número.</small>
       <input type="file" id="fotoCodigo" accept="image/*" capture="environment" hidden>
     </div>
     <div class="campo">
-      <span class="rot">Fotos <span class="obrig" id="fotoObrig">*</span><span class="contador" id="fotosConta"></span></span>
+      <span class="rot"><span data-t="fotos">Fotos</span> <span class="obrig" id="fotoObrig">*</span><span class="contador" id="fotosConta"></span></span>
       <input type="file" id="foto" accept="image/*" capture="environment" hidden>
       <input type="file" id="fotoGaleria" accept="image/*" multiple hidden>
       <div class="fotos" id="fotos"></div>
@@ -420,13 +425,13 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
           <span id="btnFotoTexto">Tirar foto</span>
         </button>
-        <button type="button" class="botao galeria-btn" id="btnGaleria">Escolher da galeria</button>
+        <button type="button" class="botao galeria-btn" id="btnGaleria" data-t="galeria">Escolher da galeria</button>
       </div>
-      <small class="dica">Pode pôr quantas fotos precisar: cada uma vai numa coluna da planilha. Toque no × para tirar uma foto.</small>
+      <small class="dica" data-t="dicaFotos">Pode pôr quantas fotos precisar: cada uma vai numa coluna da planilha. Toque no × para tirar uma foto.</small>
     </div>
     <div class="campo">
-      <label class="rot" for="descricao">Descrição <span class="obrig">*</span><span class="contador" id="contador">0/1000</span></label>
-      <textarea id="descricao" name="descricao" maxlength="1000" placeholder="Descreva o que está ocorrendo" required></textarea>
+      <label class="rot" for="descricao"><span data-t="descricao">Descrição</span> <span class="obrig">*</span><span class="contador" id="contador">0/1000</span></label>
+      <textarea id="descricao" name="descricao" maxlength="1000" placeholder="Descreva o que está ocorrendo" data-t-ph="descricaoPh" required></textarea>
     </div>
     <div id="msg" role="status" aria-live="polite"></div>
     <button type="submit" class="botao enviar" id="enviar">Enviar</button>
@@ -434,38 +439,38 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
 
   <section class="cartao" aria-labelledby="tabTitulo">
     <div class="tab-topo">
-      <h2 id="tabTitulo">Registros <small id="tabInfo"></small></h2>
-      <button type="button" class="botao" id="atualizar">Atualizar</button>
+      <h2 id="tabTitulo"><span data-t="registros">Registros</span> <small id="tabInfo"></small></h2>
+      <button type="button" class="botao" id="atualizar" data-t="atualizar">Atualizar</button>
     </div>
     <div class="tempo-real">
-      <span>A planilha é preenchida na hora, a cada envio.</span>
+      <span data-t="tempoReal">A planilha é preenchida na hora, a cada envio.</span>
       <a class="botao planilha-btn" id="abrirPlanilha" target="_blank" rel="noopener" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
-        Abrir planilha
+        <span data-t="abrirPlanilha">Abrir planilha</span>
       </a>
     </div>
     <div class="tabela">
       <table>
-        <thead><tr><th>Foto</th><th>Data e hora</th><th>Turno</th><th>Colaborador</th><th>Setor</th><th>ID / remessa / lote</th><th>Descrição</th></tr></thead>
-        <tbody id="linhas"><tr><td colspan="7" class="vazio">Carregando…</td></tr></tbody>
+        <thead><tr><th data-t="thFoto">Foto</th><th data-t="dataHora">Data e hora</th><th data-t="turno">Turno</th><th data-t="thColaborador">Colaborador</th><th data-t="setor">Setor</th><th data-t="thCodigo">ID / remessa / lote</th><th data-t="descricao">Descrição</th></tr></thead>
+        <tbody id="linhas"><tr><td colspan="7" class="vazio" data-t="carregando">Carregando…</td></tr></tbody>
       </table>
     </div>
   </section>
 </main>
-<p class="rodape" id="rodape"></p>
+<p class="rodape" id="rodape">Registro de Ocorrências · Feito por Caike Oliveira</p>
 
-<div class="zoom" id="zoom" hidden role="dialog" aria-modal="true" aria-label="Foto do registro">
-  <div class="zoom-in"><img id="zoomImg" alt=""><br><button type="button" class="botao" id="zoomFechar">Fechar</button></div>
+<div class="zoom" id="zoom" hidden role="dialog" aria-modal="true" aria-label="Foto do registro" data-t-aria="fotoRegistro">
+  <div class="zoom-in"><img id="zoomImg" alt=""><br><button type="button" class="botao" id="zoomFechar" data-t="fechar">Fechar</button></div>
 </div>
 
 <div class="scanner" id="scanner" hidden role="dialog" aria-modal="true" aria-labelledby="scannerTitulo">
   <div class="scanner-in">
-    <h2 id="scannerTitulo">Escanear QR Code ou código de barras</h2>
+    <h2 id="scannerTitulo" data-t="scannerTitulo">Escanear QR Code ou código de barras</h2>
     <div class="scanner-video" id="scannerVideoCaixa"><video id="scannerVideo" playsinline muted autoplay></video><div class="mira" aria-hidden="true"></div></div>
     <p id="scannerMsg">Aponte a câmera para o código.</p>
     <div class="scanner-botoes">
-      <button type="button" class="botao" id="scannerFoto">Tirar foto do código</button>
-      <button type="button" class="botao" id="scannerFechar">Cancelar</button>
+      <button type="button" class="botao" id="scannerFoto" data-t="fotoCodigo">Tirar foto do código</button>
+      <button type="button" class="botao" id="scannerFechar" data-t="cancelar">Cancelar</button>
     </div>
   </div>
 </div>
@@ -478,7 +483,57 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   // Data, hora e turno aparecem já ao abrir (sem esperar o servidor); o servidor só confirma os turnos.
   var cfg = {fuso: 'America/Sao_Paulo', turnos: [{nome: 'T1', de: 6, ate: 14}, {nome: 'T2', de: 14, ate: 22}, {nome: 'T3', de: 22, ate: 6}],
     fotoObrigatoria: true, fotosMax: 30};
-  var fotos = [], preparando = 0, enviando = false, novoId = '';
+  var fotos = [], preparando = 0, enviando = false, novoId = '', ultimaLista = null;
+
+  // ---------- idiomas: Português e 中文 (o botão no topo troca; fica guardado no aparelho) ----------
+  var TEXTOS = {
+    pt: {
+      novoRegistro: 'Novo registro', dataHora: 'Data e hora', automatico: 'automático', turno: 'Turno', as: 'às',
+      nome: 'Nome do colaborador', setor: 'Setor', setorPh: 'Escreva o setor', codigo: 'ID de viagem, remessa ou lote', codigoPh: 'Escaneie ou digite',
+      escanear: 'Escanear', dicaCodigo: 'Escaneie o QR Code ou o código de barras, ou digite o número.', lido: 'Lido: {t} (pode corrigir se precisar)',
+      fotos: 'Fotos', umaFoto: '1 foto', nFotos: '{n} fotos', tirarFoto: 'Tirar foto', tirarMais: 'Tirar mais uma foto', preparando: 'Preparando a foto…',
+      limite: 'Limite de {n} fotos', galeria: 'Escolher da galeria', tirarFotoN: 'Tirar a foto {n}', fotoN: 'Foto {n}',
+      dicaFotos: 'Pode pôr quantas fotos precisar: cada uma vai numa coluna da planilha. Toque no × para tirar uma foto.',
+      descricao: 'Descrição', descricaoPh: 'Descreva o que está ocorrendo', enviar: 'Enviar', enviando: 'Enviando…', enviandoN: 'Enviando ({n} fotos)…',
+      faltaNome: 'Escreva o nome do colaborador.', faltaSetor: 'Escreva o setor.', faltaCodigo: 'Escaneie ou digite o ID de viagem, remessa ou lote.',
+      esperaFotos: 'Espere as fotos ficarem prontas.', faltaFoto: 'Tire a foto.', faltaDescricao: 'Descreva o que está ocorrendo.',
+      enviado: 'Registro enviado: {d} às {h} · {t}.', naoEnviou: 'Não enviou: ', naoAtualizou: 'Não consegui atualizar a tabela: ', naoLeuFoto: 'Não consegui ler a foto. Tire de novo.',
+      registros: 'Registros', ultimos: '· últimos {n}', atualizar: 'Atualizar', tempoReal: 'A planilha é preenchida na hora, a cada envio.', abrirPlanilha: 'Abrir planilha',
+      thFoto: 'Foto', thColaborador: 'Colaborador', thCodigo: 'ID / remessa / lote', carregando: 'Carregando…', nenhum: 'Nenhum registro ainda.', verFoto: 'Ver a foto de {n}',
+      fotoRegistro: 'Foto do registro', fechar: 'Fechar', scannerTitulo: 'Escanear QR Code ou código de barras', aponte: 'Aponte a câmera para o código.',
+      fotoCodigo: 'Tirar foto do código', cancelar: 'Cancelar', lendoFoto: 'Lendo o código na foto…',
+      naoAchou: 'Não achei o código nessa foto. Tire de novo mais perto e com o código inteiro na foto, ou cancele e digite.',
+      semLeitor: 'O leitor de códigos não carregou (sem internet?). Digite o número.', semCamNavegador: 'Este navegador não abre a câmera ao vivo aqui.',
+      camNegada: 'A câmera ao vivo não foi liberada aqui.', camFalhou: 'A câmera ao vivo não abriu.', useFoto: 'Toque em "Tirar foto do código": o app lê o código na foto.',
+      temaClaro: 'Usar tema claro', temaEscuro: 'Usar tema escuro', idiomaOutro: '中文', idiomaAria: '切换为中文', versao: 'versão', feitoPor: 'Feito por {a}'
+    },
+    zh: {
+      novoRegistro: '新建登记', dataHora: '日期和时间', automatico: '自动', turno: '班次', as: '至',
+      nome: '员工姓名', setor: '部门', setorPh: '填写部门', codigo: '车次号、运单号或批次号', codigoPh: '扫码或输入',
+      escanear: '扫码', dicaCodigo: '扫描二维码或条形码，或手动输入号码。', lido: '已识别：{t}（如有需要可以修改）',
+      fotos: '照片', umaFoto: '1 张照片', nFotos: '{n} 张照片', tirarFoto: '拍照', tirarMais: '再拍一张', preparando: '正在处理照片…',
+      limite: '最多 {n} 张照片', galeria: '从相册选择', tirarFotoN: '删除第 {n} 张照片', fotoN: '照片 {n}',
+      dicaFotos: '可以添加多张照片，每张照片放在表格的一列中。点 × 删除照片。',
+      descricao: '异常描述', descricaoPh: '描述发生了什么', enviar: '提交', enviando: '提交中…', enviandoN: '提交中（{n} 张照片）…',
+      faltaNome: '请填写员工姓名。', faltaSetor: '请填写部门。', faltaCodigo: '请扫码或输入车次号、运单号或批次号。',
+      esperaFotos: '请等待照片处理完成。', faltaFoto: '请拍照。', faltaDescricao: '请描述发生了什么。',
+      enviado: '已提交：{d} {h} · {t}。', naoEnviou: '提交失败：', naoAtualizou: '无法刷新表格：', naoLeuFoto: '无法读取照片，请重新拍摄。',
+      registros: '登记记录', ultimos: '· 最近 {n} 条', atualizar: '刷新', tempoReal: '每次提交后，表格会立即更新。', abrirPlanilha: '打开表格',
+      thFoto: '照片', thColaborador: '员工', thCodigo: '车次 / 运单 / 批次', carregando: '加载中…', nenhum: '暂无记录。', verFoto: '查看 {n} 的照片',
+      fotoRegistro: '登记照片', fechar: '关闭', scannerTitulo: '扫描二维码或条形码', aponte: '将摄像头对准条码。',
+      fotoCodigo: '拍摄条码照片', cancelar: '取消', lendoFoto: '正在识别照片中的条码…',
+      naoAchou: '照片中没有找到条码。请靠近一点，拍下完整的条码；或者取消后手动输入。',
+      semLeitor: '扫码组件没有加载（可能没有网络）。请手动输入号码。', semCamNavegador: '此浏览器在这里无法打开实时摄像头。',
+      camNegada: '这里没有允许使用实时摄像头。', camFalhou: '实时摄像头无法打开。', useFoto: '请点“拍摄条码照片”，系统会识别照片中的条码。',
+      temaClaro: '使用浅色主题', temaEscuro: '使用深色主题', idiomaOutro: 'PT', idiomaAria: 'Mudar para português', versao: '版本', feitoPor: '由 {a} 制作'
+    }
+  };
+  var idioma = 'pt';
+  /** Texto no idioma escolhido; {n}, {t}… são trocados por v. */
+  function t(chave, v) {
+    var s = (TEXTOS[idioma] && TEXTOS[idioma][chave]) || TEXTOS.pt[chave] || chave;
+    return s.replace(/\{(\w+)\}/g, function (m, k) { return v && v[k] !== undefined ? v[k] : m; });
+  }
 
   // ---------- servidor (google.script.run) ----------
   function chamar(fn, arg) {
@@ -507,14 +562,14 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     }
     return null;
   }
-  function horas(t) { var dois = function (n) { return (n < 10 ? '0' : '') + n; }; return dois(t.de) + ':00 às ' + dois((t.ate + 23) % 24) + ':59'; }
+  function horas(tu) { var dois = function (n) { return (n < 10 ? '0' : '') + n; }; return dois(tu.de) + ':00 ' + t('as') + ' ' + dois((tu.ate + 23) % 24) + ':59'; }
   function relogio() {
     var p = partes(new Date());
     $('agora').textContent = p.hour + ':' + p.minute + ':' + p.second;
     $('data').textContent = p.day + '/' + p.month + '/' + p.year;
     var t = turnoDe(Number(p.hour));
     $('turno').textContent = t ? t.nome : '--';
-    $('turnoHoras').textContent = t ? horas(t) : 'Automático';
+    $('turnoHoras').textContent = t ? horas(t) : '';
   }
 
   // ---------- foto: reduz no celular antes de enviar ----------
@@ -522,7 +577,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     return new Promise(function (ok, erro) {
       var url = URL.createObjectURL(arquivo), img = new Image();
       img.onload = function () { URL.revokeObjectURL(url); ok(img); };
-      img.onerror = function () { URL.revokeObjectURL(url); erro(new Error('Não consegui ler a foto. Tire de novo.')); };
+      img.onerror = function () { URL.revokeObjectURL(url); erro(new Error(t('naoLeuFoto'))); };
       img.src = url;
     });
   }
@@ -536,14 +591,14 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   }
   function mostrarFotos() {
     $('fotos').innerHTML = fotos.map(function (f, i) {
-      return '<div class="foto-item"><img src="' + esc(f.mini) + '" alt="Foto ' + (i + 1) + '"><span class="foto-num">' + (i + 1) + '</span>' +
-        '<button type="button" class="foto-tirar" data-tirar="' + i + '" aria-label="Tirar a foto ' + (i + 1) + '">×</button></div>';
+      return '<div class="foto-item"><img src="' + esc(f.mini) + '" alt="' + esc(t('fotoN', {n: i + 1})) + '"><span class="foto-num">' + (i + 1) + '</span>' +
+        '<button type="button" class="foto-tirar" data-tirar="' + i + '" aria-label="' + esc(t('tirarFotoN', {n: i + 1})) + '">×</button></div>';
     }).join('');
     var cheio = fotos.length >= cfg.fotosMax;
-    $('fotosConta').textContent = fotos.length ? fotos.length + (fotos.length === 1 ? ' foto' : ' fotos') : '';
+    $('fotosConta').textContent = fotos.length ? (fotos.length === 1 ? t('umaFoto') : t('nFotos', {n: fotos.length})) : '';
     $('btnFoto').classList.toggle('compacto', fotos.length > 0);
     $('btnFoto').disabled = $('btnGaleria').disabled = cheio || preparando > 0;
-    $('btnFotoTexto').textContent = preparando ? 'Preparando a foto…' : cheio ? 'Limite de ' + cfg.fotosMax + ' fotos' : fotos.length ? 'Tirar mais uma foto' : 'Tirar foto';
+    $('btnFotoTexto').textContent = preparando ? t('preparando') : cheio ? t('limite', {n: cfg.fotosMax}) : fotos.length ? t('tirarMais') : t('tirarFoto');
   }
   $('fotos').addEventListener('click', function (e) {
     var b = e.target.closest('[data-tirar]');
@@ -582,39 +637,40 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     var d = {nome: $('nome').value.replace(/\s+/g, ' ').trim(), setor: $('setor').value.replace(/\s+/g, ' ').trim(), codigo: $('codigo').value.trim(),
       descricao: $('descricao').value.trim(),
       fotos: fotos.map(function (f) { return f.grande; }), miniatura: fotos.length ? fotos[0].mini : ''};
-    var falta = d.nome.length < 2 ? ['Escreva o nome do colaborador.', 'nome'] : d.setor.length < 2 ? ['Escreva o setor.', 'setor'] :
-      cfg.codigoObrigatorio && !d.codigo ? ['Escaneie ou digite o ID de viagem, remessa ou lote.', 'codigo'] :
-      preparando ? ['Espere as fotos ficarem prontas.', null] : cfg.fotoObrigatoria && !fotos.length ? ['Tire a foto.', 'btnFoto'] : d.descricao.length < 3 ? ['Descreva o que está ocorrendo.', 'descricao'] : null;
-    if (falta) { aviso('erro', falta[0]); if (falta[1]) $(falta[1]).focus(); return; }
+    var falta = d.nome.length < 2 ? ['faltaNome', 'nome'] : d.setor.length < 2 ? ['faltaSetor', 'setor'] :
+      cfg.codigoObrigatorio && !d.codigo ? ['faltaCodigo', 'codigo'] :
+      preparando ? ['esperaFotos', null] : cfg.fotoObrigatoria && !fotos.length ? ['faltaFoto', 'btnFoto'] : d.descricao.length < 3 ? ['faltaDescricao', 'descricao'] : null;
+    if (falta) { aviso('erro', t(falta[0])); if (falta[1]) $(falta[1]).focus(); return; }
     enviando = true;
     $('enviar').disabled = true;
-    $('enviar').textContent = d.fotos.length > 1 ? 'Enviando (' + d.fotos.length + ' fotos)…' : 'Enviando…';
+    $('enviar').textContent = d.fotos.length > 1 ? t('enviandoN', {n: d.fotos.length}) : t('enviando');
     aviso('', '');
     chamar('salvar', d).then(function (r) {
       guardar('ocorr_nome', d.nome); guardar('ocorr_setor', d.setor);
       novoId = r.registro.id;
       if (r.aviso) aviso('erro', r.aviso);
-      else aviso('ok', 'Registro enviado: ' + r.registro.data + ' às ' + r.registro.hora + ' · ' + r.registro.turno + '.');
+      else aviso('ok', t('enviado', {d: r.registro.data, h: r.registro.hora, t: r.registro.turno}));
       fotos = []; mostrarFotos();
       $('descricao').value = ''; $('contador').textContent = '0/1000';
-      $('codigo').value = ''; dica('', 'Escaneie o QR Code ou o código de barras, ou digite o número.');
+      $('codigo').value = ''; dica('', 'dicaCodigo');
       mostrarLinhas(r.registros);
-    }).catch(function (e) { aviso('erro', 'Não enviou: ' + textoErro(e)); })
-      .then(function () { enviando = false; $('enviar').disabled = false; $('enviar').textContent = 'Enviar'; });
+    }).catch(function (e) { aviso('erro', t('naoEnviou') + textoErro(e)); })
+      .then(function () { enviando = false; $('enviar').disabled = false; $('enviar').textContent = t('enviar'); });
   });
 
   // ---------- tabela ----------
   function mostrarLinhas(lista) {
     lista = lista || [];
-    $('tabInfo').textContent = lista.length ? '· últimos ' + lista.length : '';
+    ultimaLista = lista;
+    $('tabInfo').textContent = lista.length ? t('ultimos', {n: lista.length}) : '';
     $('linhas').innerHTML = lista.length ? lista.map(function (r) {
       var mais = r.qtdFotos > 1 ? '<span class="mais">+' + (r.qtdFotos - 1) + '</span>' : '';
-      var img = r.miniatura ? '<button type="button" class="mini-btn" data-foto="' + esc(r.id) + '" aria-label="Ver a foto de ' + esc(r.nome) + '"><img class="mini" src="' +
-        esc(r.miniatura) + '" alt="">' + mais + '</button>' : r.qtdFotos ? '<span class="na-planilha">' + r.qtdFotos + (r.qtdFotos === 1 ? ' foto' : ' fotos') + '</span>' : '—';
+      var img = r.miniatura ? '<button type="button" class="mini-btn" data-foto="' + esc(r.id) + '" aria-label="' + esc(t('verFoto', {n: r.nome})) + '"><img class="mini" src="' +
+        esc(r.miniatura) + '" alt="">' + mais + '</button>' : r.qtdFotos ? '<span class="na-planilha">' + esc(r.qtdFotos === 1 ? t('umaFoto') : t('nFotos', {n: r.qtdFotos})) + '</span>' : '—';
       return '<tr' + (r.id && r.id === novoId ? ' class="novo"' : '') + '><td>' + img + '</td><td class="nw"><span class="dia">' + esc(r.data) + '</span> <span class="hr">' +
         esc(r.hora) + '</span></td><td class="nw">' + esc(r.turno) + '</td><td>' + esc(r.nome) + '</td><td>' + esc(r.setor) + '</td><td class="nw">' + esc(r.codigo || '—') +
         '</td><td class="desc">' + esc(r.descricao) + '</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="vazio">Nenhum registro ainda.</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="vazio">' + esc(t('nenhum')) + '</td></tr>';
     var fotos = {};
     lista.forEach(function (r) { fotos[r.id] = r.miniatura; });
     Array.prototype.forEach.call(document.querySelectorAll('[data-foto]'), function (b) {
@@ -622,14 +678,17 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     });
   }
   function atualizar() {
-    return chamar('listar').then(mostrarLinhas).catch(function (e) { aviso('erro', 'Não consegui atualizar a tabela: ' + textoErro(e)); });
+    return chamar('listar').then(mostrarLinhas).catch(function (e) { aviso('erro', t('naoAtualizou') + textoErro(e)); });
   }
   $('atualizar').addEventListener('click', atualizar);
   // ---------- escanear: QR Code ou código de barras (câmera ao vivo ou foto do código) ----------
   // Cada quadro da câmera vai para um canvas e é lido pelo leitor do próprio celular (BarcodeDetector, quando existe) ou
   // pela biblioteca ZXing. Sem câmera ao vivo (permissão ou navegador), a pessoa tira uma foto do código.
   var escaneando = false, stream = null, espera = 0, quadroCanvas = null, detector = null, zxRapido = null, zxCuidadoso = null;
-  function dica(tipo, texto) { $('codigoDica').className = 'dica' + (tipo ? ' ' + tipo : ''); $('codigoDica').textContent = texto; }
+  // Dica do campo e mensagem do leitor guardam a chave, para trocar de idioma com a mensagem na tela.
+  var dicaAtual = ['', 'dicaCodigo', null], scannerAtual = [['aponte']];
+  function dica(tipo, chave, v) { dicaAtual = [tipo, chave, v]; $('codigoDica').className = 'dica' + (tipo ? ' ' + tipo : ''); $('codigoDica').textContent = t(chave, v); }
+  function msgScanner(partes) { scannerAtual = partes; $('scannerMsg').textContent = partes.map(function (p) { return t(p); }).join(' '); }
   function prepararLeitores() {
     if (!detector && 'BarcodeDetector' in window) { try { detector = new BarcodeDetector(); } catch (e) { detector = null; } }
     if (!zxRapido && window.ZXing) {
@@ -654,7 +713,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     if (!t) return false;
     fecharScanner();
     $('codigo').value = t;
-    dica('ok', 'Lido: ' + t + ' (pode corrigir se precisar)');
+    dica('ok', 'lido', {t: t});
     if (navigator.vibrate) try { navigator.vibrate(80); } catch (e) { /* sem vibrar */ }
     return true;
   }
@@ -668,7 +727,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   function semCameraAoVivo(motivo) {
     pararCamera();
     $('scannerVideoCaixa').hidden = true;
-    $('scannerMsg').textContent = motivo + ' Toque em "Tirar foto do código": o app lê o código na foto.';
+    msgScanner([motivo, 'useFoto']);
   }
   function proximoQuadro() {
     if (!escaneando) return;
@@ -681,10 +740,10 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   }
   $('escanear').addEventListener('click', function () {
     $('scanner').hidden = false; $('scannerVideoCaixa').hidden = false;
-    $('scannerMsg').textContent = 'Aponte a câmera para o código.';
+    msgScanner(['aponte']);
     $('scannerFechar').focus();
-    if (!prepararLeitores()) { semCameraAoVivo('O leitor de códigos não carregou (sem internet?). Digite o número.'); return; }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { semCameraAoVivo('Este navegador não abre a câmera ao vivo aqui.'); return; }
+    if (!prepararLeitores()) { semCameraAoVivo('semLeitor'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { semCameraAoVivo('semCamNavegador'); return; }
     escaneando = true;
     navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}}, audio: false}).then(function (s) {
       if (!escaneando) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
@@ -696,7 +755,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       proximoQuadro();
     }).catch(function (e) {
       if (!escaneando) return;
-      semCameraAoVivo(e && e.name === 'NotAllowedError' ? 'A câmera ao vivo não foi liberada aqui.' : 'A câmera ao vivo não abriu.');
+      semCameraAoVivo(e && e.name === 'NotAllowedError' ? 'camNegada' : 'camFalhou');
     });
   });
   $('scannerFechar').addEventListener('click', fecharScanner);
@@ -707,7 +766,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     if (!arq) return;
     pararCamera();
     $('scannerVideoCaixa').hidden = true;
-    $('scannerMsg').textContent = 'Lendo o código na foto…';
+    msgScanner(['lendoFoto']);
     carregar(arq).then(function (img) {
       var k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement('canvas');
       c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
@@ -718,10 +777,10 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     }).then(function (t) {
       if (!lido(t)) throw new Error('vazio');
     }).catch(function () {
-      $('scannerMsg').textContent = 'Não achei o código nessa foto. Tire de novo mais perto e com o código inteiro na foto, ou cancele e digite.';
+      msgScanner(['naoAchou']);
     }).then(function () { campo.value = ''; });
   });
-  $('codigo').addEventListener('input', function () { if ($('codigoDica').className !== 'dica') dica('', 'Escaneie o QR Code ou o código de barras, ou digite o número.'); });
+  $('codigo').addEventListener('input', function () { if ($('codigoDica').className !== 'dica') dica('', 'dicaCodigo'); });
   document.addEventListener('visibilitychange', function () { if (document.hidden && escaneando) fecharScanner(); });
 
   function fecharZoom() { $('zoom').hidden = true; $('zoomImg').src = ''; }
@@ -740,8 +799,8 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   function pintarTema() {
     var escuro = temaAtual() === 'dark';
     $('tema').setAttribute('aria-pressed', String(escuro));
-    $('tema').setAttribute('aria-label', escuro ? 'Usar tema claro' : 'Usar tema escuro');
-    $('tema').title = escuro ? 'Tema claro' : 'Tema escuro';
+    $('tema').setAttribute('aria-label', escuro ? t('temaClaro') : t('temaEscuro'));
+    $('tema').title = escuro ? t('temaClaro') : t('temaEscuro');
     $('iconeLua').toggleAttribute('hidden', escuro); $('iconeSol').toggleAttribute('hidden', !escuro); // SVG: atributo, não a propriedade
   }
   var temaSalvo = lembrar('ocorr_tema');
@@ -754,7 +813,36 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   });
   pintarTema();
 
+  function rodape() {
+    $('rodape').textContent = (idioma === 'zh' ? (cfg.tituloZh || '异常登记') : (cfg.titulo || 'Registro de Ocorrências')) + (cfg.versao ? ' · ' + t('versao') + ' ' + cfg.versao : '') +
+      ' · ' + t('feitoPor', {a: cfg.autor || 'Caike Oliveira'});
+  }
+  function aplicarIdioma() {
+    document.documentElement.lang = idioma === 'zh' ? 'zh-CN' : 'pt-BR';
+    Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function (el) { el.textContent = t(el.getAttribute('data-t')); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-t-ph]'), function (el) { el.placeholder = t(el.getAttribute('data-t-ph')); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-t-aria]'), function (el) { el.setAttribute('aria-label', t(el.getAttribute('data-t-aria'))); });
+    var titulo = idioma === 'zh' ? (cfg.tituloZh || '异常登记') : (cfg.titulo || 'Registro de Ocorrências');
+    $('titulo').textContent = titulo; document.title = titulo;
+    $('idioma').textContent = t('idiomaOutro');
+    $('idioma').setAttribute('lang', idioma === 'zh' ? 'pt-BR' : 'zh-CN');
+    $('idioma').setAttribute('aria-label', t('idiomaAria')); $('idioma').title = t('idiomaAria');
+    if (!enviando) $('enviar').textContent = t('enviar');
+    dica(dicaAtual[0], dicaAtual[1], dicaAtual[2]);
+    msgScanner(scannerAtual);
+    relogio(); mostrarFotos(); pintarTema(); rodape();
+    if (ultimaLista) mostrarLinhas(ultimaLista);
+  }
+  var idiomaSalvo = lembrar('ocorr_idioma');
+  idioma = idiomaSalvo === 'zh' || idiomaSalvo === 'pt' ? idiomaSalvo : /^zh/i.test(navigator.language || '') ? 'zh' : 'pt';
+  $('idioma').addEventListener('click', function () {
+    idioma = idioma === 'zh' ? 'pt' : 'zh';
+    guardar('ocorr_idioma', idioma);
+    aplicarIdioma();
+  });
+
   // ---------- início ----------
+  aplicarIdioma();
   relogio(); setInterval(relogio, 1000);
   mostrarFotos();
   $('nome').value = lembrar('ocorr_nome');
@@ -762,10 +850,9 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   chamar('iniciar').then(function (c) {
     Object.keys(c).forEach(function (k) { cfg[k] = c[k]; });
     relogio(); mostrarFotos();
-    document.title = c.titulo;
-    $('titulo').textContent = c.titulo; $('subtitulo').textContent = c.subtitulo;
+    $('subtitulo').textContent = c.subtitulo;
     $('fotoObrig').hidden = !c.fotoObrigatoria;
-    $('rodape').textContent = c.titulo + ' · versão ' + c.versao;
+    aplicarIdioma();
     $('codigoObrig').hidden = !c.codigoObrigatorio;
     if (c.planilhaUrl) { $('abrirPlanilha').href = c.planilhaUrl; $('abrirPlanilha').hidden = false; }
     mostrarLinhas(c.registros);

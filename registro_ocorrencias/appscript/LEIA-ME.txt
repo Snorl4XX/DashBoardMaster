@@ -1,5 +1,6 @@
-J&T · REGISTRO DE OCORRÊNCIAS — versão 3.0, com PLANILHA GOOGLE (app separado: não junte com o DashMaster nem com os outros apps)
-=================================================================================================================================
+J&T · REGISTRO DE OCORRÊNCIAS (异常登记) — versão 3.1, com PLANILHA GOOGLE · feito por Caike Oliveira
+(app separado: não junte com o DashMaster nem com os outros apps)
+=====================================================================================================
 
 O que faz
 ---------
@@ -13,7 +14,11 @@ O colaborador abre um link no celular e preenche:
   - Descrição do que está ocorrendo
 A DATA, a HORA e o TURNO aparecem na tela assim que ela abre e são gravados pela hora do envio:
   T1 = 06:00 às 13:59 · T2 = 14:00 às 21:59 · T3 = 22:00 às 05:59 (ex.: enviou às 9h = T1).
-Botão no canto de cima: tema CLARO ou ESCURO (fica guardado no celular).
+Botões no canto de cima:
+  - 中文 / PT: troca a tela entre PORTUGUÊS e MANDARIM (fica guardado no celular; celular em chinês já abre em 中文).
+  - Lua / sol: tema CLARO ou ESCURO (fica guardado no celular).
+No rodapé da tela: "Feito por Caike Oliveira" (em 中文: "由 Caike Oliveira 制作").
+As mensagens que vêm do servidor (ex.: "Falta configurar") continuam em português.
 
 Cada envio vira NA HORA uma linha na aba "Ocorrências 异常登记" da Planilha Google (padrão J&T: cabeçalho vermelho,
 cada título em português e em mandarim):
@@ -69,6 +74,7 @@ No começo do Codigo.gs, no bloco CONFIG:
   colunasDeFoto: 3 (colunas de foto criadas no começo; o app cria mais quando precisar)
   codigoObrigatorio: false (true = não envia sem o ID de viagem / remessa / lote)
   ultimos: 30 (quantos registros a tabela do app mostra) · corCabecalho: '#E60012' (vermelho J&T)
+  tituloZh: '异常登记' (título da tela em mandarim) · autor: 'Caike Oliveira' (rodapé)
 Depois de mudar: salve e faça a "Nova versão" (acima).
 
 Se der problema

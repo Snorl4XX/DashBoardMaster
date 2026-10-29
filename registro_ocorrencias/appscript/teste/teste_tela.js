@@ -120,6 +120,27 @@ function tamanhoJpeg(b) {
   await pg.click('#tema');
   check(await pg.getAttribute('html', 'data-theme') === 'light' && await fundo() === claro, 'botão de tema: volta para o claro');
 
+  // Idioma: Português ↔ 中文 (e o crédito no rodapé)
+  check(/Feito por Caike Oliveira/.test(await pg.textContent('#rodape')) && /versão 3\.\d+\.\d+/.test(await pg.textContent('#rodape')), 'rodapé: "Feito por Caike Oliveira"',
+    await pg.textContent('#rodape'));
+  await pg.click('#idioma');
+  const zh = await pg.evaluate(() => ({lang: document.documentElement.lang, h2: document.querySelector('[data-t="novoRegistro"]').textContent, titulo: document.getElementById('titulo').textContent,
+    setorPh: document.getElementById('setor').placeholder, enviar: document.getElementById('enviar').textContent, horas: document.getElementById('turnoHoras').textContent,
+    th: document.querySelector('[data-t="thFoto"]').textContent, rodape: document.getElementById('rodape').textContent, botao: document.getElementById('idioma').textContent,
+    vazio: document.querySelector('#linhas td').textContent}));
+  check(zh.lang === 'zh-CN' && zh.h2 === '新建登记' && zh.titulo === '异常登记' && zh.setorPh === '填写部门' && zh.enviar === '提交' && /至/.test(zh.horas) && zh.th === '照片' &&
+    /由 Caike Oliveira 制作/.test(zh.rodape) && zh.botao === 'PT' && zh.vazio === '暂无记录。', 'botão de idioma: a tela inteira em mandarim', zh);
+  await pg.click('#enviar');
+  await pg.waitForSelector('.aviso.erro');
+  check(/请填写员工姓名/.test(await pg.textContent('#msg')), 'em mandarim: o aviso de campo faltando também', await pg.textContent('#msg'));
+  if (PRINTS) await pg.screenshot({path: path.join(PRINTS, 'celular_zh.png'), fullPage: true});
+  await pg.reload();
+  await pronta(pg);
+  check(await pg.getAttribute('html', 'lang') === 'zh-CN' && await pg.textContent('#idioma') === 'PT', 'abrir de novo: lembra o idioma');
+  await pg.click('#idioma');
+  check(await pg.getAttribute('html', 'lang') === 'pt-BR' && await pg.textContent('[data-t="novoRegistro"]') === 'Novo registro' && await pg.textContent('#idioma') === '中文',
+    'volta para o português');
+
   await pg.fill('#nome', 'COLABORADOR TESTE');
   await pg.fill('#setor', 'Expedição');
   await pg.fill('#codigo', 'LOTE-TESTE-77');

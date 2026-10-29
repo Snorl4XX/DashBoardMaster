@@ -152,8 +152,10 @@ const aba = g => g.ss.abas[ABA];
   for (let i = 0; i < 40; i++) { g.horario('2026-10-29T1' + (i % 10) + ':00:0' + (i % 10)); g.ctx.salvar(Object.assign({}, BASE, {fotos: [], nome: 'TESTE ' + i})); }
   const ini = g.ctx.iniciar();
   check(ini.registros.length === 30 && ini.registros[0].nome === 'TESTE 39' && ini.planilhaUrl === 'https://docs.google.com/spreadsheets/d/PLANILHA-FICTICIA/edit' &&
-    ini.fotosMax === 30 && ini.turnos.length === 3, 'iniciar: link da planilha, limite de fotos e os 30 últimos registros', {n: ini.registros.length});
+    ini.fotosMax === 30 && ini.turnos.length === 3 && ini.autor === 'Caike Oliveira' && ini.tituloZh === '异常登记',
+    'iniciar: link da planilha, limite de fotos, autor, título em mandarim e os 30 últimos registros', {n: ini.registros.length});
   const tela = g.ctx.doGet().html;
+  check(/id="idioma"/.test(tela) && /Feito por Caike Oliveira/.test(tela) && /由 \{a\} 制作/.test(tela), 'tela: botão de idioma (Português / 中文) e "Feito por Caike Oliveira"');
   check(tela === g.ctx.PAGINA_ && /id="tema"/.test(tela) && /id="fotoGaleria" accept="image\/\*" multiple/.test(tela) && /id="escanear"/.test(tela) && !/Feishu/i.test(tela),
     'tela: botão de tema claro/escuro, várias fotos (câmera e galeria), Escanear; sem Feishu');
   const codigo = fs.readFileSync(path.join(__dirname, '..', 'Codigo.gs'), 'utf8');
