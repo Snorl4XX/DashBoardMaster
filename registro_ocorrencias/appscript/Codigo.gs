@@ -1,42 +1,47 @@
 /**
- * J&T · REGISTRO DE OCORRÊNCIAS — Apps Script, TUDO NESTE ARQUIVO (a tela está no fim, em PAGINA_). Os registros vão para
- * uma PLANILHA DO FEISHU (ou do Lark). Projeto SEPARADO: não junte com o DashMaster nem com os outros apps.
+ * J&T · REGISTRO DE OCORRÊNCIAS — Apps Script de uma Planilha Google, TUDO NESTE ARQUIVO (a tela está no fim, em PAGINA_).
+ * Projeto SEPARADO: não junte com o DashMaster nem com os outros apps.
  *
  * O colaborador abre o link no celular e preenche: nome, setor (escrito), ID de viagem / remessa / lote (escaneando o
- * QR Code ou o código de barras, ou digitando), foto e descrição. Data, hora e turno são automáticos, pela hora do envio
- * (T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59).
- *   - Cada envio vira na hora uma linha na planilha do Feishu, com a foto dentro da célula (API de planilhas do Feishu).
- *   - Embaixo do formulário, o app mostra os últimos registros (lidos da planilha) e o botão "Abrir planilha".
+ * QR Code ou o código de barras, ou digitando), quantas fotos quiser e a descrição. Data, hora e turno são automáticos,
+ * pela hora do envio (T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59) e aparecem na tela assim que ela abre.
+ *   - Cada envio vira na hora uma linha na aba "Ocorrências 异常登记" (padrão J&T: cabeçalho vermelho, títulos em
+ *     português e mandarim). Cada foto vai numa coluna (Foto 1, Foto 2, …), dentro da célula; quando um registro tem mais
+ *     fotos que colunas, o app cria as colunas que faltam. As fotos também ficam numa pasta do Google Drive.
+ *   - Embaixo do formulário, o app mostra os últimos registros e o botão "Abrir planilha".
  *   - Escanear: câmera ao vivo, lida pelo leitor do celular (BarcodeDetector) ou pela biblioteca ZXing (jsdelivr); se a
  *     câmera ao vivo não abrir, a pessoa tira uma foto do código e o app lê na foto.
  *
- * Feishu ou Lark: o app descobre pelo link da planilha (feishu.cn / larkoffice.com → open.feishu.cn; larksuite.com →
- * open.larksuite.com). O App ID e o App Secret ficam nas Propriedades do script (nunca neste arquivo).
- *
- * Instalação (uma vez) — o passo a passo completo está no LEIA-ME.txt:
- *  1. No Feishu: app personalizado com a permissão de planilhas (sheets:spreadsheet), publicado; o app adicionado na
- *     planilha (… → Mais → Adicionar app de documento) com permissão para editar.
- *  2. Apps Script: cole este arquivo em Código.gs e salve. Em Configurações do projeto → Propriedades do script, crie
- *     FEISHU_APP_ID, FEISHU_APP_SECRET e FEISHU_PLANILHA (o link da planilha do Feishu).
- *  3. Escolha a função "configurar" e clique em ▶ Executar (confere o acesso e escreve o cabeçalho).
+ * Instalação (uma vez):
+ *  1. Crie uma Planilha Google nova → Extensões → Apps Script.
+ *  2. Apague o que estiver em Código.gs, cole este arquivo inteiro e clique em 💾 Salvar.
+ *  3. Escolha a função "configurar" no alto e clique em ▶ Executar (na 1ª vez o Google pede autorização).
  *  4. Implantar → Nova implantação → App da Web: Executar como "Eu", Quem pode acessar "Qualquer pessoa" → Implantar.
+ *     O link que termina em /exec é o do app.
  */
-var VERSAO = '2.0.0';
+var VERSAO = '3.0.0';
 var CONFIG = {
   titulo: 'Registro de Ocorrências',
   subtitulo: 'J&T Express · SP GRU',
   // Turno pela hora do envio: de "de" até antes de "ate" (o T3 passa da meia-noite).
   turnos: [{nome: 'T1', de: 6, ate: 14}, {nome: 'T2', de: 14, ate: 22}, {nome: 'T3', de: 22, ate: 6}],
-  fotoObrigatoria: true,
+  fotoObrigatoria: true,    // pelo menos uma foto
+  fotosMax: 30,             // fotos por registro (para o envio não ficar pesado demais)
+  colunasDeFoto: 3,         // colunas Foto 1..3 criadas no começo; o app cria mais quando precisar
   codigoObrigatorio: false, // ID de viagem / remessa / lote: true = não envia sem
   ultimos: 30,              // quantos registros a tabela do app mostra
-  alturaLinhaFoto: 120,     // altura (pixels) da linha com foto na planilha do Feishu
+  corCabecalho: '#E60012',  // vermelho J&T
   fuso: 'America/Sao_Paulo'
 };
-var COLUNAS_ = ['Data', 'Hora', 'Turno', 'Colaborador', 'Setor', 'ID de viagem / remessa / lote', 'Descrição', 'Foto', 'ID'];
-var COL_FOTO_ = 'H', ULTIMA_COL_ = 'I';
-var MAX_FOTO_ = 6 * 1024 * 1024, MAX_MINI_ = 45000; // foto em base64; miniatura da tabela do app
-var MINI_HORAS_ = 6; // a miniatura fica guardada no Apps Script por 6 h (a foto grande fica na planilha)
+var ABA_ = 'Ocorrências 异常登记', PASTA_FOTOS_ = 'Fotos - Registro de Ocorrências';
+// Colunas fixas: [português, mandarim, largura]. Depois delas vêm as fotos, uma coluna por foto.
+var COLUNAS_ = [
+  ['Data', '日期', 95], ['Hora', '时间', 80], ['Turno', '班次', 70], ['Colaborador', '员工姓名', 170], ['Setor', '部门', 130],
+  ['ID de viagem / remessa / lote', '车次号 / 运单号 / 批次号', 200], ['Descrição', '异常描述', 300], ['Qtd. de fotos', '照片数量', 80],
+  ['Links das fotos', '照片链接', 160], ['ID do registro', '记录编号', 170], ['Miniatura (app)', '缩略图（系统用）', 60]
+];
+var COL_QTD_ = 8, COL_LINKS_ = 9, COL_ID_ = 10, COL_MINI_ = 11, COL_FOTO1_ = 12, LARGURA_FOTO_ = 170;
+var MAX_FOTO_ = 6 * 1024 * 1024, MAX_MINI_ = 45000; // cada foto em base64; miniatura cabe numa célula (limite 50.000)
 
 // ------------------------------------------------------------------ app da web
 function doGet() {
@@ -45,76 +50,73 @@ function doGet() {
 
 /** Primeira tela: configuração do formulário, o link da planilha e os últimos registros. */
 function iniciar() {
-  var c = feishu_();
   return {versao: VERSAO, titulo: CONFIG.titulo, subtitulo: CONFIG.subtitulo, turnos: CONFIG.turnos, fotoObrigatoria: CONFIG.fotoObrigatoria,
-    codigoObrigatorio: CONFIG.codigoObrigatorio, fuso: CONFIG.fuso, planilhaUrl: c.url, registros: listar_(c)};
+    fotosMax: CONFIG.fotosMax, codigoObrigatorio: CONFIG.codigoObrigatorio, fuso: CONFIG.fuso, planilhaUrl: planilha_().getUrl(), registros: listar_()};
 }
 
 /** Últimos registros (o app atualiza a tabela de tempos em tempos). */
-function listar() { return listar_(feishu_()); }
+function listar() { return listar_(); }
 
 /**
- * Envio do formulário: d = {nome, setor, codigo (ID de viagem / remessa / lote), descricao, foto (data URL JPEG/PNG),
- * miniatura (data URL pequena)}. → {ok, registro, registros, aviso}. Erro: Error com a mensagem para mostrar na tela.
+ * Envio do formulário: d = {nome, setor, codigo (ID de viagem / remessa / lote), descricao, fotos (lista de data URL
+ * JPEG/PNG), miniatura (data URL pequena da 1ª foto)}. → {ok, registro, registros, aviso}.
+ * Erro de preenchimento: Error com a mensagem para mostrar na tela.
  */
 function salvar(d) {
-  var r = validar_(d || {}), c = feishu_();
+  var r = validar_(d || {});
   var agora = agora_();
   var turno = turnoDe(Number(Utilities.formatDate(agora, CONFIG.fuso, 'H')));
   var id = Utilities.formatDate(agora, CONFIG.fuso, 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4).toUpperCase();
-  var data = Utilities.formatDate(agora, CONFIG.fuso, 'dd/MM/yyyy'), hora = Utilities.formatDate(agora, CONFIG.fuso, 'HH:mm:ss');
+  var base = Utilities.formatDate(agora, CONFIG.fuso, 'yyyy-MM-dd_HH-mm-ss') + '_' + turno + '_' + limpo_(r.setor) + '_' + limpo_(r.nome);
+  var links = [];
+  if (r.fotos.length) {
+    var pasta = pasta_();
+    r.fotos.forEach(function (f, i) {
+      var nome = base + '_foto' + (i + 1) + (f.tipo === 'image/png' ? '.png' : '.jpg');
+      links.push(pasta.createFile(Utilities.newBlob(Utilities.base64Decode(f.base64), f.tipo, nome)).getUrl());
+    });
+  }
   var aviso = '', trava = LockService.getScriptLock();
   trava.waitLock(30000);
   try {
-    var resp = pedirFeishu_(c, 'post', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/values_append?insertDataOption=INSERT_ROWS',
-      {valueRange: {range: c.aba + '!A1:' + ULTIMA_COL_ + '1', values: [[data, hora, turno, r.nome, r.setor, r.codigo, r.descricao, '', id]]}});
-    var linha = linhaDe_(resp && resp.updates && resp.updates.updatedRange);
-    if (linha) PropertiesService.getScriptProperties().setProperty('FEISHU_ULTIMA_LINHA_' + c.planilha, String(linha));
-    if (r.foto) {
-      if (!linha) aviso = 'Registro salvo, mas o Feishu não disse a linha: a foto não entrou na planilha.';
-      else {
-        // Foto dentro da célula (Feishu: "escrever imagem"); se falhar, o registro fica salvo e a tela avisa.
-        try {
-          pedirFeishu_(c, 'post', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/values_image', {range: c.aba + '!' + COL_FOTO_ + linha + ':' + COL_FOTO_ + linha,
-            image: Array.prototype.map.call(Utilities.base64Decode(r.foto.base64), function (b) { return b & 0xFF; }), name: id + (r.foto.tipo === 'image/png' ? '.png' : '.jpg')});
-          try {
-            pedirFeishu_(c, 'put', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/dimension_range', {dimension: {sheetId: c.aba, majorDimension: 'ROWS',
-              startIndex: linha, endIndex: linha}, dimensionProperties: {visible: true, fixedSize: CONFIG.alturaLinhaFoto}});
-          } catch (e) { /* só a altura da linha: a foto já está lá */ }
-        } catch (e) {
-          aviso = 'Registro salvo, mas a foto não entrou na planilha: ' + e.message;
-        }
-      }
-      if (r.miniatura) CacheService.getScriptCache().put('mini_' + id, r.miniatura, MINI_HORAS_ * 3600);
+    var aba = aba_(planilha_());
+    colunasDeFoto_(aba, r.fotos.length);
+    var linha = aba.getLastRow() + 1;
+    aba.getRange(linha, 1, 1, COL_MINI_).setValues([[agora, agora, turno, texto_(r.nome), texto_(r.setor), texto_(r.codigo), texto_(r.descricao),
+      r.fotos.length, '', id, r.miniatura]]);
+    if (links.length) {
+      // "Foto 1  Foto 2 …": cada nome é o link da foto no Drive.
+      var rotulos = links.map(function (u, i) { return 'Foto ' + (i + 1); }), texto = rotulos.join('  ');
+      var rt = SpreadsheetApp.newRichTextValue().setText(texto), pos = 0;
+      rotulos.forEach(function (t, i) { rt = rt.setLinkUrl(pos, pos + t.length, links[i]); pos += t.length + 2; });
+      aba.getRange(linha, COL_LINKS_).setRichTextValue(rt.build());
+      // Cada foto dentro da sua célula; se o Google recusar uma imagem, fica o link na coluna "Links das fotos".
+      var recusadas = 0;
+      r.fotos.forEach(function (f, i) {
+        var cel = aba.getRange(linha, COL_FOTO1_ + i);
+        try { cel.setValue(SpreadsheetApp.newCellImage().setSourceUrl('data:' + f.tipo + ';base64,' + f.base64).build()); }
+        catch (e) { recusadas++; cel.setValue('Foto ' + (i + 1) + ' no link'); }
+      });
+      aba.setRowHeight(linha, 120);
+      if (recusadas) aviso = 'Registro salvo. ' + recusadas + (recusadas === 1 ? ' foto ficou' : ' fotos ficaram') + ' só no link (coluna "Links das fotos").';
     }
+    SpreadsheetApp.flush();
   } finally {
     trava.releaseLock();
   }
-  return {ok: true, aviso: aviso, registro: {id: id, codigo: r.codigo, data: data, hora: hora, turno: turno}, registros: listar_(c)};
+  return {ok: true, aviso: aviso, registro: {id: id, codigo: r.codigo, fotos: r.fotos.length, data: Utilities.formatDate(agora, CONFIG.fuso, 'dd/MM/yyyy'),
+    hora: Utilities.formatDate(agora, CONFIG.fuso, 'HH:mm:ss'), turno: turno}, registros: listar_()};
 }
 
-/**
- * Rode uma vez pelo editor (▶ Executar), depois de criar as Propriedades do script: confere o App ID / App Secret, acha a
- * aba da planilha e escreve o cabeçalho (se a primeira linha estiver vazia).
- */
+/** Rode uma vez pelo editor (▶ Executar): aba "Ocorrências 异常登记", pasta das fotos e fuso de São Paulo. */
 function configurar() {
-  var c = feishu_();
-  var cab = (lerFaixa_(c, 'A1:' + ULTIMA_COL_ + '1')[0] || []).map(texto_);
-  var msg;
-  if (!cab.join('')) {
-    pedirFeishu_(c, 'put', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/values', {valueRange: {range: c.aba + '!A1:' + ULTIMA_COL_ + '1', values: [COLUNAS_]}});
-    msg = 'Pronto: cabeçalho escrito na planilha do Feishu.';
-  } else if (cab.join('|') === COLUNAS_.join('|')) {
-    msg = 'Pronto: a planilha do Feishu já tem o cabeçalho certo.';
-  } else {
-    throw new Error('A primeira linha da planilha do Feishu não é o cabeçalho do app (' + cab.filter(Boolean).slice(0, 4).join(', ') +
-      '…). Use uma aba vazia: crie uma aba nova e coloque o link dela em FEISHU_PLANILHA.');
-  }
-  // Coluna do ID / remessa / lote como texto (remessa só de números não vira 8,88E+14). Se o Feishu recusar, segue.
-  try {
-    pedirFeishu_(c, 'put', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/style', {appendStyle: {range: c.aba + '!F2:F5000', style: {formatter: '@'}}});
-  } catch (e) { /* só o formato */ }
-  msg += ' Agora: Implantar → Nova implantação → App da Web.';
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('Abra o Apps Script pela planilha (Extensões → Apps Script) e rode de novo.');
+  PropertiesService.getScriptProperties().setProperty('PLANILHA_ID', ss.getId());
+  ss.setSpreadsheetTimeZone(CONFIG.fuso);
+  aba_(ss);
+  var pasta = pasta_();
+  var msg = 'Pronto: aba "' + ABA_ + '" e pasta "' + pasta.getName() + '" no Drive. Agora: Implantar → Nova implantação → App da Web.';
   Logger.log(msg);
   return msg;
 }
@@ -142,121 +144,103 @@ function validar_(d) {
   if (codigo.length > 80) throw new Error('O ID de viagem, remessa ou lote pode ter no máximo 80 letras.');
   if (descricao.length < 3) throw new Error('Descreva o que está ocorrendo.');
   if (descricao.length > 1000) throw new Error('A descrição pode ter no máximo 1.000 letras.');
-  var foto = null;
-  if (d.foto) {
-    var m = /^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+\/=]+)$/.exec(String(d.foto));
-    if (!m) throw new Error('A foto não veio certa. Tire de novo.');
-    if (m[2].length > MAX_FOTO_) throw new Error('A foto ficou grande demais. Tire de novo.');
-    foto = {tipo: m[1], base64: m[2]};
-  }
-  if (!foto && CONFIG.fotoObrigatoria) throw new Error('Tire a foto.');
+  var lista = Array.isArray(d.fotos) ? d.fotos : d.foto ? [d.foto] : [];
+  if (lista.length > CONFIG.fotosMax) throw new Error('Mande no máximo ' + CONFIG.fotosMax + ' fotos por registro.');
+  var fotos = lista.map(function (x, i) {
+    var m = /^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+\/=]+)$/.exec(String(x || ''));
+    if (!m) throw new Error('A foto ' + (i + 1) + ' não veio certa. Tire de novo.');
+    if (m[2].length > MAX_FOTO_) throw new Error('A foto ' + (i + 1) + ' ficou grande demais. Tire de novo.');
+    return {tipo: m[1], base64: m[2]};
+  });
+  if (!fotos.length && CONFIG.fotoObrigatoria) throw new Error('Tire a foto.');
   var mini = String(d.miniatura || '');
   if (!/^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+\/=]+$/.test(mini) || mini.length > MAX_MINI_) mini = '';
-  // Texto que começa com = + - @ ganha um espaço na frente: a planilha não executa como fórmula.
-  var seguro = function (v) { return /^[=+\-@]/.test(v) ? ' ' + v : v; };
-  return {nome: seguro(nome), setor: seguro(setor), codigo: seguro(codigo), descricao: seguro(descricao), foto: foto, miniatura: foto ? mini : ''};
+  return {nome: nome, setor: setor, codigo: codigo, descricao: descricao, fotos: fotos, miniatura: fotos.length ? mini : ''};
+}
+
+/** Texto do colaborador sempre como texto: ' na frente (não aparece) — a planilha não executa =fórmula nem transforma
+ * remessa em número (888001234567890 → 8,88E+14) ou "10/29" em data. */
+function texto_(v) { return v ? "'" + v : ''; }
+/** Parte do nome do arquivo da foto: sem acento e sem símbolo. */
+function limpo_(v) {
+  return String(v).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'sem-nome';
 }
 function agora_() { return new Date(); }
-/** Valor de célula do Feishu → texto (link e menção vêm como objeto ou lista). */
-function texto_(v) {
-  if (v === null || v === undefined) return '';
-  if (Array.isArray(v)) return v.map(texto_).join('');
-  if (typeof v === 'object') return String(v.text || v.link || (v.fileToken || /image/i.test(v.type || '') ? '[imagem]' : ''));
-  return String(v);
-}
-/** "abc123!A7:I7" → 7 */
-function linhaDe_(faixa) { var m = /![A-Z]+(\d+)/.exec(String(faixa || '')); return m ? Number(m[1]) : 0; }
 
-// ------------------------------------------------------------------ Feishu
-/**
- * Configuração das Propriedades do script → {base (API), id, segredo, planilha (token), aba (sheetId), url}.
- * FEISHU_PLANILHA = link da planilha (…/sheets/<token>?sheet=<aba>). FEISHU_API (opcional) troca o endereço da API.
- */
-function feishu_() {
-  var p = PropertiesService.getScriptProperties();
-  var id = String(p.getProperty('FEISHU_APP_ID') || '').trim(), segredo = String(p.getProperty('FEISHU_APP_SECRET') || '').trim();
-  var url = String(p.getProperty('FEISHU_PLANILHA') || '').trim();
-  if (!id || !segredo || !url) {
-    throw new Error('Falta configurar o Feishu: no Apps Script, em Configurações do projeto → Propriedades do script, crie FEISHU_APP_ID, ' +
-      'FEISHU_APP_SECRET e FEISHU_PLANILHA (o link da planilha).');
+// ------------------------------------------------------------------ planilha e Drive
+function planilha_() {
+  var id = PropertiesService.getScriptProperties().getProperty('PLANILHA_ID');
+  var ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('Falta configurar: no Apps Script, rode a função "configurar" uma vez.');
+  return ss;
+}
+
+/** Cabeçalho no padrão J&T: fundo vermelho, letra branca em negrito, português em cima e mandarim embaixo. */
+function estiloCabecalho_(faixa) {
+  faixa.setBackground(CONFIG.corCabecalho).setFontColor('#FFFFFF').setFontWeight('bold').setHorizontalAlignment('center')
+    .setVerticalAlignment('middle').setWrap(true);
+}
+function tituloFoto_(n) { return 'Foto ' + n + '\n照片 ' + n; }
+
+/** Aba "Ocorrências 异常登记" (cria com o cabeçalho e o formato na primeira vez). */
+function aba_(ss) {
+  var aba = ss.getSheetByName(ABA_);
+  if (!aba) aba = ss.insertSheet(ABA_, 0);
+  if (aba.getLastRow() === 0) {
+    var cab = COLUNAS_.map(function (c) { return c[0] + '\n' + c[1]; });
+    for (var n = 1; n <= CONFIG.colunasDeFoto; n++) cab.push(tituloFoto_(n));
+    if (aba.getMaxColumns() < cab.length) aba.insertColumnsAfter(aba.getMaxColumns(), cab.length - aba.getMaxColumns());
+    var faixa = aba.getRange(1, 1, 1, cab.length);
+    faixa.setValues([cab]);
+    estiloCabecalho_(faixa);
+    aba.setRowHeight(1, 46);
+    aba.setFrozenRows(1);
+    COLUNAS_.forEach(function (c, i) { aba.setColumnWidth(i + 1, c[2]); });
+    for (var k = 0; k < CONFIG.colunasDeFoto; k++) aba.setColumnWidth(COL_FOTO1_ + k, LARGURA_FOTO_);
+    aba.getRange('A2:A').setNumberFormat('dd/mm/yyyy');
+    aba.getRange('B2:B').setNumberFormat('hh:mm:ss');
+    aba.getRange('A2:J').setVerticalAlignment('middle');
+    aba.getRange('G2:G').setWrap(true);
+    aba.hideColumns(COL_MINI_);
   }
-  var m = /^https:\/\/[^\/?#]*?(feishu\.cn|larkoffice\.com|larksuite\.com)\/(sheets|wiki)\/([A-Za-z0-9]+)/.exec(url);
-  if (!m) throw new Error('FEISHU_PLANILHA não é um link de planilha do Feishu ou do Lark (…/sheets/…). Copie o link da planilha de novo.');
-  if (m[2] === 'wiki') throw new Error('O link é de uma página da Wiki. Abra a planilha fora da Wiki (Abrir em nova aba) e copie o link que tem /sheets/.');
-  var base = String(p.getProperty('FEISHU_API') || '').trim().replace(/\/+$/, '') || (m[1] === 'larksuite.com' ? 'https://open.larksuite.com' : 'https://open.feishu.cn');
-  var c = {base: base, id: id, segredo: segredo, planilha: m[3], url: url, aba: ''};
-  var aba = /[?&]sheet=([A-Za-z0-9]+)/.exec(url);
-  if (aba) c.aba = aba[1];
-  else {
-    var guardada = p.getProperty('FEISHU_ABA_' + c.planilha);
-    if (guardada) c.aba = guardada;
-    else {
-      var abas = (pedirFeishu_(c, 'get', '/open-apis/sheets/v3/spreadsheets/' + c.planilha + '/sheets/query') || {}).sheets || [];
-      if (!abas.length) throw new Error('A planilha do Feishu não tem nenhuma aba.');
-      c.aba = abas[0].sheet_id;
-      p.setProperty('FEISHU_ABA_' + c.planilha, c.aba);
-    }
+  return aba;
+}
+
+/** Garante as colunas Foto 1..qtd: cria as que faltam no fim, com o cabeçalho vermelho. */
+function colunasDeFoto_(aba, qtd) {
+  var ultima = aba.getLastColumn(), temos = Math.max(0, ultima - COL_FOTO1_ + 1);
+  if (qtd <= temos) return;
+  var faltam = qtd - temos;
+  if (aba.getMaxColumns() < ultima + faltam) aba.insertColumnsAfter(aba.getMaxColumns(), ultima + faltam - aba.getMaxColumns());
+  var cab = [];
+  for (var n = temos + 1; n <= qtd; n++) cab.push(tituloFoto_(n));
+  var faixa = aba.getRange(1, ultima + 1, 1, faltam);
+  faixa.setValues([cab]);
+  estiloCabecalho_(faixa);
+  for (var c = ultima + 1; c <= ultima + faltam; c++) aba.setColumnWidth(c, LARGURA_FOTO_);
+}
+
+/** Pasta das fotos no Drive, ao lado da planilha (criada na primeira vez). */
+function pasta_() {
+  var props = PropertiesService.getScriptProperties(), id = props.getProperty('FOTOS_ID');
+  if (id) {
+    try { var p = DriveApp.getFolderById(id); if (!p.isTrashed()) return p; } catch (e) { /* apagada: cria de novo */ }
   }
-  return c;
+  var pais = DriveApp.getFileById(planilha_().getId()).getParents();
+  var pasta = (pais.hasNext() ? pais.next() : DriveApp.getRootFolder()).createFolder(PASTA_FOTOS_);
+  props.setProperty('FOTOS_ID', pasta.getId());
+  return pasta;
 }
 
-/** tenant_access_token do app (guardado por quase 2 h). */
-function tokenFeishu_(c, novo) {
-  var cache = CacheService.getScriptCache(), k = 'feishu_token_' + c.id;
-  if (!novo) { var t = cache.get(k); if (t) return t; }
-  var r = pedirFeishu_(c, 'post', '/open-apis/auth/v3/tenant_access_token/internal', {app_id: c.id, app_secret: c.segredo}, true);
-  if (!r.tenant_access_token) throw new Error('O Feishu não devolveu o token do app.');
-  cache.put(k, r.tenant_access_token, Math.max(60, Math.min(21600, Number(r.expire || 7200) - 300)));
-  return r.tenant_access_token;
-}
-
-/** Uma chamada à API do Feishu. → data (ou a resposta inteira, no token). Erro: Error com a explicação. */
-function pedirFeishu_(c, metodo, caminho, corpo, semToken, jaTentou) {
-  var opts = {method: metodo, contentType: 'application/json; charset=utf-8', muteHttpExceptions: true, headers: {}};
-  if (!semToken) opts.headers.Authorization = 'Bearer ' + tokenFeishu_(c, jaTentou);
-  if (corpo !== undefined) opts.payload = JSON.stringify(corpo);
-  var resp, txt, j;
-  try { resp = UrlFetchApp.fetch(c.base + caminho, opts); txt = resp.getContentText(); }
-  catch (e) { throw new Error('Não consegui falar com o Feishu (' + e.message + ').'); }
-  try { j = JSON.parse(txt); } catch (e) { throw new Error('O Feishu respondeu sem dados (HTTP ' + resp.getResponseCode() + ').'); }
-  if (j.code === 0) return j.data !== undefined ? j.data : j;
-  // Token vencido ou inválido: pega outro e tenta uma vez de novo.
-  if (!semToken && !jaTentou && [99991661, 99991663, 99991664, 99991665, 99991668].indexOf(j.code) >= 0) {
-    return pedirFeishu_(c, metodo, caminho, corpo, false, true);
-  }
-  throw new Error(erroFeishu_(j.code, j.msg));
-}
-function erroFeishu_(code, msg) {
-  var m = String(msg || '').slice(0, 160), base = 'Feishu recusou (código ' + code + (m ? ': ' + m : '') + ').';
-  if (code === 10003 || code === 10014 || /app[_ ]?(id|secret)|secret/i.test(m)) return base + ' Confira FEISHU_APP_ID e FEISHU_APP_SECRET.';
-  if (code === 99991672 || code === 99991679 || /scope|permission denied|access denied/i.test(m)) {
-    return base + ' O app do Feishu não tem a permissão de planilhas (sheets:spreadsheet) ou a versão com a permissão não foi publicada.';
-  }
-  if (/forbidden|no ?permission|not ?(have )?access|permission/i.test(m)) return base + ' Adicione o app na planilha: … → Mais → Adicionar app de documento (pode editar).';
-  if (/not ?found|not exist/i.test(m)) return base + ' Confira o link da planilha em FEISHU_PLANILHA.';
-  if (/ip/i.test(m) && /white|allow/i.test(m)) return base + ' O Feishu da empresa só aceita alguns endereços (lista de IP): fale com o administrador.';
-  return base;
-}
-
-/** Valores de uma faixa da aba ("A1:I1") → lista de linhas. */
-function lerFaixa_(c, faixa) {
-  var r = pedirFeishu_(c, 'get', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/values/' + encodeURIComponent(c.aba + '!' + faixa) + '?valueRenderOption=ToString');
-  return (r && r.valueRange && r.valueRange.values) || [];
-}
-
-/** Últimos registros, do mais novo para o mais antigo (lidos da planilha do Feishu). */
-function listar_(c) {
-  var p = PropertiesService.getScriptProperties();
-  var ult = Number(p.getProperty('FEISHU_ULTIMA_LINHA_' + c.planilha) || 0);
-  // Sem a última linha guardada (ou se alguém apagou linhas): lê um pedaço maior a partir do começo.
-  var ate = Math.max(ult + 5, CONFIG.ultimos + 1), de = Math.max(2, ate - CONFIG.ultimos - 40);
-  var linhas = lerFaixa_(c, 'A' + de + ':' + ULTIMA_COL_ + ate);
-  var regs = linhas.map(function (v) { return v.map(texto_); }).filter(function (v) { return v[0] && v[8]; });
-  regs = regs.slice(-CONFIG.ultimos).reverse();
-  var minis = regs.length ? CacheService.getScriptCache().getAll(regs.map(function (v) { return 'mini_' + v[8]; })) : {};
-  return regs.map(function (v) {
-    return {data: v[0], hora: v[1], turno: v[2], nome: v[3].trim(), setor: v[4].trim(), codigo: v[5].trim(), descricao: v[6].trim(), id: v[8],
-      temFoto: !!(v[7] || minis['mini_' + v[8]]), miniatura: minis['mini_' + v[8]] || ''};
+/** Últimos registros, do mais novo para o mais antigo. */
+function listar_() {
+  var aba = aba_(planilha_()), ult = aba.getLastRow();
+  if (ult < 2) return [];
+  var qtd = Math.min(CONFIG.ultimos, ult - 1);
+  var linhas = aba.getRange(ult - qtd + 1, 1, qtd, COL_MINI_).getDisplayValues();
+  return linhas.reverse().map(function (v) {
+    return {data: v[0], hora: v[1], turno: v[2], nome: v[3], setor: v[4], codigo: v[5], descricao: v[6], qtdFotos: Number(v[7]) || 0, id: v[9],
+      miniatura: /^data:image\/(?:jpeg|png);base64,/.test(v[10]) ? v[10] : ''};
   });
 }
 
@@ -274,11 +258,16 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     --ok: #1B7F3B; --ok-claro: #E7F5EC; --erro: #B3261E; --erro-claro: #FCE8E6; --sombra: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .1);
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --vermelho: #FF3B4A; --vermelho-escuro: #E60012; --vermelho-claro: #3A1418;
       --fundo: #121417; --cartao: #1C1F24; --texto: #ECEEF1; --suave: #A3AAB5; --borda: #343941; --campo: #15181C;
-      --ok: #5CC77F; --ok-claro: #16301F; --erro: #FF8A80; --erro-claro: #3A1A18; --sombra: none;
+      --ok: #5CC77F; --ok-claro: #16301F; --erro: #FF8A80; --erro-claro: #3A1A18; --sombra: none; color-scheme: dark;
     }
+  }
+  :root[data-theme="dark"] {
+    --vermelho: #FF3B4A; --vermelho-escuro: #E60012; --vermelho-claro: #3A1418;
+    --fundo: #121417; --cartao: #1C1F24; --texto: #ECEEF1; --suave: #A3AAB5; --borda: #343941; --campo: #15181C;
+    --ok: #5CC77F; --ok-claro: #16301F; --erro: #FF8A80; --erro-claro: #3A1A18; --sombra: none; color-scheme: dark;
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -289,6 +278,11 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   .marca { flex: none; width: 44px; height: 44px; border-radius: 10px; background: #fff; color: #E60012; display: grid; place-items: center; font-weight: 800; letter-spacing: -.5px; }
   .topo h1 { margin: 0; font-size: 20px; line-height: 1.2; }
   .topo p { margin: 2px 0 0; font-size: 13px; opacity: .9; }
+  .topo-texto { flex: 1; min-width: 0; }
+  .tema-btn { flex: none; width: 44px; height: 44px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .45); background: rgba(255, 255, 255, .14); color: #fff; display: grid; place-items: center; cursor: pointer; }
+  .tema-btn:hover { background: rgba(255, 255, 255, .24); }
+  .tema-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .tema-btn svg { width: 22px; height: 22px; }
   main { max-width: 960px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
   .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 14px; box-shadow: var(--sombra); padding: 16px; min-width: 0; }
   .cartao h2 { margin: 0 0 12px; font-size: 17px; }
@@ -307,8 +301,19 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   .foto-btn { width: 100%; min-height: 120px; border: 2px dashed var(--borda); border-radius: 12px; background: var(--fundo); color: var(--texto); font: inherit; font-weight: 600; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; }
   .foto-btn:hover, .foto-btn:focus-visible { border-color: var(--vermelho); outline: none; }
   .foto-btn svg { width: 36px; height: 36px; color: var(--vermelho); }
-  .previa { display: flex; gap: 12px; align-items: center; }
-  .previa img { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid var(--borda); }
+  .foto-btn.compacto { min-height: 52px; flex-direction: row; border-style: solid; }
+  .foto-btn.compacto svg { width: 22px; height: 22px; }
+  .foto-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .foto-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .foto-acoes .foto-btn { flex: 2 1 180px; }
+  .foto-acoes .galeria-btn { flex: 1 1 140px; }
+  .fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .fotos:empty { display: none; }
+  .foto-item { position: relative; aspect-ratio: 1; max-width: 100%; }
+  .foto-item img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; border: 1px solid var(--borda); display: block; }
+  .foto-num { position: absolute; left: 6px; bottom: 6px; background: rgba(0, 0, 0, .65); color: #fff; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 1px 6px; }
+  .foto-tirar { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: 50%; border: 0; background: rgba(0, 0, 0, .65); color: #fff; font-size: 20px; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+  .foto-tirar:focus-visible { outline: 2px solid var(--vermelho); outline-offset: 2px; }
   .botao { font: inherit; font-weight: 600; border-radius: 10px; padding: 10px 14px; border: 1px solid var(--borda); background: var(--campo); color: var(--texto); cursor: pointer; min-height: 44px; }
   .botao:focus-visible { outline: 2px solid var(--vermelho); outline-offset: 2px; }
   .enviar { width: 100%; background: var(--vermelho); border-color: var(--vermelho); color: #fff; font-size: 17px; min-height: 52px; }
@@ -351,7 +356,8 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   td.desc { min-width: 200px; max-width: 320px; white-space: pre-wrap; word-break: break-word; }
   tr.novo td { background: var(--vermelho-claro); }
   .mini { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--borda); cursor: zoom-in; display: block; }
-  .mini-btn { padding: 0; border: 0; background: none; cursor: zoom-in; }
+  .mini-btn { padding: 0; border: 0; background: none; cursor: zoom-in; position: relative; display: block; }
+  .mais { position: absolute; right: -6px; bottom: -6px; background: var(--vermelho); color: #fff; font-size: 11px; font-weight: 700; border-radius: 99px; padding: 1px 6px; border: 2px solid var(--cartao); }
   .na-planilha { font-size: 12px; color: var(--suave); white-space: nowrap; }
   .vazio { color: var(--suave); text-align: center; padding: 24px 12px; }
   .zoom { position: fixed; inset: 0; background: rgba(0, 0, 0, .85); display: grid; place-items: center; padding: 16px; z-index: 10; }
@@ -370,7 +376,11 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
 <header class="topo">
   <div class="topo-in">
     <div class="marca" aria-hidden="true">J&amp;T</div>
-    <div><h1 id="titulo">Registro de Ocorrências</h1><p id="subtitulo">J&amp;T Express</p></div>
+    <div class="topo-texto"><h1 id="titulo">Registro de Ocorrências</h1><p id="subtitulo">J&amp;T Express</p></div>
+    <button type="button" class="tema-btn" id="tema" aria-label="Usar tema escuro" aria-pressed="false">
+      <svg id="iconeLua" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg id="iconeSol" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>
   </div>
 </header>
 <main>
@@ -401,16 +411,18 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       <input type="file" id="fotoCodigo" accept="image/*" capture="environment" hidden>
     </div>
     <div class="campo">
-      <span class="rot">Foto <span class="obrig" id="fotoObrig">*</span></span>
+      <span class="rot">Fotos <span class="obrig" id="fotoObrig">*</span><span class="contador" id="fotosConta"></span></span>
       <input type="file" id="foto" accept="image/*" capture="environment" hidden>
-      <button type="button" class="foto-btn" id="btnFoto">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-        <span id="btnFotoTexto">Tirar foto</span>
-      </button>
-      <div class="previa" id="previa" hidden>
-        <img id="previaImg" alt="Foto tirada">
-        <button type="button" class="botao" id="trocarFoto">Tirar outra</button>
+      <input type="file" id="fotoGaleria" accept="image/*" multiple hidden>
+      <div class="fotos" id="fotos"></div>
+      <div class="foto-acoes">
+        <button type="button" class="foto-btn" id="btnFoto">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <span id="btnFotoTexto">Tirar foto</span>
+        </button>
+        <button type="button" class="botao galeria-btn" id="btnGaleria">Escolher da galeria</button>
       </div>
+      <small class="dica">Pode pôr quantas fotos precisar: cada uma vai numa coluna da planilha. Toque no × para tirar uma foto.</small>
     </div>
     <div class="campo">
       <label class="rot" for="descricao">Descrição <span class="obrig">*</span><span class="contador" id="contador">0/1000</span></label>
@@ -426,7 +438,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       <button type="button" class="botao" id="atualizar">Atualizar</button>
     </div>
     <div class="tempo-real">
-      <span>A planilha do Feishu é preenchida na hora, a cada envio.</span>
+      <span>A planilha é preenchida na hora, a cada envio.</span>
       <a class="botao planilha-btn" id="abrirPlanilha" target="_blank" rel="noopener" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
         Abrir planilha
@@ -463,8 +475,10 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  var cfg = {fuso: 'America/Sao_Paulo', turnos: [], fotoObrigatoria: true};
-  var foto = null, enviando = false, novoId = '';
+  // Data, hora e turno aparecem já ao abrir (sem esperar o servidor); o servidor só confirma os turnos.
+  var cfg = {fuso: 'America/Sao_Paulo', turnos: [{nome: 'T1', de: 6, ate: 14}, {nome: 'T2', de: 14, ate: 22}, {nome: 'T3', de: 22, ate: 6}],
+    fotoObrigatoria: true, fotosMax: 30};
+  var fotos = [], preparando = 0, enviando = false, novoId = '';
 
   // ---------- servidor (google.script.run) ----------
   function chamar(fn, arg) {
@@ -520,24 +534,42 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     g.drawImage(img, 0, 0, c.width, c.height);
     return c.toDataURL('image/jpeg', qualidade);
   }
-  function mostrarFoto() {
-    $('previa').hidden = !foto;
-    $('btnFoto').hidden = !!foto;
-    if (foto) $('previaImg').src = foto.mini;
+  function mostrarFotos() {
+    $('fotos').innerHTML = fotos.map(function (f, i) {
+      return '<div class="foto-item"><img src="' + esc(f.mini) + '" alt="Foto ' + (i + 1) + '"><span class="foto-num">' + (i + 1) + '</span>' +
+        '<button type="button" class="foto-tirar" data-tirar="' + i + '" aria-label="Tirar a foto ' + (i + 1) + '">×</button></div>';
+    }).join('');
+    var cheio = fotos.length >= cfg.fotosMax;
+    $('fotosConta').textContent = fotos.length ? fotos.length + (fotos.length === 1 ? ' foto' : ' fotos') : '';
+    $('btnFoto').classList.toggle('compacto', fotos.length > 0);
+    $('btnFoto').disabled = $('btnGaleria').disabled = cheio || preparando > 0;
+    $('btnFotoTexto').textContent = preparando ? 'Preparando a foto…' : cheio ? 'Limite de ' + cfg.fotosMax + ' fotos' : fotos.length ? 'Tirar mais uma foto' : 'Tirar foto';
+  }
+  $('fotos').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-tirar]');
+    if (!b) return;
+    fotos.splice(Number(b.getAttribute('data-tirar')), 1);
+    mostrarFotos();
+  });
+  /** Prepara as fotos escolhidas, uma de cada vez (grande para a planilha, pequena para a tabela). */
+  function adicionarFotos(arquivos) {
+    var lista = Array.prototype.slice.call(arquivos || []).slice(0, Math.max(0, cfg.fotosMax - fotos.length));
+    if (!lista.length) return;
+    preparando++; mostrarFotos();
+    lista.reduce(function (fila, arq) {
+      return fila.then(function () { return carregar(arq); }).then(function (img) {
+        var mini = reduzir(img, 320, 0.6);
+        if (mini.length > 45000) mini = reduzir(img, 220, 0.5);
+        fotos.push({grande: reduzir(img, 1000, 0.82), mini: mini});
+        aviso('', '');
+        mostrarFotos();
+      }).catch(function (e) { aviso('erro', textoErro(e)); });
+    }, Promise.resolve()).then(function () { preparando--; mostrarFotos(); });
   }
   $('btnFoto').addEventListener('click', function () { $('foto').click(); });
-  $('trocarFoto').addEventListener('click', function () { $('foto').click(); });
-  $('foto').addEventListener('change', function () {
-    var arq = this.files && this.files[0];
-    if (!arq) return;
-    $('btnFotoTexto').textContent = 'Preparando a foto…';
-    carregar(arq).then(function (img) {
-      var mini = reduzir(img, 320, 0.6);
-      if (mini.length > 45000) mini = reduzir(img, 220, 0.5);
-      foto = {grande: reduzir(img, 1000, 0.82), mini: mini};
-      aviso('', '');
-    }).catch(function (e) { foto = null; aviso('erro', textoErro(e)); })
-      .then(function () { $('btnFotoTexto').textContent = 'Tirar foto'; $('foto').value = ''; mostrarFoto(); });
+  $('btnGaleria').addEventListener('click', function () { $('fotoGaleria').click(); });
+  ['foto', 'fotoGaleria'].forEach(function (id) {
+    $(id).addEventListener('change', function () { adicionarFotos(this.files); this.value = ''; });
   });
 
   // ---------- envio ----------
@@ -549,20 +581,21 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     if (enviando) return;
     var d = {nome: $('nome').value.replace(/\s+/g, ' ').trim(), setor: $('setor').value.replace(/\s+/g, ' ').trim(), codigo: $('codigo').value.trim(),
       descricao: $('descricao').value.trim(),
-      foto: foto ? foto.grande : '', miniatura: foto ? foto.mini : ''};
+      fotos: fotos.map(function (f) { return f.grande; }), miniatura: fotos.length ? fotos[0].mini : ''};
     var falta = d.nome.length < 2 ? ['Escreva o nome do colaborador.', 'nome'] : d.setor.length < 2 ? ['Escreva o setor.', 'setor'] :
       cfg.codigoObrigatorio && !d.codigo ? ['Escaneie ou digite o ID de viagem, remessa ou lote.', 'codigo'] :
-      cfg.fotoObrigatoria && !foto ? ['Tire a foto.', 'btnFoto'] : d.descricao.length < 3 ? ['Descreva o que está ocorrendo.', 'descricao'] : null;
+      preparando ? ['Espere as fotos ficarem prontas.', null] : cfg.fotoObrigatoria && !fotos.length ? ['Tire a foto.', 'btnFoto'] : d.descricao.length < 3 ? ['Descreva o que está ocorrendo.', 'descricao'] : null;
     if (falta) { aviso('erro', falta[0]); if (falta[1]) $(falta[1]).focus(); return; }
     enviando = true;
-    $('enviar').disabled = true; $('enviar').textContent = 'Enviando…';
+    $('enviar').disabled = true;
+    $('enviar').textContent = d.fotos.length > 1 ? 'Enviando (' + d.fotos.length + ' fotos)…' : 'Enviando…';
     aviso('', '');
     chamar('salvar', d).then(function (r) {
       guardar('ocorr_nome', d.nome); guardar('ocorr_setor', d.setor);
       novoId = r.registro.id;
       if (r.aviso) aviso('erro', r.aviso);
       else aviso('ok', 'Registro enviado: ' + r.registro.data + ' às ' + r.registro.hora + ' · ' + r.registro.turno + '.');
-      foto = null; mostrarFoto();
+      fotos = []; mostrarFotos();
       $('descricao').value = ''; $('contador').textContent = '0/1000';
       $('codigo').value = ''; dica('', 'Escaneie o QR Code ou o código de barras, ou digite o número.');
       mostrarLinhas(r.registros);
@@ -575,8 +608,9 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     lista = lista || [];
     $('tabInfo').textContent = lista.length ? '· últimos ' + lista.length : '';
     $('linhas').innerHTML = lista.length ? lista.map(function (r) {
+      var mais = r.qtdFotos > 1 ? '<span class="mais">+' + (r.qtdFotos - 1) + '</span>' : '';
       var img = r.miniatura ? '<button type="button" class="mini-btn" data-foto="' + esc(r.id) + '" aria-label="Ver a foto de ' + esc(r.nome) + '"><img class="mini" src="' +
-        esc(r.miniatura) + '" alt=""></button>' : r.temFoto ? '<span class="na-planilha">Na planilha</span>' : '—';
+        esc(r.miniatura) + '" alt="">' + mais + '</button>' : r.qtdFotos ? '<span class="na-planilha">' + r.qtdFotos + (r.qtdFotos === 1 ? ' foto' : ' fotos') + '</span>' : '—';
       return '<tr' + (r.id && r.id === novoId ? ' class="novo"' : '') + '><td>' + img + '</td><td class="nw"><span class="dia">' + esc(r.data) + '</span> <span class="hr">' +
         esc(r.hora) + '</span></td><td class="nw">' + esc(r.turno) + '</td><td>' + esc(r.nome) + '</td><td>' + esc(r.setor) + '</td><td class="nw">' + esc(r.codigo || '—') +
         '</td><td class="desc">' + esc(r.descricao) + '</td></tr>';
@@ -698,18 +732,42 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     if (!$('scanner').hidden) fecharScanner(); else if (!$('zoom').hidden) fecharZoom();
   });
 
+  // ---------- tema claro / escuro (fica guardado neste aparelho) ----------
+  function temaAtual() {
+    var t = document.documentElement.getAttribute('data-theme');
+    return t || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  }
+  function pintarTema() {
+    var escuro = temaAtual() === 'dark';
+    $('tema').setAttribute('aria-pressed', String(escuro));
+    $('tema').setAttribute('aria-label', escuro ? 'Usar tema claro' : 'Usar tema escuro');
+    $('tema').title = escuro ? 'Tema claro' : 'Tema escuro';
+    $('iconeLua').toggleAttribute('hidden', escuro); $('iconeSol').toggleAttribute('hidden', !escuro); // SVG: atributo, não a propriedade
+  }
+  var temaSalvo = lembrar('ocorr_tema');
+  if (temaSalvo === 'dark' || temaSalvo === 'light') document.documentElement.setAttribute('data-theme', temaSalvo);
+  $('tema').addEventListener('click', function () {
+    var novo = temaAtual() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', novo);
+    guardar('ocorr_tema', novo);
+    pintarTema();
+  });
+  pintarTema();
+
   // ---------- início ----------
+  relogio(); setInterval(relogio, 1000);
+  mostrarFotos();
   $('nome').value = lembrar('ocorr_nome');
   $('setor').value = lembrar('ocorr_setor');
   chamar('iniciar').then(function (c) {
-    cfg = c;
+    Object.keys(c).forEach(function (k) { cfg[k] = c[k]; });
+    relogio(); mostrarFotos();
     document.title = c.titulo;
     $('titulo').textContent = c.titulo; $('subtitulo').textContent = c.subtitulo;
     $('fotoObrig').hidden = !c.fotoObrigatoria;
     $('rodape').textContent = c.titulo + ' · versão ' + c.versao;
     $('codigoObrig').hidden = !c.codigoObrigatorio;
     if (c.planilhaUrl) { $('abrirPlanilha').href = c.planilhaUrl; $('abrirPlanilha').hidden = false; }
-    relogio(); setInterval(relogio, 1000);
     mostrarLinhas(c.registros);
     setInterval(function () { if (!document.hidden && !enviando) atualizar(); }, 60000);
   }).catch(function (e) {
