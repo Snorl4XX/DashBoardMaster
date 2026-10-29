@@ -13,11 +13,17 @@ function check(ok, nome, extra) {
   console.log('FALHOU ' + nome + (extra !== undefined ? '  -> ' + JSON.stringify(extra).slice(0, 400) : ''));
 }
 
-// Foto fictícia: um JPEG qualquer de poucos bytes (o Google de mentira não abre a imagem).
-const JPEG = 'data:image/jpeg;base64,' + Buffer.from('JPEG-FICTICIO-' + 'x'.repeat(200)).toString('base64');
-const MINI = 'data:image/jpeg;base64,' + Buffer.from('MINI-FICTICIA').toString('base64');
+// Foto fictícia: só o começo de um JPEG (marcadores SOI, APP0 e SOF0 com a largura e a altura) e um texto de teste.
+function jpegFalso(w, h, texto) {
+  const sof = [0xFF, 0xC0, 0x00, 0x11, 0x08, h >> 8, h & 255, w >> 8, w & 255, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
+  return Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]), Buffer.from(sof),
+    Buffer.from(texto), Buffer.from([0xFF, 0xD9])]);
+}
+const JPEG_BYTES = jpegFalso(1000, 750, 'JPEG-FICTICIO-' + 'x'.repeat(200)), MINI_BYTES = jpegFalso(320, 240, 'MINI-FICTICIA');
+const JPEG = 'data:image/jpeg;base64,' + JPEG_BYTES.toString('base64');
+const MINI = 'data:image/jpeg;base64,' + MINI_BYTES.toString('base64');
 
-const {criarGoogle} = require('./google_falso');
+const {criarGoogle, lerZip} = require('./google_falso');
 
 function erroDe(f) { try { f(); return ''; } catch (e) { return e.message; } }
 const BASE = {nome: 'COLABORADOR TESTE', setor: 'Recebimento', descricao: 'Pacote de teste com caixa amassada.', foto: JPEG, miniatura: MINI};
@@ -60,7 +66,7 @@ function createAndConfig(o) { const g = criarGoogle(o); g.ctx.configurar(); retu
     l[8] === r.registro.id && l[9] === MINI, 'salvar: linha na aba Registros com colaborador, setor e descrição', l.map(x => (x && x.tipo) || String(x).slice(0, 30)));
   const arq = g.arquivos[0];
   check(g.arquivos.length === 1 && arq.pasta.id === g.props.FOTOS_ID && arq.blob.tipo === 'image/jpeg' &&
-    arq.blob.nome === '2026-10-29_09-05-12_T1_Recebimento_COLABORADOR-TESTE.jpg' && Buffer.from(arq.blob.bytes).toString().startsWith('JPEG-FICTICIO'),
+    arq.blob.nome === '2026-10-29_09-05-12_T1_Recebimento_COLABORADOR-TESTE.jpg' && Buffer.from(arq.blob.bytes).equals(JPEG_BYTES),
     'salvar: foto guardada na pasta do Drive com nome de data, turno, setor e colaborador', arq && arq.blob.nome);
   check(l[6] && l[6].tipo === 'imagem' && l[6].url === JPEG && aba.alturas[2] === 120, 'salvar: foto dentro da célula (coluna Foto)', l[6]);
   check(l[7] && l[7].tipo === 'link' && l[7].texto === 'Abrir foto' && l[7].link === arq.getUrl(), 'salvar: link da foto na coluna ao lado', l[7]);
@@ -85,7 +91,8 @@ function createAndConfig(o) { const g = criarGoogle(o); g.ctx.configurar(); retu
   g.horario('2026-10-29T10:00:00');
   const casos = [
     [{nome: ' '}, /nome do colaborador/],
-    [{setor: 'Financeiro'}, /setor/],
+    [{setor: ''}, /Escreva o setor/],
+    [{setor: 'x'.repeat(61)}, /setor pode ter no máximo 60/],
     [{descricao: ''}, /Descreva/],
     [{foto: ''}, /Tire a foto/],
     [{foto: 'data:text/html;base64,PHNjcmlwdD4='}, /foto não veio certa/],
@@ -126,17 +133,75 @@ function createAndConfig(o) { const g = criarGoogle(o); g.ctx.configurar(); retu
   check(r.ok && l[6] === '' && l[9] === '' && g.arquivos.length === 1, 'foto opcional (se mudar no CONFIG): salva sem foto', l.slice(6));
   for (let i = 0; i < 40; i++) g.ctx.salvar(Object.assign({}, BASE, {foto: ''}));
   const ini = g.ctx.iniciar();
-  check(ini.registros.length === 30 && ini.setores.join() === 'Recebimento,Expedição,Rejeito,DWS' && ini.turnos.length === 3 && ini.titulo === 'Registro de Ocorrências',
-    'iniciar: setores, turnos e os 30 últimos registros', {n: ini.registros.length, setores: ini.setores});
+  check(ini.registros.length === 30 && !('setores' in ini) && ini.turnos.length === 3 && ini.titulo === 'Registro de Ocorrências' && /^\d{4}-\d{2}-\d{2}$/.test(ini.hoje),
+    'iniciar: turnos, data de hoje e os 30 últimos registros (setor é escrito, sem lista)', {n: ini.registros.length, hoje: ini.hoje});
   const tela = g.ctx.doGet();
-  check(tela.arquivo === 'Index', 'doGet abre a tela Index');
+  check(tela.html === g.ctx.PAGINA_ && /^<!DOCTYPE html>/.test(tela.html) && /<input type="text" id="setor"/.test(tela.html),
+    'doGet abre a tela que está no próprio Codigo.gs (setor é um campo para escrever)');
 }
 
 // ---------- 7. A tela não usa nada de fora ----------
 {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'Index.html'), 'utf8');
+  const html = criarGoogle().ctx.PAGINA_;
+  check(fs.readdirSync(path.join(__dirname, '..')).filter(n => /\.(gs|html)$/.test(n)).join() === 'Codigo.gs', 'tudo num arquivo só: Codigo.gs');
   check(!/<script[^>]+src=/i.test(html) && !/<link[^>]+href=/i.test(html) && /capture="environment"/.test(html) && /google\.script\.run/.test(html),
     'Index.html: sem arquivos de fora; câmera traseira; fala com o Apps Script');
+}
+
+// ---------- 8. Baixar planilha (Excel com as fotos) ----------
+{
+  const g = createAndConfig();
+  const enviar = (quando, muda) => { g.horario(quando); return g.ctx.salvar(Object.assign({}, BASE, muda || {})); };
+  enviar('2026-10-28T23:30:00', {nome: 'ONTEM TESTE', setor: 'Rejeito'});
+  enviar('2026-10-29T09:05:12', {setor: 'Recebimento', descricao: 'Caixa <aberta> & molhada "teste"'});
+  g.ctx.CONFIG.fotoObrigatoria = false;
+  enviar('2026-10-29T15:40:00', {nome: 'SEM FOTO', foto: '', miniatura: ''});
+  enviar('2026-10-29T22:10:00', {setor: '=DWS'});
+  enviar('2026-10-30T01:00:00', {nome: 'AMANHA TESTE'});
+  g.horario('2026-10-29T23:59:00');
+  const lidos0 = g.lidosDoDrive || 0;
+  const r = g.ctx.baixarExcel({de: '2026-10-29', ate: '2026-10-29'});
+  const z = lerZip(Buffer.from(r.base64, 'base64'));
+  const plan = z['xl/worksheets/sheet1.xml'].toString('utf8'), des = (z['xl/drawings/drawing1.xml'] || '').toString('utf8');
+  const textos = (plan.match(/<t xml:space="preserve">[^<]*<\/t>/g) || []).map(t => t.replace(/<[^>]+>/g, ''));
+  check(r.nome === 'registro_ocorrencias_2026-10-29.xlsx' && r.linhas === 3 && r.fotos === 2 && r.pequenas === 0,
+    'Excel do dia: só os registros do dia (3), com as 2 fotos', {nome: r.nome, linhas: r.linhas, fotos: r.fotos});
+  check(['[Content_Types].xml', '_rels/.rels', 'xl/workbook.xml', 'xl/styles.xml', 'xl/worksheets/sheet1.xml', 'xl/drawings/drawing1.xml',
+    'xl/drawings/_rels/drawing1.xml.rels', 'xl/media/foto1.jpeg', 'xl/media/foto2.jpeg'].every(n => z[n]), 'Excel: arquivo .xlsx com a planilha e as fotos dentro', Object.keys(z));
+  check(z['xl/media/foto1.jpeg'].equals(JPEG_BYTES) && g.lidosDoDrive - lidos0 === 2, 'Excel: a foto é a do Drive (tamanho normal)');
+  check(textos.slice(0, 9).join('|') === 'Data|Hora|Turno|Colaborador|Setor|Descrição|Foto|Link da foto|ID' &&
+    textos.indexOf('ONTEM TESTE') < 0 && textos.indexOf('AMANHA TESTE') < 0 && textos.indexOf('SEM FOTO') >= 0 && textos.indexOf('=DWS') >= 0,
+    'Excel: cabeçalho e só os nomes do dia; "=DWS" fica como texto', textos.slice(0, 30));
+  check(/Caixa &lt;aberta&gt; &amp; molhada &quot;teste&quot;/.test(plan), 'Excel: texto com < & " não quebra o arquivo');
+  const serial = (Date.UTC(2026, 9, 29, 9, 5, 12) - Date.UTC(1899, 11, 30)) / 864e5;
+  check(new RegExp('<c r="A2" s="2"><v>' + serial + '</v></c><c r="B2" s="3"><v>' + serial + '</v></c>').test(plan),
+    'Excel: Data e Hora como data do Excel (filtra e ordena), na hora de São Paulo', serial);
+  const ancoras = des.match(/<xdr:row>(\d+)<\/xdr:row>/g) || [];
+  check(ancoras.join() === '<xdr:row>1</xdr:row>,<xdr:row>3</xdr:row>' && /<xdr:col>6<\/xdr:col>/.test(des) && /cx="1524000" cy="1143000"/.test(des) &&
+    /<row r="2" ht="96" customHeight="1">/.test(plan) && /<row r="3">/.test(plan),
+    'Excel: cada foto na coluna Foto da sua linha (160x120), linha alta só onde tem foto', ancoras);
+  const rels = z['xl/worksheets/_rels/sheet1.xml.rels'].toString('utf8');
+  check((rels.match(/drive\.google\.com\/file\/d\/ARQ-\d+\/view/g) || []).length === 2 && /<hyperlink ref="H2" r:id="rIdL2"\/>/.test(plan),
+    'Excel: "Abrir foto" com o link do Drive');
+
+  const r2 = g.ctx.baixarExcel({de: '2026-10-30', ate: '2026-10-28'});
+  check(r2.nome === 'registro_ocorrencias_2026-10-28_a_2026-10-30.xlsx' && r2.linhas === 5, 'Excel de vários dias (datas trocadas são acertadas)', {nome: r2.nome, linhas: r2.linhas});
+  const r3 = g.ctx.baixarExcel({});
+  check(r3.linhas === 3 && r3.nome === 'registro_ocorrencias_2026-10-29.xlsx', 'Excel sem datas: hoje');
+  const r4 = g.ctx.baixarExcel({de: '2026-01-01', ate: '2026-01-01'});
+  const z4 = lerZip(Buffer.from(r4.base64, 'base64'));
+  check(r4.linhas === 0 && r4.fotos === 0 && !z4['xl/drawings/drawing1.xml'], 'Excel de um dia sem registros: vazio, sem fotos');
+  check(/no máximo 31 dias/.test(erroDe(() => g.ctx.baixarExcel({de: '2026-09-01', ate: '2026-10-29'}))), 'Excel: período de no máximo 31 dias');
+
+  g.ctx.CONFIG.fotosGrandesExcel = 1;
+  const r5 = g.ctx.baixarExcel({de: '2026-10-29', ate: '2026-10-29'}), z5 = lerZip(Buffer.from(r5.base64, 'base64'));
+  check(r5.fotos === 2 && r5.pequenas === 2 && z5['xl/media/foto1.jpeg'].equals(MINI_BYTES) && /cx="1524000" cy="1143000"/.test(z5['xl/drawings/drawing1.xml'].toString()),
+    'Excel com muitas fotos: usa a foto pequena (arquivo leve)', {fotos: r5.fotos, pequenas: r5.pequenas});
+  g.ctx.CONFIG.fotosGrandesExcel = 40;
+  g.arquivos[1].apagado = true;
+  const r6 = g.ctx.baixarExcel({de: '2026-10-29', ate: '2026-10-29'}), z6 = lerZip(Buffer.from(r6.base64, 'base64'));
+  check(r6.fotos === 2 && r6.pequenas === 1 && z6['xl/media/foto1.jpeg'].equals(MINI_BYTES) && z6['xl/media/foto2.jpeg'].equals(JPEG_BYTES),
+    'Excel: foto apagada do Drive usa a pequena da planilha', {fotos: r6.fotos, pequenas: r6.pequenas});
 }
 
 console.log('\n' + (falhas ? 'FALHOU: ' + falhas + ' de ' + (oks + falhas) : 'OK: ' + oks + ' verificações do Registro de Ocorrências passaram') + '.');

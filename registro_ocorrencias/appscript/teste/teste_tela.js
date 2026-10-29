@@ -1,16 +1,16 @@
 /**
- * Teste da tela (Index.html) no navegador, falando com o Codigo.gs de verdade sobre o Google de mentira (google_falso.js).
+ * Teste da tela (PAGINA_, no fim do Codigo.gs) no navegador, falando com o Codigo.gs de verdade sobre o Google de mentira (google_falso.js).
  * A "foto" é uma imagem gerada aqui (faixas coloridas). Precisa do Playwright com Chromium.
  * Uso: node registro_ocorrencias/appscript/teste/teste_tela.js [pasta para os prints]
  */
 'use strict';
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
 const {chromium} = require('playwright');
-const {criarGoogle} = require('./google_falso');
+const {criarGoogle, lerZip} = require('./google_falso');
 
-const HTML = path.join(__dirname, '..', 'Index.html');
 const PRINTS = process.argv[2] || '';
 let falhas = 0, oks = 0;
 function check(ok, nome, extra) {
@@ -53,6 +53,8 @@ function tamanhoJpeg(b) {
 (async () => {
   const g = criarGoogle();
   g.ctx.configurar();
+  const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'ocorr-tela-')), HTML = path.join(pasta, 'pagina.html');
+  fs.writeFileSync(HTML, g.ctx.PAGINA_);
   const navegador = await chromium.launch();
   const abrir = async (opcoes) => {
     const pg = await navegador.newPage(opcoes);
@@ -63,7 +65,7 @@ function tamanhoJpeg(b) {
     await pg.addInitScript(() => {
       const criar = (ok, erro) => {
         const r = {withSuccessHandler: f => criar(f, erro), withFailureHandler: f => criar(ok, f)};
-        ['iniciar', 'listar', 'salvar'].forEach(n => {
+        ['iniciar', 'listar', 'salvar', 'baixarExcel'].forEach(n => {
           r[n] = arg => { window.__gas(n, arg === undefined ? null : arg).then(x => { if (x.erro) { if (erro) erro(new Error(x.erro)); } else if (ok) ok(x.valor); }); };
         });
         return r;
@@ -71,7 +73,7 @@ function tamanhoJpeg(b) {
       window.google = {script: {run: criar(null, null)}};
     });
     await pg.goto('file://' + HTML);
-    await pg.waitForSelector('#setores input');
+    await pg.waitForFunction(() => document.getElementById('rodape').textContent.length > 0);
     return pg;
   };
   const foto = {name: 'foto.png', mimeType: 'image/png', buffer: png(1600, 1200)};
@@ -81,12 +83,13 @@ function tamanhoJpeg(b) {
   const agora = await pg.textContent('#agora'), turno = await pg.textContent('#turno');
   const hojeTela = await pg.textContent('#data');
   check(/^\d{2}:\d{2}:\d{2}$/.test(agora) && /^\d{2}\/\d{2}\/\d{4}$/.test(hojeTela) && /^T[123]$/.test(turno), 'data, hora e turno aparecem sozinhos', {agora, hojeTela, turno});
-  check((await pg.$$eval('#setores input', l => l.map(i => i.value))).join() === 'Recebimento,Expedição,Rejeito,DWS', 'setores: Recebimento, Expedição, Rejeito e DWS');
+  check(await pg.$eval('#setor', i => i.type) === 'text' && (await pg.$$('input[type=radio], select')).length === 0, 'setor: campo para escrever, sem opções');
+  check(await pg.inputValue('#de') === g.ctx.iniciar().hoje && await pg.inputValue('#ate') === g.ctx.iniciar().hoje, 'Baixar planilha: período começa em hoje');
   check(/Nenhum registro ainda/.test(await pg.textContent('#linhas')), 'tabela vazia no começo');
   if (PRINTS) await pg.screenshot({path: path.join(PRINTS, 'celular_vazio.png'), fullPage: true});
 
   await pg.fill('#nome', 'COLABORADOR TESTE');
-  await pg.click('text=Expedição');
+  await pg.fill('#setor', 'Expedição');
   await pg.fill('#descricao', 'Pacote de teste com a etiqueta rasgada.');
   await pg.click('#enviar');
   await pg.waitForSelector('.aviso.erro');
@@ -114,7 +117,7 @@ function tamanhoJpeg(b) {
     'depois de enviar: nome fica, descrição e foto limpam para o próximo');
 
   for (const [setor, texto] of [['Recebimento', 'Volume de teste chegou molhado.'], ['DWS', 'Leitura de teste sem peso no DWS.']]) {
-    await pg.click('text=' + setor);
+    await pg.fill('#setor', setor);
     await pg.fill('#descricao', texto);
     await pg.setInputFiles('#foto', foto);
     await pg.waitForSelector('#previa:not([hidden])');
@@ -138,19 +141,34 @@ function tamanhoJpeg(b) {
 
   // Abrir de novo: lembra o nome e o setor.
   await pg.reload();
-  await pg.waitForSelector('#setores input');
-  check(await pg.inputValue('#nome') === 'COLABORADOR TESTE' && await pg.$eval('input[name="setor"]:checked', i => i.value) === 'DWS', 'abrir de novo: lembra o nome e o setor');
+  await pg.waitForFunction(() => document.getElementById('rodape').textContent.length > 0);
+  check(await pg.inputValue('#nome') === 'COLABORADOR TESTE' && await pg.inputValue('#setor') === 'DWS', 'abrir de novo: lembra o nome e o setor');
 
   // Erro do servidor aparece na tela.
-  g.ctx.CONFIG.setores = ['Recebimento'];
-  await pg.click('text=DWS');
+  const salvarDeVerdade = g.ctx.salvar;
+  g.ctx.salvar = () => { throw new Error('Escreva o setor.'); };
   await pg.fill('#descricao', 'Teste de erro.');
   await pg.setInputFiles('#foto', foto);
   await pg.waitForSelector('#previa:not([hidden])');
   await pg.click('#enviar');
   await pg.waitForSelector('.aviso.erro');
-  check(/Não enviou: Escolha o setor\./.test(await pg.textContent('#msg')) && !(await pg.isDisabled('#enviar')), 'erro do servidor: mostra e libera o botão');
-  g.ctx.CONFIG.setores = ['Recebimento', 'Expedição', 'Rejeito', 'DWS'];
+  check(/Não enviou: Escreva o setor\./.test(await pg.textContent('#msg')) && !(await pg.isDisabled('#enviar')), 'erro do servidor: mostra e libera o botão',
+    await pg.textContent('#msg'));
+  g.ctx.salvar = salvarDeVerdade;
+
+  // Baixar planilha: Excel com as fotos.
+  const [baixado] = await Promise.all([pg.waitForEvent('download'), pg.click('#baixar')]);
+  const xlsx = path.join(PRINTS || pasta, baixado.suggestedFilename());
+  await baixado.saveAs(xlsx);
+  const z = lerZip(fs.readFileSync(xlsx)), midias = Object.keys(z).filter(n => /^xl\/media\//.test(n));
+  await pg.waitForSelector('#msgExcel .aviso.ok');
+  check(/^registro_ocorrencias_\d{4}-\d{2}-\d{2}\.xlsx$/.test(baixado.suggestedFilename()) && midias.length === 4 && z['xl/worksheets/sheet1.xml'] &&
+    /Planilha baixada: 4 registros e 4 fotos\./.test(await pg.textContent('#msgExcel')), 'Baixar planilha: baixa o Excel do dia com as 4 fotos', {nome: baixado.suggestedFilename(), midias});
+  if (PRINTS) await pg.screenshot({path: path.join(PRINTS, 'celular_baixou.png'), fullPage: true});
+  await pg.fill('#de', '2026-01-01'); await pg.fill('#ate', '2026-01-01');
+  await pg.click('#baixar');
+  await pg.waitForSelector('#msgExcel .aviso.erro');
+  check(/Nenhum registro nesse período/.test(await pg.textContent('#msgExcel')), 'Baixar planilha de um dia sem registros: avisa');
 
   // ---------- computador e tema escuro ----------
   for (const [nome, opcoes] of [['computador', {viewport: {width: 1280, height: 900}, colorScheme: 'light'}], ['celular_escuro', {viewport: {width: 390, height: 844}, deviceScaleFactor: 2, colorScheme: 'dark'}]]) {
