@@ -1,5 +1,6 @@
 /**
- * Teste da tela (PAGINA_, no fim do Codigo.gs) no navegador, falando com o Codigo.gs de verdade sobre o Google de mentira (google_falso.js).
+ * Teste da tela (PAGINA_, no fim do Codigo.gs) no navegador, falando com o Codigo.gs de verdade sobre o Apps Script e o Feishu de
+ * mentira (google_falso.js).
  * A "foto" é uma imagem gerada aqui (faixas coloridas); o QR Code e o código de barras de teste estão em teste/imagens.
  * Precisa do Playwright com Chromium. O leitor de códigos (ZXing) vem do jsdelivr; sem internet, aponte ZXING_UMD para o
  * arquivo umd/index.min.js do @zxing/library 0.21.3. A câmera ao vivo usa um vídeo do QR Code (precisa do ffmpeg; sem
@@ -13,7 +14,7 @@ const path = require('path');
 const zlib = require('zlib');
 const {chromium} = require('playwright');
 const {execFileSync} = require('child_process');
-const {criarGoogle} = require('./google_falso');
+const {criarGoogle, LINK} = require('./google_falso');
 const IMAGENS = path.join(__dirname, 'imagens');
 
 const PRINTS = process.argv[2] || '';
@@ -91,7 +92,7 @@ function tamanhoJpeg(b) {
   const hojeTela = await pg.textContent('#data');
   check(/^\d{2}:\d{2}:\d{2}$/.test(agora) && /^\d{2}\/\d{2}\/\d{4}$/.test(hojeTela) && /^T[123]$/.test(turno), 'data, hora e turno aparecem sozinhos', {agora, hojeTela, turno});
   check(await pg.$eval('#setor', i => i.type) === 'text' && (await pg.$$('input[type=radio], select')).length === 0, 'setor: campo para escrever, sem opções');
-  check(await pg.getAttribute('#abrirPlanilha', 'href') === 'https://docs.google.com/spreadsheets/d/PLANILHA-FICTICIA/edit' && await pg.isVisible('#abrirPlanilha') &&
+  check(await pg.getAttribute('#abrirPlanilha', 'href') === LINK && await pg.isVisible('#abrirPlanilha') && /planilha do Feishu/.test(await pg.textContent('.tempo-real')) &&
     await pg.getAttribute('#abrirPlanilha', 'target') === '_blank' && (await pg.$('#baixar')) === null, 'Abrir planilha (tempo real) no lugar do baixar');
   check(await pg.evaluate(() => typeof window.ZXing === 'object' && typeof ZXing.MultiFormatReader === 'function'), 'leitor de códigos (ZXing) carregou');
   check(/Nenhum registro ainda/.test(await pg.textContent('#linhas')), 'tabela vazia no começo');
@@ -103,7 +104,7 @@ function tamanhoJpeg(b) {
   await pg.fill('#descricao', 'Pacote de teste com a etiqueta rasgada.');
   await pg.click('#enviar');
   await pg.waitForSelector('.aviso.erro');
-  check(/Tire a foto/.test(await pg.textContent('#msg')) && g.ss.abas.Registros.celulas.length === 1, 'sem foto: avisa e não envia');
+  check(/Tire a foto/.test(await pg.textContent('#msg')) && g.feishu.linhas.length === 1, 'sem foto: avisa e não envia');
 
   await pg.setInputFiles('#foto', foto);
   await pg.waitForSelector('#previa:not([hidden])');
@@ -112,14 +113,15 @@ function tamanhoJpeg(b) {
   await pg.click('#enviar');
   await pg.waitForSelector('.aviso.ok');
   const msg = await pg.textContent('#msg');
-  const l = g.ss.abas.Registros.celulas[1];
-  check(/Registro enviado: \d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}:\d{2} · T[123]\./.test(msg) && l[3] === "'COLABORADOR TESTE" && l[4] === "'Expedição" && l[5] === "'LOTE-TESTE-77" && l[2] === turno,
+  const l = g.feishu.linhas[1];
+  check(/Registro enviado: \d{2}\/\d{2}\/\d{4} às \d{2}:\d{2}:\d{2} · T[123]\./.test(msg) && l[3] === 'COLABORADOR TESTE' && l[4] === 'Expedição' && l[5] === 'LOTE-TESTE-77' && l[2] === turno,
     'enviou: mensagem com data, hora e turno; linha na planilha', msg);
-  const jpg = Buffer.from(g.arquivos[0].blob.bytes), dim = tamanhoJpeg(jpg);
-  check(g.arquivos[0].blob.tipo === 'image/jpeg' && dim && dim.largura === 1000 && dim.altura === 750 && jpg.length < 400000,
+  const jpg = g.feishu.imagens[2].bytes, dim = tamanhoJpeg(jpg);
+  check(/\.jpg$/.test(g.feishu.imagens[2].nome) && dim && dim.largura === 1000 && dim.altura === 750 && jpg.length < 400000,
     'foto reduzida no celular antes de enviar (1600x1200 → 1000x750, JPEG)', {dim, bytes: jpg.length});
-  check(l[7].tipo === 'imagem' && /^data:image\/jpeg;base64,/.test(l[7].url) && l[10].length < 45000 && /^data:image\/jpeg;base64,/.test(l[10]),
-    'planilha: foto na célula e miniatura para a tabela do app', {mini: l[10].length});
+  const mini = (Object.entries(g.cache).find(([k]) => /^mini_/.test(k)) || [])[1];
+  check(g.feishu.imagens[2].col === 8 && mini && mini.v.length < 45000 && /^data:image\/jpeg;base64,/.test(mini.v),
+    'planilha do Feishu: foto na célula da coluna Foto; miniatura para a tabela do app', {mini: mini && mini.v.length});
   const tab = await pg.$$eval('#linhas tr', trs => trs.map(tr => Array.from(tr.cells).map(c => c.textContent.trim())));
   check(tab.length === 1 && /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/.test(tab[0][1]) && tab[0][3] === 'COLABORADOR TESTE' && tab[0][4] === 'Expedição' && tab[0][5] === 'LOTE-TESTE-77' &&
     tab[0][6] === 'Pacote de teste com a etiqueta rasgada.' &&
@@ -178,6 +180,11 @@ function tamanhoJpeg(b) {
   await pg.click('#atualizar');
   await pg.waitForFunction(() => document.querySelectorAll('#linhas tr').length === 4);
   check((await pg.textContent('#linhas tr:first-child')).includes('OUTRO TESTE'), 'Atualizar traz o que os outros enviaram');
+  // Depois de 6 h a miniatura sai do Apps Script: a tabela mostra que a foto está na planilha.
+  Object.keys(g.cache).filter(k => /^mini_/.test(k)).forEach(k => { delete g.cache[k]; });
+  await pg.click('#atualizar');
+  await pg.waitForFunction(() => !document.querySelector('#linhas img.mini'));
+  check((await pg.$$eval('#linhas .na-planilha', l => l.length)) === 4, 'sem a miniatura: a tabela mostra "Na planilha"');
 
   // Abrir de novo: lembra o nome e o setor.
   await pg.reload();

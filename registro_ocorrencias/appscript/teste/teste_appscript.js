@@ -1,10 +1,12 @@
 /**
- * Teste do Codigo.gs (Registro de Ocorrências) com Google de mentira: planilha, Drive e fotos fictícios.
+ * Teste do Codigo.gs (Registro de Ocorrências → planilha do Feishu) com Apps Script e Feishu de mentira (google_falso.js).
+ * Tudo fictício: app, token, planilha, nomes e fotos de teste.
  * Uso: node registro_ocorrencias/appscript/teste/teste_appscript.js
  */
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const {criarGoogle, PLANILHA, ABA, LINK} = require('./google_falso');
 
 let falhas = 0, oks = 0;
 function check(ok, nome, extra) {
@@ -12,8 +14,9 @@ function check(ok, nome, extra) {
   falhas++;
   console.log('FALHOU ' + nome + (extra !== undefined ? '  -> ' + JSON.stringify(extra).slice(0, 400) : ''));
 }
+function erroDe(f) { try { f(); return ''; } catch (e) { return e.message; } }
 
-// Foto fictícia: só o começo de um JPEG (marcadores SOI, APP0 e SOF0 com a largura e a altura) e um texto de teste.
+// Foto fictícia: só o começo de um JPEG (marcadores SOI, APP0 e SOF0) e um texto de teste.
 function jpegFalso(w, h, texto) {
   const sof = [0xFF, 0xC0, 0x00, 0x11, 0x08, h >> 8, h & 255, w >> 8, w & 255, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
   return Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]), Buffer.from(sof),
@@ -22,84 +25,90 @@ function jpegFalso(w, h, texto) {
 const JPEG_BYTES = jpegFalso(1000, 750, 'JPEG-FICTICIO-' + 'x'.repeat(200)), MINI_BYTES = jpegFalso(320, 240, 'MINI-FICTICIA');
 const JPEG = 'data:image/jpeg;base64,' + JPEG_BYTES.toString('base64');
 const MINI = 'data:image/jpeg;base64,' + MINI_BYTES.toString('base64');
-
-const {criarGoogle, lerZip} = require('./google_falso');
-
-function erroDe(f) { try { f(); return ''; } catch (e) { return e.message; } }
 const BASE = {nome: 'COLABORADOR TESTE', setor: 'Recebimento', codigo: 'REMESSA-TESTE-0001', descricao: 'Pacote de teste com caixa amassada.', foto: JPEG,
   miniatura: MINI};
+const configurado = o => { const g = criarGoogle(o); g.ctx.configurar(); return g; };
+const pedidosDe = (g, re) => g.pedidos.filter(p => re.test(p.caminho));
 
 // ---------- 1. Turno pela hora ----------
 {
-  const g = createAndConfig();
-  const t = g.ctx.turnoDe;
+  const t = criarGoogle().ctx.turnoDe;
   check([0, 5, 6, 9, 13, 14, 21, 22, 23].map(t).join() === 'T3,T3,T1,T1,T1,T2,T2,T3,T3', 'turno: T1 06–13:59, T2 14–21:59, T3 22–05:59 (9h = T1)');
 }
-function createAndConfig(o) { const g = criarGoogle(o); g.ctx.configurar(); return g; }
 
-// ---------- 2. Configurar ----------
+// ---------- 2. Configurar o Feishu ----------
 {
+  check(/Propriedades do script.*FEISHU_APP_ID.*FEISHU_APP_SECRET.*FEISHU_PLANILHA/.test(erroDe(() => criarGoogle({semPropriedades: true}).ctx.configurar())),
+    'sem configurar: explica onde pôr o App ID, o App Secret e o link da planilha');
+  check(/não é um link de planilha/.test(erroDe(() => criarGoogle({link: 'https://exemplo.com/planilha'}).ctx.configurar())), 'link errado: avisa');
+  check(/Wiki/.test(erroDe(() => criarGoogle({link: 'https://empresa-teste.feishu.cn/wiki/wikcnTESTE'}).ctx.configurar())), 'link da Wiki: explica como pegar o link da planilha');
+  check(/Confira FEISHU_APP_ID e FEISHU_APP_SECRET/.test(erroDe(() => criarGoogle({segredoErrado: true}).ctx.configurar())), 'App Secret errado: avisa qual propriedade conferir');
+  check(/Adicionar app de documento/.test(erroDe(() => criarGoogle({semPermissao: true}).ctx.configurar())), 'app fora da planilha: explica como adicionar o app na planilha');
+
   const g = criarGoogle();
   const msg = g.ctx.configurar();
-  const aba = g.ss.abas.Registros;
-  check(aba && aba.celulas[0].join('|') === 'Data|Hora|Turno|Colaborador|Setor|ID de viagem / remessa / lote|Descrição|Foto|Link da foto|ID|Miniatura (app)' &&
-    aba.ocultas.join() === '11' && g.ss.fuso === 'America/Sao_Paulo' && g.props.PLANILHA_ID === 'PLANILHA-FICTICIA',
-    'configurar: aba Registros com o cabeçalho, miniatura escondida e fuso de São Paulo', aba && aba.celulas[0]);
-  const pastaFotos = g.pastas.find(p => p.id === g.props.FOTOS_ID);
-  check(pastaFotos && pastaFotos.nome === 'Fotos - Registro de Ocorrências' && pastaFotos.pai === g.pastaDaPlanilha && /Implantar/.test(msg),
-    'configurar: pasta das fotos ao lado da planilha', pastaFotos && pastaFotos.nome);
-  g.ctx.configurar();
-  check(g.ss.abas.Registros.celulas.length === 1 && g.pastas.filter(p => p.nome === 'Fotos - Registro de Ocorrências').length === 1,
-    'configurar de novo não duplica a aba nem a pasta');
-  const sem = criarGoogle({semAtiva: true});
-  check(/Extensões/.test(erroDe(() => sem.ctx.configurar())), 'configurar fora da planilha: explica onde abrir');
+  check(/cabeçalho escrito/.test(msg) && g.feishu.linhas[0].join('|') === 'Data|Hora|Turno|Colaborador|Setor|ID de viagem / remessa / lote|Descrição|Foto|ID',
+    'configurar: escreve o cabeçalho na primeira linha da planilha do Feishu', g.feishu.linhas[0]);
+  check(g.props['FEISHU_ABA_' + PLANILHA] === ABA && pedidosDe(g, /sheets\/query/).length === 1, 'link sem aba: usa a primeira aba e guarda');
+  check(g.feishu.estilos.length === 1 && g.feishu.estilos[0].range === ABA + '!F2:F5000' && g.feishu.estilos[0].style.formatter === '@',
+    'coluna do ID / remessa / lote como texto (remessa só de números não vira 8,88E+14)', g.feishu.estilos);
+  check(g.pedidos.every(p => p.base === 'https://open.feishu.cn') && g.pedidos.filter(p => !/tenant_access_token/.test(p.caminho)).every(p => p.auth === 'Bearer t-ficticio-1') &&
+    g.tokens === 1 && g.pedidos.every(p => /application\/json/.test(p.tipo)), 'Feishu: API open.feishu.cn, um token do app para tudo (guardado)', {tokens: g.tokens});
+  check(/já tem o cabeçalho certo/.test(g.ctx.configurar()) && g.feishu.linhas.length === 1, 'configurar de novo: não escreve outra vez');
+  g.feishu.linhas[0] = ['Outra coisa', 'Qualquer'];
+  check(/aba vazia/.test(erroDe(() => g.ctx.configurar())), 'aba com outra tabela: não mexe e pede uma aba vazia');
+
+  const lark = criarGoogle({link: 'https://empresa-teste.larksuite.com/sheets/' + PLANILHA + '?sheet=' + ABA});
+  lark.ctx.configurar();
+  check(lark.pedidos.every(p => p.base === 'https://open.larksuite.com') && pedidosDe(lark, /sheets\/query/).length === 0,
+    'link do Lark: usa a API do Lark; a aba vem do link (?sheet=)');
+  const office = criarGoogle({link: 'https://empresa-teste.larkoffice.com/sheets/' + PLANILHA});
+  office.ctx.configurar();
+  check(office.pedidos.every(p => p.base === 'https://open.feishu.cn'), 'link larkoffice.com: API do Feishu');
 }
 
 // ---------- 3. Salvar ----------
 {
-  const g = createAndConfig();
+  const g = configurado();
   g.horario('2026-10-29T09:05:12');
   const r = g.ctx.salvar(Object.assign({}, BASE));
-  const aba = g.ss.abas.Registros, l = aba.celulas[1];
-  check(r.ok && r.registro.data === '29/10/2026' && r.registro.hora === '09:05:12' && r.registro.turno === 'T1' && /^20261029-090512-[0-9A-F]{4}$/.test(r.registro.id),
+  const l = g.feishu.linhas[1];
+  check(r.ok && !r.aviso && r.registro.data === '29/10/2026' && r.registro.hora === '09:05:12' && r.registro.turno === 'T1' && /^20261029-090512-[0-9A-F]{4}$/.test(r.registro.id),
     'salvar: data, hora e turno automáticos pela hora do envio (9h → T1)', r.registro);
-  check(l[0] instanceof Date && l[2] === 'T1' && l[3] === "'COLABORADOR TESTE" && l[4] === "'Recebimento" && l[5] === "'REMESSA-TESTE-0001" &&
-    l[6] === "'Pacote de teste com caixa amassada." && l[9] === r.registro.id && l[10] === MINI,
-    'salvar: linha na aba Registros com colaborador, setor, ID/remessa/lote e descrição (sempre como texto)', l.map(x => (x && x.tipo) || String(x).slice(0, 30)));
-  const arq = g.arquivos[0];
-  check(g.arquivos.length === 1 && arq.pasta.id === g.props.FOTOS_ID && arq.blob.tipo === 'image/jpeg' &&
-    arq.blob.nome === '2026-10-29_09-05-12_T1_Recebimento_COLABORADOR-TESTE.jpg' && Buffer.from(arq.blob.bytes).equals(JPEG_BYTES),
-    'salvar: foto guardada na pasta do Drive com nome de data, turno, setor e colaborador', arq && arq.blob.nome);
-  check(l[7] && l[7].tipo === 'imagem' && l[7].url === JPEG && aba.alturas[2] === 120, 'salvar: foto dentro da célula (coluna Foto)', l[7]);
-  check(l[8] && l[8].tipo === 'link' && l[8].texto === 'Abrir foto' && l[8].link === arq.getUrl(), 'salvar: link da foto na coluna ao lado', l[8]);
-  check(g.trava === 0, 'salvar: trava liberada (dois envios ao mesmo tempo não se atropelam)');
-  check(r.registros.length === 1 && r.registros[0].nome === 'COLABORADOR TESTE' && r.registros[0].codigo === 'REMESSA-TESTE-0001' && r.registros[0].data === '29/10/2026' &&
-    r.registros[0].hora === '09:05:12' && r.registros[0].miniatura === MINI, 'salvar: devolve a tabela atualizada para a tela (com o ID/remessa/lote)', r.registros[0]);
-  g.horario('2026-10-29T09:10:00');
-  g.ctx.salvar(Object.assign({}, BASE, {codigo: '888001234567890'}));
-  g.ctx.salvar(Object.assign({}, BASE, {codigo: ''}));
-  const ls = g.ctx.listar();
-  check(g.ss.abas.Registros.celulas[2][5] === "'888001234567890" && ls[1].codigo === '888001234567890' && ls[0].codigo === '' && g.ss.abas.Registros.celulas[3][5] === '',
-    'remessa só de números fica como texto (não vira 8,88E+14); sem código também salva', ls.slice(0, 2).map(x => x.codigo));
-  g.ss.abas.Registros.celulas.splice(2, 2);
+  check(l.join('|') === '29/10/2026|09:05:12|T1|COLABORADOR TESTE|Recebimento|REMESSA-TESTE-0001|Pacote de teste com caixa amassada.||' + r.registro.id,
+    'salvar: linha nova na planilha do Feishu na hora (data, hora, turno, colaborador, setor, ID/remessa/lote, descrição, ID)', l);
+  const img = g.feishu.imagens[2];
+  check(img && img.col === 8 && img.bytes.equals(JPEG_BYTES) && img.nome === r.registro.id + '.jpg', 'salvar: a foto entra dentro da célula da coluna Foto (H), na mesma linha',
+    img && {col: img.col, nome: img.nome});
+  check(g.feishu.alturas[2] === 120 && g.props['FEISHU_ULTIMA_LINHA_' + PLANILHA] === '2' && g.trava === 0, 'salvar: linha com foto mais alta; trava liberada');
+  const ap = pedidosDe(g, /values_append/)[0];
+  check(ap.caminho === '/open-apis/sheets/v2/spreadsheets/' + PLANILHA + '/values_append?insertDataOption=INSERT_ROWS' && ap.corpo.valueRange.range === ABA + '!A1:I1',
+    'Feishu: acrescenta a linha (values_append, INSERT_ROWS)', ap.caminho);
+  check(r.registros.length === 1 && r.registros[0].nome === 'COLABORADOR TESTE' && r.registros[0].codigo === 'REMESSA-TESTE-0001' && r.registros[0].miniatura === MINI &&
+    r.registros[0].temFoto, 'salvar: devolve a tabela do app (lida da planilha do Feishu) com a miniatura', r.registros[0]);
+  check(g.cache['mini_' + r.registro.id].s === 6 * 3600, 'miniatura guardada no Apps Script por 6 h (a foto grande fica na planilha)');
 
   g.horario('2026-10-29T15:30:00');
-  g.ctx.salvar(Object.assign({}, BASE, {setor: 'Expedição', nome: 'OUTRO TESTE'}));
+  g.ctx.salvar(Object.assign({}, BASE, {setor: 'Expedição', nome: 'OUTRO TESTE', codigo: '888001234567890'}));
   g.horario('2026-10-29T23:10:00');
-  g.ctx.salvar(Object.assign({}, BASE, {setor: 'DWS'}));
+  g.ctx.salvar(Object.assign({}, BASE, {setor: 'DWS', codigo: ''}));
   g.horario('2026-10-30T02:00:00');
   const r4 = g.ctx.salvar(Object.assign({}, BASE, {setor: 'Rejeito'}));
   check(r4.registros.map(x => x.turno + ':' + x.setor).join() === 'T3:Rejeito,T3:DWS,T2:Expedição,T1:Recebimento',
     'tabela: do mais novo para o mais antigo, com T2 às 15h e T3 às 23h e às 2h', r4.registros.map(x => x.turno + ':' + x.setor));
-  const outro = g.arquivos.find(x => /OUTRO-TESTE/.test(x.blob.nome));
-  check(outro && outro.blob.nome === '2026-10-29_15-30-00_T2_Expedicao_OUTRO-TESTE.jpg', 'nome do arquivo sem acento', outro && outro.blob.nome);
+  check(Object.keys(g.feishu.imagens).join() === '2,3,4,5' && r4.registros[2].codigo === '888001234567890' && r4.registros[1].codigo === '',
+    'cada foto na sua linha; código só de números e sem código também salvam');
+  Object.keys(g.cache).filter(k => /^mini_/.test(k)).forEach(k => { delete g.cache[k]; });
+  const semCache = g.ctx.listar();
+  check(semCache.every(x => x.temFoto && !x.miniatura), 'depois de 6 h (sem miniatura): a tabela mostra que a foto está na planilha');
+  check(g.tokens === 1, 'o token do app é pedido uma vez só (guardado)');
 }
 
 // ---------- 4. Preenchimento errado ----------
 {
-  const g = createAndConfig();
+  const g = configurado();
   g.horario('2026-10-29T10:00:00');
-  const casos = [
+  [
     [{nome: ' '}, /nome do colaborador/],
     [{setor: ''}, /Escreva o setor/],
     [{setor: 'x'.repeat(61)}, /setor pode ter no máximo 60/],
@@ -108,141 +117,56 @@ function createAndConfig(o) { const g = criarGoogle(o); g.ctx.configurar(); retu
     [{foto: 'data:text/html;base64,PHNjcmlwdD4='}, /foto não veio certa/],
     [{descricao: 'x'.repeat(1001)}, /1\.000/],
     [{codigo: 'x'.repeat(81)}, /remessa ou lote pode ter no máximo 80/]
-  ];
-  casos.forEach(([muda, re]) => {
+  ].forEach(([muda, re]) => {
     const m = erroDe(() => g.ctx.salvar(Object.assign({}, BASE, muda)));
     check(re.test(m), 'recusa: ' + m);
   });
-  check(g.ss.abas.Registros.celulas.length === 1 && g.arquivos.length === 0, 'nada é gravado quando falta algo');
+  check(g.feishu.linhas.length === 1 && !Object.keys(g.feishu.imagens).length, 'nada vai para o Feishu quando falta algo');
   g.ctx.salvar(Object.assign({}, BASE, {nome: '=IMPORTXML("x")', descricao: '+ caixa aberta', miniatura: '<script>'}));
-  const l = g.ss.abas.Registros.celulas[1];
-  check(l[3] === '\'=IMPORTXML("x")' && l[6] === "'+ caixa aberta" && l[10] === '', 'texto que começa com = ou + vira texto (não fórmula); miniatura estranha é ignorada', [l[3], l[6], l[10]]);
+  const l = g.feishu.linhas[1];
+  check(l[3] === ' =IMPORTXML("x")' && l[6] === ' + caixa aberta' && !Object.keys(g.cache).some(k => /^mini_/.test(k)), 'texto que começa com = ou + não vira fórmula; miniatura estranha é ignorada', l);
   check(g.ctx.listar()[0].nome === '=IMPORTXML("x")', 'a tela mostra o texto como foi escrito');
   g.ctx.CONFIG.codigoObrigatorio = true;
   check(/Escaneie ou digite o ID de viagem, remessa ou lote/.test(erroDe(() => g.ctx.salvar(Object.assign({}, BASE, {codigo: ' '})))) && g.ctx.iniciar().codigoObrigatorio,
     'ID/remessa/lote obrigatório (se ligar no CONFIG): não envia sem');
 }
 
-// ---------- 5. Google recusa a imagem dentro da célula ----------
+// ---------- 5. Feishu recusa a foto, token vence, sem permissão ----------
 {
-  const g = createAndConfig({recusarImagem: true});
+  const g = configurado({recusarImagem: true});
   g.horario('2026-10-29T08:00:00');
   const r = g.ctx.salvar(Object.assign({}, BASE));
-  const l = g.ss.abas.Registros.celulas[1];
-  check(r.ok && l[7] === 'Foto no link ao lado' && l[8].tipo === 'link' && g.arquivos.length === 1 && g.trava === 0,
-    'imagem recusada na célula: o registro é salvo, com o link da foto', l[7]);
+  check(r.ok && /Registro salvo, mas a foto não entrou na planilha/.test(r.aviso) && g.feishu.linhas[1][3] === 'COLABORADOR TESTE' && g.trava === 0,
+    'Feishu recusou a foto: o registro fica salvo e a tela avisa', r.aviso);
+
+  const v = configurado();
+  v.o.expirarToken = 1;
+  v.horario('2026-10-29T08:00:00');
+  const rv = v.ctx.salvar(Object.assign({}, BASE));
+  check(rv.ok && v.tokens === 2 && v.feishu.linhas[1][3] === 'COLABORADOR TESTE', 'token do app venceu: pega outro e envia', {tokens: v.tokens});
+
+  const s = configurado();
+  s.o.semPermissao = true;
+  check(/Adicionar app de documento/.test(erroDe(() => s.ctx.salvar(Object.assign({}, BASE)))) && s.trava === 0, 'sem permissão na planilha: explica e não trava');
 }
 
-// ---------- 6. Pasta apagada, foto opcional, limite da tabela ----------
+// ---------- 6. Tela, limite da tabela, tudo num arquivo ----------
 {
-  const g = createAndConfig();
-  g.pastas.find(p => p.id === g.props.FOTOS_ID).lixo = true;
-  g.horario('2026-10-29T11:00:00');
-  g.ctx.salvar(Object.assign({}, BASE));
-  const nova = g.pastas.find(p => p.id === g.props.FOTOS_ID);
-  check(!nova.lixo && g.arquivos[0].pasta === nova, 'pasta das fotos apagada: cria outra');
+  const g = configurado();
   g.ctx.CONFIG.fotoObrigatoria = false;
-  const r = g.ctx.salvar(Object.assign({}, BASE, {foto: '', miniatura: MINI}));
-  const l = g.ss.abas.Registros.celulas[2];
-  check(r.ok && l[7] === '' && l[10] === '' && g.arquivos.length === 1, 'foto opcional (se mudar no CONFIG): salva sem foto', l.slice(7));
-  for (let i = 0; i < 40; i++) g.ctx.salvar(Object.assign({}, BASE, {foto: ''}));
+  for (let i = 0; i < 40; i++) { g.horario('2026-10-29T1' + (i % 10) + ':00:0' + (i % 10)); g.ctx.salvar(Object.assign({}, BASE, {foto: '', nome: 'TESTE ' + i})); }
   const ini = g.ctx.iniciar();
-  check(ini.registros.length === 30 && !('setores' in ini) && ini.turnos.length === 3 && ini.titulo === 'Registro de Ocorrências' &&
-    ini.planilhaUrl === 'https://docs.google.com/spreadsheets/d/PLANILHA-FICTICIA/edit',
-    'iniciar: turnos, link da planilha (tempo real) e os 30 últimos registros (setor é escrito, sem lista)', {n: ini.registros.length, url: ini.planilhaUrl});
+  check(ini.registros.length === 30 && ini.registros[0].nome === 'TESTE 39' && ini.planilhaUrl === LINK && ini.turnos.length === 3 && !ini.registros[0].temFoto,
+    'iniciar: link da planilha do Feishu e os 30 últimos registros', {n: ini.registros.length, primeiro: ini.registros[0].nome});
   const tela = g.ctx.doGet();
-  check(tela.html === g.ctx.PAGINA_ && /^<!DOCTYPE html>/.test(tela.html) && /<input type="text" id="setor"/.test(tela.html) &&
-    /<input type="text" id="codigo"/.test(tela.html) && /id="escanear"/.test(tela.html) && !/Baixar planilha/.test(tela.html),
-    'doGet abre a tela do próprio Codigo.gs: setor escrito, ID/remessa/lote com Escanear, sem o baixar');
-  g.horario('2026-10-29T12:00:00');
-  g.ctx.onOpen();
-  g.ctx.abrirExcel();
-  check(g.menu && g.menu.nome === 'Registro de Ocorrências' && g.menu.itens[0][1] === 'abrirExcel' && g.janela.titulo === 'Baixar Excel com fotos' &&
-    /value="2026-10-29"/.test(g.janela.html) && /baixarExcel/.test(g.janela.html), 'planilha: menu Registro de Ocorrências → Baixar Excel com fotos (período começa em hoje)', g.menu);
-}
-
-// ---------- 7. A tela não usa nada de fora ----------
-{
-  const html = criarGoogle().ctx.PAGINA_;
+  check(tela.html === g.ctx.PAGINA_ && /<input type="text" id="setor"/.test(tela.html) && /<input type="text" id="codigo"/.test(tela.html) && /id="escanear"/.test(tela.html) &&
+    /planilha do Feishu/.test(tela.html), 'doGet abre a tela do próprio Codigo.gs');
+  const codigo = fs.readFileSync(path.join(__dirname, '..', 'Codigo.gs'), 'utf8');
+  check(!/SpreadsheetApp|DriveApp|cli_[a-z0-9]{8,}|t-[a-z0-9]{20,}/i.test(codigo), 'sem Planilha Google nem Drive; nenhum App ID ou token escrito no código');
   check(fs.readdirSync(path.join(__dirname, '..')).filter(n => /\.(gs|html)$/.test(n)).join() === 'Codigo.gs', 'tudo num arquivo só: Codigo.gs');
-  const fora = (html.match(/<script[^>]+src="([^"]+)"/gi) || []);
-  check(fora.length === 1 && /src="https:\/\/cdn\.jsdelivr\.net\/npm\/@zxing\/library@0\.21\.3\/umd\/index\.min\.js"/.test(fora[0]) && !/<link[^>]+href=/i.test(html) &&
-    (html.match(/capture="environment"/g) || []).length === 2 && /google\.script\.run/.test(html),
+  const fora = (tela.html.match(/<script[^>]+src="([^"]+)"/gi) || []);
+  check(fora.length === 1 && /cdn\.jsdelivr\.net\/npm\/@zxing\/library@0\.21\.3\/umd\/index\.min\.js/.test(fora[0]) && (tela.html.match(/capture="environment"/g) || []).length === 2,
     'tela: de fora só o leitor de códigos (ZXing, versão fixa); câmera traseira para a foto e para o código', fora);
-}
-
-// ---------- 8. Excel com as fotos (menu da planilha) ----------
-{
-  const g = createAndConfig();
-  const enviar = (quando, muda) => { g.horario(quando); return g.ctx.salvar(Object.assign({}, BASE, muda || {})); };
-  enviar('2026-10-28T23:30:00', {nome: 'ONTEM TESTE', setor: 'Rejeito'});
-  enviar('2026-10-29T09:05:12', {setor: 'Recebimento', descricao: 'Caixa <aberta> & molhada "teste"'});
-  g.ctx.CONFIG.fotoObrigatoria = false;
-  enviar('2026-10-29T15:40:00', {nome: 'SEM FOTO', foto: '', miniatura: ''});
-  enviar('2026-10-29T22:10:00', {setor: '=DWS'});
-  enviar('2026-10-30T01:00:00', {nome: 'AMANHA TESTE'});
-  g.horario('2026-10-29T23:59:00');
-  const lidos0 = g.lidosDoDrive || 0;
-  const r = g.ctx.baixarExcel({de: '2026-10-29', ate: '2026-10-29'});
-  const z = lerZip(Buffer.from(r.base64, 'base64'));
-  const plan = z['xl/worksheets/sheet1.xml'].toString('utf8'), des = (z['xl/drawings/drawing1.xml'] || '').toString('utf8');
-  const textos = (plan.match(/<t xml:space="preserve">[^<]*<\/t>/g) || []).map(t => t.replace(/<[^>]+>/g, ''));
-  check(r.nome === 'registro_ocorrencias_2026-10-29.xlsx' && r.linhas === 3 && r.fotos === 2 && r.pequenas === 0,
-    'Excel do dia: só os registros do dia (3), com as 2 fotos', {nome: r.nome, linhas: r.linhas, fotos: r.fotos});
-  check(['[Content_Types].xml', '_rels/.rels', 'xl/workbook.xml', 'xl/styles.xml', 'xl/worksheets/sheet1.xml', 'xl/drawings/drawing1.xml',
-    'xl/drawings/_rels/drawing1.xml.rels', 'xl/media/foto1.jpeg', 'xl/media/foto2.jpeg'].every(n => z[n]), 'Excel: arquivo .xlsx com a planilha e as fotos dentro', Object.keys(z));
-  check(z['xl/media/foto1.jpeg'].equals(JPEG_BYTES) && g.lidosDoDrive - lidos0 === 2, 'Excel: a foto é a do Drive (tamanho normal)');
-  check(textos.slice(0, 10).join('|') === 'Data|Hora|Turno|Colaborador|Setor|ID de viagem / remessa / lote|Descrição|Foto|Link da foto|ID' &&
-    textos.indexOf('REMESSA-TESTE-0001') >= 0 &&
-    textos.indexOf('ONTEM TESTE') < 0 && textos.indexOf('AMANHA TESTE') < 0 && textos.indexOf('SEM FOTO') >= 0 && textos.indexOf('=DWS') >= 0,
-    'Excel: cabeçalho e só os nomes do dia; "=DWS" fica como texto', textos.slice(0, 30));
-  check(/Caixa &lt;aberta&gt; &amp; molhada &quot;teste&quot;/.test(plan), 'Excel: texto com < & " não quebra o arquivo');
-  const serial = (Date.UTC(2026, 9, 29, 9, 5, 12) - Date.UTC(1899, 11, 30)) / 864e5;
-  check(new RegExp('<c r="A2" s="2"><v>' + serial + '</v></c><c r="B2" s="3"><v>' + serial + '</v></c>').test(plan),
-    'Excel: Data e Hora como data do Excel (filtra e ordena), na hora de São Paulo', serial);
-  const ancoras = des.match(/<xdr:row>(\d+)<\/xdr:row>/g) || [];
-  check(ancoras.join() === '<xdr:row>1</xdr:row>,<xdr:row>3</xdr:row>' && /<xdr:col>7<\/xdr:col>/.test(des) && /cx="1524000" cy="1143000"/.test(des) &&
-    /<row r="2" ht="96" customHeight="1">/.test(plan) && /<row r="3">/.test(plan),
-    'Excel: cada foto na coluna Foto da sua linha (160x120), linha alta só onde tem foto', ancoras);
-  const rels = z['xl/worksheets/_rels/sheet1.xml.rels'].toString('utf8');
-  check((rels.match(/drive\.google\.com\/file\/d\/ARQ-\d+\/view/g) || []).length === 2 && /<hyperlink ref="I2" r:id="rIdL2"\/>/.test(plan),
-    'Excel: "Abrir foto" com o link do Drive');
-
-  const r2 = g.ctx.baixarExcel({de: '2026-10-30', ate: '2026-10-28'});
-  check(r2.nome === 'registro_ocorrencias_2026-10-28_a_2026-10-30.xlsx' && r2.linhas === 5, 'Excel de vários dias (datas trocadas são acertadas)', {nome: r2.nome, linhas: r2.linhas});
-  const r3 = g.ctx.baixarExcel({});
-  check(r3.linhas === 3 && r3.nome === 'registro_ocorrencias_2026-10-29.xlsx', 'Excel sem datas: hoje');
-  const r4 = g.ctx.baixarExcel({de: '2026-01-01', ate: '2026-01-01'});
-  const z4 = lerZip(Buffer.from(r4.base64, 'base64'));
-  check(r4.linhas === 0 && r4.fotos === 0 && !z4['xl/drawings/drawing1.xml'], 'Excel de um dia sem registros: vazio, sem fotos');
-  check(/no máximo 31 dias/.test(erroDe(() => g.ctx.baixarExcel({de: '2026-09-01', ate: '2026-10-29'}))), 'Excel: período de no máximo 31 dias');
-
-  g.ctx.CONFIG.fotosGrandesExcel = 1;
-  const r5 = g.ctx.baixarExcel({de: '2026-10-29', ate: '2026-10-29'}), z5 = lerZip(Buffer.from(r5.base64, 'base64'));
-  check(r5.fotos === 2 && r5.pequenas === 2 && z5['xl/media/foto1.jpeg'].equals(MINI_BYTES) && /cx="1524000" cy="1143000"/.test(z5['xl/drawings/drawing1.xml'].toString()),
-    'Excel com muitas fotos: usa a foto pequena (arquivo leve)', {fotos: r5.fotos, pequenas: r5.pequenas});
-  g.ctx.CONFIG.fotosGrandesExcel = 40;
-  g.arquivos[1].apagado = true;
-  const r6 = g.ctx.baixarExcel({de: '2026-10-29', ate: '2026-10-29'}), z6 = lerZip(Buffer.from(r6.base64, 'base64'));
-  check(r6.fotos === 2 && r6.pequenas === 1 && z6['xl/media/foto1.jpeg'].equals(MINI_BYTES) && z6['xl/media/foto2.jpeg'].equals(JPEG_BYTES),
-    'Excel: foto apagada do Drive usa a pequena da planilha', {fotos: r6.fotos, pequenas: r6.pequenas});
-}
-
-// ---------- 9. Planilha da versão 1.1 (sem a coluna do ID / remessa / lote) ----------
-{
-  const g = criarGoogle();
-  g.props.PLANILHA_ID = 'PLANILHA-FICTICIA';
-  const aba = g.ss.insertSheet('Registros');
-  aba.celulas.push(['Data', 'Hora', 'Turno', 'Colaborador', 'Setor', 'Descrição', 'Foto', 'Link da foto', 'ID', 'Miniatura (app)']);
-  aba.celulas.push([new Date('2026-10-28T10:00:00-03:00'), new Date('2026-10-28T10:00:00-03:00'), 'T1', 'ANTIGO TESTE', 'Recebimento', 'Registro antigo de teste.', '', '',
-    '20261028-100000-AAAA', MINI]);
-  const ls = g.ctx.listar();
-  check(aba.colunasInseridas === 1 && aba.celulas[0][5] === 'ID de viagem / remessa / lote' && aba.celulas[0][6] === 'Descrição' && ls[0].nome === 'ANTIGO TESTE' &&
-    ls[0].codigo === '' && ls[0].descricao === 'Registro antigo de teste.' && ls[0].miniatura === MINI,
-    'planilha da 1.1: ganha a coluna depois de Setor e os registros antigos continuam certos', {cab: aba.celulas[0], l: ls[0]});
-  g.horario('2026-10-29T10:00:00');
-  g.ctx.salvar(Object.assign({}, BASE));
-  check(aba.colunasInseridas === 1 && aba.celulas[2][5] === "'REMESSA-TESTE-0001" && g.ctx.listar().length === 2, 'depois da troca, salva normal (a coluna entra uma vez só)');
 }
 
 console.log('\n' + (falhas ? 'FALHOU: ' + falhas + ' de ' + (oks + falhas) : 'OK: ' + oks + ' verificações do Registro de Ocorrências passaram') + '.');

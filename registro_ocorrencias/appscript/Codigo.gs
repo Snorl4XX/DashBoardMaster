@@ -1,25 +1,27 @@
 /**
- * J&T · REGISTRO DE OCORRÊNCIAS — Apps Script de uma Planilha Google, TUDO NESTE ARQUIVO (a tela está no fim, em PAGINA_).
- * Projeto SEPARADO: não junte com o DashMaster nem com os outros apps.
+ * J&T · REGISTRO DE OCORRÊNCIAS — Apps Script, TUDO NESTE ARQUIVO (a tela está no fim, em PAGINA_). Os registros vão para
+ * uma PLANILHA DO FEISHU (ou do Lark). Projeto SEPARADO: não junte com o DashMaster nem com os outros apps.
  *
  * O colaborador abre o link no celular e preenche: nome, setor (escrito), ID de viagem / remessa / lote (escaneando o
  * QR Code ou o código de barras, ou digitando), foto e descrição. Data, hora e turno são automáticos, pela hora do envio
  * (T1 06:00–13:59 · T2 14:00–21:59 · T3 22:00–05:59).
- *   - Cada envio vira na hora uma linha na aba "Registros" (a planilha em tempo real), com a foto dentro da célula e o
- *     link da foto (pasta do Google Drive "Fotos - Registro de Ocorrências", ao lado da planilha).
- *   - Embaixo do formulário, o app mostra a tabela com os últimos registros e o botão "Abrir planilha".
- *   - Na planilha, menu Registro de Ocorrências → Baixar Excel com fotos: arquivo .xlsx do período, com as fotos dentro.
+ *   - Cada envio vira na hora uma linha na planilha do Feishu, com a foto dentro da célula (API de planilhas do Feishu).
+ *   - Embaixo do formulário, o app mostra os últimos registros (lidos da planilha) e o botão "Abrir planilha".
  *   - Escanear: câmera ao vivo, lida pelo leitor do celular (BarcodeDetector) ou pela biblioteca ZXing (jsdelivr); se a
  *     câmera ao vivo não abrir, a pessoa tira uma foto do código e o app lê na foto.
  *
- * Instalação (uma vez):
- *  1. Crie uma Planilha Google nova → Extensões → Apps Script.
- *  2. Apague o que estiver em Código.gs, cole este arquivo inteiro e clique em 💾 Salvar.
- *  3. Escolha a função "configurar" no alto e clique em ▶ Executar (na 1ª vez o Google pede autorização).
+ * Feishu ou Lark: o app descobre pelo link da planilha (feishu.cn / larkoffice.com → open.feishu.cn; larksuite.com →
+ * open.larksuite.com). O App ID e o App Secret ficam nas Propriedades do script (nunca neste arquivo).
+ *
+ * Instalação (uma vez) — o passo a passo completo está no LEIA-ME.txt:
+ *  1. No Feishu: app personalizado com a permissão de planilhas (sheets:spreadsheet), publicado; o app adicionado na
+ *     planilha (… → Mais → Adicionar app de documento) com permissão para editar.
+ *  2. Apps Script: cole este arquivo em Código.gs e salve. Em Configurações do projeto → Propriedades do script, crie
+ *     FEISHU_APP_ID, FEISHU_APP_SECRET e FEISHU_PLANILHA (o link da planilha do Feishu).
+ *  3. Escolha a função "configurar" e clique em ▶ Executar (confere o acesso e escreve o cabeçalho).
  *  4. Implantar → Nova implantação → App da Web: Executar como "Eu", Quem pode acessar "Qualquer pessoa" → Implantar.
- *     O link que termina em /exec é o do app.
  */
-var VERSAO = '1.2.0';
+var VERSAO = '2.0.0';
 var CONFIG = {
   titulo: 'Registro de Ocorrências',
   subtitulo: 'J&T Express · SP GRU',
@@ -27,16 +29,14 @@ var CONFIG = {
   turnos: [{nome: 'T1', de: 6, ate: 14}, {nome: 'T2', de: 14, ate: 22}, {nome: 'T3', de: 22, ate: 6}],
   fotoObrigatoria: true,
   codigoObrigatorio: false, // ID de viagem / remessa / lote: true = não envia sem
-  ultimos: 30,           // quantos registros a tabela do app mostra
-  maxDiasExcel: 31,      // período máximo do Excel
-  fotosGrandesExcel: 40, // até tantas fotos o Excel leva a foto do Drive; mais que isso, a foto pequena (arquivo leve)
+  ultimos: 30,              // quantos registros a tabela do app mostra
+  alturaLinhaFoto: 120,     // altura (pixels) da linha com foto na planilha do Feishu
   fuso: 'America/Sao_Paulo'
 };
-var ABA_ = 'Registros', PASTA_FOTOS_ = 'Fotos - Registro de Ocorrências';
-var COL_CODIGO_NOME_ = 'ID de viagem / remessa / lote';
-var COLUNAS_ = ['Data', 'Hora', 'Turno', 'Colaborador', 'Setor', COL_CODIGO_NOME_, 'Descrição', 'Foto', 'Link da foto', 'ID', 'Miniatura (app)'];
-var COL_CODIGO_ = 6, COL_FOTO_ = 8, COL_LINK_ = 9, COL_MINI_ = 11;
-var MAX_FOTO_ = 6 * 1024 * 1024, MAX_MINI_ = 45000; // foto em base64; miniatura cabe numa célula (limite 50.000)
+var COLUNAS_ = ['Data', 'Hora', 'Turno', 'Colaborador', 'Setor', 'ID de viagem / remessa / lote', 'Descrição', 'Foto', 'ID'];
+var COL_FOTO_ = 'H', ULTIMA_COL_ = 'I';
+var MAX_FOTO_ = 6 * 1024 * 1024, MAX_MINI_ = 45000; // foto em base64; miniatura da tabela do app
+var MINI_HORAS_ = 6; // a miniatura fica guardada no Apps Script por 6 h (a foto grande fica na planilha)
 
 // ------------------------------------------------------------------ app da web
 function doGet() {
@@ -45,91 +45,76 @@ function doGet() {
 
 /** Primeira tela: configuração do formulário, o link da planilha e os últimos registros. */
 function iniciar() {
+  var c = feishu_();
   return {versao: VERSAO, titulo: CONFIG.titulo, subtitulo: CONFIG.subtitulo, turnos: CONFIG.turnos, fotoObrigatoria: CONFIG.fotoObrigatoria,
-    codigoObrigatorio: CONFIG.codigoObrigatorio, fuso: CONFIG.fuso, planilhaUrl: planilha_().getUrl(), registros: listar_()};
-}
-
-/** Menu na planilha (o Google roda sozinho quando a planilha abre). */
-function onOpen() {
-  SpreadsheetApp.getUi().createMenu('Registro de Ocorrências').addItem('Baixar Excel com fotos…', 'abrirExcel').addToUi();
-}
-/** Janela do menu: escolhe o período e baixa o Excel com as fotos. */
-function abrirExcel() {
-  var hoje = Utilities.formatDate(agora_(), CONFIG.fuso, 'yyyy-MM-dd');
-  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(JANELA_EXCEL_.replace(/__HOJE__/g, hoje)).setWidth(400).setHeight(300),
-    'Baixar Excel com fotos');
+    codigoObrigatorio: CONFIG.codigoObrigatorio, fuso: CONFIG.fuso, planilhaUrl: c.url, registros: listar_(c)};
 }
 
 /** Últimos registros (o app atualiza a tabela de tempos em tempos). */
-function listar() { return listar_(); }
+function listar() { return listar_(feishu_()); }
 
 /**
  * Envio do formulário: d = {nome, setor, codigo (ID de viagem / remessa / lote), descricao, foto (data URL JPEG/PNG),
- * miniatura (data URL pequena)}.
- * → {ok, registro, registros}. Erro de preenchimento: Error com a mensagem para mostrar na tela.
+ * miniatura (data URL pequena)}. → {ok, registro, registros, aviso}. Erro: Error com a mensagem para mostrar na tela.
  */
 function salvar(d) {
-  var r = validar_(d || {});
+  var r = validar_(d || {}), c = feishu_();
   var agora = agora_();
   var turno = turnoDe(Number(Utilities.formatDate(agora, CONFIG.fuso, 'H')));
   var id = Utilities.formatDate(agora, CONFIG.fuso, 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4).toUpperCase();
-  var link = '';
-  if (r.foto) {
-    var nome = Utilities.formatDate(agora, CONFIG.fuso, 'yyyy-MM-dd_HH-mm-ss') + '_' + turno + '_' + limpo_(r.setor) + '_' + limpo_(r.nome) +
-      (r.foto.tipo === 'image/png' ? '.png' : '.jpg');
-    link = pasta_().createFile(Utilities.newBlob(Utilities.base64Decode(r.foto.base64), r.foto.tipo, nome)).getUrl();
-  }
-  var trava = LockService.getScriptLock();
+  var data = Utilities.formatDate(agora, CONFIG.fuso, 'dd/MM/yyyy'), hora = Utilities.formatDate(agora, CONFIG.fuso, 'HH:mm:ss');
+  var aviso = '', trava = LockService.getScriptLock();
   trava.waitLock(30000);
   try {
-    var aba = aba_(planilha_()), linha = aba.getLastRow() + 1;
-    aba.getRange(linha, 1, 1, COLUNAS_.length).setValues([[agora, agora, turno, texto_(r.nome), texto_(r.setor), texto_(r.codigo), texto_(r.descricao),
-      '', '', id, r.miniatura]]);
-    if (link) {
-      aba.getRange(linha, COL_LINK_).setRichTextValue(SpreadsheetApp.newRichTextValue().setText('Abrir foto').setLinkUrl(link).build());
-      // Foto dentro da célula; se o Google recusar a imagem, fica só o link ao lado.
-      try {
-        aba.getRange(linha, COL_FOTO_).setValue(SpreadsheetApp.newCellImage()
-          .setSourceUrl('data:' + r.foto.tipo + ';base64,' + r.foto.base64).build());
-        aba.setRowHeight(linha, 120);
-      } catch (e) {
-        aba.getRange(linha, COL_FOTO_).setValue('Foto no link ao lado');
+    var resp = pedirFeishu_(c, 'post', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/values_append?insertDataOption=INSERT_ROWS',
+      {valueRange: {range: c.aba + '!A1:' + ULTIMA_COL_ + '1', values: [[data, hora, turno, r.nome, r.setor, r.codigo, r.descricao, '', id]]}});
+    var linha = linhaDe_(resp && resp.updates && resp.updates.updatedRange);
+    if (linha) PropertiesService.getScriptProperties().setProperty('FEISHU_ULTIMA_LINHA_' + c.planilha, String(linha));
+    if (r.foto) {
+      if (!linha) aviso = 'Registro salvo, mas o Feishu não disse a linha: a foto não entrou na planilha.';
+      else {
+        // Foto dentro da célula (Feishu: "escrever imagem"); se falhar, o registro fica salvo e a tela avisa.
+        try {
+          pedirFeishu_(c, 'post', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/values_image', {range: c.aba + '!' + COL_FOTO_ + linha + ':' + COL_FOTO_ + linha,
+            image: Array.prototype.map.call(Utilities.base64Decode(r.foto.base64), function (b) { return b & 0xFF; }), name: id + (r.foto.tipo === 'image/png' ? '.png' : '.jpg')});
+          try {
+            pedirFeishu_(c, 'put', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/dimension_range', {dimension: {sheetId: c.aba, majorDimension: 'ROWS',
+              startIndex: linha, endIndex: linha}, dimensionProperties: {visible: true, fixedSize: CONFIG.alturaLinhaFoto}});
+          } catch (e) { /* só a altura da linha: a foto já está lá */ }
+        } catch (e) {
+          aviso = 'Registro salvo, mas a foto não entrou na planilha: ' + e.message;
+        }
       }
+      if (r.miniatura) CacheService.getScriptCache().put('mini_' + id, r.miniatura, MINI_HORAS_ * 3600);
     }
-    SpreadsheetApp.flush();
   } finally {
     trava.releaseLock();
   }
-  return {ok: true, registro: {id: id, codigo: r.codigo, data: Utilities.formatDate(agora, CONFIG.fuso, 'dd/MM/yyyy'),
-    hora: Utilities.formatDate(agora, CONFIG.fuso, 'HH:mm:ss'), turno: turno}, registros: listar_()};
+  return {ok: true, aviso: aviso, registro: {id: id, codigo: r.codigo, data: data, hora: hora, turno: turno}, registros: listar_(c)};
 }
 
 /**
- * Menu da planilha → Baixar Excel com fotos: p = {de, ate} ("aaaa-mm-dd"; vazio = hoje). → {nome, base64 (do .xlsx), linhas, fotos, pequenas}
- * Até CONFIG.fotosGrandesExcel fotos, o Excel leva a foto do Drive; mais que isso, a foto pequena (para não ficar pesado).
+ * Rode uma vez pelo editor (▶ Executar), depois de criar as Propriedades do script: confere o App ID / App Secret, acha a
+ * aba da planilha e escreve o cabeçalho (se a primeira linha estiver vazia).
  */
-function baixarExcel(p) {
-  p = p || {};
-  var hoje = Utilities.formatDate(agora_(), CONFIG.fuso, 'yyyy-MM-dd');
-  var de = dataOk_(p.de) || hoje, ate = dataOk_(p.ate) || de;
-  if (de > ate) { var t = de; de = ate; ate = t; }
-  var dias = (Date.UTC(+ate.slice(0, 4), +ate.slice(5, 7) - 1, +ate.slice(8)) - Date.UTC(+de.slice(0, 4), +de.slice(5, 7) - 1, +de.slice(8))) / 864e5 + 1;
-  if (dias > CONFIG.maxDiasExcel) throw new Error('Escolha no máximo ' + CONFIG.maxDiasExcel + ' dias.');
-  var regs = registrosDoPeriodo_(de, ate);
-  var x = xlsx_(regs);
-  return {nome: 'registro_ocorrencias_' + (de === ate ? de : de + '_a_' + ate) + '.xlsx', base64: Utilities.base64Encode(x.blob.getBytes()),
-    linhas: regs.length, fotos: x.fotos, pequenas: x.pequenas};
-}
-
-/** Rode uma vez pelo editor (▶ Executar): aba Registros, pasta das fotos e fuso de São Paulo. */
 function configurar() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss) throw new Error('Abra o Apps Script pela planilha (Extensões → Apps Script) e rode de novo.');
-  PropertiesService.getScriptProperties().setProperty('PLANILHA_ID', ss.getId());
-  ss.setSpreadsheetTimeZone(CONFIG.fuso);
-  aba_(ss);
-  var pasta = pasta_();
-  var msg = 'Pronto: aba "' + ABA_ + '" e pasta "' + pasta.getName() + '" no Drive. Agora: Implantar → Nova implantação → App da Web.';
+  var c = feishu_();
+  var cab = (lerFaixa_(c, 'A1:' + ULTIMA_COL_ + '1')[0] || []).map(texto_);
+  var msg;
+  if (!cab.join('')) {
+    pedirFeishu_(c, 'put', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/values', {valueRange: {range: c.aba + '!A1:' + ULTIMA_COL_ + '1', values: [COLUNAS_]}});
+    msg = 'Pronto: cabeçalho escrito na planilha do Feishu.';
+  } else if (cab.join('|') === COLUNAS_.join('|')) {
+    msg = 'Pronto: a planilha do Feishu já tem o cabeçalho certo.';
+  } else {
+    throw new Error('A primeira linha da planilha do Feishu não é o cabeçalho do app (' + cab.filter(Boolean).slice(0, 4).join(', ') +
+      '…). Use uma aba vazia: crie uma aba nova e coloque o link dela em FEISHU_PLANILHA.');
+  }
+  // Coluna do ID / remessa / lote como texto (remessa só de números não vira 8,88E+14). Se o Feishu recusar, segue.
+  try {
+    pedirFeishu_(c, 'put', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/style', {appendStyle: {range: c.aba + '!F2:F5000', style: {formatter: '@'}}});
+  } catch (e) { /* só o formato */ }
+  msg += ' Agora: Implantar → Nova implantação → App da Web.';
   Logger.log(msg);
   return msg;
 }
@@ -167,234 +152,112 @@ function validar_(d) {
   if (!foto && CONFIG.fotoObrigatoria) throw new Error('Tire a foto.');
   var mini = String(d.miniatura || '');
   if (!/^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+\/=]+$/.test(mini) || mini.length > MAX_MINI_) mini = '';
-  return {nome: nome, setor: setor, codigo: codigo, descricao: descricao, foto: foto, miniatura: foto ? mini : ''};
-}
-
-/** Texto do colaborador sempre como texto: ' na frente (não aparece) — a planilha não executa =fórmula nem transforma
- * remessa em número (888001234567890 → 8,88E+14) ou "10/29" em data. */
-function texto_(v) { return v ? "'" + v : ''; }
-/** Parte do nome do arquivo da foto: sem acento e sem símbolo. */
-function limpo_(v) {
-  return String(v).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'sem-nome';
+  // Texto que começa com = + - @ ganha um espaço na frente: a planilha não executa como fórmula.
+  var seguro = function (v) { return /^[=+\-@]/.test(v) ? ' ' + v : v; };
+  return {nome: seguro(nome), setor: seguro(setor), codigo: seguro(codigo), descricao: seguro(descricao), foto: foto, miniatura: foto ? mini : ''};
 }
 function agora_() { return new Date(); }
-function ehData_(v) { return Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime()); }
-function dataOk_(v) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : ''; }
-
-// ------------------------------------------------------------------ planilha e Drive
-function planilha_() {
-  var id = PropertiesService.getScriptProperties().getProperty('PLANILHA_ID');
-  var ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss) throw new Error('Falta configurar: no Apps Script, rode a função "configurar" uma vez.');
-  return ss;
+/** Valor de célula do Feishu → texto (link e menção vêm como objeto ou lista). */
+function texto_(v) {
+  if (v === null || v === undefined) return '';
+  if (Array.isArray(v)) return v.map(texto_).join('');
+  if (typeof v === 'object') return String(v.text || v.link || (v.fileToken || /image/i.test(v.type || '') ? '[imagem]' : ''));
+  return String(v);
 }
+/** "abc123!A7:I7" → 7 */
+function linhaDe_(faixa) { var m = /![A-Z]+(\d+)/.exec(String(faixa || '')); return m ? Number(m[1]) : 0; }
 
-/** Aba "Registros" (cria com o cabeçalho e o formato na primeira vez). */
-function aba_(ss) {
-  var aba = ss.getSheetByName(ABA_);
-  if (!aba) aba = ss.insertSheet(ABA_);
-  if (aba.getLastRow() === 0) {
-    aba.getRange(1, 1, 1, COLUNAS_.length).setValues([COLUNAS_]).setFontWeight('bold').setBackground('#E60012').setFontColor('#FFFFFF');
-    aba.setFrozenRows(1);
-    aba.getRange('A2:A').setNumberFormat('dd/mm/yyyy');
-    aba.getRange('B2:B').setNumberFormat('hh:mm:ss');
-    aba.getRange('G2:G').setWrap(true);
-    [100, 80, 60, 180, 140, 190, 320, 170, 100, 170].forEach(function (w, i) { aba.setColumnWidth(i + 1, w); });
-    aba.hideColumns(COL_MINI_);
-  } else if (String(aba.getRange(1, COL_CODIGO_).getValue()) !== COL_CODIGO_NOME_) {
-    // Planilha da versão 1.0/1.1 (sem a coluna do ID de viagem / remessa / lote): entra a coluna depois de Setor.
-    aba.insertColumnAfter(COL_CODIGO_ - 1);
-    aba.getRange(1, COL_CODIGO_).setValue(COL_CODIGO_NOME_);
-    aba.setColumnWidth(COL_CODIGO_, 190);
+// ------------------------------------------------------------------ Feishu
+/**
+ * Configuração das Propriedades do script → {base (API), id, segredo, planilha (token), aba (sheetId), url}.
+ * FEISHU_PLANILHA = link da planilha (…/sheets/<token>?sheet=<aba>). FEISHU_API (opcional) troca o endereço da API.
+ */
+function feishu_() {
+  var p = PropertiesService.getScriptProperties();
+  var id = String(p.getProperty('FEISHU_APP_ID') || '').trim(), segredo = String(p.getProperty('FEISHU_APP_SECRET') || '').trim();
+  var url = String(p.getProperty('FEISHU_PLANILHA') || '').trim();
+  if (!id || !segredo || !url) {
+    throw new Error('Falta configurar o Feishu: no Apps Script, em Configurações do projeto → Propriedades do script, crie FEISHU_APP_ID, ' +
+      'FEISHU_APP_SECRET e FEISHU_PLANILHA (o link da planilha).');
   }
-  return aba;
-}
-
-/** Pasta das fotos no Drive, ao lado da planilha (criada na primeira vez). */
-function pasta_() {
-  var props = PropertiesService.getScriptProperties(), id = props.getProperty('FOTOS_ID');
-  if (id) {
-    try { var p = DriveApp.getFolderById(id); if (!p.isTrashed()) return p; } catch (e) { /* apagada: cria de novo */ }
-  }
-  var pais = DriveApp.getFileById(planilha_().getId()).getParents();
-  var pasta = (pais.hasNext() ? pais.next() : DriveApp.getRootFolder()).createFolder(PASTA_FOTOS_);
-  props.setProperty('FOTOS_ID', pasta.getId());
-  return pasta;
-}
-
-/** Últimos registros, do mais novo para o mais antigo. */
-function listar_() {
-  var aba = aba_(planilha_()), ult = aba.getLastRow();
-  if (ult < 2) return [];
-  var qtd = Math.min(CONFIG.ultimos, ult - 1);
-  var linhas = aba.getRange(ult - qtd + 1, 1, qtd, COLUNAS_.length).getDisplayValues();
-  return linhas.reverse().map(function (v) {
-    return {data: v[0], hora: v[1], turno: v[2], nome: v[3], setor: v[4], codigo: v[5], descricao: v[6], id: v[9],
-      miniatura: /^data:image\/(?:jpeg|png);base64,/.test(v[10]) ? v[10] : ''};
-  });
-}
-
-/** Registros com data de "de" até "ate" ("aaaa-mm-dd"), na ordem da planilha. */
-function registrosDoPeriodo_(de, ate) {
-  var aba = aba_(planilha_()), ult = aba.getLastRow();
-  if (ult < 2) return [];
-  var dia = function (v) { return ehData_(v) ? Utilities.formatDate(v, CONFIG.fuso, 'yyyy-MM-dd') : ''; };
-  var ini = -1, fim = -1;
-  aba.getRange(2, 1, ult - 1, 1).getValues().forEach(function (l, i) {
-    var k = dia(l[0]);
-    if (k && k >= de && k <= ate) { if (ini < 0) ini = i; fim = i; }
-  });
-  if (ini < 0) return [];
-  var n = fim - ini + 1;
-  if (n > 3000) throw new Error('Período com registros demais para um arquivo. Escolha menos dias.');
-  var vals = aba.getRange(ini + 2, 1, n, COLUNAS_.length).getValues();
-  var links = aba.getRange(ini + 2, COL_LINK_, n, 1).getRichTextValues();
-  var out = [];
-  vals.forEach(function (v, i) {
-    var k = dia(v[0]);
-    if (!k || k < de || k > ate) return;
-    var rt = links[i][0];
-    out.push({quando: v[0], turno: String(v[2]), nome: String(v[3]), setor: String(v[4]), codigo: String(v[5]), descricao: String(v[6]),
-      linkFoto: rt && rt.getLinkUrl ? rt.getLinkUrl() || '' : '', id: String(v[9]), miniatura: String(v[10] || '')});
-  });
-  return out;
-}
-
-// ------------------------------------------------------------------ Excel (.xlsx) com as fotos
-var XLSX_COLUNAS_ = [['Data', 12], ['Hora', 10], ['Turno', 7], ['Colaborador', 24], ['Setor', 18], ['ID de viagem / remessa / lote', 26],
-  ['Descrição', 50], ['Foto', 24], ['Link da foto', 13], ['ID', 22]];
-var FOTO_W_ = 160, FOTO_H_ = 120, EMU_ = 9525; // caixa da foto em pixels; 1 pixel = 9525 EMU
-
-/** Monta o .xlsx (Office Open XML) dos registros, com cada foto presa na coluna Foto da sua linha. → {blob, fotos, pequenas} */
-function xlsx_(regs) {
-  var comFoto = regs.filter(function (r) { return r.linkFoto || r.miniatura; }).length;
-  var grandes = comFoto <= CONFIG.fotosGrandesExcel;
-  var midia = [], anc = [], linksXml = [], relsPlan = [], fotos = 0, pequenas = 0;
-  var ult = regs.length + 1, letra = function (c) { return String.fromCharCode(64 + c); };
-  var linhas = ['<row r="1" ht="20" customHeight="1">' + XLSX_COLUNAS_.map(function (c, i) { return celTexto_(letra(i + 1) + '1', c[0], 1); }).join('') + '</row>'];
-  regs.forEach(function (r, i) {
-    var n = i + 2, foto = imagemExcel_(r, grandes), s = serial_(r.quando);
-    var cel = [s === null ? celTexto_('A' + n, '', 4) : '<c r="A' + n + '" s="2"><v>' + s + '</v></c>',
-      s === null ? celTexto_('B' + n, '', 4) : '<c r="B' + n + '" s="3"><v>' + s + '</v></c>',
-      celTexto_('C' + n, r.turno, 4), celTexto_('D' + n, r.nome, 5), celTexto_('E' + n, r.setor, 5), celTexto_('F' + n, r.codigo, 4),
-      celTexto_('G' + n, r.descricao, 5), celTexto_('H' + n, foto ? '' : (r.linkFoto ? 'Foto no link' : 'Sem foto'), 4),
-      r.linkFoto ? celTexto_('I' + n, 'Abrir foto', 6) : celTexto_('I' + n, '', 4), celTexto_('J' + n, r.id, 4)];
-    linhas.push('<row r="' + n + '"' + (foto ? ' ht="96" customHeight="1"' : '') + '>' + cel.join('') + '</row>');
-    if (r.linkFoto) {
-      relsPlan.push('<Relationship Id="rIdL' + n + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' +
-        xml_(r.linkFoto) + '" TargetMode="External"/>');
-      linksXml.push('<hyperlink ref="I' + n + '" r:id="rIdL' + n + '"/>');
+  var m = /^https:\/\/[^\/?#]*?(feishu\.cn|larkoffice\.com|larksuite\.com)\/(sheets|wiki)\/([A-Za-z0-9]+)/.exec(url);
+  if (!m) throw new Error('FEISHU_PLANILHA não é um link de planilha do Feishu ou do Lark (…/sheets/…). Copie o link da planilha de novo.');
+  if (m[2] === 'wiki') throw new Error('O link é de uma página da Wiki. Abra a planilha fora da Wiki (Abrir em nova aba) e copie o link que tem /sheets/.');
+  var base = String(p.getProperty('FEISHU_API') || '').trim().replace(/\/+$/, '') || (m[1] === 'larksuite.com' ? 'https://open.larksuite.com' : 'https://open.feishu.cn');
+  var c = {base: base, id: id, segredo: segredo, planilha: m[3], url: url, aba: ''};
+  var aba = /[?&]sheet=([A-Za-z0-9]+)/.exec(url);
+  if (aba) c.aba = aba[1];
+  else {
+    var guardada = p.getProperty('FEISHU_ABA_' + c.planilha);
+    if (guardada) c.aba = guardada;
+    else {
+      var abas = (pedirFeishu_(c, 'get', '/open-apis/sheets/v3/spreadsheets/' + c.planilha + '/sheets/query') || {}).sheets || [];
+      if (!abas.length) throw new Error('A planilha do Feishu não tem nenhuma aba.');
+      c.aba = abas[0].sheet_id;
+      p.setProperty('FEISHU_ABA_' + c.planilha, c.aba);
     }
-    if (!foto) return;
-    fotos++; if (foto.pequena) pequenas++;
-    var k = Math.min(FOTO_W_ / foto.w, FOTO_H_ / foto.h), cx = Math.round(foto.w * k) * EMU_, cy = Math.round(foto.h * k) * EMU_;
-    midia.push({nome: 'xl/media/foto' + fotos + '.' + foto.ext, bytes: foto.bytes, tipo: foto.tipo});
-    anc.push('<xdr:oneCellAnchor><xdr:from><xdr:col>7</xdr:col><xdr:colOff>' + 4 * EMU_ + '</xdr:colOff><xdr:row>' + (n - 1) + '</xdr:row><xdr:rowOff>' + 4 * EMU_ +
-      '</xdr:rowOff></xdr:from><xdr:ext cx="' + cx + '" cy="' + cy + '"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="' + (fotos + 1) + '" name="Foto ' + fotos +
-      '"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rIdF' + fotos +
-      '"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + cx + '" cy="' + cy +
-      '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>');
+  }
+  return c;
+}
+
+/** tenant_access_token do app (guardado por quase 2 h). */
+function tokenFeishu_(c, novo) {
+  var cache = CacheService.getScriptCache(), k = 'feishu_token_' + c.id;
+  if (!novo) { var t = cache.get(k); if (t) return t; }
+  var r = pedirFeishu_(c, 'post', '/open-apis/auth/v3/tenant_access_token/internal', {app_id: c.id, app_secret: c.segredo}, true);
+  if (!r.tenant_access_token) throw new Error('O Feishu não devolveu o token do app.');
+  cache.put(k, r.tenant_access_token, Math.max(60, Math.min(21600, Number(r.expire || 7200) - 300)));
+  return r.tenant_access_token;
+}
+
+/** Uma chamada à API do Feishu. → data (ou a resposta inteira, no token). Erro: Error com a explicação. */
+function pedirFeishu_(c, metodo, caminho, corpo, semToken, jaTentou) {
+  var opts = {method: metodo, contentType: 'application/json; charset=utf-8', muteHttpExceptions: true, headers: {}};
+  if (!semToken) opts.headers.Authorization = 'Bearer ' + tokenFeishu_(c, jaTentou);
+  if (corpo !== undefined) opts.payload = JSON.stringify(corpo);
+  var resp, txt, j;
+  try { resp = UrlFetchApp.fetch(c.base + caminho, opts); txt = resp.getContentText(); }
+  catch (e) { throw new Error('Não consegui falar com o Feishu (' + e.message + ').'); }
+  try { j = JSON.parse(txt); } catch (e) { throw new Error('O Feishu respondeu sem dados (HTTP ' + resp.getResponseCode() + ').'); }
+  if (j.code === 0) return j.data !== undefined ? j.data : j;
+  // Token vencido ou inválido: pega outro e tenta uma vez de novo.
+  if (!semToken && !jaTentou && [99991661, 99991663, 99991664, 99991665, 99991668].indexOf(j.code) >= 0) {
+    return pedirFeishu_(c, metodo, caminho, corpo, false, true);
+  }
+  throw new Error(erroFeishu_(j.code, j.msg));
+}
+function erroFeishu_(code, msg) {
+  var m = String(msg || '').slice(0, 160), base = 'Feishu recusou (código ' + code + (m ? ': ' + m : '') + ').';
+  if (code === 10003 || code === 10014 || /app[_ ]?(id|secret)|secret/i.test(m)) return base + ' Confira FEISHU_APP_ID e FEISHU_APP_SECRET.';
+  if (code === 99991672 || code === 99991679 || /scope|permission denied|access denied/i.test(m)) {
+    return base + ' O app do Feishu não tem a permissão de planilhas (sheets:spreadsheet) ou a versão com a permissão não foi publicada.';
+  }
+  if (/forbidden|no ?permission|not ?(have )?access|permission/i.test(m)) return base + ' Adicione o app na planilha: … → Mais → Adicionar app de documento (pode editar).';
+  if (/not ?found|not exist/i.test(m)) return base + ' Confira o link da planilha em FEISHU_PLANILHA.';
+  if (/ip/i.test(m) && /white|allow/i.test(m)) return base + ' O Feishu da empresa só aceita alguns endereços (lista de IP): fale com o administrador.';
+  return base;
+}
+
+/** Valores de uma faixa da aba ("A1:I1") → lista de linhas. */
+function lerFaixa_(c, faixa) {
+  var r = pedirFeishu_(c, 'get', '/open-apis/sheets/v2/spreadsheets/' + c.planilha + '/values/' + encodeURIComponent(c.aba + '!' + faixa) + '?valueRenderOption=ToString');
+  return (r && r.valueRange && r.valueRange.values) || [];
+}
+
+/** Últimos registros, do mais novo para o mais antigo (lidos da planilha do Feishu). */
+function listar_(c) {
+  var p = PropertiesService.getScriptProperties();
+  var ult = Number(p.getProperty('FEISHU_ULTIMA_LINHA_' + c.planilha) || 0);
+  // Sem a última linha guardada (ou se alguém apagou linhas): lê um pedaço maior a partir do começo.
+  var ate = Math.max(ult + 5, CONFIG.ultimos + 1), de = Math.max(2, ate - CONFIG.ultimos - 40);
+  var linhas = lerFaixa_(c, 'A' + de + ':' + ULTIMA_COL_ + ate);
+  var regs = linhas.map(function (v) { return v.map(texto_); }).filter(function (v) { return v[0] && v[8]; });
+  regs = regs.slice(-CONFIG.ultimos).reverse();
+  var minis = regs.length ? CacheService.getScriptCache().getAll(regs.map(function (v) { return 'mini_' + v[8]; })) : {};
+  return regs.map(function (v) {
+    return {data: v[0], hora: v[1], turno: v[2], nome: v[3].trim(), setor: v[4].trim(), codigo: v[5].trim(), descricao: v[6].trim(), id: v[8],
+      temFoto: !!(v[7] || minis['mini_' + v[8]]), miniatura: minis['mini_' + v[8]] || ''};
   });
-  var NS = 'http://schemas.openxmlformats.org/', REL = NS + 'officeDocument/2006/relationships';
-  var cab = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
-  var rels = function (lista) { return cab + '<Relationships xmlns="' + NS + 'package/2006/relationships">' + lista.join('') + '</Relationships>'; };
-  if (fotos) relsPlan.push('<Relationship Id="rIdD1" Type="' + REL + '/drawing" Target="../drawings/drawing1.xml"/>');
-  var arquivos = [
-    ['[Content_Types].xml', cab + '<Types xmlns="' + NS + 'package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-      '<Default Extension="xml" ContentType="application/xml"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="png" ContentType="image/png"/>' +
-      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
-      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
-      (fotos ? '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' : '') + '</Types>'],
-    ['_rels/.rels', rels(['<Relationship Id="rId1" Type="' + REL + '/officeDocument" Target="xl/workbook.xml"/>'])],
-    ['xl/workbook.xml', cab + '<workbook xmlns="' + NS + 'spreadsheetml/2006/main" xmlns:r="' + REL + '"><bookViews><workbookView/></bookViews><sheets>' +
-      '<sheet name="Registros" sheetId="1" r:id="rId1"/></sheets>' + (regs.length ? '<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">' +
-      'Registros!$A$1:$J$' + ult + '</definedName></definedNames>' : '') + '</workbook>'],
-    ['xl/_rels/workbook.xml.rels', rels(['<Relationship Id="rId1" Type="' + REL + '/worksheet" Target="worksheets/sheet1.xml"/>',
-      '<Relationship Id="rId2" Type="' + REL + '/styles" Target="styles.xml"/>'])],
-    ['xl/styles.xml', cab + '<styleSheet xmlns="' + NS + 'spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/>' +
-      '<numFmt numFmtId="165" formatCode="hh:mm:ss"/></numFmts><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font>' +
-      '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><u/><sz val="11"/><color rgb="FF0563C1"/><name val="Calibri"/></font></fonts>' +
-      '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
-      '<fill><patternFill patternType="solid"><fgColor rgb="FFE60012"/><bgColor indexed="64"/></patternFill></fill></fills>' +
-      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
-      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="7">' +
-      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
-      '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
-      '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left" vertical="top"/></xf>' +
-      '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left" vertical="top"/></xf>' +
-      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top"/></xf>' +
-      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
-      '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top"/></xf>' +
-      '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'],
-    ['xl/worksheets/sheet1.xml', cab + '<worksheet xmlns="' + NS + 'spreadsheetml/2006/main" xmlns:r="' + REL + '"><sheetViews><sheetView workbookViewId="0">' +
-      '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>' +
-      XLSX_COLUNAS_.map(function (c, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + c[1] + '" customWidth="1"/>'; }).join('') +
-      '</cols><sheetData>' + linhas.join('') + '</sheetData>' + (regs.length ? '<autoFilter ref="A1:J' + ult + '"/>' : '') +
-      (linksXml.length ? '<hyperlinks>' + linksXml.join('') + '</hyperlinks>' : '') +
-      '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>' + (fotos ? '<drawing r:id="rIdD1"/>' : '') + '</worksheet>']
-  ];
-  if (relsPlan.length) arquivos.push(['xl/worksheets/_rels/sheet1.xml.rels', rels(relsPlan)]);
-  if (fotos) {
-    arquivos.push(['xl/drawings/drawing1.xml', cab + '<xdr:wsDr xmlns:xdr="' + NS + 'drawingml/2006/spreadsheetDrawing" xmlns:a="' + NS +
-      'drawingml/2006/main" xmlns:r="' + REL + '">' + anc.join('') + '</xdr:wsDr>']);
-    arquivos.push(['xl/drawings/_rels/drawing1.xml.rels', rels(midia.map(function (m, i) {
-      return '<Relationship Id="rIdF' + (i + 1) + '" Type="' + REL + '/image" Target="../media/' + m.nome.split('/').pop() + '"/>';
-    }))]);
-  }
-  var blobs = arquivos.map(function (a) { return Utilities.newBlob('', 'application/xml', a[0]).setDataFromString(a[1], 'UTF-8'); })
-    .concat(midia.map(function (m) { return Utilities.newBlob(m.bytes, m.tipo, m.nome); }));
-  return {blob: Utilities.zip(blobs, 'registro.xlsx'), fotos: fotos, pequenas: pequenas};
-}
-
-/** Foto do registro para o Excel: a do Drive (se "grandes") ou a pequena da planilha. → {bytes, tipo, ext, w, h, pequena} | null */
-function imagemExcel_(r, grandes) {
-  var m = /\/d\/([A-Za-z0-9_-]+)/.exec(r.linkFoto || '');
-  if (grandes && m) {
-    try {
-      var bytes = DriveApp.getFileById(m[1]).getBlob().getBytes(), t = tamanhoImagem_(bytes);
-      if (t) return {bytes: bytes, tipo: t.tipo, ext: t.ext, w: t.w, h: t.h, pequena: false};
-    } catch (e) { /* foto apagada do Drive: usa a pequena */ }
-  }
-  var mm = /^data:image\/(?:jpeg|png);base64,([A-Za-z0-9+\/=]+)$/.exec(r.miniatura || '');
-  if (!mm) return null;
-  var b = Utilities.base64Decode(mm[1]), tm = tamanhoImagem_(b);
-  return tm ? {bytes: b, tipo: tm.tipo, ext: tm.ext, w: tm.w, h: tm.h, pequena: true} : null;
-}
-
-/** Largura e altura de um JPEG ou PNG (bytes do Apps Script vêm de -128 a 127). → {tipo, ext, w, h} | null */
-function tamanhoImagem_(b) {
-  var u = function (i) { return b[i] & 0xFF; };
-  if (b.length > 24 && u(0) === 0x89 && u(1) === 0x50 && u(2) === 0x4E && u(3) === 0x47) {
-    return {tipo: 'image/png', ext: 'png', w: ((u(16) << 24) | (u(17) << 16) | (u(18) << 8) | u(19)) >>> 0, h: ((u(20) << 24) | (u(21) << 16) | (u(22) << 8) | u(23)) >>> 0};
-  }
-  if (b.length < 4 || u(0) !== 0xFF || u(1) !== 0xD8) return null;
-  for (var i = 2; i + 8 < b.length;) {
-    if (u(i) !== 0xFF) { i++; continue; }
-    var mk = u(i + 1);
-    if (mk === 0xFF) { i++; continue; }
-    if (mk === 0x01 || (mk >= 0xD0 && mk <= 0xD8)) { i += 2; continue; }
-    if (mk >= 0xC0 && mk <= 0xCF && mk !== 0xC4 && mk !== 0xC8 && mk !== 0xCC) {
-      var h = (u(i + 5) << 8) | u(i + 6), w = (u(i + 7) << 8) | u(i + 8);
-      return w && h ? {tipo: 'image/jpeg', ext: 'jpeg', w: w, h: h} : null;
-    }
-    i += 2 + ((u(i + 2) << 8) | u(i + 3));
-  }
-  return null;
-}
-
-/** Data e hora → número de data do Excel (dias desde 30/12/1899), na hora de São Paulo. */
-function serial_(d) {
-  if (!ehData_(d)) return null;
-  var p = Utilities.formatDate(d, CONFIG.fuso, 'yyyy-MM-dd-HH-mm-ss').split('-').map(Number);
-  return Math.round((Date.UTC(p[0], p[1] - 1, p[2], p[3], p[4], p[5]) - Date.UTC(1899, 11, 30)) / 1000) / 86400;
-}
-function xml_(v) {
-  return String(v === null || v === undefined ? '' : v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-function celTexto_(ref, v, estilo) {
-  return '<c r="' + ref + '" t="inlineStr" s="' + estilo + '"><is><t xml:space="preserve">' + xml_(v) + '</t></is></c>';
 }
 
 // ------------------------------------------------------------------ tela do app (HTML, CSS e JavaScript)
@@ -489,6 +352,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   tr.novo td { background: var(--vermelho-claro); }
   .mini { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--borda); cursor: zoom-in; display: block; }
   .mini-btn { padding: 0; border: 0; background: none; cursor: zoom-in; }
+  .na-planilha { font-size: 12px; color: var(--suave); white-space: nowrap; }
   .vazio { color: var(--suave); text-align: center; padding: 24px 12px; }
   .zoom { position: fixed; inset: 0; background: rgba(0, 0, 0, .85); display: grid; place-items: center; padding: 16px; z-index: 10; }
   .zoom[hidden] { display: none; }
@@ -562,7 +426,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
       <button type="button" class="botao" id="atualizar">Atualizar</button>
     </div>
     <div class="tempo-real">
-      <span>A planilha é preenchida na hora, a cada envio.</span>
+      <span>A planilha do Feishu é preenchida na hora, a cada envio.</span>
       <a class="botao planilha-btn" id="abrirPlanilha" target="_blank" rel="noopener" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
         Abrir planilha
@@ -696,7 +560,8 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     chamar('salvar', d).then(function (r) {
       guardar('ocorr_nome', d.nome); guardar('ocorr_setor', d.setor);
       novoId = r.registro.id;
-      aviso('ok', 'Registro enviado: ' + r.registro.data + ' às ' + r.registro.hora + ' · ' + r.registro.turno + '.');
+      if (r.aviso) aviso('erro', r.aviso);
+      else aviso('ok', 'Registro enviado: ' + r.registro.data + ' às ' + r.registro.hora + ' · ' + r.registro.turno + '.');
       foto = null; mostrarFoto();
       $('descricao').value = ''; $('contador').textContent = '0/1000';
       $('codigo').value = ''; dica('', 'Escaneie o QR Code ou o código de barras, ou digite o número.');
@@ -711,7 +576,7 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
     $('tabInfo').textContent = lista.length ? '· últimos ' + lista.length : '';
     $('linhas').innerHTML = lista.length ? lista.map(function (r) {
       var img = r.miniatura ? '<button type="button" class="mini-btn" data-foto="' + esc(r.id) + '" aria-label="Ver a foto de ' + esc(r.nome) + '"><img class="mini" src="' +
-        esc(r.miniatura) + '" alt=""></button>' : '—';
+        esc(r.miniatura) + '" alt=""></button>' : r.temFoto ? '<span class="na-planilha">Na planilha</span>' : '—';
       return '<tr' + (r.id && r.id === novoId ? ' class="novo"' : '') + '><td>' + img + '</td><td class="nw"><span class="dia">' + esc(r.data) + '</span> <span class="hr">' +
         esc(r.hora) + '</span></td><td class="nw">' + esc(r.turno) + '</td><td>' + esc(r.nome) + '</td><td>' + esc(r.setor) + '</td><td class="nw">' + esc(r.codigo || '—') +
         '</td><td class="desc">' + esc(r.descricao) + '</td></tr>';
@@ -850,60 +715,6 @@ var PAGINA_ = String.raw`<!DOCTYPE html>
   }).catch(function (e) {
     $('linhas').innerHTML = '<tr><td colspan="7" class="vazio">' + esc(textoErro(e)) + '</td></tr>';
     aviso('erro', textoErro(e));
-  });
-})();
-</script>
-</body>
-</html>`;
-
-// ------------------------------------------------------------------ janela do menu da planilha: Baixar Excel com fotos
-var JANELA_EXCEL_ = String.raw`<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<base target="_top">
-<meta charset="utf-8">
-<style>
-  body { margin: 0; padding: 16px; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #1C1F24; background: #FFFFFF; }
-  p { margin: 0 0 12px; color: #5F6672; font-size: 13px; }
-  .datas { display: flex; gap: 10px; margin-bottom: 14px; }
-  .datas div { flex: 1; }
-  label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
-  input { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid #DDE0E5; border-radius: 8px; }
-  button { width: 100%; font: inherit; font-weight: 600; padding: 10px; border: 0; border-radius: 8px; background: #E60012; color: #FFFFFF; cursor: pointer; }
-  button:disabled { opacity: .6; cursor: wait; }
-  #msg { margin-top: 12px; font-size: 14px; }
-  .ok { color: #1B7F3B; } .erro { color: #B3261E; }
-</style>
-</head>
-<body>
-<p>O Excel vem com a foto de cada registro dentro da planilha (até 31 dias).</p>
-<div class="datas">
-  <div><label for="de">De</label><input type="date" id="de" value="__HOJE__" max="__HOJE__"></div>
-  <div><label for="ate">Até</label><input type="date" id="ate" value="__HOJE__" max="__HOJE__"></div>
-</div>
-<button type="button" id="baixar">Baixar Excel com fotos</button>
-<div id="msg" role="status" aria-live="polite"></div>
-<script>
-(function () {
-  var $ = function (id) { return document.getElementById(id); };
-  function msg(tipo, t) { $('msg').className = tipo; $('msg').textContent = t; }
-  $('baixar').addEventListener('click', function () {
-    $('baixar').disabled = true; msg('', 'Montando o Excel…');
-    google.script.run.withSuccessHandler(function (r) {
-      $('baixar').disabled = false;
-      if (!r.linhas) { msg('erro', 'Nenhum registro nesse período.'); return; }
-      var bin = atob(r.base64), bytes = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      var url = URL.createObjectURL(new Blob([bytes], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-      var a = document.createElement('a');
-      a.href = url; a.download = r.nome;
-      document.body.appendChild(a); a.click(); a.remove();
-      msg('ok', 'Pronto: ' + r.linhas + (r.linhas === 1 ? ' registro' : ' registros') + ' e ' + r.fotos + (r.fotos === 1 ? ' foto.' : ' fotos.') +
-        (r.pequenas ? ' Muitas fotos: vieram menores (a grande abre no link "Abrir foto").' : ''));
-    }).withFailureHandler(function (e) {
-      $('baixar').disabled = false;
-      msg('erro', 'Não baixou: ' + String(e && e.message || e).replace(/^(Error|Exception):\s*/, ''));
-    }).baixarExcel({de: $('de').value, ate: $('ate').value});
   });
 })();
 </script>

@@ -1,5 +1,5 @@
-J&T · REGISTRO DE OCORRÊNCIAS (app separado: não junte com o DashMaster nem com os outros apps)
-=============================================================================================
+J&T · REGISTRO DE OCORRÊNCIAS — com PLANILHA DO FEISHU (app separado: não junte com o DashMaster nem com os outros apps)
+=====================================================================================================================
 
 O que faz
 ---------
@@ -13,77 +13,85 @@ O colaborador abre um link no celular e preenche:
 A DATA, a HORA e o TURNO são automáticos, pela hora do envio:
   T1 = 06:00 às 13:59 · T2 = 14:00 às 21:59 · T3 = 22:00 às 05:59 (ex.: enviou às 9h = T1).
 
-Cada envio:
-  - aparece na tabela embaixo do formulário (os 30 mais novos, com a foto);
-  - vira NA HORA uma linha na aba "Registros" da Planilha Google (a planilha em tempo real): Data | Hora | Turno |
-    Colaborador | Setor | ID de viagem / remessa / lote | Descrição | Foto (a foto dentro da célula) | Link da foto | ID;
-  - guarda a foto na pasta "Fotos - Registro de Ocorrências" do Google Drive, ao lado da planilha.
+Cada envio vai NA HORA para a planilha do Feishu: uma linha com
+  Data | Hora | Turno | Colaborador | Setor | ID de viagem / remessa / lote | Descrição | Foto (a foto dentro da célula) | ID
+e aparece na tabela embaixo do formulário (os 30 mais novos). O botão "Abrir planilha" abre a planilha do Feishu.
+A miniatura da foto na tabela do app fica 6 horas; depois a tabela mostra "Na planilha" (a foto continua na planilha).
 
-Planilha em tempo real: no app, botão "Abrir planilha" (no quadro Registros). Abre a Planilha Google, que recebe cada
-envio na hora. Para a equipe abrir, compartilhe a planilha com ela (Compartilhar → adicionar os e-mails como Leitor).
-
-Excel com as fotos (se precisar mandar um arquivo): na Planilha Google, menu Registro de Ocorrências → Baixar Excel
-com fotos… → escolha De e Até (até 31 dias). Vem um .xlsx com as colunas da planilha e a FOTO dentro (coluna Foto, uma
-por linha). Até 40 fotos, tamanho normal; mais que isso, a foto menor (a grande continua no link "Abrir foto").
-O menu aparece quando a planilha é aberta (se não aparecer, recarregue a página da planilha).
-
-Escanear: abre a câmera ao vivo dentro do app e lê sozinho. Se a câmera ao vivo não abrir (o navegador ou o Google não
-liberou), o app mostra "Tirar foto do código": a pessoa tira a foto e o app lê o código na foto. O leitor de códigos
-vem da internet (biblioteca ZXing); sem internet, a pessoa digita o número.
-
+Funciona com o Feishu (feishu.cn) e com o Lark (larksuite.com): o app descobre pelo link da planilha.
 Arquivo: TUDO no Codigo.gs (o servidor e a tela do app). A pasta teste/ é só para conferir o código.
 
-Instalação (uma vez, uns 10 minutos)
------------------------------------
-1. No Google Drive: Novo → Planilhas Google → Planilha em branco. Dê um nome (ex.: Registro de Ocorrências).
-2. Na planilha: Extensões → Apps Script.
-3. Apague tudo o que estiver em Código.gs, cole o arquivo Codigo.gs inteiro e clique em Salvar (disquete).
-   É um arquivo só: não precisa criar outro arquivo no Apps Script.
-4. No alto, escolha a função "configurar" e clique em Executar.
-   O Google pede autorização: Revisar permissões → escolha a sua conta → se aparecer "O Google não verificou este app",
-   clique em Avançado → Acessar (não seguro) → Permitir. (O app é seu: ele só mexe nesta planilha e na pasta das fotos.)
-   Embaixo aparece "Pronto: aba Registros e pasta ... no Drive".
-5. No alto à direita: Implantar → Nova implantação → engrenagem → App da Web.
-   Executar como: Eu. Quem pode acessar: Qualquer pessoa. Clique em Implantar.
-   Copie o "URL do app da Web" (termina em /exec). Esse é o link do app.
-6. Abra o link no celular, preencha um teste e confira a linha na aba "Registros" da planilha.
-   Teste também o Escanear com uma etiqueta de remessa e o botão "Abrir planilha".
-7. Mande o link para a equipe. No celular, dá para criar um atalho: menu do navegador → Adicionar à tela inicial.
+Parte 1 — no Feishu (uma vez; pode precisar do administrador do Feishu da empresa)
+-----------------------------------------------------------------------------------
+Os nomes dos menus podem mudar um pouco de uma versão do Feishu para outra.
+1. Abra o Console de Desenvolvedor: https://open.feishu.cn/app (no Lark: https://open.larksuite.com/app).
+2. Criar app personalizado (企业自建应用 / Custom app). Nome: Registro de Ocorrências.
+3. Em "Credenciais e informações básicas" (凭证与基础信息): anote o App ID (começa com cli_) e o App Secret.
+   NÃO mande o App Secret por mensagem para ninguém (nem para o Claude): ele vai só no Apps Script (Parte 2).
+4. Em "Recursos do app" (应用能力): adicione "Bot" (机器人) — é o que deixa adicionar o app na planilha.
+5. Em "Permissões" (权限管理): adicione a permissão de planilhas "sheets:spreadsheet"
+   (查看、评论、编辑和管理电子表格 / view, comment, edit and manage spreadsheets).
+6. Em "Versões e publicação" (版本管理与发布): crie uma versão e publique. O administrador do Feishu da empresa pode ter
+   que aprovar.
+7. Crie a planilha no Feishu (Planilha / 电子表格, não "Base"), com uma aba vazia. Dentro da planilha: botão "…" no alto
+   à direita → Mais (更多) → Adicionar app de documento (添加文档应用) → procure "Registro de Ocorrências" → pode editar.
+8. Copie o link da planilha (o endereço tem /sheets/). Se a planilha estiver dentro da Wiki, abra a planilha sozinha
+   (abrir em nova aba) e copie esse link. Para usar uma aba que não é a primeira, abra a aba e copie o link (?sheet=...).
 
-Conta do Google da empresa: se "Qualquer pessoa" não aparecer, escolha "Qualquer pessoa em <empresa>": aí cada
-colaborador entra com a conta da empresa para abrir o link.
+Parte 2 — no Apps Script
+------------------------
+1. Abra https://script.google.com → Novo projeto. Nome: Registro de Ocorrências.
+   (Se você já tinha o app da versão 1.x numa Planilha Google: pode usar o mesmo projeto; a Planilha Google deixa de ser
+   usada.)
+2. Apague tudo o que estiver em Código.gs, cole o arquivo Codigo.gs inteiro e clique em Salvar (disquete).
+3. Engrenagem "Configurações do projeto" (à esquerda) → Propriedades do script → Adicionar propriedade do script:
+     FEISHU_APP_ID       = o App ID (cli_...)
+     FEISHU_APP_SECRET   = o App Secret
+     FEISHU_PLANILHA     = o link da planilha do Feishu
+   Clique em Salvar propriedades do script.
+4. Volte para o Editor (< >), escolha a função "configurar" no alto e clique em Executar.
+   Na 1ª vez o Google pede autorização: Revisar permissões → sua conta → Avançado → Acessar (não seguro) → Permitir.
+   Embaixo aparece "Pronto: cabeçalho escrito na planilha do Feishu". Confira a planilha: a primeira linha tem o cabeçalho.
+5. Implantar → Nova implantação → engrenagem → App da Web. Executar como: Eu. Quem pode acessar: Qualquer pessoa.
+   Clique em Implantar e copie o "URL do app da Web" (termina em /exec). Esse é o link do app.
+6. Abra o link no celular, preencha um teste e confira a linha nova (com a foto) na planilha do Feishu.
+   Teste também o Escanear com uma etiqueta de remessa.
+7. Mande o link do app para a equipe. Para a equipe abrir a planilha pelo botão "Abrir planilha", compartilhe a planilha
+   do Feishu com ela.
 
 Trocar o código depois (versão nova)
 ------------------------------------
-Cole o Codigo.gs novo no lugar do antigo (apague tudo e cole), salve e vá em Implantar → Gerenciar implantações → lápis (Editar) →
-Versão: Nova versão → Implantar. O link continua o mesmo.
-Vindo da versão 1.0 ou 1.1: a coluna "ID de viagem / remessa / lote" entra sozinha depois de Setor no primeiro envio
-(os registros antigos ficam com ela vazia). Se tiver um arquivo "Index" no Apps Script, apague (agora é tudo no Código.gs).
+Cole o Codigo.gs novo no lugar do antigo (apague tudo e cole), salve e vá em Implantar → Gerenciar implantações →
+lápis (Editar) → Versão: Nova versão → Implantar. O link continua o mesmo. As Propriedades do script continuam.
 
-Mudar turnos, foto obrigatória ou o Excel
------------------------------------------
+Mudar turnos, foto obrigatória ou o ID obrigatório
+--------------------------------------------------
 No começo do Codigo.gs, no bloco CONFIG:
   turnos: T1 de 6 até 14, T2 de 14 até 22, T3 de 22 até 6
   fotoObrigatoria: true (false = a foto passa a ser opcional)
   codigoObrigatorio: false (true = não envia sem o ID de viagem / remessa / lote)
-  ultimos: 30 (quantos registros a tabela do app mostra)
-  maxDiasExcel: 31 (período máximo do Excel) · fotosGrandesExcel: 40 (até quantas fotos vêm em tamanho normal)
+  ultimos: 30 (quantos registros a tabela do app mostra) · alturaLinhaFoto: 120 (altura da linha com foto)
 Depois de mudar: salve e faça a "Nova versão" (acima).
 
-Se der problema
----------------
-- "Falta configurar": faça o passo 4 (função configurar) de novo.
+Se der problema (a mensagem aparece na tela do app ou embaixo do editor do Apps Script)
+---------------------------------------------------------------------------------------
+- "Falta configurar o Feishu": faltou alguma das 3 Propriedades do script (Parte 2, passo 3).
+- "Confira FEISHU_APP_ID e FEISHU_APP_SECRET": um dos dois está errado (copie de novo, sem espaço).
+- "não tem a permissão de planilhas": falta a permissão sheets:spreadsheet ou a versão não foi publicada (Parte 1, 5 e 6).
+- "Adicione o app na planilha": falta a Parte 1, passo 7.
+- "não é um link de planilha" ou "Wiki": copie o link da planilha (com /sheets/), Parte 1, passo 8.
+- "A primeira linha da planilha do Feishu não é o cabeçalho do app": use uma aba vazia.
+- "lista de IP": o Feishu da empresa só aceita alguns endereços; fale com o administrador do Feishu.
+- "Registro salvo, mas a foto não entrou na planilha": o registro está na planilha sem a foto (o Feishu recusou a
+  imagem). Mande um print da mensagem.
 - Escanear: se a câmera ao vivo não abrir, use "Tirar foto do código" (com o código inteiro e nítido na foto).
   Abra o link no Chrome ou no Safari (não dentro do WhatsApp) e permita a câmera quando o navegador perguntar.
-- "Abrir planilha" mostra "Você precisa de permissão": a planilha não foi compartilhada com essa pessoa.
-- A célula Foto mostra "Foto no link ao lado": o Google não aceitou a imagem dentro da célula; a foto está no link
-  "Abrir foto" da coluna ao lado (e na pasta do Drive).
-- O botão Tirar foto não abre a câmera: o navegador do celular precisa da permissão de câmera (ou escolha a foto da
-  galeria na janela que abrir).
-- Mudou o código e o link não mudou nada: faltou a "Nova versão" na implantação.
+- Se um envio der erro, os campos continuam preenchidos: é só tentar Enviar de novo.
 
 Cuidados
 --------
-Quem tem o link vê a tabela (nomes, descrições e fotos) e pode enviar registros. Mande o link só para a equipe.
-Não apague nem mude a ordem das colunas da aba "Registros" (o app escreve nelas). A última coluna (escondida) guarda a
-miniatura da foto para a tabela do app.
+- O App Secret dá acesso às planilhas em que o app foi adicionado: ele fica só nas Propriedades do script. Se vazar,
+  gere outro no Console do Feishu e troque a propriedade.
+- Quem tem o link do app vê a tabela dos últimos registros (nomes, descrições e miniaturas) e pode enviar registros.
+  Mande o link só para a equipe.
+- Não mude a ordem das colunas da planilha do Feishu (o app escreve nelas) nem escreva embaixo dos registros.
