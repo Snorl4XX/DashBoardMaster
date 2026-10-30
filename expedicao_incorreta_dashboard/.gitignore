@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+# Dados deste computador: respostas do JMS guardadas e as planilhas de rotas/remessas.
+data/*.sqlite3
+data/*.xlsx
+data/*.xls
+dados_locais/
+.streamlit/secrets.toml
