@@ -1,16 +1,10 @@
-"""3 Segmentos sem consultar o JMS pelo app: a partir de arquivos que você tira do próprio JMS.
+"""3 Segmentos sem consultar o JMS pelo app: a partir de planilhas exportadas do próprio JMS.
 
-  - Planilha (ou página HTML salva) com uma linha por remessa e as colunas "Código de primeiro segmento" / "Código de dois
-    segmentos" (ou "1º Nível" / "一段码"…), ou uma coluna com os três juntos ("SP,435-00,080", o terminalDispatchCode).
-  - A página do Rastreamento do pacote, salva (Ctrl+S) ou copiada no Inspecionar (botão direito no <html> › Copiar › Copiar
-    outerHTML), com a remessa aberta: lê o bloco "3 Segmentos" e a tabela "Detalhes da encomenda" daquela remessa (uma por página).
-Nada aqui fala com o JMS: só lê o que você trouxe dele.
+Uma linha por remessa, com as colunas "Código de primeiro segmento" / "Código de dois segmentos" (ou "1º Nível" / "一段码"…), ou
+uma coluna com os três juntos ("SP,435-00,080", o terminalDispatchCode). Nada aqui fala com o JMS: só lê o que você exportou dele.
 """
 
 from __future__ import annotations
-
-import html as html_mod
-import re
 
 import pandas as pd
 
@@ -70,53 +64,12 @@ def de_tabela(df: pd.DataFrame) -> dict[str, Consulta]:
     return out
 
 
-def _texto_html(trecho: str) -> str:
-    return re.sub(r"\s+", " ", html_mod.unescape(re.sub(r"<[^>]+>", " ", trecho))).strip()
-
-
-def de_pagina(texto_html: str) -> Consulta | None:
-    """Página do Rastreamento do pacote (salva ou copiada do Inspecionar) → Consulta da remessa aberta nela."""
-    h = texto_html
-    m = re.search(r"N[úu]mero d[eo] pedido JMS\s*:?\s*(?:<[^>]*>\s*)*([A-Z0-9-]{8,40})", h, re.I)
-    rotulos = {}
-    for rot, val in re.findall(r'class="tt[^"]*"[^>]*>(.*?)</div>\s*:?\s*<div[^>]*class="des"[^>]*>(.*?)</div>', h, re.S | re.I):
-        rotulos[norm(_texto_html(rot))] = _texto_html(val)
-    p = norm_primeiro(rotulos.get(norm("Código de primeiro segmento"), ""))
-    s = norm_segundo(rotulos.get(norm("Código de dois segmentos"), ""))
-    t = rotulos.get(norm("3 Segmentos"), "")
-    w = norm_remessa(m.group(1)) if m else norm_remessa(rotulos.get(norm("Encomenda No."), "") or rotulos.get(norm("Encomenda No"), ""))
-    if not w or not p:
-        return None
-    det = {nome: "" for nome in DETALHES.values()}
-    try:
-        tabelas = arquivo._html(h.encode("utf-8"))
-    except ValueError:
-        tabelas = []
-    for i, (_, linhas) in enumerate(tabelas):  # tabela do Element UI: cabeçalho numa <table>, dados na seguinte
-        cab = next((l for l in linhas if any(limpo(v) == "PDD de saída" for v in l)), None)
-        if cab is None:
-            continue
-        corpo = linhas[linhas.index(cab) + 1] if linhas.index(cab) + 1 < len(linhas) else \
-            (tabelas[i + 1][1][0] if i + 1 < len(tabelas) and tabelas[i + 1][1] else [])
-        for j, nome in enumerate(cab):
-            if limpo(nome) in det and j < len(corpo):
-                det[limpo(nome)] = limpo(corpo[j])
-        break
-    return Consulta(w, True, p, s, re.sub(r"\s+", "", t), det)
-
-
 def de_arquivos(arquivos: list[tuple[str, bytes]]) -> tuple[dict[str, Consulta], list[str]]:
-    """Vários arquivos (planilhas e/ou páginas HTML) → ({remessa: Consulta}, avisos)."""
+    """Várias planilhas → ({remessa: Consulta}, avisos)."""
     out: dict[str, Consulta] = {}
     avisos: list[str] = []
     for nome, dados in arquivos:
         try:
-            if arquivo.formato(dados) == arquivo.HTML:
-                texto = arquivo._decodificar(dados)
-                c = de_pagina(texto)
-                if c:
-                    out[c.remessa] = c
-                    continue
             achadas = {}
             for _, linhas in arquivo.grades(dados):
                 largura = max((len(l) for l in linhas), default=0)
@@ -132,8 +85,3 @@ def de_arquivos(arquivos: list[tuple[str, bytes]]) -> tuple[dict[str, Consulta],
         except Exception as e:  # noqa: BLE001 - arquivo do usuário: o motivo vai para a tela
             avisos.append(f"{nome}: não consegui ler ({e}).")
     return out, avisos
-
-
-def de_texto_colado(texto: str) -> Consulta | None:
-    """HTML colado do Inspecionar (Copiar outerHTML)."""
-    return de_pagina(texto) if limpo(texto) else None

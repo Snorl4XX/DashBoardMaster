@@ -361,42 +361,18 @@ def test_cache(tmp_path):
     assert c.quantas() == 0
 
 
-PAGINA_RASTREAMENTO = """<html><body><div class="top">Número de pedido JMS: <span>888002560356352</span></div>
-<div data-v-41c38e10="" class="waybill-msg-item no-margin-bottom"><div data-v-41c38e10="" class="item-title">3 Segmentos</div>
-<div data-v-41c38e10="" class="item-msg"><div data-v-41c38e10="" class="tt tt-1">Código de primeiro segmento</div>:<div data-v-41c38e10=""
-class="des">SP</div></div><div data-v-41c38e10="" class="item-msg"><div data-v-41c38e10="" class="tt tt-1">Código de dois segmentos</div>:<div
-data-v-41c38e10="" class="des">435-00</div></div><div data-v-41c38e10="" class="item-msg"><div data-v-41c38e10="" class="tt tt-1">3
-Segmentos</div>:<div data-v-41c38e10="" class="des">080</div></div></div>
-<div class="el-table__header-wrapper"><table class="el-table__header"><thead><tr><th><div class="cell"></div></th><th><div class="cell">
-<div class="el-tooltip">PDD de saída</div></div></th><th><div class="cell"><div>Município de Origem</div></div></th><th><div class="cell">
-<div>SC Origem</div></div></th><th><div class="cell"><div>Base Destino</div></div></th><th><div class="cell"><div>Município de Destino</div>
-</div></th><th><div class="cell"><div>SC Destino</div></div></th></tr></thead></table></div>
-<div class="el-table__body-wrapper"><table class="el-table__body"><tbody><tr class="el-table__row"><td><div class="cell"></div></td>
-<td><div class="cell el-tooltip"><span><span title="" class="text-pre-wrap">PA MELI-VCP-SP</span></span></div></td><td><div class="cell">
-<span><span>Campinas</span></span></div></td><td><div class="cell"><span><span>SP BRE</span></span></div></td><td><div class="cell"><span>
-<span>F S-VLMR-SP</span></span></div></td><td><div class="cell"><span><span>São Paulo</span></span></div></td><td><div class="cell"><span>
-<span>SP GRU</span></span></div></td></tr></tbody></table></div></body></html>"""
-
-
 def test_trazer_3_segmentos_por_arquivo():
     from expedicao_dash import importar
-    # Página do Rastreamento salva / copiada do Inspecionar (o HTML do documento): uma remessa.
-    c = importar.de_texto_colado(PAGINA_RASTREAMENTO)
-    assert (c.remessa, c.primeiro, c.segundo, c.terceiro) == ("888002560356352", "SP", "435-00", "080")
-    assert c.detalhes == {"PDD de saída": "PA MELI-VCP-SP", "Município de Origem": "Campinas", "SC Origem": "SP BRE",
-                          "Base Destino": "F S-VLMR-SP", "Município de Destino": "São Paulo", "SC Destino": "SP GRU"}
-    assert importar.de_texto_colado("<html><body>nada</body></html>") is None
-    # Planilha exportada: colunas separadas, ou o terminalDispatchCode junto.
+    # Planilha exportada do JMS: colunas separadas, ou o terminalDispatchCode junto.
     b = io.BytesIO()
     pd.DataFrame({"Número de pedido JMS": [888002560356352, 888002223648620, 888000000000009],
                   "Código de primeiro segmento": ["GRU", "SP", ""], "Código de dois segmentos": ["404-05", "435-00", ""],
                   "SC Destino": ["SP GRU", "SP GRU", ""]}).to_excel(b, index=False)
     csv_ = "Remessa;terminalDispatchCode\n888002560356352;MRB,742-00,001\n".encode("utf-8")
-    achadas, avisos = importar.de_arquivos([("export.xls", b.getvalue()), ("t.csv", csv_), ("pagina.html", PAGINA_RASTREAMENTO.encode()),
-                                            ("lixo.csv", b"a;b\n1;2\n")])
+    achadas, avisos = importar.de_arquivos([("export.xls", b.getvalue()), ("t.csv", csv_), ("lixo.csv", b"a;b\n1;2\n")])
     assert achadas["888002223648620"].primeiro == "SP" and achadas["888002223648620"].detalhes["SC Destino"] == "SP GRU"
     assert "888000000000009" not in achadas and len(avisos) == 1 and "lixo.csv" in avisos[0]
-    assert achadas["888002560356352"].primeiro == "SP"  # a página veio por último: vale ela
+    assert (achadas["888002560356352"].primeiro, achadas["888002560356352"].segundo) == ("MRB", "742-00")  # o último arquivo vale
     assert importar.de_arquivos([("t.csv", csv_)])[0]["888002560356352"].segundo == "742-00"
 
 

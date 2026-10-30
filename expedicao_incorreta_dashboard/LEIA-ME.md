@@ -41,15 +41,16 @@ Precisa do Python 3.10 ou mais novo.
 - Clique em **Buscar no JMS**. O app consulta 2 remessas ao mesmo tempo. Se o JMS pedir para ir mais devagar, diminui sozinho.
 - **Token vencido:** o app para na hora e avisa. Cole um token novo e clique de novo: o que já veio fica guardado.
 - O que o JMS respondeu fica guardado por 12 horas (`data\cache_jms.sqlite3`). Rodar a mesma planilha de novo não consulta de novo.
-- **HTTP 405 ("o firewall do JMS barrou"):** o firewall do JMS recusou a consulta feita pelo app. O app **para na primeira vez**, porque insistir só prolonga o bloqueio. Use a aba ao lado, **Trazer do JMS por arquivo** (abaixo).
+- **HTTP 405 ("o firewall do JMS barrou"):** o firewall do JMS recusou a consulta feita pelo app. O app **para na primeira vez**, porque insistir só prolonga o bloqueio. Use a aba ao lado, **Trazer de uma planilha exportada do JMS** (abaixo).
 
-**2b · Trazer do JMS por arquivo (sem o app consultar o JMS)**
-- **Planilha exportada do JMS** que tenha a remessa e os códigos de segmento. Serve com as colunas "Código de primeiro segmento" e "Código de dois segmentos", "1º Nível" e "2º Nível", "一段码" e "二段码", ou com uma coluna `terminalDispatchCode` com os três juntos ("SP,435-00,080"). Pode enviar vários arquivos de uma vez.
-- **Página do Rastreamento do pacote, com a remessa aberta:**
-  - Ctrl+S (salvar como HTML) e envie o arquivo;
-  - ou, no **Inspecionar**, clique com o botão direito em `<html>` › Copiar › **Copiar outerHTML** e cole no campo.
-  - O app lê o bloco **3 Segmentos** e a tabela **Detalhes da encomenda**.
-  - **Uma remessa por página**: serve para conferir poucas. Para muitas, use a planilha exportada.
+**2b · Trazer de uma planilha exportada do JMS (sem o app consultar o JMS)**
+- Envie uma **planilha exportada do JMS** que tenha a remessa e os códigos de segmento.
+- **Colunas aceitas:**
+  - "Código de primeiro segmento" e "Código de dois segmentos";
+  - "1º Nível" e "2º Nível";
+  - "一段码" e "二段码";
+  - ou uma coluna `terminalDispatchCode` com os três juntos ("SP,435-00,080").
+- Pode enviar várias planilhas de uma vez.
 - O que vier fica guardado como se tivesse vindo da consulta, e o resultado (passo 3) já usa.
 
 **3 · Resultado**
@@ -190,7 +191,7 @@ Acesse `http://IP-deste-computador:8503`. Não abra a porta no roteador para a i
 | `expedicao_dash/arquivo.py` | Abre a planilha pelo conteúdo (xlsx, xls, HTML, XML 2003, CSV/texto). |
 | `expedicao_dash/planilha.py` | Lê a planilha de remessas e acha as colunas. |
 | `expedicao_dash/jms.py` | Consulta no JMS (cabeçalhos, token vencido, várias ao mesmo tempo) e o JMS de mentira. |
-| `expedicao_dash/importar.py` | 3 Segmentos de planilha exportada do JMS ou da página HTML do Rastreamento. |
+| `expedicao_dash/importar.py` | 3 Segmentos de planilha exportada do JMS. |
 | `expedicao_dash/cache.py` | Respostas do JMS guardadas no computador. |
 | `expedicao_dash/analise.py` | Certo / errado / pendente e os totais. |
 | `expedicao_dash/relatorio.py` | O Excel. |

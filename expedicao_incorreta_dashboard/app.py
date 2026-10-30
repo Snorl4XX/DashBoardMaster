@@ -272,25 +272,16 @@ def buscar_no_jms(remessas: list[str], consultar, paralelo: int, guardar) -> tup
 
 
 def trazer_por_arquivo(remessas: list[str], modo_demo: bool, cache: Cache) -> None:
-    """Os 3 Segmentos vindos de arquivos tirados do próprio JMS (sem o app consultar o JMS)."""
+    """Os 3 Segmentos vindos de planilhas exportadas do próprio JMS (sem o app consultar o JMS)."""
     ss = st.session_state
-    st.caption("Sem o app falar com o JMS: traga os códigos de um arquivo que você tirou do JMS. Serve: **uma planilha exportada** "
-               "com a remessa e os códigos de segmento (ou o terminalDispatchCode \"SP,435-00,080\"), ou **a página do Rastreamento do "
-               "pacote** com a remessa aberta: Ctrl+S (salvar como HTML) ou, no Inspecionar, botão direito em `<html>` › Copiar › "
-               "Copiar outerHTML. A página traz uma remessa por vez.")
+    st.caption("Sem o app falar com o JMS: envie uma **planilha exportada do JMS** com a remessa e os códigos de segmento "
+               "(\"Código de primeiro segmento\" e \"Código de dois segmentos\", ou o terminalDispatchCode \"SP,435-00,080\"). "
+               "Pode enviar vários arquivos de uma vez.")
     n = ss.setdefault("imp_n", 0)
-    c1, c2 = st.columns([1.2, 1])
-    subidas = c1.file_uploader("Arquivos (.xlsx, .xls, .csv, .html)", type=["xlsx", "xls", "csv", "txt", "html", "htm"],
+    subidas = st.file_uploader("Planilhas exportadas do JMS (.xlsx, .xls ou .csv)", type=["xlsx", "xls", "csv", "txt"],
                                accept_multiple_files=True, key=f"imp_arq_{n}")
-    colado = c2.text_area("ou cole o HTML copiado do Inspecionar", key=f"imp_html_{n}", height=118, placeholder="<html>…</html>")
-    if st.button("Usar estes dados", disabled=not (subidas or colado.strip()), key=f"imp_ok_{n}"):
+    if st.button("Usar estas planilhas", disabled=not subidas, key=f"imp_ok_{n}"):
         achadas, avisos = importar.de_arquivos([(f.name, f.getvalue()) for f in subidas or []])
-        if colado.strip():
-            c = importar.de_texto_colado(colado)
-            if c:
-                achadas[c.remessa] = c
-            else:
-                avisos.append("HTML colado: não achei a remessa e o bloco 3 Segmentos (abra a remessa no Rastreamento antes de copiar).")
         if modo_demo:
             ss["demo_consultas"].update(achadas)
         else:
@@ -298,11 +289,11 @@ def trazer_por_arquivo(remessas: list[str], modo_demo: bool, cache: Cache) -> No
             for w in achadas:
                 ss["falhas"].pop(w, None)
         destas = len(set(achadas) & set(remessas))
-        texto = (f"{fmt_int(len(achadas))} {'remessa' if len(achadas) == 1 else 'remessas'} com código nos arquivos; "
-                 f"{fmt_int(destas)} desta planilha." if achadas else
-                 "Nenhuma remessa com código de segmento nos arquivos.")
+        texto = (f"{fmt_int(len(achadas))} {'remessa' if len(achadas) == 1 else 'remessas'} com código nas planilhas; "
+                 f"{fmt_int(destas)} desta lista." if achadas else
+                 "Nenhuma remessa com código de segmento nas planilhas.")
         ss["aviso_busca"] = ("ok" if destas else "erro", texto + (" " + " ".join(avisos) if avisos else ""))
-        ss["imp_n"] = n + 1  # limpa os campos
+        ss["imp_n"] = n + 1  # limpa o campo
         st.rerun()
 
 
@@ -439,7 +430,7 @@ def main() -> None:
         if aviso:
             (st.error if aviso[0] == "erro" else st.success)(aviso[1])
         if faltam:
-            aba_app, aba_arq = st.tabs(["🔎  Buscar pelo app", "📄  Trazer do JMS por arquivo (planilha ou HTML)"])
+            aba_app, aba_arq = st.tabs(["🔎  Buscar pelo app", "📄  Trazer de uma planilha exportada do JMS"])
             with aba_app:
                 c1, c2 = st.columns([2.2, 1])
                 por_vez = c2.selectbox("Quantas por vez", ["Todas", 200, 500, 1000, 2000], index=0, label_visibility="collapsed",
