@@ -38,9 +38,19 @@ Precisa do Python 3.10 ou mais novo.
 
 **2 · 3 Segmentos no JMS**
 - Cole o **AuthToken** na barra da esquerda (JMS › F12 › Rede › uma consulta › Cabeçalhos › `authtoken`).
-- Clique em **Buscar no JMS**. O app consulta 4 remessas ao mesmo tempo. Se o JMS pedir para ir mais devagar, diminui sozinho.
+- Clique em **Buscar no JMS**. O app consulta 2 remessas ao mesmo tempo. Se o JMS pedir para ir mais devagar, diminui sozinho.
 - **Token vencido:** o app para na hora e avisa. Cole um token novo e clique de novo: o que já veio fica guardado.
 - O que o JMS respondeu fica guardado por 12 horas (`data\cache_jms.sqlite3`). Rodar a mesma planilha de novo não consulta de novo.
+- **HTTP 405 ("o firewall do JMS barrou"):** o firewall do JMS recusou a consulta feita pelo app. O app **para na primeira vez**, porque insistir só prolonga o bloqueio. Use a aba ao lado, **Trazer do JMS por arquivo** (abaixo).
+
+**2b · Trazer do JMS por arquivo (sem o app consultar o JMS)**
+- **Planilha exportada do JMS** que tenha a remessa e os códigos de segmento. Serve com as colunas "Código de primeiro segmento" e "Código de dois segmentos", "1º Nível" e "2º Nível", "一段码" e "二段码", ou com uma coluna `terminalDispatchCode` com os três juntos ("SP,435-00,080"). Pode enviar vários arquivos de uma vez.
+- **Página do Rastreamento do pacote, com a remessa aberta:**
+  - Ctrl+S (salvar como HTML) e envie o arquivo;
+  - ou, no **Inspecionar**, clique com o botão direito em `<html>` › Copiar › **Copiar outerHTML** e cole no campo.
+  - O app lê o bloco **3 Segmentos** e a tabela **Detalhes da encomenda**.
+  - **Uma remessa por página**: serve para conferir poucas. Para muitas, use a planilha exportada.
+- O que vier fica guardado como se tivesse vindo da consulta, e o resultado (passo 3) já usa.
 
 **3 · Resultado**
 - **Cartões:**
@@ -157,6 +167,7 @@ Precisa do Python 3.10 ou mais novo.
     - não tinha a % de cada rota e de cada segmento;
     - não mostrava as regras usadas.
 15. **Planilha do JMS com nome `.xls` não abria** ("Excel xlsx file; not supported"): o JMS exporta `.xlsx` com o nome `.xls`, e o app escolhia o leitor pela extensão. Agora abre pelo conteúdo (xlsx, xls antigo, HTML, XML 2003 ou texto).
+16. **HTTP 405 do firewall do JMS:** o app antigo continuava consultando todas as remessas, e todas davam 405. Agora para na primeira vez, não segue redirecionamento (um POST redirecionado vira GET e também dá 405) e mostra o código HTTP e o endereço.
 
 ## Abrir de outro computador da rede
 
@@ -179,6 +190,7 @@ Acesse `http://IP-deste-computador:8503`. Não abra a porta no roteador para a i
 | `expedicao_dash/arquivo.py` | Abre a planilha pelo conteúdo (xlsx, xls, HTML, XML 2003, CSV/texto). |
 | `expedicao_dash/planilha.py` | Lê a planilha de remessas e acha as colunas. |
 | `expedicao_dash/jms.py` | Consulta no JMS (cabeçalhos, token vencido, várias ao mesmo tempo) e o JMS de mentira. |
+| `expedicao_dash/importar.py` | 3 Segmentos de planilha exportada do JMS ou da página HTML do Rastreamento. |
 | `expedicao_dash/cache.py` | Respostas do JMS guardadas no computador. |
 | `expedicao_dash/analise.py` | Certo / errado / pendente e os totais. |
 | `expedicao_dash/relatorio.py` | O Excel. |

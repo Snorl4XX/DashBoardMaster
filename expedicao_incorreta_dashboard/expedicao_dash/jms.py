@@ -9,8 +9,9 @@ Resposta (code 1) → data.details:
 Nome, telefone, endereço e CPF de remetente e destinatário NÃO são lidos.
 
 Cabeçalhos: os mesmos que o navegador manda nessa tela (Routename trackingExpress, Routernamelist, Lang PT…) e o AuthToken.
-Várias consultas ao mesmo tempo (padrão 4); se o JMS pedir para ir mais devagar, cai pela metade e espera; AuthToken vencido ou
-recusado PARA tudo na hora (o que já veio fica guardado).
+Várias consultas ao mesmo tempo (padrão 2); se o JMS pedir para ir mais devagar, cai pela metade e espera. AuthToken vencido, ou o
+firewall do JMS (WAF) barrando a consulta (HTTP 405), PARA tudo na hora: insistir só prolonga o bloqueio (o que já veio fica guardado).
+Redirecionamento NÃO é seguido (um POST redirecionado vira GET e o JMS responde 405): aparece como erro, com o endereço.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ DETALHES = {  # campo do JMS → nome na tela "Detalhes da encomenda"
     "destinationDistributeName": "SC Destino",
 }
 AUTH_RE = re.compile(r"token|登录|登陆|login|expired|expirad|过期|失效|会话|session|sess[aã]o|unauthori|未授权|认证|autentica", re.I)
+WAF_RE = re.compile(r"waf|aliyun|blocked|bloquead|阻断|拦截|captcha|验证码|denied|negado", re.I)
 LIMITE_RE = re.compile(r"频繁|限流|frequen|too many|rate.?limit|muitas (requisi|consultas)|请稍后|ocupado|busy|繁忙|稍后再试", re.I)
 
 
@@ -96,9 +98,15 @@ def ler_extras(texto: str) -> dict:
     return {str(k): str(x) for k, x in v.items()}
 
 
-def ler_resposta(remessa: str, status: int, corpo: str) -> Consulta:
-    """Resposta do getOrderDetail → Consulta. Não levanta erro: o tipo do problema vai em tipo_erro."""
+def ler_resposta(remessa: str, status: int, corpo: str, local: str = "") -> Consulta:
+    """Resposta do getOrderDetail → Consulta. Não levanta erro: o tipo do problema vai em tipo_erro. local = cabeçalho Location."""
     c = Consulta(remessa)
+    if 300 <= status < 400:
+        if AUTH_RE.search(local or ""):
+            c.erro, c.tipo_erro = f"O JMS mandou para a página de login (HTTP {status}): o AuthToken venceu.", "auth"
+        else:
+            c.erro, c.tipo_erro = f"O JMS redirecionou a consulta (HTTP {status}) para {local or 'outro endereço'}.", "bloqueio"
+        return c
     if status in (401, 403):
         c.erro, c.tipo_erro = f"O JMS recusou o acesso (HTTP {status}): AuthToken vencido ou sem permissão.", "auth"
         return c
@@ -115,8 +123,11 @@ def ler_resposta(remessa: str, status: int, corpo: str) -> Consulta:
         texto = re.sub(r"\s+", " ", titulo.group(1)).strip() if titulo else (corpo or "")[:80]
         if AUTH_RE.search(texto) or "登录" in (corpo or ""):
             c.erro, c.tipo_erro = "O JMS mandou a página de login: o AuthToken venceu.", "auth"
+        elif status == 405 or WAF_RE.search(corpo or ""):
+            c.erro, c.tipo_erro = (f"O firewall do JMS barrou a consulta feita pelo app (HTTP {status}: {texto or 'sem título'}). "
+                                   "Os 3 Segmentos podem vir de um arquivo exportado do JMS (passo 2)."), "bloqueio"
         else:
-            c.erro, c.tipo_erro = f"O JMS (ou o firewall da rede) devolveu uma página em vez dos dados: {texto or 'sem título'}.", "bloqueio"
+            c.erro, c.tipo_erro = f"O JMS devolveu uma página em vez dos dados (HTTP {status}: {texto or 'sem título'}).", "bloqueio"
         return c
     if not isinstance(dados, dict):
         c.erro, c.tipo_erro = "Resposta do JMS em formato inesperado.", "recusa"
@@ -167,8 +178,8 @@ class Cliente:
         for tentativa in range(self.TENTATIVAS):
             try:
                 r = self._sessao().post(self.acesso.url, json={"waybillNo": remessa, "countryId": self.acesso.pais},
-                                        headers=self.acesso.cabecalhos(), timeout=self.timeout)
-                ultima = ler_resposta(remessa, r.status_code, r.text)
+                                        headers=self.acesso.cabecalhos(), timeout=self.timeout, allow_redirects=False)
+                ultima = ler_resposta(remessa, r.status_code, r.text, r.headers.get("Location", ""))
             except requests.RequestException as e:
                 ultima = Consulta(remessa, erro=f"Sem conexão com o JMS ({type(e).__name__}).", tipo_erro="rede")
             if ultima.tipo_erro not in ("rede", "limite") or tentativa == self.TENTATIVAS - 1:
@@ -183,14 +194,15 @@ class Andamento:
     total: int = 0
     paralelo: int = 4
     mensagem: str = ""
-    parou_auth: str = ""
+    parou: str = ""  # por que parou no meio (token vencido ou firewall do JMS)
+    tipo_parada: str = ""  # auth · bloqueio
 
 
-def consultar_lote(remessas: list[str], consultar, paralelo: int = 4, ao_andar=None, esperar=time.sleep) -> tuple[list[Consulta], Andamento]:
+def consultar_lote(remessas: list[str], consultar, paralelo: int = 2, ao_andar=None, esperar=time.sleep) -> tuple[list[Consulta], Andamento]:
     """Consulta várias remessas, `paralelo` ao mesmo tempo, em rodadas. consultar(remessa) → Consulta.
     ao_andar(andamento, consulta) é chamado (nesta linha de execução) a cada remessa pronta.
     Se o JMS pedir para ir mais devagar, a rodada seguinte vai com a metade e espera 3 s; as que ele recusou por isso voltam
-    para a fila (até 3 vezes). AuthToken recusado: para na hora e devolve o que já veio."""
+    para a fila (até 3 vezes). AuthToken recusado ou firewall do JMS barrando: para na hora e devolve o que já veio."""
     and_ = Andamento(total=len(remessas), paralelo=max(1, int(paralelo)))
     fila = list(remessas)
     voltas: dict[str, int] = {}
@@ -215,8 +227,9 @@ def consultar_lote(remessas: list[str], consultar, paralelo: int = 4, ao_andar=N
                     c = f.result()
                 except Exception as e:  # noqa: BLE001 - uma remessa com problema não derruba o lote
                     c = Consulta(w, erro=f"Erro inesperado: {e}", tipo_erro="recusa")
-                if c.tipo_erro == "auth":
-                    and_.parou_auth = c.erro
+                if c.tipo_erro in ("auth", "bloqueio"):
+                    guardar(c)  # aparece na lista de falhas, com o motivo
+                    and_.parou, and_.tipo_parada = c.erro, c.tipo_erro
                     for g in futuros:
                         g.cancel()
                     break
@@ -226,17 +239,19 @@ def consultar_lote(remessas: list[str], consultar, paralelo: int = 4, ao_andar=N
                     limite = True
                     continue
                 guardar(c)
-        if and_.parou_auth:
+        if and_.parou:
             # As que já estavam no meio do caminho e voltaram certas também ficam.
             for g in futuros:
                 if g not in vistos and g.done() and not g.cancelled() and g.exception() is None and g.result().ok:
                     guardar(g.result())
-            and_.mensagem = "Parei: " + and_.parou_auth + " Cole um AuthToken novo e clique de novo (o que já veio ficou guardado)."
+            depois = (" Cole um AuthToken novo e clique de novo." if and_.tipo_parada == "auth" else
+                      " Parei para não insistir (insistir só prolonga o bloqueio).")
+            and_.mensagem = "Parei: " + and_.parou + depois + " O que já veio ficou guardado."
             break
         if limite:
             and_.paralelo = max(1, and_.paralelo // 2)
             esperar(3)
-    if not and_.parou_auth:
+    if not and_.parou:
         and_.mensagem = f"{and_.feitas} remessas consultadas."
     return prontas, and_
 

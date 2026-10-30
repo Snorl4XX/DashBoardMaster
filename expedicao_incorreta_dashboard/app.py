@@ -20,7 +20,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from expedicao_dash import VERSAO, analise, demo, planilha
+from expedicao_dash import VERSAO, analise, demo, importar, planilha
 from expedicao_dash.cache import Cache
 from expedicao_dash.jms import Acesso, Cliente, Consulta, Demo, consultar_lote, ler_extras
 from expedicao_dash.relatorio import gerar_excel
@@ -268,7 +268,42 @@ def buscar_no_jms(remessas: list[str], consultar, paralelo: int, guardar) -> tup
     prontas, a = consultar_lote(remessas, consultar, paralelo, andou)
     guardar(pendente)
     barra.empty()
-    return prontas, a.mensagem if a.parou_auth else ""
+    return prontas, a.mensagem if a.parou else ""
+
+
+def trazer_por_arquivo(remessas: list[str], modo_demo: bool, cache: Cache) -> None:
+    """Os 3 Segmentos vindos de arquivos tirados do próprio JMS (sem o app consultar o JMS)."""
+    ss = st.session_state
+    st.caption("Sem o app falar com o JMS: traga os códigos de um arquivo que você tirou do JMS. Serve: **uma planilha exportada** "
+               "com a remessa e os códigos de segmento (ou o terminalDispatchCode \"SP,435-00,080\"), ou **a página do Rastreamento do "
+               "pacote** com a remessa aberta: Ctrl+S (salvar como HTML) ou, no Inspecionar, botão direito em `<html>` › Copiar › "
+               "Copiar outerHTML. A página traz uma remessa por vez.")
+    n = ss.setdefault("imp_n", 0)
+    c1, c2 = st.columns([1.2, 1])
+    subidas = c1.file_uploader("Arquivos (.xlsx, .xls, .csv, .html)", type=["xlsx", "xls", "csv", "txt", "html", "htm"],
+                               accept_multiple_files=True, key=f"imp_arq_{n}")
+    colado = c2.text_area("ou cole o HTML copiado do Inspecionar", key=f"imp_html_{n}", height=118, placeholder="<html>…</html>")
+    if st.button("Usar estes dados", disabled=not (subidas or colado.strip()), key=f"imp_ok_{n}"):
+        achadas, avisos = importar.de_arquivos([(f.name, f.getvalue()) for f in subidas or []])
+        if colado.strip():
+            c = importar.de_texto_colado(colado)
+            if c:
+                achadas[c.remessa] = c
+            else:
+                avisos.append("HTML colado: não achei a remessa e o bloco 3 Segmentos (abra a remessa no Rastreamento antes de copiar).")
+        if modo_demo:
+            ss["demo_consultas"].update(achadas)
+        else:
+            cache.guardar(list(achadas.values()))
+            for w in achadas:
+                ss["falhas"].pop(w, None)
+        destas = len(set(achadas) & set(remessas))
+        texto = (f"{fmt_int(len(achadas))} {'remessa' if len(achadas) == 1 else 'remessas'} com código nos arquivos; "
+                 f"{fmt_int(destas)} desta planilha." if achadas else
+                 "Nenhuma remessa com código de segmento nos arquivos.")
+        ss["aviso_busca"] = ("ok" if destas else "erro", texto + (" " + " ".join(avisos) if avisos else ""))
+        ss["imp_n"] = n + 1  # limpa os campos
+        st.rerun()
 
 
 def main() -> None:
@@ -309,7 +344,7 @@ def main() -> None:
         for aviso in rotas.avisos:
             st.warning(aviso)
         with st.expander("⚙️ Ajustes da consulta"):
-            paralelo = st.slider("Consultas ao mesmo tempo", 1, 10, 4, help="Mais = mais rápido. Se o JMS reclamar, o app diminui sozinho.")
+            paralelo = st.slider("Consultas ao mesmo tempo", 1, 6, 2, help="Mais = mais rápido. Se o JMS reclamar, o app diminui sozinho.")
             horas = st.number_input("Reaproveitar o que o JMS respondeu nas últimas (horas)", 1, 720, 12)
             nome_cab = st.text_input("Nome do cabeçalho do token", "authtoken")
             prefixo = st.text_input("Prefixo do token (ex.: Bearer)", "")
@@ -404,38 +439,42 @@ def main() -> None:
         if aviso:
             (st.error if aviso[0] == "erro" else st.success)(aviso[1])
         if faltam:
-            c1, c2 = st.columns([2.2, 1])
-            por_vez = c2.selectbox("Quantas por vez", ["Todas", 200, 500, 1000, 2000], index=0, label_visibility="collapsed",
-                                   help="Pode buscar em partes; o que já veio fica guardado.")
-            lote = faltam if por_vez == "Todas" else faltam[:int(por_vez)]
-            pode = modo_demo or bool(token.strip())
-            if c1.button(f"🔎  Buscar no JMS  ·  {fmt_int(len(lote))} remessas", type="primary", disabled=not pode, **_largura(st.button)):
-                if modo_demo:
-                    cons = Demo(gabarito)
+            aba_app, aba_arq = st.tabs(["🔎  Buscar pelo app", "📄  Trazer do JMS por arquivo (planilha ou HTML)"])
+            with aba_app:
+                c1, c2 = st.columns([2.2, 1])
+                por_vez = c2.selectbox("Quantas por vez", ["Todas", 200, 500, 1000, 2000], index=0, label_visibility="collapsed",
+                                       help="Pode buscar em partes; o que já veio fica guardado.")
+                lote = faltam if por_vez == "Todas" else faltam[:int(por_vez)]
+                pode = modo_demo or bool(token.strip())
+                if c1.button(f"🔎  Buscar no JMS  ·  {fmt_int(len(lote))} remessas", type="primary", disabled=not pode, **_largura(st.button)):
+                    if modo_demo:
+                        cons = Demo(gabarito)
 
-                    def guardar(lista: list[Consulta]) -> None:
-                        ss["demo_consultas"].update({c.remessa: c for c in lista})
-                    _, parou = buscar_no_jms(lote, cons.consultar, 8, guardar)
-                else:
-                    try:
-                        acesso = Acesso(token=token, nome_cabecalho=nome_cab, prefixo=prefixo, extras=ler_extras(extras_txt))
-                    except ValueError as e:
-                        st.error(f"Cabeçalhos adicionais: {e}")
-                        st.stop()
-                    cliente = Cliente(acesso)
+                        def guardar(lista: list[Consulta]) -> None:
+                            ss["demo_consultas"].update({c.remessa: c for c in lista})
+                        _, parou = buscar_no_jms(lote, cons.consultar, 8, guardar)
+                    else:
+                        try:
+                            acesso = Acesso(token=token, nome_cabecalho=nome_cab, prefixo=prefixo, extras=ler_extras(extras_txt))
+                        except ValueError as e:
+                            st.error(f"Cabeçalhos adicionais: {e}")
+                            st.stop()
+                        cliente = Cliente(acesso)
 
-                    def guardar(lista: list[Consulta]) -> None:
-                        cache.guardar(lista)
-                        for c in lista:
-                            if c.ok:
-                                ss["falhas"].pop(c.remessa, None)
-                            else:
-                                ss["falhas"][c.remessa] = c
-                    _, parou = buscar_no_jms(lote, cliente.consultar, paralelo, guardar)
-                ss["aviso_busca"] = ("erro", parou) if parou else ("ok", f"Pronto: {fmt_int(len(lote))} remessas consultadas no JMS.")
-                st.rerun()
-            if not pode:
-                st.caption("Cole o AuthToken do JMS na barra da esquerda para buscar (ou ligue o Modo demonstração).")
+                        def guardar(lista: list[Consulta]) -> None:
+                            cache.guardar(lista)
+                            for c in lista:
+                                if c.ok:
+                                    ss["falhas"].pop(c.remessa, None)
+                                else:
+                                    ss["falhas"][c.remessa] = c
+                        _, parou = buscar_no_jms(lote, cliente.consultar, paralelo, guardar)
+                    ss["aviso_busca"] = ("erro", parou) if parou else ("ok", f"Pronto: {fmt_int(len(lote))} remessas consultadas no JMS.")
+                    st.rerun()
+                if not pode:
+                    st.caption("Cole o AuthToken do JMS na barra da esquerda para buscar (ou ligue o Modo demonstração).")
+            with aba_arq:
+                trazer_por_arquivo(remessas, modo_demo, cache)
         elif not aviso:
             sem = sum(1 for w in precisa if consultas.get(w) and consultas[w].ok and not consultas[w].primeiro)
             st.success("Todas as remessas já foram consultadas no JMS." + (f" {fmt_int(sem)} sem código de segmento no JMS (veja "

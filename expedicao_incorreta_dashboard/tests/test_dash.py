@@ -267,8 +267,9 @@ def test_ler_resposta_do_jms():
 class _JmsFalso:
     """Servidor local que responde como o getOrderDetail e guarda os cabeçalhos recebidos."""
 
-    def __init__(self, token="tok", vence_depois=None):
+    def __init__(self, token="tok", vence_depois=None, waf=False, redireciona=False):
         self.token, self.vence_depois, self.pedidos, self.cabecalhos = token, vence_depois, 0, []
+        self.waf, self.redireciona = waf, redireciona
         dono = self
 
         class H(BaseHTTPRequestHandler):
@@ -279,6 +280,16 @@ class _JmsFalso:
                 corpo = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 dono.pedidos += 1
                 dono.cabecalhos.append(dict(self.headers))
+                if dono.waf or dono.redireciona:  # firewall do JMS barrando / mandando para outro lugar
+                    pagina = b"<html><head><title>405</title></head><body>Sorry, your request has been blocked.</body></html>"
+                    self.send_response(405 if dono.waf else 302)
+                    if dono.redireciona:
+                        self.send_header("Location", "https://jmsbr.jtjms-br.com/waf/verify")
+                    self.send_header("Content-Type", "text/html")
+                    self.send_header("Content-Length", str(len(pagina)))
+                    self.end_headers()
+                    self.wfile.write(pagina)
+                    return
                 if self.headers.get("authtoken") != dono.token or (dono.vence_depois and dono.pedidos > dono.vence_depois):
                     r = {"code": 135010035, "msg": "token失效"}
                 else:
@@ -302,14 +313,26 @@ def test_cliente_e_lote_no_jms_falso():
     cli = Cliente(Acesso(token="tok", url=jms.url))
     ws = [f"88800256035{i:04d}" for i in range(30)]
     prontas, a = consultar_lote(ws, cli.consultar, paralelo=5)
-    assert a.feitas == 30 and not a.parou_auth and {c.remessa for c in prontas} == set(ws)
+    assert a.feitas == 30 and not a.parou and {c.remessa for c in prontas} == set(ws)
     assert all(c.ok and c.primeiro == "GRU" for c in prontas)
     h = jms.cabecalhos[0]
     assert h["Routename"] == "trackingExpress" and h["Lang"] == "PT" and h["Routernamelist"].startswith("%E6%93%8D")
     # Token vence no meio: para na hora (não consulta as 200 restantes) e devolve o que já veio.
     jms2 = _JmsFalso(vence_depois=12)
     prontas, a = consultar_lote([f"88800256036{i:04d}" for i in range(200)], Cliente(Acesso(token="tok", url=jms2.url)).consultar, paralelo=4)
-    assert a.parou_auth and 8 <= len(prontas) <= 12 and jms2.pedidos < 40 and "AuthToken" in a.mensagem
+    assert a.tipo_parada == "auth" and 8 <= len([c for c in prontas if c.ok]) <= 12 and jms2.pedidos < 40 and "AuthToken" in a.mensagem
+
+
+def test_firewall_do_jms_para_o_lote():
+    """HTTP 405 do firewall do JMS: o app antigo seguia as centenas de remessas (todas 405); agora para na hora."""
+    jms = _JmsFalso(waf=True)
+    prontas, a = consultar_lote([f"88800256037{i:04d}" for i in range(300)], Cliente(Acesso(token="tok", url=jms.url)).consultar)
+    assert a.tipo_parada == "bloqueio" and "firewall" in a.mensagem and "HTTP 405" in a.mensagem
+    assert jms.pedidos <= 12 and all(not c.ok for c in prontas)
+    # Redirecionamento não é seguido (um POST redirecionado vira GET e dá 405): aparece com o endereço.
+    jms2 = _JmsFalso(redireciona=True)
+    c = Cliente(Acesso(token="tok", url=jms2.url)).consultar("888002560356352")
+    assert c.tipo_erro == "bloqueio" and "302" in c.erro and "waf/verify" in c.erro and jms2.pedidos == 1
 
 
 def test_lote_espera_quando_o_jms_pede():
@@ -336,6 +359,45 @@ def test_cache(tmp_path):
     assert c.ler(["x1"], horas_sem_codigo=0) == {}
     c.apagar()
     assert c.quantas() == 0
+
+
+PAGINA_RASTREAMENTO = """<html><body><div class="top">Número de pedido JMS: <span>888002560356352</span></div>
+<div data-v-41c38e10="" class="waybill-msg-item no-margin-bottom"><div data-v-41c38e10="" class="item-title">3 Segmentos</div>
+<div data-v-41c38e10="" class="item-msg"><div data-v-41c38e10="" class="tt tt-1">Código de primeiro segmento</div>:<div data-v-41c38e10=""
+class="des">SP</div></div><div data-v-41c38e10="" class="item-msg"><div data-v-41c38e10="" class="tt tt-1">Código de dois segmentos</div>:<div
+data-v-41c38e10="" class="des">435-00</div></div><div data-v-41c38e10="" class="item-msg"><div data-v-41c38e10="" class="tt tt-1">3
+Segmentos</div>:<div data-v-41c38e10="" class="des">080</div></div></div>
+<div class="el-table__header-wrapper"><table class="el-table__header"><thead><tr><th><div class="cell"></div></th><th><div class="cell">
+<div class="el-tooltip">PDD de saída</div></div></th><th><div class="cell"><div>Município de Origem</div></div></th><th><div class="cell">
+<div>SC Origem</div></div></th><th><div class="cell"><div>Base Destino</div></div></th><th><div class="cell"><div>Município de Destino</div>
+</div></th><th><div class="cell"><div>SC Destino</div></div></th></tr></thead></table></div>
+<div class="el-table__body-wrapper"><table class="el-table__body"><tbody><tr class="el-table__row"><td><div class="cell"></div></td>
+<td><div class="cell el-tooltip"><span><span title="" class="text-pre-wrap">PA MELI-VCP-SP</span></span></div></td><td><div class="cell">
+<span><span>Campinas</span></span></div></td><td><div class="cell"><span><span>SP BRE</span></span></div></td><td><div class="cell"><span>
+<span>F S-VLMR-SP</span></span></div></td><td><div class="cell"><span><span>São Paulo</span></span></div></td><td><div class="cell"><span>
+<span>SP GRU</span></span></div></td></tr></tbody></table></div></body></html>"""
+
+
+def test_trazer_3_segmentos_por_arquivo():
+    from expedicao_dash import importar
+    # Página do Rastreamento salva / copiada do Inspecionar (o HTML do documento): uma remessa.
+    c = importar.de_texto_colado(PAGINA_RASTREAMENTO)
+    assert (c.remessa, c.primeiro, c.segundo, c.terceiro) == ("888002560356352", "SP", "435-00", "080")
+    assert c.detalhes == {"PDD de saída": "PA MELI-VCP-SP", "Município de Origem": "Campinas", "SC Origem": "SP BRE",
+                          "Base Destino": "F S-VLMR-SP", "Município de Destino": "São Paulo", "SC Destino": "SP GRU"}
+    assert importar.de_texto_colado("<html><body>nada</body></html>") is None
+    # Planilha exportada: colunas separadas, ou o terminalDispatchCode junto.
+    b = io.BytesIO()
+    pd.DataFrame({"Número de pedido JMS": [888002560356352, 888002223648620, 888000000000009],
+                  "Código de primeiro segmento": ["GRU", "SP", ""], "Código de dois segmentos": ["404-05", "435-00", ""],
+                  "SC Destino": ["SP GRU", "SP GRU", ""]}).to_excel(b, index=False)
+    csv_ = "Remessa;terminalDispatchCode\n888002560356352;MRB,742-00,001\n".encode("utf-8")
+    achadas, avisos = importar.de_arquivos([("export.xls", b.getvalue()), ("t.csv", csv_), ("pagina.html", PAGINA_RASTREAMENTO.encode()),
+                                            ("lixo.csv", b"a;b\n1;2\n")])
+    assert achadas["888002223648620"].primeiro == "SP" and achadas["888002223648620"].detalhes["SC Destino"] == "SP GRU"
+    assert "888000000000009" not in achadas and len(avisos) == 1 and "lixo.csv" in avisos[0]
+    assert achadas["888002560356352"].primeiro == "SP"  # a página veio por último: vale ela
+    assert importar.de_arquivos([("t.csv", csv_)])[0]["888002560356352"].segundo == "742-00"
 
 
 # ------------------------------------------------------------------ análise e Excel
