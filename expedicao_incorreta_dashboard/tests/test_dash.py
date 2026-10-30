@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -186,6 +187,54 @@ def test_ler_planilha_de_remessas():
     assert l.tabela["remessa"].tolist() == ["888002560356352", "888002223648620"]
     assert l.tabela["turno"].tolist() == ["T3", "T2"] and set(l.tabela["viagem"]) == {"T123"}
     assert planilha.montar(df, cols, rota_fixa="SP BRE").tabela["rota"].tolist() == ["SP BRE", "SP BRE"]
+
+
+def _remessas_xlsx() -> bytes:
+    b = io.BytesIO()
+    pd.DataFrame({"Número de pedido JMS": [888002560356352, 888002223648620], "Próxima parada": ["SP BRE", "DC S-MOO 02-SP"],
+                  "Tempo de digitalização": [datetime(2026, 10, 28, 14, 5), datetime(2026, 10, 28, 23, 40)]}).to_excel(b, index=False)
+    return b.getvalue()
+
+
+def _confere(abas: dict) -> None:
+    df = next(iter(abas.values()))
+    l = planilha.montar(df, planilha.sugerir_colunas(df))
+    assert l.tabela["remessa"].tolist() == ["888002560356352", "888002223648620"]
+    assert l.tabela["rota"].tolist() == ["SP BRE", "DC S-MOO 02-SP"] and l.tabela["turno"].tolist() == ["T2", "T3"]
+
+
+def test_xls_que_e_xlsx_e_outros_disfarces():
+    """O JMS exporta .xlsx com o nome .xls (DBGX26102800157.xls): o app lia pela extensão e dava "Excel xlsx file; not supported"."""
+    from expedicao_dash import arquivo
+    assert arquivo.formato(_remessas_xlsx()) == "xlsx"
+    _confere(planilha.abrir(_remessas_xlsx(), "DBGX26102800157.xls"))
+    # .xls antigo de verdade (feito no LibreOffice), com célula mesclada.
+    xls = (PASTA / "tests" / "dados" / "remessas_antigo.xls").read_bytes()
+    assert arquivo.formato(xls) == "xls"
+    if importlib.util.find_spec("xlrd"):  # o iniciar.py instala; sem ele o app avisa para rodar o iniciar.py de novo
+        _confere(planilha.abrir(xls, "remessas_antigo.xls"))
+    # Página HTML salva como .xls.
+    html_ = ("<html><meta charset='utf-8'><body><table><tr><th>Número de pedido JMS</th><th>Próxima parada</th>"
+             "<th>Tempo de digitalização</th></tr><tr><td>888002560356352</td><td>SP BRE</td><td>2026-10-28 14:05:00</td></tr>"
+             "<tr><td>888002223648620</td><td>DC S-MOO 02-SP</td><td>2026-10-28 23:40:00</td></tr></table></body></html>")
+    assert arquivo.formato(html_.encode()) == "html"
+    _confere(planilha.abrir(html_.encode("utf-8"), "x.xls"))
+    # XML do Excel 2003 salvo como .xls.
+    linhas = [["Número de pedido JMS", "Próxima parada", "Tempo de digitalização"], ["888002560356352", "SP BRE", "2026-10-28 14:05:00"],
+              ["888002223648620", "DC S-MOO 02-SP", "2026-10-28 23:40:00"]]
+    xml = ('<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
+           'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="rj"><Table>' +
+           "".join("<Row>" + "".join(f'<Cell><Data ss:Type="String">{v}</Data></Cell>' for v in l) + "</Row>" for l in linhas) +
+           "</Table></Worksheet></Workbook>")
+    assert arquivo.formato(xml.encode()) == "xml2003"
+    _confere(planilha.abrir(xml.encode("utf-8"), "x.xls"))
+    # Texto com tabulação em UTF-16 salvo como .xls.
+    tsv = "\n".join("\t".join(l) for l in linhas).encode("utf-16")
+    _confere(planilha.abrir(tsv, "x.xls"))
+    # A planilha de rotas também abre com o nome .xls.
+    assert _chave(ler_rotas(planilha_rotas_24_10(), "rotas.xls")) == _chave(tabela_padrao())
+    with pytest.raises(ValueError):
+        planilha.abrir(b"", "vazio.xls")
 
 
 # ------------------------------------------------------------------ JMS

@@ -339,7 +339,7 @@ def main() -> None:
             c1.info("Modo demonstração: planilha de exemplo com 3 viagens (SP BRE, F S-PENHA-SP e DC S-MOO 02-SP).")
             c2.download_button("Baixar a planilha de exemplo", dados, nome_arq, **_largura(st.download_button))
         else:
-            subida = st.file_uploader("Planilha de remessas (.xlsx, .xls ou .csv)", type=["xlsx", "xlsm", "xls", "csv"], key="up_remessas",
+            subida = st.file_uploader("Planilha de remessas (.xlsx, .xls ou .csv)", type=["xlsx", "xlsm", "xls", "csv", "txt"], key="up_remessas",
                                       help="Ex.: a lista de carga da viagem baixada do JMS (Info de carga e descarga). Precisa da coluna "
                                            "da remessa; a rota carregada vem da coluna Próxima parada (ou digite abaixo).")
             if subida is None:

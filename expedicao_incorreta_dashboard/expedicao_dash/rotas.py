@@ -11,16 +11,17 @@ Leitura da planilha:
   - Acha sozinha a linha do cabeçalho e as colunas ("Rota de Carregamento Após o Ajuste", "1º Nível", "2º Nível", "Novo número
     da doca", "Observações") em cada aba. Também lê a planilha simples (Tipo, Rota, 1º Nível, 2º Nível, Observação).
   - Células mescladas (a mesma rota em duas docas, ex.: DC SSZ-SP 08 e 09) valem para todas as linhas.
+  - Abre pelo conteúdo (.xlsx salvo como .xls também serve).
   - Troncal ou secundária: pela aba ou pelo título (支线 / Regionais / Secundária = secundária; 干线 / Linha / Troncal = troncal).
 Sem planilha nenhuma, vale a tabela de 24/10 embutida aqui (ROTAS_24_10).
 """
 
 from __future__ import annotations
 
-import io
 import re
 from dataclasses import dataclass, field
 
+from . import arquivo
 from .texto import chave_rota, limpo, lista_primeiros, lista_segundos, norm, norm_primeiro, norm_segundo, partes_rota
 
 TRONCAL, SECUNDARIA = "Troncal", "Secundária"
@@ -152,32 +153,6 @@ def _tipo_do_texto(texto: str) -> str:
     return ""
 
 
-def _grade_openpyxl(ws) -> list[list]:
-    """Valores da aba com as células mescladas preenchidas (a rota mesclada em duas docas vale para as duas)."""
-    linhas = [[c for c in row] for row in ws.iter_rows(values_only=True)]
-    for faixa in ws.merged_cells.ranges:
-        valor = ws.cell(faixa.min_row, faixa.min_col).value
-        for r in range(faixa.min_row, faixa.max_row + 1):
-            while len(linhas) < r:
-                linhas.append([])
-            linha = linhas[r - 1]
-            while len(linha) < faixa.max_col:
-                linha.append(None)
-            for c in range(faixa.min_col, faixa.max_col + 1):
-                linha[c - 1] = valor
-    return linhas
-
-
-def _abas(dados: bytes, nome_arquivo: str) -> list[tuple[str, list[list]]]:
-    if nome_arquivo.lower().endswith(".xls"):
-        import pandas as pd  # .xls (antigo): sem células mescladas; a rota vazia herda a de cima (mesma doca dupla)
-        livro = pd.read_excel(io.BytesIO(dados), sheet_name=None, header=None, dtype=object, engine="xlrd")
-        return [(nome, df.astype(object).where(df.notna(), None).values.tolist()) for nome, df in livro.items()]
-    import openpyxl
-    livro = openpyxl.load_workbook(io.BytesIO(dados), data_only=True)
-    return [(ws.title, _grade_openpyxl(ws)) for ws in livro.worksheets]
-
-
 def _cabecalho(grade: list[list]) -> tuple[int, dict[str, int]] | None:
     for i, linha in enumerate(grade[:20]):
         cols: dict[str, int] = {}
@@ -199,20 +174,16 @@ def ler_rotas(dados: bytes, nome_arquivo: str = "rotas.xlsx") -> TabelaRotas:
     regras: list[Regra] = []
     docas_da_rota: dict[str, list[str]] = {}
     avisos: list[str] = []
-    for nome_aba, grade in _abas(dados, nome_arquivo):
+    for nome_aba, grade in arquivo.grades(dados, mesclas=True):
         achado = _cabecalho(grade)
         if not achado:
             continue
         i_cab, cols = achado
         tipo_aba = _tipo_do_texto(nome_aba) or _tipo_do_texto(" ".join(limpo(v) for linha in grade[:i_cab + 1] for v in linha))
-        herdada = ""
         for i in range(i_cab + 1, len(grade)):
             linha = grade[i]
             cel = lambda k: limpo(linha[cols[k]]) if k in cols and cols[k] < len(linha) else ""  # noqa: E731
             rota_txt = re.sub(r"\s+", " ", cel("rota"))
-            if nome_arquivo.lower().endswith(".xls") and not rota_txt and (cel("p1") or cel("doca")):
-                rota_txt = herdada
-            herdada = rota_txt if rota_txt not in ("-", "—") else ""
             if not rota_txt or rota_txt in ("-", "—"):
                 continue
             doca = cel("doca")

@@ -1,6 +1,6 @@
 """Planilha de remessas (a que você baixa do JMS ou monta) → tabela de trabalho do app.
 
-  - Lê .xlsx, .xlsm, .xls e .csv (separador ; , ou tab; UTF-8 ou Windows-1252).
+  - Lê .xlsx, .xlsm, .xls e .csv pelo CONTEÚDO (o JMS exporta .xlsx com o nome .xls; também HTML/XML/texto salvos como .xls).
   - Acha a linha do cabeçalho mesmo com título em cima, e sugere as colunas (remessa, rota carregada, data/hora, turno, viagem e,
     se a planilha já tiver, os códigos de segmento).
   - Remessa sempre como texto, sem perder dígito (888002560356352.0 → 888002560356352).
@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import csv
 import io
 import re
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from . import arquivo
 from .texto import (data_hora, limpo, norm, norm_primeiro, norm_remessa, norm_segundo, parece_remessa, so_hora, turno_da_celula,
                     turno_da_hora)
 
@@ -48,32 +48,14 @@ APELIDOS = {
 }
 
 
-def _abrir_csv(dados: bytes) -> pd.DataFrame:
-    for cod in ("utf-8-sig", "cp1252", "latin-1"):
-        try:
-            texto = dados.decode(cod)
-            break
-        except UnicodeDecodeError:
-            continue
-    # O separador é o que mais aparece nas linhas (o Sniffer erra quando há um título em cima da tabela).
-    amostra = texto[:20000]
-    sep = max(";,\t|", key=amostra.count)
-    linhas = [l for l in csv.reader(io.StringIO(texto), delimiter=sep)]  # linhas de tamanhos diferentes (título) não quebram
-    largura = max((len(l) for l in linhas), default=0)
-    return pd.DataFrame([l + [None] * (largura - len(l)) for l in linhas]).replace("", None)
-
-
 def abrir(dados: bytes, nome: str) -> dict[str, pd.DataFrame]:
     """Arquivo → {aba: tabela com o cabeçalho certo}. As células ficam como vieram (texto, número ou data)."""
-    nome_l = nome.lower()
-    if nome_l.endswith(".csv") or nome_l.endswith(".txt"):
-        brutas = {"CSV": _abrir_csv(dados)}
-    else:
-        motor = "xlrd" if nome_l.endswith(".xls") else "openpyxl"
-        brutas = pd.read_excel(io.BytesIO(dados), sheet_name=None, header=None, dtype=object, engine=motor)
     abas = {}
-    for aba, bruta in brutas.items():
-        df = _com_cabecalho(bruta)
+    for aba, linhas in arquivo.grades(dados):
+        largura = max((len(l) for l in linhas), default=0)
+        if not largura:
+            continue
+        df = _com_cabecalho(pd.DataFrame([list(l) + [None] * (largura - len(l)) for l in linhas], dtype=object))
         if df is not None and not df.empty:
             abas[str(aba)] = df
     if not abas:

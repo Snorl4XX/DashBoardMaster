@@ -28,6 +28,7 @@ Precisa do Python 3.10 ou mais novo.
 
 **1 · Remessas**
 - Arraste a planilha (`.xlsx`, `.xls` ou `.csv`). Por exemplo, a lista de carga da viagem baixada do JMS (Info de carga e descarga).
+- O arquivo é aberto pelo **conteúdo**, não pela extensão. O JMS exporta `.xlsx` com o nome `.xls` (ex.: `DBGX26102800157.xls`), e outros sistemas salvam página HTML, XML do Excel 2003 ou texto com tabulação como `.xls`: todos abrem.
 - O app acha sozinho:
   - a aba com mais remessas;
   - a linha do cabeçalho (mesmo com título em cima);
@@ -155,6 +156,7 @@ Precisa do Python 3.10 ou mais novo.
     - a taxa de erro era texto ("12.50%") e não ordenava: agora é número com formato %;
     - não tinha a % de cada rota e de cada segmento;
     - não mostrava as regras usadas.
+15. **Planilha do JMS com nome `.xls` não abria** ("Excel xlsx file; not supported"): o JMS exporta `.xlsx` com o nome `.xls`, e o app escolhia o leitor pela extensão. Agora abre pelo conteúdo (xlsx, xls antigo, HTML, XML 2003 ou texto).
 
 ## Abrir de outro computador da rede
 
@@ -174,6 +176,7 @@ Acesse `http://IP-deste-computador:8503`. Não abra a porta no roteador para a i
 | `iniciar.py` | Abre o app (instala o que falta na primeira vez). |
 | `app.py` | A tela (Streamlit). |
 | `expedicao_dash/rotas.py` | Lê a planilha de rotas e diz a rota certa de cada código; tabela de 24/10 embutida. |
+| `expedicao_dash/arquivo.py` | Abre a planilha pelo conteúdo (xlsx, xls, HTML, XML 2003, CSV/texto). |
 | `expedicao_dash/planilha.py` | Lê a planilha de remessas e acha as colunas. |
 | `expedicao_dash/jms.py` | Consulta no JMS (cabeçalhos, token vencido, várias ao mesmo tempo) e o JMS de mentira. |
 | `expedicao_dash/cache.py` | Respostas do JMS guardadas no computador. |
