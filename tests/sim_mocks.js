@@ -236,6 +236,30 @@ function realisticJms(opts) {
       const dd = m ? m[1] + '-' + m[2] + '-' + m[3] : nowIso, i = m ? Number(m[4]) : 0, hh = String(Math.min(23, Math.floor(i * 24 / 45) + 1)).padStart(2, '0');
       return respond({code: 1, msg: 'ok', succ: true, fail: false, data: [{jobCode: no, loadingTypeName: '2', scanStartTime: dd + ' ' + hh + ':35:00', scanEndTime: dd + ' ' + hh + ':' + String(40 + i % 19) + ':00'}]});
     }
+    // V4.17: Deslacre da linha troncal — ~20 IDs (DBGX) por dia chegando na SP GRU; lista por GET (filtros na URL).
+    if (/tmsShipment\/page$/.test(path)) {
+      const q = {};
+      (url.split('?')[1] || '').split('&').forEach(kv => { const i = kv.indexOf('='); if (i > 0) q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, ' ')); });
+      const d0 = String(q.startDateTime || '').slice(0, 10), d1 = String(q.endDateTime || '').slice(0, 10), list = [];
+      for (let dd = d0; dd && dd <= d1; dd = addDay(dd, 1)) {
+        const frac = dd > nowIso ? 0 : dd < nowIso ? 1 : nowH / 24, N = Math.floor(20 * frac);
+        for (let i = 0; i < N; i++) {
+          const hh = String(Math.floor(i * 24 / 20)).padStart(2, '0'), hh2 = String(Math.min(23, Math.floor(i * 24 / 20) + 1)).padStart(2, '0');
+          list.push({shipmentNo: 'DBGXSIM' + dd.replace(/-/g, '') + String(i).padStart(3, '0'), shipmentName: 'ORI-GRU-' + hh + '00-' + (i % 9), startName: 'SC ORIGEM ' + (i % 6),
+            endCode: '30001', shipmentState: 4, plannedDepartureTime: dd + ' ' + hh + ':00:00', actualArrivalTime: dd + ' ' + hh2 + ':10:00',
+            actualUnlockTime: i % 7 === 3 ? null : dd + ' ' + hh2 + ':20:00', plateNumber: 'SIM' + i, carrierName: 'TRANSP ' + (i % 4)});
+        }
+      }
+      const c = Number(q.current) || 1, sz = Math.min(100, Number(q.size) || 20);
+      return ok(list.slice((c - 1) * sz, c * sz), list.length, c, sz);
+    }
+    if (/trackingDeatil\/loading\/scan\/list$/.test(path)) {
+      const no = (url.split('shipmentNo=')[1] || ''), m = /DBGXSIM(\d{4})(\d{2})(\d{2})(\d{3})/.exec(no);
+      const dd = m ? m[1] + '-' + m[2] + '-' + m[3] : nowIso, i = m ? Number(m[4]) : 0, hh = String(Math.min(23, Math.floor(i * 24 / 20) + 1)).padStart(2, '0');
+      return respond({code: 1, msg: 'ok', succ: true, fail: false, data: [
+        {jobCode: no, loadingTypeName: '1', scanNetworkCode: '39000', scanStartTime: dd + ' 00:10:00', scanEndTime: dd + ' 00:50:00'},
+        {jobCode: no, loadingTypeName: '2', scanNetworkCode: '30001', scanStartTime: dd + ' ' + hh + ':25:00', scanEndTime: dd + ' ' + hh + ':' + String(30 + i % 25) + ':00'}]});
+    }
     // Sem Movimentação: foto do momento (sem data), volumes da captura de 04/10 (4 tipos com pedidos parados).
     if (route === 'trajectory_monitor_total' || route === 'trajectory_monitor_detail') {
       const NMV = {'发件扫描': 6251, '问题件扫描': 6180, '中心到件': 2238, '建包扫描': 2258};

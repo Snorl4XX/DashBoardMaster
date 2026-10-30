@@ -91,7 +91,8 @@ function startFakeJms(port, days, options) {
     req.on('data', c => chunks.push(c));
     req.on('end', () => {
       try {
-        const r = jms('https://gw.jtjms-br.com' + req.url, {headers: req.headers, payload: Buffer.concat(chunks).toString('utf8')}, state);
+        // method: GET (Registros de carga e descarga; V4.17: lista da troncal) e POST, como no UrlFetchApp do Apps Script.
+        const r = jms('https://gw.jtjms-br.com' + req.url, {method: req.method.toLowerCase(), headers: req.headers, payload: Buffer.concat(chunks).toString('utf8')}, state);
         res.writeHead(r.getResponseCode(), {'Content-Type': 'application/json;charset=UTF-8'});
         res.end(r.getContentText());
       } catch (e) { res.writeHead(500); res.end(String(e && e.message || e)); }

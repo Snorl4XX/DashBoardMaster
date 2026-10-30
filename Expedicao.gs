@@ -1275,12 +1275,14 @@ function scanStatus_(indicator, from, to) {
   return out;
 }
 
-// ------------------------------------------------------------------ Deslacre (linha secundária)
+// ------------------------------------------------------------------ Deslacre (linha secundária e linha troncal)
 /**
  * V4.4 (pedido "DASHBOARD DE DESLACRE"). Lista = Consulta de Viagens Secundárias (tmsBranchTrackingDetail/page) com os filtros
  * da tela (PDD de chegada = nossa base, Status Concluído). Por ID com deslacre, os Registros de carga e descarga
  * (loading/scan/list?shipmentNo=…): "Data final" (scanEndTime) do Bipe de descarregamento = bipe de recebimento.
  * Tempo do ID = mediana de (Data final − horário de deslacração) dos registros de descarregamento, em minutos.
+ * V4.17: a linha troncal (unseal_trunk) usa as mesmas funções. Muda a lista (Consulta de Viagens, GET com os filtros na URL),
+ * o campo do deslacre (actualUnlockTime) e o endereço dos Registros de carga e descarga (Config.gs → unsealPanel_).
  */
 const UNSEAL_FIELDS_ = ['unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads'];
 /** "2026-10-08 04:44:36" → milissegundos (o texto do JMS, sem fuso: só a diferença entre dois horários importa). */
@@ -1288,40 +1290,62 @@ function unsealMs_(v) {
   const m = /(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(v === null || v === undefined ? '' : v));
   return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : NaN;
 }
-function unsealArrival_(t) { return String(t.actualArrivalTime || t.appArrivalTime || t.plannedArrivalTime || '').trim(); }
+function unsealArrival_(t) { return String(t.actualArrivalTime || t.appArrivalTime || t.appTrackArrivalTime || t.plannedArrivalTime || '').trim(); }
+/** Horário de deslacração do veículo: unlockTime (secundária) ou actualUnlockTime (troncal) — Config.gs → fields.unlockTime. */
+function unsealUnlock_(cfg, t) {
+  const keys = (cfg.fields && cfg.fields.unlockTime) || ['unlockTime'];
+  for (let i = 0; i < keys.length; i++) {
+    const v = t[keys[i]] === null || t[keys[i]] === undefined ? '' : String(t[keys[i]]).trim();
+    if (v) return v;
+  }
+  return '';
+}
 /** Horário que decide o dia e o turno do ID: o deslacre; sem deslacre, a chegada do veículo. */
-function unsealEventTime_(t) { return String(t.unlockTime || '').trim() || unsealArrival_(t); }
+function unsealEventTime_(cfg, t) { return unsealUnlock_(cfg, t) || unsealArrival_(t); }
 function medianOf_(list) {
   const a = (list || []).filter(v => typeof v === 'number' && Number.isFinite(v)).sort((x, y) => x - y);
   if (!a.length) return null;
   const m = Math.floor(a.length / 2);
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
+/** URL do GET como a do navegador (captura da troncal): "startDateTime=2026-10-30+00:00:00". */
+function unsealListUrl_(endpoint, params) {
+  return endpoint + '?' + Object.keys(params).map(k => encodeURIComponent(k) + '=' +
+    encodeURIComponent(String(params[k])).replace(/%20/g, '+').replace(/%3A/gi, ':')).join('&');
+}
+/** Uma página da lista de IDs: POST (secundária) ou GET com os filtros na URL (troncal: summary.method 'get'). */
+function unsealListPage_(cfg, indicatorKey, isoDate, page, size) {
+  const endpoint = endpointFor_(cfg, 'summary'), payload = buildPayload_(indicatorKey, isoDate, page, size || APP_CONFIG.PAGE_SIZE, false);
+  return cfg.summary.method === 'get' ? jmsPost_(unsealListUrl_(endpoint, payload), null, 2) : jmsPost_(endpoint, payload, 2);
+}
 /**
  * IDs do dia: chegam na nossa base (endCode), Concluído (shipmentState) e com o deslacre (ou, sem ele, a chegada) no dia.
- * A consulta pega as saídas da véspera e do dia (viagem que sai à noite e é deslacrada de madrugada).
+ * A consulta pega também os dias de antes (viagem que sai à noite e é deslacrada de madrugada).
  */
 function unsealTrips_(indicatorKey, isoDate) {
-  const cfg = getIndicatorConfig_(indicatorKey), endpoint = endpointFor_(cfg, 'summary');
-  const payload = page => buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, false);
-  const first = jmsPost_(endpoint, payload(1), 2);
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const first = unsealListPage_(cfg, indicatorKey, isoDate, 1);
   let recs = recordsOf_(first);
   const pg = pagingOf_(first);
-  if (pg.pages > 50) throw new Error('Consulta de Viagens Secundárias com mais de 50 páginas para ' + isoDate + ': filtro da base ignorado? Importação bloqueada.');
-  for (let p = 2; p <= pg.pages; p++) recs = recs.concat(recordsOf_(jmsPost_(endpoint, payload(p), 2)));
+  // V4.17: JMS que entrega menos IDs por página que o pedido (ex.: 20): as próximas páginas seguem o tamanho que veio.
+  const size = pg.total > recs.length && recs.length > 0 && recs.length < APP_CONFIG.PAGE_SIZE ? recs.length : APP_CONFIG.PAGE_SIZE;
+  const pages = size < APP_CONFIG.PAGE_SIZE ? Math.ceil(pg.total / size) : pg.pages;
+  if (pages > 50) throw new Error(cfg.listTitle + ' com mais de 50 páginas para ' + isoDate + ': filtro da base ignorado? Importação bloqueada.');
+  for (let p = 2; p <= pages; p++) recs = recs.concat(recordsOf_(unsealListPage_(cfg, indicatorKey, isoDate, p, size)));
   const code = String(centerCode_()), state = cfg.shipmentState, seen = {};
   return recs.filter(t => {
     if (!t || !t.shipmentNo || seen[t.shipmentNo]) return false;
     if (t.endCode !== undefined && t.endCode !== null && t.endCode !== '' && String(t.endCode) !== code) return false;
     if (state && t.shipmentState !== undefined && t.shipmentState !== null && t.shipmentState !== '' && Number(t.shipmentState) !== Number(state)) return false;
-    if (normalizeDateFromValue_(unsealEventTime_(t), '') !== isoDate) return false;
+    if (normalizeDateFromValue_(unsealEventTime_(cfg, t), '') !== isoDate) return false;
     seen[t.shipmentNo] = true;
     return true;
   });
 }
 /** Resumo do dia (aba RATES): IDs, IDs sem deslacre e o tempo mediano (minutesList = tempo de cada ID; null = mantém o gravado). */
 function unsealSummaryFrom_(indicatorKey, isoDate, trips, minutesList) {
-  const miss = trips.filter(t => !String(t.unlockTime || '').trim()).length;
+  const cfg = getIndicatorConfig_(indicatorKey);
+  const miss = trips.filter(t => !unsealUnlock_(cfg, t)).length;
   const pm = (!minutesList && (getRateDay_(indicatorKey, isoDate) || {}).metrics) || {};
   const med = minutesList ? medianOf_(minutesList) : (isFinite(pm.medianMin) && pm.medianMin !== null ? pm.medianMin : null);
   const timed = minutesList ? minutesList.length : (pm.timedNum === null || pm.timedNum === undefined ? null : pm.timedNum);
@@ -1334,10 +1358,15 @@ function unsealSummary_(indicatorKey, isoDate) {
   if (!trips.length) return {indicator: indicatorKey, date: isoDate, empty: true};
   return unsealSummaryFrom_(indicatorKey, isoDate, trips, null);
 }
-/** Registro de descarregamento ("Bipe de descarregamento"; o JMS manda loadingTypeName "2"). */
+/**
+ * Registro de descarregamento ("Bipe de descarregamento"; o JMS manda loadingTypeName "2") na nossa base. V4.17: a descarga
+ * em outra base (linha troncal com parada no caminho, scanNetworkCode de outra base) não é o bipe de recebimento daqui.
+ */
 function unsealIsUnload_(cfg, x) {
   const types = (cfg.unload && cfg.unload.unloadTypes) || ['2'], v = String(x && x.loadingTypeName === undefined ? '' : x.loadingTypeName);
-  return types.indexOf(v) >= 0 || /descarreg|卸/i.test(v);
+  if (types.indexOf(v) < 0 && !/descarreg|卸/i.test(v)) return false;
+  const net = x.scanNetworkCode;
+  return net === undefined || net === null || net === '' || String(net) === String(centerCode_());
 }
 /** Data final e tempo (mediana, minutos) de um ID a partir dos Registros de carga e descarga. */
 function unsealTiming_(cfg, unlock, list) {
@@ -1355,14 +1384,14 @@ function unsealTiming_(cfg, unlock, list) {
 function runUnsealDetailJob_(job, deadline, cfg, st) {
   const ind = job.indicator, date = job.date;
   const trips = unsealTrips_(ind, date);
-  if (!trips.length) throw new Error('Consulta de Viagens Secundárias sem IDs em ' + date + ' apesar do resumo; nova tentativa mais tarde.');
+  if (!trips.length) throw new Error(cfg.listTitle + ' sem IDs em ' + date + ' apesar do resumo; nova tentativa mais tarde.');
   const cache = {};
   const df = dayFilesMap_(ind, date, date)[date];
   if (df) { try { fileRows_(loadDetailFile_(df.fileId)).forEach(r => { if (r.shipment) cache[r.shipment] = r; }); } catch (e) { /* consulta tudo */ } }
   const recent = date >= addDaysIso_(isoToday_(), -1);
   const nowMs = unsealMs_(Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm:ss'));
   const need = trips.filter(t => {
-    const unlock = String(t.unlockTime || '').trim();
+    const unlock = unsealUnlock_(cfg, t);
     if (!unlock) return false;
     const c = cache[t.shipmentNo];
     if (!c || c.unlockTime !== unlock || c.unloads === '' || c.unloads === undefined) return true;
@@ -1404,11 +1433,11 @@ function runUnsealDetailJob_(job, deadline, cfg, st) {
   }
   const sit = cfg.situations || {missing: 'Sem bipe de deslacre', done: 'Com bipe de deslacre'};
   const recs = trips.map(t => {
-    const unlock = String(t.unlockTime || '').trim(), c = cache[t.shipmentNo];
+    const unlock = unsealUnlock_(cfg, t), c = cache[t.shipmentNo];
     let tm = {end: '', minutes: '', unloads: ''};
     if (unlock && got[t.shipmentNo]) tm = unsealTiming_(cfg, unlock, got[t.shipmentNo]);
     else if (unlock && c && c.unlockTime === unlock) tm = {end: c.receiptTime || '', minutes: c.minutes || '', unloads: c.unloads || ''};
-    return Object.assign({}, t, {__eventTime: unsealEventTime_(t), __unloadEnd: tm.end, __minutes: tm.minutes, __unloads: tm.unloads,
+    return Object.assign({}, t, {__eventTime: unsealEventTime_(cfg, t), __unloadEnd: tm.end, __minutes: tm.minutes, __unloads: tm.unloads,
       __situation: unlock ? sit.done : sit.missing});
   });
   const rows = normalizeRecords_(ind, date, recs);
@@ -1424,53 +1453,58 @@ function runUnsealDetailJob_(job, deadline, cfg, st) {
     expectedRecords: trips.length, savedRows: rows.length, error: ''});
   if (lastError) {
     logSync_('WARN', ind, date, 'Registros de carga e descarga recusados em parte dos IDs (sem a Data final, o tempo desses IDs fica vazio): ' + lastError +
-      '. Rode diagnosticarDeslacre() e confira os cabeçalhos de rota (JMS_ROUTENAME_UNSEAL).');
+      '. Rode ' + (cfg.diagnostic || 'diagnosticarDeslacre') + '() e confira os cabeçalhos de rota (JMS_ROUTENAME_' + cfg.routeKey + ').');
   }
   return complete ? 'done' : 'partial';
 }
 
 /**
- * Diagnóstico do Deslacre (V4.4): testa no JMS real a Consulta de Viagens Secundárias do dia (IDs, sem deslacre, campos que
- * chegam) e os Registros de carga e descarga de até 5 IDs com deslacre (Data final e tempo). Nada de placa, motorista, CPF
- * ou telefone no texto. `date` (opcional, AAAA-MM-DD): padrão = ontem.
+ * Diagnóstico do Deslacre (V4.4): testa no JMS real a lista de IDs do dia (IDs, sem deslacre, campos que chegam) e os
+ * Registros de carga e descarga de até 5 IDs com deslacre (Data final e tempo). Nada de placa, motorista, CPF ou telefone no
+ * texto. `date` (opcional, AAAA-MM-DD): padrão = ontem. diagnosticarDeslacre = linha secundária; V4.17:
+ * diagnosticarDeslacreTroncal = linha troncal.
  */
-function diagnosticarDeslacre(date) {
-  const key = 'unseal', cfg = activeCfg_(key);
+function diagnosticarDeslacre(date) { return unsealDiagnostic_('unseal', date); }
+function diagnosticarDeslacreTroncal(date) { return unsealDiagnostic_('unseal_trunk', date); }
+function unsealDiagnostic_(key, date) {
+  const cfg = activeCfg_(key);
   const d = isIso_(date) ? date : lastClosedDate_(key);
   const lines = [], out = {versao: APP_CONFIG.VERSION, data: d};
   const add = x => lines.push(x);
   const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
   const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
   const cred = authConfigSafe_();
-  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — Deslacre (linha secundária) — dia ' + humanDatePt_(d));
+  const unlockKey = ((cfg.fields && cfg.fields.unlockTime) || ['unlockTime'])[0];
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — ' + cfg.name.pt + ' — dia ' + humanDatePt_(d));
   add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · PDD de chegada: ' + centerName_() + ' (' + centerCode_() + ')');
   (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
   let trips = [];
   try {
-    const json = jmsPost_(endpointFor_(cfg, 'summary'), buildPayload_(key, d, 1, APP_CONFIG.PAGE_SIZE, false), 2);
+    const json = unsealListPage_(cfg, key, d, 1);
     const recs = recordsOf_(json), first = recs[0] || {};
-    add('Consulta de Viagens Secundárias (saídas de ' + humanDatePt_(addDaysIso_(d, -1)) + ' e ' + humanDatePt_(d) + '): ' + fmt(pagingOf_(json).total) + ' ID(s) na lista');
-    add('  Campos que chegam: unlockTime ' + ('unlockTime' in first ? 'sim' : 'NÃO') + ' · actualArrivalTime ' + ('actualArrivalTime' in first ? 'sim' : 'NÃO') +
+    const p1 = buildPayload_(key, d, 1, APP_CONFIG.PAGE_SIZE, false);
+    const win = [p1.startDepartureTime || p1.startDateTime, p1.endDepartureTime || p1.endDateTime].map(x => humanDatePt_(String(x || '').slice(0, 10)));
+    add(cfg.listTitle + ' (consulta de ' + win[0] + ' a ' + win[1] + '): ' + fmt(pagingOf_(json).total) + ' ID(s) na lista');
+    add('  Campos que chegam: ' + unlockKey + ' ' + (unlockKey in first ? 'sim' : 'NÃO') + ' · actualArrivalTime ' + ('actualArrivalTime' in first ? 'sim' : 'NÃO') +
       ' · startName ' + ('startName' in first ? 'sim' : 'NÃO') + ' · shipmentName ' + ('shipmentName' in first ? 'sim' : 'NÃO'));
     trips = unsealTrips_(key, d);
-    const miss = trips.filter(t => !String(t.unlockTime || '').trim()).length;
+    const miss = trips.filter(t => !unsealUnlock_(cfg, t)).length;
     add('IDs do dia ' + humanDatePt_(d) + ' (pelo horário do deslacre; sem deslacre, pela chegada): ' + fmt(trips.length) + ' · sem bipe de deslacre: ' + fmt(miss));
     out.ids = trips.length; out.semDeslacre = miss;
-  } catch (e) { add('Consulta de Viagens Secundárias: ERRO — ' + err(e)); }
-  const sample = trips.filter(t => String(t.unlockTime || '').trim()).slice(0, 5);
+  } catch (e) { add(cfg.listTitle + ': ERRO — ' + err(e)); }
+  const sample = trips.filter(t => unsealUnlock_(cfg, t)).slice(0, 5);
   sample.forEach((t, i) => {
     try {
       const list = recordsOf_(jmsPost_(endpointFor_(cfg, 'unload') + '?shipmentNo=' + encodeURIComponent(t.shipmentNo), null, 2));
-      const tm = unsealTiming_(cfg, String(t.unlockTime).trim(), list);
-      add('  ID ' + (i + 1) + ': ' + list.length + ' registro(s) de carga/descarga · ' + tm.unloads + ' de descarregamento · deslacre ' +
-        String(t.unlockTime).slice(11) + ' → Data final ' + (tm.end ? tm.end.slice(11) : '—') + ' · tempo ' + (tm.minutes === '' ? '—' : tm.minutes + ' min'));
+      const unlock = unsealUnlock_(cfg, t), tm = unsealTiming_(cfg, unlock, list);
+      add('  ID ' + (i + 1) + ': ' + list.length + ' registro(s) de carga/descarga · ' + tm.unloads + ' de descarregamento na base · deslacre ' +
+        unlock.slice(11) + ' → Data final ' + (tm.end ? tm.end.slice(11) : '—') + ' · tempo ' + (tm.minutes === '' ? '—' : tm.minutes + ' min'));
     } catch (e) { add('  ID ' + (i + 1) + ': Registros de carga e descarga: ERRO — ' + err(e)); }
   });
   const r = getRateDay_(key, d);
   if (r && r.metrics) add('Gravado no painel: ' + fmt(r.metrics.tripNum) + ' IDs · ' + fmt(r.metrics.noUnlockNum) + ' sem deslacre · tempo mediano ' +
     (r.metrics.medianMin === null ? '—' : fmt(r.metrics.medianMin) + ' min'));
-  add('Dica: se der ERRO, abra Transporte > Transporte de linha secundária > Gestão de viagens de linha secundária > Consulta de Viagens Secundárias, ' +
-    'F12 → Rede, consulte e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
+  add('Dica: se der ERRO, abra ' + cfg.listMenu + ', F12 → Rede, consulte e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));
   out.texto = lines.join('\n');
   return out;

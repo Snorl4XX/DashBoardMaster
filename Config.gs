@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.16.0',
+  VERSION: '4.17.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -322,6 +322,69 @@ const ESTEIRAS_SC_DC = Object.freeze({
 
 /** Cores fixas por turno (validadas para daltonismo). A cor segue o turno em todos os gráficos. */
 const SHIFT_COLORS = Object.freeze({T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7', 'N/A': '#9CA3AF'});
+
+/**
+ * V4.17 — o que o Deslacre da linha secundária e o da linha troncal têm em comum: o resumo do dia, os cartões
+ * (Client.html → renderUnsealKpis), os gráficos, os filtros e a tabela "Informações gerais". `own` = o que é de cada linha:
+ * chave, nome, consultas do JMS (summary.endpoint/method, detail, unload), listTitle e listMenu (a tela no JMS), diagnostic
+ * (função de diagnóstico) e fields (o campo do horário de deslacração muda: unlockTime / actualUnlockTime).
+ */
+function unsealPanel_(own) {
+  return Object.assign({
+    subtitle: {pt: 'IDs sem bipe de deslacre e tempo do deslacre até o bipe de recebimento', zh: '未解封扫描车次及解封至卸车扫描时长'},
+    goal: {value: null, direction: 'max', strict: false},
+    detailMatchesErrors: false, light: true, unseal: true,
+    shipmentState: 4,
+    labels: {
+      tripId: {pt: 'Número do ID', zh: '车次号'}, route: {pt: 'Nome da viagem', zh: '车次名称'}, station: {pt: 'PDD de saída', zh: '始发网点'},
+      shift: {pt: 'Turno', zh: '班次'}, situation: {pt: 'Bipe de deslacre', zh: '解封扫描'}, minutes: {pt: 'Tempo mediano', zh: '中位时长'},
+      eventTime: {pt: 'Horário de deslacração do veículo', zh: '解封时间'}, receiptTime: {pt: 'Bipe de recebimento (Data final)', zh: '卸车结束时间'}
+    },
+    situations: {missing: 'Sem bipe de deslacre', done: 'Com bipe de deslacre'},
+    filters: ['tripId', 'route', 'station', 'shift'],
+    topCards: [],
+    hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    // Cartões próprios (Client.html → renderUnsealKpis): IDs sem deslacre, tempo mediano, ID de maior tempo e um cartão por turno.
+    unsealCards: true,
+    texts: {
+      errors: {pt: 'IDs sem bipe de deslacre', zh: '未解封扫描车次'},
+      errorsDay: {pt: 'IDs sem bipe de deslacre no dia', zh: '当日未解封扫描车次'}, errorsPeriod: {pt: 'IDs sem bipe de deslacre no período', zh: '期间未解封扫描车次'},
+      errorsFiltered: {pt: 'IDs sem bipe de deslacre (com filtro)', zh: '未解封扫描车次（已筛选）'},
+      prevErrorsDay: {pt: 'Dia anterior', zh: '前一日'}, prevErrorsPeriod: {pt: 'Período anterior', zh: '上一期间'},
+      shiftErrors: {pt: 'Sem deslacre {s}', zh: '{s} 未解封'}, shareOfErrors: {pt: '{p} dos IDs sem deslacre', zh: '占未解封车次 {p}'},
+      rateOfDay: {pt: '% de IDs sem bipe de deslacre · {date}', zh: '{date} 未解封扫描率'}, rateOfPeriod: {pt: '% de IDs sem bipe de deslacre no período', zh: '期间未解封扫描率'},
+      distinctShipments: {pt: 'IDs de viagem', zh: '车次'}, tableCount: {pt: '{n} IDs', zh: '{n} 车次'},
+      tableCountOf: {pt: '{n} de {m} IDs', zh: '{n} / {m} 车次'}, detailsOk: {pt: 'Detalhes completos · {n} IDs de viagem', zh: '明细完整 · {n} 车次'},
+      shipments: {pt: 'IDs', zh: '车次'},
+      shipmentTable: {pt: 'Informações gerais', zh: '基本信息'}, tableFind: {pt: 'Localizar ID na tabela', zh: '在表中查找车次'}
+    },
+    charts: [
+      {key: 'missShift', dim: 'shift', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', top: 4, allShifts: true,
+        title: {pt: 'Turnos com maior falta de bipe de deslacre', zh: '未解封扫描最多的班次'},
+        sub: {pt: 'Turno pelo horário do deslacre (sem deslacre, pela chegada do veículo)', zh: '按解封时间划分班次（未解封按车辆到达时间）'}},
+      {key: 'mNoUnlock', metric: 'noUnlockNum', type: 'bar', bad: true, days: 15,
+        title: {pt: 'Evolução: dias com mais falta de bipe de deslacre', zh: '每日未解封扫描车次'}},
+      {key: 'medShift', dim: 'shift', agg: 'median', valueField: 'minutes', type: 'bar', top: 4, unit: 'min', allShifts: true,
+        title: {pt: 'Tempo mediano do deslacre até o bipe de recebimento por turno', zh: '各班次解封至卸车扫描中位时长'}},
+      {key: 'topTime', dim: 'tripId', agg: 'max', valueField: 'minutes', type: 'bar', horizontal: true, top: 10, unit: 'min',
+        title: {pt: 'IDs que mais demoraram do deslacre ao bipe de recebimento (top 10)', zh: '解封至卸车扫描最慢的车次（前10）'}},
+      {key: 'origin', dim: 'station', type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'PDD de saída que mais mandou', zh: '发车最多的始发网点'}},
+      {key: 'missOrigin', dim: 'station', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'PDD de saída dos IDs sem bipe de deslacre', zh: '未解封车次的始发网点'}}
+    ],
+    table: [
+      ['date', 'Data', '日期'], ['tripId', 'Número do ID', '车次号'], ['route', 'Nome da viagem', '车次名称'],
+      ['station', 'PDD de saída', '始发网点'], ['situation', 'Bipe de deslacre', '解封扫描'], ['shift', 'Turno', '班次'],
+      ['arrivalTime', 'Tempo real de chegada', '实际到达时间'], ['unlockTime', 'Horário de deslacração do veículo', '解封时间'],
+      ['receiptTime', 'Bipe de recebimento (Data final)', '卸车结束时间'], ['minutes', 'Tempo mediano (deslacre → recebimento)', '中位时长'],
+      ['plate', 'Placa do carro', '车牌'], ['carrier', 'Transportadora', '承运商']
+    ]
+  }, own, {
+    summary: Object.assign({rateFromCounts: true, rateKeys: [], errorKeys: ['noUnlockNum'], totalKeys: ['tripNum'],
+      metrics: ['tripNum', 'noUnlockNum', 'unlockNum', 'medianMin', 'timedNum']}, own.summary)
+  });
+}
 
 /**
  * goal.direction:
@@ -1418,78 +1481,53 @@ const ALL_INDICATORS_ = Object.freeze({
    *  - Dia e turno pelo horário do deslacre ("vamos medir pela data dessa coluna"); ID sem deslacre: pela chegada do veículo.
    * Taxa guardada = IDs sem deslacre ÷ IDs do dia (%), sem meta. A lista é consultada com 1 dia antes (saídas da véspera que
    * chegam no dia).
+   * V4.12.3: retirado (pedido). V4.17 (pedido "No dashboard principal colocar o dash de deslacre troncal e secundária"): de volta,
+   * ao lado do Deslacre da linha troncal (unseal_trunk). Cartões, gráficos e tabela: unsealPanel_ (os mesmos nos dois).
    */
-  unseal: {
+  unseal: unsealPanel_({
     key: 'unseal', order: 12, routeKey: 'UNSEAL',
     name: {pt: 'Deslacre (linha secundária)', zh: '解封（支线）'},
-    subtitle: {pt: 'IDs sem bipe de deslacre e tempo do deslacre até o bipe de recebimento', zh: '未解封扫描车次及解封至卸车扫描时长'},
-    goal: {value: null, direction: 'max', strict: false},
-    apiProfile: 'unseal', detailMatchesErrors: false, light: true, unseal: true,
-    // V4.12.3 (pedido): painel RETIRADO, como o Fluxo de Lotes na V4.7 — fora do menu, dos Resultados e da fila (não gasta
-    // cota). Os dados antigos continuam na planilha. Para trazer de volta: Propriedade do script REATIVAR_PAINEIS = unseal.
-    retired: true,
-    summary: {
-      endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page',
-      rateFromCounts: true, rateKeys: [], errorKeys: ['noUnlockNum'], totalKeys: ['tripNum'],
-      metrics: ['tripNum', 'noUnlockNum', 'unlockNum', 'medianMin', 'timedNum']
-    },
+    apiProfile: 'unseal', listTitle: 'Consulta de Viagens Secundárias', diagnostic: 'diagnosticarDeslacre',
+    listMenu: 'Transporte > Transporte de linha secundária > Gestão de viagens de linha secundária > Consulta de Viagens Secundárias',
+    summary: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page'},
     // refreshHours: hoje, a lista e os Registros de carga e descarga são consultados de novo no máximo de hora em hora
     // (conta Gmail: a cada 3 h). Só os IDs novos ou ainda descarregando consultam os Registros de novo.
     detail: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page', refreshHours: 1},
     unload: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/loading/scan/list', unloadTypes: ['2']},
-    shipmentState: 4,
     fields: {
       shipment: ['shipmentNo'], tripId: ['shipmentNo'], route: ['shipmentName'], station: ['startName'],
       eventTime: ['__eventTime'], receiptTime: ['__unloadEnd'], unlockTime: ['unlockTime'],
       arrivalTime: ['actualArrivalTime', 'appArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
       plate: ['plateNumber'], carrier: ['carrierShortName', 'carrierName'], unloads: ['__unloads']
-    },
-    labels: {
-      tripId: {pt: 'Número do ID', zh: '车次号'}, route: {pt: 'Nome da viagem', zh: '车次名称'}, station: {pt: 'PDD de saída', zh: '始发网点'},
-      shift: {pt: 'Turno', zh: '班次'}, situation: {pt: 'Bipe de deslacre', zh: '解封扫描'}, minutes: {pt: 'Tempo mediano', zh: '中位时长'},
-      eventTime: {pt: 'Horário de deslacração do veículo', zh: '解封时间'}, receiptTime: {pt: 'Bipe de recebimento (Data final)', zh: '卸车结束时间'}
-    },
-    situations: {missing: 'Sem bipe de deslacre', done: 'Com bipe de deslacre'},
-    filters: ['tripId', 'route', 'station', 'shift'],
-    topCards: [],
-    hideShiftCards: true, hideEvolution: true, hideTarget: true,
-    // Cartões próprios (Client.html → renderUnsealKpis): IDs sem deslacre, tempo mediano, ID de maior tempo e um cartão por turno.
-    unsealCards: true,
-    texts: {
-      errors: {pt: 'IDs sem bipe de deslacre', zh: '未解封扫描车次'},
-      errorsDay: {pt: 'IDs sem bipe de deslacre no dia', zh: '当日未解封扫描车次'}, errorsPeriod: {pt: 'IDs sem bipe de deslacre no período', zh: '期间未解封扫描车次'},
-      errorsFiltered: {pt: 'IDs sem bipe de deslacre (com filtro)', zh: '未解封扫描车次（已筛选）'},
-      prevErrorsDay: {pt: 'Dia anterior', zh: '前一日'}, prevErrorsPeriod: {pt: 'Período anterior', zh: '上一期间'},
-      shiftErrors: {pt: 'Sem deslacre {s}', zh: '{s} 未解封'}, shareOfErrors: {pt: '{p} dos IDs sem deslacre', zh: '占未解封车次 {p}'},
-      rateOfDay: {pt: '% de IDs sem bipe de deslacre · {date}', zh: '{date} 未解封扫描率'}, rateOfPeriod: {pt: '% de IDs sem bipe de deslacre no período', zh: '期间未解封扫描率'},
-      distinctShipments: {pt: 'IDs de viagem', zh: '车次'}, tableCount: {pt: '{n} IDs', zh: '{n} 车次'},
-      tableCountOf: {pt: '{n} de {m} IDs', zh: '{n} / {m} 车次'}, detailsOk: {pt: 'Detalhes completos · {n} IDs de viagem', zh: '明细完整 · {n} 车次'},
-      shipments: {pt: 'IDs', zh: '车次'},
-      shipmentTable: {pt: 'Informações gerais', zh: '基本信息'}, tableFind: {pt: 'Localizar ID na tabela', zh: '在表中查找车次'}
-    },
-    charts: [
-      {key: 'missShift', dim: 'shift', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', top: 4, allShifts: true,
-        title: {pt: 'Turnos com maior falta de bipe de deslacre', zh: '未解封扫描最多的班次'},
-        sub: {pt: 'Turno pelo horário de chegada do veículo', zh: '按车辆到达时间划分班次'}},
-      {key: 'mNoUnlock', metric: 'noUnlockNum', type: 'bar', bad: true, days: 15,
-        title: {pt: 'Evolução: dias com mais falta de bipe de deslacre', zh: '每日未解封扫描车次'}},
-      {key: 'medShift', dim: 'shift', agg: 'median', valueField: 'minutes', type: 'bar', top: 4, unit: 'min', allShifts: true,
-        title: {pt: 'Tempo mediano do deslacre até o bipe de recebimento por turno', zh: '各班次解封至卸车扫描中位时长'}},
-      {key: 'topTime', dim: 'tripId', agg: 'max', valueField: 'minutes', type: 'bar', horizontal: true, top: 10, unit: 'min',
-        title: {pt: 'IDs que mais demoraram do deslacre ao bipe de recebimento (top 10)', zh: '解封至卸车扫描最慢的车次（前10）'}},
-      {key: 'origin', dim: 'station', type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'PDD de saída que mais mandou', zh: '发车最多的始发网点'}},
-      {key: 'missOrigin', dim: 'station', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'PDD de saída dos IDs sem bipe de deslacre', zh: '未解封车次的始发网点'}}
-    ],
-    table: [
-      ['date', 'Data', '日期'], ['tripId', 'Número do ID', '车次号'], ['route', 'Nome da viagem', '车次名称'],
-      ['station', 'PDD de saída', '始发网点'], ['situation', 'Bipe de deslacre', '解封扫描'], ['shift', 'Turno', '班次'],
-      ['arrivalTime', 'Tempo real de chegada', '实际到达时间'], ['unlockTime', 'Horário de deslacração do veículo', '解封时间'],
-      ['receiptTime', 'Bipe de recebimento (Data final)', '卸车结束时间'], ['minutes', 'Tempo mediano (deslacre → recebimento)', '中位时长'],
-      ['plate', 'Placa do carro', '车牌'], ['carrier', 'Transportadora', '承运商']
-    ]
-  }
+    }
+  }),
+
+  /**
+   * DESLACRE (linha troncal) — V4.17 (pedido "deslacre da troncal"). Transporte > Análise de dados > Dados de monitoramento >
+   * Consulta de Viagens (tmsShipment/page, GET com os filtros na URL, como a captura): PDD de chegada = a nossa base
+   * (endCode 30001), Status = Concluído (shipmentState 4), searchType manage. Uma linha por ID de viagem (DBGX…).
+   *  - "Horário de deslacração do veículo" = actualUnlockTime; vazio = ID SEM bipe de deslacre.
+   *  - Bipe de recebimento = "Data final" (scanEndTime) do Bipe de descarregamento (loadingTypeName "2") na nossa base nos
+   *    Registros de carga e descarga do ID (trackingDeatil/loading/scan/list?shipmentNo=…). O carregamento na origem (tipo "1")
+   *    e a descarga em outra base não contam.
+   *  - Mesmo cálculo, cartões, gráficos e tabela da linha secundária (unsealPanel_).
+   * A lista é consultada com 2 dias antes e 1 depois (viagens longas e chegadas adiantadas); o dia de cada ID sai do deslacre.
+   */
+  unseal_trunk: unsealPanel_({
+    key: 'unseal_trunk', order: 13, routeKey: 'UNSEAL_TRUNK',
+    name: {pt: 'Deslacre (linha troncal)', zh: '解封（干线）'},
+    apiProfile: 'unseal_trunk', listTitle: 'Consulta de Viagens (linha troncal)', diagnostic: 'diagnosticarDeslacreTroncal',
+    listMenu: 'Transporte > Análise de dados > Dados de monitoramento > Consulta de Viagens',
+    summary: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsShipment/page', method: 'get'},
+    detail: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsShipment/page', refreshHours: 1},
+    unload: {endpoint: 'https://gw.jtjms-br.com/transportation/trackingDeatil/loading/scan/list', unloadTypes: ['2']},
+    fields: {
+      shipment: ['shipmentNo'], tripId: ['shipmentNo'], route: ['shipmentName', 'lineSimpleName'], station: ['startName'],
+      eventTime: ['__eventTime'], receiptTime: ['__unloadEnd'], unlockTime: ['actualUnlockTime'],
+      arrivalTime: ['actualArrivalTime', 'appTrackArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
+      plate: ['plateNumber'], carrier: ['carrierName', 'carrierShortName'], unloads: ['__unloads']
+    }
+  })
 });
 
 /**

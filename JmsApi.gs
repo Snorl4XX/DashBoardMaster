@@ -61,7 +61,7 @@ function credentialSignature_() {
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
  * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS | NOMOVE
- *          | SCANQUERY | UNSEAL
+ *          | SCANQUERY | UNSEAL | UNSEAL_TRUNK
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -108,6 +108,11 @@ const JMS_ROUTES_ = [
   // Secundárias (lista) e os Registros de carga e descarga de cada ID. Cabeçalhos de rota não capturados: variantes em `alt`.
   {key: 'UNSEAL', pattern: /\/transportation\/(?:tmsBranchTrackingDetail|tmsnewBranchShipment)\//, name: 'NONE', list: 'NONE',
     alt: [{name: 'branchTrackingDetail', list: 'NONE'}, {name: 'tmsBranchTrackingDetail', list: 'NONE'}]},
+  // V4.17: Deslacre da linha troncal — Transporte > Análise de dados > Dados de monitoramento > Consulta de Viagens
+  // (/transportPlatformIndex/monitoringSearch: tmsShipment/page) e os Registros de carga e descarga de cada ID
+  // (trackingDeatil/loading/scan/list, grafia do JMS). Cabeçalhos de rota não capturados: variantes em `alt`.
+  {key: 'UNSEAL_TRUNK', pattern: /\/transportation\/(?:tmsShipment|trackingDeatil)\//, name: 'NONE', list: 'NONE',
+    alt: [{name: 'monitoringSearch', list: 'NONE'}, {name: 'tmsShipment', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -524,6 +529,13 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       // e do dia: o dia de cada ID sai do horário do deslacre (Expedicao.gs → unsealTrips_).
       return {current: pageNo, size: pageSize, startDepartureTime: addDaysIso_(isoDate, -1) + ' 00:00:00', endDepartureTime: isoDate + ' 23:59:59',
         endCode: centerCode, shipmentState: cfg.shipmentState || 4, countryId: countryId_()};
+    }
+
+    case 'unseal_trunk': {
+      // V4.17: Consulta de Viagens da linha troncal (captura do pedido; GET, os filtros vão na URL — Expedicao.gs → unsealListUrl_).
+      // PDD de chegada = a nossa base, Status = Concluído. Dois dias antes e um depois: o dia de cada ID sai do deslacre.
+      return {current: pageNo, size: pageSize, shipmentState: cfg.shipmentState || 4, endCode: centerCode,
+        startDateTime: addDaysIso_(isoDate, -2) + ' 00:00:00', endDateTime: addDaysIso_(isoDate, 1) + ' 23:59:59', searchType: 'manage'};
     }
 
     case 'sc_dc':

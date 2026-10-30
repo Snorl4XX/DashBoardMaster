@@ -261,6 +261,33 @@ function fakeJms(dayData, options) {
       Object.keys(dayData).forEach(k => { const u = dayData[k].usUnloads; if (u && u[no]) recs = u[no]; });
       return respond(200, {code: 1, msg: '请求成功', data: recs || [], details: null, succ: true, fail: false});
     }
+    // ----- V4.17: Deslacre da linha troncal — Consulta de Viagens (GET, filtros na URL) e Registros de carga e descarga -----
+    if (/\/transportation\/tmsShipment\/page$/.test(path)) {
+      state.trunkListCalls = (state.trunkListCalls || 0) + 1;
+      if ((req.method || 'post') !== 'get') return respond(405, {});
+      const q = {};
+      (url.split('?')[1] || '').split('&').forEach(kv => { const i = kv.indexOf('='); if (i > 0) q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, ' ')); });
+      if (q.searchType !== 'manage' || !q.current || !q.size) return respond(200, {code: 500, msg: 'parâmetro inválido', fail: true});
+      let list = [];
+      Object.keys(dayData).forEach(k => (dayData[k].ut || []).forEach(t => list.push(t)));
+      if (!options.unsealIgnoreFilter) {
+        list = list.filter(t => String(t.endCode) === String(q.endCode) && (!q.shipmentState || Number(t.shipmentState) === Number(q.shipmentState)) &&
+          t.plannedDepartureTime >= q.startDateTime && t.plannedDepartureTime <= q.endDateTime);
+      }
+      list.sort((a, b) => a.plannedDepartureTime < b.plannedDepartureTime ? -1 : 1);
+      // trunkPageCap: o JMS entrega no máximo N IDs por página (mesmo pedindo 100).
+      const cur = Number(q.current), sz = Math.min(options.trunkPageCap || 100, Number(q.size));
+      return respond(200, {code: 1, msg: '请求成功', data: {records: list.slice((cur - 1) * sz, cur * sz), total: list.length, size: sz,
+        current: cur, searchCount: true, pages: Math.ceil(list.length / sz)}, details: null, succ: true, fail: false});
+    }
+    if (/\/transportation\/trackingDeatil\/loading\/scan\/list$/.test(path)) {
+      state.trunkUnloadCalls = (state.trunkUnloadCalls || 0) + 1;
+      if ((req.method || 'post') !== 'get') return respond(405, {});
+      const no = decodeURIComponent((url.split('shipmentNo=')[1] || '').split('&')[0]);
+      let recs = null;
+      Object.keys(dayData).forEach(k => { const u = dayData[k].utUnloads; if (u && u[no]) recs = u[no]; });
+      return respond(200, {code: 1, msg: '请求成功', data: recs || [], details: null, succ: true, fail: false});
+    }
     const isDetail = /detail|_verification$|detailed$/.test(route) && !/total/.test(route);
     const size = options.maxPageSize ? Math.min(options.maxPageSize, body.size) : body.size;
     if (isDetail && options.rejectAbove && body.size > options.rejectAbove) return respond(200, {code: 500, msg: 'size参数超出限制', fail: true});
@@ -594,6 +621,57 @@ function makeUnseal(date, seed) {
   return {us: us, usUnloads: usUnloads};
 }
 
+/**
+ * V4.17 — Deslacre da linha troncal: IDs de viagem (DBGX…) que chegam na SP GRU num dia (formato da Consulta de Viagens,
+ * tmsShipment/page) e os Registros de carga e descarga de cada um (trackingDeatil/loading/scan/list). Tudo FICTÍCIO.
+ * O deslacre vem em actualUnlockTime. Regras do teste: i % 5 === 1 → sem bipe de deslacre; i % 7 === 3 → dois registros de
+ * descarregamento na base (tempo = mediana dos dois); i % 9 === 4 → deslacre sem registro de descarga; i % 6 === 2 → uma
+ * descarga (tipo 2) numa parada do caminho, em outra base (não conta); todos têm o carregamento (tipo 1) na origem (não conta).
+ * Viagens de 3 a 30 h: parte sai 1 ou 2 dias antes. Mais um ID de outra base (endCode 99999) e um "Em trânsito" (shipmentState 3).
+ */
+function makeUnsealTrunk(date, seed) {
+  let s = seed || 9;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const pad = n => String(n).padStart(2, '0');
+  const at = mins => {
+    let d = date, m = Math.round(mins);
+    while (m < 0) { m += 1440; d = addDay(d, -1); }
+    while (m >= 1440) { m -= 1440; d = addDay(d, 1); }
+    return d + ' ' + pad(Math.floor(m / 60)) + ':' + pad(m % 60) + ':' + pad(Math.floor(rnd() * 60));
+  };
+  const origins = [['SC FICTICIO NORTE', '39101'], ['SC FICTICIO SUL', '39102'], ['SC FICTICIO LESTE', '39103'], ['SC FICTICIO OESTE', '39104']];
+  const ut = [], utUnloads = {};
+  const n = 14 + Math.floor(rnd() * 8);
+  for (let i = 0; i < n; i++) {
+    // O 1º ID sai 2 dias antes (viagem de ~29 h que chega de madrugada).
+    const arrive = i < 2 ? 15 + i * 20 : 40 + Math.floor(rnd() * 1300), travel = i === 0 ? 1700 + Math.floor(rnd() * 60) : 180 + Math.floor(rnd() * 1620);
+    const unlock = arrive + 3 + Math.floor(rnd() * 40), o = origins[(i + Math.floor(rnd() * 4)) % origins.length];
+    const no = 'DBGXFIC' + date.replace(/-/g, '').slice(2) + String(i).padStart(3, '0');
+    const line = o[0].split(' ').pop().slice(0, 3) + '-GRU-' + pad(Math.floor(((arrive - travel) % 1440 + 1440) % 1440 / 60)) + '00-' + (i % 9 + 1);
+    const t = {id: 'FICT' + date.replace(/-/g, '') + i, shipmentNo: no, vehiclelineType: null, businessAttribute: 1, shipmentName: line, lineSimpleName: line,
+      startName: o[0], startCode: o[1], endName: 'SP GRU', endCode: '30001', shipmentState: 4,
+      plannedDepartureTime: at(arrive - travel), actualDepartureTime: at(arrive - travel + 10), actuallockTime: at(arrive - travel - 8),
+      actualArrivalTime: at(arrive), appTrackArrivalTime: null, appTrackDepartureTime: null, actualUnlockTime: i % 5 === 1 ? null : at(unlock),
+      plateNumber: 'FIC' + (2000 + i), carrierName: 'TRANSPORTADORA FICTICIA ' + (i % 3 + 1), driverName: 'MOTORISTA FICTICIO'};
+    ut.push(t);
+    const recs = [{jobCode: no, loadingTypeName: '1', scanStartTime: t.actuallockTime, scanEndTime: t.actualDepartureTime, scanNetworkCode: o[1],
+      scanNetworkName: o[0], scanTotalTime: '120', scanWaybillNum: 5000 + i}];
+    if (i % 6 === 2) recs.push({jobCode: no, loadingTypeName: '2', scanStartTime: at(arrive - 200), scanEndTime: at(arrive - 150), scanNetworkCode: '39999',
+      scanNetworkName: 'PARADA FICTICIA', scanTotalTime: '50', scanWaybillNum: 300});
+    if (t.actualUnlockTime && i % 9 !== 4) {
+      const d1 = 30 + Math.floor(rnd() * 400);
+      recs.push({jobCode: no, loadingTypeName: '2', scanStartTime: at(unlock + 5), scanEndTime: at(unlock + d1), scanNetworkCode: '30001', scanNetworkName: 'SP GRU',
+        scanTotalTime: String(d1), scanWaybillNum: 8000 + i});
+      if (i % 7 === 3) recs.push({jobCode: no, loadingTypeName: '2', scanStartTime: at(unlock + d1 + 5), scanEndTime: at(unlock + d1 + 70), scanNetworkCode: '30001',
+        scanNetworkName: 'SP GRU', scanTotalTime: '65', scanWaybillNum: 40});
+    }
+    utUnloads[no] = recs;
+  }
+  ut.push(Object.assign({}, ut[2], {id: 'FICTOUTRA' + date, shipmentNo: 'DBGXFICOUTRA' + date.replace(/-/g, ''), endCode: '99999', endName: 'BASE FICTICIA'}));
+  ut.push(Object.assign({}, ut[2], {id: 'FICTTRANS' + date, shipmentNo: 'DBGXFICTRANS' + date.replace(/-/g, ''), shipmentState: 3}));
+  return {ut: ut, utUnloads: utUnloads};
+}
+
 /** Dia de Envio Errado com N remessas (volume real de SC→SC / dias grandes). */
 function bigWrongSend(date, n) {
   const list = [];
@@ -641,7 +719,8 @@ function makeDay(date, seed) {
   const day = {ws: ws, wsRate: pct(0.2 + rnd() * 1.1), se: se, seRate: pct(0.3 + rnd() * 0.6), mr: mr, mrRate: pct(0.5 + rnd() * 0.8),
     md: md, mdRate: pct(0.4 + rnd() * 0.9), sc: sc, scRate: pct(88 + rnd() * 9), dc: dc, dcRate: pct(89 + rnd() * 8)};
   return Object.assign(day, makeDamage(date, (seed || 7) * 31 + 5), makeArrival(date, (seed || 7) * 17 + 3), makeSend(date, (seed || 7) * 13 + 1),
-    makeLots(date, (seed || 7) * 19 + 2), makeNoMove(date, (seed || 7) * 23 + 4), makeUnseal(date, (seed || 7) * 29 + 6));
+    makeLots(date, (seed || 7) * 19 + 2), makeNoMove(date, (seed || 7) * 23 + 4), makeUnseal(date, (seed || 7) * 29 + 6),
+    makeUnsealTrunk(date, (seed || 7) * 37 + 8));
 }
 
 /** Tipos de bipe da tela "Monitoramento de movimentação em tempo real (novo)" (código → nome na lista). */
@@ -876,4 +955,4 @@ function makeArrival(date, seed, scale) {
     uploadNoSendNum: prev.length, noSendNum: noSend.length}};
 }
 
-module.exports = {createContext: createContext, fakeJms: fakeJms, dcDepartureTrip: dcDepartureTrip, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, makeUnseal: makeUnseal, scanRecordsFor: scanRecordsFor, scanHash: scanHash, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};
+module.exports = {createContext: createContext, fakeJms: fakeJms, dcDepartureTrip: dcDepartureTrip, makeDay: makeDay, makeDamage: makeDamage, makeArrival: makeArrival, makeSend: makeSend, makeLots: makeLots, makeNoMove: makeNoMove, makeUnseal: makeUnseal, makeUnsealTrunk: makeUnsealTrunk, scanRecordsFor: scanRecordsFor, scanHash: scanHash, sheetCoerce: sheetCoerce, bigWrongSend: bigWrongSend};

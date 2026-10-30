@@ -8,7 +8,7 @@ const days = {'2026-09-17': makeDay('2026-09-17', 11), '2026-09-18': makeDay('20
 // DETAIL_DAYS_ARRIVAL_FLOW: os dias dos testes (setembro) ficam dentro da janela de detalhe do Recebimento.
 // ATUALIZACAO_MIN 60: os testes antigos contam a fila sem a atualização rápida de hoje (V3.24 tem testes próprios).
 // MODO_ATUALIZACAO continuo: os testes antigos conferem a atualização contínua (opção); o modo diário (padrão da V4.5) tem os seus.
-// REATIVAR_PAINEIS lot_flow,unseal: o Fluxo de Lotes (V4.7) e o Deslacre (V4.12.3) foram retirados (pedido); os testes antigos
+// REATIVAR_PAINEIS lot_flow,unseal: o Fluxo de Lotes (V4.7) e o Deslacre (V4.12.3; de volta na V4.17) foram retirados (pedido); os testes antigos
 // deles continuam valendo com eles de volta.
 const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60',
   MODO_ATUALIZACAO: 'continuo', REATIVAR_PAINEIS: 'lot_flow,unseal'};
@@ -137,8 +137,8 @@ check(ctx.getDashboardData('wrong_send', {}).meta.to === '2026-09-19', 'período
 // ---------- 6. Resultados ----------
 const results = ctx.getResultsData({from: '2026-09-17', to: '2026-09-19'});
 const QTY_R = {arrival_flow: 'totalNum', send_flow: 'sendcount', lot_flow: 'packageSum'};
-// (Expedição: dias fora da janela de detalhe não têm turnos — nem detalhe nem a lista por horário.)
-check(results.series.length === 11 && results.series.every(s => s.rates.length === 3 && s.agg.length === (s.key === 'send_flow' ? 0 : 3) &&
+// (Expedição: dias fora da janela de detalhe não têm turnos — nem detalhe nem a lista por horário.) V4.17: + Deslacre troncal = 12.
+check(results.series.length === 12 && results.series.every(s => s.rates.length === 3 && s.agg.length === (s.key === 'send_flow' ? 0 : 3) &&
     (QTY_R[s.key] ? s.rates.every(r => typeof r.value === 'number' && r.value === ctx.getRateDay_(s.key, r.date).metrics[QTY_R[s.key]]) &&
       s.agg.every(a => a.T1 + a.T2 + a.T3 + a.NA === a.total && a.total === s.rates.filter(r => r.date === a.date)[0].value) : s.rates.every(r => r.value === undefined))) && !hasDate(results),
   'resultados de todos os indicadores; Recebimento, Expedição e Lotes com a quantidade do dia e os turnos dela',
@@ -310,8 +310,9 @@ check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 100
 check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
 // (a foto de hoje da Sem Movimentação entra na fila sozinha e grava o arquivo de hoje: fora da conta deste dia)
 // (arquivos na lixeira não contam: o SC→DC regrava o dia com os IDs de viagem de saída e descarta o anterior)
+// V4.17: + Deslacre troncal = 11 arquivos.
 const filesA = Object.keys(cA.__state.files).filter(id => !cA.__state.files[id].trashed && !/^no_move__/.test(cA.__state.files[id].name || '') && !/__viagens/.test(cA.__state.files[id].name || ''));
-check(filesA.length === 10, 'um arquivo por dia e indicador, nenhum arquivo por página', filesA.map(id => cA.__state.files[id].name));
+check(filesA.length === 11, 'um arquivo por dia e indicador, nenhum arquivo por página', filesA.map(id => cA.__state.files[id].name));
 // V4.1: o SC→DC grava também o mapa remessa → ID de viagem de saída (Rastreamento do pacote), um por dia.
 check(Object.keys(cA.__state.files).filter(id => /^sc_dc__.*__viagens/.test(cA.__state.files[id].name || '')).length === 1, 'SC→DC: mapa de IDs de viagem de saída do dia');
 check(cA.loadDetailFile_(cA.dayFilesMap_('wrong_send', D19, D19)[D19].fileId).kind === 'jt-day', 'arquivo diário no formato colunar');
@@ -377,15 +378,16 @@ cG.queueHistory(D19, D19, true);
 cG.processSyncQueue({budgetMs: 600000});
 const pausesG = cG.publicPauses_();
 // V3.29: 10 rotas — a foto de hoje da Sem Movimentação também entra na fila sozinha. V4.4: + Deslacre (UNSEAL) = 11.
-check(pausesG.length === 11 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason) && pausesG.some(p => p.route === 'NOMOVE') &&
-  pausesG.some(p => p.route === 'UNSEAL'), 'token expirado pausa as 11 rotas com aviso claro', pausesG);
-check(cG.__state.fetches.length === 11, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
+// V4.17: + Deslacre da linha troncal (UNSEAL_TRUNK) = 12.
+check(pausesG.length === 12 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason) && pausesG.some(p => p.route === 'NOMOVE') &&
+  pausesG.some(p => p.route === 'UNSEAL') && pausesG.some(p => p.route === 'UNSEAL_TRUNK'), 'token expirado pausa as 12 rotas com aviso claro', pausesG);
+check(cG.__state.fetches.length === 12, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
 // (+ o resumo de hoje de cada painel, da atualização rápida de hoje — V3.24)
-check(cG.pendingJobs_().filter(j => j.date !== ctx.isoToday_()).length === 22 && cG.pendingJobs_().filter(j => j.date === ctx.isoToday_()).every(j => j.type === 'SUMMARY') &&
+check(cG.pendingJobs_().filter(j => j.date !== ctx.isoToday_()).length === 24 && cG.pendingJobs_().filter(j => j.date === ctx.isoToday_()).every(j => j.type === 'SUMMARY') &&
   cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
 cG.processSyncQueue({budgetMs: 600000});
-check(cG.__state.fetches.length === 11, 'fila pausada não insiste no JMS');
-check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 11 && cG.getAppBootstrap().pauses.length === 11, 'pausa chega ao painel');
+check(cG.__state.fetches.length === 12, 'fila pausada não insiste no JMS');
+check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 12 && cG.getAppBootstrap().pauses.length === 12, 'pausa chega ao painel');
 delete optsG.appError;
 cG.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO';
 runAll(cG);
@@ -395,7 +397,7 @@ check(cG.publicPauses_().length === 0 && ALL.every(k => cG.getDayStatus_(k, D19)
 const cH = freshCtx({'2026-09-19': makeDay(D19, 3)}, {html: true});
 cH.queueHistory(D19, D19, true);
 cH.processSyncQueue({budgetMs: 600000});
-check(cH.publicPauses_().length === 11 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
+check(cH.publicPauses_().length === 12 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
 
 // (i) Cota diária do Google esgotada: pausa geral por 1 h, sem marcar erro nos jobs.
 const cI = freshCtx({'2026-09-19': makeDay(D19, 3)}, {onFetch: () => { throw new Error('Service invoked too many times for one day: urlfetch.'); }});
@@ -669,7 +671,8 @@ for (let i = 0; i < 4; i++) { cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.T
 cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {};
 const qQ = cQ.queueReport_(1100);
 // V3.29: 11 resumos com erro — a foto de hoje da Sem Movimentação também entra na fila sozinha. V4.4: + Deslacre = 12.
-check(qQ.erros === 12 && qQ.esperandoTaxa === 11 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 12 &&
+// V4.17: + Deslacre da linha troncal = 13.
+check(qQ.erros === 13 && qQ.esperandoTaxa === 12 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 13 &&
   /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
 // ---------- 14. V3.8: docas na Falta de Bipagem na Expedição (planilha do usuário) ----------
@@ -3131,7 +3134,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(lists.length && lists.every(f => f.payload.endCode === '30001' && f.payload.shipmentState === 4 && f.payload.countryId === '1' && f.payload.size === 100),
     'Consulta de Viagens Secundárias como a captura (PDD de chegada 30001, Concluído)', lists.slice(0, 1).map(f => f.payload));
   check(lists.some(f => f.payload.startDepartureTime === D18 + ' 00:00:00' && f.payload.endDepartureTime === D19 + ' 23:59:59'), 'saídas da véspera e do dia');
-  const unl = SU.fetches.filter(f => /loading\/scan\/list/.test(f.url));
+  const unl = SU.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url));
   check(unl.length && unl.every(f => f.method === 'get' && /\?shipmentNo=SETRFIC\d+$/.test(f.url)), 'Registros de carga e descarga de cada ID (GET ?shipmentNo=)');
   const all = [].concat(daysU[D18].us, daysU[D19].us), unloads = Object.assign({}, daysU[D18].usUnloads, daysU[D19].usUnloads);
   const evT = t => t.unlockTime || t.actualArrivalTime;
@@ -3182,7 +3185,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const nUnl = unl.length;
   cU.enqueueJobs_([['DETAIL_INIT', 'unseal', D19, 1]], {reset: true});
   runAll(cU);
-  check(SU.fetches.filter(f => /loading\/scan\/list/.test(f.url)).length === nUnl && cU.getArchivedRange_('unseal', D19, D19).rows.length === mine.length,
+  check(SU.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url)).length === nUnl && cU.getArchivedRange_('unseal', D19, D19).rows.length === mine.length,
     'detalhe rebaixado reaproveita os Registros já consultados');
   // Painel: catálogo com os cartões próprios, filtros e a tabela "Informações gerais".
   const catU = cU.getPublicCatalog_().filter(x => x.key === 'unseal')[0];
@@ -3207,6 +3210,111 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const st0 = {summary: 'COMPLETE', details: 'COMPLETE'}, same = {errorCount: 1, totalCount: 5};
   check(cU.detailNeedsRefresh_('unseal', today, same, same, st0, false) === true && cU.detailNeedsRefresh_('wrong_send', today, same, same, st0, false) === false,
     'Deslacre de hoje: lista refeita pelo intervalo mesmo com a mesma contagem');
+}
+
+// ---------- V4.17: Deslacre da linha troncal — PDF "deslacre da troncal" (dados FICTÍCIOS) ----------
+{
+  const D18 = '2026-09-18';
+  const daysT = {[D18]: makeDay(D18, 71), [D19]: makeDay(D19, 72)};
+  const cT = freshCtx(daysT);
+  cT.queueHistory(D18, D19, true);
+  runAll(cT);
+  const ST = cT.__state;
+  const lists = ST.fetches.filter(f => /\/tmsShipment\/page\?/.test(f.url));
+  const q = u => { const o = {}; u.split('?')[1].split('&').forEach(kv => { const i = kv.indexOf('='); o[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, ' ')); }); return o; };
+  check(lists.length && lists.every(f => f.method === 'get' && !Object.keys(f.payload).length && q(f.url).endCode === '30001' && q(f.url).shipmentState === '4' &&
+    q(f.url).searchType === 'manage' && q(f.url).size === '100'), 'Consulta de Viagens da troncal como a captura (GET, PDD de chegada 30001, Concluído, searchType manage)',
+    lists.slice(0, 1).map(f => f.url));
+  check(lists.some(f => /startDateTime=2026-09-17\+00:00:00&endDateTime=2026-09-20\+23:59:59/.test(f.url)), 'datas na URL como o navegador (2 dias antes e 1 depois)',
+    lists.map(f => f.url.split('?')[1]).slice(0, 2));
+  check(lists.every(f => !f.headers.Routename && !f.headers.Routernamelist), 'sem cabeçalhos de rota por padrão (como a secundária)');
+  const unl = ST.fetches.filter(f => /trackingDeatil\/loading\/scan\/list/.test(f.url));
+  check(unl.length && unl.every(f => f.method === 'get' && /\?shipmentNo=DBGXFIC\d+$/.test(f.url)) && !ST.fetches.some(f => /tmsBranchTrackingDetail\/loading.*DBGX/.test(f.url)),
+    'Registros de carga e descarga de cada ID da troncal (trackingDeatil, GET ?shipmentNo=)');
+  const all = [].concat(daysT[D18].ut, daysT[D19].ut), unloads = Object.assign({}, daysT[D18].utUnloads, daysT[D19].utUnloads);
+  const evT = t => t.actualUnlockTime || t.actualArrivalTime;
+  const mine = all.filter(t => t.endCode === '30001' && t.shipmentState === 4 && evT(t).slice(0, 10) === D19);
+  check(mine.some(t => t.plannedDepartureTime.slice(0, 10) < D18), 'cenário: viagem que saiu 2 dias antes e foi deslacrada no dia');
+  const rowsT = cT.getArchivedRange_('unseal_trunk', D19, D19).rows;
+  check(rowsT.length === mine.length && new Set(rowsT.map(r => r.shipment)).size === mine.length && rowsT.every(r => mine.some(t => t.shipmentNo === r.shipment)) &&
+    !rowsT.some(r => /OUTRA|TRANS/.test(r.shipment)), 'troncal: um ID por linha (chega na SP GRU, Concluído, deslacre ou chegada no dia)', [rowsT.length, mine.length]);
+  const ms = s => Date.parse(s.replace(' ', 'T') + 'Z');
+  const med = a => { a = a.slice().sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+  const C = cT.JTCore_, exp = {};
+  const atBase = no => (unloads[no] || []).filter(x => x.loadingTypeName === '2' && x.scanNetworkCode === '30001');
+  mine.forEach(t => {
+    const u = t.actualUnlockTime ? atBase(t.shipmentNo) : [];
+    exp[t.shipmentNo] = {sit: t.actualUnlockTime ? 'Com bipe de deslacre' : 'Sem bipe de deslacre', shift: C.shiftOf(evT(t)), unlock: t.actualUnlockTime || '',
+      min: u.length ? String(Math.round(med(u.map(x => (ms(x.scanEndTime) - ms(t.actualUnlockTime)) / 60000)) * 10) / 10) : '', end: u.map(x => x.scanEndTime).sort().pop() || ''};
+  });
+  const badT = rowsT.filter(r => { const e = exp[r.shipment]; return r.situation !== e.sit || String(r.minutes || '') !== e.min || r.shift !== e.shift ||
+    String(r.receiptTime || '') !== e.end || String(r.unlockTime || '') !== e.unlock; });
+  check(!badT.length, 'troncal: deslacre = actualUnlockTime; tempo = mediana de (Data final − deslacre) das descargas na nossa base; turno pelo deslacre',
+    badT.slice(0, 2).map(r => [r.situation, r.minutes, r.unlockTime, r.shift, exp[r.shipment]]));
+  check(mine.some(t => t.actualUnlockTime && (unloads[t.shipmentNo] || []).some(x => x.loadingTypeName === '2' && x.scanNetworkCode !== '30001')) &&
+    mine.some(t => atBase(t.shipmentNo).length === 2) && rowsT.some(r => r.minutes === '' && r.situation === 'Com bipe de deslacre'),
+    'cenário: descarga numa parada do caminho (não conta), dois registros na base (mediana) e deslacre sem descarga (sem tempo)');
+  const missN = mine.filter(t => !t.actualUnlockTime).length;
+  const mins = Object.values(exp).filter(e => e.min !== '').map(e => Number(e.min));
+  const rT = cT.getRateDay_('unseal_trunk', D19);
+  check(rT && rT.errorCount === missN && rT.totalCount === mine.length && rT.metrics.noUnlockNum === missN && rT.metrics.tripNum === mine.length &&
+    rT.metrics.medianMin === Math.round(med(mins) * 10) / 10 && rT.metrics.timedNum === mins.length, 'troncal: resumo do dia (IDs, sem deslacre e tempo mediano)', rT);
+  const aggT = cT.getAgg_('unseal_trunk', D19, D19)[0];
+  const missBy = s => mine.filter(t => !t.actualUnlockTime && exp[t.shipmentNo].shift === s).length;
+  check(aggT && aggT.T1 === missBy('T1') && aggT.T2 === missBy('T2') && aggT.T3 === missBy('T3') && aggT.total === missN, 'troncal: Resultados com os IDs sem deslacre por turno', aggT);
+  const compT = cT.computeDashboard_('unseal_trunk', {from: D19, to: D19});
+  const chT = k => compT.charts.filter(x => x.key === k)[0];
+  check(chT('missShift').datasets[0].data.join() === [missBy('T1'), missBy('T2'), missBy('T3')].join() && chT('medShift').valueAgg === 'median' &&
+    chT('topTime').labels.length === Math.min(10, mins.length) && chT('origin') && chT('missOrigin'),
+    'troncal: gráficos (turnos sem deslacre, tempo mediano por turno, top 10 IDs, PDD de saída)');
+  // A secundária do mesmo dia não mistura com a troncal.
+  const rowsS = cT.getArchivedRange_('unseal', D19, D19).rows;
+  check(rowsS.length && rowsS.every(r => /^SETR/.test(r.shipment)) && rowsT.every(r => /^DBGX/.test(r.shipment)), 'secundária só com SETR…, troncal só com DBGX…');
+  // Detalhe de novo (dia fechado): reaproveita os Registros já consultados.
+  const nUnl = unl.length;
+  cT.enqueueJobs_([['DETAIL_INIT', 'unseal_trunk', D19, 1]], {reset: true});
+  runAll(cT);
+  check(ST.fetches.filter(f => /trackingDeatil\/loading\/scan\/list/.test(f.url)).length === nUnl && cT.getArchivedRange_('unseal_trunk', D19, D19).rows.length === mine.length,
+    'troncal: detalhe rebaixado reaproveita os Registros já consultados');
+  const catT = cT.getPublicCatalog_().filter(x => x.key === 'unseal_trunk')[0], catS = cT.getPublicCatalog_().filter(x => x.key === 'unseal')[0];
+  check(catT && catT.name.pt === 'Deslacre (linha troncal)' && catS.name.pt === 'Deslacre (linha secundária)' && catT.order > catS.order && catT.unsealCards &&
+    catT.filters.map(x => x.key).join() === 'tripId,route,station,shift' && catT.texts.shipmentTable.pt === 'Informações gerais' &&
+    JSON.stringify(catT.table) === JSON.stringify(catS.table) && JSON.stringify(catT.charts) === JSON.stringify(catS.charts),
+    'menu: Deslacre (linha troncal) logo depois da secundária, com os mesmos cartões, filtros, gráficos e tabela');
+  const dsT = C.decodeDataset(cT.getDashboardData('unseal_trunk', {from: D19, to: D19}).dataset);
+  check(dsT.length === mine.length && dsT.every(r => r.tripId && r.route && r.station && 'minutes' in r), 'painel da troncal recebe ID, viagem, PDD de saída e tempo');
+  const repT = (() => {
+    cT.UrlFetchApp.fetch = (() => { const f = cT.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cT.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
+    return cT.generateReport('unseal_trunk', {from: D19, to: D19}, 'xlsx');
+  })();
+  check(repT.ok, 'relatório do Deslacre da troncal (Excel)', repT);
+  const dgT = cT.diagnosticarDeslacreTroncal(D19);
+  check(/Deslacre \(linha troncal\)/.test(dgT.texto) && /actualUnlockTime sim/.test(dgT.texto) && /IDs do dia/.test(dgT.texto) && /Data final/.test(dgT.texto) &&
+    /Dados de monitoramento > Consulta de Viagens/.test(dgT.texto) && !/MOTORISTA|FIC\d{4}|DBGX/.test(dgT.texto), 'diagnosticarDeslacreTroncal() sem placa, motorista nem ID', dgT.texto);
+  const dgS = cT.diagnosticarDeslacre(D19);
+  check(/Deslacre \(linha secundária\)/.test(dgS.texto) && /unlockTime sim/.test(dgS.texto) && dgS.ids === rowsS.length, 'diagnosticarDeslacre() continua sendo o da secundária');
+  // Credencial recusada só na lista da troncal: pausa só a troncal.
+  const trunkList = (route, h, body) => route === 'page' && !body.startDepartureTime;
+  const cTr = freshCtx({[D19]: makeDay(D19, 72)}, {intercept: (route, h, body) => trunkList(route, h, body) ? [200, {code: 135010037, msg: 'token失效，请重新登录', fail: true}] : null});
+  cTr.queueHistory(D19, D19, true);
+  runAll(cTr);
+  check(cTr.publicPauses_().some(p => p.route === 'UNSEAL_TRUNK') && !cTr.publicPauses_().some(p => p.route === 'UNSEAL') && cTr.getRateDay_('unseal', D19),
+    'credencial recusada na Consulta de Viagens da troncal pausa só o Deslacre da troncal');
+  // JMS que entrega só 5 IDs por página (mesmo pedindo 100): as próximas páginas seguem esse tamanho e nenhum ID se perde.
+  const cCap = freshCtx({[D19]: makeDay(D19, 72)}, {trunkPageCap: 5});
+  cCap.queueHistory(D19, D19, true);
+  runAll(cCap);
+  const capLists = cCap.__state.fetches.filter(f => /\/tmsShipment\/page\?/.test(f.url));
+  check(cCap.getRateDay_('unseal_trunk', D19).totalCount === mine.length && capLists.some(f => q(f.url).current === '3') &&
+    capLists.every(f => q(f.url).current === '1' || q(f.url).size === '5'),
+    'troncal: JMS com páginas menores que o pedido — lista completa', [cCap.getRateDay_('unseal_trunk', D19).totalCount, mine.length, capLists.map(f => q(f.url).current + '/' + q(f.url).size)]);
+  // JMS que exige o Routename da tela: o painel testa as variantes sozinho e guarda a que funcionou.
+  const cRn = freshCtx({[D19]: makeDay(D19, 72)}, {intercept: (route, h, body) =>
+    trunkList(route, h, body) && h.Routename !== 'monitoringSearch' ? [200, {code: 500, msg: 'routename inválido', fail: true}] : null});
+  cRn.queueHistory(D19, D19, true);
+  runAll(cRn);
+  check(cRn.getRateDay_('unseal_trunk', D19) && cRn.getRateDay_('unseal_trunk', D19).totalCount === mine.length && cRn.getProp_('JMS_ROUTE_AUTO_UNSEAL_TRUNK', '') === '1',
+    'Routename recusado: a troncal acha sozinha o "monitoringSearch" (JMS_ROUTE_AUTO_UNSEAL_TRUNK)', cRn.getRateDay_('unseal_trunk', D19));
 }
 
 // ---------- V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50) ----------
@@ -3593,16 +3701,17 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cB = createContext({props: {REATIVAR_PAINEIS: 'lot_flow'}, jms: fakeJms({}), quiet: true});
   const cP = createContext({props: {PAINEIS: 'lot_flow,wrong_send'}, jms: fakeJms({}), quiet: true});
   const cF = createContext({props: {PAINEIS_FORA: 'arrival_flow,send_flow'}, jms: fakeJms({}), quiet: true});
-  check(keysOf(cB).indexOf('lot_flow') >= 0 && keysOf(cP).join() === 'wrong_send,lot_flow' && keysOf(cF).indexOf('lot_flow') < 0 && keysOf(cF).length === 8,
-    'REATIVAR_PAINEIS (ou PAINEIS) traz de volta; painel principal com 8 painéis (V4.12.3: sem o Deslacre)', [keysOf(cP), keysOf(cF)]);
-  // V4.12.3 (pedido): Deslacre retirado do mesmo jeito.
-  let msgU = '';
-  try { cR.activeCfg_('unseal'); } catch (e) { msgU = e.message; }
+  check(keysOf(cB).indexOf('lot_flow') >= 0 && keysOf(cP).join() === 'wrong_send,lot_flow' && keysOf(cF).indexOf('lot_flow') < 0 && keysOf(cF).length === 10,
+    'REATIVAR_PAINEIS (ou PAINEIS) traz de volta; painel principal com 10 painéis (V4.17: com o Deslacre secundária e troncal)', [keysOf(cP), keysOf(cF)]);
+  // V4.12.3: Deslacre retirado. V4.17 (pedido): de volta no painel principal, com a linha secundária e a linha troncal, sem
+  // precisar de REATIVAR_PAINEIS (quem já tinha a propriedade com "unseal" não muda nada).
   const cU = createContext({props: {REATIVAR_PAINEIS: 'unseal'}, jms: fakeJms({}), quiet: true});
-  check(keysOf(cR).indexOf('unseal') < 0 && keysOf(cF).indexOf('unseal') < 0 && !cR.getPublicCatalog_().some(c => c.key === 'unseal') &&
-    /REATIVAR_PAINEIS = unseal/.test(msgU) && keysOf(cU).indexOf('unseal') >= 0 && keysOf(cU).indexOf('lot_flow') < 0,
-    'Deslacre retirado: fora do menu, dos Resultados e da fila; REATIVAR_PAINEIS = unseal traz de volta', msgU);
-  // Nenhuma consulta dos Lotes e Resultados sem eles.
+  const menuR = cR.getPublicCatalog_().filter(c => /^unseal/.test(c.key));
+  check(['unseal', 'unseal_trunk'].every(k => keysOf(cR).indexOf(k) >= 0 && keysOf(cF).indexOf(k) >= 0 && keysOf(cU).indexOf(k) >= 0) &&
+    !vmR.runInContext('!!ALL_INDICATORS_.unseal.retired', cR) && keysOf(cU).indexOf('lot_flow') < 0 &&
+    menuR.map(c => c.name.pt).join() === 'Deslacre (linha secundária),Deslacre (linha troncal)',
+    'Deslacre de volta no painel principal: linha secundária e linha troncal no menu, nos Resultados e na fila', menuR.map(c => c.name.pt));
+  // Nenhuma consulta dos Lotes e Resultados sem eles (com o Deslacre).
   const today = cR.isoToday_(), ago = n => cR.addDaysIso_(today, -n), Y = ago(1), Y2 = ago(2), Y3 = ago(3);
   const daysR = {[today]: makeDay(today, 91), [Y]: makeDay(Y, 92), [Y2]: makeDay(Y2, 93), [Y3]: makeDay(Y3, 94)};
   const PRINC = {REATIVAR_PAINEIS: '', PAINEIS_FORA: 'arrival_flow,send_flow', MODO_ATUALIZACAO: 'diario', DATA_START_DATE: Y3};
@@ -3610,17 +3719,19 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   cL.queueHistory(Y3, Y, true);
   runAll(cL);
   const lotEp = vmR.runInContext('ALL_INDICATORS_.lot_flow.summary.endpoint', cL);
-  const unsealEp = vmR.runInContext('ALL_INDICATORS_.unseal.summary.endpoint', cL);
-  check(!cL.__state.fetches.some(f => [lotEp, unsealEp].indexOf(f.url.split('?')[0]) >= 0) && !cL.allTabRows_('JOBS').some(r => r[2] === 'lot_flow' || r[2] === 'unseal'),
-    'histórico do painel principal sem nenhuma consulta dos Lotes nem do Deslacre');
+  const unsealEps = ['unseal', 'unseal_trunk'].map(k => vmR.runInContext('ALL_INDICATORS_.' + k + '.summary.endpoint', cL));
+  check(!cL.__state.fetches.some(f => f.url.split('?')[0] === lotEp) && !cL.allTabRows_('JOBS').some(r => r[2] === 'lot_flow') &&
+    unsealEps.every(ep => cL.__state.fetches.some(f => f.url.split('?')[0] === ep)) && ['unseal', 'unseal_trunk'].every(k => cL.getRateDay_(k, Y)),
+    'histórico do painel principal sem nenhuma consulta dos Lotes; o Deslacre (secundária e troncal) é consultado');
   const res = cL.getResultsData({from: Y3, to: Y});
-  check(res && !JSON.stringify(res).includes('lot_flow') && !JSON.stringify(res).includes('unseal'), 'Resultados sem o Fluxo de Lotes e sem o Deslacre');
+  check(res && !JSON.stringify(res).includes('lot_flow') && ['unseal', 'unseal_trunk'].every(k => res.series.some(s => s.key === k)),
+    'Resultados sem o Fluxo de Lotes e com o Deslacre (secundária e troncal)');
   // Atualizar: todos os painéis de uma vez (taxas e cartões; depois listas, IDs de viagem e bipagens), o aberto primeiro.
   const cA = freshCtx(daysR, null, PRINC);
   const r1 = cA.refreshAllNow('wrong_send', Y, Y);
   const panels = keysOf(cA);
-  check(r1.ok && r1.panels === panels.length && r1.panelsTotal === 8 && r1.failed === 0 && r1.detailsQueued >= 7,
-    'Atualizar: taxa e cartões dos 8 painéis numa chamada', {panels: r1.panels, total: r1.panelsTotal, q: r1.detailsQueued, err: r1.errors});
+  check(r1.ok && r1.panels === panels.length && r1.panelsTotal === 10 && r1.failed === 0 && r1.detailsQueued >= 9,
+    'Atualizar: taxa e cartões dos 10 painéis numa chamada', {panels: r1.panels, total: r1.panelsTotal, q: r1.detailsQueued, err: r1.errors});
   check(cA.refreshAllNow('wrong_send', Y, Y).cooldown === true, 'clique repetido em seguida não consulta de novo');
   const x1 = cA.refreshAllDetailsNow('wrong_send', Y, Y);
   const complete = (k, d) => !!cA.getDayStatus_(k, d) && cA.getDayStatus_(k, d).details === 'COMPLETE';

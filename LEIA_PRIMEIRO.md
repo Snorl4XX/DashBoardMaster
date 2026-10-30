@@ -1,8 +1,77 @@
-# J&T DASHMASTER V4.16 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.17 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.17 — Deslacre da linha troncal e da linha secundária no painel principal
+
+**Pedido (arquivos "deslacre da troncal" e "DASHBOARD DE DESLACRE"):** "No dashboard principal colocar o dash de deslacre
+troncal e secundária."
+
+O menu do painel principal ganha **dois painéis**, um embaixo do outro:
+- **Deslacre (linha secundária)**: o painel da V4.4, que estava retirado desde a V4.12.3, de volta. Os dias já baixados continuam lá.
+- **Deslacre (linha troncal)**: novo, com as mesmas contas, cartões, gráficos, filtros e tabela.
+
+**De onde vêm os dados da troncal:**
+- **Lista de IDs (DBGX…):** Transporte > Análise de dados > Dados de monitoramento > **Consulta de Viagens**
+  (`tmsShipment/page`), com os filtros da captura:
+  - PDD de chegada = **SP GRU (30001)**;
+  - Status = **Concluído**.
+
+  A consulta pega 2 dias antes e 1 depois, porque viagem longa sai antes e às vezes chega adiantada. O dia de cada ID sai do horário do deslacre.
+- **Bipe de deslacre:** coluna **"Horário de deslacração do veículo"** (`actualUnlockTime`). Vazia = **ID sem bipe de deslacre**.
+- **Bipe de recebimento:** nos **Registros de carga e descarga** do ID (`trackingDeatil/loading/scan/list`), a **"Data final"**
+  do Bipe de descarregamento **na SP GRU**. Não contam o carregamento na origem (tipo 1) nem uma descarga em outra base no caminho.
+- **Tempo de cada ID:** Data final − horário do deslacre, em minutos (com mais de um descarregamento, vale a **mediana**).
+- **Dia e turno:** pelo horário do deslacre. O ID sem deslacre usa a chegada do veículo, que é o turno que deveria ter dado o bipe.
+
+**O que o painel mostra (troncal e secundária, como os PDFs pedem):**
+- **Cartões:**
+  - IDs sem bipe de deslacre;
+  - tempo mediano do deslacre até o bipe de recebimento;
+  - ID com o maior tempo mediano;
+  - IDs de viagem;
+  - um cartão por turno (T1, T2, T3) com os IDs sem deslacre, o tempo mediano e o **ID de maior mediana** do turno.
+- **Gráficos:**
+  - turnos com maior falta de bipe de deslacre;
+  - evolução por dia;
+  - tempo mediano por turno;
+  - os 10 IDs que mais demoraram;
+  - PDD de saída que mais mandou;
+  - PDD de saída dos IDs sem deslacre.
+- **Filtros:** Número do ID · Nome da viagem · PDD de saída · Turno.
+- **Tabela "Informações gerais":** uma linha por ID, com o **tempo mediano de cada ID**.
+- Os dois também aparecem nos **Resultados** e no relatório PDF/Excel.
+
+**Atualização e cota:**
+- Os dois atualizam sozinhos junto com os outros painéis (às 6h e às 8h). O botão **Atualizar** consulta na hora.
+- Os Registros de carga e descarga só são consultados de novo para IDs novos ou ainda descarregando.
+- Os dois painéis entram sozinhos na fila. Não precisa mexer em `REATIVAR_PAINEIS`. Quem tinha `unseal` nela pode apagar ou deixar.
+- O painel dos fluxos (Recebimento e Expedição) não muda.
+
+| Simulação da conta Gmail (painel principal, 7 dias de histórico) | Sem os Deslacres | Com os dois |
+|---|---|---|
+| Uso por dia, depois do histórico | 5,5 min | **6,6 min** (de 90) |
+| Consultas ao JMS por dia | 401 | **464** (de 20 mil) |
+| Dia do histórico | 34,0 min | 36,1 min |
+| Execuções barradas pela cota | 0 | **0** |
+
+**Se der erro:** no editor do Apps Script, rode **`diagnosticarDeslacreTroncal`** (troncal) ou **`diagnosticarDeslacre`**
+(secundária). Cada um testa a lista e os registros de até 5 IDs, sem mostrar placa, motorista nem o número do ID.
+
+Os cabeçalhos de rota da Consulta de Viagens não aparecem na captura. O painel tenta primeiro sem eles e, se o JMS recusar,
+testa sozinho o nome da tela (`monitoringSearch`). Para forçar um valor, use as Propriedades do script
+`JMS_ROUTENAME_UNSEAL_TRUNK` / `JMS_ROUTENAMELIST_UNSEAL_TRUNK`.
+
+**Não foi possível conferir no JMS real:** se a Consulta de Viagens aceita 100 IDs por página (a tela pede 20). Se mandar
+menos, o painel pede as outras páginas com o mesmo tamanho e nenhum ID fica de fora.
+
+**Atualizar:**
+- **Apps Script:** troque todos os arquivos pelos do ZIP `JT_DASHMASTER_V4_17_PRINCIPAL.zip` e faça Implantar → Gerenciar
+  implantações → ✏️ → Nova versão. Não precisa rodar nenhuma função: os dias dos dois painéis entram na fila sozinhos.
+- **Node.js:** feche a janela preta do painel, extraia o ZIP `JT_DASHMASTER_V4_17_NODE.zip` em `C:\` (Substituir) e abra o
+  atalho DashMaster.
 
 ## V4.16 — Expedição SC → DC: rotas pela próxima parada e esteiras
 
@@ -271,6 +340,7 @@ Para mudar os horários da tarde: Propriedade do script **`HORAS_ATUALIZACAO_SC`
 - O painel **Deslacre (linha secundária)** saiu do menu, dos Resultados e da fila (não gasta cota). Foi feito como o Fluxo de Lotes na V4.7.
 - Os dados antigos continuam na planilha.
 - Para trazer de volta: Propriedade do script **`REATIVAR_PAINEIS`** = `unseal` (com o Fluxo de Lotes também: `lot_flow,unseal`).
+- **V4.17:** o Deslacre voltou ao painel principal, junto com o da linha troncal (sem precisar de `REATIVAR_PAINEIS`).
 
 ### Como instalar
 - **Google:** troque os `.gs` e `.html` pelos do ZIP V4.12.3 e publique uma **Nova versão**. Não precisa rodar nenhuma função.
@@ -1394,6 +1464,8 @@ Mostra as **sacas criadas no dia**, ecológicas e normais, com as porcentagens d
 |---|---|
 | `JMS_ROUTENAME_LOTS` / `JMS_ROUTENAMELIST_LOTS` | Cabeçalhos de rota da tela (padrão: nenhum; a captura não mostra) |
 | `JMS_ROUTENAME_NOMOVE` / `JMS_ROUTENAMELIST_NOMOVE` | Sem Movimentação (V3.28): cabeçalhos de rota da tela (padrão: `TrackRealTimeMonitoringNew`; a captura não mostra) |
+| `JMS_ROUTENAME_UNSEAL` / `JMS_ROUTENAMELIST_UNSEAL` | Deslacre da linha secundária (V4.4): cabeçalhos de rota (padrão: nenhum) |
+| `JMS_ROUTENAME_UNSEAL_TRUNK` / `JMS_ROUTENAMELIST_UNSEAL_TRUNK` | Deslacre da linha troncal (V4.17): cabeçalhos de rota (padrão: nenhum; se o JMS recusar, `monitoringSearch`) |
 
 **Não foi possível conferir no JMS real (rode `diagnosticarLotes()` depois de instalar):**
 - o **Routename** da tela (não aparece na captura). Se o JMS recusar, o painel testa as variantes sozinho;

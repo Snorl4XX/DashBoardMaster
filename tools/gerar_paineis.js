@@ -39,9 +39,10 @@ Este pacote é o **painel principal**. Ele mostra:
 - Falta de Bipagem no Recebimento e na Expedição;
 - Expedição SC → SC e SC → DC;
 - Avaria e Sem Movimentação;
+- Deslacre (linha secundária) e Deslacre (linha troncal) — V4.17;
 - Resultados.
 
-Retirados (os dados antigos ficam na planilha): Fluxo de Lotes (V4.7) e Deslacre (V4.12.3). \`REATIVAR_PAINEIS\` = \`lot_flow,unseal\` traz de volta.
+Retirado (os dados antigos ficam na planilha): Fluxo de Lotes (V4.7). \`REATIVAR_PAINEIS\` = \`lot_flow\` traz de volta. O Deslacre (retirado na V4.12.3) voltou na V4.17, junto com o da linha troncal.
 
 Desde a V4.8, Envio Errado, Triagem Errada e Falta de Bipagem na Expedição usam as docas e rotas de carregamento da tabela de 11/10 (tabelas em \`DOCKS_EXPEDICAO\` no Config.gs).
 
