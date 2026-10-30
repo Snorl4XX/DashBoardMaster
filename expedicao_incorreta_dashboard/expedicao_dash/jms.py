@@ -157,12 +157,13 @@ def ler_resposta(remessa: str, status: int, corpo: str, local: str = "") -> Cons
 
 
 class Cliente:
-    """Consulta uma remessa no JMS (uma sessão HTTP por linha de execução)."""
+    """Consulta uma remessa no JMS (uma sessão HTTP por linha de execução).
+    pausa = segundos de espera antes de cada consulta (modo devagar: espaça as consultas para o JMS não reclamar)."""
 
     TENTATIVAS = 3
 
-    def __init__(self, acesso: Acesso, timeout: float = 25.0) -> None:
-        self.acesso, self.timeout = acesso, timeout
+    def __init__(self, acesso: Acesso, timeout: float = 25.0, pausa: float = 0.0) -> None:
+        self.acesso, self.timeout, self.pausa = acesso, timeout, max(0.0, pausa)
         self._local = threading.local()
         self.esperar = time.sleep  # os testes trocam por uma pausa curta
 
@@ -176,6 +177,8 @@ class Cliente:
         """Uma remessa. Falha de rede e "muitas consultas" tentam de novo (até 3 vezes, esperando 1 s, 2 s…)."""
         ultima = Consulta(remessa)
         for tentativa in range(self.TENTATIVAS):
+            if self.pausa:  # modo devagar: espera (com um pouco de variação, para as linhas de execução não baterem juntas)
+                self.esperar(self.pausa * (0.7 + 0.6 * random.random()))
             try:
                 r = self._sessao().post(self.acesso.url, json={"waybillNo": remessa, "countryId": self.acesso.pais},
                                         headers=self.acesso.cabecalhos(), timeout=self.timeout, allow_redirects=False)

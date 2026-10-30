@@ -336,6 +336,9 @@ def main() -> None:
             st.warning(aviso)
         with st.expander("⚙️ Ajustes da consulta"):
             paralelo = st.slider("Consultas ao mesmo tempo", 1, 6, 2, help="Mais = mais rápido. Se o JMS reclamar, o app diminui sozinho.")
+            espera_req = st.slider("Modo devagar: esperar entre consultas (segundos)", 0.0, 5.0, 0.0, 0.5,
+                                   help="0 = o mais rápido que o JMS deixar. Aumente se o JMS bloquear por excesso de consultas (e deixe "
+                                        "\"Consultas ao mesmo tempo\" em 1).")
             horas = st.number_input("Reaproveitar o que o JMS respondeu nas últimas (horas)", 1, 720, 12)
             nome_cab = st.text_input("Nome do cabeçalho do token", "authtoken")
             prefixo = st.text_input("Prefixo do token (ex.: Bearer)", "")
@@ -450,7 +453,7 @@ def main() -> None:
                         except ValueError as e:
                             st.error(f"Cabeçalhos adicionais: {e}")
                             st.stop()
-                        cliente = Cliente(acesso)
+                        cliente = Cliente(acesso, pausa=espera_req)
 
                         def guardar(lista: list[Consulta]) -> None:
                             cache.guardar(lista)
@@ -464,6 +467,24 @@ def main() -> None:
                     st.rerun()
                 if not pode:
                     st.caption("Cole o AuthToken do JMS na barra da esquerda para buscar (ou ligue o Modo demonstração).")
+                elif not modo_demo and st.button("Testar com 1 remessa", key="testar1",
+                                                 help="Faz UMA consulta e mostra o que o JMS respondeu. Serve para saber se o bloqueio é "
+                                                      "por velocidade (adianta ir devagar) ou se é o firewall barrando o app de cara."):
+                    try:
+                        ac = Acesso(token=token, nome_cabecalho=nome_cab, prefixo=prefixo, extras=ler_extras(extras_txt))
+                    except ValueError as e:
+                        st.error(f"Cabeçalhos adicionais: {e}")
+                        st.stop()
+                    teste = Cliente(ac, pausa=espera_req).consultar(lote[0])
+                    if teste.ok and teste.primeiro:
+                        st.success(f"Funcionou com {teste.remessa}: {teste.primeiro} {teste.segundo} {teste.terceiro}. Pode buscar o lote.")
+                    elif teste.ok:
+                        st.warning(f"{teste.remessa}: {teste.erro}")
+                    else:
+                        st.error(f"{teste.remessa}: {teste.erro}")
+                        if teste.tipo_erro == "bloqueio":
+                            st.caption("Bloqueou já na 1ª consulta: é o firewall do JMS reconhecendo o app, não é velocidade. Ir mais "
+                                       "devagar não resolve. Use \"Trazer de uma planilha exportada do JMS\" ou peça o acesso à TI.")
             with aba_arq:
                 trazer_por_arquivo(remessas, modo_demo, cache)
         elif not aviso:

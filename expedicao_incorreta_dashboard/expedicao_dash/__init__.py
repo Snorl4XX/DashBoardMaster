@@ -5,4 +5,4 @@ segmento e Código de dois segmentos) e os "Detalhes da encomenda"; a planilha d
 Só as remessas na rota ERRADA aparecem no resultado (as certas só entram na contagem).
 """
 
-VERSAO = "2.3"
+VERSAO = "2.4"

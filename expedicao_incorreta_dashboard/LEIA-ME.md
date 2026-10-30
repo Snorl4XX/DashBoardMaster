@@ -41,7 +41,9 @@ Precisa do Python 3.10 ou mais novo.
 - Clique em **Buscar no JMS**. O app consulta 2 remessas ao mesmo tempo. Se o JMS pedir para ir mais devagar, diminui sozinho.
 - **Token vencido:** o app para na hora e avisa. Cole um token novo e clique de novo: o que já veio fica guardado.
 - O que o JMS respondeu fica guardado por 12 horas (`data\cache_jms.sqlite3`). Rodar a mesma planilha de novo não consulta de novo.
-- **HTTP 405 ("o firewall do JMS barrou"):** o firewall do JMS recusou a consulta feita pelo app. O app **para na primeira vez**, porque insistir só prolonga o bloqueio. Use a aba ao lado, **Trazer de uma planilha exportada do JMS** (abaixo).
+- **Ir mais devagar (para o JMS não bloquear):** em **Ajustes da consulta** (barra da esquerda), deixe "Consultas ao mesmo tempo" em **1** e aumente "Modo devagar: esperar entre consultas (segundos)". O app espera esse tempo antes de cada consulta. Se o JMS pedir calma no meio (HTTP 429), ele já diminui o ritmo sozinho e continua.
+- **Testar com 1 remessa:** antes de buscar o lote, clique nesse botão. Ele faz uma consulta só e mostra o que o JMS respondeu. Se já bloquear nessa primeira, o problema não é velocidade (veja abaixo).
+- **HTTP 405 ("o firewall do JMS barrou"):** o firewall do JMS recusou a consulta feita pelo app. Se ele bloqueia **já na 1ª consulta** (teste acima), é o firewall reconhecendo o app, e **ir mais devagar não resolve**: o app para na primeira vez (insistir só prolonga o bloqueio). Nesse caso, use a aba ao lado, **Trazer de uma planilha exportada do JMS** (abaixo), ou peça à TI para liberar o acesso do app.
 
 **2b · Trazer de uma planilha exportada do JMS (sem o app consultar o JMS)**
 - Envie uma **planilha exportada do JMS** que tenha a remessa e os códigos de segmento.

@@ -335,6 +335,21 @@ def test_firewall_do_jms_para_o_lote():
     assert c.tipo_erro == "bloqueio" and "302" in c.erro and "waf/verify" in c.erro and jms2.pedidos == 1
 
 
+def test_modo_devagar_espaca_as_consultas():
+    """Modo devagar: o app espera antes de cada consulta (para o JMS não reclamar de excesso)."""
+    jms = _JmsFalso()
+    cli = Cliente(Acesso(token="tok", url=jms.url), pausa=0.5)
+    esperas = []
+    cli.esperar = esperas.append
+    c = cli.consultar("888002560356352")
+    assert c.ok and len(esperas) == 1 and 0.3 <= esperas[0] <= 0.7  # esperou ~0,5 s antes de consultar
+    # Sem pausa, não espera.
+    cli2 = Cliente(Acesso(token="tok", url=jms.url))
+    cli2.esperar = (lambda *_: esperas.append("x"))
+    cli2.consultar("888002560356352")
+    assert len(esperas) == 1
+
+
 def test_lote_espera_quando_o_jms_pede():
     vezes = {}
 
