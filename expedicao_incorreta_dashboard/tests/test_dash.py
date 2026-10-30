@@ -422,15 +422,21 @@ def test_resumo_e_excel():
     assert set(r.pendencias["Motivo"]) >= {analise.P_JMS_SEM, analise.P_NAO_ACHOU}
     x = relatorio.gerar_excel(res, r, tabela_padrao(), viagem="T20261027001", arquivo="exemplo.xlsx")
     wb = openpyxl.load_workbook(io.BytesIO(x))
-    assert wb.sheetnames == ["Painel 面板", "Erradas 错误", "Por rota 线路", "Por segmento 段码", "Turno e dia 班次日期", "Pendências 待确认",
-                             "Regras 路由表"]
+    assert wb.sheetnames == ["Resumo 汇总", "Todas 全部", "Erradas 错误", "Por rota 线路", "Por segmento 段码", "Turno e dia 班次日期",
+                             "Pendências 待确认", "Regras 路由表"]
+    # Todas as remessas, cada uma com os dois segmentos (título + cabeçalho + todas).
+    todas = wb["Todas 全部"]
+    assert todas.max_row == 2 + r.total
+    assert [str(c.value).split("\n")[0] for c in todas[2]][:8] == ["Número de pedido JMS", "ID de viagem", "Data", "Turno",
+                                                                   "Rota carregada", "Código de primeiro segmento",
+                                                                   "Código de dois segmentos", "3 Segmentos"]
     erradas = wb["Erradas 错误"]
-    assert erradas.max_row == 2 + r.incorretas  # título, cabeçalho e só as erradas (as certas não vão)
+    assert erradas.max_row == 2 + r.incorretas  # a aba Erradas continua só com as erradas
     remessas = {erradas.cell(i, 1).value for i in range(3, erradas.max_row + 1)}
     assert remessas == set(res.loc[res["situacao"] == "Incorreta", "remessa"]) and all(isinstance(w, str) for w in remessas)
     rota = wb["Por rota 线路"]
     assert rota.cell(5, 4).number_format == "0.00%" and isinstance(rota.cell(5, 4).value, float)
-    assert len(wb["Painel 面板"]._charts) == 4
+    assert all(not ws._charts for ws in wb.worksheets)  # agora é só tabela, sem gráficos
     # Sem nenhuma errada também gera.
     ok = res[res["situacao"] != "Incorreta"]
     relatorio.gerar_excel(ok, analise.resumir(ok), tabela_padrao())
@@ -448,5 +454,5 @@ def test_app_no_modo_demonstracao():
     assert not at.exception
     assert any("Pronto" in s.value for s in at.success)
     rotulos = [t.label for t in at.tabs]
-    assert any("Remessas erradas (" in t for t in rotulos) and any("Pendências (" in t for t in rotulos)
-    assert len(at.get("plotly_chart")) == 5
+    assert any("Todas as remessas (" in t for t in rotulos) and any("Remessas erradas (" in t for t in rotulos)
+    assert len(at.get("plotly_chart")) == 0  # só tabelas, sem gráficos

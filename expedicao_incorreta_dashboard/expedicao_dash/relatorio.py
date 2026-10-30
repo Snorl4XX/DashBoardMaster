@@ -10,7 +10,7 @@ from datetime import date, datetime, time as dt_time
 import pandas as pd
 import xlsxwriter
 
-from .analise import COLUNAS_ERRADAS, COLUNAS_PENDENTES, INCORRETA, PENDENTE, Resumo
+from .analise import COLUNAS_ERRADAS, COLUNAS_PENDENTES, COLUNAS_TODAS, INCORRETA, PENDENTE, Resumo
 from .rotas import TabelaRotas
 
 VERMELHO, VERMELHO_ESCURO, ROSA, CINZA = "#E60012", "#A5000C", "#FFF1F2", "#6B7280"
@@ -20,9 +20,15 @@ def gerar_excel(df: pd.DataFrame, r: Resumo, rotas: TabelaRotas, *, viagem: str 
     saida = io.BytesIO()
     wb = xlsxwriter.Workbook(saida, {"in_memory": True, "strings_to_numbers": False, "strings_to_urls": False})
     f = _formatos(wb)
-    abas = {"painel": "Painel 面板", "erradas": "Erradas 错误", "rota": "Por rota 线路", "seg": "Por segmento 段码",
-            "turno": "Turno e dia 班次日期", "pend": "Pendências 待确认", "regras": "Regras 路由表"}
-    ws_painel = wb.add_worksheet(abas["painel"])  # primeira aba; preenchida no fim (os gráficos usam as outras)
+    abas = {"resumo": "Resumo 汇总", "todas": "Todas 全部", "erradas": "Erradas 错误", "rota": "Por rota 线路",
+            "seg": "Por segmento 段码", "turno": "Turno e dia 班次日期", "pend": "Pendências 待确认", "regras": "Regras 路由表"}
+    ws_painel = wb.add_worksheet(abas["resumo"])  # primeira aba; preenchida no fim
+
+    # ---------------------------------------------------------------- Todas as remessas (cada uma com os dois segmentos)
+    _ordem = {"Rota errada": 0, "Rota certa": 1, "Pendente": 2}
+    todas = df.assign(_o=df["situacaoTexto"].map(_ordem)).sort_values(["_o", "rota", "remessa"], na_position="last").drop(columns="_o")
+    _tabela(wb, f, abas["todas"], "Todas as remessas com os 3 Segmentos / 全部运单（含段码）", todas, COLUNAS_TODAS,
+            larguras={"remessa": 20, "rota": 18, "rota_certa": 18, "motivo": 48})
 
     # ---------------------------------------------------------------- Erradas
     err = df[df["situacao"] == INCORRETA]
@@ -32,7 +38,7 @@ def gerar_excel(df: pd.DataFrame, r: Resumo, rotas: TabelaRotas, *, viagem: str 
     # ---------------------------------------------------------------- Por rota
     ws = wb.add_worksheet(abas["rota"])
     _titulo(ws, f, "Erros por rota / 按线路统计", 6)
-    lin_rc = _df(ws, f, 2, 0, r.por_rota_carregada, {"Rota carregada": "Rota carregada (caminhão)\n实际装载线路"},
+    _df(ws, f, 2, 0, r.por_rota_carregada, {"Rota carregada": "Rota carregada (caminhão)\n实际装载线路"},
                  "Onde as remessas erradas foram carregadas")
     _df(ws, f, 2, 7, r.por_rota_certa, {"Rota certa": "Rota certa\n应属线路"}, "Para onde elas deviam ter ido")
     ws.set_column(0, 0, 26)
@@ -54,15 +60,15 @@ def gerar_excel(df: pd.DataFrame, r: Resumo, rotas: TabelaRotas, *, viagem: str 
     if len(r.por_segmento):
         topo = (r.por_segmento.assign(**{"Segmento → rota certa": r.por_segmento["Segmento"] + " → " + r.por_segmento["Rota certa"]})
                 .groupby("Segmento → rota certa")["Incorretas"].sum().sort_values(ascending=False).head(15).reset_index())
-    lin_topo = _df(ws, f, 2, 6, topo, {"Segmento → rota certa": "Segmento → rota certa\n段码 → 应属线路"}, "Os 15 segmentos que mais erraram")
+    _df(ws, f, 2, 6, topo, {"Segmento → rota certa": "Segmento → rota certa\n段码 → 应属线路"}, "Os 15 segmentos que mais erraram")
     ws.set_column(6, 6, 30)
     ws.set_column(7, 7, 14)
 
     # ---------------------------------------------------------------- Turno e dia
     ws = wb.add_worksheet(abas["turno"])
     _titulo(ws, f, "Erros por turno e por dia / 按班次和日期统计", 12)
-    lin_turno = _df(ws, f, 2, 0, r.por_turno, {"Turno": "Turno\n班次"}, "Turno (T1 06h–14h · T2 14h–22h · T3 22h–06h)")
-    lin_dia = _df(ws, f, 2, 6, r.por_dia, {"Dia": "Dia\n日期"}, "Quantidade de erros no dia")
+    _df(ws, f, 2, 0, r.por_turno, {"Turno": "Turno\n班次"}, "Turno (T1 06h–14h · T2 14h–22h · T3 22h–06h)")
+    _df(ws, f, 2, 6, r.por_dia, {"Dia": "Dia\n日期"}, "Quantidade de erros no dia")
     _df(ws, f, 2, 12, r.por_hora, {"Hora": "Hora\n小时"}, "Erros por hora do bipe")
     ws.set_column(0, 4, 14)
     ws.set_column(6, 10, 14)
@@ -94,8 +100,8 @@ def gerar_excel(df: pd.DataFrame, r: Resumo, rotas: TabelaRotas, *, viagem: str 
     if arquivo:
         info.append(f"Remessas de: {arquivo}")
     ws.merge_range(2, 0, 2, 13, "   ·   ".join(info), f["nota"])
-    ws.merge_range(3, 0, 3, 13, "Só remessas carregadas na rota ERRADA aparecem neste arquivo; as certas só entram nas contagens. "
-                   "/ 报告仅包含错误运单。", f["nota"])
+    ws.merge_range(3, 0, 3, 13, "A aba \"Todas\" traz cada remessa com os dois segmentos; a aba \"Erradas\" só as carregadas na rota "
+                   "errada. / \"全部\"含每张运单的段码；\"错误\"仅错误运单。", f["nota"])
     cartoes = [("Remessas na planilha\n运单总数", r.total, f["cartao_num"]), ("Conferidas\n已核验", r.analisadas, f["cartao_num"]),
                ("Na rota errada\n错误运单", r.incorretas, f["cartao_num_vermelho"]),
                ("Taxa de erro\n错误率", r.taxa or 0, f["cartao_pct"]), ("Pendentes\n待确认", r.pendentes, f["cartao_num"]),
@@ -106,35 +112,6 @@ def gerar_excel(df: pd.DataFrame, r: Resumo, rotas: TabelaRotas, *, viagem: str 
     ws.set_row(5, 30)
     ws.set_row(6, 22)
     ws.set_row(7, 22)
-    graficos = [
-        ("column", abas["turno"], lin_turno, len(r.por_turno), 0, 2, "Remessas erradas por turno / 按班次", "B10", False),
-        ("bar", abas["rota"], lin_rc, min(15, len(r.por_rota_carregada)), 0, 2, "Erradas por rota carregada / 按实际线路", "H10", False),
-        ("bar", abas["seg"], lin_topo, len(topo), 6, 7, "Segmentos errados → rota certa / 错误段码", "B27", False),
-        ("column", abas["turno"], lin_dia, len(r.por_dia), 6, 8, "Erros no dia / 每日错误数", "H27", True),
-    ]
-    for tipo, aba, lin0, n, col_cat, col_val, titulo, onde, datas in graficos:
-        if n < 1:
-            continue
-        g = wb.add_chart({"type": tipo})
-        g.add_series({"name": titulo, "categories": [aba, lin0, col_cat, lin0 + n - 1, col_cat],
-                      "values": [aba, lin0, col_val, lin0 + n - 1, col_val],
-                      "fill": {"color": VERMELHO}, "border": {"none": True}, "gap": 60,
-                      "data_labels": {"value": True, "font": {"color": "#111827", "size": 9}}})
-        g.set_title({"name": titulo, "name_font": {"size": 11, "bold": True, "color": "#111827"}})
-        g.set_legend({"none": True})
-        g.set_chartarea({"border": {"color": "#E5E7EB"}})
-        eixo_valor = {"major_gridlines": {"visible": True, "line": {"color": "#EEF0F3"}}, "num_font": {"color": CINZA, "size": 9}}
-        eixo_cat = {"num_font": {"color": "#374151", "size": 9}}
-        if tipo == "bar":
-            g.set_y_axis({**eixo_cat, "reverse": True})
-            g.set_x_axis(eixo_valor)
-        else:
-            if datas:  # mostra a data, não o número de série
-                eixo_cat = {**eixo_cat, "date_axis": True, "num_format": "dd/mm", "base_unit": "days"}
-            g.set_x_axis(eixo_cat)
-            g.set_y_axis(eixo_valor)
-        g.set_size({"width": 560, "height": 300})
-        ws.insert_chart(onde, g, {"x_offset": 0, "y_offset": 6})
     if not r.incorretas:
         ws.merge_range(9, 1, 11, 12, "Nenhuma remessa na rota errada entre as conferidas. / 未发现错误运单。", f["ok"])
     for folha in wb.worksheets():  # impressão: paisagem, uma página de largura

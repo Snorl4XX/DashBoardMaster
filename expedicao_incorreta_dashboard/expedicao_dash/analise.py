@@ -18,6 +18,7 @@ from .rotas import TabelaRotas
 from .texto import SEM_TURNO, TURNOS
 
 INCORRETA, CORRETA, PENDENTE = "Incorreta", "Correta", "Pendente"
+SIT_TEXTO = {INCORRETA: "Rota errada", CORRETA: "Rota certa", PENDENTE: "Pendente"}
 COLS_DETALHES = list(DETALHES.values())
 
 # Motivos das pendências (o texto vai para a tela e para o Excel).
@@ -97,6 +98,7 @@ def classificar(df: pd.DataFrame, rotas: TabelaRotas) -> pd.DataFrame:
         motivo.append(m)
     out["rota_tabela"], out["rota_certa"], out["tipo_rota"], out["confere_por"] = rt, certa, tipo, metodo
     out["situacao"], out["pendencia"], out["motivo"] = sit, pend, motivo
+    out["situacaoTexto"] = [SIT_TEXTO.get(s, s) for s in sit]
     return out
 
 
@@ -202,4 +204,19 @@ COLUNAS_PENDENTES = {
     "segundo": ("Código de dois segmentos", "二段码"),
     "pendencia": ("Pendência", "待确认原因"),
     "motivo": ("Detalhe", "说明"),
+}
+
+# Colunas da tabela com TODAS as remessas preenchidas com os dois segmentos (tela e Excel).
+COLUNAS_TODAS = {
+    "remessa": ("Número de pedido JMS", "运单号"),
+    "viagem": ("ID de viagem", "车次ID"),
+    "data": ("Data", "日期"),
+    "turno": ("Turno", "班次"),
+    "rota": ("Rota carregada", "实际装载线路"),
+    "primeiro": ("Código de primeiro segmento", "一段码"),
+    "segundo": ("Código de dois segmentos", "二段码"),
+    "terceiro": ("3 Segmentos", "三段码"),
+    "rota_certa": ("Rota certa", "应属线路"),
+    "situacaoTexto": ("Situação", "状态"),
+    "motivo": ("Observação", "说明"),
 }

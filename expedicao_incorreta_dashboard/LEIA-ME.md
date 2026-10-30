@@ -1,6 +1,6 @@
 # J&T · Expedição Incorreta (错误发运分析) — painel em Python
 
-Você joga a planilha de remessas (com a rota em que cada uma foi carregada). O app busca no JMS o bloco **3 Segmentos** de cada remessa, compara com a **planilha de rotas** das docas e mostra **só as remessas que foram para a rota errada**: quantidade, porcentagem, gráficos (turno, rota, segmento, dia), tabela e Excel.
+Você joga a planilha de remessas (com a rota em que cada uma foi carregada). O app busca no JMS o bloco **3 Segmentos** de cada remessa, **preenche cada remessa com os dois segmentos** (Código de primeiro e de dois segmentos) e mostra **tudo em tabela** — comparando com a **planilha de rotas** das docas para apontar as que foram para a rota errada. Sem gráficos: só tabelas e Excel.
 
 Tudo em Python (Streamlit + Plotly), sem JavaScript. Roda no seu computador e abre no navegador em `http://localhost:8503`.
 
@@ -55,35 +55,24 @@ Precisa do Python 3.10 ou mais novo.
 - Pode enviar várias planilhas de uma vez.
 - O que vier fica guardado como se tivesse vindo da consulta, e o resultado (passo 3) já usa.
 
-**3 · Resultado**
-- **Cartões:**
-  - remessas;
-  - na rota errada;
-  - taxa de erro (erradas ÷ conferidas);
-  - turno com mais erros;
-  - pendentes.
-- **Painel:**
-  - erros por turno (T1 06h–14h · T2 14h–22h · T3 22h–06h), com a % de cada;
-  - onde foram carregadas (e a taxa de erro de cada rota);
-  - **segmentos errados → rota certa** (cor = rota em que foi carregado);
-  - erros no dia;
-  - erros por hora.
-- **Remessas erradas:** a tabela, com filtro por rota carregada, rota certa e turno, e busca. Traz também os **Detalhes da encomenda**: PDD de saída, Município de Origem, SC Origem, Base Destino, Município de Destino e SC Destino.
-- **Por rota e segmento:** quantidade e porcentagem de cada rota e de cada segmento.
+**3 · Resultado** — tudo em **tabela**, sem gráficos.
+- **Cartões** (só os números): remessas, na rota errada, taxa de erro (erradas ÷ conferidas), turno com mais erros, pendentes.
+- **Todas as remessas:** a tabela principal, com **cada remessa preenchida com os dois segmentos** (Código de primeiro e de dois segmentos, 3 Segmentos), a rota carregada, a rota certa e a situação (rota certa / errada / pendente). Filtro por situação, rota e turno, e busca.
+- **Remessas erradas:** só as que foram para a rota errada, com filtro e busca. Traz também os **Detalhes da encomenda**: PDD de saída, Município de Origem, SC Origem, Base Destino, Município de Destino e SC Destino.
+- **Por rota e segmento:** quantidade e porcentagem de cada rota e de cada segmento (em tabela).
 - **Pendências:** o que não deu para conferir, e por quê.
 - **Planilha de rotas:**
   - as regras em uso;
   - como o app entendeu cada nome de rota da sua planilha.
-- **Baixar Excel** (português e mandarim). Abas:
-  - Painel (cartões e gráficos);
+- **Baixar Excel** (português e mandarim), só com tabelas. Abas:
+  - Resumo (os números);
+  - **Todas** (cada remessa com os dois segmentos);
   - Erradas;
   - Por rota;
   - Por segmento;
   - Turno e dia;
   - Pendências;
   - Regras.
-
-  **As remessas certas não aparecem**: só entram nas contagens.
 
 ## Como o app confere
 

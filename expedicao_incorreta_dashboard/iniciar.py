@@ -28,7 +28,7 @@ REQUISITOS = PASTA / "requirements.txt"
 PORTA = 8503
 ENDERECO = f"http://localhost:{PORTA}"
 # módulo → pacote do pip
-PACOTES = {"streamlit": "streamlit", "pandas": "pandas", "plotly": "plotly", "openpyxl": "openpyxl", "requests": "requests",
+PACOTES = {"streamlit": "streamlit", "pandas": "pandas", "openpyxl": "openpyxl", "requests": "requests",
            "xlrd": "xlrd", "xlsxwriter": "XlsxWriter"}
 GET_PIP = "https://bootstrap.pypa.io/get-pip.py"
 

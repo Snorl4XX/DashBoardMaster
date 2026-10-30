@@ -17,7 +17,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from expedicao_dash import VERSAO, analise, demo, importar, planilha
@@ -32,8 +31,6 @@ DADOS = PASTA / "data"
 ROTAS_SALVA = DADOS / "planilha_de_rotas.xlsx"  # a que o usuário salvou como padrão
 ROTAS_24_10 = DADOS / "ajuste_rotas_docas_24_outubro.xlsx"
 VERMELHO = "#E60012"
-CORES_TURNO = {"T1": "#E60012", "T2": "#2A78D6", "T3": "#4A3AA7", SEM_TURNO: "#9CA3AF"}
-PALETA = ["#E60012", "#2A78D6", "#4A3AA7", "#F59E0B", "#0EA5A4", "#DB2777", "#65A30D", "#7C3AED", "#EA580C", "#0284C7", "#9CA3AF"]
 _VERSAO_ST = tuple(int(x) for x in re.findall(r"\d+", st.__version__)[:2])
 
 
@@ -109,21 +106,6 @@ def cartoes(itens: list[tuple[str, str, str, str, str]]) -> None:
         f'<div class="s">{s}</div></div>' for r, z, v, s, c in itens) + "</div>", unsafe_allow_html=True)
 
 
-def estilo(fig: go.Figure, altura: int = 330, legenda: bool = False) -> go.Figure:
-    fig.update_layout(height=altura, margin=dict(l=8, r=16, t=46, b=8), paper_bgcolor="white", plot_bgcolor="white",
-                      font=dict(family="Inter, Segoe UI, Arial, sans-serif", size=12, color="#1F2937"),
-                      title=dict(font=dict(size=15, color="#111827"), x=0.01, xanchor="left"), showlegend=legenda,
-                      legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1, title=None, font=dict(size=11)),
-                      hoverlabel=dict(bgcolor="white", font_size=12), bargap=0.28, separators=",.")
-    fig.update_xaxes(gridcolor="#EEF0F3", zeroline=False, linecolor="#E5E7EB")
-    fig.update_yaxes(gridcolor="#EEF0F3", zeroline=False, linecolor="#E5E7EB")
-    return fig
-
-
-def grafico(fig: go.Figure) -> None:
-    st.plotly_chart(fig, config={"displayModeBar": False, "locale": "pt-BR"}, **_largura(st.plotly_chart))
-
-
 def portao() -> None:
     """Senha (opcional) para abrir pela rede: variável DASHBOARD_PASSWORD."""
     senha = os.getenv("DASHBOARD_PASSWORD", "")
@@ -180,77 +162,6 @@ def rotas_em_uso(subida) -> tuple[TabelaRotas, str]:
         if arq.exists():
             return ler_planilha_rotas(arq.read_bytes(), arq.name), "pasta"
     return tabela_padrao(), "embutida"
-
-
-# ------------------------------------------------------------------ gráficos
-def g_turno(r: analise.Resumo) -> go.Figure:
-    t = r.por_turno
-    fig = go.Figure(go.Bar(
-        x=t["Turno"], y=t["Incorretas"], marker_color=[CORES_TURNO.get(x, "#9CA3AF") for x in t["Turno"]],
-        text=[f"<b>{fmt_int(i)}</b>  ·  {fmt_pct(p)}" if i else "0" for i, p in zip(t["Incorretas"], t["% dos erros"])],
-        textposition="outside", cliponaxis=False,
-        customdata=list(zip(t["Conferidas"], [fmt_pct(x) for x in t["Taxa de erro"]])),
-        hovertemplate="<b>%{x}</b><br>Na rota errada: %{y}<br>Conferidas: %{customdata[0]}<br>Taxa de erro: %{customdata[1]}<extra></extra>"))
-    fig.update_layout(title="Remessas erradas por turno · 班次")
-    fig.update_yaxes(title=None, range=[0, max(1, int(t["Incorretas"].max())) * 1.2])
-    fig.add_annotation(text="T1 06h–14h · T2 14h–22h · T3 22h–06h", xref="paper", yref="paper", x=0, y=1.07, showarrow=False,
-                       font=dict(size=11, color="#6B7280"), xanchor="left")
-    return estilo(fig)
-
-
-def g_rota(r: analise.Resumo) -> go.Figure:
-    t = r.por_rota_carregada.head(15).iloc[::-1]
-    fig = go.Figure(go.Bar(
-        y=t["Rota carregada"], x=t["Incorretas"], orientation="h", marker_color=VERMELHO,
-        text=[f"<b>{fmt_int(i)}</b>  ·  {fmt_pct(tx)} da rota" for i, tx in zip(t["Incorretas"], t["Taxa de erro"])],
-        textposition="outside", cliponaxis=False, customdata=t["Conferidas"],
-        hovertemplate="<b>%{y}</b><br>Na rota errada: %{x}<br>Conferidas na rota: %{customdata}<extra></extra>"))
-    fig.update_layout(title="Onde foram carregadas as remessas erradas · 实际装载线路")
-    fig.update_xaxes(title=None, range=[0, max(1, int(t["Incorretas"].max())) * 1.45])  # espaço para o texto da barra
-    return estilo(fig, altura=max(300, 70 + 34 * len(t)))
-
-
-def g_segmento(r: analise.Resumo) -> go.Figure:
-    s = r.por_segmento.copy()
-    s["rotulo"] = s["Segmento"] + "  →  " + s["Rota certa"]
-    topo = s.groupby("rotulo")["Incorretas"].sum().sort_values(ascending=False).head(15)
-    s = s[s["rotulo"].isin(topo.index)]
-    ordem = list(topo.index[::-1])
-    fig = go.Figure()
-    for i, rota in enumerate(sorted(s["Rota carregada"].unique())):
-        p = s[s["Rota carregada"] == rota]
-        fig.add_trace(go.Bar(y=p["rotulo"], x=p["Incorretas"], orientation="h", name=rota, marker_color=PALETA[i % len(PALETA)],
-                             hovertemplate=f"<b>%{{y}}</b><br>Carregadas em {html.escape(rota)}: %{{x}}<extra></extra>"))
-    fig.update_layout(barmode="stack", title="Segmentos errados · 错误段码  (segmento → rota certa; cor = onde foi carregado)")
-    fig.update_yaxes(categoryorder="array", categoryarray=ordem)
-    for rot, tot in topo.items():
-        fig.add_annotation(y=rot, x=tot, text=f" {fmt_int(tot)}", showarrow=False, xanchor="left", font=dict(size=11, color="#111827"))
-    return estilo(fig, altura=max(320, 90 + 30 * len(topo)), legenda=True)
-
-
-def g_dia(r: analise.Resumo) -> go.Figure:
-    d = r.por_dia
-    dias = [x.strftime("%d/%m") for x in d["Dia"]]
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=dias, y=d["Incorretas"], name="Na rota errada", marker_color=VERMELHO, text=d["Incorretas"],
-                         textposition="outside", cliponaxis=False,
-                         hovertemplate="<b>%{x}</b><br>Na rota errada: %{y}<extra></extra>"))
-    fig.add_trace(go.Scatter(x=dias, y=[(x or 0) * 100 for x in d["Taxa de erro"]], name="Taxa de erro (%)", yaxis="y2",
-                             mode="lines+markers", line=dict(color="#111827", width=2), marker=dict(size=7),
-                             hovertemplate="<b>%{x}</b><br>Taxa de erro: %{y:.1f}%<extra></extra>"))
-    fig.update_layout(title="Erros no dia · 每日错误数", yaxis2=dict(overlaying="y", side="right", showgrid=False, ticksuffix="%",
-                                                                   rangemode="tozero"))
-    fig.update_yaxes(rangemode="tozero")
-    return estilo(fig, legenda=True)
-
-
-def g_hora(r: analise.Resumo) -> go.Figure:
-    h = r.por_hora
-    cores = [CORES_TURNO["T1"] if 6 <= i < 14 else CORES_TURNO["T2"] if 14 <= i < 22 else CORES_TURNO["T3"] for i in range(24)]
-    fig = go.Figure(go.Bar(x=h["Hora"], y=h["Incorretas"], marker_color=cores,
-                           hovertemplate="<b>%{x}</b><br>Na rota errada: %{y}<extra></extra>"))
-    fig.update_layout(title="Erros por hora do bipe · 小时 (cor = turno)")
-    return estilo(fig, altura=260)
 
 
 # ------------------------------------------------------------------ busca no JMS
@@ -354,8 +265,8 @@ def main() -> None:
     chips = [f"🗺️ {html.escape(rotas.nome)}", "🧪 Modo demonstração" if modo_demo else ("🔑 AuthToken colado" if token else "🔑 Sem AuthToken")]
     st.markdown(
         '<div class="jt-hero"><div class="sobre">J&T Express · SP GRU</div><div class="titulo">Expedição Incorreta<span>错误发运分析</span></div>'
-        "<p>Jogue a planilha de remessas: o app busca o <b>3 Segmentos</b> de cada uma no JMS, compara com a planilha de rotas e mostra "
-        "<b>só as que foram para a rota errada</b>.</p>"
+        "<p>Jogue a planilha de remessas: o app busca o <b>3 Segmentos</b> no JMS, <b>preenche cada remessa com os dois segmentos</b> e "
+        "mostra tudo em tabela — comparando com a planilha de rotas para apontar as que foram para a rota errada.</p>"
         '<div class="jt-chips">' + "".join(f'<span class="jt-chip">{c}</span>' for c in chips) + "</div></div>", unsafe_allow_html=True)
 
     # ---------------------------------------------------------------- 1 · remessas
@@ -500,7 +411,7 @@ def main() -> None:
     # ---------------------------------------------------------------- 3 · resultado
     res = analise.classificar(analise.juntar_jms(tabela, consultas), rotas)
     r = analise.resumir(res)
-    passo(3, "Resultado", "结果", "só as remessas na rota errada")
+    passo(3, "Resultado", "结果", "cada remessa com os dois segmentos (em tabela)")
     c_info, c_baixar = st.columns([3, 1])
     with c_baixar:
         excel = gerar_excel(res, r, rotas, viagem=viagem or ", ".join(sorted(set(tabela["viagem"]) - {""}))[:80], arquivo=nome_arq)
@@ -519,28 +430,10 @@ def main() -> None:
         ("Turno com mais erros", "最多错误班次", _pior_turno(r), _pior_turno_sub(r), ""),
         ("Pendentes", "待确认", fmt_int(r.pendentes), "não deu para conferir", "aviso" if r.pendentes else "bom"),
     ])
-    abas_res = st.tabs(["📊  Painel", f"❌  Remessas erradas ({fmt_int(r.incorretas)})", "🚚  Por rota e segmento",
-                        f"⏳  Pendências ({fmt_int(r.pendentes)})", "🗺️  Planilha de rotas"])
+    abas_res = st.tabs([f"📋  Todas as remessas ({fmt_int(r.total)})", f"❌  Remessas erradas ({fmt_int(r.incorretas)})",
+                        "🚚  Por rota e segmento", f"⏳  Pendências ({fmt_int(r.pendentes)})", "🗺️  Planilha de rotas"])
     with abas_res[0]:
-        if not r.analisadas:
-            st.info("Nenhuma remessa conferida ainda: busque o 3 Segmentos no JMS (passo 2) e confira a rota carregada (passo 1).")
-        elif not r.incorretas:
-            st.success(f"Nenhuma remessa na rota errada entre as {fmt_int(r.analisadas)} conferidas. 🎉")
-        else:
-            c1, c2 = st.columns(2)
-            with c1:
-                grafico(g_turno(r))
-            with c2:
-                grafico(g_rota(r))
-            grafico(g_segmento(r))
-            c1, c2 = st.columns(2)
-            with c1:
-                if len(r.por_dia):
-                    grafico(g_dia(r))
-                else:
-                    st.info("A planilha não tem a data do bipe: sem o gráfico por dia.")
-            with c2:
-                grafico(g_hora(r))
+        tabela_todas(res)
     with abas_res[1]:
         tabela_erradas(res)
     with abas_res[2]:
@@ -566,16 +459,51 @@ def _pior_turno_sub(r: analise.Resumo) -> str:
     return f"{fmt_int(lin['Incorretas'])} erradas · {fmt_pct(lin['% dos erros'])} dos erros"
 
 
+def tabela_todas(res: pd.DataFrame) -> None:
+    """Todas as remessas, cada uma preenchida com os dois segmentos (1º e 2º) e a situação (rota certa / errada / pendente)."""
+    todas = res.copy()
+    if todas.empty:
+        st.info("Nenhuma remessa. Comece pela planilha de remessas (passo 1).")
+        return
+    sits = [s for s in ("Rota errada", "Rota certa", "Pendente") if s in set(todas["situacaoTexto"])]
+    c1, c2, c3, c4 = st.columns([1.1, 1.3, 0.9, 1.4])
+    f_si = c1.multiselect("Situação", sits, placeholder="todas", key="si_todas")
+    f_rc = c2.multiselect("Rota carregada", sorted(x for x in todas["rota"].unique() if x), placeholder="todas", key="rc_todas")
+    f_tu = c3.multiselect("Turno", [t for t in ("T1", "T2", "T3", SEM_TURNO) if t in set(todas["turno"])], placeholder="todos", key="tu_todas")
+    busca = c4.text_input("Localizar", placeholder="remessa, segmento, rota…", key="busca_todas")
+    if f_si:
+        todas = todas[todas["situacaoTexto"].isin(f_si)]
+    if f_rc:
+        todas = todas[todas["rota"].isin(f_rc)]
+    if f_tu:
+        todas = todas[todas["turno"].isin(f_tu)]
+    if busca.strip():
+        b = busca.strip().upper()
+        todas = todas[todas.apply(lambda l: any(b in str(l[c]).upper() for c in ("remessa", "primeiro", "segundo", "terceiro",
+                                                                                  "rota", "rota_certa", "viagem")), axis=1)]
+    ordem = {"Rota errada": 0, "Rota certa": 1, "Pendente": 2}  # erradas e certas (com segmento) primeiro; pendentes por último
+    todas = todas.assign(_o=todas["situacaoTexto"].map(ordem)).sort_values(["_o", "rota", "remessa"], na_position="last").drop(columns="_o")
+    campos = [c for c in analise.COLUNAS_TODAS if c in todas.columns]
+    vis = todas[campos].rename(columns={c: analise.COLUNAS_TODAS[c][0] for c in campos})
+    cfg = {analise.COLUNAS_TODAS[c][0]: st.column_config.Column(help=analise.COLUNAS_TODAS[c][1]) for c in campos}
+    cfg["Data"] = st.column_config.DateColumn("Data", format="DD/MM/YYYY")
+    cfg["Observação"] = st.column_config.TextColumn("Observação", width="large")
+    com = int((todas["primeiro"] != "").sum())
+    st.caption(f"{fmt_int(len(vis))} remessas · {fmt_int(com)} já com o código de segmento" +
+               (f" · {fmt_int(len(vis) - com)} ainda sem (busque no passo 2)" if len(vis) - com else ""))
+    st.dataframe(vis, hide_index=True, column_config=cfg, height=min(680, 38 + 35 * max(1, len(vis))), **_largura(st.dataframe))
+
+
 def tabela_erradas(res: pd.DataFrame) -> None:
     err = res[res["situacao"] == analise.INCORRETA].copy()
     if err.empty:
         st.success("Nenhuma remessa na rota errada.")
         return
     c1, c2, c3, c4 = st.columns([1.2, 1.2, 0.9, 1.4])
-    f_rc = c1.multiselect("Rota carregada", sorted(err["rota"].unique()), placeholder="todas")
-    f_ce = c2.multiselect("Rota certa", sorted(err["rota_certa"].unique()), placeholder="todas")
-    f_tu = c3.multiselect("Turno", [t for t in ("T1", "T2", "T3", SEM_TURNO) if t in set(err["turno"])], placeholder="todos")
-    busca = c4.text_input("Localizar", placeholder="remessa, segmento, base…")
+    f_rc = c1.multiselect("Rota carregada", sorted(err["rota"].unique()), placeholder="todas", key="rc_err")
+    f_ce = c2.multiselect("Rota certa", sorted(err["rota_certa"].unique()), placeholder="todas", key="ce_err")
+    f_tu = c3.multiselect("Turno", [t for t in ("T1", "T2", "T3", SEM_TURNO) if t in set(err["turno"])], placeholder="todos", key="tu_err")
+    busca = c4.text_input("Localizar", placeholder="remessa, segmento, base…", key="busca_err")
     if f_rc:
         err = err[err["rota"].isin(f_rc)]
     if f_ce:
