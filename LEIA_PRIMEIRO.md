@@ -1,8 +1,30 @@
-# J&T DASHMASTER V4.17 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.17.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.17.1 — Link público (Tailscale): a janela não fecha mais sozinha
+
+**O que acontecia:** "o Tailscale não quer abrir o terminal, ele está fechando sozinho".
+
+**Por quê:**
+- O `tailscale.exe` (pasta `C:\Program Files\Tailscale`) é um comando, não um programa com tela. Dois cliques nele abrem
+  uma janela preta que fecha na hora. O programa Tailscale também não abre janela: ele fica num ícone perto do relógio.
+- No atalho do LEIA_NODE (`tailscale.exe funnel 3000`), qualquer erro fechava a janela antes de dar para ler.
+
+**Agora (`node\link-publico.bat`):**
+- A janela **nunca fecha sozinha**. Ela confere em 4 passos:
+  1. se o Tailscale está instalado;
+  2. em que porta o painel está e se ele está aberto;
+  3. se o Tailscale está ligado e com a conta. Se não estiver, tenta ligar e mostra o link de login;
+  4. liga o Funnel e mostra o link `https://….ts.net`.
+- Se algo faltar, ela diz o que fazer e espera uma tecla.
+- O atalho sem `.bat` do LEIA_NODE agora usa `cmd /k`, que deixa a janela aberta.
+- Nenhuma mudança nos painéis: só o `link-publico.bat` e o passo a passo (`node\LEIA_NODE.md`, seção 5).
+
+**Atualizar (Node.js):** extraia o `JT_DASHMASTER_V4_17_1_NODE.zip` em `C:\` (Substituir) e dê dois cliques em
+`C:\dashmaster\node\link-publico.bat`. O painel do Apps Script não muda.
 
 ## V4.17 — Deslacre da linha troncal e da linha secundária no painel principal
 

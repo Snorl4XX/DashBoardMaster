@@ -108,8 +108,14 @@ Sozinho, o servidor só abre na rede da base. Para ter um **link `https://` que 
 
 1. Instale o Tailscale neste computador: https://tailscale.com/download/windows.
 2. Entre com uma conta Google, Microsoft ou e-mail.
-3. Dê dois cliques em **`link-publico.bat`** (pasta `node`).
-   - Na primeira vez, ele mostra um link para **autorizar o Funnel** na sua conta. Abra o link, autorize e rode o `link-publico.bat` de novo.
+   - **O Tailscale não abre janela nem terminal.** Ele fica num **ícone perto do relógio** (clique na setinha **^** ao lado
+     do relógio). É por esse ícone que se entra na conta (**Log in**).
+   - Dar dois cliques no `tailscale.exe` (pasta `C:\Program Files\Tailscale`) abre uma janela preta que **fecha sozinha
+     na hora**. Isso é normal: ele é um comando, não um programa com tela. Use o `link-publico.bat`.
+3. Dê dois cliques em **`link-publico.bat`** (pasta `node`, ex.: `C:\dashmaster\node`).
+   - A janela **não fecha sozinha** (V4.17.1). Ela confere, em 4 passos, se o Tailscale está instalado, se o painel está
+     aberto, se o Tailscale está ligado com a conta e liga o Funnel. Se algo faltar, ela diz o que fazer e espera uma tecla.
+   - Na primeira vez, ele mostra um link para **autorizar o Funnel** na sua conta. Abra o link, clique em **Enable** e espere na janela.
    - Se pedir permissão, clique com o botão direito no arquivo → **Executar como administrador**.
 4. O `link-publico.bat` mostra o endereço, algo como **`https://nome-do-computador.nome-da-conta.ts.net`**. Esse é o link público do painel.
 5. No `config.json`, coloque esse endereço em `"linkPublico"` e escolha uma **`"senha"`**. Depois reinicie o servidor.
@@ -118,7 +124,16 @@ Sozinho, o servidor só abre na rede da base. Para ter um **link `https://` que 
 
 Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.exe" funnel reset`.
 
-**Sem o `link-publico.bat`** (arquivos `.bat` bloqueados): crie um atalho com `"C:\Program Files\Tailscale\tailscale.exe" funnel 3000` e dê dois cliques. A janela mostra o link `https://….ts.net` e precisa ficar aberta (coloque o atalho também em `shell:startup`). Na primeira vez, ela mostra um endereço para ativar o Funnel na sua conta do Tailscale.
+**Sem o `link-publico.bat`** (arquivos `.bat` bloqueados): crie um atalho (botão direito na Área de Trabalho → Novo → Atalho) com
+`C:\Windows\System32\cmd.exe /k ""C:\Program Files\Tailscale\tailscale.exe" funnel --bg 3000"` e dê dois cliques.
+O `cmd /k` deixa a janela aberta depois do comando, para dar para ler o link `https://….ts.net` ou o erro (sem ele, a janela
+fecha sozinha). Na primeira vez, ela mostra um endereço para ativar o Funnel na sua conta do Tailscale.
+
+**A janela do Tailscale fecha sozinha / não abre:**
+- Abriu o `tailscale.exe` direto? Ele fecha na hora; é normal. Use o `link-publico.bat` (ou o atalho com `cmd /k` acima).
+- O programa Tailscale (Menu Iniciar) não abre janela: procure o ícone perto do relógio (setinha **^**).
+- O `link-publico.bat` de uma versão antiga fechou? Use o da V4.17.1 ou mais nova: ele não fecha. Se aparecer um erro, tire um
+  print da janela e mande.
 
 **Segurança:**
 - A tela **Configurações nunca abre pelo link público**, mesmo sem `senhaConfig`. O servidor reconhece pedidos vindos de túnel, e a tela só abre no próprio computador (ou com `senhaConfig`).
