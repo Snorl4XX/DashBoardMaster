@@ -612,7 +612,7 @@ function upsertAggCounts_(indicator, date, c, total) {
  */
 function groupedShiftAgg_(indicator, date, ds) {
   const cfg = getIndicatorConfig_(indicator);
-  // Entrada = nome de lista (column/columnSets) ou {name, column, where} (Fluxo de Lotes: Chegada/Partida da lista).
+  // Entrada = nome de lista (column/columnSets) ou {name, column, where} (ex.: só as linhas com um valor de um campo da lista).
   const ents = (cfg.shiftAggColumns || []).map(e => typeof e === 'string' ? {name: e, column: e} : e);
   if (!ents.length || !ds || !ds.n || !ds.cols || !ds.cols.column || !ds.cols.shift) return;
   const acc = {};

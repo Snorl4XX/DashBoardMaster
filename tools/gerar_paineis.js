@@ -39,10 +39,11 @@ Este pacote é o **painel principal**. Ele mostra:
 - Falta de Bipagem no Recebimento e na Expedição;
 - Expedição SC → SC e SC → DC;
 - Avaria e Sem Movimentação;
+- Criação de Lotes (sacas ecológicas e não ecológicas) — V4.18;
 - Deslacre (linha secundária) e Deslacre (linha troncal) — V4.17;
 - Resultados.
 
-Retirado (os dados antigos ficam na planilha): Fluxo de Lotes (V4.7). \`REATIVAR_PAINEIS\` = \`lot_flow\` traz de volta. O Deslacre (retirado na V4.12.3) voltou na V4.17, junto com o da linha troncal.
+Painéis que tinham sido retirados e voltaram: Criação de Lotes (antes "Fluxo de Lotes", retirado na V4.7, de volta na V4.18) e Deslacre (retirado na V4.12.3, de volta na V4.17, junto com o da linha troncal). Não precisa de \`REATIVAR_PAINEIS\`.
 
 Desde a V4.8, Envio Errado, Triagem Errada e Falta de Bipagem na Expedição usam as docas e rotas de carregamento da tabela de 11/10 (tabelas em \`DOCKS_EXPEDICAO\` no Config.gs).
 

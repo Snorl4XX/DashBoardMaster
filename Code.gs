@@ -1033,12 +1033,12 @@ function diagnosticarRecebimento(date) {
 }
 
 /**
- * Diagnóstico só do Fluxo de Lotes (V3.23). Rode no editor (▶ Executar) e copie o texto do "Registro de execução" —
+ * Diagnóstico só da Criação de Lotes (antes "Fluxo de Lotes"; V3.23). Rode no editor (▶ Executar) e copie o texto do "Registro de execução" —
  * ele não mostra AuthToken, Cookie nem número de saca. Testa no JMS, sem gravar nada no banco:
  *  - o resumo do dia (sdploopbagBuildbagCount: colunas da tabela principal e as calculadas "o restante");
  *  - a lista do número vermelho "Total de pacotes construídos" (packageSum): total × resumo, página aceita, campos;
  *  - a lista INTEIRA do dia (poucas páginas): ecológicas pelo campo isLoopPag × "Número do saco ecológico" do resumo,
- *    pacotes somados × "Número total de conteúdo do pacote", 进港/出港 (Chegada/Partida) e turnos;
+ *    pacotes somados × "Número total de conteúdo do pacote", 进港/出港 (Entrada/Saída de porto) e turnos;
  *  - as listas das colunas ecológicas e não ecológicas (loopSum / noloopSum) só para conferência;
  * e mostra a situação do download dos últimos dias e os últimos avisos. `date` (opcional, AAAA-MM-DD): padrão = ontem.
  */
@@ -1050,7 +1050,7 @@ function diagnosticarLotes(date) {
   const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
   const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
   const cred = authConfigSafe_();
-  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico do Fluxo de Lotes — dia ' + humanDatePt_(d) + ' · base ' + centerName_() + ' (' + centerCode_() + ')');
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico da Criação de Lotes — dia ' + humanDatePt_(d) + ' · base ' + centerName_() + ' (' + centerCode_() + ')');
   add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · conta Google: ' + googlePlan_() + ' (tarefa leve, fora do teto diário)');
   (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
   try {
@@ -1100,14 +1100,14 @@ function diagnosticarLotes(date) {
       const cnt = f => uniq.filter(f).length, sumI = l => l.reduce((a, x) => a + (Number(x.items) || 0), 0);
       const eco = uniq.filter(x => x.sackType === 'Ecológica'), sites = {}, ports = {}, sacks = {};
       all.forEach(x => { sites[String(x.proxySiteName || '—')] = 1; ports[String(x.portName || '—')] = (ports[String(x.portName || '—')] || 0) + 1; sacks[String(x.isLoopPag || '—')] = (sacks[String(x.isLoopPag || '—')] || 0) + 1; });
-      out.listaInteira = {sacas: uniq.length, ecologicas: eco.length, pacotes: sumI(uniq), pacotesEco: sumI(eco), chegada: cnt(x => x.port === 'Chegada'), partida: cnt(x => x.port === 'Partida')};
+      out.listaInteira = {sacas: uniq.length, ecologicas: eco.length, pacotes: sumI(uniq), pacotesEco: sumI(eco), entrada: cnt(x => x.port === 'Entrada'), saida: cnt(x => x.port === 'Saída de porto')};
       const ok = (a, b) => b === null || b === undefined || isNaN(b) ? '' : Number(a) === Number(b) ? ' ✓' : ' ✗ resumo ' + fmt(b);
       add('  lista inteira: ' + fmt(uniq.length) + ' sacas (' + fmt(all.length - uniq.length) + ' repetidas) · bases na lista: ' + Object.keys(sites).join(', '));
       add('  ecológicas pelo campo isLoopPag: ' + fmt(eco.length) + ok(eco.length, day && day.loopSum) + ' · valores de isLoopPag: ' +
         Object.keys(sacks).map(k => k + ' ' + fmt(sacks[k])).join(', '));
       add('  pacotes (soma de "Quantidade de itens na embalagem"): ' + fmt(sumI(uniq)) + ok(sumI(uniq), day && day.waybillSum) + ' · na ecológica ' + fmt(sumI(eco)) + ok(sumI(eco), day && day.loopWaybillSum));
-      add('  tipo de entrada e saída: ' + Object.keys(ports).map(k => k + ' ' + fmt(ports[k])).join(' · ') + ' → Chegada (进港) ' + fmt(out.listaInteira.chegada) +
-        ' · Partida (出港) ' + fmt(out.listaInteira.partida));
+      add('  tipo de entrada e saída: ' + Object.keys(ports).map(k => k + ' ' + fmt(ports[k])).join(' · ') + ' → Entrada (进港) ' + fmt(out.listaInteira.entrada) +
+        ' · Saída de porto (出港) ' + fmt(out.listaInteira.saida));
       add('  turnos pelo tempo de ensacamento: T1 ' + fmt(cnt(x => x.shift === 'T1')) + ' · T2 ' + fmt(cnt(x => x.shift === 'T2')) + ' · T3 ' + fmt(cnt(x => x.shift === 'T3')) +
         (cnt(x => !x.shift) ? ' · sem horário ' + fmt(cnt(x => !x.shift)) : ''));
     }
@@ -1135,7 +1135,7 @@ function diagnosticarLotes(date) {
     if (logs.length) {
       add('Últimos avisos do LOG (' + key + '):');
       logs.forEach(r => add('  ' + (toIsoTimestamp_(r[0]) || '').slice(0, 16).replace('T', ' ') + ' ' + r[1] + ' ' + humanDatePt_(dateCellIso_(r[3])) + ': ' + String(r[4]).slice(0, 260)));
-    } else add('LOG: nenhum aviso ou erro do Fluxo de Lotes.');
+    } else add('LOG: nenhum aviso ou erro da Criação de Lotes.');
   } catch (e) { /* sem banco */ }
   add('Dica: se algo der ERRO ou ✗, abra a tela no JMS, F12 → Rede, clique no número e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));

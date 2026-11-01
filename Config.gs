@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.17.1',
+  VERSION: '4.18.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1152,14 +1152,14 @@ const ALL_INDICATORS_ = Object.freeze({
    */
   lot_flow: {
     key: 'lot_flow', order: 10, routeKey: 'LOTS',
-    name: {pt: 'Fluxo de Lotes', zh: '建包流程'},
-    subtitle: {pt: 'Sacas criadas no dia: ecológicas e normais (estatística de criação recorrente de Eco Bag)', zh: '当日建包：环保袋与普通袋（循环袋建包统计）'},
+    // V4.18 (pedido "desenvolvendo dashboard de criação de lotes"): o nome do pedido.
+    name: {pt: 'Criação de Lotes', zh: '建包统计'},
+    subtitle: {pt: 'Sacas ecológicas e não ecológicas criadas (Estatística de Criação Recorrente de Eco Bag)', zh: '环保袋与非环保袋建包（循环袋建包统计）'},
     // Taxa do indicador = Taxa de uso de Saca Ecológica (quanto maior melhor); sem meta definida.
     goal: {value: null, direction: 'min', strict: false},
     apiProfile: 'lot_flow', detailMatchesErrors: false, grouped: true, light: true,
-    // V4.7 (pedido): painel RETIRADO — fora do menu, dos Resultados e da fila (não gasta cota). Os dados antigos continuam na
-    // planilha. Para trazer de volta: Propriedade do script REATIVAR_PAINEIS = lot_flow.
-    retired: true,
+    // V4.7: painel retirado (pedido). V4.18 (pedido "Colocar esse dashboard no dash principal"): de volta, no painel principal,
+    // seguindo os PDFs "desenvolvendo dashboard de criação de lotes" e "INFORMAÇÕES PARA PUXAR DADOS SOBRE SACAS".
     // V4.6 (pedido): agenda própria — hoje a cada LOTES_HORAS (padrão 3 h: 0h, 3h, 6h…), fora da agenda só pelo Atualizar.
     agendaEvery: {prop: 'LOTES_HORAS', hours: 3},
     summary: {
@@ -1190,11 +1190,14 @@ const ALL_INDICATORS_ = Object.freeze({
       items: ['packageQty'], packType: ['packageName'], source: ['packageSourceName'], chip: ['chipNo'], destination: ['openSiteName']
     },
     // Valores do JMS em chinês/código → como a tela mostra.
+    // V4.18: "Tipo de entrada e saída" com os nomes da tela do JMS (Todos / Saída de porto / Entrada).
     valueMaps: {
-      port: {'出港': 'Partida', '进港': 'Chegada'},
+      port: {'出港': 'Saída de porto', '进港': 'Entrada'},
       sackType: {Y: 'Ecológica', N: 'Não ecológica'},
       packType: {'普通包': 'Saco normal'}
     },
+    // Dias baixados antes da V4.18 (gravados como Partida / Chegada) aparecem com o nome novo, sem baixar de novo.
+    valueAliases: {port: {'Partida': 'Saída de porto', 'Chegada': 'Entrada'}},
     // Situação de cada saca na coluna principal: ecológica ou não (listas de cada número vermelho).
     columnFrom: 'sackType',
     columnSets: {
@@ -1204,29 +1207,33 @@ const ALL_INDICATORS_ = Object.freeze({
     },
     groupFields: ['column', 'sackType', 'lot', 'eventTime', 'shift', 'interval', 'port', 'items', 'packType', 'source', 'chip', 'destination'],
     labels: {
-      lot: {pt: 'Lotes (número da saca)', zh: '包号'}, port: {pt: 'Entrada/Saída', zh: '进出港类型'}, sackType: {pt: 'Sacas', zh: '袋类型'},
-      shift: {pt: 'Turnos', zh: '班次'}, items: {pt: 'Quantidade de itens na embalagem', zh: '包内件数'}, destination: {pt: 'Destino de desembalagem', zh: '拆包网点'},
+      lot: {pt: 'Número dos lotes', zh: '包号'}, port: {pt: 'Tipo de entrada e saída', zh: '进出港类型'}, sackType: {pt: 'Tipo de sacas', zh: '袋类型'},
+      shift: {pt: 'Turnos', zh: '班次'}, items: {pt: 'Remessas na saca', zh: '包内件数'}, destination: {pt: 'Destinos', zh: '拆包网点'},
       packType: {pt: 'Tipo de ensacamento', zh: '建包类型'}, source: {pt: 'Origem da criação', zh: '建包来源'}, chip: {pt: 'Chip nº', zh: '芯片号'}
     },
-    labelsOne: {lot: {pt: 'Saca', zh: '包号'}, port: {pt: 'Tipo', zh: '类型'}, sackType: {pt: 'Tipo de saca', zh: '袋类型'}, shift: {pt: 'Turno', zh: '班次'}},
-    filters: ['shift', 'lot', 'port', 'sackType'],
+    labelsOne: {lot: {pt: 'Saca', zh: '包号'}, port: {pt: 'Tipo', zh: '类型'}, sackType: {pt: 'Tipo de saca', zh: '袋类型'}, shift: {pt: 'Turno', zh: '班次'},
+      destination: {pt: 'Destino', zh: '拆包网点'}},
+    // V4.18: filtros do pedido, na ordem dele (a data fica no topo, como em todos os painéis).
+    filters: ['sackType', 'port', 'lot', 'destination', 'shift'],
     topCards: [],
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    // Cartão vermelho: sacas criadas no dia (as duas juntas) e, embaixo, as remessas dentro delas (V4.18). Com filtro, a lista.
     heroMetric: {key: 'packageSum', column: 'Sacas criadas', icon: 'lot',
-      label: {pt: 'Quantidade de sacas criadas', zh: '建包数量'}, labelPeriod: {pt: 'Sacas criadas no período', zh: '期间建包数量'}},
+      label: {pt: 'Quantidade de sacas criadas', zh: '建包数量'}, labelPeriod: {pt: 'Sacas criadas no período', zh: '期间建包数量'},
+      // subNoPct: remessas ÷ sacas não é porcentagem (no Recebimento, o número de baixo é parte do de cima).
+      sub: 'waybillSum', subSum: 'items', subNoPct: true, subLabel: {pt: 'Remessas nos lotes criados', zh: '包内件数'}},
+    // V4.18: "Mostrar a quantidade gerada no dia anterior" — cartão próprio, com as remessas embaixo.
+    prevCard: {key: 'packageSum', sub: 'waybillSum', label: {pt: 'Quantidade gerada no dia anterior', zh: '前一日建包数量'},
+      labelPeriod: {pt: 'Quantidade gerada no período anterior', zh: '上一期间建包数量'}, subLabel: {pt: 'Remessas nos lotes criados', zh: '包内件数'},
+      metricBy: {field: 'sackType', values: {'Ecológica': ['loopSum', 'loopWaybillSum'], 'Não ecológica': ['noloopSum', 'noloopWaybillSum']}}},
     navMetric: 'packageSum',
     metricCards: true,
     // Cartões de turno: quantidade criada, % de cada turno e, em cada turno, ecológicas e não ecológicas.
     shiftCardsByColumn: {main: 'Sacas criadas', columns: ['Sacas criadas'], unit: {pt: 'sacas', zh: '袋'},
       split: [{column: 'Sacas ecológicas', label: {pt: 'Ecológicas', zh: '环保袋'}}, {column: 'Sacas não ecológicas', label: {pt: 'Não ecológicas', zh: '非环保袋'}}]},
-    // Turnos de cada lista por dia (aba AGG) e de Chegada/Partida: o dia anterior dos cartões sem carregar o dia anterior.
-    shiftAggColumns: ['Sacas criadas', 'Sacas ecológicas', 'Sacas não ecológicas',
-      {name: 'arrivals', column: 'Sacas criadas', where: {port: 'Chegada'}}, {name: 'departures', column: 'Sacas criadas', where: {port: 'Partida'}}],
-    // Chegada e Partida: contadas na coluna "Tipo de entrada e saída" da lista (进港 / 出港).
-    detailCards: [
-      {key: 'arrivals', column: 'Sacas criadas', where: {port: 'Chegada'}, icon: 'arrival', label: {pt: 'Chegada', zh: '进港'}, sub: {pt: 'Sacas com tipo de entrada e saída 进港 (Chegada)', zh: '进港建包数'}},
-      {key: 'departures', column: 'Sacas criadas', where: {port: 'Partida'}, icon: 'departure', label: {pt: 'Partida', zh: '出港'}, sub: {pt: 'Sacas com tipo de entrada e saída 出港 (Partida)', zh: '出港建包数'}}
-    ],
+    // Turnos de cada lista por dia (aba AGG): o dia anterior dos cartões de turno sem carregar o dia anterior. V4.18: sem os
+    // cartões de Chegada/Partida (o pedido não tem; Entrada e Saída de porto ficam no gráfico e no filtro).
+    shiftAggColumns: ['Sacas criadas', 'Sacas ecológicas', 'Sacas não ecológicas'],
     texts: {
       navQty: {pt: 'Sacas criadas · {date}', zh: '建包 · {date}'},
       errors: {pt: 'Sacas não ecológicas', zh: '非环保袋'},
@@ -1237,57 +1244,65 @@ const ALL_INDICATORS_ = Object.freeze({
       dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes)', zh: '排队下载中（前面还有 {n} 个任务）'},
       listTopNote: {pt: 'Período grande: mostrando {n} sacas de cada tipo. Escolha um período menor para ver todas.', zh: '期间较长：每种类型显示 {n} 袋。选择较短期间可查看全部。'},
       distinctShipments: {pt: 'Sacas da lista "Total de pacotes construídos"', zh: '建包明细中的包'},
-      sumRows: {pt: 'Pacotes dentro das sacas', zh: '包内件数'}, sumCount: {pt: '{n} pacotes', zh: '{n} 件'},
+      sumRows: {pt: 'Remessas dentro das sacas', zh: '包内件数'}, sumCount: {pt: '{n} remessas', zh: '{n} 件'},
       tableCount: {pt: '{n} sacas', zh: '{n} 袋'}, listRows: {pt: '{n} sacas', zh: '{n} 袋'}, shipments: {pt: 'sacas', zh: '袋'},
       detailsOk: {pt: 'Detalhes completos · {n} sacas', zh: '明细完整 · {n} 袋'}, tableFind: {pt: 'Localizar saca na tabela', zh: '在表格中查找包号'}
     },
     // Colunas da tabela principal da tela. Cartões: o número oficial; com filtro, a lista baixada (detail / detailSum / detailRate).
+    // V4.18: cartões na ordem do pedido — % de criação da ecológica e da não ecológica (o restante), sacas ecológicas e não
+    // ecológicas com as remessas dentro delas embaixo (subMetric; não ecológica = o restante). As remessas não têm cartão
+    // próprio (card: false) e continuam na tabela "Dados gerais".
     metricPanels: [
       {column: 'Sacas criadas', title: {pt: 'Sacas', zh: '建包'}, metrics: [
         {key: 'packageSum', label: {pt: 'Quantidade de sacas criadas', zh: '建包总数'}, detail: 'Sacas criadas'},
-        {key: 'loopSum', label: {pt: 'Quantidade de sacas ecológicas', zh: '环保袋数'}, detail: 'Sacas ecológicas', good: true},
-        {key: 'noloopSum', label: {pt: 'Quantidade de sacas não ecológicas', zh: '非环保袋数'}, detail: 'Sacas não ecológicas', bad: true},
-        {key: 'loopRate', label: {pt: 'Taxa de criação de sacas ecológicas', zh: '环保袋使用率'}, pct: true, good: true,
+        {key: 'loopRate', label: {pt: 'Porcentagem de criação da Saca Ecológica', zh: '环保袋使用率'}, pct: true, good: true,
           rateOf: {num: 'loopSum', den: 'packageSum'}, detailRate: {num: 'Sacas ecológicas', den: 'Sacas criadas'}},
-        {key: 'noloopRate', label: {pt: 'Taxa de criação de sacas não ecológicas', zh: '非环保袋占比'}, pct: true, bad: true,
-          rateOf: {num: 'noloopSum', den: 'packageSum'}, detailRate: {num: 'Sacas não ecológicas', den: 'Sacas criadas'}}
+        {key: 'noloopRate', label: {pt: 'Porcentagem de criação da Saca Não Ecológica', zh: '非环保袋占比'}, pct: true, bad: true,
+          rateOf: {num: 'noloopSum', den: 'packageSum'}, detailRate: {num: 'Sacas não ecológicas', den: 'Sacas criadas'}},
+        {key: 'loopSum', label: {pt: 'Número de sacas ecológicas criadas', zh: '环保袋数'}, detail: 'Sacas ecológicas', good: true,
+          subMetric: {key: 'loopWaybillSum', detailSum: 'items', label: {pt: 'Remessas dentro da Saca Ecológica', zh: '环保袋内件数'}}},
+        {key: 'noloopSum', label: {pt: 'Número de sacas não ecológicas criadas', zh: '非环保袋数'}, detail: 'Sacas não ecológicas', bad: true,
+          subMetric: {key: 'noloopWaybillSum', detailSum: 'items', label: {pt: 'Remessas dentro da Saca Não Ecológica', zh: '非环保袋内件数'}}}
       ]},
-      {column: 'Sacas criadas', title: {pt: 'Pacotes dentro das sacas', zh: '包内件数'}, metrics: [
-        {key: 'waybillSum', label: {pt: 'Quantidade de pacotes dentro das sacas', zh: '包内总件数'}, detail: 'Sacas criadas', detailSum: 'items'},
-        {key: 'loopWaybillSum', label: {pt: 'Quantidade de pacotes na ecológica', zh: '环保袋内件数'}, detail: 'Sacas ecológicas', detailSum: 'items',
-          pctKey: 'loopWaybillRate', good: true},
-        {key: 'noloopWaybillSum', label: {pt: 'Quantidade de pacotes na não ecológica', zh: '非环保袋内件数'}, detail: 'Sacas não ecológicas', detailSum: 'items',
-          pctKey: 'noloopWaybillRate', bad: true},
+      {column: 'Sacas criadas', title: {pt: 'Remessas dentro das sacas', zh: '包内件数'}, metrics: [
+        {key: 'waybillSum', label: {pt: 'Remessas nos lotes criados', zh: '包内总件数'}, detail: 'Sacas criadas', detailSum: 'items', card: false},
+        {key: 'loopWaybillSum', label: {pt: 'Remessas dentro da Saca Ecológica', zh: '环保袋内件数'}, detail: 'Sacas ecológicas', detailSum: 'items',
+          pctKey: 'loopWaybillRate', good: true, card: false},
+        {key: 'noloopWaybillSum', label: {pt: 'Remessas dentro da Saca Não Ecológica', zh: '非环保袋内件数'}, detail: 'Sacas não ecológicas', detailSum: 'items',
+          pctKey: 'noloopWaybillRate', bad: true, card: false},
         {key: 'loopWaybillRate', label: {pt: 'Percentual de volume de Saca Ecológica', zh: '环保袋件量占比'}, pct: true, card: false,
           rateOf: {num: 'loopWaybillSum', den: 'waybillSum'}},
         {key: 'noloopWaybillRate', label: {pt: 'Percentual de volume na não ecológica', zh: '非环保袋件量占比'}, pct: true, card: false,
           rateOf: {num: 'noloopWaybillSum', den: 'waybillSum'}}
       ]}
     ],
+    // V4.18: gráficos do pedido, na ordem dele. Por padrão as duas sacas juntas (lista "Sacas criadas"); com o filtro "Tipo de
+    // sacas", só a escolhida (a evolução diária usa o número oficial dela: metricBy).
     charts: [
       {key: 'shiftPie', dim: 'shift', where: {column: 'Sacas criadas'}, type: 'doughnut',
         title: {pt: 'Turnos', zh: '班次'}, sub: {pt: 'Sacas criadas em cada turno (tempo de ensacamento)', zh: '各班次建包数（建包时间）'}},
+      {key: 'mDaily', metric: 'packageSum', type: 'bar', days: 15,
+        metricBy: {field: 'sackType', values: {'Ecológica': 'loopSum', 'Não ecológica': 'noloopSum'}},
+        title: {pt: 'Evolução diária', zh: '每日建包'}},
+      {key: 'ports', dim: 'port', where: {column: 'Sacas criadas'}, type: 'bar', top: 2, hideNA: true,
+        title: {pt: 'Entrada / saída', zh: '进港 / 出港'}, sub: {pt: 'Tipo de entrada e saída: Entrada (进港) e Saída de porto (出港)', zh: '进出港类型'}},
       {key: 'sackTypes', dim: 'sackType', where: {column: 'Sacas criadas'}, type: 'bar', top: 2,
         summaryBars: [{value: 'Ecológica', metric: 'loopSum'}, {value: 'Não ecológica', metric: 'noloopSum'}],
-        title: {pt: 'Sacas ecológicas / não ecológicas', zh: '环保袋 / 非环保袋'}},
-      {key: 'ports', dim: 'port', where: {column: 'Sacas criadas'}, type: 'bar', top: 2, hideNA: true,
-        title: {pt: 'Entradas / partidas', zh: '进港 / 出港'}, sub: {pt: 'Tipo de entrada e saída: 进港 (Chegada) e 出港 (Partida)', zh: '进出港类型'}},
+        title: {pt: 'Sacas ecológicas / sacas não ecológicas', zh: '环保袋 / 非环保袋'}},
+      {key: 'topDest', dim: 'destination', where: {column: 'Sacas criadas'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Destinos com maior envio', zh: '发往最多的拆包网点'}, sub: {pt: 'Sacas por destino de desembalagem (top 10)', zh: '各拆包网点建包数（前10）'}},
       {key: 'topLots', dim: 'lot', sumField: 'items', where: {column: 'Sacas criadas'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Lotes/sacas com mais quantidade de pacotes', zh: '包内件数最多的包'}, sub: {pt: 'Quantidade de itens na embalagem por número da saca', zh: '各包号包内件数'}},
-      {key: 'topNonEco', dim: 'lot', sumField: 'items', where: {column: 'Sacas não ecológicas'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Não ecológicas', zh: '非环保袋'}, sub: {pt: 'Lotes com mais quantidade (Número de sacas não ecológicas)', zh: '件数最多的非环保袋'}},
-      {key: 'topEco', dim: 'lot', sumField: 'items', where: {column: 'Sacas ecológicas'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Ecológicas', zh: '环保袋'}, sub: {pt: 'Lotes com mais quantidade (Número do saco ecológico)', zh: '件数最多的环保袋'}}
+        title: {pt: 'Sacas com maior quantidade', zh: '包内件数最多的包'}, sub: {pt: 'Remessas dentro de cada saca (top 10)', zh: '各包号包内件数（前10）'}}
     ],
     tables: [
       {key: 'tGeneral', column: 'Sacas criadas', title: {pt: 'Geral', zh: '建包明细'},
         cols: [['date', 'Data', '日期'], ['lot', 'Número da saca', '包号'], ['port', 'Tipo de entrada e saída', '进出港类型'], ['packType', 'Tipo de ensacamento', '建包类型'],
-          ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Saca', '袋类型'], ['items', 'Quantidade de itens na embalagem', '包内件数'],
+          ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Tipo de saca', '袋类型'], ['items', 'Quantidade de remessas na saca', '包内件数'],
           ['eventTime', 'Tempo de ensacamento', '建包时间'], ['shift', 'Turno', '班次'], ['destination', 'Destino de desembalagem', '拆包网点']]}
     ],
     table: [
       ['date', 'Data', '日期'], ['lot', 'Número da saca', '包号'], ['port', 'Tipo de entrada e saída', '进出港类型'], ['packType', 'Tipo de ensacamento', '建包类型'],
-      ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Saca', '袋类型'], ['items', 'Quantidade de itens na embalagem', '包内件数'],
+      ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Tipo de saca', '袋类型'], ['items', 'Quantidade de remessas na saca', '包内件数'],
       ['eventTime', 'Tempo de ensacamento', '建包时间'], ['shift', 'Turno', '班次'], ['interval', 'Intervalo', '时间段'], ['destination', 'Destino de desembalagem', '拆包网点']
     ]
   },
@@ -1700,10 +1715,12 @@ function catalogEntry_(cfg) {
     valueCards: cfg.valueCards || [],
     texts: cfg.texts || null,
     metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
+    // V4.18 (Criação de Lotes): cartão do dia anterior e os nomes novos dos valores gravados antes.
+    prevCard: cfg.prevCard || null, valueAliases: cfg.valueAliases || null,
     shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
     columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
     snapshot: !!cfg.snapshot,
-    // V4.6: agenda do painel — a cada N horas (Sem Movimentação, Fluxo de Lotes); sem isso, às HORAS_ATUALIZACAO.
+    // V4.6: agenda do painel — a cada N horas (Sem Movimentação, Criação de Lotes); sem isso, às HORAS_ATUALIZACAO.
     agendaEvery: cfg.agendaEvery ? agendaEveryHours_(cfg) : null,
     // V4.4 (Deslacre): cartões próprios e o texto de cada situação do bipe de deslacre.
     unsealCards: !!cfg.unsealCards, situations: cfg.situations || null,

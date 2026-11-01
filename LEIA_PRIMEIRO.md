@@ -1,8 +1,68 @@
-# J&T DASHMASTER V4.17.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.18 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.18 — Criação de Lotes no painel principal
+
+**Pedido (arquivos "desenvolvendo dashboard de criação de lotes" e "INFORMAÇÕES PARA PUXAR DADOS SOBRE SACAS"):**
+"Colocar esse dashboard no dash principal. Seguir as instruções fornecidas."
+
+O painel **Criação de Lotes** (antes "Fluxo de Lotes", retirado na V4.7) volta ao menu do painel principal, refeito como o
+pedido. Os dados vêm da mesma tela do JMS: Dispositivo inteligente > Materiais ecológicos > Relatório de estatística >
+**Estatística de Criação Recorrente de Eco Bag**.
+- O resumo do dia é o `sdploopbagBuildbagCount`.
+- A lista do número vermelho "Total de pacotes construídos" é o `sdploopbagBuildbagDetail`, com `detailType` igual a `packageSum`.
+  A coluna **Saca** de cada linha diz se ela é ecológica ou não.
+
+**Por padrão, as duas sacas juntas.** Gráficos e cartões mostram ecológicas e não ecológicas somadas. Com o filtro
+**Tipo de sacas**, tudo passa a mostrar só a escolhida, inclusive a evolução diária e o dia anterior.
+
+**Filtros:** data · Tipo de sacas (Todos / Ecológica / Não ecológica) · Tipo de entrada e saída (Todos / Saída de porto /
+Entrada, como na tela do JMS) · Número dos lotes · Destinos (Destino de desembalagem) · Turnos (pelo Tempo de ensacamento).
+
+**Cartões:**
+- **Quantidade de sacas criadas** no dia e, embaixo, as **remessas nos lotes criados**.
+- **Quantidade gerada no dia anterior**, com as remessas.
+- **Porcentagem de criação da Saca Ecológica** (Taxa de uso de Saca Ecológica do JMS) e **da Não Ecológica** (o restante).
+- **Número de sacas ecológicas criadas** com as **remessas dentro da Saca Ecológica** embaixo.
+- **Número de sacas não ecológicas criadas** com as remessas dentro dela embaixo (o restante: total − ecológica).
+- Um cartão por turno (T1, T2, T3) com a quantidade criada.
+
+**Gráficos:**
+- Turnos;
+- Evolução diária;
+- Entrada / saída;
+- Sacas ecológicas / não ecológicas;
+- **Destinos com maior envio** (novo);
+- Sacas com maior quantidade (remessas dentro da saca).
+
+Os gráficos separados de ecológicas e de não ecológicas saíram: o filtro faz isso.
+
+**Tabela "Geral":** todas as colunas da lista do JMS:
+- Número da saca e Tipo de entrada e saída;
+- Tipo de ensacamento, Origem da criação e Chip;
+- Tipo de saca e **Quantidade de remessas na saca**;
+- Tempo de ensacamento e **Turno**;
+- Destino de desembalagem.
+
+Embaixo, a tabela "Dados gerais" mostra os números do resumo, dia a dia.
+
+**Dias já baixados antes da V4.7:** "Chegada" e "Partida" aparecem como **Entrada** e **Saída de porto**, sem baixar de novo.
+
+**Atualização e cota:** atualiza sozinho a cada 3 horas (Propriedade `LOTES_HORAS`), como antes da V4.7. O botão **Atualizar**
+consulta na hora. Na simulação da conta Gmail (painel principal, 7 dias de histórico), o uso por dia ficou em
+**10,3 min** (antes 6,6 min, de 90 min), com 535 consultas ao JMS por dia (de 20 mil). Nenhuma execução foi barrada pela cota.
+
+**Se der erro:** no editor do Apps Script, rode **`diagnosticarLotes`**. Ele compara a lista com o resumo, sem mostrar
+número de saca.
+
+**Atualizar:**
+- **Apps Script:** troque todos os arquivos pelos do `JT_DASHMASTER_V4_18_PRINCIPAL.zip` e faça Implantar → Gerenciar
+  implantações → ✏️ → Nova versão. Não precisa rodar nenhuma função nem mexer em `REATIVAR_PAINEIS`: os dias entram na fila sozinhos.
+- **Node.js:** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_18_NODE.zip` em `C:\` (Substituir) e abra o
+  atalho DashMaster.
 
 ## V4.17.1 — Link público (Tailscale): a janela não fecha mais sozinha
 
@@ -682,6 +742,7 @@ Os dias anteriores continuam com a tabela antiga.
 - Sai do menu, dos Resultados, da agenda e da fila. Não consulta mais o JMS nem gasta cota.
 - Os dados antigos continuam na planilha.
 - **Para trazer de volta:** Propriedade do script `REATIVAR_PAINEIS` = `lot_flow`.
+- **V4.18:** de volta no painel principal, como **Criação de Lotes** (sem precisar de `REATIVAR_PAINEIS`).
 - **Simulação da conta Gmail, painel principal:** **5,2 min por dia** (V4.6: 9 min) e 240 consultas por dia, de 20 mil. Das 9h às 23h, só a foto da Sem Movimentação a cada 2 h.
 
 ### Botão Atualizar: todos os indicadores de uma vez

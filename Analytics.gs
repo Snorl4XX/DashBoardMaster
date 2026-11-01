@@ -482,7 +482,11 @@ function GroupSummarySink_(cfg, filters, topLimit) {
   const active = dims.filter(k => filters && filters[k] && filters[k].length);
   const sets = {}, scopes = cfg.filterScopes || {};
   active.forEach(k => { sets[k] = {}; filters[k].forEach(v => { sets[k][String(v)] = 1; }); });
+  // V4.18: valores antigos com o nome novo (Config.gs → valueAliases), como na leitura normal (JTCore_.applyAliases).
+  const al = cfg.valueAliases || {};
+  const alias = (f, v) => (al[f] && v !== null && v !== undefined && Object.prototype.hasOwnProperty.call(al[f], v) ? al[f][v] : v);
   const norm = (f, v) => {
+    v = alias(f, v);
     v = v === null || v === undefined ? '' : String(v);
     if (fill[f] && v.trim() === '') v = fill[f];
     return v.trim() === '' ? 'N/A' : v;
@@ -549,7 +553,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       const colV = vals.column[ci], tl = tops[colV] || (tops[colV] = []), fl = floors[colV] || 0;
       if (topLimit && (q > fl || tl.length < topLimit)) {
         const r = {};
-        fields.forEach(f => { const c = ds.cols[f]; r[f] = c ? ds.dict[f][c[i]] : ''; });
+        fields.forEach(f => { const c = ds.cols[f]; r[f] = c ? alias(f, ds.dict[f][c[i]]) : ''; });
         r.qty = q;
         tl.push(r);
         if (tl.length >= topLimit * 2) { tl.sort((x, y) => y.qty - x.qty); tops[colV] = tl.slice(0, topLimit); floors[colV] = tops[colV][topLimit - 1].qty; }
@@ -921,6 +925,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   // V3.34: Sem Movimentação — só a lista da linha dos cartões.
   const rowCol = rowListType_(cfg, indicatorKey, p.to);
   if (rowCol !== null) archive.rows = archive.rows.filter(r => r.column === rowCol);
+  if (cfg.valueAliases) JTCore_.applyAliases(archive.rows, cfg.valueAliases);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.segmentBase) JTCore_.applySegmentBase(archive.rows, true);
   if (cfg.dayOf) JTCore_.applyDayOf(archive.rows, cfg.dayOf);

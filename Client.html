@@ -98,8 +98,8 @@
       footer: 'Fonte: JMS (taxas oficiais) · detalhes arquivados no Google Drive',
       resultsNoteRate: 'Taxa do período = Σ erros ÷ Σ base oficial de cada dia (sem contagem de erros, usa a média das taxas diárias).',
       resultsNoteShift: 'Taxa do turno {s} = remessas com erro no {s} ÷ volume total do dia (base oficial do JMS). O JMS não publica volume por turno; somando T1, T2 e T3 dá a taxa de erros do dia. Nos indicadores de prazo (SC → SC, SC → DC), é a taxa fora do prazo.',
-      resultsNoteQty: 'Recebimento, Expedição e Fluxo de Lotes: quantidade do número principal (Recebido · Total que saiu · Sacas criadas) somada em cada período.',
-      resultsNoteShiftQty: 'Recebimento, Expedição e Fluxo de Lotes: quantidade do turno {s} somada em cada período e a participação dele no total.',
+      resultsNoteQty: 'Recebimento, Expedição e Criação de Lotes: quantidade do número principal (Recebido · Total que saiu · Sacas criadas) somada em cada período.',
+      resultsNoteShiftQty: 'Recebimento, Expedição e Criação de Lotes: quantidade do turno {s} somada em cada período e a participação dele no total.',
       resQtySub: 'Quantidade · {l}', qty: 'Quantidade', qtyAvgDay: 'Média por dia', qtyShift: 'Quantidade {s}', qtyShiftPeriod: '{s} no período',
       qtyPeriodTotal: 'Total do período',
       lastPeriod: 'Último período', shiftErrors: 'Erros {s}', shiftShareOf: '{p} do total', noAgg: 'Sem detalhes consolidados deste turno no período.',
@@ -1079,7 +1079,7 @@
       var sm = res.summary;
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
         shiftSum: res.shiftSum || {}, routes: res.routes || null,
-        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applySegmentBase(Core.applyDocks(Core.decodeDataset(res.dataset), c && c.docks), c && c.segmentBase), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
+        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applySegmentBase(Core.applyDocks(Core.applyAliases(Core.decodeDataset(res.dataset), c && c.valueAliases), c && c.docks), c && c.segmentBase), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
           totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};
@@ -1885,18 +1885,41 @@
         // pctKey: a participação é o percentual oficial do JMS (Percentual de volume de Saca Ecológica).
         var pk = m.pctKey && !fk.length ? metricDef(c, m.pctKey) : null, pkv = pk ? metricValue(pk.m, state.from, state.to) : null;
         var share = !fk.length && m.key !== totalKey && isNum(v) && total ? (isNum(pkv) ? pkv : v / total * 100) : null;
+        // V4.18 (Criação de Lotes): número de baixo no mesmo cartão (remessas dentro das sacas); com filtro, a soma da lista.
+        var sm2 = m.subMetric, subLine = '';
+        if (sm2) {
+          var sv = fk.length && sm2.detailSum ? listSum(m.detail, sm2.detailSum) : metricSum(sm2.key, state.from, state.to);
+          subLine = '<div class="kpi-sub mc-subm">' + esc(L(sm2.label)) + ': <b>' + fmtInt(sv) + '</b></div>';
+        }
         cards += '<article class="kpi metric-kpi' + (m.bad ? ' bad-metric' : '') + (m.good ? ' good-metric' : '') + '"><div class="kpi-label">' + icon(m.bad ? 'errors' : 'check') +
           '<span class="mc-name">' + esc(name) + '</span></div>' +
-          '<div class="kpi-value">' + fmtInt(v) + '</div>' +
+          '<div class="kpi-value">' + fmtInt(v) + '</div>' + subLine +
           '<div class="kpi-sub">' + (live ? '' : esc(day ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dlt(v, pv, m.bad)) +
           (isNum(share) ? (live ? '' : '<br>') + esc(t('mcOfTotal', {p: fmtPct(share, 1), of: L(p.metrics[0].label)})) : '') + extra + '</div>' +
           (isNum(share) ? '<div class="kpi-foot"><div class="bar"><i data-w="' + share + '" style="background:' + (m.bad ? RED : GOOD) + '"></i></div></div>' : '') + '</article>';
       });
     });
-    grid.innerHTML = hero + cards + detailCountCards(c, f, k, dlt) + shiftColumnCards(c, f, k, dlt) + metricTopCards(c, f);
+    grid.innerHTML = hero + prevQtyCard(c, k, f) + cards + detailCountCards(c, f, k, dlt) + shiftColumnCards(c, f, k, dlt) + metricTopCards(c, f);
     fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
+  }
+  /**
+   * V4.18 (Criação de Lotes, pedido "Mostrar a quantidade gerada no dia anterior"): cartão do dia (ou período) anterior com o
+   * número oficial do JMS e, embaixo, o número de prevCard.sub (remessas nos lotes criados).
+   */
+  function prevQtyCard(c, k, f) {
+    var pc = c.prevCard;
+    if (!pc || isLive()) return '';
+    // Com um só valor no filtro de metricBy.field (tipo de saca): os números oficiais desse valor ([sacas, remessas]).
+    var day = k.mode === 'day', mb = pc.metricBy, fsel = mb && f[mb.field], keys = fsel && fsel.length === 1 && mb.values[fsel[0]];
+    var mk = keys ? keys[0] : pc.key, sk = keys ? keys[1] : pc.sub, name = L(day ? pc.label : pc.labelPeriod);
+    var v = metricSum(mk, k.prevFrom, k.prevTo), sv = sk ? metricSum(sk, k.prevFrom, k.prevTo) : null;
+    var when = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo), other = Object.keys(f).filter(function (x) { return !keys || x !== mb.field; });
+    return '<article class="kpi metric-kpi prev-kpi"><div class="kpi-label">' + icon('history') + '<span class="mc-name">' +
+      esc(name + ' · ' + when + (keys ? ' · ' + vlabel(mb.field, fsel[0]) : '')) + '</span></div><div class="kpi-value">' + fmtInt(v) + '</div>' +
+      (sk ? '<div class="kpi-sub mc-subm">' + esc(L(pc.subLabel)) + ': <b>' + fmtInt(sv) + '</b></div>' : '') +
+      (other.length ? '<div class="kpi-sub"><span class="mc-note">' + esc(t('mcOfficial', {n: fmtInt(v)})) + '</span></div>' : '') + '</article>';
   }
   /**
    * Cartão de uma taxa do resumo (Fluxo de Lotes): a do JMS no dia; no período, os números somados (num ÷ den). Com
@@ -1973,11 +1996,13 @@
       big = fq || null;
       label = t('hmFiltered', {label: label});
       if (!fq) lines += '<div class="kpi-sub">' + esc(t('hmNoDetail')) + '</div>';
+      // V4.18 (Criação de Lotes): com filtro, as remessas dos lotes da lista filtrada (soma de def.subSum).
+      if (def.subSum && fq) lines += '<div class="kpi-sub">' + esc(L(def.subLabel)) + ': <b>' + fmtInt(listSum(def.column, def.subSum)) + '</b></div>';
       lines += '<div class="hero-metric"><span>' + esc(t('hmOfficial')) + '</span><b>' + fmtInt(cur) + '</b>' + (def.sub ?
-        '<small>' + esc(L(def.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + ')' : '') + '</small>' : '') + '</div>';
+        '<small>' + esc(L(def.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur && !def.subNoPct ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + ')' : '') + '</small>' : '') + '</div>';
     } else if (def.sub) {
       lines += '<div class="hero-metric"><span>' + esc(L(def.subLabel)) + '</span><b>' + fmtInt(sub) + '</b>' +
-        (isNum(sub) && cur ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + '</em>' : '') + '</div>';
+        (isNum(sub) && cur && !def.subNoPct ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + '</em>' : '') + '</div>';
     }
     // V3.26: quando o número foi consultado no JMS (dia escolhido; no período, o mais antigo dos dias) — para comparar
     // com a tela do JMS sabendo de que hora é o número do painel.
@@ -2130,21 +2155,25 @@
   /** Série diária de um número do resumo (rates[].metrics) até a data escolhida. */
   function metricSpec(def) {
     var n = def.days || MP_DAYS, to = state.to, from = Core.addDays(state.to, -(n - 1));
+    // V4.18 (Criação de Lotes): com um só valor no filtro de metricBy.field (tipo de saca), o número oficial desse valor.
+    var mb = def.metricBy, fsel = mb && filtersObj()[mb.field], mk = def.metric, note = '';
+    if (fsel && fsel.length === 1 && mb.values[fsel[0]]) { mk = mb.values[fsel[0]]; note = vlabel(mb.field, fsel[0]); }
     if (state.from < from) from = state.from;
     // V3.32: Histórico — o período escolhido (com um dia só, a semana até ele).
     var hr = histDays();
     if (hr) { from = hr[0]; to = hr[hr.length - 1]; }
     if (Core.daysBetween(from, to) > 90) from = Core.addDays(to, -90);
     var byDate = {};
-    activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[def.metric])) byDate[r.date] = Number(r.metrics[def.metric]); });
+    activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[mk])) byDate[r.date] = Number(r.metrics[mk]); });
     var days = Core.dateRange(from, to);
-    return {key: def.key, metric: def.metric, type: def.type || 'bar', bad: !!def.bad, title: def.title,
+    return {key: def.key, metric: mk, type: def.type || 'bar', bad: !!def.bad, title: def.title, note: note,
       days: days, values: days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; })};
   }
   function renderMetricChart(card, spec) {
     var key = spec.key, vals = spec.values, days = spec.days, last = days.length - 1;
     $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '');
-    $('small', card).textContent = spec.type === 'line' ? t('metricLineSub', {date: fmtDate(state.to, true)}) : t('metricSub', {n: days.length, date: fmtDate(state.to, true)});
+    $('small', card).textContent = (spec.type === 'line' ? t('metricLineSub', {date: fmtDate(state.to, true)}) : t('metricSub', {n: days.length, date: fmtDate(state.to, true)})) +
+      (spec.note ? ' · ' + spec.note : '');
     var view = state.chartViews[key] || (window.Chart ? 'chart' : 'table'), tools = $('.chart-tools', card);
     tools.innerHTML = seg('view', [['chart', t('chartView')], ['table', t('tableView')]], view);
     $$('.seg button', tools).forEach(function (b) { b.addEventListener('click', function () { state.chartViews[key] = b.getAttribute('data-v'); renderCharts(cfg()); }); });

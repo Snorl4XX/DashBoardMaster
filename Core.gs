@@ -210,6 +210,21 @@ function JTCoreFactory_() {
    * V3.8 (só com o código do 1º segmento) usa esse código; "BRE" sozinho é ambíguo nesse caso (pode ter sido "BRE - SP") e
    * fica "Sem informação" até o dia ser baixado de novo.
    */
+  /**
+   * V4.18: valores antigos com o nome novo, na leitura (Config.gs → valueAliases; ex.: Criação de Lotes, "Partida" gravado
+   * antes → "Saída de porto", como a tela do JMS). Os dias já baixados não precisam ser baixados de novo.
+   */
+  function applyAliases(rows, aliases) {
+    if (!aliases || !rows) return rows;
+    var keys = Object.keys(aliases);
+    for (var i = 0; i < rows.length; i++) {
+      for (var j = 0; j < keys.length; j++) {
+        var k = keys[j], m = aliases[k], v = rows[i][k];
+        if (v !== undefined && v !== null && Object.prototype.hasOwnProperty.call(m, v)) rows[i][k] = m[v];
+      }
+    }
+    return rows;
+  }
   function applyDocks(rows, docks) {
     if (!docks || !rows) return rows;
     // V4.16: docks.show 'line' = mostra a linha de desvio do DWS ("Esteira 6") no lugar da doca (SC → DC).
@@ -1027,13 +1042,13 @@ function JTCoreFactory_() {
   var VALUE_ZH_PT = {
     '上环节建包异常': 'Erro de ensacamento na etapa anterior', '一段码异常': 'Erro no 1º segmento', '人为因素': 'Fator humano',
     '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição',
-    '出港': 'Partida', '进港': 'Chegada', '普通包': 'Saco normal'
+    '出港': 'Saída de porto', '进港': 'Entrada', '普通包': 'Saco normal'
   };
   var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
     'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Sem bipe na etapa anterior': '上一环节未发件扫描', 'Sem bipe de expedição nesta base': '本网点未发件扫描', 'Chegou': '已到',
     'Enviados': '已发件', 'Em trânsito': '在途（未到下一站）', 'Não entregues': '未签收', 'Não chegou ao destino': '未到下一站',
     'Chegou ao destino · não entregue': '已到下一站·未签收', 'Entregue': '已签收', 'Entregue · sem bipe de chegada': '已签收·无到件扫描',
-    'Chegada': '进港', 'Partida': '出港', 'Ecológica': '环保袋', 'Não ecológica': '非环保袋', 'Saco normal': '普通包',
+    'Chegada': '进港', 'Partida': '出港', 'Saída de porto': '出港', 'Entrada': '进港', 'Ecológica': '环保袋', 'Não ecológica': '非环保袋', 'Saco normal': '普通包',
     'Sacas criadas': '建包', 'Sacas ecológicas': '环保袋', 'Sacas não ecológicas': '非环保袋',
     'Sem movimentação': '断更件', 'Bipe de expedição': '发件扫描', 'Bipe de pacote problemático': '问题件扫描', 'Chegadas ao centro': '中心到件',
     'Encomenda inserida em lote': '建包扫描', 'Entrada no galpão de pacote não expedido': '留仓件入仓', 'Encomenda retirada do lote': '拆包扫描'};
@@ -1059,7 +1074,7 @@ function JTCoreFactory_() {
     SHIFTS: SHIFTS, NO_TRIP_ID: NO_TRIP_ID, noValue: noValue, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentPair: segmentPair, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
-    dockVersion: dockVersion, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
+    dockVersion: dockVersion, applyAliases: applyAliases, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,

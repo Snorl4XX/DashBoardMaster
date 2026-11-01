@@ -2131,7 +2131,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(!cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'lot_flow'}) && cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'send_flow'}),
     'Lotes: tarefa leve (fora do teto diário do Recebimento/Expedição)');
 
-  // 2. Dia completo: cartões do resumo ("o restante" calculado), uma linha por saca, Chegada/Partida e turnos.
+  // 2. Dia completo: cartões do resumo ("o restante" calculado), uma linha por saca, Entrada/Saída de porto e turnos.
   const dA = lfDays(), cA = freshCtx(dA);
   cA.queueHistory('2026-09-18', D19, true);
   runAll(cA, 12);
@@ -2144,45 +2144,73 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   cA.JTCore_.setColumnSets(cfgL.columnSets);
   const qL = f => rowsA.filter(f).reduce((a, r) => a + Number(r.qty || 1), 0), cm = (col, r) => cA.JTCore_.colMatch(col, r.column);
   check(qL(r => cm('Sacas criadas', r)) === tA.n && qL(r => cm('Sacas ecológicas', r)) === tA.eco && qL(r => cm('Sacas não ecológicas', r)) === tA.n - tA.eco &&
-    qL(r => r.port === 'Chegada') === tA.arr && qL(r => r.port === 'Partida') === tA.dep && ['T1', 'T2', 'T3'].every(s => qL(r => r.shift === s) === tA.sh[s]) &&
+    qL(r => r.port === 'Entrada') === tA.arr && qL(r => r.port === 'Saída de porto') === tA.dep && ['T1', 'T2', 'T3'].every(s => qL(r => r.shift === s) === tA.sh[s]) &&
     rowsA.every(r => r.packType === 'Saco normal' && r.lot && (r.sackType === 'Ecológica') === (r.column === 'Ecológica')) &&
     cA.getDayStatus_('lot_flow', D19).details === 'COMPLETE',
-    'Lotes: uma linha por saca; ecológica pelo isLoopPag; 进港 = Chegada, 出港 = Partida; turno pelo tempo de ensacamento', {rows: rowsA.length});
+    'Lotes: uma linha por saca; ecológica pelo isLoopPag; 进港 = Entrada, 出港 = Saída de porto (V4.18, nomes da tela); turno pelo tempo de ensacamento', {rows: rowsA.length});
   const fL = cA.__state.fetches.filter(f => /sdploopbagBuildbagDetail/.test(f.url));
   check(fL.length > 0 && fL.every(f => f.payload.size <= 100 && f.payload.detailType === 'packageSum' && f.payload.proxySiteCode === '30001'),
     'Lotes: só a lista "Total de pacotes construídos" é baixada (a ecológica sai da coluna Saca), páginas de até 100', fL.length);
   const agL = n => cA.getAgg_('lot_flow:' + n, D19, D19)[0] || {};
   check(agL('Sacas criadas').total === tA.n && agL('Sacas criadas').T1 === tA.sh.T1 && agL('Sacas ecológicas').total === tA.eco &&
-    agL('Sacas não ecológicas').total === tA.n - tA.eco && agL('arrivals').total === tA.arr && agL('departures').total === tA.dep,
-    'Lotes: turnos de cada lista e de Chegada/Partida por dia (aba AGG, dia anterior dos cartões)', {arr: agL('arrivals'), dep: agL('departures')});
+    agL('Sacas não ecológicas').total === tA.n - tA.eco,
+    'Lotes: turnos de cada lista por dia (aba AGG, dia anterior dos cartões de turno)', agL('Sacas criadas'));
 
   // 3. Painel: gráficos de lotes com mais pacotes (soma dos itens), catálogo e período grande.
   const dashL = cA.getDashboardData('lot_flow', {from: D19, to: D19});
   const rowsD = cA.JTCore_.decodeDataset(dashL.dataset), chDef = k => cfgL.charts.filter(c => c.key === k)[0];
   const topT = dA[D19].lt.reduce((a, b) => Math.max(a, b.packageQty), 0);
-  const chTop = cA.JTCore_.buildChart(chDef('topLots'), rowsD, {}), chEco = cA.JTCore_.buildChart(chDef('topEco'), rowsD, {});
-  const chNon = cA.JTCore_.buildChart(chDef('topNonEco'), rowsD, {}), chPort = cA.JTCore_.buildChart(chDef('ports'), rowsD, {});
+  const chTop = cA.JTCore_.buildChart(chDef('topLots'), rowsD, {}), chPort = cA.JTCore_.buildChart(chDef('ports'), rowsD, {});
+  // V4.18: com o filtro "Tipo de sacas", o gráfico das sacas com maior quantidade mostra só a escolhida (antes: gráficos separados).
+  const chEco = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.applyFilters(rowsD, {sackType: ['Ecológica']}), {});
+  const chNon = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.applyFilters(rowsD, {sackType: ['Não ecológica']}), {});
   check(chTop.total === tA.items && chTop.datasets[0].data[0] === topT && chTop.labels.length === 10 && chEco.total === tA.ecoItems &&
-    chNon.total === tA.items - tA.ecoItems && chPort.labels.join() === (tA.dep >= tA.arr ? 'Partida,Chegada' : 'Chegada,Partida') &&
-    dashL.colAgg.arrivals.some(a => a.date === D19 && a.total === tA.arr) && !dashL.summary && !hasDate(dashL),
-    'Lotes: gráficos de lotes/sacas com mais pacotes = soma de "Quantidade de itens na embalagem"; entradas/partidas', {top: chTop.datasets[0].data[0], topT});
+    chNon.total === tA.items - tA.ecoItems && chPort.labels.join() === (tA.dep >= tA.arr ? 'Saída de porto,Entrada' : 'Entrada,Saída de porto') &&
+    !dashL.summary && !hasDate(dashL),
+    'Lotes: sacas com maior quantidade = soma das remessas da saca (as duas juntas; com o filtro, só a escolhida); entrada/saída', {top: chTop.datasets[0].data[0], topT});
+  const byDest = {};
+  rowsD.forEach(r => { if (cA.JTCore_.colMatch('Sacas criadas', r.column)) byDest[r.destination] = (byDest[r.destination] || 0) + Number(r.qty || 1); });
+  const topDestT = Object.keys(byDest).filter(k => k !== 'N/A').sort((a, b) => byDest[b] - byDest[a])[0];
+  const chDest = cA.JTCore_.buildChart(chDef('topDest'), rowsD, {});
+  check(chDest.labels[0] === topDestT && chDest.datasets[0].data[0] === byDest[topDestT] && chDest.labels.length <= 10,
+    'Lotes: gráfico "Destinos com maior envio" (sacas por destino de desembalagem)', {g: chDest.labels.slice(0, 3), topDestT});
   const catL = cA.getPublicCatalog_().filter(x => x.key === 'lot_flow')[0];
-  check(catL && catL.filters.map(f => f.key).join() === 'shift,lot,port,sackType' && catL.filters[1].label.pt === 'Lotes (número da saca)' &&
-    catL.charts.length === 6 && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' && catL.detailCards.length === 2 &&
-    catL.metricPanels.length === 2 && catL.shiftCardsByColumn.split.length === 2,
-    'Lotes: catálogo com 4 filtros, 6 gráficos, cartões de Chegada/Partida, turnos com ecológicas/não ecológicas e a tabela Geral');
+  // V4.18 (PDF "desenvolvendo dashboard de criação de lotes"): filtros, cartões e gráficos do pedido, na ordem dele.
+  const cardsL = catL.metricPanels[0].metrics.filter(x => x.card !== false).map(x => x.key);
+  check(catL && catL.name.pt === 'Criação de Lotes' && catL.filters.map(f => f.key).join() === 'sackType,port,lot,destination,shift' &&
+    catL.filters.map(f => f.label.pt).join() === 'Tipo de sacas,Tipo de entrada e saída,Número dos lotes,Destinos,Turnos' &&
+    catL.charts.map(x => x.key).join() === 'shiftPie,mDaily,ports,sackTypes,topDest,topLots' && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' &&
+    !(catL.detailCards || []).length && catL.heroMetric.sub === 'waybillSum' && catL.prevCard && catL.prevCard.sub === 'waybillSum' &&
+    cardsL.join() === 'packageSum,loopRate,noloopRate,loopSum,noloopSum' &&
+    catL.metricPanels[0].metrics.filter(x => x.subMetric).map(x => x.subMetric.key).join() === 'loopWaybillSum,noloopWaybillSum' &&
+    catL.metricPanels[1].metrics.every(x => x.card === false) && catL.shiftCardsByColumn.split.length === 2,
+    'Lotes: catálogo do pedido — filtros (tipo de sacas, entrada/saída, lotes, destinos, turnos), cartões com as remessas embaixo e 6 gráficos',
+    {f: catL.filters.map(f => f.key), ch: catL.charts.map(x => x.key), cards: cardsL});
   const both = tA.items + truthL(dA['2026-09-18'].lt).items, arrBoth = tA.arrItems + truthL(dA['2026-09-18'].lt).arrItems;
   cA.__state.props.GROUPED_CLIENT_ROWS = '10';
   const dS = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {}});
-  const dSf = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {port: ['Chegada']}});
+  const dSf = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {port: ['Entrada']}});
   delete cA.__state.props.GROUPED_CLIENT_ROWS;
   const mS = cA.JTCore_.marginalsByDim(dS.summary.marginals), mSf = cA.JTCore_.marginalsByDim(dSf.summary.marginals);
   const chS = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mS, {}), {});
-  const chSf = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mSf, {port: ['Chegada']}), {});
+  const chSf = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mSf, {port: ['Entrada']}), {});
   const topBoth = Math.max(topT, dA['2026-09-18'].lt.reduce((a, b) => Math.max(a, b.packageQty), 0));
   check(dS.summary && chS.total === both && chS.datasets[0].data[0] === topBoth,
     'Lotes: período grande (totais no servidor) com a soma de itens por saca', {total: chS.total, both});
   check(dSf.summary && chSf.total === arrBoth, 'Lotes: período grande com filtro de Entrada/Saída aplicado no servidor', {total: chSf.total, arrBoth});
+
+  // 3b. V4.18: dias baixados antes (gravados como "Partida"/"Chegada") aparecem com os nomes da tela, na leitura normal e no
+  // resumo de período grande, sem baixar de novo.
+  const oldRows = [{date: D19, column: 'Ecológica', sackType: 'Ecológica', lot: 'BRFICVELHA1', port: 'Partida', shift: 'T1', items: 5, qty: 1},
+    {date: D19, column: 'Não ecológica', sackType: 'Não ecológica', lot: 'BRFICVELHA2', port: 'Chegada', shift: 'T2', items: 7, qty: 1}];
+  const alRows = cA.JTCore_.applyAliases(JSON.parse(JSON.stringify(oldRows)), cfgL.valueAliases);
+  const sinkA = cA.GroupSummarySink_(cfgL, {port: ['Saída de porto']}, 10);
+  sinkA.addRows(JSON.parse(JSON.stringify(oldRows)));
+  const viewA = cA.groupSummaryView_(cfgL, sinkA.build(), {port: ['Saída de porto']});
+  const portsA = (viewA.byDim.port || []).map(x => x.port);
+  check(alRows.map(r => r.port).join() === 'Saída de porto,Entrada' && portsA.indexOf('Partida') < 0 && portsA.indexOf('Saída de porto') >= 0 &&
+    viewA.top.every(r => r.port !== 'Partida' && r.port !== 'Chegada'),
+    'Lotes: "Partida"/"Chegada" dos dias antigos viram "Saída de porto"/"Entrada" na leitura e no resumo de período grande', {alRows, portsA});
 
   // 4. Resumo com a linha de outra base: o painel usa a nossa (30001).
   const cO = freshCtx(lfDays(), {lotOtherSite: true});
@@ -2201,7 +2229,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   catch (e) { otherErr = e.message; }
   const okSite = cP.normalizeRecords_('lot_flow', D19, [{packageCode: 'BRTESTE2', proxySiteName: ' sp  gru ', isLoopPag: 'N', portName: '进港', packageQty: 4,
     scanDateTime: D19 + ' 07:10:00'}], 'packageSum');
-  check(/sem filtro/.test(otherErr) && okSite.length === 1 && okSite[0].column === 'Não ecológica' && okSite[0].port === 'Chegada' && okSite[0].shift === 'T1',
+  check(/sem filtro/.test(otherErr) && okSite.length === 1 && okSite[0].column === 'Não ecológica' && okSite[0].port === 'Entrada' && okSite[0].shift === 'T1',
     'Lotes: saca de outra base na lista bloqueia a importação (hoje também)', otherErr);
 
   // 6. Hoje: lista nova no máximo de hora em hora (Google Workspace) ou a cada 3 h (conta Gmail: cota de 90 min/dia).
@@ -2259,9 +2287,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
 
   // 7. diagnosticarLotes(): resumo, lista, contas da lista inteira × resumo, sem número de saca.
   const dg = cA.diagnosticarLotes(D19);
-  check(/Fluxo de Lotes/.test(dg.texto) && dg.lista.total === tA.n && dg.listaInteira.ecologicas === tA.eco && dg.listaInteira.pacotes === tA.items &&
-    dg.listaInteira.chegada === tA.arr && /isLoopPag: \d+ ✓/.test(dg.texto.replace(/\./g, '')) && !dA[D19].lt.some(b => dg.texto.indexOf(b.packageCode) >= 0) &&
-    !/FAKE/.test(dg.texto), 'diagnosticarLotes: lista × resumo (ecológicas pelo isLoopPag, pacotes, Chegada/Partida), sem número de saca', dg.texto);
+  check(/Criação de Lotes/.test(dg.texto) && dg.lista.total === tA.n && dg.listaInteira.ecologicas === tA.eco && dg.listaInteira.pacotes === tA.items &&
+    dg.listaInteira.entrada === tA.arr && /isLoopPag: \d+ ✓/.test(dg.texto.replace(/\./g, '')) && !dA[D19].lt.some(b => dg.texto.indexOf(b.packageCode) >= 0) &&
+    !/FAKE/.test(dg.texto), 'diagnosticarLotes: lista × resumo (ecológicas pelo isLoopPag, pacotes, Entrada/Saída de porto), sem número de saca', dg.texto);
 }
 
 // ---------- V3.24: atualização mais rápida (resumos em paralelo, hoje mais vezes, carimbo para o navegador) ----------
@@ -3442,12 +3470,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
 {
   const c0 = createContext({props: {}, jms: fakeJms({}), quiet: true});
   const keys0 = require('vm').runInContext('Object.keys(INDICATORS)', c0);
-  // (V4.7: o Fluxo de Lotes foi retirado — fora de INDICATORS sem REATIVAR_PAINEIS; a agenda dele continua na configuração.)
+  // (V4.7: o Fluxo de Lotes foi retirado. V4.18: de volta como Criação de Lotes, com a agenda dele.)
   const lotCfg = c => require('vm').runInContext('ALL_INDICATORS_.lot_flow', c);
   check(c0.dailyMode_() === true && c0.updateHours_().join() === '6,8' && c0.updateHour_() === 6 && c0.updateHoursSc_().join() === '15,17' &&
     c0.agendaEveryHours_(c0.getIndicatorConfig_('no_move')) === 2 && c0.agendaEveryHours_(lotCfg(c0)) === 3 &&
-    keys0.filter(k => c0.getIndicatorConfig_(k).agendaEvery).sort().join() === 'no_move',
-    'padrão: agenda às 6h e 8h; Sem Movimentação a cada 2 h; Fluxo de Lotes (se reativado) a cada 3 h');
+    keys0.filter(k => c0.getIndicatorConfig_(k).agendaEvery).sort().join() === 'lot_flow,no_move',
+    'padrão: agenda às 6h e 8h; Sem Movimentação a cada 2 h; Criação de Lotes a cada 3 h');
   const c1 = createContext({props: {HORAS_ATUALIZACAO: '9h e 7h', HORAS_ATUALIZACAO_SC: '16h', SEM_MOVIMENTACAO_HORAS: '4', LOTES_HORAS: '0'}, jms: fakeJms({}), quiet: true});
   check(c1.updateHours_().join() === '7,9' && c1.updateHoursSc_().join() === '16' && c1.agendaEveryHours_(c1.getIndicatorConfig_('no_move')) === 4 &&
     c1.agendaEveryHours_(lotCfg(c1)) === 3, 'HORAS_ATUALIZACAO ("9h e 7h"), HORAS_ATUALIZACAO_SC, SEM_MOVIMENTACAO_HORAS e LOTES_HORAS (valor inválido = padrão)');
@@ -3688,30 +3716,29 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     {hits: cDE.__state.tripEmptyHits, rows: rowsE.length, com: rowsE.filter(r => r.tripId && r.tripId !== 'N/A').length});
 }
 
-// ---------- V4.7: Fluxo de Lotes retirado; Atualizar atualiza TODOS os painéis de uma vez ----------
+// ---------- V4.7: Fluxo de Lotes retirado (V4.18: de volta como Criação de Lotes); Atualizar atualiza TODOS os painéis ----------
 {
   const vmR = require('vm');
   const keysOf = c => vmR.runInContext('Object.keys(INDICATORS)', c);
   const cR = createContext({props: {}, jms: fakeJms({}), quiet: true});
-  check(keysOf(cR).indexOf('lot_flow') < 0 && vmR.runInContext('!!ALL_INDICATORS_.lot_flow.retired', cR) && !cR.getPublicCatalog_().some(c => c.key === 'lot_flow'),
-    'Fluxo de Lotes retirado: fora do menu, dos Resultados e da fila (a configuração continua no código)');
-  let msg = '';
-  try { cR.activeCfg_('lot_flow'); } catch (e) { msg = e.message; }
-  check(/REATIVAR_PAINEIS = lot_flow/.test(msg), 'diagnosticarLotes explica como trazer de volta', msg);
+  // V4.18 (pedido "Colocar esse dashboard no dash principal"): sem retired; nenhum painel retirado sobra.
+  const menuL = cR.getPublicCatalog_().filter(c => c.key === 'lot_flow')[0];
+  check(keysOf(cR).indexOf('lot_flow') >= 0 && !vmR.runInContext('Object.keys(ALL_INDICATORS_).some(k => ALL_INDICATORS_[k].retired)', cR) &&
+    menuL && menuL.name.pt === 'Criação de Lotes', 'Criação de Lotes de volta: no menu, nos Resultados e na fila, sem REATIVAR_PAINEIS');
   const cB = createContext({props: {REATIVAR_PAINEIS: 'lot_flow'}, jms: fakeJms({}), quiet: true});
   const cP = createContext({props: {PAINEIS: 'lot_flow,wrong_send'}, jms: fakeJms({}), quiet: true});
   const cF = createContext({props: {PAINEIS_FORA: 'arrival_flow,send_flow'}, jms: fakeJms({}), quiet: true});
-  check(keysOf(cB).indexOf('lot_flow') >= 0 && keysOf(cP).join() === 'wrong_send,lot_flow' && keysOf(cF).indexOf('lot_flow') < 0 && keysOf(cF).length === 10,
-    'REATIVAR_PAINEIS (ou PAINEIS) traz de volta; painel principal com 10 painéis (V4.17: com o Deslacre secundária e troncal)', [keysOf(cP), keysOf(cF)]);
+  check(keysOf(cB).indexOf('lot_flow') >= 0 && keysOf(cP).join() === 'wrong_send,lot_flow' && keysOf(cF).indexOf('lot_flow') >= 0 && keysOf(cF).length === 11,
+    'PAINEIS escolhe os painéis; painel principal com 11 painéis (V4.17: Deslacre secundária e troncal; V4.18: Criação de Lotes)', [keysOf(cP), keysOf(cF)]);
   // V4.12.3: Deslacre retirado. V4.17 (pedido): de volta no painel principal, com a linha secundária e a linha troncal, sem
   // precisar de REATIVAR_PAINEIS (quem já tinha a propriedade com "unseal" não muda nada).
   const cU = createContext({props: {REATIVAR_PAINEIS: 'unseal'}, jms: fakeJms({}), quiet: true});
   const menuR = cR.getPublicCatalog_().filter(c => /^unseal/.test(c.key));
   check(['unseal', 'unseal_trunk'].every(k => keysOf(cR).indexOf(k) >= 0 && keysOf(cF).indexOf(k) >= 0 && keysOf(cU).indexOf(k) >= 0) &&
-    !vmR.runInContext('!!ALL_INDICATORS_.unseal.retired', cR) && keysOf(cU).indexOf('lot_flow') < 0 &&
+    !vmR.runInContext('!!ALL_INDICATORS_.unseal.retired', cR) && keysOf(cU).indexOf('lot_flow') >= 0 &&
     menuR.map(c => c.name.pt).join() === 'Deslacre (linha secundária),Deslacre (linha troncal)',
     'Deslacre de volta no painel principal: linha secundária e linha troncal no menu, nos Resultados e na fila', menuR.map(c => c.name.pt));
-  // Nenhuma consulta dos Lotes e Resultados sem eles (com o Deslacre).
+  // Histórico do painel principal: os Lotes e o Deslacre consultados; Resultados com eles.
   const today = cR.isoToday_(), ago = n => cR.addDaysIso_(today, -n), Y = ago(1), Y2 = ago(2), Y3 = ago(3);
   const daysR = {[today]: makeDay(today, 91), [Y]: makeDay(Y, 92), [Y2]: makeDay(Y2, 93), [Y3]: makeDay(Y3, 94)};
   const PRINC = {REATIVAR_PAINEIS: '', PAINEIS_FORA: 'arrival_flow,send_flow', MODO_ATUALIZACAO: 'diario', DATA_START_DATE: Y3};
@@ -3720,18 +3747,18 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   runAll(cL);
   const lotEp = vmR.runInContext('ALL_INDICATORS_.lot_flow.summary.endpoint', cL);
   const unsealEps = ['unseal', 'unseal_trunk'].map(k => vmR.runInContext('ALL_INDICATORS_.' + k + '.summary.endpoint', cL));
-  check(!cL.__state.fetches.some(f => f.url.split('?')[0] === lotEp) && !cL.allTabRows_('JOBS').some(r => r[2] === 'lot_flow') &&
+  check(cL.__state.fetches.some(f => f.url.split('?')[0] === lotEp) && cL.getRateDay_('lot_flow', Y) &&
     unsealEps.every(ep => cL.__state.fetches.some(f => f.url.split('?')[0] === ep)) && ['unseal', 'unseal_trunk'].every(k => cL.getRateDay_(k, Y)),
-    'histórico do painel principal sem nenhuma consulta dos Lotes; o Deslacre (secundária e troncal) é consultado');
+    'histórico do painel principal com a Criação de Lotes e o Deslacre (secundária e troncal)');
   const res = cL.getResultsData({from: Y3, to: Y});
-  check(res && !JSON.stringify(res).includes('lot_flow') && ['unseal', 'unseal_trunk'].every(k => res.series.some(s => s.key === k)),
-    'Resultados sem o Fluxo de Lotes e com o Deslacre (secundária e troncal)');
+  check(res && ['lot_flow', 'unseal', 'unseal_trunk'].every(k => res.series.some(s => s.key === k)),
+    'Resultados com a Criação de Lotes e o Deslacre (secundária e troncal)');
   // Atualizar: todos os painéis de uma vez (taxas e cartões; depois listas, IDs de viagem e bipagens), o aberto primeiro.
   const cA = freshCtx(daysR, null, PRINC);
   const r1 = cA.refreshAllNow('wrong_send', Y, Y);
   const panels = keysOf(cA);
-  check(r1.ok && r1.panels === panels.length && r1.panelsTotal === 10 && r1.failed === 0 && r1.detailsQueued >= 9,
-    'Atualizar: taxa e cartões dos 10 painéis numa chamada', {panels: r1.panels, total: r1.panelsTotal, q: r1.detailsQueued, err: r1.errors});
+  check(r1.ok && r1.panels === panels.length && r1.panelsTotal === 11 && r1.failed === 0 && r1.detailsQueued >= 10,
+    'Atualizar: taxa e cartões dos 11 painéis numa chamada', {panels: r1.panels, total: r1.panelsTotal, q: r1.detailsQueued, err: r1.errors});
   check(cA.refreshAllNow('wrong_send', Y, Y).cooldown === true, 'clique repetido em seguida não consulta de novo');
   const x1 = cA.refreshAllDetailsNow('wrong_send', Y, Y);
   const complete = (k, d) => !!cA.getDayStatus_(k, d) && cA.getDayStatus_(k, d).details === 'COMPLETE';
