@@ -152,8 +152,8 @@ function sorterSwitchBody_(corpo, metodo, csrf) {
   return {form: parts.join('&')};
 }
 /**
- * Prepara a sessão de um sorter: o padrão não troca nada (sessão nova); o outro abre a página, lê o _token e manda o pedido
- * de troca configurado. Sem a troca: erro claro (quem chama pula esse sorter).
+ * Prepara a sessão de um sorter: o padrão não troca nada (sessão nova); o outro abre a página, lê o _token e faz a troca
+ * configurada (pedido e/ou cookie). Sem a troca: erro claro (quem chama pula esse sorter).
  */
 function sorterPrepare_(dev) {
   const s = sorterSession_(dev);
@@ -161,28 +161,255 @@ function sorterPrepare_(dev) {
   if (dev.trocaInvalida) throw new Error('SORTER_TROCA_' + dev.id + ' não é um JSON válido (ex.: {"metodo": "POST", "caminho": "/home/…", "corpo": "_token=x&…"}).');
   const t = dev.troca;
   if (!t || (!t.caminho && !t.cookie)) throw new Error(dev.nome + ': falta a troca de sorter (Propriedade SORTER_TROCA_' + dev.id + ').');
-  const page = sorterOpenPage_(s, t.pagina || sorterPage_());
-  if (page.code >= 400) throw new Error('A página ' + (t.pagina || sorterPage_()) + ' do sorter respondeu código ' + page.code + '.');
+  sorterApplySwitch_(s, t, dev.nome);
+  return s;
+}
+/** Faz a troca `t` ({metodo, caminho, corpo} e/ou {cookie: {nome: valor}}) na sessão `s`. */
+function sorterApplySwitch_(s, t, nome) {
+  if (t.caminho || !t.cookie) {
+    const page = sorterOpenPage_(s, t.pagina || sorterPage_());
+    if (page.code >= 400) throw new Error('A página ' + (t.pagina || sorterPage_()) + ' do sorter respondeu código ' + page.code + '.');
+  }
   if (t.cookie && typeof t.cookie === 'object') Object.keys(t.cookie).forEach(k => { s.cookies[k] = encodeURIComponent(String(t.cookie[k])); });
-  if (t.caminho) {
-    const metodo = String(t.metodo || (t.corpo !== undefined && t.corpo !== null ? 'POST' : 'GET')).toUpperCase();
-    const h = {'X-Requested-With': 'XMLHttpRequest', Referer: sorterBase_() + (t.pagina || sorterPage_()), Origin: sorterBase_()};
-    if (s.csrf) h['X-CSRF-TOKEN'] = s.csrf;
-    if (s.cookies['XSRF-TOKEN']) { try { h['X-XSRF-TOKEN'] = decodeURIComponent(s.cookies['XSRF-TOKEN']); } catch (e) { /* cookie sem codificação */ } }
-    let url = sorterBase_() + (String(t.caminho).charAt(0) === '/' ? '' : '/') + t.caminho;
-    const c = sorterSwitchBody_(t.corpo, metodo, s.csrf), opts = {method: metodo.toLowerCase(), headers: h};
-    if (metodo === 'GET') { if (c.form) url += (url.indexOf('?') >= 0 ? '&' : '?') + c.form; }
-    else if (c.json !== undefined) { opts.payload = c.json; opts.contentType = 'application/json'; }
-    else { opts.payload = c.form || ''; opts.contentType = 'application/x-www-form-urlencoded; charset=UTF-8'; }
-    const res = sorterFetch_(s, url, opts), code = res.getResponseCode();
-    if (code === 419) throw new Error('O site do sorter recusou o _token na troca para o ' + dev.nome + ' (código 419).');
-    if (code >= 400) throw new Error('O site do sorter recusou a troca para o ' + dev.nome + ' (código ' + code + ').');
-    const j = safeJsonParse_(res.getContentText(), null);
-    if (j && typeof j === 'object' && (j.code === 0 || j.code === '0' || j.status === false || j.success === false || j.status === 'error')) {
-      throw new Error('O site do sorter recusou a troca para o ' + dev.nome + ': ' + String(j.msg || j.message || 'sem mensagem').slice(0, 120) + '.');
-    }
+  if (!t.caminho) return s;
+  const metodo = String(t.metodo || (t.corpo !== undefined && t.corpo !== null ? 'POST' : 'GET')).toUpperCase();
+  const h = {'X-Requested-With': 'XMLHttpRequest', Referer: sorterBase_() + (t.pagina || sorterPage_()), Origin: sorterBase_()};
+  if (s.csrf) h['X-CSRF-TOKEN'] = s.csrf;
+  if (s.cookies['XSRF-TOKEN']) { try { h['X-XSRF-TOKEN'] = decodeURIComponent(s.cookies['XSRF-TOKEN']); } catch (e) { /* cookie sem codificação */ } }
+  let url = sorterBase_() + (String(t.caminho).charAt(0) === '/' ? '' : '/') + t.caminho;
+  const c = sorterSwitchBody_(t.corpo, metodo, s.csrf), opts = {method: metodo.toLowerCase(), headers: h};
+  if (metodo === 'GET') { if (c.form) url += (url.indexOf('?') >= 0 ? '&' : '?') + c.form; }
+  else if (c.json !== undefined) { opts.payload = c.json; opts.contentType = 'application/json'; }
+  else { opts.payload = c.form || ''; opts.contentType = 'application/x-www-form-urlencoded; charset=UTF-8'; }
+  const res = sorterFetch_(s, url, opts), code = res.getResponseCode();
+  if (code === 419) throw new Error('O site do sorter recusou o _token na troca para o ' + nome + ' (código 419).');
+  if (code >= 400) throw new Error('O site do sorter recusou a troca para o ' + nome + ' (código ' + code + ').');
+  const j = safeJsonParse_(res.getContentText(), null);
+  if (j && typeof j === 'object' && (j.code === 0 || j.code === '0' || j.status === false || j.success === false || j.status === 'error')) {
+    throw new Error('O site do sorter recusou a troca para o ' + nome + ': ' + String(j.msg || j.message || 'sem mensagem').slice(0, 120) + '.');
   }
   return s;
+}
+
+// ------------------------------------------------------------------ descoberta da troca (V4.22.1)
+/**
+ * O site não mostrou um pedido de troca no DevTools (só as consultas depois dela): o painel descobre sozinho como o site escolhe
+ * o sorter. Abre a página (/home) e os arquivos .js do próprio site que ela carrega; acha as opções "GRU-A" / "GRU-B" (valor
+ * da lista, data-id, onclick, link, script), os pedidos que o código faz e os nomes de cookie que ele grava; testa cada jeito
+ * numa sessão nova e compara o Sort total dos últimos 7 dias com o do sorter padrão (tem que mudar e não pode mudar para todo
+ * o site). O que funciona fica em SORTER_TROCA_<ID> ({..., auto: true}).
+ */
+const SORTER_COOKIE_NAMES_ = ['device', 'device_id', 'deviceId', 'deviceid', 'deviceNo', 'sorter', 'sorter_id', 'sorterId', 'equip', 'machine'];
+const SORTER_LIBS_ = /(jquery|layui|layer\.js|echarts|bootstrap|vue|axios|lodash|moment|chart|highcharts|polyfill|font)/i;
+function sorterDecode_(t) {
+  return String(t).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, ' ');
+}
+function sorterAttrs_(tag) {
+  const o = {}, re = /([^\s=/>"']+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+  const body = String(tag).replace(/^<\s*[\w-]+/, '').replace(/\/?>$/, '');
+  let m;
+  while ((m = re.exec(body))) o[m[1].toLowerCase()] = sorterDecode_(m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4] !== undefined ? m[4] : '');
+  return o;
+}
+/** Caminho no próprio site (ou null): "/home/x?y", "x.js" → "/x.js". */
+function sorterLocalPath_(href) {
+  const h = String(href || '').trim();
+  if (!h || /^(javascript:|#|mailto:|data:)/i.test(h)) return null;
+  const base = sorterBase_();
+  if (/^https?:\/\//i.test(h)) return h.toLowerCase().indexOf(base.toLowerCase() + '/') === 0 ? h.slice(base.length) : null;
+  if (/^\/\//.test(h)) return null;
+  return h.charAt(0) === '/' ? h : '/' + h;
+}
+/** Onde a opção "GRU-<id>" aparece na página: [{valor, campo, como, href}]. */
+function sorterOptions_(html, id) {
+  const out = [], s = String(html), re = new RegExp('GRU[-_\\s]?' + id + '(?![A-Za-z0-9])', 'gi');
+  const add = o => { if (o.valor !== undefined && o.valor !== '' && !out.some(x => x.valor === o.valor && x.campo === o.campo && x.href === o.href)) out.push(o); };
+  const ATRS = ['data-id', 'data-value', 'data-device', 'data-device-id', 'data-device_id', 'data-deviceid', 'data-sorter', 'data-sorter-id', 'data-key', 'data-code', 'lay-value', 'value'];
+  let m;
+  while ((m = re.exec(s))) {
+    const i = m.index, before = s.slice(Math.max(0, i - 600), i);
+    const op = before.lastIndexOf('<option');
+    if (op >= 0 && before.indexOf('</option', op) < 0) {
+      const a = sorterAttrs_((before.slice(op).match(/<option[^>]*>/i) || [''])[0]);
+      const si = s.lastIndexOf('<select', i), sel = si >= 0 ? s.slice(si).match(/<select[^>]*>/i) : null;
+      add({valor: a.value !== undefined ? a.value : m[0], campo: sel ? sorterAttrs_(sel[0]).name || '' : '', como: 'opção de lista'});
+    }
+    const radio = (before.slice(-250).match(/<input[^>]*type\s*=\s*["']?(radio|checkbox)[^>]*>/gi) || []).pop();
+    if (radio) { const a = sorterAttrs_(radio); if (a.value !== undefined) add({valor: a.value, campo: a.name || '', como: 'botão de escolha'}); }
+    // A etiqueta aberta mais perto do texto com um valor: <li data-id="3">Cross-belt GRU-A</li>, <a href=…>, onclick.
+    const tags = [];
+    const tre = /<([a-z][\w-]*)(\s[^<>]*)?>/gi;
+    let t;
+    while ((t = tre.exec(before))) {
+      if (/^(input|img|br|hr|meta|link)$/i.test(t[1])) continue;
+      if (new RegExp('</' + t[1] + '\\s*>', 'i').test(before.slice(t.index + t[0].length))) continue;
+      tags.push(t[0]);
+    }
+    for (const tag of tags.slice(-4).reverse()) {
+      const a = sorterAttrs_(tag), n0 = out.length;
+      ATRS.forEach(k => { if (a[k] !== undefined && a[k] !== '' && !/^(radio|checkbox)$/i.test(a.type || '')) add({valor: a[k], campo: k.replace(/^data-|^lay-/, ''), como: 'atributo ' + k}); });
+      const oc = (a.onclick || '').match(/\(\s*['"]?([\w-]+)['"]?\s*[,)]/);
+      if (oc) add({valor: oc[1], campo: '', como: 'onclick'});
+      const hp = sorterLocalPath_(a.href);
+      if (hp && !/^\/?$|login|logout|statis|summary/i.test(hp)) add({valor: hp, campo: '', como: 'link', href: hp});
+      if (out.length > n0) break;
+    }
+    const js = Array.from(s.slice(Math.max(0, i - 160), i).matchAll(/\b(id|value|device_id|deviceId|device|sorter_id|sorterId|code)\s*["']?\s*:\s*["']?([\w-]+)/g)).pop();
+    if (js) add({valor: js[2], campo: js[1], como: 'script'});
+  }
+  return out;
+}
+/** Pedidos que o código da página pode fazer (formulários e chamadas nos scripts): [{metodo, caminho, concat, chaves}]. */
+function sorterRequests_(text) {
+  const s = String(text), out = [];
+  const RES = /^(url|type|method|data|dataType|success|error|complete|headers|async|cache|contentType|processData|timeout|beforeSend|function|_token|then|catch|xhrFields|traditional)$/;
+  const keysOf = d => { const k = []; String(d || '').replace(/["']?([A-Za-z_$][\w$]*)["']?\s*:/g, (x, n) => { if (!RES.test(n) && k.indexOf(n) < 0) k.push(n); return x; }); return k; };
+  const add = p => {
+    const c = sorterLocalPath_(p.caminho);
+    if (!c || /statis|summary|login|logout|\.(js|css|png|jpg|svg|ico)(\?|$)/i.test(c)) return;
+    p.caminho = c; p.metodo = String(p.metodo || 'GET').toUpperCase();
+    p.pontos = (/switch|device|choose|change|select|toggle|equip|machine|sorter|cross/i.test(c) ? 3 : 0) + (p.metodo === 'POST' ? 1 : 0);
+    if (!out.some(x => x.metodo === p.metodo && x.caminho === p.caminho && x.concat === p.concat)) out.push(p);
+  };
+  let m;
+  const forms = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
+  while ((m = forms.exec(s))) {
+    const a = sorterAttrs_('<form ' + m[1] + '>'), names = [];
+    (m[2].match(/<(select|input)[^>]*>/gi) || []).forEach(tg => { const x = sorterAttrs_(tg); if (x.name && x.name !== '_token' && !/^hidden$/i.test(x.type || '') && names.indexOf(x.name) < 0) names.push(x.name); });
+    add({metodo: a.method || 'GET', caminho: a.action || sorterPage_(), concat: false, chaves: names});
+  }
+  const Q = n => '(["\'`])([^"\'`]+)\\' + n + '(\\s*\\+)?';
+  const pads = [
+    [new RegExp('\\$\\.(post|get)\\(\\s*' + Q(2) + '\\s*(?:[\\w.$\\[\\]()\'"]*\\s*)?,?\\s*(\\{[^}]*\\})?', 'gi'), x => ({metodo: x[1], caminho: x[3], concat: !!x[4], dados: x[5]})],
+    [/\$\.ajax\(\s*\{([\s\S]{0,700}?)\}\s*\)/gi, x => {
+      const u = x[1].match(/url\s*:\s*(["'`])([^"'`]+)\1(\s*\+)?/), t = x[1].match(/(?:type|method)\s*:\s*["'](\w+)/i), d = x[1].match(/data\s*:\s*(\{[^}]*\})/);
+      return u ? {metodo: t ? t[1] : 'GET', caminho: u[2], concat: !!u[3], dados: d ? d[1] : ''} : null;
+    }],
+    [new RegExp('axios\\.(post|get)\\(\\s*' + Q(2) + '\\s*,?\\s*(\\{[^}]*\\})?', 'gi'), x => ({metodo: x[1], caminho: x[3], concat: !!x[4], dados: x[5]})],
+    [new RegExp('fetch\\(\\s*' + Q(1) + '([\\s\\S]{0,300})', 'gi'), x => {
+      const t = x[4].match(/method\s*:\s*["'](\w+)/i), d = x[4].match(/body\s*:\s*[^{]*(\{[^}]*\})/);
+      return {metodo: t ? t[1] : 'GET', caminho: x[2], concat: !!x[3], dados: d ? d[1] : ''};
+    }],
+    [new RegExp('location(?:\\.href)?\\s*=\\s*' + Q(1), 'gi'), x => ({metodo: 'GET', caminho: x[2], concat: !!x[3], dados: ''})]
+  ];
+  pads.forEach(pr => {
+    let x;
+    while ((x = pr[0].exec(s))) { const p = pr[1](x); if (p) add({metodo: p.metodo, caminho: p.caminho, concat: p.concat, chaves: keysOf(p.dados)}); }
+  });
+  return out.sort((a, b) => b.pontos - a.pontos);
+}
+/** Nomes de cookie que o código grava (document.cookie, $.cookie, Cookies.set, setCookie). */
+function sorterCookieNames_(text) {
+  const out = [], s = String(text);
+  [/document\.cookie\s*=\s*["'`]\s*([\w-]+)\s*=/g, /\$\.cookie\(\s*["']([\w-]+)["']\s*,/g, /Cookies\.set\(\s*["']([\w-]+)["']/g,
+    /setCookie\(\s*["']([\w-]+)["']/g].forEach(re => { let m; while ((m = re.exec(s))) if (out.indexOf(m[1]) < 0) out.push(m[1]); });
+  return out;
+}
+/** Sort total dos últimos 7 dias na sessão `s` (o número que muda quando a troca funciona). */
+function sorterTotal7_(s) {
+  const to = isoToday_(), from = addDaysIso_(to, -6);
+  const url = sorterBase_() + SORTER_PATH_ + '?page=1&limit=1000&start=' + encodeURIComponent(from + ' 00:00:00') + '&end=' +
+    encodeURIComponent(to + ' 23:59:59') + '&group=0&inductionno=0&layerno=0';
+  return sorterParse_(sorterFetch_(s, url)).rows.reduce((a, r) => a + (Number(r.total) || 0), 0);
+}
+/**
+ * Descobre a troca do sorter `dev` (não padrão). Volta {ok, troca, report} — report com nomes e números, nunca valores de
+ * token ou cookie de sessão.
+ */
+function sorterDiscover_(dev) {
+  const report = [], log = l => report.push(l);
+  const s0 = sorterSession_(dev), page = sorterOpenPage_(s0, sorterPage_());
+  const title = (page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1];
+  log('Página ' + sorterPage_() + ': código ' + page.code + (title ? ' · ' + sorterDecode_(title).replace(/\s+/g, ' ').trim().slice(0, 60) : '') +
+    ' · _token: ' + (s0.csrf ? 'sim' : 'não') + ' · cookies: ' + (Object.keys(s0.cookies).join(', ') || 'nenhum'));
+  // Arquivos .js do próprio site (sem as bibliotecas) e janelas à parte (iframe / layer) com "device/choose/switch".
+  let text = page.html;
+  const extra = [];
+  String(page.html).replace(/<script[^>]+src\s*=\s*["']([^"']+)["']/gi, (x, u) => { const c = sorterLocalPath_(u); if (c && !SORTER_LIBS_.test(c.split('?')[0].split('/').pop()) && extra.indexOf(c) < 0) extra.push(c); return x; });
+  String(page.html).replace(/(?:src|href|content|url)\s*[:=]\s*["']([^"']*(?:device|choose|switch|equip|sorter)[^"']*)["']/gi, (x, u) => {
+    const c = sorterLocalPath_(u);
+    if (c && !/\.(css|png|jpg|svg|ico)(\?|$)/i.test(c) && extra.indexOf(c) < 0) extra.push(c);
+    return x;
+  });
+  extra.slice(0, 8).forEach(c => {
+    try {
+      const r = sorterFetch_(s0, sorterBase_() + c, {headers: {Accept: '*/*'}});
+      if (r.getResponseCode() < 400) { text += '\n' + r.getContentText(); log('  arquivo ' + c + ': lido'); }
+      else log('  arquivo ' + c + ': código ' + r.getResponseCode());
+    } catch (e) { log('  arquivo ' + c + ': ' + String(e && e.message || e).slice(0, 80)); }
+  });
+  const others = sorterDevices_().filter(d => d.id !== dev.id);
+  const optsA = sorterOptions_(text, dev.id), optsB = others.length ? sorterOptions_(text, others[0].id) : [];
+  log('Opções do ' + dev.nome + ' na página: ' + (optsA.map(o => (o.campo ? o.campo + '=' : '') + o.valor + ' [' + o.como + ']').join(' · ') || 'nenhuma'));
+  if (others.length) log('Opções do ' + others[0].nome + ': ' + (optsB.map(o => (o.campo ? o.campo + '=' : '') + o.valor).join(' · ') || 'nenhuma'));
+  const reqs = sorterRequests_(text), cookieNames = sorterCookieNames_(text);
+  log('Pedidos no código: ' + (reqs.slice(0, 8).map(p => p.metodo + ' ' + p.caminho + (p.concat ? '+valor' : '') + (p.chaves.length ? ' (' + p.chaves.join(', ') + ')' : '')).join(' · ') || 'nenhum'));
+  log('Cookies gravados pelo código: ' + (cookieNames.join(', ') || 'nenhum'));
+  const t0 = sorterTotal7_(sorterSession_(dev));
+  log('Sem trocar (sorter padrão), Sort total dos últimos 7 dias: ' + t0);
+  const vals = optsA.filter(o => !o.href).map(o => o.valor).concat([dev.id, 'GRU-' + dev.id]).filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
+  const cands = [];
+  optsA.filter(o => o.href).forEach(o => cands.push({desc: 'link ' + o.href, troca: {metodo: 'GET', caminho: o.href}}));
+  reqs.filter(p => p.pontos >= 3).slice(0, 4).forEach(p => {
+    if (p.concat) vals.slice(0, 2).forEach(v => cands.push({desc: p.metodo + ' ' + p.caminho + v, troca: {metodo: p.metodo, caminho: p.caminho + encodeURIComponent(v)}}));
+    const keys = (p.chaves.length ? p.chaves : optsA.map(o => o.campo).filter(Boolean).concat(['device_id', 'id', 'device', 'deviceId']))
+      .filter((k, i, a) => a.indexOf(k) === i).slice(0, 4);
+    keys.forEach(k => vals.slice(0, 2).forEach(v => cands.push({desc: p.metodo + ' ' + p.caminho + ' (' + k + '=' + v + ')',
+      troca: {metodo: p.metodo, caminho: p.caminho, corpo: encodeURIComponent(k) + '=' + encodeURIComponent(v)}})));
+  });
+  const tested = [];
+  const tryOne = (c, global) => {
+    const s = sorterSession_(dev);
+    let t;
+    try { sorterApplySwitch_(s, c.troca, dev.nome); t = sorterTotal7_(s); }
+    catch (e) { log('  ✗ ' + c.desc + ': ' + String(e && e.message || e).slice(0, 100)); return null; }
+    const ok = t > 0 && t !== t0;
+    log('  ' + (ok ? '✓' : '✗') + ' ' + c.desc + ': Sort total ' + t + (ok ? '' : ' (não mudou)'));
+    if (!ok || !global) return ok ? t : null;
+    // A troca vale para todo o site? (sessão nova sem trocar mostraria o mesmo número): não usa, para não mudar a tela de ninguém.
+    const t1 = sorterTotal7_(sorterSession_(dev));
+    if (t1 === t) {
+      log('  A troca vale para TODO o site: o painel não usa, para não mudar a tela de quem usa o sorter.');
+      return 'global';
+    }
+    return t;
+  };
+  for (let i = 0; i < cands.length && tested.length < 24; i++) {
+    tested.push(cands[i].desc);
+    const r = tryOne(cands[i], true);
+    if (r === 'global') {
+      // Volta o site para o sorter padrão pelo mesmo pedido, com o valor dele.
+      const vb = optsB.filter(o => !o.href).map(o => o.valor)[0];
+      const back = cands[i].troca.corpo && vb ? Object.assign({}, cands[i].troca, {corpo: cands[i].troca.corpo.replace(/=[^=]*$/, '=' + encodeURIComponent(vb))}) : null;
+      if (back) { try { sorterApplySwitch_(sorterSession_(dev), back, dev.nome); } catch (e) { /* tentou voltar */ } }
+      return {ok: false, global: true, report: report};
+    }
+    if (r !== null) return {ok: true, troca: cands[i].troca, como: cands[i].desc, report: report};
+  }
+  // Cookie: cada valor em todos os nomes de uma vez; o que mudar, nome por nome.
+  const names = cookieNames.concat(SORTER_COOKIE_NAMES_).filter((n, i, a) => a.indexOf(n) === i).slice(0, 14);
+  for (let i = 0; i < vals.length; i++) {
+    const all = {};
+    names.forEach(n => { all[n] = vals[i]; });
+    if (tryOne({desc: 'cookies (' + names.length + ' nomes) = ' + vals[i], troca: {cookie: all}}, false) === null) continue;
+    for (let k = 0; k < names.length; k++) {
+      const one = {};
+      one[names[k]] = vals[i];
+      if (tryOne({desc: 'cookie ' + names[k] + '=' + vals[i], troca: {cookie: one}}, false) !== null) return {ok: true, troca: {cookie: one}, como: 'cookie ' + names[k], report: report};
+    }
+    return {ok: true, troca: {cookie: all}, como: 'cookies ' + names.join(', '), report: report};
+  }
+  log('Nenhum jeito de trocar para o ' + dev.nome + ' funcionou (' + (cands.length + vals.length) + ' tentativa(s)).');
+  return {ok: false, report: report};
+}
+/** Descobre e grava a troca (SORTER_TROCA_<ID> com auto: true). */
+function sorterLearnSwitch_(dev) {
+  const r = sorterDiscover_(dev);
+  if (r.ok) {
+    setProp_('SORTER_TROCA_' + dev.id, JSON.stringify(Object.assign({}, r.troca, {auto: true})));
+    logSync_('INFO', 'sorter_flow', isoToday_(), dev.nome + ': troca descoberta sozinha (' + r.como + ').');
+  }
+  return r;
 }
 
 // ------------------------------------------------------------------ consulta
@@ -237,6 +464,12 @@ function sorterSum_(rows) {
 function sorterSessions_() {
   const out = [], skipped = [];
   sorterDevices_().forEach(dev => {
+    // V4.22.1: sorter sem a troca — o painel tenta descobrir sozinho (uma vez por dia; Configurações → Salvar e testar: na hora).
+    if (!dev.padrao && !dev.troca && !dev.trocaInvalida && getProp_('SORTER_DESCOBERTA_' + dev.id, '') !== isoToday_()) {
+      setProp_('SORTER_DESCOBERTA_' + dev.id, isoToday_());
+      try { const r = sorterLearnSwitch_(dev); if (r.ok) dev.troca = r.troca; }
+      catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; }
+    }
     try { out.push(sorterPrepare_(dev)); }
     catch (e) {
       const m = String(e && e.message || e);
@@ -262,6 +495,11 @@ function sorterCheckSwitch_(totals) {
     for (let b = a + 1; b < ids.length; b++) {
       const x = totals[ids[a]], y = totals[ids[b]];
       if (x.total > 0 && x.total === y.total && x.valid === y.valid && x.noInfo === y.noInfo) {
+        // Troca descoberta sozinha que parou de valer: esquecida, para ser descoberta de novo na próxima vez.
+        [ids[a], ids[b]].forEach(id => {
+          const t = safeJsonParse_(getProp_('SORTER_TROCA_' + id, ''), null);
+          if (t && t.auto) { deleteProp_('SORTER_TROCA_' + id); deleteProp_('SORTER_DESCOBERTA_' + id); }
+        });
         throw new Error('Sorter ' + ids[a] + ' e Sorter ' + ids[b] + ' vieram com os mesmos números: a troca de sorter não funcionou ' +
           '(confira SORTER_TROCA_' + ids[a] + ' / SORTER_TROCA_' + ids[b] + ').');
       }
@@ -343,9 +581,20 @@ function diagnosticarSorter() {
   const out = {endereco: sorterBase_() + SORTER_PATH_, pagina: sorterPage_(), balancas: sorterInductions_().length, sorters: []};
   const today = isoToday_();
   sorterDevices_().forEach(dev => {
-    const x = {id: dev.id, padrao: dev.padrao, troca: dev.padrao ? 'não precisa (sorter padrão do site)' : (dev.troca ? 'configurada' : 'falta SORTER_TROCA_' + dev.id)};
+    const x = {id: dev.id, padrao: dev.padrao, troca: dev.padrao ? 'não precisa (sorter padrão do site)' :
+      (dev.troca ? (dev.troca.auto ? 'descoberta sozinha' : 'configurada') : 'falta SORTER_TROCA_' + dev.id)};
+    // V4.22.1: sem a troca (ou com uma que falha), o teste procura sozinho como o site troca e mostra o relatório.
+    const learn = () => {
+      const r = sorterLearnSwitch_(dev);
+      x.descoberta = r.report;
+      if (r.ok) { dev.troca = r.troca; x.troca = 'descoberta sozinha (' + r.como + ')'; }
+      return r.ok;
+    };
     try {
-      const s = sorterPrepare_(dev);
+      if (!dev.padrao && !dev.troca && !dev.trocaInvalida) learn();
+      let s;
+      try { s = sorterPrepare_(dev); }
+      catch (e) { if (dev.padrao || dev.trocaInvalida || x.descoberta || !learn()) throw e; s = sorterPrepare_(dev); }
       const t = sorterSum_(sorterFetchDay_(s, today, [{induction: 0}])[0]);
       x.hoje = {sortTotal: t.total, validTotal: t.valid, noSortCode: t.noInfo};
       x.cookies = Object.keys(s.cookies);
@@ -353,5 +602,7 @@ function diagnosticarSorter() {
     } catch (e) { x.erro = String(e && e.message || e); }
     out.sorters.push(x);
   });
+  const ok = out.sorters.filter(x => x.hoje), same = ok.length > 1 && ok.every(x => x.hoje.sortTotal === ok[0].hoje.sortTotal && x.hoje.sortTotal > 0);
+  if (same) out.aviso = 'Os sorters vieram com os mesmos números hoje: a troca não funcionou.';
   return out;
 }

@@ -1,8 +1,24 @@
-# J&T DASHMASTER V4.22.0 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.1 — Produção do Sorter: o Sorter A é descoberto sozinho
+
+A captura do DevTools mostrou as consultas do Sorter A, mas nenhum pedido de troca. Agora o painel **descobre sozinho** como o
+site escolhe o sorter:
+- abre a página `/home` e os arquivos `.js` do próprio site que ela carrega (sem as bibliotecas, como jQuery e layui);
+- acha a opção "GRU-A" (valor da lista, data-id, onclick, link ou script), os pedidos que o código faz e os cookies que ele grava;
+- testa cada jeito numa sessão nova e compara o Sort total dos últimos 7 dias com o do sorter padrão. Tem que mudar, e não pode
+  mudar o site para todo mundo (se mudar, o painel não usa e volta o site para o B);
+- grava o que funcionou em `SORTER_TROCA_A` (com `"auto": true`). Se um dia parar de valer, ele esquece e descobre de novo.
+
+Isso roda sozinho uma vez por dia enquanto falta a troca, e na hora em **Configurações → Salvar e testar o sorter**. O teste
+mostra o relatório "descoberta", só com nomes e números (nunca token nem valor de cookie da sessão).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_1_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**.
 
 ## V4.22.0 — Produção do Sorter, no esquema do principal (painel separado)
 

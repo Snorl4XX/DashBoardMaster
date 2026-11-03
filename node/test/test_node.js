@@ -351,8 +351,8 @@ function firstDiff(a, b, p) {
   };
   const isoS = d => new Date(Date.now() + d * 864e5).toLocaleDateString('sv-SE', {timeZone: 'America/Sao_Paulo'});
   const dS1 = isoS(-2), dS2 = isoS(-1);
-  const propsS = {PAINEIS: 'sorter_flow', SORTER_URL: 'http://127.0.0.1:' + portSite + '/home', SORTER_MAX_BALANCAS: '14', DATA_START_DATE: dS1,
-    SORTER_TROCA_A: JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: '_token=copiado&device_id=3'})};
+  // V4.22.1: sem SORTER_TROCA_A — a troca do Sorter A é descoberta sozinha pela rede (página, _token e cookies de verdade).
+  const propsS = {PAINEIS: 'sorter_flow', SORTER_URL: 'http://127.0.0.1:' + portSite + '/home', SORTER_MAX_BALANCAS: '14', DATA_START_DATE: dS1};
   for (const k of Object.keys(propsS)) await adminS('propriedade', {k, v: propsS[k]});
   const histS = await adminS('executar', {fn: 'startFullHistory', args: []});
   check(histS.result && histS.result.ok && histS.result.indicators === 1, 'Sorter: histórico enfileirado sem AuthToken do JMS', histS.result);
@@ -371,7 +371,9 @@ function firstDiff(a, b, p) {
   const got = (dashS.rates || []).reduce((a, r) => a + (Number(r.totalCount) || 0), 0);
   check(got === want && (dashS.rates || []).every(r => r.metrics && r.metrics.sortTotalA > 0 && r.metrics.sortTotalB > 0),
     'Sorter pelo Node.js: Sorter A (sessão com cookies e _token) + Sorter B gravados dia a dia', {got, want});
-  check(siteS.log.some(x => x.path === '/statis/summary.data' && x.device === 'A'), 'Sorter pelo Node.js: a troca para o A valeu na sessão (Set-Cookie guardado)');
+  const trS = ((await adminS('estado')).props.filter(p => p.k === 'SORTER_TROCA_A')[0] || {}).v || '';
+  check(siteS.log.some(x => x.path === '/statis/summary.data' && x.device === 'A') && /"auto":true/.test(trS),
+    'Sorter pelo Node.js: troca do A descoberta sozinha e valendo na sessão (Set-Cookie guardado)');
   const cfgS = await request(portS, 'GET', '/config'), estS = await adminS('estado');
   check(/Sorter da base/.test(cfgS.text) && !/AuthToken do JMS/.test(cfgS.text) && estS.semJms === true && !/AuthToken do JMS ainda não cadastrado/.test(srvS.out()),
     'pacote do Sorter: Configurações com o sorter, sem pedir AuthToken do JMS');

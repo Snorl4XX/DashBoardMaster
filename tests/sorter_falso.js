@@ -6,7 +6,14 @@
  *  - GET  /statis/summary.data → uma linha por hora do dia (group=60), por balança (inductionno; 0 = todas).
  * Sessão sem troca (ou sem cookie) = Sorter B (o padrão do site). Números fictícios e determinísticos.
  * Uso no Node (servidor HTTP: http.createServer(handler)) e nos testes do servidor (UrlFetchApp falso: fetchMock).
+ * opts.modo (V4.22.1) — como o site troca de sorter ("switch device" → Cross-belt GRU-A = data-id 3):
+ *   'pedido' (padrão): $.post('/home/switchDevice', {device_id, _token}) no script da própria página;
+ *   'js': o mesmo pedido num arquivo .js à parte (/js/home.js); 'cookie': o .js grava o cookie deviceId e recarrega (sem pedido);
+ *   'global': o pedido troca o sorter do site inteiro (para todo mundo); 'nenhum': sem jeito de trocar.
  */
+const SCRIPT_PEDIDO = "$('.dev').on('click', function () { $.post('/home/switchDevice', {device_id: $(this).data('id'), " +
+  "_token: $('meta[name=csrf-token]').attr('content')}, function () { location.reload(); }); });";
+const SCRIPT_COOKIE = "$('.dev').on('click', function () { document.cookie = 'deviceId=' + $(this).data('id') + '; path=/'; location.reload(); });";
 const BALANCAS = 12;
 const TOKEN_LEN = 40;
 
@@ -48,7 +55,7 @@ function dayTotals(dev, date) {
 
 function createFakeSorter(opts) {
   opts = opts || {};
-  const sessions = {}, log = [];
+  const sessions = {}, log = [], modo = opts.modo || 'pedido', global = {device: 'B'};
   let seq = 0;
   const cookiesOf = h => {
     const out = {};
@@ -65,16 +72,26 @@ function createFakeSorter(opts) {
       sess = sessions[sid] = {device: 'B', token: ('tok' + seq).padEnd(TOKEN_LEN, 'k')};
     }
     set.push('laravel_session=' + sid + '; path=/; httponly', 'XSRF-TOKEN=' + encodeURIComponent(sess.token) + '; path=/');
-    log.push({method: req.method, path: req.path, device: sess.device});
+    const device = modo === 'cookie' ? (ck.deviceId === '3' ? 'A' : 'B') : modo === 'global' ? global.device : sess.device;
+    log.push({method: req.method, path: req.path, device});
     if (req.method === 'GET' && req.path === '/home') {
       return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
-        body: '<html><head><meta name="csrf-token" content="' + sess.token + '"></head><body>巴西GRU分拣机 · switch device</body></html>'};
+        body: '<html><head><meta name="csrf-token" content="' + sess.token + '"><title>巴西GRU分拣机</title>' +
+          '<script src="/js/jquery.min.js"></script>' + (modo === 'js' || modo === 'cookie' ? '<script src="/js/home.js?v=2"></script>' : '') + '</head>' +
+          '<body><div id="deviceChoose"><span>switch device</span><ul><li class="dev" data-id="3">Cross-belt GRU-A</li>' +
+          '<li class="dev" data-id="7">Cross-belt GRU-B</li></ul></div><a href="/logout">Guest</a>' +
+          (modo === 'pedido' || modo === 'global' ? '<script>' + SCRIPT_PEDIDO + '</script>' : '') + '</body></html>'};
     }
-    if (req.method === 'POST' && req.path === '/home/switchDevice') {
+    if (req.method === 'GET' && req.path === '/js/jquery.min.js') return {code: 200, headers: {'content-type': 'application/javascript'}, body: '/* biblioteca */'};
+    if (req.method === 'GET' && req.path === '/js/home.js' && (modo === 'js' || modo === 'cookie')) {
+      return {code: 200, headers: {'content-type': 'application/javascript'}, body: modo === 'js' ? SCRIPT_PEDIDO : SCRIPT_COOKIE};
+    }
+    if (req.method === 'POST' && req.path === '/home/switchDevice' && ['pedido', 'js', 'global'].indexOf(modo) >= 0) {
       const form = new URLSearchParams(String(req.body || ''));
       if (form.get('_token') !== sess.token) return {code: 419, headers: {'set-cookie': set}, body: 'Page Expired'};
       const id = form.get('device_id');
-      sess.device = id === '3' ? 'A' : id === '7' ? 'B' : sess.device;
+      const dev = id === '3' ? 'A' : id === '7' ? 'B' : null;
+      if (dev && modo === 'global') global.device = dev; else if (dev) sess.device = dev;
       return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'ok'})};
     }
     if (req.method === 'GET' && req.path === '/statis/summary.data') {
@@ -82,7 +99,17 @@ function createFakeSorter(opts) {
       if (opts.down) return {code: 500, headers: {}, body: 'erro'};
       const date = String(q.get('start') || '').slice(0, 10), n = Number(q.get('inductionno')) || 0;
       const data = [];
-      for (let h = 0; h < 24; h++) { const r = hourRow(sess.device, date, n, h); if (r) data.push(r); }
+      if (q.get('group') === '0') {
+        // "no group by": uma linha só para o período inteiro (start → end).
+        const end = String(q.get('end') || '').slice(0, 10), sum = {};
+        for (let d = date; d <= end; d = new Date(Date.parse(d + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10)) {
+          for (let h = 0; h < 24; h++) {
+            const r = hourRow(device, d, n, h);
+            if (r) Object.keys(r).forEach(k => { if (k !== 'timearea') sum[k] = (sum[k] || 0) + r[k]; });
+          }
+        }
+        if (Object.keys(sum).length) data.push(Object.assign({timearea: date + ' 00:00:00~' + end + ' 23:59:59'}, sum));
+      } else for (let h = 0; h < 24; h++) { const r = hourRow(device, date, n, h); if (r) data.push(r); }
       return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: data.length, data})};
     }
     return {code: 404, headers: {}, body: 'not found'};

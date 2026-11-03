@@ -4721,8 +4721,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     catS.filters.map(f => f.key).join() === 'sorter,induction,shift,interval',
     'Sorter: catálogo com filtros (sorter, balança, turno, horário), tabela por horário e a fonte "sorter"');
 
-  // Sem a troca do Sorter A: só o B é lido, com aviso no LOG (uma vez por dia).
-  const {c: cB} = sorterCtx({SORTER_TROCA_A: ''});
+  // Sem a troca do Sorter A (e o site sem jeito de trocar): só o B é lido, com aviso no LOG (uma vez por dia).
+  const {c: cB} = sorterCtx({SORTER_TROCA_A: ''}, {modo: 'nenhum'});
   cB.queueHistory(DS, DS2, true);
   runAll(cB);
   const warns = cB.allTabRows_('LOG').filter(r => /Sorter A fora da leitura/.test(String(r[4])));
@@ -4741,6 +4741,37 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   runAll(cD);
   const stD = cD.getDayStatus_('sorter_flow', DS);
   check(/O sorter respondeu código 500/.test(stD.error) && cD.errorKind_(stD.error) === 'OTHER', 'Sorter: site fora do ar — erro claro, nova tentativa', stD.error);
+  // V4.22.1: sem SORTER_TROCA_A, o painel descobre sozinho como o site troca para o Sorter A e grava (auto).
+  const {c: cP} = sorterCtx({SORTER_TROCA_A: ''});
+  cP.queueHistory(DS, DS, true);
+  runAll(cP);
+  const trP = JSON.parse(cP.__state.props.SORTER_TROCA_A || '{}');
+  check(cP.getRateDay_('sorter_flow', DS).totalCount === A.total + B.total && trP.auto === true && trP.caminho === '/home/switchDevice' &&
+    trP.corpo === 'device_id=3' && cP.allTabRows_('LOG').some(r => /troca descoberta sozinha/.test(String(r[4]))),
+    'Sorter A: troca descoberta sozinha (pedido no script da página) e o dia com A + B', trP);
+  const discover = modo => {
+    const {c, site} = sorterCtx({SORTER_TROCA_A: ''}, {modo});
+    return {d: c.diagnosticarSorter(), c, site};
+  };
+  const dJs = discover('js'), dCk = discover('cookie'), dGl = discover('global');
+  check(/descoberta sozinha/.test(dJs.d.sorters[1].troca) && dJs.d.sorters[1].hoje.sortTotal === dayTotals('A', dJs.c.isoToday_()).total &&
+    dJs.d.sorters[1].descoberta.some(l => /arquivo \/js\/home\.js\?v=2: lido/.test(l)) && !dJs.d.sorters[1].descoberta.some(l => /jquery/.test(l)),
+    'Sorter A: troca achada num arquivo .js do site (sem abrir as bibliotecas)', dJs.d.sorters[1]);
+  check(JSON.parse(dCk.c.__state.props.SORTER_TROCA_A).cookie.deviceId === '3' && dCk.d.sorters[1].hoje.sortTotal === dayTotals('A', dCk.c.isoToday_()).total,
+    'Sorter A: troca por cookie (o site grava o cookie e recarrega, sem pedido de troca)', dCk.d.sorters[1]);
+  const fresh = dGl.site.fetchMock('http://sorter.falso/statis/summary.data?page=1&limit=10&start=' + encodeURIComponent(DS + ' 00:00:00') +
+    '&end=' + encodeURIComponent(DS + ' 23:59:59') + '&group=0&inductionno=0&layerno=0', {});
+  check(!dGl.c.__state.props.SORTER_TROCA_A && /falta/.test(dGl.d.sorters[1].troca) && dGl.d.sorters[1].descoberta.some(l => /TODO o site/.test(l)) &&
+    JSON.parse(fresh.getContentText()).data[0].sorter_sorttotal === B.total,
+    'Sorter A: troca que vale para o site inteiro é recusada e o site volta para o sorter padrão', dGl.d.sorters[1].descoberta);
+  // Troca descoberta que parou de valer (A e B iguais): esquecida, para ser descoberta de novo.
+  cP.__state.props.SORTER_TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: 'device_id=9', auto: true});
+  cP.queueHistory(DS2, DS2, true);
+  runAll(cP);
+  const A2 = dayTotals('A', DS2), B2 = dayTotals('B', DS2), trP2 = JSON.parse(cP.__state.props.SORTER_TROCA_A || '{}');
+  check(cP.getRateDay_('sorter_flow', DS2).totalCount === A2.total + B2.total && trP2.corpo === 'device_id=3' && trP2.auto === true &&
+    cP.allTabRows_('LOG').some(r => /mesmos números/.test(String(r[4]))),
+    'Sorter A: troca descoberta que parou de valer é esquecida e descoberta de novo na próxima tentativa (o dia fica certo)', trP2);
   const diag = cS.diagnosticarSorter();
   check(diag.sorters.length === 2 && diag.sorters.every(x => x.hoje && x.hoje.sortTotal > 0) && !/tok\d+k|sess\d+x/.test(JSON.stringify(diag)) &&
     diag.sorters[1].cookies.indexOf('laravel_session') >= 0, 'diagnosticarSorter: os dois sorters, sem mostrar token nem cookie (só os nomes)', diag);

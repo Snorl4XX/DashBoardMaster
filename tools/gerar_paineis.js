@@ -109,9 +109,9 @@ rede interna: este painel só funciona na versão Node.js.
 3. Neste computador, abra **http://localhost:3500/config**:
    - **Sorter da base:** o endereço já vem http://10.1.166.9. Clique em **Salvar e testar o sorter**. O teste mostra os números de
      hoje de cada sorter.
-   - **Sorter A:** o B é o que o site mostra sem trocar. Para ler o A, cole o pedido de troca em "Troca do Sorter A". Se o Painel
-     do Sorter (porta 3100) já descobriu a troca, ela está no config.json dele, em \`"sorters"\` → A → \`"troca"\`. Sem a troca, o
-     painel lê só o B e avisa no LOG.
+   - **Sorter A:** o B é o que o site mostra sem trocar. Para o A, o painel **descobre sozinho** como o site troca (pedido da
+     página, arquivo .js do site ou cookie) e guarda. O teste mostra o relatório "descoberta". Se ele não achar, mande um print
+     desse relatório. Também dá para colar a troca à mão em "Troca do Sorter A".
    - **Histórico:** escolha a Data inicial, clique em **Salvar data** e depois em **Baixar histórico**.
 4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Sorter").
 5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica igual ao do principal com **/sorter** no fim:
