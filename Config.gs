@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.18.0',
+  VERSION: '4.19.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -217,6 +217,40 @@ const DOCK_TABLE_2026_10_11_ = DOCK_TABLE_2026_10_04_.map(e => {
   {dock: 'DOCA 21/22', line: 2, route: 'DC JND 02-SP',
     codes: DOCK_SUB_('GRU', ['381-06', '381-07', '381-12']).concat(DOCK_SUB_('SP', ['395-05', '395-06', '395-07']), DOCK_SUB_('BRE', ['381-06', '381-07', '381-12']))}
 ]);
+/**
+ * V4.19 (comunicados de 30/10 e 01/11 e a tabela "Código de alocação de carga das rotas tronco e de distribuição do SP GRU"):
+ *  - 30/10/2026: unidades novas atendidas pelo DC TBT-SP — F SJC-SP (GRU 402-08), F UBT-SP (GRU 402-09) e F CRZ-SP
+ *    (GRU 402-10);
+ *  - 01/11/2026: as cargas de TO, MRB, RO e AC (TO PMW, PA MRB, RO PVH e DC RBR-AC) passam a ir pela rota DF BSB, e
+ *    a tabela da mesma data tem CDG (DC CDG-RJ) no SP GRU-SJM e JPN no SP GRU-CGB, fora do SP BRE.
+ * A tabela ainda lista "AC" no SP GRU-BRE; vale o comunicado (as cargas de AC vão pelo DF BSB).
+ */
+const NEW_TBT_CODES_2026_10_30_ = DOCK_SUB_('GRU', ['402-08', '402-09', '402-10']);
+const NEW_TBT_STOPS_2026_10_30_ = ['F SJC-SP', 'F UBT-SP', 'F CRZ-SP'];
+const BSB_CODES_2026_11_01_ = ['TO', 'MRB', 'RO', 'AC'];
+const BSB_STOPS_2026_11_01_ = ['TO PMW', 'PA MRB', 'RO PVH', 'DC RBR-AC'];
+/** Tabela com as unidades novas do DC TBT-SP (a partir de 30/10). */
+const withNewTbt_ = table => table.map(e => e.route !== 'DC TBT-SP' ? e :
+  Object.assign({}, e, {codes: e.codes.concat(NEW_TBT_CODES_2026_10_30_.filter(c => e.codes.indexOf(c) < 0)),
+    stops: (e.stops || []).concat(NEW_TBT_STOPS_2026_10_30_)}));
+/**
+ * Tabela com as rotas de 01/11: TO/MRB/RO/AC (e as paradas deles) saem do SP BRE para o DF BSB; `moves` = outros códigos que a
+ * tabela de 01/11 tira do SP BRE ({route, codes, stops}).
+ */
+const withBsb_ = (table, moves) => table.map(e => {
+  const out = [].concat(BSB_CODES_2026_11_01_, ...(moves || []).map(m => m.codes));
+  const outStops = [].concat(BSB_STOPS_2026_11_01_, ...(moves || []).map(m => m.stops || []));
+  if (e.route === 'SP BRE') return Object.assign({}, e, {codes: e.codes.filter(c => out.indexOf(c) < 0), stops: (e.stops || []).filter(x => outStops.indexOf(x) < 0)});
+  if (e.route === 'DF BSB') return Object.assign({}, e, {codes: e.codes.concat(BSB_CODES_2026_11_01_), stops: (e.stops || []).concat(BSB_STOPS_2026_11_01_)});
+  const m = (moves || []).filter(x => x.route === e.route)[0];
+  return m ? Object.assign({}, e, {codes: e.codes.concat(m.codes.filter(c => e.codes.indexOf(c) < 0)),
+    stops: (e.stops || []).concat((m.stops || []).filter(x => (e.stops || []).indexOf(x) < 0))}) : e;
+});
+const DOCK_TABLE_2026_10_30_ = withNewTbt_(DOCK_TABLE_2026_10_11_);
+const DOCK_TABLE_2026_11_01_ = withBsb_(DOCK_TABLE_2026_10_30_, [
+  {route: 'RJ SJM', codes: ['CDG'], stops: ['DC CDG-RJ']},
+  {route: 'MT CGB', codes: ['JPN'], stops: ['DC JPN']}
+]);
 const DOCKS_EXPEDICAO = Object.freeze({
   versions: [
     {
@@ -245,7 +279,9 @@ const DOCKS_EXPEDICAO = Object.freeze({
       }
     },
     {from: '2026-10-04', entries: DOCK_TABLE_2026_10_04_},
-    {from: '2026-10-11', entries: DOCK_TABLE_2026_10_11_}
+    {from: '2026-10-11', entries: DOCK_TABLE_2026_10_11_},
+    {from: '2026-10-30', entries: DOCK_TABLE_2026_10_30_},
+    {from: '2026-11-01', entries: DOCK_TABLE_2026_11_01_}
   ],
   fallback: 'SEM DOCA'
 });
@@ -313,10 +349,16 @@ const ESTEIRA_TABLE_2026_10_24_ = [
   {dock: 'DOCA 22', line: 5, route: 'F S-PENHA-SP', codes: ['GRU 404-05']},
   {dock: 'DOCA 24', line: 5, route: 'F S-PENHA 03-SP', codes: ['GRU 404-06']}
 ];
-/** Esteiras do SC → DC: a tabela de 24/10 vale para todo o histórico do painel (o valor mostrado é "Esteira N"). */
+/**
+ * Esteiras do SC → DC (o valor mostrado é "Esteira N"): a tabela de 24/10 vale até 29/10; V4.19: de 30/10, com as unidades
+ * novas do DC TBT-SP (Esteira 2); de 01/11, com TO, MRB, RO e AC no DF BSB (Esteira 3, antes Esteira 2 com o SP BRE).
+ */
+const ESTEIRA_TABLE_2026_10_30_ = withNewTbt_(ESTEIRA_TABLE_2026_10_24_);
+const ESTEIRA_TABLE_2026_11_01_ = withBsb_(ESTEIRA_TABLE_2026_10_30_);
 const ESTEIRAS_SC_DC = Object.freeze({
   source: 'destination', show: 'line', linePrefix: 'Esteira ',
-  versions: [{from: '', entries: ESTEIRA_TABLE_2026_10_24_}],
+  versions: [{from: '', entries: ESTEIRA_TABLE_2026_10_24_}, {from: '2026-10-30', entries: ESTEIRA_TABLE_2026_10_30_},
+    {from: '2026-11-01', entries: ESTEIRA_TABLE_2026_11_01_}],
   fallback: 'SEM ESTEIRA'
 });
 

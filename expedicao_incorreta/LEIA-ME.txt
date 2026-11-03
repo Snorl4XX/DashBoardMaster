@@ -68,6 +68,17 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
   (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
 
+Rotas de 30/10 e 01/11 (versão 1.9.2)
+  A planilha padrão já vem com os comunicados:
+  - desde 30/10: F SJC-SP (402-08), F UBT-SP (402-09) e F CRZ-SP (402-10) na linha DC TBT-SP / GRU;
+  - desde 01/11: TO, MRB, RO e AC na linha DF BSB (saíram da linha SP BRE).
+  Quem já tinha o app continua com a planilha antiga. Para atualizar, escolha um jeito:
+  - na tela Configurações → "Enviar planilha de rotas (.xlsx)", envie o arquivo rotas.xlsx novo (substitui a planilha inteira);
+  - ou edite a sua planilha: na linha SP BRE, apague TO, MRB, RO e AC; na linha DF BSB, escreva "DF, TO, MRB, RO, AC";
+    na linha DC TBT-SP / GRU, acrescente 402-09 e 402-10.
+  Atenção: o app confere com a planilha de agora, inclusive nos dias que já estavam no painel. Depois da troca, um pacote de
+  TO, MRB, RO ou AC no caminhão do SP BRE em 31/10 (certo naquele dia) aparece como Errado. Olhe os dias a partir de 01/11.
+
 Situações na tabela
 -------------------
 Errado                 pacote fora da rota do caminhão (conta como erro). A coluna "Destino correto" diz onde devia ir.

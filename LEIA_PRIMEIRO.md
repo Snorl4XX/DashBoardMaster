@@ -1,8 +1,42 @@
-# J&T DASHMASTER V4.18 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.19 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.19 — Rotas de 01/11 (TO, MRB, RO e AC pelo DF BSB) e unidades novas do DC TBT-SP
+
+**Pedido:** "Alterações nas rotas, mudar os indicadores que mexem com rotas". Vieram três comunicados e a tabela "Código de
+alocação de carga das rotas tronco e de distribuição do SP GRU".
+
+**O que mudou, com a data de cada um** (os dias anteriores continuam com as rotas da época):
+
+| Desde | Mudança |
+|---|---|
+| 30/10/2026 | F SJC-SP (GRU 402-08), F UBT-SP (GRU 402-09) e F CRZ-SP (GRU 402-10) vão pelo **DC TBT-SP** |
+| 01/11/2026 | TO, MRB, RO e AC (TO PMW, PA MRB, RO PVH e DC RBR-AC) saem do **SP BRE** e vão pelo **DF BSB** |
+| 01/11/2026 | Pela tabela da mesma data: CDG (DC CDG-RJ) no **SP GRU-SJM** e JPN no **SP GRU-CGB**, fora do SP BRE |
+
+**Painéis que mudam** (tudo é calculado na leitura, sem baixar nada de novo):
+- **Envio Errado, Triagem Errada e Expedição SC → SC:** rota e doca pela próxima parada. "PA MRB" desde 01/11 → DF BSB,
+  doca 38. As unidades novas (F SJC-SP, F UBT-SP, F CRZ-SP) → DC TBT-SP.
+- **Falta de Bipagem na Expedição:** rota e doca pelo código do segmento ("TO" desde 01/11 → DF BSB). No Envio Errado
+  e aqui, a coluna **Segmento (base)** (fórmula do WPS) também segue as datas.
+- **Expedição SC → DC:** esteira pela próxima parada. Desde 01/11, TO PMW, PA MRB, RO PVH e DC RBR-AC → DF BSB, **Esteira 3**
+  (antes Esteira 2, com o SP BRE). As unidades novas → DC TBT-SP, Esteira 2.
+
+**Atenção:** a tabela ainda mostra "AC" na linha SP GRU-BRE. Segui o comunicado: as cargas de AC vão pelo DF BSB. Se
+algum destino com código AC continuar no SP BRE, avise para ajustar.
+
+**App Expedição Incorreta (separado):** a planilha padrão de rotas (versão 1.9.2) já vem com essas mudanças. Quem já usa o app
+envia o `rotas.xlsx` novo em Configurações → "Enviar planilha de rotas", ou edita a planilha como no LEIA-ME do app.
+
+**Atualizar:**
+- **Apps Script:** troque `Config.gs` e `Core.gs` (ou todos os arquivos do `JT_DASHMASTER_V4_19_PRINCIPAL.zip`) e faça
+  Implantar → Gerenciar implantações → ✏️ → Nova versão. O painel dos fluxos (Recebimento e Expedição) não usa essas
+  tabelas e pode ficar como está.
+- **Node.js:** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_19_NODE.zip` em `C:\` (Substituir) e abra o
+  atalho DashMaster.
 
 ## V4.18 — Criação de Lotes no painel principal
 

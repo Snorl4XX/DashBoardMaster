@@ -4431,4 +4431,49 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'SC → DC: relatório com filtro de esteira', repDC.rows.length);
 }
 
+// ---------- V4.19: rotas de 01/11 (TO, MRB, RO e AC pelo DF BSB) e unidades novas do DC TBT-SP de 30/10 ----------
+{
+  const vmV = require('vm');
+  const cV = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CV = cV.JTCore_, DEXP = vmV.runInContext('DOCKS_EXPEDICAO', cV), DPP = vmV.runInContext('DOCKS_PROXIMA_PARADA', cV);
+  const EST = vmV.runInContext('ESTEIRAS_SC_DC', cV);
+  const seg = (c, d) => { const r = CV.applyDocks([{segmentRaw: CV.segmentHead2(c), segment: CV.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CV.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d) => { const r = CV.applyDocks([{destination: v, date: d}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const BEFORE = '2026-10-31', AFTER = '2026-11-01', wrong = [];
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  // Comunicado de 01/11: TO, MRB, RO e AC (códigos e paradas) saem do SP BRE para o DF BSB. Antes, continua SP BRE.
+  [['TO,1', 'TO PMW'], ['MRB,1', 'PA MRB'], ['RO,1', 'RO PVH'], ['AC,1', 'DC RBR-AC']].forEach(([c, p]) => {
+    want(seg(c, BEFORE), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 31/10');
+    want(seg(c, AFTER), 'DF BSB | DOCA 38', 'código ' + c + ' em 01/11');
+    want(stop(p, BEFORE), 'SP BRE | DOCA 21/22', 'parada ' + p + ' em 31/10');
+    want(stop(p, AFTER), 'DF BSB | DOCA 38', 'parada ' + p + ' em 01/11');
+    want(est(p, BEFORE), 'SP BRE | Esteira 2', 'esteira de ' + p + ' em 31/10');
+    want(est(p, AFTER), 'DF BSB | Esteira 3', 'esteira de ' + p + ' em 01/11');
+  });
+  want(seg('BRE - TO', AFTER), 'DF BSB | DOCA 38', 'código antigo "BRE - TO" em 01/11');
+  // Tabela de 01/11: CDG no SP GRU-SJM, JPN no SP GRU-CGB; o resto do SP BRE continua lá.
+  want(seg('CDG,1', AFTER), 'RJ SJM | DOCA 10', 'CDG em 01/11');
+  want(stop('DC CDG-RJ', AFTER), 'RJ SJM | DOCA 10', 'parada DC CDG-RJ em 01/11');
+  want(seg('JPN,1', AFTER), 'MT CGB | DOCA 42', 'JPN em 01/11');
+  want(seg('CDG,1', BEFORE), 'SP BRE | DOCA 21/22', 'CDG em 31/10 (tabela de 11/10)');
+  ['STM,1', 'PPB,1', 'NAT,1', 'BAU 484-00,1', 'SOD,1', 'VCP,1', 'MA,1', 'AM,1'].forEach(c => want(seg(c, AFTER), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 01/11'));
+  ['PA STM', 'DC PPB-SP', 'DC MAO-AM', 'DC VCP-SP'].forEach(p => { want(stop(p, AFTER), 'SP BRE | DOCA 21/22', 'parada ' + p + ' em 01/11'); want(est(p, AFTER), 'SP BRE | Esteira 2', 'esteira de ' + p); });
+  want(seg('DF,1', AFTER), 'DF BSB | DOCA 38', 'DF em 01/11');
+  // Comunicado de 30/10: F SJC-SP (402-08), F UBT-SP (402-09) e F CRZ-SP (402-10) pelo DC TBT-SP.
+  ['GRU,402-08,1', 'GRU,402-09,1', 'GRU,402-10,1'].forEach(c => { want(seg(c, '2026-10-30'), 'DC TBT-SP | DOCA 14', 'código ' + c + ' em 30/10'); want(seg(c, AFTER), 'DC TBT-SP | DOCA 14', 'código ' + c + ' em 01/11'); });
+  ['F SJC-SP', 'F UBT-SP', 'F CRZ-SP'].forEach(p => {
+    want(stop(p, '2026-10-30'), 'DC TBT-SP | DOCA 14', 'parada ' + p + ' em 30/10');
+    want(est(p, '2026-10-30'), 'DC TBT-SP | Esteira 2', 'esteira de ' + p + ' em 30/10');
+  });
+  check(!wrong.length, 'rotas de 01/11 (TO, MRB, RO, AC pelo DF BSB; CDG no SJM; JPN no CGB) e unidades novas do DC TBT-SP de 30/10, com o histórico da época', wrong);
+  // Segmento (base) pela fórmula do WPS (Envio Errado e Falta de Bipagem na Expedição): pelo dia da remessa.
+  const sb = (code, date) => CV.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
+  check(sb('TO,123-00,000', BEFORE) === 'SP BRE' && sb('TO,123-00,000', AFTER) === 'DF BSB' && sb('AC,1', AFTER) === 'DF BSB' && sb('MRB,2', AFTER) === 'DF BSB' &&
+    sb('RO,3', AFTER) === 'DF BSB' && sb('CDG,4', AFTER) === 'RJ SJM' && sb('CDG,4', BEFORE) === 'SP BRE' && sb('STM,5', AFTER) === 'SP BRE' &&
+    sb('GRU,402-09,1', BEFORE) === 'DC TBT-SP' && sb('GRU,402-10,1', AFTER) === 'DC TBT-SP' && sb('GRU,402-08,1', AFTER) === 'DC TBT-SP',
+    'segmento (base): TO/MRB/RO/AC no DF BSB e CDG no RJ SJM a partir de 01/11; GRU 402-08/09/10 no DC TBT-SP',
+    [sb('TO,123-00,000', AFTER), sb('GRU,402-09,1', BEFORE), sb('CDG,4', AFTER)]);
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

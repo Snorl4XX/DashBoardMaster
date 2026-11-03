@@ -2,6 +2,8 @@
 /**
  * Planilha de rotas que o app cria na primeira vez (planilhas/rotas.xlsx), a partir das tabelas vermelhas de 24/10:
  * "干线装车码头进行调整" (rota TRONCAL) e "Ajuste das Docas de Carregamento das Rotas Regionais" (rota SECUNDÁRIA).
+ * 1.9.2: comunicados de 30/10 (F SJC-SP, F UBT-SP e F CRZ-SP, GRU 402-08/09/10, pelo DC TBT-SP) e de 01/11 (TO, MRB, RO e AC
+ * pela rota DF BSB, fora do SP BRE).
  * Depois de criada, quem manda é a planilha: quando as docas mudarem, edite planilhas/rotas.xlsx (ou envie em Configurações).
  *
  * Aba "Rotas": uma linha por grupo de códigos. Rota = a Próxima parada do caminhão. 1º Nível = códigos aceitos;
@@ -24,10 +26,11 @@ const ROTAS = [
   ['Troncal', 'BA FEC', 'BA, SBA, SNS', '', 'Doca 18'],
   ['Troncal', 'MG CGE', 'MG, MG1, CHV', '', 'Doca 19'],
   ['Troncal', 'PA ANA', 'PA', '', 'Doca 20 · movimentação manual de sacas'],
-  ['Troncal', 'SP BRE', 'AC, AM, BAU, BVB, JDF, LDB, MIA, MRB, RO, SJP, SOD, SP, SP1, STM, TO, VCP, XAP, BJE, MA, PPB, NAT', '',
-    'Docas 21 e 22 · excluir CDG'],
+  ['Troncal', 'SP BRE', 'AM, BAU, BVB, JDF, LDB, MIA, SJP, SOD, SP, SP1, STM, VCP, XAP, BJE, MA, PPB, NAT', '',
+    'Docas 21 e 22 · excluir CDG · desde 01/11: TO, MRB, RO e AC no DF BSB'],
   ['Troncal', 'DC TBT-SP', 'SP', seg('402', [1, 3, 5]).concat('421-00').join(', '), 'Doca 23 (antiga 14) · SP (antigo)'],
-  ['Troncal', 'DC TBT-SP', 'GRU', seg('402', [0, 1, 3, 5, 6, 7, 8, 2, 4]).join(', '), 'Doca 23 (antiga 14) · GRU (novo)'],
+  ['Troncal', 'DC TBT-SP', 'GRU', seg('402', [0, 1, 3, 5, 6, 7, 8, 2, 4, 9, 10]).join(', '),
+    'Doca 23 (antiga 14) · GRU (novo) · 402-08 F SJC-SP, 402-09 F UBT-SP, 402-10 F CRZ-SP (desde 30/10)'],
   ['Troncal', 'DC GRU-SP', 'SP', seg('395', [5, 6, 7]).concat('381-04').join(', '), 'Doca 44 · SP (antigo)'],
   ['Troncal', 'DC GRU-SP', 'GRU', seg('381', [0, 1, 2, 3, 4, 5, 11, 13, 14, 15, 18, 19, 20, 21]).concat('378-04').join(', '),
     'Doca 44 · GRU (novo) · 378-04: data de ativação a definir'],
@@ -36,7 +39,7 @@ const ROTAS = [
   ['Troncal', 'PI THE', 'PI, IMP', '', 'Doca 41 (na tabela: THE)'],
   ['Troncal', 'ES SRR', 'ES', '', 'Doca 40'],
   ['Troncal', 'SP RBP', 'NE, NE1', '', 'Doca 39'],
-  ['Troncal', 'DF BSB', 'DF', '', 'Doca 38'],
+  ['Troncal', 'DF BSB', 'DF, TO, MRB, RO, AC', '', 'Doca 38 · desde 01/11 também TO PMW, PA MRB, RO PVH e DC RBR-AC'],
   // ---------- SECUNDÁRIA (docas 01 a 25) ----------
   ['Secundária', 'DC S-VLANA-SP', 'VLANA', '', 'Doca 01 · reservado'],
   ['Secundária', 'F S-JBO-SP', 'GRU', '404-11', 'Doca 02 · reservado'],

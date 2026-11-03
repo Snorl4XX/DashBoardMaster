@@ -284,7 +284,8 @@ function JTCoreFactory_() {
    */
   var SEG_GRU_ = [
     [['378-00', '378-01', '378-02', '378-03', '378-05', '378-06'], 'DC SSZ-SP'],
-    [['402-00', '402-01', '402-03', '402-05', '402-06', '402-07'], 'DC TBT-SP'],
+    // V4.19: F SJC-SP (402-08), F UBT-SP (402-09) e F CRZ-SP (402-10), unidades novas do DC TBT-SP desde 30/10/2026.
+    [['402-00', '402-01', '402-03', '402-05', '402-06', '402-07', '402-08', '402-09', '402-10'], 'DC TBT-SP'],
     [['404-00', '404-03', '404-09', '404-10', '404-11', '404-12'], 'MOOCA'],
     [['381-00', '381-01', '381-02', '381-03', '381-04', '381-05', '381-11', '381-13', '381-14', '381-15', '404-01', '404-02', '404-04',
       '404-05', '404-06', '404-07', '404-08', '378-04', '402-02', '402-04'], 'DC GRU'],
@@ -298,7 +299,12 @@ function JTCoreFactory_() {
     [['AC', 'AM', 'BAU', 'BVB', 'CDG', 'JDF', 'LDB', 'MIA', 'MRB', 'RO', 'SJP', 'SOD', 'SP1', 'STM', 'TO', 'VCP', 'XAP', 'BJE', 'MA', 'PPB', 'NAT'], 'SP BRE'],
     [['MS'], 'MS CGR'], [['MT', 'JPN'], 'MT CGB'], [['PI', 'IMP'], 'THE'], [['ES'], 'ES SRR'], [['NE', 'NE1'], 'SP RBP'], [['DF'], 'DF BSB']
   ];
-  function segmentBase(v) {
+  /**
+   * V4.19 (comunicado): a partir de 01/11/2026 as cargas de TO, MRB, RO e AC vão pela rota DF BSB; a tabela de alocação da
+   * mesma data tem CDG no SP GRU-SJM. Vale pelo dia da remessa (o histórico continua como era).
+   */
+  var SEG_FIRST_FROM_2026_11_01_ = {TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB', AC: 'DF BSB', CDG: 'RJ SJM'};
+  function segmentBase(v, date) {
     if (blank(v)) return '';
     var c = String(v).trim(), up = c.toUpperCase();
     var has = function (list) { for (var i = 0; i < list.length; i++) if (c.indexOf(list[i]) >= 0) return true; return false; };
@@ -310,6 +316,7 @@ function JTCoreFactory_() {
     if (up.slice(0, 4) === 'SBN,') return c.indexOf('375-') >= 0 ? 'SBN' : 'REVISAR SBN';
     if (up.slice(0, 4) === 'MOO,') return has(SEG_MOO_) ? 'MOOCA' : 'REVISAR MOO';
     var first = up.split(',')[0];
+    if (date && String(date) >= '2026-11-01' && SEG_FIRST_FROM_2026_11_01_[first]) return SEG_FIRST_FROM_2026_11_01_[first];
     for (var f = 0; f < SEG_FIRST_.length; f++) if (SEG_FIRST_[f][0].indexOf(first) >= 0) return SEG_FIRST_[f][1];
     return 'REVISAR SEGMENTO';
   }
@@ -322,8 +329,8 @@ function JTCoreFactory_() {
     var memo = {};
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i], src = !blank(r.segmentFull) ? r.segmentFull : !blank(r.segmentRaw) ? r.segmentRaw : r.segment;
-      var k = blank(src) ? '' : String(src);
-      r.segmentBase = memo.hasOwnProperty(k) ? memo[k] : (memo[k] = segmentBase(k));
+      var k = blank(src) ? '' : String(src), nov = r.date && String(r.date) >= '2026-11-01', mk = (nov ? '1|' : '0|') + k;
+      r.segmentBase = memo.hasOwnProperty(mk) ? memo[mk] : (memo[mk] = segmentBase(k, nov ? r.date : ''));
     }
     return rows;
   }
