@@ -1,8 +1,43 @@
-# J&T DASHMASTER V4.19 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.20 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.20 — Sacas ecológicas por destino (Criação de Lotes) e Deslacre pela Data inicial
+
+### Criação de Lotes: destinos das sacas ecológicas
+**Pedido:** tirar o gráfico com os números das sacas e mostrar os destinos que receberam a saca ecológica (vermelha com chip):
+os enviados incorretamente e os corretos, pela tabela do comunicado "Envio de sacas vermelhas com chip".
+
+- **Saiu:** o gráfico "Sacas com maior quantidade" (números das sacas). O filtro "Número dos lotes" e a tabela continuam.
+- **Novo — Sacas ecológicas enviadas incorretamente:** sacas ecológicas cujo "Destino de desembalagem" **não** está na lista
+  do comunicado (top 10).
+- **Novo — Destinos que receberam as sacas ecológicas corretamente:** sacas ecológicas para os SCs e DCs da lista (top 10).
+- **Lista autorizada** (comunicado de 24/08/2026), em `ECO_BAG_SITES_2026_08_24_` no Config.gs:
+  - **31 SCs**, por exemplo SP BRE, MG CGE, BA FEC e PR SJS;
+  - **26 DCs**, por exemplo DC MGF-PR, DC JDF-MG, DC VCP, DC CDG-RJ e DC EXT-MG.
+- Na comparação dos nomes, maiúsculas, hífens e o "-UF" do fim não contam: "DC VCP-SP" é o "DC VCP" da lista.
+- Saca sem destino não entra nos dois gráficos.
+- Vale para todo o histórico, sem baixar nada de novo (o destino já está gravado).
+- **Para mudar a lista:** edite `ECO_BAG_SITES_2026_08_24_` no Config.gs.
+
+### Deslacre (secundária e troncal): tempo até a Data inicial
+**Pedido:** medir do deslacre até o **início** do bipe de recebimento, e não mais até o último.
+- Antes: "Data final" do Bipe de descarregamento. Agora: **Data inicial**.
+- Sempre a linha "Bipe de descarregamento" do Site de carga e descarga **SP GRU**, pelo código da base e, sem ele, pelo nome.
+- Tempo de cada ID = Data inicial − horário de deslacração. Se houver mais de um descarregamento na SP GRU, vale a mediana.
+- O tempo mediano, o cartão do ID de maior tempo, os gráficos por turno e o top 10 usam o tempo novo.
+- A coluna da tabela passa a ser **"Bipe de recebimento (Data inicial)"**.
+- **Dias já baixados:** uma vez, os dias do Deslacre dos últimos 62 entram na fila de novo. Os Registros de carga e
+  descarga de cada ID são consultados de novo e o tempo é refeito pela Data inicial. Dias mais antigos que isso ficam
+  com o cálculo antigo.
+
+**Atualizar:**
+- **Apps Script:** troque todos os arquivos pelos do `JT_DASHMASTER_V4_20_PRINCIPAL.zip` e faça Implantar → Gerenciar
+  implantações → ✏️ → Nova versão. Não precisa rodar nenhuma função: a fila refaz os dias do Deslacre sozinha.
+- **Node.js:** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_20_NODE.zip` em `C:\` (Substituir) e abra o
+  atalho DashMaster.
 
 ## V4.19 — Rotas de 01/11 (TO, MRB, RO e AC pelo DF BSB) e unidades novas do DC TBT-SP
 

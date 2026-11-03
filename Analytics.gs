@@ -17,7 +17,8 @@ const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expediti
 const EXTRA_FIELDS_ = ['port', 'sackType', 'items', 'packType', 'source', 'chip',
   'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase',
   // V4.4 (Deslacre): horários do ID, tempo mediano, situação do bipe de deslacre, placa, transportadora, registros de descarregamento.
-  'unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads'];
+  // V4.20: timing = regra do tempo do ID ("inicio" = pela Data inicial do descarregamento).
+  'unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads', 'timing'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 
@@ -495,7 +496,8 @@ function GroupSummarySink_(cfg, filters, topLimit) {
   dims.forEach(k => { marg[k] = new Map(); });
   // Gráfico que soma um campo (Fluxo de Lotes: itens na embalagem por saca): total do campo por valor ("lot:items").
   const sums = [];
-  (cfg.charts || []).forEach(c => {
+  // V4.20: sumDefs = somas sem gráfico próprio (Criação de Lotes: remessas por turno, para os cartões com filtro).
+  (cfg.charts || []).concat(cfg.sumDefs || []).forEach(c => {
     const d = c.dim || c.key;
     if (c.sumField && dims.indexOf(d) >= 0 && (cfg.groupFields || []).indexOf(c.sumField) >= 0 && !sums.some(x => x.dim === d && x.field === c.sumField)) {
       sums.push({dim: d, field: c.sumField, name: d + ':' + c.sumField});

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.19.0',
+  VERSION: '4.20.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -362,6 +362,23 @@ const ESTEIRAS_SC_DC = Object.freeze({
   fallback: 'SEM ESTEIRA'
 });
 
+/**
+ * V4.20 (pedido, Criação de Lotes): bases que podem receber as SACAS VERMELHAS COM CHIP (sacas ecológicas) — comunicado
+ * "Envio de sacas vermelhas com chip", a partir de 24/08/2026: "Envie somente para os DCs autorizados acima". Comparado com
+ * o "Destino de desembalagem" de cada saca (maiúsculas, hífens e o "-UF" do fim não contam: "DC VCP-SP" = "DC VCP").
+ */
+const ECO_BAG_SITES_2026_08_24_ = [
+  // SCs que podemos realizar envio (UF + base)
+  'SP BRE', 'MG CGE', 'BA FEC', 'PE JGS', 'PR SJS', 'RJ SJM', 'CE FOR', 'SE RAO', 'SP GRU', 'SC BNU', 'PA ANA', 'PI THE',
+  'DC SRR-ES', 'ES SRR', // nº 13 do comunicado; "ES SRR" = o mesmo SC com o nome da rota (tabela das docas)
+  'RS NSR', 'MT CGB', 'GO GYN', 'DF BSB', 'RO PVH', 'SE AJU', 'BA VDC', 'PA STM', 'PA MRB', 'TO PMW', 'MS CGR', 'SC BLU', 'MA SLZ',
+  'PE SNS', 'MG CHV', 'SP RBP', 'AM MAO', 'BA SBA',
+  // DCs para envio
+  'DC MGF-PR', 'DC JDF-MG', 'DC VCP', 'DC BJE-PI', 'DC BAU-SP', 'DC NOD-SP', 'DC S-VLANA-SP', 'DC JND-SP', 'JND-SP', 'DC GRU-SP',
+  'DC SBN-SP', 'DC ITJ 001-PR', 'DC LDB-PR', 'DC SJP-SP', 'DC MAO-AM', 'DC NSR-MG', 'DC QDF 001', 'DC MTC-MG', 'DC TFL 001', 'DC CUV',
+  'DC VAG 001', 'DC PPY-MG', 'DC UBA-MG', 'DC CDG-RJ', 'DC SOO 02-SP', 'DC EXT-MG'
+];
+
 /** Cores fixas por turno (validadas para daltonismo). A cor segue o turno em todos os gráficos. */
 const SHIFT_COLORS = Object.freeze({T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7', 'N/A': '#9CA3AF'});
 
@@ -380,7 +397,7 @@ function unsealPanel_(own) {
     labels: {
       tripId: {pt: 'Número do ID', zh: '车次号'}, route: {pt: 'Nome da viagem', zh: '车次名称'}, station: {pt: 'PDD de saída', zh: '始发网点'},
       shift: {pt: 'Turno', zh: '班次'}, situation: {pt: 'Bipe de deslacre', zh: '解封扫描'}, minutes: {pt: 'Tempo mediano', zh: '中位时长'},
-      eventTime: {pt: 'Horário de deslacração do veículo', zh: '解封时间'}, receiptTime: {pt: 'Bipe de recebimento (Data final)', zh: '卸车结束时间'}
+      eventTime: {pt: 'Horário de deslacração do veículo', zh: '解封时间'}, receiptTime: {pt: 'Bipe de recebimento (Data inicial)', zh: '卸车开始时间'}
     },
     situations: {missing: 'Sem bipe de deslacre', done: 'Com bipe de deslacre'},
     filters: ['tripId', 'route', 'station', 'shift'],
@@ -419,7 +436,7 @@ function unsealPanel_(own) {
       ['date', 'Data', '日期'], ['tripId', 'Número do ID', '车次号'], ['route', 'Nome da viagem', '车次名称'],
       ['station', 'PDD de saída', '始发网点'], ['situation', 'Bipe de deslacre', '解封扫描'], ['shift', 'Turno', '班次'],
       ['arrivalTime', 'Tempo real de chegada', '实际到达时间'], ['unlockTime', 'Horário de deslacração do veículo', '解封时间'],
-      ['receiptTime', 'Bipe de recebimento (Data final)', '卸车结束时间'], ['minutes', 'Tempo mediano (deslacre → recebimento)', '中位时长'],
+      ['receiptTime', 'Bipe de recebimento (Data inicial)', '卸车开始时间'], ['minutes', 'Tempo mediano (deslacre → recebimento)', '中位时长'],
       ['plate', 'Placa do carro', '车牌'], ['carrier', 'Transportadora', '承运商']
     ]
   }, own, {
@@ -1333,9 +1350,20 @@ const ALL_INDICATORS_ = Object.freeze({
         title: {pt: 'Sacas ecológicas / sacas não ecológicas', zh: '环保袋 / 非环保袋'}},
       {key: 'topDest', dim: 'destination', where: {column: 'Sacas criadas'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
         title: {pt: 'Destinos com maior envio', zh: '发往最多的拆包网点'}, sub: {pt: 'Sacas por destino de desembalagem (top 10)', zh: '各拆包网点建包数（前10）'}},
-      {key: 'topLots', dim: 'lot', sumField: 'items', where: {column: 'Sacas criadas'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Sacas com maior quantidade', zh: '包内件数最多的包'}, sub: {pt: 'Remessas dentro de cada saca (top 10)', zh: '各包号包内件数（前10）'}}
+      // V4.20 (pedido): sai o gráfico dos números das sacas; entram os destinos das sacas ecológicas (vermelhas com chip) pela
+      // lista do comunicado "Envio de sacas vermelhas com chip" — enviadas incorretamente e corretamente.
+      {key: 'ecoWrong', dim: 'destination', where: {column: 'Sacas ecológicas'}, siteList: ECO_BAG_SITES_2026_08_24_, siteMode: 'out',
+        type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Sacas ecológicas enviadas incorretamente', zh: '红色芯片袋错发网点'},
+        sub: {pt: 'Destinos fora da lista do comunicado "Envio de sacas vermelhas com chip" (desde 24/08/2026) · top 10',
+          zh: '不在《红色芯片袋发送通知》授权名单内的拆包网点（前10）'}},
+      {key: 'ecoRight', dim: 'destination', where: {column: 'Sacas ecológicas'}, siteList: ECO_BAG_SITES_2026_08_24_, siteMode: 'in',
+        type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Destinos que receberam as sacas ecológicas corretamente', zh: '红色芯片袋正确发往的网点'},
+        sub: {pt: 'SCs e DCs autorizados no comunicado "Envio de sacas vermelhas com chip" · top 10', zh: '通知中授权的 SC 与 DC（前10）'}}
     ],
+    // Soma das remessas por turno (sem gráfico próprio): os cartões com filtro em período grande (Client.html → listSum).
+    sumDefs: [{key: 'itemsByShift', dim: 'shift', sumField: 'items', where: {column: 'Sacas criadas'}}],
     tables: [
       {key: 'tGeneral', column: 'Sacas criadas', title: {pt: 'Geral', zh: '建包明细'},
         cols: [['date', 'Data', '日期'], ['lot', 'Número da saca', '包号'], ['port', 'Tipo de entrada e saída', '进出港类型'], ['packType', 'Tipo de ensacamento', '建包类型'],
@@ -1532,8 +1560,8 @@ const ALL_INDICATORS_ = Object.freeze({
    * de viagens de linha secundária > Consulta de Viagens Secundárias (tmsBranchTrackingDetail/page), com os filtros da tela:
    * PDD de chegada = a nossa base (endCode 30001) e Status = Concluído (shipmentState 4). Uma linha por ID de viagem.
    *  - "Horário de deslacração do veículo" (unlockTime) vazio = ID SEM bipe de deslacre.
-   *  - Bipe de recebimento = "Data final" do Bipe de descarregamento nos Registros de carga e descarga do ID
-   *    (tmsBranchTrackingDetail/loading/scan/list?shipmentNo=…, scanEndTime). Tempo do ID = mediana de (Data final −
+   *  - Bipe de recebimento = "Data inicial" (V4.20; antes "Data final") do Bipe de descarregamento da SP GRU nos Registros de
+   *    carga e descarga do ID (tmsBranchTrackingDetail/loading/scan/list?shipmentNo=…, scanStartTime). Tempo do ID = mediana de (Data inicial −
    *    deslacre) dos registros de descarregamento, em minutos (Expedicao.gs → runUnsealDetailJob_).
    *  - Dia e turno pelo horário do deslacre ("vamos medir pela data dessa coluna"); ID sem deslacre: pela chegada do veículo.
    * Taxa guardada = IDs sem deslacre ÷ IDs do dia (%), sem meta. A lista é consultada com 1 dia antes (saídas da véspera que
@@ -1555,7 +1583,7 @@ const ALL_INDICATORS_ = Object.freeze({
       shipment: ['shipmentNo'], tripId: ['shipmentNo'], route: ['shipmentName'], station: ['startName'],
       eventTime: ['__eventTime'], receiptTime: ['__unloadEnd'], unlockTime: ['unlockTime'],
       arrivalTime: ['actualArrivalTime', 'appArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
-      plate: ['plateNumber'], carrier: ['carrierShortName', 'carrierName'], unloads: ['__unloads']
+      plate: ['plateNumber'], carrier: ['carrierShortName', 'carrierName'], unloads: ['__unloads'], timing: ['__timing']
     }
   }),
 
@@ -1564,7 +1592,7 @@ const ALL_INDICATORS_ = Object.freeze({
    * Consulta de Viagens (tmsShipment/page, GET com os filtros na URL, como a captura): PDD de chegada = a nossa base
    * (endCode 30001), Status = Concluído (shipmentState 4), searchType manage. Uma linha por ID de viagem (DBGX…).
    *  - "Horário de deslacração do veículo" = actualUnlockTime; vazio = ID SEM bipe de deslacre.
-   *  - Bipe de recebimento = "Data final" (scanEndTime) do Bipe de descarregamento (loadingTypeName "2") na nossa base nos
+   *  - Bipe de recebimento = "Data inicial" (scanStartTime; V4.20) do Bipe de descarregamento (loadingTypeName "2") na nossa base nos
    *    Registros de carga e descarga do ID (trackingDeatil/loading/scan/list?shipmentNo=…). O carregamento na origem (tipo "1")
    *    e a descarga em outra base não contam.
    *  - Mesmo cálculo, cartões, gráficos e tabela da linha secundária (unsealPanel_).
@@ -1582,7 +1610,7 @@ const ALL_INDICATORS_ = Object.freeze({
       shipment: ['shipmentNo'], tripId: ['shipmentNo'], route: ['shipmentName', 'lineSimpleName'], station: ['startName'],
       eventTime: ['__eventTime'], receiptTime: ['__unloadEnd'], unlockTime: ['actualUnlockTime'],
       arrivalTime: ['actualArrivalTime', 'appTrackArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
-      plate: ['plateNumber'], carrier: ['carrierName', 'carrierShortName'], unloads: ['__unloads']
+      plate: ['plateNumber'], carrier: ['carrierName', 'carrierShortName'], unloads: ['__unloads'], timing: ['__timing']
     }
   })
 });
@@ -1758,7 +1786,7 @@ function catalogEntry_(cfg) {
     texts: cfg.texts || null,
     metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
     // V4.18 (Criação de Lotes): cartão do dia anterior e os nomes novos dos valores gravados antes.
-    prevCard: cfg.prevCard || null, valueAliases: cfg.valueAliases || null,
+    prevCard: cfg.prevCard || null, valueAliases: cfg.valueAliases || null, sumDefs: cfg.sumDefs || null,
     shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
     columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
     snapshot: !!cfg.snapshot,

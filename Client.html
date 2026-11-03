@@ -204,13 +204,13 @@
       usMissDay: 'IDs sem bipe de deslacre · {date}', usMissPeriod: 'IDs sem bipe de deslacre no período',
       usMissOf: '{p} dos {n} IDs de viagem', usOfTrips: 'de {n} IDs', usPrevDay: 'Dia anterior ({d})', usPrevPeriod: 'Período anterior',
       usFilteredNote: 'Contado nos IDs filtrados.', usDaysOf: '{a} de {b} dias',
-      usMedian: 'Tempo mediano: deslacre → bipe de recebimento', usMedianSub: 'Mediana dos {n} IDs com deslacre e Data final',
-      usTop: 'ID com maior tempo mediano', usFrom: 'PDD de saída: {o}', usNoTime: 'Nenhum ID com deslacre e Data final.',
+      usMedian: 'Tempo mediano: deslacre → bipe de recebimento', usMedianSub: 'Mediana dos {n} IDs com deslacre e Data inicial do descarregamento',
+      usTop: 'ID com maior tempo mediano', usFrom: 'PDD de saída: {o}', usNoTime: 'Nenhum ID com deslacre e Data inicial do descarregamento.',
       usTrips: 'IDs de viagem', usTripsSub: 'Com deslacre: {a} · sem deslacre: {b}',
       usShiftMissUnit: 'sem deslacre', usShiftShare: 'dos IDs sem deslacre', usShiftTrips: '{n} IDs no turno',
       usShiftMed: 'Tempo mediano', usShiftTop: 'Maior mediana',
-      usMinutes: 'Tempo (min)', usTipIds: '{n} ID(s)', usTimedHint: 'com deslacre e Data final',
-      usAggMedianSub: 'Mediana do tempo de cada ID (deslacre → Data final) · {n} IDs com tempo',
+      usMinutes: 'Tempo (min)', usTipIds: '{n} ID(s)', usTimedHint: 'com deslacre e Data inicial',
+      usAggMedianSub: 'Mediana do tempo de cada ID (deslacre → Data inicial) · {n} IDs com tempo',
       usAggMaxSub: 'Tempo de cada ID (mediana dos registros de descarregamento) · {n} IDs com tempo',
       usColMedian: 'Tempo mediano', usColTime: 'Tempo', usColIds: 'IDs'
     },
@@ -378,13 +378,13 @@
       usMissDay: '{date} 未解封扫描车次', usMissPeriod: '期间未解封扫描车次',
       usMissOf: '占 {n} 个车次的 {p}', usOfTrips: '共 {n} 个车次', usPrevDay: '前一日（{d}）', usPrevPeriod: '上一期间',
       usFilteredNote: '按筛选后的车次计数。', usDaysOf: '{b} 天中的 {a} 天',
-      usMedian: '中位时长：解封 → 卸车扫描', usMedianSub: '{n} 个有解封和结束时间的车次的中位数',
-      usTop: '中位时长最长的车次', usFrom: '始发网点：{o}', usNoTime: '没有同时有解封和结束时间的车次。',
+      usMedian: '中位时长：解封 → 卸车扫描', usMedianSub: '{n} 个有解封和卸车开始时间的车次的中位数',
+      usTop: '中位时长最长的车次', usFrom: '始发网点：{o}', usNoTime: '没有同时有解封和卸车开始时间的车次。',
       usTrips: '车次', usTripsSub: '已解封：{a} · 未解封：{b}',
       usShiftMissUnit: '未解封', usShiftShare: '占未解封车次', usShiftTrips: '本班次 {n} 个车次',
       usShiftMed: '中位时长', usShiftTop: '最长中位时长',
-      usMinutes: '时长（分钟）', usTipIds: '{n} 个车次', usTimedHint: '有解封和结束时间',
-      usAggMedianSub: '各车次时长（解封 → 结束时间）的中位数 · {n} 个车次有时长',
+      usMinutes: '时长（分钟）', usTipIds: '{n} 个车次', usTimedHint: '有解封和卸车开始时间',
+      usAggMedianSub: '各车次时长（解封 → 卸车开始时间）的中位数 · {n} 个车次有时长',
       usAggMaxSub: '各车次时长（卸车记录的中位数） · {n} 个车次有时长',
       usColMedian: '中位时长', usColTime: '时长', usColIds: '车次'
     }
@@ -1591,7 +1591,7 @@
     drawSpark(c);
   }
   // ------------------------------------------------------------------ Deslacre (V4.4): cartões próprios
-  /** Minutos → "42 min" / "1 h 05 min" (negativo: Data final antes do deslacre). */
+  /** Minutos → "42 min" / "1 h 05 min" (negativo: Data inicial antes do deslacre). */
   function fmtDur(v) {
     if (v === null || v === undefined || v === '' || !isFinite(Number(v))) return '—';
     var n = Number(v), neg = n < 0, a = Math.round(Math.abs(n));
@@ -1606,7 +1606,7 @@
   /**
    * Deslacre (V4.4, pedido): cartões contados nos IDs de viagem filtrados (uma linha por ID).
    *  - IDs sem bipe de deslacre (com o dia/período anterior do JMS);
-   *  - tempo mediano do deslacre até o bipe de recebimento (Data final do Bipe de descarregamento);
+   *  - tempo mediano do deslacre até o bipe de recebimento (Data inicial do Bipe de descarregamento na SP GRU; V4.20);
    *  - ID com o maior tempo mediano; IDs de viagem do período;
    *  - um cartão por turno: IDs sem deslacre, tempo mediano do turno e o ID de maior tempo do turno.
    */
@@ -1711,7 +1711,8 @@
   function listSum(col, field) {
     var sm = state.data.summary, rows = state.filtered, n = 0;
     if (sm) {
-      var ch = ((cfg() && cfg().charts) || []).filter(function (d) { return d.sumField === field; })[0];
+      // V4.20: também as somas sem gráfico próprio (sumDefs).
+      var ch = ((cfg() && cfg().charts) || []).concat((cfg() && cfg().sumDefs) || []).filter(function (d) { return d.sumField === field; })[0];
       rows = ch ? Core.summaryChartRows(ch, sm.byDim, filtersObj()) : [];
     }
     (rows || []).forEach(function (r) {

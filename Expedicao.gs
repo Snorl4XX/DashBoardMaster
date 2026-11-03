@@ -1279,12 +1279,18 @@ function scanStatus_(indicator, from, to) {
 /**
  * V4.4 (pedido "DASHBOARD DE DESLACRE"). Lista = Consulta de Viagens Secundárias (tmsBranchTrackingDetail/page) com os filtros
  * da tela (PDD de chegada = nossa base, Status Concluído). Por ID com deslacre, os Registros de carga e descarga
- * (loading/scan/list?shipmentNo=…): "Data final" (scanEndTime) do Bipe de descarregamento = bipe de recebimento.
- * Tempo do ID = mediana de (Data final − horário de deslacração) dos registros de descarregamento, em minutos.
+ * (loading/scan/list?shipmentNo=…): "Data inicial" (scanStartTime) do Bipe de descarregamento da SP GRU = bipe de recebimento
+ * (V4.20, pedido: "agora vai pegar o horário de início do bipe em vez do último bipe"; até a V4.19, a Data final, scanEndTime).
+ * Tempo do ID = mediana de (Data inicial − horário de deslacração) dos registros de descarregamento, em minutos.
  * V4.17: a linha troncal (unseal_trunk) usa as mesmas funções. Muda a lista (Consulta de Viagens, GET com os filtros na URL),
  * o campo do deslacre (actualUnlockTime) e o endereço dos Registros de carga e descarga (Config.gs → unsealPanel_).
  */
-const UNSEAL_FIELDS_ = ['unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads'];
+const UNSEAL_FIELDS_ = ['unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads', 'timing'];
+/**
+ * Cálculo gravado em cada ID (campo timing): "inicio" = tempo pela Data inicial (V4.20). ID gravado antes (sem o campo, pela
+ * Data final) tem os Registros de carga e descarga consultados de novo na próxima vez que o dia for baixado.
+ */
+const UNSEAL_TIMING_ = 'inicio';
 /** "2026-10-08 04:44:36" → milissegundos (o texto do JMS, sem fuso: só a diferença entre dois horários importa). */
 function unsealMs_(v) {
   const m = /(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(v === null || v === undefined ? '' : v));
@@ -1365,19 +1371,25 @@ function unsealSummary_(indicatorKey, isoDate) {
 function unsealIsUnload_(cfg, x) {
   const types = (cfg.unload && cfg.unload.unloadTypes) || ['2'], v = String(x && x.loadingTypeName === undefined ? '' : x.loadingTypeName);
   if (types.indexOf(v) < 0 && !/descarreg|卸/i.test(v)) return false;
-  const net = x.scanNetworkCode;
-  return net === undefined || net === null || net === '' || String(net) === String(centerCode_());
-}
-/** Data final e tempo (mediana, minutos) de um ID a partir dos Registros de carga e descarga. */
-function unsealTiming_(cfg, unlock, list) {
-  const use = (list || []).filter(x => unsealIsUnload_(cfg, x) && x.scanEndTime);
-  const t0 = unsealMs_(unlock);
-  const mins = use.map(x => (unsealMs_(x.scanEndTime) - t0) / 60000).filter(Number.isFinite);
-  const med = medianOf_(mins);
-  return {end: use.map(x => String(x.scanEndTime)).sort().pop() || '', minutes: med === null ? '' : String(Math.round(med * 10) / 10), unloads: String(use.length)};
+  // "Site de carga e descarga" = a nossa base: pelo código (scanNetworkCode) e, sem ele, pelo nome (scanNetworkName, "SP GRU").
+  const net = x.scanNetworkCode, name = x.scanNetworkName;
+  if (net !== undefined && net !== null && net !== '') return String(net) === String(centerCode_());
+  const key = s => String(s || '').toUpperCase().replace(/[\s\-]+/g, ' ').trim();
+  return !name || key(name) === key(centerName_());
 }
 /**
- * Detalhe do dia (tarefa DETAIL_INIT do Deslacre): a lista de IDs e, para cada ID com deslacre ainda sem a Data final (ou de
+ * Data inicial e tempo (mediana, minutos) de um ID a partir dos Registros de carga e descarga: linhas "Bipe de descarregamento"
+ * da SP GRU, tempo de cada uma = Data inicial (scanStartTime) − deslacre. `end` = a Data inicial mais cedo (mostrada na tabela).
+ */
+function unsealTiming_(cfg, unlock, list) {
+  const use = (list || []).filter(x => unsealIsUnload_(cfg, x) && x.scanStartTime);
+  const t0 = unsealMs_(unlock);
+  const mins = use.map(x => (unsealMs_(x.scanStartTime) - t0) / 60000).filter(Number.isFinite);
+  const med = medianOf_(mins);
+  return {end: use.map(x => String(x.scanStartTime)).sort()[0] || '', minutes: med === null ? '' : String(Math.round(med * 10) / 10), unloads: String(use.length)};
+}
+/**
+ * Detalhe do dia (tarefa DETAIL_INIT do Deslacre): a lista de IDs e, para cada ID com deslacre ainda sem a Data inicial (ou de
  * hoje/ontem com descarregamento recente), os Registros de carga e descarga — os já consultados vêm do arquivo do dia. O tempo
  * acabando, grava o que já veio e continua na próxima execução.
  */
@@ -1394,8 +1406,8 @@ function runUnsealDetailJob_(job, deadline, cfg, st) {
     const unlock = unsealUnlock_(cfg, t);
     if (!unlock) return false;
     const c = cache[t.shipmentNo];
-    if (!c || c.unlockTime !== unlock || c.unloads === '' || c.unloads === undefined) return true;
-    // Hoje/ontem: sem Data final ainda, ou terminada há menos de 2 h (descarregamento pode continuar).
+    if (!c || c.unlockTime !== unlock || c.unloads === '' || c.unloads === undefined || c.timing !== UNSEAL_TIMING_) return true;
+    // Hoje/ontem: sem Data inicial ainda, ou começada há menos de 2 h (pode aparecer outro registro de descarregamento).
     return recent && (!c.receiptTime || nowMs - unsealMs_(c.receiptTime) < 2 * 3600000);
   });
   const endpoint = endpointFor_(cfg, 'unload'), got = {};
@@ -1436,9 +1448,11 @@ function runUnsealDetailJob_(job, deadline, cfg, st) {
     const unlock = unsealUnlock_(cfg, t), c = cache[t.shipmentNo];
     let tm = {end: '', minutes: '', unloads: ''};
     if (unlock && got[t.shipmentNo]) tm = unsealTiming_(cfg, unlock, got[t.shipmentNo]);
-    else if (unlock && c && c.unlockTime === unlock) tm = {end: c.receiptTime || '', minutes: c.minutes || '', unloads: c.unloads || ''};
+    else if (unlock && c && c.unlockTime === unlock && c.timing === UNSEAL_TIMING_) tm = {end: c.receiptTime || '', minutes: c.minutes || '', unloads: c.unloads || ''};
+    // timing: cálculo deste ID (só quando os Registros foram consultados com a regra atual).
+    const fresh = unlock && (got[t.shipmentNo] || (c && c.unlockTime === unlock && c.timing === UNSEAL_TIMING_));
     return Object.assign({}, t, {__eventTime: unsealEventTime_(cfg, t), __unloadEnd: tm.end, __minutes: tm.minutes, __unloads: tm.unloads,
-      __situation: unlock ? sit.done : sit.missing});
+      __timing: fresh ? UNSEAL_TIMING_ : '', __situation: unlock ? sit.done : sit.missing});
   });
   const rows = normalizeRecords_(ind, date, recs);
   saveDayDataset_(ind, date, encodeDayFile_(rows, STORE_FIELDS_.concat(UNSEAL_FIELDS_)), 1, trips.length);
@@ -1452,7 +1466,7 @@ function runUnsealDetailJob_(job, deadline, cfg, st) {
   updateDayStatus_(ind, date, {detailsStatus: complete ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: 1, savedPages: 1,
     expectedRecords: trips.length, savedRows: rows.length, error: ''});
   if (lastError) {
-    logSync_('WARN', ind, date, 'Registros de carga e descarga recusados em parte dos IDs (sem a Data final, o tempo desses IDs fica vazio): ' + lastError +
+    logSync_('WARN', ind, date, 'Registros de carga e descarga recusados em parte dos IDs (sem a Data inicial, o tempo desses IDs fica vazio): ' + lastError +
       '. Rode ' + (cfg.diagnostic || 'diagnosticarDeslacre') + '() e confira os cabeçalhos de rota (JMS_ROUTENAME_' + cfg.routeKey + ').');
   }
   return complete ? 'done' : 'partial';
@@ -1460,7 +1474,7 @@ function runUnsealDetailJob_(job, deadline, cfg, st) {
 
 /**
  * Diagnóstico do Deslacre (V4.4): testa no JMS real a lista de IDs do dia (IDs, sem deslacre, campos que chegam) e os
- * Registros de carga e descarga de até 5 IDs com deslacre (Data final e tempo). Nada de placa, motorista, CPF ou telefone no
+ * Registros de carga e descarga de até 5 IDs com deslacre (Data inicial e tempo). Nada de placa, motorista, CPF ou telefone no
  * texto. `date` (opcional, AAAA-MM-DD): padrão = ontem. diagnosticarDeslacre = linha secundária; V4.17:
  * diagnosticarDeslacreTroncal = linha troncal.
  */
@@ -1498,7 +1512,7 @@ function unsealDiagnostic_(key, date) {
       const list = recordsOf_(jmsPost_(endpointFor_(cfg, 'unload') + '?shipmentNo=' + encodeURIComponent(t.shipmentNo), null, 2));
       const unlock = unsealUnlock_(cfg, t), tm = unsealTiming_(cfg, unlock, list);
       add('  ID ' + (i + 1) + ': ' + list.length + ' registro(s) de carga/descarga · ' + tm.unloads + ' de descarregamento na base · deslacre ' +
-        unlock.slice(11) + ' → Data final ' + (tm.end ? tm.end.slice(11) : '—') + ' · tempo ' + (tm.minutes === '' ? '—' : tm.minutes + ' min'));
+        unlock.slice(11) + ' → Data inicial ' + (tm.end ? tm.end.slice(11) : '—') + ' · tempo ' + (tm.minutes === '' ? '—' : tm.minutes + ' min'));
     } catch (e) { add('  ID ' + (i + 1) + ': Registros de carga e descarga: ERRO — ' + err(e)); }
   });
   const r = getRateDay_(key, d);

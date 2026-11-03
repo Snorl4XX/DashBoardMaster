@@ -2159,15 +2159,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // 3. Painel: gráficos de lotes com mais pacotes (soma dos itens), catálogo e período grande.
   const dashL = cA.getDashboardData('lot_flow', {from: D19, to: D19});
   const rowsD = cA.JTCore_.decodeDataset(dashL.dataset), chDef = k => cfgL.charts.filter(c => c.key === k)[0];
-  const topT = dA[D19].lt.reduce((a, b) => Math.max(a, b.packageQty), 0);
-  const chTop = cA.JTCore_.buildChart(chDef('topLots'), rowsD, {}), chPort = cA.JTCore_.buildChart(chDef('ports'), rowsD, {});
-  // V4.18: com o filtro "Tipo de sacas", o gráfico das sacas com maior quantidade mostra só a escolhida (antes: gráficos separados).
-  const chEco = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.applyFilters(rowsD, {sackType: ['Ecológica']}), {});
-  const chNon = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.applyFilters(rowsD, {sackType: ['Não ecológica']}), {});
-  check(chTop.total === tA.items && chTop.datasets[0].data[0] === topT && chTop.labels.length === 10 && chEco.total === tA.ecoItems &&
+  // V4.20: o gráfico dos números das sacas saiu; a soma das remessas fica em sumDefs (remessas por turno, cartões com filtro).
+  const sumDef = cfgL.sumDefs[0], chPort = cA.JTCore_.buildChart(chDef('ports'), rowsD, {});
+  const chTop = cA.JTCore_.buildChart(sumDef, rowsD, {});
+  const chEco = cA.JTCore_.buildChart(sumDef, cA.JTCore_.applyFilters(rowsD, {sackType: ['Ecológica']}), {});
+  const chNon = cA.JTCore_.buildChart(sumDef, cA.JTCore_.applyFilters(rowsD, {sackType: ['Não ecológica']}), {});
+  check(chTop.total === tA.items && chEco.total === tA.ecoItems && !chDef('topLots') &&
     chNon.total === tA.items - tA.ecoItems && chPort.labels.join() === (tA.dep >= tA.arr ? 'Saída de porto,Entrada' : 'Entrada,Saída de porto') &&
     !dashL.summary && !hasDate(dashL),
-    'Lotes: sacas com maior quantidade = soma das remessas da saca (as duas juntas; com o filtro, só a escolhida); entrada/saída', {top: chTop.datasets[0].data[0], topT});
+    'Lotes: remessas dentro das sacas (as duas juntas; com o filtro, só a escolhida); entrada/saída', {total: chTop.total, items: tA.items});
   const byDest = {};
   rowsD.forEach(r => { if (cA.JTCore_.colMatch('Sacas criadas', r.column)) byDest[r.destination] = (byDest[r.destination] || 0) + Number(r.qty || 1); });
   const topDestT = Object.keys(byDest).filter(k => k !== 'N/A').sort((a, b) => byDest[b] - byDest[a])[0];
@@ -2179,12 +2179,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cardsL = catL.metricPanels[0].metrics.filter(x => x.card !== false).map(x => x.key);
   check(catL && catL.name.pt === 'Criação de Lotes' && catL.filters.map(f => f.key).join() === 'sackType,port,lot,destination,shift' &&
     catL.filters.map(f => f.label.pt).join() === 'Tipo de sacas,Tipo de entrada e saída,Número dos lotes,Destinos,Turnos' &&
-    catL.charts.map(x => x.key).join() === 'shiftPie,mDaily,ports,sackTypes,topDest,topLots' && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' &&
+    catL.charts.map(x => x.key).join() === 'shiftPie,mDaily,ports,sackTypes,topDest,ecoWrong,ecoRight' && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' &&
     !(catL.detailCards || []).length && catL.heroMetric.sub === 'waybillSum' && catL.prevCard && catL.prevCard.sub === 'waybillSum' &&
     cardsL.join() === 'packageSum,loopRate,noloopRate,loopSum,noloopSum' &&
     catL.metricPanels[0].metrics.filter(x => x.subMetric).map(x => x.subMetric.key).join() === 'loopWaybillSum,noloopWaybillSum' &&
     catL.metricPanels[1].metrics.every(x => x.card === false) && catL.shiftCardsByColumn.split.length === 2,
-    'Lotes: catálogo do pedido — filtros (tipo de sacas, entrada/saída, lotes, destinos, turnos), cartões com as remessas embaixo e 6 gráficos',
+    'Lotes: catálogo do pedido — filtros (tipo de sacas, entrada/saída, lotes, destinos, turnos), cartões com as remessas embaixo e 7 gráficos',
     {f: catL.filters.map(f => f.key), ch: catL.charts.map(x => x.key), cards: cardsL});
   const both = tA.items + truthL(dA['2026-09-18'].lt).items, arrBoth = tA.arrItems + truthL(dA['2026-09-18'].lt).arrItems;
   cA.__state.props.GROUPED_CLIENT_ROWS = '10';
@@ -2192,12 +2192,32 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const dSf = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {port: ['Entrada']}});
   delete cA.__state.props.GROUPED_CLIENT_ROWS;
   const mS = cA.JTCore_.marginalsByDim(dS.summary.marginals), mSf = cA.JTCore_.marginalsByDim(dSf.summary.marginals);
-  const chS = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mS, {}), {});
-  const chSf = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mSf, {port: ['Entrada']}), {});
-  const topBoth = Math.max(topT, dA['2026-09-18'].lt.reduce((a, b) => Math.max(a, b.packageQty), 0));
-  check(dS.summary && chS.total === both && chS.datasets[0].data[0] === topBoth,
-    'Lotes: período grande (totais no servidor) com a soma de itens por saca', {total: chS.total, both});
+  const chS = cA.JTCore_.buildChart(sumDef, cA.JTCore_.summaryChartRows(sumDef, mS, {}), {});
+  const chSf = cA.JTCore_.buildChart(sumDef, cA.JTCore_.summaryChartRows(sumDef, mSf, {port: ['Entrada']}), {});
+  check(dS.summary && chS.total === both,
+    'Lotes: período grande (totais no servidor) com a soma das remessas (sumDefs, sem gráfico próprio)', {total: chS.total, both});
+  // Sacas ecológicas: os destinos do JMS falso estão fora da lista do comunicado → todas "enviadas incorretamente".
+  const ecoBoth = tA.eco + truthL(dA['2026-09-18'].lt).eco;
+  const chWS = cA.JTCore_.buildChart(chDef('ecoWrong'), cA.JTCore_.summaryChartRows(chDef('ecoWrong'), mS, {}), {});
+  const chRS = cA.JTCore_.buildChart(chDef('ecoRight'), cA.JTCore_.summaryChartRows(chDef('ecoRight'), mS, {}), {});
+  check(chWS.total === ecoBoth && chRS.total === 0, 'Lotes: período grande — sacas ecológicas por destino autorizado ou não', {w: chWS.total, r: chRS.total, ecoBoth});
   check(dSf.summary && chSf.total === arrBoth, 'Lotes: período grande com filtro de Entrada/Saída aplicado no servidor', {total: chSf.total, arrBoth});
+
+  // 3a. V4.20 (pedido): destinos das sacas ecológicas (vermelhas com chip) pela lista do comunicado "Envio de sacas vermelhas com
+  // chip": corretas = SC/DC da lista ("DC VCP-SP" = "DC VCP"; maiúsculas e hífens não contam); incorretas = fora dela. Só as
+  // ecológicas; sem destino não conta.
+  // Uma linha por saca (número fictício): [tipo, destino, quantas sacas].
+  const ecoRows = [];
+  [['Ecológica', 'DC VCP-SP', 1], ['Ecológica', 'dc itj 001-pr', 1], ['Ecológica', 'SP GRU', 2], ['Ecológica', 'JND-SP', 1],
+    ['Ecológica', 'RT ALFA', 3], ['Ecológica', 'DC FICTICIO-AL', 1], ['Ecológica', 'N/A', 4], ['Ecológica', 'DC GRU 02-SP', 1],
+    ['Não ecológica', 'RT ALFA', 9], ['Não ecológica', 'SP GRU', 9]].forEach(([col, dest, n]) => {
+    for (let i = 0; i < n; i++) ecoRows.push({column: col, destination: dest, shipment: 'BRFICECO' + ecoRows.length, qty: 1});
+  });
+  const chW = cA.JTCore_.buildChart(chDef('ecoWrong'), ecoRows, {}), chR = cA.JTCore_.buildChart(chDef('ecoRight'), ecoRows, {});
+  check(chW.total === 5 && chW.labels[0] === 'RT ALFA' && chW.labels.indexOf('DC GRU 02-SP') >= 0 && chW.labels.indexOf('N/A') < 0 &&
+    chR.total === 5 && chR.labels[0] === 'SP GRU' && ['DC VCP-SP', 'dc itj 001-pr', 'JND-SP'].every(x => chR.labels.indexOf(x) >= 0) &&
+    chDef('ecoWrong').title.pt === 'Sacas ecológicas enviadas incorretamente' && chDef('ecoRight').title.pt === 'Destinos que receberam as sacas ecológicas corretamente',
+    'Lotes: sacas ecológicas enviadas incorretamente / corretamente pela lista de SCs e DCs do comunicado', {w: chW.labels, r: chR.labels, tw: chW.total, tr: chR.total});
 
   // 3b. V4.18: dias baixados antes (gravados como "Partida"/"Chegada") aparecem com os nomes da tela, na leitura normal e no
   // resumo de período grande, sem baixar de novo.
@@ -3176,10 +3196,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   mine.forEach(t => {
     const u = t.unlockTime ? (unloads[t.shipmentNo] || []).filter(x => x.loadingTypeName === '2') : [];
     exp[t.shipmentNo] = {sit: t.unlockTime ? 'Com bipe de deslacre' : 'Sem bipe de deslacre', shift: C.shiftOf(evT(t)),
-      min: u.length ? String(Math.round(med(u.map(x => (ms(x.scanEndTime) - ms(t.unlockTime)) / 60000)) * 10) / 10) : '', end: u.map(x => x.scanEndTime).sort().pop() || ''};
+      min: u.length ? String(Math.round(med(u.map(x => (ms(x.scanStartTime) - ms(t.unlockTime)) / 60000)) * 10) / 10) : '', end: u.map(x => x.scanStartTime).sort()[0] || ''};
   });
   const badU = rowsU.filter(r => { const e = exp[r.shipment]; return r.situation !== e.sit || String(r.minutes || '') !== e.min || r.shift !== e.shift || String(r.receiptTime || '') !== e.end; });
-  check(!badU.length, 'tempo de cada ID = mediana de (Data final − deslacre) dos registros de descarregamento; turno pelo deslacre (sem ele, pela chegada)',
+  check(!badU.length, 'tempo de cada ID = mediana de (Data inicial − deslacre) dos registros de descarregamento (V4.20); turno pelo deslacre (sem ele, pela chegada)',
     badU.slice(0, 2).map(r => [r.situation, r.minutes, r.shift, exp[r.shipment]]));
   check(rowsU.some(r => r.minutes === '' && r.situation === 'Com bipe de deslacre') && mine.some(t => (unloads[t.shipmentNo] || []).filter(x => x.loadingTypeName === '2').length === 2),
     'ID com deslacre sem registro de descarga fica sem tempo; dois registros = mediana dos dois');
@@ -3232,7 +3252,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const repU = cU.generateReport('unseal', {from: D19, to: D19}, 'xlsx');
   check(repU.ok, 'relatório do Deslacre (Excel)', repU);
   const dgU = cU.diagnosticarDeslacre(D19);
-  check(/IDs do dia/.test(dgU.texto) && /Data final/.test(dgU.texto) && !/MOTORISTA|FIC\d{4}/.test(dgU.texto), 'diagnosticarDeslacre() sem placa nem motorista', dgU.texto);
+  check(/IDs do dia/.test(dgU.texto) && /Data inicial/.test(dgU.texto) && !/MOTORISTA|FIC\d{4}/.test(dgU.texto), 'diagnosticarDeslacre() sem placa nem motorista', dgU.texto);
   // Hoje: a lista é refeita pelo intervalo mesmo sem mudar a contagem (descarregamento em andamento), sem marcar desatualizado.
   const today = cU.isoToday_();
   const st0 = {summary: 'COMPLETE', details: 'COMPLETE'}, same = {errorCount: 1, totalCount: 5};
@@ -3273,11 +3293,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   mine.forEach(t => {
     const u = t.actualUnlockTime ? atBase(t.shipmentNo) : [];
     exp[t.shipmentNo] = {sit: t.actualUnlockTime ? 'Com bipe de deslacre' : 'Sem bipe de deslacre', shift: C.shiftOf(evT(t)), unlock: t.actualUnlockTime || '',
-      min: u.length ? String(Math.round(med(u.map(x => (ms(x.scanEndTime) - ms(t.actualUnlockTime)) / 60000)) * 10) / 10) : '', end: u.map(x => x.scanEndTime).sort().pop() || ''};
+      min: u.length ? String(Math.round(med(u.map(x => (ms(x.scanStartTime) - ms(t.actualUnlockTime)) / 60000)) * 10) / 10) : '', end: u.map(x => x.scanStartTime).sort()[0] || ''};
   });
   const badT = rowsT.filter(r => { const e = exp[r.shipment]; return r.situation !== e.sit || String(r.minutes || '') !== e.min || r.shift !== e.shift ||
     String(r.receiptTime || '') !== e.end || String(r.unlockTime || '') !== e.unlock; });
-  check(!badT.length, 'troncal: deslacre = actualUnlockTime; tempo = mediana de (Data final − deslacre) das descargas na nossa base; turno pelo deslacre',
+  check(!badT.length, 'troncal: deslacre = actualUnlockTime; tempo = mediana de (Data inicial − deslacre) das descargas na nossa base; turno pelo deslacre',
     badT.slice(0, 2).map(r => [r.situation, r.minutes, r.unlockTime, r.shift, exp[r.shipment]]));
   check(mine.some(t => t.actualUnlockTime && (unloads[t.shipmentNo] || []).some(x => x.loadingTypeName === '2' && x.scanNetworkCode !== '30001')) &&
     mine.some(t => atBase(t.shipmentNo).length === 2) && rowsT.some(r => r.minutes === '' && r.situation === 'Com bipe de deslacre'),
@@ -3317,7 +3337,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   })();
   check(repT.ok, 'relatório do Deslacre da troncal (Excel)', repT);
   const dgT = cT.diagnosticarDeslacreTroncal(D19);
-  check(/Deslacre \(linha troncal\)/.test(dgT.texto) && /actualUnlockTime sim/.test(dgT.texto) && /IDs do dia/.test(dgT.texto) && /Data final/.test(dgT.texto) &&
+  check(/Deslacre \(linha troncal\)/.test(dgT.texto) && /actualUnlockTime sim/.test(dgT.texto) && /IDs do dia/.test(dgT.texto) && /Data inicial/.test(dgT.texto) &&
     /Dados de monitoramento > Consulta de Viagens/.test(dgT.texto) && !/MOTORISTA|FIC\d{4}|DBGX/.test(dgT.texto), 'diagnosticarDeslacreTroncal() sem placa, motorista nem ID', dgT.texto);
   const dgS = cT.diagnosticarDeslacre(D19);
   check(/Deslacre \(linha secundária\)/.test(dgS.texto) && /unlockTime sim/.test(dgS.texto) && dgS.ids === rowsS.length, 'diagnosticarDeslacre() continua sendo o da secundária');
@@ -4474,6 +4494,36 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     sb('GRU,402-09,1', BEFORE) === 'DC TBT-SP' && sb('GRU,402-10,1', AFTER) === 'DC TBT-SP' && sb('GRU,402-08,1', AFTER) === 'DC TBT-SP',
     'segmento (base): TO/MRB/RO/AC no DF BSB e CDG no RJ SJM a partir de 01/11; GRU 402-08/09/10 no DC TBT-SP',
     [sb('TO,123-00,000', AFTER), sb('GRU,402-09,1', BEFORE), sb('CDG,4', AFTER)]);
+}
+
+// ---------- V4.20: Deslacre pela Data inicial — dias gravados antes (Data final) são refeitos uma vez ----------
+{
+  const vmD = require('vm');
+  const DD = '2026-09-19', dD = {'2026-09-18': makeDay('2026-09-18', 51), [DD]: makeDay(DD, 52)};
+  const cD = freshCtx(dD);
+  cD.queueHistory('2026-09-18', DD, true);
+  runAll(cD);
+  const fieldsD = vmD.runInContext('STORE_FIELDS_.concat(UNSEAL_FIELDS_)', cD);
+  // Como um dia gravado na V4.19: sem o campo timing e com o tempo de antes (aqui, 999).
+  const old = cD.fileRows_(cD.loadDetailFile_(cD.dayFilesMap_('unseal', DD, DD)[DD].fileId)).map(r => Object.assign({}, r, {timing: '', minutes: r.unlockTime ? '999' : ''}));
+  cD.saveDayDataset_('unseal', DD, cD.encodeDayFile_(old, fieldsD), 1, old.length);
+  const before = cD.__state.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url)).length;
+  const nMig = cD.migrateToV420_(), again = cD.migrateToV420_();
+  runAll(cD);
+  const rowsD = cD.getArchivedRange_('unseal', DD, DD).rows, withUnlock = rowsD.filter(r => r.unlockTime).length;
+  const after = cD.__state.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url)).length;
+  check(nMig > 0 && again === 0 && after - before >= withUnlock && rowsD.every(r => r.minutes !== '999') &&
+    rowsD.filter(r => r.unlockTime).every(r => r.timing === 'inicio') && cD.getRateDay_('unseal', DD).metrics.medianMin !== 999,
+    'V4.20: uma vez, os dias do Deslacre gravados pela Data final são refeitos (Registros consultados de novo, tempo pela Data inicial)',
+    {nMig, again, consultas: after - before, withUnlock});
+  // Só a linha "Bipe de descarregamento" da SP GRU conta: pelo código e, sem ele, pelo nome do site.
+  const cfgD = cD.getIndicatorConfig_('unseal');
+  const tm = cD.unsealTiming_(cfgD, '2026-09-19 10:00:00', [
+    {loadingTypeName: '1', scanNetworkName: 'SP GRU', scanStartTime: '2026-09-19 08:00:00', scanEndTime: '2026-09-19 09:00:00'},
+    {loadingTypeName: '2', scanNetworkName: 'PR SJS', scanStartTime: '2026-09-19 10:05:00', scanEndTime: '2026-09-19 10:30:00'},
+    {loadingTypeName: '2', scanNetworkName: 'SP GRU', scanStartTime: '2026-09-19 10:40:00', scanEndTime: '2026-09-19 15:11:19'}]);
+  check(tm.minutes === '40' && tm.end === '2026-09-19 10:40:00' && tm.unloads === '1',
+    'tempo do ID = Data inicial do Bipe de descarregamento da SP GRU − deslacre (sem a linha de outra base nem a de carregamento)', tm);
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

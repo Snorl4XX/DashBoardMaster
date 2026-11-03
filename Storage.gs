@@ -1312,6 +1312,24 @@ function migrateToV4126_() {
   if (n) logSync_('INFO', 'wrong_send', '', 'V4.12.6: ' + n + ' dia(s) do Envio Errado baixados de novo (código de três segmentos para o gráfico do segmento).');
   return n;
 }
+/**
+ * V4.20 (pedido): o tempo do Deslacre passa a ir do deslacre até a Data inicial do Bipe de descarregamento da SP GRU (antes, a
+ * Data final). Os dias gravados guardam só o resultado: uma vez, os dias dos últimos 62 com a lista do Deslacre (linha
+ * secundária e troncal) entram na fila de novo. Cada ID sem o cálculo novo (timing) tem os Registros de carga e descarga
+ * consultados de novo (Expedicao.gs → runUnsealDetailJob_); o tempo mediano do dia é refeito.
+ */
+function migrateToV420_() {
+  if (getProp_('MIGRATION_V420', '')) return 0;
+  const to = isoToday_(), from = addDaysIso_(to, -62);
+  let n = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].unseal).forEach(k => {
+    const days = Object.keys(dayFilesMap_(k, from, to)).sort().reverse();
+    if (days.length) n += enqueueJobs_(days.map(d => ['DETAIL_INIT', k, d, 1]), {reset: true});
+  });
+  setProp_('MIGRATION_V420', new Date().toISOString());
+  if (n) logSync_('INFO', 'unseal', '', 'V4.20: ' + n + ' dia(s) do Deslacre na fila de novo (tempo pela Data inicial do descarregamento).');
+  return n;
+}
 function retryFailedJobs() {
   let count = 0;
   allTabRows_('JOBS').forEach((r, i) => {

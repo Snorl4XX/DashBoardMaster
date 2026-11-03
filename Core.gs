@@ -725,12 +725,32 @@ function JTCoreFactory_() {
 
   // ---------- gráficos ----------
   /** Linhas do recorte do gráfico (def.where, ex.: {column: 'Chegou'}): um painel com duas colunas principais. */
+  /**
+   * V4.20: nome de base comparável — maiúsculas, hífens e espaços iguais e sem o "-UF" do fim ("DC VCP-SP" = "DC VCP",
+   * "DC ITJ 001-PR" = "DC ITJ 001"). "SP GRU" continua "SP GRU" (a base tem 3 letras).
+   */
+  function siteKey(s) { return String(s === null || s === undefined ? '' : s).toUpperCase().replace(/[\s\-\u2013\u2014_]+/g, ' ').trim().replace(/ [A-Z]{2}$/, ''); }
+  var SITE_SETS = [];
+  function inSiteList(name, list) {
+    var e = null;
+    for (var i = 0; i < SITE_SETS.length && !e; i++) if (SITE_SETS[i].list === list) e = SITE_SETS[i];
+    if (!e) { e = {list: list, set: {}}; (list || []).forEach(function (n) { e.set[siteKey(n)] = 1; }); SITE_SETS.push(e); }
+    return !!e.set[siteKey(name)];
+  }
   function chartRows(def, rows) {
-    if (!def.where) return rows || [];
-    var keys = Object.keys(def.where);
-    return (rows || []).filter(function (r) {
-      return keys.every(function (k) { return k === 'column' ? colMatch(def.where[k], r[k]) : r[k] === def.where[k]; });
-    });
+    var out = rows || [];
+    if (def.where) {
+      var keys = Object.keys(def.where);
+      out = out.filter(function (r) {
+        return keys.every(function (k) { return k === 'column' ? colMatch(def.where[k], r[k]) : r[k] === def.where[k]; });
+      });
+    }
+    // V4.20 (Criação de Lotes): só os destinos da lista (siteMode 'in') ou só os de fora ('out'); sem destino não conta.
+    if (def.siteList) {
+      var f = def.siteField || def.dim, keep = def.siteMode !== 'out';
+      out = out.filter(function (r) { var v = r[f]; return !blank(v) && !noValue(v) && inSiteList(v, def.siteList) === keep; });
+    }
+    return out;
   }
   /**
    * Recebimento com período grande (servidor manda totais por campo): {campo: [{date, column, campo: valor, qty}]}.
@@ -1084,7 +1104,7 @@ function JTCoreFactory_() {
     dockVersion: dockVersion, applyAliases: applyAliases, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
-    hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
+    hasFilters: hasFilters, applyFilters: applyFilters, siteKey: siteKey, inSiteList: inSiteList, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
     computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
     encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText, median: median
