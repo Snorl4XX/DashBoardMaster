@@ -1,8 +1,27 @@
-# J&T DASHMASTER V4.21 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.21.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.21.1 — Tabela de rotas atualizada: AC RBR no SP GRU-BSB
+
+**Pedido:** "Mudanças nas rotas, mudar o dashboard", com a tabela "Código de alocação de carga das rotas tronco e de
+distribuição do SP GRU" atualizada.
+
+- A tabela confirma a V4.19: **SP GRU-BSB = DF, PA MRB, TO PMW, RO PVH e AC RBR**, e o AC saiu do SP GRU-BRE. O painel já
+  fazia assim desde 01/11 (o comunicado dizia o mesmo).
+- Nova: **AC = RBR** (Rio Branco). A parada escrita **"AC RBR"** (nome da tabela) e o código **RBR** entram na rota DF BSB,
+  junto com "DC RBR-AC" e o código AC. Isso vale:
+  - no Envio Errado, na Triagem Errada e no SC → SC (doca 38);
+  - na Falta de Bipagem na Expedição e no Segmento (base);
+  - no SC → DC (Esteira 3).
+
+  Antes de 01/11, o AC continua no SP BRE.
+- As outras linhas da tabela são iguais às do painel: nada mais muda.
+
+**Atualizar:** Node.js — extraia o `JT_DASHMASTER_V4_21_1_NODE.zip` em `C:\` (Substituir). Apps Script — troque o `Config.gs`
+(ou todos os arquivos do `JT_DASHMASTER_V4_21_1_PRINCIPAL.zip`) e faça uma Nova versão. O painel de Lotes não usa rotas.
 
 ## V4.21 — Painel de Lotes/Sacas separado do principal, com link próprio no Tailscale
 
@@ -106,8 +125,8 @@ alocação de carga das rotas tronco e de distribuição do SP GRU".
 - **Expedição SC → DC:** esteira pela próxima parada. Desde 01/11, TO PMW, PA MRB, RO PVH e DC RBR-AC → DF BSB, **Esteira 3**
   (antes Esteira 2, com o SP BRE). As unidades novas → DC TBT-SP, Esteira 2.
 
-**Atenção:** a tabela ainda mostra "AC" na linha SP GRU-BRE. Segui o comunicado: as cargas de AC vão pelo DF BSB. Se
-algum destino com código AC continuar no SP BRE, avise para ajustar.
+**Atenção:** a tabela ainda mostra "AC" na linha SP GRU-BRE. Segui o comunicado: as cargas de AC vão pelo DF BSB.
+(V4.21.1: a tabela atualizada confirma — AC RBR no SP GRU-BSB.)
 
 **App Expedição Incorreta (separado):** a planilha padrão de rotas (versão 1.9.2) já vem com essas mudanças. Quem já usa o app
 envia o `rotas.xlsx` novo em Configurações → "Enviar planilha de rotas", ou edita a planilha como no LEIA-ME do app.

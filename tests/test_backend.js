@@ -4501,6 +4501,14 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     want(est(p, AFTER), 'DF BSB | Esteira 3', 'esteira de ' + p + ' em 01/11');
   });
   want(seg('BRE - TO', AFTER), 'DF BSB | DOCA 38', 'código antigo "BRE - TO" em 01/11');
+  // V4.21.1: tabela atualizada — "AC RBR" no SP GRU-BSB.
+  want(stop('AC RBR', AFTER), 'DF BSB | DOCA 38', 'parada AC RBR em 01/11');
+  want(est('AC RBR', AFTER), 'DF BSB | Esteira 3', 'esteira de AC RBR em 01/11');
+  want(stop('AC RBR', BEFORE), 'SP BRE | DOCA 21/22', 'parada AC RBR em 31/10');
+  // AC = RBR: o código RBR e uma parada com RBR no nome também vão pelo DF BSB.
+  want(seg('RBR,1', AFTER), 'DF BSB | DOCA 38', 'código RBR em 01/11');
+  want(stop('DC RBR', AFTER), 'DF BSB | DOCA 38', 'parada DC RBR em 01/11');
+  want(est('DC RBR', AFTER), 'DF BSB | Esteira 3', 'esteira de DC RBR em 01/11');
   // Tabela de 01/11: CDG no SP GRU-SJM, JPN no SP GRU-CGB; o resto do SP BRE continua lá.
   want(seg('CDG,1', AFTER), 'RJ SJM | DOCA 10', 'CDG em 01/11');
   want(stop('DC CDG-RJ', AFTER), 'RJ SJM | DOCA 10', 'parada DC CDG-RJ em 01/11');
@@ -4519,7 +4527,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // Segmento (base) pela fórmula do WPS (Envio Errado e Falta de Bipagem na Expedição): pelo dia da remessa.
   const sb = (code, date) => CV.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
   check(sb('TO,123-00,000', BEFORE) === 'SP BRE' && sb('TO,123-00,000', AFTER) === 'DF BSB' && sb('AC,1', AFTER) === 'DF BSB' && sb('MRB,2', AFTER) === 'DF BSB' &&
-    sb('RO,3', AFTER) === 'DF BSB' && sb('CDG,4', AFTER) === 'RJ SJM' && sb('CDG,4', BEFORE) === 'SP BRE' && sb('STM,5', AFTER) === 'SP BRE' &&
+    sb('RO,3', AFTER) === 'DF BSB' && sb('RBR,6', AFTER) === 'DF BSB' && sb('CDG,4', AFTER) === 'RJ SJM' && sb('CDG,4', BEFORE) === 'SP BRE' && sb('STM,5', AFTER) === 'SP BRE' &&
     sb('GRU,402-09,1', BEFORE) === 'DC TBT-SP' && sb('GRU,402-10,1', AFTER) === 'DC TBT-SP' && sb('GRU,402-08,1', AFTER) === 'DC TBT-SP',
     'segmento (base): TO/MRB/RO/AC no DF BSB e CDG no RJ SJM a partir de 01/11; GRU 402-08/09/10 no DC TBT-SP',
     [sb('TO,123-00,000', AFTER), sb('GRU,402-09,1', BEFORE), sb('CDG,4', AFTER)]);

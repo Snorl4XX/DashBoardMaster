@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.21.0',
+  VERSION: '4.21.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -223,12 +223,14 @@ const DOCK_TABLE_2026_10_11_ = DOCK_TABLE_2026_10_04_.map(e => {
  *    (GRU 402-10);
  *  - 01/11/2026: as cargas de TO, MRB, RO e AC (TO PMW, PA MRB, RO PVH e DC RBR-AC) passam a ir pela rota DF BSB, e
  *    a tabela da mesma data tem CDG (DC CDG-RJ) no SP GRU-SJM e JPN no SP GRU-CGB, fora do SP BRE.
- * A tabela ainda lista "AC" no SP GRU-BRE; vale o comunicado (as cargas de AC vão pelo DF BSB).
+ * V4.21.1: a tabela atualizada confirma — SP GRU-BSB = DF, PA MRB, TO PMW, RO PVH e AC RBR (o AC saiu do SP GRU-BRE). A parada
+ * "AC RBR" (nome da tabela) entra junto com "DC RBR-AC".
  */
 const NEW_TBT_CODES_2026_10_30_ = DOCK_SUB_('GRU', ['402-08', '402-09', '402-10']);
 const NEW_TBT_STOPS_2026_10_30_ = ['F SJC-SP', 'F UBT-SP', 'F CRZ-SP'];
-const BSB_CODES_2026_11_01_ = ['TO', 'MRB', 'RO', 'AC'];
-const BSB_STOPS_2026_11_01_ = ['TO PMW', 'PA MRB', 'RO PVH', 'DC RBR-AC'];
+// AC = RBR (Rio Branco): o código RBR vale como AC.
+const BSB_CODES_2026_11_01_ = ['TO', 'MRB', 'RO', 'AC', 'RBR'];
+const BSB_STOPS_2026_11_01_ = ['TO PMW', 'PA MRB', 'RO PVH', 'DC RBR-AC', 'AC RBR'];
 /** Tabela com as unidades novas do DC TBT-SP (a partir de 30/10). */
 const withNewTbt_ = table => table.map(e => e.route !== 'DC TBT-SP' ? e :
   Object.assign({}, e, {codes: e.codes.concat(NEW_TBT_CODES_2026_10_30_.filter(c => e.codes.indexOf(c) < 0)),

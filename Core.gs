@@ -303,7 +303,8 @@ function JTCoreFactory_() {
    * V4.19 (comunicado): a partir de 01/11/2026 as cargas de TO, MRB, RO e AC vão pela rota DF BSB; a tabela de alocação da
    * mesma data tem CDG no SP GRU-SJM. Vale pelo dia da remessa (o histórico continua como era).
    */
-  var SEG_FIRST_FROM_2026_11_01_ = {TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB', AC: 'DF BSB', CDG: 'RJ SJM'};
+  // AC = RBR (Rio Branco): o código RBR vale como AC (V4.21.1).
+  var SEG_FIRST_FROM_2026_11_01_ = {TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB', AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM'};
   function segmentBase(v, date) {
     if (blank(v)) return '';
     var c = String(v).trim(), up = c.toUpperCase();
