@@ -1,8 +1,23 @@
-# J&T DASHMASTER V4.21.3 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.21.4 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.21.4 — Criação de Lotes com os cabeçalhos da tela do JMS
+
+O print do DevTools (tela "Estatística de Criação Recorrente de Eco Bag") mostrou os cabeçalhos que o JMS espera. O painel
+agora manda os mesmos:
+- **Routename:** `CirculationBagReport|crisbiIndex`;
+- **Routernamelist:** `智能设备>环保物料>统计报表>循环建包统计` (Dispositivo inteligente > Materiais ecológicos >
+  Relatório de estatística > Estatística de criação recorrente). O navegador manda codificado (`%E6%99%BA…`), e o painel
+  também.
+
+A variante aprendida na V4.21.3, se houver, é esquecida uma vez. Se o JMS recusar a lista, o painel testa sozinho a variante só
+com o Routename.
+
+**Atualizar:** feche a janela preta do painel de Lotes, extraia o `JT_DASHMASTER_V4_21_4_LOTES_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e clique em **Atualizar**. A porta (3400), a senha, o link e os dados continuam.
 
 ## V4.21.3 — Criação de Lotes: "HTTP 403: sem permissão no JMS"
 

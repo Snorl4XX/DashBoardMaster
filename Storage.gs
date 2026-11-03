@@ -1330,6 +1330,18 @@ function migrateToV420_() {
   if (n) logSync_('INFO', 'unseal', '', 'V4.20: ' + n + ' dia(s) do Deslacre na fila de novo (tempo pela Data inicial do descarregamento).');
   return n;
 }
+/**
+ * V4.21.4: os cabeçalhos de rota da Criação de Lotes foram capturados no DevTools e viram o padrão; a lista de variantes mudou de
+ * ordem. Uma vez, a variante aprendida antes (JMS_ROUTE_AUTO_LOTS) é esquecida e a pausa da rota (HTTP 403) sai: a próxima
+ * consulta já usa os cabeçalhos da tela.
+ */
+function migrateToV4214_() {
+  if (getProp_('MIGRATION_V4214', '')) return 0;
+  deleteProp_('JMS_ROUTE_AUTO_LOTS');
+  try { forgetPause_('LOTS'); } catch (e) { /* sem pausa */ }
+  setProp_('MIGRATION_V4214', new Date().toISOString());
+  return 1;
+}
 function retryFailedJobs() {
   let count = 0;
   allTabRows_('JOBS').forEach((r, i) => {

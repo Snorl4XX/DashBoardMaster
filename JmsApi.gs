@@ -91,13 +91,15 @@ const JMS_ROUTES_ = [
   {key: 'TRACKING', pattern: /\/podTracking\/inner\/query\/keywordList(?:\?|$)/, name: 'NONE', list: 'NONE',
     alt: [{name: 'trackingExpress', list: 'NONE'}, {name: 'waybillTracking', list: 'NONE'}, {name: 'packageTracking', list: 'NONE'}]},
   // Criação de Lotes (Dispositivo inteligente > Materiais ecológicos > Relatório de estatística > Estatística de Criação Recorrente
-  // de Eco Bag). V4.21.3: o JMS respondeu HTTP 403 sem o cabeçalho de rota. Routename = nome da página, como nas outras telas: o
-  // PDF "INFORMAÇÕES PARA PUXAR DADOS SOBRE SACAS" mostra /app/crisbiIndex/CirculationBagReport (moduleCode crisbiIndex). Se o
-  // JMS recusar, as variantes de `alt` são testadas sozinhas (a que funcionar fica em JMS_ROUTE_AUTO_LOTS); captura manual no
-  // DevTools: JMS_ROUTENAME_LOTS / JMS_ROUTENAMELIST_LOTS (sobrepõem tudo).
-  {key: 'LOTS', pattern: /\/bigdataReport\/detail\/sdploopbagBuildbag\w+(?:\?|$)/, name: 'CirculationBagReport', list: 'NONE',
-    alt: [{name: 'CirculationBagReport|crisbiIndex', list: 'NONE'}, {name: 'NONE', list: 'NONE'}, {name: 'sdploopbagBuildbag', list: 'NONE'},
-      {name: 'LoopBagBuildBag', list: 'NONE'}, {name: 'ecoBagStatistics', list: 'NONE'}]},
+  // de Eco Bag). V4.21.3: o JMS respondeu HTTP 403 sem o cabeçalho de rota. V4.21.4: capturado ao vivo no DevTools (print do
+  // usuário, tela /app/crisbiIndex/CirculationBagReport): Routename "CirculationBagReport|crisbiIndex" e Routernamelist
+  // "智能设备>环保物料>统计报表>循环建包统计" (o navegador manda codificado, como headerSafe_). Se o JMS recusar, as variantes
+  // de `alt` são testadas sozinhas (a que funcionar fica em JMS_ROUTE_AUTO_LOTS); JMS_ROUTENAME_LOTS / JMS_ROUTENAMELIST_LOTS
+  // sobrepõem tudo.
+  {key: 'LOTS', pattern: /\/bigdataReport\/detail\/sdploopbagBuildbag\w+(?:\?|$)/, name: 'CirculationBagReport|crisbiIndex',
+    list: '智能设备>环保物料>统计报表>循环建包统计',
+    alt: [{name: 'CirculationBagReport|crisbiIndex', list: 'NONE'}, {name: 'CirculationBagReport', list: '智能设备>环保物料>统计报表>循环建包统计'},
+      {name: 'CirculationBagReport', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
   // Sem Movimentação (Indicadores de Negócios > Monitoramento de movimentação em tempo real (novo),
   // /businessIndicatorIndex/TrackRealTimeMonitoringNew). Routename = nome da página (regra das outras telas); os cabeçalhos
   // não aparecem na captura: se o JMS recusar, as variantes de `alt` são testadas sozinhas.

@@ -2127,19 +2127,31 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     pD.current === 2 && cP.detailPageSize_(cP.getIndicatorConfig_('lot_flow')) === 100,
     'Lotes: payload da lista "Total de pacotes construídos" igual à captura, até 100 por página', pD);
   const hL = cP.jmsHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sdploopbagBuildbagDetail');
-  // V4.21.3: o JMS respondeu HTTP 403 sem o cabeçalho de rota — Routename = nome da página (/app/crisbiIndex/CirculationBagReport).
-  check(hL.AuthToken === 'FAKE' && hL.Routename === 'CirculationBagReport' && !hL.Routernamelist,
-    'Lotes: Routename = nome da página do JMS (CirculationBagReport)', hL);
-  // JMS que só aceita "CirculationBagReport|crisbiIndex" (HTTP 403 nas outras): o painel acha sozinho, guarda e segue.
-  const cL403 = freshCtx(lfDays(), {intercept: (route, h) => /sdploopbagBuildbag/.test(route) && h.Routename !== 'CirculationBagReport|crisbiIndex' ? [403, {}] : null});
+  // V4.21.4: cabeçalhos capturados no DevTools (tela /app/crisbiIndex/CirculationBagReport) — Routename e Routernamelist codificado.
+  const LOTS_LIST_ENC = '%E6%99%BA%E8%83%BD%E8%AE%BE%E5%A4%87%3E%E7%8E%AF%E4%BF%9D%E7%89%A9%E6%96%99%3E%E7%BB%9F%E8%AE%A1%E6%8A%A5%E8%A1%A8%3E' +
+    '%E5%BE%AA%E7%8E%AF%E5%BB%BA%E5%8C%85%E7%BB%9F%E8%AE%A1';
+  check(hL.AuthToken === 'FAKE' && hL.Routename === 'CirculationBagReport|crisbiIndex' && hL.Routernamelist === LOTS_LIST_ENC,
+    'Lotes: Routename e Routernamelist iguais aos da tela do JMS (captura do DevTools)', hL);
+  // JMS que exige os dois cabeçalhos como a tela (HTTP 403 sem eles): consulta de primeira, nada a aprender, nada pausado.
+  const want403 = h => h.Routename === 'CirculationBagReport|crisbiIndex' && h.Routernamelist === LOTS_LIST_ENC;
+  const cL403 = freshCtx(lfDays(), {intercept: (route, h) => /sdploopbagBuildbag/.test(route) && !want403(h) ? [403, {}] : null});
   cL403.queueHistory(D19, D19, true);
   runAll(cL403, 12);
   const fL403 = cL403.__state.fetches.filter(f => /sdploopbagBuildbag/.test(f.url));
-  check(cL403.getRateDay_('lot_flow', D19) && cL403.getDayStatus_('lot_flow', D19).details === 'COMPLETE' &&
-    cL403.__state.props.JMS_ROUTE_AUTO_LOTS === '1' && fL403.slice(-3).every(f => f.headers.Routename === 'CirculationBagReport|crisbiIndex') &&
-    !cL403.publicPauses_().some(p => p.route === 'LOTS'),
-    'Lotes: HTTP 403 com o Routename da página — a variante aceita é achada sozinha (JMS_ROUTE_AUTO_LOTS) e usada nas consultas seguintes',
-    {auto: cL403.__state.props.JMS_ROUTE_AUTO_LOTS, pausas: cL403.publicPauses_()});
+  check(cL403.getRateDay_('lot_flow', D19) && cL403.getDayStatus_('lot_flow', D19).details === 'COMPLETE' && fL403.every(f => want403(f.headers)) &&
+    !cL403.__state.props.JMS_ROUTE_AUTO_LOTS && !cL403.publicPauses_().some(p => p.route === 'LOTS'),
+    'Lotes: com os cabeçalhos da tela o JMS responde de primeira (antes: HTTP 403)', {auto: cL403.__state.props.JMS_ROUTE_AUTO_LOTS, n: fL403.length});
+  // JMS que recusa o Routernamelist (só o Routename): o painel acha sozinho a variante sem a lista e segue.
+  const cLn = freshCtx(lfDays(), {intercept: (route, h) => /sdploopbagBuildbag/.test(route) && h.Routernamelist ? [403, {}] : null});
+  cLn.queueHistory(D19, D19, true);
+  runAll(cLn, 12);
+  check(cLn.getDayStatus_('lot_flow', D19).details === 'COMPLETE' && cLn.__state.props.JMS_ROUTE_AUTO_LOTS === '1',
+    'Lotes: Routernamelist recusado — a variante só com o Routename é aprendida (JMS_ROUTE_AUTO_LOTS)', cLn.__state.props.JMS_ROUTE_AUTO_LOTS);
+  // V4.21.4: a variante aprendida na V4.21.3 é esquecida uma vez (a ordem das variantes mudou).
+  cLn.__state.props.JMS_ROUTE_AUTO_LOTS = '3';
+  delete cLn.__state.props.MIGRATION_V4214;
+  check(cLn.migrateToV4214_() === 1 && !cLn.__state.props.JMS_ROUTE_AUTO_LOTS && cLn.migrateToV4214_() === 0,
+    'Lotes: variante aprendida antes da V4.21.4 esquecida uma vez');
   check(!cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'lot_flow'}) && cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'send_flow'}),
     'Lotes: tarefa leve (fora do teto diário do Recebimento/Expedição)');
 
