@@ -293,7 +293,11 @@ function sorterRequests_(text, page) {
     if (!c || /statis|summary|logout|\.(js|css|png|jpg|svg|ico)(\?|$)/i.test(c)) return;
     p.caminho = c; p.metodo = String(p.metodo || 'GET').toUpperCase(); p.pagina = page || sorterPage_(); p.campos = p.campos || {};
     p.pontos = (/switch|device|choose|change|select|toggle|equip|machine|sorter|cross/i.test(c) ? 3 : 0) + (p.metodo === 'POST' ? 1 : 0);
-    if (!out.some(x => x.metodo === p.metodo && x.caminho === p.caminho && x.concat === p.concat)) out.push(p);
+    // O mesmo pedido no formulário e no script ($.ajax): junta os campos dos dois.
+    const same = out.filter(x => x.metodo === p.metodo && x.caminho === p.caminho && x.concat === p.concat)[0];
+    if (!same) { out.push(p); return; }
+    p.chaves.forEach(k => { if (same.chaves.indexOf(k) < 0) same.chaves.push(k); });
+    Object.keys(p.campos).forEach(k => { if (same.campos[k] === undefined && same.chaves.indexOf(k) < 0) same.campos[k] = p.campos[k]; });
   };
   let m;
   const forms = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
@@ -302,7 +306,8 @@ function sorterRequests_(text, page) {
     (m[2].match(/<(select|input)[^>]*>/gi) || []).forEach(tg => {
       const x = sorterAttrs_(tg);
       if (!x.name || x.name === '_token') return;
-      if (/^hidden$/i.test(x.type || '')) hidden[x.name] = x.value || '';
+      // Campo oculto vazio = o código põe nele o valor do botão (site real: selecteddb ← data-connectionname); com valor, vai junto.
+      if (/^hidden$/i.test(x.type || '') && x.value) hidden[x.name] = x.value;
       else if (names.indexOf(x.name) < 0) names.push(x.name);
     });
     if (names.length || Object.keys(hidden).length) add({metodo: a.method || 'GET', caminho: a.action || page || sorterPage_(), concat: false, chaves: names, campos: hidden});
@@ -310,8 +315,8 @@ function sorterRequests_(text, page) {
   const Q = n => '(["\'`])([^"\'`]+)\\' + n + '(\\s*\\+)?';
   const pads = [
     [new RegExp('\\$\\.(post|get)\\(\\s*' + Q(2) + '\\s*(?:[\\w.$\\[\\]()\'"]*\\s*)?,?\\s*(\\{[^}]*\\})?', 'gi'), x => ({metodo: x[1], caminho: x[3], concat: !!x[4], dados: x[5]})],
-    [/\$\.ajax\(\s*\{([\s\S]{0,700}?)\}\s*\)/gi, x => {
-      const u = x[1].match(/url\s*:\s*(["'`])([^"'`]+)\1(\s*\+)?/), t = x[1].match(/(?:type|method)\s*:\s*["'](\w+)/i), d = x[1].match(/data\s*:\s*(\{[^}]*\})/);
+    [/\$\.ajax\(\s*\{([\s\S]{0,4000}?)\}\s*\)/gi, x => {
+      const u = x[1].match(/url\s*:\s*(["'`])([^"'`]+)\1(\s*\+)?/), t = x[1].match(/\b(?:type|method)\s*:\s*["'](\w+)/i), d = x[1].match(/data\s*:\s*(\{[^}]*\})/);
       return u ? {metodo: t ? t[1] : 'GET', caminho: u[2], concat: !!u[3], dados: d ? d[1] : ''} : null;
     }],
     [new RegExp('axios\\.(post|get)\\(\\s*' + Q(2) + '\\s*,?\\s*(\\{[^}]*\\})?', 'gi'), x => ({metodo: x[1], caminho: x[3], concat: !!x[4], dados: x[5]})],
@@ -319,7 +324,12 @@ function sorterRequests_(text, page) {
       const t = x[4].match(/method\s*:\s*["'](\w+)/i), d = x[4].match(/body\s*:\s*[^{]*(\{[^}]*\})/);
       return {metodo: t ? t[1] : 'GET', caminho: x[2], concat: !!x[3], dados: d ? d[1] : ''};
     }],
-    [new RegExp('location(?:\\.href)?\\s*=\\s*' + Q(1), 'gi'), x => ({metodo: 'GET', caminho: x[2], concat: !!x[3], dados: ''})]
+    [new RegExp('location(?:\\.href)?\\s*=\\s*' + Q(1), 'gi'), x => ({metodo: 'GET', caminho: x[2], concat: !!x[3], dados: ''})],
+    // url: "…" com type/data por perto (chamadas que o padrão do $.ajax não pegou).
+    [new RegExp('\\burl\\s*:\\s*' + Q(1) + '([\\s\\S]{0,400})', 'gi'), x => {
+      const near = x[0], t = near.match(/\b(?:type|method)\s*:\s*["'](\w+)/i), d = near.match(/data\s*:\s*(\{[^}]*\})/);
+      return {metodo: t ? t[1] : 'POST', caminho: x[2], concat: !!x[3], dados: d ? d[1] : ''};
+    }]
   ];
   pads.forEach(pr => {
     let x;
@@ -681,6 +691,9 @@ function diagnosticarSorter() {
       catch (e) { if (dev.padrao || dev.trocaInvalida || x.descoberta || !learn()) throw e; s = sorterPrepare_(dev); }
       const t = sorterSum_(sorterFetchDay_(s, today, [{induction: 0}])[0]);
       x.hoje = {sortTotal: t.total, validTotal: t.valid, noSortCode: t.noInfo};
+      // Título da página nesta sessão: o site mostra o sorter escolhido (ex.: 巴西GRU分拣机(A套)监控系统).
+      try { x.pagina = sorterDecode_(((sorterOpenPage_(s, sorterPage_()).html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim()).slice(0, 60); }
+      catch (e) { /* só o título */ }
       x.cookies = Object.keys(s.cookies);
       x.token = s.csrf ? 'lido da página' : (dev.padrao ? 'não precisa' : 'não encontrado');
     } catch (e) { x.erro = String(e && e.message || e); }

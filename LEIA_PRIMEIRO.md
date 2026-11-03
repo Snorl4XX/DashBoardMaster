@@ -1,8 +1,28 @@
-# J&T DASHMASTER V4.22.2 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.3 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.3 — Produção do Sorter: o pedido exato da troca (selecteddb)
+
+O HTML da janela "device choose" (`/dbselectview?from=top`) mostrou o pedido que o site faz:
+- `<form method="post" action="http://10.1.166.9/dbselect">`, com um botão por sorter (`data-connectionname` DB1 = B, DB2 = A), o
+  campo oculto vazio `selecteddb` e o `_token`;
+- o clique copia o DB do botão para o `selecteddb` e manda `$.ajax` **POST /dbselect** com `{_token, selecteddb}`. Resposta
+  `code` 1 (ou -1) = trocou, e a página vai para `/home`.
+
+A descoberta agora lê isso direto do formulário e do script:
+- o campo oculto vazio recebe o valor do botão;
+- o mesmo pedido no formulário e no `$.ajax` vira um só;
+- ela lê `$.ajax` longos e não confunde `dataType` com o método.
+
+A troca do Sorter A fica `{"metodo": "POST", "caminho": "/dbselect", "corpo": "selecteddb=DB2", "pagina": "/dbselectview?from=top"}`.
+O `_token` é sempre o da sessão, lido da janela na hora. O teste em Configurações mostra o título da página de cada sorter
+("(B套)" / "(A套)").
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_3_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**.
 
 ## V4.22.2 — Produção do Sorter: a troca do Sorter A como o site faz de verdade
 

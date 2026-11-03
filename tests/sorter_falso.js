@@ -10,17 +10,23 @@
  *   'pedido' (padrão): $.post('/home/switchDevice', {device_id, _token}) no script da própria página;
  *   'js': o mesmo pedido num arquivo .js à parte (/js/home.js); 'cookie': o .js grava o cookie deviceId e recarrega (sem pedido);
  *   'global': o pedido troca o sorter do site inteiro (para todo mundo); 'nenhum': sem jeito de trocar;
- *   'xadmin' (como o site real, HTML enviado pelo usuário): "switch device" = xadmin.open('device choose',
- *   'http://…/dbselectview?from=top', 500, 350) — uma janela à parte com um botão por sorter:
- *   <input value="Cross-belt GRU-A" type="button" lay-filter="login" title="GRU-A交叉带" data-connectionname="DB2"> (B = DB1).
- *   O clique manda $.post('/dbselect', {connectionname}) com o X-CSRF-TOKEN; a página /home passa a ter "(A套)" no título.
- *   'xadmin-login': o clique vai para location.href = '/login?connectionname=' + valor (GET); 'xadmin-oculto': o código do clique
- *   não está em nenhum arquivo que o painel lê (o pedido é POST /dbselect).
+ *   'xadmin' (o site real, HTML enviado pelo usuário): "switch device" = xadmin.open('device choose',
+ *   'http://…/dbselectview?from=top', 500, 350) — a janela tem o <form method="post" action="…/dbselect"> com um botão por sorter
+ *   (<input type="button" lay-filter="login" data-connectionname="DB2"> = A, DB1 = B), o campo oculto vazio "selecteddb" e o
+ *   _token; o clique põe o DB no "selecteddb" e manda $.ajax POST /dbselect {_token, selecteddb}; resposta {code: 1}. A página
+ *   /home passa a ter "(A套)" no título. 'xadmin-oculto': o mesmo, mas sem o script (só o formulário).
  */
-const SCRIPT_DBSELECT = "layui.use(['form'], function () { $.ajaxSetup({headers: {'X-CSRF-TOKEN': $('meta[name=csrf-token]').attr('content')}}); " +
-  "$(\"input[lay-filter='login']\").on('click', function () { $.post('/dbselect', {connectionname: $(this).data('connectionname'), from: 'top'}, " +
-  "function (res) { if (res.code == 1) { parent.location.reload(); } }); }); });";
-const SCRIPT_LOGIN = "$(\"input[lay-filter='login']\").on('click', function () { parent.location.href = '/login?connectionname=' + $(this).data('connectionname'); });";
+const SCRIPT_DBSELECT = function (host, token) {
+  return "$(function () { $('input:button').on('click', function () { $('#hid_selected').val($(this).data('connectionname')); " +
+    "$('#btn_submit').trigger('click'); }); layui.use('form', function () { var form = layui.form; form.on('submit(selectdb)', function (data) { " +
+    "if ('false' == $('#btn_submit').attr('useable')) { return false; } $('#btn_submit').attr('useable', false); $.ajax({ type: 'POST', " +
+    "url: \"http://" + host + "/dbselect\", data: {'_token': \"" + token + "\", 'selecteddb': $('#hid_selected').val()}, dataType: \"json\", " +
+    "success: function (data) { if (data.code == 1 || data.code == -1) { goto(\"http://" + host + "/home??noremember\"); } " +
+    "$('#btn_submit').attr('useable', true); }, error: function (request, data, error) { if (request.status == 500) { layer.msg('Server Error[login_err]'); } " +
+    "else if (request.status == 419) { layer.msg('Page Expired[csrf_err]'); } else if (request.status == 422) { for (var i in request.responseJSON.errors) { " +
+    "layer.msg(request.responseJSON.errors[i][0]); break; } } else { layer.msg(request.responseText); } $('#btn_submit').attr('useable', true); }, }) " +
+    "return false; }); }); function goto(url) { if (self != top) { parent.location.href = url; } else { location.href = url; } } })";
+};
 const SCRIPT_PEDIDO = "$('.dev').on('click', function () { $.post('/home/switchDevice', {device_id: $(this).data('id'), " +
   "_token: $('meta[name=csrf-token]').attr('content')}, function () { location.reload(); }); });";
 const SCRIPT_COOKIE = "$('.dev').on('click', function () { document.cookie = 'deviceId=' + $(this).data('id') + '; path=/'; location.reload(); });";
@@ -95,27 +101,25 @@ function createFakeSorter(opts) {
     }
     if (req.method === 'GET' && req.path === '/js/xadmin.js') return {code: 200, headers: {'content-type': 'application/javascript'}, body: 'var xadmin = {open: function () {}};'};
     if (req.method === 'GET' && req.path === '/dbselectview' && xa) {
+      const host = req.headers.host || 'sorter.falso';
       return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
-        body: '<html><head><meta name="csrf-token" content="' + sess.token + '"><script src="/lib/layui/layui.js"></script></head><body>' +
-          '<form class="layui-form"><input value="Cross-belt GRU-A" type="button" lay-filter="login" style="width:100%;" title="GRU-A交叉带" data-connectionname="DB2">' +
-          '<input value="Cross-belt GRU-B" type="button" lay-filter="login" style="width:100%;" title="GRU-B交叉带" data-connectionname="DB1"></form>' +
-          (modo === 'xadmin' ? '<script>' + SCRIPT_DBSELECT + '</script>' : modo === 'xadmin-login' ? '<script>' + SCRIPT_LOGIN + '</script>' : '<script src="/lib/layui/lay/dbselect.js"></script>') +
-          '</body></html>'};
+        body: '<html class="x-admin-sm"><head><meta charset="UTF-8"><title>device choose</title>' +
+          '<script type="text/javascript" src="http://' + host + '/js/jquery.min.js"></script><script src="http://' + host + '/lib/layui/layui2.6.js"></script>' +
+          '<script type="text/javascript" src="http://' + host + '/js/xadmin.js"></script></head><body><div class="login layui-anim layui-anim-up">' +
+          '<form method="post" class="layui-form" action="http://' + host + '/dbselect">' +
+          '<input value="Cross-belt GRU-B" type="button" lay-filter="login" style="width:100%;" title="GRU-B交叉带" data-connectionname="DB1"><hr class="hr15">' +
+          '<input value="Cross-belt GRU-A" type="button" lay-filter="login" style="width:100%;" title="GRU-A交叉带" data-connectionname="DB2"><hr class="hr15">' +
+          '<input type="hidden" value="" name="selecteddb" id="hid_selected"><input type="hidden" value="' + sess.token + '" name="_token">' +
+          '<input lay-submit="" lay-filter="selectdb" type="submit" style="display: none" id="btn_submit"></form></div>' +
+          (modo === 'xadmin' ? '<script>' + SCRIPT_DBSELECT(host, sess.token) + '</script>' : '') + '</body></html>'};
     }
-    const conn = v => (v === 'DB2' ? 'A' : v === 'DB1' ? 'B' : null);
-    if (req.method === 'POST' && req.path === '/dbselect' && (modo === 'xadmin' || modo === 'xadmin-oculto')) {
+    if (req.method === 'POST' && req.path === '/dbselect' && xa) {
       const form = new URLSearchParams(String(req.body || ''));
-      const tok = form.get('_token') || req.headers['x-csrf-token'];
-      if (tok !== sess.token) return {code: 419, headers: {'set-cookie': set}, body: 'Page Expired'};
-      const dev = conn(form.get('connectionname'));
-      if (!dev) return {code: 200, headers: {'content-type': 'application/json'}, body: JSON.stringify({code: 0, msg: 'conexão inválida'})};
-      sess.device = dev;
+      if (form.get('_token') !== sess.token) return {code: 419, headers: {'set-cookie': set}, body: 'Page Expired'};
+      const db = form.get('selecteddb');
+      if (db !== 'DB1' && db !== 'DB2') return {code: 422, headers: {'content-type': 'application/json'}, body: JSON.stringify({errors: {selecteddb: ['invalid']}})};
+      sess.device = db === 'DB2' ? 'A' : 'B';
       return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed'})};
-    }
-    if (req.method === 'GET' && req.path === '/login' && modo === 'xadmin-login') {
-      const dev = conn(req.query.get('connectionname'));
-      if (dev) sess.device = dev;
-      return {code: 302, headers: {location: '/home', 'set-cookie': set}, body: ''};
     }
     if (req.method === 'GET' && req.path === '/home') {
       return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
