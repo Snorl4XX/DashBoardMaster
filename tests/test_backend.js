@@ -3189,6 +3189,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const batLink = fsM.readFileSync(pathM.join(rootL, 'node', 'link-publico.bat'), 'utf8');
   check(/funnel --bg --https=%PORTALINK% --set-path=%CAMINHO% http:\/\/127\.0\.0\.1:%PORTA%%CAMINHO%/.test(batLink) && /\r\n/.test(batLink) &&
     /--set-path=%CAMINHO% off/.test(batLink) && /^[\x00-\x7f]*$/.test(batLink), 'link-publico.bat liga o link no caminho (/lotes) do mesmo endereço');
+  // V4.22.4: com dois cliques, ele se abre numa janela "cmd /k" (não some se o Windows parar o arquivo no meio).
+  check(/^@echo off\r\n(?:rem [^\r\n]*\r\n)*if \/i not "%~1"=="--na-janela" \(\r\n  start "[^"]+" cmd \/k call "%~f0" --na-janela\r\n  exit \/b\r\n\)/.test(batLink) &&
+    !/pause/i.test(batLink.split(':fim')[1]), 'link-publico.bat abre numa janela que fica aberta (cmd /k)');
   // V4.21.2: a porta do painel de Lotes não pode ser a de outro app no mesmo computador (a 3100 era a do Sorter).
   const portOf = f => Number((fsM.readFileSync(pathM.join(__dirname, '..', f), 'utf8').match(/^\s*porta:\s*(\d+)/m) || [])[1]);
   const others = {DashMaster: 3000, Sorter: portOf('sorter/server.js'), Pesquisa: portOf('pesquisa/server.js'), 'Expedição Incorreta': portOf('expedicao_incorreta/server.js')};

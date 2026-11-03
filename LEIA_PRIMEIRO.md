@@ -1,8 +1,26 @@
-# J&T DASHMASTER V4.22.3 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.4 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.4 — link-publico.bat não some mais
+
+Com dois cliques, o `link-publico.bat` fechava antes de dar para ler a mensagem. Agora ele se abre de novo numa janela
+`cmd /k`, que fica aberta mesmo se o Windows parar o arquivo no meio. No fim, a janela continua aberta: feche no X depois de ler.
+
+**Vários painéis no mesmo computador e no mesmo link do Tailscale:**
+- Cada painel tem a **sua porta** no computador: principal 3000, Lotes 3400, Sorter 3500.
+- No link, cada um fica num **caminho** do mesmo endereço, todos na porta 443:
+  - principal: `https://NOME.ts.net`;
+  - Lotes: `https://NOME.ts.net/lotes`;
+  - Sorter: `https://NOME.ts.net/sorter`.
+- Dois painéis **na mesma porta do link e sem caminho** (ex.: os dois em `:10000`) dão errado: o último `link-publico.bat` que
+  rodar fica com o link, e o outro some.
+- Para ver o que está ligado: `"C:\Program Files\Tailscale\tailscale.exe" funnel status`. Para desligar um link antigo na
+  10000: `"C:\Program Files\Tailscale\tailscale.exe" funnel --https=10000 off`.
+
+**Atualizar:** troque o `link-publico.bat` da pasta `node` de cada painel pelo novo (é o mesmo arquivo nos três).
 
 ## V4.22.3 — Produção do Sorter: o pedido exato da troca (selecteddb)
 

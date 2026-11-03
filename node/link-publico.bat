@@ -2,6 +2,12 @@
 rem JT DashMaster - link publico do painel pelo Tailscale Funnel (gratis, endereco https fixo).
 rem V4.17.1: a janela NUNCA fecha sozinha. Cada problema mostra o que fazer e espera uma tecla (antes, um erro do Tailscale
 rem podia fechar a janela antes de dar para ler). Sem "chcp 65001": no Windows 7/8 ele fazia o .bat parar no meio.
+rem V4.22.4: com dois cliques, o arquivo se abre de novo numa janela "cmd /k", que fica aberta mesmo se o Windows parar o
+rem arquivo no meio (antes a janela sumia e nao dava para ler o erro).
+if /i not "%~1"=="--na-janela" (
+  start "Link publico do DashMaster" cmd /k call "%~f0" --na-janela
+  exit /b
+)
 cd /d "%~dp0"
 title Link publico do DashMaster (Tailscale Funnel)
 echo.
@@ -105,5 +111,5 @@ goto fim
 
 :fim
 echo.
-echo   Pressione qualquer tecla para fechar.
-pause >nul
+echo   Pode fechar esta janela (X) depois de ler.
+exit /b 0
