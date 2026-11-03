@@ -3056,9 +3056,13 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const keysOf = c => vmM.runInContext('Object.keys(INDICATORS)', c);
   const ctxOf = (id, props) => createContext({root: res.filter(r => r.id === id)[0].dir, props: Object.assign({}, baseProps, props || {}), jms: fakeJms({}), quiet: true});
   const full = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
-  const pP = ctxOf('principal'), pF = ctxOf('fluxos');
-  check(keysOf(pP).length === full.length - 2 && keysOf(pP).every(k => k !== 'arrival_flow' && k !== 'send_flow') && pP.getAppBootstrap().app.panel === '',
-    'pacote principal: tudo menos os fluxos, sem precisar de propriedade', keysOf(pP));
+  const pP = ctxOf('principal'), pF = ctxOf('fluxos'), pL = ctxOf('lotes');
+  // V4.21 (pedido): a Criação de Lotes sai do principal e tem pacote próprio.
+  check(keysOf(pP).length === full.length - 3 && keysOf(pP).every(k => k !== 'arrival_flow' && k !== 'send_flow' && k !== 'lot_flow') && pP.getAppBootstrap().app.panel === '',
+    'pacote principal: tudo menos os fluxos e a Criação de Lotes, sem precisar de propriedade', keysOf(pP));
+  check(keysOf(pL).join() === 'lot_flow' && pL.getAppBootstrap().app.panel === 'Criação de Lotes' &&
+    /painel de Lotes\/Sacas/.test(fsM.readFileSync(pathM.join(res.filter(r => r.id === 'lotes')[0].dir, 'LEIA_ESTE_PAINEL.md'), 'utf8')),
+    'pacote de Lotes (Apps Script): só a Criação de Lotes, com o nome embaixo do logo', keysOf(pL));
   check(keysOf(pF).sort().join() === 'arrival_flow,send_flow' && pF.getAppBootstrap().app.panel === 'Fluxo operacional',
     'pacote dos fluxos: só Recebimento e Expedição, com o nome "Fluxo operacional"', keysOf(pF));
   check(keysOf(ctxOf('fluxos', {PAINEIS: 'arrival_flow'})).join() === 'arrival_flow' && ctxOf('fluxos', {NOME_PAINEL: 'Fluxos GRU'}).getAppBootstrap().app.panel === 'Fluxos GRU',
@@ -3094,14 +3098,39 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const keysOf = c => vmM.runInContext('Object.keys(INDICATORS)', c);
   const ctxNode = props => createContext({root, props: Object.assign({}, baseProps, props || {}), jms: fakeJms({}), quiet: true});
   const full = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
-  check(keysOf(ctxNode()).length === full.length - 2 && keysOf(ctxNode()).every(k => k !== 'arrival_flow' && k !== 'send_flow'),
-    'pacote Node.js: sem Recebimento e Expedição, sem precisar de propriedade', keysOf(ctxNode()));
-  check(keysOf(ctxNode({PAINEIS_FORA: 'nenhum'})).length === full.length, 'pacote Node.js: PAINEIS_FORA = nenhum traz os dois de volta');
+  check(keysOf(ctxNode()).length === full.length - 3 && keysOf(ctxNode()).every(k => k !== 'arrival_flow' && k !== 'send_flow' && k !== 'lot_flow'),
+    'pacote Node.js: sem Recebimento, Expedição e Criação de Lotes (V4.21), sem precisar de propriedade', keysOf(ctxNode()));
+  check(keysOf(ctxNode({PAINEIS_FORA: 'nenhum'})).length === full.length, 'pacote Node.js: PAINEIS_FORA = nenhum traz todos de volta');
   const noLine = t => t.replace(/^const PACOTE_PAINEIS_ = .*$/m, '');
   const cfgRepo = fsM.readFileSync(pathM.join(__dirname, '..', 'Config.gs'), 'utf8'), cfgNode = fsM.readFileSync(pathM.join(root, 'Config.gs'), 'utf8');
-  check(noLine(cfgNode) === noLine(cfgRepo) && /^const PACOTE_PAINEIS_ = \{so: '', fora: 'arrival_flow,send_flow', nome: ''\};$/m.test(cfgNode),
+  check(noLine(cfgNode) === noLine(cfgRepo) && /^const PACOTE_PAINEIS_ = \{so: '', fora: 'arrival_flow,send_flow,lot_flow', nome: ''\};$/m.test(cfgNode),
     'pacote Node.js: só a linha do pacote muda no Config.gs');
-  check(fsM.existsSync(pathM.join(root, 'node', 'server.js')) && !fsM.existsSync(pathM.join(root, 'node', 'test')), 'pacote Node.js com o servidor e sem os testes');
+  check(fsM.existsSync(pathM.join(root, 'node', 'server.js')) && !fsM.existsSync(pathM.join(root, 'node', 'test')) && !fsM.existsSync(pathM.join(root, 'node', 'padrao.json')),
+    'pacote Node.js com o servidor, sem os testes e sem padrao.json (porta 3000, link na 443)');
+  // V4.21: painel de Lotes separado (Node.js) — outra pasta, porta 3100, link do Tailscale na 10000, atalho próprio.
+  const {LOTS_NODE} = require('../tools/gerar_paineis');
+  const zipL = fsM.readFileSync(buildNode(out, {variant: LOTS_NODE}).zip), dirL = pathM.join(out, 'extraido-lotes');
+  for (let i = 0; zipL.readUInt32LE(i) === 0x04034b50;) {
+    const size = zipL.readUInt32LE(i + 18), nameLen = zipL.readUInt16LE(i + 26), start = i + 30 + nameLen + zipL.readUInt16LE(i + 28);
+    const file = pathM.join(dirL, zipL.slice(i + 30, i + 30 + nameLen).toString('utf8'));
+    fsM.mkdirSync(pathM.dirname(file), {recursive: true});
+    fsM.writeFileSync(file, zlibM.inflateRawSync(zipL.slice(start, start + size)));
+    i = start + size;
+  }
+  const rootL = pathM.join(dirL, 'dashmaster-lotes');
+  const ctxL = createContext({root: rootL, props: Object.assign({}, baseProps), jms: fakeJms({}), quiet: true});
+  const cfgModL = require(pathM.join(rootL, 'node', 'lib', 'config.js'));
+  const cfgFileL = pathM.join(out, 'config-lotes.json');
+  const prevEnv = process.env.DASHMASTER_CONFIG;
+  process.env.DASHMASTER_CONFIG = cfgFileL;
+  const confL = cfgModL.loadConfig();
+  if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
+  const created = JSON.parse(fsM.readFileSync(cfgFileL, 'utf8'));
+  const batW = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar-com-windows.bat'), 'utf8'), batI = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar.bat'), 'utf8');
+  check(keysOf(ctxL).join() === 'lot_flow' && ctxL.getAppBootstrap().app.panel === 'Criação de Lotes' && confL.porta === 3100 && confL.portaLink === 10000 &&
+    created.porta === 3100 && created.portaLink === 10000 && /JT DashMaster Lotes\.lnk/.test(batW) && !/JT DashMaster\.lnk/.test(batW) && /DashMaster Lotes/.test(batI) &&
+    fsM.existsSync(pathM.join(rootL, 'LEIA_LOTES.md')) && fsM.existsSync(pathM.join(rootL, 'node', 'link-publico.bat')),
+    'pacote Node.js de Lotes: só a Criação de Lotes, porta 3100, link na 10000 e atalho próprio', {keys: keysOf(ctxL), porta: confL.porta, link: confL.portaLink});
   fsM.rmSync(out, {recursive: true, force: true});
 }
 

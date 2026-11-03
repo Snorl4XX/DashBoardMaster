@@ -1,8 +1,54 @@
-# J&T DASHMASTER V4.20 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.21 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.21 — Painel de Lotes/Sacas separado do principal, com link próprio no Tailscale
+
+**Pedido:** "Separar o DASHBOARD DE LOTE/SACA do Dash principal. Quero fazer separadamente e crie um link com tails."
+
+- O **painel principal** não tem mais a Criação de Lotes (menu, Resultados e fila).
+- A Criação de Lotes ganhou **pacotes próprios**:
+
+| Pacote | Para quê |
+|---|---|
+| `JT_DASHMASTER_V4_21_LOTES_NODE.zip` | **Node.js**, no mesmo computador do principal: pasta `C:\dashmaster-lotes`, porta **3100**, link do Tailscale na porta **10000** |
+| `JT_DASHMASTER_V4_21_LOTES.zip` | Apps Script, num projeto novo (de preferência noutra conta Google) |
+
+**Três painéis no mesmo computador, cada um com o seu link:**
+
+| | Pasta | Neste computador | Link do Tailscale |
+|---|---|---|---|
+| Painel principal | `C:\dashmaster` | http://localhost:3000 | `https://NOME.xxxx.ts.net` (porta 443) |
+| Expedição Incorreta | `C:\expedicao_incorreta` | http://localhost:3300 | `https://NOME.xxxx.ts.net:8443` |
+| **Lotes/Sacas** | `C:\dashmaster-lotes` | **http://localhost:3100** | **`https://NOME.xxxx.ts.net:10000`** |
+
+O Tailscale Funnel só aceita as portas 443, 8443 e 10000: as três estão em uso.
+
+**Instalar o painel de Lotes (Node.js):**
+1. Extraia o `JT_DASHMASTER_V4_21_LOTES_NODE.zip` em `C:\`. Fica a pasta `C:\dashmaster-lotes` (não extraia por cima do
+   `C:\dashmaster`).
+2. Em `C:\dashmaster-lotes\node`, dois cliques em **iniciar.bat**. A janela preta fica aberta.
+3. Abra **http://localhost:3100/config**:
+   - cole o AuthToken do JMS;
+   - escolha a Data inicial;
+   - clique em **Baixar histórico**.
+4. Dois cliques em **iniciar-com-windows.bat**. Ele cria o atalho "JT DashMaster Lotes" e não mexe no do principal.
+5. Dois cliques em **link-publico.bat**. Ele liga o link `https://NOME.xxxx.ts.net:10000` e não mexe nos outros links.
+6. Coloque esse link em `"linkPublico"` no `C:\dashmaster-lotes\node\config.json` e escolha uma `"senha"`. Depois
+   reinicie a janela preta.
+
+**Atualizar o painel principal:**
+- **Node.js:** extraia o `JT_DASHMASTER_V4_21_NODE.zip` em `C:\` (Substituir).
+- **Apps Script:** troque os arquivos pelos do `JT_DASHMASTER_V4_21_PRINCIPAL.zip` e faça uma Nova versão.
+- **Se você colocou `PAINEIS_FORA`** nas propriedades, ela vale mais que o pacote. Troque por
+  `arrival_flow,send_flow,lot_flow`. No Node.js, na pasta `C:\dashmaster\node`:
+  `node dashmaster.js propriedade PAINEIS_FORA arrival_flow,send_flow,lot_flow`.
+- Os dados de Lotes já baixados no principal continuam lá (nada é apagado), mas não aparecem mais.
+
+**Novo no Node.js:** `node/padrao.json` (vem no ZIP de Lotes) define a porta do painel e a do link; o `config.json` de quem
+instalou vale mais. O `link-publico.bat` lê a porta do link (`portaLink`: 443, 8443 ou 10000).
 
 ## V4.20 — Sacas ecológicas por destino (Criação de Lotes) e Deslacre pela Data inicial
 

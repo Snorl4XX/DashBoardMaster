@@ -16,10 +16,15 @@ if not defined TS for /f "delims=" %%p in ('where tailscale 2^>nul') do if not d
 if not defined TS goto semTailscale
 echo   [1/4] Tailscale encontrado: %TS%
 
-rem ---------- 2. Porta do painel (config.json) ----------
+rem ---------- 2. Porta do painel e do link (padrao.json do pacote; config.json vale mais) ----------
+rem V4.21: o painel de Lotes separado usa a porta 3100 e o link na porta 10000 (padrao.json), no mesmo computador do principal.
 set PORTA=3000
+set PORTALINK=443
+if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"porta\"" padrao.json') do set PORTA=%%a
+if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"portaLink\"" padrao.json') do set PORTALINK=%%a
 if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"porta\"" config.json') do set PORTA=%%a
-echo   [2/4] Porta do painel: %PORTA%
+if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"portaLink\"" config.json') do set PORTALINK=%%a
+echo   [2/4] Porta do painel: %PORTA% - porta do link: %PORTALINK%
 netstat -an | findstr /r /c:":%PORTA% .*LISTENING" >nul
 if errorlevel 1 (
   echo         AVISO: o painel nao esta aberto agora. Abra o atalho DashMaster depois - o link so mostra o painel com ele aberto.
@@ -42,15 +47,20 @@ rem ---------- 4. Funnel ----------
 echo   [4/4] Publicando o painel na internet (Funnel)...
 echo         Na primeira vez aparece um link para AUTORIZAR o Funnel: abra, clique em Enable e espere aqui.
 echo.
+if "%PORTALINK%"=="443" goto funnel443
+"%TS%" funnel --bg --https=%PORTALINK% %PORTA%
+goto funnelFeito
+:funnel443
 "%TS%" funnel --bg %PORTA%
+:funnelFeito
 if errorlevel 1 goto funnelErro
 echo.
 "%TS%" funnel status
 echo.
-echo   PRONTO. O endereco https://....ts.net acima e o LINK PUBLICO do painel.
+echo   PRONTO. O endereco https://....ts.net acima e o LINK PUBLICO do painel (com :%PORTALINK% no fim, se nao for 443).
 echo   Ele nao muda e continua valendo depois de reiniciar o computador (nao precisa deixar esta janela aberta).
 echo   Coloque-o em "linkPublico" no config.json e defina uma "senha" para o painel.
-echo   Para tirar do ar: "%TS%" funnel reset
+echo   Para tirar do ar so este link: "%TS%" funnel --https=%PORTALINK% off
 goto fim
 
 :semTailscale

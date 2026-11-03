@@ -11,6 +11,10 @@
  * (sem cota do Google), com a pasta node (instalador da Oracle Cloud, link público e o passo a passo). V4.15.2 (pedido): os
  * mesmos painéis do pacote principal, sem Recebimento e Expedição (fluxo operacional).
  *
+ * V4.21 (pedido "Separar o DASHBOARD DE LOTE/SACA do Dash principal"): a Criação de Lotes sai do painel principal e ganha
+ * pacotes próprios — JT_DASHMASTER_<versão>_LOTES.zip (Apps Script, outro projeto) e JT_DASHMASTER_<versão>_LOTES_NODE.zip
+ * (pasta "dashmaster-lotes/": porta 3100 e link do Tailscale na porta 10000, no mesmo computador do painel principal).
+ *
  * Netlify: também a página do painel para um site do Netlify (JT_DASHMASTER_<versão>_NETLIFY.zip, pasta "dashmaster-netlify/"):
  * a mesma tela, já montada, pedindo os dados ao Apps Script (Api.gs) pelo link /exec — nada instalado no computador.
  *
@@ -22,16 +26,50 @@ const {zip} = require('../node/lib/report');
 
 const ROOT = path.join(__dirname, '..');
 const FLOWS = 'arrival_flow,send_flow';
+// V4.21: o painel de Lotes/Sacas (Criação de Lotes) fica separado do principal.
+const LOTS = 'lot_flow';
+const MAIN_OUT = FLOWS + ',' + LOTS;
+const LOTS_PACOTE = {so: LOTS, fora: '', nome: 'Criação de Lotes'};
+// Pacote Node.js do painel de Lotes: outra pasta, outra porta e o link do Tailscale na porta 10000 (o principal usa a 443 e a
+// Expedição Incorreta a 8443 — o Funnel só aceita 443, 8443 e 10000).
+const LOTS_NODE = {folder: 'dashmaster-lotes', zip: 'LOTES_NODE', pacote: LOTS_PACOTE, padrao: {porta: 3100, portaLink: 10000},
+  // Atalho e janela com nome próprio (o atalho "JT DashMaster" do principal não é trocado).
+  replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster Lotes.lnk'], ['"JT DashMaster"', '"JT DashMaster Lotes"'],
+    ['o DashMaster vai abrir', 'o painel de Lotes vai abrir']],
+    'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster Lotes (Node.js) - porta 3100']]},
+  readme: v => `# Painel de Lotes/Sacas (Node.js) — J&T DashMaster ${v}
+
+Painel **separado** do principal, só com a **Criação de Lotes** (sacas ecológicas e não ecológicas). Roda no mesmo computador
+do painel principal, sem misturar: pasta, dados, porta e link próprios.
+
+| | Painel principal | Painel de Lotes |
+|---|---|---|
+| Pasta | C:\\dashmaster | **C:\\dashmaster-lotes** |
+| Neste computador | http://localhost:3000 | **http://localhost:3100** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net:10000** |
+
+## Instalar (uma vez)
+1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-lotes). Não extraia por cima do C:\\dashmaster.
+2. Abra C:\\dashmaster-lotes\\node e dê dois cliques em **iniciar.bat**. Deixe a janela preta aberta.
+3. Neste computador, abra **http://localhost:3100/config**: cole o AuthToken do JMS, escolha a Data inicial e clique em
+   **Baixar histórico**.
+4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Lotes").
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. Ele liga o link na porta **10000**:
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000 — não mexe no link do painel principal (porta 443) nem no da Expedição
+   Incorreta (8443). Coloque esse link em \`"linkPublico"\` no config.json e escolha uma \`"senha"\`.
+
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=10000 off\`
+`};
 const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
-// V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição).
-const NODE_PACOTE = {so: '', fora: FLOWS, nome: ''};
+// V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.
+const NODE_PACOTE = {so: '', fora: MAIN_OUT, nome: ''};
 
 const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
 const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
 
 const PACKAGES = [
   {
-    id: 'principal', zip: 'PRINCIPAL', pacote: {so: '', fora: FLOWS, nome: ''},
+    id: 'principal', zip: 'PRINCIPAL', pacote: {so: '', fora: MAIN_OUT, nome: ''},
     readme: v => `# Painel principal — J&T DashMaster ${v}
 
 Este pacote é o **painel principal**. Ele mostra:
@@ -39,11 +77,10 @@ Este pacote é o **painel principal**. Ele mostra:
 - Falta de Bipagem no Recebimento e na Expedição;
 - Expedição SC → SC e SC → DC;
 - Avaria e Sem Movimentação;
-- Criação de Lotes (sacas ecológicas e não ecológicas) — V4.18;
 - Deslacre (linha secundária) e Deslacre (linha troncal) — V4.17;
 - Resultados.
 
-Painéis que tinham sido retirados e voltaram: Criação de Lotes (antes "Fluxo de Lotes", retirado na V4.7, de volta na V4.18) e Deslacre (retirado na V4.12.3, de volta na V4.17, junto com o da linha troncal). Não precisa de \`REATIVAR_PAINEIS\`.
+**V4.21: a Criação de Lotes (sacas) saiu daqui.** Ela tem pacotes próprios: \`JT_DASHMASTER_..._LOTES.zip\` (Apps Script) e \`JT_DASHMASTER_..._LOTES_NODE.zip\` (Node.js, link próprio no Tailscale). Se você tinha colocado \`PAINEIS_FORA\` nas Propriedades do script, troque para \`arrival_flow,send_flow,lot_flow\` (ou apague a propriedade).
 
 Desde a V4.8, Envio Errado, Triagem Errada e Falta de Bipagem na Expedição usam as docas e rotas de carregamento da tabela de 11/10 (tabelas em \`DOCKS_EXPEDICAO\` no Config.gs).
 
@@ -97,6 +134,30 @@ ${fileList()}
 `
   }
 ];
+
+// V4.21: painel de Lotes/Sacas separado (Apps Script), como o painel dos fluxos.
+PACKAGES.push({
+  id: 'lotes', zip: 'LOTES', pacote: LOTS_PACOTE,
+  readme: v => `# Painel de Lotes/Sacas — J&T DashMaster ${v}
+
+Este pacote é o **painel de Lotes/Sacas** separado do principal (pedido V4.21). Ele mostra só a **Criação de Lotes** (sacas
+ecológicas e não ecológicas, destinos das sacas vermelhas com chip), com os Resultados dela. O nome embaixo do logo é
+"Criação de Lotes".
+
+## Como instalar (uma vez)
+1. Abra https://script.google.com → **Novo projeto** (de preferência noutra conta Google: a cota diária é por conta). Nome: "JT Lotes".
+2. Crie cada arquivo \`.gs\` (**+ → Script**) e cada \`.html\` (**+ → HTML**) com o mesmo nome deste pacote, sem a extensão, e cole o conteúdo.
+3. Em **Configurações do projeto**, marque "Mostrar arquivo de manifesto appsscript.json" e cole o \`appsscript.json\` deste pacote.
+4. Em **Propriedades do script**, adicione as propriedades **JMS_** do painel principal (ex.: \`JMS_AUTHTOKEN\` e \`JMS_AUTH_MODE\`) e **DATA_START_DATE** (AAAA-MM-DD).
+5. Rode **setupProject** (▶ Executar, autorize) e depois **startFullHistory**.
+6. **Implantar → Nova implantação → App da Web**. O link que aparece é o link do painel de Lotes.
+
+**Quando o AuthToken do JMS vencer:** troque \`JMS_AUTHTOKEN\` aqui **e** no painel principal.
+
+## Arquivos
+${fileList()}
+`
+});
 
 function fileList() {
   return GS_ORDER.map(f => '- `' + f + '.gs`').concat(HTML.map(f => '- `' + f + '.html`'), ['- `appsscript.json`']).join('\n');
@@ -153,13 +214,22 @@ function build(outDir, opts) {
 function buildNode(outDir, opts) {
   opts = opts || {};
   const root = opts.root || ROOT;
+  // V4.21: opts.variant = LOTS_NODE (painel de Lotes separado: outra pasta, porta, atalho e link).
+  const vr = opts.variant || null, folder = vr ? vr.folder : 'dashmaster';
   const config = fs.readFileSync(path.join(root, 'Config.gs'), 'utf8');
   const parts = versionOf(config).split('.');
   const tag = 'V' + (parts[2] && parts[2] !== '0' ? parts.slice(0, 3) : parts.slice(0, 2)).join('_');
   if (!PACOTE_RE.test(config)) throw new Error('Config.gs sem a linha PACOTE_PAINEIS_ (o gerador não sabe separar os painéis).');
   const files = [];
-  const add = (rel, data) => files.push({name: 'dashmaster/' + rel.split(path.sep).join('/'), data: data || fs.readFileSync(path.join(root, rel))});
-  GS_ORDER.forEach(f => add(f + '.gs', f === 'Config' ? Buffer.from(config.replace(PACOTE_RE, pacoteLine(NODE_PACOTE))) : null));
+  const fix = (rel, buf) => {
+    const subs = vr && vr.replace && vr.replace[rel.split(path.sep).join('/')];
+    if (!subs) return buf;
+    let t = buf.toString('utf8');
+    subs.forEach(([a, b]) => { if (t.indexOf(a) < 0) throw new Error('Pacote ' + vr.zip + ': "' + a + '" não está em ' + rel); t = t.split(a).join(b); });
+    return Buffer.from(t);
+  };
+  const add = (rel, data) => files.push({name: folder + '/' + rel.split(path.sep).join('/'), data: fix(rel, data || fs.readFileSync(path.join(root, rel)))});
+  GS_ORDER.forEach(f => add(f + '.gs', f === 'Config' ? Buffer.from(config.replace(PACOTE_RE, pacoteLine(vr ? vr.pacote : NODE_PACOTE))) : null));
   HTML.forEach(f => add(f + '.html'));
   ['appsscript.json', 'LEIA_PRIMEIRO.md'].forEach(f => add(f));
   const skip = /^node\/(test|dados|node_modules|link-netlify)(\/|$)|^node\/config\.json$|^node\/.*\.log$/;
@@ -170,8 +240,11 @@ function buildNode(outDir, opts) {
       if (d.isDirectory()) walk(r); else add(r);
     });
   })('node');
+  // Padrões do pacote (porta e porta do link): uma chave por linha, para o link-publico.bat ler cada uma.
+  if (vr && vr.padrao) add(path.join('node', 'padrao.json'), Buffer.from(JSON.stringify(vr.padrao, null, 2) + '\n'));
+  if (vr && vr.readme) add('LEIA_LOTES.md', Buffer.from(vr.readme(versionOf(config))));
   fs.mkdirSync(outDir, {recursive: true});
-  const zipPath = path.join(outDir, 'JT_DASHMASTER_' + tag + '_NODE.zip');
+  const zipPath = path.join(outDir, 'JT_DASHMASTER_' + tag + '_' + (vr ? vr.zip : 'NODE') + '.zip');
   fs.writeFileSync(zipPath, zip(files));
   return {zip: zipPath, files: files.map(f => f.name)};
 }
@@ -364,8 +437,10 @@ if (require.main === module) {
   build(out).forEach(r => console.log(r.id + ': ' + r.dir + '\n  ' + r.zip + '\n  ' + r.line));
   const n = buildNode(out);
   console.log('node: ' + n.zip + ' (' + n.files.length + ' arquivos)');
+  const nl = buildNode(out, {variant: LOTS_NODE});
+  console.log('node (lotes): ' + nl.zip + ' (' + nl.files.length + ' arquivos)');
   const w = buildNetlify(out);
   console.log('netlify: ' + w.zip + ' (' + w.files.length + ' arquivos)');
 }
 
-module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, FLOWS};
+module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, FLOWS, LOTS_NODE, MAIN_OUT};

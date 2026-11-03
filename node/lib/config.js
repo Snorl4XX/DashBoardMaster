@@ -33,8 +33,20 @@ const DEFAULTS = {
   linkPublico: '',
   // Link do Netlify que repassa para o linkPublico (ex.: https://jt-dashmaster.netlify.app). Com ele, o painel aceita as
   // chamadas que chegam por esse endereço.
-  linkNetlify: ''
+  linkNetlify: '',
+  // Porta do link público no Tailscale Funnel (link-publico.bat): 443 (padrão, link sem número), 8443 ou 10000.
+  portaLink: 443
 };
+/**
+ * V4.21: padrões do pacote (node/padrao.json, vem no ZIP). Ex.: o painel de Lotes separado usa a porta 3100 e o link na
+ * 10000, para rodar no mesmo computador que o painel principal (3000 / 443). O config.json de quem instalou vale mais.
+ */
+function packageDefaults() {
+  const file = path.join(NODE_DIR, 'padrao.json');
+  if (!fs.existsSync(file)) return {};
+  try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) || {}; }
+  catch (e) { return {}; }
+}
 
 function configPath() {
   return process.env.DASHMASTER_CONFIG ? path.resolve(process.env.DASHMASTER_CONFIG) : path.join(NODE_DIR, 'config.json');
@@ -49,9 +61,9 @@ function loadConfig(opts) {
     try { user = JSON.parse(text); }
     catch (e) { throw new Error('config.json inválido (' + e.message + '). Corrija o arquivo ou apague-o para recriar.'); }
   } else if (opts.create !== false) {
-    try { fs.writeFileSync(file, JSON.stringify(DEFAULTS, null, 2) + '\n'); } catch (e) { /* pasta só leitura: usa os padrões */ }
+    try { fs.writeFileSync(file, JSON.stringify(Object.assign({}, DEFAULTS, packageDefaults()), null, 2) + '\n'); } catch (e) { /* pasta só leitura: usa os padrões */ }
   }
-  const cfg = Object.assign({}, DEFAULTS, user);
+  const cfg = Object.assign({}, DEFAULTS, packageDefaults(), user);
   if (process.env.DASHMASTER_PORT) cfg.porta = Number(process.env.DASHMASTER_PORT);
   if (process.env.DASHMASTER_DATA) cfg.pastaDados = process.env.DASHMASTER_DATA;
   const base = path.dirname(file);
@@ -75,4 +87,4 @@ function loadConfig(opts) {
   return cfg;
 }
 
-module.exports = {loadConfig, DEFAULTS, NODE_DIR};
+module.exports = {loadConfig, DEFAULTS, NODE_DIR, packageDefaults};
