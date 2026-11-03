@@ -4753,7 +4753,21 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     const {c, site} = sorterCtx({SORTER_TROCA_A: ''}, {modo});
     return {d: c.diagnosticarSorter(), c, site};
   };
-  const dJs = discover('js'), dCk = discover('cookie'), dGl = discover('global');
+  const dJs = discover('js'), dCk = discover('cookie'), dGl = discover('global'), dXa = discover('xadmin');
+  // V4.22.2: como o site real (HTML do usuário): "switch device" abre a janela xadmin.open('device choose', '…/dbselectview?from=top')
+  // com um botão por sorter (data-connectionname DB2 = A, DB1 = B); o clique troca a conexão da sessão.
+  const trX = JSON.parse(dXa.c.__state.props.SORTER_TROCA_A || '{}');
+  check(trX.metodo === 'POST' && trX.caminho === '/dbselect' && /(^|&)connectionname=DB2(&|$)/.test(trX.corpo) && /(^|&)from=top(&|$)/.test(trX.corpo) &&
+    trX.pagina === '/dbselectview?from=top' && dXa.d.sorters[1].hoje.sortTotal === dayTotals('A', dXa.c.isoToday_()).total &&
+    dXa.d.sorters[1].descoberta.some(l => /janela \/dbselectview\?from=top: lida/.test(l)) &&
+    dXa.d.sorters[1].descoberta.some(l => /connectionname=DB2 \[atributo data-connectionname\]/.test(l)) &&
+    dXa.d.sorters[1].descoberta.some(l => /✓ .*\(A套\)/.test(l)) && !dXa.site.log.some(x => x.method === 'GET' && x.path === '/dbselect'),
+    'Sorter A: troca do site real descoberta (janela /dbselectview, botão data-connectionname=DB2, POST /dbselect; página "(A套)")', {trX, rel: dXa.d.sorters[1].descoberta});
+  const dXl = discover('xadmin-login'), dXo = discover('xadmin-oculto');
+  const trL = JSON.parse(dXl.c.__state.props.SORTER_TROCA_A || '{}'), trO = JSON.parse(dXo.c.__state.props.SORTER_TROCA_A || '{}');
+  check(trL.metodo === 'GET' && trL.caminho === '/login?connectionname=DB2' && dXl.d.sorters[1].hoje.sortTotal === dayTotals('A', dXl.c.isoToday_()).total &&
+    trO.caminho === '/dbselect' && /connectionname=DB2/.test(trO.corpo) && dXo.d.sorters[1].hoje.sortTotal === dayTotals('A', dXo.c.isoToday_()).total,
+    'Sorter A: o clique indo para /login?connectionname=DB2, ou com o código fora do que o painel lê (palpite: /dbselectview → /dbselect)', {trL, trO});
   check(/descoberta sozinha/.test(dJs.d.sorters[1].troca) && dJs.d.sorters[1].hoje.sortTotal === dayTotals('A', dJs.c.isoToday_()).total &&
     dJs.d.sorters[1].descoberta.some(l => /arquivo \/js\/home\.js\?v=2: lido/.test(l)) && !dJs.d.sorters[1].descoberta.some(l => /jquery/.test(l)),
     'Sorter A: troca achada num arquivo .js do site (sem abrir as bibliotecas)', dJs.d.sorters[1]);

@@ -1,8 +1,25 @@
-# J&T DASHMASTER V4.22.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.2 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.2 — Produção do Sorter: a troca do Sorter A como o site faz de verdade
+
+O HTML do site mostrou como ele troca de sorter:
+- "switch device" abre uma janela à parte: `xadmin.open('device choose', 'http://10.1.166.9/dbselectview?from=top', 500, 350)`;
+- nela há um botão por sorter: `<input value="Cross-belt GRU-A" type="button" lay-filter="login" data-connectionname="DB2">` (o B é o
+  `DB1`). O site troca a **conexão** (o banco do sorter A ou do B), e a página passa a mostrar "巴西GRU分拣机(A套)" no título.
+
+A descoberta da V4.22.1 não abria essa janela e não lia o `data-connectionname`. Agora ela:
+- abre as janelas chamadas por `xadmin.open` / `layer.open` / iframe (só janelas e links, nunca o endereço de um pedido);
+- lê o valor do botão (`connectionname=DB2`) e os campos fixos do pedido;
+- testa primeiro os pedidos que usam esse campo, inclusive `/login`. Se o código do clique não estiver em nenhum arquivo que o
+  painel lê, testa o endereço da janela sem o "view" (`/dbselect`);
+- no relatório, mostra o título da página depois da troca (deve aparecer "(A套)").
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_2_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**.
 
 ## V4.22.1 — Produção do Sorter: o Sorter A é descoberto sozinho
 

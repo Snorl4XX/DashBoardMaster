@@ -9,8 +9,18 @@
  * opts.modo (V4.22.1) — como o site troca de sorter ("switch device" → Cross-belt GRU-A = data-id 3):
  *   'pedido' (padrão): $.post('/home/switchDevice', {device_id, _token}) no script da própria página;
  *   'js': o mesmo pedido num arquivo .js à parte (/js/home.js); 'cookie': o .js grava o cookie deviceId e recarrega (sem pedido);
- *   'global': o pedido troca o sorter do site inteiro (para todo mundo); 'nenhum': sem jeito de trocar.
+ *   'global': o pedido troca o sorter do site inteiro (para todo mundo); 'nenhum': sem jeito de trocar;
+ *   'xadmin' (como o site real, HTML enviado pelo usuário): "switch device" = xadmin.open('device choose',
+ *   'http://…/dbselectview?from=top', 500, 350) — uma janela à parte com um botão por sorter:
+ *   <input value="Cross-belt GRU-A" type="button" lay-filter="login" title="GRU-A交叉带" data-connectionname="DB2"> (B = DB1).
+ *   O clique manda $.post('/dbselect', {connectionname}) com o X-CSRF-TOKEN; a página /home passa a ter "(A套)" no título.
+ *   'xadmin-login': o clique vai para location.href = '/login?connectionname=' + valor (GET); 'xadmin-oculto': o código do clique
+ *   não está em nenhum arquivo que o painel lê (o pedido é POST /dbselect).
  */
+const SCRIPT_DBSELECT = "layui.use(['form'], function () { $.ajaxSetup({headers: {'X-CSRF-TOKEN': $('meta[name=csrf-token]').attr('content')}}); " +
+  "$(\"input[lay-filter='login']\").on('click', function () { $.post('/dbselect', {connectionname: $(this).data('connectionname'), from: 'top'}, " +
+  "function (res) { if (res.code == 1) { parent.location.reload(); } }); }); });";
+const SCRIPT_LOGIN = "$(\"input[lay-filter='login']\").on('click', function () { parent.location.href = '/login?connectionname=' + $(this).data('connectionname'); });";
 const SCRIPT_PEDIDO = "$('.dev').on('click', function () { $.post('/home/switchDevice', {device_id: $(this).data('id'), " +
   "_token: $('meta[name=csrf-token]').attr('content')}, function () { location.reload(); }); });";
 const SCRIPT_COOKIE = "$('.dev').on('click', function () { document.cookie = 'deviceId=' + $(this).data('id') + '; path=/'; location.reload(); });";
@@ -74,6 +84,39 @@ function createFakeSorter(opts) {
     set.push('laravel_session=' + sid + '; path=/; httponly', 'XSRF-TOKEN=' + encodeURIComponent(sess.token) + '; path=/');
     const device = modo === 'cookie' ? (ck.deviceId === '3' ? 'A' : 'B') : modo === 'global' ? global.device : sess.device;
     log.push({method: req.method, path: req.path, device});
+    const xa = /^xadmin/.test(modo);
+    if (req.method === 'GET' && req.path === '/home' && xa) {
+      return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
+        body: '<html><head><meta name="csrf-token" content="' + sess.token + '"><title>巴西GRU分拣机(' + device + '套)监控系统</title>' +
+          '<script type="text/javascript" src="http://' + (req.headers.host || 'sorter.falso') + '/js/jquery.min.js"></script><script src="/lib/layui/layui.js"></script>' +
+          '<script src="/js/xadmin.js"></script></head><body><ul class="layui-nav right"><li class="layui-nav-item"><a onclick="xadmin.open(' +
+          "'device choose','http://" + (req.headers.host || 'sorter.falso') + "/dbselectview?from=top',500,350)" + '">switch device</a></li>' +
+          '<li class="layui-nav-item"><a href="/logout">Guest</a></li></ul></body></html>'};
+    }
+    if (req.method === 'GET' && req.path === '/js/xadmin.js') return {code: 200, headers: {'content-type': 'application/javascript'}, body: 'var xadmin = {open: function () {}};'};
+    if (req.method === 'GET' && req.path === '/dbselectview' && xa) {
+      return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
+        body: '<html><head><meta name="csrf-token" content="' + sess.token + '"><script src="/lib/layui/layui.js"></script></head><body>' +
+          '<form class="layui-form"><input value="Cross-belt GRU-A" type="button" lay-filter="login" style="width:100%;" title="GRU-A交叉带" data-connectionname="DB2">' +
+          '<input value="Cross-belt GRU-B" type="button" lay-filter="login" style="width:100%;" title="GRU-B交叉带" data-connectionname="DB1"></form>' +
+          (modo === 'xadmin' ? '<script>' + SCRIPT_DBSELECT + '</script>' : modo === 'xadmin-login' ? '<script>' + SCRIPT_LOGIN + '</script>' : '<script src="/lib/layui/lay/dbselect.js"></script>') +
+          '</body></html>'};
+    }
+    const conn = v => (v === 'DB2' ? 'A' : v === 'DB1' ? 'B' : null);
+    if (req.method === 'POST' && req.path === '/dbselect' && (modo === 'xadmin' || modo === 'xadmin-oculto')) {
+      const form = new URLSearchParams(String(req.body || ''));
+      const tok = form.get('_token') || req.headers['x-csrf-token'];
+      if (tok !== sess.token) return {code: 419, headers: {'set-cookie': set}, body: 'Page Expired'};
+      const dev = conn(form.get('connectionname'));
+      if (!dev) return {code: 200, headers: {'content-type': 'application/json'}, body: JSON.stringify({code: 0, msg: 'conexão inválida'})};
+      sess.device = dev;
+      return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed'})};
+    }
+    if (req.method === 'GET' && req.path === '/login' && modo === 'xadmin-login') {
+      const dev = conn(req.query.get('connectionname'));
+      if (dev) sess.device = dev;
+      return {code: 302, headers: {location: '/home', 'set-cookie': set}, body: ''};
+    }
     if (req.method === 'GET' && req.path === '/home') {
       return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
         body: '<html><head><meta name="csrf-token" content="' + sess.token + '"><title>巴西GRU分拣机</title>' +

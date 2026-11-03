@@ -228,6 +228,23 @@ function sorterOptions_(html, id) {
   let m;
   while ((m = re.exec(s))) {
     const i = m.index, before = s.slice(Math.max(0, i - 600), i);
+    // O nome dentro da própria etiqueta (layui: <input type="radio" name="db" value="x" title="Cross-belt GRU-A">).
+    const lt = before.lastIndexOf('<'), gt = before.lastIndexOf('>'), end = s.indexOf('>', i);
+    if (lt > gt && end > 0) {
+      const own = before.slice(lt) + s.slice(i, end + 1), tn = ((own.match(/^<\s*([\w-]+)/) || [])[1] || '').toLowerCase(), a = sorterAttrs_(own);
+      // Botão do site real: <input value="Cross-belt GRU-A" type="button" lay-filter="login" data-connectionname="DB2">.
+      Object.keys(a).filter(k => /^data-/.test(k) && a[k] !== '' && !/^data-(type|toggle|target|index|title)$/.test(k))
+        .forEach(k => add({valor: a[k], campo: k.slice(5), como: 'atributo ' + k}));
+      if (tn === 'input' || tn === 'option') {
+        const si = s.lastIndexOf('<select', i), sel = tn === 'option' && si >= 0 ? s.slice(si).match(/<select[^>]*>/i) : null;
+        if (a.value !== undefined) add({valor: a.value, campo: a.name || (sel ? sorterAttrs_(sel[0]).name || '' : ''), como: tn === 'input' ? 'botão de escolha' : 'opção de lista'});
+      } else {
+        ATRS.forEach(k => { if (a[k] !== undefined && a[k] !== '') add({valor: a[k], campo: k.replace(/^data-|^lay-/, ''), como: 'atributo ' + k}); });
+        const oc = (a.onclick || '').match(/\(\s*['"]?([\w-]+)['"]?\s*[,)]/);
+        if (oc) add({valor: oc[1], campo: '', como: 'onclick'});
+      }
+      continue;
+    }
     const op = before.lastIndexOf('<option');
     if (op >= 0 && before.indexOf('</option', op) < 0) {
       const a = sorterAttrs_((before.slice(op).match(/<option[^>]*>/i) || [''])[0]);
@@ -259,24 +276,36 @@ function sorterOptions_(html, id) {
   }
   return out;
 }
-/** Pedidos que o código da página pode fazer (formulários e chamadas nos scripts): [{metodo, caminho, concat, chaves}]. */
-function sorterRequests_(text) {
+/**
+ * Pedidos que o código de uma página pode fazer (formulários e chamadas nos scripts): [{metodo, caminho, concat, chaves, campos,
+ * pagina}]. Formulário sem action vai para a própria página (`page`); os campos ocultos (menos o _token) vão junto.
+ */
+function sorterRequests_(text, page) {
   const s = String(text), out = [];
   const RES = /^(url|type|method|data|dataType|success|error|complete|headers|async|cache|contentType|processData|timeout|beforeSend|function|_token|then|catch|xhrFields|traditional)$/;
-  const keysOf = d => { const k = []; String(d || '').replace(/["']?([A-Za-z_$][\w$]*)["']?\s*:/g, (x, n) => { if (!RES.test(n) && k.indexOf(n) < 0) k.push(n); return x; }); return k; };
+  // Campos do objeto de dados: com valor fixo ('guest', 1) vão sempre; os outros recebem o valor da opção do sorter.
+  const keysOf = d => { const k = []; String(d || '').replace(/["']?([A-Za-z_$][\w$]*)["']?\s*:\s*(["'][^"']*["']|-?\d+(?=\s*[,}])|true|false)?/g, (x, n, lit) => {
+    if (!RES.test(n) && !lit && k.indexOf(n) < 0) k.push(n); return x; }); return k; };
+  const fixedOf = d => { const o = {}; String(d || '').replace(/["']?([A-Za-z_$][\w$]*)["']?\s*:\s*(?:["']([^"']*)["']|(-?\d+)(?=\s*[,}]))/g, (x, n, sv, nv) => {
+    if (!RES.test(n)) o[n] = sv !== undefined ? sv : nv; return x; }); return o; };
   const add = p => {
     const c = sorterLocalPath_(p.caminho);
-    if (!c || /statis|summary|login|logout|\.(js|css|png|jpg|svg|ico)(\?|$)/i.test(c)) return;
-    p.caminho = c; p.metodo = String(p.metodo || 'GET').toUpperCase();
+    if (!c || /statis|summary|logout|\.(js|css|png|jpg|svg|ico)(\?|$)/i.test(c)) return;
+    p.caminho = c; p.metodo = String(p.metodo || 'GET').toUpperCase(); p.pagina = page || sorterPage_(); p.campos = p.campos || {};
     p.pontos = (/switch|device|choose|change|select|toggle|equip|machine|sorter|cross/i.test(c) ? 3 : 0) + (p.metodo === 'POST' ? 1 : 0);
     if (!out.some(x => x.metodo === p.metodo && x.caminho === p.caminho && x.concat === p.concat)) out.push(p);
   };
   let m;
   const forms = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
   while ((m = forms.exec(s))) {
-    const a = sorterAttrs_('<form ' + m[1] + '>'), names = [];
-    (m[2].match(/<(select|input)[^>]*>/gi) || []).forEach(tg => { const x = sorterAttrs_(tg); if (x.name && x.name !== '_token' && !/^hidden$/i.test(x.type || '') && names.indexOf(x.name) < 0) names.push(x.name); });
-    add({metodo: a.method || 'GET', caminho: a.action || sorterPage_(), concat: false, chaves: names});
+    const a = sorterAttrs_('<form ' + m[1] + '>'), names = [], hidden = {};
+    (m[2].match(/<(select|input)[^>]*>/gi) || []).forEach(tg => {
+      const x = sorterAttrs_(tg);
+      if (!x.name || x.name === '_token') return;
+      if (/^hidden$/i.test(x.type || '')) hidden[x.name] = x.value || '';
+      else if (names.indexOf(x.name) < 0) names.push(x.name);
+    });
+    if (names.length || Object.keys(hidden).length) add({metodo: a.method || 'GET', caminho: a.action || page || sorterPage_(), concat: false, chaves: names, campos: hidden});
   }
   const Q = n => '(["\'`])([^"\'`]+)\\' + n + '(\\s*\\+)?';
   const pads = [
@@ -294,7 +323,13 @@ function sorterRequests_(text) {
   ];
   pads.forEach(pr => {
     let x;
-    while ((x = pr[0].exec(s))) { const p = pr[1](x); if (p) add({metodo: p.metodo, caminho: p.caminho, concat: p.concat, chaves: keysOf(p.dados)}); }
+    while ((x = pr[0].exec(s))) {
+      const p = pr[1](x);
+      if (!p) continue;
+      // '/login?connectionname=' + valor: o campo é o do fim do endereço.
+      const tail = p.concat ? /[?&]([\w-]+)=$/.exec(p.caminho) : null;
+      add({metodo: p.metodo, caminho: p.caminho, concat: p.concat, chaves: tail ? [tail[1]] : keysOf(p.dados), campos: fixedOf(p.dados)});
+    }
   });
   return out.sort((a, b) => b.pontos - a.pontos);
 }
@@ -322,40 +357,87 @@ function sorterDiscover_(dev) {
   const title = (page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1];
   log('Página ' + sorterPage_() + ': código ' + page.code + (title ? ' · ' + sorterDecode_(title).replace(/\s+/g, ' ').trim().slice(0, 60) : '') +
     ' · _token: ' + (s0.csrf ? 'sim' : 'não') + ' · cookies: ' + (Object.keys(s0.cookies).join(', ') || 'nenhum'));
-  // Arquivos .js do próprio site (sem as bibliotecas) e janelas à parte (iframe / layer) com "device/choose/switch".
-  let text = page.html;
-  const extra = [];
-  String(page.html).replace(/<script[^>]+src\s*=\s*["']([^"']+)["']/gi, (x, u) => { const c = sorterLocalPath_(u); if (c && !SORTER_LIBS_.test(c.split('?')[0].split('/').pop()) && extra.indexOf(c) < 0) extra.push(c); return x; });
-  String(page.html).replace(/(?:src|href|content|url)\s*[:=]\s*["']([^"']*(?:device|choose|switch|equip|sorter)[^"']*)["']/gi, (x, u) => {
-    const c = sorterLocalPath_(u);
-    if (c && !/\.(css|png|jpg|svg|ico)(\?|$)/i.test(c) && extra.indexOf(c) < 0) extra.push(c);
-    return x;
-  });
-  extra.slice(0, 8).forEach(c => {
+  // Janelas à parte (xadmin.open / layer / iframe: ex. "switch device" → /dbselectview?from=top) e os arquivos .js do próprio site
+  // (sem as bibliotecas) que cada página carrega; até 10 arquivos.
+  const pages = [{path: sorterPage_(), text: page.html, owner: sorterPage_()}], queue = [], seen = {};
+  seen[sorterPage_()] = 1;
+  const KW = /device|choose|switch|equip|sorter|select|machine/i;
+  const scan = p => {
+    if (/\.js(\?|$)/i.test(p.path)) return;
+    String(p.text).replace(/<script[^>]+src\s*=\s*["']([^"']+)["']/gi, (x, u) => {
+      const c = sorterLocalPath_(u);
+      if (c && !seen[c] && !SORTER_LIBS_.test(c.split('?')[0].split('/').pop())) { seen[c] = 1; queue.push({path: c, owner: p.path}); }
+      return x;
+    });
+    // Só endereços de janela/link (href, src, iframe, xadmin.open/layer.open/x_admin_show, content: '…'), nunca os dos pedidos
+    // ($.post etc.): abrir uma janela é só ler; o pedido de troca é testado depois, numa sessão à parte.
+    const take = u => {
+      const c = sorterLocalPath_(u);
+      if (c && !seen[c] && KW.test(c) && !/\.(css|png|jpe?g|gif|svg|ico|woff2?)(\?|$)|statis|summary|login|logout/i.test(c)) {
+        seen[c] = 1;
+        queue.push({path: c, owner: /\.js(\?|$)/i.test(c) ? p.path : c});
+      }
+    };
+    [/(?:href|src|data-url|lay-href)\s*=\s*["']([^"']+)["']/gi, /(?:\.open|x_admin_show|openWin|openWindow)\(\s*(?:["'][^"']*["']\s*,\s*)?["']([^"']+)["']/gi,
+      /\bcontent\s*:\s*["']([^"']+)["']/gi].forEach(re => { String(p.text).replace(re, (x, u) => { take(u); return x; }); });
+  };
+  scan(pages[0]);
+  for (let k = 0; k < queue.length && k < 10; k++) {
+    const q = queue[k];
     try {
-      const r = sorterFetch_(s0, sorterBase_() + c, {headers: {Accept: '*/*'}});
-      if (r.getResponseCode() < 400) { text += '\n' + r.getContentText(); log('  arquivo ' + c + ': lido'); }
-      else log('  arquivo ' + c + ': código ' + r.getResponseCode());
-    } catch (e) { log('  arquivo ' + c + ': ' + String(e && e.message || e).slice(0, 80)); }
-  });
+      const r = sorterFetch_(s0, sorterBase_() + q.path, {headers: {Accept: '*/*', Referer: sorterBase_() + sorterPage_()}});
+      if (r.getResponseCode() >= 400) { log('  arquivo ' + q.path + ': código ' + r.getResponseCode()); continue; }
+      const p = {path: q.path, text: r.getContentText(), owner: q.owner};
+      pages.push(p);
+      log('  ' + (/\.js(\?|$)/i.test(q.path) ? 'arquivo ' + q.path + ': lido' : 'janela ' + q.path + ': lida'));
+      scan(p);
+    } catch (e) { log('  arquivo ' + q.path + ': ' + String(e && e.message || e).slice(0, 80)); }
+  }
+  const text = pages.map(p => p.text).join('\n');
   const others = sorterDevices_().filter(d => d.id !== dev.id);
   const optsA = sorterOptions_(text, dev.id), optsB = others.length ? sorterOptions_(text, others[0].id) : [];
   log('Opções do ' + dev.nome + ' na página: ' + (optsA.map(o => (o.campo ? o.campo + '=' : '') + o.valor + ' [' + o.como + ']').join(' · ') || 'nenhuma'));
   if (others.length) log('Opções do ' + others[0].nome + ': ' + (optsB.map(o => (o.campo ? o.campo + '=' : '') + o.valor).join(' · ') || 'nenhuma'));
-  const reqs = sorterRequests_(text), cookieNames = sorterCookieNames_(text);
-  log('Pedidos no código: ' + (reqs.slice(0, 8).map(p => p.metodo + ' ' + p.caminho + (p.concat ? '+valor' : '') + (p.chaves.length ? ' (' + p.chaves.join(', ') + ')' : '')).join(' · ') || 'nenhum'));
+  const reqs = [];
+  pages.forEach(p => sorterRequests_(p.text, p.owner).forEach(r => {
+    if (!reqs.some(x => x.metodo === r.metodo && x.caminho === r.caminho && x.concat === r.concat)) reqs.push(r);
+  }));
+  reqs.sort((x, y) => y.pontos - x.pontos);
+  const cookieNames = sorterCookieNames_(text);
+  log('Pedidos no código: ' + (reqs.slice(0, 8).map(p => p.metodo + ' ' + p.caminho + (p.concat ? '+valor' : '') + (p.chaves.length ? ' (' + p.chaves.join(', ') + ')' : '') +
+    (Object.keys(p.campos).length ? ' [+' + Object.keys(p.campos).join(', ') + ']' : '')).join(' · ') || 'nenhum'));
   log('Cookies gravados pelo código: ' + (cookieNames.join(', ') || 'nenhum'));
   const t0 = sorterTotal7_(sorterSession_(dev));
   log('Sem trocar (sorter padrão), Sort total dos últimos 7 dias: ' + t0);
   const vals = optsA.filter(o => !o.href).map(o => o.valor).concat([dev.id, 'GRU-' + dev.id]).filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
   const cands = [];
   optsA.filter(o => o.href).forEach(o => cands.push({desc: 'link ' + o.href, troca: {metodo: 'GET', caminho: o.href}}));
-  reqs.filter(p => p.pontos >= 3).slice(0, 4).forEach(p => {
-    if (p.concat) vals.slice(0, 2).forEach(v => cands.push({desc: p.metodo + ' ' + p.caminho + v, troca: {metodo: p.metodo, caminho: p.caminho + encodeURIComponent(v)}}));
-    const keys = (p.chaves.length ? p.chaves : optsA.map(o => o.campo).filter(Boolean).concat(['device_id', 'id', 'device', 'deviceId']))
-      .filter((k, i, a) => a.indexOf(k) === i).slice(0, 4);
-    keys.forEach(k => vals.slice(0, 2).forEach(v => cands.push({desc: p.metodo + ' ' + p.caminho + ' (' + k + '=' + v + ')',
-      troca: {metodo: p.metodo, caminho: p.caminho, corpo: encodeURIComponent(k) + '=' + encodeURIComponent(v)}})));
+  const optFields = optsA.map(o => o.campo).filter(Boolean).filter((k, i, a) => a.indexOf(k) === i);
+  const usesField = p => p.chaves.some(k => optFields.indexOf(k) >= 0);
+  const relevant = reqs.filter(usesField).concat(reqs.filter(p => !usesField(p) && p.pontos >= 3));
+  // Palpite no fim (o código do clique pode estar num arquivo que o painel não lê): o endereço da janela sem o "view"
+  // (/dbselectview → /dbselect) e a própria janela, com o campo do botão (connectionname).
+  if (optFields.length && !reqs.some(usesField)) {
+    pages.filter(p => p.path !== sorterPage_() && !/\.js(\?|$)/i.test(p.path)).forEach(p => {
+      const base = p.path.split('?')[0], guess = base.replace(/view$/i, '');
+      [['POST', guess], ['GET', guess], ['POST', base]].filter((x, i, arr) => arr.findIndex(y => y[0] === x[0] && y[1] === x[1]) === i)
+        .forEach(x => relevant.push({metodo: x[0], caminho: x[1], concat: false, chaves: optFields.slice(0, 2), campos: {}, pagina: p.path, pontos: 0}));
+    });
+  }
+  // Valor da opção para o campo: a opção com esse nome de campo (ex.: data-connectionname) ou os primeiros valores.
+  const valFor = k => { const o = optsA.filter(x => !x.href && x.campo && x.campo.toLowerCase() === String(k).toLowerCase())[0]; return o ? [o.valor] : vals.slice(0, 2); };
+  relevant.slice(0, 8).forEach(p => {
+    const hid = Object.keys(p.campos).filter(k => optFields.indexOf(k) < 0).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(p.campos[k]));
+    const pg = p.pagina && p.pagina !== sorterPage_() ? {pagina: p.pagina} : {};
+    if (p.concat) {
+      (p.chaves.length ? valFor(p.chaves[0]) : vals.slice(0, 2)).forEach(v => cands.push({desc: p.metodo + ' ' + p.caminho + v,
+        troca: Object.assign({metodo: p.metodo, caminho: p.caminho + encodeURIComponent(v)}, pg)}));
+      return;
+    }
+    const keys = (p.chaves.length ? p.chaves.filter(k => optFields.indexOf(k) >= 0).concat(p.chaves) : (optFields.length ? optFields : ['device_id', 'id', 'device', 'deviceId']))
+      .filter((k, i, a) => a.indexOf(k) === i).slice(0, 3);
+    keys.forEach(k => valFor(k).forEach(v => cands.push({desc: p.metodo + ' ' + p.caminho + ' (' + k + '=' + v + ')',
+      troca: Object.assign({metodo: p.metodo, caminho: p.caminho, corpo: hid.concat([encodeURIComponent(k) + '=' + encodeURIComponent(v)]).join('&')}, pg)})));
   });
   const tested = [];
   const tryOne = (c, global) => {
@@ -364,7 +446,9 @@ function sorterDiscover_(dev) {
     try { sorterApplySwitch_(s, c.troca, dev.nome); t = sorterTotal7_(s); }
     catch (e) { log('  ✗ ' + c.desc + ': ' + String(e && e.message || e).slice(0, 100)); return null; }
     const ok = t > 0 && t !== t0;
-    log('  ' + (ok ? '✓' : '✗') + ' ' + c.desc + ': Sort total ' + t + (ok ? '' : ' (não mudou)'));
+    let title = '';
+    if (ok) { try { title = ((sorterOpenPage_(s, sorterPage_()).html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim().slice(0, 60); } catch (e) { /* só o título */ } }
+    log('  ' + (ok ? '✓' : '✗') + ' ' + c.desc + ': Sort total ' + t + (ok ? (title ? ' · página: ' + sorterDecode_(title) : '') : ' (não mudou)'));
     if (!ok || !global) return ok ? t : null;
     // A troca vale para todo o site? (sessão nova sem trocar mostraria o mesmo número): não usa, para não mudar a tela de ninguém.
     const t1 = sorterTotal7_(sorterSession_(dev));
@@ -380,14 +464,14 @@ function sorterDiscover_(dev) {
     if (r === 'global') {
       // Volta o site para o sorter padrão pelo mesmo pedido, com o valor dele.
       const vb = optsB.filter(o => !o.href).map(o => o.valor)[0];
-      const back = cands[i].troca.corpo && vb ? Object.assign({}, cands[i].troca, {corpo: cands[i].troca.corpo.replace(/=[^=]*$/, '=' + encodeURIComponent(vb))}) : null;
+      const back = cands[i].troca.corpo && vb ? Object.assign({}, cands[i].troca, {corpo: cands[i].troca.corpo.replace(/=[^=&]*$/, '=' + encodeURIComponent(vb))}) : null;
       if (back) { try { sorterApplySwitch_(sorterSession_(dev), back, dev.nome); } catch (e) { /* tentou voltar */ } }
       return {ok: false, global: true, report: report};
     }
     if (r !== null) return {ok: true, troca: cands[i].troca, como: cands[i].desc, report: report};
   }
   // Cookie: cada valor em todos os nomes de uma vez; o que mudar, nome por nome.
-  const names = cookieNames.concat(SORTER_COOKIE_NAMES_).filter((n, i, a) => a.indexOf(n) === i).slice(0, 14);
+  const names = cookieNames.concat(optFields, SORTER_COOKIE_NAMES_).filter((n, i, a) => a.indexOf(n) === i).slice(0, 16);
   for (let i = 0; i < vals.length; i++) {
     const all = {};
     names.forEach(n => { all[n] = vals[i]; });

@@ -336,7 +336,7 @@ function firstDiff(a, b, p) {
 
   // ---------- 9c. V4.22: Produção do Sorter (pacote sem JMS) — sorter falso por HTTP, com sessão (cookies) e _token ----------
   const {createFakeSorter, dayTotals} = require(path.join(ROOT, 'tests', 'sorter_falso.js'));
-  const siteS = createFakeSorter();
+  const siteS = createFakeSorter({modo: 'xadmin'});
   const portSite = await freePort();
   const srvSite = http.createServer(siteS.handler);
   servers.push(srvSite);
