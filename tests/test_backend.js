@@ -2127,7 +2127,19 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     pD.current === 2 && cP.detailPageSize_(cP.getIndicatorConfig_('lot_flow')) === 100,
     'Lotes: payload da lista "Total de pacotes construídos" igual à captura, até 100 por página', pD);
   const hL = cP.jmsHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sdploopbagBuildbagDetail');
-  check(hL.AuthToken === 'FAKE' && !hL.Routename && !hL.Routernamelist, 'Lotes: sem cabeçalho de rota (variantes só se o JMS recusar)');
+  // V4.21.3: o JMS respondeu HTTP 403 sem o cabeçalho de rota — Routename = nome da página (/app/crisbiIndex/CirculationBagReport).
+  check(hL.AuthToken === 'FAKE' && hL.Routename === 'CirculationBagReport' && !hL.Routernamelist,
+    'Lotes: Routename = nome da página do JMS (CirculationBagReport)', hL);
+  // JMS que só aceita "CirculationBagReport|crisbiIndex" (HTTP 403 nas outras): o painel acha sozinho, guarda e segue.
+  const cL403 = freshCtx(lfDays(), {intercept: (route, h) => /sdploopbagBuildbag/.test(route) && h.Routename !== 'CirculationBagReport|crisbiIndex' ? [403, {}] : null});
+  cL403.queueHistory(D19, D19, true);
+  runAll(cL403, 12);
+  const fL403 = cL403.__state.fetches.filter(f => /sdploopbagBuildbag/.test(f.url));
+  check(cL403.getRateDay_('lot_flow', D19) && cL403.getDayStatus_('lot_flow', D19).details === 'COMPLETE' &&
+    cL403.__state.props.JMS_ROUTE_AUTO_LOTS === '1' && fL403.slice(-3).every(f => f.headers.Routename === 'CirculationBagReport|crisbiIndex') &&
+    !cL403.publicPauses_().some(p => p.route === 'LOTS'),
+    'Lotes: HTTP 403 com o Routename da página — a variante aceita é achada sozinha (JMS_ROUTE_AUTO_LOTS) e usada nas consultas seguintes',
+    {auto: cL403.__state.props.JMS_ROUTE_AUTO_LOTS, pausas: cL403.publicPauses_()});
   check(!cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'lot_flow'}) && cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'send_flow'}),
     'Lotes: tarefa leve (fora do teto diário do Recebimento/Expedição)');
 

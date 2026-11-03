@@ -1,8 +1,33 @@
-# J&T DASHMASTER V4.21.2 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.21.3 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.21.3 — Criação de Lotes: "HTTP 403: sem permissão no JMS"
+
+**O que aparecia:** "Não foi possível atualizar: HTTP 403: sem permissão no JMS (Criação de Lotes)".
+
+**Por quê:** o JMS confere o cabeçalho **Routename** (o nome da tela). O painel consultava as sacas sem ele.
+
+**Agora:**
+- O painel manda **Routename = CirculationBagReport**, o nome da tela "Estatística de Criação Recorrente de Eco Bag"
+  (`/app/crisbiIndex/CirculationBagReport`, no PDF das sacas).
+- Se o JMS ainda recusar, o painel testa sozinho `CirculationBagReport|crisbiIndex`, sem cabeçalho e os nomes antigos.
+  Ele guarda o que funcionar e usa nas próximas consultas. Isso vale também no botão Atualizar.
+
+**Atualizar:** feche a janela preta do painel de Lotes, extraia o `JT_DASHMASTER_V4_21_3_LOTES_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. O `config.json` (porta, senha, link) e os dados continuam. Depois clique em **Atualizar**.
+
+**Se continuar o 403**, o nome certo está na tela do JMS:
+1. Abra a tela no JMS e aperte F12 → Rede (Network) → Consultar.
+2. Clique na linha `sdploopbagBuildbagCount` → Cabeçalhos da solicitação.
+3. Copie só os valores de **routename** e **routernamelist**. **Nunca** copie o AuthToken nem o Cookie.
+4. Em `C:\dashmaster-lotes\node`, rode:
+   `node dashmaster.js propriedade JMS_ROUTENAME_LOTS <valor>` e `node dashmaster.js propriedade JMS_ROUTENAMELIST_LOTS <valor>`.
+
+Outra causa possível: o usuário do AuthToken não tem acesso à tela no JMS. Nesse caso, o navegador também mostra
+"sem permissão" ao abrir a tela.
 
 ## V4.21.2 — Painel de Lotes/Sacas na porta 3400
 
