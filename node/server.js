@@ -240,6 +240,11 @@ function send(res, code, body, headers) {
 }
 function sendJson(res, code, obj) { send(res, code, JSON.stringify(obj), {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}); }
 function sendHtml(req, res, code, html, extra) {
+  // V4.21.5: painel num caminho do link (ex.: /lotes): os endereços relativos da página (api/run, entrar…) ficam dentro dele.
+  if (req.jtBaseHref) {
+    const tag = '<base href="' + req.jtBaseHref + '">';
+    html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => m + tag) : tag + html;
+  }
   const body = Buffer.from(html, 'utf8');
   const headers = Object.assign({'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'}, extra || {});
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || '')) && body.length > 2048) {
@@ -268,12 +273,12 @@ async function readJson(req) {
 }
 async function readForm(req) { return Object.fromEntries(new URLSearchParams(await readBody(req, 64 * 1024))); }
 function baseUrl(req) {
-  // Pelo Netlify, os links de arquivo (relatórios) ficam no endereço do Netlify.
+  // Pelo Netlify, os links de arquivo (relatórios) ficam no endereço do Netlify. V4.21.5: com o caminho do painel (ex.: /lotes).
   if (req.headers.origin && sameOrigin(req)) {
-    try { return new URL(String(req.headers.origin)).origin; } catch (e) { /* segue abaixo */ }
+    try { return new URL(String(req.headers.origin)).origin + (req.jtBase || ''); } catch (e) { /* segue abaixo */ }
   }
   const proto = String(req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')).split(',')[0].trim();
-  return proto + '://' + String(req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + cfg.porta)).split(',')[0].trim();
+  return proto + '://' + String(req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + cfg.porta)).split(',')[0].trim() + (req.jtBase || '');
 }
 /**
  * POST de outro site (CSRF): o navegador manda Origin; tem que ser este mesmo painel. Pelo link público, o túnel pode trocar
@@ -425,14 +430,32 @@ async function answerOrWait(res, job, id) {
   sendJson(res, 202, {ok: true, pendente: id});
 }
 
+/** V4.21.5: cookie do painel com nome próprio quando ele fica num caminho (ex.: jt_painel_lotes), para não brigar com o principal. */
+const SCOPE_SUFFIX = cfg.caminho ? cfg.caminho.replace(/[^A-Za-z0-9]/g, '_') : '';
+const PANEL_SCOPE = 'painel' + SCOPE_SUFFIX;
+const CONFIG_SCOPE = 'config' + SCOPE_SUFFIX;
+
 async function handle(req, res) {
-  const url = new URL(req.url, 'http://localhost');
+  let url = new URL(req.url, 'http://localhost');
+  // V4.21.5: painel num caminho do link público (config "caminho", ex.: /lotes → https://NOME.ts.net/lotes). O Tailscale repassa
+  // com o caminho (destino http://127.0.0.1:PORTA/lotes) ou sem ele (versões que tiram o caminho): os dois funcionam.
+  req.jtBase = '';
+  if (cfg.caminho) {
+    if (url.pathname === cfg.caminho) { send(res, 301, '', {Location: cfg.caminho + '/' + url.search}); return; }
+    if (url.pathname.indexOf(cfg.caminho + '/') === 0) {
+      url = new URL(url.pathname.slice(cfg.caminho.length) + url.search, 'http://localhost');
+      req.jtBase = cfg.caminho;
+    } else if (viaTunnel(req)) req.jtBase = cfg.caminho;
+  }
+  const B = req.jtBase;
+  // Pasta da página no link público: os endereços relativos (api/run, entrar…) continuam certos mesmo se o Tailscale tirar o caminho.
+  req.jtBaseHref = B ? B + url.pathname.replace(/[^/]*$/, '') : '';
   const p = url.pathname.replace(/\/+$/, '') || '/';
-  const panelOk = auth.valid(req, 'painel', cfg.senha);
-  const configOk = cfg.senhaConfig ? auth.valid(req, 'config', cfg.senhaConfig) : isLocal(req);
+  const panelOk = auth.valid(req, PANEL_SCOPE, cfg.senha);
+  const configOk = cfg.senhaConfig ? auth.valid(req, CONFIG_SCOPE, cfg.senhaConfig) : isLocal(req);
 
   // "/config/" → "/config" (os endereços relativos da tela dependem disso).
-  if (url.pathname !== p && (p === '/config' || p === '/entrar')) { send(res, 301, '', {Location: p + url.search}); return; }
+  if (url.pathname !== p && (p === '/config' || p === '/entrar')) { send(res, 301, '', {Location: B + p + url.search}); return; }
   if (p === '/saude') {
     sendJson(res, 200, {ok: true, versao: panelVersion(), servidor: SERVER_VERSION, fila: {rodando: sched.running, pendentes: sched.pending}});
     return;
@@ -446,23 +469,23 @@ async function handle(req, res) {
       const f = await readForm(req);
       if (!auth.allowAttempt(clientIp(req))) { sendHtml(req, res, 429, pages.loginPage({title: 'Painel J&T', text: 'Muitas tentativas. Espere 1 minuto.', action: 'entrar', back: f.volta})); return; }
       if (auth.check(cfg.senha, f.senha || '')) {
-        send(res, 303, '', {Location: safeBack(f.volta, '/'), 'Set-Cookie': auth.cookie('painel', cfg.senha, 24 * 30, isSecure(req))});
+        send(res, 303, '', {Location: B + safeBack(f.volta, '/'), 'Set-Cookie': auth.cookie(PANEL_SCOPE, cfg.senha, 24 * 30, isSecure(req))});
       } else sendHtml(req, res, 401, pages.loginPage({title: 'Painel J&T', text: 'Digite a senha do painel.', error: 'Senha incorreta.', action: 'entrar', back: f.volta}));
       return;
     }
     sendHtml(req, res, 200, pages.loginPage({title: 'Painel J&T', text: 'Digite a senha do painel.', action: 'entrar', back: url.searchParams.get('volta') || '/'}));
     return;
   }
-  if (p === '/sair') { send(res, 303, '', {Location: '/', 'Set-Cookie': 'jt_painel=; Path=/; Max-Age=0'}); return; }
+  if (p === '/sair') { send(res, 303, '', {Location: B + '/', 'Set-Cookie': 'jt_' + PANEL_SCOPE + '=; Path=/; Max-Age=0'}); return; }
 
   // ----- Configurações
   if (p === '/config/entrar') {
-    if (!cfg.senhaConfig) { send(res, 303, '', {Location: '/config'}); return; }
+    if (!cfg.senhaConfig) { send(res, 303, '', {Location: B + '/config'}); return; }
     if (req.method === 'POST') {
       if (!sameOrigin(req)) { send(res, 403, 'Origem não permitida.'); return; }
       const f = await readForm(req);
       if (!auth.allowAttempt(clientIp(req))) { sendHtml(req, res, 429, pages.loginPage({title: 'Configurações', text: 'Muitas tentativas. Espere 1 minuto.', action: 'entrar'})); return; }
-      if (auth.check(cfg.senhaConfig, f.senha || '')) send(res, 303, '', {Location: '/config', 'Set-Cookie': auth.cookie('config', cfg.senhaConfig, 12, isSecure(req))});
+      if (auth.check(cfg.senhaConfig, f.senha || '')) send(res, 303, '', {Location: B + '/config', 'Set-Cookie': auth.cookie(CONFIG_SCOPE, cfg.senhaConfig, 12, isSecure(req))});
       else sendHtml(req, res, 401, pages.loginPage({title: 'Configurações', text: 'Senha da tela Configurações.', error: 'Senha incorreta.', action: 'entrar'}));
       return;
     }
@@ -472,7 +495,7 @@ async function handle(req, res) {
   if (p === '/config' || p.indexOf('/config/') === 0) {
     if (!configOk) {
       if (p.indexOf('/config/api/') === 0) { sendJson(res, 401, {ok: false, error: 'Acesso negado às Configurações.'}); return; }
-      if (cfg.senhaConfig) { send(res, 303, '', {Location: '/config/entrar'}); return; }
+      if (cfg.senhaConfig) { send(res, 303, '', {Location: B + '/config/entrar'}); return; }
       sendHtml(req, res, 403, pages.deniedPage());
       return;
     }
@@ -494,7 +517,7 @@ async function handle(req, res) {
   }
   if (!panelOk) {
     if (p === '/api/run') { sendJson(res, 401, {ok: false, error: 'Sessão expirada: recarregue a página e entre com a senha.'}); return; }
-    send(res, 303, '', {Location: '/entrar?volta=' + encodeURIComponent(url.pathname + url.search)});
+    send(res, 303, '', {Location: B + '/entrar?volta=' + encodeURIComponent(url.pathname + url.search)});
     return;
   }
   if (p === '/' || p === '/index.html' || p === '/exec') {

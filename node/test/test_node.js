@@ -304,6 +304,36 @@ function firstDiff(a, b, p) {
   check(evil.headers.location === '/', 'não redireciona para outro site depois do login');
   srv2.child.kill();
 
+  // ---------- 9b. V4.21.5: painel num caminho do link (Lotes em https://NOME.ts.net/lotes, o mesmo link do principal) ----------
+  const portC = await freePort();
+  const srvC = await startServer({porta: portC, senha: 'segredo-lotes', caminho: 'lotes/'});
+  const funnel = {'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'painel.exemplo.ts.net', 'Tailscale-Funnel-Request': '?1'};
+  const semBarra = await request(portC, 'GET', '/lotes?x=1', undefined, funnel);
+  check(semBarra.status === 301 && semBarra.headers.location === '/lotes/?x=1', '/lotes sem a barra vai para /lotes/', semBarra.headers);
+  const loginC = await request(portC, 'GET', '/lotes/', undefined, funnel);
+  check(loginC.status === 303 && loginC.headers.location === '/lotes/entrar?volta=%2F', 'pelo link /lotes: login dentro do /lotes', loginC.headers);
+  const telaC = await request(portC, 'GET', '/lotes/entrar?volta=%2F', undefined, funnel);
+  check(telaC.status === 200 && telaC.text.includes('<base href="/lotes/">') && /action="entrar"/.test(telaC.text), 'tela de login com os endereços dentro do /lotes');
+  const rightC = await request(portC, 'POST', '/lotes/entrar', 'senha=segredo-lotes&volta=%2F%3Fx%3D1',
+    Object.assign({'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://painel.exemplo.ts.net'}, funnel));
+  const cookieC = String(rightC.headers['set-cookie'] || '').split(';')[0];
+  check(rightC.status === 303 && rightC.headers.location === '/lotes/?x=1' && /^jt_painel_lotes=/.test(cookieC),
+    'senha certa volta para /lotes e o login tem cookie próprio (não briga com o do principal)', rightC.headers);
+  const outroCookie = await request(portC, 'GET', '/lotes/', undefined, Object.assign({Cookie: cookieC.replace(/^jt_painel_lotes=/, 'jt_painel=')}, funnel));
+  check(outroCookie.status === 303, 'o login do painel principal (jt_painel) não abre o painel de /lotes');
+  const paginaC = await request(portC, 'GET', '/lotes/', undefined, Object.assign({Cookie: cookieC}, funnel));
+  check(paginaC.status === 200 && paginaC.text.includes('<base href="/lotes/">'), 'painel abre em /lotes/ (api/run fica dentro do /lotes)');
+  const apiC = await request(portC, 'POST', '/lotes/api/run', {fn: 'getAppBootstrap', args: []}, Object.assign({Cookie: cookieC}, funnel));
+  check(apiC.status === 200 && JSON.parse(apiC.text).ok, 'API pelo /lotes/api/run');
+  // Tailscale que tira o /lotes antes de repassar: o servidor percebe pelo túnel e mantém os endereços no /lotes.
+  const tirado = await request(portC, 'GET', '/', undefined, funnel);
+  check(tirado.status === 303 && tirado.headers.location === '/lotes/entrar?volta=%2F', 'Tailscale sem o /lotes no pedido: continua no /lotes', tirado.headers);
+  const local = await request(portC, 'GET', '/');
+  check(local.status === 303 && local.headers.location === '/entrar?volta=%2F', 'neste computador (localhost:PORTA) o painel segue na raiz', local.headers);
+  const sairC = await request(portC, 'GET', '/lotes/sair', undefined, Object.assign({Cookie: cookieC}, funnel));
+  check(sairC.status === 303 && sairC.headers.location === '/lotes/' && /^jt_painel_lotes=;/.test(String(sairC.headers['set-cookie'] || '')), 'sair volta para /lotes/');
+  srvC.child.kill();
+
   // ---------- 10. Link do Netlify (grátis) repassando para o link público (Tailscale) ----------
   const viaNetlify = {Origin: 'https://jt-teste.netlify.app', 'X-Forwarded-Host': 'painel.exemplo.ts.net', 'X-Forwarded-Proto': 'https'};
   const noNetlify = await request(port, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, viaNetlify);

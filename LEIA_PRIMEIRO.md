@@ -1,8 +1,24 @@
-# J&T DASHMASTER V4.21.4 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.21.5 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.21.5 — Link do painel de Lotes igual ao do principal (/lotes)
+
+O painel de Lotes/Sacas sai da porta 10000 e passa para o mesmo endereço do principal, com **/lotes** no fim:
+`https://NOME-DO-COMPUTADOR.xxxx.ts.net/lotes`. O `link-publico.bat` do pacote de Lotes liga o Funnel na porta 443 só no
+caminho `/lotes` (`--set-path=/lotes`), sem mexer no link do principal (a raiz do mesmo endereço).
+- O servidor de Lotes atende com e sem o `/lotes` no pedido. Neste computador continua em `http://localhost:3400`.
+- A senha do painel de Lotes usa um cookie próprio, para não sair do principal quando entra no de Lotes (e vice-versa).
+- Novo no `config.json`: `"caminho"` (ex.: `"/lotes"`). Vazio = painel na raiz do link, como o principal.
+
+**Atualizar (quem usava o link com :10000):**
+1. Desligue o link antigo: `"C:\Program Files\Tailscale\tailscale.exe" funnel --https=10000 off`
+2. Feche a janela preta do painel de Lotes, extraia o `JT_DASHMASTER_V4_21_5_LOTES_NODE.zip` em `C:\` (Substituir) e abra
+   o `iniciar.bat`. Ele troca sozinho no `config.json`: `"caminho": "/lotes"`, `"portaLink": 443` e o `"linkPublico"`
+   sem o `:10000`.
+3. Dois cliques no `link-publico.bat`. Link novo: `https://NOME-DO-COMPUTADOR.xxxx.ts.net/lotes`.
 
 ## V4.21.4 — Criação de Lotes com os cabeçalhos da tela do JMS
 

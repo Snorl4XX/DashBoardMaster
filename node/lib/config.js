@@ -35,7 +35,10 @@ const DEFAULTS = {
   // chamadas que chegam por esse endereço.
   linkNetlify: '',
   // Porta do link público no Tailscale Funnel (link-publico.bat): 443 (padrão, link sem número), 8443 ou 10000.
-  portaLink: 443
+  portaLink: 443,
+  // V4.21.5: caminho do painel no link público (ex.: "/lotes" → https://NOME.xxxx.ts.net/lotes, o mesmo link do principal com
+  // o caminho no fim). Vazio = o painel fica na raiz do link.
+  caminho: ''
 };
 /**
  * V4.21: padrões do pacote (node/padrao.json, vem no ZIP). Ex.: o painel de Lotes separado usa a porta 3400 e o link na
@@ -46,6 +49,20 @@ function packageDefaults() {
   if (!fs.existsSync(file)) return {};
   try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) || {}; }
   catch (e) { return {}; }
+}
+
+/**
+ * V4.21.5: o pacote passou a ter um caminho no link (ex.: Lotes em https://NOME.ts.net/lotes, no lugar do :10000). Um
+ * config.json de antes (sem "caminho") recebe o caminho, a porta do link do pacote e o "linkPublico" sem a porta, uma vez só.
+ */
+function migrateLinkPath(file, user) {
+  const pkg = packageDefaults();
+  if (!pkg.caminho || !user || typeof user !== 'object' || Object.prototype.hasOwnProperty.call(user, 'caminho')) return;
+  user.caminho = pkg.caminho;
+  if (pkg.portaLink) user.portaLink = pkg.portaLink;
+  const m = /^(https:\/\/[^/:]+)(:\d+)?\/*$/.exec(String(user.linkPublico || '').trim());
+  if (m) user.linkPublico = m[1] + '/' + String(pkg.caminho).replace(/^\/+|\/+$/g, '');
+  try { fs.writeFileSync(file, JSON.stringify(user, null, 2) + '\n'); } catch (e) { /* pasta só leitura: vale só nesta execução */ }
 }
 
 function configPath() {
@@ -60,6 +77,7 @@ function loadConfig(opts) {
     const text = fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
     try { user = JSON.parse(text); }
     catch (e) { throw new Error('config.json inválido (' + e.message + '). Corrija o arquivo ou apague-o para recriar.'); }
+    migrateLinkPath(file, user);
   } else if (opts.create !== false) {
     try { fs.writeFileSync(file, JSON.stringify(Object.assign({}, DEFAULTS, packageDefaults()), null, 2) + '\n'); } catch (e) { /* pasta só leitura: usa os padrões */ }
   }
@@ -72,6 +90,9 @@ function loadConfig(opts) {
   cfg.dbFile = path.join(cfg.dataDir, 'dashmaster.db');
   cfg.filesDir = path.join(cfg.dataDir, 'arquivos');
   cfg.porta = Number(cfg.porta) || DEFAULTS.porta;
+  // "/lotes", "lotes", "/lotes/" → "/lotes"; só letras, números, - e _.
+  const cam = String(cfg.caminho || '').trim().replace(/^\/+|\/+$/g, '');
+  cfg.caminho = /^[A-Za-z0-9_-]+$/.test(cam) ? '/' + cam : '';
   cfg.linkPublico = String(cfg.linkPublico || '').trim().replace(/\/+$/, '');
   cfg.linkNetlify = String(cfg.linkNetlify || '').trim().replace(/\/+$/, '');
   cfg.configDir = base;
@@ -87,4 +108,4 @@ function loadConfig(opts) {
   return cfg;
 }
 
-module.exports = {loadConfig, DEFAULTS, NODE_DIR, packageDefaults};
+module.exports = {loadConfig, DEFAULTS, NODE_DIR, packageDefaults, migrateLinkPath};

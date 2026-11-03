@@ -20,11 +20,19 @@ rem ---------- 2. Porta do painel e do link (padrao.json do pacote; config.json 
 rem V4.21: o painel de Lotes separado usa a porta 3400 e o link na porta 10000 (padrao.json), no mesmo computador do principal.
 set PORTA=3000
 set PORTALINK=443
+set "CAMINHO="
 if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"porta\"" padrao.json') do set PORTA=%%a
 if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"portaLink\"" padrao.json') do set PORTALINK=%%a
+if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"caminho\"" padrao.json') do set "CAMINHO=%%~a"
 if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"porta\"" config.json') do set PORTA=%%a
-if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"portaLink\"" config.json') do set PORTALINK=%%a
-echo   [2/4] Porta do painel: %PORTA% - porta do link: %PORTALINK%
+rem config.json de antes do caminho (sem "caminho"): o link fica o do pacote (iniciar.bat atualiza o config.json).
+set "LINKCFG=1"
+if defined CAMINHO set "LINKCFG="
+if exist config.json findstr /c:"\"caminho\"" config.json >nul 2>nul && set "LINKCFG=1"
+if defined LINKCFG if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"portaLink\"" config.json') do set PORTALINK=%%a
+if defined LINKCFG if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"caminho\"" config.json') do set "CAMINHO=%%~a"
+rem V4.21.5: com "caminho" (ex.: /lotes), o painel fica no mesmo link do principal com o caminho no fim (https://NOME.ts.net/lotes).
+echo   [2/4] Porta do painel: %PORTA% - porta do link: %PORTALINK% - caminho: %CAMINHO%
 netstat -an | findstr /r /c:":%PORTA% .*LISTENING" >nul
 if errorlevel 1 (
   echo         AVISO: o painel nao esta aberto agora. Abra o atalho DashMaster depois - o link so mostra o painel com ele aberto.
@@ -47,8 +55,12 @@ rem ---------- 4. Funnel ----------
 echo   [4/4] Publicando o painel na internet (Funnel)...
 echo         Na primeira vez aparece um link para AUTORIZAR o Funnel: abra, clique em Enable e espere aqui.
 echo.
+if defined CAMINHO goto funnelCaminho
 if "%PORTALINK%"=="443" goto funnel443
 "%TS%" funnel --bg --https=%PORTALINK% %PORTA%
+goto funnelFeito
+:funnelCaminho
+"%TS%" funnel --bg --https=%PORTALINK% --set-path=%CAMINHO% http://127.0.0.1:%PORTA%%CAMINHO%
 goto funnelFeito
 :funnel443
 "%TS%" funnel --bg %PORTA%
@@ -57,10 +69,11 @@ if errorlevel 1 goto funnelErro
 echo.
 "%TS%" funnel status
 echo.
-echo   PRONTO. O endereco https://....ts.net acima e o LINK PUBLICO do painel (com :%PORTALINK% no fim, se nao for 443).
+echo   PRONTO. O endereco https://....ts.net acima e o LINK PUBLICO do painel (com :%PORTALINK% no fim, se nao for 443, e %CAMINHO%).
 echo   Ele nao muda e continua valendo depois de reiniciar o computador (nao precisa deixar esta janela aberta).
 echo   Coloque-o em "linkPublico" no config.json e defina uma "senha" para o painel.
-echo   Para tirar do ar so este link: "%TS%" funnel --https=%PORTALINK% off
+if defined CAMINHO echo   Para tirar do ar so este link: "%TS%" funnel --https=%PORTALINK% --set-path=%CAMINHO% off
+if not defined CAMINHO echo   Para tirar do ar so este link: "%TS%" funnel --https=%PORTALINK% off
 goto fim
 
 :semTailscale

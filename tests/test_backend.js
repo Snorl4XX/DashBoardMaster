@@ -3151,14 +3151,28 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
   const created = JSON.parse(fsM.readFileSync(cfgFileL, 'utf8'));
   const batW = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar-com-windows.bat'), 'utf8'), batI = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar.bat'), 'utf8');
-  check(keysOf(ctxL).join() === 'lot_flow' && ctxL.getAppBootstrap().app.panel === 'Criação de Lotes' && confL.porta === 3400 && confL.portaLink === 10000 &&
-    created.porta === 3400 && created.portaLink === 10000 && /JT DashMaster Lotes\.lnk/.test(batW) && !/JT DashMaster\.lnk/.test(batW) && /DashMaster Lotes/.test(batI) &&
+  check(keysOf(ctxL).join() === 'lot_flow' && ctxL.getAppBootstrap().app.panel === 'Criação de Lotes' && confL.porta === 3400 && confL.portaLink === 443 &&
+    confL.caminho === '/lotes' && created.porta === 3400 && created.portaLink === 443 && created.caminho === '/lotes' && /JT DashMaster Lotes\.lnk/.test(batW) && !/JT DashMaster\.lnk/.test(batW) && /DashMaster Lotes/.test(batI) &&
     fsM.existsSync(pathM.join(rootL, 'LEIA_LOTES.md')) && fsM.existsSync(pathM.join(rootL, 'node', 'link-publico.bat')),
-    'pacote Node.js de Lotes: só a Criação de Lotes, porta 3400, link na 10000 e atalho próprio', {keys: keysOf(ctxL), porta: confL.porta, link: confL.portaLink});
+    'pacote Node.js de Lotes: só a Criação de Lotes, porta 3400, link em /lotes e atalho próprio', {keys: keysOf(ctxL), porta: confL.porta, link: confL.portaLink});
+  // V4.21.5: quem já usava o link com :10000 — o config.json de antes passa para o /lotes sozinho, uma vez só.
+  fsM.writeFileSync(cfgFileL, JSON.stringify({porta: 3400, portaLink: 10000, senha: 'x', linkPublico: 'https://painel.exemplo.ts.net:10000/'}, null, 2));
+  process.env.DASHMASTER_CONFIG = cfgFileL;
+  const migL = cfgModL.loadConfig();
+  const migFile = JSON.parse(fsM.readFileSync(cfgFileL, 'utf8'));
+  fsM.writeFileSync(cfgFileL, JSON.stringify(Object.assign({}, migFile, {caminho: '', portaLink: 10000})));
+  const keptL = cfgModL.loadConfig();
+  if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
+  check(migL.caminho === '/lotes' && migL.portaLink === 443 && migL.linkPublico === 'https://painel.exemplo.ts.net/lotes' && migFile.senha === 'x' &&
+    migFile.caminho === '/lotes' && migFile.portaLink === 443 && keptL.caminho === '' && keptL.portaLink === 10000,
+    'config.json com o link antigo (:10000) vira /lotes uma vez; depois vale o que a pessoa escolher', {migL: [migL.caminho, migL.portaLink, migL.linkPublico], keptL: [keptL.caminho, keptL.portaLink]});
+  const batLink = fsM.readFileSync(pathM.join(rootL, 'node', 'link-publico.bat'), 'utf8');
+  check(/funnel --bg --https=%PORTALINK% --set-path=%CAMINHO% http:\/\/127\.0\.0\.1:%PORTA%%CAMINHO%/.test(batLink) && /\r\n/.test(batLink) &&
+    /--set-path=%CAMINHO% off/.test(batLink) && /^[\x00-\x7f]*$/.test(batLink), 'link-publico.bat liga o link no caminho (/lotes) do mesmo endereço');
   // V4.21.2: a porta do painel de Lotes não pode ser a de outro app no mesmo computador (a 3100 era a do Sorter).
   const portOf = f => Number((fsM.readFileSync(pathM.join(__dirname, '..', f), 'utf8').match(/^\s*porta:\s*(\d+)/m) || [])[1]);
   const others = {DashMaster: 3000, Sorter: portOf('sorter/server.js'), Pesquisa: portOf('pesquisa/server.js'), 'Expedição Incorreta': portOf('expedicao_incorreta/server.js')};
-  check(Object.keys(others).every(k => others[k] > 0 && others[k] !== LOTS_NODE.padrao.porta) && LOTS_NODE.padrao.portaLink === 10000,
+  check(Object.keys(others).every(k => others[k] > 0 && others[k] !== LOTS_NODE.padrao.porta) && LOTS_NODE.padrao.portaLink === 443 && LOTS_NODE.padrao.caminho === '/lotes',
     'painel de Lotes numa porta livre (nenhum outro app usa a ' + LOTS_NODE.padrao.porta + ')', others);
   fsM.rmSync(out, {recursive: true, force: true});
 }
