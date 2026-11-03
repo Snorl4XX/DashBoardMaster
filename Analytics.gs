@@ -504,6 +504,16 @@ function GroupSummarySink_(cfg, filters, topLimit) {
     }
   });
   sums.forEach(x => { marg[x.name] = new Map(); });
+  // V4.21.6: gráfico de um campo só nas linhas com a base de OUTRO campo dentro/fora da lista (Criação de Lotes: turnos que
+  // enviaram sacas ecológicas para destinos fora do comunicado): total por valor só dessas linhas ("shift@ecoWrongShift").
+  const crosses = [];
+  (cfg.charts || []).forEach(c => {
+    const d = c.dim || c.key, sf = c.siteField;
+    if (c.siteList && sf && sf !== d && dims.indexOf(d) >= 0 && (cfg.groupFields || []).indexOf(sf) >= 0) {
+      crosses.push({dim: d, field: sf, list: c.siteList, keep: c.siteMode !== 'out', name: d + '@' + c.key});
+    }
+  });
+  crosses.forEach(x => { marg[x.name] = new Map(); });
   // Maiores combinações POR LISTA (tabelas do painel: uma por lista; as listas pequenas têm quantidade 1).
   const tops = {}, floors = {};
   let cubeRows = 0, totalQty = 0, outCount = 0;
@@ -528,6 +538,17 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       acc[x.name] = new Float64Array(dDate.length * nCol * vals[x.dim].length);
       fv[x.name] = {vals: (ds.dict[x.field] || ['']).map(v => Number(v) || 0), col: idxOf(x.field)};
     });
+    // Linha conta no gráfico cruzado se a base dela (sem "N/A") está dentro/fora da lista, como no JTCore_.chartRows.
+    const cx = {};
+    crosses.forEach(x => {
+      acc[x.name] = new Float64Array(dDate.length * nCol * vals[x.dim].length);
+      cx[x.name] = {ok: (ds.dict[x.field] || ['']).map(v => { const s = norm(x.field, v); return !JTCore_.noValue(s) && JTCore_.inSiteList(s, x.list) === x.keep; }),
+        col: idxOf(x.field)};
+    });
+    const crossAdd = (x, base, i, q) => {
+      const c = cols[x.dim], k = cx[x.name];
+      if (k.ok[k.col ? k.col[i] : 0]) acc[x.name][base * vals[x.dim].length + (c ? c[i] : 0)] += q;
+    };
     for (let i = 0; i < n; i++) {
       const q = cQty ? qd[cQty[i]] : 1;
       cubeRows++; totalQty += q;
@@ -544,6 +565,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
         const c = cols[failK];
         acc[failK][base * vals[failK].length + (c ? c[i] : 0)] += q;
         sums.forEach(x => { if (x.dim !== failK) return; const f = fv[x.name]; acc[x.name][base * vals[failK].length + (c ? c[i] : 0)] += q * (f.col ? f.vals[f.col[i]] : 0); });
+        crosses.forEach(x => { if (x.dim === failK) crossAdd(x, base, i, q); });
         continue;
       }
       tot[base] += q;
@@ -552,6 +574,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
         const x = sums[a], c = cols[x.dim], f = fv[x.name];
         acc[x.name][base * vals[x.dim].length + (c ? c[i] : 0)] += q * (f.col ? f.vals[f.col[i]] : 0);
       }
+      for (let a = 0; a < crosses.length; a++) crossAdd(crosses[a], base, i, q);
       const colV = vals.column[ci], tl = tops[colV] || (tops[colV] = []), fl = floors[colV] || 0;
       if (topLimit && (q > fl || tl.length < topLimit)) {
         const r = {};
@@ -569,7 +592,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
           const a = acc[k], m = vals[k].length;
           for (let v = 0; v < m; v++) if (a[b * m + v]) bump(marg[k], key + '\u0001' + vals[k][v], a[b * m + v]);
         });
-        sums.forEach(x => {
+        sums.concat(crosses).forEach(x => {
           const a = acc[x.name], m = vals[x.dim].length;
           for (let v = 0; v < m; v++) if (a[b * m + v]) bump(marg[x.name], key + '\u0001' + vals[x.dim][v], a[b * m + v]);
         });
@@ -586,7 +609,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       const tb = DatasetBuilder_(['date', 'column', 'shipment', 'qty'], null);
       totals.forEach((q, key) => { const p = key.split('\u0001'); tb.addRows([{date: p[0], column: p[1], shipment: 'T' + (++seq), qty: String(q)}]); });
       const mb = DatasetBuilder_(['date', 'column', 'shipment', '_m', 'value', 'qty'], null);
-      dims.concat(sums.map(x => x.name)).forEach(k => marg[k].forEach((q, key) => {
+      dims.concat(sums.map(x => x.name), crosses.map(x => x.name)).forEach(k => marg[k].forEach((q, key) => {
         const p = key.split('\u0001');
         mb.addRows([{date: p[0], column: p[1], shipment: 'M' + (++seq), _m: k, value: p[2], qty: String(q)}]);
       }));

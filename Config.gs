@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.21.5',
+  VERSION: '4.21.6',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1359,6 +1359,13 @@ const ALL_INDICATORS_ = Object.freeze({
         title: {pt: 'Sacas ecológicas enviadas incorretamente', zh: '红色芯片袋错发网点'},
         sub: {pt: 'Destinos fora da lista do comunicado "Envio de sacas vermelhas com chip" (desde 24/08/2026) · top 10',
           zh: '不在《红色芯片袋发送通知》授权名单内的拆包网点（前10）'}},
+      // V4.21.6 (pedido): turnos que enviaram errado as sacas ecológicas — as mesmas sacas do gráfico acima (destino fora da
+      // lista do comunicado), contadas pelo turno do tempo de ensacamento. T1, T2 e T3 sempre, na ordem.
+      {key: 'ecoWrongShift', dim: 'shift', where: {column: 'Sacas ecológicas'}, siteList: ECO_BAG_SITES_2026_08_24_, siteMode: 'out',
+        siteField: 'destination', type: 'bar', allShifts: true,
+        title: {pt: 'Turnos que enviaram sacas ecológicas incorretamente', zh: '各班次红色芯片袋错发数'},
+        sub: {pt: 'Sacas ecológicas para destinos fora da lista do comunicado "Envio de sacas vermelhas com chip", por turno (tempo de ensacamento)',
+          zh: '发往授权名单外网点的红色芯片袋，按班次（建包时间）'}},
       {key: 'ecoRight', dim: 'destination', where: {column: 'Sacas ecológicas'}, siteList: ECO_BAG_SITES_2026_08_24_, siteMode: 'in',
         type: 'bar', horizontal: true, top: 10, hideNA: true,
         title: {pt: 'Destinos que receberam as sacas ecológicas corretamente', zh: '红色芯片袋正确发往的网点'},

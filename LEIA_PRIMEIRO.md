@@ -1,8 +1,18 @@
-# J&T DASHMASTER V4.21.5 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.21.6 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.21.6 — Turnos que enviaram errado as sacas ecológicas (painel de Lotes)
+
+Gráfico novo no painel de Lotes/Sacas, logo depois de "Sacas ecológicas enviadas incorretamente": **Turnos que enviaram
+sacas ecológicas incorretamente**. São as mesmas sacas daquele gráfico (ecológicas com destino fora da lista do comunicado
+"Envio de sacas vermelhas com chip"), contadas pelo turno do tempo de ensacamento. T1, T2 e T3 aparecem sempre, na ordem
+(turno sem erro fica com 0). Sacas sem destino e sacas não ecológicas não contam. Funciona com os filtros e em período grande.
+
+**Atualizar:** feche a janela preta do painel de Lotes, extraia o `JT_DASHMASTER_V4_21_6_LOTES_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. Os dados, a senha e o link `/lotes` continuam.
 
 ## V4.21.5 — Link do painel de Lotes igual ao do principal (/lotes)
 

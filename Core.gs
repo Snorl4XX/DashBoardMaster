@@ -747,9 +747,10 @@ function JTCoreFactory_() {
       });
     }
     // V4.20 (Criação de Lotes): só os destinos da lista (siteMode 'in') ou só os de fora ('out'); sem destino não conta.
+    // V4.21.6: _siteOk = linha de total já filtrada pela lista no servidor (período grande; ex.: turnos × destino).
     if (def.siteList) {
       var f = def.siteField || def.dim, keep = def.siteMode !== 'out';
-      out = out.filter(function (r) { var v = r[f]; return !blank(v) && !noValue(v) && inSiteList(v, def.siteList) === keep; });
+      out = out.filter(function (r) { var v = r[f]; return r._siteOk || (!blank(v) && !noValue(v) && inSiteList(v, def.siteList) === keep); });
     }
     return out;
   }
@@ -761,14 +762,19 @@ function JTCoreFactory_() {
     var out = {};
     decodeDataset(ds).forEach(function (r) {
       var o = {date: r.date, column: r.column, shipment: r.shipment, qty: r.qty};
-      // "lot:items" = soma de itens por saca: o valor vai no campo da dimensão (lot).
-      o[String(r._m).split(':')[0]] = r.value;
+      // "lot:items" = soma de itens por saca: o valor vai no campo da dimensão (lot). V4.21.6: "shift@ecoWrongShift" = turnos
+      // só das linhas com o destino fora/dentro da lista do gráfico (já filtradas no servidor).
+      var m = String(r._m).split(':')[0];
+      if (m.indexOf('@') > 0) { m = m.split('@')[0]; o._siteOk = 1; }
+      o[m] = r.value;
       (out[r._m] || (out[r._m] = [])).push(o);
     });
     return out;
   }
   function summaryChartRows(def, byDim, filters) {
     var k = def.dim || def.key, f = {}, sk = def.sumField ? k + ':' + def.sumField : null;
+    // V4.21.6: gráfico de um campo com a lista de bases em OUTRO campo (turnos × destino): os totais só dessas linhas.
+    if (def.siteList && def.siteField && def.siteField !== k) sk = k + '@' + def.key;
     if (filters && filters[k]) f[k] = filters[k];
     return applyFilters((byDim && ((sk && byDim[sk]) || byDim[k])) || [], f);
   }

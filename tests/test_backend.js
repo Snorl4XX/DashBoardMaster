@@ -2203,12 +2203,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cardsL = catL.metricPanels[0].metrics.filter(x => x.card !== false).map(x => x.key);
   check(catL && catL.name.pt === 'Criação de Lotes' && catL.filters.map(f => f.key).join() === 'sackType,port,lot,destination,shift' &&
     catL.filters.map(f => f.label.pt).join() === 'Tipo de sacas,Tipo de entrada e saída,Número dos lotes,Destinos,Turnos' &&
-    catL.charts.map(x => x.key).join() === 'shiftPie,mDaily,ports,sackTypes,topDest,ecoWrong,ecoRight' && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' &&
+    catL.charts.map(x => x.key).join() === 'shiftPie,mDaily,ports,sackTypes,topDest,ecoWrong,ecoWrongShift,ecoRight' && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' &&
     !(catL.detailCards || []).length && catL.heroMetric.sub === 'waybillSum' && catL.prevCard && catL.prevCard.sub === 'waybillSum' &&
     cardsL.join() === 'packageSum,loopRate,noloopRate,loopSum,noloopSum' &&
     catL.metricPanels[0].metrics.filter(x => x.subMetric).map(x => x.subMetric.key).join() === 'loopWaybillSum,noloopWaybillSum' &&
     catL.metricPanels[1].metrics.every(x => x.card === false) && catL.shiftCardsByColumn.split.length === 2,
-    'Lotes: catálogo do pedido — filtros (tipo de sacas, entrada/saída, lotes, destinos, turnos), cartões com as remessas embaixo e 7 gráficos',
+    'Lotes: catálogo do pedido — filtros (tipo de sacas, entrada/saída, lotes, destinos, turnos), cartões com as remessas embaixo e 8 gráficos',
     {f: catL.filters.map(f => f.key), ch: catL.charts.map(x => x.key), cards: cardsL});
   const both = tA.items + truthL(dA['2026-09-18'].lt).items, arrBoth = tA.arrItems + truthL(dA['2026-09-18'].lt).arrItems;
   cA.__state.props.GROUPED_CLIENT_ROWS = '10';
@@ -2225,6 +2225,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const chWS = cA.JTCore_.buildChart(chDef('ecoWrong'), cA.JTCore_.summaryChartRows(chDef('ecoWrong'), mS, {}), {});
   const chRS = cA.JTCore_.buildChart(chDef('ecoRight'), cA.JTCore_.summaryChartRows(chDef('ecoRight'), mS, {}), {});
   check(chWS.total === ecoBoth && chRS.total === 0, 'Lotes: período grande — sacas ecológicas por destino autorizado ou não', {w: chWS.total, r: chRS.total, ecoBoth});
+  const chTS = cA.JTCore_.buildChart(chDef('ecoWrongShift'), cA.JTCore_.summaryChartRows(chDef('ecoWrongShift'), mS, {}), {});
+  check(chTS.total === ecoBoth && chTS.labels.slice(0, 3).join() === 'T1,T2,T3' && chTS.datasets[0].data.reduce((a, v) => a + v, 0) === ecoBoth,
+    'Lotes: período grande — turnos que enviaram sacas ecológicas incorretamente (totais no servidor)', {t: chTS.total, l: chTS.labels, d: chTS.datasets[0].data, ecoBoth});
   check(dSf.summary && chSf.total === arrBoth, 'Lotes: período grande com filtro de Entrada/Saída aplicado no servidor', {total: chSf.total, arrBoth});
 
   // 3a. V4.20 (pedido): destinos das sacas ecológicas (vermelhas com chip) pela lista do comunicado "Envio de sacas vermelhas com
@@ -2242,6 +2245,21 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     chR.total === 5 && chR.labels[0] === 'SP GRU' && ['DC VCP-SP', 'dc itj 001-pr', 'JND-SP'].every(x => chR.labels.indexOf(x) >= 0) &&
     chDef('ecoWrong').title.pt === 'Sacas ecológicas enviadas incorretamente' && chDef('ecoRight').title.pt === 'Destinos que receberam as sacas ecológicas corretamente',
     'Lotes: sacas ecológicas enviadas incorretamente / corretamente pela lista de SCs e DCs do comunicado', {w: chW.labels, r: chR.labels, tw: chW.total, tr: chR.total});
+  // V4.21.6 (pedido): turnos que enviaram errado as sacas ecológicas — só as ecológicas com destino fora da lista, por turno.
+  // [tipo, destino, turno, quantas sacas]
+  const shRows = [];
+  [['Ecológica', 'RT ALFA', 'T1', 2], ['Ecológica', 'DC FICTICIO-AL', 'T3', 1], ['Ecológica', 'DC VCP-SP', 'T2', 4], ['Ecológica', 'N/A', 'T2', 3],
+    ['Não ecológica', 'RT ALFA', 'T2', 5], ['Ecológica', 'RT ALFA', 'T3', 1]].forEach(([col, dest, sh, n]) => {
+    for (let i = 0; i < n; i++) shRows.push({date: D19, column: col, sackType: col, destination: dest, shift: sh, lot: 'BRFICSH' + shRows.length, shipment: 'BRFICSH' + shRows.length, qty: 1});
+  });
+  const chT = cA.JTCore_.buildChart(chDef('ecoWrongShift'), shRows, {});
+  const sumView = f => { const sk = cA.GroupSummarySink_(cfgL, f, 10); sk.addRows(JSON.parse(JSON.stringify(shRows))); return cA.groupSummaryView_(cfgL, sk.build(), f).charts.filter(c => c.key === 'ecoWrongShift')[0]; };
+  const chTS0 = sumView({}), chTS1 = sumView({shift: ['T1']}), chTSd = sumView({destination: ['DC FICTICIO-AL']});
+  check(chT.total === 4 && chT.labels.join() === 'T1,T2,T3' && chT.datasets[0].data.join() === '2,0,2' && chT.type === 'bar' &&
+    chTS0.datasets[0].data.join() === '2,0,2' && chTS1.datasets[0].data.join() === '2,0,0' && chTSd.datasets[0].data.join() === '0,0,1' &&
+    chDef('ecoWrongShift').title.pt === 'Turnos que enviaram sacas ecológicas incorretamente',
+    'Lotes: gráfico dos turnos que enviaram sacas ecológicas incorretamente (destino fora do comunicado; sem destino e não ecológica não contam)',
+    {t: chT.datasets[0].data, s0: chTS0.datasets[0].data, s1: chTS1.datasets[0].data, sd: chTSd.datasets[0].data});
 
   // 3b. V4.18: dias baixados antes (gravados como "Partida"/"Chegada") aparecem com os nomes da tela, na leitura normal e no
   // resumo de período grande, sem baixar de novo.
