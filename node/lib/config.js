@@ -38,7 +38,7 @@ const DEFAULTS = {
   portaLink: 443
 };
 /**
- * V4.21: padrões do pacote (node/padrao.json, vem no ZIP). Ex.: o painel de Lotes separado usa a porta 3100 e o link na
+ * V4.21: padrões do pacote (node/padrao.json, vem no ZIP). Ex.: o painel de Lotes separado usa a porta 3400 e o link na
  * 10000, para rodar no mesmo computador que o painel principal (3000 / 443). O config.json de quem instalou vale mais.
  */
 function packageDefaults() {

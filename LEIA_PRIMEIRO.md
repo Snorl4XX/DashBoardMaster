@@ -1,8 +1,31 @@
-# J&T DASHMASTER V4.21.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.21.2 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.21.2 — Painel de Lotes/Sacas na porta 3400
+
+**O que acontecia:** "a porta já está sendo usada". A porta 3100 do painel de Lotes é a mesma do painel do **Sorter**.
+
+**Agora:** o painel de Lotes usa a porta **3400** (http://localhost:3400). Portas dos apps no mesmo computador:
+
+| App | Porta |
+|---|---|
+| Painel principal | 3000 |
+| Sorter | 3100 |
+| Pesquisa no Rastreamento | 3200 |
+| Expedição Incorreta | 3300 |
+| **Lotes/Sacas** | **3400** |
+
+O link do Tailscale do painel de Lotes continua na porta **10000** (`https://NOME.xxxx.ts.net:10000`).
+
+**Quem já extraiu o ZIP de Lotes** (o `config.json` já foi criado com a 3100):
+1. Feche a janela preta do painel de Lotes.
+2. Abra `C:\dashmaster-lotes\node\config.json` no Bloco de Notas, troque `"porta": 3100` por `"porta": 3400` e salve.
+3. Dois cliques em `iniciar.bat`.
+4. No cmd, rode `"C:\Program Files\Tailscale\tailscale.exe" funnel --https=10000 off`. Depois dê dois cliques em `link-publico.bat`:
+   o link :10000 passa a abrir o painel da porta 3400.
 
 ## V4.21.1 — Tabela de rotas atualizada: AC RBR no SP GRU-BSB
 
@@ -32,7 +55,7 @@ distribuição do SP GRU" atualizada.
 
 | Pacote | Para quê |
 |---|---|
-| `JT_DASHMASTER_V4_21_LOTES_NODE.zip` | **Node.js**, no mesmo computador do principal: pasta `C:\dashmaster-lotes`, porta **3100**, link do Tailscale na porta **10000** |
+| `JT_DASHMASTER_V4_21_LOTES_NODE.zip` | **Node.js**, no mesmo computador do principal: pasta `C:\dashmaster-lotes`, porta **3400** (V4.21.2), link do Tailscale na porta **10000** |
 | `JT_DASHMASTER_V4_21_LOTES.zip` | Apps Script, num projeto novo (de preferência noutra conta Google) |
 
 **Três painéis no mesmo computador, cada um com o seu link:**
@@ -41,7 +64,7 @@ distribuição do SP GRU" atualizada.
 |---|---|---|---|
 | Painel principal | `C:\dashmaster` | http://localhost:3000 | `https://NOME.xxxx.ts.net` (porta 443) |
 | Expedição Incorreta | `C:\expedicao_incorreta` | http://localhost:3300 | `https://NOME.xxxx.ts.net:8443` |
-| **Lotes/Sacas** | `C:\dashmaster-lotes` | **http://localhost:3100** | **`https://NOME.xxxx.ts.net:10000`** |
+| **Lotes/Sacas** | `C:\dashmaster-lotes` | **http://localhost:3400** | **`https://NOME.xxxx.ts.net:10000`** |
 
 O Tailscale Funnel só aceita as portas 443, 8443 e 10000: as três estão em uso.
 
@@ -49,7 +72,7 @@ O Tailscale Funnel só aceita as portas 443, 8443 e 10000: as três estão em us
 1. Extraia o `JT_DASHMASTER_V4_21_LOTES_NODE.zip` em `C:\`. Fica a pasta `C:\dashmaster-lotes` (não extraia por cima do
    `C:\dashmaster`).
 2. Em `C:\dashmaster-lotes\node`, dois cliques em **iniciar.bat**. A janela preta fica aberta.
-3. Abra **http://localhost:3100/config**:
+3. Abra **http://localhost:3400/config**:
    - cole o AuthToken do JMS;
    - escolha a Data inicial;
    - clique em **Baixar histórico**.

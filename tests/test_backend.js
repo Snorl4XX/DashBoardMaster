@@ -3107,7 +3107,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'pacote Node.js: só a linha do pacote muda no Config.gs');
   check(fsM.existsSync(pathM.join(root, 'node', 'server.js')) && !fsM.existsSync(pathM.join(root, 'node', 'test')) && !fsM.existsSync(pathM.join(root, 'node', 'padrao.json')),
     'pacote Node.js com o servidor, sem os testes e sem padrao.json (porta 3000, link na 443)');
-  // V4.21: painel de Lotes separado (Node.js) — outra pasta, porta 3100, link do Tailscale na 10000, atalho próprio.
+  // V4.21: painel de Lotes separado (Node.js) — outra pasta, porta 3400, link do Tailscale na 10000, atalho próprio.
   const {LOTS_NODE} = require('../tools/gerar_paineis');
   const zipL = fsM.readFileSync(buildNode(out, {variant: LOTS_NODE}).zip), dirL = pathM.join(out, 'extraido-lotes');
   for (let i = 0; zipL.readUInt32LE(i) === 0x04034b50;) {
@@ -3127,10 +3127,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
   const created = JSON.parse(fsM.readFileSync(cfgFileL, 'utf8'));
   const batW = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar-com-windows.bat'), 'utf8'), batI = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar.bat'), 'utf8');
-  check(keysOf(ctxL).join() === 'lot_flow' && ctxL.getAppBootstrap().app.panel === 'Criação de Lotes' && confL.porta === 3100 && confL.portaLink === 10000 &&
-    created.porta === 3100 && created.portaLink === 10000 && /JT DashMaster Lotes\.lnk/.test(batW) && !/JT DashMaster\.lnk/.test(batW) && /DashMaster Lotes/.test(batI) &&
+  check(keysOf(ctxL).join() === 'lot_flow' && ctxL.getAppBootstrap().app.panel === 'Criação de Lotes' && confL.porta === 3400 && confL.portaLink === 10000 &&
+    created.porta === 3400 && created.portaLink === 10000 && /JT DashMaster Lotes\.lnk/.test(batW) && !/JT DashMaster\.lnk/.test(batW) && /DashMaster Lotes/.test(batI) &&
     fsM.existsSync(pathM.join(rootL, 'LEIA_LOTES.md')) && fsM.existsSync(pathM.join(rootL, 'node', 'link-publico.bat')),
-    'pacote Node.js de Lotes: só a Criação de Lotes, porta 3100, link na 10000 e atalho próprio', {keys: keysOf(ctxL), porta: confL.porta, link: confL.portaLink});
+    'pacote Node.js de Lotes: só a Criação de Lotes, porta 3400, link na 10000 e atalho próprio', {keys: keysOf(ctxL), porta: confL.porta, link: confL.portaLink});
+  // V4.21.2: a porta do painel de Lotes não pode ser a de outro app no mesmo computador (a 3100 era a do Sorter).
+  const portOf = f => Number((fsM.readFileSync(pathM.join(__dirname, '..', f), 'utf8').match(/^\s*porta:\s*(\d+)/m) || [])[1]);
+  const others = {DashMaster: 3000, Sorter: portOf('sorter/server.js'), Pesquisa: portOf('pesquisa/server.js'), 'Expedição Incorreta': portOf('expedicao_incorreta/server.js')};
+  check(Object.keys(others).every(k => others[k] > 0 && others[k] !== LOTS_NODE.padrao.porta) && LOTS_NODE.padrao.portaLink === 10000,
+    'painel de Lotes numa porta livre (nenhum outro app usa a ' + LOTS_NODE.padrao.porta + ')', others);
   fsM.rmSync(out, {recursive: true, force: true});
 }
 

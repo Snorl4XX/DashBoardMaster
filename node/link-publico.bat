@@ -17,7 +17,7 @@ if not defined TS goto semTailscale
 echo   [1/4] Tailscale encontrado: %TS%
 
 rem ---------- 2. Porta do painel e do link (padrao.json do pacote; config.json vale mais) ----------
-rem V4.21: o painel de Lotes separado usa a porta 3100 e o link na porta 10000 (padrao.json), no mesmo computador do principal.
+rem V4.21: o painel de Lotes separado usa a porta 3400 e o link na porta 10000 (padrao.json), no mesmo computador do principal.
 set PORTA=3000
 set PORTALINK=443
 if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"porta\"" padrao.json') do set PORTA=%%a

@@ -13,7 +13,7 @@
  *
  * V4.21 (pedido "Separar o DASHBOARD DE LOTE/SACA do Dash principal"): a Criação de Lotes sai do painel principal e ganha
  * pacotes próprios — JT_DASHMASTER_<versão>_LOTES.zip (Apps Script, outro projeto) e JT_DASHMASTER_<versão>_LOTES_NODE.zip
- * (pasta "dashmaster-lotes/": porta 3100 e link do Tailscale na porta 10000, no mesmo computador do painel principal).
+ * (pasta "dashmaster-lotes/": porta 3400 e link do Tailscale na porta 10000, no mesmo computador do painel principal).
  *
  * Netlify: também a página do painel para um site do Netlify (JT_DASHMASTER_<versão>_NETLIFY.zip, pasta "dashmaster-netlify/"):
  * a mesma tela, já montada, pedindo os dados ao Apps Script (Api.gs) pelo link /exec — nada instalado no computador.
@@ -30,13 +30,14 @@ const FLOWS = 'arrival_flow,send_flow';
 const LOTS = 'lot_flow';
 const MAIN_OUT = FLOWS + ',' + LOTS;
 const LOTS_PACOTE = {so: LOTS, fora: '', nome: 'Criação de Lotes'};
-// Pacote Node.js do painel de Lotes: outra pasta, outra porta e o link do Tailscale na porta 10000 (o principal usa a 443 e a
+// Pacote Node.js do painel de Lotes: outra pasta, outra porta (V4.21.2: 3400 — a 3100 é do painel do Sorter, a 3200 da
+// Pesquisa e a 3300 da Expedição Incorreta) e o link do Tailscale na porta 10000 (o principal usa a 443 e a
 // Expedição Incorreta a 8443 — o Funnel só aceita 443, 8443 e 10000).
-const LOTS_NODE = {folder: 'dashmaster-lotes', zip: 'LOTES_NODE', pacote: LOTS_PACOTE, padrao: {porta: 3100, portaLink: 10000},
+const LOTS_NODE = {folder: 'dashmaster-lotes', zip: 'LOTES_NODE', pacote: LOTS_PACOTE, padrao: {porta: 3400, portaLink: 10000},
   // Atalho e janela com nome próprio (o atalho "JT DashMaster" do principal não é trocado).
   replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster Lotes.lnk'], ['"JT DashMaster"', '"JT DashMaster Lotes"'],
     ['o DashMaster vai abrir', 'o painel de Lotes vai abrir']],
-    'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster Lotes (Node.js) - porta 3100']]},
+    'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster Lotes (Node.js) - porta 3400']]},
   readme: v => `# Painel de Lotes/Sacas (Node.js) — J&T DashMaster ${v}
 
 Painel **separado** do principal, só com a **Criação de Lotes** (sacas ecológicas e não ecológicas). Roda no mesmo computador
@@ -45,13 +46,13 @@ do painel principal, sem misturar: pasta, dados, porta e link próprios.
 | | Painel principal | Painel de Lotes |
 |---|---|---|
 | Pasta | C:\\dashmaster | **C:\\dashmaster-lotes** |
-| Neste computador | http://localhost:3000 | **http://localhost:3100** |
+| Neste computador | http://localhost:3000 | **http://localhost:3400** |
 | Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net:10000** |
 
 ## Instalar (uma vez)
 1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-lotes). Não extraia por cima do C:\\dashmaster.
 2. Abra C:\\dashmaster-lotes\\node e dê dois cliques em **iniciar.bat**. Deixe a janela preta aberta.
-3. Neste computador, abra **http://localhost:3100/config**: cole o AuthToken do JMS, escolha a Data inicial e clique em
+3. Neste computador, abra **http://localhost:3400/config**: cole o AuthToken do JMS, escolha a Data inicial e clique em
    **Baixar histórico**.
 4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Lotes").
 5. **Link do Tailscale:** dois cliques em **link-publico.bat**. Ele liga o link na porta **10000**:

@@ -125,7 +125,7 @@ Sozinho, o servidor só abre na rede da base. Para ter um **link `https://` que 
 Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.exe" funnel reset`.
 
 **Painel de Lotes/Sacas separado (V4.21):** o ZIP `JT_DASHMASTER_..._LOTES_NODE.zip` instala outro painel em
-`C:\dashmaster-lotes` (porta 3100). O `link-publico.bat` dele liga o link na porta **10000**
+`C:\dashmaster-lotes` (porta 3400). O `link-publico.bat` dele liga o link na porta **10000**
 (`https://NOME.xxxx.ts.net:10000`), sem mexer no link do painel principal. Passo a passo no `LEIA_LOTES.md` do ZIP.
 
 **Sem o `link-publico.bat`** (arquivos `.bat` bloqueados): crie um atalho (botão direito na Área de Trabalho → Novo → Atalho) com
