@@ -79,7 +79,7 @@
       evolution30: '30 dias até {date}',
       periodView: 'Período', historyView: 'Histórico', ranking: 'Ranking', timeline: '24 h', chartView: 'Gráfico', tableView: 'Tabela',
       distinctShipments: 'Remessas distintas', topOf: 'Top {n} de {m}', partial: 'PARCIAL',
-      noData: 'Sem dados no período', noDataHint: 'Os detalhes deste período ainda não foram sincronizados.',
+      noData: 'Sem dados no período', crossTotal: 'Total', noDataHint: 'Os detalhes deste período ainda não foram sincronizados.',
       noRateHint: 'Nenhuma taxa oficial sincronizada no período.', noChartLib: 'Biblioteca de gráficos indisponível — exibindo tabela.',
       rate: 'Taxa', errors: 'Erros', status: 'Situação', date: 'Data', period: 'Período', qty: 'Remessas', share: '% do total', days: 'dias',
       ratesBadge: 'Taxas: {a}/{b} dias', ratesMissing: '{n} sem consulta', emptyDays: '{n} sem registro',
@@ -253,7 +253,7 @@
       evolution30: '截至 {date} 的30天',
       periodView: '所选期间', historyView: '全部历史', ranking: '排名', timeline: '24小时', chartView: '图表', tableView: '表格',
       distinctShipments: '去重运单数', topOf: '前 {n} / 共 {m}', partial: '部分',
-      noData: '该期间暂无数据', noDataHint: '该期间明细尚未同步。',
+      noData: '该期间暂无数据', crossTotal: '合计', noDataHint: '该期间明细尚未同步。',
       noRateHint: '该期间尚无同步的官方指标率。', noChartLib: '图表库不可用，改为显示表格。',
       rate: '指标率', errors: '异常', status: '状态', date: '日期', period: '期间', qty: '票数', share: '占比', days: '天',
       ratesBadge: '指标率：{a}/{b} 天', ratesMissing: '{n} 天未查询', emptyDays: '{n} 天无记录',
@@ -470,8 +470,17 @@
   function t(key, vars) {
     var dict = I18N[state.lang] || I18N.pt;
     var s = dict[key] !== undefined ? dict[key] : (I18N.pt[key] !== undefined ? I18N.pt[key] : key);
+    // V4.22: painel que não vem do JMS (Produção do Sorter, pacote próprio): "JMS" nos textos vira o nome da fonte.
+    var src = sourceName();
+    if (src && typeof s === 'string') s = s.replace(/JMS/g, src);
     if (vars) s = s.replace(/\{(\w+)\}/g, function (_, k) { return vars[k] === undefined || vars[k] === null ? '' : vars[k]; });
     return s;
+  }
+  /** Nome da fonte dos números quando TODOS os painéis deste pacote têm fonte própria (Config.gs → source); senão null. */
+  function sourceName() {
+    var list = state.catalog || [];
+    if (!list.length || !list.every(function (c) { return c.source; })) return null;
+    return L(list[0].source);
   }
   /** Texto com o nome do indicador: a Avaria diz "Avarias no dia" onde os outros dizem "Erros no dia" (Config.gs → texts). */
   function tx(c, key, vars) {
@@ -1153,6 +1162,7 @@
     renderSummaryTable(c);
     renderRankPanels(c);
     renderMetricPanels(c);
+    renderCrossTables(c);
     // Recebimento: uma tabela por lista no lugar da tabela de remessas.
     $('#detailCard').classList.toggle('hidden', !!c.tables);
     if (c.tables) renderListTables(c); else { $('#listTables').innerHTML = ''; renderDetailTable(); }
@@ -1405,7 +1415,9 @@
     if (pend.length || !capped.length) {
       html += badge(pend.length ? 'warn' : 'ok', pend.length ? 'warn' : 'check',
         pend.length ? t('detailsPartial', {n: pend.length}) : tx(cfg(), 'detailsOk', {n: fmtInt(cfg() && cfg().grouped && state.data ?
-          (state.data.summary ? state.data.summary.totalQty : Core.distinctCount(state.data.rows)) : meta.rowsLoaded)}),
+          // V4.22 (Produção do Sorter): a contagem de uma lista só (Sort total), não a soma de todos os números da tela.
+          (cfg().detailsOkColumn ? colQty(state.data.summary ? (state.data.summary.byDim.column || []) : state.data.rows, cfg().detailsOkColumn) :
+            state.data.summary ? state.data.summary.totalQty : Core.distinctCount(state.data.rows)) : meta.rowsLoaded)}),
         pend.map(function (d) { return fmtDate(d, true); }).join(', '));
     }
     if (state.data && state.data.summary) html += badge('ok', 'info', t('summaryBadge', {n: fmtInt(state.data.summary.cubeRows)}), t('summaryHint'));
@@ -2000,10 +2012,10 @@
       // V4.18 (Criação de Lotes): com filtro, as remessas dos lotes da lista filtrada (soma de def.subSum).
       if (def.subSum && fq) lines += '<div class="kpi-sub">' + esc(L(def.subLabel)) + ': <b>' + fmtInt(listSum(def.column, def.subSum)) + '</b></div>';
       lines += '<div class="hero-metric"><span>' + esc(t('hmOfficial')) + '</span><b>' + fmtInt(cur) + '</b>' + (def.sub ?
-        '<small>' + esc(L(def.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur && !def.subNoPct ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + ')' : '') + '</small>' : '') + '</div>';
+        '<small>' + esc(L(def.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur && !def.subNoPct ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(def.subOf ? L(def.subOf) : t('hmOfDay')) + ')' : '') + '</small>' : '') + '</div>';
     } else if (def.sub) {
       lines += '<div class="hero-metric"><span>' + esc(L(def.subLabel)) + '</span><b>' + fmtInt(sub) + '</b>' +
-        (isNum(sub) && cur && !def.subNoPct ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(t('hmOfDay')) + '</em>' : '') + '</div>';
+        (isNum(sub) && cur && !def.subNoPct ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(def.subOf ? L(def.subOf) : t('hmOfDay')) + '</em>' : '') + '</div>';
     }
     // V3.26: quando o número foi consultado no JMS (dia escolhido; no período, o mais antigo dos dias) — para comparar
     // com a tela do JMS sabendo de que hora é o número do painel.
@@ -2234,6 +2246,50 @@
     var ch = state.charts[key];
     if (ch && ch.$sig === config.$sig && ch.canvas === canvas) { ch.data = config.data; ch.options = config.options; ch.update(); }
     else { destroyChart(key); ch = new Chart(canvas, config); ch.$sig = config.$sig; state.charts[key] = ch; }
+  }
+
+  // ------------------------------------------------------------------ V4.22 (Produção do Sorter): tabela cruzada
+  /**
+   * Uma linha por valor de rowDim (ex.: horário), uma coluna por lista (Sort total, Valid total, motivos…) e a linha de Total,
+   * como a tabela da tela do sorter. Com os filtros; no período grande, pelos totais do servidor (byDim do rowDim).
+   */
+  function renderCrossTables(c) {
+    var box = $('#crossTables');
+    if (!box) {
+      var lt = $('#listTables');
+      if (!lt) return;
+      box = document.createElement('section');
+      box.id = 'crossTables';
+      lt.parentNode.insertBefore(box, lt);
+    }
+    if (!c.crossTables || !c.crossTables.length || !state.data) { box.innerHTML = ''; return; }
+    var sm = state.data.summary, f = filtersObj();
+    box.innerHTML = c.crossTables.map(function (tb) {
+      var rows = sm ? Core.summaryChartRows({dim: tb.rowDim}, sm.byDim, f) : state.filtered;
+      var grid = {}, keys = [], tot = {};
+      tb.cols.forEach(function (col) { tot[col] = 0; });
+      (rows || []).forEach(function (r) {
+        var k = r[tb.rowDim];
+        if (k === undefined || k === null || k === '') k = 'N/A';
+        tb.cols.forEach(function (col) {
+          if (!Core.colMatch(col, r.column)) return;
+          if (!grid[k]) { grid[k] = {}; keys.push(k); }
+          var w = Core.weight(r);
+          grid[k][col] = (grid[k][col] || 0) + w;
+          tot[col] += w;
+        });
+      });
+      keys.sort(function (a, b) { return (a === 'N/A') - (b === 'N/A') || cmpText(a, b); });
+      var head = '<tr><th>' + esc(L(dimLabel(tb.rowDim))) + '</th>' + tb.cols.map(function (col) { return '<th class="num">' + esc(col) + '</th>'; }).join('') + '</tr>';
+      var body = keys.map(function (k) {
+        return '<tr><td>' + esc(k === 'N/A' ? t('na') : vlabel(tb.rowDim, k)) + '</td>' + tb.cols.map(function (col) { return '<td class="num">' + fmtInt(grid[k][col] || 0) + '</td>'; }).join('') + '</tr>';
+      }).join('');
+      var foot = keys.length ? '<tr class="cross-total"><td><b>' + esc(t('crossTotal')) + '</b></td>' + tb.cols.map(function (col) { return '<td class="num"><b>' + fmtInt(tot[col]) + '</b></td>'; }).join('') + '</tr>' : '';
+      return '<section class="card table-card cross-table" data-t="' + esc(tb.key) + '"><div class="section-head"><div><span class="kicker">' + esc(t('details')) + '</span>' +
+        '<h2>' + esc(L(tb.title)) + (Lo(tb.title) ? ' <span class="rp-zh">/ ' + esc(Lo(tb.title)) + '</span>' : '') + '</h2></div></div>' +
+        '<div class="table-scroll"><table class="data-table"><thead>' + head + '</thead><tbody>' +
+        (body || '<tr><td colspan="' + (tb.cols.length + 1) + '" class="muted">' + esc(t('noData')) + '</td></tr>') + foot + '</tbody></table></div></section>';
+    }).join('');
   }
 
   // ------------------------------------------------------------------ Recebimento: uma tabela por lista

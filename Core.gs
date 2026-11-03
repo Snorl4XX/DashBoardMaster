@@ -817,7 +817,8 @@ function JTCoreFactory_() {
       base.datasets = [{label: 'qty', data: labels.map(function (l) { return map[l] || 0; })}];
       return base;
     }
-    if (def.key === 'interval' && opts.intervalMode === 'timeline') {
+    // V4.22: timeline no gráfico = sempre as 24 horas em ordem (Produção do Sorter: evolução por hora).
+    if (def.key === 'interval' && (opts.intervalMode === 'timeline' || def.timeline)) {
       var byLabel = {}; groups.forEach(function (g) { byLabel[g.label] = g.value; });
       var hours = []; for (var h = 0; h < 24; h++) hours.push(intervalLabel(h));
       base.ranking = false; base.timeline = true;

@@ -67,7 +67,26 @@ function deniedPage() {
 <div class="actions"><a class="btn ghost" href="./">Abrir o painel</a></div></div></div></body></html>`;
 }
 
+/**
+ * V4.22: pacote sem JMS (Produção do Sorter): no lugar do AuthToken, o endereço do sorter da base e a troca do Sorter A
+ * (Propriedades SORTER_URL e SORTER_TROCA_A), com o teste diagnosticarSorter.
+ */
+const SORTER_CARD = `<section class="card"><h2>Sorter da base</h2>
+<p class="hint">O painel lê o monitor do sorter pela rede da base (este computador precisa abrir o endereço no navegador).
+O Sorter B é o que o site mostra sem trocar. Para o Sorter A, cole o pedido de troca (switch device → Cross-belt GRU-A) como no
+Painel do Sorter: {"metodo": "POST", "caminho": "/…", "corpo": "_token=…&…"}. O _token é sempre o da sessão.</p>
+<label for="sUrl">Endereço do sorter</label><input id="sUrl" placeholder="http://10.1.166.9">
+<label for="sTroca" style="margin-top:10px">Troca do Sorter A (opcional)</label><textarea id="sTroca" autocomplete="off" spellcheck="false" style="min-height:52px" placeholder='{"metodo": "POST", "caminho": "/home/…", "corpo": "_token=x&device_id=…"}'></textarea>
+<div class="actions"><button id="saveSorter">Salvar e testar o sorter</button></div>
+<pre class="out" id="sorterOut"></pre></section>`;
+
 function configPage(opts) {
+  const page = configPageHtml(opts);
+  if (!opts.semJms) return page;
+  return page.replace(/<section class="card"><h2>AuthToken do JMS<\/h2>[\s\S]*?<\/section>/, () => SORTER_CARD)
+    .replace('Primeiro dia que o painel deve baixar do JMS', 'Primeiro dia que o painel deve baixar do sorter');
+}
+function configPageHtml(opts) {
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light"><title>Configurações · DashMaster</title><style>${BASE_CSS}</style></head><body>
 <div class="wrap">
@@ -134,8 +153,8 @@ O valor salvo não aparece de novo nesta tela.</p>
       var q = s.fila || {};
       $('#stats').innerHTML =
         stat('Painel', escH(s.versaoPainel)) +
-        stat('AuthToken', s.token ? 'cadastrado' : 'não cadastrado', s.token ? 'ok' : 'bad') +
-        stat('Fila do JMS', escH(s.filaTexto || '—')) +
+        (s.semJms ? '' : stat('AuthToken', s.token ? 'cadastrado' : 'não cadastrado', s.token ? 'ok' : 'bad')) +
+        stat(s.semJms ? 'Fila de downloads' : 'Fila do JMS', escH(s.filaTexto || '—')) +
         stat('Última execução da fila', escH(s.agendador.ultima || '—')) +
         stat('Agora', escH(s.agendador.rodando ? 'rodando ' + s.agendador.rodando : 'parada, esperando a próxima')) +
         stat('Link público', s.linkPublico ? '<a href="' + escH(s.linkPublico) + '">' + escH(s.linkPublico.replace(/^https?:[/][/]/, '')) + '</a>' : 'não configurado') +
@@ -143,6 +162,10 @@ O valor salvo não aparece de novo nesta tela.</p>
         stat('Senha do painel', s.senhaPainel ? 'sim' : (s.linkPublico ? 'não: defina "senha"' : 'não'), s.senhaPainel ? 'ok' : (s.linkPublico ? 'bad' : ''));
       $('#addrs').innerHTML = 'Endereços do painel: ' + s.enderecos.map(function (a) { return '<a href="' + escH(a) + '">' + escH(a) + '</a>'; }).join(' · ');
       $('#start').value = s.dataInicial || '';
+      if ($('#sUrl') && !$('#sUrl').value) {
+        var su = s.props.filter(function (p) { return p.k === 'SORTER_URL'; })[0];
+        $('#sUrl').value = su ? su.v : 'http://10.1.166.9';
+      }
       var row = function (p) {
         return '<tr><td class="k">' + escH(p.k) + '</td><td class="v">' + escH(p.v) + '</td><td style="white-space:nowrap">' +
           (p.secret ? '' : '<button class="ghost" data-edit="' + escH(p.k) + '">Editar</button> ') +
@@ -165,7 +188,17 @@ O valor salvo não aparece de novo nesta tela.</p>
     return api('executar', {fn: fn, args: args}).then(function (j) { show(out, fmtRun(j)); })
       .catch(function (e) { show(out, e.message, true); }).then(function () { busy(btn, false); load(); });
   }
-  $('#saveTok').onclick = function () {
+  if ($('#saveSorter')) $('#saveSorter').onclick = function () {
+    var url = $('#sUrl').value.trim(), troca = $('#sTroca').value.trim(), out = $('#sorterOut'), btn = this;
+    if (!/^https?:[/][/][^/ ]+/i.test(url)) { show(out, 'Endereço inválido. Exemplo: http://10.1.166.9', true); return; }
+    if (troca) { try { var tj = JSON.parse(troca); if (!tj || typeof tj !== 'object') throw new Error('x'); } catch (e) { show(out, 'A troca do Sorter A não é um JSON válido.', true); return; } }
+    busy(btn, true);
+    api('propriedade', {k: 'SORTER_URL', v: url}).then(function () {
+      return troca ? api('propriedade', {k: 'SORTER_TROCA_A', v: troca}) : null;
+    }).then(function () { $('#sTroca').value = ''; return runFn('diagnosticarSorter', [], out, btn); })
+      .catch(function (e) { show(out, e.message, true); busy(btn, false); });
+  };
+  if ($('#saveTok')) $('#saveTok').onclick = function () {
     var tok = $('#tok').value.trim(), cookie = $('#cookie').value.trim(), out = $('#tokOut'), btn = this;
     if (!tok && !cookie) { show(out, 'Cole o AuthToken antes de salvar.', true); return; }
     busy(btn, true);

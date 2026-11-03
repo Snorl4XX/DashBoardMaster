@@ -129,6 +129,10 @@ Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.
 no fim (`https://NOME.xxxx.ts.net/lotes`, V4.21.5 — antes era a porta 10000), sem mexer no link do painel principal.
 Passo a passo no `LEIA_LOTES.md` do ZIP. Em qualquer pacote, `"caminho"` no `config.json` põe o painel num caminho do link.
 
+**Produção do Sorter separada (V4.22):** o ZIP `JT_DASHMASTER_..._SORTER_NODE.zip` instala outro painel em `C:\dashmaster-sorter`
+(porta 3500, link `https://NOME.xxxx.ts.net/sorter`). Ele lê o monitor do sorter da base (http://10.1.166.9) e salva cada dia,
+sem JMS (`"semJms": true` no `padrao.json`). O computador precisa estar na rede da base. Passo a passo no `LEIA_SORTER.md` do ZIP.
+
 **Sem o `link-publico.bat`** (arquivos `.bat` bloqueados): crie um atalho (botão direito na Área de Trabalho → Novo → Atalho) com
 `C:\Windows\System32\cmd.exe /k ""C:\Program Files\Tailscale\tailscale.exe" funnel --bg 3000"` e dê dois cliques.
 O `cmd /k` deixa a janela aberta depois do comando, para dar para ler o link `https://….ts.net` ou o erro (sem ele, a janela

@@ -38,7 +38,9 @@ const DEFAULTS = {
   portaLink: 443,
   // V4.21.5: caminho do painel no link público (ex.: "/lotes" → https://NOME.xxxx.ts.net/lotes, o mesmo link do principal com
   // o caminho no fim). Vazio = o painel fica na raiz do link.
-  caminho: ''
+  caminho: '',
+  // V4.22: pacote sem JMS (Produção do Sorter): a tela Configurações mostra o sorter no lugar do AuthToken.
+  semJms: false
 };
 /**
  * V4.21: padrões do pacote (node/padrao.json, vem no ZIP). Ex.: o painel de Lotes separado usa a porta 3400 e o link na

@@ -161,6 +161,7 @@ const FN_HELP = {
   diagnosticarLotes: 'Fluxo de Lotes (data opcional)',
   diagnosticarAvaria: 'Avaria (data opcional)',
   diagnosticarSemMovimentacao: 'Sem Movimentação',
+  diagnosticarSorter: 'Produção do Sorter: endereço, Sorter A/B e os números de hoje',
   baixarHistoricoAvaria: 'Avaria: baixa o histórico agora',
   testProjectInstallation: 'confere se os arquivos do painel carregaram'
 };
@@ -351,7 +352,7 @@ async function configApi(req, res, name) {
     } catch (e) { filaTexto = 'indisponível (' + String(e.message).slice(0, 80) + ')'; }
     const last = sched.last.processSyncQueue;
     sendJson(res, 200, {
-      ok: true, versaoPainel: panelVersion(), versaoServidor: SERVER_VERSION, token: !!all.JMS_AUTHTOKEN,
+      ok: true, versaoPainel: panelVersion(), versaoServidor: SERVER_VERSION, token: !!all.JMS_AUTHTOKEN, semJms: !!cfg.semJms,
       senhaPainel: !!cfg.senha, senhaConfig: !!cfg.senhaConfig, linkPublico: cfg.linkPublico, linkNetlify: cfg.linkNetlify,
       dataInicial: all.DATA_START_DATE || '', fila, filaTexto,
       agendador: {rodando: sched.running, pendentes: sched.pending.slice(),
@@ -499,7 +500,7 @@ async function handle(req, res) {
       sendHtml(req, res, 403, pages.deniedPage());
       return;
     }
-    if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir})); return; }
+    if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir, semJms: !!cfg.semJms})); return; }
     if (p.indexOf('/config/api/') === 0) {
       if (req.method === 'POST' && !sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
       await configApi(req, res, p.slice('/config/api/'.length));
@@ -614,7 +615,8 @@ server.listen(cfg.porta, cfg.host, () => {
       'aparecer em "linkNetlify" no config.json.');
   }
   log('info', '  Configurações (AuthToken, histórico, diagnósticos): http://localhost:' + cfg.porta + '/config');
-  if (!props.getProperty('JMS_AUTHTOKEN')) log('aviso', 'AuthToken do JMS ainda não cadastrado: abra Configurações.');
+  // V4.22: o pacote da Produção do Sorter (semJms) não usa o JMS: sem aviso de AuthToken.
+  if (!cfg.semJms && !props.getProperty('JMS_AUTHTOKEN')) log('aviso', 'AuthToken do JMS ainda não cadastrado: abra Configurações.');
   if (cfg.agendador === false) log('aviso', 'Agendador desligado: a fila do JMS só roda pela tela Configurações.');
   else log('info', 'A fila do JMS roda a cada ' + cfg.filaCadaSegundos + ' s, sem limite diário. Deixe esta janela aberta.');
 });

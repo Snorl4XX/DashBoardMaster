@@ -195,7 +195,11 @@ function jmsHeaders_(url) {
   return headers;
 }
 
+/** V4.22: algum painel deste projeto consulta o JMS? (o pacote da Produção do Sorter só lê o sorter da base) */
+function usesJms_() { return Object.keys(INDICATORS).some(k => !INDICATORS[k].sorter); }
 function validateJmsAuth_() {
+  // V4.22: projeto só com a Produção do Sorter — não precisa de AuthToken (Baixar histórico, Atualizar…).
+  if (!usesJms_()) return;
   const p = jmsReadProperties_();
   const mode = jmsAuthMode_(p);
   mode.split('_').forEach(function (key) {
@@ -579,6 +583,8 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   const cfg = getIndicatorConfig_(indicatorKey);
   // V4.4: Deslacre — a "tabela" do dia é a própria lista de IDs (Expedicao.gs → unsealSummary_).
   if (cfg.unseal) return unsealSummary_(indicatorKey, isoDate);
+  // V4.22: Produção do Sorter — o monitor do sorter da base, não o JMS (Sorter.gs).
+  if (cfg.sorter) return sorterSummary_(indicatorKey, isoDate);
   const endpoint = endpointFor_(cfg, 'summary');
   const payloadOf = page => Object.assign(buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, false), extra || {});
   const json = jmsPost_(endpoint, payloadOf(1), 2);

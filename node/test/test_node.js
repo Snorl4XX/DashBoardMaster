@@ -334,6 +334,51 @@ function firstDiff(a, b, p) {
   check(sairC.status === 303 && sairC.headers.location === '/lotes/' && /^jt_painel_lotes=;/.test(String(sairC.headers['set-cookie'] || '')), 'sair volta para /lotes/');
   srvC.child.kill();
 
+  // ---------- 9c. V4.22: Produção do Sorter (pacote sem JMS) — sorter falso por HTTP, com sessão (cookies) e _token ----------
+  const {createFakeSorter, dayTotals} = require(path.join(ROOT, 'tests', 'sorter_falso.js'));
+  const siteS = createFakeSorter();
+  const portSite = await freePort();
+  const srvSite = http.createServer(siteS.handler);
+  servers.push(srvSite);
+  await new Promise(r => srvSite.listen(portSite, '127.0.0.1', r));
+  const portS = await freePort();
+  const srvS = await startServer({porta: portS, semJms: true});
+  const adminS = async (name, body) => {
+    const r = await request(portS, body === undefined ? 'GET' : 'POST', '/config/api/' + name, body);
+    const j = JSON.parse(r.text);
+    if (!j.ok) throw new Error(name + ': ' + j.error);
+    return j;
+  };
+  const isoS = d => new Date(Date.now() + d * 864e5).toLocaleDateString('sv-SE', {timeZone: 'America/Sao_Paulo'});
+  const dS1 = isoS(-2), dS2 = isoS(-1);
+  const propsS = {PAINEIS: 'sorter_flow', SORTER_URL: 'http://127.0.0.1:' + portSite + '/home', SORTER_MAX_BALANCAS: '14', DATA_START_DATE: dS1,
+    SORTER_TROCA_A: JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: '_token=copiado&device_id=3'})};
+  for (const k of Object.keys(propsS)) await adminS('propriedade', {k, v: propsS[k]});
+  const histS = await adminS('executar', {fn: 'startFullHistory', args: []});
+  check(histS.result && histS.result.ok && histS.result.indicators === 1, 'Sorter: histórico enfileirado sem AuthToken do JMS', histS.result);
+  for (let g = 0; g < 8; g++) {
+    const r = await adminS('executar', {fn: 'processSyncQueue', args: [{budgetMs: 600000}]});
+    if (r.result && (r.result.idle || r.result.remaining === 0)) break;
+  }
+  const apiS = async (fn, args) => {
+    let j = JSON.parse((await request(portS, 'POST', '/api/run', {fn, args})).text);
+    while (j.ok && j.pendente) j = JSON.parse((await request(portS, 'GET', '/api/resultado?id=' + j.pendente)).text);
+    if (!j.ok) throw new Error(fn + ': ' + j.error);
+    return j.result;
+  };
+  const dashS = await apiS('getDashboardData', ['sorter_flow', {from: dS1, to: dS2}]);
+  const want = [dS1, dS2].reduce((a, d) => a + dayTotals('A', d).total + dayTotals('B', d).total, 0);
+  const got = (dashS.rates || []).reduce((a, r) => a + (Number(r.totalCount) || 0), 0);
+  check(got === want && (dashS.rates || []).every(r => r.metrics && r.metrics.sortTotalA > 0 && r.metrics.sortTotalB > 0),
+    'Sorter pelo Node.js: Sorter A (sessão com cookies e _token) + Sorter B gravados dia a dia', {got, want});
+  check(siteS.log.some(x => x.path === '/statis/summary.data' && x.device === 'A'), 'Sorter pelo Node.js: a troca para o A valeu na sessão (Set-Cookie guardado)');
+  const cfgS = await request(portS, 'GET', '/config'), estS = await adminS('estado');
+  check(/Sorter da base/.test(cfgS.text) && !/AuthToken do JMS/.test(cfgS.text) && estS.semJms === true && !/AuthToken do JMS ainda não cadastrado/.test(srvS.out()),
+    'pacote do Sorter: Configurações com o sorter, sem pedir AuthToken do JMS');
+  const pageS = await request(portS, 'GET', '/?ind=sorter_flow');
+  check(pageS.status === 200 && /Produção do Sorter/.test(pageS.text), 'página da Produção do Sorter');
+  srvS.child.kill();
+
   // ---------- 10. Link do Netlify (grátis) repassando para o link público (Tailscale) ----------
   const viaNetlify = {Origin: 'https://jt-teste.netlify.app', 'X-Forwarded-Host': 'painel.exemplo.ts.net', 'X-Forwarded-Proto': 'https'};
   const noNetlify = await request(port, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, viaNetlify);

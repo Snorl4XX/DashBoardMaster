@@ -1,8 +1,39 @@
-# J&T DASHMASTER V4.21.6 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.0 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.0 — Produção do Sorter, no esquema do principal (painel separado)
+
+Painel novo e **separado** do principal: **Produção do Sorter**. Ele lê o monitor do sorter da base (`http://10.1.166.9`, tela
+"summary statistics of sorter operation") e **salva cada dia** no banco do computador, como o principal faz com o JMS.
+
+**Como funciona:**
+- Mesmo visual do principal: cartões, gráficos, filtros, tabela, Data inicial, Baixar histórico e atualização de hora em hora.
+- Cada hora de cada balança (Induction No.) de cada sorter (A e B) vira uma linha por número da tela: Sort total, Valid total,
+  Anormais, cada motivo (No Sort Code, No plan, Chute, Intercept, No Read, Multi, Outros) e cada andar (Layer1/2/3).
+- **Cartões:** Total produzido, Deu certo e %, Não deu certo (No Sort Code) e %, Anormais, dia anterior e um cartão por turno.
+- **Gráficos:** evolução diária, evolução por hora (24 h em ordem), No Sort Code por hora, turnos, por sorter, top 10 balanças
+  (Sort total e No Sort Code), motivos de falha e andares.
+- **Filtros:** Sorter, Balança, Turno e Horário.
+- **Tabela por horário** igual à da tela do sorter, com o Total no fim.
+
+**Onde roda:**
+- Só na versão Node.js, num computador **dentro da rede da base**. O Google (Apps Script) não enxerga a rede interna, por isso o
+  `Sorter.gs` não vai nos pacotes do Apps Script.
+- Pacote próprio: `JT_DASHMASTER_V4_22_SORTER_NODE.zip`, pasta `C:\dashmaster-sorter`, porta **3500**.
+- Link do Tailscale: o mesmo endereço do principal com **/sorter** no fim.
+- Não pede AuthToken do JMS: a tela Configurações mostra **Sorter da base** (endereço e troca do Sorter A) no lugar dele.
+- Nunca aparece no painel principal, nem com `PAINEIS_FORA`.
+
+**Sorter A e B:** o site mostra um sorter por sessão. O B é o que o site mostra sem trocar. O A precisa do pedido de troca
+(`SORTER_TROCA_A`), o mesmo que o Painel do Sorter (porta 3100) usa; o `_token` é sempre o da sessão. Se os dois vierem com os
+mesmos números, o dia não é gravado e o erro explica (a troca não trocou nada). Diagnóstico: `diagnosticarSorter`.
+
+**Instalar:** passo a passo no `LEIA_SORTER.md` do ZIP.
+
+**Painel principal e Lotes:** nada muda (só a versão).
 
 ## V4.21.6 — Turnos que enviaram errado as sacas ecológicas (painel de Lotes)
 

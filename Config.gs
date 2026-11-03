@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.21.6',
+  VERSION: '4.22.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1621,7 +1621,113 @@ const ALL_INDICATORS_ = Object.freeze({
       arrivalTime: ['actualArrivalTime', 'appTrackArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
       plate: ['plateNumber'], carrier: ['carrierName', 'carrierShortName'], unloads: ['__unloads'], timing: ['__timing']
     }
-  })
+  }),
+
+  /**
+   * V4.22 (pedido "dashboard no mesmo esquema que o principal para http://10.1.166.9"): Produção do Sorter — o monitor do
+   * sorter da base (巴西GRU分拣机, tela "summary statistics of sorter operation"), gravado dia a dia como os outros painéis
+   * (Sorter.gs). Painel SEPARADO (separate): só aparece no pacote dele (dashmaster-sorter) ou com PAINEIS = sorter_flow;
+   * nunca no principal. Só na versão Node.js num computador da rede da base.
+   * Cada hora de cada balança vira uma linha agrupada por número da tela (coluna principal = Sort total, Valid total,
+   * Anormais, cada motivo e cada andar; quantidade = o número).
+   */
+  sorter_flow: {
+    key: 'sorter_flow', order: 14, routeKey: 'SORTER', separate: true, sorter: true,
+    // Fonte dos números: no pacote só com este painel, "JMS" nos textos da tela vira "sorter".
+    source: {pt: 'sorter', zh: '分拣机'},
+    // Selo "Dados completos · N volumes": N = Sort total (não a soma de todos os números da tela).
+    detailsOkColumn: 'Sort total',
+    name: {pt: 'Produção do Sorter', zh: '分拣机产量'},
+    subtitle: {pt: 'Produção do sorter (summary statistics of sorter operation)', zh: '分拣机运行统计'},
+    // Taxa do painel = % Não deu certo (No Sort Code ÷ Sort total): quanto menor melhor; sem meta definida.
+    goal: {value: null, direction: 'max', strict: false},
+    apiProfile: 'sorter_flow', detailMatchesErrors: false, grouped: true, light: true,
+    summary: {rateFromCounts: true, rateKeys: [], errorKeys: ['noSortCode'], totalKeys: ['sortTotal'],
+      metrics: ['sortTotal', 'validTotal', 'abnormal', 'noSortCode', 'noPlan', 'chute', 'intercept', 'noRead', 'multi', 'other',
+        'layer1', 'layer2', 'layer3', 'validRate', 'noSortRate', 'abnormalRate', 'sortTotalA', 'sortTotalB'],
+      percentMetrics: ['validRate', 'noSortRate', 'abnormalRate']},
+    // Hoje: as linhas são lidas de novo a cada hora (o sorter não para); dias fechados só quando o total muda.
+    detail: {days: 0, refreshHours: 1, maxPerDay: 500000},
+    fields: {},
+    columnSets: {
+      'Motivos de falha': ['No Sort Code', 'No plan', 'Chute', 'Intercept', 'No Read', 'Multi', 'Outros'],
+      'Andares': ['Layer1 total', 'Layer2 total', 'Layer3 total']
+    },
+    groupFields: ['column', 'sorter', 'induction', 'shift', 'interval'],
+    labels: {
+      sorter: {pt: 'Sorter', zh: '分拣机'}, induction: {pt: 'Balança (Induction No.)', zh: '供包台'}, shift: {pt: 'Turnos', zh: '班次'},
+      interval: {pt: 'Horário', zh: '时间段'}, column: {pt: 'Número da tela', zh: '统计项'}
+    },
+    labelsOne: {sorter: {pt: 'Sorter', zh: '分拣机'}, induction: {pt: 'Balança', zh: '供包台'}, shift: {pt: 'Turno', zh: '班次'},
+      interval: {pt: 'Horário', zh: '时间段'}},
+    filters: ['sorter', 'induction', 'shift', 'interval'],
+    topCards: [],
+    hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    heroMetric: {key: 'sortTotal', column: 'Sort total', icon: 'qty',
+      label: {pt: 'Total produzido (Sort total)', zh: '分拣总量'}, labelPeriod: {pt: 'Total produzido no período', zh: '期间分拣总量'},
+      sub: 'validTotal', subLabel: {pt: 'Deu certo (Valid total)', zh: '有效分拣'}, subOf: {pt: 'do total', zh: '占总量'}},
+    prevCard: {key: 'sortTotal', sub: 'validTotal', label: {pt: 'Produção do dia anterior', zh: '前一日分拣总量'},
+      labelPeriod: {pt: 'Produção do período anterior', zh: '上一期间分拣总量'}, subLabel: {pt: 'Deu certo (Valid total)', zh: '有效分拣'}},
+    navMetric: 'sortTotal',
+    metricCards: true,
+    // Cartões de turno: Sort total de cada turno, com o que deu certo e o que não deu certo (No Sort Code) dentro dele.
+    shiftCardsByColumn: {main: 'Sort total', columns: ['Sort total'], unit: {pt: 'volumes', zh: '件'},
+      split: [{column: 'Valid total', label: {pt: 'Deu certo', zh: '有效'}}, {column: 'No Sort Code', label: {pt: 'Não deu certo', zh: '无分拣码'}}]},
+    shiftAggColumns: ['Sort total', 'Valid total', 'No Sort Code'],
+    texts: {
+      navQty: {pt: 'Sort total · {date}', zh: '分拣总量 · {date}'},
+      errors: {pt: 'Não deu certo (No Sort Code)', zh: '无分拣码'},
+      errorsDay: {pt: 'Não deu certo no dia', zh: '当日无分拣码'}, errorsPeriod: {pt: 'Não deu certo no período', zh: '期间无分拣码'},
+      errorsFiltered: {pt: 'Volumes (com filtro)', zh: '件数（已筛选）'},
+      rateOfDay: {pt: '% Não deu certo · {date}', zh: '{date} 无分拣码占比'}, rateOfPeriod: {pt: '% Não deu certo no período', zh: '期间无分拣码占比'},
+      dsHelp: {pt: 'Para saber o motivo em detalhe, rode diagnosticarSorter() (Configurações → Diagnósticos).', zh: '如需详细原因，请运行 diagnosticarSorter()。'},
+      dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes)', zh: '排队下载中（前面还有 {n} 个任务）'},
+      distinctShipments: {pt: 'Volumes do sorter', zh: '分拣件数'},
+      tableCount: {pt: '{n} volumes', zh: '{n} 件'}, listRows: {pt: '{n} volumes', zh: '{n} 件'}, shipments: {pt: 'volumes', zh: '件'},
+      detailsOk: {pt: 'Dados completos · {n} volumes', zh: '数据完整 · {n} 件'}, tableFind: {pt: 'Localizar na tabela', zh: '在表格中查找'}
+    },
+    metricPanels: [
+      {column: 'Sort total', title: {pt: 'Produção do sorter', zh: '分拣机产量'}, metrics: [
+        {key: 'sortTotal', label: {pt: 'Total produzido (Sort total)', zh: '分拣总量'}, detail: 'Sort total'},
+        {key: 'validTotal', label: {pt: 'Deu certo (Valid total)', zh: '有效分拣'}, detail: 'Valid total', good: true},
+        {key: 'validRate', label: {pt: '% Deu certo', zh: '有效分拣率'}, pct: true, good: true,
+          rateOf: {num: 'validTotal', den: 'sortTotal'}, detailRate: {num: 'Valid total', den: 'Sort total'}},
+        {key: 'noSortCode', label: {pt: 'Não deu certo (No Sort Code)', zh: '无分拣码'}, detail: 'No Sort Code', bad: true},
+        {key: 'noSortRate', label: {pt: '% Não deu certo', zh: '无分拣码占比'}, pct: true, bad: true,
+          rateOf: {num: 'noSortCode', den: 'sortTotal'}, detailRate: {num: 'No Sort Code', den: 'Sort total'}},
+        {key: 'abnormal', label: {pt: 'Anormais (todos os motivos)', zh: '异常总数'}, detail: 'Anormais', bad: true}
+      ]}
+    ],
+    charts: [
+      {key: 'mDaily', metric: 'sortTotal', type: 'bar', days: 15, title: {pt: 'Evolução diária · Sort total', zh: '每日分拣总量'}},
+      {key: 'byHour', dim: 'interval', where: {column: 'Sort total'}, type: 'bar', top: 24, timeline: true,
+        title: {pt: 'Evolução por hora · Sort total', zh: '每小时分拣总量'}, sub: {pt: 'Volumes por hora do dia', zh: '各时段分拣量'}},
+      {key: 'noSortHour', dim: 'interval', where: {column: 'No Sort Code'}, type: 'bar', top: 24, timeline: true,
+        title: {pt: 'Não deu certo por hora · No Sort Code', zh: '每小时无分拣码'}},
+      {key: 'shiftPie', dim: 'shift', where: {column: 'Sort total'}, type: 'doughnut',
+        title: {pt: 'Produção por turno', zh: '各班次产量'}, sub: {pt: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', zh: 'T1 06–14 · T2 14–22 · T3 22–06'}},
+      {key: 'bySorter', dim: 'sorter', where: {column: 'Sort total'}, type: 'bar', top: 4, hideNA: true,
+        title: {pt: 'Produção por sorter', zh: '各分拣机产量'}},
+      {key: 'topInd', dim: 'induction', where: {column: 'Sort total'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Top 10 balanças · Sort total', zh: '供包台分拣量前10'}},
+      {key: 'topIndNoSort', dim: 'induction', where: {column: 'No Sort Code'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Top 10 balanças · No Sort Code', zh: '供包台无分拣码前10'}, sub: {pt: 'As balanças com mais "Não deu certo"', zh: '无分拣码最多的供包台'}},
+      {key: 'reasons', dim: 'column', where: {column: 'Motivos de falha'}, type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'Motivos de falha', zh: '异常原因'}, sub: {pt: 'No Sort Code, No plan, Chute, Intercept, No Read, Multi e outros', zh: '各异常原因数量'}},
+      {key: 'layers', dim: 'column', where: {column: 'Andares'}, type: 'bar', top: 3,
+        title: {pt: 'Produção por andar', zh: '各层产量'}, sub: {pt: 'Layer1 / Layer2 / Layer3 total', zh: '第1/2/3层分拣量'}}
+    ],
+    // Tabela da tela do sorter: uma linha por horário, uma coluna por número, e o Total no fim.
+    crossTables: [
+      {key: 'tHours', rowDim: 'interval', title: {pt: 'Tabela por horário (como na tela do sorter)', zh: '分时段统计表'},
+        cols: ['Sort total', 'Valid total', 'No Sort Code', 'No plan', 'Chute', 'Intercept', 'No Read', 'Multi', 'Outros', 'Anormais',
+          'Layer1 total', 'Layer2 total', 'Layer3 total']}
+    ],
+    table: [
+      ['date', 'Data', '日期'], ['sorter', 'Sorter', '分拣机'], ['induction', 'Balança', '供包台'], ['shift', 'Turno', '班次'],
+      ['interval', 'Horário', '时间段'], ['column', 'Número da tela', '统计项'], ['qty', 'Quantidade', '数量']
+    ]
+  }
 });
 
 /**
@@ -1644,7 +1750,8 @@ function activeIndicators_(all) {
   const list = x => x.split(/[\s,;]+/).map(k => k.trim()).filter(k => k && all[k]);
   const keep = list(only), out = list(drop), revived = list(back);
   // V4.7: painel retirado (Config: retired, ex.: Fluxo de Lotes) fica fora, a não ser que PAINEIS ou REATIVAR_PAINEIS o nomeie.
-  const retired = k => !!all[k].retired && keep.indexOf(k) < 0 && revived.indexOf(k) < 0;
+  // V4.22: painel separado (Config: separate, ex.: Produção do Sorter) só aparece no pacote dele (ou PAINEIS / REATIVAR_PAINEIS).
+  const retired = k => (!!all[k].retired || !!all[k].separate) && keep.indexOf(k) < 0 && revived.indexOf(k) < 0;
   if (!keep.length && !out.length && !Object.keys(all).some(retired)) return all;
   const res = {};
   Object.keys(all).forEach(k => { if ((!keep.length || keep.indexOf(k) >= 0) && out.indexOf(k) < 0 && !retired(k)) res[k] = all[k]; });
@@ -1797,6 +1904,8 @@ function catalogEntry_(cfg) {
     // V4.18 (Criação de Lotes): cartão do dia anterior e os nomes novos dos valores gravados antes.
     prevCard: cfg.prevCard || null, valueAliases: cfg.valueAliases || null, sumDefs: cfg.sumDefs || null,
     shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
+    // V4.22 (Produção do Sorter): tabela cruzada — uma linha por valor de rowDim, uma coluna por lista (cols) e o Total.
+    crossTables: cfg.crossTables || null, source: cfg.source || null, detailsOkColumn: cfg.detailsOkColumn || null,
     columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
     snapshot: !!cfg.snapshot,
     // V4.6: agenda do painel — a cada N horas (Sem Movimentação, Criação de Lotes); sem isso, às HORAS_ATUALIZACAO.

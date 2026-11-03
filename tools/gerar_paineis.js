@@ -69,11 +69,75 @@ Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" 
    sozinho no config.json: \`"caminho": "/lotes"\`, \`"portaLink": 443\` e o \`"linkPublico"\` sem o :10000.
 3. Dois cliques em **link-publico.bat**. O link novo é https://NOME-DO-COMPUTADOR.xxxx.ts.net/lotes
 `};
+// V4.22 (pedido "dashboard no mesmo esquema que o principal para http://10.1.166.9"): Produção do Sorter, separada do principal —
+// outra pasta, porta 3500 (3000 principal, 3100 Painel do Sorter, 3200 Pesquisa, 3300 Expedição Incorreta, 3400 Lotes) e o link
+// do Tailscale no mesmo endereço do principal com /sorter no fim. Sem JMS (semJms): a tela Configurações pede o sorter.
+const SORTER = 'sorter_flow';
+const SORTER_PACOTE = {so: SORTER, fora: '', nome: 'Produção do Sorter'};
+const SORTER_NODE = {folder: 'dashmaster-sorter', zip: 'SORTER_NODE', pacote: SORTER_PACOTE, readmeName: 'LEIA_SORTER.md',
+  padrao: {porta: 3500, portaLink: 443, caminho: '/sorter', semJms: true},
+  replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster Sorter.lnk'], ['"JT DashMaster"', '"JT DashMaster Sorter"'],
+    ['o DashMaster vai abrir', 'o painel do Sorter vai abrir']],
+    'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster Sorter (Node.js) - porta 3500']]},
+  readme: v => `# Produção do Sorter (Node.js) — J&T DashMaster ${v}
+
+Painel **separado** do principal, no mesmo esquema dele: lê o monitor do sorter da base (**http://10.1.166.9**, tela
+"summary statistics of sorter operation") e **salva cada dia** no banco deste computador, como o painel principal faz com o JMS.
+Mesmo visual (cartões, gráficos, filtros, tabela), Data inicial, Baixar histórico e atualização de hora em hora.
+
+| | Painel principal | Produção do Sorter |
+|---|---|---|
+| Pasta | C:\\dashmaster | **C:\\dashmaster-sorter** |
+| Neste computador | http://localhost:3000 | **http://localhost:3500** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net/sorter** |
+
+**Importante:** o computador precisa estar **na rede da base** (abrir http://10.1.166.9 no navegador dele). O Google não enxerga a
+rede interna: este painel só funciona na versão Node.js.
+
+## O que aparece
+- **Cartões:** Total produzido (Sort total), Deu certo (Valid total) e %, Não deu certo (No Sort Code) e %, Anormais, dia anterior
+  e um cartão por turno (T1 06h–14h, T2 14h–22h, T3 22h–06h).
+- **Gráficos:** evolução diária, evolução por hora, No Sort Code por hora, produção por turno, por sorter (A e B), top 10 balanças
+  (Sort total e No Sort Code), motivos de falha (No Sort Code, No plan, Chute, Intercept, No Read, Multi, Outros) e produção por
+  andar (Layer1/2/3).
+- **Filtros:** Sorter, Balança (Induction No.), Turno e Horário.
+- **Tabela por horário**, com as mesmas colunas da tela do sorter e o Total no fim.
+
+## Instalar (uma vez)
+1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-sorter). Não extraia por cima do C:\\dashmaster.
+2. Abra C:\\dashmaster-sorter\\node e dê dois cliques em **iniciar.bat**. Deixe a janela preta aberta.
+3. Neste computador, abra **http://localhost:3500/config**:
+   - **Sorter da base:** o endereço já vem http://10.1.166.9. Clique em **Salvar e testar o sorter**. O teste mostra os números de
+     hoje de cada sorter.
+   - **Sorter A:** o B é o que o site mostra sem trocar. Para ler o A, cole o pedido de troca em "Troca do Sorter A". Se o Painel
+     do Sorter (porta 3100) já descobriu a troca, ela está no config.json dele, em \`"sorters"\` → A → \`"troca"\`. Sem a troca, o
+     painel lê só o B e avisa no LOG.
+   - **Histórico:** escolha a Data inicial, clique em **Salvar data** e depois em **Baixar histórico**.
+4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Sorter").
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica igual ao do principal com **/sorter** no fim:
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net/sorter. Coloque esse link em \`"linkPublico"\` no config.json e escolha uma \`"senha"\`.
+
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=443 --set-path=/sorter off\`
+
+## Ajustes (Configurações → Propriedades)
+| Propriedade | Para que serve |
+|---|---|
+| SORTER_URL | endereço do sorter (padrão http://10.1.166.9) |
+| SORTER_TROCA_A | pedido de troca para o Sorter A: {"metodo", "caminho", "corpo"} |
+| SORTERS | sorters lidos, na ordem (padrão "B,A") |
+| SORTER_PADRAO | o sorter que o site mostra sem trocar (padrão "B") |
+| SORTER_BALANCAS | lista das balanças (ex.: "1,2,3"); sem ela, de 1 até SORTER_MAX_BALANCAS (padrão 40) |
+
+Se os dois sorters vierem com os mesmos números, o painel não grava o dia e avisa: a troca não trocou nada. Para conferir, rode
+**diagnosticarSorter** em Configurações → Executar função.
+`};
 const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
 // V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.
 const NODE_PACOTE = {so: '', fora: MAIN_OUT, nome: ''};
 
-const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
+const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Sorter', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
+// V4.22: Sorter.gs (Produção do Sorter) só vai nos pacotes Node.js — o Google não enxerga a rede da base.
+const GS_APPS = GS_ORDER.filter(f => f !== 'Sorter');
 const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
 
 const PACKAGES = [
@@ -169,7 +233,7 @@ ${fileList()}
 });
 
 function fileList() {
-  return GS_ORDER.map(f => '- `' + f + '.gs`').concat(HTML.map(f => '- `' + f + '.html`'), ['- `appsscript.json`']).join('\n');
+  return GS_APPS.map(f => '- `' + f + '.gs`').concat(HTML.map(f => '- `' + f + '.html`'), ['- `appsscript.json`']).join('\n');
 }
 
 function versionOf(config) { const m = config.match(/VERSION:\s*'([^']+)'/); return m ? m[1] : '?'; }
@@ -201,7 +265,7 @@ function build(outDir, opts) {
     const put = (name, data) => { fs.writeFileSync(path.join(dir, name), data); files.push({name, data: Buffer.from(data)}); };
     const line = pacoteLine(pkg.pacote);
     put('LEIA_ESTE_PAINEL.md', pkg.readme(version));
-    GS_ORDER.forEach(f => {
+    GS_APPS.forEach(f => {
       let text = fs.readFileSync(path.join(root, f + '.gs'), 'utf8');
       if (f === 'Config') text = text.replace(PACOTE_RE, line);
       put(f + '.gs', text);
@@ -251,7 +315,7 @@ function buildNode(outDir, opts) {
   })('node');
   // Padrões do pacote (porta e porta do link): uma chave por linha, para o link-publico.bat ler cada uma.
   if (vr && vr.padrao) add(path.join('node', 'padrao.json'), Buffer.from(JSON.stringify(vr.padrao, null, 2) + '\n'));
-  if (vr && vr.readme) add('LEIA_LOTES.md', Buffer.from(vr.readme(versionOf(config))));
+  if (vr && vr.readme) add(vr.readmeName || 'LEIA_LOTES.md', Buffer.from(vr.readme(versionOf(config))));
   fs.mkdirSync(outDir, {recursive: true});
   const zipPath = path.join(outDir, 'JT_DASHMASTER_' + tag + '_' + (vr ? vr.zip : 'NODE') + '.zip');
   fs.writeFileSync(zipPath, zip(files));
@@ -448,8 +512,10 @@ if (require.main === module) {
   console.log('node: ' + n.zip + ' (' + n.files.length + ' arquivos)');
   const nl = buildNode(out, {variant: LOTS_NODE});
   console.log('node (lotes): ' + nl.zip + ' (' + nl.files.length + ' arquivos)');
+  const ns = buildNode(out, {variant: SORTER_NODE});
+  console.log('node (sorter): ' + ns.zip + ' (' + ns.files.length + ' arquivos)');
   const w = buildNetlify(out);
   console.log('netlify: ' + w.zip + ' (' + w.files.length + ' arquivos)');
 }
 
-module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, FLOWS, LOTS_NODE, MAIN_OUT};
+module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, FLOWS, LOTS_NODE, SORTER_NODE, MAIN_OUT};

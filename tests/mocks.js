@@ -170,8 +170,10 @@ function createContext(opts) {
   }
   vm.createContext(context);
   const root = opts.root || path.join(__dirname, '..');
-  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
-  const code = files.map(f => fs.readFileSync(path.join(root, f + '.gs'), 'utf8')).join('\n;\n');
+  const files = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Sorter', 'Analytics', 'Report', 'Triggers', 'Code'];
+  // V4.22: Sorter.gs só existe nos pacotes Node.js (os do Apps Script rodam sem ele).
+  const code = files.filter(f => f !== 'Sorter' || fs.existsSync(path.join(root, f + '.gs')))
+    .map(f => fs.readFileSync(path.join(root, f + '.gs'), 'utf8')).join('\n;\n');
   vm.runInContext(code, context, {filename: 'projeto.gs'});
   context.__state = state;
   return context;

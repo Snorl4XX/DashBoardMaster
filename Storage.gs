@@ -2135,6 +2135,8 @@ function runDetailJob_(job, deadline) {
   if (cfg.byRoute) return runSendDetailJob_(job, deadline, cfg, st);
   // V4.4: Deslacre — lista de IDs e os Registros de carga e descarga de cada um (Expedicao.gs).
   if (cfg.unseal) return runUnsealDetailJob_(job, deadline, cfg, st);
+  // V4.22: Produção do Sorter — cada hora de cada balança de cada sorter (Sorter.gs).
+  if (cfg.sorter) return runSorterDetailJob_(job, deadline, cfg, st);
   // Recebimento retomando um dia já fechado: o plano gravado (fatias e totais) dispensa ~80 consultas por execução.
   const plan = (cfg.grouped && storedGroupedPlan_(job, st)) ||
     planDetailDownload_(job.indicator, job.date, (total, type) => validateDetailTotal_(cfg, job.indicator, job.date, total, type));

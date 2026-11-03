@@ -3097,6 +3097,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const res = build(out);
   const keysOf = c => vmM.runInContext('Object.keys(INDICATORS)', c);
   const ctxOf = (id, props) => createContext({root: res.filter(r => r.id === id)[0].dir, props: Object.assign({}, baseProps, props || {}), jms: fakeJms({}), quiet: true});
+  check(res.every(r => !fsM.existsSync(pathM.join(r.dir, 'Sorter.gs'))) && fsM.existsSync(pathM.join(res[0].dir, 'Expedicao.gs')),
+    'V4.22: pacotes do Apps Script sem o Sorter.gs (o Google não enxerga a rede da base); o painel roda sem ele');
   const full = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
   const pP = ctxOf('principal'), pF = ctxOf('fluxos'), pL = ctxOf('lotes');
   // V4.21 (pedido): a Criação de Lotes sai do principal e tem pacote próprio.
@@ -3192,6 +3194,36 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const others = {DashMaster: 3000, Sorter: portOf('sorter/server.js'), Pesquisa: portOf('pesquisa/server.js'), 'Expedição Incorreta': portOf('expedicao_incorreta/server.js')};
   check(Object.keys(others).every(k => others[k] > 0 && others[k] !== LOTS_NODE.padrao.porta) && LOTS_NODE.padrao.portaLink === 443 && LOTS_NODE.padrao.caminho === '/lotes',
     'painel de Lotes numa porta livre (nenhum outro app usa a ' + LOTS_NODE.padrao.porta + ')', others);
+  // V4.22: Produção do Sorter separada — pasta dashmaster-sorter, porta 3500, link /sorter, sem JMS, atalho próprio.
+  const {SORTER_NODE} = require('../tools/gerar_paineis');
+  const zipS = fsM.readFileSync(buildNode(out, {variant: SORTER_NODE}).zip), dirS = pathM.join(out, 'extraido-sorter');
+  for (let i = 0; zipS.readUInt32LE(i) === 0x04034b50;) {
+    const size = zipS.readUInt32LE(i + 18), nameLen = zipS.readUInt16LE(i + 26), start = i + 30 + nameLen + zipS.readUInt16LE(i + 28);
+    const file = pathM.join(dirS, zipS.slice(i + 30, i + 30 + nameLen).toString('utf8'));
+    fsM.mkdirSync(pathM.dirname(file), {recursive: true});
+    fsM.writeFileSync(file, zlibM.inflateRawSync(zipS.slice(start, start + size)));
+    i = start + size;
+  }
+  const rootS = pathM.join(dirS, 'dashmaster-sorter');
+  const ctxS = createContext({root: rootS, props: {}, jms: fakeJms({}), quiet: true});
+  const cfgModS = require(pathM.join(rootS, 'node', 'lib', 'config.js'));
+  const cfgFileS = pathM.join(out, 'config-sorter.json');
+  process.env.DASHMASTER_CONFIG = cfgFileS;
+  const confS = cfgModS.loadConfig();
+  if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
+  const batWS = fsM.readFileSync(pathM.join(rootS, 'node', 'iniciar-com-windows.bat'), 'utf8');
+  const pagesS = require(pathM.join(rootS, 'node', 'lib', 'pages.js'));
+  const cfgPageS = pagesS.configPage({version: 'x', dataDir: 'y', semJms: true}), cfgPageM = pagesS.configPage({version: 'x', dataDir: 'y'});
+  check(keysOf(ctxS).join() === 'sorter_flow' && ctxS.getAppBootstrap().app.panel === 'Produção do Sorter' && confS.porta === 3500 &&
+    confS.portaLink === 443 && confS.caminho === '/sorter' && confS.semJms === true && /JT DashMaster Sorter\.lnk/.test(batWS) &&
+    fsM.existsSync(pathM.join(rootS, 'LEIA_SORTER.md')) && !fsM.existsSync(pathM.join(rootS, 'LEIA_LOTES.md')) &&
+    /Sorter da base/.test(cfgPageS) && !/AuthToken do JMS/.test(cfgPageS) && /AuthToken do JMS/.test(cfgPageM) && !/Sorter da base/.test(cfgPageM) &&
+    Object.keys(others).concat(['Lotes']).every(k => (k === 'Lotes' ? LOTS_NODE.padrao.porta : others[k]) !== SORTER_NODE.padrao.porta),
+    'pacote Node.js da Produção do Sorter: só ela, porta 3500, link em /sorter, Configurações com o sorter no lugar do AuthToken',
+    {keys: keysOf(ctxS), porta: confS.porta, caminho: confS.caminho});
+  // O painel do Sorter nunca aparece no principal (nem no pacote Node.js principal, nem com PAINEIS_FORA do usuário).
+  check(keysOf(ctxNode()).indexOf('sorter_flow') < 0 && keysOf(ctxNode({PAINEIS_FORA: 'arrival_flow'})).indexOf('sorter_flow') < 0 &&
+    full.indexOf('sorter_flow') < 0, 'Produção do Sorter fora do painel principal (painel separado)');
   fsM.rmSync(out, {recursive: true, force: true});
 }
 
@@ -4622,6 +4654,100 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     {loadingTypeName: '2', scanNetworkName: 'SP GRU', scanStartTime: '2026-09-19 10:40:00', scanEndTime: '2026-09-19 15:11:19'}]);
   check(tm.minutes === '40' && tm.end === '2026-09-19 10:40:00' && tm.unloads === '1',
     'tempo do ID = Data inicial do Bipe de descarregamento da SP GRU − deslacre (sem a linha de outra base nem a de carregamento)', tm);
+}
+
+// ---------- V4.22: Produção do Sorter (monitor do sorter da base, gravado como os painéis do JMS) ----------
+{
+  const {createFakeSorter, dayTotals} = require('./sorter_falso');
+  const DS = '2026-10-31', DS2 = '2026-11-01';
+  const TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: '_token=copiado-do-navegador&device_id=3'});
+  const sorterCtx = (props, fakeOpts) => {
+    const site = createFakeSorter(fakeOpts), jmsF = fakeJms({});
+    const c = createContext({props: Object.assign({DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home', SORTER_MAX_BALANCAS: '15', SORTER_TROCA_A: TROCA_A}, props || {}),
+      jms: (url, req, state) => (/^http:\/\/sorter\.falso/.test(url) ? site.fetchMock(url, req) : jmsF(url, req, state)), quiet: true});
+    c.setupProject();
+    return {c, site};
+  };
+  const {c: cS, site: siteS} = sorterCtx();
+  const A = dayTotals('A', DS), B = dayTotals('B', DS);
+  // Sem AuthToken do JMS: o projeto só com o Sorter baixa o histórico (o JMS não é consultado).
+  const histS = cS.startFullHistory();
+  runAll(cS);
+  const st = cS.getDayStatus_('sorter_flow', DS), rate = cS.getRateDay_('sorter_flow', DS);
+  check(histS.ok && st.summary === 'COMPLETE' && st.details === 'COMPLETE' && cS.__state.fetches.length === 0,
+    'Sorter: Baixar histórico sem AuthToken do JMS (nenhuma consulta ao JMS)', {st, jms: cS.__state.fetches.length});
+  check(rate.totalCount === A.total + B.total && rate.errorCount === A.noInfo + B.noInfo && rate.metrics.sortTotalA === A.total &&
+    rate.metrics.sortTotalB === B.total && rate.metrics.validTotal === A.valid + B.valid && rate.metrics.abnormal === A.abnormal + B.abnormal &&
+    Math.abs(rate.rate - (A.noInfo + B.noInfo) / (A.total + B.total) * 100) < 1e-9,
+    'Sorter: resumo do dia = Sorter A + Sorter B (Sort total, Valid total, No Sort Code, Anormais)', {rate, A, B});
+  // A troca leva o _token da sessão (o copiado do navegador é trocado; o site falso recusa outro com 419).
+  check(siteS.log.some(x => x.method === 'POST' && x.path === '/home/switchDevice') && siteS.log.some(x => x.path === '/statis/summary.data' && x.device === 'A'),
+    'Sorter: troca para o Sorter A com o _token da sessão (lido da página)');
+  const rowsS = cS.getArchivedRange_('sorter_flow', DS, DS).rows;
+  const sumOf = (col, f) => rowsS.filter(r => r.column === col && (!f || f(r))).reduce((a, r) => a + Number(r.qty), 0);
+  check(sumOf('Sort total') === A.total + B.total && sumOf('Valid total') === A.valid + B.valid && sumOf('No Sort Code') === A.noInfo + B.noInfo &&
+    sumOf('Anormais') === A.abnormal + B.abnormal && sumOf('Sort total', r => r.sorter === 'Sorter A') === A.total &&
+    sumOf('Layer1 total') + sumOf('Layer2 total') + sumOf('Layer3 total') === A.total + B.total,
+    'Sorter: linhas do dia (hora × balança × sorter) somam o resumo em cada número da tela', {st: sumOf('Sort total'), A, B});
+  // O que o total da hora tem a mais que as balanças (2 volumes por hora no site falso) fica em N/A; balanças com zero padding.
+  check(sumOf('Sort total', r => r.induction === 'N/A') === 2 * 21 * 2 && rowsS.some(r => r.induction === 'Balança 01') &&
+    !rowsS.some(r => r.induction === 'Balança 13') && rowsS.every(r => /^(T[123])$/.test(r.shift) && /^\d{2}h - \d{2}h$/.test(r.interval)),
+    'Sorter: volumes sem balança ficam em N/A; turno e horário de cada hora', sumOf('Sort total', r => r.induction === 'N/A'));
+  // Painel: cartões e gráficos (evolução por hora em ordem, 24 horas; motivos; balanças sem o N/A).
+  const dS = cS.getDashboardData('sorter_flow', {from: DS, to: DS, filters: {}});
+  const cfgS = cS.getIndicatorConfig_('sorter_flow'), chDefS = k => cfgS.charts.filter(x => x.key === k)[0];
+  const rowsD = cS.JTCore_.decodeDataset(dS.dataset || dS.rows);
+  const hourCh = cS.JTCore_.buildChart(chDefS('byHour'), rowsD, {}), indCh = cS.JTCore_.buildChart(chDefS('topInd'), rowsD, {});
+  const reasonCh = cS.JTCore_.buildChart(chDefS('reasons'), rowsD, {});
+  check(hourCh.labels.length === 24 && hourCh.labels[0] === '00h - 01h' && hourCh.labels[23] === '23h - 00h' && hourCh.datasets[0].data[4] === 0 &&
+    hourCh.datasets[0].data.reduce((a, v) => a + v, 0) === A.total + B.total && indCh.labels.indexOf('N/A') < 0 && indCh.labels.length === 10 &&
+    reasonCh.labels.every(l => ['No Sort Code', 'No plan', 'Chute', 'Intercept', 'No Read', 'Multi', 'Outros'].indexOf(l) >= 0) &&
+    reasonCh.total === A.abnormal + B.abnormal,
+    'Sorter: gráficos — evolução por hora (24 h em ordem), top 10 balanças sem o N/A, motivos de falha = Anormais',
+    {h: hourCh.labels.slice(0, 3), ind: indCh.labels, r: reasonCh.labels, rt: reasonCh.total});
+  // Período grande (totais no servidor): mesmos totais por balança.
+  cS.__state.props.GROUPED_CLIENT_ROWS = '10';
+  const dSum = cS.getDashboardData('sorter_flow', {from: DS, to: DS, filters: {sorter: ['Sorter A']}});
+  delete cS.__state.props.GROUPED_CLIENT_ROWS;
+  const mSum = cS.JTCore_.marginalsByDim(dSum.summary.marginals);
+  const indSum = cS.JTCore_.buildChart(chDefS('topInd'), cS.JTCore_.summaryChartRows(chDefS('topInd'), mSum, {sorter: ['Sorter A']}), {});
+  const indRow = cS.JTCore_.buildChart(chDefS('topInd'), rowsD.filter(r => r.sorter === 'Sorter A'), {});
+  check(dSum.summary && indSum.total === indRow.total && indSum.labels.join() === indRow.labels.join(),
+    'Sorter: período grande com filtro de sorter (totais no servidor) = os mesmos números', {s: indSum.total, r: indRow.total});
+  // Catálogo: separado, com a tabela por horário e a fonte "sorter" (a tela troca "JMS" por "sorter").
+  const catS = cS.getPublicCatalog_()[0];
+  check(catS.key === 'sorter_flow' && catS.crossTables[0].rowDim === 'interval' && catS.source.pt === 'sorter' &&
+    catS.filters.map(f => f.key).join() === 'sorter,induction,shift,interval',
+    'Sorter: catálogo com filtros (sorter, balança, turno, horário), tabela por horário e a fonte "sorter"');
+
+  // Sem a troca do Sorter A: só o B é lido, com aviso no LOG (uma vez por dia).
+  const {c: cB} = sorterCtx({SORTER_TROCA_A: ''});
+  cB.queueHistory(DS, DS2, true);
+  runAll(cB);
+  const warns = cB.allTabRows_('LOG').filter(r => /Sorter A fora da leitura/.test(String(r[4])));
+  check(cB.getRateDay_('sorter_flow', DS).totalCount === B.total && cB.getRateDay_('sorter_flow', DS).metrics.sortTotalA === null && warns.length === 1,
+    'Sorter: sem a troca do Sorter A, lê só o B e avisa uma vez', {t: cB.getRateDay_('sorter_flow', DS).totalCount, B: B.total, warns: warns.length});
+  // Troca que não troca (device errado): os dois sorters com os mesmos números — o dia não é gravado e o erro diz o motivo.
+  const {c: cE} = sorterCtx({SORTER_TROCA_A: JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: 'device_id=9'})});
+  cE.queueHistory(DS, DS, true);
+  runAll(cE);
+  const stE = cE.getDayStatus_('sorter_flow', DS);
+  check(stE.summary !== 'COMPLETE' && /mesmos números: a troca de sorter não funcionou/.test(stE.error) && !cE.getRateDay_('sorter_flow', DS),
+    'Sorter: troca que não troca nada não grava o dia (o mesmo sorter somado duas vezes)', stE);
+  // Sorter fora do ar: erro claro (sem pausar a fila como credencial).
+  const {c: cD} = sorterCtx({}, {down: true});
+  cD.queueHistory(DS, DS, true);
+  runAll(cD);
+  const stD = cD.getDayStatus_('sorter_flow', DS);
+  check(/O sorter respondeu código 500/.test(stD.error) && cD.errorKind_(stD.error) === 'OTHER', 'Sorter: site fora do ar — erro claro, nova tentativa', stD.error);
+  const diag = cS.diagnosticarSorter();
+  check(diag.sorters.length === 2 && diag.sorters.every(x => x.hoje && x.hoje.sortTotal > 0) && !/tok\d+k|sess\d+x/.test(JSON.stringify(diag)) &&
+    diag.sorters[1].cookies.indexOf('laravel_session') >= 0, 'diagnosticarSorter: os dois sorters, sem mostrar token nem cookie (só os nomes)', diag);
+  // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
+  check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&
+    (() => { try { createContext({props: {}, jms: fakeJms({}), quiet: true}).validateJmsAuth_(); return false; } catch (e) { return true; } })(),
+    'AuthToken exigido só quando algum painel usa o JMS');
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

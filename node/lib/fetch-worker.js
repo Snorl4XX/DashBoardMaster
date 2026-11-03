@@ -35,6 +35,9 @@ async function one(r) {
     const bytes = new Uint8Array(await res.arrayBuffer());
     const hdrs = {};
     res.headers.forEach((v, k) => { hdrs[k] = v; });
+    // Vários Set-Cookie (ex.: sessão do site do sorter): todos, em lista, como o getAllHeaders() do Apps Script.
+    const sc = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+    if (sc.length) hdrs['set-cookie'] = sc.length > 1 ? sc : sc[0];
     return {code: res.status, headers: hdrs, body: bytes};
   } catch (e) {
     const cause = e && e.cause ? ' (' + (e.cause.code || e.cause.message || e.cause) + ')' : '';
