@@ -1,8 +1,18 @@
-# J&T DASHMASTER V4.23.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.2 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.23.2 — Bot do Feishu: todas as balanças
+
+Pedido "o bot mostre todos os dados das balanças": depois das 3 que mais e das 3 que menos processaram, o cartão do Feishu traz
+**todas as balanças de cada sorter** (Sorter A e Sorter B), com a quantidade alimentada no dia e o total do sorter, em duas
+colunas. Balança que não alimentou nada no dia aparece com **0 ⚠️**.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_2_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. O webhook do bot continua salvo. Para ver na hora: Configurações → Bot do Feishu →
+**Salvar e mandar um teste** (sem colar nada de novo).
 
 ## V4.23.1 — Produção do Sorter: sem a "Tabela de remessas"
 

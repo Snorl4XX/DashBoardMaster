@@ -4991,6 +4991,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       m.sign === sign,
       'Bot do Feishu: no minuto 5 manda a hora que fechou (A + B), o dia, os turnos e as 3 balanças que mais/menos processaram — uma vez, com assinatura',
       {early, t1, t2, n: msgs.length, hourTot, top: feeds[0], low: low[0], text: text.slice(0, 600)});
+    // V4.23.2 (pedido "o bot mostre todos os dados das balanças"): todas as balanças de cada sorter, em duas colunas.
+    const fieldsOf = sn => ((m.card.elements || []).map((e, i, a) => (/Todas as balanças · /.test(JSON.stringify(e)) && /Sorter /.test(JSON.stringify(e)) &&
+      JSON.stringify(e).indexOf(sn) >= 0 ? a[i + 1] : null)).filter(Boolean)[0] || {}).fields || [];
+    const fA0 = feederTotals('A', DS), fB0 = feederTotals('B', DS), fdA = fieldsOf('Sorter A'), fdB = fieldsOf('Sorter B');
+    const cellOk = (fd, ft) => fd.length === Object.keys(ft).length && Object.keys(ft).every(n => fd[n - 1] && fd[n - 1].is_short &&
+      fd[n - 1].text.content === 'Balança ' + String(n).padStart(2, '0') + ': **' + cF.feishuN_(ft[n]) + '**');
+    check(cellOk(fdA, fA0) && cellOk(fdB, fB0) && text.indexOf('Todas as balanças · Sorter A / 所有供包台** — total ' +
+      cF.feishuN_(Object.values(fA0).reduce((a, v) => a + v, 0))) >= 0,
+      'Bot do Feishu: todas as balanças de cada sorter (1 a 12 no simulado) com a quantidade do dia', {a: fdA.slice(0, 3), n: fdA.length});
     reply = {code: 19021, msg: 'sign match fail or timestamp is not within one hour from current time'};
     const bad = cF.testarFeishu(), bad1 = cF.feishuSorterTick_(at(15, 6)), bad2 = cF.feishuSorterTick_(at(15, 7)), bad3 = cF.feishuSorterTick_(at(15, 8));
     const bad4 = cF.feishuSorterTick_(at(15, 9));
