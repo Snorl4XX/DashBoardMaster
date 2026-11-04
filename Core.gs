@@ -634,6 +634,13 @@ function JTCoreFactory_() {
    */
   var FILTER_SCOPES = {};
   function setFilterScopes(scopes) { FILTER_SCOPES = scopes || {}; }
+  /**
+   * V4.22.11: contagem da lista de cada filtro só nestas colunas (ex.: Produção do Sorter: "Sort total"). Sem isso, a lista somava
+   * todos os números da tela juntos (Sort total + Valid total + andares + balanças…) e o mesmo volume aparecia umas 4 vezes. Só a
+   * contagem: o filtro continua valendo para todas as linhas. Filtro com escopo (filterScopes) conta as linhas do escopo dele.
+   */
+  var FACET_COLUMNS = null;
+  function setFacetColumns(cols) { FACET_COLUMNS = cols && cols.length ? cols : null; }
   function inScope(k, r) { var sc = FILTER_SCOPES[k]; return !sc || sc.some(function (c) { return colMatch(c, r.column); }); }
   /**
    * Listas formadas por várias situações (Expedição: "Enviados" = todas as remessas; "Em trânsito" e "Não entregues"
@@ -713,8 +720,11 @@ function JTCoreFactory_() {
       var all = {}, cnt = {};
       // Filtro com escopo: as opções e as contagens saem só das linhas da(s) lista(s) dele.
       var own = FILTER_SCOPES[k] ? (rows || []).filter(function (r) { return inScope(k, r); }) : rows;
-      countBy(own, k).forEach(function (x) { all[x.label] = x.value; });
-      countBy(applyFilters(own, filters, k), k).forEach(function (x) { cnt[x.label] = x.value; });
+      var counted = !FILTER_SCOPES[k] && FACET_COLUMNS ?
+        (own || []).filter(function (r) { return FACET_COLUMNS.some(function (c) { return colMatch(c, r.column); }); }) : own;
+      if (counted !== own) countBy(own, k).forEach(function (x) { all[x.label] = 0; });
+      countBy(counted, k).forEach(function (x) { all[x.label] = x.value; });
+      countBy(applyFilters(counted, filters, k), k).forEach(function (x) { cnt[x.label] = x.value; });
       if (SHIFT_KEYS[k]) SHIFTS.forEach(function (s) { if (all[s] === undefined) all[s] = 0; });
       (filters && filters[k] || []).forEach(function (v) { if (all[v] === undefined) all[v] = 0; });
       out[k] = orderOptions(k, Object.keys(all).map(function (v) {
@@ -1114,7 +1124,7 @@ function JTCoreFactory_() {
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, siteKey: siteKey, inSiteList: inSiteList, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
-    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
+    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, setFacetColumns: setFacetColumns, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
     encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText, median: median
   };
 }

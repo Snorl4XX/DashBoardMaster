@@ -4854,6 +4854,21 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     hEst.logs.some(l => /formato desconhecido \(ex\.: "Período 1"\), lido pela ordem das linhas/.test(l)) && !hCurto.logs.some(l => /formato desconhecido/.test(l)),
     'Sorter: horário da tela feeder feed quantity em outros formatos ("07:00", "2026-11-4 7:00", desconhecido) — as balanças aparecem, sem somar a linha Total',
     {curto: hCurto.sum('Alimentação'), sem: hSem.sum('Alimentação'), est: hEst.sum('Alimentação'), feedAll, h7: [h7(hCurto), h7(hSem), h7(hEst)], want7});
+  // V4.22.11 (print do usuário: "Sorter B 1.122.969" no filtro): o número de cada opção do filtro é o Sort total, não a soma de
+  // todos os números da tela (Sort total + Valid total + andares + balanças…); o filtro de balança conta a quantidade alimentada.
+  const Cf = cS.JTCore_;
+  Cf.setFilterScopes(cfgS.filterScopes); Cf.setFacetColumns(cfgS.facetColumns);
+  const fc = Cf.facets(rowsD, {}, ['sorter', 'induction', 'shift']), optOf = (k, v) => (fc[k].filter(o => o.value === v)[0] || {});
+  const fcA = Cf.facets(rowsD, {sorter: ['Sorter A']}, ['shift']);
+  check(optOf('sorter', 'Sorter A').total === A.total && optOf('sorter', 'Sorter B').total === B.total &&
+    optOf('induction', 'Balança 01').total === fA[1] + fB[1] && fc.shift.reduce((a, o) => a + o.total, 0) === A.total + B.total &&
+    fcA.shift.reduce((a, o) => a + o.count, 0) === A.total,
+    'Sorter: o número ao lado de cada opção do filtro é o Sort total (não a soma de todos os números da tela)',
+    {A: optOf('sorter', 'Sorter A'), B: optOf('sorter', 'Sorter B'), want: [A.total, B.total]});
+  Cf.setFacetColumns(null);
+  const fcOld = Cf.facets(rowsD, {}, ['sorter']);
+  check(fcOld.sorter.filter(o => o.value === 'Sorter A')[0].total > A.total * 3, 'sem facetColumns, a lista soma todas as linhas (como nos outros painéis)');
+  Cf.setFilterScopes({});
   const dgH = hSem.c.diagnosticarSorter().sorters[0];
   check(dgH.telaBalancas && dgH.telaBalancas.linhas === 1 && /^\d{4}-\d{2}-\d{2} 00:00~\d{4}-\d{2}-\d{2} 23:59$/.test(dgH.telaBalancas.exemploHorario) &&
     dgH.telaBalancas.linhasPorHora === 24 && dgH.telaBalancas.colunas === 14 && /^2026-\d+-\d+ \d+:00$/.test(dgH.telaBalancas.exemploHora) &&

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.22.10',
+  VERSION: '4.22.11',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1664,6 +1664,8 @@ const ALL_INDICATORS_ = Object.freeze({
     // V4.22.8: a balança só existe na quantidade alimentada (tela "feeder feed quantity"): o filtro vale só para ela; os totais
     // (Sort total, Valid total, motivos) são do sorter inteiro e não mudam com o filtro de balança.
     filterScopes: {induction: ['Alimentação']},
+    // V4.22.11: o número ao lado de cada opção do filtro (Sorter, Turno, Horário) = o Sort total, não a soma de todos os números.
+    facetColumns: ['Sort total'],
     topCards: [],
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
     heroMetric: {key: 'sortTotal', column: 'Sort total', icon: 'qty',
@@ -1909,7 +1911,7 @@ function catalogEntry_(cfg) {
     metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
     // V4.18 (Criação de Lotes): cartão do dia anterior e os nomes novos dos valores gravados antes.
     prevCard: cfg.prevCard || null, valueAliases: cfg.valueAliases || null, sumDefs: cfg.sumDefs || null,
-    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
+    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, facetColumns: cfg.facetColumns || null, tables: cfg.tables || null,
     // V4.22 (Produção do Sorter): tabela cruzada — uma linha por valor de rowDim, uma coluna por lista (cols) e o Total.
     crossTables: cfg.crossTables || null, source: cfg.source || null, detailsOkColumn: cfg.detailsOkColumn || null,
     columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,

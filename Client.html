@@ -1136,6 +1136,7 @@
     if (!state.data) return;
     var c = cfg(), f = filtersObj();
     Core.setFilterScopes(c.filterScopes || {});
+    Core.setFacetColumns(c.facetColumns || null);
     Core.setColumnSets(c.columnSets || {});
     renderHeader();
     // Modo de totais: as linhas (totais por dia e coluna) já vêm filtradas do servidor.
