@@ -1,8 +1,22 @@
-# J&T DASHMASTER V4.23.3 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.4 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.23.4 — Bot do Feishu: cartão com emojis e "Balança" em chinês
+
+Pedido "deixar as mensagens do bot mais bonitas, com emojis; colocar em chinês a palavra Balança": o cartão ganhou emojis
+(📊 título, ⏱️ hora, 📦 volumes, 📈 total do dia, 🌅🌇🌙 turnos, 🥇🥈🥉 as que mais processaram, 🔻 as que menos, 📋 todas as
+balanças, ⚠️ balança parada) e cada balança aparece também em chinês: "Balança 07 / 供包台07".
+
+- **Figurinhas/imagens:** o bot personalizado (webhook) do Feishu não manda imagem — para isso o Feishu exige subir a imagem por
+  um app da empresa (app_id e segredo do app). Os emojis funcionam.
+- **Foto do bot (ex.: MAOMAO):** é escolhida no próprio Feishu, ao adicionar o bot no grupo (nome, descrição e foto). Se o bot já
+  existe e o Feishu não deixar trocar a foto, remova e adicione de novo com a foto — o webhook muda: cole o novo em Configurações.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_4_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. Para ver o cartão novo: Configurações → Bot do Feishu → **Salvar e mandar um teste**.
 
 ## V4.23.3 — Produção do Sorter: Evolução diária com os filtros
 

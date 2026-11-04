@@ -4995,7 +4995,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     check(early === null && t1 && t1.ok && t2 === null && msgs.length === 1 && m.msg_type === 'interactive' && /13h–14h/.test(m.card.header.title.content) &&
       text.indexOf('**' + cF.feishuN_(hourTot) + '** volumes') >= 0 && text.indexOf(cF.feishuN_(A.total + B.total)) >= 0 &&
       text.indexOf('T1 (06h–14h): **' + cF.feishuN_(t1Tot) + '**') >= 0 &&
-      text.indexOf('1. ' + feeds[0].name + ': **' + cF.feishuN_(feeds[0].q) + '**') >= 0 && text.indexOf('1. ' + low[0].name + ': **' + cF.feishuN_(low[0].q) + '**') >= 0 &&
+      text.indexOf('🥇 ' + feeds[0].name + ' / 供包台' + feeds[0].name.slice(-2) + ': **' + cF.feishuN_(feeds[0].q) + '**') >= 0 &&
+      text.indexOf('🔻 ' + low[0].name + ' / 供包台' + low[0].name.slice(-2) + ': **' + cF.feishuN_(low[0].q) + '**') >= 0 && /📊 Produção do Sorter \/ 分拣机产量/.test(m.card.header.title.content) &&
       m.sign === sign,
       'Bot do Feishu: no minuto 5 manda a hora que fechou (A + B), o dia, os turnos e as 3 balanças que mais/menos processaram — uma vez, com assinatura',
       {early, t1, t2, n: msgs.length, hourTot, top: feeds[0], low: low[0], text: text.slice(0, 600)});
@@ -5004,7 +5005,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       JSON.stringify(e).indexOf(sn) >= 0 ? a[i + 1] : null)).filter(Boolean)[0] || {}).fields || [];
     const fA0 = feederTotals('A', DS), fB0 = feederTotals('B', DS), fdA = fieldsOf('Sorter A'), fdB = fieldsOf('Sorter B');
     const cellOk = (fd, ft) => fd.length === Object.keys(ft).length && Object.keys(ft).every(n => fd[n - 1] && fd[n - 1].is_short &&
-      fd[n - 1].text.content === 'Balança ' + String(n).padStart(2, '0') + ': **' + cF.feishuN_(ft[n]) + '**');
+      fd[n - 1].text.content === 'Balança ' + String(n).padStart(2, '0') + ' / 供包台' + String(n).padStart(2, '0') + ': **' + cF.feishuN_(ft[n]) + '**');
     check(cellOk(fdA, fA0) && cellOk(fdB, fB0) && text.indexOf('Todas as balanças · Sorter A / 所有供包台** — total ' +
       cF.feishuN_(Object.values(fA0).reduce((a, v) => a + v, 0))) >= 0,
       'Bot do Feishu: todas as balanças de cada sorter (1 a 12 no simulado) com a quantidade do dia', {a: fdA.slice(0, 3), n: fdA.length});
