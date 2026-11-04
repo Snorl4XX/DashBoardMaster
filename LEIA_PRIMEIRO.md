@@ -1,53 +1,8 @@
-# J&T DASHMASTER V4.23.7 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.4 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
-
-## V4.23.7 — Bot do Feishu: hora com linha zerada
-
-Print do usuário (17:11): o cartão das 16h–17h veio com tudo 0, mas com a lista das balanças — o site respondeu a janela de uma
-hora com **uma linha zerada** (nulos), não com "nenhuma linha", e a V4.23.6 só usava a consulta por hora quando não vinha linha.
-- Agora a consulta por hora entra sempre que a janela vem **zerada** (totais, balanças e fechamento do turno).
-- Hora ainda vazia: o bot espera e tenta de 5 em 5 minutos até o minuto **55** (`FEISHU_ESPERA`); se sair zerado, o cartão diz
-  "O site do sorter não tinha números para esta hora".
-- `testarFeishu` com o parâmetro `16` mostra em `oQueOSiteRespondeu`, para cada sorter: `totaisDaJanela`,
-  `totaisPelaConsultaPorHora`, `horasComDadosNoSite` (ex.: "0h até 15h" = o site ainda não tem as 16h) e `totalDoDiaNoSite`.
-
-**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_7_SORTER_NODE.zip` em `C:\`
-(Substituir) e abra o `iniciar.bat`.
-
-## V4.23.6 — Bot do Feishu: hora com zero (16h–17h)
-
-Print do usuário: o cartão das 16h–17h chegou com tudo **0** e sem nenhuma balança — o site devolveu **nenhuma linha** para a
-janela de uma hora (16:00 às 16:59), nos dois sorters.
-- **Sem linha na janela:** os números da hora vêm da consulta por hora (a mesma dos gráficos "por hora" do painel): Sort total,
-  Valid total, No Sort Code e as balanças da hora; o fechamento do turno, somando as horas do turno.
-- **Hora ainda vazia** (o site pode demorar alguns minutos para fechar a hora): o bot espera e tenta de 5 em 5 minutos até o
-  minuto 30; depois manda como estiver (sorter parado = zero).
-- **Mandar uma hora escolhida:** Configurações → Executar função → `testarFeishu` com o parâmetro `16` (16:00 às 16:59 de hoje)
-  ou `2026-11-04 16`. O resultado mostra `oQueOSiteRespondeu` (linhas da janela e o número da consulta por hora) — mande um print
-  dele se algo não bater.
-
-**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_6_SORTER_NODE.zip` em `C:\`
-(Substituir) e abra o `iniciar.bat`.
-
-## V4.23.5 — Bot do Feishu: os dados de cada hora
-
-Pedido "tem que mandar em 1 hora, 1 hora: das 01h até 02h, os dados desse período; das 12h às 13h, desse período": cada cartão
-traz **só os números da hora que fechou**, pedidos ao site do sorter para essa janela (ex.: às 13:05, de 12:00:00 a 12:59:59,
-"no group by", Induction All, By Layer All — os mesmos filtros dos prints):
-- ⏱️ Sort total da hora (Sorter A + B e cada um), ✅ Valid total e ❌ No Sort Code (com %), e o turno da hora;
-- 🏆 as 3 balanças que mais e 🐢 as 3 que menos processaram **na hora**, e 📋 todas as balanças de cada sorter na hora
-  (sem produção = 0 ⚠️);
-- 🏁 **no fim de cada turno** (cartões das 13h–14h, 21h–22h e 05h–06h): o total do turno que fechou (T1 06h–14h, T2 14h–22h,
-  T3 22h–06h, que começa no dia anterior).
-
-Sem acesso ao sorter (computador fora da rede da base), o grupo recebe **um aviso só** em vez de cartões com zero; quando o acesso
-volta, o cartão seguinte diz "O acesso ao sorter voltou".
-
-**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_5_SORTER_NODE.zip` em `C:\`
-(Substituir) e abra o `iniciar.bat`. Para ver na hora: Configurações → Bot do Feishu → **Salvar e mandar um teste**.
 
 ## V4.23.4 — Bot do Feishu: cartão com emojis e "Balança" em chinês
 
