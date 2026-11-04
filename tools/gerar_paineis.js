@@ -98,10 +98,10 @@ rede interna: este painel só funciona na versão Node.js.
 - **Cartões:** Total produzido (Sort total), Deu certo (Valid total) e %, Não deu certo (No Sort Code) e %, Anormais, dia anterior
   e um cartão por turno (T1 06h–14h, T2 14h–22h, T3 22h–06h).
 - **Gráficos:** evolução diária, evolução por hora, No Sort Code por hora, produção por turno, por sorter (A e B), top 10 balanças
-  (Sort total e No Sort Code), motivos de falha (No Sort Code, No plan, Chute, Intercept, No Read, Multi, Outros) e produção por
-  andar (Layer1/2/3).
+  pela quantidade alimentada (tela "feeder feed quantity"), motivos de falha (No Sort Code, No plan, Chute, Intercept, No Read,
+  Multi, Outros) e produção por andar (Layer1/2/3).
 - **Filtros:** Sorter, Balança (Induction No.), Turno e Horário.
-- **Tabela por horário**, com as mesmas colunas da tela do sorter e o Total no fim.
+- **Tabelas:** por horário (as mesmas colunas da tela do sorter e o Total no fim) e a quantidade alimentada por balança.
 
 ## Instalar (uma vez)
 1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-sorter). Não extraia por cima do C:\\dashmaster.
@@ -130,11 +130,10 @@ Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" 
 | SORTER_TROCA_A | pedido de troca para o Sorter A: {"metodo", "caminho", "corpo"} |
 | SORTERS | sorters lidos, na ordem (padrão "B,A") |
 | SORTER_PADRAO | o sorter que o site mostra sem trocar (padrão "B") |
-| SORTER_BALANCAS | lista das balanças: os valores do "Induction No./区" da tela do sorter (ex.: "1,2,3"). Sem ela, o painel procura a lista na tela de estatística do site; sem achar, de 1 até SORTER_MAX_BALANCAS (padrão 40) |
 
 Se os dois sorters vierem com os mesmos números, o painel não grava o dia e avisa: a troca não trocou nada. Cada sorter é conferido
-pelo título da página do site ("(A套)" / "(B套)"). Se o site devolver o total do sorter para cada número de balança, o painel não
-soma por balança (só o total) e avisa no LOG. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
+pelo título da página do site ("(A套)" / "(B套)"). As balanças vêm da tela "feeder feed quantity" (/statis/outlets); se ela não
+responder, o dia fica com os totais e o LOG avisa. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
 `};
 const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
 // V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.

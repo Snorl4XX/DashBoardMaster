@@ -1,8 +1,28 @@
-# J&T DASHMASTER V4.22.7 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.8 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.8 — Produção do Sorter: balanças pela tela "feeder feed quantity"
+
+O HTML enviado mostrou de onde o site tira os números de cada balança: a tela **"feeder feed quantity"** (`/statis/outlets`).
+Ela busca no mesmo endereço (pedido AJAX com `start`, `end` e `group`) e devolve, por horário, uma coluna por balança
+(`total_1` … `total_36`), para o sorter escolhido na sessão. A consulta de totais (`summary.data`) não serve para balança: com
+`inductionno` 1…40, ela devolvia o total do sorter inteiro.
+
+- Os totais (Sort total, Valid total, No Sort Code, motivos e andares) continuam vindo da consulta de totais, **sem balança**.
+- A quantidade de cada balança vira a lista **Alimentação**, com uma consulta por sorter por dia (antes eram 40).
+- **Gráfico** "Top 10 balanças · quantidade alimentada" e **tabela nova** "Quantidade alimentada por balança", com todas as
+  balanças e o Total. A tabela por horário ganhou a coluna Alimentação.
+- O site não dá o No Sort Code por balança: o gráfico "Top 10 balanças · No Sort Code" saiu.
+- O filtro **Balança** vale só para a quantidade alimentada. Os totais do sorter não mudam com ele.
+- Se a tela "feeder feed quantity" não responder, o dia fica com os totais (aviso no LOG).
+- **Uma vez:** os dias já baixados são baixados de novo. O teste em Configurações mostra, para cada sorter, quantas balanças e
+  quanto alimentaram hoje.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_8_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**.
 
 ## V4.22.7 — Produção do Sorter: balanças somadas 40 vezes e A/B conferidos (PDF "ALTERAÇÃO NO DASH SORTER")
 

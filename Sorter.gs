@@ -30,6 +30,8 @@ const SORTER_COLUMNS_ = [['Sort total', 'total'], ['Valid total', 'valid'], ['An
   ['No plan', 'noPlan'], ['Chute', 'chuteBlock'], ['Intercept', 'intercept'], ['No Read', 'noRead'], ['Multi', 'multi'], ['Outros', 'other'],
   ['Layer1 total', 'PS01'], ['Layer2 total', 'PS02'], ['Layer3 total', 'PS03']];
 const SORTER_REASONS_ = ['No Sort Code', 'No plan', 'Chute', 'Intercept', 'No Read', 'Multi', 'Outros'];
+/** V4.22.8: quantidade alimentada em cada balança (tela "feeder feed quantity"), numa lista própria (não soma no Sort total). */
+const SORTER_FEED_COLUMN_ = 'Alimentação';
 const SORTER_LAYERS_ = ['Layer1 total', 'Layer2 total', 'Layer3 total'];
 /** Números do resumo do dia (Config.gs → summary.metrics) ← campos somados das linhas. */
 const SORTER_METRICS_ = {sortTotal: 'total', validTotal: 'valid', abnormal: 'abnormal', noSortCode: 'noInfo', noPlan: 'noPlan',
@@ -58,56 +60,52 @@ function sorterDevices_() {
   });
 }
 /**
- * Balanças consultadas: [{v: valor do inductionno, l: nome}]. SORTER_BALANCAS = "1,2,3…" (à mão); senão a lista da tela de
- * estatística do site (SORTER_BALANCAS_SITE, achada sozinha — V4.22.7); senão de 1 até SORTER_MAX_BALANCAS (padrão 40).
+ * V4.22.8: quantidade de cada balança pela tela "feeder feed quantity" do site (/statis/outlets — HTML enviado pelo usuário).
+ * A tabela é carregada do mesmo endereço (layui table.reload, pedido AJAX) com start / end / group e devolve, por horário, uma
+ * coluna por balança: total_1 … total_36 (null = 0). Vale para o sorter escolhido na sessão (o título mostra "(B套)").
+ * A consulta de totais (summary.data) com inductionno = 1…40 devolvia o total do sorter inteiro para cada balança.
  */
-function sorterInductions_() {
-  const manual = String(getProp_('SORTER_BALANCAS', '') || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => x && x !== '0');
-  if (manual.length) return manual.filter((x, i, a) => a.indexOf(x) === i).map(x => ({v: x, l: x}));
-  const site = safeJsonParse_(getProp_('SORTER_BALANCAS_SITE', ''), null);
-  if (Array.isArray(site) && site.length) return site.filter(x => x && x.v !== undefined).map(x => ({v: String(x.v), l: String(x.l || x.v)}));
-  const max = Math.max(1, Math.min(200, Number(getProp_('SORTER_MAX_BALANCAS', '')) || 40));
-  const out = [];
-  for (let i = 1; i <= max; i++) out.push({v: String(i), l: String(i)});
-  return out;
+const SORTER_OUTLETS_PATH_ = '/statis/outlets';
+function sorterOutletsUrl_(date) {
+  return sorterBase_() + SORTER_OUTLETS_PATH_ + '?start=' + encodeURIComponent(date + ' 00:00:00') + '&end=' + encodeURIComponent(date + ' 23:59:59') +
+    '&group=60&nc=&page=1&limit=1000';
 }
-/** "7" → "Balança 07"; outro nome da tela ("1区") → "Balança 1区". */
-function sorterInductionLabel_(it) {
-  const l = String(it && it.l !== undefined ? it.l : it).trim();
-  return 'Balança ' + (/^\d+$/.test(l) ? l.padStart(2, '0') : l);
+/** Hora da linha ("2026-11-04 07:00:00~…", "11-04 07:00" ou "07:00") no dia `date`; null = outro dia / linha de total. */
+function sorterHourOf_(timearea, date) {
+  const t = String(timearea || '');
+  let m = /(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(t);
+  if (m) return m[1] === date ? Number(m[2]) : null;
+  m = /(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/.exec(t);
+  if (m) return m[1] + '-' + m[2] === date.slice(5) ? Number(m[3]) : null;
+  m = /^\s*(\d{1,2}):(\d{2})/.exec(t);
+  return m ? Number(m[1]) : null;
 }
-/**
- * V4.22.7: lista das balanças na tela de estatística do site (o <select> do "Induction No./区"). O site devolve o total do sorter
- * inteiro quando o número da balança não vale para ele (as 40 balanças "1…40" vieram iguais ao total). Volta {page, list} ou null.
- */
-function sorterInductionsFromSite_() {
-  const s = sorterSession_({id: '', nome: 'sorter'}), home = sorterOpenPage_(s, sorterPage_()), urls = [];
-  const add = u => {
-    const c = sorterLocalPath_(u);
-    if (c && /statis/i.test(c) && !/\.data(\?|$)|\.(js|css|png|jpe?g|gif|svg|ico|woff2?)(\?|$)/i.test(c) && urls.indexOf(c) < 0) urls.push(c);
-  };
-  String(home.html).replace(/["']((?:https?:\/\/[^"'\s<>]+)?\/[^"'\s<>]*)["']/g, (x, u) => { add(u); return x; });
-  ['/statis/summary', '/statis/summaryview', '/statis/index', '/statis'].forEach(add);
-  for (let i = 0; i < urls.length && i < 8; i++) {
-    let html = '';
-    try {
-      const r = sorterFetch_(s, sorterBase_() + urls[i], {headers: {Accept: 'text/html,*/*'}});
-      if (r.getResponseCode() >= 400) continue;
-      html = r.getContentText();
-    } catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; continue; }
-    const sel = /<select\b[^>]*(?:name|id)\s*=\s*["'][^"']*induction[^"']*["'][^>]*>([\s\S]*?)<\/select>/i.exec(html);
-    if (!sel) continue;
-    const list = [];
-    sel[1].replace(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi, (x, at, txt) => {
-      const a = sorterAttrs_('<option ' + at + '>'), l = sorterDecode_(txt.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
-      const v = a.value !== undefined ? String(a.value).trim() : l;
-      if (v !== '' && v !== '0' && !/^(all|todas?|全部)$/i.test(l) && !list.some(y => y.v === v)) list.push({v: v, l: l || v});
-      return x;
+/** Quantidade por balança e hora no dia, na sessão `s`: {rows: [{hour, q: {n: qtd}}], feeders: [n…]} (ou erro claro). */
+function sorterFetchOutlets_(s, date) {
+  const res = sorterFetch_(s, sorterOutletsUrl_(date), {headers: {'X-Requested-With': 'XMLHttpRequest', Referer: sorterBase_() + SORTER_OUTLETS_PATH_}});
+  const code = res.getResponseCode(), text = res.getContentText();
+  if (code !== 200) throw new Error('A tela "feeder feed quantity" (' + SORTER_OUTLETS_PATH_ + ') respondeu código ' + code + '.');
+  const body = safeJsonParse_(text, null);
+  if (!body || typeof body !== 'object') throw new Error('A tela "feeder feed quantity" não respondeu em JSON: ' + String(text).replace(/\s+/g, ' ').slice(0, 100));
+  if (body.code !== undefined && Number(body.code) !== 1) throw new Error('A tela "feeder feed quantity" recusou a consulta: ' + String(body.msg || 'sem mensagem').slice(0, 120) + '.');
+  const rows = [], feeders = [];
+  (Array.isArray(body.data) ? body.data : []).forEach(x => {
+    const h = sorterHourOf_(x && x.timearea, date);
+    if (h === null || !(h >= 0 && h < 24)) return;
+    const q = {};
+    Object.keys(x).forEach(k => {
+      const m = /^total_(\d+)$/i.exec(k);
+      if (!m) return;
+      const n = Number(m[1]), v = Number(x[k]);
+      if (feeders.indexOf(n) < 0) feeders.push(n);
+      if (isFinite(v) && v > 0) q[n] = (q[n] || 0) + v;
     });
-    if (list.length) return {page: urls[i], list: list};
-  }
-  return null;
+    rows.push({hour: h, q: q});
+  });
+  return {rows: rows, feeders: feeders.sort((a, b) => a - b)};
 }
+/** 7 → "Balança 07". */
+function sorterInductionLabel_(n) { return 'Balança ' + String(n).padStart(2, '0'); }
 function sorterUrl_(date, page, opts) {
   opts = opts || {};
   return sorterBase_() + SORTER_PATH_ + '?page=' + page + '&limit=1000&start=' + encodeURIComponent(date + ' 00:00:00') +
@@ -743,56 +741,31 @@ function sorterSummary_(indicatorKey, isoDate) {
 function runSorterDetailJob_(job, deadline, cfg, st) {
   const ind = job.indicator, date = job.date;
   const ss = sorterSessions_();
-  let inds = sorterInductions_(), ignored = false;
-  const acc = GroupAccumulator_(cfg), totals = {};
+  const acc = GroupAccumulator_(cfg), totals = {}, falhas = [];
   let rowsIn = 0;
-  // V4.22.7: o site devolve o total do sorter inteiro quando o número da balança não vale para ele. Duas ou mais balanças iguais ao
-  // total = filtro ignorado (as 40 balanças "1…40" vieram com o total e o painel somava 40 vezes).
-  const sameAsAll = (rows, all) => { const a = sorterSum_(rows), b = sorterSum_(all); return b.total > 0 && a.total === b.total && a.valid === b.valid && a.noInfo === b.noInfo; };
-  const isIgnored = got => got.slice(1).filter(rows => sameAsAll(rows, got[0])).length >= 2;
-  const fetchAll = s => sorterFetchDay_(s, date, [{induction: 0}].concat(inds.map(n => ({induction: n.v}))));
   ss.sessions.forEach(s => {
     if (Date.now() + 20000 > deadline) throw new Error('Tempo da execução acabou antes de ler todos os sorters do dia; nova tentativa na próxima.');
-    let got = fetchAll(s);
-    if (isIgnored(got) && !getProp_('SORTER_BALANCAS', '') && getProp_('SORTER_BALANCAS_BUSCA', '') !== isoToday_()) {
-      // Procura a lista certa na tela de estatística do site (uma vez por dia) e lê de novo com ela.
-      setProp_('SORTER_BALANCAS_BUSCA', isoToday_());
-      const found = sorterInductionsFromSite_();
-      if (found && found.list.length) {
-        setProp_('SORTER_BALANCAS_SITE', JSON.stringify(found.list));
-        logSync_('INFO', ind, date, found.list.length + ' balança(s) achadas na tela ' + found.page + ' do sorter.');
-        inds = sorterInductions_();
-        got = fetchAll(s);
-      }
-    }
-    const all = got[0], byHour = {};
-    const ign = isIgnored(got);
-    if (ign) ignored = true;
-    totals[s.dev.id] = sorterSum_(all);
-    all.forEach(r => { byHour[r.hour] = Object.assign({}, r); });
-    const push = (r, label) => {
-      const time = String(r.hour).padStart(2, '0') + ':00:00';
-      SORTER_COLUMNS_.forEach(c => {
-        const q = Number(r[c[1]]) || 0;
-        if (q <= 0) return;
-        acc.addRow({date: date, column: c[0], sorter: s.dev.nome, induction: label, shift: JTCore_.shiftOf(time), interval: JTCore_.intervalOf(time), qty: q});
-        rowsIn++;
-      });
+    const add = (hour, column, induction, q) => {
+      if (!(q > 0)) return;
+      const time = String(hour).padStart(2, '0') + ':00:00';
+      acc.addRow({date: date, column: column, sorter: s.dev.nome, induction: induction, shift: JTCore_.shiftOf(time), interval: JTCore_.intervalOf(time), qty: q});
+      rowsIn++;
     };
-    // Filtro ignorado: só o total (balança "N/A"), nunca o mesmo total somado por balança.
-    if (!ign) {
-      inds.forEach((n, i) => got[i + 1].forEach(r => {
-        push(r, sorterInductionLabel_(n));
-        const h = byHour[r.hour];
-        if (h) SORTER_COLUMNS_.forEach(c => { h[c[1]] = (h[c[1]] || 0) - (Number(r[c[1]]) || 0); });
-      }));
+    // Os números da tela de totais (todas as balanças juntas, uma linha por hora): Sort total, Valid total, motivos, andares.
+    const all = sorterFetchDay_(s, date, [{induction: 0}])[0];
+    totals[s.dev.id] = sorterSum_(all);
+    all.forEach(r => SORTER_COLUMNS_.forEach(c => add(r.hour, c[0], '', Number(r[c[1]]) || 0)));
+    // V4.22.8: quantidade alimentada em cada balança (tela "feeder feed quantity"). Sem ela, o dia fica com os totais.
+    try {
+      sorterFetchOutlets_(s, date).rows.forEach(r => Object.keys(r.q).forEach(n => add(r.hour, SORTER_FEED_COLUMN_, sorterInductionLabel_(n), r.q[n])));
+    } catch (e) {
+      if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e;
+      falhas.push(s.dev.nome + ': ' + String(e && e.message || e).slice(0, 160));
     }
-    Object.keys(byHour).forEach(hr => push(byHour[hr], 'N/A'));
   });
-  if (ignored && getProp_('SORTER_AVISO_BALANCAS', '') !== isoToday_()) {
+  if (falhas.length && getProp_('SORTER_AVISO_BALANCAS', '') !== isoToday_()) {
     setProp_('SORTER_AVISO_BALANCAS', isoToday_());
-    logSync_('WARN', ind, date, 'O sorter devolveu o total inteiro para cada número de balança (inductionno): os gráficos de balança ficam vazios ' +
-      'até a lista certa de balanças (Propriedade SORTER_BALANCAS, os valores do "Induction No./区" da tela do sorter). Os totais estão certos.');
+    logSync_('WARN', ind, date, 'Quantidade por balança (feeder feed quantity) não lida — os totais estão certos: ' + falhas.join(' · '));
   }
   sorterCheckSwitch_(totals);
   sorterWarnSkipped_(ind, date, ss.skipped);
@@ -805,17 +778,20 @@ function runSorterDetailJob_(job, deadline, cfg, st) {
   return 'done';
 }
 /**
- * V4.22.7 (uma vez): os dias já baixados somavam o total do sorter em cada balança (40 vezes) e podiam ter o A e o B trocados.
- * A troca descoberta antes (só a do A) é esquecida para ser descoberta de novo com a do B, e os dias entram na fila de novo.
+ * Dias já baixados refeitos (uma vez por versão dos dados): V4.22.7 — as balanças somavam o total do sorter 40 vezes e o A/B podia
+ * estar trocado (a troca só do A é esquecida e descoberta de novo com a do B); V4.22.8 — a quantidade por balança vem da tela
+ * "feeder feed quantity".
  */
-function migrateSorterV4227_() {
-  if (!INDICATORS.sorter_flow || getProp_('MIGRADO_SORTER_V4227', '')) return 0;
-  setProp_('MIGRADO_SORTER_V4227', '1');
+const SORTER_DADOS_VERSAO_ = 2;
+function migrateSorterDados_() {
+  if (!INDICATORS.sorter_flow || Number(getProp_('SORTER_DADOS_VERSAO', '')) >= SORTER_DADOS_VERSAO_) return 0;
+  setProp_('SORTER_DADOS_VERSAO', String(SORTER_DADOS_VERSAO_));
   const ta = safeJsonParse_(getProp_('SORTER_TROCA_A', ''), null);
   if (ta && ta.auto && !getProp_('SORTER_TROCA_B', '')) { deleteProp_('SORTER_TROCA_A'); deleteProp_('SORTER_DESCOBERTA_A'); }
+  ['SORTER_BALANCAS_SITE', 'SORTER_BALANCAS_BUSCA', 'MIGRADO_SORTER_V4227'].forEach(k => { if (getProp_(k, '')) deleteProp_(k); });
   const days = Object.keys(dayFilesMap_('sorter_flow', null, null)).sort().reverse();
   if (days.length) enqueueJobs_(days.map(d => ['DETAIL_INIT', 'sorter_flow', d, 1]), {reset: true});
-  logSync_('INFO', 'sorter_flow', '', 'V4.22.7: ' + days.length + ' dia(s) da Produção do Sorter na fila de novo (balanças e A/B conferidos).');
+  logSync_('INFO', 'sorter_flow', '', 'Produção do Sorter: ' + days.length + ' dia(s) na fila de novo (quantidade por balança e A/B conferidos).');
   return days.length;
 }
 
@@ -824,8 +800,7 @@ function migrateSorterV4227_() {
  * token ou cookie (só os nomes).
  */
 function diagnosticarSorter() {
-  const lista = getProp_('SORTER_BALANCAS', '') ? 'SORTER_BALANCAS (à mão)' : getProp_('SORTER_BALANCAS_SITE', '') ? 'lista da tela do sorter' : '1 a ' + sorterInductions_().length;
-  const out = {endereco: sorterBase_() + SORTER_PATH_, pagina: sorterPage_(), balancas: sorterInductions_().length + ' (' + lista + ')', sorters: []};
+  const out = {endereco: sorterBase_() + SORTER_PATH_, balancas: sorterBase_() + SORTER_OUTLETS_PATH_ + ' (feeder feed quantity)', pagina: sorterPage_(), sorters: []};
   const today = isoToday_(), reports = {};
   // V4.22.1/V4.22.7: sem a troca, o teste procura sozinho como o site troca (e grava a do A e a do B) e mostra o relatório.
   sorterDevices_().filter(dev => !dev.padrao && !dev.troca && !dev.trocaInvalida).forEach(dev => {
@@ -851,6 +826,12 @@ function diagnosticarSorter() {
       }
       const t = sorterSum_(sorterFetchDay_(s, today, [{induction: 0}])[0]);
       x.hoje = {sortTotal: t.total, validTotal: t.valid, noSortCode: t.noInfo};
+      // V4.22.8: balanças da tela "feeder feed quantity" (quantas e quanto alimentaram hoje).
+      try {
+        const fo = sorterFetchOutlets_(s, today);
+        x.hoje.balancas = fo.feeders.length;
+        x.hoje.alimentacao = fo.rows.reduce((a, r) => a + Object.keys(r.q).reduce((b2, n) => b2 + r.q[n], 0), 0);
+      } catch (e) { x.balancasErro = String(e && e.message || e).slice(0, 160); }
       // Título da página nesta sessão: o site mostra o sorter escolhido (ex.: 巴西GRU分拣机(A套)监控系统).
       try { x.pagina = sorterDecode_(((sorterOpenPage_(s, sorterPage_()).html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim()).slice(0, 60); }
       catch (e) { /* só o título */ }

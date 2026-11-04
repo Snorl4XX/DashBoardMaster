@@ -16,8 +16,10 @@
  *   _token; o clique põe o DB no "selecteddb" e manda $.ajax POST /dbselect {_token, selecteddb}; resposta {code: 1}. A página
  *   /home passa a ter "(A套)" no título. 'xadmin-oculto': o mesmo, mas sem o script (só o formulário).
  * V4.22.7: opts.padraoA — a sessão nova (sem escolher) mostra o Sorter A; opts.codigos — as balanças do site são 1001…1012: o
- * site devolve o TOTAL do sorter para qualquer outro número (como o site real com 1…40); a tela /statis/summary tem o
- * <select name="inductionno"> com a lista (opts.semLista: a lista vem por script, fora do HTML).
+ * site devolve o TOTAL do sorter para qualquer outro número (como o site real com 1…40).
+ * V4.22.8: GET /statis/outlets (tela "feeder feed quantity", HTML do usuário) — a página com uma coluna por balança (total_1…
+ * total_14) e, no pedido AJAX (X-Requested-With) com start/end/group, as linhas por horário {timearea, total_1…} do sorter da
+ * sessão (balança sem produção = null). opts.semOutlets: a tela responde código 500.
  */
 const SCRIPT_DBSELECT = function (host, token) {
   return "$(function () { $('input:button').on('click', function () { $('#hid_selected').val($(this).data('connectionname')); " +
@@ -102,6 +104,24 @@ function createFakeSorter(opts) {
           "'device choose','http://" + (req.headers.host || 'sorter.falso') + "/dbselectview?from=top',500,350)" + '">switch device</a></li>' +
           '<li class="layui-nav-item"><a href="/logout">Guest</a></li></ul><ul class="left-nav"><li><a onclick="xadmin.add_tab(' +
           "'summary statistics','http://" + (req.headers.host || 'sorter.falso') + "/statis/summary')" + '">summary statistics</a></li></ul></body></html>'};
+    }
+    if (req.method === 'GET' && req.path === '/statis/outlets') {
+      if (opts.semOutlets) return {code: 500, headers: {}, body: 'Server Error'};
+      const ajax = String(req.headers['x-requested-with'] || '').toLowerCase() === 'xmlhttprequest';
+      const COLS = BALANCAS + 2;
+      if (!ajax || !req.query.get('start')) {
+        return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
+          body: '<html><head><title>feeder feed quantity|巴西GRU分拣机(' + device + '套)监控系统</title></head><body><table class="layui-table" ' +
+            'lay-data="{id:\'induction\'}"><thead><tr>' + Array.from({length: COLS}, (x, i) => "<th lay-data=\"{field:'total_" + (i + 1) + "'}\">" + (i + 1) + '</th>').join('') +
+            '</tr></thead></table></body></html>'};
+      }
+      const date = String(req.query.get('start') || '').slice(0, 10), data = [];
+      for (let h = 0; h < 24; h++) {
+        const hh = String(h).padStart(2, '0'), row = {timearea: date + ' ' + hh + ':00:00~' + date + ' ' + hh + ':59:59'};
+        for (let n = 1; n <= COLS; n++) { const r = n <= BALANCAS ? hourRow(device, date, n, h) : null; row['total_' + n] = r ? r.sorter_sorttotal : null; }
+        data.push(row);
+      }
+      return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: data.length, data})};
     }
     if (req.method === 'GET' && req.path === '/statis/summary' && xa) {
       const opts1 = opts.codigos && !opts.semLista ? Array.from({length: BALANCAS}, (x, i) => '<option value="' + (1001 + i) + '">' + (i + 1) + '</option>').join('') : '';
@@ -199,4 +219,11 @@ function createFakeSorter(opts) {
   return {handler, fetchMock, log, sessions};
 }
 
-module.exports = {createFakeSorter, dayTotals, hourRow, BALANCAS};
+/** Quantidade alimentada no dia em cada balança 1…12 (tela "feeder feed quantity") de um sorter. */
+function feederTotals(dev, date) {
+  const out = {};
+  for (let n = 1; n <= BALANCAS; n++) { out[n] = 0; for (let h = 0; h < 24; h++) { const r = hourRow(dev, date, n, h); if (r) out[n] += r.sorter_sorttotal; } }
+  return out;
+}
+
+module.exports = {createFakeSorter, dayTotals, feederTotals, hourRow, BALANCAS};

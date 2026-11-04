@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.22.7',
+  VERSION: '4.22.8',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1661,6 +1661,9 @@ const ALL_INDICATORS_ = Object.freeze({
     labelsOne: {sorter: {pt: 'Sorter', zh: '分拣机'}, induction: {pt: 'Balança', zh: '供包台'}, shift: {pt: 'Turno', zh: '班次'},
       interval: {pt: 'Horário', zh: '时间段'}},
     filters: ['sorter', 'induction', 'shift', 'interval'],
+    // V4.22.8: a balança só existe na quantidade alimentada (tela "feeder feed quantity"): o filtro vale só para ela; os totais
+    // (Sort total, Valid total, motivos) são do sorter inteiro e não mudam com o filtro de balança.
+    filterScopes: {induction: ['Alimentação']},
     topCards: [],
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
     heroMetric: {key: 'sortTotal', column: 'Sort total', icon: 'qty',
@@ -1708,10 +1711,10 @@ const ALL_INDICATORS_ = Object.freeze({
         title: {pt: 'Produção por turno', zh: '各班次产量'}, sub: {pt: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', zh: 'T1 06–14 · T2 14–22 · T3 22–06'}},
       {key: 'bySorter', dim: 'sorter', where: {column: 'Sort total'}, type: 'bar', top: 4, hideNA: true,
         title: {pt: 'Produção por sorter', zh: '各分拣机产量'}},
-      {key: 'topInd', dim: 'induction', where: {column: 'Sort total'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
-        title: {pt: 'Top 10 balanças · Sort total', zh: '供包台分拣量前10'}},
-      {key: 'topIndNoSort', dim: 'induction', where: {column: 'No Sort Code'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
-        title: {pt: 'Top 10 balanças · No Sort Code', zh: '供包台无分拣码前10'}, sub: {pt: 'As balanças com mais "Não deu certo"', zh: '无分拣码最多的供包台'}},
+      // V4.22.8: pela tela "feeder feed quantity" (quantidade alimentada em cada balança). O site não dá o No Sort Code por balança.
+      {key: 'topInd', dim: 'induction', where: {column: 'Alimentação'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Top 10 balanças · quantidade alimentada', zh: '供包台供包量前10'},
+        sub: {pt: 'Volumes alimentados em cada balança (feeder feed quantity)', zh: '各供包台供包量（feeder feed quantity）'}},
       {key: 'reasons', dim: 'column', where: {column: 'Motivos de falha'}, type: 'bar', horizontal: true, top: 10,
         title: {pt: 'Motivos de falha', zh: '异常原因'}, sub: {pt: 'No Sort Code, No plan, Chute, Intercept, No Read, Multi e outros', zh: '各异常原因数量'}},
       {key: 'layers', dim: 'column', where: {column: 'Andares'}, type: 'bar', top: 3,
@@ -1721,7 +1724,10 @@ const ALL_INDICATORS_ = Object.freeze({
     crossTables: [
       {key: 'tHours', rowDim: 'interval', title: {pt: 'Tabela por horário (como na tela do sorter)', zh: '分时段统计表'},
         cols: ['Sort total', 'Valid total', 'No Sort Code', 'No plan', 'Chute', 'Intercept', 'No Read', 'Multi', 'Outros', 'Anormais',
-          'Layer1 total', 'Layer2 total', 'Layer3 total']}
+          'Layer1 total', 'Layer2 total', 'Layer3 total', 'Alimentação']},
+      // V4.22.8: todas as balanças, com a quantidade alimentada (tela "feeder feed quantity").
+      {key: 'tFeeders', rowDim: 'induction', title: {pt: 'Quantidade alimentada por balança (feeder feed quantity)', zh: '各供包台供包量'},
+        cols: ['Alimentação']}
     ],
     table: [
       ['date', 'Data', '日期'], ['sorter', 'Sorter', '分拣机'], ['induction', 'Balança', '供包台'], ['shift', 'Turno', '班次'],

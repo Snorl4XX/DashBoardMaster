@@ -4698,7 +4698,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
 
 // ---------- V4.22: Produção do Sorter (monitor do sorter da base, gravado como os painéis do JMS) ----------
 {
-  const {createFakeSorter, dayTotals} = require('./sorter_falso');
+  const {createFakeSorter, dayTotals, feederTotals} = require('./sorter_falso');
   const DS = '2026-10-31', DS2 = '2026-11-01';
   const TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: '_token=copiado-do-navegador&device_id=3'});
   const sorterCtx = (props, fakeOpts) => {
@@ -4730,10 +4730,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     sumOf('Anormais') === A.abnormal + B.abnormal && sumOf('Sort total', r => r.sorter === 'Sorter A') === A.total &&
     sumOf('Layer1 total') + sumOf('Layer2 total') + sumOf('Layer3 total') === A.total + B.total,
     'Sorter: linhas do dia (hora × balança × sorter) somam o resumo em cada número da tela', {st: sumOf('Sort total'), A, B});
-  // O que o total da hora tem a mais que as balanças (2 volumes por hora no site falso) fica em N/A; balanças com zero padding.
-  check(sumOf('Sort total', r => r.induction === 'N/A') === 2 * 21 * 2 && rowsS.some(r => r.induction === 'Balança 01') &&
-    !rowsS.some(r => r.induction === 'Balança 13') && rowsS.every(r => /^(T[123])$/.test(r.shift) && /^\d{2}h - \d{2}h$/.test(r.interval)),
-    'Sorter: volumes sem balança ficam em N/A; turno e horário de cada hora', sumOf('Sort total', r => r.induction === 'N/A'));
+  // V4.22.8: a quantidade de cada balança vem da tela "feeder feed quantity" (lista Alimentação); os totais não têm balança.
+  const fA = feederTotals('A', DS), fB = feederTotals('B', DS);
+  const feedOk = Object.keys(fA).every(n => sumOf('Alimentação', r => r.sorter === 'Sorter A' && r.induction === 'Balança ' + String(n).padStart(2, '0')) === fA[n] &&
+    sumOf('Alimentação', r => r.sorter === 'Sorter B' && r.induction === 'Balança ' + String(n).padStart(2, '0')) === fB[n]);
+  check(feedOk && !rowsS.some(r => r.induction === 'Balança 13' || r.induction === 'Balança 14') &&
+    rowsS.filter(r => r.column !== 'Alimentação').every(r => !r.induction || r.induction === 'N/A') &&
+    rowsS.every(r => /^(T[123])$/.test(r.shift) && /^\d{2}h - \d{2}h$/.test(r.interval)),
+    'Sorter: quantidade por balança pela tela "feeder feed quantity" (total_1…; nulas ficam de fora); turno e horário de cada hora',
+    {a1: sumOf('Alimentação', r => r.sorter === 'Sorter A' && r.induction === 'Balança 01'), fA1: fA[1]});
   // Painel: cartões e gráficos (evolução por hora em ordem, 24 horas; motivos; balanças sem o N/A).
   const dS = cS.getDashboardData('sorter_flow', {from: DS, to: DS, filters: {}});
   const cfgS = cS.getIndicatorConfig_('sorter_flow'), chDefS = k => cfgS.charts.filter(x => x.key === k)[0];
@@ -4746,6 +4751,13 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     reasonCh.total === A.abnormal + B.abnormal,
     'Sorter: gráficos — evolução por hora (24 h em ordem), top 10 balanças sem o N/A, motivos de falha = Anormais',
     {h: hourCh.labels.slice(0, 3), ind: indCh.labels, r: reasonCh.labels, rt: reasonCh.total});
+  // V4.22.8: o filtro de balança vale só para a quantidade alimentada (filterScopes): o Sort total do sorter não some.
+  cS.JTCore_.setFilterScopes(cfgS.filterScopes);
+  const fRows = cS.JTCore_.applyFilters(rowsD, {induction: ['Balança 01']});
+  const fSum = col => fRows.filter(r => r.column === col).reduce((x, r) => x + Number(r.qty), 0);
+  check(fSum('Sort total') === A.total + B.total && fSum('Alimentação') === fA[1] + fB[1],
+    'Sorter: filtro de balança só na quantidade alimentada (os totais do sorter continuam)', {st: fSum('Sort total'), al: fSum('Alimentação')});
+  cS.JTCore_.setFilterScopes({});
   // Período grande (totais no servidor): mesmos totais por balança.
   cS.__state.props.GROUPED_CLIENT_ROWS = '10';
   const dSum = cS.getDashboardData('sorter_flow', {from: DS, to: DS, filters: {sorter: ['Sorter A']}});
@@ -4824,15 +4836,14 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     const sum = (col, f) => rows.filter(r => r.column === col && (!f || f(r))).reduce((x, r) => x + Number(r.qty), 0);
     return {c, site, rows, sum, rate: c.getRateDay_('sorter_flow', DS), logs: c.allTabRows_('LOG').map(r => String(r[4]))};
   };
-  const kL = runS({codigos: true}), kN = runS({codigos: true, semLista: true}), kA = runS({padraoA: true});
-  check(kL.sum('Sort total') === A.total + B.total && kL.sum('Sort total', r => /^Balança/.test(r.induction)) === A.total + B.total - 2 * 21 * 2 &&
-    kL.rows.some(r => r.induction === 'Balança 12') && !kL.rows.some(r => r.induction === 'Balança 13') &&
-    JSON.parse(kL.c.__state.props.SORTER_BALANCAS_SITE).length === 12 && kL.logs.some(l => /12 balança\(s\) achadas na tela \/statis\/summary/.test(l)),
-    'Sorter: os números 1…40 devolvem o total → o painel acha a lista de balanças na tela de estatística e soma certo (não 40 vezes)',
+  const kL = runS({codigos: true}), kN = runS({semOutlets: true}), kA = runS({padraoA: true});
+  check(kL.sum('Sort total') === A.total + B.total && kL.sum('Alimentação') === Object.values(fA).concat(Object.values(fB)).reduce((x, v) => x + v, 0) &&
+    kL.rows.some(r => r.induction === 'Balança 12') && !kL.rows.some(r => r.column !== 'Alimentação' && /^Balança/.test(r.induction)),
+    'Sorter: os números 1…40 do summary.data não são mais usados: Sort total certo (não 40 vezes) e as balanças pela tela feeder feed quantity',
     {total: kL.sum('Sort total'), esperado: A.total + B.total});
-  check(kN.sum('Sort total') === A.total + B.total && kN.rows.every(r => r.induction === 'N/A') &&
-    kN.logs.some(l => /devolveu o total inteiro para cada número de balança/.test(l)),
-    'Sorter: sem a lista de balanças, o filtro ignorado não é somado (só o total, com aviso)', {total: kN.sum('Sort total')});
+  check(kN.sum('Sort total') === A.total + B.total && !kN.rows.some(r => r.column === 'Alimentação') &&
+    kN.c.getDayStatus_('sorter_flow', DS).details === 'COMPLETE' && kN.logs.some(l => /Quantidade por balança \(feeder feed quantity\) não lida/.test(l)),
+    'Sorter: sem a tela feeder feed quantity, o dia fica com os totais (aviso no LOG)', {total: kN.sum('Sort total')});
   check(kA.rate.metrics.sortTotalA === A.total && kA.rate.metrics.sortTotalB === B.total && kA.sum('Sort total', r => r.sorter === 'Sorter A') === A.total &&
     JSON.parse(kA.c.__state.props.SORTER_TROCA_A).corpo === 'selecteddb=DB2' && JSON.parse(kA.c.__state.props.SORTER_TROCA_B).corpo === 'selecteddb=DB1',
     'Sorter: o site com o A como padrão — A (DB2) e B (DB1) escolhidos de propósito, sem trocar os números', kA.rate.metrics);
@@ -4845,9 +4856,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // Uma vez: os dias já baixados entram na fila de novo e a troca antiga (só a do A) é esquecida.
   kL.c.__state.props.SORTER_TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/dbselect', corpo: 'selecteddb=DB2', auto: true});
   delete kL.c.__state.props.SORTER_TROCA_B;
-  const mig1 = kL.c.migrateSorterV4227_(), mig2 = kL.c.migrateSorterV4227_();
+  delete kL.c.__state.props.SORTER_DADOS_VERSAO;
+  const mig1 = kL.c.migrateSorterDados_(), mig2 = kL.c.migrateSorterDados_();
   check(mig1 === 1 && mig2 === 0 && !kL.c.__state.props.SORTER_TROCA_A && kL.c.pendingJobs_().some(j => j.indicator === 'sorter_flow' && j.type === 'DETAIL_INIT' && j.date === DS),
-    'V4.22.7: os dias da Produção do Sorter são baixados de novo, uma vez (e a troca só do A é descoberta de novo)', {mig1, mig2});
+    'V4.22.7/V4.22.8: os dias da Produção do Sorter são baixados de novo, uma vez por versão (e a troca só do A é descoberta de novo)', {mig1, mig2});
   const diag = cS.diagnosticarSorter();
   check(diag.sorters.length === 2 && diag.sorters.every(x => x.hoje && x.hoje.sortTotal > 0) && !/tok\d+k|sess\d+x/.test(JSON.stringify(diag)) &&
     diag.sorters[1].cookies.indexOf('laravel_session') >= 0, 'diagnosticarSorter: os dois sorters, sem mostrar token nem cookie (só os nomes)', diag);
