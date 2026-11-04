@@ -3194,9 +3194,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const batLink = fsM.readFileSync(pathM.join(rootL, 'node', 'link-publico.bat'), 'utf8');
   check(/funnel --bg --https=%PORTALINK% --set-path=%CAMINHO% http:\/\/127\.0\.0\.1:%PORTA%%CAMINHO%/.test(batLink) && /\r\n/.test(batLink) &&
     /--set-path=%CAMINHO% off/.test(batLink) && /^[\x00-\x7f]*$/.test(batLink), 'link-publico.bat liga o link no caminho (/lotes) do mesmo endereço');
-  // V4.22.4: com dois cliques, ele se abre numa janela "cmd /k" (não some se o Windows parar o arquivo no meio).
-  check(/^@echo off\r\n(?:rem [^\r\n]*\r\n)*if \/i not "%~1"=="--na-janela" \(\r\n  start "[^"]+" cmd \/k call "%~f0" --na-janela\r\n  exit \/b\r\n\)/.test(batLink) &&
-    !/pause/i.test(batLink.split(':fim')[1]), 'link-publico.bat abre numa janela que fica aberta (cmd /k)');
+  // V4.22.4: com dois cliques, ele roda dentro de um "cmd /k" (não some se o Windows parar o arquivo no meio). V4.22.6: na mesma
+  // janela (sem "start": a primeira janela não pisca e fecha); sem o lib\link.js (pacote antigo), segue sem a conferência.
+  check(/^@echo off\r\n(?:rem [^\r\n]*\r\n)*if \/i not "%~1"=="--na-janela" \(\r\n  cmd \/k call "%~f0" --na-janela\r\n  exit \/b\r\n\)/.test(batLink) &&
+    !/\bstart\b/i.test(batLink) && /if not exist "%~dp0lib\\link\.js" set "NODEOK="/.test(batLink) &&
+    !/pause/i.test(batLink.split(':fim')[1]), 'link-publico.bat roda numa janela só, que fica aberta (cmd /k)');
   // V4.22.5: o .bat lê as portas pelo lib\link.js (aplica o pacote no config.json), confere se o endereço já leva para OUTRO painel
   // (pergunta antes de trocar) e desliga os links antigos deste painel.
   check(/node "%~dp0lib\\link\.js" config 2\^>nul/.test(batLink) && /node "%~dp0lib\\link\.js" livre "%TS%" %PORTALINK% %PORTA% %CAMINHO%\r\nif errorlevel 2 goto ocupado/.test(batLink) &&

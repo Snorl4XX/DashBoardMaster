@@ -2,10 +2,10 @@
 rem JT DashMaster - link publico do painel pelo Tailscale Funnel (gratis, endereco https fixo).
 rem V4.17.1: a janela NUNCA fecha sozinha. Cada problema mostra o que fazer e espera uma tecla (antes, um erro do Tailscale
 rem podia fechar a janela antes de dar para ler). Sem "chcp 65001": no Windows 7/8 ele fazia o .bat parar no meio.
-rem V4.22.4: com dois cliques, o arquivo se abre de novo numa janela "cmd /k", que fica aberta mesmo se o Windows parar o
-rem arquivo no meio (antes a janela sumia e nao dava para ler o erro).
+rem V4.22.4: com dois cliques, o arquivo roda dentro de um "cmd /k", que fica aberto mesmo se o Windows parar o arquivo no meio
+rem (antes a janela sumia e nao dava para ler o erro). V4.22.6: na MESMA janela (antes abria outra e a primeira piscava e fechava).
 if /i not "%~1"=="--na-janela" (
-  start "Link publico do DashMaster" cmd /k call "%~f0" --na-janela
+  cmd /k call "%~f0" --na-janela
   exit /b
 )
 cd /d "%~dp0"
@@ -42,6 +42,7 @@ rem V4.22.5: cada painel na sua porta do link (principal 443, Sorter 8443, Lotes
 rem mudanca do pacote e as portas vem dele (lib\link.js); sem o Node.js, valem as lidas acima.
 set "NODEOK="
 where node >nul 2>nul && set "NODEOK=1"
+if not exist "%~dp0lib\link.js" set "NODEOK="
 if defined NODEOK for /f "tokens=1-3" %%a in ('node "%~dp0lib\link.js" config 2^>nul') do (
   set "PORTA=%%a"
   set "PORTALINK=%%b"

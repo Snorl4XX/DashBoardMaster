@@ -139,7 +139,8 @@ O `cmd /k` deixa a janela aberta depois do comando, para dar para ler o link `ht
 fecha sozinha). Na primeira vez, ela mostra um endereço para ativar o Funnel na sua conta do Tailscale.
 
 **A janela do Tailscale fecha sozinha / não abre:**
-- Abriu o `tailscale.exe` direto? Ele fecha na hora; é normal. Use o `link-publico.bat` (ou o atalho com `cmd /k` acima).
+- Abriu o `tailscale.exe` direto (ou um atalho para ele)? Ele fecha na hora; é normal. Use o `link-publico.bat` (ou o atalho
+  com `cmd /k` acima). Atalho na Área de Trabalho: botão direito no `link-publico.bat` → Enviar para → Área de trabalho.
 - O programa Tailscale (Menu Iniciar) não abre janela: procure o ícone perto do relógio (setinha **^**).
 - O `link-publico.bat` de uma versão antiga fechou? Use o da V4.17.1 ou mais nova: ele não fecha. Se aparecer um erro, tire um
   print da janela e mande.

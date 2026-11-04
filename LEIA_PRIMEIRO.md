@@ -1,8 +1,18 @@
-# J&T DASHMASTER V4.22.5 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.6 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.6 — link-publico.bat numa janela só
+
+Na V4.22.4, o `link-publico.bat` abria uma segunda janela e a primeira piscava e fechava. Parecia que tinha fechado sozinho.
+Agora ele roda numa janela só, que fica aberta até você fechar no X. Sem o `node\lib\link.js` (pacote antigo), ele liga o link
+sem a conferência de porta, sem mostrar erro.
+
+**Atalho na Área de Trabalho:** aponte para o `link-publico.bat` do painel, e não para o `tailscale.exe`. O `tailscale.exe`
+aberto direto sempre fecha na hora, porque é um comando, sem janela. Para criar o atalho: botão direito no `link-publico.bat` →
+**Enviar para** → **Área de trabalho (criar atalho)**. Depois renomeie (ex.: "Link Sorter").
 
 ## V4.22.5 — Uma porta do link para cada painel
 
