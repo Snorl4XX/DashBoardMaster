@@ -152,6 +152,12 @@ function createFakeSorter(opts) {
         if (opts.janelaVazia && hs.length < 24) {
           return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: 0, data: [], tcha: false})};
         }
+        // opts.janelaNula (V4.23.7): uma linha só, com tudo nulo (SQL sem GROUP BY), na janela menor que um dia.
+        if (opts.janelaNula && hs.length < 24) {
+          const nula = {timearea: req.query.get('start') + '~' + req.query.get('end')};
+          for (let n = 1; n <= COLS; n++) nula['total_' + n] = null;
+          return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: 1, data: [nula], tcha: false})};
+        }
         const row = {timearea: hs.length ? stampOf(Date.parse(hs[0].date + 'T' + String(hs[0].h).padStart(2, '0') + ':00:00Z')) + '~' +
           stampOf(Date.parse(hs[hs.length - 1].date + 'T' + String(hs[hs.length - 1].h).padStart(2, '0') + ':59:00Z')) : date + ' 00:00~' + date + ' 23:59'};
         for (let n = 1; n <= COLS; n++) {
@@ -237,7 +243,12 @@ function createFakeSorter(opts) {
       if (q.get('group') === '0') {
         // "no group by": uma linha só para o período inteiro (start → end; V4.23.5: também uma hora ou um turno).
         const end = isoOf(q.get('end')), sum = {}, hs = hoursIn(q.get('start'), q.get('end'));
-        if (opts.janelaVazia && hs.length < 24) hs.length = 0;
+        if ((opts.janelaVazia || opts.janelaNula) && hs.length < 24) hs.length = 0;
+        if (opts.janelaNula && !hs.length) {
+          data.push({timearea: q.get('start') + '~' + q.get('end'), sorter_sorttotal: null, sorter_validtotal: null, sorter_abnormaltotal: null,
+            sorter_noinfototal: null, sorter_noplantotal: null, intercept: null, noread: null, multi: null, sorter_chuteblocktotal: null,
+            sorter_otherreasontotal: null, ps01_sorttotal: null, ps02_sorttotal: null, ps03_sorttotal: null});
+        }
         hs.forEach(x => {
           const r = hourRow(device, x.date, n, x.h);
           if (r) Object.keys(r).forEach(k => { if (k !== 'timearea') sum[k] = (sum[k] || 0) + r[k]; });

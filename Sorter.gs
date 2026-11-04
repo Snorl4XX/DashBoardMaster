@@ -1056,10 +1056,24 @@ function feishuHourData_(date, hour) {
     ss.sessions.forEach(s => {
       const nome = s.dev.nome, info = x.site[nome] = {};
       let t = sorterWindowTotals_(s, w, info), f = sorterWindowFeed_(s, w, info);
-      if (!info.linhasTotais) { t = sorterSum_(feishuHourlyRows_(s, cache, date, [hour])); info.totaisPelaConsultaPorHora = t.total; }
-      if (!info.linhasBalancas) {
-        try { f = feishuHourlyFeed_(s, date, hour); info.balancasPelaConsultaPorHora = Object.keys(f.q).length; }
-        catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; info.balancasPorHoraErro = String(e && e.message || e).slice(0, 120); }
+      // V4.23.7: também quando a janela vem com uma linha zerada (SQL sem GROUP BY devolve uma linha com nulos), não só sem linha.
+      info.totaisDaJanela = t.total;
+      if (!(t.total > 0)) {
+        const th = sorterSum_(feishuHourlyRows_(s, cache, date, [hour]));
+        info.totaisPelaConsultaPorHora = th.total;
+        if (th.total > 0) t = th;
+        // Diagnóstico (testarFeishu): até que hora o site já tem números hoje (atraso do site?) e o total do dia.
+        const hs = feishuHourlyRows_(s, cache, date, Array.from({length: 24}, (v, i) => i)).filter(r => r.total > 0).map(r => r.hour);
+        info.horasComDadosNoSite = hs.length ? Math.min.apply(null, hs) + 'h até ' + Math.max.apply(null, hs) + 'h' : 'nenhuma';
+        try { info.totalDoDiaNoSite = (sorterDayTotal_(s, date) || {}).total || 0; } catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; }
+      }
+      info.balancasDaJanela = Object.keys(f.q).length;
+      if (!Object.keys(f.q).length) {
+        try {
+          const fh = feishuHourlyFeed_(s, date, hour);
+          info.balancasPelaConsultaPorHora = Object.keys(fh.q).length;
+          if (Object.keys(fh.q).length || !f.feeders.length) f = fh;
+        } catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; info.balancasPorHoraErro = String(e && e.message || e).slice(0, 120); }
       }
       Object.keys(x.total).forEach(k => { x.total[k] += t[k] || 0; });
       x.bySorter[nome] = t;
@@ -1069,7 +1083,7 @@ function feishuHourData_(date, hour) {
       if (x.close) {
         const ic = {};
         let tc = sorterWindowTotals_(s, sc.w, ic);
-        if (!ic.linhasTotais) tc = sorterSum_([].concat.apply([], sc.parts.map(p => feishuHourlyRows_(s, cache, p.date, p.hours))));
+        if (!(tc.total > 0)) tc = sorterSum_([].concat.apply([], sc.parts.map(p => feishuHourlyRows_(s, cache, p.date, p.hours))));
         Object.keys(x.close.total).forEach(k => { x.close.total[k] += tc[k] || 0; });
         x.close.bySorter[nome] = tc;
       }
@@ -1103,6 +1117,7 @@ function feishuCard_(x, voltou) {
     '\n✅ Deu certo (Valid total) / 有效: **' + feishuN_(t.valid) + '**' + pct(t.valid, t.total) +
     '\n❌ Não deu certo (No Sort Code) / 无分拣码: **' + feishuN_(t.noInfo) + '**' + pct(t.noInfo, t.total) +
     '\n' + (FEISHU_TURNO_[x.shift] || '')));
+  if (x.vazio) els.push(md('⚠️ O site do sorter não tinha números para esta hora (sorter parado ou a hora ainda não fechada no site). / 分拣机系统暂无本小时数据。'));
   els.push({tag: 'hr'});
   els.push(md('🏆 **3 balanças que mais processaram nesta hora / 本小时供包量最多**\n' + bal(x.top, ['🥇', '🥈', '🥉'])));
   els.push(md('🐢 **3 balanças que menos processaram nesta hora / 本小时供包量最少**\n' + bal(x.bottom, ['🔻', '🔻', '🔻'])));
@@ -1162,7 +1177,7 @@ function feishuPost_(body) {
 /** Busca no site e manda a hora `h` ({date, hour}). Devolve os números enviados. */
 function feishuSendHour_(h, opts) {
   const x = feishuHourData_(h.date, h.hour), voltou = !!getProp_('FEISHU_FALHA', '');
-  // V4.23.6: hora ainda vazia no site (os números podem chegar alguns minutos depois): espera até o minuto 30 e tenta de 5 em 5 min.
+  // V4.23.6: hora ainda vazia no site (os números podem chegar alguns minutos depois): espera (até FEISHU_ESPERA) e tenta de 5 em 5 min.
   if (x.vazio && opts && opts.esperar) {
     setProp_('FEISHU_VAZIO', h.key + '|' + h.minute);
     return {aguardando: true, numeros: x};
@@ -1181,7 +1196,9 @@ function feishuSorterTick_(nowMs) {
   const h = feishuLastHour_(nowMs), min = Math.max(0, Math.min(55, Number(getProp_('FEISHU_MINUTO', '')) || 5));
   if (h.minute < min || getProp_('FEISHU_ULTIMA', '') === h.key) return null;
   // Hora que veio vazia: nova tentativa 5 min depois; a partir do minuto 30, manda como estiver (sorter parado = zero).
-  const vz = String(getProp_('FEISHU_VAZIO', '')).split('|'), espera = h.minute < Math.max(min + 5, 30);
+  // V4.23.7: espera até o minuto FEISHU_ESPERA (padrão 55): o site pode levar mais de meia hora para fechar a hora.
+  const lim = Math.max(min + 5, Math.min(59, Number(getProp_('FEISHU_ESPERA', '')) || 55));
+  const vz = String(getProp_('FEISHU_VAZIO', '')).split('|'), espera = h.minute < lim;
   if (vz[0] === h.key && h.minute - Number(vz[1]) < 5 && espera) return null;
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return null;

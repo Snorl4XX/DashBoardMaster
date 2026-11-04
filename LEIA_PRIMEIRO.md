@@ -1,8 +1,21 @@
-# J&T DASHMASTER V4.23.6 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.7 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.23.7 — Bot do Feishu: hora com linha zerada
+
+Print do usuário (17:11): o cartão das 16h–17h veio com tudo 0, mas com a lista das balanças — o site respondeu a janela de uma
+hora com **uma linha zerada** (nulos), não com "nenhuma linha", e a V4.23.6 só usava a consulta por hora quando não vinha linha.
+- Agora a consulta por hora entra sempre que a janela vem **zerada** (totais, balanças e fechamento do turno).
+- Hora ainda vazia: o bot espera e tenta de 5 em 5 minutos até o minuto **55** (`FEISHU_ESPERA`); se sair zerado, o cartão diz
+  "O site do sorter não tinha números para esta hora".
+- `testarFeishu` com o parâmetro `16` mostra em `oQueOSiteRespondeu`, para cada sorter: `totaisDaJanela`,
+  `totaisPelaConsultaPorHora`, `horasComDadosNoSite` (ex.: "0h até 15h" = o site ainda não tem as 16h) e `totalDoDiaNoSite`.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_7_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`.
 
 ## V4.23.6 — Bot do Feishu: hora com zero (16h–17h)
 
