@@ -1136,7 +1136,7 @@
     if (!state.data) return;
     var c = cfg(), f = filtersObj();
     Core.setFilterScopes(c.filterScopes || {});
-    Core.setFacetColumns(c.facetColumns || null);
+    Core.setFacetColumns(facetColumnsFor(c, f));
     Core.setColumnSets(c.columnSets || {});
     renderHeader();
     // Modo de totais: as linhas (totais por dia e coluna) já vêm filtradas do servidor.
@@ -1358,7 +1358,13 @@
     });
     state.builtFor = dataKey();
   }
+  /** V4.22.13: colunas contadas nas listas dos filtros — com um filtro de facetByFilter escolhido, as dele (como os gráficos). */
+  function facetColumnsFor(c, f) {
+    var bf = (c && c.facetByFilter) || {}, k = Object.keys(bf).filter(function (x) { return f[x] && f[x].length; })[0];
+    return k ? bf[k] : (c && c.facetColumns) || null;
+  }
   function refreshFilterOptions(f) {
+    Core.setFacetColumns(facetColumnsFor(cfg(), f));
     var keys = Object.keys(state.dropdowns), sm = state.data.summary, facets = {};
     // Modo de totais: a lista de cada filtro vem dos totais daquele campo (já com os outros filtros).
     if (sm) keys.forEach(function (k) { var o = {}; if (f[k]) o[k] = f[k]; facets[k] = Core.facets(sm.byDim[k] || [], o, [k])[k]; });

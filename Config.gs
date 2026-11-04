@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.22.12',
+  VERSION: '4.22.13',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1666,6 +1666,8 @@ const ALL_INDICATORS_ = Object.freeze({
     filterScopes: {induction: ['Alimentação']},
     // V4.22.11: o número ao lado de cada opção do filtro (Sorter, Turno, Horário) = o Sort total, não a soma de todos os números.
     facetColumns: ['Sort total'],
+    // V4.22.13: com o filtro de balança, as listas dos outros filtros contam a quantidade alimentada (como os gráficos).
+    facetByFilter: {induction: ['Alimentação']},
     // V4.22.12 (pedido "quando troco os filtros, os cartões e gráficos ficam fixos"): com o filtro de balança, o cartão vermelho e
     // os gráficos por hora, turno e sorter passam a mostrar a quantidade alimentada; o aviso diz o que continua do sorter inteiro.
     scopeNotes: {induction: {
@@ -1925,7 +1927,7 @@ function catalogEntry_(cfg) {
     metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
     // V4.18 (Criação de Lotes): cartão do dia anterior e os nomes novos dos valores gravados antes.
     prevCard: cfg.prevCard || null, valueAliases: cfg.valueAliases || null, sumDefs: cfg.sumDefs || null,
-    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, facetColumns: cfg.facetColumns || null, scopeNotes: cfg.scopeNotes || null, tables: cfg.tables || null,
+    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, facetColumns: cfg.facetColumns || null, facetByFilter: cfg.facetByFilter || null, scopeNotes: cfg.scopeNotes || null, tables: cfg.tables || null,
     // V4.22 (Produção do Sorter): tabela cruzada — uma linha por valor de rowDim, uma coluna por lista (cols) e o Total.
     crossTables: cfg.crossTables || null, source: cfg.source || null, detailsOkColumn: cfg.detailsOkColumn || null,
     columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,

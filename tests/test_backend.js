@@ -4873,6 +4873,16 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     ['shiftPie', 'bySorter'].every(k => Cf.chartDefFor(chDefS(k), fB1).where.column === 'Alimentação') && cfgS.scopeNotes && cfgS.scopeNotes.induction &&
     cfgS.heroMetric.byFilter.induction.column === 'Alimentação',
     'Sorter: com o filtro de balança, os gráficos por hora/turno/sorter mostram a quantidade alimentada (e o aviso explica)', {total: chB1.total, want: fA[1] + fB[1]});
+  // V4.22.13: com o filtro de balança, as listas dos outros filtros contam a quantidade alimentada (como os gráficos).
+  Cf.setFacetColumns(cfgS.facetByFilter.induction);
+  const fcB = Cf.facets(rowsD, fB1, ['sorter']), oB = v => (fcB.sorter.filter(o => o.value === v)[0] || {}).count;
+  check(oB('Sorter A') === fA[1] && oB('Sorter B') === fB[1], 'Sorter: com o filtro de balança, a lista de sorters bate com o gráfico (quantidade alimentada)',
+    {a: oB('Sorter A'), fA1: fA[1], b: oB('Sorter B'), fB1: fB[1]});
+  // A lista do dia é refeita junto com o resumo (cartões, filtros e gráficos do mesmo momento), mesmo logo depois da última.
+  const stS = cS.getDayStatus_('sorter_flow', DS);
+  check(cS.detailNeedsRefresh_('sorter_flow', DS, {errorCount: 1, totalCount: 1}, {errorCount: 2, totalCount: 5}, stS, false) === true &&
+    cS.detailNeedsRefresh_('sorter_flow', DS, {errorCount: 2, totalCount: 5}, {errorCount: 2, totalCount: 5}, stS, false) === false,
+    'Sorter: a lista do dia acompanha o resumo (sem esperar 1 h), e não é refeita se nada mudou', stS);
   Cf.setFacetColumns(null);
   const fcOld = Cf.facets(rowsD, {}, ['sorter']);
   check(fcOld.sorter.filter(o => o.value === 'Sorter A')[0].total > A.total * 3, 'sem facetColumns, a lista soma todas as linhas (como nos outros painéis)');

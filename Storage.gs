@@ -1979,6 +1979,9 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   const live = !!(cfgR.unseal && date >= addDaysIso_(isoToday_(), -1));
   if (!changed && st.details === 'COMPLETE' && !live) return false;
   if (manual) return true;
+  // V4.22.13 (Produção do Sorter: "valores do filtro não batem com os gráficos"): a lista do dia é refeita junto com o resumo
+  // (poucas consultas na rede da base) — cartões, filtros e gráficos do mesmo momento. Antes a lista podia ficar até 2 h atrás.
+  if (cfgR.sorter) return true;
   let minH = cfgR.detail && cfgR.detail.refreshHours ? Math.max(cfgR.detail.refreshHours, heavyDetailLimited_(cfgR) ? 12 : 0) : 0;
   // Expedição: dia fechado só muda a situação (chegou/entregue) — atualizado no máximo a cada closedRefreshHours.
   if (cfgR.detail && cfgR.detail.closedRefreshHours && date < isoToday_()) minH = Math.max(minH, cfgR.detail.closedRefreshHours);
