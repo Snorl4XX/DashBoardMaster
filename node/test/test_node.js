@@ -379,6 +379,25 @@ function firstDiff(a, b, p) {
     'pacote do Sorter: Configurações com o sorter, sem pedir AuthToken do JMS');
   const pageS = await request(portS, 'GET', '/?ind=sorter_flow');
   check(pageS.status === 200 && /Produção do Sorter/.test(pageS.text), 'página da Produção do Sorter');
+  // V4.23: bot do Feishu — Configurações com o cartão; testarFeishu manda o cartão no webhook (Feishu falso local) com assinatura;
+  // o webhook e o segredo ficam escondidos na lista de propriedades.
+  const feishuGot = [];
+  const srvF = http.createServer((q, r) => { const c = []; q.on('data', d => c.push(d)); q.on('end', () => {
+    feishuGot.push({path: q.url, body: JSON.parse(Buffer.concat(c).toString('utf8'))});
+    r.writeHead(200, {'content-type': 'application/json'}); r.end(JSON.stringify({code: 0, msg: 'success', data: {}}));
+  }); });
+  servers.push(srvF);
+  const portF = await freePort();
+  await new Promise(r => srvF.listen(portF, '127.0.0.1', r));
+  await adminS('propriedade', {k: 'FEISHU_WEBHOOK', v: 'http://127.0.0.1:' + portF + '/open-apis/bot/v2/hook/teste-node'});
+  await adminS('propriedade', {k: 'FEISHU_SEGREDO', v: 'segredo-node'});
+  const tf = await adminS('executar', {fn: 'testarFeishu', args: []}), estF = await adminS('estado');
+  const fb = (feishuGot[0] || {}).body || {}, sigOk = fb.sign === require('crypto').createHmac('sha256', fb.timestamp + '\n' + 'segredo-node').update('').digest('base64');
+  const pF = estF.props.filter(p => /^FEISHU_(WEBHOOK|SEGREDO)$/.test(p.k));
+  check(/Bot do Feishu/.test(cfgS.text) && tf.result && tf.result.ok && feishuGot.length === 1 && fb.msg_type === 'interactive' && sigOk &&
+    /Produção do Sorter/.test(fb.card.header.title.content) && pF.length === 2 && pF.every(p => p.secret && !p.interna && !/teste-node|segredo-node/.test(p.v)) &&
+    !/teste-node|segredo-node/.test(JSON.stringify(tf)),
+    'pacote do Sorter: bot do Feishu pelo Node.js (cartão com assinatura; webhook e segredo escondidos)', {tf: tf.result, n: feishuGot.length, pF});
   srvS.child.kill();
 
   // ---------- 10. Link do Netlify (grátis) repassando para o link público (Tailscale) ----------

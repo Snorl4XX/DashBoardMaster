@@ -4951,6 +4951,55 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const diag = cS.diagnosticarSorter();
   check(diag.sorters.length === 2 && diag.sorters.every(x => x.hoje && x.hoje.sortTotal > 0) && !/tok\d+k|sess\d+x/.test(JSON.stringify(diag)) &&
     diag.sorters[1].cookies.indexOf('laravel_session') >= 0, 'diagnosticarSorter: os dois sorters, sem mostrar token nem cookie (só os nomes)', diag);
+  // V4.23 (pedido "bot que avise no grupo do Feishu"): de hora em hora, a produção da hora que fechou (A + B), o total do dia,
+  // os turnos e as 3 balanças que mais e as 3 que menos processaram — webhook e segredo só nas Propriedades (nunca na resposta).
+  {
+    const msgs = [];
+    let reply = {code: 0, msg: 'success'};
+    const siteF = createFakeSorter({modo: 'xadmin'}), jmsFF = fakeJms({});
+    const HOOK = 'https://open.feishu.cn/open-apis/bot/v2/hook/teste-falso', SEG = 'segredo-falso';
+    const cF = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home', FEISHU_WEBHOOK: HOOK, FEISHU_SEGREDO: SEG},
+    jms: (url, req, state) => {
+      if (url.indexOf('https://open.feishu.cn/') === 0) {
+        msgs.push(JSON.parse(req.payload));
+        const r = reply;
+        return {getResponseCode: () => 200, getContentText: () => JSON.stringify(r)};
+      }
+      return /^http:\/\/sorter\.falso/.test(url) ? siteF.fetchMock(url, req) : jmsFF(url, req, state);
+    }, quiet: true});
+    cF.setupProject();
+    const at = (h, m) => Date.parse(DS + 'T' + String(h + 3).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':00Z');  // São Paulo = UTC-3
+    const early = cF.feishuSorterTick_(at(14, 3)), t1 = cF.feishuSorterTick_(at(14, 7)), t2 = cF.feishuSorterTick_(at(14, 20));
+    const m = msgs[0] || {}, text = JSON.stringify(m.card || {});
+    const hourTot = ['A', 'B'].reduce((a, dv) => a + hourRow(dv, DS, 0, 13).sorter_sorttotal, 0);
+    const t1Tot = ['A', 'B'].reduce((a, dv) => a + [6, 7, 8, 9, 10, 11, 12, 13].reduce((b, h) => b + ((hourRow(dv, DS, 0, h) || {}).sorter_sorttotal || 0), 0), 0);
+    const feeds = [];
+    ['A', 'B'].forEach(dv => { const ft = feederTotals(dv, DS); Object.keys(ft).forEach(n => feeds.push({name: 'Sorter ' + dv + ' · Balança ' + String(n).padStart(2, '0'), q: ft[n]})); });
+    feeds.sort((a, b) => b.q - a.q || (a.name < b.name ? -1 : 1));
+    const low = feeds.slice().sort((a, b) => a.q - b.q || (a.name < b.name ? -1 : 1));
+    const sign = require('crypto').createHmac('sha256', m.timestamp + '\n' + SEG).update('').digest('base64');
+    check(early === null && t1 && t1.ok && t2 === null && msgs.length === 1 && m.msg_type === 'interactive' && /13h–14h/.test(m.card.header.title.content) &&
+      text.indexOf('**' + cF.feishuN_(hourTot) + '** volumes') >= 0 && text.indexOf(cF.feishuN_(A.total + B.total)) >= 0 &&
+      text.indexOf('T1 (06h–14h): **' + cF.feishuN_(t1Tot) + '**') >= 0 &&
+      text.indexOf('1. ' + feeds[0].name + ': **' + cF.feishuN_(feeds[0].q) + '**') >= 0 && text.indexOf('1. ' + low[0].name + ': **' + cF.feishuN_(low[0].q) + '**') >= 0 &&
+      m.sign === sign,
+      'Bot do Feishu: no minuto 5 manda a hora que fechou (A + B), o dia, os turnos e as 3 balanças que mais/menos processaram — uma vez, com assinatura',
+      {early, t1, t2, n: msgs.length, hourTot, top: feeds[0], low: low[0], text: text.slice(0, 600)});
+    reply = {code: 19021, msg: 'sign match fail or timestamp is not within one hour from current time'};
+    const bad = cF.testarFeishu(), bad1 = cF.feishuSorterTick_(at(15, 6)), bad2 = cF.feishuSorterTick_(at(15, 7)), bad3 = cF.feishuSorterTick_(at(15, 8));
+    const bad4 = cF.feishuSorterTick_(at(15, 9));
+    check(bad.ok === false && /assinatura não confere/.test(bad.erro) && bad1.ok === false && bad2.ok === false && bad3.ok === false && bad4 === null &&
+      cF.__state.props.FEISHU_ULTIMA === DS + ' 14' && cF.allTabRows_('LOG').some(r => /Bot do Feishu \(.* tentativa 3\)/.test(String(r[4]))),
+      'Bot do Feishu: recusa com dica (assinatura) e no máximo 3 tentativas por hora (aviso no LOG)', {bad, bad1, ultima: cF.__state.props.FEISHU_ULTIMA});
+    reply = {code: 0, msg: 'success'};
+    const ok = cF.testarFeishu(), js = JSON.stringify(ok);
+    check(ok.ok && /Mensagem enviada/.test(ok.enviado) && ok.numeros.maisProcessaram.length === 3 && ok.numeros.menosProcessaram.length === 3 &&
+      js.indexOf('teste-falso') < 0 && js.indexOf(SEG) < 0, 'testarFeishu: manda e mostra os números, sem o webhook nem o segredo', ok);
+    delete cF.__state.props.FEISHU_WEBHOOK;
+    const nMsgs = msgs.length;
+    check(cF.feishuSorterTick_(at(16, 10)) === null && msgs.length === nMsgs && cF.testarFeishu().ok === false, 'Bot do Feishu: sem webhook, nada é enviado');
+  }
   // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
   check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&
     (() => { try { createContext({props: {}, jms: fakeJms({}), quiet: true}).validateJmsAuth_(); return false; } catch (e) { return true; } })(),

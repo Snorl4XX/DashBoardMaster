@@ -78,7 +78,18 @@ Painel do Sorter: {"metodo": "POST", "caminho": "/…", "corpo": "_token=…&…
 <label for="sUrl">Endereço do sorter</label><input id="sUrl" placeholder="http://10.1.166.9">
 <label for="sTroca" style="margin-top:10px">Troca do Sorter A (opcional)</label><textarea id="sTroca" autocomplete="off" spellcheck="false" style="min-height:52px" placeholder='{"metodo": "POST", "caminho": "/home/…", "corpo": "_token=x&device_id=…"}'></textarea>
 <div class="actions"><button id="saveSorter">Salvar e testar o sorter</button></div>
-<pre class="out" id="sorterOut"></pre></section>`;
+<pre class="out" id="sorterOut"></pre></section>
+
+<section class="card"><h2>Bot do Feishu</h2>
+<p class="hint">De hora em hora (minuto 5), o painel manda no grupo do Feishu: a produção da hora que fechou (Sorter A + B), o total do
+dia, a produção por turno e as 3 balanças que mais e as 3 que menos processaram no dia. No grupo do Feishu: Configurações do grupo
+→ Bots → Adicionar bot → Bot personalizado; copie o endereço do webhook. Se ligar a "Assinatura" no bot, cole o segredo também.
+Os valores salvos não aparecem de novo nesta tela.</p>
+<p class="small" id="feishuState"></p>
+<label for="fHook">Webhook do bot</label><input id="fHook" autocomplete="off" spellcheck="false" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…">
+<label for="fSeg" style="margin-top:10px">Segredo da assinatura (opcional)</label><input id="fSeg" type="password" autocomplete="new-password">
+<div class="actions"><button id="saveFeishu">Salvar e mandar um teste</button><button class="ghost" id="offFeishu">Desligar o bot</button></div>
+<pre class="out" id="feishuOut"></pre></section>`;
 
 function configPage(opts) {
   const page = configPageHtml(opts);
@@ -162,6 +173,10 @@ O valor salvo não aparece de novo nesta tela.</p>
         stat('Senha do painel', s.senhaPainel ? 'sim' : (s.linkPublico ? 'não: defina "senha"' : 'não'), s.senhaPainel ? 'ok' : (s.linkPublico ? 'bad' : ''));
       $('#addrs').innerHTML = 'Endereços do painel: ' + s.enderecos.map(function (a) { return '<a href="' + escH(a) + '">' + escH(a) + '</a>'; }).join(' · ');
       $('#start').value = s.dataInicial || '';
+      if ($('#feishuState')) {
+        var fh = s.props.some(function (p) { return p.k === 'FEISHU_WEBHOOK'; }), fs = s.props.some(function (p) { return p.k === 'FEISHU_SEGREDO'; });
+        $('#feishuState').textContent = fh ? 'Bot ligado' + (fs ? ' (com segredo)' : '') + ': manda o resumo de hora em hora.' : 'Bot desligado: cole o webhook do bot para ligar.';
+      }
       if ($('#sUrl') && !$('#sUrl').value) {
         var su = s.props.filter(function (p) { return p.k === 'SORTER_URL'; })[0];
         $('#sUrl').value = su ? su.v : 'http://10.1.166.9';
@@ -197,6 +212,25 @@ O valor salvo não aparece de novo nesta tela.</p>
       return troca ? api('propriedade', {k: 'SORTER_TROCA_A', v: troca}) : null;
     }).then(function () { $('#sTroca').value = ''; return runFn('diagnosticarSorter', [], out, btn); })
       .catch(function (e) { show(out, e.message, true); busy(btn, false); });
+  };
+  if ($('#saveFeishu')) $('#saveFeishu').onclick = function () {
+    var hook = $('#fHook').value.trim(), seg = $('#fSeg').value.trim(), out = $('#feishuOut'), btn = this;
+    var has = (window.__props || []).some(function (p) { return p.k === 'FEISHU_WEBHOOK'; });
+    if (!hook && !has) { show(out, 'Cole o endereço do webhook do bot.', true); return; }
+    if (hook && !/^https:[/][/]open[.](feishu[.]cn|larksuite[.]com)[/]open-apis[/]bot[/]v2[/]hook[/][A-Za-z0-9-]+$/.test(hook)) {
+      show(out, 'Endereço inválido. Ele começa com https://open.feishu.cn/open-apis/bot/v2/hook/', true); return;
+    }
+    busy(btn, true);
+    (hook ? api('propriedade', {k: 'FEISHU_WEBHOOK', v: hook}) : Promise.resolve(null)).then(function () {
+      return seg ? api('propriedade', {k: 'FEISHU_SEGREDO', v: seg}) : null;
+    }).then(function () { $('#fHook').value = ''; $('#fSeg').value = ''; return runFn('testarFeishu', [], out, btn); })
+      .catch(function (e) { show(out, e.message, true); busy(btn, false); });
+  };
+  if ($('#offFeishu')) $('#offFeishu').onclick = function () {
+    var out = $('#feishuOut');
+    api('remover', {k: 'FEISHU_WEBHOOK'}).then(function () { return api('remover', {k: 'FEISHU_SEGREDO'}); })
+      .then(function () { show(out, 'Bot do Feishu desligado (webhook e segredo apagados).'); load(); })
+      .catch(function (e) { show(out, e.message, true); });
   };
   if ($('#saveTok')) $('#saveTok').onclick = function () {
     var tok = $('#tok').value.trim(), cookie = $('#cookie').value.trim(), out = $('#tokOut'), btn = this;

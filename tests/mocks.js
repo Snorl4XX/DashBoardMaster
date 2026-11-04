@@ -148,7 +148,9 @@ function createContext(opts) {
       newBlob: (data, type, name) => makeBlob(typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data), type, name),
       gzip: blob => makeBlob(zlib.gzipSync(blob.bytes), 'application/x-gzip', blob.name + '.gz'),
       ungzip: blob => makeBlob(zlib.gunzipSync(blob.bytes), 'application/json', blob.name),
-      base64Encode: bytes => Buffer.from(bytes).toString('base64')
+      base64Encode: bytes => Buffer.from(bytes).toString('base64'),
+      computeHmacSha256Signature: (value, key) => Array.from(require('crypto').createHmac('sha256', Buffer.from(key, 'utf8'))
+        .update(Buffer.from(value, 'utf8')).digest()).map(b => (b > 127 ? b - 256 : b))
     },
     UrlFetchApp: {
       fetch: (url, req) => { state.fetchIdx = 0; return opts.jms(url, req, state); },

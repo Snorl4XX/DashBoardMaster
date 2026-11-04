@@ -276,6 +276,9 @@ class GasRuntime {
         return Array.from(crypto.createHash(name).update(typeof value === 'string' ? Buffer.from(value, 'utf8') : Buffer.from(value)).digest())
           .map(b => (b > 127 ? b - 256 : b));
       },
+      // V4.23 (bot do Feishu): assinatura do robô (HMAC-SHA256), como no Apps Script — bytes com sinal.
+      computeHmacSha256Signature: (value, key) => Array.from(crypto.createHmac('sha256', typeof key === 'string' ? Buffer.from(key, 'utf8') : Buffer.from(key))
+        .update(typeof value === 'string' ? Buffer.from(value, 'utf8') : Buffer.from(value)).digest()).map(b => (b > 127 ? b - 256 : b)),
       DigestAlgorithm: {MD5: 'MD5', SHA_1: 'SHA_1', SHA_256: 'SHA_256', SHA_384: 'SHA_384', SHA_512: 'SHA_512'},
       Charset: {UTF_8: 'UTF-8', US_ASCII: 'US-ASCII'}
     };

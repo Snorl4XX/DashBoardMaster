@@ -162,6 +162,7 @@ const FN_HELP = {
   diagnosticarAvaria: 'Avaria (data opcional)',
   diagnosticarSemMovimentacao: 'Sem Movimentação',
   diagnosticarSorter: 'Produção do Sorter: endereço, Sorter A/B e os números de hoje',
+  testarFeishu: 'Bot do Feishu: manda agora no grupo o resumo da última hora',
   baixarHistoricoAvaria: 'Avaria: baixa o histórico agora',
   testProjectInstallation: 'confere se os arquivos do painel carregaram'
 };
@@ -328,7 +329,8 @@ function addresses() {
 }
 
 function maskProp(k, v) {
-  const secret = /^JMS_(AUTHTOKEN|COOKIE|AUTHORIZATION)$/.test(k) || /TOKEN|COOKIE|SENHA|SECRET|PASSWORD|AUTHORIZATION/i.test(k);
+  // V4.23: o webhook do bot do Feishu e o segredo também (quem tem o endereço manda mensagem no grupo).
+  const secret = /^JMS_(AUTHTOKEN|COOKIE|AUTHORIZATION)$/.test(k) || /TOKEN|COOKIE|SENHA|SECRET|PASSWORD|AUTHORIZATION|WEBHOOK|SEGREDO/i.test(k);
   const interna = !USER_PROP.test(k);
   if (secret) return {k, v: '•••••• (' + String(v).length + ' caracteres)', secret: true, interna};
   const s = String(v);
@@ -336,7 +338,7 @@ function maskProp(k, v) {
 }
 const INTERNAL_PROPS = ['DB_SPREADSHEET_ID', 'DATA_FOLDER_ID', 'REPORT_FOLDER_ID', 'PLATAFORMA'];
 /** Propriedades de configuração (as que o LEIA_PRIMEIRO/DIAGNOSTICO mandam ajustar); o resto é controle interno do painel. */
-const USER_PROP = /^(JMS_|DATA_START_DATE$|ATUALIZACAO_MIN$|COTA_GOOGLE$|DETAIL_|DASHBOARD_MAX_ROWS$|MAX_CLIENT_ROWS$|GROUPED_CLIENT_ROWS$|EXPEDICAO_IDS_|DOCKS_|PAGE_SIZE$|ARRIVAL_CAP$|[A-Z_]+_MIN_POR_DIA$)/;
+const USER_PROP = /^(JMS_|DATA_START_DATE$|ATUALIZACAO_MIN$|COTA_GOOGLE$|DETAIL_|DASHBOARD_MAX_ROWS$|MAX_CLIENT_ROWS$|GROUPED_CLIENT_ROWS$|EXPEDICAO_IDS_|DOCKS_|PAGE_SIZE$|ARRIVAL_CAP$|[A-Z_]+_MIN_POR_DIA$|SORTER_URL$|SORTER_TROCA_[A-Z]$|FEISHU_(WEBHOOK|SEGREDO|MINUTO)$)/;
 
 async function configApi(req, res, name) {
   if (name === 'estado' && req.method === 'GET') {

@@ -1762,6 +1762,10 @@ function processSyncQueue(opts) {
     // V3.29: dia sem foto da Sem Movimentação (instalação, virada do dia): a primeira foto entra na fila já.
     try { queueSnapshotsToday_(); } catch (e) { logSync_('WARN', '', '', 'Foto de hoje (Sem Movimentação) não enfileirada: ' + String(e && e.message || e).slice(0, 300)); }
   }
+  // V4.23 (Produção do Sorter): bot do Feishu — o resumo da hora que fechou no grupo (só com FEISHU_WEBHOOK em Configurações).
+  if (typeof feishuSorterTick_ === 'function') {
+    try { feishuSorterTick_(); } catch (e) { logSync_('WARN', 'sorter_flow', '', 'Bot do Feishu: ' + String(e && e.message || e).slice(0, 300)); }
+  }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return {ok: false, busy: true};

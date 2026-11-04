@@ -1,8 +1,32 @@
-# J&T DASHMASTER V4.22.13 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.0 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.23.0 — Produção do Sorter: bot do Feishu (resumo de hora em hora no grupo)
+
+De hora em hora (no minuto 5), o painel da Produção do Sorter atualiza o dia no sorter e manda no grupo do Feishu um cartão com:
+- **Produção da hora que fechou** (Sort total, Sorter A + B, e cada sorter) e o **total do dia até agora**;
+- **Produção por turno** no dia (T1 06h–14h, T2 14h–22h, T3 22h–06h);
+- **As 3 balanças que mais processaram** e **as 3 que menos processaram** no dia (quantidade alimentada; sorter + balança —
+  a Balança 19 do A é outra máquina que a do B; balanças sem produção no dia não entram).
+
+Os números são os mesmos do painel. Se o sorter não responder, a mensagem sai com os números da última atualização e um aviso.
+
+**Ligar:**
+1. No grupo do Feishu: Configurações do grupo → **Bots** → **Adicionar bot** → **Bot personalizado**. Copie o endereço do webhook
+   (`https://open.feishu.cn/open-apis/bot/v2/hook/…`). Em segurança, pode ligar a **Assinatura** (copie o segredo) ou colocar a
+   palavra-chave **Sorter**.
+2. Em `http://localhost:3500/config`, seção **Bot do Feishu**: cole o webhook (e o segredo, se ligou a assinatura) e clique em
+   **Salvar e mandar um teste**. A mensagem chega no grupo na hora.
+3. Pronto: depois disso, uma mensagem por hora, enquanto o painel estiver ligado. **Desligar o bot** apaga o webhook.
+
+O webhook e o segredo ficam só neste computador (Propriedades `FEISHU_WEBHOOK` e `FEISHU_SEGREDO`, escondidas na tela). Outro
+minuto: Propriedade `FEISHU_MINUTO` (padrão 5). O computador precisa de internet para falar com o Feishu.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`.
 
 ## V4.22.13 — Produção do Sorter: filtros, cartões e gráficos com os mesmos números
 
