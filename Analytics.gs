@@ -744,6 +744,30 @@ function maxClientRows_() {
 }
 
 /**
+ * V4.23.3 (Produção do Sorter, pedido "quando trocar os filtros, a Evolução diária deve mostrar o resultado do filtro"): a
+ * quantidade da lista `column` em cada dia de from..to, com os filtros — dias com a lista baixada (sem ela, o dia fica sem número).
+ * Só para gráficos de número do resumo que dizem a lista (charts[].detail, ou byFilter[].detail): até 93 dias.
+ */
+function getDailySeries(indicatorKey, params) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  params = params || {};
+  const to = isIso_(params.to) ? params.to : isoToday_();
+  let from = isIso_(params.from) ? params.from : addDaysIso_(to, -14);
+  if (from < addDaysIso_(to, -92)) from = addDaysIso_(to, -92);
+  const column = String(params.column || '');
+  const ok = (cfg.charts || []).some(c => c.metric && (c.detail === column || Object.keys(c.byFilter || {}).some(k => c.byFilter[k].detail === column)));
+  if (!column || !ok) throw new Error('Lista sem série diária: ' + column);
+  JTCore_.setFilterScopes(cfg.filterScopes || {});
+  JTCore_.setColumnSets(cfg.columnSets || {});
+  const archive = getArchivedRange_(indicatorKey, from, to), values = {};
+  (archive.loadedDates || []).concat(archive.partialDates || []).forEach(d => { values[d] = 0; });
+  JTCore_.applyFilters(archive.rows || [], normalizeFilters_(params.filters)).forEach(r => {
+    if (values[r.date] !== undefined && JTCore_.colMatch(column, r.column)) values[r.date] += Number(r.qty) || 0;
+  });
+  return safeReturn_({from: from, to: to, column: column, values: values});
+}
+
+/**
  * Dados do dashboard: taxas oficiais (histórico completo do indicador) + detalhes
  * compactados do período. Filtros, cartões e gráficos são calculados no navegador
  * com o mesmo núcleo (Core.gs) — trocar filtros é instantâneo.

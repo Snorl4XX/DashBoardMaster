@@ -1,8 +1,19 @@
-# J&T DASHMASTER V4.23.2 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.3 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.23.3 — Produção do Sorter: Evolução diária com os filtros
+
+Pedido "quando trocar os filtros, o gráfico de Evolução Diária deve mostrar os resultados desse filtro": sem filtro, o gráfico
+continua com o número oficial do sorter de cada dia; **com filtro** (Sorter, Turno, Horário), cada coluna é o Sort total do dia
+com o filtro — e com o filtro de **Balança**, a quantidade alimentada na(s) balança(s) ("Evolução diária · quantidade
+alimentada"). O texto embaixo do título diz "Com os filtros". Os cartões Dia escolhido / Maior / Menor / Média acompanham.
+Dias sem a lista baixada ficam sem coluna. (Servidor: `getDailySeries`.)
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_3_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e aperte **Ctrl+F5** no navegador.
 
 ## V4.23.2 — Bot do Feishu: todas as balanças
 

@@ -4888,6 +4888,14 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(cfgS.hideDetailTable === true && catHT.filter(x => x.key === 'sorter_flow').every(x => x.hideDetailTable === true) &&
     (require('fs').readFileSync(require('path').join(__dirname, '..', 'Config.gs'), 'utf8').match(/^\s*hideDetailTable: true,/gm) || []).length === 1,
     'Produção do Sorter sem a tabela de remessas (só ela)', {cfg: cfgS.hideDetailTable, cat: catHT.map(x => [x.key, x.hideDetailTable])});
+  // V4.23.3 (pedido "ao trocar os filtros, a Evolução diária deve mostrar o resultado do filtro"): a série do dia com o filtro.
+  const ds = (col, f) => cS.getDailySeries('sorter_flow', {from: DS, to: DS, column: col, filters: f}).values[DS];
+  const dsBad = (() => { try { cS.getDailySeries('sorter_flow', {from: DS, to: DS, column: 'Valid total', filters: {}}); return false; } catch (e) { return true; } })();
+  check(ds('Sort total', {}) === A.total + B.total && ds('Sort total', {sorter: ['Sorter A']}) === A.total &&
+    ds('Alimentação', {induction: ['Balança 01']}) === fA[1] + fB[1] && ds('Sort total', {shift: ['T1']}) === sumOf('Sort total', r => r.shift === 'T1') &&
+    dsBad && Cf.chartDefFor(chDefS('mDaily'), {induction: ['Balança 01']}).detail === 'Alimentação',
+    'Sorter: Evolução diária com filtro = a lista de cada dia com o filtro (sorter, turno; balança = quantidade alimentada)',
+    {all: ds('Sort total', {}), a: ds('Sort total', {sorter: ['Sorter A']}), b1: ds('Alimentação', {induction: ['Balança 01']})});
   Cf.setFacetColumns(null);
   const fcOld = Cf.facets(rowsD, {}, ['sorter']);
   check(fcOld.sorter.filter(o => o.value === 'Sorter A')[0].total > A.total * 3, 'sem facetColumns, a lista soma todas as linhas (como nos outros painéis)');

@@ -152,6 +152,8 @@
       dsPaused: 'rota pausada: {r}', dsDone: 'completo', dsHelp: 'Para saber o motivo em detalhe, rode diagnosticarRecebimento() no editor do Apps Script.',
       mcFiltered: '{label} (com filtro)', mcOfficial: 'Oficial do JMS (sem filtros): {n}', mcWholeDay: 'Número do dia todo: o JMS não separa este número por turno nem por viagem',
       scReceived: 'recebido', scShare: 'de participação', metricSub: 'Número oficial do JMS · {n} dias até {date} (coluna vermelha = dia escolhido)',
+      metricSubFiltered: 'Com os filtros · {n} dias até {date} (coluna vermelha = dia escolhido)', dailyFLoading: 'carregando com os filtros…',
+      dailyFError: 'não consegui aplicar os filtros: número oficial',
       metricLineSub: 'Número oficial do JMS · evolução diária até {date}', mAvg: 'Média', mMax: 'Maior', mMin: 'Menor', mDay: 'Dia escolhido',
       listRows: '{n} remessas', listTopNote: 'Mostrando as {n} maiores combinações. Filtre para ver outras.', navQty: 'Deve chegar · {date}',
       mpMax: 'Maior', mpMin: 'Menor', noPrevDay: 'sem dia anterior', mpTable: 'Dados gerais / 总体数据',
@@ -326,6 +328,7 @@
       dsPaused: '接口已暂停：{r}', dsDone: '完成', dsHelp: '如需详细原因，请在 Apps Script 编辑器中运行 diagnosticarRecebimento()。',
       mcFiltered: '{label}（已筛选）', mcOfficial: 'JMS官方（未筛选）：{n}', mcWholeDay: '全天数字：JMS 未按班次或车次拆分该数字',
       scReceived: '已到', scShare: '占比', metricSub: 'JMS官方数字 · 截至 {date} 的 {n} 天（红色柱 = 所选日期）',
+      metricSubFiltered: '已筛选 · 截至 {date} 的 {n} 天（红色柱 = 所选日期）', dailyFLoading: '正在按筛选加载…', dailyFError: '筛选失败：显示官方数字',
       metricLineSub: 'JMS官方数字 · 截至 {date} 的每日趋势', mAvg: '平均', mMax: '最高', mMin: '最低', mDay: '所选日期',
       listRows: '{n} 票', listTopNote: '显示数量最多的 {n} 个组合。筛选可查看其他组合。', navQty: '应到 · {date}',
       mpMax: '最高', mpMin: '最低', noPrevDay: '无前一日', mpTable: '总体数据 / Dados gerais',
@@ -1086,6 +1089,7 @@
       if (seq !== state.seq) return;
       renderSyncBanner(res.meta.pauses);
       var sm = res.summary;
+      state.dailyF = null;  // V4.23.3: dados novos — a Evolução diária com filtro é buscada de novo
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
         shiftSum: res.shiftSum || {}, routes: res.routes || null,
         rows: Core.applyDayOf(Core.applyOrderKinds(Core.applySegmentBase(Core.applyDocks(Core.applyAliases(Core.decodeDataset(res.dataset), c && c.valueAliases), c && c.docks), c && c.segmentBase), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
@@ -2192,16 +2196,39 @@
     var hr = histDays();
     if (hr) { from = hr[0]; to = hr[hr.length - 1]; }
     if (Core.daysBetween(from, to) > 90) from = Core.addDays(to, -90);
-    var byDate = {};
+    var byDate = {}, title = def.title, filtered = false;
     activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[mk])) byDate[r.date] = Number(r.metrics[mk]); });
+    // V4.23.3 (Produção do Sorter): com filtro, a soma da lista de cada dia com o filtro (servidor: getDailySeries).
+    var fo = filtersObj(), dd = def.detail && Object.keys(fo).length ? Core.chartDefFor(def, fo) : null;
+    if (dd) {
+      var fkey = JSON.stringify([state.indicator, from, to, dd.detail, fo]);
+      title = dd.title;
+      if (state.dailyF && state.dailyF.key === fkey && state.dailyF.values) { byDate = state.dailyF.values; filtered = true; }
+      else { requestDailySeries(fkey, dd.detail, from, to, fo); note = t(state.dailyF && state.dailyF.error ? 'dailyFError' : 'dailyFLoading'); }
+    }
     var days = Core.dateRange(from, to);
-    return {key: def.key, metric: mk, type: def.type || 'bar', bad: !!def.bad, title: def.title, note: note,
+    return {key: def.key, metric: mk, type: def.type || 'bar', bad: !!def.bad, title: title, note: note, filtered: filtered,
       days: days, values: days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; })};
+  }
+  function requestDailySeries(fkey, col, from, to, fo) {
+    if (state.dailyF && state.dailyF.key === fkey) return;
+    var ind = state.indicator;
+    state.dailyF = {key: fkey, values: null};
+    call('getDailySeries', ind, {from: from, to: to, column: col, filters: fo}).then(function (r) {
+      if (!state.dailyF || state.dailyF.key !== fkey) return;
+      state.dailyF.values = (r && r.values) || {};
+      if (state.view === 'dashboard' && state.indicator === ind) renderCharts(cfg());
+    }).catch(function (e) {
+      if (!state.dailyF || state.dailyF.key !== fkey) return;
+      state.dailyF.error = e.message;
+      if (state.view === 'dashboard' && state.indicator === ind) renderCharts(cfg());
+    });
   }
   function renderMetricChart(card, spec) {
     var key = spec.key, vals = spec.values, days = spec.days, last = days.length - 1;
     $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '');
-    $('small', card).textContent = (spec.type === 'line' ? t('metricLineSub', {date: fmtDate(state.to, true)}) : t('metricSub', {n: days.length, date: fmtDate(state.to, true)})) +
+    $('small', card).textContent = (spec.type === 'line' ? t('metricLineSub', {date: fmtDate(state.to, true)}) :
+      t(spec.filtered ? 'metricSubFiltered' : 'metricSub', {n: days.length, date: fmtDate(state.to, true)})) +
       (spec.note ? ' · ' + spec.note : '');
     var view = state.chartViews[key] || (window.Chart ? 'chart' : 'table'), tools = $('.chart-tools', card);
     tools.innerHTML = seg('view', [['chart', t('chartView')], ['table', t('tableView')]], view);

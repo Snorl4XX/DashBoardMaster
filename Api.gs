@@ -12,7 +12,7 @@
  */
 const FUNCOES_DA_PAGINA_ = ['getAppBootstrap', 'getDashboardData', 'getResultsData', 'getUpdateStamp', 'refreshNow', 'refreshAllNow',
   'refreshAllDetailsNow', 'refreshOrderKindsNow', 'refreshSnapshotList', 'completeTriagemNow', 'fetchNoMoveHistory',
-  'fetchNoMoveHistoryList', 'generateReport'];
+  'fetchNoMoveHistoryList', 'generateReport', 'getDailySeries'];
 
 function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify(apiDaPagina_(e && e.postData ? e.postData.contents : '')))

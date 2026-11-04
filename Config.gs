@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.23.2',
+  VERSION: '4.23.3',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1718,7 +1718,9 @@ const ALL_INDICATORS_ = Object.freeze({
       ]}
     ],
     charts: [
-      {key: 'mDaily', metric: 'sortTotal', type: 'bar', days: 15, title: {pt: 'Evolução diária · Sort total', zh: '每日分拣总量'}},
+      // V4.23.3: com filtro, a soma da lista do dia com o filtro (detail); com o filtro de balança, a quantidade alimentada.
+      {key: 'mDaily', metric: 'sortTotal', type: 'bar', days: 15, title: {pt: 'Evolução diária · Sort total', zh: '每日分拣总量'},
+        detail: 'Sort total', byFilter: {induction: {detail: 'Alimentação', title: {pt: 'Evolução diária · quantidade alimentada', zh: '每日供包量'}}}},
       {key: 'byHour', dim: 'interval', where: {column: 'Sort total'}, type: 'bar', top: 24, timeline: true,
         title: {pt: 'Evolução por hora · Sort total', zh: '每小时分拣总量'}, sub: {pt: 'Volumes por hora do dia', zh: '各时段分拣量'},
         byFilter: {induction: {where: {column: 'Alimentação'}, title: {pt: 'Evolução por hora · quantidade alimentada', zh: '每小时供包量'},
