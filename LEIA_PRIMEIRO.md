@@ -1,20 +1,40 @@
-# J&T DASHMASTER V4.22.4 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.5 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.5 — Uma porta do link para cada painel
+
+Pedido: "porta diferente para cada dash". O Funnel do Tailscale só aceita **3 portas** no link público (443, 8443 e 10000).
+Então fica assim:
+
+| Painel | Porta no computador | Link do Tailscale |
+|---|---|---|
+| Principal | 3000 | `https://NOME.ts.net` (443) |
+| Produção do Sorter | 3500 | `https://NOME.ts.net:8443` |
+| Lotes/Sacas | 3400 | `https://NOME.ts.net:10000` |
+
+- Quem instalou antes (Lotes em `/lotes`, Sorter em `/sorter`): o `link-publico.bat` troca sozinho o `config.json` para a
+  porta nova, uma vez só (`"linkVersao": 2`), liga o link novo e desliga o `/lotes` / `/sorter` antigo do mesmo painel.
+- **Antes de ligar**, o `link-publico.bat` confere se a porta do link já leva para **outro** painel deste computador. Se levar,
+  ele avisa qual e pergunta se é para trocar (S/N), em vez de derrubar o outro sem avisar.
+- A **Expedição Incorreta** também usa a 8443. Se ela estiver no mesmo computador do Sorter, não sobra porta: deixe o Sorter
+  num caminho do link principal (no `config.json` do Sorter: `"portaLink": 443` e `"caminho": "/sorter"`).
+- O `link-publico.bat` usa o Node.js (`node\lib\link.js`) para isso; sem o Node.js, ele liga o link como antes, sem conferir.
+- **Atualizar** (painel principal): entre 0h e 6h, o botão não atualizava o dia de ontem dos painéis que se atualizam a cada
+  poucas horas (Criação de Lotes). Agora atualiza.
+
+**Atualizar:** em cada painel (Lotes e Sorter), feche a janela preta, extraia o ZIP novo em `C:\` (Substituir), dê dois cliques
+no `link-publico.bat` e depois abra o `iniciar.bat`. No principal, só troque o `link-publico.bat` (e a pasta `node\lib`).
 
 ## V4.22.4 — link-publico.bat não some mais
 
 Com dois cliques, o `link-publico.bat` fechava antes de dar para ler a mensagem. Agora ele se abre de novo numa janela
 `cmd /k`, que fica aberta mesmo se o Windows parar o arquivo no meio. No fim, a janela continua aberta: feche no X depois de ler.
 
-**Vários painéis no mesmo computador e no mesmo link do Tailscale:**
+**Vários painéis no mesmo computador e no mesmo link do Tailscale** (na V4.22.5 cada um passou a ter a sua porta do link):
 - Cada painel tem a **sua porta** no computador: principal 3000, Lotes 3400, Sorter 3500.
-- No link, cada um fica num **caminho** do mesmo endereço, todos na porta 443:
-  - principal: `https://NOME.ts.net`;
-  - Lotes: `https://NOME.ts.net/lotes`;
-  - Sorter: `https://NOME.ts.net/sorter`.
 - Dois painéis **na mesma porta do link e sem caminho** (ex.: os dois em `:10000`) dão errado: o último `link-publico.bat` que
   rodar fica com o link, e o outro some.
 - Para ver o que está ligado: `"C:\Program Files\Tailscale\tailscale.exe" funnel status`. Para desligar um link antigo na

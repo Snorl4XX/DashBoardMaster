@@ -125,12 +125,12 @@ Sozinho, o servidor só abre na rede da base. Para ter um **link `https://` que 
 Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.exe" funnel reset`.
 
 **Painel de Lotes/Sacas separado (V4.21):** o ZIP `JT_DASHMASTER_..._LOTES_NODE.zip` instala outro painel em
-`C:\dashmaster-lotes` (porta 3400). O `link-publico.bat` dele liga o link no mesmo endereço do principal com **/lotes**
-no fim (`https://NOME.xxxx.ts.net/lotes`, V4.21.5 — antes era a porta 10000), sem mexer no link do painel principal.
+`C:\dashmaster-lotes` (porta 3400). O `link-publico.bat` dele liga o link na porta **10000**
+(`https://NOME.xxxx.ts.net:10000`; V4.22.5 — entre a V4.21.5 e a V4.22.4 era `/lotes`), sem mexer no link do painel principal.
 Passo a passo no `LEIA_LOTES.md` do ZIP. Em qualquer pacote, `"caminho"` no `config.json` põe o painel num caminho do link.
 
 **Produção do Sorter separada (V4.22):** o ZIP `JT_DASHMASTER_..._SORTER_NODE.zip` instala outro painel em `C:\dashmaster-sorter`
-(porta 3500, link `https://NOME.xxxx.ts.net/sorter`). Ele lê o monitor do sorter da base (http://10.1.166.9) e salva cada dia,
+(porta 3500, link `https://NOME.xxxx.ts.net:8443`). Ele lê o monitor do sorter da base (http://10.1.166.9) e salva cada dia,
 sem JMS (`"semJms": true` no `padrao.json`). O computador precisa estar na rede da base. Passo a passo no `LEIA_SORTER.md` do ZIP.
 
 **Sem o `link-publico.bat`** (arquivos `.bat` bloqueados): crie um atalho (botão direito na Área de Trabalho → Novo → Atalho) com

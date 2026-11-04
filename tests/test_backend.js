@@ -3171,31 +3171,62 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
   const created = JSON.parse(fsM.readFileSync(cfgFileL, 'utf8'));
   const batW = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar-com-windows.bat'), 'utf8'), batI = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar.bat'), 'utf8');
-  check(keysOf(ctxL).join() === 'lot_flow' && ctxL.getAppBootstrap().app.panel === 'Criação de Lotes' && confL.porta === 3400 && confL.portaLink === 443 &&
-    confL.caminho === '/lotes' && created.porta === 3400 && created.portaLink === 443 && created.caminho === '/lotes' && /JT DashMaster Lotes\.lnk/.test(batW) && !/JT DashMaster\.lnk/.test(batW) && /DashMaster Lotes/.test(batI) &&
+  check(keysOf(ctxL).join() === 'lot_flow' && ctxL.getAppBootstrap().app.panel === 'Criação de Lotes' && confL.porta === 3400 && confL.portaLink === 10000 &&
+    confL.caminho === '' && created.porta === 3400 && created.portaLink === 10000 && created.caminho === '' && created.linkVersao === 2 && /JT DashMaster Lotes\.lnk/.test(batW) && !/JT DashMaster\.lnk/.test(batW) && /DashMaster Lotes/.test(batI) &&
     fsM.existsSync(pathM.join(rootL, 'LEIA_LOTES.md')) && fsM.existsSync(pathM.join(rootL, 'node', 'link-publico.bat')),
-    'pacote Node.js de Lotes: só a Criação de Lotes, porta 3400, link em /lotes e atalho próprio', {keys: keysOf(ctxL), porta: confL.porta, link: confL.portaLink});
-  // V4.21.5: quem já usava o link com :10000 — o config.json de antes passa para o /lotes sozinho, uma vez só.
-  fsM.writeFileSync(cfgFileL, JSON.stringify({porta: 3400, portaLink: 10000, senha: 'x', linkPublico: 'https://painel.exemplo.ts.net:10000/'}, null, 2));
+    'pacote Node.js de Lotes: só a Criação de Lotes, porta 3400, link na porta 10000 e atalho próprio', {keys: keysOf(ctxL), porta: confL.porta, link: confL.portaLink});
+  // V4.22.5 (pedido "porta diferente para cada dash"): o config.json de quem usava /lotes (V4.21.5 a 4.22.4) ou :10000 (V4.21.4)
+  // passa para a porta 10000, sem caminho, uma vez só; depois vale o que a pessoa escolher.
   process.env.DASHMASTER_CONFIG = cfgFileL;
+  fsM.writeFileSync(cfgFileL, JSON.stringify({porta: 3400, portaLink: 443, caminho: '/lotes', senha: 'x', linkPublico: 'https://painel.exemplo.ts.net/lotes'}, null, 2));
   const migL = cfgModL.loadConfig();
   const migFile = JSON.parse(fsM.readFileSync(cfgFileL, 'utf8'));
-  fsM.writeFileSync(cfgFileL, JSON.stringify(Object.assign({}, migFile, {caminho: '', portaLink: 10000})));
+  fsM.writeFileSync(cfgFileL, JSON.stringify({porta: 3400, portaLink: 10000, senha: 'x', linkPublico: 'https://painel.exemplo.ts.net:10000/'}, null, 2));
+  const migOld = cfgModL.loadConfig();
+  fsM.writeFileSync(cfgFileL, JSON.stringify(Object.assign({}, migFile, {caminho: '/lotes', portaLink: 443})));
   const keptL = cfgModL.loadConfig();
   if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
-  check(migL.caminho === '/lotes' && migL.portaLink === 443 && migL.linkPublico === 'https://painel.exemplo.ts.net/lotes' && migFile.senha === 'x' &&
-    migFile.caminho === '/lotes' && migFile.portaLink === 443 && keptL.caminho === '' && keptL.portaLink === 10000,
-    'config.json com o link antigo (:10000) vira /lotes uma vez; depois vale o que a pessoa escolher', {migL: [migL.caminho, migL.portaLink, migL.linkPublico], keptL: [keptL.caminho, keptL.portaLink]});
+  check(migL.caminho === '' && migL.portaLink === 10000 && migL.linkPublico === 'https://painel.exemplo.ts.net:10000' && migFile.senha === 'x' &&
+    migFile.linkVersao === 2 && migOld.portaLink === 10000 && migOld.caminho === '' && migOld.linkPublico === 'https://painel.exemplo.ts.net:10000' &&
+    keptL.caminho === '/lotes' && keptL.portaLink === 443,
+    'config.json com o link /lotes (ou o :10000 antigo) vai para a porta 10000 uma vez; depois vale o que a pessoa escolher',
+    {migL: [migL.caminho, migL.portaLink, migL.linkPublico], migOld: [migOld.caminho, migOld.portaLink, migOld.linkPublico], keptL: [keptL.caminho, keptL.portaLink]});
   const batLink = fsM.readFileSync(pathM.join(rootL, 'node', 'link-publico.bat'), 'utf8');
   check(/funnel --bg --https=%PORTALINK% --set-path=%CAMINHO% http:\/\/127\.0\.0\.1:%PORTA%%CAMINHO%/.test(batLink) && /\r\n/.test(batLink) &&
     /--set-path=%CAMINHO% off/.test(batLink) && /^[\x00-\x7f]*$/.test(batLink), 'link-publico.bat liga o link no caminho (/lotes) do mesmo endereço');
   // V4.22.4: com dois cliques, ele se abre numa janela "cmd /k" (não some se o Windows parar o arquivo no meio).
   check(/^@echo off\r\n(?:rem [^\r\n]*\r\n)*if \/i not "%~1"=="--na-janela" \(\r\n  start "[^"]+" cmd \/k call "%~f0" --na-janela\r\n  exit \/b\r\n\)/.test(batLink) &&
     !/pause/i.test(batLink.split(':fim')[1]), 'link-publico.bat abre numa janela que fica aberta (cmd /k)');
+  // V4.22.5: o .bat lê as portas pelo lib\link.js (aplica o pacote no config.json), confere se o endereço já leva para OUTRO painel
+  // (pergunta antes de trocar) e desliga os links antigos deste painel.
+  check(/node "%~dp0lib\\link\.js" config 2\^>nul/.test(batLink) && /node "%~dp0lib\\link\.js" livre "%TS%" %PORTALINK% %PORTA% %CAMINHO%\r\nif errorlevel 2 goto ocupado/.test(batLink) &&
+    /choice \/c SN/.test(batLink) && /node "%~dp0lib\\link\.js" limpar/.test(batLink) && fsM.existsSync(pathM.join(rootL, 'node', 'lib', 'link.js')),
+    'link-publico.bat confere a porta do link antes de trocar e desliga os links antigos do mesmo painel');
+  {
+    // Tailscale simulado: "serve status --json" com o principal na 443, a Expedição Incorreta na 8443 e o /lotes antigo na 443.
+    const {execFileSync: runF} = require('child_process');
+    const tsDir = fsM.mkdtempSync(pathM.join(os.tmpdir(), 'jt-ts-')), tsFake = pathM.join(tsDir, 'tailscale'), tsLog = pathM.join(tsDir, 'chamadas.txt');
+    const status = {Web: {'pc.exemplo.ts.net:443': {Handlers: {'/': {Proxy: 'http://127.0.0.1:3000'}, '/lotes': {Proxy: 'http://127.0.0.1:3400/lotes'}}},
+      'pc.exemplo.ts.net:8443': {Handlers: {'/': {Proxy: 'http://127.0.0.1:3300'}}}}};
+    fsM.writeFileSync(tsFake, '#!/usr/bin/env node\nconst fs = require("fs");\nfs.appendFileSync(' + JSON.stringify(tsLog) + ', process.argv.slice(2).join(" ") + "\\n");\n' +
+      'if (process.argv[2] === "serve") process.stdout.write(' + JSON.stringify(JSON.stringify(status)) + ');\n');
+    fsM.chmodSync(tsFake, 0o755);
+    const linkJs = pathM.join(rootL, 'node', 'lib', 'link.js');
+    const run = args => { try { return {code: 0, out: runF(process.execPath, [linkJs].concat(args), {encoding: 'utf8'})}; } catch (e) { return {code: e.status, out: String(e.stdout || '')}; } };
+    const sorter8443 = run(['livre', tsFake, '8443', '3500']), lotes10000 = run(['livre', tsFake, '10000', '3400']), same = run(['livre', tsFake, '8443', '3300']);
+    const limpa = run(['limpar', tsFake, '10000', '3400']);
+    const calls = fsM.readFileSync(tsLog, 'utf8');
+    check(sorter8443.code === 2 && /pc\.exemplo\.ts\.net:8443 ja leva para OUTRO painel deste computador \(porta 3300\)/.test(sorter8443.out) &&
+      lotes10000.code === 0 && same.code === 0 && /Link antigo deste painel desligado: https:\/\/pc\.exemplo\.ts\.net\/lotes/.test(limpa.out) &&
+      /funnel --https=443 --set-path=\/lotes off/.test(calls) && !/funnel --https=443 off/.test(calls) && !/--https=8443 .*off/.test(calls),
+      'link.js: avisa quando a porta do link já é de outro painel (Expedição na 8443) e desliga só o /lotes antigo do mesmo painel',
+      {sorter8443, lotes10000: lotes10000.code, limpa: limpa.out, calls});
+    fsM.rmSync(tsDir, {recursive: true, force: true});
+  }
   // V4.21.2: a porta do painel de Lotes não pode ser a de outro app no mesmo computador (a 3100 era a do Sorter).
   const portOf = f => Number((fsM.readFileSync(pathM.join(__dirname, '..', f), 'utf8').match(/^\s*porta:\s*(\d+)/m) || [])[1]);
   const others = {DashMaster: 3000, Sorter: portOf('sorter/server.js'), Pesquisa: portOf('pesquisa/server.js'), 'Expedição Incorreta': portOf('expedicao_incorreta/server.js')};
-  check(Object.keys(others).every(k => others[k] > 0 && others[k] !== LOTS_NODE.padrao.porta) && LOTS_NODE.padrao.portaLink === 443 && LOTS_NODE.padrao.caminho === '/lotes',
+  check(Object.keys(others).every(k => others[k] > 0 && others[k] !== LOTS_NODE.padrao.porta) && LOTS_NODE.padrao.portaLink === 10000 && LOTS_NODE.padrao.caminho === '',
     'painel de Lotes numa porta livre (nenhum outro app usa a ' + LOTS_NODE.padrao.porta + ')', others);
   // V4.22: Produção do Sorter separada — pasta dashmaster-sorter, porta 3500, link /sorter, sem JMS, atalho próprio.
   const {SORTER_NODE} = require('../tools/gerar_paineis');
@@ -3218,12 +3249,16 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const pagesS = require(pathM.join(rootS, 'node', 'lib', 'pages.js'));
   const cfgPageS = pagesS.configPage({version: 'x', dataDir: 'y', semJms: true}), cfgPageM = pagesS.configPage({version: 'x', dataDir: 'y'});
   check(keysOf(ctxS).join() === 'sorter_flow' && ctxS.getAppBootstrap().app.panel === 'Produção do Sorter' && confS.porta === 3500 &&
-    confS.portaLink === 443 && confS.caminho === '/sorter' && confS.semJms === true && /JT DashMaster Sorter\.lnk/.test(batWS) &&
+    confS.portaLink === 8443 && confS.caminho === '' && confS.semJms === true && /JT DashMaster Sorter\.lnk/.test(batWS) &&
     fsM.existsSync(pathM.join(rootS, 'LEIA_SORTER.md')) && !fsM.existsSync(pathM.join(rootS, 'LEIA_LOTES.md')) &&
     /Sorter da base/.test(cfgPageS) && !/AuthToken do JMS/.test(cfgPageS) && /AuthToken do JMS/.test(cfgPageM) && !/Sorter da base/.test(cfgPageM) &&
     Object.keys(others).concat(['Lotes']).every(k => (k === 'Lotes' ? LOTS_NODE.padrao.porta : others[k]) !== SORTER_NODE.padrao.porta),
-    'pacote Node.js da Produção do Sorter: só ela, porta 3500, link em /sorter, Configurações com o sorter no lugar do AuthToken',
+    'pacote Node.js da Produção do Sorter: só ela, porta 3500, link na porta 8443, Configurações com o sorter no lugar do AuthToken',
     {keys: keysOf(ctxS), porta: confS.porta, caminho: confS.caminho});
+  // V4.22.5: cada painel na sua porta do link (o Funnel só aceita 443, 8443 e 10000): principal 443, Sorter 8443, Lotes 10000.
+  const linkPorts = [443, SORTER_NODE.padrao.portaLink, LOTS_NODE.padrao.portaLink];
+  check(new Set(linkPorts).size === 3 && linkPorts.every(p => [443, 8443, 10000].indexOf(p) >= 0) && !SORTER_NODE.padrao.caminho && !LOTS_NODE.padrao.caminho,
+    'cada painel na sua porta do link do Tailscale (443, 8443, 10000)', linkPorts);
   // O painel do Sorter nunca aparece no principal (nem no pacote Node.js principal, nem com PAINEIS_FORA do usuário).
   check(keysOf(ctxNode()).indexOf('sorter_flow') < 0 && keysOf(ctxNode({PAINEIS_FORA: 'arrival_flow'})).indexOf('sorter_flow') < 0 &&
     full.indexOf('sorter_flow') < 0, 'Produção do Sorter fora do painel principal (painel separado)');

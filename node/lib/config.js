@@ -67,6 +67,22 @@ function migrateLinkPath(file, user) {
   try { fs.writeFileSync(file, JSON.stringify(user, null, 2) + '\n'); } catch (e) { /* pasta só leitura: vale só nesta execução */ }
 }
 
+/**
+ * V4.22.5 (pedido "porta diferente para cada dash"): cada painel na sua porta do link (principal 443, Sorter 8443, Lotes 10000),
+ * sem caminho. Um config.json de antes (sem "linkVersao" do pacote) recebe a porta e o caminho do pacote e o "linkPublico"
+ * com a porta nova, uma vez só; depois vale o que a pessoa escolher.
+ */
+function migrateLinkPort(file, user) {
+  const pkg = packageDefaults();
+  if (!pkg.linkVersao || !user || typeof user !== 'object' || Number(user.linkVersao) >= Number(pkg.linkVersao)) return;
+  user.portaLink = Number(pkg.portaLink) || 443;
+  user.caminho = pkg.caminho || '';
+  const m = /^(https:\/\/[^/:?#\s]+)/.exec(String(user.linkPublico || '').trim());
+  if (m) user.linkPublico = m[1] + (user.portaLink !== 443 ? ':' + user.portaLink : '') + (user.caminho ? '/' + String(user.caminho).replace(/^\/+|\/+$/g, '') : '');
+  user.linkVersao = pkg.linkVersao;
+  try { fs.writeFileSync(file, JSON.stringify(user, null, 2) + '\n'); } catch (e) { /* pasta só leitura: vale só nesta execução */ }
+}
+
 function configPath() {
   return process.env.DASHMASTER_CONFIG ? path.resolve(process.env.DASHMASTER_CONFIG) : path.join(NODE_DIR, 'config.json');
 }
@@ -80,6 +96,7 @@ function loadConfig(opts) {
     try { user = JSON.parse(text); }
     catch (e) { throw new Error('config.json inválido (' + e.message + '). Corrija o arquivo ou apague-o para recriar.'); }
     migrateLinkPath(file, user);
+    migrateLinkPort(file, user);
   } else if (opts.create !== false) {
     try { fs.writeFileSync(file, JSON.stringify(Object.assign({}, DEFAULTS, packageDefaults()), null, 2) + '\n'); } catch (e) { /* pasta só leitura: usa os padrões */ }
   }
@@ -110,4 +127,4 @@ function loadConfig(opts) {
   return cfg;
 }
 
-module.exports = {loadConfig, DEFAULTS, NODE_DIR, packageDefaults, migrateLinkPath};
+module.exports = {loadConfig, DEFAULTS, NODE_DIR, packageDefaults, migrateLinkPath, migrateLinkPort};

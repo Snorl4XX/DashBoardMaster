@@ -23,7 +23,7 @@ if not defined TS goto semTailscale
 echo   [1/4] Tailscale encontrado: %TS%
 
 rem ---------- 2. Porta do painel e do link (padrao.json do pacote; config.json vale mais) ----------
-rem V4.21: o painel de Lotes separado usa a porta 3400 e o link na porta 10000 (padrao.json), no mesmo computador do principal.
+rem Painel de Lotes: porta 3400 e link na 10000; Sorter: porta 3500 e link na 8443 (padrao.json de cada pacote).
 set PORTA=3000
 set PORTALINK=443
 set "CAMINHO="
@@ -38,6 +38,16 @@ if exist config.json findstr /c:"\"caminho\"" config.json >nul 2>nul && set "LIN
 if defined LINKCFG if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"portaLink\"" config.json') do set PORTALINK=%%a
 if defined LINKCFG if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"caminho\"" config.json') do set "CAMINHO=%%~a"
 rem V4.21.5: com "caminho" (ex.: /lotes), o painel fica no mesmo link do principal com o caminho no fim (https://NOME.ts.net/lotes).
+rem V4.22.5: cada painel na sua porta do link (principal 443, Sorter 8443, Lotes 10000). Com o Node.js, o config.json recebe a
+rem mudanca do pacote e as portas vem dele (lib\link.js); sem o Node.js, valem as lidas acima.
+set "NODEOK="
+where node >nul 2>nul && set "NODEOK=1"
+if defined NODEOK for /f "tokens=1-3" %%a in ('node "%~dp0lib\link.js" config 2^>nul') do (
+  set "PORTA=%%a"
+  set "PORTALINK=%%b"
+  set "CAMINHO=%%c"
+)
+if "%CAMINHO%"=="-" set "CAMINHO="
 echo   [2/4] Porta do painel: %PORTA% - porta do link: %PORTALINK% - caminho: %CAMINHO%
 netstat -an | findstr /r /c:":%PORTA% .*LISTENING" >nul
 if errorlevel 1 (
@@ -58,6 +68,16 @@ if errorlevel 1 goto semConta
 echo   [3/4] Tailscale ligado.
 
 rem ---------- 4. Funnel ----------
+rem V4.22.5: o endereco ja leva para OUTRO painel deste computador? Avisa e pergunta antes de trocar.
+if not defined NODEOK goto funnelPublicar
+node "%~dp0lib\link.js" livre "%TS%" %PORTALINK% %PORTA% %CAMINHO%
+if errorlevel 2 goto ocupado
+goto funnelPublicar
+:ocupado
+echo.
+choice /c SN /n /m "  Trocar mesmo assim? S = sim, N = nao: "
+if errorlevel 2 goto fim
+:funnelPublicar
 echo   [4/4] Publicando o painel na internet (Funnel)...
 echo         Na primeira vez aparece um link para AUTORIZAR o Funnel: abra, clique em Enable e espere aqui.
 echo.
@@ -72,6 +92,8 @@ goto funnelFeito
 "%TS%" funnel --bg %PORTA%
 :funnelFeito
 if errorlevel 1 goto funnelErro
+rem V4.22.5: links antigos deste painel (ex.: /lotes na 443 depois de passar para a 10000) saem do ar.
+if defined NODEOK node "%~dp0lib\link.js" limpar "%TS%" %PORTALINK% %PORTA% %CAMINHO%
 echo.
 "%TS%" funnel status
 echo.

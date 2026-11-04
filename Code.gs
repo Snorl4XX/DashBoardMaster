@@ -236,6 +236,8 @@ function refreshAllNow(indicatorKey, from, to) {
   if (open && INDICATORS[open].snapshot) add(open, today);
   agendaDailyJobs_().forEach(j => { if (j[0] === 'SUMMARY') add(j[1], j[2]); else details.push(j); });
   Object.keys(INDICATORS).filter(k => INDICATORS[k].agendaEvery).forEach(k => agendaEveryJobs_(k).forEach(j => add(j[1], j[2])));
+  // V4.22.5: e o último dia fechado deles (antes do horário da agenda, ex.: 0h–6h, ontem ficava de fora do Atualizar).
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].agendaEvery && !INDICATORS[k].snapshot).forEach(k => add(k, lastClosedDate_(k)));
   const deadline = Date.now() + APP_CONFIG.REFRESH_ALL_BUDGET_MS;
   try { prefetchSummaries_(pairs.slice(0, 150)); } catch (e) { /* um por um */ }
   const result = {ok: true, updated: 0, empty: 0, failed: 0, pendingDays: 0, detailsQueued: 0, errors: [], panels: 0};

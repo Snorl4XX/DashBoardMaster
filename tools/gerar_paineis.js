@@ -31,10 +31,11 @@ const LOTS = 'lot_flow';
 const MAIN_OUT = FLOWS + ',' + LOTS;
 const LOTS_PACOTE = {so: LOTS, fora: '', nome: 'Criação de Lotes'};
 // Pacote Node.js do painel de Lotes: outra pasta, outra porta (V4.21.2: 3400 — a 3100 é do painel do Sorter, a 3200 da
-// Pesquisa e a 3300 da Expedição Incorreta). V4.21.5: o link do Tailscale é o mesmo do principal com /lotes no fim
-// (https://NOME.xxxx.ts.net/lotes, porta 443) — antes era a porta 10000.
+// Pesquisa e a 3300 da Expedição Incorreta). V4.22.5 (pedido "porta diferente para cada dash"): o link do Tailscale na porta
+// 10000 (https://NOME.xxxx.ts.net:10000); o principal fica na 443 e o Sorter na 8443 (o Funnel só aceita 443, 8443 e 10000).
+// linkVersao: o config.json de quem instalou antes recebe a porta nova uma vez (node/lib/config.js → migrateLinkPort).
 const LOTS_NODE = {folder: 'dashmaster-lotes', zip: 'LOTES_NODE', pacote: LOTS_PACOTE,
-  padrao: {porta: 3400, portaLink: 443, caminho: '/lotes'},
+  padrao: {porta: 3400, portaLink: 10000, caminho: '', linkVersao: 2},
   // Atalho e janela com nome próprio (o atalho "JT DashMaster" do principal não é trocado).
   replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster Lotes.lnk'], ['"JT DashMaster"', '"JT DashMaster Lotes"'],
     ['o DashMaster vai abrir', 'o painel de Lotes vai abrir']],
@@ -48,7 +49,7 @@ do painel principal, sem misturar: pasta, dados, porta e link próprios.
 |---|---|---|
 | Pasta | C:\\dashmaster | **C:\\dashmaster-lotes** |
 | Neste computador | http://localhost:3000 | **http://localhost:3400** |
-| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net/lotes** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net:10000** |
 
 ## Instalar (uma vez)
 1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-lotes). Não extraia por cima do C:\\dashmaster.
@@ -56,26 +57,25 @@ do painel principal, sem misturar: pasta, dados, porta e link próprios.
 3. Neste computador, abra **http://localhost:3400/config**: cole o AuthToken do JMS, escolha a Data inicial e clique em
    **Baixar histórico**.
 4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Lotes").
-5. **Link do Tailscale:** dois cliques em **link-publico.bat**. Ele liga o link igual ao do principal, com **/lotes** no
-   fim: https://NOME-DO-COMPUTADOR.xxxx.ts.net/lotes — não mexe no link do painel principal (o mesmo endereço, sem o
-   /lotes) nem no da Expedição Incorreta (8443). Coloque esse link em \`"linkPublico"\` no config.json e escolha uma
-   \`"senha"\` (a senha deste painel é separada da do principal).
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. Ele liga o link na porta **10000**:
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000. Cada painel tem a sua porta no link: principal 443, Sorter 8443, Lotes
+   10000. Se a porta já levar para outro painel deste computador, ele avisa e pergunta antes de trocar. Coloque esse link em
+   \`"linkPublico"\` no config.json e escolha uma \`"senha"\` (a senha deste painel é separada da do principal).
 
-Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=443 --set-path=/lotes off\`
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=10000 off\`
 
-## Quem já usava o link com :10000 (versão 4.21.4 ou antes)
-1. Desligue o link antigo: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=10000 off\`
-2. Feche a janela preta do painel de Lotes, extraia o ZIP novo em C:\\ (Substituir) e abra **iniciar.bat**. Ele troca
-   sozinho no config.json: \`"caminho": "/lotes"\`, \`"portaLink": 443\` e o \`"linkPublico"\` sem o :10000.
-3. Dois cliques em **link-publico.bat**. O link novo é https://NOME-DO-COMPUTADOR.xxxx.ts.net/lotes
+## Quem usava o link com /lotes (versões 4.21.5 a 4.22.4)
+Feche a janela preta do painel de Lotes, extraia o ZIP novo em C:\\ (Substituir) e dê dois cliques em **link-publico.bat**. Ele
+troca sozinho o config.json para a porta 10000, liga o link https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000 e desliga o /lotes.
+Depois abra o **iniciar.bat**.
 `};
 // V4.22 (pedido "dashboard no mesmo esquema que o principal para http://10.1.166.9"): Produção do Sorter, separada do principal —
-// outra pasta, porta 3500 (3000 principal, 3100 Painel do Sorter, 3200 Pesquisa, 3300 Expedição Incorreta, 3400 Lotes) e o link
-// do Tailscale no mesmo endereço do principal com /sorter no fim. Sem JMS (semJms): a tela Configurações pede o sorter.
+// outra pasta, porta 3500 (3000 principal, 3100 Painel do Sorter, 3200 Pesquisa, 3300 Expedição Incorreta, 3400 Lotes). V4.22.5:
+// link do Tailscale na porta 8443 (cada painel na sua porta). Sem JMS (semJms): a tela Configurações pede o sorter.
 const SORTER = 'sorter_flow';
 const SORTER_PACOTE = {so: SORTER, fora: '', nome: 'Produção do Sorter'};
 const SORTER_NODE = {folder: 'dashmaster-sorter', zip: 'SORTER_NODE', pacote: SORTER_PACOTE, readmeName: 'LEIA_SORTER.md',
-  padrao: {porta: 3500, portaLink: 443, caminho: '/sorter', semJms: true},
+  padrao: {porta: 3500, portaLink: 8443, caminho: '', semJms: true, linkVersao: 2},
   replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster Sorter.lnk'], ['"JT DashMaster"', '"JT DashMaster Sorter"'],
     ['o DashMaster vai abrir', 'o painel do Sorter vai abrir']],
     'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster Sorter (Node.js) - porta 3500']]},
@@ -89,7 +89,7 @@ Mesmo visual (cartões, gráficos, filtros, tabela), Data inicial, Baixar histó
 |---|---|---|
 | Pasta | C:\\dashmaster | **C:\\dashmaster-sorter** |
 | Neste computador | http://localhost:3000 | **http://localhost:3500** |
-| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net/sorter** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net:8443** |
 
 **Importante:** o computador precisa estar **na rede da base** (abrir http://10.1.166.9 no navegador dele). O Google não enxerga a
 rede interna: este painel só funciona na versão Node.js.
@@ -114,10 +114,14 @@ rede interna: este painel só funciona na versão Node.js.
      desse relatório. Também dá para colar a troca à mão em "Troca do Sorter A".
    - **Histórico:** escolha a Data inicial, clique em **Salvar data** e depois em **Baixar histórico**.
 4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Sorter").
-5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica igual ao do principal com **/sorter** no fim:
-   https://NOME-DO-COMPUTADOR.xxxx.ts.net/sorter. Coloque esse link em \`"linkPublico"\` no config.json e escolha uma \`"senha"\`.
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica na porta **8443**:
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net:8443 (principal 443, Lotes 10000). Coloque esse link em \`"linkPublico"\` no config.json
+   e escolha uma \`"senha"\`.
+   - O Funnel do Tailscale só tem 3 portas (443, 8443 e 10000). A Expedição Incorreta também usa a 8443: se ela estiver no mesmo
+     computador, o link-publico.bat avisa. Nesse caso, deixe o Sorter num caminho do link principal: no config.json,
+     \`"portaLink": 443\` e \`"caminho": "/sorter"\` (link https://NOME-DO-COMPUTADOR.xxxx.ts.net/sorter).
 
-Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=443 --set-path=/sorter off\`
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=8443 off\`
 
 ## Ajustes (Configurações → Propriedades)
 | Propriedade | Para que serve |
