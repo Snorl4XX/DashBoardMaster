@@ -20,6 +20,8 @@
  * V4.22.8: GET /statis/outlets (tela "feeder feed quantity", HTML do usuário) — a página com uma coluna por balança (total_1…
  * total_14) e, no pedido AJAX (X-Requested-With) com start/end/group, as linhas por horário {timearea, total_1…} do sorter da
  * sessão (balança sem produção = null). opts.semOutlets: a tela responde código 500.
+ * V4.22.9: opts.horario — formato do horário dessa tela: 'curto' ("07:00" e "11-04 00:00" na virada do dia, como o gráfico da
+ * página inicial), 'semZero' ("2026-11-4 7:00"), 'estranho' ("Período 8"); e uma linha "Total" no fim (opts.linhaTotal).
  */
 const SCRIPT_DBSELECT = function (host, token) {
   return "$(function () { $('input:button').on('click', function () { $('#hid_selected').val($(this).data('connectionname')); " +
@@ -117,9 +119,18 @@ function createFakeSorter(opts) {
       }
       const date = String(req.query.get('start') || '').slice(0, 10), data = [];
       for (let h = 0; h < 24; h++) {
-        const hh = String(h).padStart(2, '0'), row = {timearea: date + ' ' + hh + ':00:00~' + date + ' ' + hh + ':59:59'};
+        const hh = String(h).padStart(2, '0'), d3 = date.split('-').map(Number);
+        const ta = opts.horario === 'curto' ? (h === 0 ? date.slice(5) + ' 00:00' : hh + ':00') :
+          opts.horario === 'semZero' ? d3[0] + '-' + d3[1] + '-' + d3[2] + ' ' + h + ':00' :
+          opts.horario === 'estranho' ? 'Período ' + (h + 1) : date + ' ' + hh + ':00:00~' + date + ' ' + hh + ':59:59';
+        const row = {timearea: ta};
         for (let n = 1; n <= COLS; n++) { const r = n <= BALANCAS ? hourRow(device, date, n, h) : null; row['total_' + n] = r ? r.sorter_sorttotal : null; }
         data.push(row);
+      }
+      if (opts.linhaTotal) {
+        const tot = {timearea: 'Total'};
+        data.forEach(r => Object.keys(r).forEach(k => { if (k !== 'timearea') tot[k] = (tot[k] || 0) + (r[k] || 0); }));
+        data.push(tot);
       }
       return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: data.length, data})};
     }

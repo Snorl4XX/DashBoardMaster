@@ -1,8 +1,24 @@
-# J&T DASHMASTER V4.22.8 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.9 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.9 — Produção do Sorter: balanças vazias
+
+O painel não mostrava os valores das balanças. A leitura da tela "feeder feed quantity" só aceitava o horário como
+`2026-11-04 07:00`. Em outro formato (ex.: `2026-11-4 7:00`, sem o zero, como o site escreve as datas), cada linha era
+descartada sem aviso.
+
+- Agora ela aceita `2026-11-4 7:00`, `11-4 7:00` e `07:00`, e ignora a linha "Total" da tabela.
+- Se o horário vier num formato desconhecido, as balanças não somem mais: com 24 linhas, vale a ordem das linhas como a hora;
+  senão, a quantidade do dia inteiro (sem turno e horário). O LOG avisa e mostra um exemplo do horário.
+- O teste em **Configurações → Salvar e testar o sorter** mostra, em cada sorter, o que essa tela devolveu (`telaBalancas`:
+  linhas, exemplo de horário, colunas de balança e como as horas foram lidas), além de quantas balanças e quanto alimentaram hoje.
+- Os dias já baixados são baixados de novo (uma vez).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_9_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e clique em **Salvar e testar o sorter** em `http://localhost:3500/config`.
 
 ## V4.22.8 — Produção do Sorter: balanças pela tela "feeder feed quantity"
 

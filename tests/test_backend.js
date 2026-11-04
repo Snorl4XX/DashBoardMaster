@@ -4698,7 +4698,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
 
 // ---------- V4.22: Produção do Sorter (monitor do sorter da base, gravado como os painéis do JMS) ----------
 {
-  const {createFakeSorter, dayTotals, feederTotals} = require('./sorter_falso');
+  const {createFakeSorter, dayTotals, feederTotals, hourRow} = require('./sorter_falso');
   const DS = '2026-10-31', DS2 = '2026-11-01';
   const TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: '_token=copiado-do-navegador&device_id=3'});
   const sorterCtx = (props, fakeOpts) => {
@@ -4842,8 +4842,21 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'Sorter: os números 1…40 do summary.data não são mais usados: Sort total certo (não 40 vezes) e as balanças pela tela feeder feed quantity',
     {total: kL.sum('Sort total'), esperado: A.total + B.total});
   check(kN.sum('Sort total') === A.total + B.total && !kN.rows.some(r => r.column === 'Alimentação') &&
-    kN.c.getDayStatus_('sorter_flow', DS).details === 'COMPLETE' && kN.logs.some(l => /Quantidade por balança \(feeder feed quantity\) não lida/.test(l)),
+    kN.c.getDayStatus_('sorter_flow', DS).details === 'COMPLETE' && kN.logs.some(l => /Quantidade por balança \(feeder feed quantity\) — os totais do sorter estão certos: .*código 500/.test(l)),
     'Sorter: sem a tela feeder feed quantity, o dia fica com os totais (aviso no LOG)', {total: kN.sum('Sort total')});
+  // V4.22.9: o horário da tela "feeder feed quantity" em outros formatos não apaga as balanças (antes ficavam vazias); a linha
+  // "Total" não é somada.
+  const feedAll = Object.values(fA).concat(Object.values(fB)).reduce((x, v) => x + v, 0);
+  const hCurto = runS({horario: 'curto', linhaTotal: true}), hSem = runS({horario: 'semZero'}), hEst = runS({horario: 'estranho'});
+  const h7 = k => k.sum('Alimentação', r => r.interval === '07h - 08h');
+  const want7 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].reduce((x, n) => x + ['A', 'B'].reduce((y, dv) => y + ((hourRow(dv, DS, n, 7) || {}).sorter_sorttotal || 0), 0), 0);
+  check([hCurto, hSem, hEst].every(k => k.sum('Alimentação') === feedAll) && [hCurto, hSem, hEst].every(k => h7(k) === want7) &&
+    hEst.logs.some(l => /formato desconhecido \(ex\.: "Período 1"\), lido pela ordem das linhas/.test(l)) && !hCurto.logs.some(l => /formato desconhecido/.test(l)),
+    'Sorter: horário da tela feeder feed quantity em outros formatos ("07:00", "2026-11-4 7:00", desconhecido) — as balanças aparecem, sem somar a linha Total',
+    {curto: hCurto.sum('Alimentação'), sem: hSem.sum('Alimentação'), est: hEst.sum('Alimentação'), feedAll, h7: [h7(hCurto), h7(hSem), h7(hEst)], want7});
+  const dgH = hSem.c.diagnosticarSorter().sorters[0];
+  check(dgH.telaBalancas && dgH.telaBalancas.linhas === 24 && dgH.telaBalancas.colunas === 14 && /^2026-\d+-\d+ \d+:00$/.test(dgH.telaBalancas.exemploHorario) &&
+    dgH.hoje.balancas === 14 && dgH.hoje.alimentacao > 0, 'diagnosticarSorter mostra o que a tela feeder feed quantity devolveu (linhas, horário, colunas)', dgH.telaBalancas);
   check(kA.rate.metrics.sortTotalA === A.total && kA.rate.metrics.sortTotalB === B.total && kA.sum('Sort total', r => r.sorter === 'Sorter A') === A.total &&
     JSON.parse(kA.c.__state.props.SORTER_TROCA_A).corpo === 'selecteddb=DB2' && JSON.parse(kA.c.__state.props.SORTER_TROCA_B).corpo === 'selecteddb=DB1',
     'Sorter: o site com o A como padrão — A (DB2) e B (DB1) escolhidos de propósito, sem trocar os números', kA.rate.metrics);
