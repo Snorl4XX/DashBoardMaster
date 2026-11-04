@@ -4855,8 +4855,50 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'Sorter: horário da tela feeder feed quantity em outros formatos ("07:00", "2026-11-4 7:00", desconhecido) — as balanças aparecem, sem somar a linha Total',
     {curto: hCurto.sum('Alimentação'), sem: hSem.sum('Alimentação'), est: hEst.sum('Alimentação'), feedAll, h7: [h7(hCurto), h7(hSem), h7(hEst)], want7});
   const dgH = hSem.c.diagnosticarSorter().sorters[0];
-  check(dgH.telaBalancas && dgH.telaBalancas.linhas === 24 && dgH.telaBalancas.colunas === 14 && /^2026-\d+-\d+ \d+:00$/.test(dgH.telaBalancas.exemploHorario) &&
+  check(dgH.telaBalancas && dgH.telaBalancas.linhas === 1 && /^\d{4}-\d{2}-\d{2} 00:00~\d{4}-\d{2}-\d{2} 23:59$/.test(dgH.telaBalancas.exemploHorario) &&
+    dgH.telaBalancas.linhasPorHora === 24 && dgH.telaBalancas.colunas === 14 && /^2026-\d+-\d+ \d+:00$/.test(dgH.telaBalancas.exemploHora) &&
     dgH.hoje.balancas === 14 && dgH.hoje.alimentacao > 0, 'diagnosticarSorter mostra o que a tela feeder feed quantity devolveu (linhas, horário, colunas)', dgH.telaBalancas);
+  // V4.22.10 (print do usuário: a tela "no group by" mostra "2026-11-04 00:00~2026-11-04 23:59" e as balanças): o pedido igual ao
+  // da tela (data sem zero, sem page/limit) e, sem a quantidade por hora, o total do dia de cada balança (sem turno e horário).
+  const today = hSem.c.isoToday_(), siteDay = today.split('-').map(Number).join('-');
+  const outQ = hSem.site.log.filter(x => x.path === '/statis/outlets' && /start=/.test(x.query)).map(x => new URLSearchParams(x.query));
+  const dayQ = outQ.filter(q => q.get('start') === siteDay + ' 00:00:00' && q.get('end') === siteDay + ' 23:59:59');
+  check(dayQ.some(q => q.get('group') === '0' && q.get('page') === '1' && q.get('limit') === '10' && q.has('nc')) &&
+    dayQ.some(q => q.get('group') === '60') && outQ.every(q => q.has('nc')),
+    'Sorter: balanças com o pedido dos prints (data "' + siteDay + '", 00:00:00 → 23:59:59, no group by, page 1 / limit 10) e por hora',
+    outQ.map(q => q.toString()));
+  const sumQ = hSem.site.log.filter(x => x.path === '/statis/summary.data').map(x => new URLSearchParams(x.query));
+  check(sumQ.some(q => q.get('start') === siteDay + ' 00:00:00' && q.get('group') === '0' && q.get('inductionno') === '0' && q.get('layerno') === '0' &&
+    q.get('limit') === '10'), 'Sorter: total do dia com os filtros dos prints (no group by, Induction All, By Layer All)', sumQ.map(q => q.toString()));
+  const pVaz = runS({porHora: 'vazio'}), pErr = runS({porHora: 'erro'}), pIgn = runS({porHora: 'ignora'});
+  const diaOk = k => k.sum('Alimentação') === feedAll && k.rows.filter(r => r.column === 'Alimentação').every(r => r.shift === 'N/A' && r.interval === 'N/A') &&
+    k.sum('Sort total') === A.total + B.total && k.sum('Alimentação', r => r.induction === 'Balança 01') === fA[1] + fB[1];
+  check(diaOk(pVaz) && diaOk(pErr) && diaOk(pIgn),
+    'Sorter: sem a quantidade por hora (vazio, erro ou só o dia), as balanças aparecem com o total do dia (no group by)',
+    {vaz: pVaz.sum('Alimentação'), err: pErr.sum('Alimentação'), ign: pIgn.sum('Alimentação'), feedAll});
+  check(pVaz.logs.some(l => /sem a quantidade por hora \(por hora veio sem quantidade .*usei o total do dia de cada balança/.test(l)) &&
+    pErr.logs.some(l => /sem a quantidade por hora \(.*código 500.*usei o total do dia/.test(l)) &&
+    pIgn.logs.some(l => /por hora veio sem quantidade \(1 linha\(s\), ex\.: "\d{4}-\d{2}-\d{2} 00:00~\d{4}-\d{2}-\d{2} 23:59"\)/.test(l)) &&
+    !pIgn.rows.some(r => r.column === 'Alimentação' && r.interval === '00h - 01h'),
+    'Sorter: o dia inteiro ("00:00~23:59") não vai para a hora 0, e o LOG diz de onde veio', pIgn.logs.filter(l => /balança/i.test(l)));
+  const dgV = pVaz.c.diagnosticarSorter().sorters[0];
+  check(dgV.telaBalancas && dgV.telaBalancas.horas === 'dia inteiro' && /por hora veio sem quantidade/.test(dgV.telaBalancas.porHora) && dgV.hoje.alimentacao > 0,
+    'diagnosticarSorter mostra quando as balanças vieram do total do dia (e por quê)', dgV.telaBalancas);
+  const chV = cS.JTCore_.buildChart(chDefS('topInd'), pVaz.rows, {});
+  check(chV.total === feedAll && chV.labels.length === 10 && chV.labels.every(l => /^Balança \d{2}$/.test(l)),
+    'Sorter: o Top 10 balanças mostra o total do dia (sem turno)', {total: chV.total, labels: chV.labels});
+  // O total do dia sem agrupar (prints) manda: o que as horas não têm fica sem turno e horário, nos cartões e nas balanças.
+  const pX = runS({diaExtra: 7});
+  check(pX.rate.metrics.sortTotal === A.total + B.total + 14 && pX.rate.metrics.sortTotalA === A.total + 7 && pX.sum('Sort total') === A.total + B.total + 14 &&
+    pX.sum('Sort total', r => r.interval === 'N/A') === 14 && pX.sum('Sort total', r => r.interval !== 'N/A') === A.total + B.total &&
+    pX.sum('Alimentação', r => r.induction === 'Balança 01') === fA[1] + fB[1] + 14 &&
+    pX.sum('Alimentação', r => r.induction === 'Balança 01' && r.interval === 'N/A') === 14 && pX.sum('Alimentação') === feedAll + 14 &&
+    !pX.logs.some(l => /Quantidade por balança/.test(l)),
+    'Sorter: os números do dia são os da tela sem agrupar (prints); as horas dividem o dia e o resto fica sem horário',
+    {st: pX.rate.metrics.sortTotal, want: A.total + B.total + 14, b1: pX.sum('Alimentação', r => r.induction === 'Balança 01'), fb1: fA[1] + fB[1] + 14});
+  const dgX = pX.c.diagnosticarSorter().sorters[0];
+  check(dgX.hoje.sortTotal === dgX.hoje.somaDasHoras + 7 && dgX.telaBalancas.horas === 'hora' && dgX.telaBalancas.semHora === 7,
+    'diagnosticarSorter: hoje com os números da tela sem agrupar (como nos prints) e a soma das horas', dgX.hoje);
   check(kA.rate.metrics.sortTotalA === A.total && kA.rate.metrics.sortTotalB === B.total && kA.sum('Sort total', r => r.sorter === 'Sorter A') === A.total &&
     JSON.parse(kA.c.__state.props.SORTER_TROCA_A).corpo === 'selecteddb=DB2' && JSON.parse(kA.c.__state.props.SORTER_TROCA_B).corpo === 'selecteddb=DB1',
     'Sorter: o site com o A como padrão — A (DB2) e B (DB1) escolhidos de propósito, sem trocar os números', kA.rate.metrics);

@@ -66,9 +66,23 @@ function sorterDevices_() {
  * A consulta de totais (summary.data) com inductionno = 1…40 devolvia o total do sorter inteiro para cada balança.
  */
 const SORTER_OUTLETS_PATH_ = '/statis/outlets';
-function sorterOutletsUrl_(date) {
-  return sorterBase_() + SORTER_OUTLETS_PATH_ + '?start=' + encodeURIComponent(date + ' 00:00:00') + '&end=' + encodeURIComponent(date + ' 23:59:59') +
-    '&group=60&nc=&page=1&limit=1000';
+/** V4.22.10: data como a própria tela manda (laydate: "2026-11-4", sem zero no mês e no dia). */
+function sorterSiteDate_(date) { return date.split('-').map(Number).join('-'); }
+/**
+ * O mesmo pedido da tela (botão "make statistics", print do usuário): page, limit, start, end, group e nc. group 0 = "no group by"
+ * (uma linha, como no print: limit 10); 60 = 1hour (24 linhas: limit 1000).
+ */
+function sorterOutletsUrl_(date, group) {
+  const d = sorterSiteDate_(date), g = group === undefined ? 60 : group;
+  return sorterBase_() + SORTER_OUTLETS_PATH_ + '?page=1&limit=' + (g === 0 ? 10 : 1000) + '&start=' + encodeURIComponent(d + ' 00:00:00') +
+    '&end=' + encodeURIComponent(d + ' 23:59:59') + '&group=' + g + '&nc=';
+}
+/** Minutos entre o início e o fim do horário "2026-11-04 00:00~2026-11-04 23:59" (null = sem as duas datas). */
+function sorterSpanMin_(timearea) {
+  const re = /(\d{4})-(\d{1,2})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?/g, t = String(timearea || ''), ms = [];
+  let m;
+  while (ms.length < 2 && (m = re.exec(t))) ms.push(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)));
+  return ms.length === 2 ? (ms[1] - ms[0]) / 60000 : null;
 }
 /**
  * Hora da linha no dia `date`: "2026-11-04 07:00:00~…", "2026-11-4 7:00", "11-04 07:00", "11-4 7:00" ou "07:00". null = outro dia,
@@ -88,8 +102,8 @@ function sorterHourOf_(timearea, date) {
  * V4.22.9: horário em formato desconhecido não apaga as balanças — com 24 linhas, a ordem é a hora; senão, o dia inteiro (hora -1).
  * info (para o teste em Configurações): linhas, exemplo de horário, colunas de balança e como as horas foram lidas.
  */
-function sorterFetchOutlets_(s, date) {
-  const res = sorterFetch_(s, sorterOutletsUrl_(date), {headers: {'X-Requested-With': 'XMLHttpRequest', Referer: sorterBase_() + SORTER_OUTLETS_PATH_}});
+function sorterReadOutlets_(s, date, group) {
+  const res = sorterFetch_(s, sorterOutletsUrl_(date, group), {headers: {'X-Requested-With': 'XMLHttpRequest', Referer: sorterBase_() + SORTER_OUTLETS_PATH_}});
   const code = res.getResponseCode(), text = res.getContentText();
   if (code !== 200) throw new Error('A tela "feeder feed quantity" (' + SORTER_OUTLETS_PATH_ + ') respondeu código ' + code + '.');
   const body = safeJsonParse_(text, null);
@@ -106,17 +120,64 @@ function sorterFetchOutlets_(s, date) {
       if (feeders.indexOf(n) < 0) feeders.push(n);
       if (isFinite(v) && v > 0) q[n] = (q[n] || 0) + v;
     });
-    parsed.push({hour: sorterHourOf_(x.timearea, date), q: q});
+    // V4.22.10: "2026-11-04 00:00~2026-11-04 23:59" (o dia inteiro, como no "no group by") não é a hora 0.
+    const span = sorterSpanMin_(x.timearea);
+    parsed.push({hour: group === 0 || (span !== null && span > 90) ? -1 : sorterHourOf_(x.timearea, date), q: q});
   });
   let modo = 'hora';
   const outros = list.filter(x => /\d{4}-\d{1,2}-\d{1,2}/.test(String(x.timearea || '')) && sorterHourOf_(x.timearea, date) === null).length;
-  if (parsed.length && parsed.every(r => r.hour === null || !(r.hour >= 0 && r.hour < 24))) {
+  const porHora = parsed.filter(r => sorterIsHour_(r.hour)).length;
+  if (porHora && parsed.some(r => r.hour === -1)) parsed.forEach(r => { if (r.hour === -1) r.hour = null; });  // linha do dia junto das horas = total
+  else if (parsed.length && parsed.every(r => r.hour === -1)) modo = 'dia inteiro';
+  else if (parsed.length && !porHora) {
     if (parsed.length === 24 && !outros) { parsed.forEach((r, i) => { r.hour = i; }); modo = 'ordem das linhas'; }
     else if (!outros) { parsed.forEach(r => { r.hour = -1; }); modo = 'dia inteiro'; }
   }
-  const rows = parsed.filter(r => r.hour === -1 || (r.hour >= 0 && r.hour < 24));
+  const rows = parsed.filter(r => r.hour === -1 || sorterIsHour_(r.hour));
   const info = {linhas: list.length, exemploHorario: String((list[0] || {}).timearea || '').slice(0, 40), colunas: feeders.length, horas: modo};
   return {rows: rows, feeders: feeders.sort((a, b) => a - b), info: info};
+}
+/** Hora de verdade (0…23); null não é a hora 0. */
+function sorterIsHour_(h) { return typeof h === 'number' && h >= 0 && h < 24; }
+function sorterFeedSum_(rows) { return rows.reduce((a, r) => a + Object.keys(r.q).reduce((b, n) => b + r.q[n], 0), 0); }
+/**
+ * V4.22.10 (prints do usuário): o total do dia de cada balança vem da tela sem agrupar (group 0 = "no group by", start 00:00 →
+ * end 23:59) — os números que o site mostra. A consulta por hora (group 60, feita antes) só divide esse total em horas; o que ela
+ * não tiver fica sem turno e horário ("N/A"). Sem a consulta por hora, o dia inteiro fica assim (info.porHora diz por quê).
+ */
+function sorterFetchOutlets_(s, date) {
+  const rede = e => /^Não consegui acessar o sorter/.test(String(e && e.message || e));
+  let hora = null, eHora = null, dia = null, eDia = null;
+  try { hora = sorterReadOutlets_(s, date, 60); } catch (e) { if (rede(e)) throw e; eHora = e; }
+  try { dia = sorterReadOutlets_(s, date, 0); } catch (e) { if (rede(e)) throw e; eDia = e; }
+  if (!dia) {
+    if (hora) return hora;
+    throw new Error(String(eDia && eDia.message || eDia) + (eHora ? ' (por hora: ' + String(eHora.message || eHora).slice(0, 100) + ')' : ''));
+  }
+  const porN = rows => {
+    const t = {};
+    rows.forEach(r => Object.keys(r.q).forEach(n => { t[n] = (t[n] || 0) + r.q[n]; }));
+    return t;
+  };
+  const totDia = porN(dia.rows), info = dia.info;
+  const horas = hora ? hora.rows.filter(r => sorterIsHour_(r.hour)) : [];
+  if (!horas.length || !(sorterFeedSum_(horas) > 0)) {
+    info.horas = 'dia inteiro';
+    if (sorterFeedSum_(dia.rows) > 0) {
+      info.porHora = eHora ? String(eHora.message || eHora).slice(0, 140) :
+        'por hora veio sem quantidade (' + hora.info.linhas + ' linha(s), ex.: "' + hora.info.exemploHorario + '")';
+    }
+    return {rows: dia.rows, feeders: dia.feeders, info: info};
+  }
+  const totHora = porN(horas), resto = {};
+  Object.keys(totDia).forEach(n => { const d = totDia[n] - (totHora[n] || 0); if (d > 0) resto[n] = d; });
+  const rows = horas.concat(Object.keys(resto).length ? [{hour: -1, q: resto}] : []);
+  const feeders = dia.feeders.concat(hora.feeders.filter(n => dia.feeders.indexOf(n) < 0)).sort((a, b) => a - b);
+  info.horas = hora.info.horas;
+  info.linhasPorHora = hora.info.linhas;
+  info.exemploHora = hora.info.exemploHorario;
+  if (Object.keys(resto).length) info.semHora = sorterFeedSum_([{q: resto}]);
+  return {rows: rows, feeders: feeders, info: info};
 }
 /** 7 → "Balança 07". */
 function sorterInductionLabel_(n) { return 'Balança ' + String(n).padStart(2, '0'); }
@@ -124,6 +185,29 @@ function sorterUrl_(date, page, opts) {
   opts = opts || {};
   return sorterBase_() + SORTER_PATH_ + '?page=' + page + '&limit=1000&start=' + encodeURIComponent(date + ' 00:00:00') +
     '&end=' + encodeURIComponent(date + ' 23:59:59') + '&group=60&inductionno=' + (opts.induction || 0) + '&layerno=0';
+}
+/**
+ * V4.22.10: o total do dia com os filtros dos prints do usuário (start 00:00 → end 23:59, time group by "no group by", Induction
+ * No. All, By Layer All) — o mesmo pedido da tela: os números que o site mostra. null = a tela não deu (fica a soma das horas).
+ */
+function sorterDayUrl_(date) {
+  const d = sorterSiteDate_(date);
+  return sorterBase_() + SORTER_PATH_ + '?page=1&limit=10&start=' + encodeURIComponent(d + ' 00:00:00') + '&end=' + encodeURIComponent(d + ' 23:59:59') +
+    '&group=0&inductionno=0&layerno=0';
+}
+function sorterDayTotal_(s, date) {
+  try {
+    const p = sorterParse_(sorterFetch_(s, sorterDayUrl_(date)));
+    return p.rows.length ? sorterSum_(p.rows) : null;
+  } catch (e) {
+    if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e;
+    return null;
+  }
+}
+/** Total de cada número no dia: o da tela sem agrupar (print) e, sem ele, a soma das horas. */
+function sorterTotals_(s, date, hours) {
+  const day = sorterDayTotal_(s, date);
+  return day && day.total > 0 ? day : sorterSum_(hours);
 }
 
 // ------------------------------------------------------------------ sessão (cookies e _token, como um navegador)
@@ -743,7 +827,7 @@ function sorterSummaryFrom_(indicatorKey, isoDate, totals) {
 /** Resumo do dia (tarefa SUMMARY): o total de cada sorter (todas as balanças, uma linha por hora). */
 function sorterSummary_(indicatorKey, isoDate) {
   const ss = sorterSessions_(), totals = {};
-  ss.sessions.forEach(s => { totals[s.dev.id] = sorterSum_(sorterFetchDay_(s, isoDate, [{induction: 0}])[0]); });
+  ss.sessions.forEach(s => { totals[s.dev.id] = sorterTotals_(s, isoDate, sorterFetchDay_(s, isoDate, [{induction: 0}])[0]); });
   sorterCheckSwitch_(totals);
   sorterWarnSkipped_(indicatorKey, isoDate, ss.skipped);
   return sorterSummaryFrom_(indicatorKey, isoDate, totals);
@@ -768,15 +852,20 @@ function runSorterDetailJob_(job, deadline, cfg, st) {
       rowsIn++;
     };
     // Os números da tela de totais (todas as balanças juntas, uma linha por hora): Sort total, Valid total, motivos, andares.
-    const all = sorterFetchDay_(s, date, [{induction: 0}])[0];
-    totals[s.dev.id] = sorterSum_(all);
+    const all = sorterFetchDay_(s, date, [{induction: 0}])[0], somaHoras = sorterSum_(all);
+    totals[s.dev.id] = sorterTotals_(s, date, all);
     all.forEach(r => SORTER_COLUMNS_.forEach(c => add(r.hour, c[0], '', Number(r[c[1]]) || 0)));
+    // V4.22.10: o que o total do dia (tela sem agrupar, como nos prints) tem a mais que a soma das horas fica sem turno e horário.
+    SORTER_COLUMNS_.forEach(c => add(-1, c[0], '', (totals[s.dev.id][c[1]] || 0) - (somaHoras[c[1]] || 0)));
     // V4.22.8: quantidade alimentada em cada balança (tela "feeder feed quantity"). Sem ela, o dia fica com os totais.
     try {
       const fo = sorterFetchOutlets_(s, date);
       fo.rows.forEach(r => Object.keys(r.q).forEach(n => add(r.hour, SORTER_FEED_COLUMN_, sorterInductionLabel_(n), r.q[n])));
       if (fo.info.linhas && !fo.rows.length) falhas.push(s.dev.nome + ': ' + fo.info.linhas + ' linha(s) sem o horário deste dia (ex.: "' + fo.info.exemploHorario + '")');
-      else if (fo.info.horas !== 'hora') falhas.push(s.dev.nome + ': horário em formato desconhecido (ex.: "' + fo.info.exemploHorario + '"), lido pela ' + fo.info.horas);
+      else if (fo.info.porHora) falhas.push(s.dev.nome + ': sem a quantidade por hora (' + fo.info.porHora + '); usei o total do dia de cada balança (sem turno e horário)');
+      else if (fo.info.horas !== 'hora' && fo.info.horas !== 'dia inteiro') {
+        falhas.push(s.dev.nome + ': horário em formato desconhecido (ex.: "' + (fo.info.exemploHora || fo.info.exemploHorario) + '"), lido pela ' + fo.info.horas);
+      }
     } catch (e) {
       if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e;
       falhas.push(s.dev.nome + ': ' + String(e && e.message || e).slice(0, 160));
@@ -799,9 +888,10 @@ function runSorterDetailJob_(job, deadline, cfg, st) {
 /**
  * Dias já baixados refeitos (uma vez por versão dos dados): V4.22.7 — as balanças somavam o total do sorter 40 vezes e o A/B podia
  * estar trocado (a troca só do A é esquecida e descoberta de novo com a do B); V4.22.8 — a quantidade por balança vem da tela
- * "feeder feed quantity"; V4.22.9 — horário da tela "feeder feed quantity" em outros formatos (as balanças ficavam vazias).
+ * "feeder feed quantity"; V4.22.9 — horário da tela "feeder feed quantity" em outros formatos (as balanças ficavam vazias);
+ * V4.22.10 — o pedido igual ao da tela e, sem a quantidade por hora, o total do dia de cada balança ("no group by").
  */
-const SORTER_DADOS_VERSAO_ = 3;
+const SORTER_DADOS_VERSAO_ = 4;
 function migrateSorterDados_() {
   if (!INDICATORS.sorter_flow || Number(getProp_('SORTER_DADOS_VERSAO', '')) >= SORTER_DADOS_VERSAO_) return 0;
   setProp_('SORTER_DADOS_VERSAO', String(SORTER_DADOS_VERSAO_));
@@ -844,13 +934,14 @@ function diagnosticarSorter() {
         x.troca = 'descoberta sozinha (' + r.como + ')';
         s = sorterPrepare_(dev);
       }
-      const t = sorterSum_(sorterFetchDay_(s, today, [{induction: 0}])[0]);
-      x.hoje = {sortTotal: t.total, validTotal: t.valid, noSortCode: t.noInfo};
+      const hs = sorterFetchDay_(s, today, [{induction: 0}])[0], t = sorterTotals_(s, today, hs), th = sorterSum_(hs);
+      // V4.22.10: os números da tela sem agrupar ("no group by", 00:00 → 23:59) — os mesmos dos prints; somaDasHoras = por hora.
+      x.hoje = {sortTotal: t.total, validTotal: t.valid, noSortCode: t.noInfo, somaDasHoras: th.total};
       // V4.22.8: balanças da tela "feeder feed quantity" (quantas e quanto alimentaram hoje).
       try {
         const fo = sorterFetchOutlets_(s, today);
         x.hoje.balancas = fo.feeders.length;
-        x.hoje.alimentacao = fo.rows.reduce((a, r) => a + Object.keys(r.q).reduce((b2, n) => b2 + r.q[n], 0), 0);
+        x.hoje.alimentacao = sorterFeedSum_(fo.rows);
         x.telaBalancas = fo.info;
       } catch (e) { x.balancasErro = String(e && e.message || e).slice(0, 160); }
       // Título da página nesta sessão: o site mostra o sorter escolhido (ex.: 巴西GRU分拣机(A套)监控系统).

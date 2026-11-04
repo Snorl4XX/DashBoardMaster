@@ -22,6 +22,9 @@
  * sessão (balança sem produção = null). opts.semOutlets: a tela responde código 500.
  * V4.22.9: opts.horario — formato do horário dessa tela: 'curto' ("07:00" e "11-04 00:00" na virada do dia, como o gráfico da
  * página inicial), 'semZero' ("2026-11-4 7:00"), 'estranho' ("Período 8"); e uma linha "Total" no fim (opts.linhaTotal).
+ * V4.22.10: group=0 ("no group by") devolve uma linha só, "2026-11-04 00:00~2026-11-04 23:59" (print do usuário); opts.porHora —
+ * como o pedido por hora (group=60) responde: 'erro' (código 500), 'vazio' (sem linhas) ou 'ignora' (a linha do dia inteiro);
+ * opts.diaExtra: a tela sem agrupar (summary.data e a balança 1) tem esse tanto a mais que a soma das horas.
  */
 const SCRIPT_DBSELECT = function (host, token) {
   return "$(function () { $('input:button').on('click', function () { $('#hid_selected').val($(this).data('connectionname')); " +
@@ -40,6 +43,11 @@ const SCRIPT_COOKIE = "$('.dev').on('click', function () { document.cookie = 'de
 const BALANCAS = 12;
 const TOKEN_LEN = 40;
 
+/** "2026-11-4 00:00:00" ou "2026-11-04 …" → "2026-11-04" (a tela manda a data sem zero). */
+function isoOf(v) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(v || '')) || [];
+  return m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0');
+}
 function num(dev, n, h, salt) { return ((n * 7 + h * 3 + salt * 5 + (dev === 'A' ? 11 : 0)) % 9); }
 /** Uma hora de uma balança (0 = todas as balanças + 2 volumes sem balança por hora, para testar o "N/A"). */
 function hourRow(dev, date, n, h) {
@@ -96,7 +104,7 @@ function createFakeSorter(opts) {
     }
     set.push('laravel_session=' + sid + '; path=/; httponly', 'XSRF-TOKEN=' + encodeURIComponent(sess.token) + '; path=/');
     const device = modo === 'cookie' ? (ck.deviceId === '3' ? 'A' : 'B') : modo === 'global' ? global.device : sess.device;
-    log.push({method: req.method, path: req.path, device});
+    log.push({method: req.method, path: req.path, device, query: req.query ? req.query.toString() : ''});
     const xa = /^xadmin/.test(modo);
     if (req.method === 'GET' && req.path === '/home' && xa) {
       return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
@@ -117,7 +125,24 @@ function createFakeSorter(opts) {
             'lay-data="{id:\'induction\'}"><thead><tr>' + Array.from({length: COLS}, (x, i) => "<th lay-data=\"{field:'total_" + (i + 1) + "'}\">" + (i + 1) + '</th>').join('') +
             '</tr></thead></table></body></html>'};
       }
-      const date = String(req.query.get('start') || '').slice(0, 10), data = [];
+      // A tela manda a data sem zero ("2026-11-4 00:00:00"); o horário volta com zero ("2026-11-04 00:00~2026-11-04 23:59").
+      const date = isoOf(req.query.get('start')), data = [];
+      const group = String(req.query.get('group') || '');
+      if (group !== '0' && opts.porHora === 'erro') return {code: 500, headers: {}, body: 'Server Error'};
+      if (group !== '0' && opts.porHora === 'vazio') {
+        return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: 0, data: []})};
+      }
+      if (group === '0' || opts.porHora === 'ignora') {
+        // "no group by" (print do usuário): uma linha só, o dia inteiro.
+        const row = {timearea: date + ' 00:00~' + date + ' 23:59'};
+        for (let n = 1; n <= COLS; n++) {
+          let t = null;
+          for (let h = 0; h < 24 && n <= BALANCAS; h++) { const r = hourRow(device, date, n, h); if (r) t = (t || 0) + r.sorter_sorttotal; }
+          if (group === '0' && n === 1 && opts.diaExtra) t += opts.diaExtra;
+          row['total_' + n] = t;
+        }
+        return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: 1, data: [row]})};
+      }
       for (let h = 0; h < 24; h++) {
         const hh = String(h).padStart(2, '0'), d3 = date.split('-').map(Number);
         const ta = opts.horario === 'curto' ? (h === 0 ? date.slice(5) + ' 00:00' : hh + ':00') :
@@ -186,19 +211,21 @@ function createFakeSorter(opts) {
     if (req.method === 'GET' && req.path === '/statis/summary.data') {
       const q = req.query;
       if (opts.down) return {code: 500, headers: {}, body: 'erro'};
-      const date = String(q.get('start') || '').slice(0, 10), raw = Number(q.get('inductionno')) || 0;
+      const date = isoOf(q.get('start')), raw = Number(q.get('inductionno')) || 0;
       // opts.codigos: só 1001…1012 valem; qualquer outro número devolve o total do sorter inteiro (filtro ignorado).
       const n = opts.codigos ? (raw >= 1001 && raw < 1001 + BALANCAS ? raw - 1000 : 0) : raw;
       const data = [];
       if (q.get('group') === '0') {
         // "no group by": uma linha só para o período inteiro (start → end).
-        const end = String(q.get('end') || '').slice(0, 10), sum = {};
+        const end = isoOf(q.get('end')), sum = {};
         for (let d = date; d <= end; d = new Date(Date.parse(d + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10)) {
           for (let h = 0; h < 24; h++) {
             const r = hourRow(device, d, n, h);
             if (r) Object.keys(r).forEach(k => { if (k !== 'timearea') sum[k] = (sum[k] || 0) + r[k]; });
           }
         }
+        // opts.diaExtra: a tela sem agrupar tem volumes que as horas não têm (o total do dia manda).
+        if (opts.diaExtra && sum.sorter_sorttotal) { sum.sorter_sorttotal += opts.diaExtra; sum.sorter_validtotal += opts.diaExtra; }
         if (Object.keys(sum).length) data.push(Object.assign({timearea: date + ' 00:00:00~' + end + ' 23:59:59'}, sum));
       } else for (let h = 0; h < 24; h++) { const r = hourRow(device, date, n, h); if (r) data.push(r); }
       return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: data.length, data})};

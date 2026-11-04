@@ -132,8 +132,9 @@ Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" 
 | SORTER_PADRAO | o sorter que o site mostra sem trocar (padrão "B") |
 
 Se os dois sorters vierem com os mesmos números, o painel não grava o dia e avisa: a troca não trocou nada. Cada sorter é conferido
-pelo título da página do site ("(A套)" / "(B套)"). As balanças vêm da tela "feeder feed quantity" (/statis/outlets); se ela não
-responder, o dia fica com os totais e o LOG avisa. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
+pelo título da página do site ("(A套)" / "(B套)"). Os números do dia são os da tela com os filtros 00:00 → 23:59, "no group by",
+Induction All e By Layer All (summary statistics); a consulta por hora só divide o dia. As balanças vêm da tela "feeder feed
+quantity" (/statis/outlets), do mesmo jeito; se ela não responder, o dia fica com os totais e o LOG avisa. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
 `};
 const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
 // V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.

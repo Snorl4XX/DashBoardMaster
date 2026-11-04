@@ -1,8 +1,27 @@
-# J&T DASHMASTER V4.22.9 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.10 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.10 — Produção do Sorter: números com os filtros dos prints
+
+Os prints e as respostas enviados (GRU-B) mostraram como o site entrega os números: `start` 00:00 → `end` 23:59, **time group by
+= no group by**, **Induction No. = All**, **By Layer = All**. A tela "feeder feed quantity" assim devolve uma linha só
+(`2026-11-04 00:00~2026-11-04 23:59`) com a quantidade de cada balança (`total_1` … `total_36`).
+
+- **Total do dia = o da tela:** o painel pede o `summary.data` e a tela das balanças com esses mesmos filtros (o mesmo pedido do
+  navegador: data como `2026-11-4`, `page=1&limit=10`, `group=0`). Os cartões (Sort total, Valid total, No Sort Code…) e a
+  quantidade de cada balança são esses números.
+- **Por hora:** a consulta por hora (`group=60`) só divide o dia em horas, para os gráficos por hora e por turno. O que ela não
+  tiver fica sem turno e horário ("N/A"); se ela não responder, as balanças aparecem com o total do dia.
+- O horário `00:00~23:59` (o dia inteiro) não vai mais para a hora 0.
+- O teste em **Configurações → Salvar e testar o sorter** mostra, em cada sorter, `hoje.sortTotal` (o número da tela, para
+  comparar com o print), `hoje.somaDasHoras` e `telaBalancas` (linhas, horário, colunas e se veio por hora).
+- Os dias já baixados são baixados de novo (uma vez).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_10_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e clique em **Salvar e testar o sorter** em `http://localhost:3500/config`.
 
 ## V4.22.9 — Produção do Sorter: balanças vazias
 
