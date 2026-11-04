@@ -5020,7 +5020,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     cF.feishuSorterTick_(at(14, 7));
     const mT1 = JSON.stringify((msgs[msgs.length - 1] || {}).card || {});
     const D0 = DS, Dm1 = new Date(Date.parse(DS + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
-    cF.feishuSorterTick_(at(6, 7, D0));
+    cF.feishuSorterTick_(at(6, 31, D0));  // 05h–06h: sorter parado no simulado (hora vazia) — sai no minuto 30
     const mT3 = JSON.stringify((msgs[msgs.length - 1] || {}).card || {}), t3Tot = tot(22, Dm1) + tot(23, Dm1) + [0, 1, 2, 3, 4, 5].reduce((a, h) => a + tot(h, D0), 0);
     check(/13h–14h/.test(mT1) && mT1.indexOf('🏁 **Fechamento do turno T1 (06h–14h) / 班次结束**\\n📦 **' + cF.feishuN_(t1Tot) + '**') >= 0 &&
       /05h–06h/.test(mT3) && mT3.indexOf('Fechamento do turno T3 (22h–06h) / 班次结束**\\n📦 **' + cF.feishuN_(t3Tot) + '**') >= 0,
@@ -5043,6 +5043,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     const back = JSON.stringify((msgs[msgs.length - 1] || {}).card || {});
     check(avisos.length === 1 && /sem acesso ao sorter/.test(avisos[0].card.header.title.content) && /O acesso ao sorter voltou/.test(back) && /17h–18h/.test(back) &&
       !cF.__state.props.FEISHU_FALHA, 'Bot do Feishu: sem acesso ao sorter, um aviso só; quando volta, segue com a hora', {avisos: avisos.length});
+    // V4.23.6 (print: cartão das 16h–17h com tudo zero): hora vazia no site → espera (de 5 em 5 min) até o minuto 30; aí manda.
+    const nV = msgs.length, w1 = cF.feishuSorterTick_(at(4, 7)), w2 = cF.feishuSorterTick_(at(4, 9)), w3 = cF.feishuSorterTick_(at(4, 13)),
+      w4 = cF.feishuSorterTick_(at(4, 31));
+    check(w1 && w1.aguardando && w2 === null && w3 && w3.aguardando && w4 && w4.ok && msgs.length === nV + 1 &&
+      /03h–04h/.test(msgs[nV].card.header.title.content) && /📦 \*\*0\*\* volumes/.test(JSON.stringify(msgs[nV].card)),
+      'Bot do Feishu: hora vazia no site espera até o minuto 30 (tentando de 5 em 5 min) e depois manda (sorter parado = zero)', {w1, w2, w3, w4});
     const ok = cF.testarFeishu(), js = JSON.stringify(ok);
     check(ok.ok && /Mensagem enviada/.test(ok.enviado) && ok.numeros.maisProcessaram.length === 3 && ok.numeros.menosProcessaram.length === 3 &&
       /:00:00 → .*:59:59$/.test(ok.periodo) && js.indexOf('teste-falso') < 0 && js.indexOf(SEG) < 0,
@@ -5050,6 +5056,25 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     delete cF.__state.props.FEISHU_WEBHOOK;
     const nMsgs = msgs.length;
     check(cF.feishuSorterTick_(at(19, 10)) === null && msgs.length === nMsgs && cF.testarFeishu().ok === false, 'Bot do Feishu: sem webhook, nada é enviado');
+  }
+  // V4.23.6: o site devolve nenhuma linha na janela de uma hora (print do usuário) → a consulta por hora (a dos gráficos por hora).
+  {
+    const msgs = [], siteV = createFakeSorter({modo: 'xadmin', janelaVazia: true}), jmsV = fakeJms({});
+    const cV = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home', FEISHU_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/teste-v'},
+    jms: (url, req, state) => url.indexOf('https://open.feishu.cn/') === 0 ? (msgs.push(JSON.parse(req.payload)), {getResponseCode: () => 200, getContentText: () => '{"code":0}'})
+      : /^http:\/\/sorter\.falso/.test(url) ? siteV.fetchMock(url, req) : jmsV(url, req, state), quiet: true});
+    cV.setupProject();
+    const r = cV.testarFeishu(DS + ' 13'), txt = JSON.stringify((msgs[0] || {}).card || {});
+    const tot = (h, f) => ['A', 'B'].reduce((a, dv) => a + ((hourRow(dv, DS, 0, h) || {})[f || 'sorter_sorttotal'] || 0), 0);
+    const t1 = [6, 7, 8, 9, 10, 11, 12, 13].reduce((a, h) => a + tot(h), 0);
+    check(r.ok && txt.indexOf('📦 **' + cV.feishuN_(tot(13)) + '** volumes') >= 0 &&
+      txt.indexOf('Balança 01 / 供包台01: **' + cV.feishuN_(hourRow('A', DS, 1, 13).sorter_sorttotal) + '**') >= 0 &&
+      txt.indexOf('Fechamento do turno T1 (06h–14h) / 班次结束**\\n📦 **' + cV.feishuN_(t1) + '**') >= 0 &&
+      r.oQueOSiteRespondeu['Sorter A'].linhasTotais === 0 && r.oQueOSiteRespondeu['Sorter A'].totaisPelaConsultaPorHora === hourRow('A', DS, 0, 13).sorter_sorttotal &&
+      !cV.__state.props.FEISHU_ULTIMA,
+      'Bot do Feishu: sem linha na janela de uma hora, usa a consulta por hora (totais, balanças e o turno); testarFeishu("AAAA-MM-DD 13") manda essa hora',
+      {r, txt: txt.slice(0, 500)});
   }
   // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
   check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&

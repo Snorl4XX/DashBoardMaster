@@ -685,7 +685,7 @@ function sorterLearnSwitch_(dev) {
 
 // ------------------------------------------------------------------ consulta
 /** Uma resposta de /statis/summary.data → {rows: [{date, hour, total, valid, …, PS01…}], count} (ou erro claro). */
-function sorterParse_(res) {
+function sorterParse_(res, opts) {
   const code = res.getResponseCode(), text = res.getContentText();
   if (code !== 200) throw new Error('O sorter respondeu código ' + code + ' em ' + SORTER_PATH_ + (code >= 300 && code < 400 ? ' (pediu login?)' : '') + '.');
   const body = safeJsonParse_(text, null);
@@ -694,9 +694,10 @@ function sorterParse_(res) {
   const list = Array.isArray(body.data) ? body.data : [];
   const rows = [];
   list.forEach(x => {
-    const m = String(x && x.timearea || '').match(/(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
-    if (!m) return;
-    const r = {date: m[1], hour: Number(m[2])};
+    const ta = String(x && x.timearea || ''), m = ta.match(/(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
+    // V4.23.6: a janela do bot (uma hora, sem agrupar) vale com qualquer horário (ex.: "16:00:00~16:59:59"), menos a linha Total.
+    if (!m && !(opts && opts.anyTime && x && typeof x === 'object' && !/total|合计/i.test(ta))) return;
+    const r = {date: m ? m[1] : '', hour: m ? Number(m[2]) : -1, timearea: ta.slice(0, 40)};
     Object.keys(SORTER_FIELDS_).forEach(k => { const v = Number(x[SORTER_FIELDS_[k]]); r[k] = isFinite(v) ? v : 0; });
     Object.keys(x).forEach(k => { const p = /^ps(\d+)_sorttotal$/i.exec(k); if (p) { const v = Number(x[k]); r['PS' + String(Number(p[1])).padStart(2, '0')] = isFinite(v) ? v : 0; } });
     rows.push(r);
@@ -996,17 +997,20 @@ function feishuWindow_(date, h1, hours) {
   return {start: f(t0), end: f(t1)};
 }
 /** Totais da tela de totais (summary.data) na janela, sem agrupar: Sort total, Valid total, No Sort Code… */
-function sorterWindowTotals_(s, w) {
+function sorterWindowTotals_(s, w, info) {
   const url = sorterBase_() + SORTER_PATH_ + '?page=1&limit=10&start=' + encodeURIComponent(w.start) + '&end=' + encodeURIComponent(w.end) +
     '&group=0&inductionno=0&layerno=0';
-  return sorterSum_(sorterParse_(sorterFetch_(s, url)).rows);
+  const p = sorterParse_(sorterFetch_(s, url), {anyTime: true});
+  if (info) { info.linhasTotais = p.rows.length; info.horarioTotais = p.rows.length ? p.rows[0].timearea : ''; }
+  return sorterSum_(p.rows);
 }
 /** Quantidade de cada balança na janela (tela "feeder feed quantity", sem agrupar): {q: {n: qtd}, feeders: [n…]}. */
-function sorterWindowFeed_(s, w) {
+function sorterWindowFeed_(s, w, info) {
   const url = sorterBase_() + SORTER_OUTLETS_PATH_ + '?page=1&limit=10&start=' + encodeURIComponent(w.start) + '&end=' + encodeURIComponent(w.end) +
     '&group=0&nc=';
-  const q = {}, feeders = [];
-  sorterOutletsList_(s, url).forEach(x => Object.keys(x).forEach(k => {
+  const q = {}, feeders = [], list = sorterOutletsList_(s, url);
+  if (info) { info.linhasBalancas = list.length; info.horarioBalancas = list.length ? String(list[0].timearea || '').slice(0, 40) : ''; }
+  list.forEach(x => Object.keys(x).forEach(k => {
     const m = /^total_?(\d+)$/i.exec(k);
     if (!m) return;
     const n = Number(m[1]), v = Number(x[k]);
@@ -1017,10 +1021,25 @@ function sorterWindowFeed_(s, w) {
 }
 /** Turno que fecha no fim da hora `hour` (13h → T1, 21h → T2, 5h → T3) e a janela dele; null nas outras horas. */
 function feishuShiftClose_(date, hour) {
-  if (hour === 13) return {shift: 'T1', label: 'T1 (06h–14h)', w: feishuWindow_(date, 6, 8)};
-  if (hour === 21) return {shift: 'T2', label: 'T2 (14h–22h)', w: feishuWindow_(date, 14, 8)};
-  if (hour === 5) return {shift: 'T3', label: 'T3 (22h–06h)', w: feishuWindow_(addDaysIso_(date, -1), 22, 8)};
+  const hs = (a, b) => Array.from({length: b - a + 1}, (v, i) => a + i), prev = addDaysIso_(date, -1);
+  if (hour === 13) return {shift: 'T1', label: 'T1 (06h–14h)', w: feishuWindow_(date, 6, 8), parts: [{date: date, hours: hs(6, 13)}]};
+  if (hour === 21) return {shift: 'T2', label: 'T2 (14h–22h)', w: feishuWindow_(date, 14, 8), parts: [{date: date, hours: hs(14, 21)}]};
+  if (hour === 5) return {shift: 'T3', label: 'T3 (22h–06h)', w: feishuWindow_(prev, 22, 8), parts: [{date: prev, hours: [22, 23]}, {date: date, hours: hs(0, 5)}]};
   return null;
+}
+/**
+ * V4.23.6 (print do usuário: cartão das 16h–17h com tudo zero — o site devolveu nenhuma linha na janela de uma hora): sem linha
+ * na janela, os números vêm da consulta por hora (group 60, a mesma dos gráficos por hora do painel), linha da(s) hora(s).
+ */
+function feishuHourlyRows_(s, cache, date, hours) {
+  const k = s.dev.id + '|' + date;
+  if (!cache[k]) cache[k] = sorterFetchDay_(s, date, [{induction: 0}])[0];
+  return cache[k].filter(r => hours.indexOf(r.hour) >= 0);
+}
+function feishuHourlyFeed_(s, date, hour) {
+  const fo = sorterReadOutlets_(s, date, 60), q = {};
+  fo.rows.filter(r => r.hour === hour).forEach(r => Object.keys(r.q).forEach(n => { q[n] = (q[n] || 0) + r.q[n]; }));
+  return {q: q, feeders: fo.feeders};
 }
 /**
  * Dados da hora `hour` do dia `date` no site, para cada sorter (sessões A e B, como o painel): totais e balanças; no fim de um
@@ -1030,24 +1049,33 @@ function feishuHourData_(date, hour) {
   const w = feishuWindow_(date, hour, 1), sc = feishuShiftClose_(date, hour);
   const iv = JTCore_.intervalOf(String(hour).padStart(2, '0') + ':00:00');
   const x = {date: date, hour: hour, interval: iv, window: w, shift: JTCore_.shiftOf(String(hour).padStart(2, '0') + ':00:00'),
-    total: sorterSum_([]), bySorter: {}, feed: [], all: {}, close: null};
+    total: sorterSum_([]), bySorter: {}, feed: [], all: {}, close: null, site: {}};
   try {
-    const ss = sorterSessions_();
+    const ss = sorterSessions_(), cache = {};
     if (sc) x.close = {shift: sc.shift, label: sc.label, total: sorterSum_([]), bySorter: {}};
     ss.sessions.forEach(s => {
-      const nome = s.dev.nome, t = sorterWindowTotals_(s, w), f = sorterWindowFeed_(s, w);
+      const nome = s.dev.nome, info = x.site[nome] = {};
+      let t = sorterWindowTotals_(s, w, info), f = sorterWindowFeed_(s, w, info);
+      if (!info.linhasTotais) { t = sorterSum_(feishuHourlyRows_(s, cache, date, [hour])); info.totaisPelaConsultaPorHora = t.total; }
+      if (!info.linhasBalancas) {
+        try { f = feishuHourlyFeed_(s, date, hour); info.balancasPelaConsultaPorHora = Object.keys(f.q).length; }
+        catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; info.balancasPorHoraErro = String(e && e.message || e).slice(0, 120); }
+      }
       Object.keys(x.total).forEach(k => { x.total[k] += t[k] || 0; });
       x.bySorter[nome] = t;
       const ns = f.feeders.length ? f.feeders : Object.keys(f.q).map(Number);
       x.all[nome] = ns.map(n => ({n: n, qty: f.q[n] || 0}));
       ns.forEach(n => x.feed.push({sorter: nome, n: n, qty: f.q[n] || 0}));
       if (x.close) {
-        const tc = sorterWindowTotals_(s, sc.w);
+        const ic = {};
+        let tc = sorterWindowTotals_(s, sc.w, ic);
+        if (!ic.linhasTotais) tc = sorterSum_([].concat.apply([], sc.parts.map(p => feishuHourlyRows_(s, cache, p.date, p.hours))));
         Object.keys(x.close.total).forEach(k => { x.close.total[k] += tc[k] || 0; });
         x.close.bySorter[nome] = tc;
       }
     });
   } catch (e) { const err = new Error(String(e && e.message || e)); err.sorterFalha = true; throw err; }
+  x.vazio = !(x.total.total > 0) && !x.feed.some(b => b.qty > 0);
   const ativas = x.feed.filter(b => b.qty > 0), nm = b => b.sorter + ' ' + b.n;
   x.top = ativas.slice().sort((a, b) => b.qty - a.qty || (nm(a) < nm(b) ? -1 : 1)).slice(0, 3);
   x.bottom = ativas.slice().sort((a, b) => a.qty - b.qty || (nm(a) < nm(b) ? -1 : 1)).slice(0, 3);
@@ -1101,9 +1129,10 @@ function feishuCard_(x, voltou) {
 }
 /** Aviso (uma vez) quando o painel não alcança o sorter: em vez de cartões com zero a cada hora. */
 function feishuWarnCard_(h, erro) {
-  const d = h.date.split('-');
+  const d = h.date.split('-'), rede = /^Não consegui acessar o sorter/.test(String(erro));
   return {msg_type: 'interactive', card: {config: {wide_screen_mode: true},
-    header: {template: 'orange', title: {tag: 'plain_text', content: '⚠️ Produção do Sorter / 分拣机产量 · sem acesso ao sorter'}},
+    header: {template: 'orange', title: {tag: 'plain_text', content: '⚠️ Produção do Sorter / 分拣机产量 · ' +
+      (rede ? 'sem acesso ao sorter' : 'não consegui ler o sorter')}},
     elements: [{tag: 'div', text: {tag: 'lark_md', content: 'Não consegui ler o sorter para ' + d[2] + '/' + d[1] + ' ' +
       String(h.hour).padStart(2, '0') + 'h (' + String(erro).slice(0, 140) + ').\nAs mensagens voltam sozinhas quando o computador do painel ' +
       'alcançar o sorter de novo. / 无法连接分拣机，恢复后自动继续发送。'}}]}};
@@ -1131,11 +1160,17 @@ function feishuPost_(body) {
     (dica ? ' — ' + dica : '') + '.');
 }
 /** Busca no site e manda a hora `h` ({date, hour}). Devolve os números enviados. */
-function feishuSendHour_(h) {
+function feishuSendHour_(h, opts) {
   const x = feishuHourData_(h.date, h.hour), voltou = !!getProp_('FEISHU_FALHA', '');
+  // V4.23.6: hora ainda vazia no site (os números podem chegar alguns minutos depois): espera até o minuto 30 e tenta de 5 em 5 min.
+  if (x.vazio && opts && opts.esperar) {
+    setProp_('FEISHU_VAZIO', h.key + '|' + h.minute);
+    return {aguardando: true, numeros: x};
+  }
   feishuPost_(feishuCard_(x, voltou));
+  deleteProp_('FEISHU_VAZIO');
   if (voltou) deleteProp_('FEISHU_FALHA');
-  return x;
+  return {numeros: x};
 }
 /**
  * Na fila: manda a hora que fechou (uma vez por hora, a partir do minuto FEISHU_MINUTO). Até 3 tentativas; se o sorter não
@@ -1145,10 +1180,14 @@ function feishuSorterTick_(nowMs) {
   if (!feishuOn_()) return null;
   const h = feishuLastHour_(nowMs), min = Math.max(0, Math.min(55, Number(getProp_('FEISHU_MINUTO', '')) || 5));
   if (h.minute < min || getProp_('FEISHU_ULTIMA', '') === h.key) return null;
+  // Hora que veio vazia: nova tentativa 5 min depois; a partir do minuto 30, manda como estiver (sorter parado = zero).
+  const vz = String(getProp_('FEISHU_VAZIO', '')).split('|'), espera = h.minute < Math.max(min + 5, 30);
+  if (vz[0] === h.key && h.minute - Number(vz[1]) < 5 && espera) return null;
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return null;
   try {
-    feishuSendHour_(h);
+    const r = feishuSendHour_(h, {esperar: espera});
+    if (r.aguardando) return {ok: false, hora: h.key, aguardando: true};
     setProp_('FEISHU_ULTIMA', h.key);
     deleteProp_('FEISHU_TENTATIVA');
     return {ok: true, hora: h.key};
@@ -1170,15 +1209,23 @@ function feishuSorterTick_(nowMs) {
  * Configurações → "Salvar e mandar um teste" (ou Executar função): manda agora o resumo da última hora que fechou. Mostra os números
  * enviados e o resultado — nunca o endereço do webhook nem o segredo.
  */
-function testarFeishu() {
+function testarFeishu(hora) {
   if (!INDICATORS.sorter_flow) return {ok: false, erro: 'O bot do Feishu é do painel Produção do Sorter.'};
   if (!feishuWebhook_()) return {ok: false, erro: 'Cole o webhook do bot do Feishu em Configurações (Bot do Feishu).'};
-  const h = feishuLastHour_();
+  let h = feishuLastHour_();
+  // V4.23.6: uma hora escolhida — "16" (16:00 às 16:59 de hoje) ou "2026-11-04 16".
+  if (hora !== undefined && hora !== null && String(hora).trim() !== '') {
+    const m = /^\s*(?:(\d{4}-\d{2}-\d{2})\s+)?(\d{1,2})\s*h?\s*$/i.exec(String(hora));
+    if (!m || Number(m[2]) > 23) return {ok: false, erro: 'Hora inválida: use "16" (16:00 às 16:59 de hoje) ou "2026-11-04 16".'};
+    const date = m[1] || isoToday_();
+    h = {date: date, hour: Number(m[2]), key: date + ' ' + Number(m[2]), minute: 59};
+  }
   try {
-    const x = feishuSendHour_(h), por = {};
+    const x = feishuSendHour_(h).numeros, por = {};
     Object.keys(x.bySorter).forEach(k => { por[k] = x.bySorter[k].total; });
-    setProp_('FEISHU_ULTIMA', h.key);
+    if (hora === undefined || hora === null || String(hora).trim() === '') setProp_('FEISHU_ULTIMA', h.key);
     return {ok: true, enviado: 'Mensagem enviada no grupo: Produção do Sorter · ' + x.interval + ' de ' + h.date,
+      oQueOSiteRespondeu: x.site,
       periodo: x.window.start + ' → ' + x.window.end, assinatura: getProp_('FEISHU_SEGREDO', '') ? 'com segredo' : 'sem segredo',
       numeros: {sortTotal: x.total.total, porSorter: por, validTotal: x.total.valid, noSortCode: x.total.noInfo,
         maisProcessaram: x.top.map(b => b.sorter + ' · Balança ' + b.n + ': ' + b.qty),

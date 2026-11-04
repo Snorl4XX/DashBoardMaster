@@ -25,6 +25,7 @@
  * V4.22.10: group=0 ("no group by") devolve uma linha só, "2026-11-04 00:00~2026-11-04 23:59" (print do usuário); opts.porHora —
  * como o pedido por hora (group=60) responde: 'erro' (código 500), 'vazio' (sem linhas) ou 'ignora' (a linha do dia inteiro);
  * opts.diaExtra: a tela sem agrupar (summary.data e a balança 1) tem esse tanto a mais que a soma das horas.
+ * V4.23.6: opts.janelaVazia — a janela sem agrupar menor que um dia (a hora do bot do Feishu) volta sem nenhuma linha.
  */
 const SCRIPT_DBSELECT = function (host, token) {
   return "$(function () { $('input:button').on('click', function () { $('#hid_selected').val($(this).data('connectionname')); " +
@@ -147,6 +148,10 @@ function createFakeSorter(opts) {
       if (group === '0' || opts.porHora === 'ignora') {
         // "no group by" (print do usuário): uma linha só, a janela start → end (o dia inteiro ou, no bot, uma hora / um turno).
         const hs = hoursIn(req.query.get('start'), req.query.get('end'));
+        // opts.janelaVazia (V4.23.6, print do usuário): janela menor que um dia sem agrupar → nenhuma linha.
+        if (opts.janelaVazia && hs.length < 24) {
+          return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: 0, data: [], tcha: false})};
+        }
         const row = {timearea: hs.length ? stampOf(Date.parse(hs[0].date + 'T' + String(hs[0].h).padStart(2, '0') + ':00:00Z')) + '~' +
           stampOf(Date.parse(hs[hs.length - 1].date + 'T' + String(hs[hs.length - 1].h).padStart(2, '0') + ':59:00Z')) : date + ' 00:00~' + date + ' 23:59'};
         for (let n = 1; n <= COLS; n++) {
@@ -232,6 +237,7 @@ function createFakeSorter(opts) {
       if (q.get('group') === '0') {
         // "no group by": uma linha só para o período inteiro (start → end; V4.23.5: também uma hora ou um turno).
         const end = isoOf(q.get('end')), sum = {}, hs = hoursIn(q.get('start'), q.get('end'));
+        if (opts.janelaVazia && hs.length < 24) hs.length = 0;
         hs.forEach(x => {
           const r = hourRow(device, x.date, n, x.h);
           if (r) Object.keys(r).forEach(k => { if (k !== 'timearea') sum[k] = (sum[k] || 0) + r[k]; });
