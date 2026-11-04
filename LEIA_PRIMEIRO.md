@@ -1,8 +1,16 @@
-# J&T DASHMASTER V4.23.0 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.23.1 — Produção do Sorter: sem a "Tabela de remessas"
+
+Pedido "Eliminar Tabela de remessas": a Produção do Sorter não mostra mais a tabela de remessas no fim do painel (Config.gs →
+`hideDetailTable`). As tabelas por horário, por balança e os Dados gerais continuam. Os outros painéis não mudam.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_1_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e aperte **Ctrl+F5** no navegador.
 
 ## V4.23.0 — Produção do Sorter: bot do Feishu (resumo de hora em hora no grupo)
 

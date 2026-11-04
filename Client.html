@@ -1164,9 +1164,9 @@
     renderRankPanels(c);
     renderMetricPanels(c);
     renderCrossTables(c);
-    // Recebimento: uma tabela por lista no lugar da tabela de remessas.
-    $('#detailCard').classList.toggle('hidden', !!c.tables);
-    if (c.tables) renderListTables(c); else { $('#listTables').innerHTML = ''; renderDetailTable(); }
+    // Recebimento: uma tabela por lista no lugar da tabela de remessas. V4.23.1: hideDetailTable (Produção do Sorter) = sem ela.
+    $('#detailCard').classList.toggle('hidden', !!(c.tables || c.hideDetailTable));
+    if (c.tables) renderListTables(c); else { $('#listTables').innerHTML = ''; if (!c.hideDetailTable) renderDetailTable(); }
   }
   /**
    * Avaria com UMA opção de "Pedidos principais/filhos" (Config.gs → orderKinds): a taxa e a quantidade

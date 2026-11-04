@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.23.0',
+  VERSION: '4.23.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1678,6 +1678,8 @@ const ALL_INDICATORS_ = Object.freeze({
         '有效分拣、无分拣码、异常原因和各层仍为整台分拣机数据。'}},
     topCards: [],
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    // V4.23.1 (pedido "Eliminar Tabela de remessas"): sem a tabela de remessas no fim do painel.
+    hideDetailTable: true,
     heroMetric: {key: 'sortTotal', column: 'Sort total', icon: 'qty',
       byFilter: {induction: {column: 'Alimentação', label: {pt: 'Alimentado na balança', zh: '供包台供包量'}}},
       label: {pt: 'Total produzido (Sort total)', zh: '分拣总量'}, labelPeriod: {pt: 'Total produzido no período', zh: '期间分拣总量'},
@@ -1938,7 +1940,7 @@ function catalogEntry_(cfg) {
     unsealCards: !!cfg.unsealCards, situations: cfg.situations || null,
     // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).
     refTypes: cfg.detail && cfg.detail.typeFromSummary ? (cfg.detail.types || []).map(t => t.column) : null,
-    labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null,
+    labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null, hideDetailTable: !!cfg.hideDetailTable,
     hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
     grouped: !!cfg.grouped, routeKey: cfg.routeKey,
     detailDays: cfg.detail && cfg.detail.days || null,

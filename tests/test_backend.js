@@ -4883,6 +4883,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(cS.detailNeedsRefresh_('sorter_flow', DS, {errorCount: 1, totalCount: 1}, {errorCount: 2, totalCount: 5}, stS, false) === true &&
     cS.detailNeedsRefresh_('sorter_flow', DS, {errorCount: 2, totalCount: 5}, {errorCount: 2, totalCount: 5}, stS, false) === false,
     'Sorter: a lista do dia acompanha o resumo (sem esperar 1 h), e não é refeita se nada mudou', stS);
+  // V4.23.1 (pedido "Eliminar Tabela de remessas"): a Produção do Sorter sem a tabela de remessas; os outros painéis continuam com ela.
+  const catHT = cS.getAppBootstrap().catalog || [];
+  check(cfgS.hideDetailTable === true && catHT.filter(x => x.key === 'sorter_flow').every(x => x.hideDetailTable === true) &&
+    (require('fs').readFileSync(require('path').join(__dirname, '..', 'Config.gs'), 'utf8').match(/^\s*hideDetailTable: true,/gm) || []).length === 1,
+    'Produção do Sorter sem a tabela de remessas (só ela)', {cfg: cfgS.hideDetailTable, cat: catHT.map(x => [x.key, x.hideDetailTable])});
   Cf.setFacetColumns(null);
   const fcOld = Cf.facets(rowsD, {}, ['sorter']);
   check(fcOld.sorter.filter(o => o.value === 'Sorter A')[0].total > A.total * 3, 'sem facetColumns, a lista soma todas as linhas (como nos outros painéis)');
