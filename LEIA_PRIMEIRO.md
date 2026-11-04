@@ -1,8 +1,22 @@
-# J&T DASHMASTER V4.22.11 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.12 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.12 — Produção do Sorter: filtro de balança muda cartão e gráficos
+
+"Quando troco os filtros, os cartões e gráficos ficam fixos": os filtros **Sorter**, **Turno** e **Horário** já mudavam tudo, mas o
+filtro **Balança** só mudava o Top 10 e a tabela por balança — o site do sorter só separa por balança a quantidade alimentada
+(tela "feeder feed quantity"); Sort total, Valid total, No Sort Code, motivos e andares vêm só do sorter inteiro.
+
+- Com o filtro de balança, o **cartão vermelho** mostra o que foi **alimentado na(s) balança(s)** escolhida(s) (com o oficial do
+  sorter embaixo), e os gráficos **por hora**, **por turno** e **por sorter** mostram a quantidade alimentada.
+- Um aviso embaixo dos filtros diz o que muda e o que continua do sorter inteiro; os cartões que não mudam dizem "Sorter inteiro".
+- Inclui a V4.22.11 (o número ao lado de cada opção do filtro é o Sort total, não 1 milhão).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_12_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. No navegador, aperte **Ctrl+F5**.
 
 ## V4.22.11 — Produção do Sorter: número do filtro (1 milhão)
 

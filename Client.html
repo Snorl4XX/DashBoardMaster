@@ -1390,6 +1390,9 @@
       });
     });
     html += '<button type="button" class="btn btn-ghost" id="clearAllFilters">' + icon('x') + esc(t('clearFilters')) + '</button>';
+    // V4.22.12: o que um filtro muda e o que não muda (ex.: balança no Sorter).
+    var notes = (cfg() && cfg().scopeNotes) || {};
+    keys.forEach(function (k) { if (notes[k]) html += '<p class="scope-note">' + icon('info') + '<span>' + esc(L(notes[k])) + '</span></p>'; });
     box.innerHTML = html;
     box.hidden = false;
     $$('.fchip button', box).forEach(function (b) {
@@ -1896,6 +1899,8 @@
           pv = fk.length === 1 && fk[0] === 'shift' ? aggShiftSum(m.detail, sel, k.prevFrom, k.prevTo) : null;
           extra = '<br>' + esc(t('mcOfficial', {n: fmtInt(off)}));
         } else if (Object.keys(f).length && !m.detail) extra = '<br><span class="mc-note">' + esc(t('mcWholeDay')) + '</span>';
+        // V4.22.12: filtro que não vale para esta lista (ex.: balança no Valid total do sorter): o número é sem esse filtro.
+        else if (m.detail && Object.keys(f).length && c.texts && c.texts.mcNoScope) extra = '<br><span class="mc-note">' + esc(tx(c, 'mcNoScope')) + '</span>';
         // pctKey: a participação é o percentual oficial do JMS (Percentual de volume de Saca Ecológica).
         var pk = m.pctKey && !fk.length ? metricDef(c, m.pctKey) : null, pkv = pk ? metricValue(pk.m, state.from, state.to) : null;
         var share = !fk.length && m.key !== totalKey && isNum(v) && total ? (isNum(pkv) ? pkv : v / total * 100) : null;
@@ -2005,8 +2010,12 @@
     var prevWord = day ? t('hmPrev') : t('hmPrevPeriod'), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
     var label = day ? L(def.label) + ' · ' + (isLive() ? t('srcLive') : fmtDate(state.to, true)) : L(def.labelPeriod) + ' · ' + fmtRange(state.from, state.to);
     var big = cur, lines = '';
-    if (filtersFor(f, def.column).length) {
-      var fq = listQty(def.column);
+    // V4.22.12: com o filtro de def.byFilter (ex.: balança no Sorter), o número grande vem de outra lista (quantidade alimentada).
+    var bfk = def.byFilter ? Object.keys(def.byFilter).filter(function (x) { return f[x] && f[x].length; })[0] : null;
+    var col = bfk ? def.byFilter[bfk].column : def.column;
+    if (bfk) label = L(def.byFilter[bfk].label) + ' · ' + (day ? fmtDate(state.to, true) : fmtRange(state.from, state.to));
+    if (filtersFor(f, col).length) {
+      var fq = listQty(col);
       big = fq || null;
       label = t('hmFiltered', {label: label});
       if (!fq) lines += '<div class="kpi-sub">' + esc(t('hmNoDetail')) + '</div>';
@@ -2559,6 +2568,7 @@
       return !cols || !def.where || !def.where.column || cols.has(def.where.column);
     }).map(function (def) {
       if (def.metric) return metricSpec(def);
+      def = Core.chartDefFor(def, filtersObj());
       var spec = Core.buildChart(def, sm ? Core.summaryChartRows(def, sm.byDim, fo) : rows, {intervalMode: state.intervalMode});
       if (def.sub) spec.sub = def.sub;
       if (def.trips) spec.trips = true;

@@ -642,7 +642,8 @@ function groupSummaryView_(cfg, built, filters) {
   const byDim = JTCore_.marginalsByDim(built.marginals);
   const totals = JTCore_.decodeDataset(built.totals);
   return {byDim: byDim, totals: totals, top: JTCore_.decodeDataset(built.top),
-    charts: (cfg.charts || []).filter(def => !def.metric).map(def => JTCore_.buildChart(def, JTCore_.summaryChartRows(def, byDim, filters), {}))};
+    charts: (cfg.charts || []).filter(def => !def.metric).map(def => JTCore_.chartDefFor(def, filters))
+      .map(def => JTCore_.buildChart(def, JTCore_.summaryChartRows(def, byDim, filters), {}))};
 }
 
 function normalizeFilters_(filters) {
@@ -967,7 +968,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
     cards: JTCore_.computeCards(cfg, rv ? rv.rates : allRates, rows, rv ? rv.filters : filters, p.from, p.to,
       {shares: shares, shiftRows: sel ? JTCore_.applyFilters(archive.rows, filters, 'shift') : null,
         partRows: (cfg.filters || []).indexOf('shift') >= 0 && !cfg.grouped ? archive.rows : null, agg: getAgg_(indicatorKey, null, null), only: only}),
-    charts: cfg.charts.filter(def => !def.metric).map(def => JTCore_.buildChart(def, rows, {})),
+    charts: cfg.charts.filter(def => !def.metric).map(def => JTCore_.buildChart(JTCore_.chartDefFor(def, filters), rows, {})),
     summary: JTCore_.summaryTable(cfg, rows),
     pivots: (cfg.pivotTables || []).map(def => JTCore_.pivot(rows, def))
   };

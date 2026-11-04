@@ -640,6 +640,16 @@ function JTCoreFactory_() {
    * contagem: o filtro continua valendo para todas as linhas. Filtro com escopo (filterScopes) conta as linhas do escopo dele.
    */
   var FACET_COLUMNS = null;
+  /**
+   * V4.22.12: gráfico com outra lista quando um filtro está escolhido (def.byFilter = {campo: {where, title, sub}}). Ex.: Produção
+   * do Sorter — com o filtro de balança, "por hora" mostra a quantidade alimentada (o site não dá o Sort total por balança).
+   */
+  function chartDefFor(def, filters) {
+    var bf = def && def.byFilter;
+    if (!bf) return def;
+    var k = Object.keys(bf).filter(function (x) { return filters && filters[x] && filters[x].length; })[0];
+    return k ? Object.assign({}, def, bf[k], {byFilter: null}) : def;
+  }
   function setFacetColumns(cols) { FACET_COLUMNS = cols && cols.length ? cols : null; }
   function inScope(k, r) { var sc = FILTER_SCOPES[k]; return !sc || sc.some(function (c) { return colMatch(c, r.column); }); }
   /**
@@ -1124,7 +1134,7 @@ function JTCoreFactory_() {
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, siteKey: siteKey, inSiteList: inSiteList, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
-    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, setFacetColumns: setFacetColumns, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
+    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, setFacetColumns: setFacetColumns, chartDefFor: chartDefFor, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
     encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText, median: median
   };
 }

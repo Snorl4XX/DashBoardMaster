@@ -4865,6 +4865,14 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     fcA.shift.reduce((a, o) => a + o.count, 0) === A.total,
     'Sorter: o número ao lado de cada opção do filtro é o Sort total (não a soma de todos os números da tela)',
     {A: optOf('sorter', 'Sorter A'), B: optOf('sorter', 'Sorter B'), want: [A.total, B.total]});
+  // V4.22.12 (pedido "quando troco os filtros, cartões e gráficos ficam fixos"): com o filtro de balança, os gráficos por hora,
+  // turno e sorter usam a quantidade alimentada (o site não dá o Sort total por balança); sem ele, o Sort total.
+  const fB1 = {induction: ['Balança 01']}, bh = Cf.chartDefFor(chDefS('byHour'), fB1), bh0 = Cf.chartDefFor(chDefS('byHour'), {sorter: ['Sorter A']});
+  const chB1 = Cf.buildChart(bh, Cf.applyFilters(rowsD, fB1), {});
+  check(bh.where.column === 'Alimentação' && /alimentada/.test(bh.title.pt) && bh0.where.column === 'Sort total' && chB1.total === fA[1] + fB[1] &&
+    ['shiftPie', 'bySorter'].every(k => Cf.chartDefFor(chDefS(k), fB1).where.column === 'Alimentação') && cfgS.scopeNotes && cfgS.scopeNotes.induction &&
+    cfgS.heroMetric.byFilter.induction.column === 'Alimentação',
+    'Sorter: com o filtro de balança, os gráficos por hora/turno/sorter mostram a quantidade alimentada (e o aviso explica)', {total: chB1.total, want: fA[1] + fB[1]});
   Cf.setFacetColumns(null);
   const fcOld = Cf.facets(rowsD, {}, ['sorter']);
   check(fcOld.sorter.filter(o => o.value === 'Sorter A')[0].total > A.total * 3, 'sem facetColumns, a lista soma todas as linhas (como nos outros painéis)');

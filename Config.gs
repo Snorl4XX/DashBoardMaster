@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.22.11',
+  VERSION: '4.22.12',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1666,9 +1666,18 @@ const ALL_INDICATORS_ = Object.freeze({
     filterScopes: {induction: ['Alimentação']},
     // V4.22.11: o número ao lado de cada opção do filtro (Sorter, Turno, Horário) = o Sort total, não a soma de todos os números.
     facetColumns: ['Sort total'],
+    // V4.22.12 (pedido "quando troco os filtros, os cartões e gráficos ficam fixos"): com o filtro de balança, o cartão vermelho e
+    // os gráficos por hora, turno e sorter passam a mostrar a quantidade alimentada; o aviso diz o que continua do sorter inteiro.
+    scopeNotes: {induction: {
+      pt: 'Filtro de balança: o site do sorter só separa por balança a quantidade alimentada (feeder feed quantity). Mudam o cartão ' +
+        'vermelho, os gráficos por hora, por turno e por sorter, o Top 10 e a tabela por balança. Valid total, No Sort Code, motivos ' +
+        'e andares continuam do sorter inteiro.',
+      zh: '供包台筛选：分拣机系统只按供包台提供供包量（feeder feed quantity）。红色卡片、每小时/班次/分拣机图表、前10和供包台表会变化；' +
+        '有效分拣、无分拣码、异常原因和各层仍为整台分拣机数据。'}},
     topCards: [],
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
     heroMetric: {key: 'sortTotal', column: 'Sort total', icon: 'qty',
+      byFilter: {induction: {column: 'Alimentação', label: {pt: 'Alimentado na balança', zh: '供包台供包量'}}},
       label: {pt: 'Total produzido (Sort total)', zh: '分拣总量'}, labelPeriod: {pt: 'Total produzido no período', zh: '期间分拣总量'},
       sub: 'validTotal', subLabel: {pt: 'Deu certo (Valid total)', zh: '有效分拣'}, subOf: {pt: 'do total', zh: '占总量'}},
     prevCard: {key: 'sortTotal', sub: 'validTotal', label: {pt: 'Produção do dia anterior', zh: '前一日分拣总量'},
@@ -1684,6 +1693,7 @@ const ALL_INDICATORS_ = Object.freeze({
       errors: {pt: 'Não deu certo (No Sort Code)', zh: '无分拣码'},
       errorsDay: {pt: 'Não deu certo no dia', zh: '当日无分拣码'}, errorsPeriod: {pt: 'Não deu certo no período', zh: '期间无分拣码'},
       errorsFiltered: {pt: 'Volumes (com filtro)', zh: '件数（已筛选）'},
+      mcNoScope: {pt: 'Sorter inteiro: o site não separa este número por balança', zh: '整台分拣机：系统未按供包台拆分此数字'},
       rateOfDay: {pt: '% Não deu certo · {date}', zh: '{date} 无分拣码占比'}, rateOfPeriod: {pt: '% Não deu certo no período', zh: '期间无分拣码占比'},
       dsHelp: {pt: 'Para saber o motivo em detalhe, rode diagnosticarSorter() (Configurações → Diagnósticos).', zh: '如需详细原因，请运行 diagnosticarSorter()。'},
       dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes)', zh: '排队下载中（前面还有 {n} 个任务）'},
@@ -1706,12 +1716,16 @@ const ALL_INDICATORS_ = Object.freeze({
     charts: [
       {key: 'mDaily', metric: 'sortTotal', type: 'bar', days: 15, title: {pt: 'Evolução diária · Sort total', zh: '每日分拣总量'}},
       {key: 'byHour', dim: 'interval', where: {column: 'Sort total'}, type: 'bar', top: 24, timeline: true,
-        title: {pt: 'Evolução por hora · Sort total', zh: '每小时分拣总量'}, sub: {pt: 'Volumes por hora do dia', zh: '各时段分拣量'}},
+        title: {pt: 'Evolução por hora · Sort total', zh: '每小时分拣总量'}, sub: {pt: 'Volumes por hora do dia', zh: '各时段分拣量'},
+        byFilter: {induction: {where: {column: 'Alimentação'}, title: {pt: 'Evolução por hora · quantidade alimentada', zh: '每小时供包量'},
+          sub: {pt: 'Volumes alimentados na(s) balança(s) escolhida(s)', zh: '所选供包台的供包量'}}}},
       {key: 'noSortHour', dim: 'interval', where: {column: 'No Sort Code'}, type: 'bar', top: 24, timeline: true,
         title: {pt: 'Não deu certo por hora · No Sort Code', zh: '每小时无分拣码'}},
       {key: 'shiftPie', dim: 'shift', where: {column: 'Sort total'}, type: 'doughnut',
+        byFilter: {induction: {where: {column: 'Alimentação'}, title: {pt: 'Quantidade alimentada por turno', zh: '各班次供包量'}}},
         title: {pt: 'Produção por turno', zh: '各班次产量'}, sub: {pt: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', zh: 'T1 06–14 · T2 14–22 · T3 22–06'}},
       {key: 'bySorter', dim: 'sorter', where: {column: 'Sort total'}, type: 'bar', top: 4, hideNA: true,
+        byFilter: {induction: {where: {column: 'Alimentação'}, title: {pt: 'Quantidade alimentada por sorter', zh: '各分拣机供包量'}}},
         title: {pt: 'Produção por sorter', zh: '各分拣机产量'}},
       // V4.22.8: pela tela "feeder feed quantity" (quantidade alimentada em cada balança). O site não dá o No Sort Code por balança.
       {key: 'topInd', dim: 'induction', where: {column: 'Alimentação'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
@@ -1911,7 +1925,7 @@ function catalogEntry_(cfg) {
     metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
     // V4.18 (Criação de Lotes): cartão do dia anterior e os nomes novos dos valores gravados antes.
     prevCard: cfg.prevCard || null, valueAliases: cfg.valueAliases || null, sumDefs: cfg.sumDefs || null,
-    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, facetColumns: cfg.facetColumns || null, tables: cfg.tables || null,
+    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, facetColumns: cfg.facetColumns || null, scopeNotes: cfg.scopeNotes || null, tables: cfg.tables || null,
     // V4.22 (Produção do Sorter): tabela cruzada — uma linha por valor de rowDim, uma coluna por lista (cols) e o Total.
     crossTables: cfg.crossTables || null, source: cfg.source || null, detailsOkColumn: cfg.detailsOkColumn || null,
     columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
