@@ -81,8 +81,9 @@ Painel do Sorter: {"metodo": "POST", "caminho": "/…", "corpo": "_token=…&…
 <pre class="out" id="sorterOut"></pre></section>
 
 <section class="card"><h2>Bot do Feishu</h2>
-<p class="hint">De hora em hora (minuto 5), o painel manda no grupo do Feishu: a produção da hora que fechou (Sorter A + B), o total do
-dia, a produção por turno e as 3 balanças que mais e as 3 que menos processaram no dia. No grupo do Feishu: Configurações do grupo
+<p class="hint">De hora em hora (minuto 5), o painel manda no grupo do Feishu os dados da hora que fechou (ex.: às 13:05, das 12:00
+às 12:59): produção (Sorter A + B), Valid total, No Sort Code e as balanças (as 3 que mais, as 3 que menos e todas). No fim de cada
+turno (14h, 22h e 06h), também o total do turno. No grupo do Feishu: Configurações do grupo
 → Bots → Adicionar bot → Bot personalizado; copie o endereço do webhook. Se ligar a "Assinatura" no bot, cole o segredo também.
 Os valores salvos não aparecem de novo nesta tela.</p>
 <p class="small" id="feishuState"></p>

@@ -4964,11 +4964,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const diag = cS.diagnosticarSorter();
   check(diag.sorters.length === 2 && diag.sorters.every(x => x.hoje && x.hoje.sortTotal > 0) && !/tok\d+k|sess\d+x/.test(JSON.stringify(diag)) &&
     diag.sorters[1].cookies.indexOf('laravel_session') >= 0, 'diagnosticarSorter: os dois sorters, sem mostrar token nem cookie (só os nomes)', diag);
-  // V4.23 (pedido "bot que avise no grupo do Feishu"): de hora em hora, a produção da hora que fechou (A + B), o total do dia,
-  // os turnos e as 3 balanças que mais e as 3 que menos processaram — webhook e segredo só nas Propriedades (nunca na resposta).
+  // V4.23 (pedido "bot que avise no grupo do Feishu") + V4.23.5 ("tem que mandar em 1 hora, 1 hora: das 01h até 02h, os dados desse
+  // período"): às HH:05, os dados da hora que fechou direto do site (janela HH:00:00 → HH:59:59, "no group by") — Sort total (A + B),
+  // Valid total, No Sort Code, as balanças (3 que mais, 3 que menos e todas); no fim de cada turno, o total do turno.
   {
     const msgs = [];
-    let reply = {code: 0, msg: 'success'};
+    let reply = {code: 0, msg: 'success'}, longe = false;
     const siteF = createFakeSorter({modo: 'xadmin'}), jmsFF = fakeJms({});
     const HOOK = 'https://open.feishu.cn/open-apis/bot/v2/hook/teste-falso', SEG = 'segredo-falso';
     const cF = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
@@ -4979,36 +4980,51 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
         const r = reply;
         return {getResponseCode: () => 200, getContentText: () => JSON.stringify(r)};
       }
-      return /^http:\/\/sorter\.falso/.test(url) ? siteF.fetchMock(url, req) : jmsFF(url, req, state);
+      if (/^http:\/\/sorter\.falso/.test(url)) {
+        if (longe) throw new Error('Exception: Address unavailable: http://sorter.falso');
+        return siteF.fetchMock(url, req);
+      }
+      return jmsFF(url, req, state);
     }, quiet: true});
     cF.setupProject();
-    const at = (h, m) => Date.parse(DS + 'T' + String(h + 3).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':00Z');  // São Paulo = UTC-3
-    const early = cF.feishuSorterTick_(at(14, 3)), t1 = cF.feishuSorterTick_(at(14, 7)), t2 = cF.feishuSorterTick_(at(14, 20));
+    const at = (h, m, d) => Date.parse((d || DS) + 'T' + String(h + 3).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':00Z');  // São Paulo = UTC-3
+    const tot = (h, d, f) => ['A', 'B'].reduce((a, dv) => a + ((hourRow(dv, d || DS, 0, h) || {})[f || 'sorter_sorttotal'] || 0), 0);
+    const early = cF.feishuSorterTick_(at(12, 3)), t1 = cF.feishuSorterTick_(at(12, 7)), t2 = cF.feishuSorterTick_(at(12, 20));
     const m = msgs[0] || {}, text = JSON.stringify(m.card || {});
-    const hourTot = ['A', 'B'].reduce((a, dv) => a + hourRow(dv, DS, 0, 13).sorter_sorttotal, 0);
-    const t1Tot = ['A', 'B'].reduce((a, dv) => a + [6, 7, 8, 9, 10, 11, 12, 13].reduce((b, h) => b + ((hourRow(dv, DS, 0, h) || {}).sorter_sorttotal || 0), 0), 0);
+    // A hora 11h–12h: só os números dessa hora.
     const feeds = [];
-    ['A', 'B'].forEach(dv => { const ft = feederTotals(dv, DS); Object.keys(ft).forEach(n => feeds.push({name: 'Sorter ' + dv + ' · Balança ' + String(n).padStart(2, '0'), q: ft[n]})); });
+    ['A', 'B'].forEach(dv => { for (let n = 1; n <= 12; n++) feeds.push({name: 'Sorter ' + dv + ' · Balança ' + String(n).padStart(2, '0'), q: hourRow(dv, DS, n, 11).sorter_sorttotal}); });
     feeds.sort((a, b) => b.q - a.q || (a.name < b.name ? -1 : 1));
     const low = feeds.slice().sort((a, b) => a.q - b.q || (a.name < b.name ? -1 : 1));
     const sign = require('crypto').createHmac('sha256', m.timestamp + '\n' + SEG).update('').digest('base64');
-    check(early === null && t1 && t1.ok && t2 === null && msgs.length === 1 && m.msg_type === 'interactive' && /13h–14h/.test(m.card.header.title.content) &&
-      text.indexOf('**' + cF.feishuN_(hourTot) + '** volumes') >= 0 && text.indexOf(cF.feishuN_(A.total + B.total)) >= 0 &&
-      text.indexOf('T1 (06h–14h): **' + cF.feishuN_(t1Tot) + '**') >= 0 &&
+    const hourQs = siteF.log.filter(x => /^\/statis\/(summary\.data|outlets)$/.test(x.path)).map(x => new URLSearchParams(x.query))
+      .filter(q => /11:00:00$/.test(q.get('start') || ''));
+    check(early === null && t1 && t1.ok && t2 === null && msgs.length === 1 && m.msg_type === 'interactive' && /11h–12h/.test(m.card.header.title.content) &&
+      text.indexOf('📦 **' + cF.feishuN_(tot(11)) + '** volumes') >= 0 && text.indexOf('✅ Deu certo (Valid total) / 有效: **' + cF.feishuN_(tot(11, DS, 'sorter_validtotal')) + '**') >= 0 &&
+      text.indexOf('无分拣码: **' + cF.feishuN_(tot(11, DS, 'sorter_noinfototal')) + '**') >= 0 && text.indexOf('🌅 Turno T1 (06h–14h)') >= 0 &&
       text.indexOf('🥇 ' + feeds[0].name + ' / 供包台' + feeds[0].name.slice(-2) + ': **' + cF.feishuN_(feeds[0].q) + '**') >= 0 &&
-      text.indexOf('🔻 ' + low[0].name + ' / 供包台' + low[0].name.slice(-2) + ': **' + cF.feishuN_(low[0].q) + '**') >= 0 && /📊 Produção do Sorter \/ 分拣机产量/.test(m.card.header.title.content) &&
-      m.sign === sign,
-      'Bot do Feishu: no minuto 5 manda a hora que fechou (A + B), o dia, os turnos e as 3 balanças que mais/menos processaram — uma vez, com assinatura',
-      {early, t1, t2, n: msgs.length, hourTot, top: feeds[0], low: low[0], text: text.slice(0, 600)});
-    // V4.23.2 (pedido "o bot mostre todos os dados das balanças"): todas as balanças de cada sorter, em duas colunas.
-    const fieldsOf = sn => ((m.card.elements || []).map((e, i, a) => (/Todas as balanças · /.test(JSON.stringify(e)) && /Sorter /.test(JSON.stringify(e)) &&
+      text.indexOf('🔻 ' + low[0].name + ' / 供包台' + low[0].name.slice(-2) + ': **' + cF.feishuN_(low[0].q) + '**') >= 0 &&
+      text.indexOf('Fechamento do turno') < 0 && text.indexOf('11:00 às 11:59') >= 0 && m.sign === sign &&
+      hourQs.length >= 4 && hourQs.every(q => q.get('group') === '0' && /11:59:59$/.test(q.get('end'))),
+      'Bot do Feishu: às 12:07 manda só a hora 11h–12h (janela 11:00:00 → 11:59:59 no site, sem agrupar): Sort total, Valid, No Sort Code e balanças',
+      {early, t1, t2, n: msgs.length, tot: tot(11), top: feeds[0], low: low[0], text: text.slice(0, 700)});
+    // Todas as balanças de cada sorter na hora, em duas colunas (V4.23.2), "Balança / 供包台" (V4.23.4).
+    const fieldsOf = sn => ((m.card.elements || []).map((e, i, a) => (/Todas as balanças · /.test(JSON.stringify(e)) &&
       JSON.stringify(e).indexOf(sn) >= 0 ? a[i + 1] : null)).filter(Boolean)[0] || {}).fields || [];
-    const fA0 = feederTotals('A', DS), fB0 = feederTotals('B', DS), fdA = fieldsOf('Sorter A'), fdB = fieldsOf('Sorter B');
-    const cellOk = (fd, ft) => fd.length === Object.keys(ft).length && Object.keys(ft).every(n => fd[n - 1] && fd[n - 1].is_short &&
-      fd[n - 1].text.content === 'Balança ' + String(n).padStart(2, '0') + ' / 供包台' + String(n).padStart(2, '0') + ': **' + cF.feishuN_(ft[n]) + '**');
-    check(cellOk(fdA, fA0) && cellOk(fdB, fB0) && text.indexOf('Todas as balanças · Sorter A / 所有供包台** — total ' +
-      cF.feishuN_(Object.values(fA0).reduce((a, v) => a + v, 0))) >= 0,
-      'Bot do Feishu: todas as balanças de cada sorter (1 a 12 no simulado) com a quantidade do dia', {a: fdA.slice(0, 3), n: fdA.length});
+    const cellOk = (fd, dv) => fd.length === 14 && fd.every((f, i) => f.is_short && f.text.content === 'Balança ' + String(i + 1).padStart(2, '0') + ' / 供包台' +
+      String(i + 1).padStart(2, '0') + ': ' + (i < 12 ? '**' + cF.feishuN_(hourRow(dv, DS, i + 1, 11).sorter_sorttotal) + '**' : '0 ⚠️'));
+    check(cellOk(fieldsOf('Sorter A'), 'A') && cellOk(fieldsOf('Sorter B'), 'B'),
+      'Bot do Feishu: todas as balanças de cada sorter na hora (as sem produção com 0 ⚠️)', fieldsOf('Sorter A').slice(0, 3));
+    // Fim do turno: às 14:07 (hora 13h–14h), o fechamento do T1; às 06:07, o do T3 (22h do dia anterior → 06h).
+    const t1Tot = [6, 7, 8, 9, 10, 11, 12, 13].reduce((a, h) => a + tot(h), 0);
+    cF.feishuSorterTick_(at(14, 7));
+    const mT1 = JSON.stringify((msgs[msgs.length - 1] || {}).card || {});
+    const D0 = DS, Dm1 = new Date(Date.parse(DS + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
+    cF.feishuSorterTick_(at(6, 7, D0));
+    const mT3 = JSON.stringify((msgs[msgs.length - 1] || {}).card || {}), t3Tot = tot(22, Dm1) + tot(23, Dm1) + [0, 1, 2, 3, 4, 5].reduce((a, h) => a + tot(h, D0), 0);
+    check(/13h–14h/.test(mT1) && mT1.indexOf('🏁 **Fechamento do turno T1 (06h–14h) / 班次结束**\\n📦 **' + cF.feishuN_(t1Tot) + '**') >= 0 &&
+      /05h–06h/.test(mT3) && mT3.indexOf('Fechamento do turno T3 (22h–06h) / 班次结束**\\n📦 **' + cF.feishuN_(t3Tot) + '**') >= 0,
+      'Bot do Feishu: no fim do turno, o total do turno (T1 às 14h; T3 das 22h do dia anterior às 06h)', {t1Tot, t3Tot});
     reply = {code: 19021, msg: 'sign match fail or timestamp is not within one hour from current time'};
     const bad = cF.testarFeishu(), bad1 = cF.feishuSorterTick_(at(15, 6)), bad2 = cF.feishuSorterTick_(at(15, 7)), bad3 = cF.feishuSorterTick_(at(15, 8));
     const bad4 = cF.feishuSorterTick_(at(15, 9));
@@ -5016,12 +5032,24 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       cF.__state.props.FEISHU_ULTIMA === DS + ' 14' && cF.allTabRows_('LOG').some(r => /Bot do Feishu \(.* tentativa 3\)/.test(String(r[4]))),
       'Bot do Feishu: recusa com dica (assinatura) e no máximo 3 tentativas por hora (aviso no LOG)', {bad, bad1, ultima: cF.__state.props.FEISHU_ULTIMA});
     reply = {code: 0, msg: 'success'};
+    // Sem acesso ao sorter: UM aviso no grupo (não cartões com zero a cada hora); quando volta, o cartão diz que voltou.
+    longe = true;
+    const n0 = msgs.length;
+    [6, 7, 8].forEach(mi => cF.feishuSorterTick_(at(16, mi)));
+    [6, 7, 8].forEach(mi => cF.feishuSorterTick_(at(17, mi)));
+    const avisos = msgs.slice(n0);
+    longe = false;
+    cF.feishuSorterTick_(at(18, 6));
+    const back = JSON.stringify((msgs[msgs.length - 1] || {}).card || {});
+    check(avisos.length === 1 && /sem acesso ao sorter/.test(avisos[0].card.header.title.content) && /O acesso ao sorter voltou/.test(back) && /17h–18h/.test(back) &&
+      !cF.__state.props.FEISHU_FALHA, 'Bot do Feishu: sem acesso ao sorter, um aviso só; quando volta, segue com a hora', {avisos: avisos.length});
     const ok = cF.testarFeishu(), js = JSON.stringify(ok);
     check(ok.ok && /Mensagem enviada/.test(ok.enviado) && ok.numeros.maisProcessaram.length === 3 && ok.numeros.menosProcessaram.length === 3 &&
-      js.indexOf('teste-falso') < 0 && js.indexOf(SEG) < 0, 'testarFeishu: manda e mostra os números, sem o webhook nem o segredo', ok);
+      /:00:00 → .*:59:59$/.test(ok.periodo) && js.indexOf('teste-falso') < 0 && js.indexOf(SEG) < 0,
+      'testarFeishu: manda a última hora e mostra o período e os números, sem o webhook nem o segredo', ok);
     delete cF.__state.props.FEISHU_WEBHOOK;
     const nMsgs = msgs.length;
-    check(cF.feishuSorterTick_(at(16, 10)) === null && msgs.length === nMsgs && cF.testarFeishu().ok === false, 'Bot do Feishu: sem webhook, nada é enviado');
+    check(cF.feishuSorterTick_(at(19, 10)) === null && msgs.length === nMsgs && cF.testarFeishu().ok === false, 'Bot do Feishu: sem webhook, nada é enviado');
   }
   // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
   check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&

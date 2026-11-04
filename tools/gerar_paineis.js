@@ -137,8 +137,9 @@ Induction All e By Layer All (summary statistics); a consulta por hora só divid
 quantity" (/statis/outlets), do mesmo jeito; se ela não responder, o dia fica com os totais e o LOG avisa.
 
 ## Bot do Feishu (opcional)
-De hora em hora (minuto 5), um cartão no grupo do Feishu: produção da hora que fechou (Sorter A + B), total do dia, produção por
-turno e as 3 balanças que mais e as 3 que menos processaram no dia. No grupo: Configurações do grupo → Bots → Adicionar bot → Bot
+De hora em hora (minuto 5), um cartão no grupo do Feishu com os dados da hora que fechou (ex.: às 13:05, das 12:00 às 12:59):
+produção (Sorter A + B), Valid total, No Sort Code e as balanças (3 que mais, 3 que menos e todas); no fim de cada turno, o total do
+turno. No grupo: Configurações do grupo → Bots → Adicionar bot → Bot
 personalizado; copie o webhook. Em http://localhost:3500/config, seção **Bot do Feishu**: cole o webhook (e o segredo, se ligou a
 assinatura) e clique em **Salvar e mandar um teste**. O computador precisa de internet. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
 `};

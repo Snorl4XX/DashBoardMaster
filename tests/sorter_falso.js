@@ -48,6 +48,18 @@ function isoOf(v) {
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(v || '')) || [];
   return m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0');
 }
+/**
+ * V4.23.5: horas da janela start → end ("2026-11-4 12:00:00" → "2026-11-4 12:59:59" = só a hora 12; dia inteiro = 24 horas;
+ * "2026-11-3 22:00:00" → "2026-11-4 05:59:59" = o T3 que passa da meia-noite): [{date, h}].
+ */
+function hoursIn(start, end) {
+  const p = v => { const m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(String(v || ''));
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) : NaN; };
+  const a = p(start), b = p(end), out = [];
+  for (let t = a - (a % 3600000); t <= b; t += 3600000) { const d = new Date(t); out.push({date: d.toISOString().slice(0, 10), h: d.getUTCHours()}); }
+  return out;
+}
+const stampOf = (v, sec) => { const d = new Date(v); return d.toISOString().slice(0, 10) + ' ' + d.toISOString().slice(11, sec ? 19 : 16); };
 function num(dev, n, h, salt) { return ((n * 7 + h * 3 + salt * 5 + (dev === 'A' ? 11 : 0)) % 9); }
 /** Uma hora de uma balança (0 = todas as balanças + 2 volumes sem balança por hora, para testar o "N/A"). */
 function hourRow(dev, date, n, h) {
@@ -133,12 +145,14 @@ function createFakeSorter(opts) {
         return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: 0, data: []})};
       }
       if (group === '0' || opts.porHora === 'ignora') {
-        // "no group by" (print do usuário): uma linha só, o dia inteiro.
-        const row = {timearea: date + ' 00:00~' + date + ' 23:59'};
+        // "no group by" (print do usuário): uma linha só, a janela start → end (o dia inteiro ou, no bot, uma hora / um turno).
+        const hs = hoursIn(req.query.get('start'), req.query.get('end'));
+        const row = {timearea: hs.length ? stampOf(Date.parse(hs[0].date + 'T' + String(hs[0].h).padStart(2, '0') + ':00:00Z')) + '~' +
+          stampOf(Date.parse(hs[hs.length - 1].date + 'T' + String(hs[hs.length - 1].h).padStart(2, '0') + ':59:00Z')) : date + ' 00:00~' + date + ' 23:59'};
         for (let n = 1; n <= COLS; n++) {
           let t = null;
-          for (let h = 0; h < 24 && n <= BALANCAS; h++) { const r = hourRow(device, date, n, h); if (r) t = (t || 0) + r.sorter_sorttotal; }
-          if (group === '0' && n === 1 && opts.diaExtra) t += opts.diaExtra;
+          if (n <= BALANCAS) hs.forEach(x => { const r = hourRow(device, x.date, n, x.h); if (r) t = (t || 0) + r.sorter_sorttotal; });
+          if (group === '0' && n === 1 && opts.diaExtra && hs.length === 24) t += opts.diaExtra;
           row['total_' + n] = t;
         }
         return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: 1, data: [row]})};
@@ -216,17 +230,17 @@ function createFakeSorter(opts) {
       const n = opts.codigos ? (raw >= 1001 && raw < 1001 + BALANCAS ? raw - 1000 : 0) : raw;
       const data = [];
       if (q.get('group') === '0') {
-        // "no group by": uma linha só para o período inteiro (start → end).
-        const end = isoOf(q.get('end')), sum = {};
-        for (let d = date; d <= end; d = new Date(Date.parse(d + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10)) {
-          for (let h = 0; h < 24; h++) {
-            const r = hourRow(device, d, n, h);
-            if (r) Object.keys(r).forEach(k => { if (k !== 'timearea') sum[k] = (sum[k] || 0) + r[k]; });
-          }
-        }
+        // "no group by": uma linha só para o período inteiro (start → end; V4.23.5: também uma hora ou um turno).
+        const end = isoOf(q.get('end')), sum = {}, hs = hoursIn(q.get('start'), q.get('end'));
+        hs.forEach(x => {
+          const r = hourRow(device, x.date, n, x.h);
+          if (r) Object.keys(r).forEach(k => { if (k !== 'timearea') sum[k] = (sum[k] || 0) + r[k]; });
+        });
         // opts.diaExtra: a tela sem agrupar tem volumes que as horas não têm (o total do dia manda).
-        if (opts.diaExtra && sum.sorter_sorttotal) { sum.sorter_sorttotal += opts.diaExtra; sum.sorter_validtotal += opts.diaExtra; }
-        if (Object.keys(sum).length) data.push(Object.assign({timearea: date + ' 00:00:00~' + end + ' 23:59:59'}, sum));
+        if (opts.diaExtra && sum.sorter_sorttotal && hs.length >= 24) { sum.sorter_sorttotal += opts.diaExtra; sum.sorter_validtotal += opts.diaExtra; }
+        const ta = hs.length ? stampOf(Date.parse(hs[0].date + 'T' + String(hs[0].h).padStart(2, '0') + ':00:00Z'), true) + '~' +
+          stampOf(Date.parse(hs[hs.length - 1].date + 'T' + String(hs[hs.length - 1].h).padStart(2, '0') + ':59:59Z'), true) : date + ' 00:00:00~' + end + ' 23:59:59';
+        if (Object.keys(sum).length) data.push(Object.assign({timearea: ta}, sum));
       } else for (let h = 0; h < 24; h++) { const r = hourRow(device, date, n, h); if (r) data.push(r); }
       return {code: 200, headers: {'content-type': 'application/json', 'set-cookie': set}, body: JSON.stringify({code: 1, msg: 'Succeed', count: data.length, data})};
     }

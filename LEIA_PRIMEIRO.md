@@ -1,8 +1,25 @@
-# J&T DASHMASTER V4.23.4 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.5 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.23.5 — Bot do Feishu: os dados de cada hora
+
+Pedido "tem que mandar em 1 hora, 1 hora: das 01h até 02h, os dados desse período; das 12h às 13h, desse período": cada cartão
+traz **só os números da hora que fechou**, pedidos ao site do sorter para essa janela (ex.: às 13:05, de 12:00:00 a 12:59:59,
+"no group by", Induction All, By Layer All — os mesmos filtros dos prints):
+- ⏱️ Sort total da hora (Sorter A + B e cada um), ✅ Valid total e ❌ No Sort Code (com %), e o turno da hora;
+- 🏆 as 3 balanças que mais e 🐢 as 3 que menos processaram **na hora**, e 📋 todas as balanças de cada sorter na hora
+  (sem produção = 0 ⚠️);
+- 🏁 **no fim de cada turno** (cartões das 13h–14h, 21h–22h e 05h–06h): o total do turno que fechou (T1 06h–14h, T2 14h–22h,
+  T3 22h–06h, que começa no dia anterior).
+
+Sem acesso ao sorter (computador fora da rede da base), o grupo recebe **um aviso só** em vez de cartões com zero; quando o acesso
+volta, o cartão seguinte diz "O acesso ao sorter voltou".
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_5_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. Para ver na hora: Configurações → Bot do Feishu → **Salvar e mandar um teste**.
 
 ## V4.23.4 — Bot do Feishu: cartão com emojis e "Balança" em chinês
 
