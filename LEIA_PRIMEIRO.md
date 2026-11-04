@@ -1,8 +1,32 @@
-# J&T DASHMASTER V4.22.6 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.22.7 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.22.7 — Produção do Sorter: balanças somadas 40 vezes e A/B conferidos (PDF "ALTERAÇÃO NO DASH SORTER")
+
+**O que estava errado:**
+- As 40 balanças vinham com o mesmo número (505.017 de Sort total e 92 de No Sort Code). O site devolve o **total do sorter
+  inteiro** quando o número da balança não vale para ele, e o painel perguntava as balanças "1 a 40". Cada uma vinha com o total,
+  e o painel somava 40 vezes (20.200.680 = 40 × 505.017). Isso afetava os gráficos de balança, o "Produção por sorter" e a
+  tabela; os cartões (número oficial) estavam certos.
+- O Sorter B era lido sem escolher (o que o site mostra numa sessão nova). Se o padrão do site fosse outro, A e B se misturavam.
+
+**O que mudou:**
+- **Balanças:** se duas ou mais balanças vierem iguais ao total, o painel não soma nada por balança. Ele procura a lista certa no
+  `<select>` "Induction No./区" da tela de estatística do site (`/statis/...`) e lê de novo com ela (fica em
+  `SORTER_BALANCAS_SITE`). Se não achar, guarda só o total (balança "N/A"), avisa no LOG e os gráficos de balança ficam vazios até
+  a lista certa (Propriedade `SORTER_BALANCAS`, os valores do "Induction No./区").
+- **A e B:** a descoberta grava a troca dos dois: A = `selecteddb=DB2` e B = `selecteddb=DB1`. Cada sessão escolhe o seu
+  sorter de propósito, e o painel confere pelo título da página do site ("(A套)" / "(B套)"). Se uma sessão mostrar o outro sorter,
+  vale o que o site mostra (aviso no LOG); se as duas mostrarem o mesmo, o dia não é gravado.
+- **Uma vez:** os dias já baixados entram na fila de novo, e a troca antiga (só a do A) é descoberta de novo com a do B.
+- O teste em Configurações mostra, para cada sorter, a página "(A套)" / "(B套)" e de onde vem a lista de balanças.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_7_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**. Os dias antigos
+são refeitos sozinhos pela fila.
 
 ## V4.22.6 — link-publico.bat numa janela só
 

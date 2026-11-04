@@ -130,10 +130,11 @@ Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" 
 | SORTER_TROCA_A | pedido de troca para o Sorter A: {"metodo", "caminho", "corpo"} |
 | SORTERS | sorters lidos, na ordem (padrão "B,A") |
 | SORTER_PADRAO | o sorter que o site mostra sem trocar (padrão "B") |
-| SORTER_BALANCAS | lista das balanças (ex.: "1,2,3"); sem ela, de 1 até SORTER_MAX_BALANCAS (padrão 40) |
+| SORTER_BALANCAS | lista das balanças: os valores do "Induction No./区" da tela do sorter (ex.: "1,2,3"). Sem ela, o painel procura a lista na tela de estatística do site; sem achar, de 1 até SORTER_MAX_BALANCAS (padrão 40) |
 
-Se os dois sorters vierem com os mesmos números, o painel não grava o dia e avisa: a troca não trocou nada. Para conferir, rode
-**diagnosticarSorter** em Configurações → Executar função.
+Se os dois sorters vierem com os mesmos números, o painel não grava o dia e avisa: a troca não trocou nada. Cada sorter é conferido
+pelo título da página do site ("(A套)" / "(B套)"). Se o site devolver o total do sorter para cada número de balança, o painel não
+soma por balança (só o total) e avisa no LOG. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
 `};
 const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
 // V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.

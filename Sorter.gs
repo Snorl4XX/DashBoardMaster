@@ -57,17 +57,57 @@ function sorterDevices_() {
     return {id: id, nome: 'Sorter ' + id, padrao: id === def, troca: troca && typeof troca === 'object' ? troca : null, trocaInvalida: !!raw && !troca};
   });
 }
-/** Balanças consultadas: SORTER_BALANCAS = "1,2,3…" ou, sem ela, de 1 até SORTER_MAX_BALANCAS (padrão 40). */
+/**
+ * Balanças consultadas: [{v: valor do inductionno, l: nome}]. SORTER_BALANCAS = "1,2,3…" (à mão); senão a lista da tela de
+ * estatística do site (SORTER_BALANCAS_SITE, achada sozinha — V4.22.7); senão de 1 até SORTER_MAX_BALANCAS (padrão 40).
+ */
 function sorterInductions_() {
-  const list = String(getProp_('SORTER_BALANCAS', '') || '').split(/[\s,;]+/).map(Number).filter(n => n >= 1 && n <= 999 && Math.floor(n) === n);
-  if (list.length) return list.filter((n, i, a) => a.indexOf(n) === i).sort((a, b) => a - b);
+  const manual = String(getProp_('SORTER_BALANCAS', '') || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => x && x !== '0');
+  if (manual.length) return manual.filter((x, i, a) => a.indexOf(x) === i).map(x => ({v: x, l: x}));
+  const site = safeJsonParse_(getProp_('SORTER_BALANCAS_SITE', ''), null);
+  if (Array.isArray(site) && site.length) return site.filter(x => x && x.v !== undefined).map(x => ({v: String(x.v), l: String(x.l || x.v)}));
   const max = Math.max(1, Math.min(200, Number(getProp_('SORTER_MAX_BALANCAS', '')) || 40));
   const out = [];
-  for (let i = 1; i <= max; i++) out.push(i);
+  for (let i = 1; i <= max; i++) out.push({v: String(i), l: String(i)});
   return out;
 }
-function sorterInductionLabel_(n) { return 'Balança ' + String(n).padStart(2, '0'); }
-
+/** "7" → "Balança 07"; outro nome da tela ("1区") → "Balança 1区". */
+function sorterInductionLabel_(it) {
+  const l = String(it && it.l !== undefined ? it.l : it).trim();
+  return 'Balança ' + (/^\d+$/.test(l) ? l.padStart(2, '0') : l);
+}
+/**
+ * V4.22.7: lista das balanças na tela de estatística do site (o <select> do "Induction No./区"). O site devolve o total do sorter
+ * inteiro quando o número da balança não vale para ele (as 40 balanças "1…40" vieram iguais ao total). Volta {page, list} ou null.
+ */
+function sorterInductionsFromSite_() {
+  const s = sorterSession_({id: '', nome: 'sorter'}), home = sorterOpenPage_(s, sorterPage_()), urls = [];
+  const add = u => {
+    const c = sorterLocalPath_(u);
+    if (c && /statis/i.test(c) && !/\.data(\?|$)|\.(js|css|png|jpe?g|gif|svg|ico|woff2?)(\?|$)/i.test(c) && urls.indexOf(c) < 0) urls.push(c);
+  };
+  String(home.html).replace(/["']((?:https?:\/\/[^"'\s<>]+)?\/[^"'\s<>]*)["']/g, (x, u) => { add(u); return x; });
+  ['/statis/summary', '/statis/summaryview', '/statis/index', '/statis'].forEach(add);
+  for (let i = 0; i < urls.length && i < 8; i++) {
+    let html = '';
+    try {
+      const r = sorterFetch_(s, sorterBase_() + urls[i], {headers: {Accept: 'text/html,*/*'}});
+      if (r.getResponseCode() >= 400) continue;
+      html = r.getContentText();
+    } catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; continue; }
+    const sel = /<select\b[^>]*(?:name|id)\s*=\s*["'][^"']*induction[^"']*["'][^>]*>([\s\S]*?)<\/select>/i.exec(html);
+    if (!sel) continue;
+    const list = [];
+    sel[1].replace(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi, (x, at, txt) => {
+      const a = sorterAttrs_('<option ' + at + '>'), l = sorterDecode_(txt.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+      const v = a.value !== undefined ? String(a.value).trim() : l;
+      if (v !== '' && v !== '0' && !/^(all|todas?|全部)$/i.test(l) && !list.some(y => y.v === v)) list.push({v: v, l: l || v});
+      return x;
+    });
+    if (list.length) return {page: urls[i], list: list};
+  }
+  return null;
+}
 function sorterUrl_(date, page, opts) {
   opts = opts || {};
   return sorterBase_() + SORTER_PATH_ + '?page=' + page + '&limit=1000&start=' + encodeURIComponent(date + ' 00:00:00') +
@@ -157,7 +197,8 @@ function sorterSwitchBody_(corpo, metodo, csrf) {
  */
 function sorterPrepare_(dev) {
   const s = sorterSession_(dev);
-  if (dev.padrao) return s;
+  // V4.22.7: com a troca do sorter padrão (ex.: B = DB1), ele também é escolhido de propósito (não depende do padrão do site).
+  if (dev.padrao && !dev.troca && !dev.trocaInvalida) return s;
   if (dev.trocaInvalida) throw new Error('SORTER_TROCA_' + dev.id + ' não é um JSON válido (ex.: {"metodo": "POST", "caminho": "/home/…", "corpo": "_token=x&…"}).');
   const t = dev.troca;
   if (!t || (!t.caminho && !t.cookie)) throw new Error(dev.nome + ': falta a troca de sorter (Propriedade SORTER_TROCA_' + dev.id + ').');
@@ -434,31 +475,46 @@ function sorterDiscover_(dev) {
         .forEach(x => relevant.push({metodo: x[0], caminho: x[1], concat: false, chaves: optFields.slice(0, 2), campos: {}, pagina: p.path, pontos: 0}));
     });
   }
-  // Valor da opção para o campo: a opção com esse nome de campo (ex.: data-connectionname) ou os primeiros valores.
-  const valFor = k => { const o = optsA.filter(x => !x.href && x.campo && x.campo.toLowerCase() === String(k).toLowerCase())[0]; return o ? [o.valor] : vals.slice(0, 2); };
+  // Pares A/B: o valor do A e o do B no MESMO campo (ex.: data-connectionname DB2 / DB1). Com os dois, cada sessão escolhe o seu
+  // sorter de propósito, e a troca vale se os números dos dois forem diferentes (não depende de qual é o padrão do site).
+  const plainA = optsA.filter(x => !x.href), pairOf = oA => { const oB = optsB.filter(x => !x.href && x.campo === oA.campo)[0]; return {a: oA.valor, b: oB ? oB.valor : null}; };
+  const pairsFor = k => {
+    const same = plainA.filter(x => x.campo && x.campo.toLowerCase() === String(k).toLowerCase());
+    const list = (same.length ? same : plainA).slice(0, 2).map(pairOf);
+    return list.length ? list : vals.slice(0, 2).map(v => ({a: v, b: null}));
+  };
   relevant.slice(0, 8).forEach(p => {
     const hid = Object.keys(p.campos).filter(k => optFields.indexOf(k) < 0).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(p.campos[k]));
     const pg = p.pagina && p.pagina !== sorterPage_() ? {pagina: p.pagina} : {};
     if (p.concat) {
-      (p.chaves.length ? valFor(p.chaves[0]) : vals.slice(0, 2)).forEach(v => cands.push({desc: p.metodo + ' ' + p.caminho + v,
-        troca: Object.assign({metodo: p.metodo, caminho: p.caminho + encodeURIComponent(v)}, pg)}));
+      pairsFor(p.chaves[0] || '').forEach(pr => {
+        const mk = v => Object.assign({metodo: p.metodo, caminho: p.caminho + encodeURIComponent(v)}, pg);
+        cands.push({desc: p.metodo + ' ' + p.caminho + pr.a, troca: mk(pr.a), outro: pr.b !== null ? mk(pr.b) : null});
+      });
       return;
     }
     const keys = (p.chaves.length ? p.chaves.filter(k => optFields.indexOf(k) >= 0).concat(p.chaves) : (optFields.length ? optFields : ['device_id', 'id', 'device', 'deviceId']))
       .filter((k, i, a) => a.indexOf(k) === i).slice(0, 3);
-    keys.forEach(k => valFor(k).forEach(v => cands.push({desc: p.metodo + ' ' + p.caminho + ' (' + k + '=' + v + ')',
-      troca: Object.assign({metodo: p.metodo, caminho: p.caminho, corpo: hid.concat([encodeURIComponent(k) + '=' + encodeURIComponent(v)]).join('&')}, pg)})));
+    keys.forEach(k => pairsFor(k).forEach(pr => {
+      const mk = v => Object.assign({metodo: p.metodo, caminho: p.caminho, corpo: hid.concat([encodeURIComponent(k) + '=' + encodeURIComponent(v)]).join('&')}, pg);
+      cands.push({desc: p.metodo + ' ' + p.caminho + ' (' + k + '=' + pr.a + ')', troca: mk(pr.a), outro: pr.b !== null ? mk(pr.b) : null});
+    }));
   });
   const tested = [];
+  const titleOf = s => { try { return sorterDecode_(((sorterOpenPage_(s, sorterPage_()).html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim()).slice(0, 60); } catch (e) { return ''; } };
+  const totalWith = (troca, label) => {
+    const s = sorterSession_(dev);
+    try { sorterApplySwitch_(s, troca, dev.nome); return {t: sorterTotal7_(s), title: titleOf(s)}; }
+    catch (e) { log('  ✗ ' + label + ': ' + String(e && e.message || e).slice(0, 100)); return null; }
+  };
   const tryOne = (c, global) => {
     const s = sorterSession_(dev);
     let t;
     try { sorterApplySwitch_(s, c.troca, dev.nome); t = sorterTotal7_(s); }
     catch (e) { log('  ✗ ' + c.desc + ': ' + String(e && e.message || e).slice(0, 100)); return null; }
     const ok = t > 0 && t !== t0;
-    let title = '';
-    if (ok) { try { title = ((sorterOpenPage_(s, sorterPage_()).html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim().slice(0, 60); } catch (e) { /* só o título */ } }
-    log('  ' + (ok ? '✓' : '✗') + ' ' + c.desc + ': Sort total ' + t + (ok ? (title ? ' · página: ' + sorterDecode_(title) : '') : ' (não mudou)'));
+    const title = ok ? titleOf(s) : '';
+    log('  ' + (ok ? '✓' : '✗') + ' ' + c.desc + ': Sort total ' + t + (ok ? (title ? ' · página: ' + title : '') : ' (não mudou)'));
     if (!ok || !global) return ok ? t : null;
     // A troca vale para todo o site? (sessão nova sem trocar mostraria o mesmo número): não usa, para não mudar a tela de ninguém.
     const t1 = sorterTotal7_(sorterSession_(dev));
@@ -469,16 +525,35 @@ function sorterDiscover_(dev) {
     return t;
   };
   for (let i = 0; i < cands.length && tested.length < 24; i++) {
-    tested.push(cands[i].desc);
-    const r = tryOne(cands[i], true);
+    const c = cands[i];
+    tested.push(c.desc);
+    if (c.outro) {
+      // Os dois valores, cada um numa sessão nova: a troca vale se os números forem diferentes.
+      const ra = totalWith(c.troca, c.desc);
+      const rb = ra ? totalWith(c.outro, c.desc + ' [' + others[0].nome + ']') : null;
+      if (!ra || !rb) continue;
+      const ok = (ra.t > 0 || rb.t > 0) && ra.t !== rb.t;
+      log('  ' + (ok ? '✓' : '✗') + ' ' + c.desc + ': ' + dev.nome + ' ' + ra.t + (ra.title ? ' (' + ra.title + ')' : '') + ' · ' + others[0].nome + ' ' + rb.t +
+        (rb.title ? ' (' + rb.title + ')' : '') + (ok ? '' : ' (números iguais: não trocou)'));
+      if (!ok) continue;
+      const t1 = sorterTotal7_(sorterSession_(dev));
+      if (t1 !== t0) {
+        // O padrão do site mudou: a troca vale para todo mundo. Volta o site para o que estava (o valor com o número de antes).
+        log('  A troca vale para TODO o site: o painel não usa, para não mudar a tela de quem usa o sorter.');
+        const back = rb.t === t0 ? c.outro : ra.t === t0 ? c.troca : null;
+        if (back) { try { sorterApplySwitch_(sorterSession_(dev), back, dev.nome); } catch (e) { /* tentou voltar */ } }
+        return {ok: false, global: true, report: report};
+      }
+      return {ok: true, troca: c.troca, como: c.desc, outro: {id: others[0].id, troca: c.outro}, report: report};
+    }
+    const r = tryOne(c, true);
     if (r === 'global') {
-      // Volta o site para o sorter padrão pelo mesmo pedido, com o valor dele.
       const vb = optsB.filter(o => !o.href).map(o => o.valor)[0];
-      const back = cands[i].troca.corpo && vb ? Object.assign({}, cands[i].troca, {corpo: cands[i].troca.corpo.replace(/=[^=&]*$/, '=' + encodeURIComponent(vb))}) : null;
+      const back = c.troca.corpo && vb ? Object.assign({}, c.troca, {corpo: c.troca.corpo.replace(/=[^=&]*$/, '=' + encodeURIComponent(vb))}) : null;
       if (back) { try { sorterApplySwitch_(sorterSession_(dev), back, dev.nome); } catch (e) { /* tentou voltar */ } }
       return {ok: false, global: true, report: report};
     }
-    if (r !== null) return {ok: true, troca: cands[i].troca, como: cands[i].desc, report: report};
+    if (r !== null) return {ok: true, troca: c.troca, como: c.desc, report: report};
   }
   // Cookie: cada valor em todos os nomes de uma vez; o que mudar, nome por nome.
   const names = cookieNames.concat(optFields, SORTER_COOKIE_NAMES_).filter((n, i, a) => a.indexOf(n) === i).slice(0, 16);
@@ -501,7 +576,9 @@ function sorterLearnSwitch_(dev) {
   const r = sorterDiscover_(dev);
   if (r.ok) {
     setProp_('SORTER_TROCA_' + dev.id, JSON.stringify(Object.assign({}, r.troca, {auto: true})));
-    logSync_('INFO', 'sorter_flow', isoToday_(), dev.nome + ': troca descoberta sozinha (' + r.como + ').');
+    // V4.22.7: o outro sorter (ex.: B = DB1) também é escolhido de propósito.
+    if (r.outro) setProp_('SORTER_TROCA_' + r.outro.id, JSON.stringify(Object.assign({}, r.outro.troca, {auto: true})));
+    logSync_('INFO', 'sorter_flow', isoToday_(), dev.nome + ': troca descoberta sozinha (' + r.como + ')' + (r.outro ? ', e a do Sorter ' + r.outro.id + ' também' : '') + '.');
   }
   return r;
 }
@@ -554,16 +631,32 @@ function sorterSum_(rows) {
   (rows || []).forEach(r => SORTER_COLUMNS_.forEach(c => { t[c[1]] += Number(r[c[1]]) || 0; }));
   return t;
 }
-/** Os sorters do dia (cada um com a sua sessão). Sorter sem a troca fica de fora, com o motivo em `skipped`. */
+/** Letra do sorter que a página mostra nesta sessão ("巴西GRU分拣机(A套)监控系统" → "A"), ou null. */
+function sorterSiteLabel_(s) {
+  try {
+    const t = (sorterOpenPage_(s, sorterPage_()).html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '';
+    const m = /\(\s*([A-Za-z0-9])\s*套\s*\)/.exec(t);
+    return m ? m[1].toUpperCase() : null;
+  } catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; return null; }
+}
+/**
+ * Os sorters do dia (cada um com a sua sessão). Sorter sem a troca fica de fora, com o motivo em `skipped`. V4.22.7: cada
+ * sessão é conferida pelo título da página do site ("(A套)" / "(B套)"); se estiverem trocadas, vale o que o site mostra.
+ */
 function sorterSessions_() {
   const out = [], skipped = [];
-  sorterDevices_().forEach(dev => {
-    // V4.22.1: sorter sem a troca — o painel tenta descobrir sozinho (uma vez por dia; Configurações → Salvar e testar: na hora).
-    if (!dev.padrao && !dev.troca && !dev.trocaInvalida && getProp_('SORTER_DESCOBERTA_' + dev.id, '') !== isoToday_()) {
+  let devs = sorterDevices_();
+  // V4.22.1: sorter sem a troca — o painel tenta descobrir sozinho (uma vez por dia; Configurações → Salvar e testar: na hora).
+  const need = devs.filter(dev => !dev.padrao && !dev.troca && !dev.trocaInvalida && getProp_('SORTER_DESCOBERTA_' + dev.id, '') !== isoToday_());
+  if (need.length) {
+    need.forEach(dev => {
       setProp_('SORTER_DESCOBERTA_' + dev.id, isoToday_());
-      try { const r = sorterLearnSwitch_(dev); if (r.ok) dev.troca = r.troca; }
+      try { sorterLearnSwitch_(dev); }
       catch (e) { if (/^Não consegui acessar o sorter/.test(String(e && e.message || e))) throw e; }
-    }
+    });
+    devs = sorterDevices_();
+  }
+  devs.forEach(dev => {
     try { out.push(sorterPrepare_(dev)); }
     catch (e) {
       const m = String(e && e.message || e);
@@ -572,6 +665,24 @@ function sorterSessions_() {
     }
   });
   if (!out.length) throw new Error('Nenhum sorter pôde ser lido: ' + skipped.map(x => x.error).join(' · '));
+  const labels = out.map(sorterSiteLabel_), ids = out.map(s => s.dev.id);
+  if (out.length > 1 && labels.every(Boolean)) {
+    const dup = labels.filter((l, i) => labels.indexOf(l) !== i)[0];
+    if (dup) {
+      ids.forEach(id => { const t = safeJsonParse_(getProp_('SORTER_TROCA_' + id, ''), null); if (t && t.auto) { deleteProp_('SORTER_TROCA_' + id); deleteProp_('SORTER_DESCOBERTA_' + id); } });
+      throw new Error('As sessões dos sorters ' + ids.join(' e ') + ' mostram o mesmo sorter no site (' + dup + '套): a troca de sorter não funcionou.');
+    }
+    if (labels.every(l => ids.indexOf(l) >= 0) && labels.some((l, i) => l !== ids[i])) {
+      const byId = {};
+      out.forEach(s => { byId[s.dev.id] = s.dev; });
+      out.forEach((s, i) => { s.dev = byId[labels[i]]; });
+      if (getProp_('SORTER_AVISO_TROCADO', '') !== isoToday_()) {
+        setProp_('SORTER_AVISO_TROCADO', isoToday_());
+        logSync_('WARN', 'sorter_flow', isoToday_(), 'Os sorters estavam trocados (a sessão do ' + ids.map((id, i) => id + ' mostrava (' + labels[i] + '套)').join(', a do ') +
+          '): o painel usou o nome que o site mostra.');
+      }
+    }
+  }
   return {sessions: out, skipped: skipped};
 }
 function sorterWarnSkipped_(indicatorKey, date, skipped) {
@@ -631,13 +742,32 @@ function sorterSummary_(indicatorKey, isoDate) {
  */
 function runSorterDetailJob_(job, deadline, cfg, st) {
   const ind = job.indicator, date = job.date;
-  const ss = sorterSessions_(), inds = sorterInductions_();
+  const ss = sorterSessions_();
+  let inds = sorterInductions_(), ignored = false;
   const acc = GroupAccumulator_(cfg), totals = {};
   let rowsIn = 0;
+  // V4.22.7: o site devolve o total do sorter inteiro quando o número da balança não vale para ele. Duas ou mais balanças iguais ao
+  // total = filtro ignorado (as 40 balanças "1…40" vieram com o total e o painel somava 40 vezes).
+  const sameAsAll = (rows, all) => { const a = sorterSum_(rows), b = sorterSum_(all); return b.total > 0 && a.total === b.total && a.valid === b.valid && a.noInfo === b.noInfo; };
+  const isIgnored = got => got.slice(1).filter(rows => sameAsAll(rows, got[0])).length >= 2;
+  const fetchAll = s => sorterFetchDay_(s, date, [{induction: 0}].concat(inds.map(n => ({induction: n.v}))));
   ss.sessions.forEach(s => {
     if (Date.now() + 20000 > deadline) throw new Error('Tempo da execução acabou antes de ler todos os sorters do dia; nova tentativa na próxima.');
-    const got = sorterFetchDay_(s, date, [{induction: 0}].concat(inds.map(n => ({induction: n}))));
+    let got = fetchAll(s);
+    if (isIgnored(got) && !getProp_('SORTER_BALANCAS', '') && getProp_('SORTER_BALANCAS_BUSCA', '') !== isoToday_()) {
+      // Procura a lista certa na tela de estatística do site (uma vez por dia) e lê de novo com ela.
+      setProp_('SORTER_BALANCAS_BUSCA', isoToday_());
+      const found = sorterInductionsFromSite_();
+      if (found && found.list.length) {
+        setProp_('SORTER_BALANCAS_SITE', JSON.stringify(found.list));
+        logSync_('INFO', ind, date, found.list.length + ' balança(s) achadas na tela ' + found.page + ' do sorter.');
+        inds = sorterInductions_();
+        got = fetchAll(s);
+      }
+    }
     const all = got[0], byHour = {};
+    const ign = isIgnored(got);
+    if (ign) ignored = true;
     totals[s.dev.id] = sorterSum_(all);
     all.forEach(r => { byHour[r.hour] = Object.assign({}, r); });
     const push = (r, label) => {
@@ -649,13 +779,21 @@ function runSorterDetailJob_(job, deadline, cfg, st) {
         rowsIn++;
       });
     };
-    inds.forEach((n, i) => got[i + 1].forEach(r => {
-      push(r, sorterInductionLabel_(n));
-      const h = byHour[r.hour];
-      if (h) SORTER_COLUMNS_.forEach(c => { h[c[1]] = (h[c[1]] || 0) - (Number(r[c[1]]) || 0); });
-    }));
+    // Filtro ignorado: só o total (balança "N/A"), nunca o mesmo total somado por balança.
+    if (!ign) {
+      inds.forEach((n, i) => got[i + 1].forEach(r => {
+        push(r, sorterInductionLabel_(n));
+        const h = byHour[r.hour];
+        if (h) SORTER_COLUMNS_.forEach(c => { h[c[1]] = (h[c[1]] || 0) - (Number(r[c[1]]) || 0); });
+      }));
+    }
     Object.keys(byHour).forEach(hr => push(byHour[hr], 'N/A'));
   });
+  if (ignored && getProp_('SORTER_AVISO_BALANCAS', '') !== isoToday_()) {
+    setProp_('SORTER_AVISO_BALANCAS', isoToday_());
+    logSync_('WARN', ind, date, 'O sorter devolveu o total inteiro para cada número de balança (inductionno): os gráficos de balança ficam vazios ' +
+      'até a lista certa de balanças (Propriedade SORTER_BALANCAS, os valores do "Induction No./区" da tela do sorter). Os totais estão certos.');
+  }
   sorterCheckSwitch_(totals);
   sorterWarnSkipped_(ind, date, ss.skipped);
   const ds = acc.build();
@@ -666,36 +804,61 @@ function runSorterDetailJob_(job, deadline, cfg, st) {
   updateDayStatus_(ind, date, {detailsStatus: 'COMPLETE', expectedPages: 1, savedPages: 1, expectedRecords: acc.total(), savedRows: rowsIn, error: ''});
   return 'done';
 }
+/**
+ * V4.22.7 (uma vez): os dias já baixados somavam o total do sorter em cada balança (40 vezes) e podiam ter o A e o B trocados.
+ * A troca descoberta antes (só a do A) é esquecida para ser descoberta de novo com a do B, e os dias entram na fila de novo.
+ */
+function migrateSorterV4227_() {
+  if (!INDICATORS.sorter_flow || getProp_('MIGRADO_SORTER_V4227', '')) return 0;
+  setProp_('MIGRADO_SORTER_V4227', '1');
+  const ta = safeJsonParse_(getProp_('SORTER_TROCA_A', ''), null);
+  if (ta && ta.auto && !getProp_('SORTER_TROCA_B', '')) { deleteProp_('SORTER_TROCA_A'); deleteProp_('SORTER_DESCOBERTA_A'); }
+  const days = Object.keys(dayFilesMap_('sorter_flow', null, null)).sort().reverse();
+  if (days.length) enqueueJobs_(days.map(d => ['DETAIL_INIT', 'sorter_flow', d, 1]), {reset: true});
+  logSync_('INFO', 'sorter_flow', '', 'V4.22.7: ' + days.length + ' dia(s) da Produção do Sorter na fila de novo (balanças e A/B conferidos).');
+  return days.length;
+}
 
 /**
  * Diagnóstico (editor / Configurações): endereço, sorters (com ou sem a troca) e os totais de hoje de cada um. Nunca mostra
  * token ou cookie (só os nomes).
  */
 function diagnosticarSorter() {
-  const out = {endereco: sorterBase_() + SORTER_PATH_, pagina: sorterPage_(), balancas: sorterInductions_().length, sorters: []};
-  const today = isoToday_();
+  const lista = getProp_('SORTER_BALANCAS', '') ? 'SORTER_BALANCAS (à mão)' : getProp_('SORTER_BALANCAS_SITE', '') ? 'lista da tela do sorter' : '1 a ' + sorterInductions_().length;
+  const out = {endereco: sorterBase_() + SORTER_PATH_, pagina: sorterPage_(), balancas: sorterInductions_().length + ' (' + lista + ')', sorters: []};
+  const today = isoToday_(), reports = {};
+  // V4.22.1/V4.22.7: sem a troca, o teste procura sozinho como o site troca (e grava a do A e a do B) e mostra o relatório.
+  sorterDevices_().filter(dev => !dev.padrao && !dev.troca && !dev.trocaInvalida).forEach(dev => {
+    try { reports[dev.id] = sorterLearnSwitch_(dev).report; }
+    catch (e) { reports[dev.id] = [String(e && e.message || e)]; }
+  });
   sorterDevices_().forEach(dev => {
-    const x = {id: dev.id, padrao: dev.padrao, troca: dev.padrao ? 'não precisa (sorter padrão do site)' :
-      (dev.troca ? (dev.troca.auto ? 'descoberta sozinha' : 'configurada') : 'falta SORTER_TROCA_' + dev.id)};
-    // V4.22.1: sem a troca (ou com uma que falha), o teste procura sozinho como o site troca e mostra o relatório.
-    const learn = () => {
-      const r = sorterLearnSwitch_(dev);
-      x.descoberta = r.report;
-      if (r.ok) { dev.troca = r.troca; x.troca = 'descoberta sozinha (' + r.como + ')'; }
-      return r.ok;
-    };
+    const x = {id: dev.id, padrao: dev.padrao, troca: dev.troca ? (dev.troca.auto ? 'descoberta sozinha' : 'configurada') :
+      (dev.padrao ? 'sem troca (sorter padrão do site)' : 'falta SORTER_TROCA_' + dev.id)};
+    if (reports[dev.id]) x.descoberta = reports[dev.id];
     try {
-      if (!dev.padrao && !dev.troca && !dev.trocaInvalida) learn();
       let s;
       try { s = sorterPrepare_(dev); }
-      catch (e) { if (dev.padrao || dev.trocaInvalida || x.descoberta || !learn()) throw e; s = sorterPrepare_(dev); }
+      catch (e) {
+        // Troca configurada que falhou: procura de novo.
+        if (dev.padrao || dev.trocaInvalida || reports[dev.id]) throw e;
+        const r = sorterLearnSwitch_(dev);
+        x.descoberta = r.report;
+        if (!r.ok) throw e;
+        dev.troca = r.troca;
+        x.troca = 'descoberta sozinha (' + r.como + ')';
+        s = sorterPrepare_(dev);
+      }
       const t = sorterSum_(sorterFetchDay_(s, today, [{induction: 0}])[0]);
       x.hoje = {sortTotal: t.total, validTotal: t.valid, noSortCode: t.noInfo};
       // Título da página nesta sessão: o site mostra o sorter escolhido (ex.: 巴西GRU分拣机(A套)监控系统).
       try { x.pagina = sorterDecode_(((sorterOpenPage_(s, sorterPage_()).html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim()).slice(0, 60); }
       catch (e) { /* só o título */ }
+      const m = /\(\s*([A-Za-z0-9])\s*套\s*\)/.exec(x.pagina || '');
+      if (m && m[1].toUpperCase() !== dev.id) x.aviso = 'Esta sessão mostra o sorter ' + m[1].toUpperCase() + ' no site: o painel usa o nome que o site mostra.';
+      if (x.troca === 'descoberta sozinha' && x.descoberta === undefined && dev.troca.auto) x.troca = 'descoberta sozinha (' + (dev.troca.corpo || dev.troca.caminho || 'cookie') + ')';
       x.cookies = Object.keys(s.cookies);
-      x.token = s.csrf ? 'lido da página' : (dev.padrao ? 'não precisa' : 'não encontrado');
+      x.token = s.csrf ? 'lido da página' : (dev.troca ? 'não encontrado' : 'não precisa');
     } catch (e) { x.erro = String(e && e.message || e); }
     out.sorters.push(x);
   });

@@ -4814,6 +4814,40 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(cP.getRateDay_('sorter_flow', DS2).totalCount === A2.total + B2.total && trP2.corpo === 'device_id=3' && trP2.auto === true &&
     cP.allTabRows_('LOG').some(r => /mesmos números/.test(String(r[4]))),
     'Sorter A: troca descoberta que parou de valer é esquecida e descoberta de novo na próxima tentativa (o dia fica certo)', trP2);
+  // V4.22.7 (PDF "ALTERAÇÃO NO DASH SORTER"): as 40 balanças vinham com o total do sorter (o site devolve o total para um número de
+  // balança que não vale para ele) e o painel somava 40 vezes; A e B podiam estar trocados.
+  const runS = (fakeOpts, props) => {
+    const {c, site} = sorterCtx(Object.assign({SORTER_TROCA_A: '', SORTER_MAX_BALANCAS: '40'}, props || {}), Object.assign({modo: 'xadmin'}, fakeOpts));
+    c.queueHistory(DS, DS, true);
+    runAll(c);
+    const rows = c.getArchivedRange_('sorter_flow', DS, DS).rows;
+    const sum = (col, f) => rows.filter(r => r.column === col && (!f || f(r))).reduce((x, r) => x + Number(r.qty), 0);
+    return {c, site, rows, sum, rate: c.getRateDay_('sorter_flow', DS), logs: c.allTabRows_('LOG').map(r => String(r[4]))};
+  };
+  const kL = runS({codigos: true}), kN = runS({codigos: true, semLista: true}), kA = runS({padraoA: true});
+  check(kL.sum('Sort total') === A.total + B.total && kL.sum('Sort total', r => /^Balança/.test(r.induction)) === A.total + B.total - 2 * 21 * 2 &&
+    kL.rows.some(r => r.induction === 'Balança 12') && !kL.rows.some(r => r.induction === 'Balança 13') &&
+    JSON.parse(kL.c.__state.props.SORTER_BALANCAS_SITE).length === 12 && kL.logs.some(l => /12 balança\(s\) achadas na tela \/statis\/summary/.test(l)),
+    'Sorter: os números 1…40 devolvem o total → o painel acha a lista de balanças na tela de estatística e soma certo (não 40 vezes)',
+    {total: kL.sum('Sort total'), esperado: A.total + B.total});
+  check(kN.sum('Sort total') === A.total + B.total && kN.rows.every(r => r.induction === 'N/A') &&
+    kN.logs.some(l => /devolveu o total inteiro para cada número de balança/.test(l)),
+    'Sorter: sem a lista de balanças, o filtro ignorado não é somado (só o total, com aviso)', {total: kN.sum('Sort total')});
+  check(kA.rate.metrics.sortTotalA === A.total && kA.rate.metrics.sortTotalB === B.total && kA.sum('Sort total', r => r.sorter === 'Sorter A') === A.total &&
+    JSON.parse(kA.c.__state.props.SORTER_TROCA_A).corpo === 'selecteddb=DB2' && JSON.parse(kA.c.__state.props.SORTER_TROCA_B).corpo === 'selecteddb=DB1',
+    'Sorter: o site com o A como padrão — A (DB2) e B (DB1) escolhidos de propósito, sem trocar os números', kA.rate.metrics);
+  // Trocas configuradas invertidas (A = DB1, B = DB2): o título da página ("(A套)" / "(B套)") manda.
+  const pg = '/dbselectview?from=top';
+  const kT = runS({}, {SORTER_TROCA_A: JSON.stringify({metodo: 'POST', caminho: '/dbselect', corpo: 'selecteddb=DB1', pagina: pg}),
+    SORTER_TROCA_B: JSON.stringify({metodo: 'POST', caminho: '/dbselect', corpo: 'selecteddb=DB2', pagina: pg})});
+  check(kT.rate.metrics.sortTotalA === A.total && kT.rate.metrics.sortTotalB === B.total && kT.logs.some(l => /Os sorters estavam trocados/.test(l)),
+    'Sorter: sessões invertidas são corrigidas pelo nome que o site mostra (A套 / B套)', kT.rate.metrics);
+  // Uma vez: os dias já baixados entram na fila de novo e a troca antiga (só a do A) é esquecida.
+  kL.c.__state.props.SORTER_TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/dbselect', corpo: 'selecteddb=DB2', auto: true});
+  delete kL.c.__state.props.SORTER_TROCA_B;
+  const mig1 = kL.c.migrateSorterV4227_(), mig2 = kL.c.migrateSorterV4227_();
+  check(mig1 === 1 && mig2 === 0 && !kL.c.__state.props.SORTER_TROCA_A && kL.c.pendingJobs_().some(j => j.indicator === 'sorter_flow' && j.type === 'DETAIL_INIT' && j.date === DS),
+    'V4.22.7: os dias da Produção do Sorter são baixados de novo, uma vez (e a troca só do A é descoberta de novo)', {mig1, mig2});
   const diag = cS.diagnosticarSorter();
   check(diag.sorters.length === 2 && diag.sorters.every(x => x.hoje && x.hoje.sortTotal > 0) && !/tok\d+k|sess\d+x/.test(JSON.stringify(diag)) &&
     diag.sorters[1].cookies.indexOf('laravel_session') >= 0, 'diagnosticarSorter: os dois sorters, sem mostrar token nem cookie (só os nomes)', diag);

@@ -15,6 +15,9 @@
  *   (<input type="button" lay-filter="login" data-connectionname="DB2"> = A, DB1 = B), o campo oculto vazio "selecteddb" e o
  *   _token; o clique põe o DB no "selecteddb" e manda $.ajax POST /dbselect {_token, selecteddb}; resposta {code: 1}. A página
  *   /home passa a ter "(A套)" no título. 'xadmin-oculto': o mesmo, mas sem o script (só o formulário).
+ * V4.22.7: opts.padraoA — a sessão nova (sem escolher) mostra o Sorter A; opts.codigos — as balanças do site são 1001…1012: o
+ * site devolve o TOTAL do sorter para qualquer outro número (como o site real com 1…40); a tela /statis/summary tem o
+ * <select name="inductionno"> com a lista (opts.semLista: a lista vem por script, fora do HTML).
  */
 const SCRIPT_DBSELECT = function (host, token) {
   return "$(function () { $('input:button').on('click', function () { $('#hid_selected').val($(this).data('connectionname')); " +
@@ -85,7 +88,7 @@ function createFakeSorter(opts) {
     const set = [];
     if (!sess) {
       sid = 'sess' + (++seq) + 'x'.repeat(10);
-      sess = sessions[sid] = {device: 'B', token: ('tok' + seq).padEnd(TOKEN_LEN, 'k')};
+      sess = sessions[sid] = {device: opts.padraoA ? 'A' : 'B', token: ('tok' + seq).padEnd(TOKEN_LEN, 'k')};
     }
     set.push('laravel_session=' + sid + '; path=/; httponly', 'XSRF-TOKEN=' + encodeURIComponent(sess.token) + '; path=/');
     const device = modo === 'cookie' ? (ck.deviceId === '3' ? 'A' : 'B') : modo === 'global' ? global.device : sess.device;
@@ -97,7 +100,15 @@ function createFakeSorter(opts) {
           '<script type="text/javascript" src="http://' + (req.headers.host || 'sorter.falso') + '/js/jquery.min.js"></script><script src="/lib/layui/layui.js"></script>' +
           '<script src="/js/xadmin.js"></script></head><body><ul class="layui-nav right"><li class="layui-nav-item"><a onclick="xadmin.open(' +
           "'device choose','http://" + (req.headers.host || 'sorter.falso') + "/dbselectview?from=top',500,350)" + '">switch device</a></li>' +
-          '<li class="layui-nav-item"><a href="/logout">Guest</a></li></ul></body></html>'};
+          '<li class="layui-nav-item"><a href="/logout">Guest</a></li></ul><ul class="left-nav"><li><a onclick="xadmin.add_tab(' +
+          "'summary statistics','http://" + (req.headers.host || 'sorter.falso') + "/statis/summary')" + '">summary statistics</a></li></ul></body></html>'};
+    }
+    if (req.method === 'GET' && req.path === '/statis/summary' && xa) {
+      const opts1 = opts.codigos && !opts.semLista ? Array.from({length: BALANCAS}, (x, i) => '<option value="' + (1001 + i) + '">' + (i + 1) + '</option>').join('') : '';
+      return {code: 200, headers: {'content-type': 'text/html', 'set-cookie': set},
+        body: '<html><head><title>summary statistics</title></head><body><form class="layui-form"><select name="inductionno" lay-search>' +
+          '<option value="0">All</option>' + opts1 + '</select><select name="layerno"><option value="0">All</option><option value="1">1</option></select>' +
+          '</form></body></html>'};
     }
     if (req.method === 'GET' && req.path === '/js/xadmin.js') return {code: 200, headers: {'content-type': 'application/javascript'}, body: 'var xadmin = {open: function () {}};'};
     if (req.method === 'GET' && req.path === '/dbselectview' && xa) {
@@ -144,7 +155,9 @@ function createFakeSorter(opts) {
     if (req.method === 'GET' && req.path === '/statis/summary.data') {
       const q = req.query;
       if (opts.down) return {code: 500, headers: {}, body: 'erro'};
-      const date = String(q.get('start') || '').slice(0, 10), n = Number(q.get('inductionno')) || 0;
+      const date = String(q.get('start') || '').slice(0, 10), raw = Number(q.get('inductionno')) || 0;
+      // opts.codigos: só 1001…1012 valem; qualquer outro número devolve o total do sorter inteiro (filtro ignorado).
+      const n = opts.codigos ? (raw >= 1001 && raw < 1001 + BALANCAS ? raw - 1000 : 0) : raw;
       const data = [];
       if (q.get('group') === '0') {
         // "no group by": uma linha só para o período inteiro (start → end).
