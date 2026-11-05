@@ -1,0 +1,464 @@
+<!doctype html><html lang="pt-BR" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monitor de Recebimento | SP GRU</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet"><script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --red:#E60012; --red-600:#C8000F; --red-700:#A5000C; --red-50:#FFF1F2; --red-100:#FFE1E4; --red-200:#FFC2C8;
+  --ink:#1F2430; --ink-2:#434A5B; --muted:#6B7280; --muted-2:#9AA0AB;
+  --line:#ECECEF; --line-2:#F3F3F5; --bg:#F6F6F8; --card:#FFFFFF; --soft:#F6F6F8; --soft-2:#F1F1F4;
+  --field-line:#DFDFE4; --row-alt:#FBFBFC; --row-hover:#FFF5F6;
+  --good:#15803D; --good-bg:#EAF7EE; --good-line:#BBE5C8;
+  --bad:#B42318; --bad-bg:#FDEBEC; --bad-line:#F7C3C7;
+  --warn:#B45309; --warn-bg:#FFF7ED;
+  --t1:#E60012; --t2:#2A78D6; --t3:#4A3AA7;
+  --radius:16px; --radius-sm:10px;
+  --shadow:0 1px 2px rgba(31,36,48,.04),0 8px 24px rgba(31,36,48,.06);
+}
+:root[data-theme="dark"] {
+  --red:#E60012; --red-600:#FF5A67; --red-700:#FF7D87; --red-50:rgba(230,0,18,.16); --red-100:rgba(230,0,18,.30); --red-200:rgba(255,90,103,.55);
+  --ink:#F2F3F5; --ink-2:#C9CCD4; --muted:#9BA1AD; --muted-2:#727885;
+  --line:#2A2D36; --line-2:#22252D; --bg:#0E0F13; --card:#17191F; --soft:#1E2128; --soft-2:#272A33;
+  --field-line:#353946; --row-alt:#1B1D24; --row-hover:rgba(230,0,18,.12);
+  --good:#3DD07A; --good-bg:rgba(61,208,122,.14); --good-line:rgba(61,208,122,.38);
+  --bad:#FF6B76; --bad-bg:rgba(230,0,18,.18); --bad-line:rgba(230,0,18,.45);
+  --warn:#F5A524; --warn-bg:rgba(245,165,36,.12);
+  --t1:#FF3B4A; --t2:#4C93F0; --t3:#9B8CFA;
+  --shadow:0 1px 2px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px Inter,"PingFang SC","Microsoft YaHei","Noto Sans SC","Segoe UI",Arial,sans-serif}button,input,select{font:inherit;color:inherit;background:var(--card);border:1px solid var(--field-line);height:40px;border-radius:10px;padding:0 12px;min-width:0}button{border-radius:12px;font-size:13px;font-weight:700;cursor:pointer}button:disabled{opacity:.5;cursor:default}:focus-visible{outline:2px solid var(--red);outline-offset:2px}.red,.red:hover{background:var(--red);color:#fff;border-color:transparent}.red:hover{background:#C8000F}.ico{width:18px;height:18px;vertical-align:middle;flex:none}.square{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:10px;color:var(--red-600);background:var(--red-50);flex:none}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted-2);margin-right:6px}aside{position:fixed;inset:0 auto 0 0;width:268px;background:var(--card);border-right:1px solid var(--line);padding:25px 16px;z-index:5;display:flex;flex-direction:column;gap:10px;overflow:auto}aside:before{content:"";position:absolute;inset:0 0 auto;height:4px;background:linear-gradient(90deg,#E60012,#FF4D5E)}.brand{display:flex;align-items:center;gap:10px;margin:0 0 20px 4px}.brand b{background:var(--red);color:white;padding:8px;border-radius:11px;font-size:23px;font-style:italic;font-weight:900}.brand strong{display:block;letter-spacing:2.4px;font-style:italic;color:var(--red-600)}small,.sub{color:var(--muted);font-size:11.5px}.nav{display:flex;align-items:center;gap:8px;text-align:left;width:100%;height:auto;min-height:52px;padding:7px;border:0}.nav .last{margin-left:auto}.nav[aria-pressed=true]{background:var(--red-50);color:var(--red-600)}.nav[aria-pressed=true] .square{background:var(--red);color:white}aside footer{margin-top:auto;line-height:1.8}main{margin-left:268px;min-width:0}header{position:sticky;top:0;z-index:3;background:color-mix(in srgb,var(--bg) 87%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 28px;flex-wrap:wrap}.eyebrow,.label{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px}.eyebrow{color:var(--red-600);letter-spacing:1.6px}h1{font-size:25px;margin:4px 0;font-weight:800}h2{font-size:17px;margin:0}h2 em{font-style:normal;color:var(--red-600)}.actions,.chips,.heading{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.iconButton{width:40px;padding:0}.wrap{padding:14px 28px 28px;display:grid;gap:12px;min-width:0}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:16px 18px;min-width:0}.notice{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 12px}.filters,.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.filters label{display:grid;gap:6px}.filters .label,.metric .label{color:var(--muted)}.label svg{color:var(--red-600);width:15px;height:15px}.filterActions{margin-top:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.chips button{height:32px;border-radius:999px}.chips button[aria-pressed=true]{background:var(--red-50);border-color:var(--red-600);color:var(--red-600)}.metric{min-height:118px;transition:transform .2s;animation:rise .35s ease both}.metric:hover{transform:translateY(-2px)}@keyframes rise{from{opacity:0;transform:translateY(8px)}}.metric strong{display:block;font-size:30px;letter-spacing:-1px;margin:8px 0}.hero{grid-column:span 2;grid-row:span 2;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(135deg,#F0101F,#E60012,#B3000D);color:white;position:relative;overflow:hidden;border:0;box-shadow:0 12px 32px rgba(230,0,18,.22)}.hero:before,.hero:after{content:"";position:absolute;border-radius:50%;width:230px;height:230px;background:#ffffff18;right:-62px;top:-90px;pointer-events:none}.hero:after{right:-110px;top:-25px}.hero strong{font-size:54px}.hero .sub,.hero .label,.hero .label svg{color:#fff}.bar{height:4px;background:var(--soft-2);border-radius:9px;margin-top:10px;overflow:hidden}.bar i{display:block;height:100%;border-radius:9px}.chart{border-top:3px solid var(--red)}.heading{justify-content:space-between;margin-bottom:12px}.title{display:flex;gap:10px;align-items:center}.plot{height:220px;position:relative}.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}.stats div{background:var(--soft);border-radius:10px;padding:8px;display:flex;gap:8px;align-items:center}.stats .square{background:var(--red);color:white}.tablebox{max-width:100%;max-height:480px;overflow:auto;border-radius:10px}table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}th{position:sticky;top:0;background:var(--red);color:#fff;text-align:left;z-index:1}th button{display:block;width:100%;text-align:inherit;background:none;border:0;color:white;height:auto;padding:10px 7px;font-size:12.5px}th small{color:#fff;font-size:10.5px;display:block}td{padding:9px 7px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}tr:nth-child(even){background:var(--row-alt)}tbody tr:hover{background:var(--row-hover)}.num{text-align:right}.pager{justify-content:flex-end;margin-top:10px}.drawer,.shade{display:none}[hidden]{display:none!important}@media(max-width:1080px){main{margin:0}aside{transform:translateX(-100%);transition:transform .2s}body.open aside{transform:translateX(0)}.drawer{display:inline-block}body.open .shade{display:block;position:fixed;inset:0;background:#0008;z-index:4}}@media(max-width:860px){.filters,.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{grid-row:span 1}.wrap,header{padding-left:14px;padding-right:14px}.tablebox{max-height:none}table,tbody,tr,td{display:block}thead{position:sticky;top:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--red)}thead tr{display:contents}td{display:flex;justify-content:space-between;gap:8px;text-align:right}td:before{content:attr(data-label);color:var(--muted);text-align:left}td:last-child{border-bottom:2px solid var(--field-line)}}@media(max-width:380px){.filters,.grid,.stats{grid-template-columns:1fr}.hero{grid-column:span 1}.actions input{width:100%}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+.agenda-list{display:grid;gap:8px;max-height:530px;overflow:auto}.agenda-list details{border:1px solid var(--line);border-radius:10px;background:var(--soft)}.agenda-list summary{cursor:pointer;padding:11px 12px;overflow-wrap:anywhere}.agenda-list summary small{margin-left:8px}.agenda-list .tablebox{max-height:none;background:var(--card)}.agenda-list th{padding:8px 7px}
+</style>
+<body><div class="shade" id="shade"></div><aside id="sidebar"><div class="brand"><b>J&amp;T</b><div><strong>EXPRESS</strong><small>SP GRU · 30001</small></div></div><nav id="nav"></nav><footer id="footer"></footer></aside>
+<main><header><div><button id="drawer" class="drawer iconButton" aria-label="Menu" aria-expanded="false"></button><div class="eyebrow">J&amp;T EXPRESS • SP GRU</div><h1 data-i="Monitor de Recebimento|到货监控"></h1><div class="sub">Previsão de chegada e volumetria por turno / 预计到达与班次货量</div></div><div class="actions"><button id="theme" class="iconButton"></button><div class="actions"><button id="pt">PT-BR</button><button id="zh">中文</button></div><button id="refresh" data-i="Atualizar|刷新"></button><button id="export" class="red" data-i="Baixar relatório|下载报告"></button></div></header>
+<div class="wrap">
+<div class="notice" id="notice" role="status"></div>
+<section class="card"><div class="heading"><div><h2 data-i="Filtros|筛选"></h2><div class="sub" data-i="A data do T3 é a do encerramento: das 22h do dia anterior até antes das 06h da data selecionada.|T3 按结束日期筛选：从前一天 22:00 到所选日期 06:00 前。"></div></div><button id="import" data-i="Importar JSON do JMS|导入 JMS JSON"></button><input id="file" type="file" accept=".json,application/json" multiple hidden></div>
+<form id="filters"><div class="filters">
+<label><span class="label" data-i="Indicador|指标"></span><select id="indicator"><option value="volume" data-i="Pedidos-mãe|主运单"></option><option value="trips" data-i="Viagens|车次"></option></select></label>
+<label><span class="label" data-i="Data inicial|开始日期"></span><input type="date" id="from"></label>
+<label><span class="label" data-i="Data final|结束日期"></span><input type="date" id="to"></label>
+<label><span class="label" data-i="Status da viagem|运输状态"></span><select id="status"><option value="" data-i="Todos|全部"></option><option value="3" data-i="Em trânsito|在途"></option><option value="4" data-i="Concluído|已完成"></option></select></label>
+<label><span class="label" data-i="Linha|线路"></span><select id="line"><option value="" data-i="Todas|全部"></option><option value="trunk" data-i="Troncal|干线"></option><option value="branch" data-i="Secundária|支线"></option></select></label>
+<label><span class="label" data-i="Turno previsto|预计班次"></span><select id="shift"><option value="" data-i="Todos|全部"></option><option>T1</option><option>T2</option><option>T3</option><option value="none" data-i="Sem previsão|无预计时间"></option></select></label>
+</div><div class="filterActions"><div class="chips" id="chips"></div><button type="submit" class="red" data-i="Aplicar|应用"></button></div></form></section>
+<section class="grid" id="metrics"></section>
+<section class="card chart"><h2 data-i="Veículos aguardando início da descarga|等待开始卸货的车辆"></h2><p id="filaResumo" class="sub" role="status"></p><div id="filaDescarga" class="tablebox"></div></section>
+<section class="card chart"><h2 data-i="Descarga iniciada sem check-in|已开始卸货但未签到"></h2><p id="semCheckinResumo" class="sub" role="status"></p><div id="semCheckinTabela" class="tablebox"></div></section>
+<section class="card chart"><h2 data-i="Descarga iniciada sem deslacre prévio|卸货开始前未解封"></h2><p id="semDeslacreResumo" class="sub" role="status"></p><div id="semDeslacreTabela" class="tablebox"></div></section>
+<section class="card chart"><h2 data-i="Desempenho da descarga|卸货绩效"></h2><div id="desempenho" class="tablebox"></div></section>
+<section class="card chart"><div class="heading"><div><h2>Virada T2 → T3 <em>/ 班次交接</em></h2><div class="sub" data-i="Selecione a data de encerramento do T3. A consulta considera veículos que chegaram no T2 do dia anterior.|请选择 T3 结束日期。查询前一天 T2 到达的车辆。"></div></div><div class="actions"><input id="viradaData" type="date" aria-label="Data de encerramento do T3"></div></div><div id="viradaResumo" class="sub" role="status"></div><div id="viradaTabela" class="tablebox"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" id="agendaIcon"></span><div><h2>Agenda de chegadas por hora <em>/ 分时到达计划</em></h2><div class="sub" data-i="Abra uma faixa para ver cada veículo e seu horário programado. Para próximas chegadas, selecione Em trânsito.|展开时段查看每辆车及计划到达时间。查看待到车辆请选择在途。"></div></div></div></div><div id="agenda" class="agenda-list"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" id="chartIcon"></span><div><h2>Previsão por turno <em>/ 班次到货预测</em></h2><div class="sub" data-i="Distribuição pela data operacional da chegada programada|按计划到达的运营日期分布"></div></div></div><div class="actions"><button id="graph" data-i="Gráfico|图表"></button><button id="chartTable" data-i="Tabela|表格"></button></div></div><div id="chartBody"></div><div id="stats" class="stats"></div></section>
+<section class="card"><div class="heading"><div><h2 data-i="Informações gerais|详细信息"></h2><div id="count" class="sub"></div></div><input id="query" type="search"></div><div class="tablebox"><table><thead id="thead"></thead><tbody id="rows"></tbody></table></div><div class="actions pager" id="pager"></div></section>
+</div></main>
+<script>
+const by=id=>document.getElementById(id);
+const root=document.documentElement;
+const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
+const write=(key,value)=>{try{localStorage.setItem(key,JSON.stringify(value))}catch{}};
+let lang=read('gru-lang','pt');
+root.dataset.theme=read('gru-theme','dark');
+const tr=(pt,zh)=>lang==='zh'?zh:pt;
+const pair=text=>tr(...text.split('|'));
+const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
+const paths={box:'M3 7l9-4 9 4v10l-9 4-9-4z M3 7l9 4 9-4 M12 11v10',truck:'M2 5h13v12H2z M15 9h4l3 4v4h-7 M7 19a2 2 0 1 0 0 .01 M20 19a2 2 0 1 0 0 .01',chart:'M4 20V4 M4 20h16 M9 16v-4 M14 16V8 M19 16v-6',clock:'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0z M12 6v6l4 2',sun:'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z M12 2v2 M12 20v2 M2 12h2 M20 12h2 M5 5l2 2 M17 17l2 2 M19 5l-2 2 M7 17l-2 2',moon:'M20 15a9 9 0 0 1-11-11 9 9 0 1 0 11 11z',menu:'M3 6h18 M3 12h18 M3 18h18'};
+const icon=name=>'<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+paths[name]+'"/></svg>';
+const blank={indicator:'volume',from:'',to:'',status:'',line:'',shift:''};
+let source=null, filter={...blank}, preset='all', page=1, sort='plannedArrivalTime', direction=1, chartMode='graph', chart, message='';
+const number=value=>value.toLocaleString(lang==='zh'?'zh-CN':'pt-BR');
+const statusName=value=>Number(value)===3?tr('Em trânsito','在途'):tr('Concluído','已完成');
+const lineName=value=>value==='trunk'?tr('Troncal','干线'):tr('Secundária','支线');
+const dateAdd=(date,days)=>{const instant=new Date(date+'T12:00:00Z');instant.setUTCDate(instant.getUTCDate()+days);return instant.toISOString().slice(0,10)};
+const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Sao_Paulo'}).format(new Date());
+function shiftOf(time){
+ if(typeof time!=='string'||!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(time))return {name:'none',date:''};
+ const date=time.slice(0,10), hour=Number(time.slice(11,13));
+ if(!Number.isFinite(Date.parse(date+'T00:00:00Z'))||hour>23)return {name:'none',date:''};
+ return {name:hour<6||hour>=22?'T3':hour<14?'T1':'T2',date:hour>=22?dateAdd(date,1):date};
+}
+const normalize=record=>{
+ const raw=record.scanMainWaybillNum;
+ return {...record,shipmentState:Number(record.shipmentState),volume:raw===null||raw===undefined||raw===''||!Number.isFinite(Number(raw))||Number(raw)<0?null:Number(raw),expected:shiftOf(record.plannedArrivalTime),unload:shiftOf(record.unloadStartTime)};
+};
+const detalhes=new Map();
+const chave=row=>row.line+':'+row.shipmentNo;
+const all=()=> (source?.records??[]).map(row=>normalize(detalhes.get(chave(row))??row)).filter(row=>{
+ const mes=today().slice(0,7);
+ return row.expected.date.startsWith(mes)||shiftOf(row.actualArrivalTime).date.startsWith(mes);
+});
+const matches=(row,f)=> (!f.status||row.shipmentState===Number(f.status))&&(!f.line||row.line===f.line)&&(!f.shift||row.expected.name===f.shift)&&(!f.from||row.expected.date>=f.from)&&(!f.to||!!row.expected.date&&row.expected.date<=f.to);
+const value=rows=>filter.indicator==='trips'?rows.length:rows.some(row=>row.volume!==null)||!rows.length?rows.reduce((sum,row)=>sum+(row.volume??0),0):null;
+const display=v=>v===null?'—':number(v);
+const unit=()=>filter.indicator==='trips'?tr('viagens','车次'):tr('pedidos-mãe','主运单');
+const shiftDisplay=s=>s.name==='none'?'—':s.name+' · '+s.date.split('-').reverse().join('/');
+const dateDisplay=v=>v?v.slice(8,10)+'/'+v.slice(5,7)+'/'+v.slice(0,4)+' '+v.slice(11,19):'—';
+function waitTime(row){
+ const arrival=Date.parse(String(row.actualArrivalTime).replace(' ','T')+'-03:00');
+ const unload=Date.parse(String(row.unloadStartTime).replace(' ','T')+'-03:00');
+ if(!Number.isFinite(arrival)||!Number.isFinite(unload)||unload<arrival)return '—';
+ const seconds=(unload-arrival)/1000;
+ return Math.floor(seconds/3600)+'h '+String(Math.floor(seconds/60)%60).padStart(2,'0')+'min '+String(seconds%60).padStart(2,'0')+'s';
+}
+
+const columns=[
+ ['shipmentNo','Viagem','车次编号',r=>r.shipmentNo],['line','Linha','线路',r=>lineName(r.line)],['startName','Origem','始发站',r=>r.startName],['shipmentState','Status JMS','运输状态',r=>statusName(r.shipmentState)],['plateNumber','Placa','车牌',r=>r.plateNumber],['volume','Pedidos-mãe','主运单',r=>r.volume],['plannedArrivalTime','Chegada prevista','计划到达',r=>dateDisplay(r.plannedArrivalTime)],['expected','Turno previsto','预计班次',r=>shiftDisplay(r.expected)],['actualArrivalTime','Chegada real','实际到达',r=>dateDisplay(r.actualArrivalTime)],['unlock','Deslacre','解封',r=>r.unlockTime||r.actualUnlockTime?dateDisplay(r.unlockTime??r.actualUnlockTime):r.actualArrivalTime?tr('Sem registro','无记录'):'—'],['unloadStartTime','Início da descarga','开始卸货',r=>dateDisplay(r.unloadStartTime)],['unloadEnd','Término da descarga / último bipe','卸货结束 / 最后扫描',r=>dateDisplay(r.unloadEndTime||r.ultimoBipe)],['duration','Duração da descarga','卸货用时',r=>formatMinutes(minutos(r.unloadStartTime,r.unloadEndTime))],['unload','Turno da descarga','卸货班次',r=>shiftDisplay(r.unload)],['wait','Espera até descarga','卸货等待',waitTime]
+];
+const periods=[['today','Hoje|今天'],['yesterday','Último dia|昨天'],['week','7 dias|7天'],['month30','30 dias|30天'],['month','Mês atual|本月'],['all','Tudo|全部']];
+function sortValue(row,key){
+ if(key==='expected'||key==='unload')return row[key].date+row[key].name;
+ if(key==='unloadEnd')return row.unloadEndTime||row.ultimoBipe;
+ if(key==='duration')return minutos(row.unloadStartTime,row.unloadEndTime);
+ if(key==='unlock')return row.unlockTime??row.actualUnlockTime;
+ if(key==='wait')return waitTime(row)==='—'?null:Date.parse(row.unloadStartTime.replace(' ','T'))-Date.parse(row.actualArrivalTime.replace(' ','T'));
+ return row[key];
+}
+function visible(rows){
+ const search=by('query').value.trim().toLocaleLowerCase();
+ return rows.filter(row=>!search||columns.some(col=>String(col[3](row)??'').toLocaleLowerCase().includes(search))).sort((a,b)=>{
+  const x=sortValue(a,sort),y=sortValue(b,sort);
+  if(x==null)return y==null?0:1;
+  if(y==null)return -1;
+  return direction*(typeof x==='number'&&typeof y==='number'?x-y:String(x).localeCompare(String(y),undefined,{numeric:true}));
+ });
+}
+function celulaUltimoBipe(row){
+ const time=row.unloadEndTime||row.ultimoBipe;
+ if(time)return esc(dateDisplay(time))+'<br><small>'+(row.unloadEndTime?tr('Término oficial','正式卸货结束'):tr('Último bipe','最后扫描'))+'</small>';
+ if(!row.actualArrivalTime&&!row.unloadStartTime)return '—';
+ return detalhes.has(chave(row))?tr('Sem término confirmado','无确认结束'):loadingDetails?tr('Carregando…','加载中…'):tr('Detalhe indisponível','详情不可用');
+}
+function renderTable(rows){
+ const results=visible(rows), pages=Math.max(1,Math.ceil(results.length/50));
+ page=Math.min(page,pages);
+ by('count').textContent=number(results.length)+' '+tr('linhas','条记录');
+ by('thead').innerHTML='<tr>'+columns.map(([key,pt,zh])=>'<th scope="col" class="'+(key==='volume'?'num':'')+'" '+(key===sort?'aria-sort="'+(direction===1?'ascending':'descending')+'"':'')+'><button data-sort="'+key+'">'+esc(tr(pt,zh))+(key===sort?(direction===1?' ↑':' ↓'):'')+'<small>'+esc(tr(zh,pt))+'</small></button></th>').join('')+'</tr>';
+ by('rows').innerHTML=results.slice((page-1)*50,page*50).map(row=>'<tr>'+columns.map(([key,pt,zh,fn])=>'<td class="'+(key==='volume'?'num':'')+'" data-label="'+esc(tr(pt,zh))+'">'+(key==='unloadEnd'?celulaUltimoBipe(row):esc(key==='volume'?display(row.volume):fn(row)??'—'))+'</td>').join('')+'</tr>').join('')||'<tr><td colspan="'+columns.length+'">'+tr('Nenhuma viagem para os filtros aplicados.','当前筛选无车次。')+'</td></tr>';
+ by('pager').innerHTML='<button id="prev" '+(page===1?'disabled':'')+'>'+tr('Anterior','上一页')+'</button><span>'+page+' / '+pages+'</span><button id="next" '+(page===pages?'disabled':'')+'>'+tr('Próxima','下一页')+'</button>';
+}
+function card(title,v,sub,extra='',className='',mark=icon('box')){
+ return '<article class="card metric '+className+'"><div class="label">'+mark+' '+title+'</div><strong>'+display(v)+'</strong><div class="sub">'+sub+'</div>'+extra+'</article>';
+}
+function renderChart(groups,total){
+ chart?.destroy(); chart=null;
+ by('graph').className=chartMode==='graph'&&window.Chart?'red':'';
+ by('chartTable').className=chartMode==='table'||!window.Chart?'red':'';
+ const available=groups.filter(group=>group.v!==null);
+ const biggest=[...available].sort((a,b)=>b.v-a.v)[0];
+ const smallest=[...available].sort((a,b)=>a.v-b.v)[0];
+ const percent=v=>v===null||!total?'—':number(Math.round(v/total*1000)/10)+'%';
+ by('stats').innerHTML=[[tr('Total geral','总计'),total,''],[tr('Maior','最高'),biggest?.v??null,biggest?.name??''],[tr('Menor','最低'),smallest?.v??null,smallest?.name??'']].map(([title,v,name])=>'<div><span class="square">'+icon('chart')+'</span><span><small>'+title+'</small><br><b>'+display(v)+'</b> · '+(name?name+' · ':'')+percent(v)+'</span></div>').join('');
+ if(chartMode==='table'||!window.Chart){
+  by('chartBody').innerHTML='<table><thead><tr><th>'+tr('Turno','班次')+'</th><th class="num">'+unit()+'</th></tr></thead><tbody>'+groups.map(group=>'<tr><td data-label="'+tr('Turno','班次')+'">'+group.name+'</td><td class="num" data-label="'+unit()+'">'+display(group.v)+'</td></tr>').join('')+'</tbody></table>';return;
+ }
+ by('chartBody').innerHTML='<div class="plot"><canvas role="img" aria-label="'+tr('Volumetria por turno','班次货量')+'"></canvas></div>';
+ const css=getComputedStyle(root), color=key=>css.getPropertyValue(key).trim();
+ chart=new Chart(by('chartBody').querySelector('canvas'),{type:'bar',data:{labels:groups.map(group=>group.name),datasets:[{data:groups.map(group=>group.v),backgroundColor:groups.map(group=>color('--'+group.name.toLowerCase())),borderRadius:6,maxBarThickness:75}]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:20}},animation:matchMedia('(prefers-reduced-motion: reduce)').matches?false:undefined,plugins:{legend:{display:false}},scales:{x:{ticks:{color:color('--ink')},grid:{display:false}},y:{beginAtZero:true,ticks:{color:color('--muted'),precision:0},grid:{color:color('--line')}}}},plugins:[{id:'values',afterDatasetsDraw(chart){const {ctx}=chart;ctx.save();ctx.fillStyle=color('--ink');ctx.textAlign='center';ctx.font='700 12px Inter, sans-serif';chart.getDatasetMeta(0).data.forEach((bar,index)=>{if(groups[index].v!==null)ctx.fillText(display(groups[index].v),bar.x,bar.y-6)});ctx.restore()}}]});
+}
+function renderAgenda(rows){
+ const agenda=by('agenda');
+ const expanded=new Set(Array.from(agenda.querySelectorAll('details[open]'),item=>item.dataset.hour));
+ const firstRender=!agenda.querySelector('details');
+ const groups=new Map();
+ let missing=0;
+ for(const row of rows){
+  if(row.expected.name==='none'){missing++;continue}
+  const hour=row.plannedArrivalTime.replace('T',' ').slice(0,13);
+  if(!groups.has(hour))groups.set(hour,[]);
+  groups.get(hour).push(row);
+ }
+ const labels=[['Chegada prevista','计划到达'],['Viagem','车次编号'],['Placa','车牌'],['Origem','始发站'],['Linha','线路'],['Status JMS','运输状态'],['Turno previsto','预计班次'],['Pedidos-mãe','主运单']];
+ by('agendaIcon').innerHTML=icon('clock');
+ agenda.innerHTML=[...groups.keys()].sort().map((hour,index)=>{
+  const trips=groups.get(hour).sort((a,b)=>a.plannedArrivalTime.localeCompare(b.plannedArrivalTime));
+  const date=hour.slice(0,10).split('-').reverse().join('/');
+  const time=hour.slice(11);
+  const known=trips.filter(row=>row.volume!==null);
+  const volume=known.length?number(known.reduce((sum,row)=>sum+row.volume,0)):'—';
+  const details=trips.map(row=>{
+   const fields=[row.plannedArrivalTime.slice(11,19),row.shipmentNo,row.plateNumber,row.startName,lineName(row.line),statusName(row.shipmentState),shiftDisplay(row.expected),display(row.volume)];
+   return '<tr>'+fields.map((field,i)=>'<td class="'+(i===7?'num':'')+'" data-label="'+esc(tr(...labels[i]))+'">'+esc(field??'—')+'</td>').join('')+'</tr>';
+  }).join('');
+  return '<details data-hour="'+esc(hour)+'" '+(expanded.has(hour)||(firstRender&&index===0)?'open':'')+'><summary><b>'+date+' · '+time+':00–'+time+':59</b> <small>'+number(trips.length)+' '+tr('viagens','车次')+' · '+volume+' '+tr('pedidos-mãe','主运单')+(known.length<trips.length?' · '+number(trips.length-known.length)+' '+tr('sem volumetria','缺少货量'):'')+'</small></summary><div class="tablebox"><table><thead><tr>'+labels.map(([pt,zh],i)=>'<th scope="col" class="'+(i===7?'num':'')+'">'+tr(pt,zh)+'<small>'+tr(zh,pt)+'</small></th>').join('')+'</tr></thead><tbody>'+details+'</tbody></table></div></details>';
+ }).join('')+(missing?'<small>'+number(missing)+' '+tr('viagens sem horário previsto','车次缺少预计时间')+'</small>':'');
+ if(!groups.size&&!missing)agenda.textContent=tr('Nenhuma chegada prevista para os filtros aplicados.','当前筛选无计划到达。');
+}
+function render(){
+ const base=all(), rows=base.filter(row=>matches(row,filter)), total=value(rows);
+ document.querySelectorAll('[data-i]').forEach(el=>el.textContent=pair(el.dataset.i));
+ document.querySelectorAll('.filters .label').forEach(el=>el.insertAdjacentHTML('afterbegin',icon('chart')+' '));
+ root.lang=lang==='zh'?'zh-CN':'pt-BR';
+ by('pt').className=lang==='pt'?'red':'';by('zh').className=lang==='zh'?'red':'';
+ by('pt').setAttribute('aria-pressed',lang==='pt');by('zh').setAttribute('aria-pressed',lang==='zh');
+ by('theme').innerHTML=icon(root.dataset.theme==='dark'?'sun':'moon');
+ by('theme').setAttribute('aria-label',tr('Alternar tema','切换主题'));
+ by('query').placeholder=tr('Localizar na tabela','在表格中搜索');by('query').setAttribute('aria-label',by('query').placeholder);
+ by('footer').innerHTML='<small><i class="dot"></i>'+tr('Atualização do painel a cada 15 min','每15分钟刷新面板')+'<br>'+tr('Última atualização','最近更新')+' · '+(source?new Date(source.updated).toLocaleString(lang==='zh'?'zh-CN':'pt-BR',{timeZone:'America/Sao_Paulo'}):'—')+'<br>v1.0 · '+tr('Feito por Marcelo Wesley','制作：Marcelo Wesley')+'</small>';
+ const desatualizado=source&&(source.falhaColeta||Date.now()-Date.parse(source.updated)>30*60000);
+ if(desatualizado){
+  const horario=new Date(source.updated).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'});
+  const motivo=source.falhaColeta==='cota'?tr(' · Cota do Apps Script atingida',' · 已达 Apps Script 配额'):'';
+  by('notice').textContent=tr('Dados desatualizados · Última coleta válida: ','数据已过期 · 最近成功采集：')+horario+motivo;
+ }
+ else by('notice').textContent=message?pair(message):source?tr('Fonte: planilha Recebimento JMS.','来源：Recebimento JMS 表格。'):tr('Carregando dados da planilha…','正在加载表格数据…');
+ by('nav').innerHTML=[['','Visão geral','总览','chart'],['3','Em trânsito','在途','truck'],['4','Concluído','已完成','box']].map(([id,pt,zh,ico])=>'<button class="nav" data-status="'+id+'" aria-pressed="'+(filter.status===id)+'"><span class="square">'+icon(ico)+'</span><span>'+tr(pt,zh)+'<br><small>'+tr(zh,pt)+'</small></span><span class="last"><i class="dot"></i>'+number(base.filter(row=>matches(row,{...filter,status:id})).length)+'</span></button>').join('');
+ by('chips').innerHTML=periods.map(([key,label])=>'<button type="button" data-period="'+key+'" aria-pressed="'+(preset===key)+'">'+pair(label)+'</button>').join('');
+ const groups=['T1','T2','T3'].map((name,index)=>({name,time:['06:00–13:59','14:00–21:59','22:00–05:59'][index],v:value(rows.filter(row=>row.expected.name===name))}));
+ const yesterday=filter.from&&filter.from===filter.to?dateAdd(filter.from,-1):'';
+ const previous=yesterday?base.filter(row=>matches(row,{...filter,from:yesterday,to:yesterday})):[];
+ const previousTotal=previous.length?value(previous):null;
+ const variation=total!==null&&previousTotal>0?' · '+new Intl.NumberFormat(root.lang,{style:'percent',signDisplay:'always',maximumFractionDigits:1}).format((total-previousTotal)/previousTotal):'';
+ const prior=tr('Dia anterior','前一天')+' <b>'+display(previousTotal)+'</b>'+variation;
+ const missing=rows.filter(row=>row.volume===null).length;
+ const noForecast=rows.filter(row=>row.expected.name==='none').length;
+ by('metrics').innerHTML=card(tr('Total no período','期间合计'),total,'<b>'+unit()+'</b> · '+number(rows.length)+' '+tr('viagens','车次')+'<br>'+prior+(missing?' · '+missing+' '+tr('sem volumetria','缺少货量'):''),'','hero')+
+  card(tr('Em trânsito','在途'),rows.filter(row=>row.shipmentState===3).length,tr('Viagens no JMS','JMS 车次'),'','',icon('truck'))+
+  card(tr('Concluído','已完成'),rows.filter(row=>row.shipmentState===4).length,tr('Status da viagem no JMS','JMS 运输状态'))+
+  groups.map(group=>{const color='var(--'+group.name.toLowerCase()+')';return card(group.name,group.v,group.time+' · '+unit(),'<div class="bar"><i style="background:'+color+';width:'+(total?100*(group.v??0)/total:0)+'%"></i></div>','','<i class="dot" style="background:'+color+'"></i>')}).join('')+
+  card(tr('Sem previsão','无预计时间'),noForecast,tr('Viagens sem chegada programada','缺少计划到达时间的车次'),'','',icon('clock'));
+ by('chartIcon').innerHTML=icon('chart');renderChart(groups,total);renderAgenda(rows);renderTable(rows);renderVirada();renderDesempenho(base.filter(row=>(!filter.line||row.line===filter.line)&&(!filter.status||row.shipmentState===Number(filter.status))));
+}
+function apply(){
+ const next=Object.fromEntries(Object.keys(blank).map(key=>[key,by(key).value]));
+ if(next.from&&next.to&&next.from>next.to){by('to').setCustomValidity(tr('A data final deve ser igual ou posterior à inicial.','结束日期不得早于开始日期。'));by('to').reportValidity();return}
+ filter=next;page=1;render();
+}
+function setPeriod(key){
+ const date=today();preset=key;
+ by('from').value={today:date,yesterday:dateAdd(date,-1),week:dateAdd(date,-6),month30:dateAdd(date,-29),month:date.slice(0,8)+'01',all:''}[key];
+ by('to').value=key==='all'?'':key==='yesterday'?dateAdd(date,-1):date;
+ by('to').setCustomValidity('');apply();
+}
+const unwrap=value=>{
+ if(Array.isArray(value))return value;
+ if(!value||typeof value!=='object')return [];
+ if('shipmentNo' in value)return [value];
+ return unwrap(value.records??value.list??value.rows??value.data??value.result??value.content);
+};
+function sanitize(row){
+ const line=row.line==='trunk'||row.line==='branch'?row.line:(row.distributionType!=null||row.lineCode||/^(SRTR|SETR)/.test(row.shipmentNo??''))?'branch':(row.vehiclelineCode||row.vehiclelineId||row.transportType==='GX'||/^[A-Z]{4}GX|^[A-Z]{2}GX/.test(row.shipmentNo??''))?'trunk':null;
+ if(!line||!row.shipmentNo||String(row.endCode)!=='30001'||![3,4].includes(Number(row.shipmentState)))return null;
+ const fields=['id','shipmentNo','shipmentState','startName','plateNumber','scanMainWaybillNum','plannedArrivalTime','actualArrivalTime','actualUnlockTime','unlockTime','unloadStartTime','updateTime'];
+ return {...Object.fromEntries(fields.filter(key=>typeof row[key]==='string'||typeof row[key]==='number').map(key=>[key,row[key]])),line};
+}
+by('import').onclick=()=>by('file').click();
+by('file').onchange=async event=>{
+ try{
+  const payloads=await Promise.all(Array.from(event.target.files,file=>file.text().then(JSON.parse)));
+  const imported=payloads.flatMap(unwrap).filter(row=>row&&typeof row==='object').map(sanitize).filter(Boolean);
+  if(!imported.length)throw Error();
+  const records=new Map();
+  for(const row of [...(source?.records??[]),...imported]){
+   const key=row.line+':'+row.shipmentNo, old=records.get(key);
+   if(!old){records.set(key,row);continue}
+   const newer=old.updateTime&&row.updateTime&&old.updateTime!==row.updateTime?row.updateTime>old.updateTime:Number(row.shipmentState)>=Number(old.shipmentState);
+   records.set(key,newer?{...old,...row}:{...row,...old});
+  }
+  source={records:[...records.values()],updated:Date.now()};write('gru-source',source);
+  message='';setPeriod('all');
+ }catch{message='Importação sem registros válidos. Use o JSON das viagens para SP GRU (30001), com status 3 ou 4.|未找到有效记录。请导入目的地为 SP GRU (30001)、状态为 3 或 4 的 JSON。';render()}
+ event.target.value='';
+};
+by('export').onclick=()=>{
+ const csv=value=>'"'+String(value??'').replace(/^[=+\-@\t\r\n]/,"'$&").replaceAll('"','""')+'"';
+ const rows=visible(all().filter(row=>matches(row,filter)));
+ const output=[columns.map(([,pt,zh])=>pt+' / '+zh),...rows.map(row=>columns.map(col=>col[3](row)))].map(line=>line.map(csv).join(';')).join('\r\n');
+ const url=URL.createObjectURL(new Blob(['\uFEFF',output],{type:'text/csv;charset=utf-8'}));
+ const a=document.createElement('a');a.href=url;a.download='Recebimento_SP_GRU_'+today()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+by('filters').onsubmit=event=>{event.preventDefault();apply()};
+for(const id of ['from','to'])by(id).oninput=()=>{by('to').setCustomValidity('');preset='custom'};
+by('chips').onclick=event=>{const button=event.target.closest('[data-period]');if(button)setPeriod(button.dataset.period)};
+by('nav').onclick=event=>{const button=event.target.closest('[data-status]');if(button){by('status').value=button.dataset.status;apply();toggleDrawer(false)}};
+by('thead').onclick=event=>{const button=event.target.closest('[data-sort]');if(!button)return;const key=button.dataset.sort;direction=key===sort?-direction:1;sort=key;page=1;renderTable(all().filter(row=>matches(row,filter)));by('thead').querySelector('[data-sort="'+key+'"]')?.focus()};
+by('pager').onclick=event=>{if(event.target.id==='prev'||event.target.id==='next'){page+=event.target.id==='prev'?-1:1;renderTable(all().filter(row=>matches(row,filter)))}};
+by('query').oninput=()=>{page=1;renderTable(all().filter(row=>matches(row,filter)))};
+by('graph').onclick=()=>{chartMode='graph';render()};by('chartTable').onclick=()=>{chartMode='table';render()};
+let loadingDetails=false, detailErrors=0;
+function minutos(inicio,fim){
+ if(!inicio||!fim)return null;
+ const ms=Date.parse(fim.replace(' ','T')+'-03:00')-Date.parse(inicio.replace(' ','T')+'-03:00');
+ return Number.isFinite(ms)&&ms>=0?ms/60000:null;
+}
+function formatMinutes(value){
+ if(value===null)return '—';
+ const n=Math.round(value);
+ return Math.floor(n/60)+'h '+String(n%60).padStart(2,'0')+'min';
+}
+function filaSemInicio(rows,agora,mes){
+ return rows.filter(r=>shiftOf(r.actualArrivalTime).date.startsWith(mes)&&
+  minutos(r.actualArrivalTime,agora)!==null&&!r.unloadStartTime&&!r.unloadEndTime&&!r.ultimoBipe&&!r.bipeDescargaRegistrado)
+  .sort((a,b)=>a.actualArrivalTime.replace('T',' ').localeCompare(b.actualArrivalTime.replace('T',' ')));
+}
+function renderFilaDescarga(){
+ const agora=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'medium'}).format(new Date());
+ const candidatos=filaSemInicio(all(),agora,today().slice(0,7));
+ const fila=candidatos.filter(row=>row.detalheDisponivel);
+ const pendentes=candidatos.length-fila.length;
+ const cols=[['Viagem','车次'],['Placa','车牌'],['Origem','始发站'],['Linha','线路'],['Chegada real','实际到达'],['Turno da chegada','到达班次'],['Deslacre','解封'],['Tempo de espera','等待时长'],['Detalhe JMS','JMS 详情']];
+ by('filaResumo').textContent=source?number(fila.length)+' '+tr('veículos sem início registrado no mês · maior espera primeiro. Inclui todos os status JMS.','当月无卸货开始记录的车辆 · 等待最久优先。含所有 JMS 状态。')+(pendentes?' · '+number(pendentes)+' '+(loadingDetails?tr('aguardando verificação no JMS','等待核对'):tr('sem detalhe confirmado pela coleta','采集尚未确认详情')):''):tr('Aguardando os dados da planilha…','正在等待表格数据…');
+ by('filaDescarga').innerHTML=fila.length?'<table><thead><tr>'+cols.map(col=>'<th scope="col">'+esc(tr(...col))+'</th>').join('')+'</tr></thead><tbody>'+fila.map(r=>{
+  const lacre=r.unlockTime||r.actualUnlockTime;
+  const values=[r.shipmentNo,r.plateNumber,r.startName,lineName(r.line),dateDisplay(r.actualArrivalTime),shiftDisplay(shiftOf(r.actualArrivalTime)),lacre?dateDisplay(lacre):tr('Sem registro','无记录'),formatMinutes(minutos(r.actualArrivalTime,agora)),r.detalheDisponivel?tr('Verificado','已核对'):loadingDetails&&!detalhes.has(chave(r))?tr('Em conferência','核对中'):tr('Indisponível','不可用')];
+  return '<tr>'+values.map((v,i)=>'<td data-label="'+esc(tr(...cols[i]))+'">'+esc(v??'—')+'</td>').join('')+'</tr>';
+ }).join('')+'</tbody></table>':'';
+}
+function descargasSemCheckin(rows,mes){
+ return rows.filter(row=>!row.actualArrivalTime&&shiftOf(row.unloadStartTime).date.startsWith(mes))
+  .sort((a,b)=>b.unloadStartTime.replace('T',' ').localeCompare(a.unloadStartTime.replace('T',' ')));
+}
+function situacaoDeslacre(row){
+ const lacre=row.unlockTime||row.actualUnlockTime;
+ if(!lacre)return 'missing';
+ const intervalo=minutos(lacre,row.unloadStartTime);
+ if(intervalo!==null)return 'before';
+ return minutos(row.unloadStartTime,lacre)!==null?'after':'unknown';
+}
+function estadoBipagemExcecao(row){
+ if(row.ultimoBipe)return dateDisplay(row.ultimoBipe);
+ if(loadingDetails&&!detalhes.has(chave(row)))return tr('Em consulta','查询中');
+ const situacao=row.situacaoBipagem||row.detalheSituacao;
+ if(/^HTTP \d{3}$/.test(situacao||''))return situacao;
+ if(situacao==='semRegistroGru')return tr('Sem registro no SP GRU','SP GRU 无记录');
+ if(!row.detalheDisponivel||situacao!=='verificado')return tr('Consulta de bipagem indisponível','扫描查询不可用');
+ return tr('Fim da bipagem não informado','未提供扫描结束时间');
+}
+function prioridadeDetalhe(row){
+ if(!row.unloadStartTime)return 2;
+ return !row.actualArrivalTime||['missing','after'].includes(situacaoDeslacre(row))?0:1;
+}
+function renderSemCheckin(){
+ const mes=today().slice(0,7);
+ const registros=(source?.records??[]).map(row=>detalhes.get(chave(row))??row);
+ const semCheckin=descargasSemCheckin(registros,mes);
+ const semDeslacre=registros.filter(row=>shiftOf(row.unloadStartTime).date.startsWith(mes)&&
+  ['missing','after'].includes(situacaoDeslacre(row)))
+  .sort((a,b)=>b.unloadStartTime.replace('T',' ').localeCompare(a.unloadStartTime.replace('T',' ')));
+ const cols=[['Viagem','车次'],['Placa','车牌'],['Origem','始发站'],['Linha','线路'],['Deslacre','解封'],['Início da descarga','开始卸货'],['Fim da bipagem','扫描结束'],['Término oficial','正式卸货结束'],['Turno da descarga','卸货班次'],['Situação do deslacre','解封状态']];
+ const situacoes={missing:tr('Sem registro de deslacre','无解封记录'),after:tr('Deslacre após o início','卸货开始后解封'),before:tr('Registrado até o início','开始前或同时解封'),unknown:tr('Horário inconclusivo','时间无法确认')};
+ const progresso=loadingDetails?' '+tr('Conferindo detalhes no JMS…','正在核对 JMS 详情…'):detailErrors?' '+tr('Há detalhes indisponíveis.','部分详情不可用。'):'';
+ const aguardando=tr('Aguardando os dados da planilha…','正在等待表格数据…');
+ by('semCheckinResumo').textContent=source?number(semCheckin.length)+' '+tr('viagens com início de descarga no mês e sem chegada real registrada no JMS.','当月已开始卸货且 JMS 无实际到达记录的车次。')+progresso:aguardando;
+ const semRegistro=semDeslacre.filter(row=>situacaoDeslacre(row)==='missing').length;
+ by('semDeslacreResumo').textContent=source?number(semDeslacre.length)+' '+tr('viagens no mês','当月车次')+' · '+number(semRegistro)+' '+tr('sem registro','无记录')+' · '+number(semDeslacre.length-semRegistro)+' '+tr('com deslacre após o início','开始后解封')+'.'+progresso:aguardando;
+ for(const [id,fila] of [['semCheckinTabela',semCheckin],['semDeslacreTabela',semDeslacre]]){
+  by(id).innerHTML=fila.length?'<table><thead><tr>'+cols.map(col=>'<th scope="col">'+esc(tr(...col))+'</th>').join('')+'</tr></thead><tbody>'+fila.map(row=>{
+   const lacre=row.unlockTime||row.actualUnlockTime;
+   const fim=row.unloadEndTime?dateDisplay(row.unloadEndTime):loadingDetails&&!detalhes.has(chave(row))?tr('Em consulta','查询中'):tr('Sem término confirmado','无确认结束');
+   const valores=[row.shipmentNo,row.plateNumber,row.startName,lineName(row.line),dateDisplay(lacre),dateDisplay(row.unloadStartTime),estadoBipagemExcecao(row),fim,shiftDisplay(shiftOf(row.unloadStartTime)),situacoes[situacaoDeslacre(row)]];
+   return '<tr>'+valores.map((v,i)=>'<td data-label="'+esc(tr(...cols[i]))+'">'+esc(v??'—')+'</td>').join('')+'</tr>';
+  }).join('')+'</tbody></table>':'';
+ }
+}
+function renderDesempenho(rows){
+ renderFilaDescarga();
+ renderSemCheckin();
+ const mes=today().slice(0,7);
+ const chegadas=rows.filter(r=>shiftOf(r.actualArrivalTime).date.startsWith(mes));
+ const base=rows.filter(r=>shiftOf(r.unloadStartTime).date.startsWith(mes));
+ const media=values=>values.length?values.reduce((a,b)=>a+b,0)/values.length:null;
+ const grupos=['T1','T2','T3'].map(turno=>{
+  const amostra=base.filter(r=>r.unload.name===turno);
+  const dur=amostra.map(r=>minutos(r.unloadStartTime,r.unloadEndTime)).filter(v=>v!==null);
+  const espera=amostra.map(r=>minutos(r.actualArrivalTime,r.unloadStartTime)).filter(v=>v!==null);
+  return {turno,dur,espera,media:media(dur)};
+ });
+ const medias=grupos.filter(g=>g.media!==null);
+ const maior=medias.length?Math.max(...medias.map(g=>g.media)):null;
+ const todos=grupos.flatMap(g=>g.dur);
+ const lacre=chegadas.filter(r=>r.unlockTime||r.actualUnlockTime).length;
+ const abertos=chegadas.filter(r=>r.unloadStartTime&&!r.unloadEndTime).length;
+ const espera=grupos.flatMap(g=>g.espera);
+ const titulos=[tr('Turno de início','开始班次'),tr('Espera média','平均等待'),tr('Descarga média','平均卸货'),tr('Descargas com término oficial','有正式结束的卸货')];
+ const resumo=[tr('Espera média','平均等待')+' '+formatMinutes(media(espera))+' ('+espera.length+')',tr('Descarga média','平均卸货')+' '+formatMinutes(media(todos))+' ('+todos.length+')',tr('Deslacres registrados','解封已记录')+' '+lacre+'/'+chegadas.length,tr('Chegadas sem deslacre registrado','到达无解封记录')+' '+(chegadas.length-lacre),tr('Com início, sem término confirmado','有开始无确认结束')+' '+abertos];
+ by('desempenho').innerHTML='<p>'+resumo.map(esc).join(' · ')+'</p><p class="sub">'+tr('Espera: chegada real → início. Descarga: início → término oficial. O maior tempo médio aparece destacado.','等待：实际到达到开始。卸货：开始到正式结束。突出显示最高平均值。')+(loadingDetails?' '+tr('Carregando detalhes do JMS…','正在加载 JMS 详情…'):'')+(detailErrors?' '+detailErrors+' '+tr('detalhes indisponíveis nesta atualização.','条详情不可用。'):'')+'</p><table><thead><tr>'+titulos.map(t=>'<th scope="col">'+esc(t)+'</th>').join('')+'</tr></thead><tbody>'+grupos.map(g=>'<tr>'+[g.turno,formatMinutes(media(g.espera))+' ('+g.espera.length+')',formatMinutes(g.media)+(g.media!==null&&g.media===maior?' · '+tr('Maior média','最高平均') : ''),g.dur.length].map((v,i)=>'<td data-label="'+esc(titulos[i])+'">'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+}
+
+function estadoVirada(row,corte,fimTurno){
+ if(row.unloadEndTime){
+  if(row.unloadEndTime<corte)return 'finishedT2';
+  if(row.unloadEndTime<fimTurno)return 'finishedT3';
+  return 'finishedLater';
+ }
+ const inicio=row.unloadStartTime;
+ const ultimo=row.ultimoBipe;
+ if(inicio>=corte)return 'started';
+ if(ultimo>=corte)return 'continued';
+ if(loadingDetails&&!detalhes.has(chave(row)))return 'checking';
+ if(row.detalheSituacao==='semRegistroGru')return 'noGruRecord';
+ if(!row.detalheDisponivel)return 'unavailable';
+ if(!inicio)return 'waiting';
+ if(!ultimo)return 'open';
+ return 'verify';
+}
+function renderVirada(){
+ const resumo=by('viradaResumo'), tabela=by('viradaTabela');
+ const data=by('viradaData').value;
+ if(!data||!data.startsWith(today().slice(0,7))){
+  resumo.textContent=tr('Selecione uma data do mês atual.','请选择当月日期。');tabela.innerHTML='';return;
+ }
+ const anterior=dateAdd(data,-1);
+ const corte=anterior+' 22:00:00', fimTurno=data+' 06:00:00';
+ const consultadoEm=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'medium'}).format(new Date());
+ const registros=(source?.records??[]).map(r=>detalhes.get(chave(r))??r).filter(r=>{
+  const chegada=String(r.actualArrivalTime??'').replace('T',' ');
+  return chegada>=anterior+' 14:00:00'&&chegada<corte;
+ });
+ const labels={
+  finishedT2:['Finalizada antes da virada','交接前完成'],
+  finishedT3:['Pendência finalizada no T3','T3 已完成'],
+  finishedLater:['Pendente às 06h · finalizada depois','06:00 未完成，之后完成'],
+  started:['Começou no T3 ou depois','T3 或之后开始'],
+  continued:['Bipagem seguiu no T3 ou depois','T3 或之后仍有扫描'],
+  unavailable:['Detalhe indisponível','详情不可用'],
+  checking:['Em consulta','查询中'],
+  noGruRecord:['Resposta sem registro de descarga do SP GRU','响应无 SP GRU 卸货记录'],
+  waiting:['Sem início registrado','无卸货开始记录'],
+  open:['Início registrado, sem último bipe','已开始，无最后扫描'],
+  verify:['Último bipe antes da virada · confirmar conclusão','交接前最后扫描，需确认完成']
+ };
+ const cols=[['Viagem','车次'],['Placa','车牌'],['Linha','线路'],['Chegada real','实际到达'],['Início da descarga','开始卸货'],['Último bipe','最后扫描'],['Término oficial','正式卸货结束'],['Situação na virada','交接状态']];
+ const estados=registros.map(r=>estadoVirada(r,corte,fimTurno));
+ const count=(...keys)=>estados.filter(state=>keys.includes(state)).length;
+ resumo.textContent=tr('Finalizadas antes da virada','交接前完成')+' '+count('finishedT2')+' · '+tr('Finalizadas no T3','T3 完成')+' '+count('finishedT3')+' · '+tr('Pendentes às 06h com término posterior confirmado','06:00 待卸，之后确认完成')+' '+count('finishedLater')+' · '+tr('Sem término oficial confirmado','无确认结束')+' '+count('started','continued','unavailable','checking','noGruRecord','waiting','open','verify')+' | '+tr('Corte','交接时间')+' '+dateDisplay(corte)+' · '+number(registros.length)+' '+tr('chegadas no T2. Último bipe não confirma o fim da descarga.','辆车在 T2 到达。最后扫描不代表卸货完成。')+(consultadoEm<corte?' '+tr('Virada ainda futura.','交接时间尚未到。'):'');
+ tabela.innerHTML=registros.length?'<table><thead><tr>'+cols.map(col=>'<th scope="col">'+tr(...col)+'</th>').join('')+'</tr></thead><tbody>'+[...registros].sort((a,b)=>a.actualArrivalTime.localeCompare(b.actualArrivalTime)).map(row=>{
+  const fields=[row.shipmentNo,row.plateNumber,lineName(row.line),dateDisplay(row.actualArrivalTime),dateDisplay(row.unloadStartTime),dateDisplay(row.ultimoBipe),dateDisplay(row.unloadEndTime),tr(...labels[estadoVirada(row,corte,fimTurno)])+(/^HTTP \d{3}$/.test(row.detalheSituacao||'')?' · '+row.detalheSituacao:'')];
+  return '<tr>'+fields.map((field,i)=>'<td data-label="'+esc(tr(...cols[i]))+'">'+esc(field??'—')+'</td>').join('')+'</tr>';
+ }).join('')+'</tbody></table>':'';
+}
+const hoje=today();
+by('viradaData').value=hoje;
+by('viradaData').min=hoje.slice(0,7)+'-01';
+by('viradaData').max=dateAdd(dateAdd(hoje.slice(0,7)+'-01',32).slice(0,7)+'-01',-1);
+by('viradaData').onchange=renderVirada;
+let loadingLive=false;
+function atualizarPainel(){
+ if(loadingLive||loadingDetails)return;
+ loadingLive=true;
+ by('refresh').disabled=true;
+ google.script.run.withSuccessHandler(data=>{
+  loadingLive=false;
+  by('refresh').disabled=false;
+  source=data;
+  detalhes.clear();
+  message='';
+  for(const row of data.records)if(row.detalheConsultadoEm)detalhes.set(chave(row),row);
+  detailErrors=data.records.filter(row=>row.detalheConsultadoEm&&!row.detalheDisponivel).length;
+  render();
+ }).withFailureHandler(()=>{
+  loadingLive=false;
+  by('refresh').disabled=false;
+  message='Falha ao ler a planilha. Confira seu acesso; os dados anteriores podem estar desatualizados.|读取表格失败，请检查权限；现有数据可能已过期。';
+  render();
+ }).dadosPainelRecebimento();
+}
+by('refresh').onclick=atualizarPainel;
+by('import').hidden=true;
+setInterval(atualizarPainel,15*60*1000);
+setInterval(renderFilaDescarga,60*1000);
+atualizarPainel();
+by('theme').onclick=()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';write('gru-theme',root.dataset.theme);render()};
+for(const code of ['pt','zh'])by(code).onclick=()=>{lang=code;write('gru-lang',lang);render()};
+function toggleDrawer(open){document.body.classList.toggle('open',open);by('drawer').setAttribute('aria-expanded',open)}
+by('drawer').innerHTML=icon('menu');by('drawer').onclick=()=>toggleDrawer(!document.body.classList.contains('open'));by('shade').onclick=()=>toggleDrawer(false);
+document.addEventListener('keydown',event=>{if(event.key==='Escape')toggleDrawer(false)});
+render();window.addEventListener('load',render,{once:true});
+</script></body></html>

@@ -1,0 +1,59 @@
+J&T · MONITOR DE RECEBIMENTO | SP GRU (no notebook, como os painéis do DashMaster)
+==================================================================================
+
+O que faz
+---------
+Mostra os caminhões que estão vindo para a SP GRU (30001): troncal e secundária, em trânsito e concluídos, com chegada,
+desbloqueio, início e fim da descarga e o último bipe. São os SEUS arquivos do Apps Script, sem nenhuma mudança:
+  Recebimento_SP_GRU.gs   a coleta do JMS (atualizarRecebimento)
+  Painel.gs               os dados do painel (dadosPainelRecebimento) e os detalhes de cada viagem
+  Index.html              o painel
+O que muda é só ONDE roda: no notebook, e não no Google.
+  - A coleta roda ao abrir e depois a cada 15 min (no Google era o acionador de 15 min).
+  - A planilha "Recebimento JMS" vira o arquivo dados\planilha.json (não precisa de planilha do Google).
+  - As Propriedades do script viram dados\propriedades.json. O JMS_HEADERS_JSON vem da tela Configurações
+    (ou do DashMaster deste computador: o Monitor usa o mesmo AuthToken dele).
+
+Não mexe no DashMaster: pasta, porta (3600) e link próprios.
+
+Instalar (no notebook onde já roda o DashMaster)
+------------------------------------------------
+1. No ZIP: botão direito > Propriedades > marque "Desbloquear" > OK.
+2. Botão direito no ZIP > Extrair tudo... > destino C:\  > Extrair. Fica a pasta C:\monitor-recebimento.
+3. Dois cliques em C:\monitor-recebimento\iniciar.bat. Abre uma janela preta com o endereço do painel. Deixe aberta
+   (pode minimizar). Se o Windows perguntar sobre o Firewall, clique em Permitir.
+4. Abra http://localhost:3600/config no navegador.
+   - Se o DashMaster está neste notebook, aparece "Em uso: o AuthToken do DashMaster deste computador". Pronto.
+   - Se não: cole o AuthToken do JMS (ou o mesmo JMS_HEADERS_JSON que estava nas Propriedades do script)
+     e clique em "Salvar e coletar".
+   - Espere "Última coleta OK" (a primeira do dia demora um pouco mais: ela revisa o mês todo).
+5. Abra o painel: http://localhost:3600
+6. Ligar sozinho com o Windows: dois cliques em iniciar-com-windows.bat (uma vez só).
+
+Link para a equipe (Tailscale, o mesmo do DashMaster)
+-----------------------------------------------------
+Dois cliques em link-publico.bat. O link fica:  https://NOME-DO-NOTEBOOK.xxxx.ts.net/recebimento
+(o mesmo endereço do painel principal, com /recebimento no fim; as portas 443, 8443 e 10000 já são dos outros painéis).
+O link continua valendo depois de reiniciar o notebook. Para tirar do ar só este link:
+  "C:\Program Files\Tailscale\tailscale.exe" funnel --https=443 --set-path=/recebimento off
+
+config.json (criado na 1ª vez, ao lado do server.js)
+----------------------------------------------------
+porta 3600 · senha (vazio = quem tem o link abre; com senha, o painel pede a senha) · coletaMinutos 15 ·
+linkPublico (só para mostrar) · portaLink 443 / caminho "/recebimento" (link público) ·
+dashmaster (pasta do DashMaster; vazio = procura em C:\dashmaster; "nao" = não usar o AuthToken dele).
+Mudou? Feche a janela preta e abra o iniciar.bat de novo.
+
+Se der problema
+---------------
+- Painel mostra "Falha ao ler a planilha": a primeira coleta ainda não terminou (ou não tem AuthToken).
+  Abra http://localhost:3600/config e veja a "Coleta do JMS".
+- "O AuthToken do JMS pode ter vencido": pegue um novo no JMS e cole em Configurações (ou no DashMaster).
+- "Sem acesso ao JMS": confira a internet. Se a empresa usa proxy, veja as linhas "rem set HTTPS_PROXY" no iniciar.bat.
+- "A porta 3600 já está em uso": o Monitor já está aberto em outra janela.
+- Mande um print da tela Configurações (o AuthToken nunca aparece nela).
+
+Para quem mexe no código
+------------------------
+node test/teste.js   (JMS de mentira, viagens fictícias)
+node gerar-zip.js    (gera dist/MONITOR_RECEBIMENTO_V<versão>.zip)

@@ -1,0 +1,16 @@
+{
+  "name": "jt-monitor-recebimento",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monitor de Recebimento | SP GRU: caminhões vindo para a base 30001 (JMS), no computador, com os arquivos do Apps Script.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/teste.js",
+    "zip": "node gerar-zip.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "UNLICENSED"
+}

@@ -13,3 +13,7 @@ expedicao_incorreta/dados/
 expedicao_incorreta/config.json
 expedicao_incorreta/planilhas/
 expedicao_incorreta/dist/
+# Monitor de Recebimento: dados do computador (planilha local, AuthToken), configuração e pacote gerado.
+monitor-recebimento/dados/
+monitor-recebimento/config.json
+monitor-recebimento/dist/
