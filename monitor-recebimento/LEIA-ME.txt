@@ -62,6 +62,18 @@ Dois cliques em link-publico.bat. O link fica:  https://NOME-DO-NOTEBOOK.xxxx.ts
 O link continua valendo depois de reiniciar o notebook. Para tirar do ar só este link:
   "C:\Program Files\Tailscale\tailscale.exe" funnel --https=443 --set-path=/recebimento off
 
+Link numa porta só do Monitor (ex.: https://NOME.ts.net:10000)
+O Tailscale Funnel só tem 3 portas: 443 (painel principal), 8443 (Sorter) e 10000 (Lotes). Para o Monitor ter uma
+porta só dele, um outro painel passa para um caminho. Exemplo, Lotes vai para https://NOME.ts.net/lotes:
+  1. Lotes: feche a janela preta do Lotes. No Bloco de Notas, abra C:\dashmaster-lotes\node\config.json e troque
+     "portaLink": 10000 por "portaLink": 443 e "caminho": "" por "caminho": "/lotes". Salve, abra o Lotes de novo
+     e dê dois cliques no link-publico.bat do Lotes (a porta 10000 fica livre).
+  2. Monitor: feche a janela preta do Monitor. Abra C:\monitor-recebimento\config.json e troque
+     "caminho": "/recebimento" por "caminho": "" e "portaLink": 443 por "portaLink": 10000. Salve, abra o Monitor de novo
+     e dê dois cliques no link-publico.bat do Monitor.
+  3. Links: Monitor https://NOME.ts.net:10000 · Lotes https://NOME.ts.net/lotes (avise quem usava o link antigo do Lotes).
+Monitor em OUTRO computador (com Tailscale)? Lá ele pode usar a 443 sozinho: "portaLink": 443 e "caminho": "".
+
 config.json (criado na 1ª vez, ao lado do server.js)
 ----------------------------------------------------
 porta 3600 · senha (vazio = quem tem o link abre; com senha, o painel pede a senha) · coletaMinutos 15 ·
