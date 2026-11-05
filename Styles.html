@@ -342,6 +342,8 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .charts-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:12px}
 .chart-card{padding:18px 20px 16px;min-width:0;display:flex;flex-direction:column;border-top:3px solid var(--red)}
 .chart-card.full{grid-column:1/-1}
+/* V4.24: dois gráficos por linha (painel principal) em telas largas; o último de um número ímpar ocupa a linha. */
+@media (min-width:1200px){.charts-grid.two-col{grid-template-columns:repeat(2,minmax(0,1fr))}.charts-grid.two-col .chart-card.odd-last{grid-column:1/-1}}
 .chart-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .chart-ico{width:34px;height:34px;border-radius:10px;background:var(--red-50);color:var(--red);display:grid;place-items:center;flex:none}
 .chart-titles{flex:1 1 180px;min-width:0}

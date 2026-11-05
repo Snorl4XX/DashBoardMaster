@@ -5126,4 +5126,19 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'AuthToken exigido só quando algum painel usa o JMS');
 }
 
+// V4.24 (pedido): Triagem Errada na meta com a taxa MENOR OU IGUAL a 0,50% (0,50% está na meta), comparando com 2 casas como na tela;
+// gráficos dois por linha no painel principal (Lotes e Produção do Sorter continuam um por linha).
+{
+  const cM = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const gS = cM.getIndicatorConfig_('sorting_error').goal, gW = cM.getIndicatorConfig_('wrong_send').goal, met = (r, g) => cM.JTCore_.goalMet(r, g);
+  check(met(0.50, gS) === true && met(0.504, gS) === true && met(0.49, gS) === true && met(0.51, gS) === false && met(0.6, gS) === false &&
+    met(1.00, gW) === false && met(0.99, gW) === true,
+    'Triagem Errada: 0,50% está na meta (≤ 0,50%, com 2 casas: 0,504% = 0,50%); 0,51% fora; o Envio Errado continua "abaixo de 1,00%"',
+    {a: met(0.50, gS), b: met(0.504, gS), c: met(0.51, gS)});
+  const catM = cM.getAppBootstrap().catalog || [], cfgTxt = require('fs').readFileSync(require('path').join(__dirname, '..', 'Config.gs'), 'utf8');
+  check(catM.length && catM.every(x => x.chartsFull === (x.key === 'lot_flow' || x.key === 'sorter_flow')) &&
+    (cfgTxt.match(/^\s*chartsFull: true,/gm) || []).length === 2,
+    'gráficos dois por linha no painel principal; Lotes e Produção do Sorter com chartsFull (um por linha)', catM.map(x => [x.key, x.chartsFull]));
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

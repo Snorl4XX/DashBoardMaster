@@ -1,8 +1,19 @@
-# J&T DASHMASTER V4.23.9 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.24.0 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.24.0 — Painel principal: meta da Triagem Errada (≤ 0,50%) e gráficos lado a lado
+
+- **Triagem Errada:** na meta com a taxa **menor ou igual a 0,50%** — 0,50% está na meta. A comparação usa as 2 casas da tela
+  (0,504% aparece e conta como 0,50%). O selo mostra "Meta ≤ 0,50%" e o texto do Maomao diz "até 0,50%".
+- **Gráficos lado a lado:** no painel principal, os gráficos ficam **dois por linha** em telas largas (a partir de 1200 px);
+  a Evolução diária continua na linha inteira, e com número ímpar de gráficos o último ocupa a linha. Em tela menor (notebook
+  pequeno, celular), um por linha. Os painéis separados (Lotes e Produção do Sorter) continuam com um gráfico por linha.
+
+**Atualizar (painel principal, Node.js):** feche a janela preta do painel principal, extraia o `JT_DASHMASTER_V4_24_NODE.zip` em
+`C:\` (Substituir), abra o `iniciar.bat` e aperte **Ctrl+F5** no navegador. (Apps Script: `JT_DASHMASTER_V4_24_PRINCIPAL.zip`.)
 
 ## V4.23.9 — Bot do Feishu em mais de um grupo
 

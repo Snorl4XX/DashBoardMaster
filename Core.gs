@@ -504,6 +504,8 @@ function JTCoreFactory_() {
   function goalMet(rate, goal) {
     if (!isNum(rate) || !goal || !isNum(goal.value)) return null;
     rate = Number(rate);
+    // V4.24: goal.roundTo = casas da tela (ex.: 2 → 0,503% conta como 0,50%, a mesma que aparece).
+    if (isNum(goal.roundTo)) { var f = Math.pow(10, Number(goal.roundTo)); rate = Math.round(rate * f) / f; }
     var v = Number(goal.value);
     if (goal.direction === 'min') return goal.strict ? rate > v : rate >= v;
     return goal.strict ? rate < v : rate <= v;

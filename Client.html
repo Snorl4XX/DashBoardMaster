@@ -74,7 +74,7 @@
       targetBadText: 'Maomao está chorando: {name} está fora da meta ({goal}). Veja abaixo os maiores ofensores.',
       targetNoneText: 'Ainda não há taxa sincronizada do JMS para este período. Confira a cobertura nos selos acima.',
       targetOpenText: 'O dia {d} deste painel vai das 14h de {d} às 13:59 de {n}: o JMS só tem o número depois das 14h de {n}. Último dia com taxa: {a}.',
-      goalBelow: 'abaixo de {v}', goalAbove: 'acima de {v}',
+      goalBelow: 'abaixo de {v}', goalAbove: 'acima de {v}', goalBelowEq: 'até {v}', goalAboveEq: 'a partir de {v}',
       evolution: 'Evolução diária', evolutionSub: 'Taxa oficial do JMS por dia · pontos verdes na meta, vermelhos fora', evolutionSubNoGoal: 'Taxa oficial do JMS por dia',
       evolution30: '30 dias até {date}',
       periodView: 'Período', historyView: 'Histórico', ranking: 'Ranking', timeline: '24 h', chartView: 'Gráfico', tableView: 'Tabela',
@@ -250,7 +250,7 @@
       targetBadText: 'Maomao 哭了：{name} 未达标（目标 {goal}）。请查看下方主要问题。',
       targetNoneText: '该期间尚无已同步的JMS指标率，请查看上方的覆盖情况。',
       targetOpenText: '本面板的 {d} 为 {d} 14 点至 {n} 13:59：JMS 在 {n} 14 点后才有数据。最近有指标率的日期：{a}。',
-      goalBelow: '低于 {v}', goalAbove: '高于 {v}',
+      goalBelow: '低于 {v}', goalAbove: '高于 {v}', goalBelowEq: '不高于 {v}', goalAboveEq: '不低于 {v}',
       evolution: '每日趋势', evolutionSub: 'JMS官方每日指标率 · 绿点达标，红点未达标', evolutionSubNoGoal: 'JMS官方每日指标率',
       evolution30: '截至 {date} 的30天',
       periodView: '所选期间', historyView: '全部历史', ranking: '排名', timeline: '24小时', chartView: '图表', tableView: '表格',
@@ -577,7 +577,12 @@
   }
   /** "Meta < 1,00%" ou, sem meta, "Meta não definida". */
   function goalLabel(goal) { return hasGoal(goal) ? t('goal') + ' ' + goalText(goal) : t('noGoal'); }
-  function goalSentence(goal) { return hasGoal(goal) ? t(goal.direction === 'min' ? 'goalAbove' : 'goalBelow', {v: fmtRate(goal.value, goal, goalDigits(goal))}) : t('noGoal'); }
+  // V4.24: meta "menor ou igual" (strict: false) → "até 0,50%" (0,50% está na meta), não "abaixo de".
+  function goalSentence(goal) {
+    if (!hasGoal(goal)) return t('noGoal');
+    var k = goal.direction === 'min' ? (goal.strict ? 'goalAbove' : 'goalAboveEq') : (goal.strict ? 'goalBelow' : 'goalBelowEq');
+    return t(k, {v: fmtRate(goal.value, goal, goalDigits(goal))});
+  }
   /** Casas da meta: as do indicador (2), ou, com goal.digits, só as que o valor tem (0,025 → "0,025%"). */
   function goalDigits(goal) {
     if (!goal.digits) return undefined;
@@ -2654,6 +2659,8 @@
 
   function renderCharts(c) {
     var grid = $('#chartsGrid'), specs = chartSpecs(c);
+    // V4.24 (pedido "colocar dois gráficos lado a lado"): dois por linha no painel principal (chartsFull = um por linha).
+    grid.classList.toggle('two-col', !c.chartsFull);
     var sig = state.indicator + '|' + specs.map(function (s) { return s.key; }).join(',');
     if (grid.getAttribute('data-sig') !== sig) {
       Object.keys(state.charts).forEach(function (k) { if (k !== 'spark' && k !== 'spark2') destroyChart(k); });
@@ -2661,6 +2668,11 @@
       specs.forEach(function (s) {
         var card = document.createElement('article');
         card.className = 'card chart-card' + (s.key === 'evolution' || (s.metric && s.type === 'line') ? ' full' : '');
+        // Número ímpar de gráficos lado a lado: o último ocupa a linha inteira (sem buraco ao lado).
+        if (!/ full/.test(card.className)) {
+          var halves = specs.filter(function (x) { return !(x.key === 'evolution' || (x.metric && x.type === 'line')); });
+          if (halves.length % 2 === 1 && halves[halves.length - 1] === s) card.className += ' odd-last';
+        }
         card.setAttribute('data-key', s.key);
         card.innerHTML = '<div class="chart-head"><span class="chart-ico">' + icon(s.metric ? (s.type === 'line' ? 'trend' : s.bad ? 'errors' : 'check') : s.grouped ? (s.dim || 'segment') : (s.dim || s.key)) + '</span>' +
           '<div class="chart-titles"><h3></h3><small></small></div><div class="chart-tools"></div></div><div class="chart-body"></div><div class="chart-legend"></div>' +

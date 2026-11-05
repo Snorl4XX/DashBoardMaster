@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.23.9',
+  VERSION: '4.24.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -524,7 +524,8 @@ const ALL_INDICATORS_ = Object.freeze({
     key: 'sorting_error', order: 2, routeKey: 'SORTING_ERROR',
     name: {pt: 'Triagem Errada', zh: '错分'},
     subtitle: {pt: 'Taxa de triagem incorreta nesta etapa', zh: '本环节错分率'},
-    goal: {value: 0.50, direction: 'max', strict: true},
+    // V4.24 (pedido): na meta com a taxa MENOR OU IGUAL a 0,50% (0,50% está na meta), comparando com 2 casas como na tela.
+    goal: {value: 0.50, direction: 'max', strict: false, roundTo: 2},
     apiProfile: 'sorting_error', detailMatchesErrors: true,
     // Resposta real (center_error_rate_new_total): sendCount, wrongType12Count, wrongRate2 = "Taxa de Triagem Incorreta nesta Etapa".
     summary: {
@@ -1213,6 +1214,8 @@ const ALL_INDICATORS_ = Object.freeze({
    */
   lot_flow: {
     key: 'lot_flow', order: 10, routeKey: 'LOTS',
+    // V4.24: painel separado (Lotes) — continua com um gráfico por linha (os dois por linha são do painel principal).
+    chartsFull: true,
     // V4.18 (pedido "desenvolvendo dashboard de criação de lotes"): o nome do pedido.
     name: {pt: 'Criação de Lotes', zh: '建包统计'},
     subtitle: {pt: 'Sacas ecológicas e não ecológicas criadas (Estatística de Criação Recorrente de Eco Bag)', zh: '环保袋与非环保袋建包（循环袋建包统计）'},
@@ -1680,6 +1683,8 @@ const ALL_INDICATORS_ = Object.freeze({
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
     // V4.23.1 (pedido "Eliminar Tabela de remessas"): sem a tabela de remessas no fim do painel.
     hideDetailTable: true,
+    // V4.24: os gráficos dois por linha são do painel principal; a Produção do Sorter continua com um gráfico por linha.
+    chartsFull: true,
     heroMetric: {key: 'sortTotal', column: 'Sort total', icon: 'qty',
       byFilter: {induction: {column: 'Alimentação', label: {pt: 'Alimentado na balança', zh: '供包台供包量'}}},
       label: {pt: 'Total produzido (Sort total)', zh: '分拣总量'}, labelPeriod: {pt: 'Total produzido no período', zh: '期间分拣总量'},
@@ -1943,6 +1948,7 @@ function catalogEntry_(cfg) {
     // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).
     refTypes: cfg.detail && cfg.detail.typeFromSummary ? (cfg.detail.types || []).map(t => t.column) : null,
     labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null, hideDetailTable: !!cfg.hideDetailTable,
+    chartsFull: !!cfg.chartsFull,
     hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
     grouped: !!cfg.grouped, routeKey: cfg.routeKey,
     detailDays: cfg.detail && cfg.detail.days || null,
