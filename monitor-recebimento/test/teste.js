@@ -158,6 +158,8 @@ async function testeServidor(tmp, jms) {
     confere(r.status === 200 && r.texto.indexOf('<title>Monitor de Recebimento | SP GRU</title>') >= 0, 'painel abre');
     confere(r.texto.indexOf('window.google={script:{run:run()}}') >= 0 && r.texto.indexOf('var api="/api/run"') >= 0, 'ponte google.script.run');
     confere(r.texto.indexOf('Marcelo Wesley') >= 0, 'crédito do painel mantido');
+    confere(r.texto.indexOf('translate="no"') >= 0 && r.texto.indexOf('<meta name="google" content="notranslate">') >= 0, 'painel não é traduzido pelo navegador (tem PT-BR / 中文 próprio)');
+    confere(r.texto.indexOf('<option value="4" data-i="Concluído|已完成">') >= 0, 'filtro Status: Concluído');
     confere(r.texto.indexOf('<title>Monitor de Recebimento | SP GRU</title><script>') >= 0, 'ponte logo depois do título');
     let d = await dados(porta);
     confere(d.ok === false && d.error === 'A coleta JMS ainda não foi configurada.', 'antes da 1ª coleta: mensagem do Painel.gs', d);

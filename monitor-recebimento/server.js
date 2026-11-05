@@ -258,7 +258,7 @@ function paginaPainel(base) {
 }
 
 function paginaEntrar(erro) {
-  return '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+  return '<!doctype html><html lang="pt-BR" translate="no"><meta charset="utf-8"><meta name="google" content="notranslate"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>Monitor de Recebimento | Entrar</title><style>' + CSS + '</style><body><main class="caixa"><h1>Monitor de Recebimento</h1>' +
     '<form method="post" action="entrar"><label>Senha<input type="password" name="senha" autofocus required></label>' +
     (erro ? '<p class="erro">' + html(erro) + '</p>' : '') + '<button>Entrar</button></form></main></body></html>';
@@ -278,7 +278,7 @@ const CSS = ':root{color-scheme:light dark;--fundo:#f4f5f7;--cartao:#fff;--texto
   'a{color:inherit}ol{margin:6px 0 0;padding-left:20px}';
 
 function paginaConfig() {
-  return '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+  return '<!doctype html><html lang="pt-BR" translate="no"><meta charset="utf-8"><meta name="google" content="notranslate"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>Monitor de Recebimento | Configurações</title><style>' + CSS + '</style><body><main class="caixa">' +
     '<h1>Monitor de Recebimento · Configurações</h1><p class="sub">Esta tela só abre neste computador. Versão ' + html(VERSAO) + '.</p>' +
     '<section class="cartao"><h2>Coleta do JMS</h2><div id="coleta" class="suave">Carregando…</div>' +
@@ -393,7 +393,7 @@ async function tratar(req, res) {
   }
   if (p === '/config' || p.indexOf('/config/') === 0) {
     if (!isLocal(req)) {
-      enviar(req, res, 403, '<!doctype html><meta charset="utf-8"><title>Configurações</title><style>' + CSS + '</style><main class="caixa"><h1>Configurações</h1>' +
+      enviar(req, res, 403, '<!doctype html><html lang="pt-BR" translate="no"><meta charset="utf-8"><meta name="google" content="notranslate"><title>Configurações</title><style>' + CSS + '</style><main class="caixa"><h1>Configurações</h1>' +
         '<p>Esta tela só abre no computador do Monitor: <b>http://localhost:' + cfg.porta + '/config</b></p></main>');
       return;
     }
