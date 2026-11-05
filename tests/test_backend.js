@@ -5085,6 +5085,41 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
         'Bot do Feishu: site zerado na janela (' + modoJ + ') = cartão zerado, sem buscar números de outra consulta', {r, txt: txt.slice(0, 500)});
     }
   });
+  // V4.23.9 (pedido "adicionar o bot em outro grupo que mostre os mesmos valores"): até 5 grupos, um webhook (e segredo) por grupo;
+  // a mesma mensagem vai para todos; numa nova tentativa, só para os que faltaram (sem repetir no grupo que já recebeu).
+  {
+    const sent = [];
+    let falha2 = 1;
+    const siteG = createFakeSorter({modo: 'xadmin'}), jmsG = fakeJms({});
+    const cG = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home', FEISHU_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/g1',
+      FEISHU_WEBHOOK_2: 'https://open.feishu.cn/open-apis/bot/v2/hook/g2', FEISHU_SEGREDO_2: 'seg2'},
+    jms: (url, req, state) => {
+      if (url.indexOf('https://open.feishu.cn/') === 0) {
+        const g = url.slice(-2);
+        let body = {code: 0, msg: 'success'};
+        if (g === 'g2' && falha2 > 0) { falha2--; body = {code: 9499, msg: 'Bad Request'}; }
+        sent.push({g, p: JSON.parse(req.payload)});
+        return {getResponseCode: () => 200, getContentText: () => JSON.stringify(body)};
+      }
+      return /^http:\/\/sorter\.falso/.test(url) ? siteG.fetchMock(url, req) : jmsG(url, req, state);
+    }, quiet: true});
+    cG.setupProject();
+    const at = (h, m) => Date.parse(DS + 'T' + String(h + 3).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':00Z');
+    const g1 = cG.feishuSorterTick_(at(12, 7)), g2 = cG.feishuSorterTick_(at(12, 8)), g3 = cG.feishuSorterTick_(at(12, 9));
+    const s1 = sent.filter(x => x.g === 'g1'), s2 = sent.filter(x => x.g === 'g2'), last2 = (s2[s2.length - 1] || {}).p || {};
+    const sig2 = require('crypto').createHmac('sha256', last2.timestamp + '\n' + 'seg2').update('').digest('base64');
+    check(g1 && g1.ok === false && /Grupo 2: o Feishu recusou/.test(g1.erro) && g2 && g2.ok && g3 === null && s1.length === 1 && s2.length === 2 &&
+      !s1[0].p.sign && last2.sign === sig2 && JSON.stringify(s1[0].p.card) === JSON.stringify(last2.card),
+      'Bot do Feishu: a mesma mensagem nos 2 grupos (cada um com o seu segredo); a nova tentativa manda só para o grupo que faltou',
+      {g1, g2, g3, s1: s1.length, s2: s2.length});
+    const n0 = sent.length, tg2 = cG.testarFeishu('', 2), tAll = cG.testarFeishu(''), tg3 = cG.testarFeishu('', 3);
+    const after = sent.slice(n0).map(x => x.g);
+    check(tg2.ok && /grupo\(s\) 2:/.test(tg2.enviado) && tAll.ok && /grupo\(s\) 1, 2:/.test(tAll.enviado) && after.join(',') === 'g2,g1,g2' &&
+      tg3.ok === false && /grupo 3 não tem webhook/.test(tg3.erro) && tAll.gruposLigados.join('|') === 'Grupo 1 (sem segredo)|Grupo 2 (com segredo)' &&
+      !/hook\/g[12]|seg2/.test(JSON.stringify([tg2, tAll])),
+      'testarFeishu: um grupo (o do botão) ou todos; grupo sem webhook avisa; sem mostrar webhook nem segredo', {tg2, after});
+  }
   // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
   check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&
     (() => { try { createContext({props: {}, jms: fakeJms({}), quiet: true}).validateJmsAuth_(); return false; } catch (e) { return true; } })(),

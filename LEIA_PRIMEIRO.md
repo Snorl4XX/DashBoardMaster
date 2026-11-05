@@ -1,8 +1,21 @@
-# J&T DASHMASTER V4.23.8 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.23.9 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.23.9 — Bot do Feishu em mais de um grupo
+
+Pedido "adicionar o bot em outro grupo que mostre os mesmos valores": no Feishu, cada grupo tem o seu bot e o seu webhook; o painel
+agora manda **a mesma mensagem para até 5 grupos**.
+- Em Configurações → **Bot do Feishu**, escolha **Grupo 2** (3, 4, 5), cole o webhook do bot desse grupo (e o segredo, se ligou a
+  assinatura) e clique em **Salvar e mandar um teste** — o teste vai só para esse grupo. **Desligar o bot deste grupo** apaga só
+  o dele. O Grupo 1 continua sendo o de antes (`FEISHU_WEBHOOK`); os outros ficam em `FEISHU_WEBHOOK_2`… e `FEISHU_SEGREDO_2`…
+- De hora em hora, todos os grupos recebem o mesmo cartão. Se um grupo falhar, a nova tentativa manda só para ele (o grupo que já
+  recebeu não recebe de novo). `testarFeishu` sem parâmetro de grupo manda para todos.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_9_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`.
 
 ## V4.23.8 — Bot do Feishu: período sem produção = zerado
 

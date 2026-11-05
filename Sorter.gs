@@ -974,8 +974,20 @@ function diagnosticarSorter() {
  * fechou, com os números do painel. Uma mensagem por hora; até 3 tentativas se o Feishu não responder.
  */
 const FEISHU_TENTATIVAS_ = 3;
-function feishuWebhook_() { return String(getProp_('FEISHU_WEBHOOK', '') || '').trim(); }
-function feishuOn_() { return !!(INDICATORS.sorter_flow && feishuWebhook_()); }
+/**
+ * V4.23.9 (pedido "adicionar o bot em outro grupo, com os mesmos valores"): até 5 grupos, um bot por grupo — grupo 1 =
+ * FEISHU_WEBHOOK / FEISHU_SEGREDO; grupos 2…5 = FEISHU_WEBHOOK_2 / FEISHU_SEGREDO_2… A mesma mensagem vai para todos.
+ */
+const FEISHU_MAX_GRUPOS_ = 5;
+function feishuGroups_() {
+  const out = [];
+  for (let n = 1; n <= FEISHU_MAX_GRUPOS_; n++) {
+    const sfx = n === 1 ? '' : '_' + n, url = String(getProp_('FEISHU_WEBHOOK' + sfx, '') || '').trim();
+    if (url) out.push({n: n, url: url, seg: String(getProp_('FEISHU_SEGREDO' + sfx, '') || '').trim()});
+  }
+  return out;
+}
+function feishuOn_() { return !!(INDICATORS.sorter_flow && feishuGroups_().length); }
 /** 257316 → "257.316". */
 function feishuN_(n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
 /** Hora que fechou em `nowMs` (fuso do painel): {date, hour, key, minute}. */
@@ -1122,9 +1134,10 @@ function feishuWarnCard_(h, erro) {
       'alcançar o sorter de novo. / 无法连接分拣机，恢复后自动继续发送。'}}]}};
 }
 /** Manda no grupo. Assinatura do robô: base64(HMAC-SHA256 com a chave "timestamp\nsegredo" e mensagem vazia). */
-function feishuPost_(body) {
-  const url = feishuWebhook_(), seg = String(getProp_('FEISHU_SEGREDO', '') || '').trim();
-  if (!/^https?:\/\/\S+$/i.test(url)) throw new Error('FEISHU_WEBHOOK inválido: cole o endereço do webhook do bot (https://open.feishu.cn/open-apis/bot/v2/hook/…).');
+function feishuPost_(body, g) {
+  g = g || feishuGroups_()[0] || {n: 1, url: '', seg: ''};
+  const url = g.url, seg = g.seg, grupo = 'Grupo ' + g.n + ': ';
+  if (!/^https?:\/\/\S+$/i.test(url)) throw new Error(grupo + 'webhook inválido: cole o endereço do webhook do bot (https://open.feishu.cn/open-apis/bot/v2/hook/…).');
   const payload = Object.assign({}, body);
   if (seg) {
     const ts = String(Math.floor(Date.now() / 1000));
@@ -1133,28 +1146,41 @@ function feishuPost_(body) {
   }
   let res;
   try { res = UrlFetchApp.fetch(url, {method: 'post', contentType: 'application/json; charset=utf-8', payload: JSON.stringify(payload), muteHttpExceptions: true}); }
-  catch (e) { throw new Error('Não consegui falar com o Feishu (' + String(e && e.message || e).replace(/^Exception:\s*/, '').slice(0, 120) + '). Este computador precisa de internet.'); }
+  catch (e) { throw new Error(grupo + 'não consegui falar com o Feishu (' + String(e && e.message || e).replace(/^Exception:\s*/, '').slice(0, 120) + '). Este computador precisa de internet.'); }
   const code = res.getResponseCode(), j = safeJsonParse_(res.getContentText(), null) || {};
   const c = j.code !== undefined ? Number(j.code) : j.StatusCode !== undefined ? Number(j.StatusCode) : (code === 200 ? 0 : code);
   if (code === 200 && c === 0) return {ok: true};
   const dica = {19021: 'a assinatura não confere: confira o segredo do bot', 19022: 'o IP deste computador não está liberado no bot',
     19024: 'o bot exige uma palavra-chave: coloque "Sorter" nas palavras-chave do bot', 19001: 'webhook inválido',
     9499: 'pedido recusado pelo Feishu'}[c] || '';
-  throw new Error('O Feishu recusou a mensagem (código ' + c + (j.msg || j.StatusMessage ? ': ' + String(j.msg || j.StatusMessage).slice(0, 80) : '') + ')' +
+  throw new Error(grupo + 'o Feishu recusou a mensagem (código ' + c + (j.msg || j.StatusMessage ? ': ' + String(j.msg || j.StatusMessage).slice(0, 80) : '') + ')' +
     (dica ? ' — ' + dica : '') + '.');
 }
-/** Busca no site e manda a hora `h` ({date, hour}). Devolve os números enviados. */
+/**
+ * Manda `body` para os grupos (menos os de `feitos`, números). Devolve os grupos que receberam; com erro em algum, lança o erro
+ * com err.enviados = os que já receberam (a nova tentativa manda só para os que faltam).
+ */
+function feishuPostAll_(body, grupos, feitos) {
+  const ok = (feitos || []).slice(), erros = [];
+  grupos.filter(g => ok.indexOf(g.n) < 0).forEach(g => {
+    try { feishuPost_(body, g); ok.push(g.n); } catch (e) { erros.push(String(e && e.message || e)); }
+  });
+  if (erros.length) { const err = new Error(erros.join(' · ')); err.enviados = ok; throw err; }
+  return ok;
+}
+/** Busca no site e manda a hora `h` ({date, hour}) para os grupos. Devolve os números enviados. */
 function feishuSendHour_(h, opts) {
+  opts = opts || {};
   const x = feishuHourData_(h.date, h.hour), voltou = !!getProp_('FEISHU_FALHA', '');
   // V4.23.6: hora ainda vazia no site (os números podem chegar alguns minutos depois): espera (até FEISHU_ESPERA) e tenta de 5 em 5 min.
-  if (x.vazio && opts && opts.esperar) {
+  if (x.vazio && opts.esperar) {
     setProp_('FEISHU_VAZIO', h.key + '|' + h.minute);
     return {aguardando: true, numeros: x};
   }
-  feishuPost_(feishuCard_(x, voltou));
+  const grupos = feishuPostAll_(feishuCard_(x, voltou), opts.grupos || feishuGroups_(), opts.enviados);
   deleteProp_('FEISHU_VAZIO');
-  if (voltou) deleteProp_('FEISHU_FALHA');
-  return {numeros: x};
+  if (voltou && !opts.grupos) deleteProp_('FEISHU_FALHA');
+  return {numeros: x, grupos: grupos};
 }
 /**
  * Na fila: manda a hora que fechou (uma vez por hora, a partir do minuto FEISHU_MINUTO). Até 3 tentativas; se o sorter não
@@ -1171,20 +1197,28 @@ function feishuSorterTick_(nowMs) {
   if (vz[0] === h.key && h.minute - Number(vz[1]) < 5 && espera) return null;
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return null;
+  // V4.23.9: grupos que já receberam esta hora (numa tentativa anterior) não recebem de novo.
+  const env = String(getProp_('FEISHU_ENVIADOS', '')).split('|');
+  const feitos = env[0] === h.key && env[1] ? env[1].split(',').map(Number).filter(Boolean) : [];
   try {
-    const r = feishuSendHour_(h, {esperar: espera});
+    const r = feishuSendHour_(h, {esperar: espera, enviados: feitos});
     if (r.aguardando) return {ok: false, hora: h.key, aguardando: true};
     setProp_('FEISHU_ULTIMA', h.key);
     deleteProp_('FEISHU_TENTATIVA');
-    return {ok: true, hora: h.key};
+    deleteProp_('FEISHU_ENVIADOS');
+    return {ok: true, hora: h.key, grupos: r.grupos};
   } catch (e) {
     const t = String(getProp_('FEISHU_TENTATIVA', '')).split('|'), n = (t[0] === h.key ? Number(t[1]) || 0 : 0) + 1;
     const msg = String(e && e.message || e);
+    if (e && e.enviados && e.enviados.length) setProp_('FEISHU_ENVIADOS', h.key + '|' + e.enviados.join(','));
     if (n >= FEISHU_TENTATIVAS_) {
       setProp_('FEISHU_ULTIMA', h.key);
       deleteProp_('FEISHU_TENTATIVA');
+      deleteProp_('FEISHU_ENVIADOS');
       if (e && e.sorterFalha && !getProp_('FEISHU_FALHA', '')) {
-        try { feishuPost_(feishuWarnCard_(h, msg)); setProp_('FEISHU_FALHA', h.key); } catch (e2) { /* sem internet: fica no LOG */ }
+        // Aviso (uma vez) em todos os grupos; sem internet, fica só no LOG.
+        try { feishuPostAll_(feishuWarnCard_(h, msg), feishuGroups_()); } catch (e2) { /* fica no LOG */ }
+        setProp_('FEISHU_FALHA', h.key);
       }
     } else setProp_('FEISHU_TENTATIVA', h.key + '|' + n);
     logSync_('WARN', 'sorter_flow', h.date, 'Bot do Feishu (' + h.key + 'h, tentativa ' + n + '): ' + msg.slice(0, 300));
@@ -1195,9 +1229,13 @@ function feishuSorterTick_(nowMs) {
  * Configurações → "Salvar e mandar um teste" (ou Executar função): manda agora o resumo da última hora que fechou. Mostra os números
  * enviados e o resultado — nunca o endereço do webhook nem o segredo.
  */
-function testarFeishu(hora) {
+function testarFeishu(hora, grupo) {
   if (!INDICATORS.sorter_flow) return {ok: false, erro: 'O bot do Feishu é do painel Produção do Sorter.'};
-  if (!feishuWebhook_()) return {ok: false, erro: 'Cole o webhook do bot do Feishu em Configurações (Bot do Feishu).'};
+  const todos = feishuGroups_();
+  if (!todos.length) return {ok: false, erro: 'Cole o webhook do bot do Feishu em Configurações (Bot do Feishu).'};
+  // V4.23.9: grupo = só esse grupo (o botão "Salvar e mandar um teste" do grupo escolhido); sem grupo = todos.
+  const gn = Number(grupo) || 0, grupos = gn ? todos.filter(g => g.n === gn) : todos;
+  if (gn && !grupos.length) return {ok: false, erro: 'O grupo ' + gn + ' não tem webhook: cole o webhook do bot desse grupo.'};
   let h = feishuLastHour_();
   // V4.23.6: uma hora escolhida — "16" (16:00 às 16:59 de hoje) ou "2026-11-04 16".
   if (hora !== undefined && hora !== null && String(hora).trim() !== '') {
@@ -1207,17 +1245,20 @@ function testarFeishu(hora) {
     h = {date: date, hour: Number(m[2]), key: date + ' ' + Number(m[2]), minute: 59};
   }
   try {
-    const x = feishuSendHour_(h).numeros, por = {};
+    const r = feishuSendHour_(h, {grupos: grupos}), x = r.numeros, por = {};
     Object.keys(x.bySorter).forEach(k => { por[k] = x.bySorter[k].total; });
-    if (hora === undefined || hora === null || String(hora).trim() === '') setProp_('FEISHU_ULTIMA', h.key);
-    return {ok: true, enviado: 'Mensagem enviada no grupo: Produção do Sorter · ' + x.interval + ' de ' + h.date,
+    if ((hora === undefined || hora === null || String(hora).trim() === '') && !gn) setProp_('FEISHU_ULTIMA', h.key);
+    return {ok: true, enviado: 'Mensagem enviada no(s) grupo(s) ' + r.grupos.join(', ') + ': Produção do Sorter · ' + x.interval + ' de ' + h.date,
+      gruposLigados: todos.map(g => 'Grupo ' + g.n + (g.seg ? ' (com segredo)' : ' (sem segredo)')),
       oQueOSiteRespondeu: x.site,
-      periodo: x.window.start + ' → ' + x.window.end, assinatura: getProp_('FEISHU_SEGREDO', '') ? 'com segredo' : 'sem segredo',
+      periodo: x.window.start + ' → ' + x.window.end,
       numeros: {sortTotal: x.total.total, porSorter: por, validTotal: x.total.valid, noSortCode: x.total.noInfo,
         maisProcessaram: x.top.map(b => b.sorter + ' · Balança ' + b.n + ': ' + b.qty),
         menosProcessaram: x.bottom.map(b => b.sorter + ' · Balança ' + b.n + ': ' + b.qty),
         todasAsBalancas: Object.keys(x.all).map(sn => sn + ': ' + x.all[sn].length + ' balança(s)'),
         fechamentoDoTurno: x.close ? x.close.shift + ': ' + x.close.total.total : 'não (só às 14h, 22h e 06h)'},
       proxima: 'De hora em hora, a partir do minuto ' + (Number(getProp_('FEISHU_MINUTO', '')) || 5) + ', com os dados da hora que fechou.'};
-  } catch (e) { return {ok: false, erro: String(e && e.message || e)}; }
+  } catch (e) {
+    return {ok: false, erro: String(e && e.message || e), recebeu: e && e.enviados && e.enviados.length ? 'grupo(s) ' + e.enviados.join(', ') : 'nenhum grupo'};
+  }
 }
