@@ -162,7 +162,7 @@ const FN_HELP = {
   diagnosticarAvaria: 'Avaria (data opcional)',
   diagnosticarSemMovimentacao: 'Sem Movimentação',
   diagnosticarSorter: 'Produção do Sorter: endereço, Sorter A/B e os números de hoje',
-  testarFeishu: 'Bot do Feishu: manda agora no grupo o resumo da última hora',
+  testarFeishu: 'Bot do Feishu: manda agora a última hora (ou a hora do parâmetro, ex.: "16" = 16:00 às 16:59 de hoje)',
   baixarHistoricoAvaria: 'Avaria: baixa o histórico agora',
   testProjectInstallation: 'confere se os arquivos do painel carregaram'
 };
