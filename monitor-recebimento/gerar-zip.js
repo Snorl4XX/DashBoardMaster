@@ -12,7 +12,8 @@ const {version} = require('./package.json');
 
 const ARQUIVOS = ['Recebimento_SP_GRU.gs', 'Painel.gs', 'Index.html', 'server.js', 'package.json', 'LEIA-ME.txt',
   'iniciar.bat', 'iniciar-com-windows.bat', 'link-publico.bat',
-  'lib/apps-script.js', 'lib/auth.js', 'lib/coleta.js', 'lib/config.js', 'lib/fetch-worker.js', 'lib/link.js', 'lib/syncfetch.js'];
+  'lib/apps-script.js', 'lib/auth.js', 'lib/banco.js', 'lib/coleta.js', 'lib/config.js', 'lib/fetch-worker.js', 'lib/link.js', 'lib/quieto.js',
+  'lib/syncfetch.js'];
 
 function gerar(saida) {
   const faltando = fs.readdirSync(path.join(__dirname, 'lib')).map(f => 'lib/' + f).filter(f => ARQUIVOS.indexOf(f) < 0);

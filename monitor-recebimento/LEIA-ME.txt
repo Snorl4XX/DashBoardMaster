@@ -10,11 +10,18 @@ desbloqueio, início e fim da descarga e o último bipe. São os SEUS arquivos d
   Index.html              o painel
 O que muda é só ONDE roda: no notebook, e não no Google.
   - A coleta roda ao abrir e depois a cada 15 min (no Google era o acionador de 15 min).
-  - A planilha "Recebimento JMS" vira o arquivo dados\planilha.json (não precisa de planilha do Google).
-  - As Propriedades do script viram dados\propriedades.json. O JMS_HEADERS_JSON vem da tela Configurações
+  - NÃO precisa da planilha do Google. Tudo fica no banco local C:\monitor-recebimento\dados\recebimento.db,
+    igual ao DashMaster principal (o dashmaster.db): a aba "Recebimento JMS" nas tabelas sheets/rows (uma linha da aba =
+    uma linha do banco) e as Propriedades do script na tabela props. O JMS_HEADERS_JSON vem da tela Configurações
     (ou do DashMaster deste computador: o Monitor usa o mesmo AuthToken dele).
 
 Não mexe no DashMaster: pasta, porta (3600) e link próprios.
+
+Histórico: a primeira coleta de cada dia revisa o mês todo no JMS (desde o último dia do mês anterior), como o
+Apps Script fazia. Por isso o banco já começa com o mês atual; não precisa copiar nada da planilha do Google.
+Veio da versão 1.0 (arquivos planilha.json / propriedades.json / jms.json)? Na 1ª vez o Monitor leva tudo para o banco
+sozinho e renomeia os arquivos para *.importado (pode apagar depois).
+Cópia de segurança: feche a janela preta e copie a pasta C:\monitor-recebimento\dados.
 
 Instalar (no notebook onde já roda o DashMaster)
 ------------------------------------------------

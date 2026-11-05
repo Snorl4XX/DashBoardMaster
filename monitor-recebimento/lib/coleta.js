@@ -3,6 +3,7 @@
  * Uma coleta do JMS (a função atualizarRecebimento do Recebimento_SP_GRU.gs), num processo leve separado:
  * enquanto ela espera o JMS, o painel continua respondendo.
  */
+require('./quieto');
 const {parentPort, workerData} = require('worker_threads');
 const {fetchAllSync, sleepSync} = require('./syncfetch');
 const {carregar} = require('./apps-script');

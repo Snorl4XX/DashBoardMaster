@@ -5,25 +5,19 @@
  *
  * Roda os arquivos do Apps Script SEM MUDAR NADA neles (Recebimento_SP_GRU.gs, Painel.gs e Index.html):
  *   - a coleta do JMS (atualizarRecebimento) roda ao abrir e a cada 15 min, num processo leve separado (lib/coleta.js);
- *   - a planilha "Recebimento JMS" vira o arquivo dados/planilha.json (lib/apps-script.js);
+ *   - a planilha "Recebimento JMS" e as Propriedades do script ficam no banco local dados/recebimento.db (SQLite, o mesmo
+ *     esquema do dashmaster.db do DashMaster: tabelas props e sheets/rows) — não precisa de planilha do Google;
  *   - o painel (Index.html) abre em http://localhost:3600 e pede os dados como no Google (google.script.run).
  * Configurações (AuthToken do JMS, coletar agora, registro): http://localhost:3600/config — só neste computador.
  *
  * Uso: dois cliques no iniciar.bat (ou: node server.js).
  */
-// O node:sqlite (só para ler o AuthToken do DashMaster) avisa "experimental" na janela: sem esse aviso.
-const emitirAviso = process.emitWarning;
-process.emitWarning = function (w) { if (/SQLite/i.test(String((w && w.message) || w))) return; return emitirAviso.apply(process, arguments); };
-
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
 const zlib = require('zlib');
 const {Worker} = require('worker_threads');
-const {loadConfig} = require('./lib/config');
-const {carregar, lerJson, gravarJson, ID_PLANILHA} = require('./lib/apps-script');
-const {Auth, isLocal, viaTunnel} = require('./lib/auth');
 const VERSAO = require('./package.json').version;
 
 /**
@@ -38,15 +32,24 @@ function parar(msg) {
   }
   process.exit(1);
 }
-if (Number(process.versions.node.split('.')[0]) < 18) {
-  parar('O Monitor precisa do Node.js 18 ou mais novo (este é o ' + process.version + '). Baixe a versão LTS em https://nodejs.org');
+const [MAIOR, MENOR] = process.versions.node.split('.').map(Number);
+if (MAIOR < 22 || (MAIOR === 22 && MENOR < 13)) {
+  parar('O Monitor precisa do Node.js 22.13 ou mais novo, como o DashMaster (este é o ' + process.version + ').\n' +
+    '  Baixe a versão LTS em https://nodejs.org (ou use o node.exe do DashMaster).');
 }
+require('./lib/quieto');
+const {loadConfig} = require('./lib/config');
+const {abrirBanco, props: propsDo} = require('./lib/banco');
+const {carregar, contarViagens, importarJsonAntigo, ID_PLANILHA} = require('./lib/apps-script');
+const {Auth, isLocal, viaTunnel} = require('./lib/auth');
 
 let cfg;
 try { cfg = loadConfig(); } catch (e) { parar(e.message); }
-const ARQ_JMS = path.join(cfg.pastaDados, 'jms.json');
-const ARQ_PROPS = path.join(cfg.pastaDados, 'propriedades.json');
-const ARQ_PLANILHA = path.join(cfg.pastaDados, 'planilha.json');
+// Banco local (como o dashmaster.db do DashMaster): Propriedades do script + aba "Recebimento JMS".
+let db;
+try { db = abrirBanco(path.join(cfg.pastaDados, 'recebimento.db')); }
+catch (e) { parar('Não consegui abrir o banco ' + path.join(cfg.pastaDados, 'recebimento.db') + ': ' + ((e && e.message) || e)); }
+const props = propsDo(db);
 
 // ------------------------------------------------------------------ registro (janela + dados/recebimento.log)
 const REGISTRO = [];
@@ -135,27 +138,27 @@ function credenciaisDashmaster() {
 }
 /** Cabeçalhos em uso: os colados neste app; sem eles, o AuthToken do DashMaster deste computador. */
 function cabecalhosEmUso() {
-  const proprio = lerJson(ARQ_JMS, null);
-  if (proprio && proprio.cabecalhos && Object.keys(proprio.cabecalhos).length) return {fonte: 'app', cabecalhos: proprio.cabecalhos, salvoEm: proprio.salvoEm || ''};
+  let proprio = null;
+  try { proprio = JSON.parse(props.get('JMS_HEADERS_JSON') || 'null'); } catch (e) { /* inválido: ignora */ }
+  if (proprio && typeof proprio === 'object' && Object.keys(proprio).length) return {fonte: 'app', cabecalhos: proprio, salvoEm: props.get('JMS_HEADERS_SALVO_EM') || ''};
   const dm = credenciaisDashmaster();
   if (dm) return {fonte: 'dashmaster', cabecalhos: cabecalhosDe(dm.JMS_AUTHTOKEN, dm), arquivo: dm.arquivo};
   return {fonte: '', cabecalhos: null};
 }
 
-// ------------------------------------------------------------------ planilha local e painel
-// O Apps Script guardava o ID da planilha (instalarRecebimento15min). Aqui a planilha é a local.
-(function () {
-  const p = lerJson(ARQ_PROPS, {});
-  if (p.RECEBIMENTO_SHEET_ID !== ID_PLANILHA) { p.RECEBIMENTO_SHEET_ID = ID_PLANILHA; gravarJson(ARQ_PROPS, p); }
-})();
+// ------------------------------------------------------------------ banco e painel
+// Versão 1.0.x guardava em arquivos .json: vai para o banco uma vez só.
+try {
+  const importado = importarJsonAntigo(db, cfg.pastaDados);
+  if (importado.length) log('info', 'Dados da versão anterior levados para o banco (recebimento.db): ' + importado.join(', ') + '.');
+} catch (e) { log('erro', 'Não consegui levar os dados da versão anterior para o banco: ' + ((e && e.message) || e)); }
+// O Apps Script guardava o ID da planilha (instalarRecebimento15min). Aqui a "planilha" é o banco local.
+if (props.get('RECEBIMENTO_SHEET_ID') !== ID_PLANILHA) props.set('RECEBIMENTO_SHEET_ID', ID_PLANILHA);
 let painel;
 try {
-  painel = carregar({pastaCodigo: cfg.pastaApp, pastaDados: cfg.pastaDados, cabecalhosJms: () => null, fetchAllSync: null, log});
+  painel = carregar({pastaCodigo: cfg.pastaApp, db, cabecalhosJms: () => null, fetchAllSync: null, log});
 } catch (e) { parar('Não consegui carregar os arquivos .gs: ' + ((e && e.stack) || e)); }
-function viagensNaPlanilha() {
-  const aba = lerJson(ARQ_PLANILHA, {})['Recebimento JMS'];
-  return aba && Array.isArray(aba.linhas) ? Math.max(0, aba.linhas.length - 1) : 0;
-}
+function viagensNoBanco() { return contarViagens(db); }
 
 // ------------------------------------------------------------------ coleta do JMS (a cada N minutos)
 const coleta = {rodando: false, desde: 0, proxima: 0, ultima: null, timer: null};
@@ -175,7 +178,7 @@ function agendar() {
 function terminar(r) {
   coleta.rodando = false;
   coleta.ultima = Object.assign({quando: Date.now(), segundos: Math.round((Date.now() - coleta.desde) / 1000)}, r);
-  if (r.ok) log('info', 'Coleta do JMS terminou em ' + coleta.ultima.segundos + ' s. Viagens na planilha: ' + viagensNaPlanilha() + '.');
+  if (r.ok) log('info', 'Coleta do JMS terminou em ' + coleta.ultima.segundos + ' s. Viagens no banco: ' + viagensNoBanco() + '.');
   else log('erro', 'A coleta do JMS falhou: ' + r.erro + (r.dica ? ' → ' + r.dica : ''));
   agendar();
 }
@@ -309,7 +312,7 @@ async function atualizar(){
     if(c.rodando)t+='<p><b>Coletando agora…</b> (desde '+hora(c.desde)+')</p>';
     if(u)t+=u.ok?'<p class="ok">Última coleta OK: '+hora(u.quando)+' ('+u.segundos+' s)</p>'
       :'<p class="erro">Última coleta falhou ('+hora(u.quando)+'): '+esc(u.erro)+'</p>'+(u.dica?'<p>'+esc(u.dica)+'</p>':'');
-    t+='<p>Viagens na planilha: <b>'+e.viagens+'</b>'+(e.ultimoSucesso?' · dados do painel de '+hora(Date.parse(e.ultimoSucesso)):'')+
+    t+='<p>Viagens no banco: <b>'+e.viagens+'</b>'+(e.ultimoSucesso?' · dados do painel de '+hora(Date.parse(e.ultimoSucesso)):'')+
       (c.proxima&&!c.rodando?' · próxima coleta: '+hora(c.proxima):'')+'</p>';
     $('coleta').innerHTML=t;
     $('coletar').disabled=c.rodando;
@@ -404,12 +407,11 @@ async function tratar(req, res) {
     const acao = p.slice('/config/'.length);
     if (acao === 'estado' && req.method === 'GET') {
       const uso = cabecalhosEmUso();
-      const props = lerJson(ARQ_PROPS, {});
       const links = [['Painel neste computador', 'http://localhost:' + cfg.porta + '/']]
         .concat(ipsDaRede().map(ip => ['Painel na rede', 'http://' + ip + ':' + cfg.porta + '/']));
       if (cfg.linkPublico) links.push(['Link público', cfg.linkPublico]);
-      json(req, res, 200, {ok: true, versao: VERSAO, viagens: viagensNaPlanilha(), ultimoSucesso: props.RECEBIMENTO_ULTIMO_SUCESSO || '',
-        falha: props.RECEBIMENTO_FALHA || '', token: {fonte: uso.fonte, salvoEm: uso.salvoEm || ''},
+      json(req, res, 200, {ok: true, versao: VERSAO, viagens: viagensNoBanco(), ultimoSucesso: props.get('RECEBIMENTO_ULTIMO_SUCESSO') || '',
+        falha: props.get('RECEBIMENTO_FALHA') || '', token: {fonte: uso.fonte, salvoEm: uso.salvoEm || ''},
         coleta: {rodando: coleta.rodando, desde: coleta.desde, proxima: coleta.proxima, ultima: coleta.ultima}, links, registro: REGISTRO.slice(-60)});
       return;
     }
@@ -419,14 +421,16 @@ async function tratar(req, res) {
     if (acao === 'token') {
       let cab;
       try { cab = interpretarToken(corpo.texto); } catch (e) { json(req, res, 200, {ok: false, erro: e.message}); return; }
-      gravarJson(ARQ_JMS, {cabecalhos: cab, salvoEm: new Date().toISOString()}, 0o600);
+      props.set('JMS_HEADERS_JSON', JSON.stringify(cab));
+      props.set('JMS_HEADERS_SALVO_EM', new Date().toISOString());
       log('info', 'AuthToken do JMS salvo em Configurações.');
       coletar('AuthToken novo');
       json(req, res, 200, {ok: true});
       return;
     }
     if (acao === 'apagar-token') {
-      try { fs.unlinkSync(ARQ_JMS); } catch (e) { /* já não existia */ }
+      props.del('JMS_HEADERS_JSON');
+      props.del('JMS_HEADERS_SALVO_EM');
       log('info', 'AuthToken deste app apagado (usa o do DashMaster, se houver).');
       json(req, res, 200, {ok: true});
       return;

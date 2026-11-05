@@ -5,8 +5,7 @@
  * Uso: node test/teste.js
  */
 // Sem o aviso "SQLite experimental" (o teste cria um banco do DashMaster de mentira).
-const emitirAviso = process.emitWarning;
-process.emitWarning = function (w) { if (/SQLite/i.test(String((w && w.message) || w))) return; return emitirAviso.apply(process, arguments); };
+require('../lib/quieto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -14,7 +13,14 @@ const http = require('http');
 const zlib = require('zlib');
 const {spawn, execFileSync} = require('child_process');
 const falso = require('./jms_falso');
-const {carregar, formatDate} = require('../lib/apps-script');
+const {carregar, formatDate, importarJsonAntigo, contarViagens} = require('../lib/apps-script');
+const {abrirBanco} = require('../lib/banco');
+const {DatabaseSync} = require('node:sqlite');
+/** Lê o banco do Monitor como o DashMaster lê o dele (só leitura). */
+function lerBanco(arquivo, sql, ...args) {
+  const db = new DatabaseSync(arquivo, {readOnly: true});
+  try { return db.prepare(sql).all(...args); } finally { db.close(); }
+}
 
 const APP = path.join(__dirname, '..');
 let ok = 0, falhas = 0;
@@ -96,6 +102,12 @@ function testeAmbiente(tmp) {
   confere(/não corresponde/.test(erro), 'tamanho errado dá erro como no Google');
   aba.insertRowsAfter(1000, 50);
   confere(aba.getMaxRows() === 1050, 'insertRowsAfter');
+  const banco = path.join(pasta, 'recebimento.db');
+  confere(fs.existsSync(banco) && fs.readdirSync(pasta).every(f => !/\.json$/.test(f)), 'tudo no banco recebimento.db (nenhum .json)', fs.readdirSync(pasta));
+  const tabelas = lerBanco(banco, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").map(x => x.name).join(',');
+  confere(tabelas === 'props,rows,sheets,sqlite_sequence', 'tabelas como o dashmaster.db (props, sheets, rows)', tabelas);
+  const linhasDb = lerBanco(banco, "SELECT r, v FROM rows WHERE sheet = (SELECT id FROM sheets WHERE name = 'Recebimento JMS') ORDER BY r");
+  confere(linhasDb.length === 1 && linhasDb[0].r === 1 && linhasDb[0].v === '["a","b"]', 'uma linha da aba = uma linha do banco', linhasDb);
   const p = s.PropertiesService.getScriptProperties();
   p.setProperty('A', 1);
   confere(p.getProperty('A') === '1' && p.getProperty('B') === null, 'propriedades');
@@ -104,6 +116,27 @@ function testeAmbiente(tmp) {
   confere(p.getProperty('JMS_HEADERS_JSON') === '{"AuthToken":"x"}', 'JMS_HEADERS_JSON vem de fora');
   confere(formatDate(Date.UTC(2026, 10, 5, 2, 3, 4), 'America/Sao_Paulo', 'yyyy-MM-dd HH:mm:ss') === '2026-11-04 23:03:04', 'formatDate no horário de SP');
   confere(s.turnoRecebimento_('2026-11-05 23:10:00').dataOperacional === '2026-11-06', 'turno T3 vai para o dia seguinte');
+  confere(lerBanco(banco, "SELECT v FROM props WHERE k = 'A'").length === 0 && lerBanco(banco, 'SELECT COUNT(*) AS n FROM props')[0].n === 0, 'propriedades na tabela props');
+
+  // Versão 1.0.x (arquivos .json) → banco, uma vez só
+  const velha = path.join(tmp, 'versao-antiga');
+  fs.mkdirSync(velha, {recursive: true});
+  fs.writeFileSync(path.join(velha, 'planilha.json'), JSON.stringify({'Recebimento JMS': {linhas: [['shipmentNo', 'line'], ['TESTE-X1', 'trunk'], ['TESTE-X2']]}}));
+  fs.writeFileSync(path.join(velha, 'propriedades.json'), JSON.stringify({RECEBIMENTO_ULTIMO_SUCESSO: '2026-11-05T12:00:00.000Z', RECEBIMENTO_SHEET_ID: 'planilha-local'}));
+  fs.writeFileSync(path.join(velha, 'jms.json'), JSON.stringify({cabecalhos: {AuthToken: 'tok-antigo-123'}, salvoEm: '2026-11-05T11:00:00.000Z'}));
+  const dbVelho = abrirBanco(path.join(velha, 'recebimento.db'));
+  const feito = importarJsonAntigo(dbVelho, velha);
+  confere(feito.length === 3 && contarViagens(dbVelho) === 2, 'versão 1.0 importada', feito);
+  const sv = carregar({pastaCodigo: APP, db: dbVelho, fetchAllSync: null, log: () => {}});
+  const pv = sv.PropertiesService.getScriptProperties();
+  confere(pv.getProperty('RECEBIMENTO_ULTIMO_SUCESSO') === '2026-11-05T12:00:00.000Z' && JSON.parse(pv.getProperty('JMS_HEADERS_JSON')).AuthToken === 'tok-antigo-123',
+    'propriedades e AuthToken importados');
+  const lidas = sv.lerViagensRecebimento_(sv.SpreadsheetApp.openById('x').getSheetByName('Recebimento JMS'));
+  confere(lidas.length === 2 && lidas[1].shipmentNo === 'TESTE-X2' && lidas[1].line === null, 'viagens importadas', lidas);
+  confere(['planilha.json', 'propriedades.json', 'jms.json'].every(f => !fs.existsSync(path.join(velha, f)) && fs.existsSync(path.join(velha, f + '.importado'))),
+    'arquivos antigos renomeados (*.importado)');
+  confere(importarJsonAntigo(dbVelho, velha).length === 0, 'importa uma vez só');
+  dbVelho.close();
 }
 
 // ------------------------------------------------------------------ 2. servidor sem AuthToken → com AuthToken
@@ -149,6 +182,10 @@ async function testeServidor(tmp, jms) {
     confere(e.coleta.ultima.ok === true, '1ª coleta OK', e.coleta.ultima);
     confere(JSON.stringify(e).indexOf('tok-teste-12345') < 0, 'o AuthToken nunca aparece na tela');
     confere(e.token.fonte === 'app' && e.viagens === 28, 'estado depois da coleta', {fonte: e.token.fonte, viagens: e.viagens});
+    const arqDados = fs.readdirSync(path.join(pasta, 'dados'));
+    confere(arqDados.indexOf('recebimento.db') >= 0 && arqDados.every(f => !/\.json$/.test(f)), 'servidor: dados no banco, sem planilha .json', arqDados);
+    const viagensDb = lerBanco(path.join(pasta, 'dados', 'recebimento.db'), "SELECT COUNT(*) AS n FROM rows WHERE sheet = (SELECT id FROM sheets WHERE name = 'Recebimento JMS')")[0].n;
+    confere(viagensDb === 29, 'aba Recebimento JMS no banco: cabeçalho + 28 viagens', viagensDb);
 
     d = await dados(porta);
     confere(d.ok === true && Array.isArray(d.result.records), 'dadosPainelRecebimento');
@@ -199,7 +236,7 @@ async function testeServidor(tmp, jms) {
     confere(e.coleta.ultima.ok === true, 'coleta com o JMS_HEADERS_JSON', e.coleta.ultima);
     d = await dados(porta);
     confere(d.ok && !d.result.falhaColeta, 'aviso de falha some depois da coleta OK');
-    const salvo = JSON.parse(fs.readFileSync(path.join(pasta, 'dados', 'jms.json'), 'utf8'));
+    const salvo = {cabecalhos: JSON.parse(lerBanco(path.join(pasta, 'dados', 'recebimento.db'), "SELECT v FROM props WHERE k = 'JMS_HEADERS_JSON'")[0].v)};
     confere(!salvo.cabecalhos.Host && !salvo.cabecalhos['Content-Length'] && salvo.cabecalhos.authToken === 'outro-token-678', 'cabeçalhos proibidos saem');
 
     // link público com caminho
@@ -217,7 +254,7 @@ async function testeServidor(tmp, jms) {
     // apagar o AuthToken
     r = await pedido(porta, 'POST', '/config/apagar-token', {corpo: {}, cabecalhos: CFG});
     e = await estado(porta);
-    confere(r.json.ok && e.token.fonte === '' && !fs.existsSync(path.join(pasta, 'dados', 'jms.json')), 'AuthToken apagado');
+    confere(r.json.ok && e.token.fonte === '' && lerBanco(path.join(pasta, 'dados', 'recebimento.db'), "SELECT k FROM props WHERE k LIKE 'JMS_HEADERS%'").length === 0, 'AuthToken apagado');
 
     // link-publico.bat: node lib/link.js config
     const linha = execFileSync(process.execPath, [path.join(APP, 'lib', 'link.js'), 'config'], {env: Object.assign({}, process.env, {RECEBIMENTO_CONFIG: path.join(pasta, 'config.json')}), encoding: 'utf8'}).trim();

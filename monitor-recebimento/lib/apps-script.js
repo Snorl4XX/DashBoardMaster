@@ -1,39 +1,25 @@
 'use strict';
 /**
  * O pedaço do Google Apps Script que os arquivos do Monitor usam, para eles rodarem no computador SEM MUDAR NADA:
- *   SpreadsheetApp   → a planilha vira o arquivo dados/planilha.json (aba "Recebimento JMS");
- *   PropertiesService → as Propriedades do script viram o arquivo dados/propriedades.json
+ *   SpreadsheetApp    → a aba "Recebimento JMS" fica no banco local (dados/recebimento.db, tabelas sheets/rows),
+ *                       como a planilha do banco do DashMaster: não precisa de planilha do Google;
+ *   PropertiesService → as Propriedades do script ficam na tabela props do mesmo banco
  *                       (JMS_HEADERS_JSON vem da tela Configurações ou do DashMaster deste computador);
- *   UrlFetchApp      → consultas HTTP de verdade (lib/syncfetch.js), esperando a resposta como no Google;
+ *   UrlFetchApp       → consultas HTTP de verdade (lib/syncfetch.js), esperando a resposta como no Google;
  *   Utilities.formatDate, LockService, ScriptApp e HtmlService (o agendamento de 15 min é feito pelo server.js).
  */
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const {abrirBanco, tx, props} = require('./banco');
 
 const ARQUIVOS_GS = ['Recebimento_SP_GRU.gs', 'Painel.gs'];
-const ID_PLANILHA = 'planilha-local';
+const ID_PLANILHA = 'db';
+const ABA = 'Recebimento JMS';
 const FUSO = 'America/Sao_Paulo';
 
 const pausa = new Int32Array(new SharedArrayBuffer(4));
 function esperar(ms) { Atomics.wait(pausa, 0, 0, ms); }
-
-function lerJson(arq, padrao) {
-  try { return JSON.parse(fs.readFileSync(arq, 'utf8')); } catch (e) { return padrao; }
-}
-/** Grava inteiro num arquivo temporário e troca (nunca fica um arquivo pela metade). */
-function gravarJson(arq, obj, modo) {
-  const tmp = arq + '.' + process.pid + '.' + Math.random().toString(36).slice(2) + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(obj), modo ? {mode: modo} : undefined);
-  for (let i = 0; ; i++) {
-    try { fs.renameSync(tmp, arq); return; }
-    catch (e) {
-      // Windows: o arquivo pode estar aberto por um instante (o painel lendo). Tenta de novo.
-      if (i >= 20) { try { fs.unlinkSync(tmp); } catch (x) { /* nada */ } throw e; }
-      esperar(50);
-    }
-  }
-}
 
 /** Utilities.formatDate com os padrões yyyy, MM, dd, HH, mm e ss. */
 function formatDate(data, fuso, formato) {
@@ -55,29 +41,38 @@ function celula(v) {
   return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
 const vazia = v => v === '' || v === null || v === undefined;
+/** Linha sem as células vazias do fim (assim a última linha/coluna com dado sai direto do banco). */
+function aparar(l) { let n = l.length; while (n && vazia(l[n - 1])) n--; return l.slice(0, n); }
 
-/** SpreadsheetApp numa planilha local (um arquivo JSON: {"nome da aba": {linhas: [[...]], maxLinhas, maxColunas}}). */
-function criarPlanilha(arq) {
-  let cache = null;
-  function abas() {
-    let st = null;
-    try { st = fs.statSync(arq); } catch (e) { /* ainda não existe */ }
-    const chave = st ? st.mtimeMs + ':' + st.size : 'nenhum';
-    if (!cache || cache.chave !== chave) cache = {chave, abas: st ? lerJson(arq, {}) : {}};
-    return cache.abas;
-  }
-  function salvar(o) { gravarJson(arq, o); cache = null; }
-  function aba(nome) {
-    const dados = () => abas()[nome] || {linhas: []};
-    const ultimaLinha = () => { const L = dados().linhas; for (let i = L.length - 1; i >= 0; i--) if ((L[i] || []).some(v => !vazia(v))) return i + 1; return 0; };
-    const ultimaColuna = () => dados().linhas.reduce((m, l) => { for (let j = (l || []).length - 1; j >= 0; j--) if (!vazia(l[j])) return Math.max(m, j + 1); return m; }, 0);
+/** SpreadsheetApp no banco: cada aba é uma linha de sheets; cada linha da aba, uma linha de rows (texto JSON). */
+function criarPlanilha(db) {
+  const sql = {
+    aba: db.prepare('SELECT id FROM sheets WHERE ss = ? AND name = ?'),
+    abas: db.prepare('SELECT id, name FROM sheets WHERE ss = ? ORDER BY pos'),
+    nova: db.prepare('INSERT INTO sheets (ss, name, pos) VALUES (?, ?, (SELECT COALESCE(MAX(pos), 0) + 1 FROM sheets WHERE ss = ?))'),
+    faixa: db.prepare('SELECT r, v FROM rows WHERE sheet = ? AND r BETWEEN ? AND ?'),
+    linha: db.prepare('SELECT v FROM rows WHERE sheet = ? AND r = ?'),
+    ultima: db.prepare('SELECT MAX(r) AS m FROM rows WHERE sheet = ?'),
+    todas: db.prepare('SELECT v FROM rows WHERE sheet = ?'),
+    gravar: db.prepare('INSERT INTO rows (sheet, r, v) VALUES (?, ?, ?) ON CONFLICT(sheet, r) DO UPDATE SET v = excluded.v'),
+    apagar: db.prepare('DELETE FROM rows WHERE sheet = ? AND r = ?'),
+    limpar: db.prepare('DELETE FROM rows WHERE sheet = ?')
+  };
+  // Tamanho da grade (getMaxRows/getMaxColumns): no banco a aba cresce sozinha; aqui só para o código do Google conferir.
+  const grade = {};
+  function aba(nome, id) {
+    const g = grade[id] || (grade[id] = {linhas: 1000, colunas: 26});
+    const ultimaLinha = () => { const x = sql.ultima.get(id); return (x && x.m) || 0; };
+    const ultimaColuna = () => sql.todas.all(id).reduce((m, x) => Math.max(m, JSON.parse(x.v).length), 0);
     function faixa(r, c, h, w) {
       return {
         getNumRows: () => h, getNumColumns: () => w, getRow: () => r, getColumn: () => c,
         getValues() {
-          const L = dados().linhas, out = [];
+          const porLinha = {};
+          sql.faixa.all(id, r, r + h - 1).forEach(x => { porLinha[x.r] = JSON.parse(x.v); });
+          const out = [];
           for (let i = 0; i < h; i++) {
-            const l = L[r - 1 + i] || [];
+            const l = porLinha[r + i] || [];
             const linha = [];
             for (let j = 0; j < w; j++) { const v = l[c - 1 + j]; linha.push(vazia(v) ? '' : v); }
             out.push(linha);
@@ -88,16 +83,16 @@ function criarPlanilha(arq) {
           if (!valores || valores.length !== h || valores.some(l => !l || l.length !== w)) {
             throw new Error('O tamanho dos dados (' + (valores ? valores.length : 0) + ' linhas) não corresponde ao intervalo (' + h + ' x ' + w + ').');
           }
-          const o = abas();
-          const a = o[nome] || (o[nome] = {linhas: []});
-          for (let i = 0; i < h; i++) {
-            const k = r - 1 + i;
-            while (a.linhas.length <= k) a.linhas.push([]);
-            const l = a.linhas[k] || (a.linhas[k] = []);
-            for (let j = 0; j < w; j++) { while (l.length < c - 1 + j) l.push(''); l[c - 1 + j] = celula(valores[i][j]); }
-          }
-          while (a.linhas.length && !(a.linhas[a.linhas.length - 1] || []).some(v => !vazia(v))) a.linhas.pop();
-          salvar(o);
+          tx(db, () => {
+            for (let i = 0; i < h; i++) {
+              const k = r + i, atual = sql.linha.get(id, k);
+              const l = atual ? JSON.parse(atual.v) : [];
+              while (l.length < c - 1 + w) l.push('');
+              for (let j = 0; j < w; j++) l[c - 1 + j] = celula(valores[i][j]);
+              const final = aparar(l);
+              if (final.length) sql.gravar.run(id, k, JSON.stringify(final)); else sql.apagar.run(id, k);
+            }
+          });
           return this;
         },
         clearContent() { return this.setValues(Array.from({length: h}, () => Array.from({length: w}, () => ''))); }
@@ -105,44 +100,48 @@ function criarPlanilha(arq) {
     }
     const folha = {
       getName: () => nome,
+      getSheetId: () => id,
       getLastRow: ultimaLinha,
       getLastColumn: ultimaColuna,
-      getMaxRows: () => Math.max(dados().maxLinhas || 1000, dados().linhas.length),
-      getMaxColumns: () => Math.max(dados().maxColunas || 26, ultimaColuna()),
-      insertRowsAfter(_, n) { const o = abas(); const a = o[nome] || (o[nome] = {linhas: []}); a.maxLinhas = folha.getMaxRows() + Number(n || 0); salvar(o); return folha; },
-      insertColumnsAfter(_, n) { const o = abas(); const a = o[nome] || (o[nome] = {linhas: []}); a.maxColunas = folha.getMaxColumns() + Number(n || 0); salvar(o); return folha; },
+      getMaxRows: () => Math.max(g.linhas, ultimaLinha()),
+      getMaxColumns: () => Math.max(g.colunas, ultimaColuna()),
+      insertRowsAfter(_, n) { g.linhas = folha.getMaxRows() + Number(n || 0); return folha; },
+      insertColumnsAfter(_, n) { g.colunas = folha.getMaxColumns() + Number(n || 0); return folha; },
       setFrozenRows() { return folha; },
       getRange(r, c, h, w) { return faixa(Number(r), Number(c), Number(h) || 1, Number(w) || 1); },
       getDataRange() { return faixa(1, 1, Math.max(ultimaLinha(), 1), Math.max(ultimaColuna(), 1)); },
-      clear() { const o = abas(); if (o[nome]) { o[nome].linhas = []; salvar(o); } return folha; }
+      clear() { sql.limpar.run(id); return folha; }
     };
     return folha;
   }
   const planilha = {
     getId: () => ID_PLANILHA,
-    getName: () => 'Monitor de Recebimento (local)',
-    getSheetByName: nome => (abas()[nome] ? aba(nome) : null),
-    getSheets: () => Object.keys(abas()).map(aba),
-    insertSheet(nome) { const o = abas(); if (!o[nome]) { o[nome] = {linhas: []}; salvar(o); } return aba(nome); }
+    getName: () => 'Monitor de Recebimento (banco local)',
+    getSheetByName(nome) { const x = sql.aba.get(ID_PLANILHA, String(nome)); return x ? aba(String(nome), x.id) : null; },
+    getSheets: () => sql.abas.all(ID_PLANILHA).map(x => aba(x.name, x.id)),
+    insertSheet(nome) {
+      nome = String(nome);
+      if (!sql.aba.get(ID_PLANILHA, nome)) sql.nova.run(ID_PLANILHA, nome, ID_PLANILHA);
+      return planilha.getSheetByName(nome);
+    }
   };
   return {openById: () => planilha, openByUrl: () => planilha, getActiveSpreadsheet: () => planilha, flush() {}};
 }
 
-/** PropertiesService num arquivo JSON. `especiais` = propriedades que vêm de fora (ex.: JMS_HEADERS_JSON). */
-function criarPropriedades(arq, especiais) {
-  const ler = () => lerJson(arq, {});
-  const props = {
+/** PropertiesService na tabela props. `especiais` = propriedades que vêm de fora (ex.: JMS_HEADERS_JSON). */
+function criarPropriedades(db, especiais) {
+  const p = props(db);
+  const obj = {
     getProperty(k) {
       if (especiais && Object.prototype.hasOwnProperty.call(especiais, k)) { const v = especiais[k](); if (v !== null && v !== undefined) return String(v); }
-      const v = ler()[k];
-      return v === null || v === undefined ? null : String(v);
+      return p.get(k);
     },
-    getProperties() { return Object.assign({}, ler()); },
-    setProperty(k, v) { const o = ler(); o[k] = String(v); gravarJson(arq, o); return props; },
-    setProperties(obj) { const o = ler(); Object.keys(obj || {}).forEach(k => { o[k] = String(obj[k]); }); gravarJson(arq, o); return props; },
-    deleteProperty(k) { const o = ler(); if (Object.prototype.hasOwnProperty.call(o, k)) { delete o[k]; gravarJson(arq, o); } return props; }
+    getProperties() { return p.all(); },
+    setProperty(k, v) { p.set(k, v); return obj; },
+    setProperties(o) { tx(db, () => Object.keys(o || {}).forEach(k => p.set(k, o[k]))); return obj; },
+    deleteProperty(k) { p.del(k); return obj; }
   };
-  return {getScriptProperties: () => props, getUserProperties: () => props, getDocumentProperties: () => props};
+  return {getScriptProperties: () => obj, getUserProperties: () => obj, getDocumentProperties: () => obj};
 }
 
 /** UrlFetchApp: fetch e fetchAll, com a mesma resposta (getResponseCode, getContentText…). */
@@ -177,17 +176,19 @@ function criarUrlFetch(fetchAllSync, jmsUrl) {
 
 /**
  * Cria o ambiente e carrega os arquivos .gs. Devolve o "global" do script (com as funções dele).
- * opcoes: {pastaCodigo, pastaDados, cabecalhosJms() → texto JSON ou null, fetchAllSync, sleepSync, jmsUrl, log(nivel, texto)}
+ * opcoes: {pastaCodigo, db (banco aberto) ou pastaDados, cabecalhosJms() → texto JSON ou null, fetchAllSync, sleepSync, jmsUrl,
+ *          log(nivel, texto)}
  */
 function carregar(opcoes) {
   const log = opcoes.log || ((n, t) => console.log(t));
+  const db = opcoes.db || abrirBanco(path.join(opcoes.pastaDados, 'recebimento.db'));
   const texto = args => Array.from(args).map(a => (typeof a === 'string' ? a : (a && a.message) || JSON.stringify(a))).join(' ');
   const encadeado = () => new Proxy({}, {get: (alvo, k) => (k === 'create' ? () => ({}) : () => encadeado())});
   const ctx = vm.createContext({
     console: {log() { log('info', texto(arguments)); }, info() { log('info', texto(arguments)); }, warn() { log('aviso', texto(arguments)); }, error() { log('erro', texto(arguments)); }},
     Logger: {log() { log('info', texto(arguments)); }},
-    SpreadsheetApp: criarPlanilha(path.join(opcoes.pastaDados, 'planilha.json')),
-    PropertiesService: criarPropriedades(path.join(opcoes.pastaDados, 'propriedades.json'), {JMS_HEADERS_JSON: opcoes.cabecalhosJms || (() => null)}),
+    SpreadsheetApp: criarPlanilha(db),
+    PropertiesService: criarPropriedades(db, {JMS_HEADERS_JSON: opcoes.cabecalhosJms || (() => null)}),
     UrlFetchApp: criarUrlFetch(opcoes.fetchAllSync, opcoes.jmsUrl),
     Utilities: {formatDate, sleep: ms => (opcoes.sleepSync || esperar)(Number(ms) || 0)},
     LockService: {getScriptLock: () => ({tryLock: () => true, waitLock() {}, releaseLock() {}, hasLock: () => true})},
@@ -198,4 +199,50 @@ function carregar(opcoes) {
   return ctx;
 }
 
-module.exports = {carregar, formatDate, lerJson, gravarJson, ARQUIVOS_GS, ID_PLANILHA};
+/** Quantas viagens a aba "Recebimento JMS" tem (linhas menos o cabeçalho). */
+function contarViagens(db) {
+  const x = db.prepare('SELECT COUNT(*) AS n FROM rows WHERE sheet = (SELECT id FROM sheets WHERE ss = ? AND name = ?)').get(ID_PLANILHA, ABA);
+  return Math.max(0, ((x && x.n) || 0) - 1);
+}
+
+/**
+ * Versão 1.0.x guardava em arquivos .json (planilha.json, propriedades.json, jms.json). Leva para o banco, uma vez só,
+ * e renomeia os arquivos para *.importado. Devolve o que foi importado (para o registro).
+ */
+function importarJsonAntigo(db, pastaDados) {
+  const feito = [];
+  const ler = f => { try { return JSON.parse(fs.readFileSync(path.join(pastaDados, f), 'utf8')); } catch (e) { return null; } };
+  const guardar = f => { try { fs.renameSync(path.join(pastaDados, f), path.join(pastaDados, f + '.importado')); } catch (e) { /* fica */ } };
+  const p = props(db);
+  const planilhaAntiga = ler('planilha.json');
+  if (planilhaAntiga) {
+    const ss = criarPlanilha(db).openById(ID_PLANILHA);
+    Object.keys(planilhaAntiga).forEach(nome => {
+      const linhas = (planilhaAntiga[nome] && planilhaAntiga[nome].linhas) || [];
+      if (ss.getSheetByName(nome) && ss.getSheetByName(nome).getLastRow()) return;
+      const aba = ss.insertSheet(nome);
+      const w = linhas.reduce((m, l) => Math.max(m, (l || []).length), 0);
+      if (linhas.length && w) aba.getRange(1, 1, linhas.length, w).setValues(linhas.map(l => Array.from({length: w}, (_, j) => ((l || [])[j] === undefined ? '' : l[j]))));
+      feito.push('aba ' + nome + ' (' + Math.max(0, linhas.length - 1) + ' viagens)');
+    });
+    guardar('planilha.json');
+  }
+  const propsAntigas = ler('propriedades.json');
+  if (propsAntigas) {
+    tx(db, () => Object.keys(propsAntigas).forEach(k => { if (p.get(k) === null) p.set(k, propsAntigas[k]); }));
+    feito.push('propriedades');
+    guardar('propriedades.json');
+  }
+  const jms = ler('jms.json');
+  if (jms) {
+    if (jms.cabecalhos && p.get('JMS_HEADERS_JSON') === null) {
+      p.set('JMS_HEADERS_JSON', JSON.stringify(jms.cabecalhos));
+      p.set('JMS_HEADERS_SALVO_EM', jms.salvoEm || new Date().toISOString());
+      feito.push('AuthToken');
+    }
+    guardar('jms.json');
+  }
+  return feito;
+}
+
+module.exports = {carregar, formatDate, contarViagens, importarJsonAntigo, ARQUIVOS_GS, ID_PLANILHA, ABA};
