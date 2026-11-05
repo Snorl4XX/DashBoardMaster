@@ -1,4 +1,4 @@
-<!doctype html><html lang="pt-BR" data-theme="dark" translate="no"><meta charset="utf-8"><meta name="google" content="notranslate"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monitor de Recebimento | SP GRU</title>
+<!doctype html><html lang="pt-BR" data-theme="dark" translate="no" class="notranslate"><meta charset="utf-8"><meta name="google" content="notranslate"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monitor de Recebimento | SP GRU</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet"><script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
 <style>
 /* Monitor de Recebimento · mesmo visual do DashMaster (Styles.html): identidade branco/vermelho, tema escuro por padrão. */
@@ -8,7 +8,7 @@
   --ink:#1F2430; --ink-2:#434A5B; --muted:#6B7280; --muted-2:#9AA0AB;
   --line:#ECECEF; --line-2:#F3F3F5; --bg:#F6F6F8; --card:#FFFFFF;
   --soft:#F6F6F8; --soft-2:#F1F1F4; --field-line:#DFDFE4; --field-line-2:#CFCFD6;
-  --row-alt:#FBFBFC; --row-hover:#FFF5F6; --sidebar-bg:#FFFFFF; --on-ink:#FFFFFF;
+  --row-alt:#FBFBFC; --row-hover:#FFF5F6; --sidebar-bg:#FFFFFF; --on-ink:#FFFFFF; --check-line:#C9CBD3;
   --good:#15803D; --good-bg:#EAF7EE; --good-line:#BBE5C8;
   --bad:#B42318; --bad-bg:#FDEBEC; --bad-line:#F7C3C7;
   --warn:#B45309; --warn-bg:#FFF7ED; --warn-line:#FBD9B0;
@@ -25,7 +25,7 @@
   --ink:#F2F3F5; --ink-2:#C9CCD4; --muted:#9BA1AD; --muted-2:#727885;
   --line:#2A2D36; --line-2:#22252D; --bg:#0E0F13; --card:#17191F;
   --soft:#1E2128; --soft-2:#272A33; --field-line:#353946; --field-line-2:#4B505E;
-  --row-alt:#1B1D24; --row-hover:rgba(230,0,18,.12); --sidebar-bg:#121318; --on-ink:#111318;
+  --row-alt:#1B1D24; --row-hover:rgba(230,0,18,.12); --sidebar-bg:#121318; --on-ink:#111318; --check-line:#555B69;
   --good:#3DD07A; --good-bg:rgba(61,208,122,.14); --good-line:rgba(61,208,122,.38);
   --bad:#FF6B76; --bad-bg:rgba(230,0,18,.18); --bad-line:rgba(230,0,18,.45);
   --warn:#F5A524; --warn-bg:rgba(245,165,36,.12); --warn-line:rgba(245,165,36,.38);
@@ -146,6 +146,37 @@ select:focus,input[type=date]:focus,input[type=search]:focus{border-color:var(--
 .dd-label{display:flex;align-items:center;gap:6px;font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);font-weight:800}
 .dd-label .ico{width:14px;height:14px;color:var(--red)}
 .dd.has-value select{border-color:var(--red-200);background:var(--red-50);color:var(--red-700)}
+.dd{position:relative}
+.dd-btn{display:flex;align-items:center;gap:8px;width:100%;height:42px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 14px 0 12px;text-align:left;transition:border-color .18s,box-shadow .18s,background .18s}
+.dd-btn:hover{border-color:var(--field-line-2)}
+.dd-btn[aria-expanded="true"]{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}
+.dd.has-value .dd-btn{border-color:var(--red-200);background:var(--red-50)}
+.dd-value{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:13.5px}
+.dd.has-value .dd-value{color:var(--red-700)}
+.dd-count{font-size:11px;font-weight:800;background:var(--red);color:#fff;border-radius:999px;padding:1px 7px}
+.dd-caret{width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg) translateY(-2px);transition:transform .18s;flex:none}
+.dd-btn[aria-expanded="true"] .dd-caret{transform:rotate(225deg) translate(-2px,-1px)}
+.dd-panel{position:absolute;left:0;top:calc(100% + 6px);width:max(100%,300px);max-width:min(420px,92vw);background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);z-index:70;overflow:hidden;animation:pop .14s ease}
+.dd.align-right .dd-panel{left:auto;right:0}
+@keyframes pop{from{opacity:0;transform:translateY(-4px)}}
+.dd-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:12px}
+.dd-head b{font-size:12.5px}
+.dd-clear{border:0;background:transparent;color:var(--muted);font-weight:700;font-size:12px;padding:5px 8px;border-radius:8px}
+.dd-clear:hover{color:var(--red-600);background:var(--red-50)}
+.dd-find{padding:8px 8px 0}
+.dd-find input{height:36px;font-size:13px}
+.dd-list{list-style:none;margin:0;padding:6px;max-height:320px;overflow:auto;overscroll-behavior:contain}
+.dd-opt{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;cursor:pointer;font-size:13px;user-select:none}
+.dd-opt:hover{background:var(--soft)}
+.dd-opt[aria-selected="true"]{background:var(--red-50)}
+.dd-check{width:18px;height:18px;border-radius:6px;border:1.8px solid var(--check-line);display:grid;place-items:center;flex:none;background:var(--card);transition:.14s}
+.dd-check .ico{width:12px;height:12px;stroke:#fff;stroke-width:3;opacity:0}
+.dd-opt[aria-selected="true"] .dd-check{background:var(--red);border-color:var(--red)}
+.dd-opt[aria-selected="true"] .dd-check .ico{opacity:1}
+.dd-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.dd-n{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;font-weight:600}
+.dd-more{display:block;width:calc(100% - 12px);margin:4px 6px 8px;border:1px dashed var(--line);background:var(--card);border-radius:9px;padding:8px;font-size:12px;font-weight:700;color:var(--ink-2)}
+.dd-empty{padding:16px;color:var(--muted);font-size:12.5px;text-align:center}
 .scope-note{display:flex;align-items:flex-start;gap:6px;margin:12px 0 0;font-size:12px;line-height:1.45;color:var(--muted)}
 .scope-note .ico{width:14px;height:14px;margin-top:2px;color:var(--muted)}
 
@@ -246,7 +277,7 @@ tbody tr:hover td{background:var(--row-hover)}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
-<body><div class="shade" id="shade"></div><aside id="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">J&amp;T</div><div class="brand-copy"><strong>EXPRESS</strong><small>SP GRU · 30001</small></div></div><div class="side-nav"><div class="nav-label" data-i="Recebimento|到货"></div><nav id="nav"></nav></div><footer id="footer" class="sidebar-foot"></footer></aside>
+<body class="notranslate" translate="no"><div class="shade" id="shade"></div><aside id="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">J&amp;T</div><div class="brand-copy"><strong>EXPRESS</strong><small>SP GRU · 30001</small></div></div><div class="side-nav"><nav id="nav"></nav></div><footer id="footer" class="sidebar-foot"></footer></aside>
 <main><header class="topbar"><button id="drawer" class="drawer icon-btn" type="button" aria-label="Menu" aria-expanded="false"></button><div class="title-wrap"><div class="eyebrow"><span>J&amp;T EXPRESS</span><span class="dot-sep"></span><span>SP GRU</span></div><h1 data-i="Monitor de Recebimento|到货监控"></h1><p>Previsão de chegada e volumetria por turno / 预计到达与班次货量</p></div><div class="top-actions"><button id="theme" class="theme-btn" type="button"></button><div class="lang-switch"><button id="pt" class="lang-btn" type="button">PT-BR</button><button id="zh" class="lang-btn" type="button">中文</button></div><button id="refresh" class="btn btn-light" type="button"><span data-ico="refresh"></span><span data-i="Atualizar|刷新"></span></button><button id="export" class="btn btn-red" type="button"><span data-ico="download"></span><span data-i="Baixar relatório|下载报告"></span></button></div></header>
 <div class="wrap">
 <div class="notice" id="notice" role="status"></div>
@@ -258,11 +289,13 @@ tbody tr:hover td{background:var(--row-hover)}
 <button type="submit" class="btn btn-dark"><span data-ico="check"></span><span data-i="Aplicar|应用"></span></button>
 <div class="presets" id="chips"></div>
 </section>
-<section class="card refine"><div class="section-head"><div><div class="kicker" data-i="Filtros|筛选"></div><h2 data-i="Refine os resultados|细化结果"></h2></div><button id="import" class="btn btn-light" type="button" data-i="Importar JSON do JMS|导入 JMS JSON"></button><input id="file" type="file" accept=".json,application/json" multiple hidden></div>
+<section class="card refine"><div class="section-head"><div><h2 data-i="Filtros|筛选"></h2></div><button id="import" class="btn btn-light" type="button" data-i="Importar JSON do JMS|导入 JMS JSON"></button><input id="file" type="file" accept=".json,application/json" multiple hidden></div>
 <div class="filter-grid">
 <label class="dd"><span class="dd-label" data-ico="status" data-i="Status da viagem|运输状态"></span><span class="select-wrap"><select id="status"><option value="" data-i="Todos|全部"></option><option value="3" data-i="Em trânsito|在途"></option><option value="4" data-i="Concluído|已完成"></option></select></span></label>
 <label class="dd"><span class="dd-label" data-ico="route" data-i="Linha|线路"></span><span class="select-wrap"><select id="line"><option value="" data-i="Todas|全部"></option><option value="trunk" data-i="Troncal|干线"></option><option value="branch" data-i="Secundária|支线"></option></select></span></label>
 <label class="dd"><span class="dd-label" data-ico="clock" data-i="Turno previsto|预计班次"></span><span class="select-wrap"><select id="shift"><option value="" data-i="Todos|全部"></option><option>T1</option><option>T2</option><option>T3</option><option value="none" data-i="Sem previsão|无预计时间"></option></select></span></label>
+<div class="dd" id="tripDd"><span class="dd-label" id="tripLabel" data-ico="truck" data-i="ID da viagem|车次编号"></span><button type="button" class="dd-btn" id="tripBtn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="tripLabel tripValue"><span class="dd-value" id="tripValue"></span><span class="dd-count" id="tripCount" hidden></span><span class="dd-caret" aria-hidden="true"></span></button><input type="hidden" id="trip">
+<div class="dd-panel" id="tripPanel" hidden><div class="dd-head"><b></b><button type="button" class="dd-clear" data-act="clear"></button></div><div class="dd-find"><input type="search" id="tripFind" autocomplete="off"></div><ul class="dd-list" role="listbox" aria-multiselectable="true" aria-labelledby="tripLabel"></ul></div></div>
 </div>
 <p class="scope-note"><span data-ico="info"></span><span data-i="A data do T3 é a do encerramento: das 22h do dia anterior até antes das 06h da data selecionada.|T3 按结束日期筛选：从前一天 22:00 到所选日期 06:00 前。"></span></p>
 </section>
@@ -294,7 +327,7 @@ Object.assign(paths,{check:'M5 12l5 5L20 7',refresh:'M20 11a8 8 0 1 0-2.3 5.7M20
  lock:'<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/><path d="M12 15v2"/>',gauge:'M4 18a8 8 0 1 1 16 0M12 18l4-6',
  swap:'M4 7h14m0 0l-3-3m3 3l-3 3M20 17H6m0 0l3-3m-3 3l3 3',table:'M4 5h16v14H4zM4 10h16M10 5v14'});
 const icon=name=>{const p=paths[name]||paths.chart;return '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(p.charAt(0)==='<'?p:'<path d="'+p+'"/>')+'</svg>'};
-const blank={indicator:'volume',from:'',to:'',status:'',line:'',shift:''};
+const blank={indicator:'volume',from:'',to:'',status:'',line:'',shift:'',trip:''};
 let source=null, filter={...blank}, preset='all', page=1, sort='plannedArrivalTime', direction=1, chartMode='graph', chart, message='';
 const number=value=>value.toLocaleString(lang==='zh'?'zh-CN':'pt-BR');
 const statusName=value=>Number(value)===3?tr('Em trânsito','在途'):tr('Concluído','已完成');
@@ -317,7 +350,7 @@ const all=()=> (source?.records??[]).map(row=>normalize(detalhes.get(chave(row))
  const mes=today().slice(0,7);
  return row.expected.date.startsWith(mes)||shiftOf(row.actualArrivalTime).date.startsWith(mes);
 });
-const matches=(row,f)=> (!f.status||row.shipmentState===Number(f.status))&&(!f.line||row.line===f.line)&&(!f.shift||row.expected.name===f.shift)&&(!f.from||row.expected.date>=f.from)&&(!f.to||!!row.expected.date&&row.expected.date<=f.to);
+const matches=(row,f)=> (!f.trip||f.trip.split('|').includes(String(row.shipmentNo)))&&(!f.status||row.shipmentState===Number(f.status))&&(!f.line||row.line===f.line)&&(!f.shift||row.expected.name===f.shift)&&(!f.from||row.expected.date>=f.from)&&(!f.to||!!row.expected.date&&row.expected.date<=f.to);
 const value=rows=>filter.indicator==='trips'?rows.length:rows.some(row=>row.volume!==null)||!rows.length?rows.reduce((sum,row)=>sum+(row.volume??0),0):null;
 const display=v=>v===null?'—':number(v);
 const unit=()=>filter.indicator==='trips'?tr('viagens','车次'):tr('pedidos-mãe','主运单');
@@ -423,7 +456,7 @@ function render(){
  by('theme').setAttribute('aria-label',tr('Alternar tema','切换主题'));
  by('query').placeholder=tr('Localizar na tabela','在表格中搜索');by('query').setAttribute('aria-label',by('query').placeholder);
  const desatualizado=source&&(source.falhaColeta||Date.now()-Date.parse(source.updated)>30*60000);
- by('footer').innerHTML='<div class="sync-line"><span class="sync-dot'+(desatualizado?' warn':'')+'"></span><div><b>'+tr('Atualização automática','自动更新')+'</b><small>'+tr('A cada 15 min · Última atualização: ','每15分钟 · 最近更新：')+(source?new Date(source.updated).toLocaleString(lang==='zh'?'zh-CN':'pt-BR',{timeZone:'America/Sao_Paulo'}):'—')+'</small></div></div><span class="version">v1.0</span><span class="made-by">'+tr('Feito por Marcelo Wesley','制作：Marcelo Wesley')+'</span>';
+ by('footer').innerHTML='<div class="sync-line"><span class="sync-dot'+(desatualizado?' warn':'')+'"></span><div><b>'+tr('Atualização do painel a cada 15 min','每15分钟刷新面板')+'</b><small>'+tr('Última atualização','最近更新')+' · '+(source?new Date(source.updated).toLocaleString(lang==='zh'?'zh-CN':'pt-BR',{timeZone:'America/Sao_Paulo'}):'—')+'</small></div></div><span class="made-by">v1.0 · '+tr('Feito por Marcelo Wesley','制作：Marcelo Wesley')+'</span>';
  if(desatualizado){
   const horario=new Date(source.updated).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'});
   const motivo=source.falhaColeta==='cota'?tr(' · Cota do Apps Script atingida',' · 已达 Apps Script 配额'):'';
@@ -432,6 +465,7 @@ function render(){
  else by('notice').textContent=message?pair(message):source?'':tr('Carregando dados…','正在加载数据…');
  by('nav').innerHTML=[['','Visão geral','总览','chart'],['3','Em trânsito','在途','truck'],['4','Concluído','已完成','box']].map(([id,pt,zh,ico])=>'<button type="button" class="nav-item" data-status="'+id+'" aria-pressed="'+(filter.status===id)+'"><span class="nav-ico">'+icon(ico)+'</span><span class="nav-copy"><b>'+tr(pt,zh)+'</b><small>'+tr(zh,pt)+'</small></span><span class="nav-rate"><i></i>'+number(base.filter(row=>matches(row,{...filter,status:id})).length)+'</span></button>').join('');
  for(const id of ['status','line','shift'])by(id).closest('.dd').classList.toggle('has-value',!!filter[id]);
+ renderTripFilter();
  by('chips').innerHTML=periods.map(([key,label])=>'<button type="button" data-period="'+key+'" aria-pressed="'+(preset===key)+'">'+pair(label)+'</button>').join('');
  const groups=['T1','T2','T3'].map((name,index)=>({name,time:['06:00–13:59','14:00–21:59','22:00–05:59'][index],v:value(rows.filter(row=>row.expected.name===name))}));
  const yesterday=filter.from&&filter.from===filter.to?dateAdd(filter.from,-1):'';
@@ -497,6 +531,54 @@ by('export').onclick=()=>{
  const a=document.createElement('a');a.href=url;a.download='Recebimento_SP_GRU_'+today()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 by('filters').onsubmit=event=>{event.preventDefault();apply()};
+// Filtro "ID da viagem": lista com busca, marca um ou vários IDs (como os filtros do DashMaster). Vale na hora.
+var tripOpen=false,tripLimit=200;
+function tripSel(){return new Set(by('trip').value?by('trip').value.split('|'):[])}
+function tripOptions(){
+ const ids=new Map();
+ for(const row of all())if(row.shipmentNo&&matches(row,{...filter,trip:''})&&!ids.has(String(row.shipmentNo)))ids.set(String(row.shipmentNo),row);
+ for(const id of tripSel())if(!ids.has(id))ids.set(id,null);
+ return [...ids].map(([id,row])=>({id,plate:row?.plateNumber||'',origin:row?.startName||''})).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));
+}
+function renderTripFilter(){
+ const sel=[...tripSel()];
+ by('tripValue').textContent=!sel.length?tr('Todos','全部'):sel.length===1?sel[0]:tr(sel.length+' selecionados','已选 '+sel.length+' 项');
+ by('tripCount').textContent=sel.length;by('tripCount').hidden=sel.length<2;
+ by('tripDd').classList.toggle('has-value',sel.length>0);
+ by('tripBtn').title=sel.join(', ');
+ by('tripPanel').querySelector('.dd-head b').textContent=tr('ID da viagem','车次编号');
+ by('tripPanel').querySelector('[data-act=clear]').textContent=tr('Limpar','清除');
+ by('tripFind').placeholder=tr('Procurar ID, placa ou origem','搜索车次编号、车牌或始发站');
+ if(tripOpen)renderTripList();
+}
+function renderTripList(){
+ const sel=tripSel(),busca=by('tripFind').value.trim().toLocaleLowerCase();
+ const opts=tripOptions().filter(o=>!busca||(o.id+' '+o.plate+' '+o.origin).toLocaleLowerCase().includes(busca));
+ const list=by('tripPanel').querySelector('.dd-list'),scroll=list.scrollTop;
+ list.innerHTML=opts.length?opts.slice(0,tripLimit).map(o=>'<li class="dd-opt" role="option" data-id="'+esc(o.id)+'" aria-selected="'+sel.has(o.id)+'"><span class="dd-check">'+icon('check')+'</span><span class="dd-text" title="'+esc(o.id+(o.origin?' · '+o.origin:''))+'">'+esc(o.id)+'</span><span class="dd-n">'+esc(o.plate)+'</span></li>').join('')+
+  (opts.length>tripLimit?'<li><button type="button" class="dd-more">'+tr('Mostrar mais','显示更多')+' ('+number(opts.length-tripLimit)+')</button></li>':'')
+  :'<li class="dd-empty">'+tr('Nenhum ID de viagem','没有车次编号')+'</li>';
+ list.scrollTop=scroll;
+}
+function openTrip(open){
+ tripOpen=open;by('tripBtn').setAttribute('aria-expanded',open);by('tripPanel').hidden=!open;
+ if(!open)return;
+ const r=by('tripDd').getBoundingClientRect();by('tripDd').classList.toggle('align-right',r.left+320>window.innerWidth);
+ tripLimit=200;renderTripList();by('tripFind').focus();
+}
+function setTrip(ids){by('trip').value=[...ids].join('|');apply()}
+by('tripBtn').onclick=()=>openTrip(!tripOpen);
+by('tripFind').oninput=()=>{tripLimit=200;renderTripList()};
+by('tripFind').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();const first=by('tripPanel').querySelector('.dd-opt');if(first)first.click()}};
+by('tripPanel').onclick=event=>{
+ const li=event.target.closest('.dd-opt');
+ if(li){const s=tripSel(),id=li.dataset.id;if(s.has(id))s.delete(id);else s.add(id);setTrip(s);return}
+ if(event.target.closest('.dd-more')){tripLimit+=300;renderTripList();return}
+ if(event.target.closest('[data-act=clear]'))setTrip(new Set());
+};
+// composedPath: o item clicado some da página quando a lista é redesenhada; o caminho do clique continua dentro do filtro.
+document.addEventListener('click',event=>{if(tripOpen&&!event.composedPath().includes(by('tripDd')))openTrip(false)});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&tripOpen){openTrip(false);by('tripBtn').focus()}});
 for(const id of ['from','to'])by(id).oninput=()=>{by('to').setCustomValidity('');preset='custom'};
 by('chips').onclick=event=>{const button=event.target.closest('[data-period]');if(button)setPeriod(button.dataset.period)};
 by('nav').onclick=event=>{const button=event.target.closest('[data-status]');if(button){by('status').value=button.dataset.status;apply();toggleDrawer(false)}};

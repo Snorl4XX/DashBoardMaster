@@ -160,6 +160,10 @@ async function testeServidor(tmp, jms) {
     confere(r.texto.indexOf('Marcelo Wesley') >= 0, 'crédito do painel mantido');
     confere(r.texto.indexOf('translate="no"') >= 0 && r.texto.indexOf('<meta name="google" content="notranslate">') >= 0, 'painel não é traduzido pelo navegador (tem PT-BR / 中文 próprio)');
     confere(r.texto.indexOf('<option value="4" data-i="Concluído|已完成">') >= 0, 'filtro Status: Concluído');
+    confere(r.texto.indexOf('class="notranslate"') >= 0, 'classe notranslate (tradutor do Google e da Microsoft)');
+    confere(r.texto.indexOf('id="tripBtn"') >= 0 && r.texto.indexOf('data-i="ID da viagem|车次编号"') >= 0 && r.texto.indexOf("trip:''") >= 0, 'filtro ID da viagem');
+    confere(r.texto.indexOf('<h2 data-i="Filtros|筛选">') >= 0 && r.texto.indexOf('Refine os resultados') < 0 && r.texto.indexOf('Atualização do painel a cada 15 min') >= 0,
+      'nomes iguais aos de antes (Filtros, rodapé)');
     confere(r.texto.indexOf('<title>Monitor de Recebimento | SP GRU</title><script>') >= 0, 'ponte logo depois do título');
     let d = await dados(porta);
     confere(d.ok === false && d.error === 'A coleta JMS ainda não foi configurada.', 'antes da 1ª coleta: mensagem do Painel.gs', d);
