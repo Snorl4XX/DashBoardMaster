@@ -268,6 +268,10 @@ function testeZip(tmp) {
   const {gerar, ARQUIVOS} = require('../gerar-zip');
   const zip = gerar(path.join(tmp, 'dist'));
   const conteudo = fs.readFileSync(zip);
+  const leia = fs.readFileSync(path.join(APP, 'LEIA-ME.txt'), 'utf8');
+  confere(leia.indexOf('"C:\\dashmaster\\node\\node.exe" "C:\\monitor-recebimento\\server.js"') >= 0, 'LEIA-ME: atalho igual ao do DashMaster');
+  confere(fs.readFileSync(path.join(APP, 'iniciar.bat'), 'utf8').indexOf('set RECEBIMENTO_SEM_PAUSA=1') >= 0 &&
+    fs.readFileSync(path.join(APP, 'server.js'), 'utf8').indexOf('!process.env.RECEBIMENTO_SEM_PAUSA') >= 0, 'atalho: janela não fecha no erro; iniciar.bat sem a pausa');
   confere(/MONITOR_RECEBIMENTO_V\d+_\d+(_\d+)?\.zip$/.test(zip), 'nome do ZIP', path.basename(zip));
   confere(ARQUIVOS.every(f => conteudo.indexOf(Buffer.from('monitor-recebimento/' + f)) >= 0), 'arquivos no ZIP');
   confere(conteudo.indexOf(Buffer.from('monitor-recebimento/test/')) < 0 && conteudo.indexOf(Buffer.from('monitor-recebimento/dados/')) < 0 &&
@@ -278,6 +282,7 @@ function testeZip(tmp) {
   ['iniciar.bat', 'iniciar-com-windows.bat', 'link-publico.bat'].forEach(f => {
     const t = fs.readFileSync(path.join(APP, f), 'utf8');
     confere(/\r\n/.test(t) && !/[^\r]\n/.test(t), f + ' com quebras de linha do Windows');
+    if (f !== 'iniciar-com-windows.bat') confere(t.indexOf('C:\\dashmaster\\node\\node.exe') >= 0 && t.indexOf('"%NODE%"') >= 0, f + ' acha o node.exe do DashMaster');
   });
 }
 

@@ -30,6 +30,21 @@ Instalar (no notebook onde já roda o DashMaster)
 5. Abra o painel: http://localhost:3600
 6. Ligar sozinho com o Windows: dois cliques em iniciar-com-windows.bat (uma vez só).
 
+Atalho na Área de Trabalho (igual ao do DashMaster e da Expedição)
+--------------------------------------------------------------------
+1. Na Área de Trabalho: botão direito > Novo > Atalho. Cole (com as aspas):
+     "C:\dashmaster\node\node.exe" "C:\monitor-recebimento\server.js"
+   Avançar > nome: Monitor de Recebimento > Concluir. (Usa o mesmo node.exe do DashMaster.)
+   Node.js instalado no Windows? Pode usar: "C:\Program Files\nodejs\node.exe" "C:\monitor-recebimento\server.js"
+2. Dois cliques no atalho: abre a janela preta do Monitor. Deixe aberta (pode minimizar).
+   Se der erro ao abrir, a janela não fecha: mostra o motivo; tire um print e feche no X.
+3. Abrir sozinho com o Windows: Windows + R > shell:startup > cole o atalho nessa pasta.
+   Use o atalho OU o iniciar-com-windows.bat, não os dois (o segundo avisa "porta 3600 já está em uso").
+4. Atalho do link público: botão direito no link-publico.bat > Enviar para > Área de trabalho (criar atalho).
+   Arquivos .bat bloqueados? Novo > Atalho com:
+     C:\Windows\System32\cmd.exe /k ""C:\Program Files\Tailscale\tailscale.exe" funnel --bg --set-path=/recebimento http://127.0.0.1:3600/recebimento"
+5. Atalho para abrir o painel no navegador: Novo > Atalho com  http://localhost:3600  > nome: Painel Recebimento.
+
 Link para a equipe (Tailscale, o mesmo do DashMaster)
 -----------------------------------------------------
 Dois cliques em link-publico.bat. O link fica:  https://NOME-DO-NOTEBOOK.xxxx.ts.net/recebimento

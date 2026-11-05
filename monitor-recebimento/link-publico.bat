@@ -23,9 +23,13 @@ rem ---------- 2. Porta do painel, porta do link e caminho (config.json; padrao 
 set PORTA=3600
 set PORTALINK=443
 set "CAMINHO=/recebimento"
-where node >nul 2>nul
-if errorlevel 1 goto semNode
-for /f "tokens=1-3" %%a in ('node "%~dp0lib\link.js" config 2^>nul') do (
+rem Node.js: o node.exe desta pasta, o instalado no Windows ou o node.exe do DashMaster (C:\dashmaster\node).
+set "NODE="
+if exist "%~dp0node.exe" set "NODE=%~dp0node.exe"
+if not defined NODE for /f "delims=" %%p in ('where node 2^>nul') do if not defined NODE set "NODE=%%p"
+if not defined NODE if exist "C:\dashmaster\node\node.exe" set "NODE=C:\dashmaster\node\node.exe"
+if not defined NODE goto semNode
+for /f "tokens=1-3" %%a in ('call "%NODE%" "%~dp0lib\link.js" config 2^>nul') do (
   set "PORTA=%%a"
   set "PORTALINK=%%b"
   set "CAMINHO=%%c"
@@ -52,7 +56,7 @@ echo   [3/4] Tailscale ligado.
 
 rem ---------- 4. Funnel ----------
 rem O endereco ja leva para OUTRO painel deste computador? Avisa e pergunta antes de trocar.
-node "%~dp0lib\link.js" livre "%TS%" %PORTALINK% %PORTA% %CAMINHO%
+"%NODE%" "%~dp0lib\link.js" livre "%TS%" %PORTALINK% %PORTA% %CAMINHO%
 if errorlevel 2 goto ocupado
 goto funnelPublicar
 :ocupado
@@ -74,7 +78,7 @@ goto funnelFeito
 "%TS%" funnel --bg %PORTA%
 :funnelFeito
 if errorlevel 1 goto funnelErro
-node "%~dp0lib\link.js" limpar "%TS%" %PORTALINK% %PORTA% %CAMINHO%
+"%NODE%" "%~dp0lib\link.js" limpar "%TS%" %PORTALINK% %PORTA% %CAMINHO%
 echo.
 "%TS%" funnel status
 echo.
@@ -87,8 +91,9 @@ if not defined CAMINHO echo   Para tirar do ar so este link: "%TS%" funnel --htt
 goto fim
 
 :semNode
-echo   O Node.js nao esta instalado neste computador.
+echo   O Node.js nao foi encontrado neste computador.
 echo   Baixe a versao LTS em https://nodejs.org , instale e abra este arquivo de novo.
+echo   Sem administrador: copie o node.exe do DashMaster para a pasta do Monitor.
 goto fim
 
 :semTailscale

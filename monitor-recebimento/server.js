@@ -26,9 +26,20 @@ const {carregar, lerJson, gravarJson, ID_PLANILHA} = require('./lib/apps-script'
 const {Auth, isLocal, viaTunnel} = require('./lib/auth');
 const VERSAO = require('./package.json').version;
 
+/**
+ * Erro que impede o Monitor de abrir. Pelo atalho do Windows (node.exe server.js), a janela fecharia na hora, sem dar para
+ * ler o motivo: ali ela fica aberta (até o X ou 30 min). Pelo iniciar.bat (RECEBIMENTO_SEM_PAUSA) e fora do Windows, sai na hora.
+ */
 function parar(msg) {
-  console.error('\n  ' + msg + '\n');
+  console.error('\n  [erro] ' + msg + '\n');
+  if (process.platform === 'win32' && process.stdout.isTTY && !process.env.RECEBIMENTO_SEM_PAUSA) {
+    console.error('  O Monitor NÃO está no ar. Tire um print desta janela para pedir ajuda.\n  Esta janela fica aberta para você ler: feche no X.');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30 * 60000);
+  }
   process.exit(1);
+}
+if (Number(process.versions.node.split('.')[0]) < 18) {
+  parar('O Monitor precisa do Node.js 18 ou mais novo (este é o ' + process.version + '). Baixe a versão LTS em https://nodejs.org');
 }
 
 let cfg;
