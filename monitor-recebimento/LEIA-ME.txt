@@ -4,10 +4,11 @@ J&T · MONITOR DE RECEBIMENTO | SP GRU (no notebook, como os painéis do DashMas
 O que faz
 ---------
 Mostra os caminhões que estão vindo para a SP GRU (30001): troncal e secundária, em trânsito e concluídos, com chegada,
-desbloqueio, início e fim da descarga e o último bipe. São os SEUS arquivos do Apps Script, sem nenhuma mudança:
+desbloqueio, início e fim da descarga e o último bipe. São os SEUS arquivos do Apps Script:
   Recebimento_SP_GRU.gs   a coleta do JMS (atualizarRecebimento)
   Painel.gs               os dados do painel (dadosPainelRecebimento) e os detalhes de cada viagem
-  Index.html              o painel
+  Index.html              o painel, com o mesmo visual do DashMaster (topo, filtros, cartões e tabelas;
+                          tema escuro e claro). As seções ocupam a largura toda.
 O que muda é só ONDE roda: no notebook, e não no Google.
   - A coleta roda ao abrir e depois a cada 15 min (no Google era o acionador de 15 min).
   - NÃO precisa da planilha do Google. Tudo fica no banco local C:\monitor-recebimento\dados\recebimento.db,

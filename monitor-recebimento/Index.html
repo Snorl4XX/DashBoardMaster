@@ -1,54 +1,281 @@
 <!doctype html><html lang="pt-BR" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monitor de Recebimento | SP GRU</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet"><script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
 <style>
-:root {
+/* Monitor de Recebimento · mesmo visual do DashMaster (Styles.html): identidade branco/vermelho, tema escuro por padrão. */
+:root{
+  color-scheme:light;
   --red:#E60012; --red-600:#C8000F; --red-700:#A5000C; --red-50:#FFF1F2; --red-100:#FFE1E4; --red-200:#FFC2C8;
   --ink:#1F2430; --ink-2:#434A5B; --muted:#6B7280; --muted-2:#9AA0AB;
-  --line:#ECECEF; --line-2:#F3F3F5; --bg:#F6F6F8; --card:#FFFFFF; --soft:#F6F6F8; --soft-2:#F1F1F4;
-  --field-line:#DFDFE4; --row-alt:#FBFBFC; --row-hover:#FFF5F6;
+  --line:#ECECEF; --line-2:#F3F3F5; --bg:#F6F6F8; --card:#FFFFFF;
+  --soft:#F6F6F8; --soft-2:#F1F1F4; --field-line:#DFDFE4; --field-line-2:#CFCFD6;
+  --row-alt:#FBFBFC; --row-hover:#FFF5F6; --sidebar-bg:#FFFFFF; --on-ink:#FFFFFF;
   --good:#15803D; --good-bg:#EAF7EE; --good-line:#BBE5C8;
   --bad:#B42318; --bad-bg:#FDEBEC; --bad-line:#F7C3C7;
-  --warn:#B45309; --warn-bg:#FFF7ED;
+  --warn:#B45309; --warn-bg:#FFF7ED; --warn-line:#FBD9B0;
   --t1:#E60012; --t2:#2A78D6; --t3:#4A3AA7;
   --radius:16px; --radius-sm:10px;
   --shadow:0 1px 2px rgba(31,36,48,.04),0 8px 24px rgba(31,36,48,.06);
+  --shadow-lg:0 12px 40px rgba(31,36,48,.14);
+  --font:"Inter","PingFang SC","Microsoft YaHei","Noto Sans SC","Segoe UI",Arial,sans-serif;
+  --side:268px;
 }
-:root[data-theme="dark"] {
+:root[data-theme="dark"]{
+  color-scheme:dark;
   --red:#E60012; --red-600:#FF5A67; --red-700:#FF7D87; --red-50:rgba(230,0,18,.16); --red-100:rgba(230,0,18,.30); --red-200:rgba(255,90,103,.55);
   --ink:#F2F3F5; --ink-2:#C9CCD4; --muted:#9BA1AD; --muted-2:#727885;
-  --line:#2A2D36; --line-2:#22252D; --bg:#0E0F13; --card:#17191F; --soft:#1E2128; --soft-2:#272A33;
-  --field-line:#353946; --row-alt:#1B1D24; --row-hover:rgba(230,0,18,.12);
+  --line:#2A2D36; --line-2:#22252D; --bg:#0E0F13; --card:#17191F;
+  --soft:#1E2128; --soft-2:#272A33; --field-line:#353946; --field-line-2:#4B505E;
+  --row-alt:#1B1D24; --row-hover:rgba(230,0,18,.12); --sidebar-bg:#121318; --on-ink:#111318;
   --good:#3DD07A; --good-bg:rgba(61,208,122,.14); --good-line:rgba(61,208,122,.38);
   --bad:#FF6B76; --bad-bg:rgba(230,0,18,.18); --bad-line:rgba(230,0,18,.45);
-  --warn:#F5A524; --warn-bg:rgba(245,165,36,.12);
+  --warn:#F5A524; --warn-bg:rgba(245,165,36,.12); --warn-line:rgba(245,165,36,.38);
   --t1:#FF3B4A; --t2:#4C93F0; --t3:#9B8CFA;
   --shadow:0 1px 2px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.35);
+  --shadow-lg:0 12px 40px rgba(0,0,0,.55);
 }
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px Inter,"PingFang SC","Microsoft YaHei","Noto Sans SC","Segoe UI",Arial,sans-serif}button,input,select{font:inherit;color:inherit;background:var(--card);border:1px solid var(--field-line);height:40px;border-radius:10px;padding:0 12px;min-width:0}button{border-radius:12px;font-size:13px;font-weight:700;cursor:pointer}button:disabled{opacity:.5;cursor:default}:focus-visible{outline:2px solid var(--red);outline-offset:2px}.red,.red:hover{background:var(--red);color:#fff;border-color:transparent}.red:hover{background:#C8000F}.ico{width:18px;height:18px;vertical-align:middle;flex:none}.square{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:10px;color:var(--red-600);background:var(--red-50);flex:none}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted-2);margin-right:6px}aside{position:fixed;inset:0 auto 0 0;width:268px;background:var(--card);border-right:1px solid var(--line);padding:25px 16px;z-index:5;display:flex;flex-direction:column;gap:10px;overflow:auto}aside:before{content:"";position:absolute;inset:0 0 auto;height:4px;background:linear-gradient(90deg,#E60012,#FF4D5E)}.brand{display:flex;align-items:center;gap:10px;margin:0 0 20px 4px}.brand b{background:var(--red);color:white;padding:8px;border-radius:11px;font-size:23px;font-style:italic;font-weight:900}.brand strong{display:block;letter-spacing:2.4px;font-style:italic;color:var(--red-600)}small,.sub{color:var(--muted);font-size:11.5px}.nav{display:flex;align-items:center;gap:8px;text-align:left;width:100%;height:auto;min-height:52px;padding:7px;border:0}.nav .last{margin-left:auto}.nav[aria-pressed=true]{background:var(--red-50);color:var(--red-600)}.nav[aria-pressed=true] .square{background:var(--red);color:white}aside footer{margin-top:auto;line-height:1.8}main{margin-left:268px;min-width:0}header{position:sticky;top:0;z-index:3;background:color-mix(in srgb,var(--bg) 87%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 28px;flex-wrap:wrap}.eyebrow,.label{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px}.eyebrow{color:var(--red-600);letter-spacing:1.6px}h1{font-size:25px;margin:4px 0;font-weight:800}h2{font-size:17px;margin:0}h2 em{font-style:normal;color:var(--red-600)}.actions,.chips,.heading{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.iconButton{width:40px;padding:0}.wrap{padding:14px 28px 28px;display:grid;gap:12px;min-width:0}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:16px 18px;min-width:0}.notice{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 12px}.filters,.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.filters label{display:grid;gap:6px}.filters .label,.metric .label{color:var(--muted)}.label svg{color:var(--red-600);width:15px;height:15px}.filterActions{margin-top:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.chips button{height:32px;border-radius:999px}.chips button[aria-pressed=true]{background:var(--red-50);border-color:var(--red-600);color:var(--red-600)}.metric{min-height:118px;transition:transform .2s;animation:rise .35s ease both}.metric:hover{transform:translateY(-2px)}@keyframes rise{from{opacity:0;transform:translateY(8px)}}.metric strong{display:block;font-size:30px;letter-spacing:-1px;margin:8px 0}.hero{grid-column:span 2;grid-row:span 2;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(135deg,#F0101F,#E60012,#B3000D);color:white;position:relative;overflow:hidden;border:0;box-shadow:0 12px 32px rgba(230,0,18,.22)}.hero:before,.hero:after{content:"";position:absolute;border-radius:50%;width:230px;height:230px;background:#ffffff18;right:-62px;top:-90px;pointer-events:none}.hero:after{right:-110px;top:-25px}.hero strong{font-size:54px}.hero .sub,.hero .label,.hero .label svg{color:#fff}.bar{height:4px;background:var(--soft-2);border-radius:9px;margin-top:10px;overflow:hidden}.bar i{display:block;height:100%;border-radius:9px}.chart{border-top:3px solid var(--red)}.heading{justify-content:space-between;margin-bottom:12px}.title{display:flex;gap:10px;align-items:center}.plot{height:220px;position:relative}.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}.stats div{background:var(--soft);border-radius:10px;padding:8px;display:flex;gap:8px;align-items:center}.stats .square{background:var(--red);color:white}.tablebox{max-width:100%;max-height:480px;overflow:auto;border-radius:10px}table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}th{position:sticky;top:0;background:var(--red);color:#fff;text-align:left;z-index:1}th button{display:block;width:100%;text-align:inherit;background:none;border:0;color:white;height:auto;padding:10px 7px;font-size:12.5px}th small{color:#fff;font-size:10.5px;display:block}td{padding:9px 7px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}tr:nth-child(even){background:var(--row-alt)}tbody tr:hover{background:var(--row-hover)}.num{text-align:right}.pager{justify-content:flex-end;margin-top:10px}.drawer,.shade{display:none}[hidden]{display:none!important}@media(max-width:1080px){main{margin:0}aside{transform:translateX(-100%);transition:transform .2s}body.open aside{transform:translateX(0)}.drawer{display:inline-block}body.open .shade{display:block;position:fixed;inset:0;background:#0008;z-index:4}}@media(max-width:860px){.filters,.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{grid-row:span 1}.wrap,header{padding-left:14px;padding-right:14px}.tablebox{max-height:none}table,tbody,tr,td{display:block}thead{position:sticky;top:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--red)}thead tr{display:contents}td{display:flex;justify-content:space-between;gap:8px;text-align:right}td:before{content:attr(data-label);color:var(--muted);text-align:left}td:last-child{border-bottom:2px solid var(--field-line)}}@media(max-width:380px){.filters,.grid,.stats{grid-template-columns:1fr}.hero{grid-column:span 1}.actions input{width:100%}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
-.agenda-list{display:grid;gap:8px;max-height:530px;overflow:auto}.agenda-list details{border:1px solid var(--line);border-radius:10px;background:var(--soft)}.agenda-list summary{cursor:pointer;padding:11px 12px;overflow-wrap:anywhere}.agenda-list summary small{margin-left:8px}.agenda-list .tablebox{max-height:none;background:var(--card)}.agenda-list th{padding:8px 7px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit;min-width:0}
+button{cursor:pointer}
+button:disabled{opacity:.55;cursor:default}
+:focus-visible{outline:2px solid var(--red);outline-offset:2px;border-radius:6px}
+.ico{width:18px;height:18px;vertical-align:middle;flex:none}
+[hidden]{display:none!important}
+small,.sub{color:var(--muted);font-size:11.5px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted-2);margin-right:6px}
+.square{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:10px;color:var(--red);background:var(--red-50);flex:none}
+
+/* ---------- menu lateral ---------- */
+aside{position:fixed;inset:0 auto 0 0;width:var(--side);background:var(--sidebar-bg);border-right:1px solid var(--line);padding:20px 14px 16px;z-index:40;display:flex;flex-direction:column;overflow:auto}
+aside::before{content:"";position:absolute;left:0;top:0;right:0;height:4px;background:linear-gradient(90deg,var(--red),#FF4D5E)}
+.brand{display:flex;align-items:center;gap:12px;padding:6px 8px 18px;border-bottom:1px solid var(--line)}
+.brand-mark{background:var(--red);color:#fff;border-radius:11px;padding:8px 11px;font-weight:900;font-size:19px;letter-spacing:-.5px;font-style:italic;box-shadow:0 6px 16px rgba(230,0,18,.25);line-height:1}
+.brand-copy{display:flex;flex-direction:column;line-height:1.1}
+.brand-copy strong{font-size:14px;letter-spacing:2.4px;color:var(--red);font-style:italic}
+:root[data-theme="dark"] .brand-copy strong{color:#FF3B4A}
+.brand-copy small{font-size:11px;color:var(--muted);margin-top:5px}
+.side-nav{flex:1;padding:14px 0;display:flex;flex-direction:column;gap:3px}
+.nav-label{padding:12px 10px 6px;font-size:10.5px;text-transform:uppercase;letter-spacing:1.3px;color:var(--muted-2);font-weight:800}
+.nav-item{display:flex;align-items:center;gap:11px;width:100%;border:0;background:transparent;text-align:left;padding:9px 10px;border-radius:12px;color:var(--ink-2);transition:background .18s,color .18s}
+.nav-item:hover{background:var(--soft);color:var(--ink)}
+.nav-item[aria-pressed="true"]{background:var(--red-50);color:var(--red-600)}
+.nav-ico{width:34px;height:34px;border-radius:10px;background:var(--soft-2);display:grid;place-items:center;color:var(--red);transition:.18s;flex:none}
+.nav-item[aria-pressed="true"] .nav-ico{background:var(--red);color:#fff;box-shadow:0 6px 14px rgba(230,0,18,.25)}
+.nav-copy{min-width:0;flex:1}
+.nav-copy b{display:block;font-size:13px;font-weight:650;line-height:1.25}
+.nav-copy small{display:block;font-size:11px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-rate{font-size:11px;font-weight:700;display:flex;align-items:center;gap:5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.nav-rate i{width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block}
+.sidebar-foot{border-top:1px solid var(--line);padding:14px 8px 0;display:flex;flex-direction:column;gap:8px}
+.sync-line{display:flex;gap:10px;align-items:center}
+.sync-line b{display:block;font-size:12px}
+.sync-line small{display:block;font-size:11px;color:var(--muted)}
+.sync-dot{width:9px;height:9px;border-radius:50%;background:#16A34A;box-shadow:0 0 0 4px #DCFCE7;flex:none}
+.sync-dot.warn{background:#D97706;box-shadow:0 0 0 4px #FEF3C7}
+:root[data-theme="dark"] .sync-dot{box-shadow:0 0 0 4px rgba(22,163,74,.25)}
+:root[data-theme="dark"] .sync-dot.warn{box-shadow:0 0 0 4px rgba(217,119,6,.25)}
+.version{font-size:10.5px;color:var(--muted-2)}
+.made-by{display:block;font-size:11.5px;font-weight:700;color:var(--muted)}
+
+/* ---------- topo ---------- */
+main{margin-left:var(--side);min-width:0;padding:0 28px 40px}
+.topbar{position:sticky;top:0;z-index:30;background:rgba(246,246,248,.92);backdrop-filter:blur(10px);display:flex;align-items:center;gap:16px;padding:18px 0 14px;margin:0 -2px}
+:root[data-theme="dark"] .topbar{background:rgba(14,15,19,.94)}
+.title-wrap{min-width:0;flex:1}
+.eyebrow{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:1.6px;color:var(--red)}
+.dot-sep{width:4px;height:4px;border-radius:50%;background:var(--red-200)}
+.title-wrap h1{margin:4px 0 2px;font-size:25px;line-height:1.15;letter-spacing:-.6px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title-wrap p{margin:0;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.theme-btn,.icon-btn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;place-items:center;color:var(--ink-2);box-shadow:var(--shadow);transition:.18s;padding:0}
+.theme-btn:hover{color:var(--red-600);border-color:var(--red-200)}
+.lang-switch{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px;box-shadow:var(--shadow)}
+.lang-btn{border:0;background:transparent;padding:7px 11px;border-radius:9px;font-size:12px;font-weight:800;color:var(--muted);transition:.18s}
+.lang-btn[aria-pressed="true"]{background:var(--red);color:#fff;box-shadow:0 4px 10px rgba(230,0,18,.25)}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid transparent;border-radius:12px;padding:9px 14px;font-weight:700;font-size:13px;white-space:nowrap;transition:transform .12s,background .18s,box-shadow .18s,border-color .18s}
+.btn:active{transform:translateY(1px)}
+.btn .ico{width:17px;height:17px}
+.btn-light{background:var(--card);border-color:var(--line);box-shadow:var(--shadow)}
+.btn-light:hover{border-color:var(--red-200);color:var(--red-600)}
+.btn-red{background:var(--red);color:#fff;box-shadow:0 6px 16px rgba(230,0,18,.22)}
+.btn-red:hover{background:var(--red-600)}
+:root[data-theme="dark"] .btn-red:hover{background:#C8000F}
+.btn-dark{background:var(--ink);color:var(--on-ink)}
+.btn-dark:hover{background:#000}
+:root[data-theme="dark"] .btn-dark{background:var(--red);color:#fff;box-shadow:0 6px 16px rgba(230,0,18,.22)}
+:root[data-theme="dark"] .btn-dark:hover{background:#C8000F}
+.drawer,.shade{display:none}
+
+/* ---------- conteúdo ---------- */
+.wrap{display:grid;gap:12px;min-width:0;padding-top:4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;min-width:0}
+.notice{border-radius:14px;padding:12px 14px;font-size:13px;border:1px solid var(--warn-line);background:var(--warn-bg);color:var(--warn);font-weight:600}
+.notice:empty{display:none}
+h1,h2{font-weight:800}
+h2{font-size:17px;margin:0;letter-spacing:-.3px}
+h2 em{font-style:normal;color:var(--red-600)}
+.actions,.heading{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.heading{justify-content:space-between;margin-bottom:12px}
+.title{display:flex;gap:10px;align-items:center;min-width:0}
+.title .sub,.title p.sub{margin:2px 0 0}
+
+/* ---------- filtros (como o DashMaster: período em cima, "Refine os resultados" embaixo) ---------- */
+#filters{display:grid;gap:12px;min-width:0}
+input[type=date],input[type=search],select{width:100%;height:42px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 12px;font-size:13.5px;outline:none;transition:border-color .18s,box-shadow .18s,background .18s}
+select{appearance:none;-webkit-appearance:none;padding-right:34px;font-weight:600;cursor:pointer}
+select:hover,input[type=date]:hover,input[type=search]:hover{border-color:var(--field-line-2)}
+select:focus,input[type=date]:focus,input[type=search]:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}
+.select-wrap{position:relative;display:block}
+.select-wrap::after{content:"";position:absolute;right:14px;top:50%;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:translateY(-70%) rotate(45deg);pointer-events:none}
+.toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;padding:14px 16px}
+.field{display:flex;flex-direction:column;gap:6px;min-width:150px}
+.field-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);font-weight:800}
+.field-indicator{flex:1 1 250px}
+.field-date{flex:0 1 165px}
+.toolbar .btn-dark{height:42px}
+.presets{display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:1 1 100%;padding-top:2px}
+.presets button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700;color:var(--ink-2);transition:.16s}
+.presets button:hover{border-color:var(--red-200);color:var(--red-600)}
+.presets button[aria-pressed="true"]{background:var(--red-50);border-color:var(--red-200);color:var(--red-600)}
+.refine{padding:16px 18px}
+.section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.kicker{font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:var(--red);font-weight:800}
+.section-head h2{margin:2px 0 0;font-size:16px;letter-spacing:-.2px}
+.filter-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;margin-top:14px}
+.dd{display:flex;flex-direction:column;gap:6px;min-width:0}
+.dd-label{display:flex;align-items:center;gap:6px;font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);font-weight:800}
+.dd-label .ico{width:14px;height:14px;color:var(--red)}
+.dd.has-value select{border-color:var(--red-200);background:var(--red-50);color:var(--red-700)}
+.scope-note{display:flex;align-items:flex-start;gap:6px;margin:12px 0 0;font-size:12px;line-height:1.45;color:var(--muted)}
+.scope-note .ico{width:14px;height:14px;margin-top:2px;color:var(--muted)}
+
+/* ---------- cartões ---------- */
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.metric{padding:16px 18px;position:relative;overflow:hidden;min-height:118px;display:flex;flex-direction:column;animation:rise .35s ease both;transition:transform .18s,box-shadow .18s}
+.metric:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(31,36,48,.05),0 14px 30px rgba(31,36,48,.09)}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}}
+.metric .label{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:800;display:flex;align-items:center;gap:7px}
+.metric .label .ico{width:15px;height:15px;color:var(--red)}
+.metric .label .dot{width:10px;height:10px;border-radius:3px;margin:0}
+.metric strong{display:block;font-size:30px;font-weight:800;letter-spacing:-1px;margin-top:8px;line-height:1.05}
+.metric .sub{font-size:12px;color:var(--muted);margin-top:6px}
+.metric .sub b{color:var(--ink-2)}
+.bar{height:6px;border-radius:99px;background:var(--soft-2);overflow:hidden;margin-top:auto}
+.metric .bar{margin-top:auto}
+.metric .sub{margin-bottom:12px}
+.bar i{display:block;height:100%;border-radius:99px;transition:width .7s cubic-bezier(.2,.8,.2,1)}
+/* 8 cartões: o principal (2x2) + 4 ao lado; os 2 últimos dividem a última linha, sem buraco. */
+@media(min-width:861px){#metrics .metric:nth-last-child(-n+2):not(.hero){grid-column:span 2}}
+.hero{grid-column:span 2;grid-row:span 2;background:linear-gradient(135deg,#F0101F 0%,var(--red) 40%,#B3000D 100%);border:0;color:#fff;padding:20px 22px;box-shadow:0 14px 34px rgba(230,0,18,.28)}
+:root[data-theme="dark"] .hero{box-shadow:0 14px 34px rgba(230,0,18,.22)}
+.hero::after{content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.08);pointer-events:none}
+.hero::before{content:"";position:absolute;right:40px;bottom:-90px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.06);pointer-events:none}
+.hero .label,.hero .label .ico{color:rgba(255,255,255,.88)}
+.hero strong{font-size:54px;letter-spacing:-2px;margin-top:10px;color:#fff}
+.hero .sub{color:rgba(255,255,255,.88);font-size:13px;line-height:1.6}
+.hero .sub b{color:#fff}
+
+/* ---------- seções (largura total, como os gráficos do DashMaster) ---------- */
+.chart{padding:18px 20px 16px;border-top:3px solid var(--red)}
+.chart > h2{margin-bottom:2px}
+.chart > .sub{margin:2px 0 10px}
+.seg{display:inline-flex;background:var(--soft-2);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;border-radius:8px;padding:6px 10px;font-size:11.5px;font-weight:800;color:var(--muted);transition:.16s}
+.seg button.red{background:var(--card);color:var(--red-600);box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.plot{height:290px;position:relative}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+.stats div{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;gap:10px;align-items:center}
+.stats .square{background:var(--red);color:#fff}
+#viradaData{width:auto;min-width:170px}
+#query{width:260px;max-width:100%}
+
+/* ---------- tabelas (cabeçalho vermelho, como no DashMaster) ---------- */
+.tablebox{max-width:100%;max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:12px}
+.tablebox:empty{display:none}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
+th{position:sticky;top:0;z-index:2;background:var(--red);color:#fff;text-align:left;font-weight:700;white-space:nowrap;border-right:1px solid rgba(255,255,255,.16);padding:10px 12px}
+th:last-child{border-right:0}
+th:has(button){padding:0}
+th button{display:block;width:100%;text-align:inherit;background:none;border:0;color:#fff;padding:10px 12px;font-size:12.5px;font-weight:700}
+th small{color:#fff;opacity:.8;font-size:10.5px;display:block;font-weight:500;margin-top:1px}
+td{padding:9px 12px;border-bottom:1px solid var(--line-2);white-space:nowrap}
+tbody tr:nth-child(even) td{background:var(--row-alt)}
+tbody tr:hover td{background:var(--row-hover)}
+.num{text-align:right}
+#desempenho{border:0;border-radius:0;max-height:none;overflow:visible}
+#desempenho > :not(table){margin:0 0 8px}
+#desempenho table{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:6px}
+.pager{justify-content:flex-end;margin-top:10px;color:var(--muted);font-size:12.5px;font-weight:700}
+.pager button{display:inline-flex;align-items:center;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:8px 13px;font-weight:700;font-size:12.5px;box-shadow:var(--shadow)}
+.pager button:not(:disabled):hover{border-color:var(--red-200);color:var(--red-600)}
+.agenda-list{display:grid;gap:8px;max-height:530px;overflow:auto}
+.agenda-list details{border:1px solid var(--line);border-radius:12px;background:var(--soft)}
+.agenda-list summary{cursor:pointer;padding:11px 12px;overflow-wrap:anywhere;font-weight:600}
+.agenda-list summary small{margin-left:8px;font-weight:500}
+.agenda-list .tablebox{max-height:none;background:var(--card);border:0;border-top:1px solid var(--line);border-radius:0 0 12px 12px}
+.agenda-list th{padding:8px 10px}
+
+/* ---------- telas menores ---------- */
+@media(max-width:1080px){
+  main{margin-left:0}
+  aside{transform:translateX(-100%);transition:transform .2s}
+  body.open aside{transform:translateX(0)}
+  .drawer{display:grid}
+  body.open .shade{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:35}
+  :root[data-theme="dark"] body.open .shade{background:rgba(0,0,0,.55)}
+}
+@media(max-width:860px){
+  main{padding:0 14px 28px}
+  .topbar{flex-wrap:wrap}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hero{grid-row:span 1}
+  .field-date{flex:1 1 140px}
+  .tablebox{max-height:none}
+  table,tbody,tr,td{display:block}
+  thead{position:sticky;top:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--red)}
+  thead tr{display:contents}
+  td{display:flex;justify-content:space-between;gap:8px;text-align:right;white-space:normal;overflow-wrap:anywhere}
+  td:before{content:attr(data-label);color:var(--muted);text-align:left}
+  td:last-child{border-bottom:2px solid var(--field-line)}
+}
+@media(max-width:420px){
+  .grid,.stats{grid-template-columns:1fr}
+  .hero{grid-column:span 1}
+  .title-wrap h1{font-size:21px}
+  #viradaData,#query{width:100%}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
-<body><div class="shade" id="shade"></div><aside id="sidebar"><div class="brand"><b>J&amp;T</b><div><strong>EXPRESS</strong><small>SP GRU · 30001</small></div></div><nav id="nav"></nav><footer id="footer"></footer></aside>
-<main><header><div><button id="drawer" class="drawer iconButton" aria-label="Menu" aria-expanded="false"></button><div class="eyebrow">J&amp;T EXPRESS • SP GRU</div><h1 data-i="Monitor de Recebimento|到货监控"></h1><div class="sub">Previsão de chegada e volumetria por turno / 预计到达与班次货量</div></div><div class="actions"><button id="theme" class="iconButton"></button><div class="actions"><button id="pt">PT-BR</button><button id="zh">中文</button></div><button id="refresh" data-i="Atualizar|刷新"></button><button id="export" class="red" data-i="Baixar relatório|下载报告"></button></div></header>
+<body><div class="shade" id="shade"></div><aside id="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">J&amp;T</div><div class="brand-copy"><strong>EXPRESS</strong><small>SP GRU · 30001</small></div></div><div class="side-nav"><div class="nav-label" data-i="Recebimento|到货"></div><nav id="nav"></nav></div><footer id="footer" class="sidebar-foot"></footer></aside>
+<main><header class="topbar"><button id="drawer" class="drawer icon-btn" type="button" aria-label="Menu" aria-expanded="false"></button><div class="title-wrap"><div class="eyebrow"><span>J&amp;T EXPRESS</span><span class="dot-sep"></span><span>SP GRU</span></div><h1 data-i="Monitor de Recebimento|到货监控"></h1><p>Previsão de chegada e volumetria por turno / 预计到达与班次货量</p></div><div class="top-actions"><button id="theme" class="theme-btn" type="button"></button><div class="lang-switch"><button id="pt" class="lang-btn" type="button">PT-BR</button><button id="zh" class="lang-btn" type="button">中文</button></div><button id="refresh" class="btn btn-light" type="button"><span data-ico="refresh"></span><span data-i="Atualizar|刷新"></span></button><button id="export" class="btn btn-red" type="button"><span data-ico="download"></span><span data-i="Baixar relatório|下载报告"></span></button></div></header>
 <div class="wrap">
 <div class="notice" id="notice" role="status"></div>
-<section class="card"><div class="heading"><div><h2 data-i="Filtros|筛选"></h2><div class="sub" data-i="A data do T3 é a do encerramento: das 22h do dia anterior até antes das 06h da data selecionada.|T3 按结束日期筛选：从前一天 22:00 到所选日期 06:00 前。"></div></div><button id="import" data-i="Importar JSON do JMS|导入 JMS JSON"></button><input id="file" type="file" accept=".json,application/json" multiple hidden></div>
-<form id="filters"><div class="filters">
-<label><span class="label" data-i="Indicador|指标"></span><select id="indicator"><option value="volume" data-i="Pedidos-mãe|主运单"></option><option value="trips" data-i="Viagens|车次"></option></select></label>
-<label><span class="label" data-i="Data inicial|开始日期"></span><input type="date" id="from"></label>
-<label><span class="label" data-i="Data final|结束日期"></span><input type="date" id="to"></label>
-<label><span class="label" data-i="Status da viagem|运输状态"></span><select id="status"><option value="" data-i="Todos|全部"></option><option value="3" data-i="Em trânsito|在途"></option><option value="4" data-i="Concluído|已完成"></option></select></label>
-<label><span class="label" data-i="Linha|线路"></span><select id="line"><option value="" data-i="Todas|全部"></option><option value="trunk" data-i="Troncal|干线"></option><option value="branch" data-i="Secundária|支线"></option></select></label>
-<label><span class="label" data-i="Turno previsto|预计班次"></span><select id="shift"><option value="" data-i="Todos|全部"></option><option>T1</option><option>T2</option><option>T3</option><option value="none" data-i="Sem previsão|无预计时间"></option></select></label>
-</div><div class="filterActions"><div class="chips" id="chips"></div><button type="submit" class="red" data-i="Aplicar|应用"></button></div></form></section>
+<form id="filters">
+<section class="card toolbar">
+<label class="field field-indicator"><span class="field-label" data-i="Indicador|指标"></span><span class="select-wrap"><select id="indicator"><option value="volume" data-i="Pedidos-mãe|主运单"></option><option value="trips" data-i="Viagens|车次"></option></select></span></label>
+<label class="field field-date"><span class="field-label" data-i="Data inicial|开始日期"></span><input type="date" id="from"></label>
+<label class="field field-date"><span class="field-label" data-i="Data final|结束日期"></span><input type="date" id="to"></label>
+<button type="submit" class="btn btn-dark"><span data-ico="check"></span><span data-i="Aplicar|应用"></span></button>
+<div class="presets" id="chips"></div>
+</section>
+<section class="card refine"><div class="section-head"><div><div class="kicker" data-i="Filtros|筛选"></div><h2 data-i="Refine os resultados|细化结果"></h2></div><button id="import" class="btn btn-light" type="button" data-i="Importar JSON do JMS|导入 JMS JSON"></button><input id="file" type="file" accept=".json,application/json" multiple hidden></div>
+<div class="filter-grid">
+<label class="dd"><span class="dd-label" data-ico="status" data-i="Status da viagem|运输状态"></span><span class="select-wrap"><select id="status"><option value="" data-i="Todos|全部"></option><option value="3" data-i="Em trânsito|在途"></option><option value="4" data-i="Concluído|已完成"></option></select></span></label>
+<label class="dd"><span class="dd-label" data-ico="route" data-i="Linha|线路"></span><span class="select-wrap"><select id="line"><option value="" data-i="Todas|全部"></option><option value="trunk" data-i="Troncal|干线"></option><option value="branch" data-i="Secundária|支线"></option></select></span></label>
+<label class="dd"><span class="dd-label" data-ico="clock" data-i="Turno previsto|预计班次"></span><span class="select-wrap"><select id="shift"><option value="" data-i="Todos|全部"></option><option>T1</option><option>T2</option><option>T3</option><option value="none" data-i="Sem previsão|无预计时间"></option></select></span></label>
+</div>
+<p class="scope-note"><span data-ico="info"></span><span data-i="A data do T3 é a do encerramento: das 22h do dia anterior até antes das 06h da data selecionada.|T3 按结束日期筛选：从前一天 22:00 到所选日期 06:00 前。"></span></p>
+</section>
+</form>
 <section class="grid" id="metrics"></section>
-<section class="card chart"><h2 data-i="Veículos aguardando início da descarga|等待开始卸货的车辆"></h2><p id="filaResumo" class="sub" role="status"></p><div id="filaDescarga" class="tablebox"></div></section>
-<section class="card chart"><h2 data-i="Descarga iniciada sem check-in|已开始卸货但未签到"></h2><p id="semCheckinResumo" class="sub" role="status"></p><div id="semCheckinTabela" class="tablebox"></div></section>
-<section class="card chart"><h2 data-i="Descarga iniciada sem deslacre prévio|卸货开始前未解封"></h2><p id="semDeslacreResumo" class="sub" role="status"></p><div id="semDeslacreTabela" class="tablebox"></div></section>
-<section class="card chart"><h2 data-i="Desempenho da descarga|卸货绩效"></h2><div id="desempenho" class="tablebox"></div></section>
-<section class="card chart"><div class="heading"><div><h2>Virada T2 → T3 <em>/ 班次交接</em></h2><div class="sub" data-i="Selecione a data de encerramento do T3. A consulta considera veículos que chegaram no T2 do dia anterior.|请选择 T3 结束日期。查询前一天 T2 到达的车辆。"></div></div><div class="actions"><input id="viradaData" type="date" aria-label="Data de encerramento do T3"></div></div><div id="viradaResumo" class="sub" role="status"></div><div id="viradaTabela" class="tablebox"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="clock"></span><div><h2 data-i="Veículos aguardando início da descarga|等待开始卸货的车辆"></h2><p id="filaResumo" class="sub" role="status"></p></div></div></div><div id="filaDescarga" class="tablebox"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="alert"></span><div><h2 data-i="Descarga iniciada sem check-in|已开始卸货但未签到"></h2><p id="semCheckinResumo" class="sub" role="status"></p></div></div></div><div id="semCheckinTabela" class="tablebox"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="lock"></span><div><h2 data-i="Descarga iniciada sem deslacre prévio|卸货开始前未解封"></h2><p id="semDeslacreResumo" class="sub" role="status"></p></div></div></div><div id="semDeslacreTabela" class="tablebox"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="gauge"></span><div><h2 data-i="Desempenho da descarga|卸货绩效"></h2></div></div></div><div id="desempenho" class="tablebox"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="swap"></span><div><h2>Virada T2 → T3 <em>/ 班次交接</em></h2><div class="sub" data-i="Selecione a data de encerramento do T3. A consulta considera veículos que chegaram no T2 do dia anterior.|请选择 T3 结束日期。查询前一天 T2 到达的车辆。"></div></div></div><div class="actions"><input id="viradaData" type="date" aria-label="Data de encerramento do T3"></div></div><div id="viradaResumo" class="sub" role="status"></div><div id="viradaTabela" class="tablebox"></div></section>
 <section class="card chart"><div class="heading"><div class="title"><span class="square" id="agendaIcon"></span><div><h2>Agenda de chegadas por hora <em>/ 分时到达计划</em></h2><div class="sub" data-i="Abra uma faixa para ver cada veículo e seu horário programado. Para próximas chegadas, selecione Em trânsito.|展开时段查看每辆车及计划到达时间。查看待到车辆请选择在途。"></div></div></div></div><div id="agenda" class="agenda-list"></div></section>
-<section class="card chart"><div class="heading"><div class="title"><span class="square" id="chartIcon"></span><div><h2>Previsão por turno <em>/ 班次到货预测</em></h2><div class="sub" data-i="Distribuição pela data operacional da chegada programada|按计划到达的运营日期分布"></div></div></div><div class="actions"><button id="graph" data-i="Gráfico|图表"></button><button id="chartTable" data-i="Tabela|表格"></button></div></div><div id="chartBody"></div><div id="stats" class="stats"></div></section>
-<section class="card"><div class="heading"><div><h2 data-i="Informações gerais|详细信息"></h2><div id="count" class="sub"></div></div><input id="query" type="search"></div><div class="tablebox"><table><thead id="thead"></thead><tbody id="rows"></tbody></table></div><div class="actions pager" id="pager"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" id="chartIcon"></span><div><h2>Previsão por turno <em>/ 班次到货预测</em></h2><div class="sub" data-i="Distribuição pela data operacional da chegada programada|按计划到达的运营日期分布"></div></div></div><div class="seg"><button id="graph" type="button" data-i="Gráfico|图表"></button><button id="chartTable" type="button" data-i="Tabela|表格"></button></div></div><div id="chartBody"></div><div id="stats" class="stats"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="table"></span><div><h2 data-i="Informações gerais|详细信息"></h2><div id="count" class="sub"></div></div></div><input id="query" type="search"></div><div class="tablebox"><table><thead id="thead"></thead><tbody id="rows"></tbody></table></div><div class="actions pager" id="pager"></div></section>
 </div></main>
 <script>
 const by=id=>document.getElementById(id);
@@ -61,7 +288,12 @@ const tr=(pt,zh)=>lang==='zh'?zh:pt;
 const pair=text=>tr(...text.split('|'));
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
 const paths={box:'M3 7l9-4 9 4v10l-9 4-9-4z M3 7l9 4 9-4 M12 11v10',truck:'M2 5h13v12H2z M15 9h4l3 4v4h-7 M7 19a2 2 0 1 0 0 .01 M20 19a2 2 0 1 0 0 .01',chart:'M4 20V4 M4 20h16 M9 16v-4 M14 16V8 M19 16v-6',clock:'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0z M12 6v6l4 2',sun:'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z M12 2v2 M12 20v2 M2 12h2 M20 12h2 M5 5l2 2 M17 17l2 2 M19 5l-2 2 M7 17l-2 2',moon:'M20 15a9 9 0 0 1-11-11 9 9 0 1 0 11 11z',menu:'M3 6h18 M3 12h18 M3 18h18'};
-const icon=name=>'<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+paths[name]+'"/></svg>';
+Object.assign(paths,{check:'M5 12l5 5L20 7',refresh:'M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6',download:'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14',
+ info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8v.5"/>',status:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+ route:'<circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h4c5 0 1-12 6-12"/>',alert:'<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>',
+ lock:'<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/><path d="M12 15v2"/>',gauge:'M4 18a8 8 0 1 1 16 0M12 18l4-6',
+ swap:'M4 7h14m0 0l-3-3m3 3l-3 3M20 17H6m0 0l3-3m-3 3l3 3',table:'M4 5h16v14H4zM4 10h16M10 5v14'});
+const icon=name=>{const p=paths[name]||paths.chart;return '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(p.charAt(0)==='<'?p:'<path d="'+p+'"/>')+'</svg>'};
 const blank={indicator:'volume',from:'',to:'',status:'',line:'',shift:''};
 let source=null, filter={...blank}, preset='all', page=1, sort='plannedArrivalTime', direction=1, chartMode='graph', chart, message='';
 const number=value=>value.toLocaleString(lang==='zh'?'zh-CN':'pt-BR');
@@ -184,22 +416,22 @@ function renderAgenda(rows){
 function render(){
  const base=all(), rows=base.filter(row=>matches(row,filter)), total=value(rows);
  document.querySelectorAll('[data-i]').forEach(el=>el.textContent=pair(el.dataset.i));
- document.querySelectorAll('.filters .label').forEach(el=>el.insertAdjacentHTML('afterbegin',icon('chart')+' '));
+ document.querySelectorAll('[data-ico]').forEach(el=>{if(el.dataset.i)el.insertAdjacentHTML('afterbegin',icon(el.dataset.ico));else el.innerHTML=icon(el.dataset.ico)});
  root.lang=lang==='zh'?'zh-CN':'pt-BR';
- by('pt').className=lang==='pt'?'red':'';by('zh').className=lang==='zh'?'red':'';
  by('pt').setAttribute('aria-pressed',lang==='pt');by('zh').setAttribute('aria-pressed',lang==='zh');
  by('theme').innerHTML=icon(root.dataset.theme==='dark'?'sun':'moon');
  by('theme').setAttribute('aria-label',tr('Alternar tema','切换主题'));
  by('query').placeholder=tr('Localizar na tabela','在表格中搜索');by('query').setAttribute('aria-label',by('query').placeholder);
- by('footer').innerHTML='<small><i class="dot"></i>'+tr('Atualização do painel a cada 15 min','每15分钟刷新面板')+'<br>'+tr('Última atualização','最近更新')+' · '+(source?new Date(source.updated).toLocaleString(lang==='zh'?'zh-CN':'pt-BR',{timeZone:'America/Sao_Paulo'}):'—')+'<br>v1.0 · '+tr('Feito por Marcelo Wesley','制作：Marcelo Wesley')+'</small>';
  const desatualizado=source&&(source.falhaColeta||Date.now()-Date.parse(source.updated)>30*60000);
+ by('footer').innerHTML='<div class="sync-line"><span class="sync-dot'+(desatualizado?' warn':'')+'"></span><div><b>'+tr('Atualização automática','自动更新')+'</b><small>'+tr('A cada 15 min · Última atualização: ','每15分钟 · 最近更新：')+(source?new Date(source.updated).toLocaleString(lang==='zh'?'zh-CN':'pt-BR',{timeZone:'America/Sao_Paulo'}):'—')+'</small></div></div><span class="version">v1.0</span><span class="made-by">'+tr('Feito por Marcelo Wesley','制作：Marcelo Wesley')+'</span>';
  if(desatualizado){
   const horario=new Date(source.updated).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'});
   const motivo=source.falhaColeta==='cota'?tr(' · Cota do Apps Script atingida',' · 已达 Apps Script 配额'):'';
   by('notice').textContent=tr('Dados desatualizados · Última coleta válida: ','数据已过期 · 最近成功采集：')+horario+motivo;
  }
- else by('notice').textContent=message?pair(message):source?tr('Fonte: planilha Recebimento JMS.','来源：Recebimento JMS 表格。'):tr('Carregando dados da planilha…','正在加载表格数据…');
- by('nav').innerHTML=[['','Visão geral','总览','chart'],['3','Em trânsito','在途','truck'],['4','Concluído','已完成','box']].map(([id,pt,zh,ico])=>'<button class="nav" data-status="'+id+'" aria-pressed="'+(filter.status===id)+'"><span class="square">'+icon(ico)+'</span><span>'+tr(pt,zh)+'<br><small>'+tr(zh,pt)+'</small></span><span class="last"><i class="dot"></i>'+number(base.filter(row=>matches(row,{...filter,status:id})).length)+'</span></button>').join('');
+ else by('notice').textContent=message?pair(message):source?'':tr('Carregando dados…','正在加载数据…');
+ by('nav').innerHTML=[['','Visão geral','总览','chart'],['3','Em trânsito','在途','truck'],['4','Concluído','已完成','box']].map(([id,pt,zh,ico])=>'<button type="button" class="nav-item" data-status="'+id+'" aria-pressed="'+(filter.status===id)+'"><span class="nav-ico">'+icon(ico)+'</span><span class="nav-copy"><b>'+tr(pt,zh)+'</b><small>'+tr(zh,pt)+'</small></span><span class="nav-rate"><i></i>'+number(base.filter(row=>matches(row,{...filter,status:id})).length)+'</span></button>').join('');
+ for(const id of ['status','line','shift'])by(id).closest('.dd').classList.toggle('has-value',!!filter[id]);
  by('chips').innerHTML=periods.map(([key,label])=>'<button type="button" data-period="'+key+'" aria-pressed="'+(preset===key)+'">'+pair(label)+'</button>').join('');
  const groups=['T1','T2','T3'].map((name,index)=>({name,time:['06:00–13:59','14:00–21:59','22:00–05:59'][index],v:value(rows.filter(row=>row.expected.name===name))}));
  const yesterday=filter.from&&filter.from===filter.to?dateAdd(filter.from,-1):'';
@@ -446,7 +678,7 @@ function atualizarPainel(){
  }).withFailureHandler(()=>{
   loadingLive=false;
   by('refresh').disabled=false;
-  message='Falha ao ler a planilha. Confira seu acesso; os dados anteriores podem estar desatualizados.|读取表格失败，请检查权限；现有数据可能已过期。';
+  message='Falha ao carregar os dados. Confira se o Monitor está aberto; os dados anteriores podem estar desatualizados.|加载数据失败，请确认监控程序已打开；现有数据可能已过期。';
   render();
  }).dadosPainelRecebimento();
 }
