@@ -465,7 +465,8 @@ servidor.listen(cfg.porta, cfg.host, () => {
     '  Painel:          http://localhost:' + cfg.porta,
     '  Configurações:   http://localhost:' + cfg.porta + '/config   (AuthToken do JMS, coletar agora)'];
   ipsDaRede().forEach(ip => L.push('  Na rede:         http://' + ip + ':' + cfg.porta));
-  L.push('  Link público:    ' + (cfg.linkPublico || 'dois cliques no link-publico.bat (https://NOME.ts.net' + cfg.caminho + ')'));
+  const comoLink = process.platform === 'win32' ? 'dois cliques no link-publico.bat' : 'bash link-publico.sh';
+  L.push('  Link público:    ' + (cfg.linkPublico || comoLink + ' (https://NOME.ts.net' + (cfg.portaLink !== 443 ? ':' + cfg.portaLink : '') + cfg.caminho + ')'));
   L.push('', '  Deixe esta janela aberta (pode minimizar). A coleta do JMS roda agora e a cada ' + cfg.coletaMinutos + ' min.', '');
   console.log(L.join('\n'));
   setTimeout(() => coletar('ao abrir'), 500);

@@ -4,6 +4,22 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.24.1 — Nuvem (Oracle): principal, Lotes e Monitor de Recebimento no mesmo servidor
+
+Pedido: não depender do computador ligado. Os painéis do JMS podem ficar num servidor grátis da Oracle, ligado 24 h.
+- **`node/instalar-oracle.sh`:** um serviço por painel, com o nome da pasta (`dashmaster` = principal, `dashmaster-lotes` =
+  Lotes). Antes, instalar o Lotes no mesmo servidor trocava o serviço do principal e usava a porta 3000 dele; agora o Lotes
+  fica na 3400 (`padrao.json` do pacote).
+- **`node/link-publico.sh`:** usa a porta do link e o caminho do `config.json`, como o `link-publico.bat`: principal na 443,
+  Lotes na 10000 (`https://NOME.ts.net:10000`).
+- **Monitor de Recebimento** (pacote próprio, 1.4): `instalar-nuvem.sh` e `link-publico.sh`, link na **8443** e o mesmo
+  AuthToken do principal do servidor.
+- **A Produção do Sorter e o bot do Feishu não vão para a nuvem:** o site do sorter (10.1.166.9) só abre na rede da base.
+- Passo a passo: **`node/ORACLE_CLOUD.md`** (seção 6b: Lotes e Monitor no mesmo servidor).
+
+**No Windows não muda nada** (só os arquivos `.sh` e o guia da nuvem). Pacotes: `JT_DASHMASTER_V4_24_1_NODE.zip` e
+`JT_DASHMASTER_V4_24_1_LOTES_NODE.zip`.
+
 ## V4.24.0 — Painel principal: meta da Triagem Errada (≤ 0,50%) e gráficos lado a lado
 
 - **Triagem Errada:** na meta com a taxa **menor ou igual a 0,50%** — 0,50% está na meta. A comparação usa as 2 casas da tela

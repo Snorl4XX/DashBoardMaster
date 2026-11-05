@@ -324,6 +324,12 @@ function testeZip(tmp) {
   ['Recebimento_SP_GRU.gs', 'Painel.gs', 'Index.html'].forEach(f => {
     confere(/Monitor|RECEBIMENTO|Recebimento/.test(fs.readFileSync(path.join(APP, f), 'utf8')), 'arquivo do Apps Script presente: ' + f);
   });
+  ['instalar-nuvem.sh', 'link-publico.sh'].forEach(f => {
+    const t = fs.readFileSync(path.join(APP, f), 'utf8');
+    confere(t.indexOf('\r') < 0 && /^#!\/usr\/bin\/env bash\n/.test(t), f + ' com quebras de linha do Linux');
+  });
+  const inst = fs.readFileSync(path.join(APP, 'instalar-nuvem.sh'), 'utf8');
+  confere(/SERVICE=monitor-recebimento/.test(inst) && /portaLink:8443,caminho:''/.test(inst) && /host:'127\.0\.0\.1'/.test(inst), 'nuvem: serviço próprio, só no servidor, link na 8443');
   ['iniciar.bat', 'iniciar-com-windows.bat', 'link-publico.bat'].forEach(f => {
     const t = fs.readFileSync(path.join(APP, f), 'utf8');
     confere(/\r\n/.test(t) && !/[^\r]\n/.test(t), f + ' com quebras de linha do Windows');
