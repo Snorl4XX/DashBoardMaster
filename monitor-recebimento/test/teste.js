@@ -161,6 +161,8 @@ async function testeServidor(tmp, jms) {
     confere(r.texto.indexOf('translate="no"') >= 0 && r.texto.indexOf('<meta name="google" content="notranslate">') >= 0, 'painel não é traduzido pelo navegador (tem PT-BR / 中文 próprio)');
     confere(r.texto.indexOf('<option value="4" data-i="Concluído|已完成">') >= 0, 'filtro Status: Concluído');
     confere(r.texto.indexOf('class="notranslate"') >= 0, 'classe notranslate (tradutor do Google e da Microsoft)');
+    const posAgenda = r.texto.indexOf('Agenda de chegadas por hora'), posFila = r.texto.indexOf('Veículos aguardando início da descarga');
+    confere(posAgenda > 0 && posFila > posAgenda, 'Agenda de chegadas por hora em primeiro, acima de Veículos aguardando');
     confere(r.texto.indexOf('id="tripBtn"') >= 0 && r.texto.indexOf('data-i="ID da viagem|车次编号"') >= 0 && r.texto.indexOf("trip:''") >= 0, 'filtro ID da viagem');
     confere(r.texto.indexOf('<h2 data-i="Filtros|筛选">') >= 0 && r.texto.indexOf('Refine os resultados') < 0 && r.texto.indexOf('Atualização do painel a cada 15 min') >= 0,
       'nomes iguais aos de antes (Filtros, rodapé)');
