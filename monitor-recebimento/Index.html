@@ -236,7 +236,19 @@ tbody tr:hover td{background:var(--row-hover)}
 /* Visões: Visão geral / Falta de deslacre (menu lateral) */
 .view{display:grid;gap:12px;min-width:0}
 .metric strong.texto{font-size:22px;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-@media(min-width:861px){#deslacreCards .metric.id-top{grid-column:span 3}}
+@media(min-width:861px){#deslacreCards .metric.id-top.largo{grid-column:span 2}}
+/* Turnos numa linha própria (como o DashMaster) */
+.shift-row{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media(max-width:760px){.shift-row{grid-template-columns:1fr}}
+.metric .part{color:var(--red-600);font-weight:800}
+/* Evolução diária: colunas */
+.vbars{display:flex;align-items:stretch;gap:6px;height:230px;padding-top:6px;overflow-x:auto;overflow-y:hidden}
+.vbar{flex:1 0 28px;min-width:28px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
+.vbar b{font-size:11px;font-weight:800;margin-bottom:4px;font-variant-numeric:tabular-nums}
+.vbar i{display:block;width:100%;max-width:40px;background:var(--red);border-radius:6px 6px 2px 2px;min-height:2px}
+.vbar.zero i{background:var(--soft-2)}
+.vbar.zero b{color:var(--muted-2)}
+.vbar span{font-size:10.5px;color:var(--muted);margin-top:6px;white-space:nowrap}
 /* Gráficos de barras (largura total, sem depender de biblioteca) */
 .hbars{display:grid;gap:10px}
 .hbar{display:grid;grid-template-columns:minmax(140px,260px) minmax(0,1fr) auto;gap:14px;align-items:center}
@@ -331,8 +343,9 @@ tbody tr:hover td{background:var(--row-hover)}
 <div id="viewDeslacre" class="view" hidden>
 <section class="grid" id="deslacreCards"></section>
 <section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="clock"></span><div><h2>Falta de deslacre por turno <em>/ 各班次未解封</em></h2><div class="sub" data-i="Turno pela chegada programada, como o filtro Turno previsto.|按计划到达班次统计，与“预计班次”筛选一致。"></div></div></div></div><div id="deslacreTurnos" class="hbars"></div></section>
-<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="route"></span><div><h2>IDs de viagem da secundária com mais remessas <em>/ 支线</em></h2><div class="sub" data-i="Viagens concluídas sem deslacre · as 10 com mais pedidos-mãe.|已完成未解封车次 · 主运单最多的 10 个。"></div></div></div></div><div id="deslacreTopSec" class="hbars"></div></section>
-<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="truck"></span><div><h2>IDs de viagem da troncal com mais remessas <em>/ 干线</em></h2><div class="sub" data-i="Viagens concluídas sem deslacre · as 10 com mais pedidos-mãe.|已完成未解封车次 · 主运单最多的 10 个。"></div></div></div></div><div id="deslacreTopTro" class="hbars"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="chart"></span><div><h2>Evolução diária da falta de deslacre <em>/ 未解封每日趋势</em></h2><div class="sub" data-i="Viagens concluídas sem deslacre por dia da chegada programada (a data do T3 é a do encerramento).|按计划到达日期统计的已完成未解封车次（T3 按结束日期）。"></div></div></div></div><div id="deslacreEvolucao" class="vbars"></div></section>
+<section class="card chart" id="secTopSec"><div class="heading"><div class="title"><span class="square" data-ico="route"></span><div><h2>IDs de viagem da secundária com mais remessas <em>/ 支线</em></h2><div class="sub" data-i="Viagens concluídas sem deslacre · as 10 com mais pedidos-mãe.|已完成未解封车次 · 主运单最多的 10 个。"></div></div></div></div><div id="deslacreTopSec" class="hbars"></div></section>
+<section class="card chart" id="secTopTro"><div class="heading"><div class="title"><span class="square" data-ico="truck"></span><div><h2>IDs de viagem da troncal com mais remessas <em>/ 干线</em></h2><div class="sub" data-i="Viagens concluídas sem deslacre · as 10 com mais pedidos-mãe.|已完成未解封车次 · 主运单最多的 10 个。"></div></div></div></div><div id="deslacreTopTro" class="hbars"></div></section>
 <section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="lock"></span><div><h2>Viagens concluídas sem deslacre <em>/ 已完成未解封车次</em></h2><div id="deslacreResumo" class="sub"></div></div></div></div><div id="deslacreTabela" class="tablebox"></div></section>
 </div>
 </div></main>
@@ -749,39 +762,56 @@ function renderDeslacre(base){
  const concluidas=base.filter(row=>row.shipmentState===4&&matches(row,f));
  const lista=concluidas.filter(semLacre).sort((a,b)=>String(b.actualArrivalTime||b.plannedArrivalTime||'').localeCompare(String(a.actualArrivalTime||a.plannedArrivalTime||'')));
  deslacreLista=lista;
- const total=value(lista);
+ // Valor principal = quantidade de viagens (IDs) sem deslacre; os pedidos-mãe (remessas) ficam em letra pequena.
  const ids=n=>number(n)+' '+tr(n===1?'viagem':'viagens','车次');
- const ped=rows=>display(somaVolume(rows))+' '+tr('pedidos-mãe','主运单');
- const outra=rows=>filter.indicator==='trips'?ped(rows):ids(rows.length);
- const pct=concluidas.length?new Intl.NumberFormat(root.lang,{style:'percent',maximumFractionDigits:1}).format(lista.length/concluidas.length):'—';
+ const ped=rows=>(rows.length?display(somaVolume(rows)):'0')+' '+tr('pedidos-mãe','主运单');
+ const pctFmt=x=>new Intl.NumberFormat(root.lang,{style:'percent',maximumFractionDigits:1}).format(x);
+ const pctDe=(a,b)=>b?pctFmt(a/b):'—';
  const ref=filter.to||today(), ant=dateAdd(ref,-1);
- const doDia=d=>base.filter(row=>semLacre(row)&&matches(row,{...f,from:d,to:d}));
- const dia=doDia(ref), diaAnt=doDia(ant);
- const vDia=value(dia), vAnt=value(diaAnt);
- const variacao=vDia!==null&&vAnt>0?' · '+new Intl.NumberFormat(root.lang,{style:'percent',signDisplay:'always',maximumFractionDigits:1}).format((vDia-vAnt)/vAnt)+' '+tr('vs dia anterior','较前一天'):'';
  const dataCurta=d=>d.slice(8,10)+'/'+d.slice(5,7);
+ const diaAnt=base.filter(row=>semLacre(row)&&matches(row,{...f,from:ant,to:ant}));
+ const sec=lista.filter(row=>row.line==='branch'), tro=lista.filter(row=>row.line==='trunk');
+ const verSec=!filter.line||filter.line==='branch', verTro=!filter.line||filter.line==='trunk';
  const turnos=['T1','T2','T3'].map((name,i)=>({name,time:['06:00–13:59','14:00–21:59','22:00–05:59'][i],rows:lista.filter(row=>row.expected.name===name)}));
  const semPrev=lista.filter(row=>row.expected.name==='none');
  const top=lista.filter(row=>row.volume!==null).sort((a,b)=>b.volume-a.volume)[0];
+ const nomeLinha=filter.line==='branch'?tr(' · só secundária',' · 仅支线'):filter.line==='trunk'?tr(' · só troncal',' · 仅干线'):'';
  by('deslacreCards').innerHTML=
-  card(tr('Sem deslacre no período','期间未解封'),total,'<b>'+unit()+'</b> · '+outra(lista)+'<br>'+pct+' '+tr('das viagens concluídas','占已完成车次')+' · '+tr('só status Concluído','仅已完成状态'),'','hero',icon('lock'))+
-  card(tr('Dia','当天')+' '+dataCurta(ref),vDia,outra(dia)+variacao,'','',icon('clock'))+
-  card(tr('Dia anterior','前一天')+' '+dataCurta(ant),vAnt,outra(diaAnt),'','',icon('clock'))+
-  turnos.map(t=>{const color='var(--'+t.name.toLowerCase()+')';const v=value(t.rows);return card(t.name,v,t.time+' · '+outra(t.rows),'<div class="bar"><i style="background:'+color+';width:'+(total?100*(v??0)/total:0)+'%"></i></div>','','<i class="dot" style="background:'+color+'"></i>')}).join('')+
-  '<article class="card metric id-top"><div class="label">'+icon('box')+' '+tr('ID sem deslacre com mais remessas','主运单最多的未解封车次')+'</div>'+
-  (top?'<strong class="texto">'+esc(top.shipmentNo)+'</strong><div class="sub"><b>'+number(top.volume)+' '+tr('pedidos-mãe','主运单')+'</b> · '+esc(lineName(top.line))+' · '+esc(top.startName||'—')+' · '+esc(top.plateNumber||'—')+'</div>'
-   :'<strong>—</strong><div class="sub">'+tr('Nenhuma viagem com volumetria','没有货量数据')+'</div>')+'</article>';
+  card(tr('Falta de deslacre','未解封'),lista.length,'<b>'+tr('viagens concluídas sem deslacre','已完成未解封车次')+nomeLinha+'</b><br>'+
+   pctDe(lista.length,concluidas.length)+' '+tr('das viagens concluídas','占已完成车次')+' · '+ped(lista),'','hero',icon('lock'))+
+  (verSec?card(tr('Secundária','支线'),sec.length,'<span class="part">'+pctDe(sec.length,lista.length)+'</span> '+tr('do total','占总数')+' · '+ped(sec),'','',icon('route')):'')+
+  (verTro?card(tr('Troncal','干线'),tro.length,'<span class="part">'+pctDe(tro.length,lista.length)+'</span> '+tr('do total','占总数')+' · '+ped(tro),'','',icon('truck')):'')+
+  card(tr('Dia anterior','前一天')+' '+dataCurta(ant),diaAnt.length,ped(diaAnt),'','',icon('clock'))+
+  '<article class="card metric id-top'+(verSec&&verTro?'':' largo')+'"><div class="label">'+icon('box')+' '+tr('ID com mais remessas','主运单最多的车次')+'</div>'+
+  (top?'<strong class="texto">'+esc(top.shipmentNo)+'</strong><div class="sub"><b>'+number(top.volume)+' '+tr('pedidos-mãe','主运单')+'</b> · '+esc(lineName(top.line))+' · '+esc(top.startName||'—')+'</div>'
+   :'<strong>—</strong><div class="sub">'+tr('Nenhuma viagem com volumetria','没有货量数据')+'</div>')+'</article>'+
+  '<div class="shift-row">'+turnos.map(t=>{const color='var(--'+t.name.toLowerCase()+')';return card(t.name,t.rows.length,
+   '<span class="part">'+pctDe(t.rows.length,lista.length)+'</span> '+tr('de participação','占比')+' · '+t.time+'<br>'+ped(t.rows),
+   '<div class="bar"><i style="background:'+color+';width:'+(lista.length?100*t.rows.length/lista.length:0)+'%"></i></div>','','<i class="dot" style="background:'+color+'"></i>')}).join('')+'</div>';
  by('deslacreTurnos').innerHTML=barrasHtml(turnos.concat(semPrev.length?[{name:'none',time:'',rows:semPrev}]:[]).map(t=>({
-  nome:t.name==='none'?tr('Sem previsão','无预计时间'):t.name,sub:t.time,v:value(t.rows),
-  extra:(total?Math.round(100*(value(t.rows)??0)/total):0)+'% · '+(filter.indicator==='trips'?ped(t.rows):ids(t.rows.length)),cor:t.name==='none'?'var(--muted-2)':'var(--'+t.name.toLowerCase()+')'})),
+  nome:t.name==='none'?tr('Sem previsão','无预计时间'):t.name,sub:t.time,v:t.rows.length,
+  extra:pctDe(t.rows.length,lista.length)+' · '+ped(t.rows),cor:t.name==='none'?'var(--muted-2)':'var(--'+t.name.toLowerCase()+')'})),
   tr('Nenhuma viagem concluída sem deslacre nos filtros escolhidos.','所选筛选条件下没有未解封车次。'));
+ // Evolução diária: do início do filtro (ou do mês) até o fim do filtro (ou hoje)
+ // sem filtro de data: do 1º dia do mês (ou da viagem mais antiga, se for antes) até hoje; no máximo os últimos 62 dias
+ const fim=filter.to||today(), datas=lista.map(row=>row.expected.date).filter(Boolean).sort();
+ let inicio=filter.from||(datas[0]&&datas[0]<today().slice(0,8)+'01'?datas[0]:today().slice(0,8)+'01');
+ if(inicio<dateAdd(fim,-61))inicio=dateAdd(fim,-61);
+ const dias=[];
+ for(let d=inicio;d<=fim;d=dateAdd(d,1))dias.push(d);
+ const maxDia=Math.max(1,...dias.map(d=>lista.filter(row=>row.expected.date===d).length));
+ by('deslacreEvolucao').innerHTML=dias.length?dias.map(d=>{
+  const doDia=lista.filter(row=>row.expected.date===d), n=doDia.length;
+  return '<div class="vbar'+(n?'':' zero')+'" title="'+esc(dataCurta(d)+': '+ids(n)+' · '+ped(doDia))+'"><b>'+number(n)+'</b><i style="height:calc((100% - 40px) * '+(n/maxDia)+')"></i><span>'+dataCurta(d)+'</span></div>';
+ }).join(''):'<div class="chart-empty">'+tr('Escolha um período válido.','请选择有效期间。')+'</div>';
  const topLinha=linha=>barrasHtml(lista.filter(row=>row.line===linha&&row.volume!==null).sort((a,b)=>b.volume-a.volume).slice(0,10).map(row=>({
   nome:row.shipmentNo,sub:(row.startName||'—')+' · '+(row.plateNumber||'—'),v:row.volume,extra:tr('pedidos-mãe','主运单')})),
   tr('Nenhuma viagem desta linha sem deslacre nos filtros escolhidos.','所选筛选条件下该线路没有未解封车次。'));
  by('deslacreTopSec').innerHTML=topLinha('branch');
  by('deslacreTopTro').innerHTML=topLinha('trunk');
+ by('secTopSec').hidden=!verSec;by('secTopTro').hidden=!verTro;
  const semDetalhe=lista.filter(row=>!row.detalheDisponivel).length;
- by('deslacreResumo').textContent=source?ids(lista.length)+' · '+ped(lista)+' · '+pct+' '+tr('das viagens concluídas','占已完成车次')+
+ by('deslacreResumo').textContent=source?ids(lista.length)+' · '+ped(lista)+' · '+pctDe(lista.length,concluidas.length)+' '+tr('das viagens concluídas','占已完成车次')+
   (semDetalhe?' · '+number(semDetalhe)+' '+tr('sem detalhe confirmado pela coleta','采集尚未确认详情'):'')+'.':tr('Carregando dados…','正在加载数据…');
  const cols=deslacreColunas();
  by('deslacreTabela').innerHTML=lista.length?'<table><thead><tr>'+cols.map(col=>'<th scope="col"'+(col[2]?' class="num"':'')+'>'+esc(tr(col[0],col[1]))+'<small>'+esc(tr(col[1],col[0]))+'</small></th>').join('')+'</tr></thead><tbody>'+

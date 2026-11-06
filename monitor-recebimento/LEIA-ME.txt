@@ -12,9 +12,11 @@ desbloqueio, início e fim da descarga e o último bipe. São os SEUS arquivos d
                           Filtros: Status da viagem, Linha, Turno previsto e ID da viagem (procure pelo ID, placa
                           ou origem e marque um ou vários). Valem para todos os cartões, tabelas e gráficos.
                           O navegador não traduz o painel: use PT-BR / 中文.
-                          Menu "Falta de deslacre": viagens Concluídas sem deslacre registrado — cartões do período,
-                          do dia e do dia anterior, de cada turno e o ID com mais remessas; gráfico por turno; IDs da
-                          secundária e da troncal com mais remessas; tabela. "Baixar relatório" baixa essa tabela.
+                          Menu "Falta de deslacre": viagens Concluídas sem deslacre registrado. O número grande é a
+                          quantidade de viagens (os pedidos-mãe aparecem pequenos). Cartões: total, Secundária e Troncal
+                          (somam o total; com o filtro Linha aparece só a escolhida), dia anterior, ID com mais
+                          remessas e cada turno com a % de participação. Gráficos: por turno, evolução diária e IDs
+                          da secundária e da troncal com mais remessas; tabela. "Baixar relatório" baixa essa tabela.
 O que muda é só ONDE roda: no notebook, e não no Google.
   - A coleta roda ao abrir e depois a cada 15 min (no Google era o acionador de 15 min).
   - NÃO precisa da planilha do Google. Tudo fica no banco local C:\monitor-recebimento\dados\recebimento.db,
@@ -82,7 +84,7 @@ Na nuvem (servidor grátis da Oracle, ligado 24 h — o notebook pode ficar desl
 -------------------------------------------------------------------------------------
 Passo a passo completo no DashMaster: node/ORACLE_CLOUD.md (seção 6b). Resumo, no servidor (Ubuntu), com o DashMaster
 principal já instalado em ~/dashmaster:
-  cd ~ && unzip -o MONITOR_RECEBIMENTO_V1_4.zip
+  cd ~ && unzip -o MONITOR_RECEBIMENTO_V1_8.zip
   cd ~/monitor-recebimento && bash instalar-nuvem.sh && bash link-publico.sh
 - Fica no ar como o serviço "monitor-recebimento" (liga sozinho e reinicia se parar).
 - Link: https://dashmaster.xxxx.ts.net:8443 (na nuvem a 443 é do principal e a 10000 do Lotes).
