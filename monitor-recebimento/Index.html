@@ -233,6 +233,23 @@ td{padding:9px 12px;border-bottom:1px solid var(--line-2);white-space:nowrap}
 tbody tr:nth-child(even) td{background:var(--row-alt)}
 tbody tr:hover td{background:var(--row-hover)}
 .num{text-align:right}
+/* Visões: Visão geral / Falta de deslacre (menu lateral) */
+.view{display:grid;gap:12px;min-width:0}
+.metric strong.texto{font-size:22px;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(min-width:861px){#deslacreCards .metric.id-top{grid-column:span 3}}
+/* Gráficos de barras (largura total, sem depender de biblioteca) */
+.hbars{display:grid;gap:10px}
+.hbar{display:grid;grid-template-columns:minmax(140px,260px) minmax(0,1fr) auto;gap:14px;align-items:center}
+.hbar-name{min-width:0;font-weight:700;font-size:13px}
+.hbar-name span,.hbar-name small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hbar-name small{font-weight:500;color:var(--muted);font-size:11px;margin-top:1px}
+.hbar-track{height:14px;border-radius:99px;background:var(--soft-2);overflow:hidden}
+.hbar-track i{display:block;height:100%;border-radius:99px;background:var(--red);min-width:3px;transition:width .7s cubic-bezier(.2,.8,.2,1)}
+.hbar b{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;min-width:56px}
+.hbar b em{display:block;font-style:normal;font-size:11px;font-weight:700;color:var(--muted)}
+.chart-empty{display:grid;place-items:center;text-align:center;color:var(--muted);font-size:13px;min-height:90px;border-radius:12px;padding:16px;
+  background:repeating-linear-gradient(135deg,var(--row-alt) 0 10px,var(--soft) 10px 20px)}
+@media(max-width:600px){.hbar{grid-template-columns:minmax(0,1fr) auto}.hbar-track{grid-column:1/-1;grid-row:2}}
 #desempenho{border:0;border-radius:0;max-height:none;overflow:visible}
 #desempenho > :not(table){margin:0 0 8px}
 #desempenho table{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:6px}
@@ -300,6 +317,7 @@ tbody tr:hover td{background:var(--row-hover)}
 <p class="scope-note"><span data-ico="info"></span><span data-i="A data do T3 é a do encerramento: das 22h do dia anterior até antes das 06h da data selecionada.|T3 按结束日期筛选：从前一天 22:00 到所选日期 06:00 前。"></span></p>
 </section>
 </form>
+<div id="viewGeral" class="view">
 <section class="grid" id="metrics"></section>
 <section class="card chart"><div class="heading"><div class="title"><span class="square" id="agendaIcon"></span><div><h2>Agenda de chegadas por hora <em>/ 分时到达计划</em></h2><div class="sub" data-i="Abra uma faixa para ver cada veículo e seu horário programado. Para próximas chegadas, selecione Em trânsito.|展开时段查看每辆车及计划到达时间。查看待到车辆请选择在途。"></div></div></div></div><div id="agenda" class="agenda-list"></div></section>
 <section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="clock"></span><div><h2 data-i="Veículos aguardando início da descarga|等待开始卸货的车辆"></h2><p id="filaResumo" class="sub" role="status"></p></div></div></div><div id="filaDescarga" class="tablebox"></div></section>
@@ -309,6 +327,14 @@ tbody tr:hover td{background:var(--row-hover)}
 <section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="swap"></span><div><h2>Virada T2 → T3 <em>/ 班次交接</em></h2><div class="sub" data-i="Selecione a data de encerramento do T3. A consulta considera veículos que chegaram no T2 do dia anterior.|请选择 T3 结束日期。查询前一天 T2 到达的车辆。"></div></div></div><div class="actions"><input id="viradaData" type="date" aria-label="Data de encerramento do T3"></div></div><div id="viradaResumo" class="sub" role="status"></div><div id="viradaTabela" class="tablebox"></div></section>
 <section class="card chart"><div class="heading"><div class="title"><span class="square" id="chartIcon"></span><div><h2>Previsão por turno <em>/ 班次到货预测</em></h2><div class="sub" data-i="Distribuição pela data operacional da chegada programada|按计划到达的运营日期分布"></div></div></div><div class="seg"><button id="graph" type="button" data-i="Gráfico|图表"></button><button id="chartTable" type="button" data-i="Tabela|表格"></button></div></div><div id="chartBody"></div><div id="stats" class="stats"></div></section>
 <section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="table"></span><div><h2 data-i="Informações gerais|详细信息"></h2><div id="count" class="sub"></div></div></div><input id="query" type="search"></div><div class="tablebox"><table><thead id="thead"></thead><tbody id="rows"></tbody></table></div><div class="actions pager" id="pager"></div></section>
+</div>
+<div id="viewDeslacre" class="view" hidden>
+<section class="grid" id="deslacreCards"></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="clock"></span><div><h2>Falta de deslacre por turno <em>/ 各班次未解封</em></h2><div class="sub" data-i="Turno pela chegada programada, como o filtro Turno previsto.|按计划到达班次统计，与“预计班次”筛选一致。"></div></div></div></div><div id="deslacreTurnos" class="hbars"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="route"></span><div><h2>IDs de viagem da secundária com mais remessas <em>/ 支线</em></h2><div class="sub" data-i="Viagens concluídas sem deslacre · as 10 com mais pedidos-mãe.|已完成未解封车次 · 主运单最多的 10 个。"></div></div></div></div><div id="deslacreTopSec" class="hbars"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="truck"></span><div><h2>IDs de viagem da troncal com mais remessas <em>/ 干线</em></h2><div class="sub" data-i="Viagens concluídas sem deslacre · as 10 com mais pedidos-mãe.|已完成未解封车次 · 主运单最多的 10 个。"></div></div></div></div><div id="deslacreTopTro" class="hbars"></div></section>
+<section class="card chart"><div class="heading"><div class="title"><span class="square" data-ico="lock"></span><div><h2>Viagens concluídas sem deslacre <em>/ 已完成未解封车次</em></h2><div id="deslacreResumo" class="sub"></div></div></div></div><div id="deslacreTabela" class="tablebox"></div></section>
+</div>
 </div></main>
 <script>
 const by=id=>document.getElementById(id);
@@ -328,6 +354,7 @@ Object.assign(paths,{check:'M5 12l5 5L20 7',refresh:'M20 11a8 8 0 1 0-2.3 5.7M20
  swap:'M4 7h14m0 0l-3-3m3 3l-3 3M20 17H6m0 0l3-3m-3 3l3 3',table:'M4 5h16v14H4zM4 10h16M10 5v14'});
 const icon=name=>{const p=paths[name]||paths.chart;return '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(p.charAt(0)==='<'?p:'<path d="'+p+'"/>')+'</svg>'};
 const blank={indicator:'volume',from:'',to:'',status:'',line:'',shift:'',trip:''};
+let view='geral';
 let source=null, filter={...blank}, preset='all', page=1, sort='plannedArrivalTime', direction=1, chartMode='graph', chart, message='';
 const number=value=>value.toLocaleString(lang==='zh'?'zh-CN':'pt-BR');
 const statusName=value=>Number(value)===3?tr('Em trânsito','在途'):tr('Concluído','已完成');
@@ -463,7 +490,9 @@ function render(){
   by('notice').textContent=tr('Dados desatualizados · Última coleta válida: ','数据已过期 · 最近成功采集：')+horario+motivo;
  }
  else by('notice').textContent=message?pair(message):source?'':tr('Carregando dados…','正在加载数据…');
- by('nav').innerHTML=[['','Visão geral','总览','chart'],['3','Em trânsito','在途','truck'],['4','Concluído','已完成','box']].map(([id,pt,zh,ico])=>'<button type="button" class="nav-item" data-status="'+id+'" aria-pressed="'+(filter.status===id)+'"><span class="nav-ico">'+icon(ico)+'</span><span class="nav-copy"><b>'+tr(pt,zh)+'</b><small>'+tr(zh,pt)+'</small></span><span class="nav-rate"><i></i>'+number(base.filter(row=>matches(row,{...filter,status:id})).length)+'</span></button>').join('');
+ const semLacreN=base.filter(row=>semLacre(row)&&matches(row,{...filter,status:''})).length;
+ by('nav').innerHTML=[['','Visão geral','总览','chart'],['3','Em trânsito','在途','truck'],['4','Concluído','已完成','box']].map(([id,pt,zh,ico])=>'<button type="button" class="nav-item" data-status="'+id+'" aria-pressed="'+(view==='geral'&&filter.status===id)+'"><span class="nav-ico">'+icon(ico)+'</span><span class="nav-copy"><b>'+tr(pt,zh)+'</b><small>'+tr(zh,pt)+'</small></span><span class="nav-rate"><i></i>'+number(base.filter(row=>matches(row,{...filter,status:id})).length)+'</span></button>').join('')+
+  '<button type="button" class="nav-item" data-view="deslacre" aria-pressed="'+(view==='deslacre')+'"><span class="nav-ico">'+icon('lock')+'</span><span class="nav-copy"><b>'+tr('Falta de deslacre','未解封')+'</b><small>'+tr('未解封','Falta de deslacre')+'</small></span><span class="nav-rate"><i></i>'+number(semLacreN)+'</span></button>';
  for(const id of ['status','line','shift'])by(id).closest('.dd').classList.toggle('has-value',!!filter[id]);
  renderTripFilter();
  by('chips').innerHTML=periods.map(([key,label])=>'<button type="button" data-period="'+key+'" aria-pressed="'+(preset===key)+'">'+pair(label)+'</button>').join('');
@@ -480,7 +509,9 @@ function render(){
   card(tr('Concluído','已完成'),rows.filter(row=>row.shipmentState===4).length,tr('Status da viagem no JMS','JMS 运输状态'))+
   groups.map(group=>{const color='var(--'+group.name.toLowerCase()+')';return card(group.name,group.v,group.time+' · '+unit(),'<div class="bar"><i style="background:'+color+';width:'+(total?100*(group.v??0)/total:0)+'%"></i></div>','','<i class="dot" style="background:'+color+'"></i>')}).join('')+
   card(tr('Sem previsão','无预计时间'),noForecast,tr('Viagens sem chegada programada','缺少计划到达时间的车次'),'','',icon('clock'));
- by('chartIcon').innerHTML=icon('chart');renderChart(groups,total);renderAgenda(rows);renderTable(rows);renderVirada();renderDesempenho(base.filter(row=>(!filter.line||row.line===filter.line)&&(!filter.status||row.shipmentState===Number(filter.status))));
+ by('chartIcon').innerHTML=icon('chart');renderChart(groups,total);renderAgenda(rows);renderTable(rows);renderVirada();renderDesempenho(rows);
+ renderDeslacre(base);
+ by('viewGeral').hidden=view!=='geral';by('viewDeslacre').hidden=view!=='deslacre';
 }
 function apply(){
  const next=Object.fromEntries(Object.keys(blank).map(key=>[key,by(key).value]));
@@ -524,6 +555,14 @@ by('file').onchange=async event=>{
  event.target.value='';
 };
 by('export').onclick=()=>{
+ if(view==='deslacre'){
+  const csvD=value=>'"'+String(value??'').replace(/^[=+\-@\t\r\n]/,"'$&").replaceAll('"','""')+'"';
+  const colsD=deslacreColunas();
+  const saida=[colsD.map(col=>col[0]+' / '+col[1]),...deslacreLista.map(row=>colsD.map(col=>col[3](row)))].map(linha=>linha.map(csvD).join(';')).join('\r\n');
+  const urlD=URL.createObjectURL(new Blob(['\uFEFF',saida],{type:'text/csv;charset=utf-8'}));
+  const aD=document.createElement('a');aD.href=urlD;aD.download='Falta_de_deslacre_SP_GRU_'+today()+'.csv';aD.click();setTimeout(()=>URL.revokeObjectURL(urlD),1000);
+  return;
+ }
  const csv=value=>'"'+String(value??'').replace(/^[=+\-@\t\r\n]/,"'$&").replaceAll('"','""')+'"';
  const rows=visible(all().filter(row=>matches(row,filter)));
  const output=[columns.map(([,pt,zh])=>pt+' / '+zh),...rows.map(row=>columns.map(col=>col[3](row)))].map(line=>line.map(csv).join(';')).join('\r\n');
@@ -581,7 +620,11 @@ document.addEventListener('click',event=>{if(tripOpen&&!event.composedPath().inc
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&tripOpen){openTrip(false);by('tripBtn').focus()}});
 for(const id of ['from','to'])by(id).oninput=()=>{by('to').setCustomValidity('');preset='custom'};
 by('chips').onclick=event=>{const button=event.target.closest('[data-period]');if(button)setPeriod(button.dataset.period)};
-by('nav').onclick=event=>{const button=event.target.closest('[data-status]');if(button){by('status').value=button.dataset.status;apply();toggleDrawer(false)}};
+by('nav').onclick=event=>{
+ const visao=event.target.closest('[data-view]');
+ if(visao){view=visao.dataset.view;render();toggleDrawer(false);window.scrollTo({top:0});return}
+ const button=event.target.closest('[data-status]');if(button){view='geral';by('status').value=button.dataset.status;apply();toggleDrawer(false)}
+};
 by('thead').onclick=event=>{const button=event.target.closest('[data-sort]');if(!button)return;const key=button.dataset.sort;direction=key===sort?-direction:1;sort=key;page=1;renderTable(all().filter(row=>matches(row,filter)));by('thead').querySelector('[data-sort="'+key+'"]')?.focus()};
 by('pager').onclick=event=>{if(event.target.id==='prev'||event.target.id==='next'){page+=event.target.id==='prev'?-1:1;renderTable(all().filter(row=>matches(row,filter)))}};
 by('query').oninput=()=>{page=1;renderTable(all().filter(row=>matches(row,filter)))};
@@ -602,10 +645,14 @@ function filaSemInicio(rows,agora,mes){
   minutos(r.actualArrivalTime,agora)!==null&&!r.unloadStartTime&&!r.unloadEndTime&&!r.ultimoBipe&&!r.bipeDescargaRegistrado)
   .sort((a,b)=>a.actualArrivalTime.replace('T',' ').localeCompare(b.actualArrivalTime.replace('T',' ')));
 }
+// Registros do mês com os filtros da página (status, linha, turno previsto, datas e IDs de viagem).
+function registrosFiltrados(f){
+ return (source?.records??[]).map(row=>normalize(detalhes.get(chave(row))??row)).filter(row=>matches(row,f||filter));
+}
 function renderFilaDescarga(){
  const agora=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'medium'}).format(new Date());
  // Só viagens Em trânsito (3): quando o JMS muda o status para Concluído (4), a viagem sai desta tabela.
- const candidatos=filaSemInicio(all(),agora,today().slice(0,7)).filter(row=>row.shipmentState!==4);
+ const candidatos=filaSemInicio(registrosFiltrados(),agora,today().slice(0,7)).filter(row=>row.shipmentState!==4);
  const fila=candidatos.filter(row=>row.detalheDisponivel);
  const pendentes=candidatos.length-fila.length;
  const cols=[['Viagem','车次'],['Placa','车牌'],['Origem','始发站'],['Linha','线路'],['Chegada real','实际到达'],['Turno da chegada','到达班次'],['Deslacre','解封'],['Tempo de espera','等待时长'],['Detalhe JMS','JMS 详情']];
@@ -642,7 +689,7 @@ function prioridadeDetalhe(row){
 }
 function renderSemCheckin(){
  const mes=today().slice(0,7);
- const registros=(source?.records??[]).map(row=>detalhes.get(chave(row))??row);
+ const registros=registrosFiltrados();
  const semCheckin=descargasSemCheckin(registros,mes);
  const semDeslacre=registros.filter(row=>shiftOf(row.unloadStartTime).date.startsWith(mes)&&
   ['missing','after'].includes(situacaoDeslacre(row)))
@@ -687,6 +734,67 @@ function renderDesempenho(rows){
  by('desempenho').innerHTML='<p>'+resumo.map(esc).join(' · ')+'</p><p class="sub">'+tr('Espera: chegada real → início. Descarga: início → término oficial. O maior tempo médio aparece destacado.','等待：实际到达到开始。卸货：开始到正式结束。突出显示最高平均值。')+(loadingDetails?' '+tr('Carregando detalhes do JMS…','正在加载 JMS 详情…'):'')+(detailErrors?' '+detailErrors+' '+tr('detalhes indisponíveis nesta atualização.','条详情不可用。'):'')+'</p><table><thead><tr>'+titulos.map(t=>'<th scope="col">'+esc(t)+'</th>').join('')+'</tr></thead><tbody>'+grupos.map(g=>'<tr>'+[g.turno,formatMinutes(media(g.espera))+' ('+g.espera.length+')',formatMinutes(g.media)+(g.media!==null&&g.media===maior?' · '+tr('Maior média','最高平均') : ''),g.dur.length].map((v,i)=>'<td data-label="'+esc(titulos[i])+'">'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
 }
 
+// ---------- Falta de deslacre: viagens Concluídas sem deslacre registrado
+const semLacre=row=>row.shipmentState===4&&!(row.unlockTime||row.actualUnlockTime);
+let deslacreLista=[];
+function somaVolume(rows){return rows.some(row=>row.volume!==null)?rows.reduce((total,row)=>total+(row.volume??0),0):null}
+function barrasHtml(itens,vazio){
+ if(!itens.length)return '<div class="chart-empty">'+esc(vazio)+'</div>';
+ const maximo=Math.max(...itens.map(item=>item.v??0),1);
+ return itens.map(item=>'<div class="hbar"><div class="hbar-name"><span title="'+esc(item.nome)+'">'+esc(item.nome)+'</span>'+(item.sub?'<small title="'+esc(item.sub)+'">'+esc(item.sub)+'</small>':'')+'</div>'+
+  '<div class="hbar-track"><i style="width:'+(100*(item.v??0)/maximo)+'%;'+(item.cor?'background:'+item.cor:'')+'"></i></div><b>'+esc(display(item.v))+(item.extra?'<em>'+esc(item.extra)+'</em>':'')+'</b></div>').join('');
+}
+function renderDeslacre(base){
+ const f={...filter,status:''};
+ const concluidas=base.filter(row=>row.shipmentState===4&&matches(row,f));
+ const lista=concluidas.filter(semLacre).sort((a,b)=>String(b.actualArrivalTime||b.plannedArrivalTime||'').localeCompare(String(a.actualArrivalTime||a.plannedArrivalTime||'')));
+ deslacreLista=lista;
+ const total=value(lista);
+ const ids=n=>number(n)+' '+tr(n===1?'viagem':'viagens','车次');
+ const ped=rows=>display(somaVolume(rows))+' '+tr('pedidos-mãe','主运单');
+ const outra=rows=>filter.indicator==='trips'?ped(rows):ids(rows.length);
+ const pct=concluidas.length?new Intl.NumberFormat(root.lang,{style:'percent',maximumFractionDigits:1}).format(lista.length/concluidas.length):'—';
+ const ref=filter.to||today(), ant=dateAdd(ref,-1);
+ const doDia=d=>base.filter(row=>semLacre(row)&&matches(row,{...f,from:d,to:d}));
+ const dia=doDia(ref), diaAnt=doDia(ant);
+ const vDia=value(dia), vAnt=value(diaAnt);
+ const variacao=vDia!==null&&vAnt>0?' · '+new Intl.NumberFormat(root.lang,{style:'percent',signDisplay:'always',maximumFractionDigits:1}).format((vDia-vAnt)/vAnt)+' '+tr('vs dia anterior','较前一天'):'';
+ const dataCurta=d=>d.slice(8,10)+'/'+d.slice(5,7);
+ const turnos=['T1','T2','T3'].map((name,i)=>({name,time:['06:00–13:59','14:00–21:59','22:00–05:59'][i],rows:lista.filter(row=>row.expected.name===name)}));
+ const semPrev=lista.filter(row=>row.expected.name==='none');
+ const top=lista.filter(row=>row.volume!==null).sort((a,b)=>b.volume-a.volume)[0];
+ by('deslacreCards').innerHTML=
+  card(tr('Sem deslacre no período','期间未解封'),total,'<b>'+unit()+'</b> · '+outra(lista)+'<br>'+pct+' '+tr('das viagens concluídas','占已完成车次')+' · '+tr('só status Concluído','仅已完成状态'),'','hero',icon('lock'))+
+  card(tr('Dia','当天')+' '+dataCurta(ref),vDia,outra(dia)+variacao,'','',icon('clock'))+
+  card(tr('Dia anterior','前一天')+' '+dataCurta(ant),vAnt,outra(diaAnt),'','',icon('clock'))+
+  turnos.map(t=>{const color='var(--'+t.name.toLowerCase()+')';const v=value(t.rows);return card(t.name,v,t.time+' · '+outra(t.rows),'<div class="bar"><i style="background:'+color+';width:'+(total?100*(v??0)/total:0)+'%"></i></div>','','<i class="dot" style="background:'+color+'"></i>')}).join('')+
+  '<article class="card metric id-top"><div class="label">'+icon('box')+' '+tr('ID sem deslacre com mais remessas','主运单最多的未解封车次')+'</div>'+
+  (top?'<strong class="texto">'+esc(top.shipmentNo)+'</strong><div class="sub"><b>'+number(top.volume)+' '+tr('pedidos-mãe','主运单')+'</b> · '+esc(lineName(top.line))+' · '+esc(top.startName||'—')+' · '+esc(top.plateNumber||'—')+'</div>'
+   :'<strong>—</strong><div class="sub">'+tr('Nenhuma viagem com volumetria','没有货量数据')+'</div>')+'</article>';
+ by('deslacreTurnos').innerHTML=barrasHtml(turnos.concat(semPrev.length?[{name:'none',time:'',rows:semPrev}]:[]).map(t=>({
+  nome:t.name==='none'?tr('Sem previsão','无预计时间'):t.name,sub:t.time,v:value(t.rows),
+  extra:(total?Math.round(100*(value(t.rows)??0)/total):0)+'% · '+(filter.indicator==='trips'?ped(t.rows):ids(t.rows.length)),cor:t.name==='none'?'var(--muted-2)':'var(--'+t.name.toLowerCase()+')'})),
+  tr('Nenhuma viagem concluída sem deslacre nos filtros escolhidos.','所选筛选条件下没有未解封车次。'));
+ const topLinha=linha=>barrasHtml(lista.filter(row=>row.line===linha&&row.volume!==null).sort((a,b)=>b.volume-a.volume).slice(0,10).map(row=>({
+  nome:row.shipmentNo,sub:(row.startName||'—')+' · '+(row.plateNumber||'—'),v:row.volume,extra:tr('pedidos-mãe','主运单')})),
+  tr('Nenhuma viagem desta linha sem deslacre nos filtros escolhidos.','所选筛选条件下该线路没有未解封车次。'));
+ by('deslacreTopSec').innerHTML=topLinha('branch');
+ by('deslacreTopTro').innerHTML=topLinha('trunk');
+ const semDetalhe=lista.filter(row=>!row.detalheDisponivel).length;
+ by('deslacreResumo').textContent=source?ids(lista.length)+' · '+ped(lista)+' · '+pct+' '+tr('das viagens concluídas','占已完成车次')+
+  (semDetalhe?' · '+number(semDetalhe)+' '+tr('sem detalhe confirmado pela coleta','采集尚未确认详情'):'')+'.':tr('Carregando dados…','正在加载数据…');
+ const cols=deslacreColunas();
+ by('deslacreTabela').innerHTML=lista.length?'<table><thead><tr>'+cols.map(col=>'<th scope="col"'+(col[2]?' class="num"':'')+'>'+esc(tr(col[0],col[1]))+'<small>'+esc(tr(col[1],col[0]))+'</small></th>').join('')+'</tr></thead><tbody>'+
+  lista.map(row=>'<tr>'+cols.map(col=>'<td'+(col[2]?' class="num"':'')+' data-label="'+esc(tr(col[0],col[1]))+'">'+esc(col[3](row)??'—')+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'';
+}
+function deslacreColunas(){
+ return [['Viagem','车次',0,row=>row.shipmentNo],['Linha','线路',0,row=>lineName(row.line)],['Placa','车牌',0,row=>row.plateNumber],['Origem','始发站',0,row=>row.startName],
+  ['Chegada prevista','计划到达',0,row=>dateDisplay(row.plannedArrivalTime)],['Turno previsto','预计班次',0,row=>shiftDisplay(row.expected)],
+  ['Chegada real','实际到达',0,row=>dateDisplay(row.actualArrivalTime)],['Início da descarga','开始卸货',0,row=>dateDisplay(row.unloadStartTime)],
+  ['Término oficial','正式卸货结束',0,row=>dateDisplay(row.unloadEndTime)],['Pedidos-mãe','主运单',1,row=>display(row.volume)],
+  ['Detalhe JMS','JMS 详情',0,row=>row.detalheDisponivel?tr('Verificado','已核对'):tr('Não confirmado','未确认')]];
+}
+
 function estadoVirada(row,corte,fimTurno){
  if(row.unloadEndTime){
   if(row.unloadEndTime<corte)return 'finishedT2';
@@ -713,7 +821,7 @@ function renderVirada(){
  const anterior=dateAdd(data,-1);
  const corte=anterior+' 22:00:00', fimTurno=data+' 06:00:00';
  const consultadoEm=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'medium'}).format(new Date());
- const registros=(source?.records??[]).map(r=>detalhes.get(chave(r))??r).filter(r=>{
+ const registros=registrosFiltrados({...filter,from:'',to:'',shift:''}).filter(r=>{
   const chegada=String(r.actualArrivalTime??'').replace('T',' ');
   return chegada>=anterior+' 14:00:00'&&chegada<corte;
  });

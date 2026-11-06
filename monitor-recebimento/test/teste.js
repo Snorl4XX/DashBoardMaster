@@ -161,8 +161,12 @@ async function testeServidor(tmp, jms) {
     confere(r.texto.indexOf('translate="no"') >= 0 && r.texto.indexOf('<meta name="google" content="notranslate">') >= 0, 'painel não é traduzido pelo navegador (tem PT-BR / 中文 próprio)');
     confere(r.texto.indexOf('<option value="4" data-i="Concluído|已完成">') >= 0, 'filtro Status: Concluído');
     confere(r.texto.indexOf('class="notranslate"') >= 0, 'classe notranslate (tradutor do Google e da Microsoft)');
-    confere(r.texto.indexOf('filaSemInicio(all(),agora,today().slice(0,7)).filter(row=>row.shipmentState!==4)') >= 0,
+    confere(r.texto.indexOf('filaSemInicio(registrosFiltrados(),agora,today().slice(0,7)).filter(row=>row.shipmentState!==4)') >= 0,
       'Veículos aguardando início da descarga: sem as viagens Concluídas');
+    confere(r.texto.indexOf('data-view="deslacre"') >= 0 && r.texto.indexOf('id="viewDeslacre"') >= 0 && r.texto.indexOf('function renderDeslacre(base)') >= 0 &&
+      r.texto.indexOf('row.shipmentState===4&&!(row.unlockTime||row.actualUnlockTime)') >= 0, 'visão Falta de deslacre (Concluídas sem deslacre)');
+    confere(r.texto.indexOf('filaSemInicio(registrosFiltrados(),') >= 0 && r.texto.indexOf("const registros=registrosFiltrados();") >= 0 &&
+      r.texto.indexOf('renderDesempenho(rows);') >= 0, 'tabelas da visão geral seguem os filtros');
     const posAgenda = r.texto.indexOf('Agenda de chegadas por hora'), posFila = r.texto.indexOf('Veículos aguardando início da descarga');
     confere(posAgenda > 0 && posFila > posAgenda, 'Agenda de chegadas por hora em primeiro, acima de Veículos aguardando');
     confere(r.texto.indexOf('id="tripBtn"') >= 0 && r.texto.indexOf('data-i="ID da viagem|车次编号"') >= 0 && r.texto.indexOf("trip:''") >= 0, 'filtro ID da viagem');

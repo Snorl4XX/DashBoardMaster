@@ -10,7 +10,11 @@ desbloqueio, início e fim da descarga e o último bipe. São os SEUS arquivos d
   Index.html              o painel, com o mesmo visual do DashMaster (topo, filtros, cartões e tabelas;
                           tema escuro e claro). As seções ocupam a largura toda.
                           Filtros: Status da viagem, Linha, Turno previsto e ID da viagem (procure pelo ID, placa
-                          ou origem e marque um ou vários). O navegador não traduz o painel: use PT-BR / 中文.
+                          ou origem e marque um ou vários). Valem para todos os cartões, tabelas e gráficos.
+                          O navegador não traduz o painel: use PT-BR / 中文.
+                          Menu "Falta de deslacre": viagens Concluídas sem deslacre registrado — cartões do período,
+                          do dia e do dia anterior, de cada turno e o ID com mais remessas; gráfico por turno; IDs da
+                          secundária e da troncal com mais remessas; tabela. "Baixar relatório" baixa essa tabela.
 O que muda é só ONDE roda: no notebook, e não no Google.
   - A coleta roda ao abrir e depois a cada 15 min (no Google era o acionador de 15 min).
   - NÃO precisa da planilha do Google. Tudo fica no banco local C:\monitor-recebimento\dados\recebimento.db,
