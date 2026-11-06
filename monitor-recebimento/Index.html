@@ -632,6 +632,8 @@ by('tripPanel').onclick=event=>{
 document.addEventListener('click',event=>{if(tripOpen&&!event.composedPath().includes(by('tripDd')))openTrip(false)});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&tripOpen){openTrip(false);by('tripBtn').focus()}});
 for(const id of ['from','to'])by(id).oninput=()=>{by('to').setCustomValidity('');preset='custom'};
+// Os filtros valem na hora, sem precisar clicar em Aplicar (cartões, gráficos e tabelas de todas as telas).
+for(const id of ['indicator','status','line','shift','from','to'])by(id).addEventListener('change',apply);
 by('chips').onclick=event=>{const button=event.target.closest('[data-period]');if(button)setPeriod(button.dataset.period)};
 by('nav').onclick=event=>{
  const visao=event.target.closest('[data-view]');

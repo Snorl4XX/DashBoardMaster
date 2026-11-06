@@ -168,6 +168,8 @@ async function testeServidor(tmp, jms) {
     confere(r.texto.indexOf("card(tr('Falta de deslacre','未解封'),lista.length,") >= 0 && r.texto.indexOf("tr('Secundária','支线'),sec.length,") >= 0 &&
       r.texto.indexOf("tr('Troncal','干线'),tro.length,") >= 0 && r.texto.indexOf("tr('Dia','当天')") < 0,
       'deslacre: valor principal = viagens, cartões Secundária e Troncal, sem o cartão Dia');
+    confere(r.texto.indexOf("for(const id of ['indicator','status','line','shift','from','to'])by(id).addEventListener('change',apply);") >= 0,
+      'filtros valem na hora, sem clicar em Aplicar');
     confere(r.texto.indexOf('id="deslacreEvolucao"') >= 0 && r.texto.indexOf("tr('de participação','占比')") >= 0, 'deslacre: evolução diária e % de participação dos turnos');
     confere(r.texto.indexOf('filaSemInicio(registrosFiltrados(),') >= 0 && r.texto.indexOf("const registros=registrosFiltrados();") >= 0 &&
       r.texto.indexOf('renderDesempenho(rows);') >= 0, 'tabelas da visão geral seguem os filtros');
