@@ -90,15 +90,17 @@ principal já instalado em ~/dashmaster:
 
 A equipe troca o AuthToken pelo link (página /token)
 ----------------------------------------------------
-Para outras pessoas trocarem o AuthToken vencido SEM acesso ao servidor, à conta da Oracle ou à chave:
-1. Defina a senha da página (uma vez):
-   - Na nuvem: entre no servidor (Cloud Shell) e rode:  cd ~/monitor-recebimento && bash senha-token.sh
-   - No notebook: no config.json, escreva a senha em "senhaToken" (mínimo 8 caracteres) e abra o Monitor de novo.
-2. Mande para a equipe o link do Monitor com /token no fim (ex.: https://dashmaster.xxxx.ts.net:8443/token) e essa senha.
-3. Quando o painel avisar "Dados desatualizados", a pessoa abre o /token, digita a senha, cola o AuthToken novo e clica em
-   "Salvar e coletar". A página mostra se a coleta voltou a funcionar.
-Quem tem essa senha só troca o AuthToken: não vê o token salvo, não abre Configurações e não entra no servidor.
-Para trocar a senha, rode de novo o senha-token.sh. Para desligar a página, rode e tecle Enter com a senha vazia.
+Outras pessoas trocam o AuthToken vencido SEM acesso ao servidor, à conta da Oracle ou à chave:
+1. Mande para a equipe o link do Monitor com /token no fim (ex.: https://dashmaster.xxxx.ts.net:8443/token).
+   A página já vem ligada e SEM senha.
+2. Quando o painel avisar "Dados desatualizados", a pessoa abre o /token, cola o AuthToken novo e clica em
+   "Salvar e coletar". O Monitor testa o token no JMS antes de salvar: token errado ou vencido é recusado e nada muda.
+   A página mostra se a coleta voltou a funcionar.
+Quem abre a página só troca o AuthToken: não vê o token salvo, não abre Configurações e não entra no servidor.
+Opcional, no servidor (pasta monitor-recebimento):
+  bash senha-token.sh            põe uma senha na página (Enter vazio = sem senha)
+  bash senha-token.sh desligar   desliga a página
+No notebook: no config.json, "senhaToken" (senha, mínimo 8 caracteres) e "trocaTokenPeloLink": false (desliga).
 
 config.json (criado na 1ª vez, ao lado do server.js)
 ----------------------------------------------------

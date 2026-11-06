@@ -337,9 +337,29 @@ atualizar();setInterval(atualizar,5000);
 `;
 
 // ------------------------------------------------------------------ página /token: a equipe troca o AuthToken pelo link
-// Quem tem a senha da página (config.json "senhaToken", definida com: bash senha-token.sh) só troca o AuthToken e vê se a
-// coleta está funcionando. Não entra no servidor, não vê o token salvo nem mexe em mais nada.
-const tokenAtivo = () => String(cfg.senhaToken || '').length >= 8;
+// Quem abre o link com /token só troca o AuthToken e vê se a coleta está funcionando: não entra no servidor, não vê o token
+// salvo nem mexe em mais nada. V1.6: sem senha por padrão; o token novo só é salvo se o JMS aceitar (token errado ou vencido
+// é recusado e o Monitor continua com o anterior). Senha opcional: config.json "senhaToken" (bash senha-token.sh).
+// "trocaTokenPeloLink": false desliga a página.
+const tokenAtivo = () => cfg.trocaTokenPeloLink !== false;
+const tokenComSenha = () => String(cfg.senhaToken || '').length >= 8;
+
+/** Testa o AuthToken numa consulta pequena ao JMS (1 viagem). Devolve '' se o JMS aceitou, ou o motivo. */
+async function testarTokenNoJms(cab) {
+  const hoje = new Date().toLocaleDateString('en-CA', {timeZone: 'America/Sao_Paulo'});
+  const q = new URLSearchParams({current: '1', size: '1', shipmentState: '4', endCode: '30001', startDateTime: hoje + ' 00:00:00',
+    endDateTime: hoje + ' 23:59:59', searchType: 'manage'});
+  const url = (cfg.jmsUrl || 'https://gw.jtjms-br.com').replace(/\/+$/, '') + '/transportation/tmsShipment/page?' + q;
+  let r;
+  try { r = await fetch(url, {headers: cab, redirect: 'manual', signal: AbortSignal.timeout(20000)}); }
+  catch (e) { return 'Não consegui falar com o JMS agora. Tente de novo em alguns minutos.'; }
+  if (r.status !== 200) return 'O JMS não aceitou esse AuthToken (HTTP ' + r.status + '). Pegue um novo no JMS.';
+  let body;
+  try { body = await r.json(); } catch (e) { return 'O JMS não aceitou esse AuthToken. Pegue um novo no JMS.'; }
+  const payload = (body && (body.data != null ? body.data : body.result != null ? body.result : body)) || {};
+  const rows = Array.isArray(payload) ? payload : payload.records || payload.rows || payload.list;
+  return Array.isArray(rows) ? '' : 'O JMS não aceitou esse AuthToken (sessão vencida ou token errado). Pegue um novo no JMS.';
+}
 
 function paginaToken() {
   const corpo = !tokenAtivo()
@@ -347,12 +367,13 @@ function paginaToken() {
       '<p class="suave">Quem cuida do Monitor liga no servidor com: <b>bash senha-token.sh</b> (pasta monitor-recebimento).</p></section>'
     : '<section class="cartao"><h2>Coleta do JMS</h2><div id="coleta" class="suave">Carregando…</div></section>' +
       '<section class="cartao"><h2>Trocar o AuthToken</h2>' +
-      '<label>Senha desta página<input type="password" id="senha" autocomplete="current-password"></label>' +
+      (tokenComSenha() ? '<label>Senha desta página<input type="password" id="senha" autocomplete="current-password"></label>' : '') +
       '<label>AuthToken do JMS<textarea id="texto" placeholder="Cole aqui o AuthToken novo"></textarea></label>' +
       '<button id="salvar">Salvar e coletar</button><div id="msg"></div>' +
       '<p class="suave">Como pegar o AuthToken: abra o JMS no navegador e entre. Aperte F12, aba Rede (Network), clique em ' +
       'qualquer consulta da lista e procure <b>authToken</b> em Cabeçalhos (Headers). Copie só o valor.</p>' +
-      '<p class="suave">O token salvo nunca aparece aqui. Esta página só troca o AuthToken.</p></section>' +
+      '<p class="suave">O Monitor testa o AuthToken no JMS antes de salvar: se o JMS não aceitar, nada muda. ' +
+      'O token salvo nunca aparece aqui. Esta página só troca o AuthToken.</p></section>' +
       '<script>' + JS_TOKEN + '</script>';
   return '<!doctype html><html lang="pt-BR" translate="no" class="notranslate"><meta charset="utf-8"><meta name="google" content="notranslate">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">' +
@@ -376,12 +397,12 @@ async function estado(){
   }catch(err){$('coleta').innerHTML='<p class="erro">Não consegui ler a situação da coleta.</p>'}
 }
 $('salvar').onclick=async()=>{
-  $('msg').innerHTML='';$('salvar').disabled=true;
+  $('msg').innerHTML='<p class="suave">Testando o AuthToken no JMS…</p>';$('salvar').disabled=true;
   try{
     const r=await fetch('token/salvar',{method:'POST',headers:{'Content-Type':'application/json','X-Recebimento-Token':'1'},
-      body:JSON.stringify({senha:$('senha').value,texto:$('texto').value})});
+      body:JSON.stringify({senha:$('senha')?$('senha').value:'',texto:$('texto').value})});
     const j=await r.json().catch(()=>({ok:false,erro:'HTTP '+r.status}));
-    if(j.ok){$('texto').value='';$('msg').innerHTML='<p class="ok">Salvo. A coleta começou: em alguns minutos o painel atualiza.</p>'}
+    if(j.ok){$('texto').value='';$('msg').innerHTML='<p class="ok">O JMS aceitou e o AuthToken foi salvo. A coleta começou: em alguns minutos o painel atualiza.</p>'}
     else $('msg').innerHTML='<p class="erro">'+esc(j.erro||'Não deu certo.')+'</p>';
   }catch(err){$('msg').innerHTML='<p class="erro">'+esc(err.message)+'</p>'}
   $('salvar').disabled=false;estado();
@@ -466,16 +487,23 @@ async function tratar(req, res) {
       if (!auth.allowAttempt('token:' + (req.socket.remoteAddress || ''))) { json(req, res, 429, {ok: false, erro: 'Muitas tentativas. Espere 1 minuto.'}); return; }
       let corpo;
       try { corpo = JSON.parse(await lerCorpo(req, 65536) || '{}'); } catch (e) { json(req, res, 400, {ok: false, erro: 'Pedido inválido.'}); return; }
-      if (!auth.check(cfg.senhaToken, String(corpo.senha || ''))) {
+      if (tokenComSenha() && !auth.check(cfg.senhaToken, String(corpo.senha || ''))) {
         log('aviso', 'Senha errada na página de troca do AuthToken.');
         json(req, res, 401, {ok: false, erro: 'Senha errada.'});
         return;
       }
       let cab;
       try { cab = interpretarToken(corpo.texto); } catch (e) { json(req, res, 200, {ok: false, erro: e.message}); return; }
+      // Só salva o que o JMS aceitar: token errado ou vencido não para o Monitor.
+      const recusa = await testarTokenNoJms(cab);
+      if (recusa) {
+        log('aviso', 'Página do link (/token): AuthToken recusado pelo JMS, nada mudou.');
+        json(req, res, 200, {ok: false, erro: recusa});
+        return;
+      }
       props.set('JMS_HEADERS_JSON', JSON.stringify(cab));
       props.set('JMS_HEADERS_SALVO_EM', new Date().toISOString());
-      log('info', 'AuthToken do JMS trocado pela página do link (/token).');
+      log('info', 'AuthToken do JMS trocado pela página do link (/token), aceito pelo JMS.');
       coletar('AuthToken novo pelo link');
       json(req, res, 200, {ok: true});
       return;

@@ -264,11 +264,21 @@ async function testeServidor(tmp, jms) {
     e = await estado(porta);
     confere(r.json.ok && e.token.fonte === '' && lerBanco(path.join(pasta, 'dados', 'recebimento.db'), "SELECT k FROM props WHERE k LIKE 'JMS_HEADERS%'").length === 0, 'AuthToken apagado');
 
-    // página /token sem senha configurada: desligada
-    r = await pedido(porta, 'GET', '/token', {cabecalhos: {'X-Forwarded-For': '1.2.3.4'}});
-    confere(r.status === 200 && /desligada/.test(r.texto) && r.texto.indexOf('id="senha"') < 0, '/token sem senhaToken: desligada');
-    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'qualquer-coisa', texto: 'tok-x-1234567'}, cabecalhos: {'X-Recebimento-Token': '1'}});
-    confere(r.status === 403 && r.json && r.json.ok === false, '/token/salvar desligado: 403');
+    // página /token SEM senha (padrão): só salva o AuthToken que o JMS aceitar
+    const TUN = {'X-Forwarded-For': '1.2.3.4', 'Tailscale-User-Login': 'x'};
+    r = await pedido(porta, 'GET', '/token', {cabecalhos: TUN});
+    confere(r.status === 200 && r.texto.indexOf('id="texto"') >= 0 && r.texto.indexOf('id="senha"') < 0, '/token sem senha: abre pelo link, sem campo de senha');
+    const CABT = Object.assign({'X-Recebimento-Token': '1'}, TUN);
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {texto: 'tok-recusado-555'}, cabecalhos: CABT});
+    e = await estado(porta);
+    confere(r.json && r.json.ok === false && /não aceitou/.test(r.json.erro) && e.token.fonte === '', '/token: AuthToken que o JMS recusa não é salvo', r.json);
+    const antesSem = Date.now();
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {texto: 'outro-token-678'}, cabecalhos: CABT});
+    confere(r.json && r.json.ok === true, '/token sem senha: AuthToken aceito pelo JMS é salvo', r.json);
+    e = await esperarColeta(porta, antesSem);
+    confere(e.token.fonte === 'app' && e.coleta.ultima.ok === true, '/token sem senha: coleta com o token novo', e.coleta.ultima);
+    const linTok = lerBanco(path.join(pasta, 'dados', 'recebimento.db'), "SELECT v FROM props WHERE k = 'JMS_HEADERS_JSON'");
+    confere(linTok.length === 1 && JSON.parse(linTok[0].v).AuthToken === 'outro-token-678', '/token: token salvo no banco');
 
     // link-publico.bat: node lib/link.js config
     const linha = execFileSync(process.execPath, [path.join(APP, 'lib', 'link.js'), 'config'], {env: Object.assign({}, process.env, {RECEBIMENTO_CONFIG: path.join(pasta, 'config.json')}), encoding: 'utf8'}).trim();
@@ -327,6 +337,9 @@ async function testeSenhaEDashmaster(tmp, jms) {
     confere(r.status === 401 && r.json.ok === false && /Senha errada/.test(r.json.erro), '/token: a senha do painel não serve, senha errada');
     r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'senha-do-token-1', texto: 'curto'}, cabecalhos: CAB});
     confere(r.json && r.json.ok === false && /AuthToken/.test(r.json.erro), '/token: texto que não é AuthToken é recusado');
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'senha-do-token-1', texto: 'tok-recusado-555'}, cabecalhos: CAB});
+    let eB = await estado(porta);
+    confere(r.json && r.json.ok === false && /não aceitou/.test(r.json.erro) && eB.token.fonte === 'dashmaster', '/token com senha: token recusado pelo JMS não muda nada', r.json);
     jms.estado.token = 'tok-link-777888';
     jms.estado.pedidos = [];
     const antesLink = Date.now();
@@ -345,6 +358,23 @@ async function testeSenhaEDashmaster(tmp, jms) {
       bloqueou = r.status === 429;
     }
     confere(bloqueou, '/token: muitas tentativas → espera 1 minuto');
+  } finally { filho.kill(); }
+}
+
+// ------------------------------------------------------------------ 3b. página /token desligada
+async function testeTokenDesligado(tmp, jms) {
+  const porta = await portaLivre();
+  const pasta = path.join(tmp, 'c');
+  fs.mkdirSync(pasta, {recursive: true});
+  fs.writeFileSync(path.join(pasta, 'config.json'), JSON.stringify({porta, caminho: '', trocaTokenPeloLink: false}));
+  const filho = iniciar({RECEBIMENTO_DADOS: path.join(pasta, 'dados'), RECEBIMENTO_CONFIG: path.join(pasta, 'config.json'),
+    RECEBIMENTO_JMS_URL: 'http://127.0.0.1:' + jms.porta, RECEBIMENTO_DASHMASTER_DB: path.join(tmp, 'nao-existe.db')});
+  try {
+    await noAr(porta, filho);
+    let r = await pedido(porta, 'GET', '/token', {cabecalhos: {'X-Forwarded-For': '1.2.3.4'}});
+    confere(r.status === 200 && /desligada/.test(r.texto) && r.texto.indexOf('id="texto"') < 0, '/token desligado (trocaTokenPeloLink: false)');
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {texto: 'tok-teste-12345'}, cabecalhos: {'X-Recebimento-Token': '1'}});
+    confere(r.status === 403 && r.json && r.json.ok === false, '/token/salvar desligado: 403');
   } finally { filho.kill(); }
 }
 
@@ -386,6 +416,7 @@ function testeZip(tmp) {
     testeAmbiente(tmp);
     await testeServidor(tmp, jms);
     await testeSenhaEDashmaster(tmp, jms);
+    await testeTokenDesligado(tmp, jms);
     testeZip(tmp);
   } catch (e) {
     falhas++;

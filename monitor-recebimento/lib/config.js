@@ -15,8 +15,10 @@ const PADRAO = {
   host: '0.0.0.0',
   // Senha para abrir o painel (vazio = qualquer um com o link abre).
   senha: '',
-  // Senha da página de trocar o AuthToken pelo link (https://…/token), para a equipe. Mínimo 8 caracteres; vazio = desligada.
-  // Defina no servidor com: bash senha-token.sh
+  // Página para a equipe trocar o AuthToken pelo link (https://…/token). O token novo só é salvo se o JMS aceitar.
+  // false = página desligada.
+  trocaTokenPeloLink: true,
+  // Senha opcional dessa página (mínimo 8 caracteres; vazio = sem senha). Defina no servidor com: bash senha-token.sh
   senhaToken: '',
   // A coleta do JMS roda ao abrir e depois a cada N minutos (no Apps Script era a cada 15 min).
   coletaMinutos: 15,
