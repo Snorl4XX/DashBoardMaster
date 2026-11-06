@@ -604,11 +604,12 @@ function filaSemInicio(rows,agora,mes){
 }
 function renderFilaDescarga(){
  const agora=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'medium'}).format(new Date());
- const candidatos=filaSemInicio(all(),agora,today().slice(0,7));
+ // Só viagens Em trânsito (3): quando o JMS muda o status para Concluído (4), a viagem sai desta tabela.
+ const candidatos=filaSemInicio(all(),agora,today().slice(0,7)).filter(row=>row.shipmentState!==4);
  const fila=candidatos.filter(row=>row.detalheDisponivel);
  const pendentes=candidatos.length-fila.length;
  const cols=[['Viagem','车次'],['Placa','车牌'],['Origem','始发站'],['Linha','线路'],['Chegada real','实际到达'],['Turno da chegada','到达班次'],['Deslacre','解封'],['Tempo de espera','等待时长'],['Detalhe JMS','JMS 详情']];
- by('filaResumo').textContent=source?number(fila.length)+' '+tr('veículos sem início registrado no mês · maior espera primeiro. Inclui todos os status JMS.','当月无卸货开始记录的车辆 · 等待最久优先。含所有 JMS 状态。')+(pendentes?' · '+number(pendentes)+' '+(loadingDetails?tr('aguardando verificação no JMS','等待核对'):tr('sem detalhe confirmado pela coleta','采集尚未确认详情')):''):tr('Aguardando os dados da planilha…','正在等待表格数据…');
+ by('filaResumo').textContent=source?number(fila.length)+' '+tr('veículos sem início registrado no mês · maior espera primeiro. Só viagens em trânsito: as concluídas no JMS saem da lista.','当月无卸货开始记录的车辆 · 等待最久优先。仅显示在途车次：JMS 已完成的不显示。')+(pendentes?' · '+number(pendentes)+' '+(loadingDetails?tr('aguardando verificação no JMS','等待核对'):tr('sem detalhe confirmado pela coleta','采集尚未确认详情')):''):tr('Aguardando os dados da planilha…','正在等待表格数据…');
  by('filaDescarga').innerHTML=fila.length?'<table><thead><tr>'+cols.map(col=>'<th scope="col">'+esc(tr(...col))+'</th>').join('')+'</tr></thead><tbody>'+fila.map(r=>{
   const lacre=r.unlockTime||r.actualUnlockTime;
   const values=[r.shipmentNo,r.plateNumber,r.startName,lineName(r.line),dateDisplay(r.actualArrivalTime),shiftDisplay(shiftOf(r.actualArrivalTime)),lacre?dateDisplay(lacre):tr('Sem registro','无记录'),formatMinutes(minutos(r.actualArrivalTime,agora)),r.detalheDisponivel?tr('Verificado','已核对'):loadingDetails&&!detalhes.has(chave(r))?tr('Em conferência','核对中'):tr('Indisponível','不可用')];
