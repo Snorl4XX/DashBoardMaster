@@ -336,6 +336,59 @@ $('apagar').onclick=async()=>{if(!confirm('Apagar o AuthToken deste app?'))retur
 atualizar();setInterval(atualizar,5000);
 `;
 
+// ------------------------------------------------------------------ página /token: a equipe troca o AuthToken pelo link
+// Quem tem a senha da página (config.json "senhaToken", definida com: bash senha-token.sh) só troca o AuthToken e vê se a
+// coleta está funcionando. Não entra no servidor, não vê o token salvo nem mexe em mais nada.
+const tokenAtivo = () => String(cfg.senhaToken || '').length >= 8;
+
+function paginaToken() {
+  const corpo = !tokenAtivo()
+    ? '<section class="cartao"><p>A troca do AuthToken pelo link está <b>desligada</b>.</p>' +
+      '<p class="suave">Quem cuida do Monitor liga no servidor com: <b>bash senha-token.sh</b> (pasta monitor-recebimento).</p></section>'
+    : '<section class="cartao"><h2>Coleta do JMS</h2><div id="coleta" class="suave">Carregando…</div></section>' +
+      '<section class="cartao"><h2>Trocar o AuthToken</h2>' +
+      '<label>Senha desta página<input type="password" id="senha" autocomplete="current-password"></label>' +
+      '<label>AuthToken do JMS<textarea id="texto" placeholder="Cole aqui o AuthToken novo"></textarea></label>' +
+      '<button id="salvar">Salvar e coletar</button><div id="msg"></div>' +
+      '<p class="suave">Como pegar o AuthToken: abra o JMS no navegador e entre. Aperte F12, aba Rede (Network), clique em ' +
+      'qualquer consulta da lista e procure <b>authToken</b> em Cabeçalhos (Headers). Copie só o valor.</p>' +
+      '<p class="suave">O token salvo nunca aparece aqui. Esta página só troca o AuthToken.</p></section>' +
+      '<script>' + JS_TOKEN + '</script>';
+  return '<!doctype html><html lang="pt-BR" translate="no" class="notranslate"><meta charset="utf-8"><meta name="google" content="notranslate">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">' +
+    '<title>Monitor de Recebimento | Trocar o AuthToken</title><style>' + CSS + '</style><body><main class="caixa">' +
+    '<h1>Monitor de Recebimento · Trocar o AuthToken</h1><p class="sub">Use quando o painel avisar "Dados desatualizados".</p>' +
+    corpo + '<p><a href="./">Abrir o painel</a></p></main></body></html>';
+}
+
+const JS_TOKEN = `
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+const hora=ms=>ms?new Date(ms).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+async function estado(){
+  try{
+    const r=await fetch('token/estado',{headers:{'X-Recebimento-Token':'1'}});const e=await r.json();
+    const u=e.ultima;let t='';
+    if(e.coletando)t+='<p><b>Coletando agora…</b></p>';
+    if(u)t+=u.ok?'<p class="ok">Última coleta OK: '+hora(u.quando)+'</p>':'<p class="erro">Última coleta falhou ('+hora(u.quando)+').</p>'+(u.dica?'<p>'+esc(u.dica)+'</p>':'');
+    if(e.ultimoSucesso)t+='<p class="suave">Dados do painel de '+hora(Date.parse(e.ultimoSucesso))+'.</p>';
+    $('coleta').innerHTML=t||'<p class="suave">Ainda sem coleta.</p>';
+  }catch(err){$('coleta').innerHTML='<p class="erro">Não consegui ler a situação da coleta.</p>'}
+}
+$('salvar').onclick=async()=>{
+  $('msg').innerHTML='';$('salvar').disabled=true;
+  try{
+    const r=await fetch('token/salvar',{method:'POST',headers:{'Content-Type':'application/json','X-Recebimento-Token':'1'},
+      body:JSON.stringify({senha:$('senha').value,texto:$('texto').value})});
+    const j=await r.json().catch(()=>({ok:false,erro:'HTTP '+r.status}));
+    if(j.ok){$('texto').value='';$('msg').innerHTML='<p class="ok">Salvo. A coleta começou: em alguns minutos o painel atualiza.</p>'}
+    else $('msg').innerHTML='<p class="erro">'+esc(j.erro||'Não deu certo.')+'</p>';
+  }catch(err){$('msg').innerHTML='<p class="erro">'+esc(err.message)+'</p>'}
+  $('salvar').disabled=false;estado();
+};
+estado();setInterval(estado,10000);
+`;
+
 function ipsDaRede() {
   const out = [];
   Object.values(os.networkInterfaces()).forEach(l => (l || []).forEach(a => { if (a.family === 'IPv4' && !a.internal) out.push(a.address); }));
@@ -389,6 +442,45 @@ async function tratar(req, res) {
     } catch (e) {
       json(req, res, 200, {ok: false, error: String((e && e.message) || e)});
     }
+    return;
+  }
+  if (p === '/token' || p.indexOf('/token/') === 0) {
+    // Página da equipe: abre pelo link público (não pede a senha do painel; tem a senha própria).
+    if (p === '/token') {
+      if (url.pathname !== '/token') { res.writeHead(301, {Location: base + '/token'}); res.end(); return; }
+      enviar(req, res, 200, paginaToken());
+      return;
+    }
+    // Ações: só com o cabeçalho da página (outro site aberto no navegador não consegue mandar).
+    if (req.headers['x-recebimento-token'] !== '1') { json(req, res, 403, {ok: false, erro: 'Pedido sem o cabeçalho da página.'}); return; }
+    if (!tokenAtivo()) { json(req, res, 403, {ok: false, erro: 'A troca do AuthToken pelo link está desligada.'}); return; }
+    const acao = p.slice('/token/'.length);
+    if (acao === 'estado' && req.method === 'GET') {
+      const u = coleta.ultima;
+      json(req, res, 200, {ok: true, coletando: coleta.rodando, ultimoSucesso: props.get('RECEBIMENTO_ULTIMO_SUCESSO') || '',
+        ultima: u ? {ok: u.ok, quando: u.quando, dica: u.ok ? '' : (u.dica || 'Confira o AuthToken.')} : null});
+      return;
+    }
+    if (acao === 'salvar' && req.method === 'POST') {
+      // Limite de tentativas (pelo link todos chegam do mesmo endereço: o limite vale para todos juntos).
+      if (!auth.allowAttempt('token:' + (req.socket.remoteAddress || ''))) { json(req, res, 429, {ok: false, erro: 'Muitas tentativas. Espere 1 minuto.'}); return; }
+      let corpo;
+      try { corpo = JSON.parse(await lerCorpo(req, 65536) || '{}'); } catch (e) { json(req, res, 400, {ok: false, erro: 'Pedido inválido.'}); return; }
+      if (!auth.check(cfg.senhaToken, String(corpo.senha || ''))) {
+        log('aviso', 'Senha errada na página de troca do AuthToken.');
+        json(req, res, 401, {ok: false, erro: 'Senha errada.'});
+        return;
+      }
+      let cab;
+      try { cab = interpretarToken(corpo.texto); } catch (e) { json(req, res, 200, {ok: false, erro: e.message}); return; }
+      props.set('JMS_HEADERS_JSON', JSON.stringify(cab));
+      props.set('JMS_HEADERS_SALVO_EM', new Date().toISOString());
+      log('info', 'AuthToken do JMS trocado pela página do link (/token).');
+      coletar('AuthToken novo pelo link');
+      json(req, res, 200, {ok: true});
+      return;
+    }
+    json(req, res, 404, {ok: false, erro: 'Ação desconhecida.'});
     return;
   }
   if (p === '/config' || p.indexOf('/config/') === 0) {

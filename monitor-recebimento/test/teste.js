@@ -264,6 +264,12 @@ async function testeServidor(tmp, jms) {
     e = await estado(porta);
     confere(r.json.ok && e.token.fonte === '' && lerBanco(path.join(pasta, 'dados', 'recebimento.db'), "SELECT k FROM props WHERE k LIKE 'JMS_HEADERS%'").length === 0, 'AuthToken apagado');
 
+    // página /token sem senha configurada: desligada
+    r = await pedido(porta, 'GET', '/token', {cabecalhos: {'X-Forwarded-For': '1.2.3.4'}});
+    confere(r.status === 200 && /desligada/.test(r.texto) && r.texto.indexOf('id="senha"') < 0, '/token sem senhaToken: desligada');
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'qualquer-coisa', texto: 'tok-x-1234567'}, cabecalhos: {'X-Recebimento-Token': '1'}});
+    confere(r.status === 403 && r.json && r.json.ok === false, '/token/salvar desligado: 403');
+
     // link-publico.bat: node lib/link.js config
     const linha = execFileSync(process.execPath, [path.join(APP, 'lib', 'link.js'), 'config'], {env: Object.assign({}, process.env, {RECEBIMENTO_CONFIG: path.join(pasta, 'config.json')}), encoding: 'utf8'}).trim();
     confere(linha === '3600 443 /recebimento', 'link.js config', linha);
@@ -276,7 +282,7 @@ async function testeSenhaEDashmaster(tmp, jms) {
   const porta = await portaLivre();
   const pasta = path.join(tmp, 'b');
   fs.mkdirSync(pasta, {recursive: true});
-  fs.writeFileSync(path.join(pasta, 'config.json'), JSON.stringify({porta, senha: 'senha-teste'}));
+  fs.writeFileSync(path.join(pasta, 'config.json'), JSON.stringify({porta, senha: 'senha-teste', senhaToken: 'senha-do-token-1'}));
   const banco = path.join(tmp, 'dashmaster.db');
   const {DatabaseSync} = require('node:sqlite');
   const db = new DatabaseSync(banco);
@@ -305,6 +311,40 @@ async function testeSenhaEDashmaster(tmp, jms) {
     confere(r.status === 200 && r.texto.indexOf('google.script') >= 0, 'com cookie: painel');
     const d = await dados(porta, {Cookie: cookie});
     confere(d.ok && d.result.records.length === 28, 'com cookie: dados');
+
+    // Página /token: a equipe troca o AuthToken pelo link, com a senha própria (sem a senha do painel e sem o servidor)
+    const TUNEL = {'X-Forwarded-For': '1.2.3.4', 'Tailscale-User-Login': 'x'};
+    r = await pedido(porta, 'GET', '/token', {cabecalhos: TUNEL});
+    confere(r.status === 200 && r.texto.indexOf('id="senha"') >= 0 && r.texto.indexOf('id="texto"') >= 0 && r.texto.indexOf('translate="no"') >= 0,
+      '/token abre pelo link, sem a senha do painel');
+    confere(r.texto.indexOf('dm-token-999') < 0, '/token não mostra o AuthToken em uso');
+    r = await pedido(porta, 'GET', '/token/', {cabecalhos: TUNEL});
+    confere(r.status === 301 && r.cabecalhos.location === '/recebimento/token', '/token/ → /token (com o caminho do link)', r.cabecalhos.location);
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'senha-do-token-1', texto: 'tok-link-777888'}, cabecalhos: TUNEL});
+    confere(r.status === 403, '/token/salvar sem o cabeçalho da página: 403');
+    const CAB = Object.assign({'X-Recebimento-Token': '1'}, TUNEL);
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'senha-teste', texto: 'tok-link-777888'}, cabecalhos: CAB});
+    confere(r.status === 401 && r.json.ok === false && /Senha errada/.test(r.json.erro), '/token: a senha do painel não serve, senha errada');
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'senha-do-token-1', texto: 'curto'}, cabecalhos: CAB});
+    confere(r.json && r.json.ok === false && /AuthToken/.test(r.json.erro), '/token: texto que não é AuthToken é recusado');
+    jms.estado.token = 'tok-link-777888';
+    jms.estado.pedidos = [];
+    const antesLink = Date.now();
+    r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'senha-do-token-1', texto: 'tok-link-777888'}, cabecalhos: CAB});
+    confere(r.json && r.json.ok === true && JSON.stringify(r.json).indexOf('tok-link') < 0, '/token: AuthToken trocado pelo link');
+    const e2 = await esperarColeta(porta, antesLink);
+    confere(e2.coleta.ultima.ok === true && e2.token.fonte === 'app', 'coleta com o AuthToken do link', e2.coleta.ultima);
+    confere(jms.estado.pedidos.length > 0 && jms.estado.pedidos.every(x => x.cabecalhos.authtoken === 'tok-link-777888'), 'JMS recebeu o AuthToken trocado pelo link');
+    r = await pedido(porta, 'GET', '/token/estado', {cabecalhos: CAB});
+    confere(r.json && r.json.ok && r.json.ultima && r.json.ultima.ok === true && r.texto.indexOf('tok-link') < 0, '/token/estado: situação da coleta, sem o token');
+    r = await pedido(porta, 'GET', '/config', {cabecalhos: TUNEL});
+    confere(r.status === 403, 'Configurações continua fechada pelo link');
+    let bloqueou = false;
+    for (let i = 0; i < 10 && !bloqueou; i++) {
+      r = await pedido(porta, 'POST', '/token/salvar', {corpo: {senha: 'errada-' + i, texto: 'x'}, cabecalhos: CAB});
+      bloqueou = r.status === 429;
+    }
+    confere(bloqueou, '/token: muitas tentativas → espera 1 minuto');
   } finally { filho.kill(); }
 }
 
@@ -324,7 +364,7 @@ function testeZip(tmp) {
   ['Recebimento_SP_GRU.gs', 'Painel.gs', 'Index.html'].forEach(f => {
     confere(/Monitor|RECEBIMENTO|Recebimento/.test(fs.readFileSync(path.join(APP, f), 'utf8')), 'arquivo do Apps Script presente: ' + f);
   });
-  ['instalar-nuvem.sh', 'link-publico.sh'].forEach(f => {
+  ['instalar-nuvem.sh', 'link-publico.sh', 'senha-token.sh'].forEach(f => {
     const t = fs.readFileSync(path.join(APP, f), 'utf8');
     confere(t.indexOf('\r') < 0 && /^#!\/usr\/bin\/env bash\n/.test(t), f + ' com quebras de linha do Linux');
   });
