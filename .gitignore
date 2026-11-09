@@ -17,3 +17,7 @@ expedicao_incorreta/dist/
 monitor-recebimento/dados/
 monitor-recebimento/config.json
 monitor-recebimento/dist/
+# Controle de Pátio: dados do Feishu do servidor (App Secret), configuração e pacote gerado.
+controle-patio/dados/
+controle-patio/config.json
+controle-patio/dist/

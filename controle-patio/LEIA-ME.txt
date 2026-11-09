@@ -1,0 +1,81 @@
+J&T · CONTROLE DE PÁTIO | SP GRU (Portaria, Fila FIFO, Docas e Expedição do Feishu)
+=====================================================================================
+
+O que é
+-------
+O seu painel do Apps Script (Index.html + Código.gs) rodando num servidor ligado 24 h, como o Monitor de Recebimento.
+Os dois arquivos são OS SEUS, sem nenhuma mudança (o Código.gs aqui se chama Codigo.gs, sem acento, para o ZIP abrir
+certo no Windows). Só muda ONDE roda:
+  - o painel abre pelo link do Tailscale (https://dashmaster.xxxx.ts.net:10000), com senha se você quiser;
+  - as consultas ao Feishu são as mesmas do Google, SOMENTE LEITURA (nada é alterado no Feishu);
+  - com várias pessoas abertas, cada tabela é consultada no Feishu no máximo 1 vez a cada 30 s (o painel se atualiza
+    sozinho a cada 1 min);
+  - as Propriedades do script (FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_APP_TOKEN, FEISHU_TABLE_PATIO,
+    FEISHU_TABLE_DOCAS e FEISHU_TABLE_EXPEDICAO) ficam no servidor, no arquivo dados/propriedades.json, que só o seu
+    usuário do servidor lê. O App Secret nunca aparece na tela, no registro nem no link.
+
+Antes de começar: copie as Propriedades do script
+-------------------------------------------------
+No Apps Script do painel: engrenagem (Configurações do projeto) > Propriedades do script. Deixe essa tela aberta:
+o instalador pede esses 6 valores (copie e cole um por um).
+
+Instalar na Oracle (no mesmo servidor do Monitor de Recebimento)
+------------------------------------------------------------------
+É leve (não guarda histórico: só consulta o Feishu quando alguém abre o painel), então cabe no servidor do Monitor.
+1. No console da Oracle, abra o Cloud Shell (ícone >_ no topo).
+2. Engrenagem do Cloud Shell > Upload > envie o CONTROLE_PATIO_V1_0.zip.
+3. Mande para o servidor e entre nele (o mesmo IP do Monitor):
+     scp -i ~/chave.key ~/CONTROLE_PATIO_V1_0.zip ubuntu@IP_DO_SERVIDOR:~/
+     ssh -i ~/chave.key ubuntu@IP_DO_SERVIDOR
+4. No servidor:
+     cd ~ && unzip -o CONTROLE_PATIO_V1_0.zip
+     cd ~/controle-patio && bash instalar-nuvem.sh
+   Ele pede os 6 valores do Feishu (o App Secret não aparece enquanto você cola) e testa a conexão.
+   Tem que aparecer "CONEXÃO COM FEISHU REALIZADA COM SUCESSO!" e "Tudo certo com o Feishu."
+5. Link para a equipe:
+     bash link-publico.sh
+   Ele pede uma senha para o painel (recomendado: o painel mostra placas e nomes de motoristas; Enter = sem senha).
+   No fim aparece o link: https://dashmaster.xxxx.ts.net:10000
+
+Portas no servidor do Monitor: 8443 = Monitor de Recebimento, 10000 = Controle de Pátio (a 443 fica livre).
+Outro servidor? Também funciona: o mesmo passo a passo. Para mudar a porta do link, edite "portaLink" no config.json
+(443, 8443 ou 10000) e rode bash link-publico.sh de novo.
+
+Comandos (no servidor, pasta controle-patio)
+--------------------------------------------
+  node patio.js status                  mostra os dados do Feishu cadastrados (o App Secret não aparece) e o link
+  node patio.js testar                  roda testarConexaoFeishu, testarTabelasFeishu e testarLeituraPatio
+  node patio.js diagnosticar            roda diagnosticarDescargasPatio_SCGRU (somente leitura)
+  bash configurar.sh                    troca os dados do Feishu (Enter vazio = mantém); vale na hora
+  sudo systemctl restart controle-patio reinicia o painel
+  sudo journalctl -u controle-patio -f  mostra o que o painel está fazendo (Ctrl+C sai)
+
+Atualizar para uma versão nova
+------------------------------
+Envie o ZIP novo pelo Cloud Shell (passos 2 e 3) e, no servidor:
+  cd ~ && unzip -o CONTROLE_PATIO_V<versão>.zip && sudo systemctl restart controle-patio
+Responda A (substituir todos) se ele perguntar. Os dados do Feishu, a senha e o config.json ficam (não estão no ZIP).
+
+Mudou o painel no Apps Script?
+------------------------------
+Copie o Index.html e o Código.gs novos para a pasta controle-patio do servidor (o Código.gs com o nome Codigo.gs) e
+reinicie: sudo systemctl restart controle-patio. Ou me mande os arquivos para gerar um ZIP novo.
+
+config.json (criado na instalação)
+----------------------------------
+porta 3700 (só no servidor) · senha (vazio = quem tem o link abre) · cacheSegundos 30 (tempo que uma consulta ao
+Feishu é reaproveitada) · portaLink 10000 / caminho "" (link) · linkPublico (só para mostrar).
+Mudou? sudo systemctl restart controle-patio
+
+Se der problema
+---------------
+- Painel mostra "Faltam os dados do Feishu": rode bash configurar.sh.
+- "Falha na autenticação com Feishu": App ID ou App Secret errado. Rode bash configurar.sh e confira.
+- "Erro ao consultar Feishu: ...": o ID de alguma tabela (FEISHU_TABLE_...) ou o FEISHU_APP_TOKEN está errado, ou o app
+  do Feishu perdeu a permissão na base. Rode node patio.js testar para ver qual tabela.
+- O link não abre: sudo systemctl status controle-patio e bash link-publico.sh de novo.
+
+Para quem mexe no código
+------------------------
+node test/teste.js   (Feishu de mentira, dados fictícios)
+node gerar-zip.js    (gera dist/CONTROLE_PATIO_V<versão>.zip)

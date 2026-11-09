@@ -1,0 +1,2145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<base target="_top">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J&T Express | SP GRU DashMaster</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" defer></script>
+
+<style>
+:root {
+  --red:#E60012; --red-600:#C8000F; --red-700:#A5000C;
+  --red-50:#FFF1F2; --red-100:#FFE1E4; --red-200:#FFC2C8;
+  --ink:#1F2430; --ink-2:#434A5B; --muted:#6B7280; --muted-2:#9AA0AB;
+  --line:#ECECEF; --line-2:#F3F3F5; --bg:#F6F6F8;
+  --card:#FFFFFF; --soft:#F6F6F8; --soft-2:#F1F1F4;
+  --field-line:#DFDFE4; --row-alt:#FBFBFC; --row-hover:#FFF5F6;
+  --good:#15803D; --good-bg:#EAF7EE; --good-line:#BBE5C8;
+  --bad:#B42318; --bad-bg:#FDEBEC; --bad-line:#F7C3C7;
+  --warn:#B45309; --warn-bg:#FFF7ED;
+  --t1:#E60012; --t2:#2A78D6; --t3:#4A3AA7;
+  --radius:16px; --radius-sm:10px;
+  --shadow:0 1px 2px rgba(31,36,48,.04),0 8px 24px rgba(31,36,48,.06);
+}
+:root[data-theme="dark"] {
+  --red:#E60012; --red-600:#FF5A67; --red-700:#FF7D87;
+  --red-50:rgba(230,0,18,.16); --red-100:rgba(230,0,18,.30);
+  --red-200:rgba(255,90,103,.55);
+  --ink:#F2F3F5; --ink-2:#C9CCD4; --muted:#9BA1AD;
+  --muted-2:#727885; --line:#2A2D36; --line-2:#22252D;
+  --bg:#0E0F13; --card:#17191F; --soft:#1E2128;
+  --soft-2:#272A33; --field-line:#353946;
+  --row-alt:#1B1D24; --row-hover:rgba(230,0,18,.12);
+  --good:#3DD07A; --good-bg:rgba(61,208,122,.14);
+  --good-line:rgba(61,208,122,.38);
+  --bad:#FF6B76; --bad-bg:rgba(230,0,18,.18);
+  --bad-line:rgba(230,0,18,.45);
+  --warn:#F5A524; --warn-bg:rgba(245,165,36,.12);
+  --t1:#FF3B4A; --t2:#4C93F0; --t3:#9B8CFA;
+  --shadow:0 1px 2px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.35);
+}
+* {box-sizing:border-box}
+html,body {margin:0;max-width:100%;overflow-x:hidden}
+body {
+  background:var(--bg);color:var(--ink);font-size:14px;
+  font-family:Inter,"PingFang SC","Microsoft YaHei",
+  "Noto Sans SC","Segoe UI",Arial,sans-serif;
+}
+button,input,select {font:inherit}
+button {cursor:pointer}
+button:disabled {opacity:.55;cursor:wait}
+button:focus-visible,input:focus-visible,select:focus-visible {
+  outline:2px solid var(--red);outline-offset:2px;
+}
+.hidden {display:none!important}
+svg {width:18px;height:18px;fill:none;stroke:currentColor;
+  stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
+/* MENU */
+.sidebar {
+  position:fixed;left:0;top:0;bottom:0;width:268px;
+  background:var(--card);border-right:1px solid var(--line);
+  z-index:40;display:flex;flex-direction:column;
+}
+.sidebar:before {
+  content:"";height:4px;flex:none;
+  background:linear-gradient(90deg,#E60012,#FF4D5E);
+}
+.logo {display:flex;align-items:center;gap:12px;
+  padding:19px 15px;border-bottom:1px solid var(--line)}
+.jt {background:#E60012;color:white;font-weight:900;
+  font-style:italic;font-size:24px;border-radius:11px;
+  padding:11px 12px}
+.logo-name {font-size:16px;color:var(--red);font-weight:900;
+  font-style:italic;letter-spacing:2.4px}
+.logo-sub {font-size:11px;color:var(--muted);margin-top:5px}
+.nav-list {padding:18px 10px;overflow-y:auto;flex:1}
+.nav-caption {font-size:10px;color:var(--muted);font-weight:800;
+  letter-spacing:1.5px;padding:0 10px;margin-bottom:12px}
+.nav-item {
+  display:flex;align-items:center;gap:10px;width:100%;
+  padding:9px 10px;border:0;border-radius:12px;
+  background:transparent;color:var(--ink);text-align:left;
+  margin-bottom:5px;
+}
+.nav-item:hover {background:var(--soft)}
+.nav-item.active {background:var(--red-50);color:var(--red-600)}
+.nav-icon {width:34px;height:34px;flex:none;border-radius:10px;
+  display:grid;place-items:center;background:var(--soft-2);
+  color:var(--red)}
+.nav-item.active .nav-icon {background:#E60012;color:white}
+.nav-label {flex:1;min-width:0}
+.nav-label strong {display:block;font-size:13px}
+.nav-label small {display:block;color:var(--muted);
+  font-size:11px;margin-top:3px}
+.nav-count {font-size:11px;color:var(--muted);font-weight:800}
+.nav-count:before {content:"";display:inline-block;width:7px;
+  height:7px;border-radius:50%;background:var(--good);margin-right:5px}
+.sidebar-footer {padding:15px 17px;border-top:1px solid var(--line);
+  font-size:11px;color:var(--muted);line-height:1.9}
+.live {display:inline-block;width:8px;height:8px;
+  background:var(--good);border-radius:50%;margin-right:6px}
+.sidebar-footer strong {color:var(--ink)}
+
+/* CABEÇALHO */
+.workspace {margin-left:268px;min-width:0}
+.topbar {
+  position:sticky;top:0;z-index:20;display:flex;
+  justify-content:space-between;align-items:center;gap:14px;
+  padding:17px 28px;background:var(--card);
+  border-bottom:1px solid var(--line);
+  backdrop-filter:blur(14px);flex-wrap:wrap;
+}
+.eyebrow {font-size:11px;color:var(--red);font-weight:800;
+  letter-spacing:1.6px}
+.topbar h1 {font-size:25px;font-weight:800;margin:5px 0}
+.subtitle {font-size:12.5px;color:var(--muted)}
+.actions {display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn {
+  height:40px;border:1px solid var(--field-line);
+  border-radius:12px;background:var(--card);color:var(--ink);
+  padding:0 14px;font-size:13px;font-weight:700;
+}
+.btn:hover {background:var(--soft)}
+.btn.primary {background:#E60012;border-color:#E60012;color:white}
+.btn.primary:hover {background:#C8000F}
+.lang {display:flex;border:1px solid var(--field-line);
+  border-radius:12px;padding:3px}
+.lang button {border:0;background:transparent;color:var(--muted);
+  padding:8px 10px;border-radius:9px;font-size:12px;font-weight:800}
+.lang button.active {background:#E60012;color:white}
+.mobile-menu {display:none}
+
+/* CONTEÚDO */
+.content {padding:20px 28px 36px;display:grid;gap:12px}
+.card {
+  background:var(--card);border:1px solid var(--line);
+  border-radius:16px;box-shadow:var(--shadow);
+  padding:16px 18px;min-width:0;animation:rise .35s ease both;
+}
+.card h2 {margin:0 0 12px;font-size:17px;font-weight:800}
+.section-label {font-size:11px;font-weight:800;color:var(--red);
+  letter-spacing:1px;margin-bottom:8px}
+.filters {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.field {min-width:0}
+.field label {display:block;color:var(--muted);font-size:11px;
+  font-weight:800;text-transform:uppercase;margin-bottom:7px}
+.field input,.field select {
+  width:100%;height:40px;border:1px solid var(--field-line);
+  border-radius:10px;background:var(--card);color:var(--ink);
+  padding:0 11px;min-width:0;
+}
+.chips {display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
+.chip {border:1px solid var(--line);background:var(--card);
+  color:var(--ink);border-radius:24px;padding:9px 14px;font-weight:700}
+.chip.active {background:var(--red-50);border-color:var(--red-200);
+  color:var(--red-600)}
+.message {padding:11px 13px;background:var(--soft);
+  border:1px solid var(--line);border-radius:10px;
+  color:var(--muted);font-size:12px}
+.message.error {background:var(--bad-bg);color:var(--bad)}
+.muted {color:var(--muted);font-size:12px}
+
+/* INDICADORES */
+.stats {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.stat {min-height:118px;transition:transform .2s}
+.stat:hover {transform:translateY(-2px)}
+.clickable {cursor:pointer;transition:transform .16s,border-color .16s,box-shadow .16s}
+.clickable:hover {transform:translateY(-2px);border-color:var(--red-200);box-shadow:0 7px 22px rgba(0,0,0,.15)}
+.clickable:focus-visible {outline:3px solid var(--red);outline-offset:3px}
+.yard-modal-backdrop {position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:18px}
+.yard-modal {width:min(1120px,100%);max-height:94vh;overflow:hidden;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:17px;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.yard-modal-head {display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:20px;border-bottom:1px solid var(--line)}
+.yard-modal-head h2 {margin:0 0 5px;font-size:19px}
+.yard-modal-tools {display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--line)}
+.yard-modal-tools input {flex:1;min-width:180px;height:40px;border:1px solid var(--field-line);border-radius:10px;background:var(--card);color:var(--ink);padding:0 12px}
+.yard-modal-scroll {overflow:auto;padding:0 20px 20px}
+.yard-modal-scroll table {min-width:900px}
+.yard-modal-scroll th {position:sticky;top:0;z-index:1}
+@media(max-width:650px){.yard-modal-backdrop{padding:5px}.yard-modal{max-height:98vh}.yard-modal-head,.yard-modal-tools{padding:12px}}
+.stat-label {font-size:11px;color:var(--muted);
+  text-transform:uppercase;font-weight:800}
+.stat-value {font-size:30px;font-weight:800;
+  letter-spacing:-1px;margin:12px 0 5px}
+.stat-help {font-size:12px;color:var(--muted)}
+.stat-main {
+  grid-column:span 2;grid-row:span 2;min-height:248px;
+  position:relative;overflow:hidden;color:white;
+  background:linear-gradient(135deg,#F0101F,#E60012,#B3000D);
+  border-color:#E60012;box-shadow:0 12px 30px rgba(230,0,18,.22);
+}
+.stat-main:before,.stat-main:after {
+  content:"";position:absolute;width:200px;height:200px;
+  border-radius:50%;background:rgba(255,255,255,.06);
+  right:-60px;top:-70px;
+}
+.stat-main:after {top:auto;bottom:-130px;right:50px}
+.stat-main .stat-label,.stat-main .stat-help {color:white}
+.stat-main .stat-value {font-size:54px;margin-top:35px}
+.stat-main>* {position:relative;z-index:1}
+
+/* DESTINOS E VIAGENS */
+.destinations {display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.destination {padding:0;overflow:hidden}
+.destination-head {background:var(--soft);padding:16px 18px;
+  border-bottom:1px solid var(--line)}
+.destination-top {display:flex;justify-content:space-between;
+  align-items:center;gap:10px}
+.destination-head h3 {margin:0;font-size:16px;overflow-wrap:anywhere}
+.destination-head small {display:block;color:var(--muted);
+  font-size:11px;margin-top:8px}
+.count {background:var(--red-50);color:var(--red-600);
+  padding:7px 10px;border-radius:20px;font-size:11px;
+  font-weight:800;white-space:nowrap}
+.trip-list {padding:11px;display:grid;gap:9px}
+.trip {padding:13px;border:1px solid var(--line);
+  border-radius:10px;background:var(--card)}
+.trip-top {display:flex;justify-content:space-between;
+  gap:10px;align-items:flex-start}
+.trip-time {font-size:22px;font-weight:800}
+.trip-date {font-size:11px;color:var(--muted);margin-top:4px}
+.trip-id {font-size:11px;font-weight:800;text-align:right;
+  overflow-wrap:anywhere}
+.tag {display:inline-block;border-radius:20px;
+  padding:5px 9px;background:var(--soft);
+  font-size:10px;font-weight:800;margin-top:6px}
+.tag.good {background:var(--good-bg);color:var(--good)}
+.tag.bad {background:var(--bad-bg);color:var(--bad)}
+.tag.warn {background:var(--warn-bg);color:var(--warn)}
+.trip-details {display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:11px;margin-top:15px}
+.detail-label {font-size:10px;text-transform:uppercase;
+  color:var(--muted);font-weight:700;margin-bottom:4px}
+.detail-value {font-size:12px;font-weight:600;overflow-wrap:anywhere}
+
+/* VÍNCULO OPERACIONAL COM PÁTIO */
+.patio-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}
+.patio-strip>div{background:var(--soft);border:1px solid var(--line);padding:11px;border-radius:10px}
+.patio-strip strong{display:block;font-size:18px;margin-top:6px}
+.patio-panel{border-top:1px dashed var(--field-line);margin-top:13px;padding-top:12px}
+.patio-panel-title{font-size:11px;font-weight:900;color:var(--red);letter-spacing:.4px;margin-bottom:10px}
+.patio-alert{background:var(--warn-bg);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--warn)}
+@media(max-width:860px){.patio-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* GRÁFICOS */
+.chart-card {border-top:3px solid #E60012}
+.chart-head {display:flex;justify-content:space-between;
+  gap:12px;align-items:center;flex-wrap:wrap}
+.chart-head h2 {margin:0}
+.zh {color:var(--red);font-weight:800}
+.chart-area {height:300px;position:relative;margin-top:15px}
+.chart-area canvas {max-width:100%;max-height:100%}
+.chart-fallback {display:none;overflow:auto}
+.mini-summary {display:grid;grid-template-columns:repeat(3,1fr);
+  gap:10px;margin-top:13px}
+.mini-summary div {background:var(--soft);border-radius:10px;
+  padding:12px;font-size:12px}
+.mini-summary strong {display:block;font-size:16px;margin-top:6px}
+
+/* TABELAS */
+.table-wrap {overflow:auto;max-width:100%}
+table {width:100%;border-collapse:collapse;min-width:720px}
+th {background:#E60012;color:white;font-size:12px;
+  font-weight:700;text-align:left;padding:12px;
+  position:sticky;top:0;cursor:pointer}
+th small {display:block;font-size:10.5px;opacity:.85;margin-top:4px}
+td {padding:12px;border-bottom:1px solid var(--line);
+  font-size:12.5px;overflow-wrap:anywhere}
+tbody tr:nth-child(even) {background:var(--row-alt)}
+tbody tr:hover {background:var(--row-hover)}
+.num {text-align:right}
+.table-tools {display:flex;justify-content:space-between;
+  align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.table-tools input {height:40px;border-radius:10px;
+  background:var(--card);color:var(--ink);
+  border:1px solid var(--field-line);padding:0 12px}
+.pagination {display:flex;align-items:center;justify-content:flex-end;
+  gap:10px;margin-top:12px}
+.docks {display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));
+  gap:12px}
+.dock {padding:15px;border:1px solid var(--line);
+  border-left:4px solid var(--muted);border-radius:10px}
+.dock.free {border-left-color:var(--good)}
+.dock.busy {border-left-color:var(--red)}
+.dock h3 {margin:0;font-size:15px}
+.dock p {font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.empty {padding:35px;text-align:center;color:var(--muted)}
+@keyframes rise {
+  from {opacity:0;transform:translateY(8px)}
+  to {opacity:1;transform:translateY(0)}
+}
+@media(max-width:1080px) {
+  .sidebar {transform:translateX(-100%);transition:transform .2s}
+  .sidebar.open {transform:translateX(0)}
+  .workspace {margin-left:0}
+  .mobile-menu {display:inline-block}
+  .destinations {grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:860px) {
+  .stats,.filters {grid-template-columns:repeat(2,minmax(0,1fr))}
+  .destinations {grid-template-columns:1fr}
+  .content {padding:14px}
+  .topbar {padding:14px}
+}
+@media(max-width:380px) {
+  .stats,.filters,.mini-summary {grid-template-columns:1fr}
+  .stat-main {grid-column:auto;grid-row:auto}
+  .trip-details {grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce) {
+  *,*:before,*:after {animation:none!important;transition:none!important}
+}
+
+/* PORTARIA E FIFO — VISUALIZAÇÃO OPERACIONAL */
+.yard-stats .stat-main {min-height:248px}
+.yard-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.yard-vehicle {padding:0;overflow:hidden}
+.yard-vehicle .yard-head {display:flex;justify-content:space-between;gap:12px;align-items:center;background:var(--soft);padding:15px 17px;border-bottom:1px solid var(--line)}
+.yard-vehicle h3 {font-size:18px;font-weight:800;margin:0;letter-spacing:.4px}
+.yard-vehicle .yard-meta {padding:15px 17px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.yard-vehicle .yard-footer {padding:10px 17px;background:var(--soft);border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.yard-vehicle .yard-meta .detail-value {font-size:12px}
+.yard-vehicle .tag {margin-top:0}
+.yard-vehicle .yard-wait {font-size:12px;font-weight:800;color:var(--red-600)}
+.yard-vehicle .yard-priority {font-size:11px;color:var(--muted)}
+.yard-stats .stat-label {line-height:1.5}
+ .unload-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+ .unload-tile {background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:16px}
+ .unload-tile strong {display:block;font-size:30px;margin-top:8px}
+ .unload-tile small {color:var(--muted);font-size:11px}
+ .status-breakdown {display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}
+ .status-pill {background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px 13px;font-size:12px}
+ .status-pill strong {font-size:17px;margin-left:8px}
+ .fifo-rank {display:inline-grid;place-items:center;min-width:36px;height:36px;background:var(--red);color:#fff;font-weight:900;border-radius:10px;font-size:16px}
+ @media(max-width:860px){.unload-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:1080px){.yard-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:650px){.yard-grid{grid-template-columns:1fr}.yard-filters{grid-template-columns:1fr}}
+
+/* VISÃO HORÁRIA: leitura rápida e detalhes sob demanda */
+.hourly-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.hourly-head h2{margin:0 0 7px}
+.hourly-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:14px}
+.hourly-shift{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--soft);min-width:0}
+.hourly-shift-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+.hourly-shift-head strong{font-size:13px}
+.hourly-shift-head span{color:var(--muted);font-size:11px}
+.hourly-slots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.hourly-slot{border:1px solid var(--field-line);background:var(--card);border-radius:9px;color:var(--ink);padding:10px 8px;text-align:left;min-width:0}
+.hourly-slot:hover{border-color:var(--red);background:var(--red-50)}
+.hourly-slot.active{border-color:var(--red);background:var(--red-50);box-shadow:inset 0 0 0 1px var(--red)}
+.hourly-slot-time{display:block;font-size:11px;color:var(--muted);white-space:nowrap}
+.hourly-slot-count{display:block;font-size:20px;font-weight:800;margin-top:5px}
+.hourly-slot-sub{font-size:10px;color:var(--muted)}
+.hourly-zero{font-size:12px;color:var(--muted);padding:12px 3px}
+.hourly-summary{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.hourly-summary strong{color:var(--ink)}
+.yard-list-tools{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.yard-list-tools .btn{height:34px}
+.yard-compact-table{min-width:650px}
+.yard-compact-table th,.yard-compact-table td{padding:10px 12px}
+.yard-compact-table td{font-size:12px}
+.yard-list-pager{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px}
+.yard-list-pager button{height:34px}
+@media(max-width:900px){.hourly-grid{grid-template-columns:1fr}}
+@media(max-width:460px){.hourly-slots{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* FIFO exclusivo: duas áreas objetivas, sem indicadores de pátio duplicados */
+.fifo-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0}
+.fifo-tile{border:1px solid var(--line);background:var(--soft);border-radius:12px;padding:15px}
+.fifo-tile strong{display:block;font-size:29px;margin-top:7px}
+.fifo-toolbar{display:flex;gap:12px;align-items:end;justify-content:space-between;flex-wrap:wrap;margin:12px 0}
+.fifo-toolbar .field{min-width:180px;max-width:260px;flex:1}
+.fifo-compact-table{min-width:730px}
+.fifo-compact-table td{padding:10px 12px}
+.fifo-section-note{margin-top:10px;color:var(--muted);font-size:12px}
+.fifo-table-title{margin:0;font-size:16px}
+@media(max-width:700px){.fifo-tiles{grid-template-columns:1fr 1fr}.fifo-toolbar .field{min-width:150px}}
+</style>
+</head>
+
+<body>
+
+<aside class="sidebar" id="sidebar">
+  <div class="logo">
+    <div class="jt">J&T</div>
+    <div>
+      <div class="logo-name">EXPRESS</div>
+      <div class="logo-sub">SP GRU · Painel Operacional</div>
+    </div>
+  </div>
+
+  <div class="nav-list">
+    <div class="nav-caption">MÓDULOS / 功能模块</div>
+    <div id="navigation"></div>
+  </div>
+
+  <div class="sidebar-footer">
+    <div><span class="live"></span><strong id="liveLabel">Atualização automática</strong></div>
+    <div id="updatedAt">Aguardando atualização</div>
+    <div>Versão 2.2 · DashMaster</div>
+    <div>Feito por Marcelo Wesley</div>
+  </div>
+</aside>
+
+<div class="workspace">
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">J&T EXPRESS • SP GRU</div>
+      <h1>
+        <button class="btn mobile-menu" onclick="toggleMenu()">☰</button>
+        <span id="pageTitle">Portaria</span>
+      </h1>
+      <div class="subtitle" id="pageSubtitle">
+        Controle de pátio integrado ao Feishu
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="themeBtn" onclick="toggleTheme()" title="Alternar tema">☀</button>
+
+      <div class="lang">
+        <button id="ptBtn" class="active" onclick="setLanguage('pt')">PT-BR</button>
+        <button id="zhBtn" onclick="setLanguage('zh')">中文</button>
+      </div>
+
+      <button class="btn" id="refreshBtn" onclick="refreshAll()">Atualizar</button>
+      <button class="btn primary" id="downloadBtn" onclick="downloadCSV()">Baixar relatório</button>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <section id="expedition">
+
+      <div class="card">
+        <div class="section-label" id="periodLabel">PERÍODO / 日期</div>
+        <h2 id="programTitle">Programação por destino e horário</h2>
+
+        <div class="filters">
+          <div class="field">
+            <label id="typeLabel">INDICADOR / 指标</label>
+            <select id="expType" onchange="changeType(this.value)">
+              <option value="PRINCIPAL">Expedição SC</option>
+              <option value="SECUNDARIA">Expedição DC</option>
+            </select>
+          </div>
+          <div class="field">
+            <label id="startLabel">DATA INICIAL / 开始日期</label>
+            <input id="dateStart" readonly>
+          </div>
+          <div class="field">
+            <label id="endLabel">DATA FINAL / 结束日期</label>
+            <input id="dateEnd" readonly>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button class="btn primary" style="width:100%" onclick="renderExpedition()" id="applyBtn">Aplicar</button>
+          </div>
+        </div>
+
+        <div class="chips">
+          <button class="chip active" id="chipToday" onclick="selectDay('today')">Hoje</button>
+          <button class="chip" id="chipTomorrow" onclick="selectDay('tomorrow')">Amanhã</button>
+          <button class="chip" id="chipBoth" onclick="selectDay('both')">Hoje + amanhã</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-label" id="filterLabel">FILTROS / 筛选</div>
+        <h2 id="filterTitle">Refine os resultados</h2>
+
+        <div class="filters">
+          <div class="field">
+            <label id="searchLabel">PESQUISAR / 搜索</label>
+            <input id="expSearch" oninput="renderExpedition()" placeholder="Viagem, destino ou placa">
+          </div>
+          <div class="field">
+            <label id="destinationLabel">DESTINO / 目的地</label>
+            <select id="expDestination" onchange="renderExpedition()"></select>
+          </div>
+          <div class="field">
+            <label id="statusLabel">STATUS / 状态</label>
+            <select id="expStatus" onchange="renderExpedition()"></select>
+          </div>
+          <div class="field">
+            <label id="shiftLabel">TURNO / 班次</label>
+            <select id="expShift" onchange="renderExpedition()">
+              <option value="">Todos / 全部</option>
+              <option value="T1">T1 · 06:00–13:59</option>
+              <option value="T2">T2 · 14:00–21:59</option>
+              <option value="T3">T3 · 22:00–05:59</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="filters" style="margin-top:12px">
+          <div class="field"><label>STATUS PÁTIO / 场内状态</label><select id="expPatioStatus" onchange="renderExpedition()"></select></div>
+          <div class="field"><label>DOCA / 月台</label><select id="expDock" onchange="renderExpedition()"></select></div>
+          <div class="field"><label>STATUS DOCA / 月台状态</label><select id="expDockStatus" onchange="renderExpedition()"></select></div>
+          <div class="field"><label>VÍNCULO COM PÁTIO / 场内匹配</label><select id="expPatioMatch" onchange="renderExpedition()"><option value="">Todos / 全部</option><option value="yes">Vinculado / 已匹配</option><option value="no">Não vinculado / 未匹配</option></select></div>
+        </div>
+        <div class="message" id="expMessage" style="margin-top:13px">
+          Consultando programação no Feishu...
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="card stat stat-main">
+          <div class="stat-label" id="tripsLabel">VIAGENS PROGRAMADAS</div>
+          <div class="stat-value" id="tripCount">—</div>
+          <div class="stat-help" id="tripHelp">Hoje</div>
+        </div>
+
+        <div class="card stat">
+          <div class="stat-label" id="packagesLabel">PACOTES PROGRAMADOS</div>
+          <div class="stat-value" id="packageCount">—</div>
+        </div>
+
+        <div class="card stat">
+          <div class="stat-label" id="destinationsLabel">DESTINOS ATENDIDOS</div>
+          <div class="stat-value" id="destinationCount">—</div>
+        </div>
+
+        <div class="card stat">
+          <div class="stat-label" id="completedLabel">VIAGENS CONCLUÍDAS</div>
+          <div class="stat-value" id="completedCount">—</div>
+        </div>
+
+        <div class="card stat">
+          <div class="stat-label" id="remainingLabel">DEMAIS STATUS</div>
+          <div class="stat-value" id="pendingCount">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Controle de Pátio das viagens / 发运车辆场内信息</h2>
+        <p class="muted">Vínculo por placa entre programação e PATIO_VEICULO. Status e docas são consultados no Feishu; sem correspondência, exibimos “Não vinculado”.</p>
+        <div class="patio-strip" id="expPatioStats"></div>
+      </div>
+      <div class="card chart-card">
+        <div class="chart-head">
+          <div>
+            <h2 id="chartTitle">Destinos com mais viagens / 车次最多的目的地</h2>
+            <div class="muted" id="chartSubtitle">Ranking dos 10 principais destinos</div>
+          </div>
+          <div>
+            <button class="btn" onclick="setChartMode('chart')" id="chartBtn">Gráfico</button>
+            <button class="btn" onclick="setChartMode('table')" id="chartTableBtn">Tabela</button>
+          </div>
+        </div>
+
+        <div class="chart-area" id="chartArea">
+          <canvas id="destChart"></canvas>
+        </div>
+        <div class="chart-fallback" id="chartFallback"></div>
+
+        <div class="mini-summary">
+          <div><span id="totalChartLabel">Total geral</span><strong id="chartTotal">—</strong></div>
+          <div><span id="maxChartLabel">Maior</span><strong id="chartMax">—</strong></div>
+          <div><span id="minChartLabel">Menor</span><strong id="chartMin">—</strong></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 id="destCardsTitle">Programação detalhada por destino / 按目的地详细排班</h2>
+        <p class="muted" id="periodCaption">Somente hoje e amanhã.</p>
+      </div>
+
+      <div class="destinations" id="destinationGrid"></div>
+
+      <div class="card">
+        <div class="table-tools">
+          <div>
+            <h2 id="tableTitle">Informações gerais / 综合信息</h2>
+            <span class="muted" id="tableCount"></span>
+          </div>
+          <input id="tableSearch" oninput="renderTable()" placeholder="Localizar na tabela">
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead id="tableHead"></thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button class="btn" onclick="changePage(-1)">‹</button>
+          <span id="pageNumber"></span>
+          <button class="btn" onclick="changePage(1)">›</button>
+        </div>
+      </div>
+
+    </section>
+
+
+    <section id="fifoSection" class="hidden">
+      <div class="card">
+        <div class="section-label">FILA FIFO / 先进先出</div>
+        <h2>Fila de recebimento e descargas concluídas</h2>
+        <p class="muted">Somente veículos aguardando doca e veículos com fim de descarga registrado. Fonte: Feishu · somente leitura.</p>
+      </div>
+      <div class="card">
+        <div class="table-tools"><div>
+          <h2>Fila FIFO — aguardando doca</h2>
+          <p class="muted">Ordem pelo CHECK_IN mais antigo. Inclui BOLSÃO VAZIO e AGUARDANDO DOCA sem CHECK_OUT.</p>
+        </div></div>
+        <div class="fifo-toolbar">
+          <div class="field"><label for="fifoType">TIPO DE VEÍCULO / 车型</label><select id="fifoType" onchange="renderFIFO()"></select></div>
+          <div class="field"><label for="fifoSearch">PESQUISAR PLACA / 搜索</label><input id="fifoSearch" type="search" placeholder="Placa, motorista, transportadora" oninput="renderFIFO()"></div>
+        </div>
+        <div class="fifo-tiles" id="fifoWaitingStats"></div>
+        <div class="table-wrap"><table class="fifo-compact-table">
+          <thead><tr><th>Posição</th><th>Placa</th><th>Tipo</th><th>Check-in</th><th>Espera</th><th>Prioridade</th><th>Status</th></tr></thead>
+          <tbody id="fifoWaitingBody"></tbody>
+        </table></div>
+        <div class="pagination"><button class="btn" id="fifoWaitPrev" onclick="fifoChangePage('waiting',-1)">‹ Anterior</button><span id="fifoWaitPage"></span><button class="btn" id="fifoWaitNext" onclick="fifoChangePage('waiting',1)">Próxima ›</button></div>
+      </div>
+      <div class="card">
+        <div class="table-tools"><div>
+          <h2>Veículos descarregados no dia / 当日卸货完成车辆</h2>
+          <p class="muted">Somente registros com FIM_DESCARGA ou FIM_OPERACAO. Turno responsável determinado pela HORA_DOCAGEM.</p>
+        </div></div>
+        <div class="fifo-toolbar">
+          <div class="field"><label for="fifoDoneDay">DIA OPERACIONAL / 运营日期</label><input id="fifoDoneDay" type="date" onchange="renderFIFO()"></div>
+          <div class="field"><label for="fifoDoneShift">TURNO DA DOCAGEM / 靠台班次</label><select id="fifoDoneShift" onchange="renderFIFO()"><option value="">Todos</option><option value="T1">T1 · 06:00–13:59</option><option value="T2">T2 · 14:00–21:59</option><option value="T3">T3 · 22:00–05:59</option></select></div>
+        </div>
+        <div class="fifo-tiles" id="fifoDoneStats"></div>
+        <div class="table-wrap"><table class="fifo-compact-table">
+          <thead><tr><th>Placa</th><th>Tipo</th><th>Doca</th><th>Docagem</th><th>Fim descarga</th><th>Tempo na doca</th><th>Turno responsável</th></tr></thead>
+          <tbody id="fifoDoneBody"></tbody>
+        </table></div>
+        <div class="pagination"><button class="btn" id="fifoDonePrev" onclick="fifoChangePage('done',-1)">‹ Anterior</button><span id="fifoDonePage"></span><button class="btn" id="fifoDoneNext" onclick="fifoChangePage('done',1)">Próxima ›</button></div>
+        <p class="fifo-section-note" id="fifoDoneNote"></p>
+      </div>
+    </section>
+
+    <section id="general" class="hidden">
+      <div class="card">
+        <div class="section-label" id="yardSectionLabel">CONTROLE DE PÁTIO / 场地管理</div>
+        <h2 id="yardSectionTitle">Visão operacional da Portaria</h2>
+        <p class="muted" id="yardIntro">Acompanhamento dos veículos cadastrados no Feishu. Somente consulta.</p>
+      </div>
+      <div class="stats yard-stats" id="generalStats"></div>
+      <div class="card">
+        <div class="table-tools">
+          <div>
+            <h2>Veículos docados por turno / 各班次靠台车辆</h2>
+            <p class="muted">Contagem pelo horário de docagem (HORA_DOCAGEM). Indica entrada na doca, não confirmação de descarga concluída. T3 atravessa a meia-noite.</p>
+          </div>
+          <div class="field" style="min-width:190px">
+            <label for="unloadDay">DIA OPERACIONAL / 运营日期</label>
+            <input id="unloadDay" type="date" onchange="renderVehicles()" aria-label="Data operacional das docagens">
+          </div>
+        </div>
+        <div class="unload-grid" id="unloadStats"></div>
+        <p class="muted" id="unloadNote"></p>
+      </div>
+      <div class="card" id="yardHourlySection">
+        <div class="hourly-head">
+          <div>
+            <h2>Veículos por horário de docagem / 每小时靠台车辆</h2>
+            <p class="muted">Contagem por HORA_DOCAGEM, agrupada pelo turno responsável. Clique no horário para filtrar a relação abaixo.</p>
+          </div>
+          <button class="btn" type="button" onclick="clearYardHour()">Limpar horário</button>
+        </div>
+        <div class="hourly-grid" id="yardHourlyGrid"></div>
+        <div class="hourly-summary" id="yardHourlySummary"></div>
+      </div>
+      <div class="card">
+        <div class="table-tools"><div><h2>Eficiência de descarregamento por doca / 月台卸货效率</h2>
+          <p class="muted">Tempo de ocupação apurado entre HORA_DOCAGEM e FIM_DESCARGA/FIM_OPERACAO, quando houver registro válido. Clique em uma doca para ver os veículos.</p></div></div>
+        <div class="unload-grid" id="dockEfficiencySummary"></div>
+        <div class="table-wrap" style="margin-top:14px"><table>
+          <thead><tr><th>Doca</th><th>Docados</th><th>Concluídos</th><th>Sem conclusão</th><th>Tempo médio</th><th>Carretas</th><th>Tempo médio carreta</th><th>T1</th><th>T2</th><th>T3</th></tr></thead>
+          <tbody id="dockEfficiencyBody"></tbody>
+        </table></div>
+        <p class="muted" id="dockEfficiencyNote"></p>
+      </div>
+      <div class="card">
+        <div class="table-tools"><div><h2>Descarregamento de carretas / 挂车卸货</h2>
+          <p class="muted">Análise exclusiva dos registros TIPO_VEICULO = CARRETA, atribuídos ao turno da docagem.</p></div></div>
+        <div class="unload-grid" id="trailerEfficiencySummary"></div>
+        <div class="table-wrap" style="margin-top:14px"><table>
+          <thead><tr><th>Turno</th><th>Carretas docadas</th><th>Concluídas</th><th>Sem conclusão</th><th>Tempo médio</th><th>Taxa de conclusão registrada</th></tr></thead>
+          <tbody id="trailerEfficiencyBody"></tbody>
+        </table></div>
+        <p class="muted">Não é uma meta de produtividade: sem quantidade descarregada ou capacidade por carreta, o indicador mostra tempo e conclusão registrada, não pacotes por hora.</p>
+      </div>
+      <div class="card">
+        <div class="table-tools">
+          <div>
+            <h2 id="generalTitle">Relação de veículos — clique na linha para detalhes</h2>
+            <p class="muted" id="generalMessage">Consultando Feishu...</p>
+          </div>
+        </div>
+        <div class="filters yard-filters">
+          <div class="field"><label>TIPO DE VEÍCULO / 车型</label><select id="vehicleType" onchange="renderVehicles()"></select></div>
+          <div class="field"><label>TURNO RESPONSÁVEL PELA DOCAGEM / 靠台责任班次</label><select id="vehicleShift" onchange="renderVehicles()"><option value="">Todos / 全部</option><option value="T1">T1 · 06:00–13:59</option><option value="T2">T2 · 14:00–21:59</option><option value="T3">T3 · 22:00–05:59</option></select></div>
+          <div class="field"><label>DIA OPERACIONAL DA DOCAGEM / 靠台运营日期</label><input id="vehicleDay" type="date" onchange="renderVehicles()" title="Em branco: todo o histórico"></div>
+          <div class="field"><label>CONTROLE / 车辆范围</label><select id="vehicleScope" onchange="renderVehicles()"><option value="">Todos os registros</option><option value="active">Somente no pátio</option><option value="carretas">Carretas no pátio</option></select></div>
+        </div>
+        <p class="muted" style="margin:9px 0 12px">Filtros aplicados aos indicadores, lista e docagens. Turno responsável definido somente por HORA_DOCAGEM, nunca pelo check-in. Data em branco = histórico completo na lista; indicadores de eficiência usam o dia operacional selecionado no quadro.</p>
+        <div class="filters yard-filters">
+          <div class="field"><label id="vehicleSearchLabel">PESQUISAR / 搜索</label>
+            <input id="vehicleSearch" type="search" oninput="renderVehicles()" placeholder="🔎 Pesquisar placa, motorista ou transportadora"></div>
+          <div class="field"><label id="vehicleStatusLabel">STATUS / 状态</label>
+            <select id="vehicleStatus" onchange="renderVehicles()"></select></div>
+          <div class="field"><label id="vehicleFlowLabel">FLUXO / 流程</label>
+            <select id="vehicleFlow" onchange="renderVehicles()"></select></div>
+          <div class="field"><label id="vehicleSortLabel">ORDENAÇÃO / 排序</label>
+            <select id="vehicleOrder" onchange="renderVehicles()">
+              <option value="old">Check-in mais antigo</option>
+              <option value="new">Check-in mais recente</option>
+            </select></div>
+        </div>
+      </div>
+      <div class="card" id="yardListSection">
+        <div class="yard-list-tools">
+          <div>
+            <h2 id="yardTableTitle">Veículos por horário</h2>
+            <p class="muted" id="yardTableCount"></p>
+          </div>
+          <div class="field" style="min-width:200px">
+            <label for="yardListPeriod">PERÍODO DA LISTA / 列表范围</label>
+            <select id="yardListPeriod" onchange="yardSelectedHour='';yardListPage=1;renderVehicles()">
+              <option value="day">Dia operacional selecionado</option>
+              <option value="all">Histórico completo</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="yard-compact-table">
+          <thead><tr>
+            <th>Placa<small>车牌</small></th>
+            <th>Tipo<small>车型</small></th>
+            <th>Doca<small>月台</small></th>
+            <th>Docagem<small>靠台时间</small></th>
+            <th>Turno<small>责任班次</small></th>
+            <th>Status<small>状态</small></th>
+            <th>Tempo em doca<small>月台时长</small></th>
+          </tr></thead>
+          <tbody id="vehicleBody"></tbody>
+        </table></div>
+        <div class="yard-list-pager">
+          <button class="btn" id="yardPrevPage" onclick="changeYardListPage(-1)">‹ Anterior</button>
+          <span class="muted" id="yardPageInfo">Página 1</span>
+          <button class="btn" id="yardNextPage" onclick="changeYardListPage(1)">Próxima ›</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="dockSection" class="hidden">
+      <div class="card">
+        <h2>Controle de Docas / 月台管理</h2>
+        <p class="muted" id="dockSummary">Consultando Feishu...</p>
+        <div class="docks" id="dockGrid"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+<div id="yardDetailOverlay" class="yard-modal-backdrop hidden" role="presentation" onclick="if(event.target===this)closeYardDetail()">
+  <div class="yard-modal" role="dialog" aria-modal="true" aria-labelledby="yardDetailTitle">
+    <div class="yard-modal-head">
+      <div><h2 id="yardDetailTitle">Detalhamento</h2><div class="muted" id="yardDetailSummary"></div></div>
+      <button class="btn" onclick="closeYardDetail()" aria-label="Fechar">✕ Fechar</button>
+    </div>
+    <div class="yard-modal-tools">
+      <input id="yardDetailSearch" type="search" placeholder="Pesquisar placa, tipo, motorista, doca..." oninput="renderYardDetailRows()">
+      <button class="btn primary" onclick="downloadYardDetailCSV()">Exportar lista CSV</button>
+    </div>
+    <div class="yard-modal-scroll"><div class="table-wrap"><table><thead id="yardDetailHead"></thead><tbody id="yardDetailBody"></tbody></table></div></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+let current = 'Portaria';
+let lang = 'pt';
+let day = 'today';
+let trips = [];
+let vehicles = [];
+let docks = [];
+let visible = [];
+let chart = null;
+let chartMode = 'chart';
+let page = 1;
+let sortKey = 'saida';
+let sortAsc = true;
+let loadingExp = false;
+let yardDetail = {title:'',rows:[],kind:'vehicle'};
+let yardCurrentList = [];
+let yardListPage = 1;
+const YARD_PAGE_SIZE = 12;
+let yardSelectedHour = '';
+let yardListSignature = '';
+
+
+const NAV = [
+  ['Portaria','门卫登记','▤'],
+  ['Fila FIFO','先进先出队列','≡'],
+  ['Controle de Docas','月台管理','▦'],
+  ['Expedição DC','配送中心发运','⇢'],
+  ['Expedição SC','分拨中心发运','⇢']
+];
+
+const WORDS = {
+  pt: {
+    all:'Todos',
+    refresh:'Atualizar',
+    download:'Baixar relatório',
+    today:'Hoje',
+    tomorrow:'Amanhã',
+    both:'Hoje + amanhã',
+    trips:'Viagens programadas',
+    packages:'Pacotes programados',
+    destinations:'Destinos atendidos',
+    completed:'Viagens concluídas',
+    remaining:'Demais status',
+    period:'Programação',
+    pkg:'pacotes',
+    trip:'viagens',
+    plate:'Placa cavalo',
+    trailer:'Placa carreta / eixo',
+    driver:'Motorista',
+    carrier:'Transportadora',
+    seal:'Lacre',
+    noData:'Nenhuma viagem encontrada para os filtros.',
+    rows:'registros',
+    page:'Página'
+  },
+  zh: {
+    all:'全部',
+    refresh:'刷新',
+    download:'下载报表',
+    today:'今天',
+    tomorrow:'明天',
+    both:'今天 + 明天',
+    trips:'计划车次',
+    packages:'计划包裹数',
+    destinations:'目的地数量',
+    completed:'已完成车次',
+    remaining:'其他状态',
+    period:'排班日期',
+    pkg:'包裹',
+    trip:'车次',
+    plate:'牵引车车牌',
+    trailer:'挂车车牌',
+    driver:'司机',
+    carrier:'承运商',
+    seal:'封签',
+    noData:'没有符合筛选条件的车次。',
+    rows:'条记录',
+    page:'页'
+  }
+};
+
+function tr(key) {
+  return WORDS[lang][key] || key;
+}
+
+function norm(v) {
+  return String(v == null ? '' : v)
+    .trim().toUpperCase().normalize('NFD')
+    .replace(/[̀-ͯ]/g,'');
+}
+
+function ms(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (Number.isFinite(n) && String(v).trim() !== '')
+    return n < 1e11 ? n * 1000 : n;
+  const d = Date.parse(v);
+  return Number.isFinite(d) ? d : null;
+}
+
+function dateParts(t) {
+  const parts = {};
+  new Intl.DateTimeFormat('en-US', {
+    timeZone:'America/Sao_Paulo',
+    year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',hourCycle:'h23'
+  }).formatToParts(new Date(t)).forEach(p => parts[p.type] = p.value);
+  return parts;
+}
+
+function dateKey(t) {
+  const p = dateParts(t);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function fmtDate(t) {
+  if (t == null) return '—';
+  const p = dateParts(t);
+  return `${p.day}/${p.month}/${p.year}`;
+}
+
+function fmtTime(t) {
+  if (t == null) return '—';
+  const p = dateParts(t);
+  return `${p.hour}:${p.minute}`;
+}
+
+function fmtFull(v) {
+  const t = ms(v);
+  return t == null ? '—' : `${fmtDate(t)} ${fmtTime(t)}`;
+}
+
+function keys() {
+  const today = dateKey(Date.now());
+  const ref = Date.parse(today + 'T12:00:00Z');
+  return {
+    today,
+    tomorrow:dateKey(ref + 86400000)
+  };
+}
+
+function nfmt(v) {
+  return (Number(v) || 0).toLocaleString('pt-BR');
+}
+
+function num(v) {
+  return Number(v) || 0;
+}
+
+function txt(id,value) {
+  $(id).textContent = String(value);
+}
+
+function el(tag,cls,value) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (value !== undefined) e.textContent = String(value);
+  return e;
+}
+
+function options(id,values,placeholder) {
+  const s = $(id);
+  const old = s.value;
+  s.replaceChildren(new Option(placeholder,''));
+  [...new Set(values.filter(Boolean))]
+    .sort((a,b) => String(a).localeCompare(String(b),'pt-BR'))
+    .forEach(v => s.add(new Option(v,v)));
+  if ([...s.options].some(o => o.value === old)) s.value = old;
+}
+
+function api(fn,success,failure) {
+  google.script.run
+    .withSuccessHandler(success)
+    .withFailureHandler(failure)[fn]();
+}
+
+function errorMessage(e) {
+  return e && e.message ? e.message : String(e);
+}
+
+function toggleMenu() {
+  $('sidebar').classList.toggle('open');
+}
+
+function navBuild() {
+  const root = $('navigation');
+  root.replaceChildren();
+  NAV.forEach(([name,zh,symbol]) => {
+    const btn = el('button','nav-item' + (current === name ? ' active' : ''));
+    const icon = el('span','nav-icon',symbol);
+    const label = el('span','nav-label');
+    label.append(
+      el('strong','',lang === 'pt' ? name : zh),
+      el('small','',lang === 'pt' ? zh : name)
+    );
+    btn.append(icon,label);
+    btn.onclick = () => switchPage(name);
+    root.append(btn);
+  });
+}
+
+function switchPage(name) {
+  current = name;
+  $('sidebar').classList.remove('open');
+  navBuild();
+
+  const exp = name.startsWith('Expedição');
+  $('expedition').classList.toggle('hidden',!exp);
+  $('general').classList.toggle('hidden',exp || name === 'Controle de Docas' || name === 'Fila FIFO');
+  $('fifoSection').classList.toggle('hidden',name !== 'Fila FIFO');
+  $('dockSection').classList.toggle('hidden',name !== 'Controle de Docas');
+
+  const nav = NAV.find(x => x[0] === name);
+  txt('pageTitle',lang === 'pt' ? name : nav[1]);
+  txt('pageSubtitle',lang === 'pt'
+    ? 'Gestão operacional integrada ao Feishu · Somente consulta'
+    : '飞书集成运营管理 · 只读');
+
+  $('expType').value = name === 'Expedição DC'
+    ? 'SECUNDARIA' : 'PRINCIPAL';
+
+  if (exp) {
+    if (!trips.length) loadExpedition();
+    else renderExpedition();
+  } else if (name === 'Controle de Docas') {
+    renderDocks();
+  } else {
+    renderVehicles();
+  }
+}
+
+function changeType(type) {
+  switchPage(type === 'SECUNDARIA' ? 'Expedição DC' : 'Expedição SC');
+}
+
+function toggleTheme() {
+  const root = document.documentElement;
+  const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  root.dataset.theme = next;
+  try { localStorage.setItem('jt-theme',next); } catch(e) {}
+  updateThemeIcon();
+  renderChart();
+}
+
+function updateThemeIcon() {
+  txt('themeBtn',document.documentElement.dataset.theme === 'dark' ? '☀' : '☾');
+}
+
+function setLanguage(value) {
+  lang = value;
+  $('ptBtn').classList.toggle('active',lang === 'pt');
+  $('zhBtn').classList.toggle('active',lang === 'zh');
+
+  txt('refreshBtn',tr('refresh'));
+  txt('downloadBtn',tr('download'));
+  txt('chipToday',tr('today'));
+  txt('chipTomorrow',tr('tomorrow'));
+  txt('chipBoth',tr('both'));
+  txt('tripsLabel',tr('trips'));
+  txt('packagesLabel',tr('packages'));
+  txt('destinationsLabel',tr('destinations'));
+  txt('completedLabel',tr('completed'));
+  txt('remainingLabel',tr('remaining'));
+  txt('programTitle',lang === 'pt'
+    ? 'Programação por destino e horário'
+    : '按目的地和时间查看发运计划');
+  txt('filterTitle',lang === 'pt' ? 'Refine os resultados' : '筛选结果');
+  txt('chartTitle',lang === 'pt'
+    ? 'Destinos com mais viagens / 车次最多的目的地'
+    : '车次最多的目的地 / Destinos com mais viagens');
+  txt('destCardsTitle',lang === 'pt'
+    ? 'Programação detalhada por destino / 按目的地详细排班'
+    : '按目的地详细排班 / Programação detalhada por destino');
+  txt('tableTitle',lang === 'pt'
+    ? 'Informações gerais / 综合信息'
+    : '综合信息 / Informações gerais');
+
+  navBuild();
+  switchPage(current);
+}
+
+function selectDay(mode) {
+  day = mode;
+  page = 1;
+  renderExpedition();
+}
+
+function shift(v) {
+  const t = ms(v.saida);
+  if (t == null) return '';
+  const hour = Number(dateParts(t).hour);
+  if (hour >= 6 && hour < 14) return 'T1';
+  if (hour >= 14 && hour < 22) return 'T2';
+  return 'T3';
+}
+
+function loadExpedition() {
+  if (loadingExp) return;
+  loadingExp = true;
+  txt('expMessage','Consultando programação no Feishu...');
+  $('expMessage').className = 'message';
+
+  api('buscarProgramacaoExpedicao',r => {
+    trips = Array.isArray(r) ? r : [];
+    loadingExp = false;
+    txt('expMessage',
+      `Feishu conectado · ${nfmt(trips.length)} viagens consultadas`);
+    renderExpedition();
+    updateTime();
+  },e => {
+    loadingExp = false;
+    $('expMessage').className = 'message error';
+    txt('expMessage','Erro na consulta: ' + errorMessage(e));
+  });
+}
+
+function loadVehicles() {
+  api('buscarVeiculosPatio',r => {
+    vehicles = Array.isArray(r) ? r : [];
+    if (!current.startsWith('Expedição')) renderVehicles(); else renderExpedition();
+    updateTime();
+  },e => { console.error(errorMessage(e)); txt('generalMessage','Erro ao consultar pátio: '+errorMessage(e)); });
+}
+
+function loadDocks() {
+  api('buscarDocasFeishu',r => {
+    docks = Array.isArray(r.docas) ? r.docas : [];
+    if (current === 'Controle de Docas') renderDocks(); else if (current.startsWith('Expedição')) renderExpedition();
+    else if (!current.startsWith('Expedição')) renderVehicles();
+    updateTime();
+  },e => console.error(errorMessage(e)));
+}
+
+function refreshAll() {
+  loadExpedition();
+  loadVehicles();
+  loadDocks();
+}
+
+function updateTime() {
+  txt('updatedAt','Atualizado às ' +
+    new Date().toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'}));
+}
+
+function currentBase() {
+  const k = keys();
+  const allowed = day === 'both'
+    ? [k.today,k.tomorrow]
+    : [day === 'today' ? k.today : k.tomorrow];
+
+  const type = current === 'Expedição DC' ? 'SECUNDARIA' : 'PRINCIPAL';
+
+  return trips.filter(v => {
+    const t = ms(v.saida);
+    return norm(v.tipo) === type &&
+      t !== null &&
+      allowed.includes(operationalDate(t));
+  });
+}
+
+// Correspondência conservadora: somente placa exata, ignorando pontuação.
+function plateKey(v) { return norm(v).replace(/[^A-Z0-9]/g,''); }
+function patioForTrip(v) {
+  const plates = [plateKey(v.placaCavalo),plateKey(v.placaCarreta)].filter(x=>x.length>=6);
+  if (!plates.length) return null;
+  const matches = vehicles.filter(x=>plates.includes(plateKey(x.placa)));
+  if (!matches.length) return null;
+  // Priorizar registro ainda ativo; depois check-in mais recente.
+  return [...matches].sort((a,b)=>{
+    const done = x => ['LIBERADO','SAIU','FINALIZADO','CANCELADO'].includes(norm(x.status));
+    return Number(done(a))-Number(done(b)) || (ms(b.checkin)||0)-(ms(a.checkin)||0);
+  })[0];
+}
+function dockForPatio(p) {
+  if (!p) return null;
+  const ref = norm(p.doca);
+  const plate = plateKey(p.placa);
+  const ids = Array.isArray(p.docaIds) ? p.docaIds : [];
+  return docks.find(d => ids.includes(d.id) ||
+    (Array.isArray(d.veiculoIds) && d.veiculoIds.includes(p.id)) ||
+    (ref && (norm(d.doca)===ref || norm(d.id)===ref)) ||
+    (plate && plateKey(d.veiculo)===plate)) || null;
+}
+function tripPatio(v) {
+  const p=patioForTrip(v), d=dockForPatio(p);
+  return {p,d,doca:d?.doca || p?.doca || '',status:p?.status || '',docaStatus:d?.status || ''};
+}
+function renderPatioStats() {
+  const root=$('expPatioStats'); root.replaceChildren();
+  const linked=visible.map(v=>tripPatio(v));
+  const metrics=[
+    [lang==='pt'?'Com registro no pátio':'场内已匹配',linked.filter(x=>x.p).length],
+    [lang==='pt'?'Aguardando doca':'等待月台',linked.filter(x=>yardStatus(x.status)==='AGUARDANDO DOCA').length],
+    [lang==='pt'?'Em doca':'已分配月台',linked.filter(x=>x.p && x.doca).length],
+    [lang==='pt'?'Sem vínculo por placa':'未匹配车牌',linked.filter(x=>!x.p).length]
+  ];
+  metrics.forEach(([label,value],i)=>{const cell=el('div');cell.append(el('span','muted',label),el('strong','',nfmt(value)));
+    const filtered=visible.filter(v=>{const x=tripPatio(v);return i===0?!!x.p:i===1?yardStatus(x.status)==='AGUARDANDO DOCA':i===2?!!(x.p&&x.doca):!x.p;});
+    makeClickable(cell,()=>openYardDetail(label,filtered,'trip'));root.append(cell);});
+}
+function renderExpedition() {
+  if (!current.startsWith('Expedição')) return;
+
+  const k = keys();
+  const from = day === 'tomorrow' ? k.tomorrow : k.today;
+  const to = day === 'today' ? k.today : k.tomorrow;
+
+  txt('dateStart',fmtDate(Date.parse(from + 'T12:00:00Z')));
+  txt('dateEnd',fmtDate(Date.parse(to + 'T12:00:00Z')));
+
+  ['today','tomorrow','both'].forEach(d => {
+    const id = d === 'today' ? 'chipToday'
+      : d === 'tomorrow' ? 'chipTomorrow' : 'chipBoth';
+    $(id).classList.toggle('active',day === d);
+  });
+
+  const base = currentBase();
+  options('expDestination',base.map(v => v.destino),tr('all'));
+  options('expStatus',base.map(v => v.status),tr('all'));
+
+  const q = norm($('expSearch').value);
+  const dst = $('expDestination').value;
+  const status = $('expStatus').value;
+  const turno = $('expShift').value;
+  options('expPatioStatus',base.map(v=>tripPatio(v).status),tr('all'));
+  options('expDock',base.map(v=>tripPatio(v).doca),tr('all'));
+  options('expDockStatus',base.map(v=>tripPatio(v).docaStatus),tr('all'));
+  const patioStatus=$('expPatioStatus').value;
+  const dockFilter=$('expDock').value;
+  const dockStatusFilter=$('expDockStatus').value;
+  const matchFilter=$('expPatioMatch').value;
+
+  visible = base.filter(v =>
+    (!dst || v.destino === dst) &&
+    (!status || v.status === status) &&
+    (!turno || shift(v) === turno) &&
+    (!patioStatus || tripPatio(v).status===patioStatus) &&
+    (!dockFilter || tripPatio(v).doca===dockFilter) &&
+    (!dockStatusFilter || tripPatio(v).docaStatus===dockStatusFilter) &&
+    (!matchFilter || Boolean(tripPatio(v).p)===(matchFilter==='yes')) &&
+    (!q || norm([
+      v.viagem,v.destino,v.placaCavalo,v.placaCarreta,
+      v.motorista,v.transportadora
+    ].join(' ')).includes(q))
+  ).sort((a,b) => (ms(a.saida) ?? Infinity) - (ms(b.saida) ?? Infinity));
+
+  const groups = grouped();
+  const completed = visible.filter(v =>
+    ['CONCLUIDO','FINALIZADO','SAIU'].includes(norm(v.status))
+  ).length;
+
+  txt('tripCount',nfmt(visible.length));
+  txt('packageCount',nfmt(visible.reduce((s,v) => s + num(v.pacotes),0)));
+  txt('destinationCount',groups.size);
+  txt('completedCount',completed);
+  txt('pendingCount',visible.length - completed);
+  [['tripCount',visible],['packageCount',visible],['destinationCount',visible],['completedCount',visible.filter(v=>['CONCLUIDO','FINALIZADO','SAIU'].includes(norm(v.status)))],['pendingCount',visible.filter(v=>!['CONCLUIDO','FINALIZADO','SAIU'].includes(norm(v.status)))]].forEach(([id,rows])=>{
+    const card=$(id).closest('.stat');if(card)makeClickable(card,()=>openYardDetail($(id).previousElementSibling?.textContent||'Viagens',rows,'trip'));
+  });
+  txt('tripHelp',tr('period') + ': ' +
+    fmtDate(Date.parse(from + 'T12:00:00Z')) +
+    (from !== to ? ' – ' + fmtDate(Date.parse(to + 'T12:00:00Z')) : ''));
+
+  txt('periodCaption',lang === 'pt'
+    ? 'Viagens agrupadas por destino e ordenadas pelo horário de saída.'
+    : '按目的地分组，并按计划发车时间排序。');
+
+  renderPatioStats();
+  renderDestinations(groups);
+  renderChart(groups);
+  renderTable();
+}
+
+function grouped() {
+  const g = new Map();
+  visible.forEach(v => {
+    const dest = v.destino || 'SEM DESTINO';
+    if (!g.has(dest)) g.set(dest,[]);
+    g.get(dest).push(v);
+  });
+  return g;
+}
+
+function statusClass(value) {
+  const s = norm(value);
+  if (['CONCLUIDO','FINALIZADO','SAIU'].includes(s)) return 'good';
+  if (s === 'CANCELADO') return 'bad';
+  if (['PLANEJADO','EM TRANSITO','CARREGANDO'].includes(s)) return 'warn';
+  return '';
+}
+
+function renderDestinations(groups) {
+  const grid = $('destinationGrid');
+  grid.replaceChildren();
+
+  if (!visible.length) {
+    grid.append(el('div','card empty',tr('noData')));
+    return;
+  }
+
+  const entries = [...groups.entries()].sort((a,b) =>
+    (ms(a[1][0].saida) ?? Infinity) -
+    (ms(b[1][0].saida) ?? Infinity) ||
+    a[0].localeCompare(b[0],'pt-BR')
+  );
+
+  entries.forEach(([dest,list]) => {
+    const card = el('article','card destination');
+    const head = el('div','destination-head');
+    const top = el('div','destination-top');
+
+    top.append(
+      el('h3','',dest),
+      el('span','count',list.length + ' ' + tr('trip'))
+    );
+
+    head.append(top,el('small','',
+      nfmt(list.reduce((s,v) => s + num(v.pacotes),0)) +
+      ' ' + tr('pkg')));
+
+    card.append(head);
+    const listEl = el('div','trip-list');
+
+    list.forEach(v => {
+      const t = ms(v.saida);
+      const trip = el('div','trip');
+      const top = el('div','trip-top');
+      const left = el('div');
+      const right = el('div');
+
+      left.append(
+        el('div','trip-time',fmtTime(t)),
+        el('div','trip-date',fmtDate(t))
+      );
+
+      right.append(
+        el('div','trip-id',v.viagem || '—'),
+        el('span','tag ' + statusClass(v.status),v.status || '—')
+      );
+
+      top.append(left,right);
+      trip.append(top);
+
+      const details = el('div','trip-details');
+
+      [
+        [tr('plate'),v.placaCavalo],
+        [tr('trailer'),v.placaCarreta],
+        [tr('driver'),v.motorista],
+        [tr('carrier'),v.transportadora],
+        [tr('pkg'),nfmt(v.pacotes)],
+        [tr('seal'),v.lacre]
+      ].forEach(([label,value]) => {
+        const cell = el('div');
+        cell.append(
+          el('div','detail-label',label),
+          el('div','detail-value',
+            value == null || value === '' ? '—' : value)
+        );
+        details.append(cell);
+      });
+
+      trip.append(details);
+      const {p,d,doca,status,docaStatus}=tripPatio(v);
+      const patio=el('div','patio-panel');
+      patio.append(el('div','patio-panel-title',lang==='pt'?'CONTROLE DE PÁTIO / 场内管理':'场内管理 / CONTROLE DE PÁTIO'));
+      if (!p) {
+        patio.append(el('div','patio-alert',lang==='pt'?'Não vinculado a um registro do pátio pela placa.':'车牌未匹配到场内记录。'));
+      } else {
+        const fields=el('div','trip-details');
+        [
+          ['Doca / 月台',doca],
+          ['Status pátio / 场内状态',status],
+          ['Status doca / 月台状态',docaStatus],
+          ['Fluxo / 流程',p.fluxo],
+          ['Check-in / 入场',fmtFull(p.checkin)],
+          ['Início docagem / 靠台时间',fmtFull(p.horaDocagem)],
+          ['Prioridade / 优先级',p.prioridade],
+          ['Placa no pátio / 场内车牌',p.placa],
+          ['Tipo de veículo / 车型',p.tipoVeiculo],
+          ['Registrado por / 登记人',p.registradoPor],
+          ['Atualizado por / 更新人',p.atualizadoPor]
+        ].forEach(([label,value])=>{const cell=el('div');cell.append(el('div','detail-label',label),el('div','detail-value',value||'—'));fields.append(cell);});
+        patio.append(fields);
+      }
+      trip.append(patio);
+      makeClickable(trip,()=>openYardDetail('Viagem '+(v.viagem||'—'),[v],'trip'));
+      listEl.append(trip);
+    });
+
+    card.append(listEl);
+    makeClickable(head,()=>openYardDetail('Destino: '+name,list,'trip'));
+    grid.append(card);
+  });
+}
+
+function setChartMode(mode) {
+  chartMode = mode;
+  renderChart();
+}
+
+function renderChart(groups) {
+  groups = groups || grouped();
+
+  const ranks = [...groups.entries()]
+    .map(([name,list]) => ({name,count:list.length}))
+    .sort((a,b) => b.count - a.count)
+    .slice(0,10);
+
+  txt('chartTotal',visible.length);
+  txt('chartMax',ranks.length
+    ? ranks[0].name + ' · ' + ranks[0].count : '—');
+  txt('chartMin',ranks.length
+    ? ranks[ranks.length-1].name + ' · ' +
+      ranks[ranks.length-1].count : '—');
+
+  if (chart) {
+    chart.destroy();
+    chart = null;
+  }
+
+  const fallback = $('chartFallback');
+  fallback.replaceChildren();
+
+  const table = el('table');
+  const tbody = el('tbody');
+
+  ranks.forEach(item => {
+    const row = el('tr');
+    row.append(
+      el('td','',item.name),
+      el('td','num',item.count)
+    );
+    makeClickable(row,()=>openYardDetail('Destino: '+item.name,visible.filter(v=>(v.destino||'SEM DESTINO')===item.name),'trip'));
+    tbody.append(row);
+  });
+
+  table.append(tbody);
+  fallback.append(table);
+
+  const useChart =
+    chartMode === 'chart' &&
+    typeof Chart !== 'undefined' &&
+    ranks.length > 0;
+
+  $('chartArea').classList.toggle('hidden',!useChart);
+  fallback.style.display = useChart ? 'none' : 'block';
+
+  if (!useChart) return;
+
+  const styles = getComputedStyle(document.documentElement);
+  const ink = styles.getPropertyValue('--ink').trim();
+  const line = styles.getPropertyValue('--line').trim();
+
+  chart = new Chart($('destChart'),{
+    type:'bar',
+    data:{
+      labels:ranks.map(x => x.name),
+      datasets:[{
+        label:tr('trip'),
+        data:ranks.map(x => x.count),
+        backgroundColor:'#E60012',
+        borderRadius:5
+      }]
+    },
+    options:{
+      indexAxis:'y',
+      responsive:true,
+      maintainAspectRatio:false,
+      onClick:(event,elements)=>{if(elements.length){const idx=elements[0].index;const item=ranks[idx];if(item)openYardDetail('Destino: '+item.name,visible.filter(v=>(v.destino||'SEM DESTINO')===item.name),'trip');}},
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{
+          beginAtZero:true,
+          ticks:{color:ink,precision:0},
+          grid:{color:line}
+        },
+        y:{
+          ticks:{color:ink},
+          grid:{display:false}
+        }
+      }
+    }
+  });
+}
+
+const COLS = [
+  ['viagem','ID Viagem','车次编号'],
+  ['destino','Destino','目的地'],
+  ['saida','Saída programada','计划发车'],
+  ['placaCavalo','Placa cavalo','牵引车车牌'],
+  ['placaCarreta','Placa carreta','挂车车牌'],
+  ['transportadora','Transportadora','承运商'],
+  ['status','Status','状态'],
+  ['pacotes','Pacotes','包裹数'],
+  ['docaPatio','Doca','月台'],
+  ['statusPatio','Status pátio','场内状态'],
+  ['statusDoca','Status doca','月台状态'],
+  ['checkinPatio','Check-in','入场时间'],
+  ['docagemPatio','Início docagem','靠台时间'],
+  ['prioridadePatio','Prioridade','优先级']
+];
+
+function renderTable() {
+  const head = $('tableHead');
+  const body = $('tableBody');
+  head.replaceChildren();
+  body.replaceChildren();
+
+  const headerRow = el('tr');
+
+  COLS.forEach(([key,pt,zh]) => {
+    const th = el('th');
+    th.append(
+      document.createTextNode(lang === 'pt' ? pt : zh),
+      el('small','',lang === 'pt' ? zh : pt)
+    );
+    th.onclick = () => {
+      if (sortKey === key) sortAsc = !sortAsc;
+      else {sortKey = key;sortAsc = true;}
+      page = 1;
+      renderTable();
+    };
+    headerRow.append(th);
+  });
+
+  head.append(headerRow);
+
+  const q = norm($('tableSearch').value);
+
+  let rows = visible.map(v=>{
+    const x=tripPatio(v);
+    return {...v,docaPatio:x.doca,statusPatio:x.status,statusDoca:x.docaStatus,
+      checkinPatio:x.p?.checkin,docagemPatio:x.p?.horaDocagem,prioridadePatio:x.p?.prioridade};
+  }).filter(v =>
+    !q || norm(COLS.map(c => v[c[0]]).join(' ')).includes(q)
+  );
+
+  rows = [...rows].sort((a,b) => {
+    const av = ['saida','checkinPatio','docagemPatio'].includes(sortKey) ? ms(a[sortKey])
+      : sortKey === 'pacotes' ? num(a.pacotes)
+      : norm(a[sortKey]);
+    const bv = ['saida','checkinPatio','docagemPatio'].includes(sortKey) ? ms(b[sortKey])
+      : sortKey === 'pacotes' ? num(b.pacotes)
+      : norm(b[sortKey]);
+    return (av > bv ? 1 : av < bv ? -1 : 0) *
+      (sortAsc ? 1 : -1);
+  });
+
+  const pages = Math.max(1,Math.ceil(rows.length / 50));
+  page = Math.min(Math.max(1,page),pages);
+
+  rows.slice((page-1)*50,page*50).forEach(v => {
+    const row = el('tr');
+    COLS.forEach(([key]) => {
+      const value = ['saida','checkinPatio','docagemPatio'].includes(key) ? fmtFull(v[key])
+        : key === 'pacotes' ? nfmt(v.pacotes)
+        : v[key] || '—';
+      row.append(el('td',key === 'pacotes' ? 'num' : '',value));
+    });
+    makeClickable(row,()=>openYardDetail('Viagem '+(v.viagem||'—'),[v],'trip'));
+    body.append(row);
+  });
+
+  txt('tableCount',rows.length + ' ' + tr('rows'));
+  txt('pageNumber',tr('page') + ' ' + page + ' / ' + pages);
+}
+
+function changePage(delta) {
+  page += delta;
+  renderTable();
+}
+
+// Normaliza ícones/emoji e acentos que podem vir dos rótulos do Feishu.
+function yardStatus(v) {
+  return norm(v).replace(/^[^A-Z0-9]+/,'').replace(/\s+/g,' ').trim();
+}
+function isReleasedYard(v) {
+  return ['LIBERADO','LIBERADA','SAIU','FINALIZADO','FINALIZADA','CANCELADO','CANCELADA','CHECK OUT','CHECKOUT'].includes(yardStatus(v.status));
+}
+function isActiveYard(v) {
+  // Um check-out registrado tem prioridade sobre um status que ficou desatualizado.
+  return !isReleasedYard(v) && ms(v.checkout) == null;
+}
+function waitMinutes(v) {
+  const start = ms(v.checkin);
+  if (start == null) return null;
+  const end = ms(v.horaDocagem) || ms(v.checkout) || ms(v.saidaPatio) || Date.now();
+  return Math.max(0,Math.floor((end-start)/60000));
+}
+function durationText(mins) {
+  if (mins == null || !Number.isFinite(mins)) return '—';
+  const h = Math.floor(mins/60), m = mins%60;
+  return (h ? h+'h ' : '') + m+'min';
+}
+function yardText(pt,zh) {return lang === 'pt' ? pt : zh;}
+function shiftFromTime(t) {
+  const hour = Number(dateParts(t).hour);
+  return hour >= 6 && hour < 14 ? 'T1' : hour >= 14 && hour < 22 ? 'T2' : 'T3';
+}
+function operationalDate(t) {
+  const p = dateParts(t);
+  const d = dateKey(t);
+  if (Number(p.hour) >= 6) return d;
+  // 00h–05h59 pertencem ao T3 do dia anterior.
+  return dateKey(Date.parse(d+'T12:00:00Z')-86400000);
+}
+function operationalSelection() {
+  return $('unloadDay').value || keys().today;
+}
+function vehicleShift(v) {
+  const t=ms(v.checkin);
+  return t==null ? '' : shiftFromTime(t);
+}
+function filteredYardBase() {
+  const type=norm($('vehicleType').value);
+  const turno=$('vehicleShift').value;
+  const dayKey=$('vehicleDay').value;
+  const scope=$('vehicleScope').value;
+  return vehicles.filter(v=>
+    (!type || norm(v.tipoVeiculo)===type) &&
+    (!turno || assignedShift(v)===turno) &&
+    (!dayKey || (ms(v.horaDocagem)!=null && operationalDate(ms(v.horaDocagem))===dayKey)) &&
+    (!scope || (scope==='active' && isActiveYard(v)) ||
+      (scope==='carretas' && isActiveYard(v) && norm(v.tipoVeiculo)==='CARRETA')));
+}
+function makeClickable(node,fn) {
+  node.classList.add('clickable'); node.setAttribute('role','button');node.tabIndex=0;
+  node.onclick=fn;
+  node.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fn();}};
+  return node;
+}
+function openYardDetail(title,records,kind='vehicle') {
+  yardDetail={title,rows:[...records],kind};
+  txt('yardDetailTitle',title);
+  $('yardDetailSearch').value='';
+  $('yardDetailOverlay').classList.remove('hidden');
+  document.body.style.overflow='hidden';
+  renderYardDetailRows();
+  $('yardDetailSearch').focus();
+}
+function closeYardDetail() {
+  $('yardDetailOverlay').classList.add('hidden');
+  document.body.style.overflow='';
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape' && !$('yardDetailOverlay').classList.contains('hidden'))closeYardDetail();});
+function yardDetailColumns(kind) {
+  if(kind==='dock')return [
+    ['doca','Doca'],['status','Status doca'],['veiculo','Veículo vinculado']];
+  if(kind==='trip')return [
+    ['viagem','Viagem'],['tipo','Expedição'],['destino','Destino'],['saida','Saída prevista'],['placaCavalo','Placa cavalo'],['placaCarreta','Placa carreta'],['status','Status'],['pacotes','Pacotes']];
+  return [['placa','Placa'],['tipoVeiculo','Tipo veículo'],['motorista','Motorista'],
+    ['transportadora','Transportadora'],['fluxo','Fluxo'],['status','Status'],
+    ['doca','Doca'],['checkin','Check-in'],['turno','Turno check-in'],
+    ['horaDocagem','Hora docagem'],['turnoDocagem','Turno responsável'],['tempoDoca','Tempo em doca'],
+    ['fimDescarga','Fim descarga'],['checkout','Check-out'],['idViagem','ID viagem']];
+}
+function yardDetailValue(v,key,kind) {
+  if(['checkin','horaDocagem','fimDescarga','checkout','saida'].includes(key))return fmtFull(v[key]);
+  if(key==='turno')return vehicleShift(v)||'—';
+  if(key==='turnoDocagem')return assignedShift(v)||'—';
+  if(key==='tempoDoca')return durationText(dockElapsed(v));
+  if(key==='doca'&&kind==='vehicle')return dockForPatio(v)?.doca||v.doca||'—';
+  if(key==='pacotes')return nfmt(v.pacotes);
+  return v[key]==null||v[key]===''?'—':String(v[key]);
+}
+function yardDetailFiltered() {
+  const q=norm($('yardDetailSearch').value);
+  const cols=yardDetailColumns(yardDetail.kind);
+  return yardDetail.rows.filter(v=>!q||norm(cols.map(([key])=>yardDetailValue(v,key,yardDetail.kind)).join(' ')).includes(q));
+}
+function renderYardDetailRows() {
+  const cols=yardDetailColumns(yardDetail.kind);
+  const list=yardDetailFiltered();
+  txt('yardDetailSummary',`${nfmt(list.length)} de ${nfmt(yardDetail.rows.length)} registros · Fonte: Feishu (somente leitura)`);
+  const head=$('yardDetailHead'),body=$('yardDetailBody');
+  head.replaceChildren();body.replaceChildren();
+  const h=el('tr');cols.forEach(([,label])=>h.append(el('th','',label)));head.append(h);
+  list.forEach(v=>{const r=el('tr');cols.forEach(([key])=>r.append(el('td','',yardDetailValue(v,key,yardDetail.kind))));body.append(r);});
+  if(!list.length){const r=el('tr'),cell=el('td','empty','Nenhum registro encontrado.');cell.colSpan=cols.length;r.append(cell);body.append(r);}
+}
+function downloadYardDetailCSV() {
+  const cols=yardDetailColumns(yardDetail.kind);
+  const rows=yardDetailFiltered();
+  const csv='﻿'+[cols.map(c=>c[1]),...rows.map(v=>cols.map(([key])=>yardDetailValue(v,key,yardDetail.kind)))].map(r=>r.map(csvCell).join(';')).join('\r\n');
+  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download='SC_GRU_Detalhamento_'+keys().today+'.csv';document.body.append(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function renderUnloadStats() {
+  const root=$('unloadStats');root.replaceChildren();
+  const selected=operationalSelection();
+  const base=filteredYardBase();
+  // A data operacional de docagem é independente do filtro de data do check-in.
+  const valid=base.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO' && ms(v.horaDocagem)!=null);
+  const countable=valid.filter(v=>operationalDate(ms(v.horaDocagem))===selected);
+  const groups={T1:[],T2:[],T3:[]};
+  countable.forEach(v=>groups[shiftFromTime(ms(v.horaDocagem))].push(v));
+  const tiles=[
+    ['T1','06:00–13:59',groups.T1],
+    ['T2','14:00–21:59',groups.T2],
+    ['T3','22:00–05:59 do dia seguinte',groups.T3],
+    [yardText('TOTAL DOCADOS','已靠台总数'),yardText('Entradas em doca','靠台次数'),countable]
+  ];
+  tiles.forEach(([label,hours,list])=>{
+    const cell=el('div','unload-tile');
+    cell.append(el('div','stat-label',label),el('strong','',nfmt(list.length)),el('small','',hours));
+    makeClickable(cell,()=>openYardDetail(`${label} · Docagem ${selected.split('-').reverse().join('/')}`,list));
+    root.append(cell);
+  });
+  txt('unloadNote',yardText(
+    `Dia operacional da docagem: ${selected.split('-').reverse().join('/')} · ${countable.length} registros. Clique em qualquer turno para ver as placas. T3 começa às 22h do dia selecionado e termina às 05h59 do dia seguinte. Docagem não comprova descarga concluída.`,
+    `靠台运营日：${selected} · ${countable.length} 条记录。点击班次查看车牌。T3从当天22:00到次日05:59；靠台不等于卸货完成。`));
+}
+function dockMinutes(v) {
+  const start=ms(v.horaDocagem), end=ms(v.fimDescarga);
+  if(start==null || end==null || end<start)return null;
+  return Math.floor((end-start)/60000);
+}
+function dockElapsed(v) {
+  const start=ms(v.horaDocagem);
+  if(start==null)return null;
+  const done=dockMinutes(v);
+  if(done!=null)return done;
+  // CHECK_OUT não confirma fim da descarga. Não mostrar veículo já liberado como ainda em doca.
+  if(!isActiveYard(v))return null;
+  return Math.max(0,Math.floor((Date.now()-start)/60000));
+}
+function assignedShift(v) {
+  const t=ms(v.horaDocagem);
+  return t==null?'':shiftFromTime(t);
+}
+function dockName(v) {
+  return String(dockForPatio(v)?.doca||v.doca||'').trim()||'NÃO INFORMADA';
+}
+function meanDockDuration(rows) {
+  const valid=rows.map(dockMinutes).filter(n=>n!=null);
+  return valid.length?Math.round(valid.reduce((a,b)=>a+b,0)/valid.length):null;
+}
+function makeEfficiencyTile(root,label,value,subtitle,rows) {
+  const cell=el('div','unload-tile');
+  cell.append(el('div','stat-label',label),el('strong','',value),el('small','',subtitle));
+  makeClickable(cell,()=>openYardDetail(label,rows));root.append(cell);
+}
+function renderDockEfficiency() {
+  const selected=operationalSelection();
+  // O turno e a data são SEMPRE derivados da docagem, nunca do check-in.
+  const base=vehicles.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO' &&
+    ms(v.horaDocagem)!=null && operationalDate(ms(v.horaDocagem))===selected &&
+    (!norm($('vehicleType').value)||norm(v.tipoVeiculo)===norm($('vehicleType').value)) &&
+    (!$('vehicleShift').value||assignedShift(v)===$('vehicleShift').value) &&
+    (!$('vehicleStatus').value||v.status===$('vehicleStatus').value) &&
+    (!$('vehicleFlow').value||v.fluxo===$('vehicleFlow').value) &&
+    (!$('vehicleScope').value || ($('vehicleScope').value==='active' && isActiveYard(v)) ||
+      ($('vehicleScope').value==='carretas' && isActiveYard(v) && norm(v.tipoVeiculo)==='CARRETA')));
+  const trailers=base.filter(v=>norm(v.tipoVeiculo)==='CARRETA');
+  const done=base.filter(v=>dockMinutes(v)!=null);
+  const doneTrailers=trailers.filter(v=>dockMinutes(v)!=null);
+  const activeDock=base.filter(v=>isActiveYard(v)&&dockMinutes(v)==null);
+  const root=$('dockEfficiencySummary');root.replaceChildren();
+  makeEfficiencyTile(root,yardText('Docagens','靠台车辆'),nfmt(base.length),'Recebimento · data selecionada',base);
+  makeEfficiencyTile(root,yardText('Conclusões registradas','已登记完成'),nfmt(done.length),'Fim de descarga válido',done);
+  makeEfficiencyTile(root,yardText('Tempo médio em doca','平均靠台时长'),durationText(meanDockDuration(done)),'Somente registros concluídos',done);
+  makeEfficiencyTile(root,yardText('Em doca sem conclusão','在台未完成'),nfmt(activeDock.length),'Ainda sem check-out',activeDock);
+  const grouped=new Map();base.forEach(v=>{const k=dockName(v);if(!grouped.has(k))grouped.set(k,[]);grouped.get(k).push(v);});
+  const body=$('dockEfficiencyBody');body.replaceChildren();
+  [...grouped].sort((a,b)=>a[0].localeCompare(b[0],'pt-BR',{numeric:true})).forEach(([name,rows])=>{
+    const tr=el('tr');const completed=rows.filter(v=>dockMinutes(v)!=null);
+    const cars=rows.filter(v=>norm(v.tipoVeiculo)==='CARRETA');
+    [name,rows.length,completed.length,rows.length-completed.length,durationText(meanDockDuration(completed)),cars.length,
+      durationText(meanDockDuration(cars)),...['T1','T2','T3'].map(t=>rows.filter(v=>assignedShift(v)===t).length)]
+      .forEach(x=>tr.append(el('td','',String(x))));
+    makeClickable(tr,()=>openYardDetail('Doca '+name+' · '+selected,rows));body.append(tr);
+  });
+  if(!grouped.size){const tr=el('tr'),td=el('td','empty','Nenhuma docagem para os filtros.');td.colSpan=10;tr.append(td);body.append(tr);}
+  txt('dockEfficiencyNote',`${nfmt(base.length)} docagens · ${nfmt(done.length)} com conclusão válida · ${nfmt(base.length-done.length)} sem conclusão registrada. Sem horário de fim, não calculamos tempo final nem tratamos CHECK_OUT como conclusão.`);
+  const sum=$('trailerEfficiencySummary');sum.replaceChildren();
+  makeEfficiencyTile(sum,'CARRETAS DOCADAS',nfmt(trailers.length),'TIPO_VEICULO = CARRETA',trailers);
+  makeEfficiencyTile(sum,'CARRETAS CONCLUÍDAS',nfmt(doneTrailers.length),'Com fim registrado',doneTrailers);
+  makeEfficiencyTile(sum,'TEMPO MÉDIO · CARRETA',durationText(meanDockDuration(doneTrailers)),'Docagem → fim de descarga',doneTrailers);
+  makeEfficiencyTile(sum,'CARRETAS SEM FIM REGISTRADO',nfmt(trailers.length-doneTrailers.length),'Inclui registros já liberados sem fim',trailers.filter(v=>dockMinutes(v)==null));
+  const trailerBody=$('trailerEfficiencyBody');trailerBody.replaceChildren();
+  ['T1','T2','T3'].forEach(shift=>{
+    const rows=trailers.filter(v=>assignedShift(v)===shift),completed=rows.filter(v=>dockMinutes(v)!=null);
+    const tr=el('tr');
+    [shift,rows.length,completed.length,rows.length-completed.length,durationText(meanDockDuration(completed)),
+      rows.length?(100*completed.length/rows.length).toFixed(1).replace('.',',')+'%':'—']
+      .forEach(x=>tr.append(el('td','',String(x))));
+    makeClickable(tr,()=>openYardDetail('Carretas '+shift+' · '+selected,rows));trailerBody.append(tr);
+  });
+}
+function yardHourKey(v) {
+  const t=ms(v.horaDocagem);
+  if(t==null)return '';
+  const p=dateParts(t);
+  return operationalDate(t)+'|'+p.hour;
+}
+function yardHourlyRows() {
+  const selected=operationalSelection();
+  const type=norm($('vehicleType').value);
+  const turno=$('vehicleShift').value;
+  const status=$('vehicleStatus').value;
+  const flow=$('vehicleFlow').value;
+  const scope=$('vehicleScope').value;
+  return vehicles.filter(v=>{
+    const t=ms(v.horaDocagem);
+    return t!=null && operationalDate(t)===selected &&
+      yardStatus(v.fluxo)==='RECEBIMENTO' &&
+      (!type||norm(v.tipoVeiculo)===type) &&
+      (!turno||assignedShift(v)===turno) &&
+      (!status||v.status===status) &&
+      (!flow||v.fluxo===flow) &&
+      (!scope||(scope==='active'&&isActiveYard(v))||
+        (scope==='carretas'&&isActiveYard(v)&&norm(v.tipoVeiculo)==='CARRETA'));
+  });
+}
+function renderYardHourly() {
+  const root=$('yardHourlyGrid');root.replaceChildren();
+  const selected=operationalSelection();
+  const rows=yardHourlyRows();
+  const groups=[
+    {name:'T1',hours:[6,7,8,9,10,11,12,13]},
+    {name:'T2',hours:[14,15,16,17,18,19,20,21]},
+    {name:'T3',hours:[22,23,0,1,2,3,4,5]}
+  ];
+  const counts=new Map();
+  rows.forEach(v=>counts.set(yardHourKey(v),(counts.get(yardHourKey(v))||0)+1));
+  // Ao trocar a data, remover a seleção horária anterior.
+  if(yardSelectedHour && !yardSelectedHour.startsWith(selected+'|'))yardSelectedHour='';
+  groups.forEach(group=>{
+    const panel=el('div','hourly-shift');
+    const head=el('div','hourly-shift-head');
+    const total=group.hours.reduce((a,h)=>a+(counts.get(selected+'|'+String(h).padStart(2,'0'))||0),0);
+    head.append(el('strong','',group.name),el('span','',nfmt(total)+' docagens'));
+    panel.append(head);
+    const slots=el('div','hourly-slots');
+    const occupied=group.hours.filter(h=>counts.get(selected+'|'+String(h).padStart(2,'0'))>0);
+    if(!occupied.length){slots.append(el('div','hourly-zero','Nenhuma docagem registrada'));}
+    occupied.forEach(h=>{
+      const hour=String(h).padStart(2,'0');
+      const key=selected+'|'+hour;
+      const count=counts.get(key)||0;
+      const button=el('button','hourly-slot'+(yardSelectedHour===key?' active':''));
+      button.type='button';
+      button.setAttribute('aria-pressed',yardSelectedHour===key?'true':'false');
+      button.title='Ver '+count+' veículos docados entre '+hour+':00 e '+hour+':59';
+      button.append(el('span','hourly-slot-time',hour+':00–'+hour+':59'),
+        el('span','hourly-slot-count',nfmt(count)),
+        el('span','hourly-slot-sub',count===1?'veículo':'veículos'));
+      button.onclick=()=>{
+        yardSelectedHour=yardSelectedHour===key?'':key;
+        yardListPage=1;
+        $('yardListPeriod').value='day';
+        renderVehicles();
+        $('yardListSection').scrollIntoView({behavior:'smooth',block:'start'});
+      };
+      slots.append(button);
+    });
+    panel.append(slots);root.append(panel);
+  });
+  const summary=$('yardHourlySummary');summary.replaceChildren();
+  summary.append(el('strong','',nfmt(rows.length)+' veículos docados no dia operacional '+selected.split('-').reverse().join('/')));
+  summary.append(el('span','muted',yardSelectedHour?'· Horário selecionado: '+yardSelectedHour.split('|')[1]+':00–'+yardSelectedHour.split('|')[1]+':59':'· Clique em uma faixa para ver as placas. Horários sem docagem ficam ocultos.'));
+}
+function clearYardHour() {
+  yardSelectedHour='';yardListPage=1;renderVehicles();
+}
+function changeYardListPage(delta) {
+  yardListPage+=delta;
+  renderVehicles();
+  $('yardListSection').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// Aba FIFO: não reutiliza os indicadores de Portaria, evitando informações repetidas.
+let fifoWaitPage=1, fifoDonePage=1;
+let fifoWaitSignature='', fifoDoneSignature='';
+let fifoCurrentWaiting=[], fifoCurrentDone=[];
+const FIFO_PAGE_SIZE=12;
+function fifoChangePage(kind,delta){
+  if(kind==='waiting')fifoWaitPage+=delta;else fifoDonePage+=delta;
+  renderFIFO();
+}
+function fifoMetric(root,label,value,detail,records){
+  const tile=el('div','fifo-tile');
+  tile.append(el('div','stat-label',label),el('strong','',value),el('div','muted',detail));
+  makeClickable(tile,()=>openYardDetail(label,records));root.append(tile);
+}
+function fifoWaitMinutes(v){
+  const start=ms(v.checkin);
+  return start==null?null:Math.max(0,Math.floor((Date.now()-start)/60000));
+}
+function fifoFillTable(bodyId,rows,kind,page){
+  const body=$(bodyId);body.replaceChildren();
+  const start=(page-1)*FIFO_PAGE_SIZE;
+  rows.slice(start,start+FIFO_PAGE_SIZE).forEach((v,i)=>{
+    const r=el('tr');
+    const cells=kind==='waiting'
+      ?[start+i+1,v.placa||'—',v.tipoVeiculo||'—',fmtFull(v.checkin),durationText(fifoWaitMinutes(v)),v.prioridade||'—',v.status||'—']
+      :[v.placa||'—',v.tipoVeiculo||'—',dockName(v),fmtFull(v.horaDocagem),fmtFull(v.fimDescarga),durationText(dockMinutes(v)),assignedShift(v)||'—'];
+    cells.forEach(x=>r.append(el('td','',String(x))));
+    makeClickable(r,()=>openYardDetail('Veículo '+(v.placa||'—'),[v]));body.append(r);
+  });
+  if(!rows.length){const r=el('tr');const td=el('td','empty',kind==='waiting'?'Nenhum veículo com check-in e status AGUARDANDO DOCA, sem docagem e sem check-out.':'Nenhuma conclusão de descarga registrada para esta data e filtros.');td.colSpan=7;r.append(td);body.append(r);}
+}
+function fifoSetPager(prefix,page,count){
+  const pages=Math.max(1,Math.ceil(count/FIFO_PAGE_SIZE));
+  txt(prefix+'Page',`Página ${page} de ${pages} · ${nfmt(count)} veículos`);
+  $(prefix+'Prev').disabled=page<=1;
+  $(prefix+'Next').disabled=page>=pages;
+}
+function renderFIFO(){
+  if(current!=='Fila FIFO')return;
+  options('fifoType',['CARRETA','TRUCK','TOCO','VUC','HR','CARRO DE PASSEIO','VAN','3/4',...vehicles.map(v=>v.tipoVeiculo)],tr('all'));
+  const type=norm($('fifoType').value);
+  const query=norm($('fifoSearch').value);
+  const matches=v=>(!type||norm(v.tipoVeiculo)===type)&&(!query||norm([v.placa,v.motorista,v.transportadora,v.idViagem].join(' ')).includes(query));
+  // FIFO estrito: check-in realizado, AGUARDANDO DOCA, sem docagem nem check-out.
+  // BOLSÃO VAZIO, EM DOCA, LIBERADO e outros status nunca entram nesta fila.
+  const waiting=vehicles.filter(v=>isActiveYard(v)&&
+    yardStatus(v.fluxo)==='RECEBIMENTO'&&
+    yardStatus(v.status)==='AGUARDANDO DOCA'&&
+    ms(v.checkin)!=null&&ms(v.horaDocagem)==null&&matches(v));
+  waiting.sort((a,b)=>(ms(a.checkin)??Infinity)-(ms(b.checkin)??Infinity));
+  fifoCurrentWaiting=waiting;
+  const wsig=[type,query,vehicles.length].join('|');
+  if(wsig!==fifoWaitSignature){fifoWaitSignature=wsig;fifoWaitPage=1;}
+  fifoWaitPage=Math.min(Math.max(1,fifoWaitPage),Math.max(1,Math.ceil(waiting.length/FIFO_PAGE_SIZE)));
+  const waits=waiting.map(fifoWaitMinutes).filter(v=>v!=null);
+  const avg=waits.length?Math.round(waits.reduce((a,b)=>a+b,0)/waits.length):null;
+  const wstats=$('fifoWaitingStats');wstats.replaceChildren();
+  fifoMetric(wstats,'Aguardando doca',nfmt(waiting.length),'Status AGUARDANDO DOCA',waiting);
+  fifoMetric(wstats,'Carretas aguardando',nfmt(waiting.filter(v=>norm(v.tipoVeiculo)==='CARRETA').length),'Somente tipo CARRETA',waiting.filter(v=>norm(v.tipoVeiculo)==='CARRETA'));
+  fifoMetric(wstats,'Espera média',durationText(avg),'Check-in até o momento da consulta',waiting);
+  fifoFillTable('fifoWaitingBody',waiting,'waiting',fifoWaitPage);
+  fifoSetPager('fifoWait',fifoWaitPage,waiting.length);
+
+  const selected=$('fifoDoneDay').value||keys().today;
+  const turno=$('fifoDoneShift').value;
+  // Dia operacional da CONCLUSÃO: entre 00h e 05h59 conta no dia anterior.
+  const completed=vehicles.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO'&&ms(v.fimDescarga)!=null&&
+    operationalDate(ms(v.fimDescarga))===selected&&(!turno||assignedShift(v)===turno)&&matches(v));
+  completed.sort((a,b)=>(ms(a.fimDescarga)??0)-(ms(b.fimDescarga)??0));
+  fifoCurrentDone=completed;
+  const dsig=[selected,turno,type,query,vehicles.length].join('|');
+  if(dsig!==fifoDoneSignature){fifoDoneSignature=dsig;fifoDonePage=1;}
+  fifoDonePage=Math.min(Math.max(1,fifoDonePage),Math.max(1,Math.ceil(completed.length/FIFO_PAGE_SIZE)));
+  const dstats=$('fifoDoneStats');dstats.replaceChildren();
+  fifoMetric(dstats,'Descargas concluídas',nfmt(completed.length),'Fim de descarga registrado',completed);
+  const trailer=completed.filter(v=>norm(v.tipoVeiculo)==='CARRETA');
+  fifoMetric(dstats,'Carretas concluídas',nfmt(trailer.length),'Tipo CARRETA',trailer);
+  const timed=completed.map(dockMinutes).filter(v=>v!=null);
+  fifoMetric(dstats,'Tempo médio doca → fim',durationText(timed.length?Math.round(timed.reduce((a,b)=>a+b,0)/timed.length):null),'Somente horários válidos',completed.filter(v=>dockMinutes(v)!=null));
+  fifoFillTable('fifoDoneBody',completed,'done',fifoDonePage);
+  fifoSetPager('fifoDone',fifoDonePage,completed.length);
+  const anyFinished=vehicles.some(v=>ms(v.fimDescarga)!=null);
+  txt('fifoDoneNote',anyFinished
+    ?'Data selecionada: '+selected.split('-').reverse().join('/')+'. T3 da data inclui 00h–05h59 do dia seguinte. Turno responsável = turno da docagem, não do check-in.'
+    :'Atenção: nenhum registro consultado contém FIM_DESCARGA/FIM_OPERACAO. CHECK_OUT ou LIBERADO não são usados como prova de descarga. Preencha o horário de conclusão no Feishu para exibir veículos aqui.');
+}
+
+function renderVehicles() {
+  if (current.startsWith('Expedição') || current === 'Controle de Docas') return;
+  if (current === 'Fila FIFO') { renderFIFO(); return; }
+  const fifo = false;
+  options('vehicleType',['CARRETA','TRUCK','TOCO','VUC','HR','CARRO DE PASSEIO','VAN','3/4',...vehicles.map(v=>v.tipoVeiculo)],tr('all'));
+  options('vehicleStatus',vehicles.map(v=>v.status),tr('all'));
+  options('vehicleFlow',vehicles.map(v=>v.fluxo),tr('all'));
+  const base=filteredYardBase();
+  const active=base.filter(isActiveYard);
+  const waiting=active.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO' && yardStatus(v.status)==='AGUARDANDO DOCA');
+  const unloading=base.filter(v=>yardStatus(v.status)==='DESCARREGANDO');
+  const inDock=base.filter(v=>yardStatus(v.status)==='EM DOCA');
+  const loading=base.filter(v=>yardStatus(v.status)==='CARREGANDO');
+  const emptyBay=base.filter(v=>yardStatus(v.status)==='BOLSAO VAZIO');
+  const released=base.filter(v=>isReleasedYard(v)||ms(v.checkout)!=null);
+  const linked=base.filter(v=>dockForPatio(v));
+  const carretas=active.filter(v=>norm(v.tipoVeiculo)==='CARRETA');
+  const carretasPendentes=carretas.filter(v=>ms(v.fimDescarga)==null);
+  const knownWaits=waiting.map(waitMinutes).filter(x=>x!=null);
+  const avgWait=knownWaits.length?Math.round(knownWaits.reduce((a,b)=>a+b,0)/knownWaits.length):null;
+  const freeDocks=docks.filter(d=>yardStatus(d.status)==='LIVRE');
+  const busyDocks=docks.filter(d=>yardStatus(d.status)==='OCUPADA');
+  const stats=$('generalStats');stats.replaceChildren();
+  const currentDock=active.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO'&&ms(v.horaDocagem)!=null&&dockMinutes(v)==null);
+  const metrics=[
+    [yardText('Veículos no pátio','场内车辆'),active.length,active,'vehicle',true],
+    [yardText('Carretas no pátio','场内挂车'),carretas.length,carretas,'vehicle',false],
+    [yardText('Carretas sem fim de descarga','未登记卸货完成的挂车'),carretasPendentes.length,carretasPendentes,'vehicle',false],
+    [yardText('Aguardando doca','等待月台'),waiting.length,waiting,'vehicle',false],
+    [yardText('Em doca sem conclusão','在台未完成'),currentDock.length,currentDock,'vehicle',false],
+    [yardText('Docas ocupadas','占用月台'),docks.length?busyDocks.length:'—',busyDocks,'dock',false],
+    [yardText('Tempo médio de espera FIFO','平均等待时间'),durationText(avgWait),waiting,'vehicle',false]
+  ];
+  metrics.forEach(([label,value,records,kind,main])=>{
+    const card=el('div','card stat'+(main?' stat-main':''));
+    card.append(el('div','stat-label',label),el('div','stat-value',value));
+    if(main)card.append(el('div','stat-help',yardText('Registros não finalizados e sem CHECK_OUT','未完成且无出场时间的记录')));
+    makeClickable(card,()=>openYardDetail(label,records,kind));stats.append(card);
+  });
+  renderUnloadStats();renderDockEfficiency();renderYardHourly();
+  const q=norm($('vehicleSearch').value),st=$('vehicleStatus').value,fl=$('vehicleFlow').value;
+  let list=base.filter(v=>(!q||norm([v.placa,v.tipoVeiculo,v.motorista,v.transportadora,v.idViagem,v.destino,v.doca].join(' ')).includes(q)) && (!st||v.status===st) && (!fl||v.fluxo===fl));
+  if(fifo){
+    list=list.filter(v=>isActiveYard(v)&&yardStatus(v.fluxo)==='RECEBIMENTO'&&yardStatus(v.status)==='AGUARDANDO DOCA');
+  }else if(yardSelectedHour){
+    list=list.filter(v=>yardHourKey(v)===yardSelectedHour);
+  }else if($('yardListPeriod').value==='day'){
+    const selected=operationalSelection();
+    list=list.filter(v=>ms(v.horaDocagem)!=null&&operationalDate(ms(v.horaDocagem))===selected);
+  }
+  list.sort((a,b)=>((ms(fifo?a.checkin:a.horaDocagem)??Infinity)-(ms(fifo?b.checkin:b.horaDocagem)??Infinity))*($('vehicleOrder').value==='new'&&!fifo?-1:1));
+  yardCurrentList=list;
+  txt('yardSectionTitle',fifo?yardText('Fila FIFO — Recebimento','先进先出队列 — 收货'):yardText('Visão operacional da Portaria','门卫运营概览'));
+  txt('yardIntro',fifo?yardText('Somente check-in confirmado + status AGUARDANDO DOCA, sem docagem e sem check-out. Ordenados pelo check-in mais antigo.','等待月台车辆，按入场时间升序。'):yardText('Docagens por hora, eficiência por doca e lista compacta. Clique para consultar detalhes.','按小时靠台、月台效率和精简列表；点击查看详情。'));
+  txt('generalTitle',fifo?yardText('Fila FIFO · relação compacta','先进先出 · 精简列表'):yardText('Veículos por horário · relação compacta','按小时车辆 · 精简列表'));
+  const signature=[current,operationalSelection(),$('yardListPeriod').value,yardSelectedHour,$('vehicleType').value,$('vehicleShift').value,$('vehicleDay').value,$('vehicleScope').value,$('vehicleStatus').value,$('vehicleFlow').value,$('vehicleSearch').value,$('vehicleOrder').value].join('|');
+  if(signature!==yardListSignature){yardListPage=1;yardListSignature=signature;}
+  const pages=Math.max(1,Math.ceil(list.length/YARD_PAGE_SIZE));
+  yardListPage=Math.max(1,Math.min(pages,yardListPage));
+  const first=(yardListPage-1)*YARD_PAGE_SIZE;
+  const showing=list.slice(first,first+YARD_PAGE_SIZE);
+  const scopeLabel=fifo?'FIFO':yardSelectedHour?'docagem '+yardSelectedHour.split('|')[1]+':00–'+yardSelectedHour.split('|')[1]+':59':$('yardListPeriod').value==='day'?'docagens do dia '+operationalSelection().split('-').reverse().join('/'):'histórico completo';
+  txt('generalMessage',`${nfmt(list.length)} registros no filtro · ${scopeLabel}. Clique na linha para ver todos os dados.`);
+  txt('yardTableCount',`${list.length?first+1:0}–${Math.min(first+YARD_PAGE_SIZE,list.length)} de ${nfmt(list.length)} veículos · ${scopeLabel}`);
+  txt('yardPageInfo',`Página ${yardListPage} de ${pages}`);
+  $('yardPrevPage').disabled=yardListPage<=1;
+  $('yardNextPage').disabled=yardListPage>=pages;
+  $('yardHourlySection').classList.toggle('hidden',fifo);
+  const body=$('vehicleBody');body.replaceChildren();
+  if(!showing.length){const row=el('tr'),td=el('td','empty','Nenhum veículo neste período. Selecione outro horário ou Histórico completo.');td.colSpan=7;row.append(td);body.append(row);}
+  showing.forEach(v=>{
+    const row=el('tr');
+    [v.placa,v.tipoVeiculo||'—',dockName(v),fmtFull(v.horaDocagem),assignedShift(v)||'—',v.status,durationText(dockElapsed(v))]
+      .forEach(value=>row.append(el('td','',value||'—')));
+    makeClickable(row,()=>openYardDetail('Veículo '+(v.placa||'—'),[v]));body.append(row);
+  });
+}
+
+function renderDocks() {
+  if (current !== 'Controle de Docas') return;
+
+  const free = docks.filter(v =>
+    yardStatus(v.status) === 'LIVRE').length;
+  const busy = docks.filter(v =>
+    yardStatus(v.status) === 'OCUPADA').length;
+
+  txt('dockSummary',
+    `Total: ${docks.length} | Livres: ${free} | ` +
+    `Ocupadas: ${busy} | Sem classificação: ` +
+    (docks.length-free-busy)
+  );
+
+  const grid = $('dockGrid');
+  grid.replaceChildren();
+
+  [...docks].sort((a,b) =>
+    String(a.doca || '').localeCompare(
+      String(b.doca || ''),'pt-BR',{numeric:true})
+  ).forEach(v => {
+    const status = norm(v.status);
+    const box = el('div','dock ' +
+      (status.includes('LIVRE') ? 'free'
+        : status.includes('OCUPADA') ? 'busy' : ''));
+
+    box.append(
+      el('h3','','DOCA ' + (v.doca || '—')),
+      el('p','',v.status || '—'),
+      el('p','','Veículo: ' + (v.veiculo || '—'))
+    );
+
+    makeClickable(box,()=>openYardDetail('Doca '+(v.doca||'—'),[v],'dock'));
+    grid.append(box);
+  });
+}
+
+function csvCell(value) {
+  const s = String(value == null ? '' : value);
+  const safe = /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+  return '"' + safe.replace(/"/g,'""') + '"';
+}
+
+function downloadCSV() {
+  let headers,rows;
+
+  if (current.startsWith('Expedição')) {
+    headers = [
+      'ID Viagem','Tipo','Destino','Saída programada',
+      'Placa cavalo','Placa carreta','Motorista',
+      'Transportadora','Status','Pacotes','Lacre','Doca','Status pátio','Status doca','Fluxo pátio','Check-in','Início docagem','Prioridade','Placa pátio'
+    ];
+    rows = visible.map(v => [
+      v.viagem,v.tipo,v.destino,fmtFull(v.saida),
+      v.placaCavalo,v.placaCarreta,v.motorista,
+      v.transportadora,v.status,v.pacotes,v.lacre,
+      tripPatio(v).doca,tripPatio(v).status,tripPatio(v).docaStatus,
+      tripPatio(v).p?.fluxo,fmtFull(tripPatio(v).p?.checkin),
+      fmtFull(tripPatio(v).p?.horaDocagem),tripPatio(v).p?.prioridade,tripPatio(v).p?.placa
+    ]);
+  } else if (current === 'Fila FIFO') {
+    headers = ['Grupo','Placa','Tipo veículo','Motorista','Transportadora','Doca','Status','Check-in','Hora docagem','Fim descarga','Turno da docagem'];
+    rows = [...fifoCurrentWaiting.map(v=>['AGUARDANDO DOCA',v.placa,v.tipoVeiculo,v.motorista,v.transportadora,dockName(v),v.status,fmtFull(v.checkin),fmtFull(v.horaDocagem),'—',assignedShift(v)]),
+      ...fifoCurrentDone.map(v=>['DESCARGA CONCLUÍDA',v.placa,v.tipoVeiculo,v.motorista,v.transportadora,dockName(v),v.status,fmtFull(v.checkin),fmtFull(v.horaDocagem),fmtFull(v.fimDescarga),assignedShift(v)])];
+  } else if (current === 'Controle de Docas') {
+    headers = ['Doca','Status','Veículo'];
+    rows = docks.map(v => [v.doca,v.status,v.veiculo]);
+  } else {
+    headers = [
+      'Placa','Tipo veículo','Turno check-in','Motorista','Transportadora','Fluxo',
+      'Doca','Status','Check-in','Início docagem','Prioridade','Status doca','Tempo espera','Posição FIFO','Fim descarga','Fonte do fim descarga','Check-out'
+    ];
+    rows = yardCurrentList.map(v => [
+      v.placa,v.tipoVeiculo,vehicleShift(v),v.motorista,v.transportadora,v.fluxo,
+      dockForPatio(v)?.doca || v.doca,v.status,fmtFull(v.checkin),fmtFull(v.horaDocagem),v.prioridade,dockForPatio(v)?.status,durationText(waitMinutes(v)),v.posicaoFIFO,fmtFull(v.fimDescarga),v.campoFimDescarga,fmtFull(v.checkout)
+    ]);
+  }
+
+  const csv = '﻿' +
+    [headers,...rows]
+      .map(row => row.map(csvCell).join(';'))
+      .join('\r\n');
+
+  const blob = new Blob([csv],{
+    type:'text/csv;charset=utf-8;'
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'SC_GRU_' +
+    current.replace(/\s+/g,'_') + '_' +
+    keys().today + '.csv';
+
+  document.body.append(a);
+  a.click();
+  a.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url),1000);
+}
+
+function init() {
+  try {
+    const saved = localStorage.getItem('jt-theme');
+    document.documentElement.dataset.theme =
+      saved === 'light' ? 'light' : 'dark';
+  } catch(e) {
+    document.documentElement.dataset.theme = 'dark';
+  }
+
+  updateThemeIcon();
+  $('unloadDay').value=dateKey(Date.parse(keys().today+'T12:00:00Z')-86400000);
+  $('fifoDoneDay').value=keys().today;
+  setLanguage('pt');
+  switchPage('Portaria');
+  loadVehicles();
+  loadDocks();
+
+  setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      refreshAll();
+    }
+  },60000);
+}
+
+document.addEventListener('DOMContentLoaded',init);
+</script>
+
+</body>
+</html>
