@@ -10,7 +10,8 @@
  *   - com várias pessoas abertas, cada tabela é consultada no Feishu no máximo uma vez a cada 30 s (cacheSegundos);
  *   - as Propriedades do script (FEISHU_APP_ID, FEISHU_APP_SECRET…) ficam em dados/propriedades.json (bash configurar.sh).
  *
- * Uso: node server.js   (no servidor da nuvem ele roda como o serviço "controle-patio": bash instalar-nuvem.sh)
+ * Uso: no Windows, dois cliques no iniciar.bat (ou: node server.js). No servidor da nuvem ele roda como o serviço
+ *      "controle-patio": bash instalar-nuvem.sh
  */
 const fs = require('fs');
 const os = require('os');
@@ -33,6 +34,8 @@ const {Auth, viaTunnel} = require('./lib/auth');
 
 let cfg;
 try { cfg = loadConfig(); } catch (e) { parar(e.message); }
+const WIN = process.platform === 'win32';
+const CMD_CONFIGURAR = WIN ? 'dois cliques no configurar.bat' : 'bash configurar.sh';
 
 function agoraSp() {
   return new Date().toLocaleString('pt-BR', {timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'}).replace(',', '');
@@ -211,7 +214,7 @@ async function tratar(req, res) {
     if (PERMITIDAS.indexOf(fn) < 0) { json(req, res, 403, {ok: false, error: 'Função não permitida: ' + fn.slice(0, 60)}); return; }
     const falta = propriedades.faltando(cfg.pastaDados);
     if (falta.length) {
-      json(req, res, 200, {ok: false, error: 'Faltam os dados do Feishu no servidor (' + falta.join(', ') + '). No servidor: bash configurar.sh'});
+      json(req, res, 200, {ok: false, error: 'Faltam os dados do Feishu (' + falta.join(', ') + '). Neste computador: ' + CMD_CONFIGURAR});
       return;
     }
     const item = await obter(fn);
@@ -247,9 +250,11 @@ servidor.listen(cfg.porta, cfg.host, () => {
   const L = ['', '  ===== Controle de Pátio | SP GRU (v' + VERSAO + ') =====', '',
     '  Painel:          http://localhost:' + cfg.porta];
   if (cfg.host !== '127.0.0.1') ipsDaRede().forEach(ip => L.push('  Na rede:         http://' + ip + ':' + cfg.porta));
-  L.push('  Link público:    ' + (cfg.linkPublico || 'bash link-publico.sh (https://NOME.ts.net' + (cfg.portaLink !== 443 ? ':' + cfg.portaLink : '') + cfg.caminho + ')'));
-  L.push('  Feishu:          ' + (falta.length ? 'FALTA configurar (' + falta.join(', ') + '): bash configurar.sh' : 'configurado'));
+  L.push('  Link público:    ' + (cfg.linkPublico || (WIN ? 'dois cliques no link-publico.bat' : 'bash link-publico.sh') +
+    ' (https://NOME.ts.net' + (cfg.portaLink !== 443 ? ':' + cfg.portaLink : '') + cfg.caminho + ')'));
+  L.push('  Feishu:          ' + (falta.length ? 'FALTA configurar (' + falta.join(', ') + '): ' + CMD_CONFIGURAR : 'configurado'));
   L.push('  Senha do painel: ' + (cfg.senha ? 'sim' : 'não (quem tiver o link abre)'), '');
+  if (WIN) L.push('  Deixe esta janela aberta (pode minimizar).', '');
   console.log(L.join('\n'));
 });
 process.on('SIGINT', () => process.exit(0));

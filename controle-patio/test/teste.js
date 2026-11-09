@@ -119,6 +119,19 @@ const DADOS = {PATIO_SET_FEISHU_APP_ID: 'cli_teste', PATIO_SET_FEISHU_APP_SECRET
   confere((fs.statSync(arqProps).mode & 0o777) === 0o600, 'dados/propriedades.json só o dono lê (600)');
   r = await cli(A, ['gravar'], {PATIO_SET_FEISHU_APP_ID: '', PATIO_SET_FEISHU_APP_SECRET: ''});
   confere(/Nada mudou/.test(r.saida) && JSON.parse(fs.readFileSync(arqProps, 'utf8')).FEISHU_APP_SECRET === SEGREDO, 'Enter vazio mantém o valor gravado');
+  confere((await cli(A, ['pronto'])).codigo === 0, 'patio.js pronto: tudo gravado');
+  // configurar pelo terminal (Windows: configurar.bat · Linux: configurar.sh). Sem terminal, uma linha por pergunta.
+  const E = {env: Object.assign({}, A.env, {PATIO_DADOS: path.join(pastaTeste, 'e-dados')})};
+  confere((await cli(E, ['pronto'])).codigo === 1, 'patio.js pronto: sem os dados, sai com 1');
+  r = await new Promise(ok => {
+    const f = execFile(process.execPath, [path.join(APP, 'patio.js'), 'configurar'], {env: E.env, encoding: 'utf8', timeout: 60000},
+      (e, out, err) => ok({codigo: e ? (e.code || 1) : 0, saida: String(out || '') + String(err || '')}));
+    f.stdin.end(['cli_teste', SEGREDO, 'app_teste', 'tbl_patio', 'tbl_docas', 'tbl_exped'].join('\n') + '\n');
+  });
+  textos.push(r.saida);
+  confere(r.codigo === 0 && /FEISHU_APP_SECRET \(não aparece na tela\)/.test(r.saida) && /CONEXÃO COM FEISHU REALIZADA COM SUCESSO!/.test(r.saida) &&
+    /Tudo certo com o Feishu/.test(r.saida) && r.saida.indexOf(SEGREDO) < 0, 'patio.js configurar: pergunta os 6, grava e testa (sem mostrar o App Secret)');
+  confere((await cli(E, ['pronto'])).codigo === 0, 'depois do configurar: pronto');
   r = await cli(A, ['status']);
   confere(/FEISHU_APP_SECRET\s+cadastrado \(não aparece\)/.test(r.saida) && r.saida.indexOf(SEGREDO) < 0 && /tbl_patio/.test(r.saida), 'status não mostra o App Secret');
   confere((await cli(A, ['tem', 'FEISHU_APP_SECRET'])).saida.trim() === 'sim' && (await cli(A, ['tem', 'NAO_EXISTE'])).saida.trim() === 'nao', 'patio.js tem');
@@ -232,6 +245,20 @@ const DADOS = {PATIO_SET_FEISHU_APP_ID: 'cli_teste', PATIO_SET_FEISHU_APP_SECRET
     'ZIP com a pasta controle-patio/ e todos os arquivos');
   confere(!lista.some(f => /dados|config\.json|test\//.test(f)), 'ZIP sem dados, config.json e testes');
   confere(lista.indexOf('controle-patio/Codigo.gs') >= 0 && lista.indexOf('controle-patio/Index.html') >= 0, 'ZIP com o Codigo.gs e o Index.html');
+  confere(['iniciar.bat', 'configurar.bat', 'link-publico.bat', 'iniciar-com-windows.bat'].every(f => lista.indexOf('controle-patio/' + f) >= 0 &&
+    /\r\n/.test(fs.readFileSync(path.join(APP, f), 'utf8')) && !/[^\r]\n/.test(fs.readFileSync(path.join(APP, f), 'utf8'))), 'ZIP com os .bat do Windows (linhas CRLF)');
+
+  console.log('\n[11] Windows e servidor');
+  const cfgMod = path.join(APP, 'lib', 'config.js');
+  const padrao = plataforma => execFileSync(process.execPath, ['-e', "Object.defineProperty(process,'platform',{value:'" + plataforma + "'});" +
+    "const {PADRAO}=require(" + JSON.stringify(cfgMod) + ");console.log(PADRAO.portaLink+' '+(PADRAO.caminho||'-'))"], {encoding: 'utf8'}).trim();
+  confere(padrao('linux') === '10000 -', 'servidor (Linux): link na porta 10000');
+  confere(padrao('win32') === '443 /patio', 'notebook (Windows): link na 443 com /patio (as outras portas são dos outros painéis)');
+  const linkCfg = execFileSync(process.execPath, [path.join(APP, 'lib', 'link.js'), 'config'], {env: A.env, encoding: 'utf8'}).trim();
+  confere(linkCfg === '3791 10000 -', 'lib/link.js config (usado pelo link-publico.bat): porta, porta do link e caminho');
+  const bat = fs.readFileSync(path.join(APP, 'iniciar.bat'), 'utf8');
+  confere(/patio\.js pronto/.test(bat) && /patio\.js configurar/.test(bat) && /server\.js/.test(bat) && /C:\\dashmaster\\node\\node\.exe/.test(bat),
+    'iniciar.bat: usa o node.exe do DashMaster, pede o Feishu na 1ª vez e abre o servidor');
 
   saidas.forEach(s => s.filho.kill());
   feishu.close();

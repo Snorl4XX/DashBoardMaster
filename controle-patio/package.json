@@ -1,6 +1,6 @@
 {
   "name": "jt-controle-patio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Controle de Pátio | SP GRU: Portaria, Fila FIFO, Docas e Expedição do Feishu, num servidor, com os arquivos do Apps Script.",
   "main": "server.js",

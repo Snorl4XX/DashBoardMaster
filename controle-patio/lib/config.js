@@ -18,10 +18,13 @@ const PADRAO = {
   // As consultas ao Feishu são reaproveitadas por N segundos: com várias pessoas abertas, o Feishu é consultado
   // no máximo uma vez a cada N segundos por tabela (o painel se atualiza a cada 60 s).
   cacheSegundos: 30,
-  // Link público (Tailscale Funnel). No servidor da Oracle: porta 10000 (8443 = Monitor de Recebimento).
+  // Link público (Tailscale Funnel).
+  //   Servidor da Oracle: porta 10000 → https://NOME.ts.net:10000 (8443 = Monitor de Recebimento).
+  //   Notebook com Windows: as portas 443, 8443 e 10000 já são do principal, do Sorter e do Lotes → o link fica na 443 com
+  //   /patio no fim (https://NOTEBOOK.ts.net/patio), como o Monitor (/recebimento).
   linkPublico: '',
-  portaLink: 10000,
-  caminho: ''
+  portaLink: process.platform === 'win32' ? 443 : 10000,
+  caminho: process.platform === 'win32' ? '/patio' : ''
 };
 
 function arquivoConfig() {
