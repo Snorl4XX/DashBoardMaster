@@ -32,12 +32,12 @@ Instalar na Oracle (no mesmo servidor do Monitor de Recebimento)
 ------------------------------------------------------------------
 É leve (não guarda histórico: só consulta o Feishu quando alguém abre o painel), então cabe no servidor do Monitor.
 1. No console da Oracle, abra o Cloud Shell (ícone >_ no topo).
-2. Engrenagem do Cloud Shell > Upload > envie o CONTROLE_PATIO_V2_0_1.zip.
+2. Engrenagem do Cloud Shell > Upload > envie o CONTROLE_PATIO_V2_1.zip.
 3. Mande para o servidor e entre nele (o mesmo IP do Monitor):
-     scp -i ~/chave.key ~/CONTROLE_PATIO_V2_0_1.zip ubuntu@IP_DO_SERVIDOR:~/
+     scp -i ~/chave.key ~/CONTROLE_PATIO_V2_1.zip ubuntu@IP_DO_SERVIDOR:~/
      ssh -i ~/chave.key ubuntu@IP_DO_SERVIDOR
 4. No servidor:
-     cd ~ && unzip -o CONTROLE_PATIO_V2_0_1.zip
+     cd ~ && unzip -o CONTROLE_PATIO_V2_1.zip
      cd ~/controle-patio && bash instalar-nuvem.sh
    Ele confere o Node.js, pede os 6 dados do Feishu (o App Secret não aparece enquanto você cola) e testa.
    Tem que aparecer "CONEXÃO COM FEISHU REALIZADA COM SUCESSO!" e "Tudo certo com o Feishu."
@@ -71,7 +71,7 @@ Comandos (pasta controle-patio)
 -------------------------------
   node patio.js status                  mostra os dados do Feishu cadastrados (o App Secret não aparece) e o link
   node patio.js testar                  testa a conexão e a 1ª página de cada tabela (pátio, docas e expedição)
-  node patio.js diagnosticar            campos e status da tabela do pátio (somente leitura)
+  node patio.js diagnosticar            confere os campos das 3 tabelas: existe? tem valor? data OK? (somente leitura)
   bash configurar.sh / configurar.bat   troca os dados do Feishu (Enter vazio = mantém); vale na hora
 Só no servidor:
   sudo systemctl restart controle-patio reinicia o painel
@@ -100,6 +100,10 @@ Se der problema
   permissão na base. Rode node patio.js testar para ver qual tabela.
 - "Sem acesso ao Feishu": a internet do servidor/computador. No Windows, se a empresa usa proxy, veja as linhas
   "rem set HTTPS_PROXY" no iniciar.bat.
+- Alguma parte do painel fica vazia ou com "—"? Rode node patio.js diagnosticar e mande um print: ele mostra, para as 3
+  tabelas, se cada campo que o painel usa existe, em quantos registros tem valor, se as datas dão para ler e os valores
+  de fluxo, status e tipos (nunca placas nem nomes). Assim dá para ver qual nome de campo ou formato está diferente.
+- O painel abre no dia operacional de hoje (das 06h às 05h59). Para ver outro dia, troque em "DIA OPERACIONAL".
 - O link não abre: Oracle: sudo systemctl status controle-patio e bash link-publico.sh de novo. Windows: veja se a
   janela preta está aberta e rode o link-publico.bat de novo.
 

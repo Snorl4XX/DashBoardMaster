@@ -40,6 +40,10 @@ const docas = [0, 1, 2].map(i => ({record_id: 'recDoca' + i, fields: {DOCA: Stri
   VEICULO_VINCULADO: i ? {link_record_ids: ['recPatio' + i]} : undefined}}));
 const expedicao = [1, 2].map(i => ({record_id: 'recExp' + i, fields: {ID_VIAGEM: 'TESTE-EXP-' + i, TIPO_EXPEDICAO: i === 1 ? 'PRINCIPAL' : 'SECUNDARIA',
   DESTINO: 'DESTINO TESTE ' + i, STATUS: 'PLANEJADO', SAIDA_PROGRAMADA: agora + i * 3600000, 'PLACA CAVALO': 'TST1000', 'PACOTES EXPEDIDOS': 100 * i}}));
+// Campos em outros formatos do Feishu: data como texto, data por fórmula/consulta, número por fórmula, tipo "DC".
+patio[3].fields.CHECK_IN = [{text: '08/11/2026 14:30', type: 'text'}];
+patio[4].fields.HORA_DOCAGEM = {type: 5, value: [agora - 4 * 60000]};
+expedicao[1].fields['PACOTES EXPEDIDOS'] = {type: 2, value: [200]};
 const TABELAS = {tbl_patio: patio, tbl_docas: docas, tbl_exped: expedicao};
 
 const feishu = http.createServer((req, res) => {
@@ -153,8 +157,13 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   confere(r.saida.indexOf('Motorista Teste') < 0 && r.saida.indexOf('TST1000') < 0, 'testar não mostra placas nem motoristas');
   r = await cli(A, ['diagnosticar']);
   textos.push(r.saida);
-  confere(r.codigo === 0 && /Registros consultados: 150/.test(r.saida) && /Registros com horário de conclusão: 38/.test(r.saida) &&
-    /Nenhum registro foi alterado/.test(r.saida), 'diagnosticar: todas as páginas, somente leitura');
+  confere(r.codigo === 0 && /TABELA PATIO_VEICULO: 150 registros/.test(r.saida) && /Registros com horário de conclusão: 38/.test(r.saida) &&
+    /TABELA CONTROLE_DOCAS: 3 registros/.test(r.saida) && /TABELA PROGRAMACAO_EXPEDICAO: 2 registros/.test(r.saida) &&
+    /Nenhum registro foi alterado/.test(r.saida), 'diagnosticar: as 3 tabelas, todas as páginas, somente leitura');
+  confere(/CHECK_IN: 150 com valor · .* · data OK/.test(r.saida) && /FIM_OPERACAO: NÃO EXISTE na tabela/.test(r.saida) &&
+    /Valores de STATUS PATIO: AGUARDANDO DOCA \(75\) · EM DOCA \(75\)/.test(r.saida) && /Valores de TIPO_EXPEDICAO: PRINCIPAL \(1\) · SECUNDARIA \(1\)/.test(r.saida) &&
+    /PACOTES EXPEDIDOS: 2 com valor · número/.test(r.saida) && r.saida.indexOf('TST1000') < 0 && r.saida.indexOf('Motorista Teste') < 0,
+  'diagnosticar: campos, formato, datas e categorias (sem placas nem nomes)');
 
   console.log('\n[4] Painel');
   let pagina = await (await fetch(A.url + '/')).text();
@@ -162,6 +171,12 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     'Index.html pede os dados ao servidor Node.js (sem google.script.run)');
   confere(pagina.indexOf('<title>SP GRU | Controle de Pátio</title>') > 0 && pagina.indexOf('Feito por Marcelo Wesley') > 0 &&
     pagina.indexOf("api('buscarVeiculosPatio'") > 0, 'Index.html: mesmo título, crédito e telas');
+  confere(pagina.indexOf('.content>section{display:grid;gap:18px') > 0 && pagina.indexOf('.card{border:1px solid var(--red)}') > 0 &&
+    pagina.indexOf('.yard-stats .stat-main{grid-row:span 1}') > 0 && pagina.indexOf('.table-wrap th,.table-wrap td{white-space:nowrap') > 0,
+  'design: espaço entre os blocos, contorno vermelho, cartões sem buraco e tabelas sem quebrar palavras');
+  confere(pagina.indexOf("$('dateStart').value = fmtDate(") > 0 && pagina.indexOf("openYardDetail('Destino: '+dest") > 0 &&
+    pagina.indexOf('function tipoExpedicao(v)') > 0 && pagina.indexOf("$('unloadDay').value=keys().today;") > 0 && pagina.indexOf('CONCLUIDA(v.status)') > 0,
+  'dados: datas do filtro, nome do destino, tipo SC/DC, dia operacional de hoje e status com emoji');
   const ini = {...contagem};
   j = await (await chamar(A, 'buscarVeiculosPatio')).json();
   confere(j.ok && j.result.length === 150, 'buscarVeiculosPatio: 150 veículos (2 páginas do Feishu)');
@@ -170,6 +185,8 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     v0.doca === '' && v0.fimDescarga && v0.campoFimDescarga === 'FIM_DESCARGA', 'campos do pátio (texto, vínculo sem virar nome, fim da descarga)');
   confere(v1.checkout && v1.fimDescarga === null && v1.campoFimDescarga === '' && v2.fimDescarga === null && v2.docaIds.length === 1,
     'CHECK_OUT não conta como fim da descarga');
+  confere(j.result[3].checkin === Date.UTC(2026, 10, 8, 17, 30) && j.result[4].horaDocagem === agora - 4 * 60000 &&
+    typeof v0.checkin === 'number' && typeof v0.horaDocagem === 'number', 'datas do Feishu em qualquer formato (data, texto, fórmula) chegam como data');
   j = await (await chamar(A, 'buscarDocasFeishu')).json();
   confere(j.ok && j.result.total === 3 && j.result.livres === 1 && j.result.ocupadas === 2 && j.result.naoClassificadas === 0 &&
     j.result.docas[1].veiculoIds[0] === 'recPatio1', 'buscarDocasFeishu (status com emoji "🟢 Livre" conta como LIVRE)');

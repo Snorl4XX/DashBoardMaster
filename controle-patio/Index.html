@@ -377,6 +377,43 @@ tbody tr:hover {background:var(--row-hover)}
 .fifo-section-note{margin-top:10px;color:var(--muted);font-size:12px}
 .fifo-table-title{margin:0;font-size:16px}
 @media(max-width:700px){.fifo-tiles{grid-template-columns:1fr 1fr}.fifo-toolbar .field{min-width:150px}}
+
+/* V2.1 — blocos com espaço entre eles, contorno vermelho e sem espaço sobrando nos cartões */
+.content{gap:18px}
+.content>section{display:grid;gap:18px;min-width:0}
+.card{border:1px solid var(--red)}
+.card h2{margin-bottom:10px}
+.stats{gap:16px}
+.stat{min-height:0;padding:14px 18px}
+.stat-value{margin:8px 0 2px}
+.stats>.stat-main{min-height:0}
+.stat-main .stat-value{font-size:50px;margin:14px 0 6px}
+/* Portaria: 7 cartões → o principal ocupa 2 colunas numa linha só (sem buraco no fim) */
+.yard-stats .stat-main{grid-row:span 1}
+.yard-stats .stat-main .stat-value{font-size:44px;margin:6px 0 2px}
+/* Grupos de cartões: a última linha estica para ocupar a largura toda */
+.unload-grid,.fifo-tiles,.patio-strip,.docks{display:flex;flex-wrap:wrap;gap:14px}
+.unload-grid>*,.fifo-tiles>*,.patio-strip>*{flex:1 1 190px;min-width:0}
+.docks>.dock{flex:1 1 165px;min-width:0}
+.unload-tile,.fifo-tile,.patio-strip>div,.trip,.hourly-shift,.mini-summary>div,.hourly-slot{border:1px solid var(--red-200)}
+.unload-tile{padding:14px 16px}.unload-tile strong{margin-top:6px}
+.fifo-tile{padding:14px 16px}
+.dock{border:1px solid var(--red-200);border-left:4px solid var(--muted)}
+.dock.free{border-left-color:var(--good)}.dock.busy{border-left-color:var(--red)}
+.dock p{margin:6px 0 0}
+/* Destinos: colunas sem buracos (cada destino ocupa só a altura que precisa) */
+.destinations{display:block;columns:3 340px;column-gap:16px}
+.destinations>.card{display:block;break-inside:avoid;margin:0 0 16px}
+.filters{gap:14px}
+.mini-summary{gap:12px}
+.hourly-grid{gap:14px}
+.patio-strip{margin-top:10px}
+.table-wrap{border:1px solid var(--red-200);border-radius:10px}
+.table-wrap table{margin:0}
+/* Tabelas: texto inteiro (antes quebrava no meio da palavra: "DESTIN O", "Conclu ído"); sem caber, a tabela rola para o lado */
+.table-wrap th,.table-wrap td{white-space:nowrap;overflow-wrap:normal}
+.table-wrap td{padding:10px 12px}
+@media(max-width:860px){.content{gap:16px}.content>section{gap:16px}.stat-main .stat-value{font-size:42px}}
 </style>
 </head>
 
@@ -908,7 +945,8 @@ function fmtFull(v) {
 }
 
 function keys() {
-  const today = dateKey(Date.now());
+  // Dia operacional: das 06h às 05h59 do dia seguinte (00h–05h59 ainda é o T3 do dia anterior).
+  const today = operationalDate(Date.now());
   const ref = Date.parse(today + 'T12:00:00Z');
   return {
     today,
@@ -999,8 +1037,9 @@ function switchPage(name) {
     ? 'SECUNDARIA' : 'PRINCIPAL';
 
   if (exp) {
+    // Mostra datas, filtros e cartões na hora (zerados) e completa quando o Feishu responder.
+    renderExpedition();
     if (!trips.length) loadExpedition();
-    else renderExpedition();
   } else if (name === 'Controle de Docas') {
     renderDocks();
   } else {
@@ -1131,11 +1170,20 @@ function currentBase() {
 
   return trips.filter(v => {
     const t = ms(v.saida);
-    return norm(v.tipo) === type &&
+    return tipoExpedicao(v.tipo) === type &&
       t !== null &&
       allowed.includes(operationalDate(t));
   });
 }
+
+// Tipo da expedição como vem no Feishu: PRINCIPAL / SC → Expedição SC; SECUNDÁRIA / DC → Expedição DC.
+function tipoExpedicao(v) {
+  const t = yardStatus(v);
+  if (/SECUNDARIA|(^|[^A-Z])DC([^A-Z]|$)/.test(t)) return 'SECUNDARIA';
+  if (/PRINCIPAL|(^|[^A-Z])SC([^A-Z]|$)/.test(t)) return 'PRINCIPAL';
+  return t;
+}
+const CONCLUIDA = v => ['CONCLUIDO','CONCLUIDA','FINALIZADO','FINALIZADA','SAIU'].includes(yardStatus(v));
 
 // Correspondência conservadora: somente placa exata, ignorando pontuação.
 function plateKey(v) { return norm(v).replace(/[^A-Z0-9]/g,''); }
@@ -1146,7 +1194,7 @@ function patioForTrip(v) {
   if (!matches.length) return null;
   // Priorizar registro ainda ativo; depois check-in mais recente.
   return [...matches].sort((a,b)=>{
-    const done = x => ['LIBERADO','SAIU','FINALIZADO','CANCELADO'].includes(norm(x.status));
+    const done = x => ['LIBERADO','LIBERADA','SAIU','FINALIZADO','FINALIZADA','CANCELADO','CANCELADA'].includes(yardStatus(x.status));
     return Number(done(a))-Number(done(b)) || (ms(b.checkin)||0)-(ms(a.checkin)||0);
   })[0];
 }
@@ -1184,8 +1232,8 @@ function renderExpedition() {
   const from = day === 'tomorrow' ? k.tomorrow : k.today;
   const to = day === 'today' ? k.today : k.tomorrow;
 
-  txt('dateStart',fmtDate(Date.parse(from + 'T12:00:00Z')));
-  txt('dateEnd',fmtDate(Date.parse(to + 'T12:00:00Z')));
+  $('dateStart').value = fmtDate(Date.parse(from + 'T12:00:00Z'));
+  $('dateEnd').value = fmtDate(Date.parse(to + 'T12:00:00Z'));
 
   ['today','tomorrow','both'].forEach(d => {
     const id = d === 'today' ? 'chipToday'
@@ -1225,7 +1273,7 @@ function renderExpedition() {
 
   const groups = grouped();
   const completed = visible.filter(v =>
-    ['CONCLUIDO','FINALIZADO','SAIU'].includes(norm(v.status))
+    CONCLUIDA(v.status)
   ).length;
 
   txt('tripCount',nfmt(visible.length));
@@ -1233,7 +1281,7 @@ function renderExpedition() {
   txt('destinationCount',groups.size);
   txt('completedCount',completed);
   txt('pendingCount',visible.length - completed);
-  [['tripCount',visible],['packageCount',visible],['destinationCount',visible],['completedCount',visible.filter(v=>['CONCLUIDO','FINALIZADO','SAIU'].includes(norm(v.status)))],['pendingCount',visible.filter(v=>!['CONCLUIDO','FINALIZADO','SAIU'].includes(norm(v.status)))]].forEach(([id,rows])=>{
+  [['tripCount',visible],['packageCount',visible],['destinationCount',visible],['completedCount',visible.filter(v=>CONCLUIDA(v.status))],['pendingCount',visible.filter(v=>!CONCLUIDA(v.status))]].forEach(([id,rows])=>{
     const card=$(id).closest('.stat');if(card)makeClickable(card,()=>openYardDetail($(id).previousElementSibling?.textContent||'Viagens',rows,'trip'));
   });
   txt('tripHelp',tr('period') + ': ' +
@@ -1261,9 +1309,9 @@ function grouped() {
 }
 
 function statusClass(value) {
-  const s = norm(value);
-  if (['CONCLUIDO','FINALIZADO','SAIU'].includes(s)) return 'good';
-  if (s === 'CANCELADO') return 'bad';
+  const s = yardStatus(value);
+  if (CONCLUIDA(value)) return 'good';
+  if (s === 'CANCELADO' || s === 'CANCELADA') return 'bad';
   if (['PLANEJADO','EM TRANSITO','CARREGANDO'].includes(s)) return 'warn';
   return '';
 }
@@ -1368,7 +1416,7 @@ function renderDestinations(groups) {
     });
 
     card.append(listEl);
-    makeClickable(head,()=>openYardDetail('Destino: '+name,list,'trip'));
+    makeClickable(head,()=>openYardDetail('Destino: '+dest,list,'trip'));
     grid.append(card);
   });
 }
@@ -2126,7 +2174,8 @@ function init() {
   }
 
   updateThemeIcon();
-  $('unloadDay').value=dateKey(Date.parse(keys().today+'T12:00:00Z')-86400000);
+  // Abre no dia operacional atual (antes abria no dia anterior e o movimento de hoje não aparecia).
+  $('unloadDay').value=keys().today;
   $('fifoDoneDay').value=keys().today;
   setLanguage('pt');
   switchPage('Portaria');

@@ -41,15 +41,72 @@ function idsVinculados(valor) {
   return /^rec/i.test(String(valor)) ? [String(valor)] : [];
 }
 
+/**
+ * Data/hora de um campo, em milissegundos, seja qual for o tipo no Feishu: data (número), texto ("08/11/2026 14:30",
+ * "2026-11-08 14:30"), fórmula ou consulta ({type, value: [...]}). Sem fuso no texto = horário de São Paulo (UTC-3).
+ * Antes ia o valor cru para a tela, e um campo que não fosse do tipo data aparecia vazio ("—").
+ */
+function instante(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? (v < 1e11 ? v * 1000 : v) : null;
+  if (Array.isArray(v)) { for (const x of v) { const t = instante(x); if (t !== null) return t; } return null; }
+  if (typeof v === 'object') return 'value' in v ? instante(v.value) : 'text' in v ? instante(v.text) : null;
+  const s = String(v).trim();
+  if (/^\d{10,13}$/.test(s)) return instante(Number(s));
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1], +(m[4] || 0) + 3, +(m[5] || 0), +(m[6] || 0));
+  m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0) + 3, +(m[5] || 0), +(m[6] || 0));
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Número de um campo (número, texto "1.234" / "12,5", fórmula ou consulta). */
+function numero(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (Array.isArray(v)) { for (const x of v) { const n = numero(x); if (n !== null) return n; } return null; }
+  if (typeof v === 'object') return 'value' in v ? numero(v.value) : 'text' in v ? numero(v.text) : null;
+  let s = String(v).trim().replace(/\s/g, '');
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+  else s = s.replace(',', '.');
+  const n = Number(s);
+  return s && Number.isFinite(n) ? n : null;
+}
+
 /** Fim da descarga: só um campo que diga isso explicitamente. CHECK_OUT e HORA_DOCAGEM não contam. */
 const CAMPOS_FIM = ['FIM_DESCARGA', 'FIM DESCARGA', 'DATA_FIM_DESCARGA', 'HORA_FIM_DESCARGA', 'HORARIO_FIM_DESCARGA',
   'FIM_DESCARREGAMENTO', 'DESCARGA_FINALIZADA_EM', 'CONCLUSAO_DESCARGA', 'CONCLUSÃO DESCARGA',
   'FIM_OPERACAO', 'FIM OPERAÇÃO', 'HORA_FIM_OPERACAO', 'DATA_FIM_OPERACAO'];
 function fimDescarga(f) {
   for (const campo of CAMPOS_FIM) {
-    if (Object.prototype.hasOwnProperty.call(f, campo) && f[campo] !== null && f[campo] !== undefined && f[campo] !== '') return {valor: f[campo], campo};
+    const t = Object.prototype.hasOwnProperty.call(f, campo) ? instante(f[campo]) : null;
+    if (t !== null) return {valor: t, campo};
   }
   return {valor: null, campo: ''};
+}
+
+/** Campos que o painel usa (diagnosticar confere se existem e o formato). */
+const USADOS = {
+  PATIO_VEICULO: ['PLACA', 'TIPO_VEICULO', 'MOTORISTA', 'TRANSPORTADORA', 'FLUXO', 'STATUS PATIO', 'DOCA', 'CONTROLE_DOCAS', 'CHECK_IN',
+    'CHECK_OUT', 'HORA_DOCAGEM', 'FIM_DESCARGA', 'FIM_OPERACAO', 'PRIORIDADE_PATIO', 'ID_VIAGEM', 'DESTINO'],
+  CONTROLE_DOCAS: ['DOCA', 'STATUS_DOCA', 'VEICULO_VINCULADO'],
+  PROGRAMACAO_EXPEDICAO: ['ID_VIAGEM', 'TIPO_EXPEDICAO', 'DESTINO', 'STATUS', 'SAIDA_PROGRAMADA', 'PLACA CAVALO', 'PLACA CARRETA / EIXO',
+    'MOTORISTA', 'TRANSPORTADORA', 'PACOTES EXPEDIDOS', 'LACRE']
+};
+const CATEGORIAS = {PATIO_VEICULO: ['FLUXO', 'STATUS PATIO', 'TIPO_VEICULO'], CONTROLE_DOCAS: ['STATUS_DOCA'], PROGRAMACAO_EXPEDICAO: ['TIPO_EXPEDICAO', 'STATUS']};
+const DATAS = ['CHECK_IN', 'CHECK_OUT', 'HORA_DOCAGEM', 'FIM_DESCARGA', 'FIM_OPERACAO', 'SAIDA_PROGRAMADA'];
+/** Formato de um valor do Feishu, sem mostrar o conteúdo. */
+function formato(v) {
+  if (typeof v === 'number') return v > 1e11 ? 'data/número' : 'número';
+  if (typeof v === 'string') return 'texto';
+  if (Array.isArray(v)) {
+    const x = v[0];
+    if (x && typeof x === 'object') return x.text !== undefined ? 'texto' : x.name !== undefined ? 'pessoa/opção' : 'lista';
+    return 'lista de opções';
+  }
+  if (v && typeof v === 'object') return v.link_record_ids || v.record_ids ? 'vínculo' : v.value !== undefined ? 'fórmula/consulta' : 'objeto';
+  return typeof v;
 }
 
 const semAcento = v => String(v || '').trim().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/^[^A-Za-z0-9]+/, '').toUpperCase();
@@ -131,15 +188,15 @@ function criarFeishu(opcoes) {
         status: texto(f['STATUS PATIO']),
         doca: texto(f['DOCA']) || texto(f['CONTROLE_DOCAS']),
         docaIds: idsVinculados(f['CONTROLE_DOCAS']),
-        posicaoFIFO: Number(f['POSIÇÃO FIFO'] ?? f['POSICAO FIFO']) || null,
-        checkin: f['CHECK_IN'] || null,
-        checkout: f['CHECK_OUT'] || null,
+        posicaoFIFO: numero(f['POSIÇÃO FIFO'] ?? f['POSICAO FIFO']) || null,
+        checkin: instante(f['CHECK_IN']),
+        checkout: instante(f['CHECK_OUT']),
         fimDescarga: fim.valor,
         campoFimDescarga: fim.campo,
-        horaDocagem: f['HORA_DOCAGEM'] || f['ENTRADA_DOCA'] || null,
-        inicioOperacao: f['INICIO_OPERACAO'] || null,
-        fimOperacao: f['FIM_OPERACAO'] || null,
-        saidaPatio: f['SAIDA_PATIO'] || null,
+        horaDocagem: instante(f['HORA_DOCAGEM']) ?? instante(f['ENTRADA_DOCA']),
+        inicioOperacao: instante(f['INICIO_OPERACAO']),
+        fimOperacao: instante(f['FIM_OPERACAO']),
+        saidaPatio: instante(f['SAIDA_PATIO']),
         prioridade: texto(f['PRIORIDADE_PATIO']),
         possuiId: texto(f['POSSUI_ID']),
         idViagem: texto(f['ID_VIAGEM']),
@@ -175,12 +232,12 @@ function criarFeishu(opcoes) {
         tipo: texto(f['TIPO_EXPEDICAO']),
         destino: texto(f['DESTINO']),
         status: texto(f['STATUS']),
-        saida: f['SAIDA_PROGRAMADA'] || null,
+        saida: instante(f['SAIDA_PROGRAMADA']),
         placaCavalo: texto(f['PLACA CAVALO']),
         placaCarreta: texto(f['PLACA CARRETA / EIXO']),
         motorista: texto(f['MOTORISTA']),
         transportadora: texto(f['TRANSPORTADORA']),
-        pacotes: Number(f['PACOTES EXPEDIDOS']) || 0,
+        pacotes: numero(f['PACOTES EXPEDIDOS']) || 0,
         lacre: texto(f['LACRE'])
       };
     });
@@ -206,26 +263,43 @@ function criarFeishu(opcoes) {
     return ok;
   }
 
-  /** Campos e status da tabela do pátio (todas as páginas), para conferir antes de contar por turno. */
+  /**
+   * Conferência dos campos que o painel usa, nas 3 tabelas (todas as páginas): se o campo existe, em quantos registros
+   * tem valor e o formato. Datas: se dá para ler como data. Categorias (fluxo, status, tipos): os valores e quantos.
+   * Nunca mostra placas, motoristas nem outros dados das pessoas.
+   */
   async function diagnosticar(log) {
-    const {items} = await registros('FEISHU_TABLE_PATIO');
-    const campos = [...new Set(items.flatMap(r => Object.keys(r.fields || {})))].sort();
-    const status = {};
-    let comConclusao = 0;
-    items.forEach(r => {
-      const f = r.fields || {}, s = texto(f['STATUS PATIO']) || '(vazio)';
-      status[s] = (status[s] || 0) + 1;
-      if (fimDescarga(f).valor !== null) comConclusao++;
-    });
-    log('Registros consultados: ' + items.length);
-    log('Status PATIO: ' + JSON.stringify(status));
-    log('Registros com horário de conclusão: ' + comConclusao);
-    log('Campos disponíveis: ' + campos.join(' | '));
-    log('Campo TIPO_VEICULO presente: ' + campos.includes('TIPO_VEICULO'));
+    const fmt = n => n.toLocaleString('pt-BR');
+    for (const [nome, chave] of TABELAS) {
+      const {items} = await registros(chave);
+      log('=============================');
+      log('TABELA ' + nome + ': ' + fmt(items.length) + ' registros');
+      const existentes = new Set(items.flatMap(r => Object.keys(r.fields || {})));
+      for (const campo of USADOS[nome]) {
+        if (!existentes.has(campo)) { log('  ' + campo + ': NÃO EXISTE na tabela'); continue; }
+        const valores = items.map(r => (r.fields || {})[campo]).filter(v => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length));
+        let linha = '  ' + campo + ': ' + fmt(valores.length) + ' com valor · ' + (valores.length ? formato(valores[0]) : '-');
+        if (DATAS.indexOf(campo) >= 0 && valores.length) {
+          const lidas = valores.filter(v => instante(v) !== null).length;
+          linha += lidas === valores.length ? ' · data OK' : ' · ' + fmt(valores.length - lidas) + ' NÃO dá para ler como data';
+        }
+        log(linha);
+      }
+      for (const campo of CATEGORIAS[nome] || []) {
+        if (!existentes.has(campo)) continue;
+        const cont = {};
+        items.forEach(r => { const t = texto((r.fields || {})[campo]) || '(vazio)'; cont[t] = (cont[t] || 0) + 1; });
+        log('  Valores de ' + campo + ': ' + Object.keys(cont).sort((a, b) => cont[b] - cont[a] || a.localeCompare(b, 'pt-BR')).slice(0, 15).map(k => k + ' (' + fmt(cont[k]) + ')').join(' · '));
+      }
+      if (nome === 'PATIO_VEICULO') {
+        log('  Registros com horário de conclusão: ' + items.filter(r => fimDescarga(r.fields || {}).valor !== null).length);
+        log('  Outros campos da tabela: ' + [...existentes].filter(c => USADOS[nome].indexOf(c) < 0).sort().join(' | '));
+      }
+    }
     log('Nenhum registro foi alterado.');
   }
 
   return {buscarVeiculosPatio, buscarDocasFeishu, buscarProgramacaoExpedicao, testar, diagnosticar};
 }
 
-module.exports = {criarFeishu, texto, idsVinculados, fimDescarga};
+module.exports = {criarFeishu, texto, idsVinculados, fimDescarga, instante, numero};
