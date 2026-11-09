@@ -11,7 +11,7 @@ if exist "%~dp0node.exe" set "NODE=%~dp0node.exe"
 if not defined NODE for /f "delims=" %%p in ('where node 2^>nul') do if not defined NODE set "NODE=%%p"
 if not defined NODE if exist "C:\dashmaster\node\node.exe" set "NODE=C:\dashmaster\node\node.exe"
 if not defined NODE goto semNode
-rem Primeira vez: pede os dados do Feishu (os das Propriedades do script do Apps Script).
+rem Primeira vez: pede os dados do Feishu (App ID, App Secret, token da base e as 3 tabelas).
 "%NODE%" patio.js pronto
 if errorlevel 1 (
   echo.

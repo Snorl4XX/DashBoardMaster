@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * CONTROLE DE PÁTIO | SP GRU — o painel do Feishu (Portaria, Fila FIFO, Docas e Expedição) num servidor, com Node.js.
+ * CONTROLE DE PÁTIO | SP GRU — Portaria, Fila FIFO, Docas e Expedição do Feishu, em Node.js (sem Google Apps Script).
  *
- * Roda os arquivos do Apps Script SEM MUDAR NADA neles (Codigo.gs e Index.html):
- *   - o painel (Index.html) abre em http://localhost:3700 e pede os dados como no Google (google.script.run);
- *   - as funções do Codigo.gs (buscarVeiculosPatio, buscarDocasFeishu, buscarProgramacaoExpedicao) rodam num processo
- *     separado e consultam o Feishu de verdade (somente leitura, como no Google);
+ *   - o painel (Index.html) abre em http://localhost:3700 e pede os dados a este servidor (POST api/<função>);
+ *   - o servidor lê o Feishu (lib/feishu.js, SOMENTE LEITURA): veículos do pátio, docas e programação de expedição;
  *   - com várias pessoas abertas, cada tabela é consultada no Feishu no máximo uma vez a cada 30 s (cacheSegundos);
- *   - as Propriedades do script (FEISHU_APP_ID, FEISHU_APP_SECRET…) ficam em dados/propriedades.json (bash configurar.sh).
+ *   - os dados do Feishu (FEISHU_APP_ID, FEISHU_APP_SECRET…) ficam em dados/feishu.json (bash configurar.sh / configurar.bat).
  *
  * Uso: no Windows, dois cliques no iniciar.bat (ou: node server.js). No servidor da nuvem ele roda como o serviço
  *      "controle-patio": bash instalar-nuvem.sh
@@ -18,7 +16,6 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 const zlib = require('zlib');
-const {Worker} = require('worker_threads');
 const VERSAO = require('./package.json').version;
 
 function parar(msg) {
@@ -26,10 +23,11 @@ function parar(msg) {
   process.exit(1);
 }
 const [MAIOR] = process.versions.node.split('.').map(Number);
-if (MAIOR < 20) parar('O Controle de Pátio precisa do Node.js 20 ou mais novo (este é o ' + process.version + '). Rode: bash instalar-nuvem.sh');
+if (MAIOR < 20) parar('O Controle de Pátio precisa do Node.js 20 ou mais novo (este é o ' + process.version + ').');
 
 const {loadConfig} = require('./lib/config');
-const propriedades = require('./lib/propriedades');
+const credenciais = require('./lib/credenciais');
+const {criarFeishu} = require('./lib/feishu');
 const {Auth, viaTunnel} = require('./lib/auth');
 
 let cfg;
@@ -44,50 +42,10 @@ function log(nivel, texto) {
   (nivel === 'erro' ? console.error : console.log)(agoraSp() + ' [' + nivel + '] ' + String(texto).replace(/\s+$/, ''));
 }
 
-// ------------------------------------------------------------------ funções do Codigo.gs, num processo separado
-// Só as que o painel chama. As de teste (testarConexaoFeishu…) rodam pelo terminal: node patio.js testar
+// ------------------------------------------------------------------ dados do Feishu
+const feishu = criarFeishu({pastaDados: cfg.pastaDados, baseUrl: cfg.feishuUrl});
+// Só o que o painel pede. Os testes (testar, diagnosticar) rodam pelo terminal: node patio.js testar
 const PERMITIDAS = ['buscarVeiculosPatio', 'buscarDocasFeishu', 'buscarProgramacaoExpedicao'];
-const LIMITE_MS = 180000;
-const trabalhadores = {};
-
-function falhar(t, erro) {
-  t.pend.forEach(p => { clearTimeout(p.timer); p.resolve({ok: false, error: erro}); });
-  t.pend.clear();
-}
-function encerrar(fn, erro) {
-  const t = trabalhadores[fn];
-  if (!t) return;
-  delete trabalhadores[fn];
-  falhar(t, erro);
-  t.w.terminate().catch(() => {});
-}
-function novoTrabalhador(fn) {
-  const w = new Worker(path.join(__dirname, 'lib', 'execucao.js'), {
-    workerData: {pastaApp: cfg.pastaApp, pastaDados: cfg.pastaDados, feishuUrl: cfg.feishuUrl}
-  });
-  const t = {w, pend: new Map(), seq: 0};
-  w.on('message', m => {
-    if (m && m.log) { log(m.log.nivel, fn + ': ' + m.log.texto); return; }
-    const p = m && t.pend.get(m.id);
-    if (!p) return;
-    clearTimeout(p.timer);
-    t.pend.delete(m.id);
-    p.resolve(m);
-  });
-  w.on('error', e => { log('erro', fn + ': ' + ((e && e.message) || e)); falhar(t, 'Erro interno do Controle de Pátio. Tente de novo.'); });
-  w.on('exit', () => { if (trabalhadores[fn] === t) delete trabalhadores[fn]; falhar(t, 'A consulta parou no meio. Tente de novo.'); });
-  return t;
-}
-/** Roda uma função do Codigo.gs: {ok, json} ou {ok: false, error}. */
-function executar(fn) {
-  return new Promise(resolve => {
-    const t = trabalhadores[fn] || (trabalhadores[fn] = novoTrabalhador(fn));
-    const id = ++t.seq;
-    const timer = setTimeout(() => encerrar(fn, 'O Feishu demorou mais de ' + Math.round(LIMITE_MS / 60000) + ' min para responder. Tente de novo.'), LIMITE_MS);
-    t.pend.set(id, {resolve, timer});
-    t.w.postMessage({id, fn});
-  });
-}
 
 // Resultado guardado por cacheSegundos (erro: 10 s), já em JSON e comprimido. Pedidos ao mesmo tempo esperam a mesma consulta.
 const guardado = {};
@@ -97,13 +55,14 @@ function obter(fn) {
   if (c && Date.now() - c.em < (c.ok ? cfg.cacheSegundos * 1000 : 10000)) return Promise.resolve(c);
   if (andamento[fn]) return andamento[fn];
   const inicio = Date.now();
-  andamento[fn] = executar(fn).then(r => {
-    if (!r.ok) log('erro', fn + ': ' + r.error);
-    const corpo = Buffer.from(r.ok ? '{"ok":true,"result":' + r.json + '}' : JSON.stringify({ok: false, error: r.error}));
-    const item = {em: Date.now(), ok: !!r.ok, corpo, gz: zlib.gzipSync(corpo, {level: 6}), ms: Date.now() - inicio};
-    guardado[fn] = item;
-    return item;
-  }).finally(() => { delete andamento[fn]; });
+  andamento[fn] = feishu[fn]().then(r => ({ok: true, json: JSON.stringify(r === undefined ? null : r)}), e => ({ok: false, error: String((e && e.message) || e)}))
+    .then(r => {
+      if (!r.ok) log('erro', fn + ': ' + r.error);
+      const corpo = Buffer.from(r.ok ? '{"ok":true,"result":' + r.json + '}' : JSON.stringify({ok: false, error: r.error}));
+      const item = {em: Date.now(), ok: r.ok, corpo, gz: zlib.gzipSync(corpo, {level: 6}), ms: Date.now() - inicio};
+      guardado[fn] = item;
+      return item;
+    }).finally(() => { delete andamento[fn]; });
   return andamento[fn];
 }
 
@@ -137,24 +96,8 @@ function lerCorpo(req, limite) {
   });
 }
 
-/** O painel do Apps Script, com o google.script.run trocado por uma chamada a este servidor (api/run). */
-function paginaPainel(base) {
-  const ponte = '<script>/* Controle de Pátio no servidor: google.script.run chama o servidor deste app (api/run). */\n(function(){' +
-    'var api=' + JSON.stringify(base + '/api/run') + ';' +
-    'function chamar(nome,args,ok,falha){fetch(api,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},' +
-    'body:JSON.stringify({fn:nome,args:args})}).then(function(r){return r.json().catch(function(){return {ok:false,error:"HTTP "+r.status}})})' +
-    '.then(function(j){if(j&&j.ok){if(ok)ok(j.result)}else if(falha){falha(new Error((j&&j.error)||"Falha"))}})' +
-    '.catch(function(e){if(falha)falha(e)})}' +
-    'function run(ok,falha){return new Proxy({},{get:function(_,k){' +
-    'if(k==="withSuccessHandler")return function(f){return run(f,falha)};' +
-    'if(k==="withFailureHandler")return function(f){return run(ok,f)};' +
-    'if(k==="withUserObject")return function(){return run(ok,falha)};' +
-    'return function(){chamar(k,Array.prototype.slice.call(arguments),ok,falha)}}})}' +
-    'window.google={script:{run:run()}};})();</script>';
-  const pagina = fs.readFileSync(path.join(cfg.pastaApp, 'Index.html'), 'utf8');
-  const i = pagina.indexOf('</title>');
-  return i >= 0 ? pagina.slice(0, i + 8) + ponte + pagina.slice(i + 8) : ponte + pagina;
-}
+/** O painel (Index.html). Ele pede os dados com fetch('api/<função>') — relativo, funciona também com /patio no link. */
+const paginaPainel = () => fs.readFileSync(path.join(cfg.pastaApp, 'Index.html'), 'utf8');
 
 const CSS = ':root{color-scheme:light dark;--fundo:#f4f5f7;--cartao:#fff;--texto:#1d2330;--suave:#5d6677;--linha:#dfe3ea;--cor:#e60012;--erro:#b3261e}' +
   '@media (prefers-color-scheme:dark){:root{--fundo:#0e0f13;--cartao:#17191f;--texto:#f2f3f5;--suave:#9ba1ad;--linha:#2a2d36;--erro:#ff8a80}}' +
@@ -188,7 +131,7 @@ async function tratar(req, res) {
 
   if (p === '/favicon.ico') { res.writeHead(204); res.end(); return; }
   if (p === '/saude') {
-    const falta = propriedades.faltando(cfg.pastaDados);
+    const falta = credenciais.faltando(cfg.pastaDados);
     json(req, res, 200, {ok: true, versao: VERSAO, feishuConfigurado: !falta.length, falta});
     return;
   }
@@ -203,16 +146,15 @@ async function tratar(req, res) {
     return;
   }
   if (p === '/' && (req.method === 'GET' || req.method === 'HEAD')) {
-    enviar(req, res, 200, liberado ? paginaPainel(base) : paginaEntrar(''));
+    enviar(req, res, 200, liberado ? paginaPainel() : paginaEntrar(''));
     return;
   }
-  if (p === '/api/run' && req.method === 'POST') {
+  const api = p.match(/^\/api\/([A-Za-z]+)$/);
+  if (api && req.method === 'POST') {
     if (!liberado) { json(req, res, 401, {ok: false, error: 'Entre com a senha do painel (recarregue a página).'}); return; }
-    let pedido;
-    try { pedido = JSON.parse(await lerCorpo(req, 65536) || '{}'); } catch (e) { json(req, res, 400, {ok: false, error: 'Pedido inválido.'}); return; }
-    const fn = String((pedido && pedido.fn) || '');
+    const fn = api[1];
     if (PERMITIDAS.indexOf(fn) < 0) { json(req, res, 403, {ok: false, error: 'Função não permitida: ' + fn.slice(0, 60)}); return; }
-    const falta = propriedades.faltando(cfg.pastaDados);
+    const falta = credenciais.faltando(cfg.pastaDados);
     if (falta.length) {
       json(req, res, 200, {ok: false, error: 'Faltam os dados do Feishu (' + falta.join(', ') + '). Neste computador: ' + CMD_CONFIGURAR});
       return;
@@ -246,7 +188,7 @@ servidor.on('error', e => {
   parar('O Controle de Pátio NÃO está no ar: ' + ((e && e.message) || e));
 });
 servidor.listen(cfg.porta, cfg.host, () => {
-  const falta = propriedades.faltando(cfg.pastaDados);
+  const falta = credenciais.faltando(cfg.pastaDados);
   const L = ['', '  ===== Controle de Pátio | SP GRU (v' + VERSAO + ') =====', '',
     '  Painel:          http://localhost:' + cfg.porta];
   if (cfg.host !== '127.0.0.1') ipsDaRede().forEach(ip => L.push('  Na rede:         http://' + ip + ':' + cfg.porta));

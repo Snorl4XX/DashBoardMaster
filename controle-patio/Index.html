@@ -4,7 +4,7 @@
 <base target="_top">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>J&T Express | SP GRU DashMaster</title>
+<title>SP GRU | Controle de Pátio</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" defer></script>
 
@@ -945,10 +945,12 @@ function options(id,values,placeholder) {
   if ([...s.options].some(o => o.value === old)) s.value = old;
 }
 
+// Dados do Feishu pelo servidor Node.js deste painel (POST api/<função>; caminho relativo: funciona também em /patio).
 function api(fn,success,failure) {
-  google.script.run
-    .withSuccessHandler(success)
-    .withFailureHandler(failure)[fn]();
+  fetch('api/' + fn,{method:'POST',credentials:'same-origin'})
+    .then(r => r.json().catch(() => ({ok:false,error:'HTTP ' + r.status})))
+    .then(j => j && j.ok ? success(j.result) : failure(new Error((j && j.error) || 'Falha na consulta')))
+    .catch(failure);
 }
 
 function errorMessage(e) {

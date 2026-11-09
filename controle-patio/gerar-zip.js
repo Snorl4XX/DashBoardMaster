@@ -10,11 +10,10 @@ const path = require('path');
 const {zip} = require('../node/lib/report');
 const {version} = require('./package.json');
 
-const ARQUIVOS = ['Codigo.gs', 'Index.html', 'server.js', 'patio.js', 'package.json', 'LEIA-ME.txt',
+const ARQUIVOS = ['Index.html', 'server.js', 'patio.js', 'package.json', 'LEIA-ME.txt',
   'instalar-nuvem.sh', 'configurar.sh', 'link-publico.sh',
   'iniciar.bat', 'configurar.bat', 'link-publico.bat', 'iniciar-com-windows.bat',
-  'lib/apps-script.js', 'lib/auth.js', 'lib/config.js', 'lib/execucao.js', 'lib/fetch-worker.js', 'lib/link.js', 'lib/propriedades.js',
-  'lib/syncfetch.js'];
+  'lib/auth.js', 'lib/config.js', 'lib/credenciais.js', 'lib/feishu.js', 'lib/link.js'];
 
 function gerar(saida) {
   const faltando = fs.readdirSync(path.join(__dirname, 'lib')).map(f => 'lib/' + f).filter(f => ARQUIVOS.indexOf(f) < 0);

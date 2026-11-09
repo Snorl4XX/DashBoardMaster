@@ -1,50 +1,56 @@
-J&T · CONTROLE DE PÁTIO | SP GRU (Portaria, Fila FIFO, Docas e Expedição do Feishu) — Node.js
-=====================================================================================
+J&T · CONTROLE DE PÁTIO | SP GRU — Node.js (Portaria, Fila FIFO, Docas e Expedição do Feishu)
+=============================================================================================
 
 O que é
 -------
-O seu painel do Apps Script (Index.html + Código.gs) rodando em Node.js, como o Monitor de Recebimento: num servidor da
-Oracle ligado 24 h (Linux) ou no seu computador com Windows.
-Os dois arquivos são OS SEUS, sem nenhuma mudança (o Código.gs aqui se chama Codigo.gs, sem acento, para o ZIP abrir
-certo no Windows). Só muda ONDE roda:
-  - o painel abre pelo link do Tailscale (Oracle: https://dashmaster.xxxx.ts.net:10000 · Windows: https://NOTEBOOK.xxxx.ts.net/patio),
-    com senha se você quiser;
-  - as consultas ao Feishu são as mesmas do Google, SOMENTE LEITURA (nada é alterado no Feishu);
+O painel de Portaria, Fila FIFO, Controle de Docas e Expedição, em Node.js. NÃO usa o Google Apps Script:
+  - o servidor (Node.js) lê o Feishu direto, SOMENTE LEITURA (nada é alterado no Feishu);
+  - roda num servidor da Oracle ligado 24 h (Linux) ou no seu computador com Windows;
+  - a equipe abre pelo link do Tailscale (Oracle: https://dashmaster.xxxx.ts.net:10000 · Windows:
+    https://NOTEBOOK.xxxx.ts.net/patio), com senha se você quiser;
   - com várias pessoas abertas, cada tabela é consultada no Feishu no máximo 1 vez a cada 30 s (o painel se atualiza
     sozinho a cada 1 min);
-  - as Propriedades do script (FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_APP_TOKEN, FEISHU_TABLE_PATIO,
-    FEISHU_TABLE_DOCAS e FEISHU_TABLE_EXPEDICAO) ficam no arquivo dados/propriedades.json da pasta do painel (no servidor,
-    só o seu usuário lê). O App Secret nunca aparece na tela, no registro nem no link.
+  - os dados de acesso ao Feishu ficam no arquivo dados/feishu.json da pasta do painel (no servidor, só o seu usuário
+    lê). O App Secret nunca aparece na tela, no registro nem no link.
 
-Antes de começar: copie as Propriedades do script
--------------------------------------------------
-No Apps Script do painel: engrenagem (Configurações do projeto) > Propriedades do script. Deixe essa tela aberta:
-o instalador pede esses 6 valores (copie e cole um por um).
+Os 6 dados do Feishu (o instalador pede um por um)
+--------------------------------------------------
+  FEISHU_APP_ID e FEISHU_APP_SECRET
+      open.feishu.cn/app (entre com a conta do Feishu) > clique no app que lê a base > "Credenciais e informações
+      básicas" (凭证与基础信息). Copie o App ID e o App Secret (clique no olho para ver o Secret).
+  FEISHU_APP_TOKEN
+      Abra a base (Bitable) no navegador. O endereço fica assim:
+        https://xxxx.feishu.cn/base/AQUI_O_APP_TOKEN?table=tblXXXXXXXX&view=vewXXXXXXXX
+      O FEISHU_APP_TOKEN é o pedaço depois de /base/ e antes do "?".
+  FEISHU_TABLE_PATIO, FEISHU_TABLE_DOCAS e FEISHU_TABLE_EXPEDICAO
+      Clique em cada tabela da base (PATIO_VEICULO, CONTROLE_DOCAS e PROGRAMACAO_EXPEDICAO) e copie o que vem depois de
+      "table=" no endereço (começa com tbl), até o "&".
+  O app precisa ter permissão de leitura na base (se já funcionava antes, já tem).
+  O endereço da base começa com /wiki/ em vez de /base/? Então o token é outro: me avise que eu mostro como pegar.
 
 Instalar na Oracle (no mesmo servidor do Monitor de Recebimento)
 ------------------------------------------------------------------
 É leve (não guarda histórico: só consulta o Feishu quando alguém abre o painel), então cabe no servidor do Monitor.
 1. No console da Oracle, abra o Cloud Shell (ícone >_ no topo).
-2. Engrenagem do Cloud Shell > Upload > envie o CONTROLE_PATIO_V1_1.zip.
+2. Engrenagem do Cloud Shell > Upload > envie o CONTROLE_PATIO_V2_0.zip.
 3. Mande para o servidor e entre nele (o mesmo IP do Monitor):
-     scp -i ~/chave.key ~/CONTROLE_PATIO_V1_1.zip ubuntu@IP_DO_SERVIDOR:~/
+     scp -i ~/chave.key ~/CONTROLE_PATIO_V2_0.zip ubuntu@IP_DO_SERVIDOR:~/
      ssh -i ~/chave.key ubuntu@IP_DO_SERVIDOR
 4. No servidor:
-     cd ~ && unzip -o CONTROLE_PATIO_V1_1.zip
+     cd ~ && unzip -o CONTROLE_PATIO_V2_0.zip
      cd ~/controle-patio && bash instalar-nuvem.sh
-   Ele pede os 6 valores do Feishu (o App Secret não aparece enquanto você cola) e testa a conexão.
+   Ele confere o Node.js, pede os 6 dados do Feishu (o App Secret não aparece enquanto você cola) e testa.
    Tem que aparecer "CONEXÃO COM FEISHU REALIZADA COM SUCESSO!" e "Tudo certo com o Feishu."
-5. Link para a equipe:
+5. Link para a equipe (Tailscale):
      bash link-publico.sh
    Ele pede uma senha para o painel (recomendado: o painel mostra placas e nomes de motoristas; Enter = sem senha).
    No fim aparece o link: https://dashmaster.xxxx.ts.net:10000
 
 Portas no servidor do Monitor: 8443 = Monitor de Recebimento, 10000 = Controle de Pátio (a 443 fica livre).
-Outro servidor? Também funciona: o mesmo passo a passo. Para mudar a porta do link, edite "portaLink" no config.json
-(443, 8443 ou 10000) e rode bash link-publico.sh de novo.
+Para mudar a porta do link: "portaLink" no config.json (443, 8443 ou 10000) e bash link-publico.sh de novo.
 
-No computador com Windows (Node.js, como o Monitor de Recebimento)
-------------------------------------------------------------------
+No computador com Windows
+-------------------------
 Usa o mesmo node.exe do DashMaster (C:\dashmaster\node). O computador precisa ficar ligado para o painel funcionar.
 1. No ZIP: botão direito > Propriedades > marque "Desbloquear" > OK.
 2. Botão direito no ZIP > Extrair tudo... > destino C:\  > Extrair. Fica a pasta C:\controle-patio.
@@ -61,43 +67,44 @@ Atalho na Área de Trabalho: botão direito > Novo > Atalho. Cole (com as aspas)
 Trocar os dados do Feishu: dois cliques no configurar.bat. Senha do painel: "senha" no config.json (feche e abra de novo).
 Use o notebook OU a Oracle para a equipe (os dois funcionam, mas mande só um link).
 
-Comandos (no servidor, pasta controle-patio)
---------------------------------------------
+Comandos (pasta controle-patio)
+-------------------------------
   node patio.js status                  mostra os dados do Feishu cadastrados (o App Secret não aparece) e o link
-  node patio.js testar                  roda testarConexaoFeishu, testarTabelasFeishu e testarLeituraPatio
-  node patio.js diagnosticar            roda diagnosticarDescargasPatio_SCGRU (somente leitura)
-  bash configurar.sh                    troca os dados do Feishu (Enter vazio = mantém); vale na hora
+  node patio.js testar                  testa a conexão e a 1ª página de cada tabela (pátio, docas e expedição)
+  node patio.js diagnosticar            campos e status da tabela do pátio (somente leitura)
+  bash configurar.sh / configurar.bat   troca os dados do Feishu (Enter vazio = mantém); vale na hora
+Só no servidor:
   sudo systemctl restart controle-patio reinicia o painel
   sudo journalctl -u controle-patio -f  mostra o que o painel está fazendo (Ctrl+C sai)
 
 Atualizar para uma versão nova
 ------------------------------
-Envie o ZIP novo pelo Cloud Shell (passos 2 e 3) e, no servidor:
+Oracle: envie o ZIP novo pelo Cloud Shell (passos 2 e 3) e, no servidor:
   cd ~ && unzip -o CONTROLE_PATIO_V<versão>.zip && sudo systemctl restart controle-patio
 Responda A (substituir todos) se ele perguntar. Os dados do Feishu, a senha e o config.json ficam (não estão no ZIP).
-
-Mudou o painel no Apps Script?
-------------------------------
-Copie o Index.html e o Código.gs novos para a pasta controle-patio do servidor (o Código.gs com o nome Codigo.gs) e
-reinicie: sudo systemctl restart controle-patio. Ou me mande os arquivos para gerar um ZIP novo.
+Windows: feche a janela preta, extraia o ZIP novo por cima da pasta C:\controle-patio e abra o iniciar.bat.
+Veio da versão 1.x? Os dados do Feishu já gravados continuam valendo (dados/propriedades.json vira dados/feishu.json).
 
 config.json (criado na instalação ou ao abrir pela 1ª vez)
 ----------------------------------------------------------
-porta 3700 · host (Oracle: 127.0.0.1; Windows: 0.0.0.0 = abre também pela rede) · senha (vazio = quem tem o link abre) · cacheSegundos 30 (tempo que uma consulta ao
-Feishu é reaproveitada) · portaLink / caminho (link: Oracle 10000 e ""; Windows 443 e "/patio") · linkPublico (só para mostrar).
+porta 3700 · host (Oracle: 127.0.0.1; Windows: 0.0.0.0 = abre também pela rede) · senha (vazio = quem tem o link
+abre) · cacheSegundos 30 (tempo que uma consulta ao Feishu é reaproveitada) · portaLink / caminho (link: Oracle 10000 e
+""; Windows 443 e "/patio") · linkPublico (só para mostrar).
 Mudou? Oracle: sudo systemctl restart controle-patio · Windows: feche a janela preta e abra o iniciar.bat de novo.
 
 Se der problema
 ---------------
 - Painel mostra "Faltam os dados do Feishu": rode bash configurar.sh (Windows: configurar.bat).
 - "Falha na autenticação com Feishu": App ID ou App Secret errado. Rode bash configurar.sh (Windows: configurar.bat).
-- "Erro ao consultar Feishu: ...": o ID de alguma tabela (FEISHU_TABLE_...) ou o FEISHU_APP_TOKEN está errado, ou o app
-  do Feishu perdeu a permissão na base. Rode node patio.js testar para ver qual tabela.
+- "Erro ao consultar Feishu: ...": o FEISHU_APP_TOKEN ou o ID de alguma tabela está errado, ou o app do Feishu não tem
+  permissão na base. Rode node patio.js testar para ver qual tabela.
+- "Sem acesso ao Feishu": a internet do servidor/computador. No Windows, se a empresa usa proxy, veja as linhas
+  "rem set HTTPS_PROXY" no iniciar.bat.
 - O link não abre: Oracle: sudo systemctl status controle-patio e bash link-publico.sh de novo. Windows: veja se a
   janela preta está aberta e rode o link-publico.bat de novo.
-- Windows: "Sem acesso" ou erro de rede: se a empresa usa proxy, veja as linhas "rem set HTTPS_PROXY" no iniciar.bat.
 
 Para quem mexe no código
 ------------------------
+lib/feishu.js (leitura do Feishu) · server.js (painel e api) · Index.html (tela)
 node test/teste.js   (Feishu de mentira, dados fictícios)
 node gerar-zip.js    (gera dist/CONTROLE_PATIO_V<versão>.zip)

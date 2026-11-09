@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Controle de Pátio — instalação num servidor Linux da nuvem (Oracle Cloud "Always Free", Ubuntu 22.04/24.04).
+# Controle de Pátio (Node.js) — instalação num servidor Linux da nuvem (Oracle Cloud "Always Free", Ubuntu 22.04/24.04).
 # Pode ficar no mesmo servidor do Monitor de Recebimento (é leve: só consulta o Feishu quando alguém abre o painel).
 #
 # Uso (no servidor, dentro da pasta controle-patio):   bash instalar-nuvem.sh
@@ -8,7 +8,7 @@
 #   1. fuso horário de São Paulo;
 #   2. Node.js 22 (NodeSource), se não houver um 20+;
 #   3. config.json: painel só no próprio servidor (127.0.0.1:3700) e link na porta 10000 (8443 = Monitor);
-#   4. dados do Feishu (os das Propriedades do script do Apps Script), se ainda não estiverem gravados, e o teste;
+#   4. dados do Feishu (App ID, App Secret, token da base e as 3 tabelas), se ainda não estiverem gravados, e o teste;
 #   5. serviço do sistema "controle-patio" (liga sozinho com o servidor e reinicia se parar).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -18,7 +18,7 @@ SERVICE=controle-patio
 
 say() { printf '\n\033[1;31m==> %s\033[0m\n' "$*"; }
 
-[ -f "$APP/Codigo.gs" ] || { echo "Não achei os arquivos do painel (Codigo.gs) em $APP. Extraia o ZIP inteiro e rode este arquivo de dentro da pasta controle-patio."; exit 1; }
+[ -f "$APP/lib/feishu.js" ] || { echo "Não achei os arquivos do painel (lib/feishu.js) em $APP. Extraia o ZIP inteiro e rode este arquivo de dentro da pasta controle-patio."; exit 1; }
 command -v apt-get >/dev/null 2>&1 || { echo "Este instalador é para Ubuntu/Debian (apt-get)."; exit 1; }
 [ "$USER_NAME" != "root" ] || { echo "Rode como o usuário normal do servidor (ex.: ubuntu), não como root."; exit 1; }
 
