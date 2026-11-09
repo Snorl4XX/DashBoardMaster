@@ -1,6 +1,6 @@
 {
   "name": "jt-controle-patio",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "description": "Controle de Pátio | SP GRU: Portaria, Fila FIFO, Docas e Expedição do Feishu, em Node.js (servidor da Oracle ou Windows).",
   "main": "server.js",

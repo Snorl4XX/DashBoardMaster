@@ -171,9 +171,10 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     'Index.html pede os dados ao servidor Node.js (sem google.script.run)');
   confere(pagina.indexOf('<title>SP GRU | Controle de Pátio</title>') > 0 && pagina.indexOf('Feito por Marcelo Wesley') > 0 &&
     pagina.indexOf("api('buscarVeiculosPatio'") > 0, 'Index.html: mesmo título, crédito e telas');
-  confere(pagina.indexOf('.content>section{display:grid;gap:18px') > 0 && pagina.indexOf('.card{border:1px solid var(--red)}') > 0 &&
+  confere(pagina.indexOf('.content>section{display:grid;gap:12px') > 0 && pagina.indexOf('border:1px solid var(--red)}') < 0 &&
+    pagina.indexOf('.card {\n  background:var(--card);border:1px solid var(--line);') > 0 && pagina.indexOf('.table-wrap{border:1px solid var(--line)') > 0 &&
     pagina.indexOf('.yard-stats .stat-main{grid-row:span 1}') > 0 && pagina.indexOf('.table-wrap th,.table-wrap td{white-space:nowrap') > 0,
-  'design: espaço entre os blocos, contorno vermelho, cartões sem buraco e tabelas sem quebrar palavras');
+  'design do painel principal: borda cinza, 12 px entre os blocos, cartões sem buraco e tabelas sem quebrar palavras');
   confere(pagina.indexOf("$('dateStart').value = fmtDate(") > 0 && pagina.indexOf("openYardDetail('Destino: '+dest") > 0 &&
     pagina.indexOf('function tipoExpedicao(v)') > 0 && pagina.indexOf("$('unloadDay').value=keys().today;") > 0 && pagina.indexOf('CONCLUIDA(v.status)') > 0,
   'dados: datas do filtro, nome do destino, tipo SC/DC, dia operacional de hoje e status com emoji');

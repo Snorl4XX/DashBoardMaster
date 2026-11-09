@@ -378,12 +378,11 @@ tbody tr:hover {background:var(--row-hover)}
 .fifo-table-title{margin:0;font-size:16px}
 @media(max-width:700px){.fifo-tiles{grid-template-columns:1fr 1fr}.fifo-toolbar .field{min-width:150px}}
 
-/* V2.1 — blocos com espaço entre eles, contorno vermelho e sem espaço sobrando nos cartões */
-.content{gap:18px}
-.content>section{display:grid;gap:18px;min-width:0}
-.card{border:1px solid var(--red)}
+/* V2.2 — padrão do painel principal (DashMaster): borda cinza, 12 px entre os blocos, sem buracos e sem sobras */
+.content{gap:12px}
+.content>section{display:grid;gap:12px;min-width:0}
 .card h2{margin-bottom:10px}
-.stats{gap:16px}
+.stats{gap:12px}
 .stat{min-height:0;padding:14px 18px}
 .stat-value{margin:8px 0 2px}
 .stats>.stat-main{min-height:0}
@@ -392,28 +391,25 @@ tbody tr:hover {background:var(--row-hover)}
 .yard-stats .stat-main{grid-row:span 1}
 .yard-stats .stat-main .stat-value{font-size:44px;margin:6px 0 2px}
 /* Grupos de cartões: a última linha estica para ocupar a largura toda */
-.unload-grid,.fifo-tiles,.patio-strip,.docks{display:flex;flex-wrap:wrap;gap:14px}
+.unload-grid,.fifo-tiles,.patio-strip,.docks{display:flex;flex-wrap:wrap;gap:12px}
 .unload-grid>*,.fifo-tiles>*,.patio-strip>*{flex:1 1 190px;min-width:0}
 .docks>.dock{flex:1 1 165px;min-width:0}
-.unload-tile,.fifo-tile,.patio-strip>div,.trip,.hourly-shift,.mini-summary>div,.hourly-slot{border:1px solid var(--red-200)}
 .unload-tile{padding:14px 16px}.unload-tile strong{margin-top:6px}
 .fifo-tile{padding:14px 16px}
-.dock{border:1px solid var(--red-200);border-left:4px solid var(--muted)}
-.dock.free{border-left-color:var(--good)}.dock.busy{border-left-color:var(--red)}
 .dock p{margin:6px 0 0}
 /* Destinos: colunas sem buracos (cada destino ocupa só a altura que precisa) */
-.destinations{display:block;columns:3 340px;column-gap:16px}
-.destinations>.card{display:block;break-inside:avoid;margin:0 0 16px}
-.filters{gap:14px}
+.destinations{display:block;columns:3 340px;column-gap:12px}
+.destinations>.card{display:block;break-inside:avoid;margin:0 0 12px}
+.filters{gap:12px}
 .mini-summary{gap:12px}
-.hourly-grid{gap:14px}
+.hourly-grid{gap:12px}
 .patio-strip{margin-top:10px}
-.table-wrap{border:1px solid var(--red-200);border-radius:10px}
+/* Tabelas como no painel principal: moldura cinza arredondada; texto inteiro (sem quebrar palavra) e rolagem para o lado */
+.table-wrap{border:1px solid var(--line);border-radius:12px}
 .table-wrap table{margin:0}
-/* Tabelas: texto inteiro (antes quebrava no meio da palavra: "DESTIN O", "Conclu ído"); sem caber, a tabela rola para o lado */
 .table-wrap th,.table-wrap td{white-space:nowrap;overflow-wrap:normal}
 .table-wrap td{padding:10px 12px}
-@media(max-width:860px){.content{gap:16px}.content>section{gap:16px}.stat-main .stat-value{font-size:42px}}
+@media(max-width:860px){.stat-main .stat-value{font-size:42px}}
 </style>
 </head>
 
