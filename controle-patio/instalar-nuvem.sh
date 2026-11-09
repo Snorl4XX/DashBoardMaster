@@ -48,7 +48,7 @@ PORT="$(node -p "require('./lib/config').loadConfig().porta")"
 say "4/5 Dados do Feishu"
 STATUS="$(node patio.js status)"
 if grep -q FALTA <<<"$STATUS"; then
-  bash configurar.sh
+  bash configurar.sh || echo "Os dados do Feishu ficam para depois: a instalação continua. Corrija com: bash configurar.sh"
 else
   echo "Dados do Feishu já gravados (para trocar: bash configurar.sh). Testando..."
   node patio.js testar || echo "O teste deu erro: confira os dados com bash configurar.sh"

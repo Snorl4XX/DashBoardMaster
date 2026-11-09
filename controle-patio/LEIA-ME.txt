@@ -32,12 +32,12 @@ Instalar na Oracle (no mesmo servidor do Monitor de Recebimento)
 ------------------------------------------------------------------
 É leve (não guarda histórico: só consulta o Feishu quando alguém abre o painel), então cabe no servidor do Monitor.
 1. No console da Oracle, abra o Cloud Shell (ícone >_ no topo).
-2. Engrenagem do Cloud Shell > Upload > envie o CONTROLE_PATIO_V2_0.zip.
+2. Engrenagem do Cloud Shell > Upload > envie o CONTROLE_PATIO_V2_0_1.zip.
 3. Mande para o servidor e entre nele (o mesmo IP do Monitor):
-     scp -i ~/chave.key ~/CONTROLE_PATIO_V2_0.zip ubuntu@IP_DO_SERVIDOR:~/
+     scp -i ~/chave.key ~/CONTROLE_PATIO_V2_0_1.zip ubuntu@IP_DO_SERVIDOR:~/
      ssh -i ~/chave.key ubuntu@IP_DO_SERVIDOR
 4. No servidor:
-     cd ~ && unzip -o CONTROLE_PATIO_V2_0.zip
+     cd ~ && unzip -o CONTROLE_PATIO_V2_0_1.zip
      cd ~/controle-patio && bash instalar-nuvem.sh
    Ele confere o Node.js, pede os 6 dados do Feishu (o App Secret não aparece enquanto você cola) e testa.
    Tem que aparecer "CONEXÃO COM FEISHU REALIZADA COM SUCESSO!" e "Tudo certo com o Feishu."
