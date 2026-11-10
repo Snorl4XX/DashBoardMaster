@@ -367,22 +367,39 @@ function JTCoreFactory_() {
     return rows;
   }
   /**
-   * V4.25 (pedido, Falta de Bipagem no Recebimento): linha TRONCAL ou SECUNDÁRIA de cada remessa, pelas tabelas de docas e
-   * esteiras de 24/10. Secundária = os DCs e a Last Mile (SBN, DC TBT-SP, DC GRU-SP, DC SSZ-SP, MOOCA, NOD, VLANA e as esteiras
-   * GRU 404-xx): 1º segmento GRU, SBN, MOO, VLANA ou NOD, ou SP com um 2º segmento desses DCs (SP 402-01, SP 395-05…).
-   * O resto é troncal (siglas: GO, SC, MG, SP…). segMain = 1º segmento; segSub = 1º + 2º segmento juntos ("GRU,404-04").
+   * V4.25 (pedido, Falta de Bipagem no Recebimento): linha TRONCAL ou SECUNDÁRIA de cada remessa.
+   * V4.25.1 (pedido: "os valores do segmento secundário devem seguir essas tabelas"): SECUNDÁRIA = só os pares de 1º + 2º
+   * segmento das tabelas de 24/10 — a das esteiras (Last Mile: GRU 404-xx, DC SSZ-SP, DC S-MOO 02-SP, NOD, VLANA) e a dos DCs
+   * (SBN 375-xx, DC TBT-SP, DC GRU-SP) —, mostrados juntos ("GRU,404-04"); VLANA e NOD só com o 1º (a tabela não tem o 2º).
+   * Todo o resto é da linha TRONCAL (principal), com o 1º segmento (GO, PA, RJ, SP…). segMain só nas remessas da troncal e
+   * segSub só nas da secundária: cada filtro lista só os valores da sua linha.
    */
-  var SEG_SECONDARY_FIRST_ = {GRU: 1, SBN: 1, MOO: 1, VLANA: 1, NOD: 1};
-  var SEG_SECONDARY_SP_ = {'402-01': 1, '402-03': 1, '402-05': 1, '421-00': 1, '395-05': 1, '395-06': 1, '395-07': 1, '381-04': 1,
-    '364-00': 1, '435-00': 1, '350-00': 1, '365-00': 1, '381-12': 1, '430-01': 1, '430-05': 1, '430-07': 1, '430-08': 1, '430-09': 1,
-    // códigos SP dos DCs das tabelas de 04/10 e 11/10 (DC SSZ-SP, MOO, DC GRU)
-    '378-00': 1, '378-01': 1, '378-02': 1, '378-03': 1, '398-00': 1, '404-00': 1, '381-06': 1, '381-07': 1, '381-08': 1, '381-13': 1,
-    '381-15': 1, '381-16': 1, '381-17': 1, '405-00': 1};
+  var SEG_SEC_FIRST_ONLY_ = {VLANA: 1, NOD: 1};
+  var SEG_SEC_PAIRS_ = (function () {
+    var o = {}, add = function (first, list) { list.forEach(function (x) { o[first + ',' + x] = 1; }); };
+    var range = function (pre, a, b) { var out = []; for (var n = a; n <= b; n++) out.push(pre + '-' + (n < 10 ? '0' : '') + n); return out; };
+    // Esteiras (Last Mile) e DC SSZ-SP
+    add('GRU', ['404-00', '404-01', '404-02', '404-03', '404-04', '404-05', '404-06', '404-07', '404-08', '404-09', '404-10', '404-11', '404-12', '404-13',
+      '378-00', '378-01', '378-02', '378-03', '378-05', '378-06']);
+    // DC S-MOO 02-SP: SP (antigo) e MOO (novo)
+    add('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01', '430-05', '430-07', '430-08', '430-09']);
+    add('MOO', range('430', 0, 9));
+    // SBN (doca 08)
+    add('SBN', range('375', 0, 10));
+    // DC TBT-SP (doca 23): SP (antigo) e GRU (novo); 402-09 e 402-10 = unidades novas do comunicado de 30/10 (F UBT-SP, F CRZ-SP)
+    add('SP', ['402-01', '402-03', '402-05', '421-00']);
+    add('GRU', range('402', 0, 10));
+    // DC GRU-SP (doca 44): SP (antigo) e GRU (novo)
+    add('SP', ['395-05', '395-06', '395-07', '381-04']);
+    add('GRU', ['381-00', '381-01', '381-02', '381-03', '381-04', '381-05', '381-11', '381-13', '381-14', '381-15', '381-18', '381-19', '381-20', '381-21', '378-04']);
+    return o;
+  })();
   function segLineOf(code) {
     var first = segmentCode(code), second = secondSegment(code);
     if (!first) return {line: '', main: '', sub: ''};
-    var sec = SEG_SECONDARY_FIRST_[first] || (first === 'SP' && second && SEG_SECONDARY_SP_[second]);
-    return {line: sec ? 'Secundária' : 'Troncal', main: first, sub: second ? first + ',' + second : first};
+    if (SEG_SEC_FIRST_ONLY_[first]) return {line: 'Secundária', main: '', sub: first};
+    if (second && SEG_SEC_PAIRS_[first + ',' + second]) return {line: 'Secundária', main: '', sub: first + ',' + second};
+    return {line: 'Troncal', main: first, sub: ''};
   }
   function applySegLines(rows, on) {
     if (!on || !rows) return rows;

@@ -1,8 +1,23 @@
-# J&T DASHMASTER V4.25.0 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.1 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.25.1 — Falta de Bipagem no Recebimento: segmentos secundários pelas tabelas
+
+Pedido: "os valores do segmento secundário estão errados, devem seguir essas tabelas; tem segmento que pertence à principal".
+- **Linha secundária = só os pares de 1º + 2º segmento das tabelas de 24/10**:
+  - a das esteiras: GRU 404-00 a 404-13, DC SSZ-SP (GRU 378-00/01/02/03/05/06), DC S-MOO 02-SP (SP 364-00, 435-00, 350-00,
+    365-00, 381-12, 430-01/05/07/08/09 e MOO 430-00 a 09), NOD e VLANA;
+  - a dos DCs: SBN 375-00 a 10, DC TBT-SP (SP 402-01/03/05, 421-00; GRU 402-00 a 08 e 402-09/10 do comunicado de 30/10)
+    e DC GRU-SP (SP 395-05/06/07, 381-04; GRU 381-00 a 05, 11, 13, 14, 15, 18 a 21; 378-04).
+- **Todo o resto é da linha troncal (principal)**, com o 1º segmento: PA,722-00 → PA; RJ,314-00 → RJ.
+- Filtros: **Segmentos Secundários** lista só os pares das tabelas (ex.: GRU,404-04); **Segmentos Principais** só os da troncal.
+  Nenhum dos dois tem mais o "Sem informação" das remessas da outra linha.
+- Vale na hora, também para os dias já baixados (calculado na leitura).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_1_NODE.zip`.
 
 ## V4.25.0 — Mudanças nos gráficos (PDF "Mudanças nos gráficos dos dashboards")
 

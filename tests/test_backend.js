@@ -4820,12 +4820,17 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     ex('DOCA 21/22') === 'Expedição B' && ex('DOCA 23') === 'Expedição B' && ex('DOCA 38') === 'Expedição C' && ex('DOCA 44') === 'Expedição C' &&
     ex('Esteira 20') === 'Esteiras' && ex('SEM DOCA') === '' && ex('DOCA 30') === '' && ex('') === '',
     'Expedição A = docas 05–14, B = 15–23, C = 38–44; esteira = Esteiras; sem doca = sem informação');
-  // Linha troncal × secundária (Falta de Bipagem no Recebimento).
+  // Linha troncal × secundária (Falta de Bipagem no Recebimento). V4.25.1: secundária = só os pares das tabelas de 24/10;
+  // o resto é da troncal (principal). segMain só na troncal, segSub só na secundária.
   const ln = c => { const x = CV5.segLineOf(c); return x.line + '|' + x.main + '|' + x.sub; };
-  check(ln('GO,795-00,002') === 'Troncal|GO|GO,795-00' && ln('GRU,404-04,020') === 'Secundária|GRU|GRU,404-04' && ln('SP,402-01,1') === 'Secundária|SP|SP,402-01' &&
-    ln('SP,977-00,1') === 'Troncal|SP|SP,977-00' && ln('SBN,375-03,420') === 'Secundária|SBN|SBN,375-03' && ln('VLANA') === 'Secundária|VLANA|VLANA' &&
-    ln('MOO,430-02,1') === 'Secundária|MOO|MOO,430-02' && ln('BAU 484-00,200') === 'Troncal|BAU|BAU,484-00' && ln('') === '||' && ln('GRU') === 'Secundária|GRU|GRU',
-    'linha troncal (1º segmento) × secundária (1º + 2º segmento juntos, ex.: GRU,404-04)', [ln('GO,795-00,002'), ln('GRU,404-04,020'), ln('SP,402-01,1')]);
+  const LN = {'GO,795-00,002': 'Troncal|GO|', 'PA,722-00,1': 'Troncal|PA|', 'RJ,314-00,1': 'Troncal|RJ|', 'SP,977-00,1': 'Troncal|SP|',
+    'BAU 484-00,200': 'Troncal|BAU|', 'GRU,391-18,1': 'Troncal|GRU|', 'GRU': 'Troncal|GRU|', 'SP,378-00,1': 'Troncal|SP|', '': '||',
+    'GRU,404-04,020': 'Secundária||GRU,404-04', 'GRU,404-11,1': 'Secundária||GRU,404-11', 'GRU,378-06,1': 'Secundária||GRU,378-06',
+    'SP,364-00,1': 'Secundária||SP,364-00', 'SP,430-09,1': 'Secundária||SP,430-09', 'MOO,430-02,1': 'Secundária||MOO,430-02', 'NOD,1': 'Secundária||NOD',
+    'VLANA': 'Secundária||VLANA', 'SBN,375-10,420': 'Secundária||SBN,375-10', 'SP,402-01,1': 'Secundária||SP,402-01', 'GRU,402-04,1': 'Secundária||GRU,402-04',
+    'SP,395-06,1': 'Secundária||SP,395-06', 'GRU,381-21,1': 'Secundária||GRU,381-21', 'GRU,378-04,1': 'Secundária||GRU,378-04', 'SP,381-04,1': 'Secundária||SP,381-04'};
+  const lnWrong = Object.keys(LN).filter(k => ln(k) !== LN[k]).map(k => k + ' → ' + ln(k) + ' (esperado ' + LN[k] + ')');
+  check(!lnWrong.length, 'V4.25.1: linha secundária só com os pares das tabelas (GRU,404-04…); PA,722-00 e RJ,314-00 ficam na principal', lnWrong);
   // Catálogo: gráficos e filtros pedidos.
   const cat = k => cV.getPublicCatalog_().filter(x => x.key === k)[0];
   const mr = cat('missing_receipt'), md = cat('missing_dispatch'), ws = cat('wrong_send'), se = cat('sorting_error'), dm = cat('damage');
@@ -4866,6 +4871,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const catE = k => cE.getPublicCatalog_().filter(x => x.key === k)[0];
   const rowsR = CV5.applyV425(CV5.decodeDataset(cE.getDashboardData('missing_receipt', {from: DN, to: DN}).dataset), catE('missing_receipt'));
   const trunk = CV5.buildChart(catE('missing_receipt').charts[1], rowsR), sec = CV5.buildChart(catE('missing_receipt').charts[2], rowsR);
+  const fac = CV5.facets(rowsR, {}, ['segMain', 'segSub']), vals = k => fac[k].map(o => o.value).filter(v => v !== 'N/A').sort().join();
+  check(vals('segMain') === 'GO,MG,SP' && vals('segSub') === 'GRU,404-04,SP,402-01' && catE('missing_receipt').hideNAFilters.join() === 'segMain,segSub',
+    'V4.25.1: filtro Segmentos Secundários só com os pares das tabelas; Segmentos Principais só com a troncal (sem "Sem informação")',
+    {main: vals('segMain'), sub: vals('segSub')});
   check(trunk.total === 3 && trunk.labels.join() === 'GO,MG,SP' && sec.total === 3 && sec.labels.join() === 'GRU,404-04,SP,402-01' && sec.datasets[0].data.join() === '2,1',
     'gráficos de segmentos: linha troncal (GO, MG, SP) e linha secundária (GRU,404-04 = 2; SP,402-01 = 1), cada um com o total da sua linha',
     {trunk: trunk.labels, sec: sec.labels});

@@ -1384,9 +1384,11 @@
     // Modo de totais: a lista de cada filtro vem dos totais daquele campo (já com os outros filtros).
     if (sm) keys.forEach(function (k) { var o = {}; if (f[k]) o[k] = f[k]; facets[k] = Core.facets(sm.byDim[k] || [], o, [k])[k]; });
     else facets = Core.facets(state.data.rows, f, keys);
-    var okc = cfg() && cfg().orderKinds;
+    var okc = cfg() && cfg().orderKinds, hideNA = (cfg() && cfg().hideNAFilters) || [];
     keys.forEach(function (k) {
       var d = state.dropdowns[k], opts = facets[k] || [];
+      // V4.25.1: filtro que lista só os valores de uma linha (Segmentos Principais / Secundários): sem o "Sem informação".
+      if (hideNA.indexOf(k) >= 0) opts = opts.filter(function (o) { return o.value !== 'N/A'; });
       // V3.35 (Avaria): "Pedido principal" e "Pedido secundário" sempre na lista, como no JMS (mesmo com 0 avarias numa
       // delas: a taxa do JMS dessa opção pode ser 0).
       if (okc && k === okc.field) {

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.25.0',
+  VERSION: '4.25.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -760,9 +760,11 @@ const ALL_INDICATORS_ = Object.freeze({
       segmentFull: ['threeSegmentCode']
     },
     // V4.25 (pedido): segmentos em linha troncal (1º segmento: GO, SC, MG…) e linha secundária (1º + 2º segmento: GRU,404-04),
-    // pelas tabelas de docas e esteiras de 24/10. Calculado na leitura (Core.applySegLines).
+    // pelas tabelas de docas e esteiras de 24/10 (V4.25.1: secundária = só os pares das tabelas). Calculado na leitura (Core.applySegLines).
     segLines: true,
     labelsOne: {segMain: {pt: 'Segmento', zh: '段码'}, segSub: {pt: 'Segmento', zh: '段码'}},
+    // V4.25.1: cada filtro de segmento lista só a sua linha (sem o "Sem informação" das remessas da outra linha).
+    hideNAFilters: ['segMain', 'segSub'],
     // V4.25 (pedido): o filtro de Segmento virou dois — Segmentos Principais (só o 1º segmento) e Segmentos Secundários (1º + 2º).
     filters: ['shift', 'login', 'interval', 'client', 'destination', 'segMain', 'segSub'],
     topCards: ['segment'],
@@ -2084,7 +2086,7 @@ function catalogEntry_(cfg) {
     dayOf: cfg.dayOf || null, scans: !!cfg.scans, segmentBase: !!cfg.segmentBase,
     emptyLotLabel: cfg.emptyLotLabel || null,
     // V4.25: explicação do indicador, grupos de Expedição (A/B/C) e linhas troncal/secundária dos segmentos.
-    about: INDICATOR_ABOUT_[cfg.key] || null, expeditions: cfg.expeditions || null, segLines: !!cfg.segLines,
+    about: INDICATOR_ABOUT_[cfg.key] || null, expeditions: cfg.expeditions || null, segLines: !!cfg.segLines, hideNAFilters: cfg.hideNAFilters || null,
     hideShiftCards: !!cfg.hideShiftCards,
     valueCards: cfg.valueCards || [],
     texts: cfg.texts || null,
