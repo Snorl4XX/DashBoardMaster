@@ -74,7 +74,9 @@ function numero(v) {
   return s && Number.isFinite(n) ? n : null;
 }
 
-/** Fim da descarga: só um campo que diga isso explicitamente. CHECK_OUT e HORA_DOCAGEM não contam. */
+const semAcento = v => String(v || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/^[^A-Za-z0-9]+/, '').toUpperCase();
+
+/** Fim da descarga: só um campo que diga isso explicitamente. CHECK_OUT e HORA_DOCAGEM não contam aqui (veja fimOuCheckout). */
 const CAMPOS_FIM = ['FIM_DESCARGA', 'FIM DESCARGA', 'DATA_FIM_DESCARGA', 'HORA_FIM_DESCARGA', 'HORARIO_FIM_DESCARGA',
   'FIM_DESCARREGAMENTO', 'DESCARGA_FINALIZADA_EM', 'CONCLUSAO_DESCARGA', 'CONCLUSÃO DESCARGA',
   'FIM_OPERACAO', 'FIM OPERAÇÃO', 'HORA_FIM_OPERACAO', 'DATA_FIM_OPERACAO'];
@@ -83,6 +85,20 @@ function fimDescarga(f) {
     const t = Object.prototype.hasOwnProperty.call(f, campo) ? instante(f[campo]) : null;
     if (t !== null) return {valor: t, campo};
   }
+  return {valor: null, campo: ''};
+}
+
+/**
+ * V2.3 (pedido: "Veículos descarregados no dia" sem dados): a tabela PATIO_VEICULO do SP GRU não tem campo de fim da descarga
+ * — o veículo sai da doca com STATUS PATIO = LIBERADO e o horário no CHECK_OUT. Sem FIM_DESCARGA/FIM_OPERACAO, a descarga
+ * conta como concluída pelo CHECK_OUT de um veículo que foi docado (CHECK_OUT depois da HORA_DOCAGEM; cancelado não conta).
+ */
+function fimOuCheckout(f) {
+  const fim = fimDescarga(f);
+  if (fim.valor !== null) return fim;
+  const saida = instante(f['CHECK_OUT']), doca = instante(f['HORA_DOCAGEM']) ?? instante(f['ENTRADA_DOCA']);
+  const status = semAcento(texto(f['STATUS PATIO']));
+  if (saida !== null && doca !== null && saida >= doca && !/^CANCELAD/.test(status)) return {valor: saida, campo: 'CHECK_OUT'};
   return {valor: null, campo: ''};
 }
 
@@ -108,8 +124,6 @@ function formato(v) {
   if (v && typeof v === 'object') return v.link_record_ids || v.record_ids ? 'vínculo' : v.value !== undefined ? 'fórmula/consulta' : 'objeto';
   return typeof v;
 }
-
-const semAcento = v => String(v || '').trim().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/^[^A-Za-z0-9]+/, '').toUpperCase();
 
 /** opcoes: {pastaDados, baseUrl (só para testes; padrão https://open.feishu.cn)} */
 function criarFeishu(opcoes) {
@@ -177,7 +191,7 @@ function criarFeishu(opcoes) {
   async function buscarVeiculosPatio() {
     const {items} = await registros('FEISHU_TABLE_PATIO');
     return items.map(item => {
-      const f = item.fields || {}, fim = fimDescarga(f);
+      const f = item.fields || {}, fim = fimOuCheckout(f);
       return {
         id: item.record_id,
         placa: texto(f['PLACA']),
@@ -293,6 +307,8 @@ function criarFeishu(opcoes) {
       }
       if (nome === 'PATIO_VEICULO') {
         log('  Registros com horário de conclusão: ' + items.filter(r => fimDescarga(r.fields || {}).valor !== null).length);
+        log('  Registros com CHECK_OUT depois da docagem (contam como descarga concluída): ' +
+          items.filter(r => fimDescarga(r.fields || {}).valor === null && fimOuCheckout(r.fields || {}).valor !== null).length);
         log('  Outros campos da tabela: ' + [...existentes].filter(c => USADOS[nome].indexOf(c) < 0).sort().join(' | '));
       }
     }
@@ -302,4 +318,4 @@ function criarFeishu(opcoes) {
   return {buscarVeiculosPatio, buscarDocasFeishu, buscarProgramacaoExpedicao, testar, diagnosticar};
 }
 
-module.exports = {criarFeishu, texto, idsVinculados, fimDescarga, instante, numero};
+module.exports = {criarFeishu, texto, idsVinculados, fimDescarga, fimOuCheckout, instante, numero};

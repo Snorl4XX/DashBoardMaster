@@ -185,7 +185,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   confere(v0.placa === 'TST1000' && v0.motorista === 'Motorista Teste 0' && v0.status === 'EM DOCA' && v0.docaIds[0] === 'recDoca0' &&
     v0.doca === '' && v0.fimDescarga && v0.campoFimDescarga === 'FIM_DESCARGA', 'campos do pátio (texto, vínculo sem virar nome, fim da descarga)');
   confere(v1.checkout && v1.fimDescarga === null && v1.campoFimDescarga === '' && v2.fimDescarga === null && v2.docaIds.length === 1,
-    'CHECK_OUT não conta como fim da descarga');
+    'CHECK_OUT sem docagem não conta como fim da descarga');
   confere(j.result[3].checkin === Date.UTC(2026, 10, 8, 17, 30) && j.result[4].horaDocagem === agora - 4 * 60000 &&
     typeof v0.checkin === 'number' && typeof v0.horaDocagem === 'number', 'datas do Feishu em qualquer formato (data, texto, fórmula) chegam como data');
   j = await (await chamar(A, 'buscarDocasFeishu')).json();
@@ -312,6 +312,25 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   const bat = fs.readFileSync(path.join(APP, 'iniciar.bat'), 'utf8');
   confere(/patio\.js pronto/.test(bat) && /patio\.js configurar/.test(bat) && /server\.js/.test(bat) && /C:\\dashmaster\\node\\node\.exe/.test(bat),
     'iniciar.bat: usa o node.exe do DashMaster, pede o Feishu na 1ª vez e abre o servidor');
+
+  console.log('\n[13] V2.3: dados que não apareciam (tabela sem FIM_DESCARGA nem FLUXO "RECEBIMENTO" exato)');
+  const {fimOuCheckout} = require(path.join(APP, 'lib', 'feishu.js'));
+  const H = Date.UTC(2026, 10, 10, 13, 0);
+  const f1 = fimOuCheckout({'STATUS PATIO': 'LIBERADO', HORA_DOCAGEM: H, CHECK_OUT: H + 40 * 60000});
+  const f2 = fimOuCheckout({'STATUS PATIO': 'LIBERADO', CHECK_OUT: H});
+  const f3 = fimOuCheckout({'STATUS PATIO': 'LIBERADO', HORA_DOCAGEM: H, CHECK_OUT: H - 60000});
+  const f4 = fimOuCheckout({'STATUS PATIO': 'CANCELADO', HORA_DOCAGEM: H, CHECK_OUT: H + 60000});
+  const f5 = fimOuCheckout({FIM_DESCARGA: H + 10 * 60000, HORA_DOCAGEM: H, CHECK_OUT: H + 40 * 60000});
+  confere(f1.valor === H + 40 * 60000 && f1.campo === 'CHECK_OUT' && f2.valor === null && f3.valor === null && f4.valor === null &&
+    f5.valor === H + 10 * 60000 && f5.campo === 'FIM_DESCARGA',
+    'sem FIM_DESCARGA: descarga concluída pelo CHECK_OUT depois da docagem (sem docagem, check-out antes da docagem ou cancelado: não conta)');
+  const pg = fs.readFileSync(path.join(APP, 'Index.html'), 'utf8');
+  confere(pg.indexOf("yardStatus(v.fluxo)==='RECEBIMENTO'") < 0 && /function isRecebimento\(v\)/.test(pg) && /semFluxo = !vehicles\.some/.test(pg) &&
+    /RECEB\|DESCARG/.test(pg), 'FLUXO: aceita variações de "RECEBIMENTO"; tabela sem FLUXO não zera as descargas, docagens e a fila');
+  const dg = await (await fetch(A.url + '/diagnostico')).text();
+  confere(/TABELA PATIO_VEICULO: 150 registros/.test(dg) && /CHECK_OUT depois da docagem/.test(dg) && /Valores de STATUS PATIO/.test(dg) &&
+    dg.indexOf('TST1000') < 0 && dg.indexOf('Motorista Teste') < 0 && dg.indexOf(SEGREDO) < 0,
+    '/diagnostico pelo link: campos, quantidades e status (sem placas, nomes nem o App Secret)');
 
   saidas.forEach(s => s.filho.kill());
   feishu.close();

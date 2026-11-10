@@ -115,6 +115,28 @@ function paginaEntrar(erro) {
     (erro ? '<p class="erro">' + html(erro) + '</p>' : '') + '<button>Entrar</button></form></main></body></html>';
 }
 
+/** Diagnóstico (no máximo uma consulta completa ao Feishu por minuto). */
+let diag = null;
+async function paginaDiagnostico() {
+  if (!diag || Date.now() - diag.em > 60000) {
+    const linhas = [];
+    const falta = credenciais.faltando(cfg.pastaDados);
+    if (falta.length) linhas.push('Faltam os dados do Feishu: ' + falta.join(', ') + '. No servidor: ' + CMD_CONFIGURAR);
+    else {
+      try { await feishu.diagnosticar(t => linhas.push(t)); }
+      catch (e) { linhas.push('[erro] ' + ((e && e.message) || e)); }
+    }
+    diag = {em: Date.now(), texto: linhas.join('\n')};
+  }
+  return '<!doctype html><html lang="pt-BR" translate="no"><meta charset="utf-8"><meta name="google" content="notranslate"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>Controle de Pátio | Diagnóstico</title><style>' + CSS + '.caixa{max-width:1100px;margin:24px auto}pre{white-space:pre-wrap;word-break:break-word;' +
+    'background:var(--cartao);border:1px solid var(--linha);border-radius:12px;padding:16px;font:13px/1.55 ui-monospace,Consolas,monospace}</style>' +
+    '<body><main class="caixa"><h1>Controle de Pátio · diagnóstico dos campos do Feishu</h1>' +
+    '<p>Gerado em ' + html(agoraSp()) + ' (atualiza no máximo uma vez por minuto). Só nomes de campos, quantidades e valores de status/fluxo/tipo; ' +
+    'nenhuma placa ou nome. Tire um print desta página e mande para quem cuida do painel.</p><pre>' + html(diag.texto) + '</pre>' +
+    '<p><a href="./">← Voltar ao painel</a></p></main></body></html>';
+}
+
 async function tratar(req, res) {
   let url = new URL(req.url, 'http://localhost');
   // Link com caminho (https://NOME.ts.net/patio): o Tailscale repassa com o caminho ou sem ele; os dois funcionam.
@@ -147,6 +169,13 @@ async function tratar(req, res) {
   }
   if (p === '/' && (req.method === 'GET' || req.method === 'HEAD')) {
     enviar(req, res, 200, liberado ? paginaPainel() : paginaEntrar(''));
+    return;
+  }
+  // V2.3: diagnóstico dos campos pelo link (o mesmo do "node patio.js diagnosticar"): campos de cada tabela, quantos têm valor,
+  // formato e os valores de status/fluxo/tipo. Nunca mostra placas, motoristas nem outros dados das pessoas. Somente leitura.
+  if (p === '/diagnostico' && (req.method === 'GET' || req.method === 'HEAD')) {
+    if (!liberado) { enviar(req, res, 200, paginaEntrar('')); return; }
+    enviar(req, res, 200, await paginaDiagnostico());
     return;
   }
   const api = p.match(/^\/api\/([A-Za-z]+)$/);

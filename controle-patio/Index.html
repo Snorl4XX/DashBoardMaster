@@ -432,7 +432,7 @@ tbody tr:hover {background:var(--row-hover)}
   <div class="sidebar-footer">
     <div><span class="live"></span><strong id="liveLabel">Atualização automática</strong></div>
     <div id="updatedAt">Aguardando atualização</div>
-    <div>Versão 2.2 · DashMaster</div>
+    <div>Versão 2.3 · DashMaster</div>
     <div>Feito por Marcelo Wesley</div>
   </div>
 </aside>
@@ -652,7 +652,7 @@ tbody tr:hover {background:var(--row-hover)}
       <div class="card">
         <div class="table-tools"><div>
           <h2>Veículos descarregados no dia / 当日卸货完成车辆</h2>
-          <p class="muted">Somente registros com FIM_DESCARGA ou FIM_OPERACAO. Turno responsável determinado pela HORA_DOCAGEM.</p>
+          <p class="muted">Fim da descarga: FIM_DESCARGA/FIM_OPERACAO ou, sem eles, o CHECK_OUT do veículo que foi docado (LIBERADO). Turno responsável determinado pela HORA_DOCAGEM.</p>
         </div></div>
         <div class="fifo-toolbar">
           <div class="field"><label for="fifoDoneDay">DIA OPERACIONAL / 运营日期</label><input id="fifoDoneDay" type="date" onchange="renderFIFO()"></div>
@@ -1131,6 +1131,7 @@ function loadExpedition() {
 function loadVehicles() {
   api('buscarVeiculosPatio',r => {
     vehicles = Array.isArray(r) ? r : [];
+    semFluxo = !vehicles.some(v => norm(v.fluxo));
     if (!current.startsWith('Expedição')) renderVehicles(); else renderExpedition();
     updateTime();
   },e => { console.error(errorMessage(e)); txt('generalMessage','Erro ao consultar pátio: '+errorMessage(e)); });
@@ -1598,6 +1599,13 @@ function changePage(delta) {
 function yardStatus(v) {
   return norm(v).replace(/^[^A-Z0-9]+/,'').replace(/\s+/g,' ').trim();
 }
+// V2.3: FLUXO do Feishu de recebimento ("RECEBIMENTO", "RECEBIMENTO / DESCARGA", "DESCARGA"…). Tabela sem o campo FLUXO
+// (nenhum veículo com fluxo): todos contam — antes, sem "RECEBIMENTO" exato, as descargas, docagens e a fila ficavam zeradas.
+let semFluxo = false;
+function isRecebimento(v) {
+  if (semFluxo) return true;
+  return /RECEB|DESCARG|ENTRADA|INBOUND/.test(yardStatus(v.fluxo));
+}
 function isReleasedYard(v) {
   return ['LIBERADO','LIBERADA','SAIU','FINALIZADO','FINALIZADA','CANCELADO','CANCELADA','CHECK OUT','CHECKOUT'].includes(yardStatus(v.status));
 }
@@ -1715,7 +1723,7 @@ function renderUnloadStats() {
   const selected=operationalSelection();
   const base=filteredYardBase();
   // A data operacional de docagem é independente do filtro de data do check-in.
-  const valid=base.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO' && ms(v.horaDocagem)!=null);
+  const valid=base.filter(v=>isRecebimento(v) && ms(v.horaDocagem)!=null);
   const countable=valid.filter(v=>operationalDate(ms(v.horaDocagem))===selected);
   const groups={T1:[],T2:[],T3:[]};
   countable.forEach(v=>groups[shiftFromTime(ms(v.horaDocagem))].push(v));
@@ -1768,7 +1776,7 @@ function makeEfficiencyTile(root,label,value,subtitle,rows) {
 function renderDockEfficiency() {
   const selected=operationalSelection();
   // O turno e a data são SEMPRE derivados da docagem, nunca do check-in.
-  const base=vehicles.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO' &&
+  const base=vehicles.filter(v=>isRecebimento(v) &&
     ms(v.horaDocagem)!=null && operationalDate(ms(v.horaDocagem))===selected &&
     (!norm($('vehicleType').value)||norm(v.tipoVeiculo)===norm($('vehicleType').value)) &&
     (!$('vehicleShift').value||assignedShift(v)===$('vehicleShift').value) &&
@@ -1782,7 +1790,7 @@ function renderDockEfficiency() {
   const activeDock=base.filter(v=>isActiveYard(v)&&dockMinutes(v)==null);
   const root=$('dockEfficiencySummary');root.replaceChildren();
   makeEfficiencyTile(root,yardText('Docagens','靠台车辆'),nfmt(base.length),'Recebimento · data selecionada',base);
-  makeEfficiencyTile(root,yardText('Conclusões registradas','已登记完成'),nfmt(done.length),'Fim de descarga válido',done);
+  makeEfficiencyTile(root,yardText('Conclusões registradas','已登记完成'),nfmt(done.length),'Fim de descarga ou check-out',done);
   makeEfficiencyTile(root,yardText('Tempo médio em doca','平均靠台时长'),durationText(meanDockDuration(done)),'Somente registros concluídos',done);
   makeEfficiencyTile(root,yardText('Em doca sem conclusão','在台未完成'),nfmt(activeDock.length),'Ainda sem check-out',activeDock);
   const grouped=new Map();base.forEach(v=>{const k=dockName(v);if(!grouped.has(k))grouped.set(k,[]);grouped.get(k).push(v);});
@@ -1796,7 +1804,7 @@ function renderDockEfficiency() {
     makeClickable(tr,()=>openYardDetail('Doca '+name+' · '+selected,rows));body.append(tr);
   });
   if(!grouped.size){const tr=el('tr'),td=el('td','empty','Nenhuma docagem para os filtros.');td.colSpan=10;tr.append(td);body.append(tr);}
-  txt('dockEfficiencyNote',`${nfmt(base.length)} docagens · ${nfmt(done.length)} com conclusão válida · ${nfmt(base.length-done.length)} sem conclusão registrada. Sem horário de fim, não calculamos tempo final nem tratamos CHECK_OUT como conclusão.`);
+  txt('dockEfficiencyNote',`${nfmt(base.length)} docagens · ${nfmt(done.length)} com conclusão · ${nfmt(base.length-done.length)} sem conclusão registrada. Conclusão = FIM_DESCARGA/FIM_OPERACAO ou, sem eles, o CHECK_OUT depois da docagem.`);
   const sum=$('trailerEfficiencySummary');sum.replaceChildren();
   makeEfficiencyTile(sum,'CARRETAS DOCADAS',nfmt(trailers.length),'TIPO_VEICULO = CARRETA',trailers);
   makeEfficiencyTile(sum,'CARRETAS CONCLUÍDAS',nfmt(doneTrailers.length),'Com fim registrado',doneTrailers);
@@ -1828,7 +1836,7 @@ function yardHourlyRows() {
   return vehicles.filter(v=>{
     const t=ms(v.horaDocagem);
     return t!=null && operationalDate(t)===selected &&
-      yardStatus(v.fluxo)==='RECEBIMENTO' &&
+      isRecebimento(v) &&
       (!type||norm(v.tipoVeiculo)===type) &&
       (!turno||assignedShift(v)===turno) &&
       (!status||v.status===status) &&
@@ -1940,7 +1948,7 @@ function renderFIFO(){
   // FIFO estrito: check-in realizado, AGUARDANDO DOCA, sem docagem nem check-out.
   // BOLSÃO VAZIO, EM DOCA, LIBERADO e outros status nunca entram nesta fila.
   const waiting=vehicles.filter(v=>isActiveYard(v)&&
-    yardStatus(v.fluxo)==='RECEBIMENTO'&&
+    isRecebimento(v)&&
     yardStatus(v.status)==='AGUARDANDO DOCA'&&
     ms(v.checkin)!=null&&ms(v.horaDocagem)==null&&matches(v));
   waiting.sort((a,b)=>(ms(a.checkin)??Infinity)-(ms(b.checkin)??Infinity));
@@ -1960,7 +1968,7 @@ function renderFIFO(){
   const selected=$('fifoDoneDay').value||keys().today;
   const turno=$('fifoDoneShift').value;
   // Dia operacional da CONCLUSÃO: entre 00h e 05h59 conta no dia anterior.
-  const completed=vehicles.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO'&&ms(v.fimDescarga)!=null&&
+  const completed=vehicles.filter(v=>isRecebimento(v)&&ms(v.fimDescarga)!=null&&
     operationalDate(ms(v.fimDescarga))===selected&&(!turno||assignedShift(v)===turno)&&matches(v));
   completed.sort((a,b)=>(ms(a.fimDescarga)??0)-(ms(b.fimDescarga)??0));
   fifoCurrentDone=completed;
@@ -1968,7 +1976,7 @@ function renderFIFO(){
   if(dsig!==fifoDoneSignature){fifoDoneSignature=dsig;fifoDonePage=1;}
   fifoDonePage=Math.min(Math.max(1,fifoDonePage),Math.max(1,Math.ceil(completed.length/FIFO_PAGE_SIZE)));
   const dstats=$('fifoDoneStats');dstats.replaceChildren();
-  fifoMetric(dstats,'Descargas concluídas',nfmt(completed.length),'Fim de descarga registrado',completed);
+  fifoMetric(dstats,'Descargas concluídas',nfmt(completed.length),'Fim de descarga ou check-out após a docagem',completed);
   const trailer=completed.filter(v=>norm(v.tipoVeiculo)==='CARRETA');
   fifoMetric(dstats,'Carretas concluídas',nfmt(trailer.length),'Tipo CARRETA',trailer);
   const timed=completed.map(dockMinutes).filter(v=>v!=null);
@@ -1976,9 +1984,11 @@ function renderFIFO(){
   fifoFillTable('fifoDoneBody',completed,'done',fifoDonePage);
   fifoSetPager('fifoDone',fifoDonePage,completed.length);
   const anyFinished=vehicles.some(v=>ms(v.fimDescarga)!=null);
+  const byCheckout=completed.filter(v=>v.campoFimDescarga==='CHECK_OUT').length;
   txt('fifoDoneNote',anyFinished
-    ?'Data selecionada: '+selected.split('-').reverse().join('/')+'. T3 da data inclui 00h–05h59 do dia seguinte. Turno responsável = turno da docagem, não do check-in.'
-    :'Atenção: nenhum registro consultado contém FIM_DESCARGA/FIM_OPERACAO. CHECK_OUT ou LIBERADO não são usados como prova de descarga. Preencha o horário de conclusão no Feishu para exibir veículos aqui.');
+    ?'Data selecionada: '+selected.split('-').reverse().join('/')+'. T3 da data inclui 00h–05h59 do dia seguinte. Turno responsável = turno da docagem, não do check-in.'+
+      (byCheckout?' Fim pelo CHECK_OUT (a tabela não tem FIM_DESCARGA): '+nfmt(byCheckout)+' de '+nfmt(completed.length)+'.':'')
+    :'Nenhum veículo docado com FIM_DESCARGA/FIM_OPERACAO ou CHECK_OUT depois da docagem nos registros consultados.');
 }
 
 function renderVehicles() {
@@ -1990,7 +2000,7 @@ function renderVehicles() {
   options('vehicleFlow',vehicles.map(v=>v.fluxo),tr('all'));
   const base=filteredYardBase();
   const active=base.filter(isActiveYard);
-  const waiting=active.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO' && yardStatus(v.status)==='AGUARDANDO DOCA');
+  const waiting=active.filter(v=>isRecebimento(v) && yardStatus(v.status)==='AGUARDANDO DOCA');
   const unloading=base.filter(v=>yardStatus(v.status)==='DESCARREGANDO');
   const inDock=base.filter(v=>yardStatus(v.status)==='EM DOCA');
   const loading=base.filter(v=>yardStatus(v.status)==='CARREGANDO');
@@ -2004,7 +2014,7 @@ function renderVehicles() {
   const freeDocks=docks.filter(d=>yardStatus(d.status)==='LIVRE');
   const busyDocks=docks.filter(d=>yardStatus(d.status)==='OCUPADA');
   const stats=$('generalStats');stats.replaceChildren();
-  const currentDock=active.filter(v=>yardStatus(v.fluxo)==='RECEBIMENTO'&&ms(v.horaDocagem)!=null&&dockMinutes(v)==null);
+  const currentDock=active.filter(v=>isRecebimento(v)&&ms(v.horaDocagem)!=null&&dockMinutes(v)==null);
   const metrics=[
     [yardText('Veículos no pátio','场内车辆'),active.length,active,'vehicle',true],
     [yardText('Carretas no pátio','场内挂车'),carretas.length,carretas,'vehicle',false],
@@ -2024,7 +2034,7 @@ function renderVehicles() {
   const q=norm($('vehicleSearch').value),st=$('vehicleStatus').value,fl=$('vehicleFlow').value;
   let list=base.filter(v=>(!q||norm([v.placa,v.tipoVeiculo,v.motorista,v.transportadora,v.idViagem,v.destino,v.doca].join(' ')).includes(q)) && (!st||v.status===st) && (!fl||v.fluxo===fl));
   if(fifo){
-    list=list.filter(v=>isActiveYard(v)&&yardStatus(v.fluxo)==='RECEBIMENTO'&&yardStatus(v.status)==='AGUARDANDO DOCA');
+    list=list.filter(v=>isActiveYard(v)&&isRecebimento(v)&&yardStatus(v.status)==='AGUARDANDO DOCA');
   }else if(yardSelectedHour){
     list=list.filter(v=>yardHourKey(v)===yardSelectedHour);
   }else if($('yardListPeriod').value==='day'){
