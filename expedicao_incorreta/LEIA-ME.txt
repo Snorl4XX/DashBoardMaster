@@ -68,6 +68,15 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
   (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
 
+Rotas de 10/11 (versão 1.9.3) — aviso urgente: PA MRB, TO PMW, RO PVH e AC RBR VOLTAM do DF BSB para o SP BRE
+  A planilha padrão já vem assim: linha SP BRE com TO, MRB, RO, AC (e RBR); linha DF BSB só com DF.
+  Quem já tem o app continua com a planilha antiga. Para atualizar, escolha um jeito:
+  - na tela Configurações → "Enviar planilha de rotas (.xlsx)", envie o arquivo rotas.xlsx novo (substitui a planilha inteira);
+  - ou edite a sua planilha: na linha DF BSB, deixe só "DF"; na linha SP BRE, acrescente "TO, MRB, RO, AC, RBR".
+  Atenção: o app confere com a planilha de agora, inclusive nos dias que já estavam no painel. Depois da troca, um pacote de
+  TO, MRB, RO ou AC no caminhão do DF BSB entre 01/11 e 09/11 (certo naqueles dias) aparece como Errado. Olhe os dias a
+  partir de 10/11.
+
 Rotas de 30/10 e 01/11 (versão 1.9.2)
   A planilha padrão já vem com os comunicados:
   - desde 30/10: F SJC-SP (402-08), F UBT-SP (402-09) e F CRZ-SP (402-10) na linha DC TBT-SP / GRU;

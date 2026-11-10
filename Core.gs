@@ -305,6 +305,13 @@ function JTCoreFactory_() {
    */
   // AC = RBR (Rio Branco): o código RBR vale como AC (V4.21.1).
   var SEG_FIRST_FROM_2026_11_01_ = {TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB', AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM'};
+  /**
+   * V4.24.2 (aviso urgente de 10/11/2026 e a tabela atualizada): TO, MRB, RO e AC (RBR) VOLTAM do DF BSB para o SP BRE; CDG continua
+   * no RJ SJM. De 01/11 a 09/11 continua DF BSB (o histórico fica como era). Mesma data de Config.gs → BRE_BACK_FROM_2026_11_10_.
+   */
+  var SEG_FIRST_FROM_2026_11_10_ = {RBR: 'SP BRE', CDG: 'RJ SJM'};
+  /** Período das rotas pelo dia da remessa: 0 = até 31/10 · 1 = 01/11 a 09/11 (TO/MRB/RO/AC no DF BSB) · 2 = desde 10/11. */
+  function segPeriod_(date) { var d = date ? String(date) : ''; return d >= '2026-11-10' ? 2 : d >= '2026-11-01' ? 1 : 0; }
   function segmentBase(v, date) {
     if (blank(v)) return '';
     var c = String(v).trim(), up = c.toUpperCase();
@@ -316,8 +323,9 @@ function JTCoreFactory_() {
     if (up.slice(0, 3) === 'SP,') return 'SP BRE';
     if (up.slice(0, 4) === 'SBN,') return c.indexOf('375-') >= 0 ? 'SBN' : 'REVISAR SBN';
     if (up.slice(0, 4) === 'MOO,') return has(SEG_MOO_) ? 'MOOCA' : 'REVISAR MOO';
-    var first = up.split(',')[0];
-    if (date && String(date) >= '2026-11-01' && SEG_FIRST_FROM_2026_11_01_[first]) return SEG_FIRST_FROM_2026_11_01_[first];
+    var first = up.split(',')[0], per = segPeriod_(date);
+    if (per === 2 && SEG_FIRST_FROM_2026_11_10_[first]) return SEG_FIRST_FROM_2026_11_10_[first];
+    if (per === 1 && SEG_FIRST_FROM_2026_11_01_[first]) return SEG_FIRST_FROM_2026_11_01_[first];
     for (var f = 0; f < SEG_FIRST_.length; f++) if (SEG_FIRST_[f][0].indexOf(first) >= 0) return SEG_FIRST_[f][1];
     return 'REVISAR SEGMENTO';
   }
@@ -330,8 +338,8 @@ function JTCoreFactory_() {
     var memo = {};
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i], src = !blank(r.segmentFull) ? r.segmentFull : !blank(r.segmentRaw) ? r.segmentRaw : r.segment;
-      var k = blank(src) ? '' : String(src), nov = r.date && String(r.date) >= '2026-11-01', mk = (nov ? '1|' : '0|') + k;
-      r.segmentBase = memo.hasOwnProperty(mk) ? memo[mk] : (memo[mk] = segmentBase(k, nov ? r.date : ''));
+      var k = blank(src) ? '' : String(src), per = segPeriod_(r.date), mk = per + '|' + k;
+      r.segmentBase = memo.hasOwnProperty(mk) ? memo[mk] : (memo[mk] = segmentBase(k, per ? r.date : ''));
     }
     return rows;
   }

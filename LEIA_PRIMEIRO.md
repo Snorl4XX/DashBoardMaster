@@ -1,8 +1,29 @@
-# J&T DASHMASTER V4.24.0 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.24.2 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.24.2 — Rotas de 10/11: PA MRB, TO PMW, RO PVH e AC RBR de volta ao SP BRE
+
+Aviso urgente de 10/11/2026 e a tabela atualizada "Código de alocação de carga das rotas tronco e de distribuição do SP GRU":
+**PA MRB, TO PMW, RO PVH e AC RBR voltam do DF BSB para o SP BRE** (SP GRU-BRE). O SP GRU-BSB fica só com DF. O resto da
+tabela não mudou (CDG no SP GRU-SJM, JPN no SP GRU-CGB, VDC no SP GRU-SJM…).
+- **Vale pelo dia da remessa**, como as trocas anteriores: **desde 10/11** TO, MRB, RO e AC (e RBR) vão para o **SP BRE**
+  (docas 21/22, Esteira 2); **de 01/11 a 09/11** continuam no **DF BSB** (doca 38, Esteira 3); antes de 01/11, SP BRE.
+- Muda em todos os painéis que usam as rotas: **Envio Errado**, **Triagem Errada**, **Falta de Bipagem na Expedição**,
+  **Expedição SC → SC** e **SC → DC** (docas, esteiras e "segmento"), todos do **painel principal**. Os painéis de Lotes,
+  Produção do Sorter e fluxos não usam as rotas (não precisam atualizar).
+- Os dias já baixados mudam sozinhos (as docas e o segmento são calculados na hora de mostrar): não precisa baixar de novo.
+- App **Expedição Incorreta 1.9.3:** planilha padrão de rotas com a mesma troca (veja o LEIA-ME do app para atualizar a sua).
+- Testes: o da migração V4.8 usava "hoje" e venceu com o calendário (só olha 31 dias); agora fixa o relógio em 20/10/2026.
+
+**Atualizar (painel principal, Node.js):** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_24_2_NODE.zip` em `C:\`
+(Substituir tudo) e abra o `C:\dashmaster\node\iniciar.bat` (ou o atalho). No navegador, **Ctrl+F5**.
+**Atalho que não abre:** confira se o atalho aponta para a pasta certa (`"C:\dashmaster\node\node.exe" "C:\dashmaster\node\server.js"`
+só funciona com o `node.exe` dentro de `C:\dashmaster\node`; com o Node.js instalado, use o `iniciar.bat`), se o Windows
+bloqueou o arquivo (botão direito → Propriedades → **Desbloquear**) e se o painel já não está aberto em outra janela ("porta 3000
+já está em uso"). O `iniciar.bat` mostra o motivo na janela preta.
 
 ## V4.24.1 — Nuvem (Oracle): principal, Lotes e Monitor de Recebimento no mesmo servidor
 

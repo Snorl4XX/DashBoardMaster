@@ -4032,6 +4032,14 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     ['DC SSZ-SP|DOCA 14', 'DC GRU|DOCA 44', 'SBN|DOCA 40', 'GO GYN|DOCA 05'].every(x => rowsM8.some(r => r.dockDest + '|' + r.dock === x)),
     'Falta de Bipagem na Expedição: 1º e 2º segmento gravados e cada remessa na doca nova', rowsM8.slice(0, 4).map(r => r.segmentRaw + '→' + r.dockDest + '/' + r.dock));
   delete cM8.__state.props.MIGRATION_V48;
+  // A migração olha só os últimos 31 dias: o relógio fica em 20/10/2026, a época do teste (senão o teste "vence" com o calendário).
+  const RD48 = Date, off48 = RD48.parse('2026-10-20T12:00:00-03:00') - RD48.now();
+  class Date48 extends RD48 {
+    constructor(...a) { if (a.length) super(...a); else super(RD48.now() + off48); }
+    static now() { return RD48.now() + off48; }
+    static [Symbol.hasInstance](x) { return x instanceof RD48; }
+  }
+  cM8.Date = Date48;
   const q48 = cM8.migrateToV48_();
   const pend48 = cM8.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
   check(q48 === 1 && pend48.length === 1 && pend48[0].indicator === 'missing_dispatch' && pend48[0].date === V1 && cM8.migrateToV48_() === 0,
@@ -4664,6 +4672,46 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     sb('GRU,402-09,1', BEFORE) === 'DC TBT-SP' && sb('GRU,402-10,1', AFTER) === 'DC TBT-SP' && sb('GRU,402-08,1', AFTER) === 'DC TBT-SP',
     'segmento (base): TO/MRB/RO/AC no DF BSB e CDG no RJ SJM a partir de 01/11; GRU 402-08/09/10 no DC TBT-SP',
     [sb('TO,123-00,000', AFTER), sb('GRU,402-09,1', BEFORE), sb('CDG,4', AFTER)]);
+}
+
+// ---------- V4.24.2: aviso de 10/11 — TO, MRB, RO e AC (RBR) voltam do DF BSB para o SP BRE ----------
+{
+  const vmB = require('vm');
+  const cB = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CB = cB.JTCore_, DEXP = vmB.runInContext('DOCKS_EXPEDICAO', cB), DPP = vmB.runInContext('DOCKS_PROXIMA_PARADA', cB);
+  const EST = vmB.runInContext('ESTEIRAS_SC_DC', cB);
+  const seg = (c, d) => { const r = CB.applyDocks([{segmentRaw: CB.segmentHead2(c), segment: CB.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CB.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d) => { const r = CB.applyDocks([{destination: v, date: d}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const MID = '2026-11-09', BACK = '2026-11-10', LATER = '2026-11-25', wrong = [];
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  [['TO,1', 'TO PMW'], ['MRB,1', 'PA MRB'], ['RO,1', 'RO PVH'], ['AC,1', 'AC RBR'], ['RBR,1', 'DC RBR-AC']].forEach(([c, p]) => {
+    want(seg(c, MID), 'DF BSB | DOCA 38', 'código ' + c + ' em 09/11 (histórico)');
+    want(seg(c, BACK), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 10/11');
+    want(seg(c, LATER), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 25/11');
+    want(stop(p, MID), 'DF BSB | DOCA 38', 'parada ' + p + ' em 09/11');
+    want(stop(p, BACK), 'SP BRE | DOCA 21/22', 'parada ' + p + ' em 10/11');
+    want(est(p, MID), 'DF BSB | Esteira 3', 'esteira de ' + p + ' em 09/11');
+    want(est(p, BACK), 'SP BRE | Esteira 2', 'esteira de ' + p + ' em 10/11');
+  });
+  want(stop('DC RBR', BACK), 'SP BRE | DOCA 21/22', 'parada DC RBR em 10/11');
+  want(seg('BRE - TO', BACK), 'SP BRE | DOCA 21/22', 'código antigo "BRE - TO" em 10/11');
+  // O resto da tabela de 01/11 continua: SP GRU-BSB só com DF, CDG no SJM, JPN no CGB.
+  want(seg('DF,1', BACK), 'DF BSB | DOCA 38', 'DF em 10/11');
+  want(seg('CDG,1', BACK), 'RJ SJM | DOCA 10', 'CDG em 10/11');
+  want(stop('DC CDG-RJ', BACK), 'RJ SJM | DOCA 10', 'parada DC CDG-RJ em 10/11');
+  want(est('DC CDG-RJ', BACK), 'RJ SJM | Esteira 7', 'esteira de DC CDG-RJ em 10/11');
+  want(seg('JPN,1', BACK), 'MT CGB | DOCA 42', 'JPN em 10/11');
+  want(stop('DC JPN', BACK), 'MT CGB | DOCA 42', 'parada DC JPN em 10/11');
+  ['STM,1', 'PPB,1', 'NAT,1', 'SOD,1', 'VCP,1', 'MA,1', 'AM,1', 'BJE,1', 'XAP,1'].forEach(c => want(seg(c, BACK), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 10/11'));
+  ['GRU,402-08,1', 'GRU,402-10,1'].forEach(c => want(seg(c, BACK), 'DC TBT-SP | DOCA 14', 'código ' + c + ' em 10/11'));
+  check(!wrong.length, 'rotas de 10/11: TO, MRB, RO e AC (RBR) de volta ao SP BRE (docas 21/22, Esteira 2); 01/11 a 09/11 continua DF BSB', wrong);
+  const sb = (code, date) => CB.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
+  const mix = CB.applySegmentBase([{segmentFull: 'TO,1', date: '2026-10-31'}, {segmentFull: 'TO,1', date: MID}, {segmentFull: 'TO,1', date: BACK}], true).map(r => r.segmentBase);
+  check(sb('TO,123-00,000', MID) === 'DF BSB' && sb('TO,123-00,000', BACK) === 'SP BRE' && sb('AC,1', BACK) === 'SP BRE' && sb('MRB,2', BACK) === 'SP BRE' &&
+    sb('RO,3', BACK) === 'SP BRE' && sb('RBR,6', BACK) === 'SP BRE' && sb('RBR,6', MID) === 'DF BSB' && sb('CDG,4', BACK) === 'RJ SJM' && sb('DF,1', BACK) === 'DF BSB' &&
+    sb('JPN,1', BACK) === 'MT CGB' && mix.join('|') === 'SP BRE|DF BSB|SP BRE',
+  'segmento (base) de 10/11: TO/MRB/RO/AC/RBR no SP BRE; de 01/11 a 09/11 no DF BSB; CDG no RJ SJM', [sb('TO,1', BACK), sb('RBR,6', BACK), mix.join('|')]);
 }
 
 // ---------- V4.20: Deslacre pela Data inicial — dias gravados antes (Data final) são refeitos uma vez ----------

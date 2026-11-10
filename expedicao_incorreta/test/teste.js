@@ -272,6 +272,11 @@ function abasRotas(comWW) {
     padrao.rotasPara('troncal', 'SP', '352-00').map(x => x.regra.rota).join() === 'SP BRE' &&
     padrao.rotasPara('troncal', 'GRU', '404-11').map(x => x.regra.rota + ' ' + x.tipo).join() === 'F S-JBO-SP secundaria',
     'padrão: VDC → RJ SJM; SP 395-05 → DC GRU-SP; SP 352-00 → SP BRE; GRU 404-11 → F S-JBO-SP (secundária)');
+  // 1.9.3: aviso de 10/11 — TO, MRB, RO e AC (RBR) de volta ao SP BRE; DF BSB só com DF.
+  const rota = (c, s) => padrao.rotasPara('troncal', c, s).map(x => x.regra.rota).join();
+  conferir(['TO', 'MRB', 'RO', 'AC', 'RBR'].every(c => rota(c, '100-00') === 'SP BRE') && rota('DF', '100-00') === 'DF BSB' &&
+    rota('CDG', '100-00') === 'RJ SJM' && rota('JPN', '100-00') === 'MT CGB',
+  'padrão de 10/11: TO, MRB, RO, AC e RBR → SP BRE; DF → DF BSB; CDG → RJ SJM; JPN → MT CGB', ['TO', 'MRB', 'RO', 'AC', 'DF'].map(c => c + '→' + rota(c, '100-00')));
   const tbt = padrao.acharRegra('troncal', 'DC TBT-SP');
   conferir(tbt && tbt.entradas.length === 2 && tbt.entradas[1].segmentos.indexOf('402-04') >= 0 && padrao.acharRegra('troncal', 'PI THE').rota === 'PI THE' &&
     padrao.acharRegra('troncal', 'THE').rota === 'PI THE' && padrao.acharRegra('secundaria', 'F S-SAP 02 -SP').rota === 'F S-SAP 02-SP',

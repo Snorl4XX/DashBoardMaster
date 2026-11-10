@@ -4,6 +4,8 @@
  * "干线装车码头进行调整" (rota TRONCAL) e "Ajuste das Docas de Carregamento das Rotas Regionais" (rota SECUNDÁRIA).
  * 1.9.2: comunicados de 30/10 (F SJC-SP, F UBT-SP e F CRZ-SP, GRU 402-08/09/10, pelo DC TBT-SP) e de 01/11 (TO, MRB, RO e AC
  * pela rota DF BSB, fora do SP BRE).
+ * 1.9.3: aviso urgente de 10/11 e a tabela atualizada — PA MRB, TO PMW, RO PVH e AC RBR VOLTAM do DF BSB para o SP BRE
+ * (SP GRU-BSB fica só com DF). AC = RBR: o código RBR também vale no SP BRE.
  * Depois de criada, quem manda é a planilha: quando as docas mudarem, edite planilhas/rotas.xlsx (ou envie em Configurações).
  *
  * Aba "Rotas": uma linha por grupo de códigos. Rota = a Próxima parada do caminhão. 1º Nível = códigos aceitos;
@@ -26,8 +28,8 @@ const ROTAS = [
   ['Troncal', 'BA FEC', 'BA, SBA, SNS', '', 'Doca 18'],
   ['Troncal', 'MG CGE', 'MG, MG1, CHV', '', 'Doca 19'],
   ['Troncal', 'PA ANA', 'PA', '', 'Doca 20 · movimentação manual de sacas'],
-  ['Troncal', 'SP BRE', 'AM, BAU, BVB, JDF, LDB, MIA, SJP, SOD, SP, SP1, STM, VCP, XAP, BJE, MA, PPB, NAT', '',
-    'Docas 21 e 22 · excluir CDG · desde 01/11: TO, MRB, RO e AC no DF BSB'],
+  ['Troncal', 'SP BRE', 'AM, BAU, BVB, JDF, LDB, MIA, SJP, SOD, SP, SP1, STM, VCP, XAP, BJE, MA, PPB, NAT, TO, MRB, RO, AC, RBR', '',
+    'Docas 21 e 22 · excluir CDG · desde 10/11: TO PMW, PA MRB, RO PVH e AC RBR de volta (de 01/11 a 09/11 foram pelo DF BSB)'],
   ['Troncal', 'DC TBT-SP', 'SP', seg('402', [1, 3, 5]).concat('421-00').join(', '), 'Doca 23 (antiga 14) · SP (antigo)'],
   ['Troncal', 'DC TBT-SP', 'GRU', seg('402', [0, 1, 3, 5, 6, 7, 8, 2, 4, 9, 10]).join(', '),
     'Doca 23 (antiga 14) · GRU (novo) · 402-08 F SJC-SP, 402-09 F UBT-SP, 402-10 F CRZ-SP (desde 30/10)'],
@@ -39,7 +41,7 @@ const ROTAS = [
   ['Troncal', 'PI THE', 'PI, IMP', '', 'Doca 41 (na tabela: THE)'],
   ['Troncal', 'ES SRR', 'ES', '', 'Doca 40'],
   ['Troncal', 'SP RBP', 'NE, NE1', '', 'Doca 39'],
-  ['Troncal', 'DF BSB', 'DF, TO, MRB, RO, AC', '', 'Doca 38 · desde 01/11 também TO PMW, PA MRB, RO PVH e DC RBR-AC'],
+  ['Troncal', 'DF BSB', 'DF', '', 'Doca 38 · desde 10/11 só DF (TO, MRB, RO e AC voltaram para o SP BRE)'],
   // ---------- SECUNDÁRIA (docas 01 a 25) ----------
   ['Secundária', 'DC S-VLANA-SP', 'VLANA', '', 'Doca 01 · reservado'],
   ['Secundária', 'F S-JBO-SP', 'GRU', '404-11', 'Doca 02 · reservado'],
