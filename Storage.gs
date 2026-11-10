@@ -1331,6 +1331,23 @@ function migrateToV420_() {
   return n;
 }
 /**
+ * V4.25 (pedido): a Falta de Bipagem no Recebimento separa os segmentos em linha troncal (1º segmento) e linha secundária
+ * (1º + 2º segmento, "GRU,404-04"); os dias baixados antes guardavam só o 1º segmento. Uma vez: os últimos 31 dias com a
+ * lista baixada são baixados de novo — só a lista (é pequena). Enquanto isso, a linha sai só pelo 1º segmento.
+ */
+function migrateToV425_() {
+  if (getProp_('MIGRATION_V425', '')) return 0;
+  const to = isoToday_(), from = addDaysIso_(to, -31);
+  let n = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].segLines).forEach(k => {
+    const days = Object.keys(dayFilesMap_(k, from, to)).sort().reverse();
+    if (days.length) n += enqueueJobs_(days.map(d => ['DETAIL_INIT', k, d, 1]), {reset: true});
+  });
+  setProp_('MIGRATION_V425', new Date().toISOString());
+  if (n) logSync_('INFO', 'missing_receipt', '', 'V4.25: ' + n + ' dia(s) baixados de novo para guardar o 2º segmento (linha troncal × secundária).');
+  return n;
+}
+/**
  * V4.24.3: dias com a lista travada no limite do JMS (10 mil remessas; ex.: Falta de Bipagem na Expedição de 04/11 com 10.906 no
  * resumo e 10 mil no painel). Uma vez: as fatias de horário voltam a ser testadas (a conferência nova entende a lista travada) e
  * os últimos 31 dias com a lista no limite, ou com menos remessas que o resumo, são baixados de novo — só a lista.
@@ -1779,7 +1796,7 @@ function processSyncQueue(opts) {
   // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
   try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4243_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4243_(); migrateToV425_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V4.6: modo diário (padrão) — só a AGENDA põe tarefas na fila (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h).
   // Fora dos horários, nada é consultado sozinho (o botão Atualizar do painel continua valendo).

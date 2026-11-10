@@ -87,6 +87,7 @@
       tableCount: '{n} remessas', tableCountOf: '{n} de {m} remessas', tableComplete: 'Clique no cabeçalho para ordenar.',
       tablePartial: 'Dados PARCIAIS: apenas remessas já sincronizadas entram na tabela.', noRows: 'Nenhuma remessa encontrada.',
       tableShort: 'O JMS entregou {a} de {b} remessas em {d} (limite do JMS): as que faltam não entram na tabela nem nos gráficos.',
+      aboutTitle: 'Sobre o indicador',
       refreshing: 'Consultando o JMS…', refreshDone: 'Taxas atualizadas: {u} dia(s). Detalhes em fila: {d}.',
       refreshCooldown: 'Atualização já solicitada há instantes. Aguarde 1–2 minutos.', refreshFailed: 'Não foi possível atualizar: {r}',
       refreshPending: '{n} dia(s) seguem na fila automática.', reporting: 'Gerando relatório…', reportReady: 'Relatório pronto',
@@ -264,6 +265,7 @@
       tableCount: '{n} 票', tableCountOf: '{n} / {m} 票', tableComplete: '点击表头可排序。',
       tablePartial: '部分数据：仅显示已同步的运单。', noRows: '未找到运单。',
       tableShort: 'JMS 在 {d} 只返回了 {b} 票中的 {a} 票（JMS 限制）：缺少的运单不在表格和图表中。',
+      aboutTitle: '指标说明',
       refreshing: '正在查询 JMS…', refreshDone: '已更新 {u} 天指标率，{d} 天明细排队中。',
       refreshCooldown: '刚刚已请求刷新，请 1–2 分钟后再试。', refreshFailed: '刷新失败：{r}',
       refreshPending: '{n} 天已加入自动队列。', reporting: '正在生成报告…', reportReady: '报告已生成',
@@ -455,7 +457,10 @@
     history: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 5v4h4"/><path d="M12 8v4l3 2"/>', trend: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>',
     check: '<path d="M5 12l5 5L20 7"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>', up: '<path d="M12 19V5m-6 6l6-6 6 6"/>', down: '<path d="M12 5v14m-6-6l6 6 6-6"/>',
     table: '<path d="M4 5h16v14H4zM4 10h16M10 5v14"/>', chart: '<path d="M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-3"/>',
-    warn: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8v.5"/>'
+    warn: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8v.5"/>',
+    // V4.25: Expedição A/B/C (grupos de docas) e os dois segmentos da Falta de Bipagem no Recebimento.
+    expedition: '<path d="M3 21V9l9-5 9 5v12"/><path d="M7 21v-8h10v8M7 17h10"/>', segMain: '<path d="M4 6h16M4 12h10M4 18h6"/>',
+    segSub: '<path d="M4 6h16M4 12h10M4 18h6"/>'
   };
   function icon(name) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICON_PATHS[name] || ICON_PATHS.chart) + '</svg>'; }
 
@@ -1099,7 +1104,7 @@
       state.dailyF = null;  // V4.23.3: dados novos — a Evolução diária com filtro é buscada de novo
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
         shiftSum: res.shiftSum || {}, routes: res.routes || null,
-        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applySegmentBase(Core.applyDocks(Core.applyAliases(Core.decodeDataset(res.dataset), c && c.valueAliases), c && c.docks), c && c.segmentBase), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
+        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applyV425(Core.applySegmentBase(Core.applyDocks(Core.applyAliases(Core.decodeDataset(res.dataset), c && c.valueAliases), c && c.docks), c && c.segmentBase), c), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
           totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};
@@ -1168,8 +1173,7 @@
         agg: state.data.agg, only: only});
     renderKpis(c, cards);
     renderDetailStatus(c);
-    $('#targetBanner').classList.toggle('hidden', !!c.hideTarget);
-    if (!c.hideTarget) renderTarget(c, cards);
+    renderAbout(c);
     renderCharts(c);
     renderSummaryTable(c);
     renderRankPanels(c);
@@ -2544,19 +2548,26 @@
         scales: {x: {display: false}, y: {display: false, grace: '15%'}}}
     });
   }
-  function renderTarget(c, k) {
-    var b = $('#targetBanner'), st = k.targetMet === true ? 'good' : k.targetMet === false ? 'bad' : 'neutral';
-    var noGoal = st === 'neutral' && isNum(k.rate) && !hasGoal(c.goal);
-    b.className = 'card target ' + st;
-    var vars = {name: L(c.name), goal: goalSentence(c.goal)};
-    $('#targetPill').textContent = st === 'good' ? t('inGoal').toUpperCase() : st === 'bad' ? t('outGoal').toUpperCase() : '—';
-    $('#targetTitle').textContent = st === 'good' ? t('targetGoodTitle') : st === 'bad' ? t('targetBadTitle') : noGoal ? t('targetNoGoalTitle') : t('targetNoneTitle');
-    // V4.12.3: SC→SC/SC→DC num dia depois do último fechado: explica a janela das 14h em vez de "sem taxa".
-    var lastDay = anchorDate(state.indicator), openDay = c.operationalWindow && state.to > lastDay;
-    $('#targetText').textContent = st === 'good' ? t('targetGoodText', vars) : st === 'bad' ? t('targetBadText', vars) : noGoal ? t('targetNoGoalText', vars)
-      : openDay ? t('targetOpenText', {d: fmtDate(state.to), n: fmtDate(Core.addDays(state.to, 1)), a: fmtDate(lastDay)}) : t('targetNoneText');
-    $('#goalValue').textContent = hasGoal(c.goal) ? goalText(c.goal) : '—';
+  /**
+   * V4.25 (pedido): explicação do indicador (Config.gs → INDICATOR_ABOUT_), no lugar do aviso "Fora da meta" do Maomao.
+   * Pode ser recolhida; o painel lembra a escolha neste navegador.
+   */
+  function aboutOpen() { try { return localStorage.getItem('jt-about-open') !== '0'; } catch (e) { return true; } }
+  function renderAbout(c) {
+    var box = $('#aboutCard'), list = c && c.about;
+    if (!box) return;
+    if (!list || !list.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    var item = function (it) {
+      return '<li><b>' + esc(L(it.k)) + ':</b> ' + esc(L(it.v)) + (it.sub ? '<ul>' + it.sub.map(item).join('') + '</ul>' : '') + '</li>';
+    };
+    box.innerHTML = '<details' + (aboutOpen() ? ' open' : '') + '><summary>' + icon('info') + '<span>' + esc(t('aboutTitle')) + '</span>' +
+      '<small>' + esc(list.map(function (b) { return L(b.title); }).join(' · ')) + '</small></summary><div class="about-body">' +
+      list.map(function (b) { return '<div class="about-block"><h3>' + esc(L(b.title)) + '</h3><ul>' + b.items.map(item).join('') + '</ul></div>'; }).join('') +
+      '</div></details>';
+    box.classList.remove('hidden');
+    $('details', box).addEventListener('toggle', function () { try { localStorage.setItem('jt-about-open', this.open ? '1' : '0'); } catch (e) {} });
   }
+
 
   // ------------------------------------------------------------------ gráficos
   function setupChartDefaults() {

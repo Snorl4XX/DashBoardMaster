@@ -753,11 +753,15 @@ check(smp.amostra === 5 && smp.docas[0].doca === 'DOCA 21' && smp.docas[0].pct =
 check(ctx.dockSampleReport_('missing_receipt', [{billcode: '1'}]) === null, 'amostra de docas só onde há docas (V4.8: a Triagem Errada passou a ter)');
 
 // (b) Painel: filtro de docas, 2 gráficos novos, colunas Destino/Doca — sem tirar nada do que existia.
-check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,destination,dock', 'filtro de docas adicionado no fim, filtros antigos mantidos');
+// V4.25 (pedido): filtros "Destinos afetados" (segmentBase) e "Expedição".
+check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,segmentBase,destination,dock,expedition', 'filtro de docas, Destinos afetados e Expedição; filtros antigos mantidos', catMD.filters.map(f => f.key));
 // V4.12.6 (pedido): sem "Top 4 segmentos por turno" e sem "Turno + rota de carregamento + doca"; segmentos pela fórmula do WPS.
-check(catMD.charts.map(c => c.key).join() === 'shift,segmentBase,login,tripId,client,interval' && catMD.segmentBase === true,
-  'V4.12.6: gráficos da Falta de Bipagem na Expedição (sem o Top 4 por turno; segmentos pela fórmula)', catMD.charts.map(c => c.key));
-check(catMD.rankPanels.map(p => p.key).join() === 'dockOverview,dockByShift', 'V4.12.6: painéis de docas sem "Turno + rota de carregamento + doca"', catMD.rankPanels.map(p => p.key));
+// V4.25 (pedido): saíram "Logins mais ofensores", "IDs de viagem de recebimento" e "Docas por turno"; "Destinos afetados" e "Expedições ofensoras".
+check(catMD.charts.map(c => c.key).join() === 'shift,segmentBase,expedition,client,interval' && catMD.segmentBase === true &&
+  catMD.charts[1].title.pt === 'Destinos afetados' && catMD.labels.segmentBase.pt === 'Destinos afetados' && catMD.filters.find(f => f.key === 'segmentBase').label.pt === 'Destinos afetados',
+  'V4.25: gráficos da Falta de Bipagem na Expedição (Destinos afetados, Expedições ofensoras; sem logins, IDs de viagem)', catMD.charts.map(c => c.key));
+check(catMD.rankPanels.map(p => p.key).join() === 'dockOverview', 'V4.25: painéis de docas sem "Docas por turno"', catMD.rankPanels.map(p => p.key));
+const DBS = {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom'};
 check(catMD.labels.dock.pt === 'Doca' && catMD.labels.dockDest.pt === 'Rota de carregamento' && catMD.table.some(c => c[0] === 'dock'), 'rótulos e colunas novas (V4.8: destino = rota de carregamento)');
 const cfMD = vm.runInContext('clientFields_(INDICATORS.missing_dispatch)', ctx);
 check(cfMD.indexOf('segmentRaw') >= 0 && cfMD.indexOf('dock') < 0 && cfMD.indexOf('dockDest') < 0, 'doca é calculada no navegador a partir do 1º segmento completo', cfMD);
@@ -770,7 +774,7 @@ const expOver = desc(cnt(fxRows, r => r.dock || null));
 check(pOver.total === 8473 && pOver.items.length === 15 && pOver.items.map(i => i.value + '=' + i.count).join() === expOver.map(e => e[0] + '=' + e[1]).join() &&
   pOver.max.value === 'DOCA 21' && pOver.max.count === 4024 && Math.abs(pOver.max.pct - 47.4920) < 0.001 && pOver.min.value === 'DOCA 06' && pOver.min.count === 43,
   'painel "Distribuição geral por docas": todas as docas, maior/menor e % do total (igual à planilha: DOCA 21 = 4024 = 47,49%)', pOver.items.slice(0, 4));
-const pShift = C.rankPanel(fxRows, RP('dockByShift'));
+const pShift = C.rankPanel(fxRows, DBS);
 const topOf = (rows, dim, s, n) => desc(cnt(rows.filter(r => r.shift === s), r => r[dim] || null)).slice(0, n);
 const expShift = ['T1', 'T2', 'T3'].map(s => topOf(fxRows, 'dock', s, 5));
 const shownShift = expShift.reduce((a, g) => a + g.reduce((b, e) => b + e[1], 0), 0);
@@ -785,7 +789,7 @@ check(t3.slice(0, 5).map(x => x.value + '|' + x.extra + '=' + x.count).join() ==
   'painel "Turno + segmento + doca": top 5 destinos por turno com a doca (T3 igual à planilha), maior combinação', t3);
 const oldRows = [{date: FX.data, shipment: 'OLD1', segment: 'BRE', shift: 'T1'}];
 C.applyDocks(oldRows, catMD.docks);
-check(oldRows[0].dock === '' && C.rankPanel(oldRows, RP('dockOverview')).total === 0 && C.rankPanel(oldRows, RP('dockByShift')).groups.length === 0,
+check(oldRows[0].dock === '' && C.rankPanel(oldRows, RP('dockOverview')).total === 0 && C.rankPanel(oldRows, DBS).groups.length === 0,
   'dado antigo só com "BRE" (ambíguo): "Sem informação", fora dos painéis');
 
 // (c) Pipeline completo: JMS → arquivo diário → painel e relatório com docas; filtro por doca.
@@ -939,11 +943,12 @@ delete cDm.__state.props.MIGRATION_V3114;
 const migLoc = cDm.migrateToV3114_();
 check(migLoc === 1 && cDm.migrateToV3114_() === 0 && cDm.allTabRows_('JOBS').some(r => r[1] === 'DETAIL_INIT' && r[2] === 'damage' && r[5] === 'PENDING'),
   'atualização: detalhe da Avaria baixado de novo uma vez para trazer o local', migLoc);
-// (e) Meta 90: a taxa precisa ficar ABAIXO (292,78 = fora da meta). Sem valor = "Meta não definida".
+// (e) Meta 120 ppm (V4.25; antes 90): a taxa precisa ficar ABAIXO (292,78 = fora da meta). Sem valor = "Meta não definida".
 const cardsDm = C.computeCards(cfgDm, dashDm.rates, rowsDm, {}, D19, D19);
-check(cfgDm.goal.value === 90 && cardsDm.rate === rateDm.rate && cardsDm.targetMet === false && C.goalMet(292.78, cfgDm.goal) === false &&
-  C.goalMet(85, cfgDm.goal) === true && C.goalMet(90, cfgDm.goal) === true && C.goalMet(85, Object.assign({}, cfgDm.goal, {value: null})) === null,
-  'meta da Avaria (≤ 90): 292,78 fora da meta, 85 na meta; sem valor = sem avaliação', cardsDm.targetMet);
+check(cfgDm.goal.value === 120 && cardsDm.rate === rateDm.rate && cardsDm.targetMet === false && C.goalMet(292.78, cfgDm.goal) === false &&
+  C.goalMet(85, cfgDm.goal) === true && C.goalMet(110, cfgDm.goal) === true && C.goalMet(120.5, cfgDm.goal) === false &&
+  C.goalMet(85, Object.assign({}, cfgDm.goal, {value: null})) === null,
+  'meta da Avaria (120 ppm): 292,78 e 120,5 fora da meta, 110 na meta; sem valor = sem avaliação', cardsDm.targetMet);
 const prDm = C.periodRate([{rate: 292.78, errorCount: 152, totalCount: 519159}, {rate: 250, errorCount: 100, totalCount: 400000}], cfgDm.goal);
 check(prDm.method === 'weighted' && Math.abs(prDm.rate - 252 / 919159 * 1e6) < 1e-6, 'taxa de vários dias como o JMS = Σavarias ÷ Σvolume × 1.000.000', prDm);
 const shDm = C.aggregateShiftResults([{date: D19, T1: 10, T2: 20, T3: 30, total: 60}], 'day', 'T2', D19, D19, [{date: D19, totalCount: 500000}], C.rateScale(cfgDm.goal));
@@ -1057,9 +1062,9 @@ runAll(cSC);
 const catSC = cSC.getPublicCatalog_().filter(x => x.key === 'sc_sc')[0], catWS = cSC.getPublicCatalog_().filter(x => x.key === 'wrong_send')[0];
 const dashSC = cSC.getDashboardData('sc_sc', {from: D19, to: D19});
 const rowsSC = C.applyDocks(C.decodeDataset(dashSC.dataset), catSC.docks);
-// V3.15: SC → SC sem "Docas por turno"; turno + próxima parada + doca = "Horário de saída do Motorista".
+// V3.15: SC → SC sem "Docas por turno"; turno + próxima parada + doca = "Horário de saída do Motorista". V4.25: o Envio Errado também sem.
 check(catSC.filters.some(f => f.key === 'dock') && catSC.rankPanels.map(p => p.key).join() === 'dockOverview,stopDockByShift' &&
-  catSC.rankPanels[1].title.pt === 'Horário de saída do Motorista' && catWS.rankPanels.some(p => p.key === 'dockByShift') && rowsSC.length > 0 &&
+  catSC.rankPanels[1].title.pt === 'Horário de saída do Motorista' && !catWS.rankPanels.some(p => p.key === 'dockByShift') && rowsSC.length > 0 &&
   rowsSC.every(r => r.dock === stopCases[r.destination][1]) && dashSC.dataset.fields.indexOf('segmentRaw') < 0,
   'SC → SC: filtro e gráficos de docas; a doca sai da próxima parada já gravada (sem baixar de novo)', catSC.rankPanels.map(p => p.key));
 const compSC = cSC.computeDashboard_('sc_sc', {from: D19, to: D19, filters: {dock: ['DOCA 19']}});
@@ -1067,8 +1072,8 @@ check(compSC.rows.length > 0 && compSC.rows.every(r => r.dock === 'DOCA 19' && /
   'SC → SC: relatório com filtro de doca e tabela dinâmica doca × próxima parada', compSC.rows.length);
 const dashWS = cSC.getDashboardData('wrong_send', {from: D19, to: D19});
 const rowsWS = C.applyDocks(C.decodeDataset(dashWS.dataset), catWS.docks);
-check(catWS.docks.source === 'destination' && catWS.filters.some(f => f.key === 'dock') && catWS.rankPanels.length === 3 &&
-  catWS.rankPanels[2].dim === 'destination' && dashWS.dataset.fields.indexOf('segmentRaw') < 0 && rowsWS.length > 0 &&
+check(catWS.docks.source === 'destination' && catWS.filters.some(f => f.key === 'dock') && catWS.rankPanels.length === 2 &&
+  catWS.rankPanels[1].dim === 'destination' && dashWS.dataset.fields.indexOf('segmentRaw') < 0 && rowsWS.length > 0 &&
   rowsWS.every(r => r.dock === stopCases[r.destination][1]),
   'Envio Errado: doca pela próxima parada (para onde a saca foi enviada), mesma regra do SC → SC', rowsWS.slice(0, 3).map(r => r.destination + '→' + r.dock));
 const compWS = cSC.computeDashboard_('wrong_send', {from: D19, to: D19, filters: {dock: ['DOCA 22']}});
@@ -4213,8 +4218,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     cfgS.table.some(c => c[0] === 'segmentPair') && cS.clientFields_(cfgS).indexOf('segmentPair') >= 0,
     'Triagem Errada: painel de segmentos no lugar dos 2 painéis de docas por turno, cartão "Segmento mais ofensor" e coluna na tabela');
   const others = ['wrong_send', 'missing_dispatch', 'sc_sc'].map(k => cS.getIndicatorConfig_(k));
-  check(others[0].rankPanels.some(p => p.key === 'dockByShift') && others.every(c => !c.topCards || c.topCards.indexOf('segmentPair') < 0),
-    'os outros indicadores não mudam (Envio Errado continua com "Docas por turno")');
+  // V4.25 (pedido): o Envio Errado também perdeu "Docas por turno".
+  check(!others[0].rankPanels.some(p => p.key === 'dockByShift') && others.every(c => !c.topCards || c.topCards.indexOf('segmentPair') < 0),
+    'os outros indicadores sem o cartão de segmento (V4.25: Envio Errado sem "Docas por turno")');
 
   // Dia baixado: segmento gravado, cartão e painel (top 15, percentual sobre todos os erros).
   const DS = '2026-10-14', dS = {[DS]: makeDay(DS, 95)};
@@ -4659,9 +4665,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   ['PA STM', 'DC PPB-SP', 'DC MAO-AM', 'DC VCP-SP'].forEach(p => { want(stop(p, AFTER), 'SP BRE | DOCA 21/22', 'parada ' + p + ' em 01/11'); want(est(p, AFTER), 'SP BRE | Esteira 2', 'esteira de ' + p); });
   want(seg('DF,1', AFTER), 'DF BSB | DOCA 38', 'DF em 01/11');
   // Comunicado de 30/10: F SJC-SP (402-08), F UBT-SP (402-09) e F CRZ-SP (402-10) pelo DC TBT-SP.
-  ['GRU,402-08,1', 'GRU,402-09,1', 'GRU,402-10,1'].forEach(c => { want(seg(c, '2026-10-30'), 'DC TBT-SP | DOCA 14', 'código ' + c + ' em 30/10'); want(seg(c, AFTER), 'DC TBT-SP | DOCA 14', 'código ' + c + ' em 01/11'); });
+  // V4.25: desde 24/10 o DC TBT-SP é a DOCA 23 (tabela de 24/10; antes, 14).
+  ['GRU,402-08,1', 'GRU,402-09,1', 'GRU,402-10,1'].forEach(c => { want(seg(c, '2026-10-30'), 'DC TBT-SP | DOCA 23', 'código ' + c + ' em 30/10'); want(seg(c, AFTER), 'DC TBT-SP | DOCA 23', 'código ' + c + ' em 01/11'); });
   ['F SJC-SP', 'F UBT-SP', 'F CRZ-SP'].forEach(p => {
-    want(stop(p, '2026-10-30'), 'DC TBT-SP | DOCA 14', 'parada ' + p + ' em 30/10');
+    want(stop(p, '2026-10-30'), 'DC TBT-SP | DOCA 23', 'parada ' + p + ' em 30/10');
     want(est(p, '2026-10-30'), 'DC TBT-SP | Esteira 2', 'esteira de ' + p + ' em 30/10');
   });
   check(!wrong.length, 'rotas de 01/11 (TO, MRB, RO, AC pelo DF BSB; CDG no SJM; JPN no CGB) e unidades novas do DC TBT-SP de 30/10, com o histórico da época', wrong);
@@ -4704,7 +4711,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   want(seg('JPN,1', BACK), 'MT CGB | DOCA 42', 'JPN em 10/11');
   want(stop('DC JPN', BACK), 'MT CGB | DOCA 42', 'parada DC JPN em 10/11');
   ['STM,1', 'PPB,1', 'NAT,1', 'SOD,1', 'VCP,1', 'MA,1', 'AM,1', 'BJE,1', 'XAP,1'].forEach(c => want(seg(c, BACK), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 10/11'));
-  ['GRU,402-08,1', 'GRU,402-10,1'].forEach(c => want(seg(c, BACK), 'DC TBT-SP | DOCA 14', 'código ' + c + ' em 10/11'));
+  ['GRU,402-08,1', 'GRU,402-10,1'].forEach(c => want(seg(c, BACK), 'DC TBT-SP | DOCA 23', 'código ' + c + ' em 10/11'));
   check(!wrong.length, 'rotas de 10/11: TO, MRB, RO e AC (RBR) de volta ao SP BRE (docas 21/22, Esteira 2); 01/11 a 09/11 continua DF BSB', wrong);
   const sb = (code, date) => CB.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
   const mix = CB.applySegmentBase([{segmentFull: 'TO,1', date: '2026-10-31'}, {segmentFull: 'TO,1', date: MID}, {segmentFull: 'TO,1', date: BACK}], true).map(r => r.segmentBase);
@@ -4779,6 +4786,101 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   runAll(g);
   check(nG >= 1 && againG === 0 && g.getArchivedRange_('missing_dispatch', DG, DG).rows.length === 10906 && g.getDayStatus_('missing_dispatch', DG).details === 'COMPLETE',
     'V4.24.3: uma vez, os dias travados em 10 mil voltam para a fila (fatias testadas de novo) e ficam com as 10.906', {nG, againG, st: g.getDayStatus_('missing_dispatch', DG)});
+}
+
+// ---------- V4.25: mudanças nos gráficos (PDF "Mudanças nos gráficos dos dashboards") ----------
+{
+  const vmV = require('vm');
+  const cV = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CV5 = cV.JTCore_, DEXP = vmV.runInContext('DOCKS_EXPEDICAO', cV), DPP = vmV.runInContext('DOCKS_PROXIMA_PARADA', cV);
+  const seg = (c, d) => { const r = CV5.applyDocks([{segmentRaw: CV5.segmentHead2(c), segment: CV5.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CV5.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const NOV = '2026-11-05', OCT20 = '2026-10-20', wrong = [];
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  // Esteiras (Last Mile, tabela de 24/10): "Esteira" + o número da doca da tabela regional.
+  [['GRU,404-11,1', 'F S-JBO-SP | Esteira 02'], ['GRU,404-04,020', 'F S-MGUE-SP | Esteira 20'], ['GRU,404-00,1', 'S-SRAF-SP | Esteira 15/16'],
+    ['VLANA,1', 'DC S-VLANA-SP | Esteira 01'], ['NOD,1', 'DC NOD-SP | Esteira 17/18'], ['MOO,430-02,1', 'DC S-MOO 02-SP | Esteira 11/12'],
+    ['SP,364-00,1', 'DC S-MOO 02-SP | Esteira 11/12'], ['GRU,404-13,1', 'S-MGUE 02-SP | Esteira 10'], ['GRU,404-06,1', 'F S-PENHA 03-SP | Esteira 24'],
+    // Docas: DC SSZ-SP é doca (08/09), DC TBT-SP na 23, DC GRU-SP na 44 (com SP 395-05/06/07), SBN na 08 (até 375-10).
+    ['GRU,378-05,1', 'DC SSZ-SP | DOCA 08/09'], ['GRU,378-00,1', 'DC SSZ-SP | DOCA 08/09'], ['GRU,402-02,1', 'DC TBT-SP | DOCA 23'], ['SP,402-01,1', 'DC TBT-SP | DOCA 23'],
+    ['SP,395-06,1', 'DC GRU-SP | DOCA 44'], ['GRU,381-20,1', 'DC GRU-SP | DOCA 44'], ['SBN,375-10,1', 'SBN | DOCA 08'], ['GO,1', 'GO GYN | DOCA 05'],
+    ['SP,977-00,1', 'SP BRE | DOCA 21/22']].forEach(([c, e]) => want(seg(c, NOV), e, 'código ' + c + ' em 05/11'));
+  // Antes de 24/10 o histórico continua com as docas da época.
+  want(seg('GRU,404-04,1', OCT20), 'DC GRU | DOCA 44', 'código GRU,404-04 em 20/10');
+  want(seg('MOO,430-02,1', OCT20), 'MOO | DOCA 23', 'código MOO em 20/10');
+  want(seg('GRU,402-05,1', OCT20), 'DC TBT-SP | DOCA 14', 'código GRU,402-05 em 20/10');
+  // Pela próxima parada (Envio Errado, Triagem Errada): o nome da unidade da Last Mile → esteira.
+  [['F S-MGUE-SP', 'F S-MGUE-SP | Esteira 20'], ['S-MGUE-SP', 'S-MGUE-SP | Esteira 07'], ['DC NOD-SP', 'DC NOD-SP | Esteira 17/18'],
+    ['DC MOOCA2', 'DC S-MOO 02-SP | Esteira 11/12'], ['DC SSZ-SP', 'DC SSZ-SP | DOCA 08/09'], ['DC GRU-SP', 'DC GRU-SP | DOCA 44'],
+    ['DC TBT-SP', 'DC TBT-SP | DOCA 23'], ['BA FEC', 'BA FEC | DOCA 18']].forEach(([v, e]) => want(stop(v, NOV), e, 'parada ' + v + ' em 05/11'));
+  check(!wrong.length, 'V4.25: docas × esteiras desde 24/10 (esteira = "Esteira" + nº da tabela regional; DC SSZ-SP continua doca)', wrong);
+  // Expedição A/B/C pela doca.
+  const EX = vmV.runInContext('EXPEDICOES_', cV), ex = d => CV5.expeditionOf(d, EX);
+  check(ex('DOCA 05') === 'Expedição A' && ex('DOCA 14') === 'Expedição A' && ex('DOCA 08/09') === 'Expedição A' && ex('DOCA 15') === 'Expedição B' &&
+    ex('DOCA 21/22') === 'Expedição B' && ex('DOCA 23') === 'Expedição B' && ex('DOCA 38') === 'Expedição C' && ex('DOCA 44') === 'Expedição C' &&
+    ex('Esteira 20') === 'Esteiras' && ex('SEM DOCA') === '' && ex('DOCA 30') === '' && ex('') === '',
+    'Expedição A = docas 05–14, B = 15–23, C = 38–44; esteira = Esteiras; sem doca = sem informação');
+  // Linha troncal × secundária (Falta de Bipagem no Recebimento).
+  const ln = c => { const x = CV5.segLineOf(c); return x.line + '|' + x.main + '|' + x.sub; };
+  check(ln('GO,795-00,002') === 'Troncal|GO|GO,795-00' && ln('GRU,404-04,020') === 'Secundária|GRU|GRU,404-04' && ln('SP,402-01,1') === 'Secundária|SP|SP,402-01' &&
+    ln('SP,977-00,1') === 'Troncal|SP|SP,977-00' && ln('SBN,375-03,420') === 'Secundária|SBN|SBN,375-03' && ln('VLANA') === 'Secundária|VLANA|VLANA' &&
+    ln('MOO,430-02,1') === 'Secundária|MOO|MOO,430-02' && ln('BAU 484-00,200') === 'Troncal|BAU|BAU,484-00' && ln('') === '||' && ln('GRU') === 'Secundária|GRU|GRU',
+    'linha troncal (1º segmento) × secundária (1º + 2º segmento juntos, ex.: GRU,404-04)', [ln('GO,795-00,002'), ln('GRU,404-04,020'), ln('SP,402-01,1')]);
+  // Catálogo: gráficos e filtros pedidos.
+  const cat = k => cV.getPublicCatalog_().filter(x => x.key === k)[0];
+  const mr = cat('missing_receipt'), md = cat('missing_dispatch'), ws = cat('wrong_send'), se = cat('sorting_error'), dm = cat('damage');
+  check(mr.charts.map(c => c.key).join() === 'shift,segTrunk,segSecondary,client,interval' && mr.segLines === true &&
+    mr.filters.map(f => f.key).join() === 'shift,login,interval,client,destination,segMain,segSub' &&
+    mr.filters.find(f => f.key === 'segMain').label.pt === 'Segmentos Principais' && mr.filters.find(f => f.key === 'segSub').label.pt === 'Segmentos Secundários' &&
+    cV.clientFields_(cV.getIndicatorConfig_('missing_receipt')).indexOf('segmentFull') >= 0 && cV.clientFields_(cV.getIndicatorConfig_('missing_receipt')).indexOf('segLine') < 0,
+    'Falta de Bipagem no Recebimento: sem logins e destinos; segmentos em linha troncal e secundária; filtros Segmentos Principais e Secundários', mr.charts.map(c => c.key));
+  check(ws.charts.some(c => c.key === 'expedition') && ws.filters.some(f => f.key === 'expedition') && ws.expeditions && md.expeditions &&
+    md.charts.some(c => c.key === 'expedition') && ws.filters.find(f => f.key === 'expedition').label.pt === 'Expedição',
+    'Envio Errado e Falta de Bipagem na Expedição: gráfico "Expedições ofensoras" e filtro Expedição');
+  check(se.naLabel.text.pt === 'VOLUMOSOS' && se.naLabel.fields.join() === 'lot' && cV.reportValue_(cV.getIndicatorConfig_('sorting_error'), 'lot', '') === 'VOLUMOSOS' &&
+    cV.reportValue_(cV.getIndicatorConfig_('sorting_error'), 'offenderBase', '') !== 'VOLUMOSOS',
+    'Triagem Errada: lote sem numeração = VOLUMOSOS (tela e relatório)');
+  check(dm.goal.value === 120 && dm.goal.unit === 'ppm', 'Avaria: meta 120 ppm');
+  const withAbout = cV.getPublicCatalog_().filter(x => x.about).map(x => x.key).sort().join();
+  check(withAbout === 'damage,missing_dispatch,missing_receipt,sorting_error,unseal,unseal_trunk,wrong_send' && se.about.length === 2 &&
+    /Abrangência/.test(se.about[1].title.pt) && /N29a/.test(cat('unseal').about[0].title.pt) && dm.about[0].items[0].sub.length === 2 &&
+    cV.getPublicCatalog_().every(x => !x.about || x.about.every(b => b.title.pt && b.title.zh && b.items.every(i => i.k.pt && i.v.pt && i.v.zh))),
+    'explicação de cada indicador (PT e 中文): os 7 do PDF, com Erro de Abrangência na Triagem e N29a no Deslacre', withAbout);
+  // Página: sem o aviso do Maomao, com o cartão da explicação.
+  const fsV = require('fs'), pathV = require('path');
+  const idx = fsV.readFileSync(pathV.join(__dirname, '..', 'Index.html'), 'utf8'), cli = fsV.readFileSync(pathV.join(__dirname, '..', 'Client.html'), 'utf8');
+  check(idx.indexOf('targetBanner') < 0 && idx.indexOf("include('Mascot')") < 0 && idx.indexOf('id="aboutCard"') > 0 && cli.indexOf('function renderAbout') > 0 &&
+    cli.indexOf('renderTarget') < 0, 'aviso "Fora da meta" do Maomao fora de todos os painéis; explicação do indicador no lugar');
+  // Dados de ponta a ponta: Recebimento com o código completo gravado; Expedição filtrada por Expedição B.
+  const DN = cV.addDaysIso_(cV.isoToday_(), -2), dd = {};
+  dd[DN] = makeDay(DN, 9);
+  dd[DN].mr = [['GO,795-00,002', 'T1'], ['GRU,404-04,020', 'T1'], ['GRU,404-04,021', 'T2'], ['SP,402-01,1', 'T2'], ['SP,977-00,1', 'T3'], ['MG,330-00,1', 'T1']]
+    .map((x, i) => ({billcode: 'TST' + i, threeSegmentCode: x[0], loadPackageTime: DN + ' ' + {T1: '08', T2: '15', T3: '23'}[x[1]] + ':00:00',
+      nextStop: 'SP BRE', loadPackageEmp: 'OPERADOR FICTICIO 01', customerName: 'CLIENTE TESTE'}));
+  dd[DN].md = [['GO,1', 'DOCA 05'], ['SP,977-00,1', 'DOCA 21/22'], ['PA,1', 'DOCA 20'], ['DF,1', 'DOCA 38'], ['GRU,404-04,1', 'Esteira 20']]
+    .map((x, i) => ({billcode: 'TSD' + i, threeSegmentCode: x[0], unloadArriveTime: DN + ' 10:00:00', unloadPackageEmp: 'OPERADOR FICTICIO 02',
+      customerName: 'CLIENTE TESTE', arriveOrder: 'TESTE-1', nextStop: ''}));
+  const cE = freshCtx(dd, {}, {DATA_START_DATE: DN});
+  cE.queueHistory(DN, DN, true);
+  runAll(cE);
+  const catE = k => cE.getPublicCatalog_().filter(x => x.key === k)[0];
+  const rowsR = CV5.applyV425(CV5.decodeDataset(cE.getDashboardData('missing_receipt', {from: DN, to: DN}).dataset), catE('missing_receipt'));
+  const trunk = CV5.buildChart(catE('missing_receipt').charts[1], rowsR), sec = CV5.buildChart(catE('missing_receipt').charts[2], rowsR);
+  check(trunk.total === 3 && trunk.labels.join() === 'GO,MG,SP' && sec.total === 3 && sec.labels.join() === 'GRU,404-04,SP,402-01' && sec.datasets[0].data.join() === '2,1',
+    'gráficos de segmentos: linha troncal (GO, MG, SP) e linha secundária (GRU,404-04 = 2; SP,402-01 = 1), cada um com o total da sua linha',
+    {trunk: trunk.labels, sec: sec.labels});
+  const compR = cE.computeDashboard_('missing_receipt', {from: DN, to: DN, filters: {segSub: ['GRU,404-04']}});
+  const compD = cE.computeDashboard_('missing_dispatch', {from: DN, to: DN, filters: {expedition: ['Expedição B']}});
+  const rowsD = CV5.applyV425(CV5.applyDocks(CV5.decodeDataset(cE.getDashboardData('missing_dispatch', {from: DN, to: DN}).dataset), catE('missing_dispatch').docks), catE('missing_dispatch'));
+  const byExp = cnt => rowsD.filter(r => r.expedition === cnt).length;
+  check(compR.rows.length === 2 && compR.rows.every(r => r.segSub === 'GRU,404-04') && compD.rows.length === 2 && compD.rows.every(r => r.expedition === 'Expedição B') &&
+    byExp('Expedição A') === 1 && byExp('Expedição C') === 1 && byExp('Esteiras') === 1 && rowsD.find(r => r.shipment === 'TSD4').dock === 'Esteira 20',
+    'filtros novos no servidor (relatório): Segmentos Secundários e Expedição; doca → Expedição A/B/C e Esteiras', rowsD.map(r => r.dock + '→' + r.expedition));
+  // Atualização: o Recebimento baixa de novo os últimos 31 dias uma vez (para guardar o 2º segmento).
+  delete cE.__state.props.MIGRATION_V425;
+  const nM = cE.migrateToV425_(), againM = cE.migrateToV425_();
+  check(nM >= 1 && againM === 0 && cE.allTabRows_('JOBS').some(r => r[1] === 'DETAIL_INIT' && r[2] === 'missing_receipt' && r[5] === 'PENDING'),
+    'V4.25: a Falta de Bipagem no Recebimento é baixada de novo uma vez (2º segmento)', {nM, againM});
 }
 
 // ---------- V4.20: Deslacre pela Data inicial — dias gravados antes (Data final) são refeitos uma vez ----------

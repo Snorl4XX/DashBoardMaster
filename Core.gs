@@ -344,6 +344,64 @@ function JTCoreFactory_() {
     return rows;
   }
   /**
+   * V4.25 (pedido): Expedição A/B/C pela doca (Config.gs → EXPEDICOES_): o número da doca ("DOCA 21/22" → 21) cai num grupo
+   * (A = 05–14, B = 15–23, C = 38–44); esteira (Last Mile) = "Esteiras"; sem doca ou fora dos grupos = sem informação.
+   */
+  function expeditionOf(dock, exps) {
+    if (blank(dock)) return '';
+    var s = String(dock).trim();
+    if (/^esteira/i.test(s)) return exps.esteiras || '';
+    var m = s.match(/\d+/);
+    if (!m) return '';
+    var n = Number(m[0]), gs = exps.groups || [];
+    for (var i = 0; i < gs.length; i++) if (n >= gs[i].from && n <= gs[i].to) return gs[i].name;
+    return '';
+  }
+  function applyExpeditions(rows, exps) {
+    if (!exps || !rows) return rows;
+    var memo = {};
+    for (var i = 0; i < rows.length; i++) {
+      var d = rows[i].dock === undefined || rows[i].dock === null ? '' : String(rows[i].dock);
+      rows[i].expedition = memo.hasOwnProperty(d) ? memo[d] : (memo[d] = expeditionOf(d, exps));
+    }
+    return rows;
+  }
+  /**
+   * V4.25 (pedido, Falta de Bipagem no Recebimento): linha TRONCAL ou SECUNDÁRIA de cada remessa, pelas tabelas de docas e
+   * esteiras de 24/10. Secundária = os DCs e a Last Mile (SBN, DC TBT-SP, DC GRU-SP, DC SSZ-SP, MOOCA, NOD, VLANA e as esteiras
+   * GRU 404-xx): 1º segmento GRU, SBN, MOO, VLANA ou NOD, ou SP com um 2º segmento desses DCs (SP 402-01, SP 395-05…).
+   * O resto é troncal (siglas: GO, SC, MG, SP…). segMain = 1º segmento; segSub = 1º + 2º segmento juntos ("GRU,404-04").
+   */
+  var SEG_SECONDARY_FIRST_ = {GRU: 1, SBN: 1, MOO: 1, VLANA: 1, NOD: 1};
+  var SEG_SECONDARY_SP_ = {'402-01': 1, '402-03': 1, '402-05': 1, '421-00': 1, '395-05': 1, '395-06': 1, '395-07': 1, '381-04': 1,
+    '364-00': 1, '435-00': 1, '350-00': 1, '365-00': 1, '381-12': 1, '430-01': 1, '430-05': 1, '430-07': 1, '430-08': 1, '430-09': 1,
+    // códigos SP dos DCs das tabelas de 04/10 e 11/10 (DC SSZ-SP, MOO, DC GRU)
+    '378-00': 1, '378-01': 1, '378-02': 1, '378-03': 1, '398-00': 1, '404-00': 1, '381-06': 1, '381-07': 1, '381-08': 1, '381-13': 1,
+    '381-15': 1, '381-16': 1, '381-17': 1, '405-00': 1};
+  function segLineOf(code) {
+    var first = segmentCode(code), second = secondSegment(code);
+    if (!first) return {line: '', main: '', sub: ''};
+    var sec = SEG_SECONDARY_FIRST_[first] || (first === 'SP' && second && SEG_SECONDARY_SP_[second]);
+    return {line: sec ? 'Secundária' : 'Troncal', main: first, sub: second ? first + ',' + second : first};
+  }
+  function applySegLines(rows, on) {
+    if (!on || !rows) return rows;
+    var memo = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i], src = !blank(r.segmentFull) ? r.segmentFull : !blank(r.segmentRaw) ? r.segmentRaw : r.segment;
+      var k = blank(src) ? '' : String(src), x = memo.hasOwnProperty(k) ? memo[k] : (memo[k] = segLineOf(k));
+      r.segLine = x.line; r.segMain = x.main; r.segSub = x.sub;
+    }
+    return rows;
+  }
+  /** V4.25: os campos calculados na leitura depois das docas (Expedição A/B/C e linhas do segmento). */
+  function applyV425(rows, c) {
+    if (!c || !rows) return rows;
+    if (c.expeditions) applyExpeditions(rows, c.expeditions);
+    if (c.segLines) applySegLines(rows, true);
+    return rows;
+  }
+  /**
    * V4.9: campos de data calculados na leitura (Config.gs → dayOf, ex.: {expDay: 'eventTime'} na Triagem Errada = data do
    * "Horário do bipe de expedição"). Assim vale também para os dias já baixados, sem baixar de novo.
    */
@@ -1109,7 +1167,8 @@ function JTCoreFactory_() {
     '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição',
     '出港': 'Saída de porto', '进港': 'Entrada', '普通包': 'Saco normal'
   };
-  var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
+  var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'VOLUMOSOS': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
+    'Expedição A': '发件区 A', 'Expedição B': '发件区 B', 'Expedição C': '发件区 C', 'Esteiras': '分拣线', 'Troncal': '干线', 'Secundária': '支线',
     'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Sem bipe na etapa anterior': '上一环节未发件扫描', 'Sem bipe de expedição nesta base': '本网点未发件扫描', 'Chegou': '已到',
     'Enviados': '已发件', 'Em trânsito': '在途（未到下一站）', 'Não entregues': '未签收', 'Não chegou ao destino': '未到下一站',
     'Chegou ao destino · não entregue': '已到下一站·未签收', 'Entregue': '已签收', 'Entregue · sem bipe de chegada': '已签收·无到件扫描',
@@ -1139,7 +1198,7 @@ function JTCoreFactory_() {
     SHIFTS: SHIFTS, NO_TRIP_ID: NO_TRIP_ID, noValue: noValue, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentPair: segmentPair, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
-    dockVersion: dockVersion, applyAliases: applyAliases, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
+    dockVersion: dockVersion, applyAliases: applyAliases, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyExpeditions: applyExpeditions, expeditionOf: expeditionOf, applySegLines: applySegLines, segLineOf: segLineOf, applyV425: applyV425, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
     hasFilters: hasFilters, applyFilters: applyFilters, siteKey: siteKey, inSiteList: inSiteList, countBy: countBy, distinctCount: distinctCount,

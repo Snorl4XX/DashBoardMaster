@@ -1,8 +1,49 @@
-# J&T DASHMASTER V4.24.3 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.0 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.25.0 — Mudanças nos gráficos (PDF "Mudanças nos gráficos dos dashboards")
+
+**Todos os painéis**
+- Saiu o aviso **"Fora da meta / Na meta" do Maomao**. No lugar, o cartão **"Sobre o indicador"** com a explicação de cada
+  indicador (o que é, impacto ou causa, meta), em PT e 中文. Dá para recolher; o painel lembra a escolha.
+  - Erro de Abrangência (registrado como N23c) aparece junto com a **Triagem Errada**;
+  - "Expedido, mas não chegou" (N29a, 6 h depois do bipe de deslacre) aparece nos dois painéis do **Deslacre**.
+
+**Avaria:** meta **120 ppm** (antes 90): tem que ficar abaixo.
+
+**Falta de Bipagem na Expedição**
+- Saíram **Logins mais ofensores**, **IDs de viagem de recebimento** e **Docas por turno**.
+- "Segmentos ofensores (1º segmento)" virou **Destinos afetados**, com um **filtro Destinos afetados** (os mesmos valores).
+- Novo gráfico **Expedições ofensoras** e **filtro Expedição**: Expedição A = docas 05 a 14, B = 15 a 23, C = 38 a 44.
+  Esteira = "Esteiras"; sem doca = "Sem informação".
+- **Docas × esteiras** (tabelas de 24/10): os segmentos da tabela regional (linhas 6 e 5 do DWS) mostram **"Esteira" + o número**
+  da tabela, por exemplo GRU,404-04 → **Esteira 20**, DC S-MOO 02-SP → **Esteira 11/12**, NOD → Esteira 17/18.
+  - O **DC SSZ-SP continua doca** (DOCA 08/09).
+  - Pela mesma tabela: DC TBT-SP na **DOCA 23** (era 14), DC GRU-SP na 44 (com SP 395-05/06/07), SBN na 08.
+  - Vale desde 24/10, pelo dia da remessa; os dias antes continuam com as docas da época.
+
+**Envio Errado:** saiu **Docas por turno**; entraram o gráfico **Expedições ofensoras** e o **filtro Expedição** (docas pela
+próxima parada, com as esteiras da Last Mile).
+
+**Triagem Errada**
+- Lote sem numeração aparece como **VOLUMOSOS** (antes "Sem informação"), na tela e no relatório.
+- Docas e esteiras pela mesma tabela de 24/10. Por exemplo, a base destino F S-MGUE-SP → Esteira 20.
+
+**Falta de Bipagem no Recebimento**
+- Saíram **Logins mais ofensores** e **Destinos ofensores (próxima parada)**.
+- "Segmentos ofensores" virou **dois gráficos**:
+  - **linha troncal**: 1º segmento, as siglas GO, SC, MG, SP…;
+  - **linha secundária**: 1º + 2º segmento juntos, por exemplo **GRU,404-04**. São SBN, DC TBT-SP, DC GRU-SP, DC SSZ-SP, MOOCA,
+    NOD, VLANA e as esteiras GRU 404-xx.
+- O filtro de Segmento virou dois: **Segmentos Principais** (só o 1º segmento) e **Segmentos Secundários** (os dois juntos).
+- Os dias já baixados guardavam só o 1º segmento. Na primeira execução da versão nova, os **últimos 31 dias são baixados de novo**
+  sozinhos (só a lista, que é pequena). Enquanto isso, a linha sai só pelo 1º segmento.
+
+**Atualizar (painel principal, Node.js):** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_25_NODE.zip` em `C:\`
+(Substituir tudo) e abra o `C:\dashmaster\node\iniciar.bat` (ou o atalho). No navegador, **Ctrl+F5**.
 
 ## V4.24.3 — Falta de Bipagem na Expedição: dias com mais de 10 mil remessas
 

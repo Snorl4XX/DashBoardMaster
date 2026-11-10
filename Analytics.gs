@@ -991,6 +991,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   if (cfg.valueAliases) JTCore_.applyAliases(archive.rows, cfg.valueAliases);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.segmentBase) JTCore_.applySegmentBase(archive.rows, true);
+  JTCore_.applyV425(archive.rows, cfg);
   if (cfg.dayOf) JTCore_.applyDayOf(archive.rows, cfg.dayOf);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);

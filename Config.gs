@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.24.3',
+  VERSION: '4.25.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -71,6 +71,11 @@ const FILTER_LABELS = Object.freeze({
   expeditionShift: {pt: 'Turno da expedição', zh: '发件班次'},
   login:           {pt: 'Login', zh: '操作员'},
   segment:         {pt: 'Segmento', zh: '一段码'},
+  // V4.25: grupos de docas (Expedição A/B/C), linha do segmento e os dois filtros de segmento da Falta de Bipagem no Recebimento.
+  expedition:      {pt: 'Expedição', zh: '发件区'},
+  segLine:         {pt: 'Linha', zh: '线路'},
+  segMain:         {pt: 'Segmentos Principais', zh: '一段码'},
+  segSub:          {pt: 'Segmentos Secundários', zh: '一段码+二段码'},
   destination:     {pt: 'Próxima parada', zh: '下一站'},
   correctDest:     {pt: 'Destino correto', zh: '应发下一站'},
   lot:             {pt: 'Lote / Saca', zh: '包号'},
@@ -260,7 +265,52 @@ const BRE_BACK_FROM_2026_11_10_ = '2026-11-10';
 const withBreBack_ = (table, moves) => withRoutes_(table, moves, false).map(e => e.route !== 'SP BRE' ? e : Object.assign({}, e, {
   codes: e.codes.concat(['RBR'].filter(c => e.codes.indexOf(c) < 0)),
   stops: (e.stops || []).concat(['AC RBR', 'DC RBR-AC', 'TO PMW', 'PA MRB', 'RO PVH'].filter(x => (e.stops || []).indexOf(x) < 0))}));
-const DOCK_TABLE_2026_10_30_ = withNewTbt_(DOCK_TABLE_2026_10_11_);
+/**
+ * V4.25 (pedido, PDF "Mudanças nos gráficos dos dashboards"): as tabelas de 24/10 ("10月24日干线装车码头进行调整" e "Ajuste das
+ * Docas de Carregamento das Rotas Regionais") separam DOCAS e ESTEIRAS:
+ *  - DOCAS (troncal e os DCs): DC TBT-SP passa para a DOCA 23 (era 14), DC GRU-SP fica na 44 (com SP 395-05/06/07 e GRU 381-15/18 a
+ *    21), SBN na 08 (até 375-10) e o DC SSZ-SP na DOCA 08/09 (378-00 a 06) — "o DC SSZ-SP é doca, não colocar em esteira";
+ *  - ESTEIRAS (Last Mile, linhas 6 e 5 do DWS): os segmentos da tabela regional mostram "Esteira" + o número da doca da tabela
+ *    (ex.: GRU,404-04 → Esteira 20; DC S-MOO 02-SP → Esteira 11/12), e não mais a doca do DC GRU (44) ou do MOO (23).
+ * Vale pelo dia da remessa, desde 24/10 (o histórico antes continua com as docas da época).
+ */
+const DOCK_ESTEIRAS_2026_10_24_ = [
+  {dock: 'Esteira 01', line: 6, route: 'DC S-VLANA-SP', codes: ['VLANA']},
+  {dock: 'Esteira 02', line: 6, route: 'F S-JBO-SP', codes: ['GRU 404-11']},
+  {dock: 'Esteira 03', line: 6, route: 'F S-SAP 02-SP', codes: ['GRU 404-12']},
+  {dock: 'Esteira 04', line: 6, route: 'F S-MGUE 02-SP', codes: ['GRU 404-08']},
+  {dock: 'Esteira 05', line: 6, route: 'F S-PQBOTU-SP', codes: ['GRU 404-09']},
+  {dock: 'Esteira 06', line: 6, route: 'F VLMT-SP', codes: ['GRU 404-10']},
+  {dock: 'Esteira 07', line: 6, route: 'S-MGUE-SP', codes: ['GRU 404-01']},
+  {dock: 'Esteira 10', line: 6, route: 'S-MGUE 02-SP', codes: ['GRU 404-13']},
+  {dock: 'Esteira 11/12', line: 5, route: 'DC S-MOO 02-SP', codes: ['MOO'].concat(
+    DOCK_SUB_('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01', '430-05', '430-07', '430-08', '430-09', '398-00', '404-00']),
+    DOCK_SUB_('MOO', ['430-00', '430-01', '430-02', '430-03', '430-04', '430-05', '430-06', '430-07', '430-08', '430-09'])), stops: ['DC MOOCA2', 'DC MOOCA']},
+  {dock: 'Esteira 13', line: 5, route: 'S-PENHA-SP', codes: ['GRU 404-02']},
+  {dock: 'Esteira 14', line: 5, route: 'F S-PENHA 02-SP', codes: ['GRU 404-07']},
+  {dock: 'Esteira 15/16', line: 5, route: 'S-SRAF-SP', codes: ['GRU 404-00']},
+  {dock: 'Esteira 17/18', line: 5, route: 'DC NOD-SP', codes: ['NOD']},
+  {dock: 'Esteira 19', line: 5, route: 'S-SAPOP-SP', codes: ['GRU 404-03']},
+  {dock: 'Esteira 20', line: 5, route: 'F S-MGUE-SP', codes: ['GRU 404-04']},
+  {dock: 'Esteira 22', line: 5, route: 'F S-PENHA-SP', codes: ['GRU 404-05']},
+  {dock: 'Esteira 24', line: 5, route: 'F S-PENHA 03-SP', codes: ['GRU 404-06']}
+];
+const DOCK_ESTEIRA_CODES_ = [].concat(...DOCK_ESTEIRAS_2026_10_24_.map(e => e.codes));
+const DOCK_TABLE_2026_10_24_ = DOCK_TABLE_2026_10_11_.filter(e => e.route !== 'MOO').map(e => {
+  const set = x => Object.assign({}, e, x), add = (list, more) => list.concat(more.filter(c => list.indexOf(c) < 0));
+  const codes = (e.codes || []).filter(c => DOCK_ESTEIRA_CODES_.indexOf(c) < 0);
+  switch (e.route) {
+    // GRU 402-02 e 402-04 (antes no DC GRU) e 402-06/07/08 no DC TBT-SP, como na tabela.
+    case 'DC TBT-SP': return set({dock: 'DOCA 23', line: 2, codes: add(codes, DOCK_SUB_('GRU', ['402-02', '402-04', '402-06', '402-07', '402-08']))});
+    case 'DC SSZ-SP': return set({dock: 'DOCA 08/09', codes: add(codes, DOCK_SUB_('GRU', ['378-05', '378-06']))});
+    case 'DC GRU': return set({route: 'DC GRU-SP', codes: add(codes.filter(c => c !== 'GRU 402-02' && c !== 'GRU 402-04'), DOCK_SUB_('SP', ['395-05', '395-06', '395-07']).concat(
+      DOCK_SUB_('GRU', ['381-15', '381-18', '381-19', '381-20', '381-21']))), stops: ['DC GRU']});
+    case 'DC JND 02-SP': return set({codes: codes.filter(c => ['SP 395-05', 'SP 395-06', 'SP 395-07'].indexOf(c) < 0)});
+    case 'SBN': return set({codes: add(codes, ['SBN 375-10'])});
+    default: return codes.length === (e.codes || []).length ? e : set({codes: codes});
+  }
+}).concat(DOCK_ESTEIRAS_2026_10_24_);
+const DOCK_TABLE_2026_10_30_ = withNewTbt_(DOCK_TABLE_2026_10_24_);
 const MOVES_2026_11_01_ = [
   {route: 'RJ SJM', codes: ['CDG'], stops: ['DC CDG-RJ']},
   {route: 'MT CGB', codes: ['JPN'], stops: ['DC JPN']}
@@ -296,6 +346,7 @@ const DOCKS_EXPEDICAO = Object.freeze({
     },
     {from: '2026-10-04', entries: DOCK_TABLE_2026_10_04_},
     {from: '2026-10-11', entries: DOCK_TABLE_2026_10_11_},
+    {from: '2026-10-24', entries: DOCK_TABLE_2026_10_24_},
     {from: '2026-10-30', entries: DOCK_TABLE_2026_10_30_},
     {from: '2026-11-01', entries: DOCK_TABLE_2026_11_01_},
     {from: BRE_BACK_FROM_2026_11_10_, entries: DOCK_TABLE_2026_11_10_}
@@ -472,6 +523,70 @@ function unsealPanel_(own) {
  *   Protege contra payloads sem filtro (que baixariam todas as remessas processadas).
  * routeKey: identifica os cabeçalhos Routename/Routernamelist (ver JmsApi.gs).
  */
+/**
+ * V4.25 (pedido): explicação de cada indicador, no lugar do aviso "Fora da meta" do Maomao (que saiu de todos os painéis).
+ * Texto do PDF "Mudanças nos gráficos dos dashboards". O Erro de Abrangência (registrado como N23c) fica na Triagem Errada e o
+ * "Expedido, mas não chegou" (N29a, prazo de 6 h depois do bipe de deslacre) nos dois painéis do Deslacre.
+ */
+const ABOUT_T_ = {
+  what: {pt: 'O que é', zh: '定义'}, impact: {pt: 'Impacto principal', zh: '主要影响'}, cause: {pt: 'Causa principal', zh: '主要原因'},
+  goal: {pt: 'Meta', zh: '目标'}, action: {pt: 'Ação', zh: '处理'}, rule: {pt: 'Regra de arbitragem', zh: '仲裁规则'},
+  important: {pt: 'Regra importante', zh: '重要规则'}
+};
+const ABOUT_N29A_ = {title: {pt: 'Expedido, mas não chegou / Enviado mas não recebido (Código N29a)', zh: '有发未到（N29a）'}, items: [
+  {k: ABOUT_T_.what, v: {pt: 'Situação em que a unidade de origem registrou no sistema que enviou o pacote, mas a unidade de destino afirma que ele não chegou ao caminhão ou esqueceu de dar o bipe de entrada.',
+    zh: '始发网点在系统中登记已发出包裹，但目的网点称包裹未随车到达，或忘记做到件扫描。'}},
+  {k: ABOUT_T_.rule, v: {pt: 'A unidade de destino precisa registrar a ocorrência N29a em até 6 horas após o bipe de deslacre. Se ultrapassar esse prazo, o sistema entende que a carga foi recebida sem problemas e responsabiliza o destino pelo extravio.',
+    zh: '目的网点必须在解封扫描后 6 小时内登记 N29a。超过时限，系统视为货物已正常收到，由目的网点承担丢失责任。'}}]};
+const INDICATOR_ABOUT_ = Object.freeze({
+  missing_receipt: [{title: {pt: 'Falta de Bipagem no Recebimento', zh: '未收件扫描'}, items: [
+    {k: ABOUT_T_.what, v: {pt: 'Acontece quando um pacote é descarregado fisicamente do caminhão no galpão, mas o operador esquece de registrar a entrada dando o bipe de "Encomenda Recebida" no PDA.',
+      zh: '包裹已从车上实际卸到仓库，但操作员忘记在 PDA 上扫描"已收件"登记入库。'}},
+    {k: ABOUT_T_.impact, v: {pt: 'A unidade fica num "ponto cego". A partir do deslacre do veículo, a base tem um cronômetro de exatamente 6 horas para apontar faltas ou estragos. Se o bipe de recebimento não for feito e a mercadoria sumir ou chegar avariada, o prejuízo financeiro será cobrado 100% da unidade recebedora.',
+      zh: '网点处于"盲区"。车辆解封后，网点只有整整 6 小时来上报短少或破损。若未做收件扫描而货物丢失或破损，经济损失将 100% 由收件网点承担。'}}]}],
+  missing_dispatch: [{title: {pt: 'Falta de Bipagem na Expedição', zh: '未发件扫描'}, items: [
+    {k: ABOUT_T_.what, v: {pt: 'Ocorre quando o pacote é carregado no caminhão e enviado para a próxima parada, mas o operador esquece de fazer o registro de saída no PDA pela opção "Carregamento e Expedição".',
+      zh: '包裹已装车发往下一站，但操作员忘记在 PDA 上通过"装车发件"登记出库。'}},
+    {k: ABOUT_T_.impact, v: {pt: 'O rastreamento do cliente é interrompido. O pacote cai em relatórios de anomalias ("pedidos sem movimentação"), e a unidade de origem sofre multas operacionais diretas.',
+      zh: '客户轨迹中断。包裹会进入异常报表（"断更件"），始发网点将直接受到运营罚款。'}}]}],
+  sorting_error: [{title: {pt: 'Erro de Triagem (Código N23c)', zh: '错分（N23c）'}, items: [
+    {k: ABOUT_T_.what, v: {pt: 'Ocorre quando um pacote está com a etiqueta física 100% correta, mas é separado por engano e enviado para uma unidade ou Centro de Distribuição (DC) incorreto dentro da mesma regional.',
+      zh: '包裹面单 100% 正确，但被误分并发往同一区域内错误的网点或分拨中心（DC）。'}},
+    {k: ABOUT_T_.cause, v: {pt: 'Falha humana ao ignorar a Regra de Ouro: o operador tenta adivinhar o destino lendo o endereço por extenso (rua/bairro) na etiqueta em vez de ler estritamente os códigos de 1º e 2º segmento.',
+      zh: '人为失误，忽视"黄金法则"：操作员读面单上的详细地址（街道/街区）去猜目的地，而没有严格按照一段码和二段码分拣。'}},
+    {k: ABOUT_T_.goal, v: {pt: 'Manter a taxa em no máximo 0,5% do volume processado.', zh: '错分率不超过处理量的 0.5%。'}}]},
+    {title: {pt: 'Erro de Abrangência (registrado como N23c)', zh: '覆盖范围错误（登记为 N23c）'}, items: [
+      {k: ABOUT_T_.what, v: {pt: 'Uma divergência sistêmica onde a etiqueta impressa aponta um destino, mas o sistema atualizado exige outro (devido a alterações de CEP, abertura de novas bases ou otimização de rotas).',
+        zh: '系统性差异：面单打印的是一个目的地，但更新后的系统要求另一个（因邮编变更、新网点开通或线路优化）。'}},
+      {k: ABOUT_T_.action, v: {pt: 'Não é culpa do operador. Quando identificada a diferença entre o sistema e os segmentos da etiqueta, a liderança deve acionar imediatamente o Departamento de Redes da regional.',
+        zh: '不是操作员的责任。发现系统与面单段码不一致时，管理人员应立即通知区域网络部。'}}]}],
+  wrong_send: [{title: {pt: 'Envio Errado (Código N31a)', zh: '错发（N31a）'}, items: [
+    {k: ABOUT_T_.what, v: {pt: 'Ocorre quando o pacote está com a etiqueta correta, mas é embarcado na doca de expedição (login de SC) e enviado por engano para uma unidade de outra regional.',
+      zh: '包裹面单正确，但在发件码头（SC 登录）装车时被误发到其他区域的网点。'}},
+    {k: ABOUT_T_.cause, v: {pt: 'Em caminhões que fazem rotas com múltiplas paradas, o operador esquece de alterar a "Próxima Parada" na tela do PDA e bipa os volumes para o destino errado.',
+      zh: '多站点线路的车辆，操作员忘记在 PDA 上修改"下一站"，把包裹扫描发往错误的目的地。'}},
+    {k: ABOUT_T_.goal, v: {pt: 'Manter a taxa em no máximo 1%.', zh: '错发率不超过 1%。'}}]}],
+  unseal: [ABOUT_N29A_],
+  unseal_trunk: [ABOUT_N29A_],
+  damage: [{title: {pt: 'Avarias e Produtos Danificados (Códigos Z00 / Z27a / Z41d)', zh: '破损（Z00 / Z27a / Z41d）'}, items: [
+    {k: ABOUT_T_.what, v: {pt: 'Mede a quantidade de pacotes que sofreram danos físicos durante o fluxo logístico.', zh: '衡量在物流过程中遭受物理损坏的包裹数量。'},
+      sub: [{k: {pt: 'Z27a', zh: 'Z27a'}, v: {pt: 'Embalagem externa e produto interno totalmente avariados.', zh: '外包装和内件完全破损。'}},
+        {k: {pt: 'Z41d', zh: 'Z41d'}, v: {pt: 'Embalagem violada/rasgada com extravio (sumiço) do conteúdo interno.', zh: '外包装被破坏/撕裂，内件丢失。'}}]},
+    {k: ABOUT_T_.important, v: {pt: 'Para não pagar pelo prejuízo de um pacote que já veio quebrado do transporte, deve-se seguir estritamente a ordem dos bipes: (1) Check-in, (2) Deslacre, (3) Encomenda Recebida e só depois (4) Registro de Avaria.',
+      zh: '为避免为运输途中已损坏的包裹赔付，必须严格按照扫描顺序：(1) 签到，(2) 解封，(3) 已收件，最后 (4) 破损登记。'}},
+    {k: ABOUT_T_.goal, v: {pt: 'Manter o índice abaixo de 120 ppm (partes por milhão).', zh: '破损率低于 120 ppm（百万分之一）。'}}]}]
+});
+/**
+ * V4.25 (pedido): "Expedições ofensoras" — as docas em três grupos: Expedição A = docas 05 a 14, Expedição B = 15 a 23,
+ * Expedição C = 38 a 44 (pelo número da doca: "DOCA 21/22" → 21 → B; "DOCA 08/09" → A). Esteira (Last Mile) = "Esteiras";
+ * sem doca = sem informação. Calculado na leitura (Core.applyExpeditions), depois das docas.
+ */
+const EXPEDICOES_ = Object.freeze({groups: [{name: 'Expedição A', from: 5, to: 14}, {name: 'Expedição B', from: 15, to: 23},
+  {name: 'Expedição C', from: 38, to: 44}], esteiras: 'Esteiras'});
+const EXPEDITION_CHART_ = {key: 'expedition', type: 'bar', top: 6, title: {pt: 'Expedições ofensoras', zh: '高频发件区'},
+  sub: {pt: 'Expedição A = docas 05 a 14 · B = 15 a 23 · C = 38 a 44', zh: '发件区 A = 05–14 号码头 · B = 15–23 · C = 38–44'},
+  stats: {max: {pt: 'Expedição mais ofensora', zh: '最多发件区'}, min: {pt: 'Expedição menos ofensora', zh: '最少发件区'}}};
+
 const ALL_INDICATORS_ = Object.freeze({
   wrong_send: {
     key: 'wrong_send', order: 1, routeKey: 'WRONG_SEND',
@@ -498,7 +613,9 @@ const ALL_INDICATORS_ = Object.freeze({
     // Docas pela PRÓXIMA PARADA (destino para onde a saca foi enviada): mostra em que doca estão
     // colocando mais sacas erradas.
     docks: DOCKS_PROXIMA_PARADA,
-    filters: ['shift', 'login', 'segment', 'destination', 'interval', 'lot', 'client', 'dock'],
+    // V4.25 (pedido): "Expedições ofensoras" (docas em Expedição A/B/C) e o filtro de Expedição.
+    expeditions: EXPEDICOES_,
+    filters: ['shift', 'login', 'segment', 'destination', 'interval', 'lot', 'client', 'dock', 'expedition'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
@@ -506,14 +623,14 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'lot', type: 'bar', horizontal: true, top: 10, title: {pt: 'Sacas / lotes mais ofensores', zh: '高频包号'}},
       {key: 'segmentBase', type: 'bar', top: 10, title: {pt: 'Primeiro segmento afetado', zh: '受影响一段码'}},
       {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Destinos incorretos ofensores', zh: '高频错发下一站'}},
+      EXPEDITION_CHART_,
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
     rankPanels: [
       {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
         title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
         stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
-      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
-        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
+      // V4.25 (pedido): saiu "Docas por turno".
       {key: 'stopDockByShift', kind: 'byShift', dim: 'destination', extra: 'dock', top: 5, accent: 'count', bands: 'top',
         title: {pt: 'Turno + próxima parada + doca', zh: '班次、下一站与码头'},
         sub: {pt: 'Quantidade e porcentagem por combinação de turno, próxima parada e doca · top {n} por turno', zh: '按班次、下一站与码头的数量及占比 · 每个班次前 {n} 名'},
@@ -560,6 +677,9 @@ const ALL_INDICATORS_ = Object.freeze({
         'terminalDispatchCode', 'orderThirdCode', 'threeSegmentCode', 'orderFirstCode']
     },
     labels: {destination: {pt: 'Base destino', zh: '目的网点'}, lot: {pt: 'Número do lote', zh: '包号'}},
+    // V4.25 (pedido): lote sem numeração = VOLUMOSOS (no lugar de "Sem informação"). Só na tela e no relatório: o lote vazio
+    // continua vazio no arquivo, para a Consulta das bipagens ainda procurar o lote dele.
+    naLabel: {text: {pt: 'VOLUMOSOS', zh: '大件'}, fields: ['lot']},
     // O JMS manda a base ofensora (baggingNetworkName) VAZIA quando a própria base é a responsável:
     // vazio = SP GRU (nome da base em JMS_CENTER_NAME), somado ao SP GRU que já vem preenchido.
     // V4.4 (pedido): é também a regra para a "Unidade de Empacotamento" sem informação (Base de escaneamento = SP GRU).
@@ -635,15 +755,26 @@ const ALL_INDICATORS_ = Object.freeze({
     fields: {
       shipment: ['billcode'], eventTime: ['loadPackageTime', 'nextStationScanTime'], login: ['loadPackageEmp'],
       segment: ['threeSegmentCode'], destination: ['nextStop'], client: ['customerName'],
-      tripId: ['arriveOrder'], route: ['lastStop']
+      tripId: ['arriveOrder'], route: ['lastStop'],
+      // V4.25: código de três segmentos completo — a linha secundária usa o 1º + 2º segmento juntos ("GRU,404-04").
+      segmentFull: ['threeSegmentCode']
     },
-    filters: ['shift', 'login', 'interval', 'client', 'destination', 'segment'],
+    // V4.25 (pedido): segmentos em linha troncal (1º segmento: GO, SC, MG…) e linha secundária (1º + 2º segmento: GRU,404-04),
+    // pelas tabelas de docas e esteiras de 24/10. Calculado na leitura (Core.applySegLines).
+    segLines: true,
+    labelsOne: {segMain: {pt: 'Segmento', zh: '段码'}, segSub: {pt: 'Segmento', zh: '段码'}},
+    // V4.25 (pedido): o filtro de Segmento virou dois — Segmentos Principais (só o 1º segmento) e Segmentos Secundários (1º + 2º).
+    filters: ['shift', 'login', 'interval', 'client', 'destination', 'segMain', 'segSub'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
-      {key: 'login', type: 'bar', horizontal: true, top: 10, title: {pt: 'Logins mais ofensores', zh: '高频责任操作员'}},
-      {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Destinos ofensores (próxima parada)', zh: '高频下一站'}},
-      {key: 'segment', type: 'bar', top: 10, title: {pt: 'Segmentos ofensores', zh: '高频一段码'}},
+      // V4.25 (pedido): saíram "Logins mais ofensores" e "Destinos ofensores (próxima parada)"; "Segmentos ofensores" virou dois.
+      {key: 'segTrunk', dim: 'segMain', where: {segLine: 'Troncal'}, type: 'bar', top: 10,
+        title: {pt: 'Segmentos ofensores — linha troncal', zh: '高频一段码（干线）'},
+        sub: {pt: '1º segmento (siglas da linha troncal)', zh: '一段码（干线）'}},
+      {key: 'segSecondary', dim: 'segSub', where: {segLine: 'Secundária'}, type: 'bar', top: 10,
+        title: {pt: 'Segmentos ofensores — linha secundária', zh: '高频段码（支线）'},
+        sub: {pt: '1º e 2º segmento juntos (ex.: GRU,404-04)', zh: '一段码+二段码（例：GRU,404-04）'}},
       {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
@@ -674,16 +805,20 @@ const ALL_INDICATORS_ = Object.freeze({
     },
     // V4.12.6 (pedido): "Segmentos ofensores (1º segmento)" pela fórmula do WPS do usuário (coluna segmentBase).
     segmentBase: true,
-    labels: {login: {pt: 'Login (descarga)', zh: '卸车操作员'}, tripId: {pt: 'ID viagem recebimento', zh: '到件车次号'}},
+    labels: {login: {pt: 'Login (descarga)', zh: '卸车操作员'}, tripId: {pt: 'ID viagem recebimento', zh: '到件车次号'},
+      segmentBase: {pt: 'Destinos afetados', zh: '受影响目的地'}},
+    labelsOne: {segmentBase: {pt: 'Destino afetado', zh: '受影响目的地'}},
     docks: DOCKS_EXPEDICAO,
-    filters: ['shift', 'login', 'interval', 'client', 'tripId', 'segment', 'destination', 'dock'],
+    expeditions: EXPEDICOES_,
+    // V4.25 (pedido): filtros "Destinos afetados" (valores do gráfico) e "Expedição".
+    filters: ['shift', 'login', 'interval', 'client', 'tripId', 'segment', 'segmentBase', 'destination', 'dock', 'expedition'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
       // V4.12.6 (pedido): saiu "Top 4 segmentos por turno"; os segmentos ofensores seguem a fórmula do WPS.
-      {key: 'segmentBase', type: 'bar', top: 10, title: {pt: 'Segmentos ofensores (1º segmento)', zh: '高频一段码'}},
-      {key: 'login', type: 'bar', horizontal: true, top: 10, title: {pt: 'Logins mais ofensores', zh: '高频卸车操作员'}},
-      {key: 'tripId', type: 'bar', horizontal: true, top: 10, title: {pt: 'IDs de viagem de recebimento', zh: '高频到件车次号'}},
+      // V4.25 (pedido): o gráfico virou "Destinos afetados"; saíram "Logins mais ofensores" e "IDs de viagem de recebimento".
+      {key: 'segmentBase', type: 'bar', top: 10, title: {pt: 'Destinos afetados', zh: '受影响目的地'}},
+      EXPEDITION_CHART_,
       {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
@@ -693,9 +828,7 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
         title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
         stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
-      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
-        title: {pt: 'Docas por turno', zh: '各班次码头分布'}}
-      // V4.12.6 (pedido): saiu o painel "Turno + rota de carregamento + doca".
+      // V4.12.6 (pedido): saiu o painel "Turno + rota de carregamento + doca". V4.25 (pedido): saiu "Docas por turno".
     ],
     // Mesmo formato das tabelas dinâmicas da planilha "Falta Expedição" (aba Planilha2): só no relatório (PDF/Excel).
     pivotTables: [
@@ -832,8 +965,9 @@ const ALL_INDICATORS_ = Object.freeze({
     name: {pt: 'Avaria', zh: '破损'},
     subtitle: {pt: 'Taxa de avaria do JMS (Relatório de Taxa de Avaria)', zh: 'JMS 破损率（破损率报表）'},
     // Meta: taxa ABAIXO de 90 (direction 'max'; na escala do JMS, informada pela operação). null = "Meta não definida".
-    // V3.38 (pedido): a taxa da Avaria é mostrada em ppm (por milhão), como o número do JMS: "189,72 ppm", meta ≤ 90 ppm.
-    goal: {value: 90, direction: 'max', strict: false, scale: 1000000, unit: 'ppm'},
+    // V3.38 (pedido): a taxa da Avaria é mostrada em ppm (por milhão), como o número do JMS: "189,72 ppm".
+    // V4.25 (pedido): a meta mudou para 120 ppm (antes 90) — tem que ficar abaixo dela.
+    goal: {value: 120, direction: 'max', strict: false, scale: 1000000, unit: 'ppm'},
     apiProfile: 'damage', detailMatchesErrors: true,
     summary: {
       endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/getBreakageRateData',
@@ -1904,7 +2038,7 @@ function usedFields_(cfg) {
   return Object.keys(set);
 }
 /** Calculadas na leitura (Core.applyDocks / Core.applyOrderKinds / Core.applyDayOf): não vão no conjunto de dados. */
-const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1, orderKind: 1, segmentBase: 1};
+const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1, orderKind: 1, segmentBase: 1, expedition: 1, segLine: 1, segMain: 1, segSub: 1};
 
 /** Campos da linha normalizada que o navegador precisa receber para este indicador. */
 function clientFields_(cfg) {
@@ -1920,6 +2054,8 @@ function clientFields_(cfg) {
   }
   // V4.12.6: a fórmula do segmento (Core.applySegmentBase) lê o código completo, ou o 1º + 2º segmento dos dias antigos.
   if (cfg.segmentBase) { set.segmentFull = 1; set.segment = 1; if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') set.segmentRaw = 1; }
+  // V4.25: linhas troncal/secundária (Core.applySegLines) pelo código completo; Expedição A/B/C pela doca.
+  if (cfg.segLines) { set.segmentFull = 1; set.segment = 1; }
   return Object.keys(set);
 }
 
@@ -1947,6 +2083,8 @@ function catalogEntry_(cfg) {
     docks: cfg.docks || null,
     dayOf: cfg.dayOf || null, scans: !!cfg.scans, segmentBase: !!cfg.segmentBase,
     emptyLotLabel: cfg.emptyLotLabel || null,
+    // V4.25: explicação do indicador, grupos de Expedição (A/B/C) e linhas troncal/secundária dos segmentos.
+    about: INDICATOR_ABOUT_[cfg.key] || null, expeditions: cfg.expeditions || null, segLines: !!cfg.segLines,
     hideShiftCards: !!cfg.hideShiftCards,
     valueCards: cfg.valueCards || [],
     texts: cfg.texts || null,

@@ -466,7 +466,7 @@ function netlifyPage(root, info, painel) {
   let html = read('Index.html');
   const parts = [
     [/<\?!=\s*include\('Styles'\);?\s*\?>/, () => read('Styles.html')],
-    [/<\?!=\s*include\('Mascot'\);?\s*\?>/, () => read('Mascot.html')],
+    // V4.25: o Maomao saiu da página (o aviso "Fora da meta" saiu de todos os painéis); o Mascot.html continua no pacote.
     [/<\?!=\s*boot\s*\?>/, () => boot],
     [/<\?!=\s*coreSource_\(\);?\s*\?>/, () => info.core],
     [/<\?!=\s*include\('Client'\);?\s*\?>/, () => read('Client.html')]
