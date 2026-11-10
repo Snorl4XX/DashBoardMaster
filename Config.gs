@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.25.1',
+  VERSION: '4.25.2',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -523,59 +523,6 @@ function unsealPanel_(own) {
  *   Protege contra payloads sem filtro (que baixariam todas as remessas processadas).
  * routeKey: identifica os cabeçalhos Routename/Routernamelist (ver JmsApi.gs).
  */
-/**
- * V4.25 (pedido): explicação de cada indicador, no lugar do aviso "Fora da meta" do Maomao (que saiu de todos os painéis).
- * Texto do PDF "Mudanças nos gráficos dos dashboards". O Erro de Abrangência (registrado como N23c) fica na Triagem Errada e o
- * "Expedido, mas não chegou" (N29a, prazo de 6 h depois do bipe de deslacre) nos dois painéis do Deslacre.
- */
-const ABOUT_T_ = {
-  what: {pt: 'O que é', zh: '定义'}, impact: {pt: 'Impacto principal', zh: '主要影响'}, cause: {pt: 'Causa principal', zh: '主要原因'},
-  goal: {pt: 'Meta', zh: '目标'}, action: {pt: 'Ação', zh: '处理'}, rule: {pt: 'Regra de arbitragem', zh: '仲裁规则'},
-  important: {pt: 'Regra importante', zh: '重要规则'}
-};
-const ABOUT_N29A_ = {title: {pt: 'Expedido, mas não chegou / Enviado mas não recebido (Código N29a)', zh: '有发未到（N29a）'}, items: [
-  {k: ABOUT_T_.what, v: {pt: 'Situação em que a unidade de origem registrou no sistema que enviou o pacote, mas a unidade de destino afirma que ele não chegou ao caminhão ou esqueceu de dar o bipe de entrada.',
-    zh: '始发网点在系统中登记已发出包裹，但目的网点称包裹未随车到达，或忘记做到件扫描。'}},
-  {k: ABOUT_T_.rule, v: {pt: 'A unidade de destino precisa registrar a ocorrência N29a em até 6 horas após o bipe de deslacre. Se ultrapassar esse prazo, o sistema entende que a carga foi recebida sem problemas e responsabiliza o destino pelo extravio.',
-    zh: '目的网点必须在解封扫描后 6 小时内登记 N29a。超过时限，系统视为货物已正常收到，由目的网点承担丢失责任。'}}]};
-const INDICATOR_ABOUT_ = Object.freeze({
-  missing_receipt: [{title: {pt: 'Falta de Bipagem no Recebimento', zh: '未收件扫描'}, items: [
-    {k: ABOUT_T_.what, v: {pt: 'Acontece quando um pacote é descarregado fisicamente do caminhão no galpão, mas o operador esquece de registrar a entrada dando o bipe de "Encomenda Recebida" no PDA.',
-      zh: '包裹已从车上实际卸到仓库，但操作员忘记在 PDA 上扫描"已收件"登记入库。'}},
-    {k: ABOUT_T_.impact, v: {pt: 'A unidade fica num "ponto cego". A partir do deslacre do veículo, a base tem um cronômetro de exatamente 6 horas para apontar faltas ou estragos. Se o bipe de recebimento não for feito e a mercadoria sumir ou chegar avariada, o prejuízo financeiro será cobrado 100% da unidade recebedora.',
-      zh: '网点处于"盲区"。车辆解封后，网点只有整整 6 小时来上报短少或破损。若未做收件扫描而货物丢失或破损，经济损失将 100% 由收件网点承担。'}}]}],
-  missing_dispatch: [{title: {pt: 'Falta de Bipagem na Expedição', zh: '未发件扫描'}, items: [
-    {k: ABOUT_T_.what, v: {pt: 'Ocorre quando o pacote é carregado no caminhão e enviado para a próxima parada, mas o operador esquece de fazer o registro de saída no PDA pela opção "Carregamento e Expedição".',
-      zh: '包裹已装车发往下一站，但操作员忘记在 PDA 上通过"装车发件"登记出库。'}},
-    {k: ABOUT_T_.impact, v: {pt: 'O rastreamento do cliente é interrompido. O pacote cai em relatórios de anomalias ("pedidos sem movimentação"), e a unidade de origem sofre multas operacionais diretas.',
-      zh: '客户轨迹中断。包裹会进入异常报表（"断更件"），始发网点将直接受到运营罚款。'}}]}],
-  sorting_error: [{title: {pt: 'Erro de Triagem (Código N23c)', zh: '错分（N23c）'}, items: [
-    {k: ABOUT_T_.what, v: {pt: 'Ocorre quando um pacote está com a etiqueta física 100% correta, mas é separado por engano e enviado para uma unidade ou Centro de Distribuição (DC) incorreto dentro da mesma regional.',
-      zh: '包裹面单 100% 正确，但被误分并发往同一区域内错误的网点或分拨中心（DC）。'}},
-    {k: ABOUT_T_.cause, v: {pt: 'Falha humana ao ignorar a Regra de Ouro: o operador tenta adivinhar o destino lendo o endereço por extenso (rua/bairro) na etiqueta em vez de ler estritamente os códigos de 1º e 2º segmento.',
-      zh: '人为失误，忽视"黄金法则"：操作员读面单上的详细地址（街道/街区）去猜目的地，而没有严格按照一段码和二段码分拣。'}},
-    {k: ABOUT_T_.goal, v: {pt: 'Manter a taxa em no máximo 0,5% do volume processado.', zh: '错分率不超过处理量的 0.5%。'}}]},
-    {title: {pt: 'Erro de Abrangência (registrado como N23c)', zh: '覆盖范围错误（登记为 N23c）'}, items: [
-      {k: ABOUT_T_.what, v: {pt: 'Uma divergência sistêmica onde a etiqueta impressa aponta um destino, mas o sistema atualizado exige outro (devido a alterações de CEP, abertura de novas bases ou otimização de rotas).',
-        zh: '系统性差异：面单打印的是一个目的地，但更新后的系统要求另一个（因邮编变更、新网点开通或线路优化）。'}},
-      {k: ABOUT_T_.action, v: {pt: 'Não é culpa do operador. Quando identificada a diferença entre o sistema e os segmentos da etiqueta, a liderança deve acionar imediatamente o Departamento de Redes da regional.',
-        zh: '不是操作员的责任。发现系统与面单段码不一致时，管理人员应立即通知区域网络部。'}}]}],
-  wrong_send: [{title: {pt: 'Envio Errado (Código N31a)', zh: '错发（N31a）'}, items: [
-    {k: ABOUT_T_.what, v: {pt: 'Ocorre quando o pacote está com a etiqueta correta, mas é embarcado na doca de expedição (login de SC) e enviado por engano para uma unidade de outra regional.',
-      zh: '包裹面单正确，但在发件码头（SC 登录）装车时被误发到其他区域的网点。'}},
-    {k: ABOUT_T_.cause, v: {pt: 'Em caminhões que fazem rotas com múltiplas paradas, o operador esquece de alterar a "Próxima Parada" na tela do PDA e bipa os volumes para o destino errado.',
-      zh: '多站点线路的车辆，操作员忘记在 PDA 上修改"下一站"，把包裹扫描发往错误的目的地。'}},
-    {k: ABOUT_T_.goal, v: {pt: 'Manter a taxa em no máximo 1%.', zh: '错发率不超过 1%。'}}]}],
-  unseal: [ABOUT_N29A_],
-  unseal_trunk: [ABOUT_N29A_],
-  damage: [{title: {pt: 'Avarias e Produtos Danificados (Códigos Z00 / Z27a / Z41d)', zh: '破损（Z00 / Z27a / Z41d）'}, items: [
-    {k: ABOUT_T_.what, v: {pt: 'Mede a quantidade de pacotes que sofreram danos físicos durante o fluxo logístico.', zh: '衡量在物流过程中遭受物理损坏的包裹数量。'},
-      sub: [{k: {pt: 'Z27a', zh: 'Z27a'}, v: {pt: 'Embalagem externa e produto interno totalmente avariados.', zh: '外包装和内件完全破损。'}},
-        {k: {pt: 'Z41d', zh: 'Z41d'}, v: {pt: 'Embalagem violada/rasgada com extravio (sumiço) do conteúdo interno.', zh: '外包装被破坏/撕裂，内件丢失。'}}]},
-    {k: ABOUT_T_.important, v: {pt: 'Para não pagar pelo prejuízo de um pacote que já veio quebrado do transporte, deve-se seguir estritamente a ordem dos bipes: (1) Check-in, (2) Deslacre, (3) Encomenda Recebida e só depois (4) Registro de Avaria.',
-      zh: '为避免为运输途中已损坏的包裹赔付，必须严格按照扫描顺序：(1) 签到，(2) 解封，(3) 已收件，最后 (4) 破损登记。'}},
-    {k: ABOUT_T_.goal, v: {pt: 'Manter o índice abaixo de 120 ppm (partes por milhão).', zh: '破损率低于 120 ppm（百万分之一）。'}}]}]
-});
 /**
  * V4.25 (pedido): "Expedições ofensoras" — as docas em três grupos: Expedição A = docas 05 a 14, Expedição B = 15 a 23,
  * Expedição C = 38 a 44 (pelo número da doca: "DOCA 21/22" → 21 → B; "DOCA 08/09" → A). Esteira (Last Mile) = "Esteiras";
@@ -2085,8 +2032,8 @@ function catalogEntry_(cfg) {
     docks: cfg.docks || null,
     dayOf: cfg.dayOf || null, scans: !!cfg.scans, segmentBase: !!cfg.segmentBase,
     emptyLotLabel: cfg.emptyLotLabel || null,
-    // V4.25: explicação do indicador, grupos de Expedição (A/B/C) e linhas troncal/secundária dos segmentos.
-    about: INDICATOR_ABOUT_[cfg.key] || null, expeditions: cfg.expeditions || null, segLines: !!cfg.segLines, hideNAFilters: cfg.hideNAFilters || null,
+    // V4.25: grupos de Expedição (A/B/C) e linhas troncal/secundária dos segmentos (V4.25.2: sem o "Sobre o indicador").
+    expeditions: cfg.expeditions || null, segLines: !!cfg.segLines, hideNAFilters: cfg.hideNAFilters || null,
     hideShiftCards: !!cfg.hideShiftCards,
     valueCards: cfg.valueCards || [],
     texts: cfg.texts || null,

@@ -4846,16 +4846,13 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     cV.reportValue_(cV.getIndicatorConfig_('sorting_error'), 'offenderBase', '') !== 'VOLUMOSOS',
     'Triagem Errada: lote sem numeração = VOLUMOSOS (tela e relatório)');
   check(dm.goal.value === 120 && dm.goal.unit === 'ppm', 'Avaria: meta 120 ppm');
-  const withAbout = cV.getPublicCatalog_().filter(x => x.about).map(x => x.key).sort().join();
-  check(withAbout === 'damage,missing_dispatch,missing_receipt,sorting_error,unseal,unseal_trunk,wrong_send' && se.about.length === 2 &&
-    /Abrangência/.test(se.about[1].title.pt) && /N29a/.test(cat('unseal').about[0].title.pt) && dm.about[0].items[0].sub.length === 2 &&
-    cV.getPublicCatalog_().every(x => !x.about || x.about.every(b => b.title.pt && b.title.zh && b.items.every(i => i.k.pt && i.v.pt && i.v.zh))),
-    'explicação de cada indicador (PT e 中文): os 7 do PDF, com Erro de Abrangência na Triagem e N29a no Deslacre', withAbout);
-  // Página: sem o aviso do Maomao, com o cartão da explicação.
+  // V4.25.2 (pedido): o cartão "Sobre o indicador" saiu de todos os painéis.
+  check(cV.getPublicCatalog_().every(x => x.about === undefined), 'V4.25.2: sem a explicação do indicador no catálogo');
+  // Página: sem o aviso do Maomao e sem o cartão "Sobre o indicador" (V4.25.2).
   const fsV = require('fs'), pathV = require('path');
   const idx = fsV.readFileSync(pathV.join(__dirname, '..', 'Index.html'), 'utf8'), cli = fsV.readFileSync(pathV.join(__dirname, '..', 'Client.html'), 'utf8');
-  check(idx.indexOf('targetBanner') < 0 && idx.indexOf("include('Mascot')") < 0 && idx.indexOf('id="aboutCard"') > 0 && cli.indexOf('function renderAbout') > 0 &&
-    cli.indexOf('renderTarget') < 0, 'aviso "Fora da meta" do Maomao fora de todos os painéis; explicação do indicador no lugar');
+  check(idx.indexOf('targetBanner') < 0 && idx.indexOf("include('Mascot')") < 0 && idx.indexOf('aboutCard') < 0 && cli.indexOf('renderAbout') < 0 &&
+    cli.indexOf('renderTarget') < 0, 'aviso "Fora da meta" do Maomao e cartão "Sobre o indicador" fora de todos os painéis');
   // Dados de ponta a ponta: Recebimento com o código completo gravado; Expedição filtrada por Expedição B.
   const DN = cV.addDaysIso_(cV.isoToday_(), -2), dd = {};
   dd[DN] = makeDay(DN, 9);

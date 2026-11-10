@@ -308,22 +308,6 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .delta{display:inline-flex;align-items:center;gap:4px;font-weight:800}
 .delta svg{width:14px;height:14px;stroke-width:2.6}
 
-/* ---------- V4.25: explicação do indicador (no lugar do aviso do Maomao) ---------- */
-.about{margin-top:12px;padding:0;overflow:hidden}
-.about details{padding:14px 20px}
-.about summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none;font-weight:800;font-size:15px;min-width:0}
-.about summary::-webkit-details-marker{display:none}
-.about summary svg{width:20px;height:20px;flex:none;color:var(--red);fill:none;stroke:currentColor;stroke-width:2}
-.about summary span{flex:none}
-.about summary small{color:var(--muted);font-weight:600;font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.about summary::after{content:'';margin-left:auto;flex:none;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);transition:transform .2s}
-.about details[open] summary::after{transform:rotate(-135deg)}
-.about-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:12px 24px;margin-top:12px}
-.about-block h3{margin:0 0 6px;font-size:14.5px;color:var(--ink)}
-.about-block ul{margin:0;padding-left:18px;display:grid;gap:6px;color:var(--ink-2);font-size:13.5px;line-height:1.5}
-.about-block ul ul{margin-top:4px;gap:3px}
-.about-block b{color:var(--ink)}
-
 /* ---------- Maomao (V3.38: imagens do usuário, animadas; acima dos cartões; letras maiores) ---------- */
 .target{margin-top:12px;display:grid;grid-template-columns:200px 1fr auto;align-items:center;gap:22px;padding:14px 28px;min-height:210px;overflow:hidden;position:relative}
 .target.good{background:linear-gradient(90deg,var(--card) 0%,var(--good-soft) 100%);border-color:var(--good-line)}

@@ -1,8 +1,15 @@
-# J&T DASHMASTER V4.25.1 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.2 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.25.2 — Sem o cartão "Sobre o indicador"
+
+Pedido: "retirar essa parte". O cartão **"Sobre o indicador"** (explicação do indicador, da V4.25) saiu de **todos os painéis**.
+Os filtros vão direto para os cartões da taxa. O resto da V4.25 e da V4.25.1 continua igual.
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_2_NODE.zip`.
 
 ## V4.25.1 — Falta de Bipagem no Recebimento: segmentos secundários pelas tabelas
 
@@ -22,7 +29,7 @@ Pedido: "os valores do segmento secundário estão errados, devem seguir essas t
 ## V4.25.0 — Mudanças nos gráficos (PDF "Mudanças nos gráficos dos dashboards")
 
 **Todos os painéis**
-- Saiu o aviso **"Fora da meta / Na meta" do Maomao**. No lugar, o cartão **"Sobre o indicador"** com a explicação de cada
+- Saiu o aviso **"Fora da meta / Na meta" do Maomao**. No lugar, o cartão **"Sobre o indicador"** (saiu na V4.25.2) com a explicação de cada
   indicador (o que é, impacto ou causa, meta), em PT e 中文. Dá para recolher; o painel lembra a escolha.
   - Erro de Abrangência (registrado como N23c) aparece junto com a **Triagem Errada**;
   - "Expedido, mas não chegou" (N29a, 6 h depois do bipe de deslacre) aparece nos dois painéis do **Deslacre**.
