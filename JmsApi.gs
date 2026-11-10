@@ -1015,7 +1015,8 @@ function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
     p.chunks.forEach(c => chunks.push({w: c.w + off, page: c.page}));
   });
   // Tamanho de página: o menor aceito (todas as listas usam o mesmo endereço).
-  return {size: Math.min.apply(null, plans.map(p => p.size)), total: plans.reduce((a, p) => a + p.total, 0), windows: windows, chunks: chunks,
+  return {size: Math.min.apply(null, plans.map(p => p.size)), total: plans.reduce((a, p) => a + p.total, 0),
+    known: plans.reduce((a, p) => a + (p.known || p.total), 0), windows: windows, chunks: chunks,
     sliced: plans.some(p => p.sliced), types: plans.map(p => p.windows[0] ? p.windows[0].type : null), skipped: skipped};
 }
 /**
@@ -1057,28 +1058,40 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
   let windows = [{start: full.start, end: full.end, type: type, total: probe.total, first: probe.records}];
   let sliced = false;
   const limit = detailMaxOffset_();
+  // V4.24.3 (Falta de Bipagem na Expedição com 10.906 remessas e o painel com 10 mil): o total da lista pode vir TRAVADO no
+  // limite do JMS (10.000) com mais remessas no dia. Com o total no limite (>=, não só acima), o dia vai em fatias de horário,
+  // e o tamanho real do dia é o maior entre a lista e o número do resumo (erros do dia).
+  const capped = limit > 0 && probe.total >= limit;
+  // Total EXATAMENTE no limite = suspeito de trava: vale o resumo, se for maior. Acima do limite o total é real (Recebimento).
+  const known = limit > 0 && probe.total === limit ? Math.max(probe.total, summaryErrorsFor_(cfg, indicatorKey, isoDate, type)) : probe.total;
   // detail.noSlice (Sem Movimentação): a lista não tem horário — fatias de horário trariam a lista inteira em cada uma.
-  if (limit > 0 && probe.total > limit && !(cfg.detail && cfg.detail.noSlice) && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
-    let n = Math.min(32, nextPow2_(Math.ceil(probe.total / (limit * 0.5))));
-    for (let round = 0; round < 3; round++) {
+  if (capped && !(cfg.detail && cfg.detail.noSlice) && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
+    let n = Math.min(32, nextPow2_(Math.ceil(known / (limit * 0.5))));
+    for (let round = 0; round < 4; round++) {
       const parts = splitWindow_(full, n).map(w => Object.assign(w, type ? {type: type} : {}));
       const firsts = fetchDetailBatch_(indicatorKey, isoDate, parts.map(w => ({page: 1, size: probe.size, win: w})));
-      const sum = firsts.reduce((s, f) => s + f.total, 0), top = firsts.reduce((m, f) => Math.max(m, f.total), 0);
-      // Dia fechado com quase tudo numa fatia: o JMS também ignora a hora (devolve o dia na janela da 00h).
-      const oneSlice = isoDate < isoToday_() && probe.total >= 1000 && top >= probe.total * 0.95;
-      if (oneSlice || Math.abs(sum - probe.total) > Math.max(countTolerance_(probe.total), probe.total * 0.05)) {
+      const totals = firsts.map(f => f.total);
+      let why = sliceProblem_(totals, probe.total, known, isoDate, limit);
+      // Todas as fatias no limite, iguais à lista do dia: ou o JMS ignora a hora, ou cada fatia também veio travada.
+      // Uma janela de 2 segundos às 00h decide: com a hora ignorada, ela traz o dia inteiro.
+      if (!why && totals.length > 1 && totals.every(x => x === probe.total)) {
+        const tiny = fetchDetailBatch_(indicatorKey, isoDate, [{page: 1, size: probe.size,
+          win: Object.assign({start: full.start, end: full.start.slice(0, 17) + '01'}, type ? {type: type} : {})}])[0];
+        if (tiny.total >= probe.total * 0.5) why = 'uma janela de 2 segundos trouxe ' + tiny.total + ' de ' + probe.total + ' (o JMS ignora a hora)';
+      }
+      if (why) {
         // A soma das fatias não bate com o dia: o JMS ignora a hora (ou filtra outro campo).
         setProp_('JMS_NO_SLICE_' + cfg.routeKey, '1');
-        logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': soma das fatias ' + sum +
-          ' ≠ total do dia ' + probe.total + '. Usando paginação normal.');
+        logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': ' + why + '. Usando paginação normal.');
         windows = [{start: full.start, end: full.end, type: type, total: probe.total, first: probe.records}];
         sliced = false;
         break;
       }
       windows = parts.map((w, i) => ({start: w.start, end: w.end, type: type, total: firsts[i].total, first: firsts[i].records}));
       sliced = true;
+      // Fatia com o total no limite também pode estar travada: divide mais.
       const worst = firsts.reduce((m, f) => Math.max(m, f.total), 0);
-      if (worst <= limit || n >= 32) break;
+      if (worst < limit || n >= 32) break;
       n = Math.min(32, n * nextPow2_(Math.ceil(worst / (limit * 0.8))));
     }
   }
@@ -1087,7 +1100,49 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
     const pages = Math.ceil(w.total / probe.size);
     for (let p = 1; p <= pages; p++) chunks.push({w: wi, page: p});
   });
-  return {size: probe.size, total: probe.total, windows: windows, chunks: chunks, sliced: sliced};
+  // Com fatias, a soma delas é o total do dia (a lista do dia inteiro pode ter vindo travada no limite).
+  const total = sliced ? Math.max(probe.total, windows.reduce((s, w) => s + w.total, 0)) : probe.total;
+  return {size: probe.size, total: total, known: Math.max(known, total), windows: windows, chunks: chunks, sliced: sliced};
+}
+
+/**
+ * V4.24.3: número do resumo do dia para a lista (erros do dia; Recebimento: o número da lista no resumo). 0 sem resumo ou
+ * quando a lista não é a mesma coisa que o número do resumo (detailMatchesErrors falso).
+ */
+function summaryErrorsFor_(cfg, indicatorKey, isoDate, type) {
+  try {
+    const r = getRateDay_(indicatorKey, isoDate);
+    if (!r) return 0;
+    if (type) return Number(r.metrics && r.metrics[type]) || 0;
+    return cfg.detailMatchesErrors ? Number(r.errorCount) || 0 : 0;
+  } catch (e) { return 0; }
+}
+
+/**
+ * V4.24.3: as fatias de horário servem? Devolve o motivo quando não servem ('' = servem).
+ *  - toda fatia com o mesmo total da lista do dia: o JMS ignora a hora (devolve o dia inteiro em cada uma);
+ *  - dia fechado com quase tudo numa fatia: o JMS devolve o dia na janela da 00h;
+ *  - soma das fatias bem abaixo do dia (pelo resumo, quando a lista vem travada no limite);
+ *  - soma bem acima do dia (só com a lista sem trava: travada, o dia real é maior que o total informado).
+ */
+function sliceProblem_(totals, dayTotal, known, isoDate, limit) {
+  const sum = totals.reduce((s, x) => s + x, 0), top = totals.reduce((m, x) => Math.max(m, x), 0);
+  const margin = Math.max(countTolerance_(known), known * 0.05);
+  // Total exatamente no limite pode estar travado (o dia real é maior); acima dele, é o total real (como antes da V4.24.3).
+  const capped = limit > 0 && dayTotal === limit;
+  // Fatia exatamente no limite também pode estar travada: a soma das fatias não diz o tamanho do dia.
+  const sliceCapped = limit > 0 && totals.some(x => x === limit);
+  if (totals.length > 1 && dayTotal > 0 && totals.every(x => x === dayTotal)) {
+    // Todas no limite: quem decide é a janela de 2 segundos (planDetailType_).
+    return sliceCapped ? '' : 'cada fatia trouxe o dia inteiro (' + dayTotal + ')';
+  }
+  if (isoDate < isoToday_() && dayTotal >= 1000 && top >= dayTotal * 0.95 && sum - top < dayTotal * 0.05) {
+    return 'uma fatia trouxe ' + top + ' de ' + dayTotal + ' (o dia inteiro)';
+  }
+  if (!sliceCapped && sum < known - margin) return 'soma das fatias ' + sum + ' < total do dia ' + known;
+  if (!capped && sum > known + margin) return 'soma das fatias ' + sum + ' > total do dia ' + known;
+  if (top > dayTotal && !capped) return 'uma fatia trouxe ' + top + ', mais que o dia (' + dayTotal + ')';
+  return '';
 }
 
 // ------------------------------------------------------------------ Avaria: tabela 2 (Consulta de Pacote Problemático)

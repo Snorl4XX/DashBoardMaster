@@ -86,6 +86,7 @@
       detailsOk: 'Detalhes completos · {n} remessas', detailsPartial: 'Detalhes parciais · {n} dia(s) pendente(s)', errorBadge: 'Erro: {r}',
       tableCount: '{n} remessas', tableCountOf: '{n} de {m} remessas', tableComplete: 'Clique no cabeçalho para ordenar.',
       tablePartial: 'Dados PARCIAIS: apenas remessas já sincronizadas entram na tabela.', noRows: 'Nenhuma remessa encontrada.',
+      tableShort: 'O JMS entregou {a} de {b} remessas em {d} (limite do JMS): as que faltam não entram na tabela nem nos gráficos.',
       refreshing: 'Consultando o JMS…', refreshDone: 'Taxas atualizadas: {u} dia(s). Detalhes em fila: {d}.',
       refreshCooldown: 'Atualização já solicitada há instantes. Aguarde 1–2 minutos.', refreshFailed: 'Não foi possível atualizar: {r}',
       refreshPending: '{n} dia(s) seguem na fila automática.', reporting: 'Gerando relatório…', reportReady: 'Relatório pronto',
@@ -262,6 +263,7 @@
       detailsOk: '明细完整 · {n} 票', detailsPartial: '明细不完整 · {n} 天待同步', errorBadge: '错误：{r}',
       tableCount: '{n} 票', tableCountOf: '{n} / {m} 票', tableComplete: '点击表头可排序。',
       tablePartial: '部分数据：仅显示已同步的运单。', noRows: '未找到运单。',
+      tableShort: 'JMS 在 {d} 只返回了 {b} 票中的 {a} 票（JMS 限制）：缺少的运单不在表格和图表中。',
       refreshing: '正在查询 JMS…', refreshDone: '已更新 {u} 天指标率，{d} 天明细排队中。',
       refreshCooldown: '刚刚已请求刷新，请 1–2 分钟后再试。', refreshFailed: '刷新失败：{r}',
       refreshPending: '{n} 天已加入自动队列。', reporting: '正在生成报告…', reportReady: '报告已生成',
@@ -1529,6 +1531,14 @@
     return '<span class="badge ' + kind + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + icon(ic) + '<span>' + esc(text) + '</span></span>';
   }
   function uniq(list) { var s = {}; return list.filter(function (x) { if (s[x]) return false; s[x] = 1; return true; }); }
+  /** V4.24.3: dias em que o JMS entregou menos remessas que o resumo (lista travada no limite do JMS). */
+  function shortNote() {
+    var sd = (state.data && state.data.meta && state.data.meta.shortDays) || [];
+    if (!sd.length) return '';
+    var a = 0, b = 0;
+    sd.forEach(function (x) { a += x.saved; b += x.expected; });
+    return t('tableShort', {a: fmtInt(a), b: fmtInt(b), d: sd.map(function (x) { return fmtDate(x.date, true); }).join(', ')});
+  }
   function detailIsPartial() {
     var a = (state.data && state.data.meta.archive) || {};
     return !a.fullyLoaded;
@@ -3512,7 +3522,8 @@
     });
     $('#tableCount').textContent = q ? tx(c, 'tableCountOf', {n: fmtInt(Core.distinctCount(rows)), m: fmtInt(total)}) : tx(c, 'tableCount', {n: fmtInt(total)});
     var smT = state.data && state.data.summary;
-    $('#tableNote').textContent = smT && smT.top.length >= smT.topLimit ? t('topRowsNote', {n: fmtInt(smT.topLimit)}) : detailIsPartial() ? t('tablePartial') : t('tableComplete');
+    $('#tableNote').textContent = smT && smT.top.length >= smT.topLimit ? t('topRowsNote', {n: fmtInt(smT.topLimit)}) : detailIsPartial() ? t('tablePartial') :
+      shortNote() || t('tableComplete');
     renderPager(pages);
   }
   function renderPager(pages) {

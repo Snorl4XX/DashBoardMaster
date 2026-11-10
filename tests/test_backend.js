@@ -4714,6 +4714,73 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   'segmento (base) de 10/11: TO/MRB/RO/AC/RBR no SP BRE; de 01/11 a 09/11 no DF BSB; CDG no RJ SJM', [sb('TO,1', BACK), sb('RBR,6', BACK), mix.join('|')]);
 }
 
+// ---------- V4.24.3: Falta de Bipagem na Expedição com mais de 10 mil remessas no dia (lista travada no limite do JMS) ----------
+{
+  const DT = '2026-09-19';
+  // Dia como o de 04/11 da planilha do usuário: 10.906 remessas espalhadas no dia (remessas, operador e cliente fictícios).
+  const bigMd = (n, date) => {
+    const o = {}; o[date] = makeDay(date, 5);
+    o[date].md = new Array(n).fill(0).map((_, i) => ({billcode: 'TST' + String(i).padStart(9, '0'), threeSegmentCode: 'SP,977-00,000',
+      unloadArriveTime: date + ' ' + String(Math.floor(i * 24 / n)).padStart(2, '0') + ':' + String(i % 60).padStart(2, '0') + ':00',
+      unloadPackageEmp: 'OPERADOR FICTICIO 01', customerName: 'CLIENTE TESTE', arriveOrder: 'TESTE-1', nextStop: 'SP BRE'}));
+    return o;
+  };
+  const runMd = (n, opts, props) => {
+    const c = freshCtx(bigMd(n, DT), opts, props);
+    c.queueHistory(DT, DT, true);
+    runAll(c);
+    const st = c.getDayStatus_('missing_dispatch', DT);
+    return {c, st, rows: c.getArchivedRange_('missing_dispatch', DT, DT).rows.length};
+  };
+  // (a) O JMS informa no máximo 10 mil no total da lista e não entrega além disso; a hora é respeitada → fatias pegam tudo.
+  const a = runMd(10906, {totalCap: 10000});
+  const fa = a.c.__state.fetches.filter(f => /center_missscan_next_detail/.test(f.url) && f.payload.detailType === 'billcodeOut');
+  check(a.rows === 10906 && a.st.details === 'COMPLETE' && a.st.savedRows === 10906 && fa.some(f => f.payload.startTime !== DT + ' 00:00:00') &&
+    !a.c.__state.props.JMS_NO_SLICE_MISSING_SCAN,
+    'lista travada em 10 mil (dia com 10.906): o painel divide o dia em horários e grava as 10.906 (antes: 10 mil como se fosse o dia todo)',
+    {rows: a.rows, st: a.st});
+  // (b) Dia bem maior (25 mil) também travado em 10 mil: as fatias se dividem até ficarem abaixo do limite.
+  const b = runMd(25000, {totalCap: 10000});
+  check(b.rows === 25000 && b.st.details === 'COMPLETE', 'lista travada com 25 mil no dia: fatias menores até caber, 25 mil gravadas', {rows: b.rows, st: b.st});
+  // (c) O JMS ignora a hora E trava em 10 mil: não tem como pegar o resto; grava 10 mil, mas o dia NÃO fica como completo.
+  const cc = runMd(10906, {totalCap: 10000, ignoreTime: true});
+  check(cc.rows === 10000 && cc.st.details === 'CHECK_COUNTS' && cc.st.expectedRecords === 10906 && cc.c.__state.props.JMS_NO_SLICE_MISSING_SCAN === '1',
+    'JMS que ignora a hora e trava em 10 mil: grava o que vem, com o dia marcado "contagem diferente" (10.906 no resumo)', cc.st);
+  const shortC = cc.c.getDashboardData('missing_dispatch', {from: DT, to: DT}).meta.shortDays, shortA = a.c.getDashboardData('missing_dispatch', {from: DT, to: DT}).meta.shortDays;
+  check(shortC.length === 1 && shortC[0].date === DT && shortC[0].saved === 10000 && shortC[0].expected === 10906 && shortA.length === 0,
+    'painel avisa os dias em que o JMS entregou menos que o resumo (10.000 de 10.906); dia completo sem aviso', {shortC, shortA});
+  // (d) O JMS ignora a hora e recusa as páginas além de 10 mil: antes o dia ficava com ERRO (e a lista de horas antes);
+  // agora grava as 10 mil que o JMS entrega, com o aviso.
+  const d = runMd(10906, {resultWindow: 10000, ignoreTime: true});
+  check(d.rows === 10000 && d.st.details === 'CHECK_COUNTS' && d.st.expectedRecords === 10906,
+    'JMS que ignora a hora e recusa a paginação além de 10 mil: grava as 10 mil com aviso, sem erro no dia', d.st);
+  // (e) Sem trava (o JMS informa 10.906 e pagina tudo): igual a antes.
+  const e = runMd(10906, {});
+  check(e.rows === 10906 && e.st.details === 'COMPLETE', 'sem trava do JMS: 10.906 gravadas como antes', e.st);
+  // (f) Conferência das fatias: lista travada (cada fatia com o dia inteiro = hora ignorada) × fatias travadas (hora respeitada).
+  const cf = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  check(cf.sliceProblem_([10000, 10000], 10000, 10906, DT, 10000) === '' && /dia inteiro/.test(cf.sliceProblem_([5000, 5000], 5000, 5000, DT, 10000)) &&
+    cf.sliceProblem_([2400, 3100, 3300, 2106], 10000, 10906, DT, 10000) === '' && /< total/.test(cf.sliceProblem_([2000, 2000, 2000, 2000], 10000, 10906, DT, 10000)) &&
+    /dia inteiro/.test(cf.sliceProblem_([10000, 0, 0, 0], 10000, 10906, DT, 10000)) && cf.sliceProblem_([10000, 10000, 3000, 2000], 10000, 25000, DT, 10000) === '',
+    'conferência das fatias: fatias no limite são divididas de novo (não desligam as fatias); hora ignorada continua desligando');
+  // (g) Atualização: os dias gravados travados em 10 mil (versão anterior) são baixados de novo uma vez, com as fatias testadas de novo.
+  // A atualização olha os últimos 31 dias: aqui, ontem.
+  const DG = cf.addDaysIso_(cf.isoToday_(), -1);
+  const g = freshCtx(bigMd(10906, DG), {totalCap: 10000}, {DATA_START_DATE: DG});
+  const ds = g.encodeDayFile_(new Array(10000).fill(0).map((_, i) => ({date: DG, shipment: 'TST' + String(i).padStart(9, '0'), shift: 'T1'})),
+    require('vm').runInContext('STORE_FIELDS_', g));
+  g.queueHistory(DG, DG, true);
+  runAll(g);
+  g.saveDayDataset_('missing_dispatch', DG, ds, 10, 10000);
+  g.updateDayStatus_('missing_dispatch', DG, {detailsStatus: 'COMPLETE', expectedPages: 10, savedPages: 10, expectedRecords: 10000, savedRows: 10000});
+  g.__state.props.JMS_NO_SLICE_MISSING_SCAN = '1';
+  delete g.__state.props.MIGRATION_V4243;
+  const nG = g.migrateToV4243_(), againG = g.migrateToV4243_();
+  runAll(g);
+  check(nG >= 1 && againG === 0 && g.getArchivedRange_('missing_dispatch', DG, DG).rows.length === 10906 && g.getDayStatus_('missing_dispatch', DG).details === 'COMPLETE',
+    'V4.24.3: uma vez, os dias travados em 10 mil voltam para a fila (fatias testadas de novo) e ficam com as 10.906', {nG, againG, st: g.getDayStatus_('missing_dispatch', DG)});
+}
+
 // ---------- V4.20: Deslacre pela Data inicial — dias gravados antes (Data final) são refeitos uma vez ----------
 {
   const vmD = require('vm');

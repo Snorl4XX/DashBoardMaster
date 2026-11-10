@@ -109,6 +109,17 @@ function segmentPairOf_(raw, row, keys) {
  * campo da remessa, é erro de mapeamento: antes o dia era gravado vazio e os
  * gráficos ficavam "sem dados" sem nenhum aviso.
  */
+/** V4.24.3: dias do período com a lista gravada abaixo do total do JMS (CHECK_COUNTS): {date, saved, expected}. */
+function shortDetailDays_(indicatorKey, from, to) {
+  const sm = statusMap_(indicatorKey, from, to), out = [];
+  Object.keys(sm).forEach(key => {
+    const st = sm[key];
+    if (st.details !== 'CHECK_COUNTS' || !(st.expectedRecords > st.savedRows + countTolerance_(st.expectedRecords))) return;
+    out.push({date: key.slice(indicatorKey.length + 1), saved: st.savedRows, expected: st.expectedRecords});
+  });
+  return out.sort((a, b) => a.date < b.date ? -1 : 1);
+}
+
 function normalizeRecords_(indicatorKey, date, records, type) {
   // Avaria: antes de normalizar, junta os dados da Consulta de Pacote Problemático (tabela 2).
   if (getIndicatorConfig_(indicatorKey).registration && records.length) enrichRegistrations_(indicatorKey, records);
@@ -804,6 +815,8 @@ function getDashboardData(indicatorKey, params) {
       // Recebimento: números que o JMS não separa por horário no resumo (turnos só pelo detalhe).
       summaryShiftsOff: cfg.byRoute ? (getProp_('JMS_NO_SLICE_' + cfg.routeKey, '') ? {sendcount: 'a lista do JMS não separa por horário'} : {})
         : ((cfg.detail || {}).shiftProbe || []).length ? summaryShiftsOff_(cfg) : null,
+      // V4.24.3: dias em que o JMS entregou menos remessas que o resumo (lista travada no limite do JMS; o painel avisa).
+      shortDays: cfg.grouped || summaryMode ? [] : safeCall_(() => shortDetailDays_(indicatorKey, p.from, p.to)) || [],
       // Expedição: remessas já consultadas no Rastreamento do pacote (IDs de viagem) por dia.
       tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null,
       // V4.12.1 (Triagem Errada): lote/login pela Consulta das bipagens — completadas, sem o bipe, na fila, erro.

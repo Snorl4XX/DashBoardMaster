@@ -1,8 +1,28 @@
-# J&T DASHMASTER V4.24.2 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.24.3 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.24.3 — Falta de Bipagem na Expedição: dias com mais de 10 mil remessas
+
+Pedido: o painel não mostrava todos os dados, faltavam ~mil. A planilha do JMS de 04/11 tem **10.906** remessas; o painel
+mostrava **10.000**.
+- **Causa:** a lista do JMS informa no máximo **10.000** no total (limite do JMS) e não entrega além disso. O painel só
+  dividia o dia em horários **acima** de 10 mil; com o total travado em exatamente 10.000, baixava 10.000 e marcava o dia como
+  completo.
+- **Correção:** com a lista no limite (10 mil ou mais), o dia é baixado em **fatias de horário** (2, 4, 8… até 32 partes, cada
+  uma abaixo do limite). O tamanho real do dia é conferido pelo **número do resumo** (o mesmo dos cartões). Vale para todos os
+  painéis do JMS com lista grande.
+- **Dias já baixados:** na primeira execução da versão nova, os dias dos últimos 31 com a lista travada em 10 mil (ou com menos
+  remessas que o resumo) são **baixados de novo** sozinhos, só a lista. Leva alguns minutos (fila).
+- **Se o JMS não separar por horário** (o painel confere sozinho): o painel grava o que o JMS entrega e
+  mostra embaixo da tabela **"O JMS entregou X de Y remessas em DD/MM (limite do JMS)"**, em vez de esconder a diferença. Antes,
+  nesse caso, o dia dava erro e ficava com a lista de horas antes.
+
+**Atualizar (painel principal, Node.js):** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_24_3_NODE.zip` em `C:\`
+(Substituir tudo) e abra o `C:\dashmaster\node\iniciar.bat` (ou o atalho). No navegador, **Ctrl+F5**. Em uns 10 a 20 minutos
+(fila), confira 04/11 na Falta de Bipagem na Expedição: a tabela deve mostrar **10.906 remessas**, igual à planilha.
 
 ## V4.24.2 — Rotas de 10/11: PA MRB, TO PMW, RO PVH e AC RBR de volta ao SP BRE
 

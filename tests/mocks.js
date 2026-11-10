@@ -190,6 +190,7 @@ function createContext(opts) {
  *  rejectAbove  → recusa (código da aplicação) páginas maiores que N
  *  resultWindow → recusa páginas cujo deslocamento passa de N (paginação profunda)
  *  ignoreTime   → ignora a hora da janela (fatias devolveriam o dia inteiro)
+ *  totalCap     → total da lista travado em N (e nada além de N), como o Elasticsearch do JMS
  *  keyCase      → 'upper' devolve os campos em MAIÚSCULAS (grafia diferente)
  *  appError     → {code, msg} em toda resposta (ex.: token expirado com HTTP 200)
  *  html         → devolve uma página HTML (redirecionamento para o login)
@@ -340,7 +341,11 @@ function fakeJms(dayData, options) {
       if (options.keyCase !== 'upper') return r;
       const o = {}; Object.keys(r).forEach(k => { o[k.toUpperCase()] = r[k]; }); return o;
     };
-    const page = (list, b) => { const l = inWindow(list); return ok(l.slice((b.current - 1) * size, b.current * size).map(shape), l.length, b.current, size); };
+    // options.totalCap (V4.24.3): o JMS informa no máximo N no total da lista e não entrega além disso (Elasticsearch).
+    const page = (list, b) => {
+      const all = inWindow(list), l = options.totalCap ? all.slice(0, options.totalCap) : all;
+      return ok(l.slice((b.current - 1) * size, b.current * size).map(shape), l.length, b.current, size);
+    };
     switch (route) {
       case 'center_wrong_send_total':
         if (!d) return ok([], 0, 1, body.size);

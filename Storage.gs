@@ -1331,6 +1331,35 @@ function migrateToV420_() {
   return n;
 }
 /**
+ * V4.24.3: dias com a lista travada no limite do JMS (10 mil remessas; ex.: Falta de Bipagem na Expedição de 04/11 com 10.906 no
+ * resumo e 10 mil no painel). Uma vez: as fatias de horário voltam a ser testadas (a conferência nova entende a lista travada) e
+ * os últimos 31 dias com a lista no limite, ou com menos remessas que o resumo, são baixados de novo — só a lista.
+ */
+function migrateToV4243_() {
+  if (getProp_('MIGRATION_V4243', '')) return 0;
+  const limit = detailMaxOffset_(), to = isoToday_(), from = addDaysIso_(to, -31);
+  let n = 0;
+  const routes = {};
+  Object.keys(INDICATORS).filter(k => !INDICATORS[k].grouped && INDICATORS[k].detailMatchesErrors && !INDICATORS[k].byRoute &&
+      !INDICATORS[k].unseal && !INDICATORS[k].sorter).forEach(k => {
+    const sm = statusMap_(k, from, to), rates = {};
+    getRates_(k, from, to).forEach(r => { rates[r.date] = r; });
+    const jobs = [];
+    Object.keys(sm).forEach(key => {
+      const st = sm[key], d = key.slice(k.length + 1), r = rates[d];
+      // Também os dias com erro no download (JMS recusando as páginas além de 10 mil): a lista ficava a de horas antes.
+      if (st.details === 'NO_RECORD' || st.details === 'SKIPPED' || st.summary !== 'COMPLETE') return;
+      const saved = Number(st.savedRows) || 0, errs = r && r.errorCount !== null ? Number(r.errorCount) : 0;
+      if (limit > 0 && (saved >= limit * 0.98 || (errs >= limit * 0.98 && errs > saved + countTolerance_(errs)))) jobs.push(['DETAIL_INIT', k, d, 1]);
+    });
+    if (jobs.length) { n += enqueueJobs_(jobs.sort((a, b) => a[2] < b[2] ? 1 : -1), {reset: true}); routes[INDICATORS[k].routeKey] = 1; }
+  });
+  Object.keys(routes).forEach(rk => deleteProp_('JMS_NO_SLICE_' + rk));
+  setProp_('MIGRATION_V4243', new Date().toISOString());
+  if (n) logSync_('INFO', '', '', 'V4.24.3: ' + n + ' dia(s) com a lista travada em ' + limit + ' remessas baixados de novo em fatias de horário.');
+  return n;
+}
+/**
  * V4.21.4: os cabeçalhos de rota da Criação de Lotes foram capturados no DevTools e viram o padrão; a lista de variantes mudou de
  * ordem. Uma vez, a variante aprendida antes (JMS_ROUTE_AUTO_LOTS) é esquecida e a pausa da rota (HTTP 403) sai: a próxima
  * consulta já usa os cabeçalhos da tela.
@@ -1750,7 +1779,7 @@ function processSyncQueue(opts) {
   // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
   try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4243_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V4.6: modo diário (padrão) — só a AGENDA põe tarefas na fila (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h).
   // Fora dos horários, nada é consultado sozinho (o botão Atualizar do painel continua valendo).
@@ -2173,7 +2202,7 @@ function runDetailJob_(job, deadline) {
   const pending = [];
   for (let i = start; i <= n; i++) if (!got[i]) pending.push(i);
   const parallel = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
-  let slowest = 8000;
+  let slowest = 8000, deepRefused = '';
   for (let k = 0; k < pending.length; k += parallel) {
     let contiguous = 0;
     while (got[start + contiguous]) contiguous++;
@@ -2182,10 +2211,26 @@ function runDetailJob_(job, deadline) {
     }
     const batch = pending.slice(k, k + parallel);
     const t0 = Date.now();
-    const res = fetchDetailBatch_(job.indicator, job.date, batch.map(i => {
+    const items = batch.map(i => {
       const c = plan.chunks[i - 1], w = plan.windows[c.w];
       return {page: c.page, size: plan.size, win: plan.sliced || w.type ? {start: w.start, end: w.end, type: w.type} : null};
-    }));
+    });
+    let res;
+    try { res = fetchDetailBatch_(job.indicator, job.date, items); }
+    catch (e) {
+      // V4.24.3: lista sem fatias (o JMS ignora a hora) e o JMS recusando as páginas além do limite (10 mil): grava o que o JMS
+      // entrega, com aviso, em vez de errar o dia inteiro (antes o painel ficava com a lista de horas antes, sem as últimas).
+      const deep = it => !plan.sliced && (it.page - 1) * it.size >= detailMaxOffset_() && detailMaxOffset_() > 0;
+      if (!items.some(deep) || errorKind_(String(e && e.message || e)) !== 'OTHER') throw e;
+      res = items.map(it => {
+        try { return fetchDetailBatch_(job.indicator, job.date, [it])[0]; }
+        catch (e2) {
+          if (!deep(it) || errorKind_(String(e2 && e2.message || e2)) !== 'OTHER') throw e2;
+          deepRefused = deepRefused || String(e2 && e2.message || e2).slice(0, 200);
+          return {page: it.page, records: [], total: 0, pages: 0};
+        }
+      });
+    }
     slowest = Math.max(slowest, Date.now() - t0);
     res.forEach((r, j) => {
       if (!sampleRaw && r.records.length) sampleRaw = r.records[0];
@@ -2195,7 +2240,7 @@ function runDetailJob_(job, deadline) {
 
   let rawTotal = 0;
   for (let i = start; i <= n; i++) rawTotal += got[i] ? got[i].raw : 0;
-  if (!resume && rawTotal < plan.total * 0.9 - tol) {
+  if (!resume && rawTotal < plan.total * 0.9 - tol && !deepRefused) {
     // Faltou muito (páginas vazias no meio): não é variação normal do dia; nova tentativa.
     throw new Error('Detalhes incompletos para ' + job.indicator + ' ' + job.date + ': o JMS informou ' + plan.total +
       ' registros, mas entregou ' + rawTotal + '; a importação será refeita.');
@@ -2205,16 +2250,22 @@ function runDetailJob_(job, deadline) {
     const acc = dayAccumulatorFor_(job.indicator);
     for (let i = 1; i <= n; i++) { acc.addDataset(got[i].ds); got[i] = null; }
     if (!cfg.grouped) warnEmptyFields_(job.indicator, job.date, acc.emptyFields(Object.keys(cfg.fields || {})), sampleRaw, acc.count());
-    const ok = Math.abs(rawTotal - plan.total) <= tol;
-    saveDayDataset_(job.indicator, job.date, acc.build(), n, plan.total);
+    // V4.24.3: o dia real (plan.known: a lista ou o número do resumo, o maior) também conta — lista travada em 10 mil com
+    // 10.906 no resumo não fica como completa.
+    const want = Math.max(plan.total, plan.known || 0);
+    const ok = Math.abs(rawTotal - plan.total) <= tol && rawTotal >= want - countTolerance_(want);
+    saveDayDataset_(job.indicator, job.date, acc.build(), n, want);
     // Agrupado: sem contagem por turno nos Resultados (as duas listas não são "erros" do dia).
     if (!cfg.grouped) upsertAggCounts_(job.indicator, job.date, acc.shiftCounts(), acc.count());
     updateDayStatus_(job.indicator, job.date, {detailsStatus: ok ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: n, savedPages: n,
-      expectedRecords: plan.total, savedRows: rawTotal, error: ''});
+      expectedRecords: want, savedRows: rawTotal, error: ''});
     afterDetailSaved_(job.indicator, job.date);
     if (!ok) {
-      logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + plan.total + ' registros no detalhe, mas entregou ' + rawTotal +
-        (plan.sliced ? ' (download em ' + plan.windows.length + ' fatias de horário)' : '') + '. Dados gravados; o dia será conferido de novo mais tarde.');
+      const capNote = deepRefused || (want > plan.total && !plan.sliced)
+        ? ' O JMS não entrega a lista além de ' + Math.min(plan.total, detailMaxOffset_() || plan.total) + ' registros e não separa por horário' +
+          ' (fatias desligadas em JMS_NO_SLICE_' + cfg.routeKey + ').' : '';
+      logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + want + ' registros no dia, mas entregou ' + rawTotal +
+        (plan.sliced ? ' (download em ' + plan.windows.length + ' fatias de horário)' : '') + '. Dados gravados; o dia será conferido de novo mais tarde.' + capNote);
     }
     return 'done';
   }
