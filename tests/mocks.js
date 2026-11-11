@@ -342,9 +342,18 @@ function fakeJms(dayData, options) {
       const o = {}; Object.keys(r).forEach(k => { o[k.toUpperCase()] = r[k]; }); return o;
     };
     // options.totalCap (V4.24.3): o JMS informa no máximo N no total da lista e não entrega além disso (Elasticsearch).
+    // options.repeatPage (V4.25.4): o JMS pagina sem ordem fixa — a página N devolve os registros da N−1 (os da N somem), como
+    // no dia com 9.140 no JMS e 8.140 no painel. {page, times}: as `times` primeiras vezes (sem `times`: sempre); só com mais de
+    // uma página na janela pedida (janela que cabe numa página vem inteira).
     const page = (list, b) => {
       const all = inWindow(list), l = options.totalCap ? all.slice(0, options.totalCap) : all;
-      return ok(l.slice((b.current - 1) * size, b.current * size).map(shape), l.length, b.current, size);
+      let cur = b.current;
+      const rp = options.repeatPage;
+      if (rp && cur > 1 && l.length > size && (rp.page === cur || rp.page === 'all' || (rp.page === 'last' && cur === Math.ceil(l.length / size)))) {
+        state.repeated = (state.repeated || 0) + 1;
+        if (rp.times === undefined || state.repeated <= rp.times) cur -= 1;
+      }
+      return ok(l.slice((cur - 1) * size, cur * size).map(shape), l.length, b.current, size);
     };
     switch (route) {
       case 'center_wrong_send_total':

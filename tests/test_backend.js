@@ -441,7 +441,8 @@ check(diagL.campos && diagL.campos.shipment.encontrado === null && diagL.campos.
   'diagnosticarDetalheJms mostra o mapeamento de campos', diagL.campos && diagL.campos.shipment);
 
 // (m) Dia retomado: tempo acabando grava os pedaços em ordem e a próxima execução continua de onde parou.
-const cM = freshCtx(withBig(D19, 1234), {maxPageSize: 50});
+// (V4.25.4: com fatias de uma página o dia vem inteiro no planejamento; a retomada vale para a paginação — JMS_PAGINAR.)
+const cM = freshCtx(withBig(D19, 1234), {maxPageSize: 50}, {JMS_PAGINAR: '1'});
 cM.queueHistory(D19, D19, true);
 cM.processJob_(cM.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'wrong_send')[0], Date.now() + 600000);
 const rM1 = cM.processJob_(cM.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'wrong_send')[0], Date.now() + 30000);
@@ -5362,6 +5363,78 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(catM.length && catM.every(x => x.chartsFull === (x.key === 'lot_flow' || x.key === 'sorter_flow')) &&
     (cfgTxt.match(/^\s*chartsFull: true,/gm) || []).length === 2,
     'gráficos dois por linha no painel principal; Lotes e Produção do Sorter com chartsFull (um por linha)', catM.map(x => [x.key, x.chartsFull]));
+}
+
+// ---------- V4.25.4 (pedido "os dados não estão batendo com o JMS"): Triagem Errada e Falta de Bipagem com 9.140 no JMS e 8.140 no
+// painel — o JMS pagina a lista sem ordem fixa e devolveu uma página de 1.000 repetida no lugar de outra; o robô conferia o total
+// BRUTO (9.140 recebidos = 9.140 do JMS) e o dia ficava "completo" com 8.140 remessas diferentes. ----------
+{
+  const DT = '2026-09-19', N = 9140;
+  const hora = (date, i) => {
+    // 40% das remessas entre 14h e 15h (pico: a fatia do pico é dividida de novo até caber numa página).
+    const h = i % 10 < 4 ? 14 : (i * 7) % 24;
+    return date + ' ' + String(h).padStart(2, '0') + ':' + String((i * 13) % 60).padStart(2, '0') + ':' + String((i * 31) % 60).padStart(2, '0');
+  };
+  const bigDay = date => {
+    const o = {}; o[date] = makeDay(date, 5);
+    o[date].md = Array.from({length: N}, (_, i) => ({billcode: 'TST' + String(i).padStart(9, '0'), threeSegmentCode: 'SP,977-00,000',
+      unloadArriveTime: hora(date, i), unloadPackageEmp: 'OPERADOR FICTICIO 01', customerName: 'CLIENTE TESTE', arriveOrder: 'TESTE-1', nextStop: 'SP BRE'}));
+    o[date].se = Array.from({length: N}, (_, i) => ({billcode: 'TSTE' + String(i).padStart(9, '0'), dt: date, orderFirstCode: 'SP', orderSecondCode: '402-03',
+      packageNo: 'BR1043', scanuser: 'OPERADOR FICTICIO 02', baggingNetworkName: 'SP GRU', transferCenterNextName: 'DC GRU-SP', transferCenterSendTime: hora(date, i),
+      orderSourceName: 'CLIENTE TESTE', wrongType: '末端人为错分一错扫|Erro humano de triagem Last Mile — bipe incorreto'}));
+    return o;
+  };
+  const runD = (opts, props, date) => {
+    const d = date || DT, c = freshCtx(bigDay(d), opts, Object.assign({DATA_START_DATE: d}, props || {}));
+    c.queueHistory(d, d, true);
+    runAll(c);
+    const r = k => ({rows: c.getArchivedRange_(k, d, d).rows.length, st: c.getDayStatus_(k, d)});
+    return {c, md: r('missing_dispatch'), se: r('sorting_error')};
+  };
+  const isMd = f => /center_missscan_next_detail/.test(f.url) && f.payload.detailType === 'billcodeOut';
+  const isSe = f => /center_error_rate_new_detail/.test(f.url);
+  // (a) O caso do print: a página 5 volta repetida (a 4 de novo) toda vez. Com fatias de uma página não há página 2 em diante.
+  const a = runD({repeatPage: {page: 5}});
+  const fa = a.c.__state.fetches.filter(isMd), fs = a.c.__state.fetches.filter(isSe);
+  check(a.md.rows === N && a.md.st.details === 'COMPLETE' && a.md.st.savedRows === N && a.se.rows === N && a.se.st.details === 'COMPLETE' &&
+    fa.every(f => f.payload.current === 1) && fs.every(f => f.payload.current === 1) && fa.length < 90 && fs.length < 90 && !a.c.__state.repeated,
+    'V4.25.4: JMS repetindo uma página (9.140 no JMS) — Falta de Bipagem e Triagem Errada gravam as 9.140, em fatias de horário de uma página (sem paginação)',
+    {md: a.md, se: a.se, consultas: [fa.length, fs.length]});
+  const md = a.c.getDashboardData('missing_dispatch', {from: DT, to: DT});
+  check(md.meta.rowsLoaded === N && md.meta.shortDays.length === 0 && md.meta.archive.fullyLoaded, 'V4.25.4: o painel mostra as 9.140 (o número dos erros do JMS)', md.meta.rowsLoaded);
+  // (b) Antes: mesmo JMS, só com paginação (JMS_PAGINAR) e conferência pelo total bruto, ficava com 8.140 e "completo".
+  //     Agora a conferência é pelos registros DIFERENTES: as páginas são baixadas de novo, uma por vez e com outros cortes.
+  const b = runD({repeatPage: {page: 5}}, {JMS_PAGINAR: '1'});
+  const logB = b.c.allTabRows_('LOG').map(r => String(r[4]));
+  check(b.md.rows === N && b.md.st.details === 'COMPLETE' && b.se.rows === N && b.se.st.details === 'COMPLETE' && b.c.__state.repeated > 0 &&
+    logB.some(t => /repetiu registros entre as páginas da lista \(8140 diferentes de 9140 recebidos/.test(t)),
+    'V4.25.4: só com paginação — 8.140 diferentes de 9.140 é percebido e as páginas baixadas de novo recuperam as 1.000 (antes: "completo" com 8.140)',
+    {md: b.md, se: b.se});
+  // (c) Paginação e uma falha que nunca se resolve (a última página sempre repetida, em qualquer tamanho): grava o que veio,
+  //     sem dizer "completo", e o painel avisa quantas faltam.
+  const c = runD({repeatPage: {page: 'last'}, ignoreTime: true});
+  const shortC = c.c.getDashboardData('missing_dispatch', {from: DT, to: DT}).meta.shortDays;
+  check(c.md.rows === 9000 && c.md.st.details === 'CHECK_COUNTS' && c.md.st.savedRows === 9000 && c.md.st.expectedRecords === N &&
+    c.c.__state.props.JMS_NO_SLICE_MISSING_SCAN === '1' && shortC.length === 1 && shortC[0].saved === 9000 && shortC[0].expected === N,
+    'V4.25.4: JMS sem hora e com a última página sempre repetida — grava 9.000, marca "contagem diferente" e o painel avisa (9.000 de 9.140)', {st: c.md.st, shortC});
+  // (d) Atualização: dia gravado antes com 8.140 de 9.140 (marcado completo) volta para a fila uma vez e fica com as 9.140.
+  const cfx = createContext({props: {}, jms: fakeJms({}), quiet: true}), DG = cfx.addDaysIso_(cfx.isoToday_(), -1);
+  const g = runD({repeatPage: {page: 5}}, {}, DG).c;
+  const FIELDS = require('vm').runInContext('STORE_FIELDS_', g);
+  g.saveDayDataset_('missing_dispatch', DG, g.encodeDayFile_(Array.from({length: 8140}, (_, i) => ({date: DG, shipment: 'TST' + String(i).padStart(9, '0'), shift: 'T1'})), FIELDS), 10, N);
+  g.updateDayStatus_('missing_dispatch', DG, {detailsStatus: 'COMPLETE', expectedPages: 10, savedPages: 10, expectedRecords: N, savedRows: N});
+  g.__state.props.JMS_NO_SLICE_MISSING_SCAN = '1';
+  delete g.__state.props.MIGRATION_V4254;
+  const nG = g.migrateToV4254_(), againG = g.migrateToV4254_();
+  const slicedAgain = !g.__state.props.JMS_NO_SLICE_MISSING_SCAN;
+  runAll(g);
+  check(nG === 1 && againG === 0 && slicedAgain && g.getArchivedRange_('missing_dispatch', DG, DG).rows.length === N && g.getDayStatus_('missing_dispatch', DG).details === 'COMPLETE',
+    'V4.25.4: uma vez, os dias gravados com menos remessas que o JMS são baixados de novo (fatias testadas de novo) e ficam com as 9.140',
+    {nG, againG, st: g.getDayStatus_('missing_dispatch', DG)});
+  // (e) Registro igual repetido x mesma remessa com outro bipe: só o igual conta como repetido.
+  check(g.recordKey_({billcode: 'TST1', t: '10:00', ROW_ID: 1}) === g.recordKey_({ROW_ID: 7, t: '10:00', billcode: 'TST1'}) &&
+    g.recordKey_({billcode: 'TST1', t: '10:00'}) !== g.recordKey_({billcode: 'TST1', t: '10:01'}),
+    'V4.25.4: identidade do registro (sem o número da linha; outro horário = outro registro)');
 }
 
 // V4.25.3 (pedido "No dash principal está faltando dados para analisar"): no Node.js, "30 dias" da Falta de Bipagem na Expedição

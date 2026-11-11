@@ -1064,8 +1064,23 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
   const capped = limit > 0 && probe.total >= limit;
   // Total EXATAMENTE no limite = suspeito de trava: vale o resumo, se for maior. Acima do limite o total é real (Recebimento).
   const known = limit > 0 && probe.total === limit ? Math.max(probe.total, summaryErrorsFor_(cfg, indicatorKey, isoDate, type)) : probe.total;
+  // V4.25.4 (Triagem Errada e Falta de Bipagem: 9.140 no JMS e 8.140 no painel): o JMS pagina a lista SEM ordem fixa
+  // (current/size, sem ordenação) e, de uma página para outra, repete registros e pula outros — uma página de 1.000 inteira
+  // voltou repetida. Lista com mais de uma página vai em fatias de horário de no máximo UMA página cada: sem paginação, nada
+  // se repete nem some. (Avaria não tem horário no pedido; agrupados têm o próprio download.)
+  if (onePageSliceable_(cfg) && known > probe.size) {
+    const r = onePageWindows_(indicatorKey, isoDate, full, type, probe.size, probe.total, known, limit);
+    if (r.why) {
+      setProp_('JMS_NO_SLICE_' + cfg.routeKey, '1');
+      logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': ' + r.why +
+        '. Usando paginação normal, com conferência das remessas repetidas.');
+    } else {
+      windows = r.windows;
+      sliced = true;
+    }
+  }
   // detail.noSlice (Sem Movimentação): a lista não tem horário — fatias de horário trariam a lista inteira em cada uma.
-  if (capped && !(cfg.detail && cfg.detail.noSlice) && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
+  else if (capped && !(cfg.detail && cfg.detail.noSlice) && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
     let n = Math.min(32, nextPow2_(Math.ceil(known / (limit * 0.5))));
     for (let round = 0; round < 4; round++) {
       const parts = splitWindow_(full, n).map(w => Object.assign(w, type ? {type: type} : {}));
@@ -1103,6 +1118,69 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
   // Com fatias, a soma delas é o total do dia (a lista do dia inteiro pode ter vindo travada no limite).
   const total = sliced ? Math.max(probe.total, windows.reduce((s, w) => s + w.total, 0)) : probe.total;
   return {size: probe.size, total: total, known: Math.max(known, total), windows: windows, chunks: chunks, sliced: sliced};
+}
+
+/** V4.25.4: a lista do indicador pode ir em fatias de horário de uma página (pedido com startTime/endTime). */
+function onePageSliceable_(cfg) {
+  if (cfg.grouped || cfg.byRoute || cfg.unseal || cfg.sorter || cfg.apiProfile === 'damage') return false;
+  if ((cfg.detail && cfg.detail.noSlice) || getProp_('JMS_NO_SLICE_' + cfg.routeKey, '') || getProp_('JMS_PAGINAR', '')) return false;
+  return true;
+}
+/**
+ * V4.25.4: fatias do dia com no máximo uma página cada (a 1ª página de cada fatia já é a fatia inteira). Fatia com mais de uma
+ * página é dividida de novo (até 2 minutos); a que ainda passar (pico raro) é paginada. {windows} ou {why} quando o JMS não
+ * respeita a hora (a soma das fatias não bate com o dia).
+ */
+function onePageWindows_(indicatorKey, isoDate, full, type, size, dayTotal, known, limit) {
+  const tag = w => (type ? Object.assign(w, {type: type}) : w);
+  const firsts = parts => {
+    const out = [];
+    for (let i = 0; i < parts.length; i += 16) {
+      fetchDetailBatch_(indicatorKey, isoDate, parts.slice(i, i + 16).map(w => ({page: 1, size: size, win: w}))).forEach(r => out.push(r));
+    }
+    return out;
+  };
+  const secs = w => (Date.parse(w.end.replace(' ', 'T') + 'Z') - Date.parse(w.start.replace(' ', 'T') + 'Z')) / 1000 + 1;
+  const parts = splitWindow_(full, Math.min(64, nextPow2_(Math.ceil(known / (size * 0.5))))).map(tag);
+  const f1 = firsts(parts);
+  let why = sliceProblem_(f1.map(f => f.total), dayTotal, known, isoDate, limit);
+  // Todas as fatias com o total do dia: uma janela de 2 segundos às 00h decide se o JMS ignora a hora.
+  if (!why && f1.length > 1 && f1.every(f => f.total === dayTotal)) {
+    const tiny = firsts([tag({start: full.start, end: full.start.slice(0, 17) + '01'})])[0];
+    if (tiny.total >= dayTotal * 0.5) why = 'uma janela de 2 segundos trouxe ' + tiny.total + ' de ' + dayTotal + ' (o JMS ignora a hora)';
+  }
+  if (why) return {why: why};
+  let windows = parts.map((w, i) => ({start: w.start, end: w.end, type: type, total: f1[i].total, first: f1[i].records}));
+  for (let round = 0; round < 6; round++) {
+    const keep = [], big = [];
+    windows.forEach(w => (w.total > size && secs(w) >= 120 ? big : keep).push(w));
+    if (!big.length) break;
+    const subs = [];
+    big.forEach(w => splitWindow_(w, Math.min(16, nextPow2_(Math.ceil(w.total / (size * 0.6))))).forEach(x => subs.push(tag(x))));
+    const f2 = firsts(subs);
+    subs.forEach((x, i) => keep.push({start: x.start, end: x.end, type: type, total: f2[i].total, first: f2[i].records}));
+    windows = keep.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+  }
+  return {windows: windows};
+}
+/**
+ * V4.25.4: identidade de um registro do JMS (todos os campos, menos o número da linha na página). Página repetida = registros
+ * iguais; a mesma remessa com outro bipe (outro horário) é outro registro.
+ */
+const ROW_NUMBER_FIELDS_ = /^(PAGEHELPER_ROW_ID|ROW_ID|ROWNUM|rowId|rowNum|rownum|row_num|rn|RN)$/;
+function recordKey_(r) {
+  let s = '';
+  Object.keys(r || {}).sort().forEach(k => {
+    if (ROW_NUMBER_FIELDS_.test(k)) return;
+    const v = r[k];
+    s += k + '\u0001' + (v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)) + '\u0002';
+  });
+  // cyrb53: 53 bits (sem guardar o texto do registro na memória).
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 }
 
 /**

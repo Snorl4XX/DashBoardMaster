@@ -1377,6 +1377,34 @@ function migrateToV4243_() {
   return n;
 }
 /**
+ * V4.25.4 (Triagem Errada e Falta de Bipagem com 1.000 a menos que o JMS): dias dos últimos 62 dias gravados com menos remessas
+ * que os erros do JMS (página repetida no lugar de outra, contada como completa) voltam uma vez para a fila — agora em fatias de
+ * horário de uma página. As fatias são testadas de novo nessas rotas (JMS_NO_SLICE_ apagado; se o JMS ignorar a hora, volta).
+ */
+function migrateToV4254_() {
+  if (getProp_('MIGRATION_V4254', '')) return 0;
+  const to = isoToday_(), from = addDaysIso_(to, -62);
+  let n = 0;
+  const routes = {};
+  Object.keys(INDICATORS).filter(k => !INDICATORS[k].grouped && INDICATORS[k].detailMatchesErrors && !INDICATORS[k].byRoute &&
+      !INDICATORS[k].unseal && !INDICATORS[k].sorter).forEach(k => {
+    const sm = statusMap_(k, from, to), files = dayFilesMap_(k, from, to), rates = {};
+    getRates_(k, from, to).forEach(r => { rates[r.date] = r; });
+    const jobs = [];
+    Object.keys(sm).forEach(key => {
+      const st = sm[key], d = key.slice(k.length + 1), r = rates[d], f = files[d];
+      if (st.summary !== 'COMPLETE' || DETAIL_USABLE_.indexOf(st.details) < 0 || !r || r.errorCount === null || !f) return;
+      const errs = Number(r.errorCount) || 0;
+      if (errs > (Number(f.rows) || 0) + countTolerance_(errs)) jobs.push(['DETAIL_INIT', k, d, 1]);
+    });
+    if (jobs.length) { n += enqueueJobs_(jobs.sort((a, b) => a[2] < b[2] ? 1 : -1), {reset: true}); routes[INDICATORS[k].routeKey] = 1; }
+  });
+  Object.keys(routes).forEach(rk => deleteProp_('JMS_NO_SLICE_' + rk));
+  setProp_('MIGRATION_V4254', new Date().toISOString());
+  if (n) logSync_('INFO', '', '', 'V4.25.4: ' + n + ' dia(s) com menos remessas que o JMS (página repetida) baixados de novo em fatias de horário.');
+  return n;
+}
+/**
  * V4.21.4: os cabeçalhos de rota da Criação de Lotes foram capturados no DevTools e viram o padrão; a lista de variantes mudou de
  * ordem. Uma vez, a variante aprendida antes (JMS_ROUTE_AUTO_LOTS) é esquecida e a pausa da rota (HTTP 403) sai: a próxima
  * consulta já usa os cabeçalhos da tela.
@@ -1796,7 +1824,7 @@ function processSyncQueue(opts) {
   // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
   try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4243_(); migrateToV425_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4243_(); migrateToV425_(); migrateToV4254_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V4.6: modo diário (padrão) — só a AGENDA põe tarefas na fila (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h).
   // Fora dos horários, nada é consultado sozinho (o botão Atualizar do painel continua valendo).
@@ -2173,6 +2201,36 @@ function savePageRecords_(indicator, date, page, records, expectedPages, expecte
  *  - Se o tempo da execução acabar no meio: grava os pedaços já baixados (em ordem),
  *    guarda o cursor na coluna "page" do job e continua na próxima execução.
  */
+/**
+ * V4.25.4: o JMS repetiu registros entre as páginas e pulou outros (a lista não tem ordem fixa). As janelas com mais de uma página
+ * são baixadas de novo, UMA página por vez (sem pedidos ao mesmo tempo), primeiro no mesmo tamanho e depois com páginas menores
+ * (outros cortes), até os registros diferentes chegarem ao total do JMS. Janela de uma página já veio inteira.
+ */
+function resweepDetail_(job, plan, seen, want, deadline) {
+  const out = [], limit = detailMaxOffset_(), tolW = countTolerance_(want);
+  const sizes = [plan.size, Math.max(50, Math.floor(plan.size / 2)), Math.max(50, Math.floor(plan.size / 5))];
+  let requests = 0;
+  for (let round = 0; round < sizes.length && seen.size < want - tolW; round++) {
+    const sz = sizes[round], items = [];
+    plan.windows.forEach(w => {
+      if (w.total <= plan.size) return;
+      const win = plan.sliced || w.type ? {start: w.start, end: w.end, type: w.type} : null;
+      for (let p = 1; p <= Math.ceil(w.total / sz); p++) if (!(limit > 0 && (p - 1) * sz >= limit)) items.push({page: p, size: sz, win: win, type: w.type});
+    });
+    for (let i = 0; i < items.length && seen.size < want - tolW; i++) {
+      if (Date.now() + 15000 > deadline) return {datasets: out, requests: requests};
+      const it = items[i];
+      let r;
+      try { r = fetchDetailBatch_(job.indicator, job.date, [{page: it.page, size: it.size, win: it.win}])[0]; }
+      catch (e) { if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e; continue; }
+      requests++;
+      const fresh = r.records.filter(x => { const k = recordKey_(x); if (seen.has(k)) return false; seen.add(k); return true; });
+      if (fresh.length) out.push(chunkDataset_(normalizeRecords_(job.indicator, job.date, fresh, it.type)));
+    }
+  }
+  return {datasets: out, requests: requests};
+}
+
 function runDetailJob_(job, deadline) {
   const cfg = getIndicatorConfig_(job.indicator);
   const st = getDayStatus_(job.indicator, job.date);
@@ -2208,10 +2266,14 @@ function runDetailJob_(job, deadline) {
   // Pedaços baixados (índice 1..n): {raw: registros do JMS, ds: linhas normalizadas em formato colunar}.
   const got = {};
   let sampleRaw = null;
+  // V4.25.4: registros DIFERENTES recebidos (o JMS pode repetir uma página inteira e pular outra; a conferência era pelo total bruto).
+  const seen = new Set();
+  const note = recs => { for (let k = 0; k < recs.length; k++) seen.add(recordKey_(recs[k])); };
   plan.chunks.forEach((c, i) => {
     const w = plan.windows[c.w];
     if (c.page === 1 && i + 1 >= start) {
       if (!sampleRaw && w.first.length) sampleRaw = w.first[0];
+      note(w.first);
       got[i + 1] = {raw: w.first.length, ds: chunkDataset_(normalizeRecords_(job.indicator, job.date, w.first, w.type))};
     }
   });
@@ -2251,6 +2313,7 @@ function runDetailJob_(job, deadline) {
     slowest = Math.max(slowest, Date.now() - t0);
     res.forEach((r, j) => {
       if (!sampleRaw && r.records.length) sampleRaw = r.records[0];
+      note(r.records);
       got[batch[j]] = {raw: r.records.length, ds: chunkDataset_(normalizeRecords_(job.indicator, job.date, r.records, plan.windows[plan.chunks[batch[j] - 1].w].type))};
     });
   }
@@ -2264,24 +2327,38 @@ function runDetailJob_(job, deadline) {
   }
   if (!resume) {
     // Caminho normal: o dia inteiro em memória (colunar) → um único arquivo diário, direto.
-    const acc = dayAccumulatorFor_(job.indicator);
-    for (let i = 1; i <= n; i++) { acc.addDataset(got[i].ds); got[i] = null; }
-    if (!cfg.grouped) warnEmptyFields_(job.indicator, job.date, acc.emptyFields(Object.keys(cfg.fields || {})), sampleRaw, acc.count());
     // V4.24.3: o dia real (plan.known: a lista ou o número do resumo, o maior) também conta — lista travada em 10 mil com
     // 10.906 no resumo não fica como completa.
-    const want = Math.max(plan.total, plan.known || 0);
-    const ok = Math.abs(rawTotal - plan.total) <= tol && rawTotal >= want - countTolerance_(want);
+    const want = Math.max(plan.total, plan.known || 0), tolW = countTolerance_(want);
+    // V4.25.4: faltaram registros diferentes (página repetida no lugar de outra): baixa de novo as janelas com mais de uma
+    // página, uma página por vez e com outros cortes, até completar. Antes o dia ficava "completo" com 1.000 a menos.
+    const extra = [], before = seen.size;
+    if (seen.size < want - tolW && !deepRefused) {
+      const sw = resweepDetail_(job, plan, seen, want, deadline);
+      sw.datasets.forEach(ds => extra.push(ds));
+      if (seen.size > before) {
+        logSync_('INFO', job.indicator, job.date, 'O JMS repetiu registros entre as páginas da lista (' + before + ' diferentes de ' + rawTotal +
+          ' recebidos); baixando de novo página por página vieram mais ' + (seen.size - before) + ' (' + sw.requests + ' consultas).');
+      }
+    }
+    const acc = dayAccumulatorFor_(job.indicator);
+    for (let i = 1; i <= n; i++) { acc.addDataset(got[i].ds); got[i] = null; }
+    extra.forEach(ds => acc.addDataset(ds));
+    if (!cfg.grouped) warnEmptyFields_(job.indicator, job.date, acc.emptyFields(Object.keys(cfg.fields || {})), sampleRaw, acc.count());
+    const unique = seen.size;
+    const ok = Math.abs(rawTotal - plan.total) <= tol && unique >= want - tolW;
     saveDayDataset_(job.indicator, job.date, acc.build(), n, want);
     // Agrupado: sem contagem por turno nos Resultados (as duas listas não são "erros" do dia).
     if (!cfg.grouped) upsertAggCounts_(job.indicator, job.date, acc.shiftCounts(), acc.count());
     updateDayStatus_(job.indicator, job.date, {detailsStatus: ok ? 'COMPLETE' : 'CHECK_COUNTS', expectedPages: n, savedPages: n,
-      expectedRecords: want, savedRows: rawTotal, error: ''});
+      expectedRecords: want, savedRows: unique, error: ''});
     afterDetailSaved_(job.indicator, job.date);
     if (!ok) {
       const capNote = deepRefused || (want > plan.total && !plan.sliced)
         ? ' O JMS não entrega a lista além de ' + Math.min(plan.total, detailMaxOffset_() || plan.total) + ' registros e não separa por horário' +
           ' (fatias desligadas em JMS_NO_SLICE_' + cfg.routeKey + ').' : '';
-      logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + want + ' registros no dia, mas entregou ' + rawTotal +
+      logSync_('WARN', job.indicator, job.date, 'O JMS informou ' + want + ' registros no dia, mas entregou ' + unique + ' diferentes' +
+        (unique < rawTotal ? ' (' + rawTotal + ' com os repetidos)' : '') +
         (plan.sliced ? ' (download em ' + plan.windows.length + ' fatias de horário)' : '') + '. Dados gravados; o dia será conferido de novo mais tarde.' + capNote);
     }
     return 'done';

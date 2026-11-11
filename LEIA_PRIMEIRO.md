@@ -1,8 +1,27 @@
-# J&T DASHMASTER V4.25.3 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.4 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.25.4 — Detalhe igual ao JMS (Triagem Errada e Falta de Bipagem com 1.000 a menos)
+
+Pedido: "os dados não estão batendo com a quantidade do JMS" (Erros no dia 9.140 · 8.140 remessas no detalhe).
+- **Causa:** o JMS entrega a lista em páginas de 1.000 **sem ordem fixa**. De uma página para outra ele repetiu uma página
+  inteira (a 4 de novo no lugar da 5) e os 1.000 registros dela nunca chegaram. O robô conferia o total **bruto** (9.140
+  recebidos = 9.140 do JMS) e marcava o dia como completo, mas o painel guarda cada remessa uma vez: 8.140.
+- **Correção 1 — sem paginação:** a lista do dia vai em **fatias de horário de no máximo uma página** cada (1.000). Cada fatia vem
+  inteira, então não tem página para repetir ou pular. O horário de pico é dividido de novo até caber.
+- **Correção 2 — conferência pelas remessas diferentes:** o dia só fica completo quando os registros **diferentes** batem com o
+  JMS. Se faltar (rota em que o JMS ignora a hora), as páginas são baixadas de novo uma por vez, com outros tamanhos, até completar;
+  se mesmo assim faltar, o dia fica "contagem diferente" e o painel avisa quantas faltam (antes ficava "completo" calado).
+- **Dias já gravados:** os dos últimos 62 dias com menos remessas que os erros do JMS são baixados de novo, uma vez, sozinhos.
+- Vale para Envio Errado, Triagem Errada, Falta de Bipagem no Recebimento e na Expedição, SC → SC e SC → DC (Avaria: só a
+  conferência, a lista dela não tem horário).
+- Propriedade `JMS_PAGINAR` = `1` volta para a paginação (só para diagnóstico).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_4_NODE.zip`. Depois de ligar, a fila baixa de novo os dias com falta
+(a barra "Fila" mostra o andamento); em seguida o "Erros no dia" e as remessas no detalhe ficam iguais.
 
 ## V4.25.3 — Painel principal (Node.js): o período inteiro chega ao painel e ao relatório
 
