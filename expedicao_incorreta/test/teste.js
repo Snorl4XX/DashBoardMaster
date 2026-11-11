@@ -300,8 +300,8 @@ function abasRotas(comWW) {
   // 2.0.1: iniciar.bat (acha o Node.js sozinho) e link-publico.bat (Tailscale 8443), com quebras de linha do Windows.
   const bats = ['iniciar.bat', 'link-publico.bat'].map(f => pacote['expedicao_incorreta/' + f]);
   conferir(bats.every(b => b && /\r\n/.test(b.toString('latin1')) && !/[^\r]\n/.test(b.toString('latin1'))) && /where node/.test(bats[0].toString()) &&
-    /funnel --bg --https=443 --set-path=\/expedicao http:\/\/127\.0\.0\.1:3300\/expedicao/.test(bats[1].toString()) && !/8443 3300/.test(bats[1].toString()),
-    'pacote com iniciar.bat e link-publico.bat (CRLF); o link é o caminho /expedicao, sem ocupar a porta de outro painel');
+    /funnel --bg --https=10000 3300/.test(bats[1].toString()) && !/8443 3300/.test(bats[1].toString()),
+    'pacote com iniciar.bat e link-publico.bat (CRLF); o link fica na porta 10000 (no lugar do Lotes)');
 
   // ---------- 2. Servidor com JMS de mentira ----------
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-teste-'));

@@ -114,12 +114,11 @@ Turnos (pelo tempo de digitalização): T1 06h-14h · T2 14h-22h · T3 22h-06h.
 
 Link para a equipe (Tailscale, o mesmo do DashMaster)
 -----------------------------------------------------
-1. Dois cliques no link-publico.bat (na pasta C:\expedicao_incorreta). Ele liga o link da Expedição num CAMINHO NOVO do
-   link principal deste computador: https://NOME-DO-COMPUTADOR.xxxx.ts.net/expedicao (2.0.2). Não troca nem ocupa a
-   porta de nenhum outro painel: DashMaster (443), Sorter (8443) e Lotes (10000) continuam como estão.
-   (O Tailscale só tem 3 portas no link público, e as 3 já são dos outros painéis; por isso a Expedição usa um caminho.)
+1. Dois cliques no link-publico.bat (na pasta C:\expedicao_incorreta). Ele liga o link da Expedição na porta 10000, no
+   lugar do painel de Lotes (2.0.3, pedido): https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000/troncal.
+   DashMaster (443) e Sorter (8443) continuam como estão. O painel de Lotes continua neste computador
+   (http://localhost:3400), sem o link público. Se o link da 2.0.2 (/expedicao) estava ligado, ele é desligado.
    O link continua ligado depois de fechar a janela e de reiniciar o computador.
-   Usou o link-publico.bat da 2.0.1 e o Sorter perdeu a 8443? Rode de novo o link-publico.bat do Sorter.
 2. Senha (recomendado): abra C:\expedicao_incorreta\config.json no Bloco de Notas, escreva a senha em "senha",
    cole o link em "linkPublico", salve e abra o atalho do app de novo.
 3. Ligar sozinho com o Windows: Windows + R > shell:startup > cole ali o atalho do iniciar.bat.

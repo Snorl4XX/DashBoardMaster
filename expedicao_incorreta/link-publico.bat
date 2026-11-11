@@ -1,26 +1,25 @@
 @echo off
 chcp 65001 >nul
-title Link da Expedicao Incorreta (Tailscale) - /expedicao
+title Link da Expedicao Incorreta (Tailscale) - porta 10000
 set "TS=C:\Program Files\Tailscale\tailscale.exe"
 if not exist "%TS%" goto semTs
 echo.
-echo   O link da Expedicao Incorreta fica num CAMINHO NOVO do link principal deste computador:
-echo       https://NOME-DO-COMPUTADOR.xxxx.ts.net/expedicao
-echo   Nao troca nem ocupa a porta de nenhum outro painel (DashMaster, Sorter e Lotes continuam como estao).
+echo   O link da Expedicao Incorreta fica na porta 10000 (no lugar do painel de Lotes):
+echo       https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000
+echo   DashMaster (443) e Sorter (8443) continuam como estao.
 echo.
-"%TS%" funnel --bg --https=443 --set-path=/expedicao http://127.0.0.1:3300/expedicao
+rem Desliga o link /expedicao da versao 2.0.2, se estiver ligado (sem erro se nao estiver).
+"%TS%" funnel --https=443 --set-path=/expedicao off >nul 2>nul
+"%TS%" funnel --bg --https=10000 3300
 if errorlevel 1 goto erro
 echo.
 echo   Links ligados agora neste computador:
 echo   -------------------------------------
 "%TS%" funnel status
 echo.
-echo   Pronto. Link da equipe: o endereco https://....ts.net mostrado acima, com /expedicao no fim.
+echo   Pronto. Link da equipe: https://....ts.net:10000 (o endereco mostrado acima), com /troncal ou /secundaria no fim.
 echo   Ele continua ligado depois de fechar esta janela e de reiniciar o computador.
-echo   Para desligar so este link: "%TS%" funnel --https=443 --set-path=/expedicao off
-echo.
-echo   Usou o link-publico.bat da versao 2.0.1 e ele tirou a porta 8443 do Sorter? Rode de novo o link-publico.bat
-echo   do Sorter (C:\dashmaster-sorter\node): ele volta para a 8443.
+echo   O painel de Lotes continua funcionando neste computador (http://localhost:3400), sem o link publico.
 goto fim
 :erro
 echo.
