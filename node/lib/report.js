@@ -45,7 +45,7 @@ function usedSize(sh) {
   return {rows, cols};
 }
 function styleAt(sh, r, c) {
-  const st = Object.assign({}, sh.styles.get(r + ':' + c) || {});
+  const st = Object.assign({}, (sh.styleOf ? sh.styleOf(r, c) : sh.styles.get(r + ':' + c)) || {});
   if (!st.bg) {
     sh.banding.forEach(b => b.ranges.forEach(x => {
       if (r >= x.r && r < x.r + x.nr && c >= x.c && c < x.c + x.nc && r % 2 === 0) st.bg = b.bg;
@@ -60,9 +60,12 @@ function zip(files) {
   let offset = 0;
   files.forEach(f => {
     const name = Buffer.from(f.name, 'utf8');
-    const data = Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data, 'utf8');
-    const comp = zlib.deflateRawSync(data, {level: 6});
-    const crc = zlib.crc32(data) >>> 0;
+    // Arquivo grande (aba Dados do relatório) chega em pedaços: comprimidos um a um, sem juntar tudo na memória.
+    const chunks = Array.isArray(f.data) ? f.data : [Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data, 'utf8')];
+    const comp = chunks.length === 1 ? zlib.deflateRawSync(chunks[0], {level: 6})
+      : Buffer.concat(chunks.map(b => zlib.deflateRawSync(b, {level: 6, finishFlush: zlib.constants.Z_SYNC_FLUSH})).concat([Buffer.from([0x03, 0x00])]));
+    const crc = chunks.reduce((c, b) => zlib.crc32(b, c), 0) >>> 0;
+    const data = {length: chunks.reduce((n, b) => n + b.length, 0)};
     const h = Buffer.alloc(30);
     h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(0x0800, 6); h.writeUInt16LE(8, 8);
     h.writeUInt16LE(0, 10); h.writeUInt16LE(0x21, 12); h.writeUInt32LE(crc, 14); h.writeUInt32LE(comp.length, 18);
@@ -84,6 +87,7 @@ function zip(files) {
 }
 
 // ------------------------------------------------------------------ Excel
+const EMPTY_XF = JSON.stringify(['', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
 function toXlsx(ss) {
   const sheets = ss.getSheets();
   const numFmts = new Map(), fonts = new Map(), fills = new Map(), xfs = new Map();
@@ -115,7 +119,7 @@ function toXlsx(ss) {
   const xfId = (st, isDateVal) => {
     const fmt = st.numberFormat || (isDateVal ? 'dd/mm/yyyy' : '');
     const key = JSON.stringify([fmt, st.bold, st.size, st.color, st.bg, st.wrap, st.halign, st.valign, st.border]);
-    if (key === JSON.stringify(['', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined])) return 0;
+    if (key === EMPTY_XF) return 0;
     if (!xfs.has(key)) {
       const nf = fmtId(fmt), fo = fontId(st), fi = fillId(st), bo = st.border ? 1 : 0;
       const al = (st.halign || st.valign || st.wrap) ? '<alignment' + (st.halign ? ' horizontal="' + ({left: 'left', center: 'center', right: 'right'}[st.halign] || 'general') + '"' : '') +
@@ -131,8 +135,9 @@ function toXlsx(ss) {
   const used = new Set();
   const sheetXml = sheets.map(sh => {
     const size = usedSize(sh);
-    const rowsXml = [];
+    const rowsXml = [], parts = [];
     for (let r = 1; r <= size.rows; r++) {
+      if (rowsXml.length >= 5000) parts.push(Buffer.from(rowsXml.splice(0).join(''), 'utf8'));
       const cells = [];
       for (let c = 1; c <= Math.max(size.cols, 1); c++) {
         const v = sh.data[r - 1] ? sh.data[r - 1][c - 1] : undefined;
@@ -156,9 +161,10 @@ function toXlsx(ss) {
     const pane = sh.frozenRows ? '<pane ySplit="' + sh.frozenRows + '" topLeftCell="A' + (sh.frozenRows + 1) + '" activePane="bottomLeft" state="frozen"/>' : '';
     const views = '<sheetViews><sheetView workbookViewId="0"' + (sh.gridlines ? '' : ' showGridLines="0"') + '>' + pane + '</sheetView></sheetViews>';
     const merges = sh.merges.length ? '<mergeCells count="' + sh.merges.length + '">' + sh.merges.map(m => '<mergeCell ref="' + colName(m.c) + m.r + ':' + colName(m.c + m.nc - 1) + (m.r + m.nr - 1) + '"/>').join('') + '</mergeCells>' : '';
-    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-      views + '<sheetFormatPr defaultRowHeight="15"/>' + cols + '<sheetData>' + rowsXml.join('') + '</sheetData>' + merges +
-      '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup orientation="landscape" paperSize="9"/></worksheet>';
+    // Em pedaços (Buffer): uma string única com o mês inteiro passaria do limite de tamanho do JavaScript.
+    return [Buffer.from('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      views + '<sheetFormatPr defaultRowHeight="15"/>' + cols + '<sheetData>', 'utf8')].concat(parts, [Buffer.from(rowsXml.join('') + '</sheetData>' + merges +
+      '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup orientation="landscape" paperSize="9"/></worksheet>', 'utf8')]);
   });
   const names = sheets.map(sh => {
     let n = String(sh.getName()).replace(/[\[\]:*?/\\]/g, ' ').slice(0, 31) || 'Planilha';

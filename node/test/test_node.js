@@ -189,6 +189,9 @@ function firstDiff(a, b, p) {
     for (const params of [{from: '2026-09-17', to: '2026-09-19'}, {from: '2026-09-19', to: '2026-09-19'}]) {
       const a = normalize(JSON.parse(JSON.stringify(ref.getDashboardData(ind, params))));
       const b = normalize(await api('getDashboardData', [ind, params]));
+      // V4.25.3: o limite de remessas por consulta é do ambiente (Apps Script 150 mil, Node 500 mil); o resto tem de ser igual.
+      const lim = [a, b].map(x => x.meta && x.meta.archive ? x.meta.archive.maxRows : undefined);
+      if ((lim[0] === 150000 || lim[0] === null) && lim[1] === (lim[0] === null ? null : 500000)) { delete a.meta.archive.maxRows; delete b.meta.archive.maxRows; }
       const d = firstDiff(a, b, ind);
       check(!d, 'painel igual ao do Apps Script: ' + ind + ' ' + params.from + '→' + params.to, d);
     }
@@ -460,6 +463,32 @@ function firstDiff(a, b, p) {
   check(busy.code === 1 && /A porta \d+ já está em uso/.test(busy.out) && /ESPEROU 1800000/.test(busy.out),
     'porta em uso (painel já aberto): a janela mostra o motivo', busy.out);
   check(fs.readFileSync(path.join(tmpErr, 'dados', 'servidor.log'), 'utf8').includes('já está em uso'), 'o motivo também fica no servidor.log');
+
+  // ---------- 11. V4.25.3: Excel grande (mês inteiro) — formatação por intervalo e arquivo comprimido em pedaços ----------
+  {
+    const {MemSpreadsheet} = require(path.join(ROOT, 'node', 'lib', 'sheets.js'));
+    const {toXlsx} = require(path.join(ROOT, 'node', 'lib', 'report.js'));
+    const ss = new MemSpreadsheet('teste', 'TESTE'), sh = ss.getSheets()[0];
+    const N = 30000, rows = Array.from({length: N}, (_, i) => ['TST' + String(i).padStart(9, '0'), '0' + (i % 10), 'OPERADOR FICTICIO ' + (i % 7)]);
+    sh.getRange(1, 2).setNumberFormat('0.00').setFontColor('#B42318');   // célula com formato antes do intervalo grande
+    sh.getRange(1, 1, 1, 3).setValues([['Remessa', 'Código', 'Login']]);
+    sh.getRange(2, 1, N, 3).setNumberFormat('@').setValues(rows);         // 90 mil células: um registro só
+    sh.getRange(5, 3).setFontWeight('bold');                              // célula com estilo depois do intervalo
+    const st5 = sh.styleOf(5, 3), stHead = sh.styleOf(1, 2);
+    check(sh.blocks.length === 1 && sh.styles.size < 10 && st5.numberFormat === '@' && st5.bold === true && stHead.numberFormat === '0.00' &&
+      stHead.color === '#B42318' && sh.getRange(3, 2).getValue() === '01' && sh.styleOf(N + 5, 1) === null,
+      'V4.25.3: formatação de intervalo grande num registro só (antes um por célula: 3 GB no Excel do mês); texto "01" continua texto');
+    const buf = toXlsx(ss), cd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    let xml = '';
+    for (let i = 0; i < buf.length - 30; i++) {
+      if (buf.readUInt32LE(i) !== 0x04034b50) continue;
+      const nl = buf.readUInt16LE(i + 26), name = buf.slice(i + 30, i + 30 + nl).toString(), size = buf.readUInt32LE(i + 18);
+      if (name === 'xl/worksheets/sheet1.xml') xml = zlib.inflateRawSync(buf.slice(i + 30 + nl, i + 30 + nl + size)).toString('utf8');
+    }
+    const nRows = (xml.match(/<row /g) || []).length;
+    check(cd > 0 && nRows === N + 1 && /<\/worksheet>$/.test(xml) && xml.indexOf('TST000029999') > 0 && /t="inlineStr"><is><t xml:space="preserve">01</.test(xml),
+      'V4.25.3: Excel com ' + N + ' remessas em pedaços comprimidos — abre inteiro (todas as linhas)', {nRows, fim: xml.slice(-40)});
+  }
 
   srv.child.kill();
   cleanup();

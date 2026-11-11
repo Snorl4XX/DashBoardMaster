@@ -4,10 +4,12 @@ function generateReport(indicatorKey, params, format) {
   requireDb_();
   format = String(format || 'pdf').toLowerCase() === 'xlsx' ? 'xlsx' : 'pdf';
   params = params || {};
+  // V4.25.3: no Node, o relatório lê as mesmas remessas do painel (antes parava em 60 mil: gráficos e totais do Excel menores que os da tela).
+  const node = onNode_();
   const dash = computeDashboard_(indicatorKey, params, {
-    maxFiles: format === 'xlsx' ? 800 : 300,
-    maxRows: APP_CONFIG.MAX_REPORT_DETAIL_ROWS,
-    deadline: Date.now() + 120000
+    maxFiles: node ? maxDetailFiles_() : format === 'xlsx' ? 800 : 300,
+    maxRows: node ? Math.max(APP_CONFIG.NODE_MAX_REPORT_DETAIL_ROWS, maxClientRows_()) : APP_CONFIG.MAX_REPORT_DETAIL_ROWS,
+    deadline: Date.now() + (node ? 300000 : 120000)
   });
   const cfg = dash.cfg;
   const temp = SpreadsheetApp.create('TEMP_JT_' + indicatorKey + '_' + Date.now());

@@ -11,6 +11,7 @@ const {tx} = require('./db');
 
 const TZ = 'America/Sao_Paulo';
 const DB_ID = 'db';
+const BLOCK_CELLS = 5000; // acima disso, a formatação do intervalo fica num registro só (MemSheet._style)
 
 function coerce(v, asText) {
   if (v === null || v === undefined) return '';
@@ -230,7 +231,7 @@ function ensureDbSpreadsheet(db, name) {
 // ------------------------------------------------------------------ planilha temporária (relatórios, na memória)
 class MemSheet {
   constructor(ss, name) {
-    this.ss = ss; this.name = name; this.data = []; this.styles = new Map(); this.merges = [];
+    this.ss = ss; this.name = name; this.data = []; this.styles = new Map(); this.blocks = []; this.merges = [];
     this.colWidths = {}; this.rowHeights = {}; this.frozenRows = 0; this.gridlines = true; this.charts = []; this.banding = [];
   }
   getName() { return this.name; }
@@ -261,12 +262,22 @@ class MemSheet {
       const idx = r - 1 + i;
       while (this.data.length <= idx) this.data.push([]);
       vals.forEach((v, j) => {
-        const st = this.styles.get((idx + 1) + ':' + (c + j));
+        const st = this.styleOf(idx + 1, c + j);
         this.data[idx][c - 1 + j] = coerce(v, st && st.numberFormat === '@');
       });
     });
   }
   _style(range, key, value) {
+    if (range.nr * range.nc > BLOCK_CELLS) {
+      // Intervalo grande (aba Dados do relatório): um registro para o intervalo, não um por célula — com 330 mil remessas
+      // eram milhões de registros e o Excel do mês passava de 3 GB de memória. Vale o último formato aplicado na célula.
+      this.styles.forEach((st, k) => {
+        const p = k.split(':'), r = +p[0], c = +p[1];
+        if (r >= range.r && r < range.r + range.nr && c >= range.c && c < range.c + range.nc) delete st[key];
+      });
+      this.blocks.push({r: range.r, c: range.c, nr: range.nr, nc: range.nc, key: key, value: value});
+      return;
+    }
     for (let i = 0; i < range.nr; i++) {
       for (let j = 0; j < range.nc; j++) {
         const k = (range.r + i) + ':' + (range.c + j);
@@ -276,9 +287,16 @@ class MemSheet {
       }
     }
   }
+  /** Formatação da célula (intervalos grandes + a da própria célula); null quando não tem nenhuma. */
+  styleOf(r, c) {
+    let out = null;
+    for (const b of this.blocks) if (r >= b.r && r < b.r + b.nr && c >= b.c && c < b.c + b.nc) { out = out || {}; out[b.key] = b.value; }
+    const st = this.styles.get(r + ':' + c);
+    return st ? Object.assign(out || {}, st) : out;
+  }
   _merge(range) { this.merges.push({r: range.r, c: range.c, nr: range.nr, nc: range.nc}); }
   appendRow(row) { this.data.splice(this.getLastRow(), 0, row.map(v => coerce(v))); return this; }
-  clear() { this.data = []; this.styles = new Map(); this.merges = []; this.charts = []; this.banding = []; return this; }
+  clear() { this.data = []; this.styles = new Map(); this.blocks = []; this.merges = []; this.charts = []; this.banding = []; return this; }
   setFrozenRows(n) { this.frozenRows = Number(n) || 0; return this; }
   setFrozenColumns() { return this; }
   setHiddenGridlines(h) { this.gridlines = !h; return this; }
@@ -306,7 +324,7 @@ class MemSheet {
     if (!spec || !spec.ranges) return;
     // Guarda os valores na hora (como o gráfico do Google aponta para as células).
     const rg = spec.ranges[0];
-    const st = rg ? this.styles.get((rg.r + 1) + ':' + (rg.c + 1)) : null;
+    const st = rg ? this.styleOf(rg.r + 1, rg.c + 1) : null;
     this.charts.push({type: spec.type, options: spec.options, row: spec.row, col: spec.col, values: rg ? rg.getValues() : [],
       numberFormat: st && st.numberFormat || ''});
   }

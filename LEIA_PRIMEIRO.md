@@ -1,8 +1,29 @@
-# J&T DASHMASTER V4.25.2 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.3 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.25.3 — Painel principal (Node.js): o período inteiro chega ao painel e ao relatório
+
+Pedido: "no dash principal está faltando dados para analisar; analisa cada parte e encontre o motivo". O que cortava dados:
+- **Painel — limite de 150 mil remessas por consulta.** O limite foi feito para o Google Apps Script (6 min e 50 MB por chamada).
+  A Falta de Bipagem na Expedição tem ~11 mil remessas por dia: em **"30 dias" só 13 dias entravam** nos gráficos, nos filtros e
+  na tabela (o resto ficava no aviso "Limite de 150.000 remessas"). No Node.js (notebook e Oracle) o limite agora é
+  **500 mil remessas**, com 3.000 arquivos e 90 s de leitura por consulta: o mês inteiro entra (teste com 330 mil: ~3 s na tela).
+- **Relatório (Excel/PDF) — parava em 60 mil remessas.** Excel de 7 dias da Expedição saía com 55 mil de 77 mil; gráficos, totais
+  e a aba Dados ficavam menores que a tela. No Node, o relatório lê as **mesmas remessas do painel** (a aba Dados do PDF continua
+  com as 1.500 primeiras e o aviso; o Excel leva todas).
+- **Excel do mês — 3 GB de memória.** A formatação da aba Dados era guardada célula por célula. Agora é guardada por intervalo e o
+  arquivo é comprimido em pedaços: o Excel de 330 mil remessas sai em ~20 s e coube em 1,5 GB.
+- **Recebimento/Expedição/Sem Movimentação (agrupados):** no Node, as combinações vão inteiras ao navegador até o mesmo limite
+  (antes, acima de 60 mil, a tabela mostrava só as 2.000 maiores).
+- Conferido e sem corte: limite do JMS de 10 mil por consulta (resolvido na V4.24.3), teto de segurança de 200 mil por dia,
+  tabela em páginas de 50 e listas dos filtros.
+- **Google Apps Script: sem mudança** (continua 150 mil no painel e 60 mil no relatório, por causa da cota do Google).
+  A propriedade `DASHBOARD_MAX_ROWS` continua mudando o limite (no Node, até 1 milhão).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_3_NODE.zip` (os dados já baixados aparecem na hora, sem baixar de novo).
 
 ## V4.25.2 — Sem o cartão "Sobre o indicador"
 
@@ -3066,7 +3087,7 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 | `DETAIL_REFRESH_HOURS` | Intervalo mínimo para rebaixar o detalhe de hoje/ontem (padrão `3`). |
 | `ATUALIZACAO_MIN` | (V3.24) Minutos entre as atualizações do resumo de hoje (padrão: Workspace `15`, Gmail `30`; `60` = só de hora em hora). |
 | `JMS_PARALELO_RESUMO` | (V3.24) Resumos pedidos ao JMS por rajada (padrão `6`, máximo `10`). |
-| `DASHBOARD_MAX_ROWS` | Remessas por consulta no painel (padrão `150000`). Diminua se computadores fracos ficarem lentos. |
+| `DASHBOARD_MAX_ROWS` | Remessas por consulta no painel (padrão `150000` no Apps Script e `500000` no Node.js, até 1 milhão). Diminua se computadores fracos ficarem lentos. |
 
 ## O que mudou na V3 (histórico)
 

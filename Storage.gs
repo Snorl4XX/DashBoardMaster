@@ -698,9 +698,9 @@ function compactDay_(indicator, date, deadline) {
  */
 function scanArchive_(indicator, from, to, opts, sink) {
   opts = opts || {};
-  const maxFiles = opts.maxFiles === undefined ? APP_CONFIG.MAX_DETAIL_FILES_PER_DASHBOARD : opts.maxFiles;
-  const maxRows = opts.maxRows === undefined ? APP_CONFIG.MAX_CLIENT_ROWS : opts.maxRows;
-  const deadline = opts.deadline || (Date.now() + APP_CONFIG.DASHBOARD_LOAD_BUDGET_MS);
+  const maxFiles = opts.maxFiles === undefined ? maxDetailFiles_() : opts.maxFiles;
+  const maxRows = opts.maxRows === undefined ? maxClientRows_() : opts.maxRows;
+  const deadline = opts.deadline || (Date.now() + loadBudgetMs_());
   const statuses = statusMap_(indicator, from, to);
   const dayFiles = dayFilesMap_(indicator, from, to);
   let pageMap = null;

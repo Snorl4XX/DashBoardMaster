@@ -5364,4 +5364,49 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'gráficos dois por linha no painel principal; Lotes e Produção do Sorter com chartsFull (um por linha)', catM.map(x => [x.key, x.chartsFull]));
 }
 
+// V4.25.3 (pedido "No dash principal está faltando dados para analisar"): no Node.js, "30 dias" da Falta de Bipagem na Expedição
+// (~11 mil remessas por dia) carregava só 13 dias — limite de 150 mil remessas por consulta, feito para o Apps Script — e o
+// relatório Excel parava em 60 mil remessas. No Node os arquivos são locais: o painel e o Excel recebem o período inteiro.
+{
+  const T0 = Date.now();
+  const FIELDS = require('vm').runInContext('STORE_FIELDS_', freshCtx({}));
+  const DIAS = 30, POR_DIA = 5100, from = '2026-10-01', to = '2026-10-30';
+  const segs = ['GO,795-00,002', 'SP,977-00,000', 'GRU,404-04,020', 'MG,330-00,1', 'BA,500-00,1'];
+  const semear = c => {
+    c.dateRangeIso_(from, to).forEach(d => {
+      const rows = Array.from({length: POR_DIA}, (_, k) => ({date: d, shipment: 'TST' + d.replace(/-/g, '') + String(k).padStart(6, '0'),
+        eventTime: d + ' ' + String(k % 24).padStart(2, '0') + ':10:00', shift: ['T1', 'T2', 'T3'][k % 3], login: 'OPERADOR FICTICIO 0' + (k % 9),
+        segment: segs[k % 5].split(',')[0], segmentRaw: segs[k % 5].split(',').slice(0, 2).join(','), segmentFull: segs[k % 5], client: 'CLIENTE TESTE',
+        interval: String(k % 24).padStart(2, '0') + 'h - ' + String((k + 1) % 24).padStart(2, '0') + 'h', tripId: 'TESTE-' + (k % 50)}));
+      c.saveDayDataset_('missing_dispatch', d, c.encodeDayFile_(rows, FIELDS), 1, POR_DIA);
+      c.upsertRate_({indicator: 'missing_dispatch', date: d, rate: 0.5, errorCount: POR_DIA, totalCount: POR_DIA * 100, raw: {}});
+      c.updateDayStatus_('missing_dispatch', d, {summaryStatus: 'COMPLETE', detailsStatus: 'COMPLETE', expectedPages: 1, savedPages: 1,
+        expectedRecords: POR_DIA, savedRows: POR_DIA});
+    });
+    return c;
+  };
+  const gs = semear(freshCtx({})), nd = semear(freshCtx({}, null, {PLATAFORMA: 'node'}));
+  check(gs.maxClientRows_() === 150000 && nd.maxClientRows_() === 500000 && nd.maxDetailFiles_() >= 3000 && nd.loadBudgetMs_() >= 60000 &&
+    gs.maxDetailFiles_() === 150 && gs.loadBudgetMs_() === 22000 &&
+    freshCtx({}, null, {PLATAFORMA: 'node', DASHBOARD_MAX_ROWS: '800000'}).maxClientRows_() === 800000 &&
+    freshCtx({}, null, {DASHBOARD_MAX_ROWS: '800000'}).maxClientRows_() === 400000,
+    'V4.25.3: limites por consulta — Apps Script como antes (150 mil, 150 arquivos, 22 s); Node 500 mil (DASHBOARD_MAX_ROWS muda, até 1 milhão)');
+  const total = DIAS * POR_DIA;
+  const rG = gs.getDashboardData('missing_dispatch', {from, to}), rN = nd.getDashboardData('missing_dispatch', {from, to});
+  check(!rG.meta.archive.fullyLoaded && rG.meta.rowsLoaded <= 150000 && rG.meta.archive.notLoaded.length > 0 &&
+    rN.meta.archive.fullyLoaded && rN.meta.archive.loadedDates.length === DIAS && rN.meta.rowsLoaded === total && rN.meta.archive.maxRows === 500000,
+    'V4.25.3: Node — os 30 dias da Falta de Bipagem na Expedição chegam ao painel (antes: dias fora por causa do limite do Apps Script)',
+    {gs: [rG.meta.rowsLoaded, rG.meta.archive.loadedDates.length], node: [rN.meta.rowsLoaded, rN.meta.archive.loadedDates.length]});
+  [gs, nd].forEach(c => { c.UrlFetchApp.fetch = () => ({getResponseCode: () => 200, getBlob: () => c.Utilities.newBlob('PK', 'application/zip', 'x')}); });
+  const xG = gs.generateReport('missing_dispatch', {from, to}, 'xlsx'), xN = nd.generateReport('missing_dispatch', {from, to}, 'xlsx');
+  check(xG.ok && xG.rows <= 60000 && !xG.coverageComplete && xN.ok && xN.rows === total && xN.coverageComplete,
+    'V4.25.3: Node — o relatório Excel leva as mesmas remessas do painel (antes parava em 60 mil)', {gs: xG.rows, node: xN.rows});
+  // Recebimento/Expedição/Sem Movimentação (agrupados): no Node, as combinações vão ao navegador até o limite do painel.
+  const ga = freshCtx({}, null, {PLATAFORMA: 'node'}), gb = freshCtx({});
+  const big = c => { c.saveDayDataset_('no_move', '2026-10-10', c.encodeDayFile_([{date: '2026-10-10', shipment: 'TST1'}], FIELDS), 1, 1);
+    c.dayFilesMap_ = () => ({'2026-10-10': {rows: 120000, fileId: 'x'}}); return c.groupedNeedsSummary_('no_move', '2026-10-10', '2026-10-10', {}); };
+  check(big(gb) === true && big(ga) === false, 'V4.25.3: agrupados com 120 mil combinações — Apps Script em totais por campo; Node manda tudo (tabela completa)');
+  check(Date.now() - T0 < 120000, 'V4.25.3: testes de volume em menos de 2 min', Date.now() - T0);
+}
+
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

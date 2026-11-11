@@ -639,7 +639,8 @@ function groupedNeedsSummary_(indicatorKey, from, to, params) {
   if (params && params.summary !== undefined && params.summary !== null) return !!params.summary;
   const v = Number(getProp_('GROUPED_CLIENT_ROWS', '')), ic = indicatorCfg_(indicatorKey) || {};
   // Expedição (uma linha por remessa): um dia inteiro (~120 mil) vai ao navegador — as tabelas mostram todas as remessas.
-  const limit = v >= 1 ? v : ic.clientRows || APP_CONFIG.MAX_GROUPED_CLIENT_ROWS;
+  // V4.25.3: no Node, as combinações vão ao navegador até o mesmo limite do painel (a tabela mostra todas, não só as 2.000 maiores).
+  const limit = v >= 1 ? v : Math.max(ic.clientRows || APP_CONFIG.MAX_GROUPED_CLIENT_ROWS, onNode_() ? maxClientRows_() : 0);
   const files = dayFilesMap_(indicatorKey, from, to), st = statusMap_(indicatorKey, from, to);
   let est = 0;
   dateRangeIso_(from, to).forEach(d => {
@@ -749,10 +750,16 @@ function blockedArchive_(day) {
   return {rows: [], loadedDates: [], partialDates: [], staleDates: [], notDownloaded: [day], notLoaded: [], emptyDates: [], readFiles: 0, fullyLoaded: false};
 }
 
+/** V4.25.3: rodando no Node.js (notebook ou nuvem), não no Google Apps Script. */
+function onNode_() { return getProp_('PLATAFORMA', '') === 'node'; }
 function maxClientRows_() {
   const v = Number(getProp_('DASHBOARD_MAX_ROWS', ''));
-  return v >= 1000 ? Math.min(400000, Math.floor(v)) : APP_CONFIG.MAX_CLIENT_ROWS;
+  if (v >= 1000) return Math.min(onNode_() ? 1000000 : 400000, Math.floor(v));
+  return onNode_() ? APP_CONFIG.NODE_MAX_CLIENT_ROWS : APP_CONFIG.MAX_CLIENT_ROWS;
 }
+/** Arquivos de detalhe e tempo de leitura por consulta do painel (no Node os arquivos estão no disco). */
+function maxDetailFiles_() { return onNode_() ? APP_CONFIG.NODE_MAX_DETAIL_FILES : APP_CONFIG.MAX_DETAIL_FILES_PER_DASHBOARD; }
+function loadBudgetMs_() { return onNode_() ? APP_CONFIG.NODE_LOAD_BUDGET_MS : APP_CONFIG.DASHBOARD_LOAD_BUDGET_MS; }
 
 /**
  * V4.23.3 (Produção do Sorter, pedido "quando trocar os filtros, a Evolução diária deve mostrar o resultado do filtro"): a
