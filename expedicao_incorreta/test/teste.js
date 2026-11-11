@@ -297,6 +297,10 @@ function abasRotas(comWW) {
   const nomes = Object.keys(pacote);
   conferir(nomes.indexOf('expedicao_incorreta/server.js') >= 0 && nomes.indexOf('expedicao_incorreta/LEIA-ME.txt') >= 0 &&
     nomes.every(n => !/\/(test|dados|planilhas)\/|config\.json$/.test(n)), 'pacote ZIP só com o app', nomes);
+  // 2.0.1: iniciar.bat (acha o Node.js sozinho) e link-publico.bat (Tailscale 8443), com quebras de linha do Windows.
+  const bats = ['iniciar.bat', 'link-publico.bat'].map(f => pacote['expedicao_incorreta/' + f]);
+  conferir(bats.every(b => b && /\r\n/.test(b.toString('latin1')) && !/[^\r]\n/.test(b.toString('latin1'))) && /where node/.test(bats[0].toString()) &&
+    /funnel --bg --https=8443 3300/.test(bats[1].toString()), 'pacote com iniciar.bat e link-publico.bat (CRLF)');
 
   // ---------- 2. Servidor com JMS de mentira ----------
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-teste-'));

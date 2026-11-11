@@ -51,11 +51,12 @@ Instalar (no computador onde já roda o DashMaster, sem administrador)
 ---------------------------------------------------------------------
 1. No ZIP: botão direito > Propriedades > marque "Desbloquear" > OK.
 2. Botão direito no ZIP > Extrair tudo... > destino C:\  > Extrair. Fica a pasta C:\expedicao_incorreta.
-3. Atalho na Área de Trabalho (botão direito > Novo > Atalho), cole com as aspas:
-     "C:\dashmaster\node\node.exe" "C:\expedicao_incorreta\server.js"
-   Nome: Expedição Incorreta. (Usa o mesmo node.exe do DashMaster.)
-4. Dois cliques no atalho. A janela preta mostra "no ar". Deixe aberta.
-   Na 1ª vez ela cria as pastas "dados" e "planilhas" dentro de C:\expedicao_incorreta.
+3. Abra a pasta C:\expedicao_incorreta e dê dois cliques no iniciar.bat. A janela preta mostra "no ar". Deixe aberta.
+   (Ele usa o Node.js do DashMaster, o instalado no Windows; se der erro, a janela fica aberta com o motivo.)
+   Na 1ª vez ele cria as pastas "dados" e "planilhas" dentro de C:\expedicao_incorreta.
+4. Atalho na Área de Trabalho: botão direito no iniciar.bat > Enviar para > Área de trabalho (criar atalho).
+   Renomeie para Expedição Incorreta. (2.0.1: o atalho antigo para C:\dashmaster\node\node.exe não funciona quando o
+   Node.js é o instalado no Windows; apague esse atalho e use este.)
 5. Abra http://localhost:3300/config
    - AuthToken: se o DashMaster está neste computador, o app já usa o mesmo AuthToken dele. Clique em "Testar a conexão".
      (Sem DashMaster: cole o AuthToken e clique em "Salvar e testar".)
@@ -113,12 +114,14 @@ Turnos (pelo tempo de digitalização): T1 06h-14h · T2 14h-22h · T3 22h-06h.
 
 Link para a equipe (Tailscale, o mesmo do DashMaster)
 -----------------------------------------------------
-1. Atalho na Área de Trabalho, cole com as aspas:
-     "C:\Program Files\Tailscale\tailscale.exe" funnel --https=8443 3300
-   Nome: Link da expedição. Dois cliques: a janela mostra o link https://....ts.net:8443
+1. Dois cliques no link-publico.bat (na pasta C:\expedicao_incorreta). Ele mostra os links já ligados e liga o da
+   Expedição na porta 8443: https://NOME-DO-COMPUTADOR.xxxx.ts.net:8443/troncal. O link continua ligado depois de fechar a
+   janela e de reiniciar o computador. Se a 8443 já for de outro painel (ex.: o Sorter), ele avisa e pergunta antes de trocar.
+   O Tailscale só aceita 3 portas no link (443, 8443 e 10000): com o Sorter no mesmo computador, passe o Sorter para o link
+   principal (config.json do Sorter: "portaLink": 443 e "caminho": "/sorter", e o link-publico.bat dele).
 2. Senha (recomendado): abra C:\expedicao_incorreta\config.json no Bloco de Notas, escreva a senha em "senha",
    cole o link em "linkPublico", salve e abra o atalho do app de novo.
-3. Ligar sozinho: Windows + R > shell:startup > cole os dois atalhos nessa pasta.
+3. Ligar sozinho com o Windows: Windows + R > shell:startup > cole ali o atalho do iniciar.bat.
 
 config.json (criado na 1ª vez)
 ------------------------------
