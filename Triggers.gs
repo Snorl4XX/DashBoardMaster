@@ -26,7 +26,9 @@ function syncHourly() {
   let history = 0;
   try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4125_(); migrateToV4126_(); migrateToV414_(); migrateToV4141_(); migrateToV415_(); migrateToV420_(); migrateToV4214_(); migrateToV4243_(); migrateToV425_(); migrateToV4254_(); if (typeof migrateSorterDados_ === 'function') migrateSorterDados_(); history = queueNewIndicatorsHistory_(); } catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + e); }
   // V4.6: modo diário (padrão) — só a agenda (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h); nada de revalidar.
-  const queued = (dailyMode_() ? runAgenda_() : queueRecentRefresh_()) + history;
+  let queued = (dailyMode_() ? runAgenda_() : queueRecentRefresh_()) + history;
+  // V4.25.5: dias fechados com a lista menor que os erros do JMS voltam para a fila (conferência de hora em hora).
+  try { queued += healDetailGaps_(); } catch (e) { logSync_('WARN', '', '', 'Conferência da lista não concluída: ' + e); }
   return {ok: true, queued: queued, worker: processSyncQueue({budgetMs: 240000})};
 }
 

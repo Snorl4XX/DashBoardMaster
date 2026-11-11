@@ -1405,6 +1405,73 @@ function migrateToV4254_() {
   return n;
 }
 /**
+ * V4.25.5: dias FECHADOS do período em que a lista gravada tem menos remessas que os erros do JMS (o número do cartão "Erros no
+ * dia"), com a situação de cada um. Só nos indicadores em que a lista é a mesma coisa que os erros (detailMatchesErrors).
+ */
+function detailGapDays_(indicator, from, to) {
+  const cfg = INDICATORS[indicator];
+  if (!cfg || cfg.grouped || !cfg.detailMatchesErrors || cfg.byRoute || cfg.unseal || cfg.sorter) return [];
+  const last = lastClosedDate_(indicator);
+  if (to > last) to = last;
+  if (!isIso_(from) || !isIso_(to) || from > to) return [];
+  const sm = statusMap_(indicator, from, to), files = dayFilesMap_(indicator, from, to), out = [];
+  getRates_(indicator, from, to).forEach(r => {
+    const st = sm[indicator + '|' + r.date], f = files[r.date];
+    if (!st || st.summary !== 'COMPLETE' || DETAIL_USABLE_.indexOf(st.details) < 0 || !f || r.errorCount === null || r.errorCount === undefined) return;
+    const errs = Number(r.errorCount) || 0, rows = Number(f.rows) || 0;
+    if (errs > rows + countTolerance_(errs)) out.push({date: r.date, saved: rows, expected: errs, status: st.details, fileAt: f.createdAt || ''});
+  });
+  return out.sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+/** Downloads de lista (DETAIL_INIT) na fila ou rodando: {"indicador|data": 1}. */
+function activeDetailJobs_() {
+  const out = {};
+  allTabRows_('JOBS').forEach(r => {
+    if (String(r[1]) === 'DETAIL_INIT' && (String(r[5]) === 'PENDING' || String(r[5]) === 'RUNNING')) out[r[2] + '|' + dateCellIso_(r[3])] = 1;
+  });
+  return out;
+}
+/**
+ * V4.25.5 (pedido "novamente com os problemas"): de hora em hora, os dias fechados dos últimos 62 dias com a lista menor que os
+ * erros do JMS voltam para a fila — antes só a atualização da V4.25.4 fazia isso, uma vez, e um dia que mudasse depois (o JMS
+ * corrige o número) ficava com a lista velha. Dia "completo" com falta: com a lista gravada há mais de 1 h. "Contagem diferente"
+ * (o JMS entregou menos): últimos 7 dias, a cada 6 h.
+ */
+function healDetailGaps_() {
+  const today = isoToday_(), from = addDaysIso_(today, -62), week = addDaysIso_(today, -7), now = Date.now();
+  const active = activeDetailJobs_(), jobs = [];
+  Object.keys(INDICATORS).forEach(k => {
+    detailGapDays_(k, from, today).forEach(g => {
+      if (active[k + '|' + g.date]) return;
+      const age = now - (Date.parse(g.fileAt) || 0);
+      if (g.status === 'CHECK_COUNTS' ? (g.date < week || age < 6 * 3600000) : age < 3600000) return;
+      jobs.push(['DETAIL_INIT', k, g.date, 1]);
+    });
+  });
+  if (!jobs.length) return 0;
+  const n = enqueueJobs_(jobs.sort((a, b) => (a[2] < b[2] ? 1 : -1)).slice(0, 60), {reset: true});
+  if (n) logSync_('INFO', '', '', 'Conferência da lista: ' + n + ' dia(s) com menos remessas que os erros do JMS voltaram para a fila.');
+  return n;
+}
+/**
+ * Painel: os dias com a lista menor que os erros do JMS no período e se já estão na fila (cartão "Erros no dia"). Dia "completo"
+ * com falta e lista gravada há mais de 1 h entra na fila na hora (sem esperar a conferência de hora em hora).
+ */
+function detailGapView_(indicator, from, to) {
+  const days = detailGapDays_(indicator, from, to);
+  if (!days.length) return null;
+  const active = activeDetailJobs_(), now = Date.now();
+  const late = days.filter(g => !active[indicator + '|' + g.date] && g.status !== 'CHECK_COUNTS' && now - (Date.parse(g.fileAt) || 0) >= 3600000).slice(-31);
+  if (late.length) {
+    try {
+      enqueueJobs_(late.map(g => ['DETAIL_INIT', indicator, g.date, 1]).reverse(), {reset: true});
+      late.forEach(g => { active[indicator + '|' + g.date] = 1; });
+      logSync_('INFO', indicator, '', 'Lista menor que os erros do JMS em ' + late.length + ' dia(s) aberto(s) no painel: baixando de novo.');
+    } catch (e) { /* a conferência de hora em hora tenta de novo */ }
+  }
+  return {days: days.map(g => ({date: g.date, saved: g.saved, expected: g.expected, status: g.status, queued: !!active[indicator + '|' + g.date]}))};
+}
+/**
  * V4.21.4: os cabeçalhos de rota da Criação de Lotes foram capturados no DevTools e viram o padrão; a lista de variantes mudou de
  * ordem. Uma vez, a variante aprendida antes (JMS_ROUTE_AUTO_LOTS) é esquecida e a pausa da rota (HTTP 403) sai: a próxima
  * consulta já usa os cabeçalhos da tela.

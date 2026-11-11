@@ -5431,6 +5431,27 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(nG === 1 && againG === 0 && slicedAgain && g.getArchivedRange_('missing_dispatch', DG, DG).rows.length === N && g.getDayStatus_('missing_dispatch', DG).details === 'COMPLETE',
     'V4.25.4: uma vez, os dias gravados com menos remessas que o JMS são baixados de novo (fatias testadas de novo) e ficam com as 9.140',
     {nG, againG, st: g.getDayStatus_('missing_dispatch', DG)});
+  // (d2) V4.25.5: conferência de hora em hora (não só a atualização, uma vez) e aviso no painel. Dia fechado com a lista menor que
+  //      os erros do JMS: o painel diz "baixando de novo"; com a lista gravada há mais de 1 h, volta para a fila sozinho.
+  const h = runD({}, {}, DG).c;
+  h.saveDayDataset_('missing_dispatch', DG, h.encodeDayFile_(Array.from({length: 8140}, (_, i) => ({date: DG, shipment: 'TST' + String(i).padStart(9, '0'), shift: 'T1'})), FIELDS), 10, N);
+  h.updateDayStatus_('missing_dispatch', DG, {detailsStatus: 'COMPLETE', expectedPages: 10, savedPages: 10, expectedRecords: N, savedRows: N});
+  const gap0 = h.detailGapDays_('missing_dispatch', DG, DG), fresh = h.healDetailGaps_();
+  const view0 = h.getDashboardData('missing_dispatch', {from: DG, to: DG}).meta.detailGap;
+  const realFiles = h.dayFilesMap_;
+  h.dayFilesMap_ = function (ind, f, t) { const m = realFiles(ind, f, t); Object.keys(m).forEach(d => { m[d].createdAt = '2026-01-01T00:00:00.000Z'; }); return m; };
+  const nH = h.healDetailGaps_(), againH = h.healDetailGaps_();
+  const view1 = h.getDashboardData('missing_dispatch', {from: DG, to: DG}).meta.detailGap;
+  h.dayFilesMap_ = realFiles;
+  runAll(h);
+  const view2 = h.getDashboardData('missing_dispatch', {from: DG, to: DG}).meta.detailGap;
+  check(gap0.length === 1 && gap0[0].saved === 8140 && gap0[0].expected === N && fresh === 0 && view0 && view0.days[0].queued === false &&
+    nH === 1 && againH === 0 && view1.days[0].queued === true && view2 === null && h.getArchivedRange_('missing_dispatch', DG, DG).rows.length === N &&
+    /healDetailGaps_\(\)/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'Triggers.gs'), 'utf8')),
+    'V4.25.5: dia com 8.140 de 9.140 — o painel avisa, a conferência de hora em hora põe na fila (uma vez) e o dia fica com as 9.140',
+    {gap0, fresh, view0, nH, againH, view1, view2});
+  // Hoje (dia aberto) não entra: a lista acompanha o resumo de hora em hora.
+  check(h.detailGapDays_('missing_dispatch', h.isoToday_(), h.isoToday_()).length === 0, 'V4.25.5: hoje fora da conferência (dia ainda aberto no JMS)');
   // (e) Registro igual repetido x mesma remessa com outro bipe: só o igual conta como repetido.
   check(g.recordKey_({billcode: 'TST1', t: '10:00', ROW_ID: 1}) === g.recordKey_({ROW_ID: 7, t: '10:00', billcode: 'TST1'}) &&
     g.recordKey_({billcode: 'TST1', t: '10:00'}) !== g.recordKey_({billcode: 'TST1', t: '10:01'}),

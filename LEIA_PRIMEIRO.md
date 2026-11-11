@@ -1,8 +1,24 @@
-# J&T DASHMASTER V4.25.4 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.5 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.25.5 — Lista menor que o JMS: conferência de hora em hora e aviso no cartão
+
+Pedido: "novamente com os problemas". Na V4.25.4 os dias com falta eram baixados de novo **uma vez só**, na atualização, e o painel
+continuava mostrando "Detalhes completos" sem aviso até o download terminar (e um dia que o JMS corrigisse depois ficava velho).
+- **Conferência de hora em hora:** todo dia fechado dos últimos 62 dias em que a lista tem menos remessas que o "Erros no dia" do
+  JMS volta para a fila sozinho (dias com "contagem diferente": últimos 7, a cada 6 h). Ao abrir um dia assim no painel, ele já
+  entra na fila na hora.
+- **Aviso no cartão "Erros no dia"** (em vermelho): "Lista com 8.140 de 9.140 do JMS: baixando de novo (na fila)", ou "nova
+  conferência em até 1 h", ou "O JMS entregou 8.140 de 9.140 na lista" quando o próprio JMS não entrega tudo. No alto, o selo
+  "Lista menor que o JMS em N dia(s)" no lugar de "Detalhes completos" (passe o mouse para ver os dias).
+- Hoje (dia ainda aberto no JMS) fica fora: a lista acompanha o resumo de hora em hora.
+- O rodapé do menu mostra a versão: confira se está **v4.25.5** no computador/servidor que você abre (notebook e Oracle são
+  atualizados separadamente).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_5_NODE.zip` (inclui a correção da V4.25.4).
 
 ## V4.25.4 — Detalhe igual ao JMS (Triagem Errada e Falta de Bipagem com 1.000 a menos)
 

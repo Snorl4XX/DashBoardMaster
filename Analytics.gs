@@ -824,6 +824,8 @@ function getDashboardData(indicatorKey, params) {
         : ((cfg.detail || {}).shiftProbe || []).length ? summaryShiftsOff_(cfg) : null,
       // V4.24.3: dias em que o JMS entregou menos remessas que o resumo (lista travada no limite do JMS; o painel avisa).
       shortDays: cfg.grouped || summaryMode ? [] : safeCall_(() => shortDetailDays_(indicatorKey, p.from, p.to)) || [],
+      // V4.25.5: dias fechados com a lista menor que os erros do JMS e se já estão sendo baixados de novo (o cartão avisa).
+      detailGap: cfg.grouped || summaryMode ? null : safeCall_(() => detailGapView_(indicatorKey, p.from, p.to)) || null,
       // Expedição: remessas já consultadas no Rastreamento do pacote (IDs de viagem) por dia.
       tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null,
       // V4.12.1 (Triagem Errada): lote/login pela Consulta das bipagens — completadas, sem o bipe, na fila, erro.
