@@ -71,6 +71,8 @@
         <dl class="info" id="busca-info"></dl>
         <div class="row">
           <input type="date" id="dia-busca" aria-label="Dia">
+          <input type="text" id="rota-busca" list="rotas-config" aria-label="Rota" placeholder="Rota (vazio = todas as rotas)" autocomplete="off" style="max-width:240px;height:42px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 12px">
+          <datalist id="rotas-config"></datalist>
           <button type="button" class="btn btn-red" id="buscar">Buscar este dia agora</button>
           <button type="button" class="btn btn-light" id="buscar-tudo" title="Baixa a lista de pacotes de todas as viagens de novo, mesmo sem mudança">Buscar tudo de novo</button>
         </div>

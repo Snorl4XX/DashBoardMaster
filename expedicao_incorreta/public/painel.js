@@ -1,7 +1,8 @@
-/* Painel (Rota Troncal ou Rota Secundária), no layout do painel principal: menu lateral, topo, período (data inicial e final),
- * filtros, cartões, gráficos e a tabela. PDD de saída é fixo (a nossa base). Pede os números ao app; enquanto o app busca no
- * JMS confere a cada 5 s, parado recarrega a cada minuto. Período e filtros ficam no endereço da página (dá para mandar o link
- * já filtrado). */
+/* Painel (Rota Troncal ou Rota Secundária), no layout do painel principal: menu lateral, topo, pesquisa de rota, período (data
+ * inicial e final), filtros, cartões, gráficos e a tabela. PDD de saída é fixo (a nossa base). 2.1: o painel mostra a rota
+ * pesquisada: Pesquisar busca no JMS só as viagens dessa rota e a tabela abre nos pacotes que não pertencem a ela. Pede os
+ * números ao app; enquanto o app busca confere a cada 5 s (e recarrega os números a cada 10 s), parado recarrega a cada minuto.
+ * Rota, período e filtros ficam no endereço da página (dá para mandar o link já filtrado). */
 (function () {
   'use strict';
   var G = window.Graficos, esc = G.esc, fmtInt = G.fmtInt, fmtPct = G.fmtPct;
@@ -12,7 +13,7 @@
   var st = {de: q.get('de') || q.get('dia') || '', ate: q.get('ate') || q.get('dia') || '', hoje: '', status: q.get('status') || '',
     turno: q.get('turno') || '', rota: q.get('rota') || '', destino: q.get('destino') || '', codigo: q.get('codigo') || '', login: q.get('login') || '',
     situacao: q.get('situacao') || '', busca: '', pagina: 1, tamanho: 50, ordem: '', direcao: 'asc', carregando: false, ultimaBusca: 0, ultimaCarga: 0,
-    resumo: null};
+    resumo: null, pesquisa: q.get('pesquisa') || '', autoTipo: false, estado: null};
   var FILTROS = ['status', 'rota', 'turno', 'destino', 'codigo', 'login'];
 
   var I = {
@@ -45,17 +46,25 @@
     return k === 'hoje' ? [h, h] : k === 'ontem' ? [somaDias(h, -1), somaDias(h, -1)] : k === '7' ? [somaDias(h, -6), h] : [h.slice(0, 8) + '01', h];
   }
   var ehHoje = function () { return (!st.de || st.de === st.hoje) && (!st.ate || st.ate === st.hoje); };
-  var periodoUrl = function () { return ehHoje() ? '' : '?de=' + st.de + '&ate=' + st.ate; };
+  /** Endereço de outra página do painel com a mesma rota pesquisada e o mesmo período. */
+  var periodoUrl = function () {
+    var p = new URLSearchParams();
+    if (st.pesquisa) p.set('pesquisa', st.pesquisa);
+    if (!ehHoje()) { p.set('de', st.de); p.set('ate', st.ate); }
+    return p.toString() ? '?' + p : '';
+  };
 
   // ---------------------------------------------------------------- endereço, pedidos
   function params(extra) {
     var p = new URLSearchParams({tipo: tipo, de: st.de, ate: st.ate});
+    if (st.pesquisa) p.set('pesquisa', st.pesquisa);
     FILTROS.forEach(function (k) { if (st[k]) p.set(k, st[k]); });
     Object.keys(extra || {}).forEach(function (k) { if (extra[k] !== '' && extra[k] !== undefined && extra[k] !== null) p.set(k, extra[k]); });
     return p.toString();
   }
   function guardarNoEndereco() {
     var p = new URLSearchParams();
+    if (st.pesquisa) p.set('pesquisa', st.pesquisa);
     if (!ehHoje()) { p.set('de', st.de); p.set('ate', st.ate); }
     FILTROS.concat(['situacao']).forEach(function (k) { if (st[k]) p.set(k, st[k]); });
     history.replaceState(null, '', location.pathname + (p.toString() ? '?' + p : ''));
@@ -69,19 +78,39 @@
   }
 
   // ---------------------------------------------------------------- menu lateral e topo
+  /** A busca em andamento (ou a última) é a da rota pesquisada nesta página. */
+  function buscaDaRota(b) {
+    var pq = b && b.pesquisa;
+    return !!(st.pesquisa && pq && pq.rotas && pq.rotas.some(function (r) { return r.toUpperCase() === st.pesquisa.toUpperCase(); }));
+  }
+  function mostrarRecentes(e) {
+    var l = (e.acompanhadas || []).filter(function (r) { return r !== st.pesquisa; });
+    $('recentes').innerHTML = l.length ? '<small>Pesquisadas nas últimas ' + esc(e.horasPesquisa) + ' h</small>' + l.map(function (r) {
+      return '<button type="button" class="chip" data-rota="' + esc(r) + '">' + esc(r) + '</button>';
+    }).join('') : '';
+    Array.prototype.forEach.call($('recentes').querySelectorAll('[data-rota]'), function (c) {
+      c.addEventListener('click', function () { pesquisar(c.getAttribute('data-rota')); });
+    });
+  }
   function mostrarEstado(e) {
     var b = e.busca, dot = $('syncDot');
-    st.hoje = e.hoje;
+    st.hoje = e.hoje; st.estado = e;
     $('brandCenter').textContent = e.base; $('eyebrowCenter').textContent = e.base; $('pddNome').textContent = e.base;
+    Array.prototype.forEach.call(document.querySelectorAll('.js-base'), function (el) { el.textContent = e.base; });
     $('de').max = e.hoje; $('ate').max = e.hoje;
     $('appVersion').textContent = 'v' + e.versao;
     dot.className = 'sync-dot' + (b.rodando ? ' run' : b.authVencido || (b.ultimo && !b.ultimo.ok) ? ' bad' : !b.ultimo ? ' warn' : '');
     $('lastSync').textContent = b.ultimo ? 'Atualizado no JMS: ' + hora(b.ultimo.quando) : 'Esperando a primeira busca no JMS';
-    $('queueLine').textContent = b.rodando ? (b.dias && b.dias.length > 1 ? dataBr(b.dia) + ' · ' : '') + b.etapa :
-      b.authVencido ? 'Parado: AuthToken do JMS vencido' : 'Só hoje, a cada ' + e.minutos + ' min';
-    $('refreshBtn').classList.toggle('spin', b.rodando);
-    $('refreshBtn').disabled = b.rodando;
-    $('progress').classList.toggle('on', b.rodando || st.carregando);
+    var ac = e.acompanhadas || [];
+    $('queueLine').textContent = b.rodando ? (b.pesquisa ? 'Rota ' + b.pesquisa.rotas.join(', ') + ' · ' : '') + b.etapa :
+      b.authVencido ? 'Parado: AuthToken do JMS vencido' : ac.length ? 'Rota' + (ac.length > 1 ? 's ' : ' ') + ac.slice(0, 3).join(', ') + (ac.length > 3 ? '…' : '') +
+        ': hoje, a cada ' + e.minutos + ' min' : 'Pesquise uma rota para buscar no JMS';
+    var minha = b.rodando && buscaDaRota(b);
+    $('refreshBtn').classList.toggle('spin', minha);
+    $('refreshBtn').disabled = !st.pesquisa || minha;
+    $('pesquisarBtn').disabled = false;
+    $('progress').classList.toggle('on', minha || st.carregando);
+    mostrarRecentes(e);
   }
   function mostrarMenu(menu) {
     ['troncal', 'secundaria'].forEach(function (t) {
@@ -103,27 +132,35 @@
     var pac = function (n) { return fmtInt(n) + (n === 1 ? ' pacote' : ' pacotes'); };
     if (e.busca.authVencido) h = alerta(h, false, 'AuthToken do JMS vencido.', 'Pegue um novo no JMS e cole no DashMaster ou na tela Configurações deste app. Os números abaixo são da última busca que deu certo.');
     else if (e.busca.ultimo && !e.busca.ultimo.ok) h = alerta(h, false, 'A última busca no JMS falhou.', e.busca.ultimo.msg);
+    // 2.1: a busca da rota pesquisada (em andamento, ou terminada sem nenhuma viagem da rota).
+    var pq = e.busca.pesquisa, vt = r.viagensPorTipo || {};
+    if (e.busca.rodando && buscaDaRota(e.busca)) {
+      h = alerta(h, true, 'Buscando a rota ' + st.pesquisa + ' no JMS…', e.busca.etapa + ' Os números aparecem aqui conforme chegam.');
+    } else if (!e.busca.rodando && buscaDaRota(e.busca) && pq && !pq.viagens.troncal && !pq.viagens.secundaria && !vt.troncal && !vt.secundaria) {
+      h = alerta(h, true, 'Nenhuma viagem saindo de ' + e.base + ' para ' + st.pesquisa + ' (Concluído ou Em Trânsito) em ' + periodoTxt(r.de, r.ate) + '.',
+        pq.destinos.length ? 'Destinos das viagens que saíram: ' + pq.destinos.slice(0, 15).join(', ') + (pq.destinos.length > 15 ? '…' : '') +
+          '. Se a rota tem outro nome no JMS, ajuste o nome na planilha de rotas.' : 'O JMS não tem viagens saindo da base nesse período.');
+    }
     e.planilhas.erros.forEach(function (m) { h = alerta(h, false, 'Planilha', m); });
     if (t.semRegra) h = alerta(h, true, pac(t.semRegra) + ' de rota fora da planilha de rotas', ex(p.semRegra) + '. Inclua a rota na planilha rotas.xlsx.');
     if (e.busca.avisoSegmentos) h = alerta(h, false, 'Conferência no JMS (3 segmentos) parada.', e.busca.avisoSegmentos);
     var ss = p.semSegmento;
     var spr = e.busca.segundosPorRemessa;
-    if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta o Rastreamento do pacote ' +
-      (spr > 0 ? 'uma remessa por vez: espera a resposta e pausa ' + fmtInt(spr) + ' s antes da próxima (cerca de ' +
-        fmtInt(Math.round(86400 / (spr + 2) * 0.9 / 100) * 100) + ' por dia), para o JMS não bloquear' : 'sem pausa') +
-      ', só os pacotes de hoje. Eles entram na conta quando o JMS responder.');
-    if (ss.naoConsultadosAntes) h = alerta(h, true, pac(ss.naoConsultadosAntes) + ' de dias anteriores ficaram sem o 3 Segmentos',
-      'O app só busca o dia de hoje: os dias que passaram ficam como foram salvos e esses pacotes não entram na conta.');
+    if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta o 3 Segmentos só dos pacotes da rota pesquisada' +
+      (spr > 0 ? ' (se a Gestão de pedido não responder, pelo Rastreamento do pacote: uma remessa por vez, com pausa de ' + fmtInt(spr) + ' s, para o JMS não bloquear)' : '') +
+      '. Eles entram na conta quando o JMS responder.');
+    if (ss.naoConsultadosAntes) h = alerta(h, true, pac(ss.naoConsultadosAntes) + ' de dias anteriores ainda sem o 3 Segmentos',
+      e.busca.rodando ? 'O app está conferindo: eles entram na conta quando o JMS responder.' : 'Clique em Pesquisar de novo para o app consultar no JMS.');
     if (ss.comErro) h = alerta(h, true, pac(ss.comErro) + ' com erro na consulta do 3 Segmentos', ex(ss.erros) +
       '. O app tenta de novo a cada 30 min. Para ver o que o JMS responde: Configurações › Testar o 3 Segmentos.');
     if (ss.jmsSemCodigo) h = alerta(h, true, pac(ss.jmsSemCodigo) + ' sem código no 3 Segmentos do JMS', 'O Rastreamento do pacote não tem o Código de primeiro segmento: não dá para conferir.');
     if (t.semCodigo) h = alerta(h, true, pac(t.semCodigo) + ' com código fora da tabela de rotas', ex(p.semCodigo) +
       '. Inclua o código na rota certa da aba "Rotas" da planilha rotas.xlsx.');
-    if (r.semBusca.length && !e.busca.rodando) {
-      h = alerta(h, true, r.semBusca.length === r.dias ? (r.dias === 1 ? 'Sem dados deste dia ainda.' : 'Sem dados deste período ainda.') :
-        r.semBusca.length + (r.semBusca.length === 1 ? ' dia sem dados salvos: ' : ' dias sem dados salvos: ') + r.semBusca.slice(0, 8).map(dataBr).join(', ') +
-          (r.semBusca.length > 8 ? '…' : '') + '.', r.semBusca.indexOf(st.hoje) >= 0 && r.semBusca.length === 1 ? 'Clique em Atualizar para buscar no JMS.' :
-          'O app só busca o dia de hoje: os dias anteriores aparecem aqui só se foram salvos no dia.');
+    if (r.semBusca.length && !(e.busca.rodando && buscaDaRota(e.busca))) {
+      h = alerta(h, true, r.semBusca.length === r.dias ? (r.dias === 1 ? 'A rota ' + st.pesquisa + ' ainda não foi buscada neste dia.' :
+        'A rota ' + st.pesquisa + ' ainda não foi buscada neste período.') :
+        r.semBusca.length + (r.semBusca.length === 1 ? ' dia sem dados da rota: ' : ' dias sem dados da rota: ') + r.semBusca.slice(0, 8).map(dataBr).join(', ') +
+          (r.semBusca.length > 8 ? '…' : '') + '.', 'Clique em Pesquisar para buscar no JMS.');
     }
     $('alerts').innerHTML = h;
     var b = [], v = r.viagens;
@@ -179,11 +216,11 @@
       '<div class="kpi-value">' + fmtInt(t.errados) + '</div>' +
       '<div class="kpi-sub"><b>' + fmtPct(t.taxa, 2) + '</b> dos ' + fmtInt(t.pacotes) + ' pacotes conferidos</div>' +
       '<div class="kpi-sub hero-parts">Por turno: ' + partes + ' = <b>' + fmtInt(t.errados) + '</b></div>' +
-      '<div class="hero-row">' + comp + '<span class="hero-goal">' + esc(NOME[tipo].pt) + ' · ' + esc(NOME[tipo].zh) +
+      '<div class="hero-row">' + comp + '<span class="hero-goal">Rota ' + esc(st.pesquisa) + ' · ' + esc(NOME[tipo].pt) + ' · ' + esc(NOME[tipo].zh) +
       (st.status ? ' · ' + esc(st.status === 'concluido' ? 'Concluído' : 'Em Trânsito') : '') + '</span></div></div></div>';
     h += kpi(a.buscado && a.errados ? 'bad' : '', svg('shift') + esc(nomeAnt) + ' · ' + esc(periodoTxt(a.de, a.ate)), a.buscado ? fmtInt(a.errados) : '—',
       a.buscado ? ['T1', 'T2', 'T3'].map(function (s) { return s + ' <b>' + fmtInt(ta[s].errados) + '</b>'; }).join(' · ') + '<br><b>' + fmtPct(a.taxa, 2) +
-        '</b> dos ' + fmtInt(a.pacotes) + ' pacotes' : 'Sem dados salvos (o app só busca o dia de hoje)');
+        '</b> dos ' + fmtInt(a.pacotes) + ' pacotes' : 'Sem dados da rota (a pesquisa de até 7 dias busca também o período anterior)');
     h += kpi(t.errados ? 'bad' : '', svg('gauge') + 'Taxa de erro', fmtPct(t.taxa, 2), '<b>' + fmtInt(t.pacotes) + '</b> pacotes conferidos em <b>' +
       fmtInt(r.viagens.total) + '</b> viagens');
     ['T1', 'T2', 'T3'].forEach(function (s) {
@@ -285,16 +322,43 @@
   }
 
   // ---------------------------------------------------------------- carregar tudo
+  function semRota() {
+    $('viewDashboard').classList.toggle('sem-rota', !st.pesquisa);
+    $('excelBtn').disabled = !st.pesquisa;
+  }
   function carregar() {
+    semRota();
     if (st.carregando) return Promise.resolve();
+    // Sem rota pesquisada: só o estado (menu lateral) e o convite para pesquisar.
+    if (!st.pesquisa) {
+      return pedir('api/estado').then(function (e) {
+        mostrarEstado(e); mostrarMenu(null);
+        if (!st.de) { st.de = e.hoje; st.ate = e.hoje; $('de').value = e.hoje; $('ate').value = e.hoje; }
+        $('pageSubtitle').textContent = NOME[tipo].zh + ' · Pesquise uma rota · PDD de saída ' + e.base;
+        $('alerts').innerHTML = '';
+        guardarNoEndereco();
+        st.ultimaCarga = Date.now();
+        return pedir('api/rotas').then(function (x) { listaRotas(x.rotas); });
+      }).catch(function () {}).then(function () { $('bootScreen').classList.add('done'); });
+    }
     st.carregando = true;
     $('app').classList.add('is-loading');
     $('progress').classList.add('on');
     return pedir('api/painel?' + params()).then(function (r) {
       st.resumo = r;
       st.de = r.de; st.ate = r.ate; $('de').value = r.de; $('ate').value = r.ate;
+      if (r.pesquisa && r.pesquisa !== st.pesquisa) { st.pesquisa = r.pesquisa; $('rotaBusca').value = r.pesquisa; }
       mostrarEstado(r.estado); mostrarMenu(r.menu);
-      $('pageSubtitle').textContent = NOME[tipo].zh + ' · Pacotes no caminhão errado · PDD de saída ' + r.estado.base + ' · ' + periodoTxt(r.de, r.ate);
+      listaRotas(r.rotasPesquisa);
+      // Logo depois de pesquisar: a rota está na outra página (ex.: rota da tabela troncal lançada como viagem secundária no JMS).
+      var outro = tipo === 'troncal' ? 'secundaria' : 'troncal', vt = r.viagensPorTipo;
+      if (st.autoTipo && vt && !vt[tipo] && vt[outro]) {
+        guardarNoEndereco(); // o endereço com a rota pesquisada agora (não a anterior)
+        location.href = outro + location.search;
+        return new Promise(function () {});
+      }
+      if (st.autoTipo && !(r.estado.busca.rodando && buscaDaRota(r.estado.busca))) st.autoTipo = false;
+      $('pageSubtitle').textContent = NOME[tipo].zh + ' · Pacotes que não pertencem à rota ' + st.pesquisa + ' · PDD de saída ' + r.estado.base + ' · ' + periodoTxt(r.de, r.ate);
       Array.prototype.forEach.call(document.querySelectorAll('#presets .chip'), function (c) {
         var p = atalho(c.getAttribute('data-p'));
         c.classList.toggle('active', p[0] === st.de && p[1] === st.ate);
@@ -326,6 +390,8 @@
   $('painelSelect').value = tipo;
   $('de').value = st.de; $('ate').value = st.ate;
   $('t-situacao').value = st.situacao;
+  $('rotaBusca').value = st.pesquisa;
+  semRota();
   $('f-turno').value = st.turno;
   $('f-status').value = st.status;
   $('painelSelect').addEventListener('change', function () { location.href = this.value + periodoUrl(); });
@@ -335,13 +401,49 @@
     if (de > ate) { if (mudou === 'de') ate = de; else de = ate; }
     st.de = de; st.ate = ate; $('de').value = de; $('ate').value = ate; st.pagina = 1;
   }
-  $('applyBtn').addEventListener('click', function () { lerDatas('de'); carregar(); });
-  ['de', 'ate'].forEach(function (id) { $(id).addEventListener('change', function () { lerDatas(id); carregar(); }); });
+  // Período novo com uma rota pesquisada: busca a rota nesse período (os dias já buscados não são consultados de novo).
+  var novoPeriodo = function () { if (st.pesquisa) pesquisar(st.pesquisa, true); else carregar(); };
+  $('applyBtn').addEventListener('click', function () { lerDatas('de'); novoPeriodo(); });
+  ['de', 'ate'].forEach(function (id) { $(id).addEventListener('change', function () { lerDatas(id); novoPeriodo(); }); });
   Array.prototype.forEach.call(document.querySelectorAll('#presets .chip'), function (c) {
     c.addEventListener('click', function () {
       var p = atalho(c.getAttribute('data-p'));
-      st.de = p[0]; st.ate = p[1]; $('de').value = p[0]; $('ate').value = p[1]; st.pagina = 1; carregar();
+      st.de = p[0]; st.ate = p[1]; $('de').value = p[0]; $('ate').value = p[1]; st.pagina = 1; novoPeriodo();
     });
+  });
+  // ---------------------------------------------------------------- 2.1: pesquisa de rota
+  var rotasConhecidas = [];
+  function listaRotas(l) {
+    if (!l || l.join('|') === rotasConhecidas.join('|')) return;
+    rotasConhecidas = l.slice();
+    $('rotasLista').innerHTML = l.map(function (r) { return '<option value="' + esc(r) + '"></option>'; }).join('');
+  }
+  /** Busca a rota no JMS (período do painel) e mostra os pacotes que não pertencem a ela. mesmoFiltro = mudou só o período. */
+  function pesquisar(rota, mesmoFiltro) {
+    rota = String(rota || '').trim();
+    if (!rota) { $('rotaBusca').focus(); return; }
+    $('pesquisarBtn').disabled = true;
+    return pedir('api/pesquisar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({rota: rota, de: st.de || st.hoje, ate: st.ate || st.hoje})})
+      .then(function (r) {
+        $('pesquisarBtn').disabled = false;
+        if (!r.ok) { $('alerts').innerHTML = alerta('', false, 'Rota não encontrada.', r.error); $('rotaBusca').focus(); return; }
+        var nova = r.rota !== st.pesquisa;
+        st.pesquisa = r.rota; $('rotaBusca').value = r.rota; st.de = r.de; st.ate = r.ate; st.pagina = 1; st.autoTipo = true;
+        if (nova && !mesmoFiltro) {
+          // Rota nova: a tabela abre nos pacotes que NÃO pertencem a ela; os outros filtros voltam para "Todos".
+          FILTROS.forEach(function (k) { if (k !== 'status') st[k] = ''; });
+          $('f-turno').value = '';
+          st.situacao = 'errado'; $('t-situacao').value = 'errado';
+        }
+        if (r.estado) mostrarEstado(r.estado);
+        return carregar();
+      }).catch(function () { $('pesquisarBtn').disabled = false; });
+  }
+  $('rotaForm').addEventListener('submit', function (ev) { ev.preventDefault(); lerDatas('de'); pesquisar($('rotaBusca').value); });
+  // Escolheu da lista: pesquisa na hora.
+  $('rotaBusca').addEventListener('input', function (ev) {
+    var v = this.value;
+    if ((!ev.inputType || ev.inputType === 'insertReplacementText') && v !== st.pesquisa && rotasConhecidas.indexOf(v) >= 0) { lerDatas('de'); pesquisar(v); }
   });
   FILTROS.forEach(function (k) {
     $('f-' + k).addEventListener('change', function () { st[k] = this.value; st.pagina = 1; carregar(); });
@@ -354,19 +456,13 @@
     espera = setTimeout(function () { st.busca = v; st.pagina = 1; carregarTabela(); }, 300);
   });
   $('excelBtn').addEventListener('click', function () {
+    if (!st.pesquisa) return;
     location.href = 'api/excel?' + params({situacao: st.situacao, busca: st.busca});
   });
   $('refreshBtn').addEventListener('click', function () {
+    if (!st.pesquisa) { $('rotaBusca').focus(); return; }
     $('refreshBtn').disabled = true;
-    pedir('api/buscar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({de: st.de, ate: st.ate})})
-      .then(function (r) {
-        if (r.estado) mostrarEstado(r.estado);
-        if (r.error) alert(r.error);
-        else if (!r.hojeNoPeriodo) {
-          $('alerts').insertAdjacentHTML('afterbegin', alerta('', true, 'Atualizando só o dia de hoje.', 'Os dias anteriores ficam como foram salvos. ' +
-            'Para buscar um deles de novo: Configurações › Buscar este dia agora (no computador do app).'));
-        }
-      }).catch(function () {});
+    pesquisar(st.pesquisa, true);
   });
   function tema() {
     var b = $('themeBtn'), dark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -396,8 +492,9 @@
     if (document.visibilityState !== 'visible') return;
     pedir('api/estado').then(function (e) {
       mostrarEstado(e);
-      var fim = e.busca.ultimo ? e.busca.ultimo.quando : 0;
-      if ((fim && fim !== st.ultimaBusca) || Date.now() - st.ultimaCarga > 60000) { st.ultimaBusca = fim; carregar(); }
+      var fim = e.busca.ultimo ? e.busca.ultimo.quando : 0, minha = e.busca.rodando && buscaDaRota(e.busca);
+      // Buscando a rota desta página: os números chegam aos poucos (recarrega a cada 10 s).
+      if ((fim && fim !== st.ultimaBusca) || Date.now() - st.ultimaCarga > (minha ? 10000 : 60000)) { st.ultimaBusca = fim; carregar(); }
     }).catch(function () {});
   }, 5000);
 })();

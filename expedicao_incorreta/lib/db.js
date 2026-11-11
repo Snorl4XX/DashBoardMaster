@@ -39,6 +39,8 @@ class Banco {
         em INTEGER NOT NULL DEFAULT 0, erro TEXT NOT NULL DEFAULT '');
       CREATE INDEX IF NOT EXISTS pacotes_remessa ON pacotes (billCode);
       CREATE INDEX IF NOT EXISTS pacotes_so_dia ON pacotes (dia);
+      CREATE INDEX IF NOT EXISTS pacotes_viagem ON pacotes (shipmentNo);
+      CREATE TABLE IF NOT EXISTS pesquisas (rota TEXT NOT NULL, dia TEXT NOT NULL, em INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (rota, dia));
     `);
     // 1.2: status da viagem quando a lista de pacotes foi conferida (viagem concluída e conferida não muda mais).
     if (!this.db.prepare('PRAGMA table_info(viagens)').all().some(c => c.name === 'estadoBusca')) this.db.exec('ALTER TABLE viagens ADD COLUMN estadoBusca TEXT');
@@ -88,7 +90,11 @@ class Banco {
       statusDia: this.db.prepare('SELECT estado, COUNT(*) AS n FROM viagens WHERE tipo = ? AND dia = ? GROUP BY estado ORDER BY n DESC'),
       marcarDia: this.db.prepare('INSERT INTO buscas (dia, em) VALUES (?, ?) ON CONFLICT (dia) DO UPDATE SET em = excluded.em'),
       buscados: this.db.prepare('SELECT dia FROM buscas WHERE dia BETWEEN ? AND ?'),
-      diasSalvos: this.db.prepare('SELECT COUNT(*) AS n, MIN(dia) AS de, MAX(dia) AS ate FROM buscas')
+      diasSalvos: this.db.prepare('SELECT COUNT(*) AS n, MIN(dia) AS de, MAX(dia) AS ate FROM buscas'),
+      // 2.1: dias buscados de cada rota pesquisada (rota = nome normalizado).
+      marcarRotaDia: this.db.prepare('INSERT INTO pesquisas (rota, dia, em) VALUES (?, ?, ?) ON CONFLICT (rota, dia) DO UPDATE SET em = excluded.em'),
+      rotaDia: this.db.prepare('SELECT em FROM pesquisas WHERE rota = ? AND dia = ?'),
+      buscadosRota: this.db.prepare('SELECT dia FROM pesquisas WHERE rota = ? AND dia BETWEEN ? AND ?')
     };
   }
   get(k) { const r = this.st.get.get(String(k)); return r ? r.v : null; }
@@ -138,6 +144,27 @@ class Banco {
   marcarDia(dia) { this.st.marcarDia.run(dia, Date.now()); }
   /** Dias do período que já foram buscados. → Set */
   buscados(de, ate) { return new Set(this.st.buscados.all(de, ate).map(r => r.dia)); }
+  /** 2.1: o dia foi buscado para esta rota (rota = nome normalizado). */
+  marcarRotaDia(rota, dia) { this.st.marcarRotaDia.run(rota, dia, Date.now()); }
+  /** Quando o dia foi buscado para a rota (0 = nunca). */
+  rotaDia(rota, dia) { const r = this.st.rotaDia.get(rota, dia); return r ? r.em : 0; }
+  /** Dias do período já buscados para a rota. → Set */
+  buscadosRota(rota, de, ate) { return new Set(this.st.buscadosRota.all(rota, de, ate).map(r => r.dia)); }
+  /** 2.1: remessas destas viagens ainda sem o "3 Segmentos" (ou com erro há mais de 30 min). */
+  semSegmentoViagens(ids, limite) {
+    if (!ids || !ids.length) return [];
+    return this.db.prepare(`SELECT DISTINCT p.billCode FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode
+      WHERE p.shipmentNo IN (${ids.map(() => '?').join(',')}) AND (s.billCode IS NULL OR (s.erro <> '' AND s.em < ?)) LIMIT ?`)
+      .all(...ids, Date.now() - 30 * 60000, limite || 2000).map(r => r.billCode);
+  }
+  /** {total, feitos, comErro} das remessas destas viagens. */
+  contarSegmentosViagens(ids) {
+    if (!ids || !ids.length) return {total: 0, feitos: 0, comErro: 0};
+    return this.db.prepare(`SELECT COUNT(DISTINCT p.billCode) AS total,
+        COUNT(DISTINCT CASE WHEN s.billCode IS NOT NULL AND s.erro = '' THEN p.billCode END) AS feitos,
+        COUNT(DISTINCT CASE WHEN s.erro <> '' THEN p.billCode END) AS comErro
+      FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode WHERE p.shipmentNo IN (${ids.map(() => '?').join(',')})`).get(...ids);
+  }
   /** {n, de, ate}: quantos dias estão guardados. */
   diasSalvos() { return this.st.diasSalvos.get(); }
   fechar() { try { this.db.close(); } catch (e) { /* já fechado */ } }

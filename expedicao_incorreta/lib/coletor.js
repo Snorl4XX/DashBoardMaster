@@ -1,5 +1,7 @@
 'use strict';
 /**
+ * 2.1: com "rotas" (pesquisa de rota) só as viagens dessas rotas (destino da viagem na planilha de rotas), os pacotes delas e o
+ * "3 Segmentos" só desses pacotes; dia que já passou e já foi buscado para a rota não vai ao JMS de novo. Sem "rotas", todas.
  * Busca no JMS, dia a dia: as viagens que SAEM da nossa base (PDD de saída fixo: troncal e secundária), o "Bipe de
  * carregamento" da nossa base em cada uma (Info / Registros de carga e descarga) e a lista de pacotes desse bipe. Grava tudo
  * no banco (os dias anteriores ficam guardados).
@@ -15,6 +17,7 @@
  *   - AuthToken vencido para tudo e avisa; erro numa viagem não para as outras.
  */
 const {statusDe} = require('./status');
+const {norm} = require('./regras');
 
 const MAX_PAGINAS = 5000;
 
@@ -34,6 +37,8 @@ function diasEntre(de, ate) {
   for (let d = de; d <= ate && out.length < 400; d = somaDias(d, 1)) out.push(d);
   return out;
 }
+/** 06:00 do dia seguinte (horário de São Paulo, TZ do app): a carga do dia não muda mais. */
+function fimDoDia(dia) { return new Date(somaDias(dia, 1) + 'T06:00:00').getTime(); }
 function texto(v) { return v === null || v === undefined ? '' : String(v).trim(); }
 /** Linha de "Bipe de carregamento" (o JMS manda loadingTypeName "1"). */
 function ehCarga(r) { const t = texto(r && r.loadingTypeName); return t === '1' || /carreg|装/i.test(t); }
@@ -51,40 +56,56 @@ async function emParalelo(itens, n, fn) {
 }
 
 class Coletor {
-  /** {banco, jms, cfg, log(nivel, texto), aoMudar(tipo, dia)} */
+  /** {banco, jms, cfg, log(nivel, texto), aoMudar(tipo, dia), regras (2.1: para achar a rota de cada viagem)} */
   constructor(o) {
     Object.assign(this, o);
     this.estado = {rodando: false, dia: '', dias: [], tipo: '', etapa: 'Ainda não buscou.', viagens: 0, feitas: 0, pacotes: 0, inicio: 0, fim: 0,
-      segmentos: 0, erros: [], ultimo: null, authVencido: false, avisoSegmentos: ''};
+      segmentos: 0, erros: [], ultimo: null, authVencido: false, avisoSegmentos: '', pesquisa: null};
     this.atual = null;
-    this.pendentes = new Set();
+    this.fila = [];
+    this.interromper = false;
   }
-  /** Busca um ou mais dias (todas as rotas), um de cada vez. Se já estiver buscando, os dias novos entram na fila e a busca
-   * atual é devolvida. */
+  /**
+   * Busca um ou mais dias, um de cada vez. opcoes = {forcar, tipos, rotas}. 2.1: com "rotas" (nomes da planilha de rotas) busca
+   * só as viagens dessas rotas, os pacotes delas e o "3 Segmentos" só desses pacotes, na ordem dos dias pedida; sem "rotas",
+   * todas as rotas (Configurações). Se já estiver buscando, o pedido entra na fila (o "3 Segmentos" da busca atual para e
+   * continua na próxima) e a busca atual é devolvida.
+   */
   coletar(dias, opcoes) {
-    const lista = Array.from(new Set([].concat(dias).filter(Boolean))).sort();
+    const o = opcoes || {}, rotas = Array.from(new Set([].concat(o.rotas || []).filter(Boolean)));
+    let lista = Array.from(new Set([].concat(dias).filter(Boolean)));
+    if (!rotas.length) lista.sort();
     if (this.atual) {
-      lista.forEach(d => { if (this.estado.dias.indexOf(d) < 0) this.pendentes.add(d); });
+      const chave = rotas.map(norm).sort().join('|') + '#' + (o.forcar ? 1 : 0), igual = this.fila.find(j => j.chave === chave);
+      if (igual) lista.forEach(d => { if (igual.dias.indexOf(d) < 0) igual.dias.push(d); });
+      else this.fila.push({chave, dias: lista, opcoes: Object.assign({}, o, {rotas})});
+      this.interromper = true;
       return this.atual;
     }
-    const o = opcoes || {}, tipos = o.tipos || ['troncal', 'secundaria'];
+    const tipos = o.tipos || ['troncal', 'secundaria'], alvo = new Set(rotas.map(norm));
+    this.interromper = false;
     this.atual = (async () => {
-      const e = this.estado, feitos = [];
+      const e = this.estado, feitos = [], ids = rotas.length ? new Map() : null;
       Object.assign(e, {rodando: true, dia: lista[0] || '', dias: lista, inicio: Date.now(), fim: 0, viagens: 0, feitas: 0, pacotes: 0, segmentos: 0,
-        erros: [], etapa: 'Começando…'});
+        erros: [], etapa: 'Começando…', pesquisa: rotas.length ? {rotas, dias: lista, viagens: {troncal: 0, secundaria: 0}, destinos: []} : null});
       if (this.jms.novaRodada) this.jms.novaRodada();
       let ok = true, msg = '';
       try {
         for (const dia of lista) {
           e.dia = dia;
-          for (const tipo of tipos) await this.coletarTipo(tipo, dia, o.forcar);
-          if (tipos.length > 1) this.banco.marcarDia(dia);
+          // Dia que já passou e foi buscado para a rota depois de terminar (06:00 do dia seguinte): a carga não muda mais.
+          const pronto = rotas.length && !o.forcar && dia < hojeSp() && rotas.every(r => this.banco.rotaDia(norm(r), dia) >= fimDoDia(dia));
+          if (!pronto) for (const tipo of tipos) await this.coletarTipo(tipo, dia, o.forcar, alvo.size ? alvo : null);
+          if (rotas.length) {
+            if (!pronto) rotas.forEach(r => this.banco.marcarRotaDia(norm(r), dia));
+            ids.set(dia, this.viagensDasRotas(dia, alvo));
+          } else if (tipos.length > 1) this.banco.marcarDia(dia);
           feitos.push(dia);
         }
-        await this.buscarSegmentos(feitos);
+        await this.buscarSegmentos(feitos, ids);
         e.authVencido = false;
-        msg = e.viagens + ' viagens, ' + e.pacotes + ' pacotes novos ou atualizados' + (e.segmentos ? ', ' + e.segmentos + ' conferidos no JMS (3 segmentos)' : '') +
-          (e.erros.length ? ' · ' + e.erros.length + ' com erro' : '');
+        msg = (rotas.length ? 'Rota ' + rotas.join(', ') + ': ' : '') + e.viagens + ' viagens, ' + e.pacotes + ' pacotes novos ou atualizados' +
+          (e.segmentos ? ', ' + e.segmentos + ' conferidos no JMS (3 segmentos)' : '') + (e.erros.length ? ' · ' + e.erros.length + ' com erro' : '');
       } catch (err) {
         ok = false;
         msg = String(err && err.message || err);
@@ -92,27 +113,48 @@ class Coletor {
         this.log('erro', 'Busca de ' + e.dia + ' parou: ' + msg);
       } finally {
         Object.assign(e, {rodando: false, fim: Date.now(), tipo: '', etapa: ok ? 'Pronto.' : 'Parou: ' + msg});
-        e.ultimo = {quando: Date.now(), dia: e.dia, dias: feitos, ok, msg};
+        e.ultimo = {quando: Date.now(), dia: e.dia, dias: feitos, ok, msg, rotas};
         this.atual = null;
-        if (this.pendentes.size) {
-          const prox = Array.from(this.pendentes);
-          this.pendentes.clear();
-          setImmediate(() => this.coletar(prox).catch(() => {}));
-        }
+        // O próximo pedido da fila começa já (o painel não vê "parado" entre um e outro).
+        const prox = this.fila.shift();
+        if (prox) this.coletar(prox.dias, prox.opcoes).catch(() => {});
       }
       return e.ultimo;
     })();
     return this.atual;
   }
-  async coletarTipo(tipo, dia, forcar) {
-    const e = this.estado, cfg = this.cfg, nomeTipo = tipo === 'troncal' ? 'troncal' : 'secundária';
+  /** 2.1: rota da viagem (nome normalizado da planilha de rotas) pelo destino dela; '' = fora da planilha. */
+  rotaDaViagem(tipo, v) {
+    const r = this.regras && this.regras.rotaDoCaminhao(tipo, v.destino);
+    return r ? r.rotaNorm : '';
+  }
+  /** IDs das viagens do dia (Concluído ou Em Trânsito) das rotas pesquisadas, nas duas tabelas (para o "3 Segmentos"). */
+  viagensDasRotas(dia, alvo) {
+    const out = [];
+    ['troncal', 'secundaria'].forEach(t => this.banco.viagensDia(t, dia).forEach(v => {
+      if (statusDe(v.estado, this.cfg.statusCodigos) && alvo.has(this.rotaDaViagem(t, v))) out.push(v.shipmentNo);
+    }));
+    return out;
+  }
+  /** Viagens do dia (troncal ou secundária) e os pacotes de cada uma. alvo = Set de rotas (nome normalizado): só as viagens delas. */
+  async coletarTipo(tipo, dia, forcar, alvo) {
+    const e = this.estado, cfg = this.cfg, nomeTipo = tipo === 'troncal' ? 'troncal' : 'secundária', br = d => d.split('-').reverse().join('/');
     e.tipo = tipo;
-    e.etapa = 'Viagens da rota ' + nomeTipo + '…';
-    const todas = await this.listarViagens(tipo, dia), viagens = todas.filter(v => statusDe(v.estado, cfg.statusCodigos));
+    e.etapa = (alvo ? br(dia) + ' · ' : '') + 'Viagens da rota ' + nomeTipo + '…';
+    const todas = await this.listarViagens(tipo, dia), noStatus = todas.filter(v => statusDe(v.estado, cfg.statusCodigos));
+    const viagens = alvo ? noStatus.filter(v => alvo.has(this.rotaDaViagem(tipo, v))) : noStatus;
     e.viagens += viagens.length;
     const conc = viagens.filter(v => statusDe(v.estado, cfg.statusCodigos) === 'concluido').length;
-    this.log('info', dia + ' · rota ' + nomeTipo + ': ' + todas.length + ' viagens saindo de ' + cfg.nomeBase + ' · ' + conc + ' concluídas e ' +
-      (viagens.length - conc) + ' em trânsito' + (todas.length > viagens.length ? ' (' + (todas.length - viagens.length) + ' em outro status ficam de fora)' : '') + '.');
+    if (alvo && e.pesquisa) {
+      e.pesquisa.viagens[tipo] += viagens.length;
+      // Para o aviso "nenhuma viagem para a rota": os destinos das viagens do dia.
+      noStatus.forEach(v => { if (v.destino && e.pesquisa.destinos.indexOf(v.destino) < 0 && e.pesquisa.destinos.length < 40) e.pesquisa.destinos.push(v.destino); });
+      this.log('info', dia + ' · rota ' + nomeTipo + ': ' + noStatus.length + ' viagens saindo de ' + cfg.nomeBase + ' (Concluído ou Em Trânsito) · ' +
+        viagens.length + ' para ' + e.pesquisa.rotas.join(', ') + (viagens.length ? ' (' + conc + ' concluídas e ' + (viagens.length - conc) + ' em trânsito)' : '') + '.');
+    } else {
+      this.log('info', dia + ' · rota ' + nomeTipo + ': ' + todas.length + ' viagens saindo de ' + cfg.nomeBase + ' · ' + conc + ' concluídas e ' +
+        (viagens.length - conc) + ' em trânsito' + (todas.length > viagens.length ? ' (' + (todas.length - viagens.length) + ' em outro status ficam de fora)' : '') + '.');
+    }
     let mudou = todas.mudou;
     await emParalelo(viagens, cfg.consultasAoMesmoTempo, async v => {
       try {
@@ -125,7 +167,7 @@ class Coletor {
         this.log('aviso', 'Viagem ' + v.shipmentNo + ' (' + nomeTipo + '): ' + msg);
       } finally {
         e.feitas++;
-        e.etapa = 'Rota ' + nomeTipo + ': viagem ' + e.feitas + ' de ' + e.viagens + '…';
+        e.etapa = (alvo ? br(dia) + ' · ' : '') + 'Rota ' + nomeTipo + ': viagem ' + e.feitas + ' de ' + e.viagens + '…';
       }
     });
     if (mudou && this.aoMudar) this.aoMudar(tipo, dia);
@@ -138,13 +180,15 @@ class Coletor {
    *     de novo depois).
    *   - JMS recusando as 20 primeiras sem nenhum acerto: para e avisa. Token vencido: para tudo.
    */
-  async buscarSegmentos(dias) {
+  async buscarSegmentos(dias, ids) {
     const e = this.estado, cfg = this.cfg;
     if (this.pausaSegmentos && Date.now() < this.pausaSegmentos) return;
+    // 2.1: ids = Map dia → IDs das viagens da rota pesquisada (só os pacotes delas, na ordem dos dias pedida).
+    const fonte = this.fonteSegmentos(dias, ids);
     // 2.0: Gestão de pedido JMS de remessa (várias remessas por consulta). Sem ela (o JMS não aceitou nenhum pedido), o
     // Rastreamento do pacote, uma remessa por vez, como antes; a Gestão é testada de novo depois de 1 h.
     if (cfg.fonteSegmentos !== 'rastreio' && this.jms.segmentosLote && !(this.gestaoFora && Date.now() < this.gestaoFora)) {
-      const r = await this.buscarSegmentosGestao(dias);
+      const r = await this.buscarSegmentosGestao(dias, ids);
       if (r !== 'indisponivel') return;
     }
     // Até 1 min antes da próxima busca automática (contando do começo desta), para não atrasar as viagens.
@@ -153,15 +197,14 @@ class Coletor {
     let ok = 0, falhas = 0, ultimoErro = '', parar = '';
     e.tipo = '';
     e.avisoSegmentos = '';
-    const hoje = hojeSp(), ordem = Array.from(new Set([].concat(dias || [hoje])))
-      .sort((a, b) => (a === hoje ? -1 : b === hoje ? 1 : b.localeCompare(a)));
-    for (const dia of ordem) {
-      const total = this.banco.contarSegmentos(dia);
+    for (const dia of fonte.ordem) {
+      const total = fonte.contar(dia);
       let feitos = total.feitos;
-      for (let lote = this.banco.semSegmento(dia, 500); lote.length && !parar; lote = this.banco.semSegmento(dia, 500)) {
+      for (let lote = fonte.pendentes(dia, 500); lote.length && !parar; lote = fonte.pendentes(dia, 500)) {
         if (Date.now() >= fim) { parar = 'tempo'; break; }
+        if (this.interromper) { parar = 'fila'; break; }
         await emParalelo(lote, aoMesmoTempo, async b => {
-          if (parar || Date.now() >= fim) return;
+          if (parar || Date.now() >= fim || this.interromper) return;
           try {
             this.banco.salvarSegmento(b, await this.jms.segmentos(b), '');
             ok++; feitos++; e.segmentos++;
@@ -190,27 +233,37 @@ class Coletor {
     }
     if (ok || falhas) {
       this.log('info', '3 segmentos: ' + ok + ' pacotes conferidos no JMS' + (falhas ? ', ' + falhas + ' com erro (tenta de novo em 30 min)' : '') +
-        (parar === 'tempo' ? '. O resto continua na próxima busca.' : '.'));
+        (parar === 'tempo' || parar === 'fila' ? '. O resto continua na próxima busca.' : '.'));
     }
+  }
+  /** De onde vêm as remessas sem "3 Segmentos": do dia inteiro (hoje primeiro) ou só das viagens da rota pesquisada (ids). */
+  fonteSegmentos(dias, ids) {
+    const hoje = hojeSp(), lista = Array.from(new Set([].concat(dias || [hoje])));
+    if (ids) {
+      return {ordem: lista.filter(d => (ids.get(d) || []).length), contar: d => this.banco.contarSegmentosViagens(ids.get(d)),
+        pendentes: (d, n) => this.banco.semSegmentoViagens(ids.get(d), n)};
+    }
+    return {ordem: lista.sort((a, b) => (a === hoje ? -1 : b === hoje ? 1 : b.localeCompare(a))), contar: d => this.banco.contarSegmentos(d),
+      pendentes: (d, n) => this.banco.semSegmento(d, n)};
   }
   /**
    * 2.0: "3 Segmentos" pela Gestão de pedido JMS de remessa, em lotes de "remessasPorConsulta" (hoje primeiro), uma consulta por
    * vez com "segundosEntreLotes" de pausa. A remessa que o JMS não devolve fica com erro e volta em 30 min. → 'indisponivel'
    * quando a Gestão não serve (o coletor usa o Rastreamento do pacote).
    */
-  async buscarSegmentosGestao(dias) {
-    const e = this.estado, cfg = this.cfg, br = d => d.split('-').reverse().join('/');
+  async buscarSegmentosGestao(dias, ids) {
+    const e = this.estado, cfg = this.cfg, br = d => d.split('-').reverse().join('/'), fonte = this.fonteSegmentos(dias, ids);
     const fim = Math.max(Date.now() + 60000, (e.inicio || Date.now()) + Math.max(2, (cfg.minutos || 15) - 1) * 60000);
     const lote = Math.max(1, Math.min(500, Number(cfg.remessasPorConsulta) || 100)), pausa = Math.max(0, Number(cfg.segundosEntreLotes) || 0) * 1000;
-    const hoje = hojeSp(), ordem = Array.from(new Set([].concat(dias || [hoje]))).sort((a, b) => (a === hoje ? -1 : b === hoje ? 1 : b.localeCompare(a)));
     let ok = 0, faltou = 0, consultas = 0, parar = '';
     e.tipo = '';
     e.avisoSegmentos = '';
-    for (const dia of ordem) {
-      const total = this.banco.contarSegmentos(dia);
+    for (const dia of fonte.ordem) {
+      const total = fonte.contar(dia);
       let feitos = total.feitos;
-      for (let ws = this.banco.semSegmento(dia, lote); ws.length && !parar; ws = this.banco.semSegmento(dia, lote)) {
+      for (let ws = fonte.pendentes(dia, lote); ws.length && !parar; ws = fonte.pendentes(dia, lote)) {
         if (Date.now() >= fim) { parar = 'tempo'; break; }
+        if (this.interromper) { parar = 'fila'; break; }
         let r;
         try { r = await this.jms.segmentosLote(ws); consultas++; }
         catch (err) {
@@ -233,7 +286,7 @@ class Coletor {
     if (parar === 'bloqueio') { this.pausaSegmentos = Date.now() + 15 * 60000; this.log('aviso', e.avisoSegmentos); }
     if (ok || faltou) {
       this.log('info', '3 segmentos (Gestão de pedido): ' + ok + ' pacotes conferidos em ' + consultas + ' consultas' +
-        (faltou ? ', ' + faltou + ' sem resposta do JMS (tenta de novo em 30 min)' : '') + (parar === 'tempo' ? '. O resto continua na próxima busca.' : '.'));
+        (faltou ? ', ' + faltou + ' sem resposta do JMS (tenta de novo em 30 min)' : '') + (parar === 'tempo' || parar === 'fila' ? '. O resto continua na próxima busca.' : '.'));
     }
     return parar || 'ok';
   }

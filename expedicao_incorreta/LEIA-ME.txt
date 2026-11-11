@@ -3,11 +3,12 @@ J&T · EXPEDIÇÃO INCORRETA (app separado do DashMaster)
 
 O que faz
 ---------
-Mostra, quase em tempo real, os pacotes colocados no caminhão errado (ex.: pacote do RJ dentro do caminhão para SP BRE).
-Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
+Você PESQUISA A ROTA (versão 2.1) e o painel mostra os pacotes que NÃO PERTENCEM a ela (ex.: pacote do RJ dentro do
+caminhão para SP BRE). Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA (o painel vai sozinho para o da rota pesquisada).
 
-1. Pega no JMS os caminhões que SAEM da base no dia (Consulta de viagens troncais e Consulta de Viagens Secundárias),
-   com PDD de saída = SP GRU (fixo) e Status Concluído：已完成 ou Em Trânsito：在途 (os outros ficam de fora).
+1. Pega no JMS só os caminhões da ROTA PESQUISADA que SAEM da base no período (Consulta de viagens troncais e Consulta
+   de Viagens Secundárias), com PDD de saída = SP GRU (fixo) e Status Concluído：已完成 ou Em Trânsito：在途 (os outros
+   ficam de fora). A rota do caminhão é o destino da viagem, procurado na planilha de rotas.
 2. Em cada viagem, abre a linha "SP GRU · Bipe de carregamento" (Info / Registros de carga e descarga) e pega a lista de
    pacotes: pedido, lote, próxima parada, Base Destino, digitalizado por e tempo de digitalização.
 3. Procura o "3 Segmentos" de cada remessa na Gestão de pedido JMS de remessa (versão 2.0): coluna 3 Segmentos, ex.:
@@ -24,15 +25,19 @@ Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
      DC TBT-SP, DC GRU-SP e SBN são conferidos assim (são da linha secundária).
    Não pertence → ERRADO, e a coluna "Destino correto" diz para onde a remessa devia ir.
    A rota do caminhão é procurada nas duas tabelas (o JMS lança, por exemplo, DC GRU-SP como viagem secundária).
-5. Busca SÓ O DIA DE HOJE, de novo a cada 15 minutos (só baixa de novo a lista das viagens que mudaram).
-6. Guarda todos os dias no banco, para você acompanhar depois. Os dias que passaram ficam como foram salvos: o app não
-   busca de novo (nem as viagens, nem o 3 Segmentos). O que ficou sem o 3 Segmentos aparece como "não consultado".
+5. Não puxa mais todas as rotas. A rota pesquisada continua atualizando sozinha (o dia de hoje, a cada 15 minutos) por
+   12 horas depois da pesquisa (só baixa de novo a lista das viagens que mudaram). Sem rota pesquisada, o app não
+   consulta o JMS.
+6. Guarda tudo no banco. Dia que já passou e já foi buscado para a rota não vai ao JMS de novo (a carga não muda mais).
 
 No painel
 ---------
-- Data inicial e Data final (até 31 dias) e os atalhos Hoje, Ontem, Últimos 7 dias e Este mês.
-  O botão Atualizar busca só o dia de hoje. Dia que não foi salvo aparece no aviso; para buscar um dia que passou:
-  Configurações > Buscar este dia agora (no computador do app).
+- Pesquisar rota: digite a rota (ex.: SP BRE; a lista mostra as rotas da planilha) e clique em Pesquisar. O app busca
+  no JMS as viagens dessa rota no período, os pacotes delas e o 3 Segmentos só desses pacotes. Os números aparecem
+  conforme chegam; a tabela abre em "Errado" (os pacotes que não pertencem à rota). Período de até 7 dias: busca também
+  o período anterior, para o cartão "Dia anterior". As rotas pesquisadas nas últimas 12 h aparecem como atalhos.
+- Data inicial e Data final (até 31 dias) e os atalhos Hoje, Ontem, Últimos 7 dias e Este mês: com uma rota pesquisada,
+  trocar o período busca a rota no período novo. O botão Atualizar busca de novo a rota pesquisada.
 - PDD de saída: SP GRU, fixo.
 - Filtros: Status (Concluído：已完成 / Em Trânsito：在途), Base Destino (as bases da tabela de rotas do SC:
   21 da troncal, 18 da secundária), Turno, Destino correto, Código de 1º segmento e Login.
@@ -60,8 +65,7 @@ Instalar (no computador onde já roda o DashMaster, sem administrador)
 5. Abra http://localhost:3300/config
    - AuthToken: se o DashMaster está neste computador, o app já usa o mesmo AuthToken dele. Clique em "Testar a conexão".
      (Sem DashMaster: cole o AuthToken e clique em "Salvar e testar".)
-   - Clique em "Buscar este dia agora".
-6. Painéis: http://localhost:3300/troncal e http://localhost:3300/secundaria
+6. Painéis: http://localhost:3300/troncal e http://localhost:3300/secundaria > Pesquisar rota.
 
 Planilha de rotas (C:\expedicao_incorreta\planilhas\rotas.xlsx)
 ---------------------------------------------------------------
@@ -70,6 +74,13 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
   Quando as docas mudarem, mude aqui. Duas linhas da mesma rota = qualquer uma vale.
   (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
+
+Versão 2.1 (pedido "pesquisar a rota")
+  - Campo "Pesquisar rota" no painel: o app puxa do JMS só a rota pesquisada e mostra os pacotes que não pertencem a ela.
+  - A busca automática não puxa mais todas as rotas: só as pesquisadas nas últimas 12 h ("horasPesquisa" no config.json),
+    o dia de hoje, a cada 15 min.
+  - Configurações > Buscar este dia agora: com a rota, só ela; vazio, todas as rotas do dia (pedido na mão).
+  - Os dias já guardados continuam no banco: pesquise a rota e eles aparecem.
 
 Versão 2.0 (pedido "localizar remessas carregadas na rota errada")
   - 3 Segmentos pela Gestão de pedido JMS de remessa, várias remessas por consulta (antes: uma a cada 30 s, cerca de
@@ -105,7 +116,8 @@ Situações na tabela
 -------------------
 Errado                 pacote fora da rota do caminhão (conta como erro). A coluna "Destino correto" diz onde devia ir.
 Certo                  pacote da rota
-Sem 3 Segmentos        · aguardando: ainda não consultado · erro no JMS: a consulta deu erro (tenta de novo em 30 min)
+Sem 3 Segmentos        · aguardando: ainda não consultado · não consultado: dia que passou (pesquise a rota de novo)
+                       · erro no JMS: a consulta deu erro (tenta de novo em 30 min)
                        · JMS sem código: o Rastreamento do pacote não tem o Código de primeiro segmento
 Código fora da tabela  o código do pacote não está em nenhuma rota da aba "Rotas" (inclua)
 Rota sem regra         a próxima parada não está na aba "Rotas"
@@ -126,7 +138,7 @@ Link para a equipe (Tailscale, o mesmo do DashMaster)
 config.json (criado na 1ª vez)
 ------------------------------
 porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 15 (busca automática
-de hoje) · fonteSegmentos "gestao" ("rastreio" = só o Rastreamento do pacote) · remessasPorConsulta 100 e segundosEntreLotes 2
+de hoje das rotas pesquisadas) · horasPesquisa 12 (por quanto tempo a rota pesquisada continua atualizando sozinha) · fonteSegmentos "gestao" ("rastreio" = só o Rastreamento do pacote) · remessasPorConsulta 100 e segundosEntreLotes 2
 (Gestão de pedido) · caminho "/expedicao" (caminho no link do Tailscale) · status {"concluido": [4], "emTransito": [3]} (códigos do
 Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultasSegmentos 3
 (consultas do "3 Segmentos" ao mesmo tempo) · consultasPorSegundo 5 (viagens e bipes: ritmo máximo das consultas ao JMS) · segundosPorRemessa 30

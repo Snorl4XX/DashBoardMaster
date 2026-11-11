@@ -59,6 +59,7 @@ function portaLivre() {
   return new Promise(r => { const s = http.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 }
 const esperar = ms => new Promise(r => setTimeout(r, ms));
+const coletorRodando = r => !!(r && r.json && r.json.busca && r.json.busca.rodando);
 
 // ------------------------------------------------------------------ planilhas fictícias
 function abasRotas(comWW) {
@@ -354,8 +355,10 @@ function abasRotas(comWW) {
   conferir(/PDD de saída/.test(pag.texto) && /id="de"/.test(pag.texto) && /id="ate"/.test(pag.texto) && /Concluído：已完成/.test(pag.texto) &&
     /Em Trânsito：在途/.test(pag.texto) && /id="f-rota"[\s\S]{0,80}Todas/.test(pag.texto) && />Base Destino</.test(pag.texto),
     'tela: PDD de saída fixo, data inicial e final, filtros Status (Concluído e Em Trânsito) e Base Destino');
+  conferir(/id="rotaBusca"/.test(pag.texto) && />Pesquisar rota</.test(pag.texto) && /id="rotasLista"/.test(pag.texto) && /id="emptySearch"/.test(pag.texto) &&
+    /class="view sem-rota"/.test(pag.texto), '2.1: campo Pesquisar rota (com a lista das rotas) e o convite para pesquisar');
   const ep = (await local('GET', '/api/estado')).json;
-  conferir(ep.base === 'SP GRU' && ep.codigoBase === '30001' && !('minutosDiaAnterior' in ep) && ep.maxDias === 31,
+  conferir(ep.base === 'SP GRU' && ep.codigoBase === '30001' && !('minutosDiaAnterior' in ep) && ep.maxDias === 31 && ep.acompanhadas.length === 0,
     'PDD de saída SP GRU (30001); busca só hoje (o "ontem a cada 60 min" de um config.json antigo é ignorado)', ep);
   conferir((await remoto('GET', '/config')).status === 403 && (await remoto('GET', '/config/api/estado')).status === 403,
     'Configurações não abrem de fora (link público)');
@@ -468,13 +471,63 @@ function abasRotas(comWW) {
   let pr = await periodo();
   conferir(pr.de === DIA_ANTES && pr.ate === DIA && pr.dia === '' && pr.dias === 2 && pr.semBusca.join() === DIA_ANTES && pr.totais.pacotes === 130,
     'período: junta os dias e aponta o dia ainda não buscado', {de: pr.de, ate: pr.ate, semBusca: pr.semBusca, t: pr.totais});
-  // Atualizar busca só o dia de hoje: o dia que falta no período continua sem dados.
+  // ---------- 4c. 2.1: pesquisa de rota (só a rota pesquisada no JMS) ----------
+  const pesq = async corpo => { const r = await local('POST', '/api/pesquisar', corpo); await esperar(50); return Object.assign(await terminar(), {resp: r}); };
+  const pr400 = await local('POST', '/api/pesquisar', {rota: 'ROTA QUE NAO EXISTE', de: DIA, ate: DIA}), vazio = await local('POST', '/api/pesquisar', {rota: ' '});
+  const ambigua = await local('POST', '/api/pesquisar', {rota: 'local', de: DIA, ate: DIA});
+  conferir(pr400.status === 400 && /não está na planilha de rotas/.test(pr400.json.error) && vazio.status === 400 && /Digite a rota/.test(vazio.json.error) &&
+    ambigua.status === 400 && !coletorRodando(await local('GET', '/api/estado')), 'pesquisa: rota fora da planilha, vazia ou ambígua ("local" = 2 rotas) é recusada sem consultar o JMS',
+  {a: pr400.json, b: vazio.json, c: ambigua.json});
+  const regAntes = Object.assign({}, jms.estado.registrosPedidos), segAntesP = Object.assign({}, jms.estado.segmentosPedidos);
   let n0 = jms.estado.diasPedidos.length;
-  const pb = (await local('POST', '/api/buscar', {de: DIA_ANTES, ate: DIA})).json;
-  await esperar(50); await terminar();
-  conferir(pb.ok && pb.dias.join() === hojeSp() && pb.hojeNoPeriodo === false && jms.estado.diasPedidos.slice(n0).join() === hojeSp() &&
-    (await periodo()).semBusca.join() === DIA_ANTES, 'Atualizar: busca só o dia de hoje (os dias do período ficam como foram salvos)',
-    {pb, pedidos: jms.estado.diasPedidos.slice(n0)});
+  let pe = await pesq({rota: 'norte', de: DIA_ANTES, ate: DIA});
+  const novosReg = Object.keys(jms.estado.registrosPedidos).filter(k => jms.estado.registrosPedidos[k] !== regAntes[k]);
+  const novosSeg = Object.keys(jms.estado.segmentosPedidos).filter(k => jms.estado.segmentosPedidos[k] !== segAntesP[k]);
+  conferir(pe.resp.json.ok && pe.resp.json.rota === 'XX NORTE' && pe.resp.json.dias.join() === DIA + ',' + DIA_ANTES && pe.resp.json.anteriores.join() === '2026-10-18,2026-10-17' &&
+    jms.estado.diasPedidos.slice(n0).join() === [DIA, DIA_ANTES, '2026-10-18', '2026-10-17'].join(),
+    'pesquisa "norte" = rota XX NORTE: busca o período (mais novo primeiro) e o período anterior, para comparar', {resp: pe.resp.json, dias: jms.estado.diasPedidos.slice(n0)});
+  conferir(novosReg.length && novosReg.every(id => /^DK(TESTE0001|2026101[789])$/.test(id)),
+    'pesquisa: só as viagens da rota pesquisada são consultadas (nada de YY SUL nem da secundária)', novosReg);
+  const pacotesNorte = new Set();
+  ['2026-10-17', '2026-10-18', DIA_ANTES].forEach(d => jms.estado.outros[d].troncal.viagens.forEach(v => jms.estado.outros[d].troncal.pacotes[v.shipmentNo].forEach(x => pacotesNorte.add(x.billCode))));
+  conferir(novosSeg.length === 6 && novosSeg.every(w => pacotesNorte.has(w)), '3 Segmentos: só os pacotes das viagens da rota pesquisada (os já conferidos não voltam)', novosSeg);
+  const pp = (await local('GET', '/api/painel?tipo=troncal&de=' + DIA_ANTES + '&ate=' + DIA + '&pesquisa=' + encodeURIComponent('XX NORTE'))).json;
+  conferir(pp.pesquisa === 'XX NORTE' && pp.totais.pacotes === 9 && pp.totais.errados === 3 && pp.viagens.total === 3 && pp.semBusca.length === 0 &&
+    pp.menu.troncal === 3 && pp.menu.secundaria === 0 && pp.viagensPorTipo.troncal === 3 && pp.viagensPorTipo.secundaria === 0 && pp.rotasPesquisa.length === 4,
+    'painel da rota XX NORTE: só os pacotes das viagens dela (9, 3 que não pertencem à rota)', {t: pp.totais, v: pp.viagens, m: pp.menu, vt: pp.viagensPorTipo});
+  conferir(pp.anterior.buscado && pp.anterior.de === '2026-10-17' && pp.anterior.errados === 2 && pp.anterior.pacotes === 4,
+    'pesquisa: período anterior da rota buscado junto (comparação)', pp.anterior);
+  const tp = (await local('GET', '/api/tabela?tipo=troncal&de=' + DIA_ANTES + '&ate=' + DIA + '&situacao=errado&pesquisa=' + encodeURIComponent('XX NORTE'))).json;
+  conferir(tp.total === 3 && tp.linhas.every(l => l.situacao === 'errado' && /^DK(TESTE0001|20261019)$/.test(l.shipmentNo) && l.codigo1 === 'SU'),
+    'tabela da rota: os pacotes que não pertencem a ela (código SU no caminhão da XX NORTE)', tp.linhas);
+  let ee = (await local('GET', '/api/estado')).json;
+  conferir(ee.acompanhadas.join() === 'XX NORTE' && ee.horasPesquisa === 12 && ee.busca.pesquisa.rotas.join() === 'XX NORTE' && ee.busca.pesquisa.viagens.troncal === 5 &&
+    ee.busca.ultimo.rotas.join() === 'XX NORTE', 'a rota pesquisada passa a ser acompanhada (atualiza sozinha por 12 h)', {ac: ee.acompanhadas, p: ee.busca.pesquisa});
+  // Dia que passou e já foi buscado para a rota: não consulta o JMS de novo.
+  n0 = jms.estado.diasPedidos.length;
+  const reg1b = jms.estado.registrosPedidos.DKTESTE0001;
+  await pesq({rota: 'XX NORTE', de: DIA_ANTES, ate: DIA});
+  conferir(jms.estado.diasPedidos.length === n0 && jms.estado.registrosPedidos.DKTESTE0001 === reg1b, 'pesquisa de novo: dias que passaram e já foram buscados para a rota não vão ao JMS',
+    jms.estado.diasPedidos.slice(n0));
+  // Duas pesquisas seguidas: a segunda espera na fila e roda logo depois; secundária: a rota fica na página certa.
+  const regS = jms.estado.registrosPedidos.SRTESTE0002 || 0;
+  await local('POST', '/api/pesquisar', {rota: 'YY SUL', de: DIA, ate: DIA});
+  const fila = (await local('POST', '/api/pesquisar', {rota: 'BASE LOCAL A-ZZ', de: DIA, ate: DIA})).json;
+  await esperar(50); ee = await terminar();
+  const ps = (await local('GET', '/api/painel?tipo=secundaria&dia=' + DIA + '&pesquisa=' + encodeURIComponent('BASE LOCAL A-ZZ'))).json;
+  const pt = (await local('GET', '/api/painel?tipo=troncal&dia=' + DIA + '&pesquisa=' + encodeURIComponent('BASE LOCAL A-ZZ'))).json;
+  conferir(fila.ok && ee.busca.ultimo.rotas.join() === 'BASE LOCAL A-ZZ' && ee.busca.fila === 0 && ee.acompanhadas.slice().sort().join() === 'BASE LOCAL A-ZZ,XX NORTE,YY SUL' &&
+    (jms.estado.registrosPedidos.SRTESTE0002 || 0) === regS && ps.totais.pacotes === 4 && ps.totais.errados === 2 && ps.viagensPorTipo.secundaria === 1 &&
+    pt.viagensPorTipo.troncal === 0 && pt.totais.pacotes === 0 && pt.menu.secundaria === 2,
+    'duas pesquisas seguidas (a 2ª na fila); rota secundária: dados na Rota Secundária (o painel troca de página sozinho)',
+    {ultimo: ee.busca.ultimo, ac: ee.acompanhadas, s: ps.totais, vt: [ps.viagensPorTipo, pt.viagensPorTipo]});
+  const semRota = (await local('GET', '/api/painel?tipo=troncal&dia=' + DIA)).json;
+  conferir(semRota.totais.pacotes === 130 && !semRota.pesquisa && !semRota.viagensPorTipo, 'sem rota pesquisada, a API continua respondendo o dia todo (Excel e testes)', semRota.totais);
+  const rotasApi = (await local('GET', '/api/rotas')).json;
+  conferir(rotasApi.rotas.join() === 'BASE LOCAL A-ZZ,BASE LOCAL B-ZZ,XX NORTE,YY SUL' && rotasApi.acompanhadas.length === 3, 'lista de rotas para a pesquisa (as duas tabelas)', rotasApi);
+  // Configurações: Buscar este dia agora com a rota (só ela) ou vazio (todas).
+  const cfgRuim = await local('POST', '/config/api/buscar', {dia: DIA, rota: 'NAO EXISTE'});
+  conferir(cfgRuim.status === 400 && /não está na planilha/.test(cfgRuim.json.error), 'Configurações: rota fora da planilha é recusada', cfgRuim.json);
   // Configurações › Buscar este dia agora: busca um dia que passou (pedido na mão).
   n0 = jms.estado.diasPedidos.length;
   await buscar({dia: DIA_ANTES});
@@ -564,9 +617,9 @@ function abasRotas(comWW) {
 
   // ---------- 7b. Bloqueio do JMS no 3 Segmentos (servidor de verdade) ----------
   jms.estado.bloquearSegmentos = true;
-  e = await buscar({dia: '2026-10-18'});
-  const pend = (await local('GET', '/api/painel?tipo=troncal&dia=2026-10-18')).json;
-  const tpend = (await local('GET', '/api/tabela?tipo=troncal&dia=2026-10-18')).json;
+  e = await buscar({dia: '2026-10-12'});
+  const pend = (await local('GET', '/api/painel?tipo=troncal&dia=2026-10-12')).json;
+  const tpend = (await local('GET', '/api/tabela?tipo=troncal&dia=2026-10-12')).json;
   // Dia que passou: o app não consulta mais sozinho (a busca é só hoje).
   conferir(e.busca.ultimo.ok && !e.busca.authVencido && /bloqueou/.test(e.busca.avisoSegmentos) && /HTTP 403 · página: "Request blocked\."/.test(e.busca.avisoSegmentos) &&
     pend.pendencias.semSegmento.naoConsultadosAntes === 2 && pend.pendencias.semSegmento.naoConsultados === 0 && pend.totais.errados === 0 &&
@@ -645,6 +698,53 @@ function abasRotas(comWW) {
     conferir(bg.contarSegmentos(DIA).feitos === 123 && jg.estado.dados.troncal.pacotes.DKTESTE0006.every(x => jg.estado.segmentosPedidos[x.billCode] === 1),
       'sem a Gestão de pedido: as remessas novas vão pelo Rastreamento do pacote (uma por vez), como antes', bg.contarSegmentos(DIA));
     bg.fechar();
+  }
+
+  // ---------- 8c. 2.1: busca automática só das rotas pesquisadas ----------
+  {
+    const subir = (arqCfg, extraEnv) => new Promise((resolve, reject) => {
+      const c = spawn(process.execPath, [SERVER], {env: Object.assign({}, process.env, {EXPEDICAO_CONFIG: arqCfg, EXPEDICAO_JMS_URL: 'http://127.0.0.1:' + portaJms},
+        extraEnv || {}), stdio: ['ignore', 'pipe', 'pipe']});
+      filhos.push(c);
+      let txt = '';
+      c.stdout.on('data', d => { txt += d; if (/Deixe esta janela aberta/.test(txt)) resolve({c, txt: () => txt}); });
+      c.stderr.on('data', d => { txt += d; });
+      c.on('exit', code => reject(new Error('servidor saiu (' + code + '):\n' + txt)));
+      setTimeout(() => reject(new Error('servidor não subiu:\n' + txt)), 20000);
+    });
+    const parar = c => new Promise(res => { if (c.exitCode !== null) return res(); c.once('exit', res); c.kill(); });
+    await parar(filho);
+    // (a) Banco com rotas pesquisadas: 3 s depois de abrir, busca hoje só essas rotas (YY SUL foi pesquisada há 13 h: não entra).
+    {
+      const {DatabaseSync} = require('node:sqlite'), db = new DatabaseSync(path.join(pasta, 'dados', 'expedicao.db'));
+      const o = JSON.parse(db.prepare("SELECT v FROM props WHERE k = 'ROTAS_PESQUISADAS'").get().v);
+      o['YY SUL'] = Date.now() - 13 * 3600000;
+      db.prepare("UPDATE props SET v = ? WHERE k = 'ROTAS_PESQUISADAS'").run(JSON.stringify(o));
+      db.close();
+    }
+    const hoje = hojeSp(), idHoje = 'DK' + hoje.replace(/-/g, ''), d0 = jms.estado.diasPedidos.length;
+    const s2 = await subir(cfgArq);
+    let ok2 = false;
+    for (let i = 0; i < 100 && !ok2; i++) {
+      await esperar(100);
+      const e2 = (await local('GET', '/api/estado')).json;
+      ok2 = !!(e2.busca.ultimo && e2.busca.ultimo.dias.join() === hoje && !e2.busca.rodando);
+    }
+    const e2 = (await local('GET', '/api/estado')).json, p2 = (await local('GET', '/api/painel?tipo=troncal&dia=' + hoje + '&pesquisa=' + encodeURIComponent('XX NORTE'))).json;
+    conferir(ok2 && /Rotas acompanhadas agora: (BASE LOCAL A-ZZ, XX NORTE|XX NORTE, BASE LOCAL A-ZZ)\./.test(s2.txt()) && e2.busca.ultimo.rotas.slice().sort().join() === 'BASE LOCAL A-ZZ,XX NORTE' &&
+      jms.estado.diasPedidos.slice(d0).join() === hoje && jms.estado.registrosPedidos[idHoje] === 1 && p2.totais.pacotes === 2 && p2.totais.errados === 1,
+      'busca automática: hoje, só as rotas pesquisadas nas últimas 12 h', {ultimo: e2.busca.ultimo, dias: jms.estado.diasPedidos.slice(d0), t: p2.totais});
+    await parar(s2.c);
+    // (b) Sem nenhuma rota pesquisada: não consulta o JMS.
+    const pasta3 = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-agenda-')), cfg3 = path.join(pasta3, 'config.json'), porta3 = await portaLivre();
+    fs.writeFileSync(cfg3, JSON.stringify({porta: porta3, host: '127.0.0.1', dashmaster: dmDb, consultasPorSegundo: 1000, segundosPorRemessa: 0}));
+    const total = () => Object.values(jms.estado.pedidos).reduce((a, b) => a + b, 0), t0b = total();
+    const s3 = await subir(cfg3);
+    await esperar(4500);
+    const e3 = (await pedido(porta3, 'GET', '/api/estado')).json;
+    conferir(total() === t0b && !e3.busca.ultimo && e3.acompanhadas.length === 0 && /só a rota pesquisada no painel/.test(s3.txt()),
+      'busca automática sem rota pesquisada: nenhuma consulta ao JMS', {pedidos: total() - t0b, txt: s3.txt()});
+    await parar(s3.c);
   }
 
   // ---------- 9. Erro ao abrir ----------

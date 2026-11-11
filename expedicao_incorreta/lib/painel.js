@@ -6,7 +6,7 @@
  * Trânsito (lib/status.js). Os filtros (status, Base Destino da rota, turno, destino correto, código de 1º segmento, login,
  * situação, busca) valem para tudo: cartões, gráficos e tabela mostram sempre o mesmo recorte.
  */
-const {SITUACOES} = require('./regras');
+const {SITUACOES, norm} = require('./regras');
 const {STATUS, statusDe} = require('./status');
 const {diasEntre, somaDias, hojeSp} = require('./coletor');
 
@@ -63,7 +63,9 @@ class Painel {
     let fora = 0;
     this.banco.viagensDia(tipo, dia).forEach(v => {
       const status = statusDe(v.estado, this.codigos);
-      if (status) viagens.set(v.shipmentNo, Object.assign({}, v, {status}));
+      // 2.1: rota da viagem pelo destino (a pesquisa de rota mostra as viagens dela).
+      const rv = this.regras.rotaDoCaminhao(tipo, v.destino);
+      if (status) viagens.set(v.shipmentNo, Object.assign({}, v, {status, rotaViagem: rv ? rv.rotaNorm : ''}));
       else fora++;
     });
     const linhas = [];
@@ -77,7 +79,7 @@ class Painel {
       const motivo = r.situacao !== 'sem_segmento' ? '' : !consultado ? (passado ? ' · não consultado' : ' · aguardando') :
         p.segErro ? ' · erro no JMS' : ' · JMS sem código';
       const l = Object.assign({}, p, r, {situacaoTexto: SITUACOES[r.situacao] + motivo, turno: turnoDe(p.horario), nomeViagem: v.nome || '',
-        destinoViagem: v.destino || '', status: v.status, statusViagem: STATUS[v.status], packageCode: lote(p.packageCode), jms, passado});
+        destinoViagem: v.destino || '', rotaViagem: v.rotaViagem, status: v.status, statusViagem: STATUS[v.status], packageCode: lote(p.packageCode), jms, passado});
       // O que falta na planilha de rotas, para o aviso.
       if (r.situacao === 'sem_codigo') l.pendente = 'código ' + r.codigo1 + (r.segmento ? ' ' + r.segmento : '');
       linhas.push(l);
@@ -97,8 +99,8 @@ class Painel {
     return this.guardar(chave, {partes, linhas, viagens, fora: partes.reduce((n, p) => n + p.fora, 0)});
   }
   filtrar(linhas, f) {
-    const busca = String(f.busca || '').trim().toUpperCase();
-    return linhas.filter(l => (!f.status || l.status === f.status) && (!f.turno || l.turno === f.turno) && (!f.rota || l.rota === f.rota) &&
+    const busca = String(f.busca || '').trim().toUpperCase(), pq = norm(f.pesquisa);
+    return linhas.filter(l => (!pq || l.rotaViagem === pq) && (!f.status || l.status === f.status) && (!f.turno || l.turno === f.turno) && (!f.rota || l.rota === f.rota) &&
       (!f.destino || l.rotaCerta === f.destino) && (!f.codigo || l.codigo1 === f.codigo) && (!f.login || l.digitalizadoPor === f.login) &&
       (!f.situacao || l.situacao === f.situacao) && (!f.viagem || l.shipmentNo === f.viagem) &&
       (!busca || [l.billCode, l.packageCode, l.shipmentNo, l.baseDestino, l.digitalizadoPor, l.nomeViagem, l.proximaParada, l.rotaCerta]
@@ -112,13 +114,19 @@ class Painel {
       return {turno: t, pacotes: pac, errados: err, participacao: errados.length ? err / errados.length * 100 : 0, taxa: pac ? err / pac * 100 : 0};
     });
   }
+  /** Dias do período com dados: os buscados para a rota pesquisada (2.1) ou os buscados inteiros (todas as rotas). → Set */
+  buscados(de, ate, f) {
+    const pq = norm(f && f.pesquisa), dias = this.banco.buscadosRota && pq ? this.banco.buscadosRota(pq, de, ate) : new Set();
+    if (pq) this.banco.buscados(de, ate).forEach(d => dias.add(d));
+    return pq ? dias : this.banco.buscados(de, ate);
+  }
   /** O dia (ou período do mesmo tamanho) anterior, com os mesmos filtros: erros, turnos e se já foi buscado. */
   anterior(tipo, de, ate, f) {
     const n = diasEntre(de, ate).length, a = somaDias(de, -n), b = somaDias(de, -1);
     const linhas = this.filtrar(this.linhas(tipo, a, b).linhas, Object.assign({}, f, {situacao: ''}));
     const errados = linhas.filter(l => l.situacao === 'errado').length;
     return {de: a, ate: b, errados, pacotes: linhas.length, taxa: linhas.length ? errados / linhas.length * 100 : 0, turnos: this.turnos(linhas),
-      buscado: this.banco.buscados(a, b).size > 0};
+      buscado: this.buscados(a, b, f).size > 0};
   }
   /** Cartões, gráficos e as opções dos filtros do período. */
   resumo(tipo, de, ate, f) {
@@ -139,8 +147,8 @@ class Painel {
     };
     const distintos = {};
     Object.keys(top).forEach(k => { distintos[k] = top[k].distintos; });
-    const viagens = Array.from(tudo.viagens.values()).filter(v => !f.status || v.status === f.status);
-    const dias = diasEntre(de, ate), buscados = this.banco.buscados(de, ate);
+    const pq = norm(f.pesquisa), viagens = Array.from(tudo.viagens.values()).filter(v => (!f.status || v.status === f.status) && (!pq || v.rotaViagem === pq));
+    const dias = diasEntre(de, ate), buscados = this.buscados(de, ate, f);
     const semConsulta = linhas.filter(l => l.situacao === 'sem_segmento' && (l.segFeito === null || l.segFeito === undefined));
     return {
       tipo, de, ate, dia: de === ate ? de : '', dias: dias.length, semBusca: dias.filter(d => !buscados.has(d)),
@@ -174,8 +182,18 @@ class Painel {
       }
     };
   }
-  /** Pacotes errados do período (só o filtro de status), para o menu lateral. */
-  errados(tipo, de, ate, status) { return this.linhas(tipo, de, ate).linhas.filter(l => l.situacao === 'errado' && (!status || l.status === status)).length; }
+  /** Pacotes errados do período (só os filtros de status e da rota pesquisada), para o menu lateral. */
+  errados(tipo, de, ate, status, pesquisa) {
+    const pq = norm(pesquisa);
+    return this.linhas(tipo, de, ate).linhas.filter(l => l.situacao === 'errado' && (!status || l.status === status) && (!pq || l.rotaViagem === pq)).length;
+  }
+  /** 2.1: viagens da rota pesquisada no período (Concluído ou Em Trânsito), para o painel ir para a rota (troncal ou secundária) certa. */
+  viagensDaRota(tipo, de, ate, pesquisa, status) {
+    const pq = norm(pesquisa);
+    let n = 0;
+    this.linhas(tipo, de, ate).viagens.forEach(v => { if (v.rotaViagem === pq && (!status || v.status === status)) n++; });
+    return n;
+  }
   /** Página da tabela. ordem = coluna (de COLUNAS) e direção ('asc' | 'desc'). */
   tabela(tipo, de, ate, f, pagina, tamanho, ordem, direcao) {
     let linhas = this.filtrar(this.linhas(tipo, de, ate).linhas, f);

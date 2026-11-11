@@ -31,6 +31,8 @@
       $('apagar-token').classList.toggle('hidden', !t.temProprio);
       $('brandCenter').textContent = e.config.nomeBase; $('eyebrowCenter').textContent = e.config.nomeBase; $('appVersion').textContent = 'v' + e.versao;
       if (!$('dia-busca').value) $('dia-busca').value = e.hoje;
+      var dl = $('rotas-config'), ops = (e.rotasPesquisa || []).map(function (r) { var o = document.createElement('option'); o.value = r; return o; });
+      if (dl.children.length !== ops.length) { dl.textContent = ''; ops.forEach(function (o) { dl.appendChild(o); }); }
       $('dia-busca').max = e.hoje;
       var b = e.busca, br = function (d) { return d ? d.split('-').reverse().join('/') : ''; };
       var diasUlt = b.ultimo ? (b.ultimo.dias && b.ultimo.dias.length ? b.ultimo.dias : [b.ultimo.dia]).filter(Boolean) : [];
@@ -48,7 +50,9 @@
           return (t.tipo === 'troncal' ? 'troncal ' : 'secundária ') + tot + (tot ? ' (' + ['concluido', 'em_transito'].map(function (k) { return (por[k] || 0) + ' ' + nomes[k]; })
             .concat(outros.length ? ['fora do painel: ' + outros.join(', ')] : []).join(' · ') + ')' : '');
         }).join(' | ')],
-        ['Busca automática', 'só o dia de hoje, a cada ' + e.config.minutos + ' min (viagens e 3 Segmentos). Os dias anteriores ficam como foram salvos.'],
+        ['Busca automática', 'só as rotas pesquisadas no painel: o dia de hoje, a cada ' + e.config.minutos + ' min (viagens e 3 Segmentos), por ' +
+          e.config.horasPesquisa + ' h depois da pesquisa. Sem rota pesquisada, o app não consulta o JMS.'],
+        ['Rotas acompanhadas', e.acompanhadas && e.acompanhadas.length ? e.acompanhadas.join(', ') : 'nenhuma (pesquise uma rota no painel)'],
         ['Erros do 3 Segmentos (hoje)', e.segmentosHoje && e.segmentosHoje.erros.length ? e.segmentosHoje.erros.map(function (x) { return x.erro + ' (' + fmt(x.n) + ')'; }).join(' · ') :
           'nenhum'],
         ['Sem código no JMS (hoje)', e.segmentosHoje ? fmt(e.segmentosHoje.semCodigo) + ' pacotes (o JMS respondeu sem o Código de primeiro segmento)' : '—'],
@@ -101,7 +105,7 @@
     });
   });
   function buscar(forcar) {
-    post('config/api/buscar', {dia: $('dia-busca').value, forcar: forcar}).then(function (r) {
+    post('config/api/buscar', {dia: $('dia-busca').value, forcar: forcar, rota: $('rota-busca').value.trim()}).then(function (r) {
       if (!r.ok) alert(r.error);
       carregar();
     });

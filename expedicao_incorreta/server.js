@@ -5,9 +5,10 @@
  * -------------------------------------------------------
  * Confere, quase em tempo real, se os pacotes bipados no carregamento de cada caminhão que SAI da base pertencem à rota do
  * caminhão (ex.: pacote do RJ dentro do caminhão para SP BRE). Dois painéis: Rota Troncal e Rota Secundária.
- *   - Busca no JMS (lib/coletor.js, lib/jms.js): viagens do dia (PDD de saída = a nossa base, fixo; Status Concluído ou
- *     Em Trânsito) → Bipe de carregamento da base → lista de pacotes. Só o dia de hoje, a cada "minutos"; os dias
- *     ficam guardados no banco como foram salvos e o painel abre qualquer período já buscado.
+ *   - 2.1: pesquisa de rota. Busca no JMS (lib/coletor.js, lib/jms.js) só as viagens da rota pesquisada no período (PDD de
+ *     saída = a nossa base, fixo; Status Concluído ou Em Trânsito) → Bipe de carregamento da base → lista de pacotes →
+ *     "3 Segmentos" só desses pacotes. A rota pesquisada atualiza sozinha (hoje, a cada "minutos") por "horasPesquisa" horas;
+ *     sem rota pesquisada, nada vai ao JMS. Os dias ficam guardados no banco.
  *   - Confere (lib/regras.js), só pelo JMS: "3 Segmentos" de cada remessa (Rastreamento do pacote) → planilha de rotas.
  *   - Painel (public/): período (data inicial e final), filtros Status e Base Destino (bases da tabela de rotas), erro do dia
  *     por turno comparado com o dia anterior, mais ofensores, gráficos e a tabela com tudo (turno e destino correto); Excel.
@@ -37,7 +38,7 @@ const os = require('os');
 const crypto = require('crypto');
 const {Banco} = require('./lib/db');
 const {Jms} = require('./lib/jms');
-const {Regras, lerRotas, TIPOS} = require('./lib/regras');
+const {Regras, lerRotas, TIPOS, norm, tokens} = require('./lib/regras');
 const {Coletor, hojeSp, somaDias, diasEntre} = require('./lib/coletor');
 const {STATUS, codigosStatus, statusDe} = require('./lib/status');
 const {Painel} = require('./lib/painel');
@@ -65,7 +66,8 @@ const DEFAULTS = {
   minutosViagemGrande: 30, // …busca a lista de novo no máximo a cada 30 min
   dashmaster: '',         // pasta do DashMaster para usar o mesmo AuthToken (vazio = procura em C:\dashmaster; "nao" = não usar)
   linkPublico: '',        // link do Tailscale (só para aparecer na janela e em Configurações)
-  caminho: '/expedicao'   // 2.0.2: caminho no link principal do Tailscale (https://NOME.ts.net/expedicao), sem ocupar porta de outro painel
+  caminho: '/expedicao',  // 2.0.2: caminho no link principal do Tailscale (https://NOME.ts.net/expedicao), sem ocupar porta de outro painel
+  horasPesquisa: 12       // 2.1: a rota pesquisada continua atualizando sozinha (hoje, a cada "minutos") por tantas horas depois da pesquisa
 };
 const MAX_CORPO = 25 * 1024 * 1024;
 const MAX_DIAS = 31; // período máximo do painel
@@ -82,7 +84,7 @@ function lerConfig() {
   const c = Object.assign({}, DEFAULTS, bruto);
   delete c.minutosDiaAnterior; // até a 1.8 buscava ontem de novo; agora a busca é só hoje
   ['porta', 'minutos', 'tamanhoPagina', 'tamanhoPaginaViagens', 'consultasAoMesmoTempo', 'viagemGrande', 'minutosViagemGrande', 'consultasSegmentos',
-    'consultasPorSegundo'].forEach(k => {
+    'consultasPorSegundo', 'horasPesquisa'].forEach(k => {
     c[k] = Number(c[k]) > 0 ? Number(c[k]) : DEFAULTS[k];
   });
   if (process.env.EXPEDICAO_PORTA) c.porta = Number(process.env.EXPEDICAO_PORTA);
@@ -184,7 +186,7 @@ try {
   jms = new Jms({base: process.env.EXPEDICAO_JMS_URL, credenciais, props: banco, log, tempoMs: 60000, porSegundo: cfg.consultasPorSegundo,
     segundosPorRemessa: cfg.segundosPorRemessa});
   painel = new Painel(banco, regras, cfg.statusCodigos);
-  coletor = new Coletor({banco, jms, cfg, log, aoMudar: (tipo, dia) => painel.invalidar(tipo, dia)});
+  coletor = new Coletor({banco, jms, cfg, log, regras, aoMudar: (tipo, dia) => painel.invalidar(tipo, dia)});
 } catch (e) { pararComErro('Não consegui iniciar: ' + (e && e.stack || e)); }
 
 // ------------------------------------------------------------------ acesso
@@ -239,7 +241,58 @@ async function lerJson(req) {
 function filtros(u) {
   const g = k => String(u.searchParams.get(k) || '').slice(0, 120);
   return {status: STATUS[g('status')] ? g('status') : '', turno: g('turno'), rota: g('rota'), destino: g('destino'), codigo: g('codigo'),
-    login: g('login'), situacao: g('situacao'), viagem: g('viagem'), busca: g('busca')};
+    login: g('login'), situacao: g('situacao'), viagem: g('viagem'), busca: g('busca'), pesquisa: g('pesquisa')};
+}
+// ------------------------------------------------------------------ 2.1: pesquisa de rota
+/** Rota da planilha de rotas pelo nome digitado (igual; senão a parecida, ex.: "BRE" → "SP BRE"). → nome da planilha | '' */
+function acharRota(texto) {
+  const n = norm(String(texto || '').slice(0, 120));
+  if (!n || !regras.rotas) return '';
+  const todas = [];
+  TIPOS.forEach(t => regras.rotas.regras[t].forEach(r => todas.push(r)));
+  const igual = todas.find(r => r.rotaNorm === n);
+  if (igual) return igual.rota;
+  // Parecida só quando não há dúvida (uma rota só com todas as palavras digitadas).
+  const tk = tokens(n), achadas = new Set(todas.filter(r => tk.every(t => r.tokens.indexOf(t) >= 0)).map(r => r.rotaNorm));
+  return achadas.size === 1 ? todas.find(r => achadas.has(r.rotaNorm)).rota : '';
+}
+/** Rotas da planilha (troncal e secundária), para a lista da pesquisa. */
+function rotasDaPlanilha() {
+  if (!regras.rotas) return [];
+  const m = new Map();
+  TIPOS.forEach(t => regras.rotas.regras[t].forEach(r => { if (!m.has(r.rotaNorm)) m.set(r.rotaNorm, r.rota); }));
+  return Array.from(m.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+/** Rotas pesquisadas nas últimas "horasPesquisa" horas (a busca automática atualiza só elas, no dia de hoje). → [nome] */
+function rotasAcompanhadas() {
+  let o = {};
+  try { o = JSON.parse(banco.get('ROTAS_PESQUISADAS') || '{}') || {}; } catch (e) { o = {}; }
+  const limite = Date.now() - cfg.horasPesquisa * 3600000;
+  return Object.keys(o).filter(k => o[k] >= limite && acharRota(k)).sort((a, b) => o[b] - o[a]).slice(0, 20);
+}
+function acompanharRota(rota) {
+  let o = {};
+  try { o = JSON.parse(banco.get('ROTAS_PESQUISADAS') || '{}') || {}; } catch (e) { o = {}; }
+  o[rota] = Date.now();
+  const limite = Date.now() - cfg.horasPesquisa * 3600000;
+  Object.keys(o).forEach(k => { if (o[k] < limite) delete o[k]; });
+  banco.set('ROTAS_PESQUISADAS', JSON.stringify(o));
+}
+/**
+ * Pesquisa de rota: busca no JMS as viagens dessa rota no período (e no período anterior, para comparar, até 7 dias), os pacotes
+ * delas e o "3 Segmentos" só desses pacotes. Os dias mais novos primeiro. → resposta para o painel
+ */
+function pesquisarRota(b) {
+  const rota = acharRota(b.rota);
+  if (!rota) return {status: 400, corpo: {ok: false, error: String(b.rota || '').trim() ? 'A rota "' + String(b.rota).trim().slice(0, 60) +
+    '" não está na planilha de rotas. Escolha uma da lista.' : 'Digite a rota que você quer pesquisar.'}};
+  const {de, ate} = periodo(b.de, b.ate, b.dia), dias = diasEntre(de, ate).reverse(), n = dias.length;
+  const anteriores = n <= 7 ? diasEntre(somaDias(de, -n), somaDias(de, -1)).reverse() : [];
+  acompanharRota(rota);
+  log('info', 'Pesquisa da rota ' + rota + ': ' + (n === 1 ? de : de + ' a ' + ate) + (anteriores.length ? ' (e ' + anteriores.length +
+    (anteriores.length === 1 ? ' dia anterior' : ' dias anteriores') + ' para comparar)' : '') + '.');
+  coletor.coletar(dias.concat(anteriores), {rotas: [rota], forcar: !!b.forcar}).catch(() => {});
+  return {status: 200, corpo: {ok: true, rota, de, ate, dias, anteriores, estado: estadoPublico()}};
 }
 /** Período pedido: de/ate (ou dia). Até hoje, no máximo MAX_DIAS dias. → {de, ate} */
 function periodo(de, ate, dia) {
@@ -258,9 +311,10 @@ function tipoDe(u) { const t = String(u.searchParams.get('tipo') || ''); return 
 function estadoPublico() {
   const e = coletor.estado, r = regras.resumo();
   return {versao: VERSAO, base: cfg.nomeBase, codigoBase: cfg.codigoBase, minutos: cfg.minutos,
-    hoje: hojeSp(), maxDias: MAX_DIAS,
+    hoje: hojeSp(), maxDias: MAX_DIAS, horasPesquisa: cfg.horasPesquisa, acompanhadas: rotasAcompanhadas(),
     busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, dias: e.dias, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
-      errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos, segundosPorRemessa: cfg.segundosPorRemessa},
+      errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos, segundosPorRemessa: cfg.segundosPorRemessa, pesquisa: e.pesquisa,
+      fila: coletor.fila.length},
     planilhas: {erros: r.erros, rotas: !!r.rotas}};
 }
 
@@ -299,9 +353,13 @@ async function tratar(req, res) {
   if (p === '/api/estado') return json(res, 200, estadoPublico());
   if (p === '/api/painel') {
     const {de, ate} = periodoDe(u), f = filtros(u);
-    return json(res, 200, Object.assign(painel.resumo(tipoDe(u), de, ate, f), {estado: estadoPublico(),
-      menu: {troncal: painel.errados('troncal', de, ate, f.status), secundaria: painel.errados('secundaria', de, ate, f.status)}}));
+    f.pesquisa = f.pesquisa ? acharRota(f.pesquisa) || f.pesquisa : '';
+    const extra = {estado: estadoPublico(), pesquisa: f.pesquisa, rotasPesquisa: rotasDaPlanilha(),
+      menu: {troncal: painel.errados('troncal', de, ate, f.status, f.pesquisa), secundaria: painel.errados('secundaria', de, ate, f.status, f.pesquisa)}};
+    if (f.pesquisa) extra.viagensPorTipo = {troncal: painel.viagensDaRota('troncal', de, ate, f.pesquisa), secundaria: painel.viagensDaRota('secundaria', de, ate, f.pesquisa)};
+    return json(res, 200, Object.assign(painel.resumo(tipoDe(u), de, ate, f), extra));
   }
+  if (p === '/api/rotas') return json(res, 200, {rotas: rotasDaPlanilha(), acompanhadas: rotasAcompanhadas()});
   if (p === '/api/tabela') {
     const {de, ate} = periodoDe(u);
     return json(res, 200, painel.tabela(tipoDe(u), de, ate, filtros(u), u.searchParams.get('pagina'), u.searchParams.get('tamanho'),
@@ -314,11 +372,10 @@ async function tratar(req, res) {
       larguras: [7, 22, 20, 26, 18, 30, 18, 18, 18, 18, 20, 20, 12, 14, 10, 20, 30, 20]}]),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {'Content-Disposition': 'attachment; filename="' + nome + '"'});
   }
-  if (p === '/api/buscar' && req.method === 'POST') {
-    // Só o dia de hoje: os dias anteriores ficam como foram salvos.
-    const b = await lerJson(req), {de, ate} = periodo(b.de, b.ate, b.dia), hoje = hojeSp();
-    coletor.coletar([hoje]).catch(() => {});
-    return json(res, 200, {ok: true, dias: [hoje], hojeNoPeriodo: de <= hoje && ate >= hoje, estado: estadoPublico()});
+  if ((p === '/api/pesquisar' || p === '/api/buscar') && req.method === 'POST') {
+    // 2.1: Pesquisar (e Atualizar) = busca no JMS só a rota pesquisada, no período do painel.
+    const r = pesquisarRota(await lerJson(req));
+    return json(res, r.status, r.corpo);
   }
   return enviar(res, 404, 'Não encontrado.');
 }
@@ -330,7 +387,8 @@ async function tratarConfig(req, res, u) {
     const c = credenciais(), r = regras.resumo();
     return json(res, 200, {versao: VERSAO, config: Object.assign({}, cfg, {senha: cfg.senha ? 'definida' : '', statusCodigos: undefined}), enderecos: enderecos(),
       token: {fonte: c.fonte, temProprio: !!banco.get('JMS_AUTHTOKEN'), dashmaster: !!credenciaisDashmaster()},
-      planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(),
+      planilhas: r, busca: coletor.estado, registro: ULTIMAS.slice(-60), hoje: hojeSp(), salvos: banco.diasSalvos(), acompanhadas: rotasAcompanhadas(),
+      rotasPesquisa: rotasDaPlanilha(),
       segmentosHoje: Object.assign(banco.contarSegmentos(hojeSp()), {semCodigo: banco.semCodigoDia(hojeSp()), erros: banco.errosSegmentos(hojeSp())}),
       status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
       viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),
@@ -388,8 +446,11 @@ async function tratarConfig(req, res, u) {
     const b = await lerJson(req), dia = /^\d{4}-\d{2}-\d{2}$/.test(String(b.dia || '')) ? b.dia : hojeSp();
     if (dia > hojeSp()) return json(res, 400, {ok: false, error: 'Esse dia ainda não chegou.'});
     if (coletor.estado.rodando) return json(res, 200, {ok: false, error: 'Já está buscando. Espere terminar.'});
-    coletor.coletar(dia, {forcar: !!b.forcar}).catch(() => {});
-    return json(res, 200, {ok: true});
+    // 2.1: com a rota, só ela; vazio = todas as rotas do dia (pedido na mão).
+    const rota = String(b.rota || '').trim() ? acharRota(b.rota) : '';
+    if (String(b.rota || '').trim() && !rota) return json(res, 400, {ok: false, error: 'A rota "' + String(b.rota).trim().slice(0, 60) + '" não está na planilha de rotas.'});
+    coletor.coletar(dia, {forcar: !!b.forcar, rotas: rota ? [rota] : []}).catch(() => {});
+    return json(res, 200, {ok: true, rota});
   }
   if (p === '/config/api/planilha') {
     const nome = u.searchParams.get('nome'), buf = await lerCorpo(req);
@@ -456,9 +517,16 @@ servidor.listen(cfg.porta, cfg.host, () => {
   if (r.rotas) log('info', 'Planilha de rotas: ' + r.rotas.troncal + ' rotas troncais e ' + r.rotas.secundaria + ' secundárias.');
   if (!credenciais().fonte) log('aviso', 'Falta o AuthToken do JMS: abra Configurações (ou cadastre no DashMaster deste computador).');
   if (process.env.EXPEDICAO_SEM_AGENDADOR === '1') return;
-  log('info', 'Busca no JMS: só o dia de hoje, a cada ' + cfg.minutos + ' min (os dias anteriores ficam salvos como estão). Deixe esta janela aberta.');
+  log('info', 'Busca no JMS: só a rota pesquisada no painel. Cada rota pesquisada continua atualizando sozinha (dia de hoje, a cada ' + cfg.minutos +
+    ' min) por ' + cfg.horasPesquisa + ' h. Deixe esta janela aberta.');
+  const ac = rotasAcompanhadas();
+  if (ac.length) log('info', 'Rotas acompanhadas agora: ' + ac.join(', ') + '.');
   // Com AuthToken vencido tenta do mesmo jeito (uma consulta): volta sozinho quando o token for trocado aqui ou no DashMaster.
-  const rodar = () => { if (credenciais().fonte && !coletor.estado.rodando) coletor.coletar([hojeSp()]).catch(() => {}); };
+  // 2.1: nada de todas as rotas: só as pesquisadas nas últimas "horasPesquisa" horas (sem nenhuma, não consulta o JMS).
+  const rodar = () => {
+    const rotas = rotasAcompanhadas();
+    if (credenciais().fonte && rotas.length && !coletor.estado.rodando) coletor.coletar([hojeSp()], {rotas}).catch(() => {});
+  };
   setTimeout(rodar, 3000);
   setInterval(rodar, cfg.minutos * 60000);
 });

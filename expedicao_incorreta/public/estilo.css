@@ -143,6 +143,24 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .chip:hover{border-color:var(--red-200);color:var(--red-600)}
 .chip.active{background:var(--red-50);border-color:var(--red-200);color:var(--red-600)}
 .toolbar .btn-dark{height:42px}
+/* 2.1: pesquisa de rota */
+.field-rota{flex:2 1 360px}
+.rota-busca{position:relative;display:flex;gap:8px;align-items:center;margin:0}
+.rota-ico{position:absolute;left:12px;top:50%;width:16px;height:16px;transform:translateY(-50%);color:var(--muted);pointer-events:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.rota-busca input{flex:1;min-width:0;height:42px;border:1.5px solid var(--red-200);border-radius:12px;background:var(--card);padding:0 12px 0 36px;font-size:14px;font-weight:700;color:var(--ink);outline:none;transition:border-color .18s,box-shadow .18s}
+.rota-busca input::placeholder{font-weight:500;color:var(--muted)}
+.rota-busca input:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}
+.rota-busca .btn{height:42px;flex:none}
+.view.sem-rota .filters,.view.sem-rota .kpi-grid,.view.sem-rota .charts-grid,.view.sem-rota #detailCard{display:none}
+.empty-search{display:none;margin-top:12px;padding:34px 28px;text-align:center}
+.view.sem-rota .empty-search{display:block}
+.empty-search h2{margin:6px 0 8px;font-size:20px;letter-spacing:-.3px}
+.empty-search p{margin:0 auto;max-width:640px;color:var(--ink-2);font-size:13.5px;line-height:1.55}
+.empty-ico{width:52px;height:52px;margin:0 auto 12px;border-radius:16px;display:grid;place-items:center;background:var(--red-50);color:var(--red)}
+.empty-ico svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.empty-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:16px}
+.empty-chips:empty{display:none}
+.empty-chips small{flex:1 1 100%;color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.8px}
 
 .alert{margin-top:12px;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;font-size:13px;border:1px solid var(--bad-line);background:var(--bad-bg);color:var(--bad)}
 .alert.warn{border-color:var(--warn-line);background:var(--warn-bg);color:var(--warn)}
@@ -347,7 +365,8 @@ label.btn input[type=file]{display:none}
   .main{padding:0 12px 28px}
   .progress{margin:0 -12px}
   .toolbar{padding:12px}
-  .field,.field-date,.field-indicator{flex:1 1 100%}
+  .field,.field-date,.field-indicator,.field-rota{flex:1 1 100%}
+  .rota-busca .btn span{display:none}
   .field-date{flex:1 1 calc(50% - 6px);min-width:0}
   .toolbar .btn-dark{width:100%;justify-content:center}
   .filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
