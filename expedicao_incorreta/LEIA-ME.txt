@@ -114,11 +114,12 @@ Turnos (pelo tempo de digitalização): T1 06h-14h · T2 14h-22h · T3 22h-06h.
 
 Link para a equipe (Tailscale, o mesmo do DashMaster)
 -----------------------------------------------------
-1. Dois cliques no link-publico.bat (na pasta C:\expedicao_incorreta). Ele mostra os links já ligados e liga o da
-   Expedição na porta 8443: https://NOME-DO-COMPUTADOR.xxxx.ts.net:8443/troncal. O link continua ligado depois de fechar a
-   janela e de reiniciar o computador. Se a 8443 já for de outro painel (ex.: o Sorter), ele avisa e pergunta antes de trocar.
-   O Tailscale só aceita 3 portas no link (443, 8443 e 10000): com o Sorter no mesmo computador, passe o Sorter para o link
-   principal (config.json do Sorter: "portaLink": 443 e "caminho": "/sorter", e o link-publico.bat dele).
+1. Dois cliques no link-publico.bat (na pasta C:\expedicao_incorreta). Ele liga o link da Expedição num CAMINHO NOVO do
+   link principal deste computador: https://NOME-DO-COMPUTADOR.xxxx.ts.net/expedicao (2.0.2). Não troca nem ocupa a
+   porta de nenhum outro painel: DashMaster (443), Sorter (8443) e Lotes (10000) continuam como estão.
+   (O Tailscale só tem 3 portas no link público, e as 3 já são dos outros painéis; por isso a Expedição usa um caminho.)
+   O link continua ligado depois de fechar a janela e de reiniciar o computador.
+   Usou o link-publico.bat da 2.0.1 e o Sorter perdeu a 8443? Rode de novo o link-publico.bat do Sorter.
 2. Senha (recomendado): abra C:\expedicao_incorreta\config.json no Bloco de Notas, escreva a senha em "senha",
    cole o link em "linkPublico", salve e abra o atalho do app de novo.
 3. Ligar sozinho com o Windows: Windows + R > shell:startup > cole ali o atalho do iniciar.bat.
@@ -127,7 +128,7 @@ config.json (criado na 1ª vez)
 ------------------------------
 porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 15 (busca automática
 de hoje) · fonteSegmentos "gestao" ("rastreio" = só o Rastreamento do pacote) · remessasPorConsulta 100 e segundosEntreLotes 2
-(Gestão de pedido) · status {"concluido": [4], "emTransito": [3]} (códigos do
+(Gestão de pedido) · caminho "/expedicao" (caminho no link do Tailscale) · status {"concluido": [4], "emTransito": [3]} (códigos do
 Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultasSegmentos 3
 (consultas do "3 Segmentos" ao mesmo tempo) · consultasPorSegundo 5 (viagens e bipes: ritmo máximo das consultas ao JMS) · segundosPorRemessa 30
 (3 Segmentos: pausa depois de cada resposta, em segundos) ·

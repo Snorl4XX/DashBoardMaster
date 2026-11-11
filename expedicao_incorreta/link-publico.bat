@@ -1,33 +1,26 @@
 @echo off
 chcp 65001 >nul
-title Link da Expedicao Incorreta (Tailscale) - porta 8443
+title Link da Expedicao Incorreta (Tailscale) - /expedicao
 set "TS=C:\Program Files\Tailscale\tailscale.exe"
 if not exist "%TS%" goto semTs
 echo.
-echo   Links do Tailscale ligados agora neste computador:
-echo   ------------------------------------------------
-"%TS%" funnel status
+echo   O link da Expedicao Incorreta fica num CAMINHO NOVO do link principal deste computador:
+echo       https://NOME-DO-COMPUTADOR.xxxx.ts.net/expedicao
+echo   Nao troca nem ocupa a porta de nenhum outro painel (DashMaster, Sorter e Lotes continuam como estao).
 echo.
-"%TS%" funnel status | findstr /C:":8443" >nul
-if errorlevel 1 goto ligar
-"%TS%" funnel status | findstr /C:"127.0.0.1:3300" >nul
-if not errorlevel 1 goto ligar
-echo   ATENCAO: a porta 8443 do link ja leva para OUTRO painel (veja acima, por exemplo o Sorter na 3500).
-echo   Se trocar, o outro painel sai do link. Para manter os dois, passe o Sorter para o link principal com /sorter
-echo   (config.json do Sorter: "portaLink": 443 e "caminho": "/sorter") e rode o link-publico.bat dele.
-choice /c SN /m "  Trocar a porta 8443 para a Expedicao Incorreta"
-if errorlevel 2 goto fim
-:ligar
-echo.
-echo   Ligando o link da Expedicao Incorreta (8443 -^> http://localhost:3300)...
-"%TS%" funnel --bg --https=8443 3300
+"%TS%" funnel --bg --https=443 --set-path=/expedicao http://127.0.0.1:3300/expedicao
 if errorlevel 1 goto erro
 echo.
+echo   Links ligados agora neste computador:
+echo   -------------------------------------
 "%TS%" funnel status
 echo.
-echo   Pronto. O link da equipe e o endereco https://....ts.net:8443 mostrado acima, com /troncal ou /secundaria no fim.
+echo   Pronto. Link da equipe: o endereco https://....ts.net mostrado acima, com /expedicao no fim.
 echo   Ele continua ligado depois de fechar esta janela e de reiniciar o computador.
-echo   Para desligar: "%TS%" funnel --https=8443 off
+echo   Para desligar so este link: "%TS%" funnel --https=443 --set-path=/expedicao off
+echo.
+echo   Usou o link-publico.bat da versao 2.0.1 e ele tirou a porta 8443 do Sorter? Rode de novo o link-publico.bat
+echo   do Sorter (C:\dashmaster-sorter\node): ele volta para a 8443.
 goto fim
 :erro
 echo.

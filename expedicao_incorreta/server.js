@@ -64,7 +64,8 @@ const DEFAULTS = {
   viagemGrande: 3000,     // viagem com mais pacotes que isto…
   minutosViagemGrande: 30, // …busca a lista de novo no máximo a cada 30 min
   dashmaster: '',         // pasta do DashMaster para usar o mesmo AuthToken (vazio = procura em C:\dashmaster; "nao" = não usar)
-  linkPublico: ''         // link do Tailscale (só para aparecer na janela e em Configurações)
+  linkPublico: '',        // link do Tailscale (só para aparecer na janela e em Configurações)
+  caminho: '/expedicao'   // 2.0.2: caminho no link principal do Tailscale (https://NOME.ts.net/expedicao), sem ocupar porta de outro painel
 };
 const MAX_CORPO = 25 * 1024 * 1024;
 const MAX_DIAS = 31; // período máximo do painel
@@ -99,6 +100,9 @@ function lerConfig() {
   c.consultasSegmentos = Math.min(50, c.consultasSegmentos);
   c.segundosPorRemessa = bruto.segundosPorRemessa !== undefined && bruto.segundosPorRemessa !== '' && Number(bruto.segundosPorRemessa) >= 0
     ? Number(bruto.segundosPorRemessa) : DEFAULTS.segundosPorRemessa;
+  // "/expedicao", "expedicao", "/expedicao/" → "/expedicao"; só letras, números, - e _ ("" = sem caminho).
+  const cam = String(c.caminho === undefined || c.caminho === null ? DEFAULTS.caminho : c.caminho).trim().replace(/^\/+|\/+$/g, '');
+  c.caminho = /^[A-Za-z0-9_-]+$/.test(cam) ? '/' + cam : '';
   c.statusCodigos = codigosStatus(c.status);
   if (!c.statusCodigos.concluido.size && !c.statusCodigos.em_transito.size) throw new Error('"status" do config.json sem nenhum código.');
   const pasta = path.dirname(arq);
@@ -262,7 +266,13 @@ function estadoPublico() {
 
 // ------------------------------------------------------------------ rotas HTTP
 async function tratar(req, res) {
-  const u = new URL(req.url, 'http://x');
+  let u = new URL(req.url, 'http://x');
+  // 2.0.2: o link do Tailscale fica num caminho do link principal (https://NOME.ts.net/expedicao → http://127.0.0.1:3300/expedicao).
+  // O app atende com e sem o caminho; a página usa endereços relativos, que continuam dentro dele.
+  if (cfg.caminho) {
+    if (u.pathname === cfg.caminho) return enviar(res, 301, '', 'text/plain', {Location: cfg.caminho + '/' + u.search});
+    if (u.pathname.indexOf(cfg.caminho + '/') === 0) u = new URL(u.pathname.slice(cfg.caminho.length) + u.search, 'http://x');
+  }
   const p = u.pathname;
   regras.atualizar();
 

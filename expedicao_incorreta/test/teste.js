@@ -300,7 +300,8 @@ function abasRotas(comWW) {
   // 2.0.1: iniciar.bat (acha o Node.js sozinho) e link-publico.bat (Tailscale 8443), com quebras de linha do Windows.
   const bats = ['iniciar.bat', 'link-publico.bat'].map(f => pacote['expedicao_incorreta/' + f]);
   conferir(bats.every(b => b && /\r\n/.test(b.toString('latin1')) && !/[^\r]\n/.test(b.toString('latin1'))) && /where node/.test(bats[0].toString()) &&
-    /funnel --bg --https=8443 3300/.test(bats[1].toString()), 'pacote com iniciar.bat e link-publico.bat (CRLF)');
+    /funnel --bg --https=443 --set-path=\/expedicao http:\/\/127\.0\.0\.1:3300\/expedicao/.test(bats[1].toString()) && !/8443 3300/.test(bats[1].toString()),
+    'pacote com iniciar.bat e link-publico.bat (CRLF); o link é o caminho /expedicao, sem ocupar a porta de outro painel');
 
   // ---------- 2. Servidor com JMS de mentira ----------
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-teste-'));
@@ -391,6 +392,12 @@ function abasRotas(comWW) {
   conferir(Object.keys(segPed).length === esperadas.size && Object.keys(segPed).every(w => esperadas.has(w)) && Object.values(segPed).every(n => n === 1) &&
     r.segmentos.jms === 130 && r.segmentos.total === 130,
     '3 Segmentos: cada pacote do dia consultado uma vez no JMS', {n: Object.keys(segPed).length, seg: r.segmentos});
+  // 2.0.2: link do Tailscale no caminho /expedicao (com ou sem o caminho no pedido, a mesma resposta).
+  const comCaminho = (await local('GET', '/expedicao/api/painel?tipo=troncal&dia=' + DIA)).json, semBarra = await local('GET', '/expedicao');
+  const pagCam = await local('GET', '/expedicao/troncal'), cssCam = await local('GET', '/expedicao/estilo.css');
+  conferir(comCaminho.totais.pacotes === r.totais.pacotes && comCaminho.totais.errados === r.totais.errados && semBarra.status === 301 &&
+    pagCam.status === 200 && /painel\.js/.test(pagCam.texto) && cssCam.status === 200 && (await remoto('GET', '/expedicao/config')).status === 403,
+    'caminho /expedicao do link: painel, dados e arquivos respondem; Configurações continuam só neste computador');
   const tn = {};
   r.turnos.forEach(x => { tn[x.turno] = x; });
   conferir(tn.T1.errados === 0 && tn.T2.errados === 2 && tn.T3.errados === 1 && Math.abs(tn.T2.participacao - 66.67) < 0.1 && tn.T1.pacotes === 125,
