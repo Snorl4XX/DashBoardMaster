@@ -10,6 +10,9 @@
  *   - A troncal só aceita o cabeçalho Routename "tmsShipment" (o app tem de descobrir).
  *   - A secundária recusa "loading/scan/page" e responde em "unloading/scan/page" (como a captura).
  *   - O JMS limita a página a 50 itens, mesmo pedindo mais.
+ *   - 2.0: Gestão de pedido JMS de remessa (shippingWaybillList): desligada por padrão (404). estado.gestao = {campo, max,
+ *     ignoraFiltro}: só filtra pelo campo "campo" (outro campo = devolve as remessas mais recentes, sem filtro, como um JMS que
+ *     ignora campo desconhecido); "max" = recusa mais remessas que isso numa consulta.
  */
 const http = require('http');
 
@@ -78,7 +81,7 @@ function outroDia(dia) {
 
 function criar(dia) {
   const estado = {token: 'TOKEN-FICTICIO-DE-TESTE', dados: dados(dia), outros: {}, pedidos: {}, registrosPedidos: {}, diasPedidos: [],
-    segmentosPedidos: {}, recusarSegmentos: false, exigeRotaTroncal: 'tmsShipment', recusarLoadingSecundaria: true};
+    segmentosPedidos: {}, recusarSegmentos: false, gestao: null, gestaoPedidos: [], exigeRotaTroncal: 'tmsShipment', recusarLoadingSecundaria: true};
   /** O pacote (de qualquer dia já pedido) com esta remessa. */
   const pacoteDe = w => {
     for (const dd of [estado.dados].concat(Object.values(estado.outros))) {
@@ -138,6 +141,21 @@ function criar(dia) {
         const x = pacoteDe(w), sg = x && SEGMENTOS_FALSOS[x.destsite] || [null, ''];
         return resp({code: 1, msg: '1:Solicitação concluída', succ: true, fail: false,
           data: {waybillNo: w, details: {waybillNo: w, terminalDispatchCode: sg[0], destinationDistributeName: sg[1], receiverCityName: 'Cidade Teste'}}});
+      }
+      if (p === '/networkmanagement/omsWaybill/shippingWaybillList' && req.method === 'POST') {
+        const g = estado.gestao;
+        if (!g) return resp({code: 404, msg: 'Not Found'}, 404);
+        const b = JSON.parse(Buffer.concat(partes).toString('utf8') || '{}');
+        estado.gestaoPedidos.push(b);
+        let ws = b[g.campo];
+        if (typeof ws === 'string') ws = ws.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
+        if (Array.isArray(ws) && g.max && ws.length > g.max) return resp({code: 0, msg: 'Quantidade máxima de consulta: ' + g.max, succ: false, fail: true});
+        const todas = [];
+        [estado.dados].concat(Object.values(estado.outros)).forEach(dd => ['troncal', 'secundaria'].forEach(t => Object.values(dd[t].pacotes).forEach(l => l.forEach(x => todas.push(x)))));
+        const lista = !Array.isArray(ws) || g.ignoraFiltro ? todas.slice(0, Number(b.size) || 20)
+          : ws.map(w => pacoteDe(String(w).replace(/-\d{3}$/, ''))).filter(Boolean);
+        return resp({code: 1, msg: 'Solicitação concluída', succ: true, fail: false, traceId: 'teste',
+          data: lista.map(x => ({id: 'id' + x.billCode, waybillNo: x.billCode, customerName: 'CLIENTE TESTE', terminalDispatchCode: (SEGMENTOS_FALSOS[x.destsite] || [null])[0]}))});
       }
       const m = /^\/transportation\/(trackingDeatil|tmsBranchTrackingDetail)\/(loading|unloading)\/scan\/(list|page)$/.exec(p);
       if (m) {

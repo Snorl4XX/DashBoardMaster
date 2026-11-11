@@ -50,8 +50,11 @@ const DEFAULTS = {
   senha: '',              // senha para abrir os painéis (vazio = sem senha)
   codigoBase: '30001',    // a nossa base (os caminhões que SAEM daqui)
   nomeBase: 'SP GRU',
-  minutos: 10,            // de quanto em quanto tempo busca no JMS (dia de hoje)
+  minutos: 15,            // de quanto em quanto tempo busca no JMS (dia de hoje) · 2.0: 15 (pedido)
   status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
+  fonteSegmentos: 'gestao', // 2.0: "3 Segmentos" pela Gestão de pedido JMS de remessa (várias por consulta); 'rastreio' = só o Rastreamento
+  remessasPorConsulta: 100, // Gestão de pedido: remessas em cada consulta
+  segundosEntreLotes: 2,    // Gestão de pedido: pausa entre uma consulta e a próxima
   consultasSegmentos: 3,   // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote): quantas consultas ao mesmo tempo
   consultasPorSegundo: 5,  // viagens e bipes: no máximo tantas consultas ao JMS por segundo, somando todas
   segundosPorRemessa: 30,  // "3 Segmentos" (Rastreamento do pacote): uma remessa por vez; espera a resposta e pausa tantos segundos
@@ -84,6 +87,15 @@ function lerConfig() {
   if (process.env.EXPEDICAO_PORTA) c.porta = Number(process.env.EXPEDICAO_PORTA);
   c.codigoBase = String(c.codigoBase).trim(); c.nomeBase = String(c.nomeBase).trim();
   c.minutos = Math.max(2, c.minutos);
+  // 2.0 (pedido "atualiza a cada 15 minutos"): quem tinha o padrão antigo (10, gravado no config.json) passa para 15.
+  if (Number(bruto.minutos) === 10 && !bruto.versaoConfig) {
+    c.minutos = 15;
+    try { fs.writeFileSync(arq, JSON.stringify(Object.assign({}, bruto, {minutos: 15, versaoConfig: 2}), null, 2) + '\n'); } catch (e) { /* só leitura */ }
+  }
+  c.fonteSegmentos = String(c.fonteSegmentos || 'gestao').toLowerCase() === 'rastreio' ? 'rastreio' : 'gestao';
+  c.remessasPorConsulta = Number(bruto.remessasPorConsulta) > 0 ? Math.min(500, Math.floor(Number(bruto.remessasPorConsulta))) : DEFAULTS.remessasPorConsulta;
+  c.segundosEntreLotes = bruto.segundosEntreLotes !== undefined && bruto.segundosEntreLotes !== '' && Number(bruto.segundosEntreLotes) >= 0
+    ? Number(bruto.segundosEntreLotes) : DEFAULTS.segundosEntreLotes;
   c.consultasSegmentos = Math.min(50, c.consultasSegmentos);
   c.segundosPorRemessa = bruto.segundosPorRemessa !== undefined && bruto.segundosPorRemessa !== '' && Number(bruto.segundosPorRemessa) >= 0
     ? Number(bruto.segundosPorRemessa) : DEFAULTS.segundosPorRemessa;
@@ -312,7 +324,9 @@ async function tratarConfig(req, res, u) {
       segmentosHoje: Object.assign(banco.contarSegmentos(hojeSp()), {semCodigo: banco.semCodigoDia(hojeSp()), erros: banco.errosSegmentos(hojeSp())}),
       status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
       viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),
-      jms: {pacotesSecundaria: banco.get('PACOTES_SECUNDARIA') || '', routeTroncal: banco.get('ROUTE_AUTO_TRONCAL') || '',
+      jms: {gestao: {fonte: cfg.fonteSegmentos, pedido: banco.get('GESTAO_VARIANTE') || '', porConsulta: Number(banco.get('GESTAO_TAMANHO')) || cfg.remessasPorConsulta,
+          reservaAte: coletor.gestaoFora && coletor.gestaoFora > Date.now() ? coletor.gestaoFora : 0},
+        pacotesSecundaria: banco.get('PACOTES_SECUNDARIA') || '', routeTroncal: banco.get('ROUTE_AUTO_TRONCAL') || '',
         routeSecundaria: banco.get('ROUTE_AUTO_SECUNDARIA') || ''}});
   }
   if (req.method !== 'POST' && p !== '/config/api/rotas.xlsx') return enviar(res, 405, 'Use POST.');
@@ -347,7 +361,16 @@ async function tratarConfig(req, res, u) {
         linhas.push('Informação básica: ' + (d.informacaoBasica ? 'sim' : 'não (resposta vazia)') + ' · 3 Segmentos: ' + (d.terminalDispatchCode || '(vazio)'));
       }
     }
-    const ok = !d.erro && d.resposta === 'dados (JSON)' && !!d.terminalDispatchCode;
+    let ok = !d.erro && d.resposta === 'dados (JSON)' && !!d.terminalDispatchCode;
+    // 2.0: a mesma remessa na Gestão de pedido JMS de remessa (a fonte principal do 3 Segmentos).
+    if (cfg.fonteSegmentos !== 'rastreio') {
+      try {
+        const g = await jms.segmentosLote([remessa]), sg = g.achados.get(remessa);
+        linhas.unshift('Gestão de pedido JMS de remessa: ' + (sg ? '3 Segmentos ' + [sg.s1, sg.s2, sg.s3].filter(Boolean).join(',') +
+          ' (pedido ' + (banco.get('GESTAO_VARIANTE') || '?') + ')' : 'o JMS respondeu, mas sem esta remessa'), 'Rastreamento do pacote (reserva):');
+        ok = ok || !!sg;
+      } catch (e) { linhas.unshift('Gestão de pedido JMS de remessa: ' + String(e && e.message || e), 'Rastreamento do pacote (reserva):'); }
+    }
     log(ok ? 'info' : 'aviso', 'Teste do 3 Segmentos: ' + linhas.join(' | '));
     return json(res, 200, {ok, linhas});
   }

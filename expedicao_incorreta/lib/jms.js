@@ -12,7 +12,11 @@
  *   pacotes:   GET  /transportation/tmsBranchTrackingDetail/loading/scan/page?… (como a troncal) ou, se o JMS recusar,
  *              …/unloading/scan/page?… (o endereço da captura). O que funcionar fica guardado.
  * ("trackingDeatil" está escrito assim mesmo no JMS.)
- * RASTREAMENTO DO PACOTE — Informação básica (uma remessa por consulta)
+ * GESTÃO DE PEDIDO JMS DE REMESSA (2.0, PDF "INFORMAÇÕES SOBRE O SITE"; tela sendWaybillSite) — várias remessas por consulta
+ *   3 Segmentos: POST /networkmanagement/omsWaybill/shippingWaybillList → data[] {waybillNo, terminalDispatchCode "VCP,362-28,203"}
+ *                O campo das remessas no pedido é descoberto na 1ª vez (variantes de GESTAO_VARIANTES) e guardado: só vale a
+ *                variante em que o JMS devolve SÓ as remessas pedidas (se ele ignorar o filtro, devolveria outras).
+ * RASTREAMENTO DO PACOTE — Informação básica (uma remessa por consulta; usado quando a Gestão de pedido não responde)
  *   3 Segmentos: POST /operatingplatform/order/getOrderDetail {waybillNo, countryId} → details.terminalDispatchCode
  *                "AL,560-12,020" (Código de primeiro segmento, Código de dois segmentos, 3 Segmentos) e
  *                details.destinationDistributeName (centro de destino, ex.: "MT CGB"). Só esses campos são usados.
@@ -31,8 +35,19 @@ const AUTH_RE = /token|登录|登陆|login|expired|expirad|过期|失效|会话|
 const ROTAS_CABECALHO = {
   troncal: ['', 'tmsShipment', 'trackingDeatil', 'transportTaskManage'],
   secundaria: ['', 'branchTrackingDetail', 'tmsBranchTrackingDetail', 'brancTaskTrackSearch'],
-  rastreio: ['', 'trackingExpress', 'waybillTracking', 'packageTracking']
+  rastreio: ['', 'trackingExpress', 'waybillTracking', 'packageTracking'],
+  gestao: ['', 'sendWaybillSite', 'omsWaybill', 'shippingWaybillList']
 };
+const GESTAO = '/networkmanagement/omsWaybill/shippingWaybillList';
+/** Campo das remessas no pedido da Gestão de pedido (a tela: "Número de pedido JMS"). A 1ª que o JMS aceitar e filtrar fica guardada. */
+const GESTAO_VARIANTES = [
+  ws => ({waybillNos: ws}), ws => ({waybillIds: ws}), ws => ({waybillNo: ws.join(',')}), ws => ({waybillNoList: ws}),
+  ws => ({keywordList: ws}), ws => ({billCodes: ws}), ws => ({waybillNo: ws.join('\n')})
+];
+/** Recusa por remessas demais numa consulta (o lote é dividido). */
+const TAMANHO_RE = /m[aá]x|limit|超过|最多|too many|exced|acima de \d+/i;
+/** Remessa sem o volume ("888002719738926-001" → "888002719738926"), para achar a resposta da remessa pedida. */
+function remessaBase(w) { return String(w === null || w === undefined ? '' : w).trim().replace(/-\d{1,4}$/, ''); }
 
 class ErroJms extends Error {
   constructor(msg, extra) { super(msg); Object.assign(this, extra || {}); }
@@ -208,6 +223,111 @@ class Jms {
     return segmentosDe(json);
   }
   /**
+   * 2.0: "3 Segmentos" de várias remessas numa consulta (Gestão de pedido JMS de remessa). → {achados: Map(remessa → {s1, s2, s3,
+   * centro}), faltando: [remessas que o JMS não devolveu]}. Na 1ª vez descobre o pedido que o JMS aceita (campo das remessas, com
+   * ou sem período) e guarda; só vale a resposta em que TODAS as remessas devolvidas estão entre as pedidas. Nenhuma variante
+   * serviu → ErroJms {indisponivel: true} (o coletor usa o Rastreamento do pacote, uma remessa por vez).
+   */
+  async segmentosLote(remessas) {
+    const ws = Array.from(new Set(remessas.map(w => String(w).trim()).filter(Boolean)));
+    if (!ws.length) return {achados: new Map(), faltando: []};
+    // Limite de remessas por consulta que o JMS aceitou (aprendido quando ele recusa um lote grande).
+    const max = Number(this.props.get('GESTAO_TAMANHO')) || 0;
+    if (max > 0 && ws.length > max) {
+      const out = {achados: new Map(), faltando: []};
+      for (let i = 0; i < ws.length; i += max) {
+        const r = await this.segmentosLote(ws.slice(i, i + max));
+        r.achados.forEach((v, k) => out.achados.set(k, v));
+        r.faltando.forEach(w => out.faltando.push(w));
+      }
+      return out;
+    }
+    try { return await this.segmentosLoteUm(ws); }
+    catch (e) {
+      if (!e.tamanho || ws.length <= 1) throw e;
+      // O JMS costuma dizer o máximo na mensagem ("Quantidade máxima de consulta: 50"); sem número, metade.
+      const nums = (String(e.message).match(/\d+/g) || []).map(Number).filter(n => n > 1 && n < ws.length);
+      const novo = nums.length ? Math.max.apply(null, nums) : Math.max(1, Math.floor(ws.length / 2));
+      this.props.set('GESTAO_TAMANHO', String(novo));
+      this.log('info', 'Gestão de pedido: o JMS recusou ' + ws.length + ' remessas numa consulta (' + e.message + '); agora ' + novo + ' por consulta.');
+      return this.segmentosLote(ws);
+    }
+  }
+  /** Um lote: a variante guardada ou, sem ela, a procura da variante que o JMS aceita e filtra. */
+  async segmentosLoteUm(ws) {
+    const tamanho = e => TAMANHO_RE.test(String(e && e.message || ''));
+    const salvo = this.props.get('GESTAO_VARIANTE');
+    if (salvo !== null && salvo !== undefined && salvo !== '') {
+      const [i, comData] = String(salvo).split(':').map(Number);
+      let r = null, motivo = '';
+      try { r = await this.tentarGestao(ws, i, comData === 1); motivo = r.motivo; }
+      catch (e) {
+        if ((e.auth && !e.recusa) || e.bloqueio || e.rede) throw e;
+        if (tamanho(e)) throw Object.assign(e, {tamanho: true});
+        motivo = e.message;
+      }
+      // Lote em que nenhuma remessa veio (ex.: todas novas demais) com a variante guardada: não é motivo para trocar.
+      if (r && r.ok) return r;
+      // A variante guardada parou de servir (o JMS mudou): esquece e procura de novo.
+      this.props.set('GESTAO_VARIANTE', null);
+      this.log('aviso', 'Gestão de pedido: o pedido guardado não serve mais (' + motivo + '); procurando de novo.');
+    }
+    let ultimo = '';
+    for (const comData of [false, true]) {
+      for (let i = 0; i < GESTAO_VARIANTES.length; i++) {
+        let r;
+        try { r = await this.tentarGestao(ws, i, comData); }
+        catch (e) {
+          if ((e.auth && !e.recusa) || e.bloqueio || e.rede) throw e;
+          if (tamanho(e)) throw Object.assign(e, {tamanho: true});
+          // Endereço que não existe (HTTP 404): nenhuma variante vai servir.
+          if (e.status === 404) throw new ErroJms('A Gestão de pedido JMS de remessa não respondeu (HTTP 404).', {indisponivel: true});
+          ultimo = e.message;
+          continue;
+        }
+        if (r.ok && r.achados.size) {
+          this.props.set('GESTAO_VARIANTE', i + ':' + (comData ? 1 : 0));
+          this.log('info', 'Gestão de pedido JMS de remessa: o JMS aceitou o pedido ' + Object.keys(GESTAO_VARIANTES[i](['x']))[0] +
+            (comData ? ' com período' : '') + ' (' + r.achados.size + ' de ' + ws.length + ' remessas na 1ª consulta).');
+          return r;
+        }
+        ultimo = r.motivo || ultimo;
+      }
+    }
+    throw new ErroJms('A Gestão de pedido JMS de remessa não devolveu o 3 Segmentos (' + (ultimo || 'nenhuma remessa encontrada') + ').', {indisponivel: true});
+  }
+  /** Uma consulta da Gestão de pedido com a variante i. → {ok, achados, faltando, motivo}. Erro de recusa do JMS sobe. */
+  async tentarGestao(ws, i, comData) {
+    const corpo = Object.assign({current: 1, size: ws.length, countryId: '1'}, GESTAO_VARIANTES[i](ws));
+    if (comData) {
+      const d = new Date(Date.now() - 3 * 3600000), iso = x => x.toISOString().slice(0, 10);
+      Object.assign(corpo, {startTime: iso(new Date(d.getTime() - 60 * 86400000)) + ' 00:00:00', endTime: iso(d) + ' 23:59:59'});
+    }
+    const pedidas = new Set(ws.map(remessaBase)), achados = new Map();
+    let registros = [], total = 0, paginas = 1;
+    for (let pag = 1; pag <= paginas && pag <= 20; pag++) {
+      corpo.current = pag;
+      const json = await this.pedir('gestao', GESTAO, corpo);
+      const d = json && json.data;
+      const lista = Array.isArray(d) ? d : d && Array.isArray(d.records) ? d.records : [];
+      if (d && !Array.isArray(d)) { total = Number(d.total) || 0; paginas = Number(d.pages) || 1; }
+      registros = registros.concat(lista);
+      if (!lista.length) break;
+    }
+    // O JMS ignorou o filtro (devolveu remessas que não foram pedidas): esta variante não serve.
+    const fora = registros.filter(x => !pedidas.has(remessaBase(x && x.waybillNo)));
+    if (fora.length) return {ok: false, achados, faltando: ws, motivo: 'devolveu ' + fora.length + ' remessas que não foram pedidas' + (total ? ' (total ' + total + ')' : '')};
+    registros.forEach(x => {
+      const cod = x.terminalDispatchCode === null || x.terminalDispatchCode === undefined ? '' : String(x.terminalDispatchCode);
+      const p = cod.split(',').map(y => y.trim());
+      achados.set(remessaBase(x.waybillNo), {s1: p[0] || '', s2: p[1] || '', s3: p[2] || '', centro: ''});
+    });
+    // Resposta por remessa pedida (a pedida pode ter o volume "-001"; a resposta vem pela remessa).
+    const out = new Map();
+    ws.forEach(w => { const r = achados.get(remessaBase(w)); if (r) out.set(w, r); });
+    return {ok: true, achados: out, faltando: ws.filter(w => !out.has(w)), motivo: out.size ? '' : 'nenhuma das remessas pedidas veio na resposta'};
+  }
+  /**
    * Teste de uma remessa (tela Configurações): uma consulta, sem tentar de novo, e o que o JMS respondeu. Só HTTP, tipo de
    * resposta, código e mensagem do JMS, título da página e o "3 Segmentos": nenhum dado de cliente.
    */
@@ -271,4 +391,4 @@ function pagina_(json) {
   return {registros, paginas, total};
 }
 
-module.exports = {Jms, ErroJms, JMS, ROTAS_CABECALHO, q, segmentosDe, detalheDe};
+module.exports = {Jms, ErroJms, JMS, ROTAS_CABECALHO, GESTAO, GESTAO_VARIANTES, remessaBase, q, segmentosDe, detalheDe};

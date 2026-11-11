@@ -55,7 +55,12 @@
         ['Aviso do 3 Segmentos', b.avisoSegmentos || 'nenhum'],
         ['3 Segmentos no JMS', e.segmentosHoje && e.segmentosHoje.total ?
           'hoje: ' + fmt(e.segmentosHoje.feitos) + ' de ' + fmt(e.segmentosHoje.total) + ' pacotes conferidos' + (e.segmentosHoje.comErro ? ' · ' + fmt(e.segmentosHoje.comErro) +
-          ' com erro (tenta de novo em 30 min)' : '') + ' · ritmo: uma remessa por vez, espera a resposta e pausa ' + e.config.segundosPorRemessa + ' s' : 'hoje ainda sem pacotes'],
+          ' com erro (tenta de novo em 30 min)' : '') : 'hoje ainda sem pacotes'],
+        // 2.0: de onde vem o 3 Segmentos (Gestão de pedido, em lotes; ou o Rastreamento do pacote, uma remessa por vez).
+        ['Fonte do 3 Segmentos', e.jms.gestao && e.jms.gestao.fonte !== 'rastreio' && !e.jms.gestao.reservaAte
+          ? 'Gestão de pedido JMS de remessa · ' + fmt(e.jms.gestao.porConsulta) + ' remessas por consulta' + (e.jms.gestao.pedido ? '' : ' (o pedido aceito pelo JMS é descoberto na 1ª busca)')
+          : 'Rastreamento do pacote · uma remessa por vez, pausa de ' + e.config.segundosPorRemessa + ' s' + (e.jms.gestao && e.jms.gestao.reservaAte
+            ? ' (a Gestão de pedido não respondeu; tenta de novo às ' + new Date(e.jms.gestao.reservaAte).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) + ')' : '')],
         ['Dias guardados', e.salvos && e.salvos.n ? e.salvos.n + (e.salvos.n === 1 ? ' dia' : ' dias') + ' (de ' + br(e.salvos.de) + ' a ' + br(e.salvos.ate) + ')' : 'nenhum ainda'],
         ['Pacotes da secundária', e.jms.pacotesSecundaria ? 'endereço "' + e.jms.pacotesSecundaria + '/scan/page"' : 'ainda não testado']
       ]);

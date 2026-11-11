@@ -10,19 +10,21 @@ Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA.
    com PDD de saída = SP GRU (fixo) e Status Concluído：已完成 ou Em Trânsito：在途 (os outros ficam de fora).
 2. Em cada viagem, abre a linha "SP GRU · Bipe de carregamento" (Info / Registros de carga e descarga) e pega a lista de
    pacotes: pedido, lote, próxima parada, Base Destino, digitalizado por e tempo de digitalização.
-3. Procura cada remessa no Rastreamento do pacote > Informação básica, bloco "3 Segmentos": Código de primeiro
-   segmento (1º nível), Código de dois segmentos (2º nível) e 3 Segmentos. Uma consulta por remessa, só na primeira vez
-   (fica guardado). A conferência é SÓ pelo JMS.
-   Ritmo: uma remessa por vez. O app manda a remessa, espera o JMS responder (até 60 segundos) e pausa 30 segundos
-   antes da próxima (cerca de 2.500 por dia). Só os pacotes de hoje, até 1 min antes da busca seguinte (o resto
-   continua nela). Se o JMS bloquear mesmo assim, o app pausa 15 min. O registro
-   mostra o título da página que o JMS devolveu.
-4. Confere com a planilha de rotas do SC (as tabelas vermelhas das docas) e acha o DESTINO CORRETO do pacote:
-   as rotas que levam o código de 1º nível (ex.: VDC > RJ SJM). Se uma linha cita o segmento (2º nível), ela vence a
-   linha geral (ex.: SP 395-05 vai na DC GRU-SP, não na SP BRE). Vale para a troncal e a secundária.
+3. Procura o "3 Segmentos" de cada remessa na Gestão de pedido JMS de remessa (versão 2.0): coluna 3 Segmentos, ex.:
+   VCP,362-28,203 (VCP = 1º segmento, 362-28 = 2º segmento). Várias remessas numa consulta (padrão 100), uma consulta
+   a cada 2 segundos: o dia inteiro fica conferido. Cada remessa é consultada uma vez só (fica guardado).
+   A conferência é SÓ pelo JMS. Na 1ª busca o app descobre sozinho o pedido que o JMS aceita e só usa a resposta se ela
+   trouxer exatamente as remessas pedidas.
+   Se a Gestão de pedido não responder, o app usa o Rastreamento do pacote > Informação básica, como antes (uma remessa
+   por vez, pausa de 30 s) e tenta a Gestão de novo depois de 1 h. Configurações mostra qual dos dois está sendo usado.
+   Se o JMS bloquear, o app pausa 15 min. O registro mostra o título da página que o JMS devolveu.
+4. Confere se a remessa PERTENCE à rota do caminhão (Próxima parada), pela planilha de rotas do SC (tabelas vermelhas):
+   - linha TRONCAL (sem 2º nível): só o 1º segmento. Ex.: caminhão RJ SJM leva RJ, RJ1, VDC e CDG.
+   - linha SECUNDÁRIA (com 2º nível): o 1º e o 2º segmento juntos. Ex.: F S-PENHA 03-SP leva só GRU,404-06.
+     DC TBT-SP, DC GRU-SP e SBN são conferidos assim (são da linha secundária).
+   Não pertence → ERRADO, e a coluna "Destino correto" diz para onde a remessa devia ir.
    A rota do caminhão é procurada nas duas tabelas (o JMS lança, por exemplo, DC GRU-SP como viagem secundária).
-   Próxima parada (o caminhão) diferente do destino correto → ERRADO.
-5. Busca SÓ O DIA DE HOJE, de novo a cada 10 minutos (só baixa de novo a lista das viagens que mudaram).
+5. Busca SÓ O DIA DE HOJE, de novo a cada 15 minutos (só baixa de novo a lista das viagens que mudaram).
 6. Guarda todos os dias no banco, para você acompanhar depois. Os dias que passaram ficam como foram salvos: o app não
    busca de novo (nem as viagens, nem o 3 Segmentos). O que ficou sem o 3 Segmentos aparece como "não consultado".
 
@@ -68,6 +70,16 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
   (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
 
+Versão 2.0 (pedido "localizar remessas carregadas na rota errada")
+  - 3 Segmentos pela Gestão de pedido JMS de remessa, várias remessas por consulta (antes: uma a cada 30 s, cerca de
+    2.500 por dia, e o resto ficava "Sem 3 Segmentos · aguardando").
+  - Troncal confere só o 1º segmento; secundária confere 1º e 2º juntos (ex.: GRU,404-06). Antes, na troncal, a linha que
+    citava o 2º segmento vencia: SP,402-01 no caminhão SP BRE era "Errado"; agora é "Certo" (SP é da SP BRE).
+  - Busca a cada 15 minutos (o config.json com o padrão antigo, 10, passa para 15 sozinho).
+  - Gráficos: Turnos, Próxima parada (destinos ofensores), 1º e 2º segmento (segmentos com mais erros) e IDs de viagem
+    mais afetados; tabela com todas as remessas. Filtros: datas, Base Destino, Destino correto e Código de 1º segmento.
+  - Atualizar: igual às outras versões (extraia o ZIP por cima da pasta; dados, config.json e planilha continuam).
+
 Rotas de 10/11 (versão 1.9.3) — aviso urgente: PA MRB, TO PMW, RO PVH e AC RBR VOLTAM do DF BSB para o SP BRE
   A planilha padrão já vem assim: linha SP BRE com TO, MRB, RO, AC (e RBR); linha DF BSB só com DF.
   Quem já tem o app continua com a planilha antiga. Para atualizar, escolha um jeito:
@@ -110,8 +122,9 @@ Link para a equipe (Tailscale, o mesmo do DashMaster)
 
 config.json (criado na 1ª vez)
 ------------------------------
-porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 10 (busca automática
-de hoje) · status {"concluido": [4], "emTransito": [3]} (códigos do
+porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 15 (busca automática
+de hoje) · fonteSegmentos "gestao" ("rastreio" = só o Rastreamento do pacote) · remessasPorConsulta 100 e segundosEntreLotes 2
+(Gestão de pedido) · status {"concluido": [4], "emTransito": [3]} (códigos do
 Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultasSegmentos 3
 (consultas do "3 Segmentos" ao mesmo tempo) · consultasPorSegundo 5 (viagens e bipes: ritmo máximo das consultas ao JMS) · segundosPorRemessa 30
 (3 Segmentos: pausa depois de cada resposta, em segundos) ·

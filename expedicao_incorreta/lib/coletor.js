@@ -141,6 +141,12 @@ class Coletor {
   async buscarSegmentos(dias) {
     const e = this.estado, cfg = this.cfg;
     if (this.pausaSegmentos && Date.now() < this.pausaSegmentos) return;
+    // 2.0: Gestão de pedido JMS de remessa (várias remessas por consulta). Sem ela (o JMS não aceitou nenhum pedido), o
+    // Rastreamento do pacote, uma remessa por vez, como antes; a Gestão é testada de novo depois de 1 h.
+    if (cfg.fonteSegmentos !== 'rastreio' && this.jms.segmentosLote && !(this.gestaoFora && Date.now() < this.gestaoFora)) {
+      const r = await this.buscarSegmentosGestao(dias);
+      if (r !== 'indisponivel') return;
+    }
     // Até 1 min antes da próxima busca automática (contando do começo desta), para não atrasar as viagens.
     const fim = Math.max(Date.now() + 60000, (e.inicio || Date.now()) + Math.max(2, (cfg.minutos || 10) - 1) * 60000), br = d => d.split('-').reverse().join('/');
     const aoMesmoTempo = cfg.segundosPorRemessa > 0 ? 1 : cfg.consultasSegmentos || 3;
@@ -186,6 +192,50 @@ class Coletor {
       this.log('info', '3 segmentos: ' + ok + ' pacotes conferidos no JMS' + (falhas ? ', ' + falhas + ' com erro (tenta de novo em 30 min)' : '') +
         (parar === 'tempo' ? '. O resto continua na próxima busca.' : '.'));
     }
+  }
+  /**
+   * 2.0: "3 Segmentos" pela Gestão de pedido JMS de remessa, em lotes de "remessasPorConsulta" (hoje primeiro), uma consulta por
+   * vez com "segundosEntreLotes" de pausa. A remessa que o JMS não devolve fica com erro e volta em 30 min. → 'indisponivel'
+   * quando a Gestão não serve (o coletor usa o Rastreamento do pacote).
+   */
+  async buscarSegmentosGestao(dias) {
+    const e = this.estado, cfg = this.cfg, br = d => d.split('-').reverse().join('/');
+    const fim = Math.max(Date.now() + 60000, (e.inicio || Date.now()) + Math.max(2, (cfg.minutos || 15) - 1) * 60000);
+    const lote = Math.max(1, Math.min(500, Number(cfg.remessasPorConsulta) || 100)), pausa = Math.max(0, Number(cfg.segundosEntreLotes) || 0) * 1000;
+    const hoje = hojeSp(), ordem = Array.from(new Set([].concat(dias || [hoje]))).sort((a, b) => (a === hoje ? -1 : b === hoje ? 1 : b.localeCompare(a)));
+    let ok = 0, faltou = 0, consultas = 0, parar = '';
+    e.tipo = '';
+    e.avisoSegmentos = '';
+    for (const dia of ordem) {
+      const total = this.banco.contarSegmentos(dia);
+      let feitos = total.feitos;
+      for (let ws = this.banco.semSegmento(dia, lote); ws.length && !parar; ws = this.banco.semSegmento(dia, lote)) {
+        if (Date.now() >= fim) { parar = 'tempo'; break; }
+        let r;
+        try { r = await this.jms.segmentosLote(ws); consultas++; }
+        catch (err) {
+          if (err && err.indisponivel) {
+            this.gestaoFora = Date.now() + 60 * 60000;
+            this.log('aviso', String(err.message || err) + ' Usando o Rastreamento do pacote (uma remessa por vez) por 1 h.');
+            return 'indisponivel';
+          }
+          if (err && err.bloqueio) { parar = 'bloqueio'; e.avisoSegmentos = 'O JMS bloqueou a Gestão de pedido. O app pausa 15 min e continua. ' + err.message; break; }
+          throw err; // token vencido, rede: a busca para e avisa
+        }
+        r.achados.forEach((sg, w) => { this.banco.salvarSegmento(w, sg, ''); ok++; feitos++; e.segmentos++; });
+        r.faltando.forEach(w => { this.banco.salvarSegmento(w, null, 'A Gestão de pedido não devolveu esta remessa'); faltou++; });
+        e.etapa = 'Conferindo no JMS (3 segmentos, Gestão de pedido) · ' + br(dia) + ': ' + feitos + ' de ' + total.total + ' pacotes…';
+        if (this.aoMudar) { this.aoMudar('troncal', dia); this.aoMudar('secundaria', dia); }
+        if (pausa) await new Promise(res => setTimeout(res, pausa));
+      }
+      if (parar) break;
+    }
+    if (parar === 'bloqueio') { this.pausaSegmentos = Date.now() + 15 * 60000; this.log('aviso', e.avisoSegmentos); }
+    if (ok || faltou) {
+      this.log('info', '3 segmentos (Gestão de pedido): ' + ok + ' pacotes conferidos em ' + consultas + ' consultas' +
+        (faltou ? ', ' + faltou + ' sem resposta do JMS (tenta de novo em 30 min)' : '') + (parar === 'tempo' ? '. O resto continua na próxima busca.' : '.'));
+    }
+    return parar || 'ok';
   }
   /** Viagens do dia que saem da nossa base (filtro do JMS e conferido aqui também). lista.mudou = alguma viagem nova ou com
    * status, nome ou destino diferente (o painel recalcula). */

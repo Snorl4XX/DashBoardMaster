@@ -7,7 +7,8 @@
  *   2. Destino correto = as rotas que recebem o Código de primeiro segmento da remessa (ex.: VDC → RJ SJM). A linha que cita
  *      o Código de dois segmentos vence a linha geral, nas duas tabelas (ex.: SP 395-05 → DC GRU-SP, não SP BRE). Sem linha
  *      específica: a geral do mesmo tipo (troncal ou secundária); se não houver, a do outro tipo.
- *   3. Certo = a rota do caminhão é um dos destinos corretos.
+ *   3. Certo = a linha da rota do caminhão aceita a remessa (2.0): troncal pelo 1º segmento; secundária (linha com 2º nível)
+ *      pelo 1º e o 2º juntos. Senão, errado (o "destino correto" do item 2 diz para onde devia ir).
  * Situações: certo · errado · sem_segmento (o JMS ainda não deu o "3 Segmentos") · sem_codigo (código fora da tabela de
  * rotas) · sem_regra (rota do caminhão fora da planilha de rotas). Só "errado" conta como erro; as outras viram aviso.
  */
@@ -74,6 +75,10 @@ function lerRotas(buf) {
 }
 
 // ------------------------------------------------------------------ conferência
+/** A linha da rota aceita a remessa: código de 1º nível e, se a linha cita segmentos (2º nível), o segmento também. */
+function aceita(regra, s1, s2) {
+  return regra.entradas.some(e => e.codigos.indexOf(s1) >= 0 && (!e.segmentos.length || e.segmentos.indexOf(s2) >= 0));
+}
 class Regras {
   /** pasta = onde fica rotas.xlsx (planilhas/). Cria rotas.xlsx com as tabelas de 24/10 se não existir. */
   constructor(pasta) {
@@ -149,8 +154,12 @@ class Regras {
       rotaCerta: certas.map(c => c.regra.rota + (c.tipo !== tipo ? ' (' + (c.tipo === 'troncal' ? 'troncal' : 'secundária') + ')' : '')).join(' / ')};
     if (!regra) return Object.assign(out, {situacao: 'sem_regra'});
     if (!s1) return Object.assign(out, {situacao: 'sem_segmento'});
+    // 2.0 (PDF "localizar remessas carregadas na rota errada"): a remessa pertence ao caminhão quando a linha da rota dele a aceita.
+    // Linha troncal (sem 2º nível) = só o 1º segmento ("Na principal vai pesquisar pelo 1º segmento"); linha secundária (com 2º
+    // nível) = 1º e 2º juntos ("GRU,404-06"). Ex.: SP,402-01 no caminhão SP BRE = certo (SP é da SP BRE).
+    if (aceita(regra, s1, s2)) return Object.assign(out, {situacao: 'certo', rotaCerta: certas.some(c => c.regra === regra) ? out.rotaCerta : regra.rota});
     if (!certas.length) return Object.assign(out, {situacao: 'sem_codigo'});
-    return Object.assign(out, {situacao: certas.some(c => c.regra === regra) ? 'certo' : 'errado'});
+    return Object.assign(out, {situacao: 'errado'});
   }
   /** Resumo para Configurações: rotas lidas e avisos da planilha. */
   resumo() {

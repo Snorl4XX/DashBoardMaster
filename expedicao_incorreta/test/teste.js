@@ -138,8 +138,9 @@ function abasRotas(comWW) {
   const cf = (o, parada) => R.conferir('troncal', Object.assign({proximaParada: parada || 'XX NORTE'}, o), '');
   const casos = [
     [{seg1: 'NO', seg2: '901-00', seg3: '100'}, 'certo', 'XX NORTE', 'código da rota do caminhão'],
-    [{seg1: 'NO', seg2: '901-07'}, 'errado', 'YY SUL', 'linha que cita o segmento vence a geral'],
-    [{seg1: 'NO', seg2: '901-09'}, 'errado', 'BASE LOCAL C-ZZ (secundária)', 'segmento de uma rota secundária'],
+    // 2.0 (PDF): caminhão da troncal confere só o 1º segmento — NO é da XX NORTE, mesmo com uma linha específica NO 901-07 na YY SUL.
+    [{seg1: 'NO', seg2: '901-07'}, 'certo', 'XX NORTE', 'troncal: só o 1º segmento (linha específica de outra rota não conta)'],
+    [{seg1: 'NO', seg2: '901-09'}, 'certo', 'XX NORTE', 'troncal: segmento de uma rota secundária, mas o 1º segmento é da rota'],
     [{seg1: 'SU', seg2: '902-00'}, 'errado', 'YY SUL', 'código de outra rota'],
     [{seg1: 'XA', seg2: '950-00'}, 'certo', 'XX NORTE', 'rota com dois códigos'],
     [{seg1: 'CE1', seg2: '960-00'}, 'errado', 'XX CENTRO', 'código escrito "DC—CE1" na tabela'],
@@ -151,6 +152,13 @@ function abasRotas(comWW) {
     const x = cf(p);
     conferir(x.situacao === sit && x.rotaCerta === certa, 'conferência — ' + nome, x);
   });
+  // 2.0: linha com 2º nível (secundária) confere o 1º E o 2º segmento juntos ("GRU,404-06"); a linha geral só o 1º.
+  conferir(cf({seg1: 'NO', seg2: '901-07'}, 'YY SUL').situacao === 'certo' && cf({seg1: 'NO', seg2: '901-00'}, 'YY SUL').situacao === 'errado' &&
+    cf({seg1: 'NO', seg2: '901-00'}, 'YY SUL').rotaCerta === 'XX NORTE' &&
+    R.conferir('secundaria', {proximaParada: 'BASE LOCAL A-ZZ', seg1: 'LOC', seg2: '903-01'}, '').situacao === 'certo' &&
+    R.conferir('secundaria', {proximaParada: 'BASE LOCAL A-ZZ', seg1: 'LOC', seg2: '903-02'}, '').situacao !== 'certo' &&
+    R.conferir('secundaria', {proximaParada: 'BASE LOCAL C-ZZ', seg1: 'NO', seg2: '901-00'}, '').situacao === 'errado',
+    'secundária: 1º + 2º segmento juntos (LOC,903-01 certo; LOC,903-02 e NO,901-00 fora da rota)');
   // Painel secundário com caminhão para uma rota da tabela troncal (o JMS lança, por exemplo, DC GRU-SP como viagem secundária).
   const sec = o => R.conferir('secundaria', Object.assign({proximaParada: 'XX NORTE'}, o), '');
   conferir(sec({seg1: 'NO', seg2: '901-00'}).situacao === 'certo' && sec({seg1: 'SU', seg2: '902-00'}).situacao === 'errado' &&
@@ -176,10 +184,11 @@ function abasRotas(comWW) {
     buscados: () => new Set()
   };
   const rs = new Painel(bancoFalso, RP, codigosStatus()).resumo('troncal', DIA, DIA, {});
-  conferir(rs.totais.errados === 10 && rs.top.codigos1[0].nome === 'VDC' && rs.top.codigos1[0].qtd === 4 && rs.top.codigos1.length === 4 &&
+  // 2.0: SP,395-05 no caminhão XX BRE (troncal, leva SP) é certo — a troncal confere só o 1º segmento.
+  conferir(rs.totais.errados === 8 && rs.top.codigos1[0].nome === 'VDC' && rs.top.codigos1[0].qtd === 4 && rs.top.codigos1.length === 3 &&
     rs.maisAfetados.codigo1.nome === 'VDC', 'gráfico e cartão do 1º segmento (todos os códigos dos errados)', rs.top.codigos1);
-  conferir(rs.seg2.errados === 6 && rs.seg2.codigos.join() === 'GRU,MOO,SP,SP1,SBN' &&
-    rs.top.segmentos2.map(i => i.nome + ':' + i.qtd + ':' + i.rota).join(' | ') === '381-00:3:1º segmento GRU | 395-05:2:1º segmento SP | 375-00:1:1º segmento SBN' &&
+  conferir(rs.seg2.errados === 4 && rs.seg2.codigos.join() === 'GRU,MOO,SP,SP1,SBN' &&
+    rs.top.segmentos2.map(i => i.nome + ':' + i.qtd + ':' + i.rota).join(' | ') === '381-00:3:1º segmento GRU | 375-00:1:1º segmento SBN' &&
     rs.maisAfetados.segmento2.nome === '381-00', 'gráfico e cartão do 2º segmento: só 1º segmento GRU, MOO, SP, SP1 ou SBN (VDC fica fora)', rs.top.segmentos2);
 
   // "3 Segmentos" na busca: uma consulta por remessa e guardado; JMS recusando tudo para depois de 20 tentativas; token vencido para tudo.
@@ -568,6 +577,64 @@ function abasRotas(comWW) {
   conferir(novo.ok && est.token.fonte === 'app' && !est.busca.authVencido, 'AuthToken colado no app: limpa "authtoken:", testa e passa a valer', novo);
   e = await buscar();
   conferir(e.busca.ultimo.ok && !e.busca.authVencido, 'com o AuthToken novo a busca volta a funcionar');
+
+  // ---------- 8b. 2.0: 3 Segmentos pela Gestão de pedido JMS de remessa (várias remessas por consulta) ----------
+  {
+    const {Jms} = require('../lib/jms');
+    const {SEGMENTOS_FALSOS} = require('./jms_falso');
+    const jg = criar(DIA);
+    servidores.push(jg.servidor);
+    const pg = await portaLivre();
+    await new Promise(res => jg.servidor.listen(pg, '127.0.0.1', res));
+    const novoJms = () => {
+      const mem = {}, logs = [];
+      const j = new Jms({base: 'http://127.0.0.1:' + pg, credenciais: () => ({JMS_AUTHTOKEN: jg.estado.token}), props: {get: k => (k in mem ? mem[k] : null),
+        set: (k, v) => { if (v === null || v === undefined) delete mem[k]; else mem[k] = String(v); }}, log: (n, t) => logs.push(t), porSegundo: 1000, segundosPorRemessa: 0});
+      return {j, mem, logs};
+    };
+    const todas = [];
+    ['troncal', 'secundaria'].forEach(t => Object.values(jg.estado.dados[t].pacotes).forEach(l => l.forEach(x => todas.push(x))));
+    const seg = x => (SEGMENTOS_FALSOS[x.destsite] || [null])[0];
+    // (a) O JMS só filtra pelo campo "waybillIds" e aceita no máximo 50 por consulta: o app descobre os dois e guarda.
+    jg.estado.gestao = {campo: 'waybillIds', max: 50};
+    const A = novoJms(), pedir = todas.slice(0, 100).map(x => x.billCode).concat([todas[0].billCode + '-001', 'TSTNAOEXISTE1']);
+    const ra = await A.j.segmentosLote(pedir);
+    const certos = todas.slice(0, 100).every(x => { const r = ra.achados.get(x.billCode); return r && (seg(x) ? r.s1 + ',' + r.s2 + ',' + r.s3 === seg(x) : r.s1 === ''); });
+    conferir(certos && ra.achados.get(todas[0].billCode + '-001') && ra.faltando.join() === 'TSTNAOEXISTE1' && A.mem.GESTAO_VARIANTE === '1:0' && A.mem.GESTAO_TAMANHO === '50',
+      'Gestão de pedido: descobre o campo das remessas (waybillIds) e o limite por consulta; 3 Segmentos de cada remessa (também com o volume "-001")',
+      {variante: A.mem.GESTAO_VARIANTE, tamanho: A.mem.GESTAO_TAMANHO, faltando: ra.faltando});
+    const antes = jg.estado.gestaoPedidos.length;
+    const rb = await A.j.segmentosLote(todas.slice(0, 40).map(x => x.billCode));
+    conferir(rb.achados.size === 40 && jg.estado.gestaoPedidos.length - antes === 1, 'com o pedido guardado: 40 remessas numa consulta só', jg.estado.gestaoPedidos.length - antes);
+    // (b) JMS que ignora o filtro (devolve outras remessas): o app não aceita a resposta (nada de segmento trocado).
+    jg.estado.gestao = {campo: 'waybillIds', ignoraFiltro: true};
+    let erroB = null;
+    try { await novoJms().j.segmentosLote(todas.slice(60, 65).map(x => x.billCode)); } catch (err) { erroB = err; }
+    conferir(erroB && erroB.indisponivel && /remessas que não foram pedidas/.test(erroB.message), 'Gestão de pedido sem filtro: resposta recusada (não troca o segmento de ninguém)', erroB && erroB.message);
+    // (c) Sem a Gestão de pedido (HTTP 404): desiste na hora e o coletor usa o Rastreamento do pacote.
+    jg.estado.gestao = null;
+    const n404 = jg.estado.pedidos['/networkmanagement/omsWaybill/shippingWaybillList'] || 0;
+    let erroC = null;
+    try { await novoJms().j.segmentosLote(['TST1']); } catch (err) { erroC = err; }
+    conferir(erroC && erroC.indisponivel && (jg.estado.pedidos['/networkmanagement/omsWaybill/shippingWaybillList'] - n404) <= 5, 'Gestão de pedido fora do ar: desiste em poucas consultas', erroC && erroC.message);
+    // (d) Coletor: o dia inteiro pela Gestão (lotes), sem nenhuma consulta ao Rastreamento; sem a Gestão, o Rastreamento como antes.
+    const bg = new Banco(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'exp-gestao-')), 'g.db'));
+    bg.trocarPacotes('troncal', 'DKTESTE0002', DIA, jg.estado.dados.troncal.pacotes.DKTESTE0002.map(x => ({billCode: x.billCode})));
+    jg.estado.gestao = {campo: 'waybillIds', max: 50};
+    const D = novoJms(), rast0 = Object.keys(jg.estado.segmentosPedidos).length, g0 = jg.estado.gestaoPedidos.length;
+    const colG = new Coletor({banco: bg, cfg: {minutos: 15, remessasPorConsulta: 100, segundosEntreLotes: 0, consultasSegmentos: 3}, log: () => {}, jms: D.j});
+    await colG.buscarSegmentos([DIA]);
+    const contG = bg.contarSegmentos(DIA);
+    conferir(contG.feitos === 121 && contG.comErro === 0 && Object.keys(jg.estado.segmentosPedidos).length === rast0 && jg.estado.gestaoPedidos.length - g0 <= 12,
+      'coletor: 121 remessas pela Gestão de pedido em poucas consultas, nenhuma pelo Rastreamento do pacote', {contG, consultas: jg.estado.gestaoPedidos.length - g0});
+    bg.trocarPacotes('troncal', 'DKTESTE0006', DIA, jg.estado.dados.troncal.pacotes.DKTESTE0006.map(x => ({billCode: x.billCode})));
+    jg.estado.gestao = null;
+    const colR = new Coletor({banco: bg, cfg: {minutos: 15, consultasSegmentos: 3, segundosPorRemessa: 0}, log: () => {}, jms: novoJms().j});
+    await colR.buscarSegmentos([DIA]);
+    conferir(bg.contarSegmentos(DIA).feitos === 123 && jg.estado.dados.troncal.pacotes.DKTESTE0006.every(x => jg.estado.segmentosPedidos[x.billCode] === 1),
+      'sem a Gestão de pedido: as remessas novas vão pelo Rastreamento do pacote (uma por vez), como antes', bg.contarSegmentos(DIA));
+    bg.fechar();
+  }
 
   // ---------- 9. Erro ao abrir ----------
   const ruimCfg = path.join(pasta, 'ruim.json');
