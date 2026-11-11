@@ -1,8 +1,24 @@
-# J&T DASHMASTER V4.25.6 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.7 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.25.7 — Avaria: os gráficos somam o período inteiro (dias sem lista são baixados na hora)
+
+Pedido (print da Avaria com "PARCIAL" em todos os gráficos e 310 avarias em 30 dias): "não arrumou nada, continua o mesmo problema".
+- **Causa de verdade:** os gráficos somam a **lista** de avarias de cada dia. Os dias em que o download da lista deu erro no
+  JMS ficavam esperando a autocorreção diária (12 h depois do erro); com 30 dias, os gráficos somavam só os 2 ou 3 dias que
+  tinham a lista (por isso o "PARCIAL" e 310), enquanto o cartão mostrava o total do JMS. Reproduzido: 360 nos gráficos
+  contra 3.600 no cartão, e continuava assim depois de o JMS voltar.
+- **Agora:** ao abrir um período, os dias sem a lista (erro, nunca baixados ou pela metade) vão para a fila **na hora**. No
+  alto aparece "Baixando a lista de N dia(s) do período" e o painel confere a cada 30 s: conforme os dias chegam, os
+  gráficos se completam sozinhos, sem recarregar a página (teste: 360 → 3.600, "Detalhes completos").
+- Se o JMS continuar recusando a lista de algum dia, o selo vermelho "Erro: …" mostra a mensagem do JMS.
+- Dia que acabou de dar erro não é pedido de novo antes de 10 min (propriedade `REPEDIR_LISTA_MIN`).
+- Vale para todos os painéis (não só a Avaria).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_7_NODE.zip`.
 
 ## V4.25.6 — Avaria (e todos os painéis): o período escolhido sempre chega aos gráficos
 

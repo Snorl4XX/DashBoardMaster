@@ -5458,6 +5458,43 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'V4.25.4: identidade do registro (sem o número da linha; outro horário = outro registro)');
 }
 
+// ---------- V4.25.7 (pedido "Avaria: coloco 30 dias e os gráficos não somam o período"): dias do período sem a lista (download com
+// erro) ficavam esperando a autocorreção diária (12 h) e os gráficos somavam só os dias com lista ("PARCIAL"). Agora o painel pede
+// esses dias na hora em que o período é aberto. ----------
+{
+  const {makeDamage} = require('./mocks');
+  const c0 = createContext({props: {}, jms: fakeJms({}), quiet: true}), hoje = c0.isoToday_(), add = (d, n) => c0.addDaysIso_(d, n);
+  const dias = {};
+  for (let i = 1; i <= 12; i++) { const d = add(hoje, -i); dias[d] = makeDay(d, 20 + i); Object.assign(dias[d], makeDamage(d, 200 + i)); }
+  const corte = add(hoje, -3);
+  let falhar = true;
+  const cD = createContext({props: Object.assign({}, baseProps, {DATA_START_DATE: add(hoje, -12), PAINEIS: 'damage', REPEDIR_LISTA_MIN: '0'}),
+    jms: fakeJms(dias, {intercept: (route, h, body) => falhar && route === 'detailBreakageRateData' && String(body.statisticalStartDate) < corte
+      ? [200, {code: 500, msg: 'Erro temporário do JMS (teste)', fail: true, succ: false}] : null}), quiet: true});
+  cD.setupProject();
+  cD.queueHistory(add(hoje, -12), add(hoje, -1), true);
+  for (let k = 0; k < 6; k++) runAll(cD);
+  falhar = false;
+  const de = add(hoje, -10), ate = add(hoje, -1);
+  const r1 = cD.getDashboardData('damage', {from: de, to: ate});
+  const pend = cD.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'damage').length;
+  runAll(cD);
+  const r2 = cD.getDashboardData('damage', {from: de, to: ate});
+  const total = Object.keys(dias).filter(d => d >= de && d <= ate).reduce((a, d) => a + dias[d].dm.length, 0);
+  check(!r1.meta.archive.fullyLoaded && r1.meta.detailFetch && r1.meta.detailFetch.days === 7 && r1.meta.detailFetch.queued >= 7 && pend >= 7 &&
+    r2.meta.archive.fullyLoaded && !r2.meta.detailFetch && r2.meta.rowsLoaded === total,
+    'V4.25.7: Avaria com 7 de 10 dias sem a lista (erro do JMS) — ao abrir o período, os 7 dias vão para a fila e o painel fica com o período inteiro',
+    {f1: r1.meta.detailFetch, pend, linhas: [r1.meta.rowsLoaded, r2.meta.rowsLoaded, total]});
+  // Dia que acabou de dar erro não é pedido de novo a cada abertura (padrão: 10 min).
+  const cE = createContext({props: Object.assign({}, baseProps, {DATA_START_DATE: add(hoje, -12), PAINEIS: 'damage'}),
+    jms: fakeJms(dias, {intercept: (route) => route === 'detailBreakageRateData' ? [200, {code: 500, msg: 'Erro do JMS (teste)', fail: true}] : null}), quiet: true});
+  cE.setupProject();
+  cE.queueHistory(add(hoje, -4), add(hoje, -1), true);
+  for (let k = 0; k < 6; k++) runAll(cE);
+  const fE = cE.getDashboardData('damage', {from: add(hoje, -4), to: add(hoje, -1)}).meta.detailFetch;
+  check(fE && fE.days === 4 && fE.queued === 0, 'V4.25.7: dia com erro há menos de 10 min não é pedido de novo (sem repetir a consulta que falhou)', fE);
+}
+
 // V4.25.3 (pedido "No dash principal está faltando dados para analisar"): no Node.js, "30 dias" da Falta de Bipagem na Expedição
 // (~11 mil remessas por dia) carregava só 13 dias — limite de 150 mil remessas por consulta, feito para o Apps Script — e o
 // relatório Excel parava em 60 mil remessas. No Node os arquivos são locais: o painel e o Excel recebem o período inteiro.

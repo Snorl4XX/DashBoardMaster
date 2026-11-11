@@ -1423,6 +1423,45 @@ function detailGapDays_(indicator, from, to) {
   });
   return out.sort((a, b) => (a.date < b.date ? -1 : 1));
 }
+/**
+ * V4.25.7 (Avaria: "coloco 30 dias e os gráficos não somam o período"): dias do período aberto no painel SEM a lista (nunca
+ * baixada, com erro ou pela metade) vão para a fila na hora — antes esperavam a autocorreção diária (dia com erro: 12 h depois)
+ * e os gráficos somavam só os dias que tinham a lista (marcados "PARCIAL"). Dia que deu erro há menos de 10 min não é pedido de
+ * novo. Sem o número do dia (resumo), o resumo vem antes. → {days, queued} | null.
+ */
+function queueMissingDetails_(indicator, from, to, archive) {
+  const cfg = INDICATORS[indicator];
+  if (!cfg || cfg.grouped || cfg.onDemand || cfg.snapshot || cfg.historyOf || !archive) return null;
+  const today = isoToday_(), win = detailDays_(cfg), minDay = win ? addDaysIso_(today, -win) : '';
+  const want = Array.from(new Set([].concat(archive.notDownloaded || [], archive.partialDates || [])))
+    .filter(d => isIso_(d) && d <= today && (!minDay || d >= minDay));
+  if (!want.length) return null;
+  const sm = statusMap_(indicator, from, to), jobs = {}, now = Date.now();
+  // Minutos antes de pedir de novo um dia que acabou de dar erro (propriedade REPEDIR_LISTA_MIN; padrão 10).
+  const esperaMs = (getProp_('REPEDIR_LISTA_MIN', '') === '' ? 10 : Math.max(0, Number(getProp_('REPEDIR_LISTA_MIN', '')) || 0)) * 60000;
+  allTabRows_('JOBS').forEach(r => {
+    const t = String(r[1]);
+    if ((t !== 'DETAIL_INIT' && t !== 'SUMMARY') || String(r[2]) !== indicator) return;
+    const d = dateCellIso_(r[3]);
+    if (d < from || d > to) return;
+    const u = r[8] instanceof Date ? r[8].getTime() : Date.parse(r[8]);
+    jobs[t + '|' + d] = {status: String(r[5]), at: Number.isFinite(u) ? u : 0};
+  });
+  const ativo = (t, d) => {
+    const j = jobs[t + '|' + d];
+    return !!j && (j.status === 'PENDING' || j.status === 'RUNNING' || (j.status === 'ERROR' && now - j.at < esperaMs));
+  };
+  const fila = [];
+  want.forEach(d => {
+    const st = sm[indicator + '|' + d];
+    if (st && (st.summary === 'NO_RECORD' || st.details === 'NO_RECORD')) return;
+    if ((!st || st.summary !== 'COMPLETE') && !ativo('SUMMARY', d)) fila.push(['SUMMARY', indicator, d, 0]);
+    if (!ativo('DETAIL_INIT', d)) fila.push(['DETAIL_INIT', indicator, d, 1]);
+  });
+  const n = fila.length ? enqueueJobs_(fila.slice(0, 124), {reset: true}) : 0;
+  if (n) logSync_('INFO', indicator, to, 'Período aberto no painel: ' + n + ' download(s) de dia(s) sem a lista pedido(s) agora (' + want.length + ' dia(s) sem a lista).');
+  return {days: want.length, queued: n};
+}
 /** Downloads de lista (DETAIL_INIT) na fila ou rodando: {"indicador|data": 1}. */
 function activeDetailJobs_() {
   const out = {};

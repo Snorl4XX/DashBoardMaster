@@ -89,6 +89,8 @@
       tableShort: 'O JMS entregou {a} de {b} remessas em {d} (limite do JMS): as que faltam não entram na tabela nem nos gráficos.',
       gapQueued: 'Lista com {a} de {b} do JMS: baixando de novo (na fila)',
       chartFail: 'Este gráfico não pôde ser montado com este período ({e}). Os outros foram atualizados.',
+      fetchingDays: 'Baixando a lista de {n} dia(s) do período',
+      fetchingDaysHint: 'Esses dias ainda não tinham a lista do JMS (download com erro ou ainda não feito). Já foram pedidos agora: os gráficos se completam sozinhos, sem recarregar a página.',
       renderFail: 'Parte do painel não pôde ser mostrada com este período; o resto foi atualizado. Mande um print deste aviso: {p}',
       partOrderKind: 'Pedidos principais/filhos', partCards: 'Cartões', partDetail: 'Situação do detalhe', partCharts: 'Gráficos',
       partSummary: 'Resultados', partRank: 'Painéis de ranking', partMetric: 'Painéis de números', partCross: 'Tabelas cruzadas', partTable: 'Tabela',
@@ -275,6 +277,8 @@
       tableShort: 'JMS 在 {d} 只返回了 {b} 票中的 {a} 票（JMS 限制）：缺少的运单不在表格和图表中。',
       gapQueued: '明细 {a} / JMS {b} 票：正在重新下载（队列中）',
       chartFail: '该期间此图表无法生成（{e}），其他图表已更新。',
+      fetchingDays: '正在下载该期间 {n} 天的明细',
+      fetchingDaysHint: '这些日期还没有 JMS 明细（下载出错或尚未下载），已立即请求：图表会自动补全，无需刷新页面。',
       renderFail: '该期间面板部分内容无法显示，其余已更新。请截图此提示：{p}',
       partOrderKind: '主/子单', partCards: '卡片', partDetail: '明细状态', partCharts: '图表',
       partSummary: '结果', partRank: '排行面板', partMetric: '数字面板', partCross: '交叉表', partTable: '表格',
@@ -1137,6 +1141,9 @@
       if (opts.resetFilters || !Object.keys(state.dropdowns).length || state.builtFor !== key) buildFilterGrid();
       renderDashboard();
       updateSidebarStatus(res.meta.sync, res.meta.lastRateSyncedAt);
+      // V4.25.7: faltam listas do período (pedidas agora): confere a cada 30 s e recarrega quando um dia chegar.
+      clearTimeout(state.fetchTimer);
+      if (res.meta.detailFetch && res.meta.detailFetch.days) state.fetchTimer = setTimeout(function () { checkForUpdates(true); }, 30000);
       state.lastReloadAt = Date.now();
       // V3.34: Sem Movimentação em Tempo real — a linha mais recente é buscada no JMS ao abrir (se a gravada tem mais de 5 min)
       // e a cada 5 min com a aba visível (liveTick). V3.30 buscava só uma vez por dia, quando faltava a foto de hoje.
@@ -1477,6 +1484,9 @@
         pend.map(function (d) { return fmtDate(d, true); }).join(', '));
     }
     if (state.data && state.data.summary) html += badge('ok', 'info', t('summaryBadge', {n: fmtInt(state.data.summary.cubeRows)}), t('summaryHint'));
+    // V4.25.7: dias do período sem a lista pedidos agora: os gráficos se completam sozinhos.
+    var df = meta.detailFetch;
+    if (df && df.days) html += badge('warn', 'info', t('fetchingDays', {n: df.days}), t('fetchingDaysHint'));
     // V4.25.5: dias fechados com a lista menor que os erros do JMS (antes: "Detalhes completos" sem aviso).
     if (gapD.length) html += badge('warn', 'warn', t('gapBadge', {d: gapD.length}), t('gapHint') + ' ' + gapD.map(function (x) {
       return fmtDate(x.date, true) + ' (' + fmtInt(x.saved) + ' de ' + fmtInt(x.expected) + ')'; }).join(', '));
