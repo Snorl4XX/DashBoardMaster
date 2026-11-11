@@ -88,6 +88,10 @@
       tablePartial: 'Dados PARCIAIS: apenas remessas já sincronizadas entram na tabela.', noRows: 'Nenhuma remessa encontrada.',
       tableShort: 'O JMS entregou {a} de {b} remessas em {d} (limite do JMS): as que faltam não entram na tabela nem nos gráficos.',
       gapQueued: 'Lista com {a} de {b} do JMS: baixando de novo (na fila)',
+      chartFail: 'Este gráfico não pôde ser montado com este período ({e}). Os outros foram atualizados.',
+      renderFail: 'Parte do painel não pôde ser mostrada com este período; o resto foi atualizado. Mande um print deste aviso: {p}',
+      partOrderKind: 'Pedidos principais/filhos', partCards: 'Cartões', partDetail: 'Situação do detalhe', partCharts: 'Gráficos',
+      partSummary: 'Resultados', partRank: 'Painéis de ranking', partMetric: 'Painéis de números', partCross: 'Tabelas cruzadas', partTable: 'Tabela',
       gapSoon: 'Lista com {a} de {b} do JMS: nova conferência em até 1 h',
       gapJms: 'O JMS entregou {a} de {b} remessas na lista: nova tentativa automática',
       gapBadge: 'Lista menor que o JMS em {d} dia(s)',
@@ -270,6 +274,10 @@
       tablePartial: '部分数据：仅显示已同步的运单。', noRows: '未找到运单。',
       tableShort: 'JMS 在 {d} 只返回了 {b} 票中的 {a} 票（JMS 限制）：缺少的运单不在表格和图表中。',
       gapQueued: '明细 {a} / JMS {b} 票：正在重新下载（队列中）',
+      chartFail: '该期间此图表无法生成（{e}），其他图表已更新。',
+      renderFail: '该期间面板部分内容无法显示，其余已更新。请截图此提示：{p}',
+      partOrderKind: '主/子单', partCards: '卡片', partDetail: '明细状态', partCharts: '图表',
+      partSummary: '结果', partRank: '排行面板', partMetric: '数字面板', partCross: '交叉表', partTable: '表格',
       gapSoon: '明细 {a} / JMS {b} 票：1 小时内重新核对',
       gapJms: 'JMS 明细只返回了 {b} 票中的 {a} 票：将自动重试',
       gapBadge: '{d} 天明细少于 JMS',
@@ -1168,27 +1176,39 @@
     refreshFilterOptions(f);
     renderChips();
     renderCoverage(state.data.meta);
-    var view = state.rateView = rateView(c, f);
-    maybeFetchOrderKind(c, view);
-    // Filtro de turno: parte do turno na taxa oficial (participação do turno nas ocorrências de cada dia).
-    var sel = state.data.summary || c.heroMetric ? null : Core.shiftSelection(view.filters), only = null;
-    if (view.kind) { only = {}; only[c.orderKinds.field] = [view.label]; }
-    state.shiftInfo = sel ? {sel: sel, name: shiftName(sel), shares: Core.shiftShares(state.data.rows, state.data.agg, sel, only)} : null;
-    var cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to,
-      {shares: state.shiftInfo && state.shiftInfo.shares, shiftRows: sel && sel.by.shift ? Core.applyFilters(state.data.rows, f, 'shift') : null,
-        // Parte de cada turno na taxa (cartões T1/T2/T3): mesma regra do filtro de turno.
-        partRows: state.data.summary || c.heroMetric || !(c.filters || []).some(function (x) { return x.key === 'shift'; }) ? null : state.data.rows,
-        agg: state.data.agg, only: only});
-    renderKpis(c, cards);
-    renderDetailStatus(c);
-    renderCharts(c);
-    renderSummaryTable(c);
-    renderRankPanels(c);
-    renderMetricPanels(c);
-    renderCrossTables(c);
+    // V4.25.6 (Avaria: "coloco 30 dias, o gráfico não atualiza e dá erro"): cada parte da tela é desenhada separada. Antes, um erro
+    // nos cartões (ou em qualquer parte) parava tudo e os gráficos ficavam com o período anterior. Agora o resto atualiza com o
+    // período e o aviso diz qual parte falhou e por quê.
+    var falhas = [];
+    var passo = function (nome, fn) {
+      try { fn(); } catch (e) { falhas.push(nome + ': ' + String(e && e.message || e)); if (window.console) console.error(nome, e); }
+    };
+    var view = state.rateView = rateView(c, f), cards = null;
+    passo(t('partOrderKind'), function () { maybeFetchOrderKind(c, view); });
+    passo(t('partCards'), function () {
+      // Filtro de turno: parte do turno na taxa oficial (participação do turno nas ocorrências de cada dia).
+      var sel = state.data.summary || c.heroMetric ? null : Core.shiftSelection(view.filters), only = null;
+      if (view.kind) { only = {}; only[c.orderKinds.field] = [view.label]; }
+      state.shiftInfo = sel ? {sel: sel, name: shiftName(sel), shares: Core.shiftShares(state.data.rows, state.data.agg, sel, only)} : null;
+      cards = Core.computeCards(c, view.rates, state.filtered, view.filters, state.from, state.to,
+        {shares: state.shiftInfo && state.shiftInfo.shares, shiftRows: sel && sel.by.shift ? Core.applyFilters(state.data.rows, f, 'shift') : null,
+          // Parte de cada turno na taxa (cartões T1/T2/T3): mesma regra do filtro de turno.
+          partRows: state.data.summary || c.heroMetric || !(c.filters || []).some(function (x) { return x.key === 'shift'; }) ? null : state.data.rows,
+          agg: state.data.agg, only: only});
+      renderKpis(c, cards);
+    });
+    passo(t('partDetail'), function () { renderDetailStatus(c); });
+    passo(t('partCharts'), function () { renderCharts(c); });
+    passo(t('partSummary'), function () { renderSummaryTable(c); });
+    passo(t('partRank'), function () { renderRankPanels(c); });
+    passo(t('partMetric'), function () { renderMetricPanels(c); });
+    passo(t('partCross'), function () { renderCrossTables(c); });
     // Recebimento: uma tabela por lista no lugar da tabela de remessas. V4.23.1: hideDetailTable (Produção do Sorter) = sem ela.
-    $('#detailCard').classList.toggle('hidden', !!(c.tables || c.hideDetailTable));
-    if (c.tables) renderListTables(c); else { $('#listTables').innerHTML = ''; if (!c.hideDetailTable) renderDetailTable(); }
+    passo(t('partTable'), function () {
+      $('#detailCard').classList.toggle('hidden', !!(c.tables || c.hideDetailTable));
+      if (c.tables) renderListTables(c); else { $('#listTables').innerHTML = ''; if (!c.hideDetailTable) renderDetailTable(); }
+    });
+    if (falhas.length) showAlert(t('renderFail', {p: falhas.join(' · ')}));
   }
   /**
    * Avaria com UMA opção de "Pedidos principais/filhos" (Config.gs → orderKinds): a taxa e a quantidade
@@ -2629,6 +2649,17 @@
       if (live && def.metric) return false;
       return !cols || !def.where || !def.where.column || cols.has(def.where.column);
     }).map(function (def) {
+      // V4.25.6 (Avaria, pedido "no período de 30 dias o gráfico não atualiza, dá erro"): um gráfico com erro vira um aviso no
+      // próprio cartão; os outros continuam com o período escolhido.
+      try { return chartSpecOne(def, rows, sm, fo); }
+      catch (e) {
+        if (window.console) console.error('Gráfico ' + def.key, e);
+        return {key: def.key, title: def.title, type: def.type || 'bar', labels: [], datasets: [], total: 0, error: String(e && e.message || e)};
+      }
+    }));
+  }
+  function chartSpecOne(def, rows, sm, fo) {
+    {
       if (def.metric) return metricSpec(def);
       def = Core.chartDefFor(def, filtersObj());
       var spec = Core.buildChart(def, sm ? Core.summaryChartRows(def, sm.byDim, fo) : rows, {intervalMode: state.intervalMode});
@@ -2640,7 +2671,7 @@
       // "Top N por turno" no padrão das docas: top N de cada turno, faixas T1/T2/T3.
       if (spec.grouped) spec.panel = Core.rankPanel(rows, {key: def.key, kind: 'byShift', dim: spec.dim, top: def.top || 4});
       return spec;
-    }));
+    }
   }
 
   /**
@@ -2710,6 +2741,14 @@
 
   function renderChartCard(card, spec, c) {
     if (!card) return;
+    if (spec.error) {
+      destroyChart(spec.key);
+      $('h3', card).innerHTML = esc(L(spec.title));
+      $('small', card).textContent = '';
+      $('.chart-body', card).innerHTML = '<div class="chart-wrap"><div class="chart-empty"><div><b>' + esc(t('errorTitle')) + '</b>' + esc(t('chartFail', {e: spec.error})) + '</div></div></div>';
+      $('.chart-legend', card).innerHTML = ''; $('.rp-stats', card).innerHTML = '';
+      return;
+    }
     if (spec.metric) return renderMetricChart(card, spec);
     var key = spec.key, partial = key !== 'evolution' && !spec.fromSummary && !spec.fromRoutes && !spec.fromMetrics && detailIsPartial();
     $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '') +

@@ -835,7 +835,7 @@ function getDashboardData(indicatorKey, params) {
       // V3.24: carimbo dos dados deste painel na hora da leitura (o navegador confere a cada 2 min se mudou).
       stamp: dataStamps_()[indicatorKey] || null,
       // Avaria: situação dos códigos de "Pedidos principais/filhos" no JMS (o painel explica quando falta a taxa da opção).
-      orderKind: cfg.orderKinds ? orderKindStatus_(indicatorKey) : null,
+      orderKind: cfg.orderKinds ? safeCall_(() => orderKindStatus_(indicatorKey)) : null,
       // V3.32: Histórico (Sem Movimentação): o período escolhido; from/to = o dia mostrado (o mais recente com linha).
       source: cfg.historyOf ? 'hist' : null, rangeFrom: p.rangeFrom || null, rangeTo: p.rangeTo || null
     },
@@ -861,12 +861,13 @@ function getDashboardData(indicatorKey, params) {
       return o;
     }, {}),
     // Avaria: remessas de cada opção pela lista do JMS (o filtro separa como a tela).
-    orderKindTags: cfg.orderKinds ? orderKindTags_(indicatorKey, p.from, p.to) : null,
+    // V4.25.6: protegido — erro aqui não derruba o painel (sem as listas, o filtro usa o sufixo "-001").
+    orderKindTags: cfg.orderKinds ? safeCall_(() => orderKindTags_(indicatorKey, p.from, p.to)) : null,
     // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (o painel troca a taxa pelo filtro).
-    rateVariants: cfg.orderKinds ? ['main', 'sub'].reduce((o, k) => {
+    rateVariants: cfg.orderKinds ? safeCall_(() => ['main', 'sub'].reduce((o, k) => {
       o[k] = getRates_(indicatorKey + ':' + k, null, null).map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, estimated: r.estimated}));
       return o;
-    }, {}) : null
+    }, {})) : null
   });
   // O conjunto de remessas só tem textos e números (sem Date): vai direto, sem cópia extra.
   if (summaryMode) {

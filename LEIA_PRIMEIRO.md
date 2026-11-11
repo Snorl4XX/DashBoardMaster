@@ -1,8 +1,22 @@
-# J&T DASHMASTER V4.25.5 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.6 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.25.6 — Avaria (e todos os painéis): o período escolhido sempre chega aos gráficos
+
+Pedido: "no dashboard de Avaria, coloco o período de 30 dias, ele não atualiza os dados do gráfico e dá erro".
+- **Causa:** a tela era desenhada de uma vez; um erro em **qualquer** parte (ex.: os cartões) parava o resto. As datas mudavam
+  para os 30 dias, aparecia "Não foi possível carregar os dados" e os gráficos ficavam com o período anterior.
+- **Agora:** cada parte (cartões, gráficos, Resultados, painéis, tabela) é desenhada separada, e cada gráfico também. Se uma
+  parte falhar, o resto atualiza com o período e o aviso diz **qual parte e o motivo** ("Cartões: …"). Gráfico com erro mostra
+  o motivo no próprio cartão.
+- No servidor, as listas e taxas de "Pedidos principais/filhos" (só da Avaria) não derrubam mais o painel: sem elas, o filtro
+  usa o sufixo "-001".
+- Se o aviso aparecer, mande um print dele: ele diz exatamente o que corrigir.
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_6_NODE.zip`.
 
 ## V4.25.5 — Lista menor que o JMS: conferência de hora em hora e aviso no cartão
 
