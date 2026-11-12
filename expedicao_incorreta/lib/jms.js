@@ -151,7 +151,9 @@ class Jms {
     const msg = String(json.msg || json.message || '').replace(/\s+/g, ' ').slice(0, 160);
     if (st === 401 || st === 403 || json.fail === true || (code !== null && code !== 1 && code !== 200) || st >= 400) {
       const auth = code === 401 || AUTH_RE.test(msg);
-      throw new ErroJms('O JMS recusou a consulta (' + (code !== null ? 'código ' + code : 'HTTP ' + st) + (msg ? ': ' + msg : '') + ').',
+      // 2.3: "页面长时间未操作，请重新登录系统" (código 401) = a página do JMS ficou muito tempo sem uso: pede para entrar de novo.
+      throw new ErroJms('O JMS recusou a consulta (' + (code !== null ? 'código ' + code : 'HTTP ' + st) + (msg ? ': ' + msg : '') + ')' +
+        (auth ? '. O JMS pede para entrar de novo: pegue um AuthToken novo no JMS e cole em Configurações (ou no DashMaster).' : '.'),
         {auth, recusa: !auth, status: st, code});
     }
     return json;
@@ -167,7 +169,8 @@ class Jms {
         await new Promise(r => setTimeout(r, 800 * (t + 1)));
       }
     }
-    if (erro.recusa || (erro.status === 401 && !erro.semToken)) {
+    // 2.3: o "código 401" do JMS (página sem uso) também testa os outros Routename, uma vez por busca; o "token失效" não.
+    if (erro.recusa || ((erro.status === 401 || erro.code === 401) && !erro.semToken)) {
       const json = await this.trocarRota(grupo, caminho, corpo, erro);
       if (json) return json;
     }
@@ -185,7 +188,7 @@ class Jms {
         this.props.set('ROUTE_AUTO_' + grupo.toUpperCase(), String(i));
         this.log('info', 'JMS ' + grupo + ': aceitou o cabeçalho Routename "' + (lista[i] || 'nenhum') + '" (o anterior foi recusado: ' + erro.message + ')');
         return json;
-      } catch (e) { if (e.auth && !e.recusa && e.status !== 401) return null; }
+      } catch (e) { if (e.auth && !e.recusa && e.status !== 401 && e.code !== 401) return null; }
     }
     return null;
   }
@@ -246,7 +249,7 @@ class Jms {
     catch (e) {
       if (!e.tamanho || ws.length <= 1) throw e;
       // O JMS costuma dizer o máximo na mensagem ("Quantidade máxima de consulta: 50"); sem número, metade.
-      const nums = (String(e.message).match(/\d+/g) || []).map(Number).filter(n => n > 1 && n < ws.length);
+      const nums = (String(e.message).replace(/c[oó]digo\s+-?\d+/gi, '').match(/\d+/g) || []).map(Number).filter(n => n > 1 && n < ws.length);
       const novo = nums.length ? Math.max.apply(null, nums) : Math.max(1, Math.floor(ws.length / 2));
       this.props.set('GESTAO_TAMANHO', String(novo));
       this.log('info', 'Gestão de pedido: o JMS recusou ' + ws.length + ' remessas numa consulta (' + e.message + '); agora ' + novo + ' por consulta.');
@@ -305,7 +308,7 @@ class Jms {
     }
     const pedidas = new Set(ws.map(remessaBase)), achados = new Map();
     let registros = [], total = 0, paginas = 1;
-    for (let pag = 1; pag <= paginas && pag <= 20; pag++) {
+    for (let pag = 1; pag <= paginas && pag <= 100; pag++) { // 2.3: 1.000 remessas mesmo com o JMS devolvendo páginas pequenas
       corpo.current = pag;
       const json = await this.pedir('gestao', GESTAO, corpo);
       const d = json && json.data;

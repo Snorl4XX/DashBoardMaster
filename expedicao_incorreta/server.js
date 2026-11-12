@@ -54,7 +54,7 @@ const DEFAULTS = {
   minutos: 15,            // de quanto em quanto tempo busca no JMS (dia de hoje) · 2.0: 15 (pedido)
   status: {concluido: [4], emTransito: [3]}, // códigos do Status no JMS: Concluído：已完成 e Em Trânsito：在途
   fonteSegmentos: 'gestao', // 2.0: "3 Segmentos" pela Gestão de pedido JMS de remessa (várias por consulta); 'rastreio' = só o Rastreamento
-  remessasPorConsulta: 100, // Gestão de pedido: remessas em cada consulta
+  remessasPorConsulta: 1000, // Gestão de pedido: remessas em cada consulta · 2.3: 1.000, o limite do JMS (pedido)
   segundosEntreLotes: 2,    // Gestão de pedido: pausa entre uma consulta e a próxima
   consultasSegmentos: 3,   // "3 Segmentos" de cada pacote no JMS (Rastreamento do pacote): quantas consultas ao mesmo tempo
   consultasPorSegundo: 5,  // viagens e bipes: no máximo tantas consultas ao JMS por segundo, somando todas
@@ -90,13 +90,16 @@ function lerConfig() {
   if (process.env.EXPEDICAO_PORTA) c.porta = Number(process.env.EXPEDICAO_PORTA);
   c.codigoBase = String(c.codigoBase).trim(); c.nomeBase = String(c.nomeBase).trim();
   c.minutos = Math.max(2, c.minutos);
-  // 2.0 (pedido "atualiza a cada 15 minutos"): quem tinha o padrão antigo (10, gravado no config.json) passa para 15.
-  if (Number(bruto.minutos) === 10 && !bruto.versaoConfig) {
-    c.minutos = 15;
-    try { fs.writeFileSync(arq, JSON.stringify(Object.assign({}, bruto, {minutos: 15, versaoConfig: 2}), null, 2) + '\n'); } catch (e) { /* só leitura */ }
+  // Padrões antigos gravados no config.json: 2.0 (pedido "atualiza a cada 15 minutos") minutos 10 → 15; 2.3 (pedido "pesquisar
+  // em 1000, o JMS só permite esse limite") remessasPorConsulta 100 → 1000.
+  const novo = {}, versao = Number(bruto.versaoConfig) || 0;
+  if (Number(bruto.minutos) === 10 && !versao) c.minutos = novo.minutos = 15;
+  if (Number(bruto.remessasPorConsulta) === 100 && versao < 3) bruto.remessasPorConsulta = novo.remessasPorConsulta = 1000;
+  if (Object.keys(novo).length) {
+    try { fs.writeFileSync(arq, JSON.stringify(Object.assign({}, bruto, novo, {versaoConfig: 3}), null, 2) + '\n'); } catch (e) { /* só leitura */ }
   }
   c.fonteSegmentos = String(c.fonteSegmentos || 'gestao').toLowerCase() === 'rastreio' ? 'rastreio' : 'gestao';
-  c.remessasPorConsulta = Number(bruto.remessasPorConsulta) > 0 ? Math.min(500, Math.floor(Number(bruto.remessasPorConsulta))) : DEFAULTS.remessasPorConsulta;
+  c.remessasPorConsulta = Number(bruto.remessasPorConsulta) > 0 ? Math.min(1000, Math.floor(Number(bruto.remessasPorConsulta))) : DEFAULTS.remessasPorConsulta;
   c.segundosEntreLotes = bruto.segundosEntreLotes !== undefined && bruto.segundosEntreLotes !== '' && Number(bruto.segundosEntreLotes) >= 0
     ? Number(bruto.segundosEntreLotes) : DEFAULTS.segundosEntreLotes;
   c.consultasSegmentos = Math.min(50, c.consultasSegmentos);
@@ -185,6 +188,8 @@ try {
   regras = new Regras(cfg.planilhas);
   jms = new Jms({base: process.env.EXPEDICAO_JMS_URL, credenciais, props: banco, log, tempoMs: 60000, porSegundo: cfg.consultasPorSegundo,
     segundosPorRemessa: cfg.segundosPorRemessa});
+  // 2.3: limite por consulta aprendido com os lotes antigos (até 500) volta a ser descoberto com os de 1.000 (uma vez).
+  if (banco.get('GESTAO_TAMANHO_23') !== '1') { banco.set('GESTAO_TAMANHO', null); banco.set('GESTAO_TAMANHO_23', '1'); }
   painel = new Painel(banco, regras, cfg.statusCodigos);
   coletor = new Coletor({banco, jms, cfg, log, regras, aoMudar: (tipo, dia) => painel.invalidar(tipo, dia)});
 } catch (e) { pararComErro('Não consegui iniciar: ' + (e && e.stack || e)); }
@@ -339,6 +344,7 @@ function estadoPublico() {
     hoje: hojeSp(), maxDias: MAX_DIAS, horasPesquisa: cfg.horasPesquisa, acompanhadas: rotasAcompanhadas(),
     busca: {rodando: e.rodando, etapa: e.etapa, dia: e.dia, dias: e.dias, inicio: e.inicio, fim: e.fim, ultimo: e.ultimo, authVencido: e.authVencido,
       errosViagens: e.erros.length, avisoSegmentos: e.avisoSegmentos, segundosPorRemessa: cfg.segundosPorRemessa, pesquisa: e.pesquisa,
+      porConsulta: cfg.fonteSegmentos === 'gestao' ? Number(banco.get('GESTAO_TAMANHO')) || cfg.remessasPorConsulta : 0,
       fila: coletor.fila.length},
     planilhas: {erros: r.erros, rotas: !!r.rotas}};
 }

@@ -12,7 +12,8 @@
  *   - O JMS limita a página a 50 itens, mesmo pedindo mais.
  *   - 2.0: Gestão de pedido JMS de remessa (shippingWaybillList): desligada por padrão (404). estado.gestao = {campo, max,
  *     ignoraFiltro}: só filtra pelo campo "campo" (outro campo = devolve as remessas mais recentes, sem filtro, como um JMS que
- *     ignora campo desconhecido); "max" = recusa mais remessas que isso numa consulta.
+ *     ignora campo desconhecido); "max" = recusa mais remessas que isso numa consulta; "exigeRota" = sem esse Routename responde
+ *     "código 401: 页面长时间未操作，请重新登录系统" (2.3, como o JMS na tela do usuário).
  */
 const http = require('http');
 
@@ -145,6 +146,7 @@ function criar(dia) {
       if (p === '/networkmanagement/omsWaybill/shippingWaybillList' && req.method === 'POST') {
         const g = estado.gestao;
         if (!g) return resp({code: 404, msg: 'Not Found'}, 404);
+        if (g.exigeRota && req.headers.routename !== g.exigeRota) return resp({code: 401, msg: '页面长时间未操作，请重新登录系统', succ: false, fail: true});
         const b = JSON.parse(Buffer.concat(partes).toString('utf8') || '{}');
         estado.gestaoPedidos.push(b);
         let ws = b[g.campo];

@@ -254,7 +254,7 @@ class Coletor {
   async buscarSegmentosGestao(dias, ids) {
     const e = this.estado, cfg = this.cfg, br = d => d.split('-').reverse().join('/'), fonte = this.fonteSegmentos(dias, ids);
     const fim = Math.max(Date.now() + 60000, (e.inicio || Date.now()) + Math.max(2, (cfg.minutos || 15) - 1) * 60000);
-    const lote = Math.max(1, Math.min(500, Number(cfg.remessasPorConsulta) || 100)), pausa = Math.max(0, Number(cfg.segundosEntreLotes) || 0) * 1000;
+    const lote = Math.max(1, Math.min(1000, Number(cfg.remessasPorConsulta) || 1000)), pausa = Math.max(0, Number(cfg.segundosEntreLotes) || 0) * 1000;
     let ok = 0, faltou = 0, consultas = 0, parar = '';
     e.tipo = '';
     e.avisoSegmentos = '';
@@ -273,7 +273,9 @@ class Coletor {
             return 'indisponivel';
           }
           if (err && err.bloqueio) { parar = 'bloqueio'; e.avisoSegmentos = 'O JMS bloqueou a Gestão de pedido. O app pausa 15 min e continua. ' + err.message; break; }
-          throw err; // token vencido, rede: a busca para e avisa
+          // Token vencido, rede: a busca para e avisa (as viagens já estão guardadas), dizendo que foi na Gestão de pedido.
+          if (err && err.message && !/^Gestão de pedido/.test(err.message)) err.message = 'Gestão de pedido (3 Segmentos): ' + err.message;
+          throw err;
         }
         r.achados.forEach((sg, w) => { this.banco.salvarSegmento(w, sg, ''); ok++; feitos++; e.segmentos++; });
         r.faltando.forEach(w => { this.banco.salvarSegmento(w, null, 'A Gestão de pedido não devolveu esta remessa'); faltou++; });

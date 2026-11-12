@@ -75,6 +75,14 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
   (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
 
+Versão 2.3 (pedido "pesquisar em 1000, o JMS só permite esse limite")
+  - 3 Segmentos pela Gestão de pedido: 1.000 remessas em cada consulta (antes 100). 45 mil pacotes = 46 consultas.
+    Quem tinha o 100 antigo no config.json passa para 1.000 sozinho.
+  - Erro "código 401: 页面长时间未操作，请重新登录系统" (= a página do JMS ficou muito tempo sem uso, entre de novo): o app
+    testa os outros cabeçalhos da tela da Gestão de pedido uma vez; se continuar, o aviso diz que foi na Gestão de pedido e
+    pede um AuthToken novo (Configurações ou DashMaster).
+  - Enquanto uma busca nova roda, o erro da busca anterior sai da tela.
+
 Versão 2.2.1 (pedido "o destino tem que seguir a tabela da nossa rota")
   - A lista do Pesquisar rota é a tabela de rotas (planilhas/rotas.xlsx) da página aberta: Rota Troncal mostra a tabela
     troncal e Rota Secundária a secundária, na mesma ordem da planilha, com a doca de cada destino (coluna Observação,
@@ -150,7 +158,7 @@ Link para a equipe (Tailscale, o mesmo do DashMaster)
 config.json (criado na 1ª vez)
 ------------------------------
 porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 15 (busca automática
-de hoje das rotas pesquisadas) · horasPesquisa 12 (por quanto tempo a rota pesquisada continua atualizando sozinha) · fonteSegmentos "gestao" ("rastreio" = só o Rastreamento do pacote) · remessasPorConsulta 100 e segundosEntreLotes 2
+de hoje das rotas pesquisadas) · horasPesquisa 12 (por quanto tempo a rota pesquisada continua atualizando sozinha) · fonteSegmentos "gestao" ("rastreio" = só o Rastreamento do pacote) · remessasPorConsulta 1000 e segundosEntreLotes 2
 (Gestão de pedido) · caminho "/expedicao" (caminho no link do Tailscale) · status {"concluido": [4], "emTransito": [3]} (códigos do
 Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultasSegmentos 3
 (consultas do "3 Segmentos" ao mesmo tempo) · consultasPorSegundo 5 (viagens e bipes: ritmo máximo das consultas ao JMS) · segundosPorRemessa 30

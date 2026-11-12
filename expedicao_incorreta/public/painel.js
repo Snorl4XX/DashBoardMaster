@@ -131,7 +131,7 @@
     var ex = function (l) { return l.slice(0, 5).map(function (i) { return i.nome + ' (' + fmtInt(i.qtd) + ')'; }).join(', '); };
     var pac = function (n) { return fmtInt(n) + (n === 1 ? ' pacote' : ' pacotes'); };
     if (e.busca.authVencido) h = alerta(h, false, 'AuthToken do JMS vencido.', 'Pegue um novo no JMS e cole no DashMaster ou na tela Configurações deste app. Os números abaixo são da última busca que deu certo.');
-    else if (e.busca.ultimo && !e.busca.ultimo.ok) h = alerta(h, false, 'A última busca no JMS falhou.', e.busca.ultimo.msg);
+    else if (e.busca.ultimo && !e.busca.ultimo.ok && !e.busca.rodando) h = alerta(h, false, 'A última busca no JMS falhou.', e.busca.ultimo.msg);
     // 2.1: a busca da rota pesquisada (em andamento, ou terminada sem nenhuma viagem da rota).
     var pq = e.busca.pesquisa, vt = r.viagensPorTipo || {};
     if (e.busca.rodando && buscaDaRota(e.busca)) {
@@ -146,7 +146,9 @@
     if (e.busca.avisoSegmentos) h = alerta(h, false, 'Conferência no JMS (3 segmentos) parada.', e.busca.avisoSegmentos);
     var ss = p.semSegmento;
     var spr = e.busca.segundosPorRemessa;
+    var pc = e.busca.porConsulta;
     if (ss.naoConsultados) h = alerta(h, true, pac(ss.naoConsultados) + ' ainda sem o 3 Segmentos do JMS', 'O app consulta o 3 Segmentos só dos pacotes da rota pesquisada' +
+      (pc ? ', ' + fmtInt(pc) + ' remessas por consulta na Gestão de pedido' : '') +
       (spr > 0 ? ' (se a Gestão de pedido não responder, pelo Rastreamento do pacote: uma remessa por vez, com pausa de ' + fmtInt(spr) + ' s, para o JMS não bloquear)' : '') +
       '. Eles entram na conta quando o JMS responder.');
     if (ss.naoConsultadosAntes) h = alerta(h, true, pac(ss.naoConsultadosAntes) + ' de dias anteriores ainda sem o 3 Segmentos',

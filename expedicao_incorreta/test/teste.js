@@ -321,7 +321,7 @@ function abasRotas(comWW) {
   const porta = await portaLivre();
   const cfgArq = path.join(pasta, 'config.json');
   fs.writeFileSync(cfgArq, JSON.stringify({porta, host: '127.0.0.1', senha: 'senha-teste', viagemGrande: 100, minutosViagemGrande: 30,
-    dashmaster: dmDb, tamanhoPagina: 100, consultasPorSegundo: 1000, segundosPorRemessa: 0, minutosDiaAnterior: 60}));
+    dashmaster: dmDb, tamanhoPagina: 100, consultasPorSegundo: 1000, segundosPorRemessa: 0, minutosDiaAnterior: 60, remessasPorConsulta: 100}));
   const filho = spawn(process.execPath, [SERVER], {env: Object.assign({}, process.env, {EXPEDICAO_CONFIG: cfgArq, EXPEDICAO_JMS_URL: 'http://127.0.0.1:' + portaJms,
     EXPEDICAO_SEM_AGENDADOR: '1'}), stdio: ['ignore', 'pipe', 'pipe']});
   filhos.push(filho);
@@ -370,6 +370,9 @@ function abasRotas(comWW) {
   conferir(est.status.concluido.join() === '4' && est.status.emTransito.join() === '3' && est.viagensHoje.length === 2 && est.salvos.n === 0,
     'Configurações mostram os códigos de status e os dias guardados', {status: est.status, salvos: est.salvos});
   conferir(JSON.stringify(est).indexOf('TOKEN-FICTICIO') < 0, 'o AuthToken nunca aparece na tela Configurações');
+  const cfgGravado = JSON.parse(fs.readFileSync(cfgArq, 'utf8'));
+  conferir(est.config.remessasPorConsulta === 1000 && est.jms.gestao.porConsulta === 1000 && cfgGravado.remessasPorConsulta === 1000 && cfgGravado.versaoConfig === 3,
+    '2.3: Gestão de pedido com 1.000 remessas por consulta (o 100 antigo do config.json passa para 1.000)', {cfg: est.config.remessasPorConsulta, gravado: cfgGravado});
   const teste = (await local('POST', '/config/api/testar')).json;
   conferir(teste.ok && /troncal: ok, o JMS respondeu/i.test(teste.linhas[0]) && /secundária: ok, o JMS respondeu \(0 viagens hoje/i.test(teste.linhas[1]), 'testar conexão: o JMS responde nas duas rotas', teste);
   est = (await local('GET', '/config/api/estado')).json;
@@ -692,19 +695,32 @@ function abasRotas(comWW) {
     // (d) Coletor: o dia inteiro pela Gestão (lotes), sem nenhuma consulta ao Rastreamento; sem a Gestão, o Rastreamento como antes.
     const bg = new Banco(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'exp-gestao-')), 'g.db'));
     bg.trocarPacotes('troncal', 'DKTESTE0002', DIA, jg.estado.dados.troncal.pacotes.DKTESTE0002.map(x => ({billCode: x.billCode})));
-    jg.estado.gestao = {campo: 'waybillIds', max: 50};
+    // 2.3: o JMS aceita 1.000 por consulta e só responde com o Routename da tela (sem ele: "código 401: 页面长时间未操作…").
+    jg.estado.gestao = {campo: 'waybillIds', max: 1000, exigeRota: 'sendWaybillSite'};
     const D = novoJms(), rast0 = Object.keys(jg.estado.segmentosPedidos).length, g0 = jg.estado.gestaoPedidos.length;
-    const colG = new Coletor({banco: bg, cfg: {minutos: 15, remessasPorConsulta: 100, segundosEntreLotes: 0, consultasSegmentos: 3}, log: () => {}, jms: D.j});
+    const colG = new Coletor({banco: bg, cfg: {minutos: 15, segundosEntreLotes: 0, consultasSegmentos: 3}, log: () => {}, jms: D.j});
     await colG.buscarSegmentos([DIA]);
-    const contG = bg.contarSegmentos(DIA);
-    conferir(contG.feitos === 121 && contG.comErro === 0 && Object.keys(jg.estado.segmentosPedidos).length === rast0 && jg.estado.gestaoPedidos.length - g0 <= 12,
-      'coletor: 121 remessas pela Gestão de pedido em poucas consultas, nenhuma pelo Rastreamento do pacote', {contG, consultas: jg.estado.gestaoPedidos.length - g0});
+    const contG = bg.contarSegmentos(DIA), pedidosG = jg.estado.gestaoPedidos.slice(g0);
+    conferir(contG.feitos === 121 && contG.comErro === 0 && Object.keys(jg.estado.segmentosPedidos).length === rast0 && pedidosG.length <= 2 &&
+      Math.max.apply(null, pedidosG.map(b => (b.waybillIds || b.waybillNos || []).length)) === 121 && D.mem.ROUTE_AUTO_GESTAO === '1',
+      'coletor: 121 remessas pela Gestão de pedido numa consulta só (até 1.000 por consulta); o "código 401" da página sem uso testa o Routename da tela',
+      {contG, consultas: pedidosG.length, rota: D.mem.ROUTE_AUTO_GESTAO});
     bg.trocarPacotes('troncal', 'DKTESTE0006', DIA, jg.estado.dados.troncal.pacotes.DKTESTE0006.map(x => ({billCode: x.billCode})));
     jg.estado.gestao = null;
     const colR = new Coletor({banco: bg, cfg: {minutos: 15, consultasSegmentos: 3, segundosPorRemessa: 0}, log: () => {}, jms: novoJms().j});
     await colR.buscarSegmentos([DIA]);
     conferir(bg.contarSegmentos(DIA).feitos === 123 && jg.estado.dados.troncal.pacotes.DKTESTE0006.every(x => jg.estado.segmentosPedidos[x.billCode] === 1),
       'sem a Gestão de pedido: as remessas novas vão pelo Rastreamento do pacote (uma por vez), como antes', bg.contarSegmentos(DIA));
+    jg.estado.gestao = {campo: 'waybillIds', max: 1000, exigeRota: 'sendWaybillSite'};
+    // Token vencido de verdade ("token失效"): nada de Routename extra; o erro diz que foi na Gestão de pedido e pede um AuthToken novo.
+    const E = novoJms(), n401 = jg.estado.pedidos['/networkmanagement/omsWaybill/shippingWaybillList'] || 0;
+    bg.trocarPacotes('troncal', 'DKTESTE0001', DIA, jg.estado.dados.troncal.pacotes.DKTESTE0001.map(x => ({billCode: x.billCode})));
+    E.j.credenciais = () => ({JMS_AUTHTOKEN: 'TOKEN-VENCIDO-FICTICIO'});
+    let erroE = null;
+    try { await new Coletor({banco: bg, cfg: {minutos: 15, segundosEntreLotes: 0}, log: () => {}, jms: E.j}).buscarSegmentos([DIA]); } catch (err) { erroE = err; }
+    conferir(erroE && erroE.auth && /^Gestão de pedido \(3 Segmentos\): .*AuthToken novo/.test(erroE.message) &&
+      (jg.estado.pedidos['/networkmanagement/omsWaybill/shippingWaybillList'] || 0) - n401 === 1,
+      'token vencido na Gestão de pedido: uma consulta só e o aviso diz onde foi e o que fazer', erroE && erroE.message);
     bg.fechar();
   }
 
