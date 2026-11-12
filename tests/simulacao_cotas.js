@@ -20,7 +20,7 @@ const QUOTA = plan === 'consumer' ? {runtimeMin: 90, urlfetch: 20000} : {runtime
 const clock = makeClock('2026-09-01T03:00:00Z'); // 00:00 em São Paulo
 const addDays = (iso, n) => new Date(Date.parse(iso + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
 const start = addDays('2026-09-01', -histDays);
-// SIM_PROPS='{"PAINEIS_FORA":"arrival_flow,send_flow"}' (V4.2): simula um projeto só com parte dos painéis.
+// SIM_PROPS='{"PAINEIS_FORA":"damage"}' (V4.2): simula um projeto só com parte dos painéis.
 const extraProps = process.env.SIM_PROPS ? JSON.parse(process.env.SIM_PROPS) : {};
 const ctx = createSimContext({root, clock, props: Object.assign({JMS_AUTHTOKEN: 'X', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: start, COTA_GOOGLE: plan === 'consumer' ? 'gmail' : 'workspace'}, extraProps), jms: realisticJms({maxPageSize: Number(process.env.JMS_CAP) || 1000, arrivalCap: Number(process.env.ARRIVAL_CAP) || 0}), urlfetchQuota: QUOTA.urlfetch});
 const st = clock.stats;
@@ -66,17 +66,6 @@ console.log('Taxa de hoje (' + today + ' ' + fmtDate(clock.now, 'America/Sao_Pau
 const s = ctx.computeSyncStatus_(); console.log('Fila:', JSON.stringify({PENDING: s.PENDING, RUNNING: s.RUNNING, DONE: s.DONE, ERROR: s.ERROR}));
 const errs = ctx.allTabRows_('STATUS').filter(r => r[8]).map(r => r[0] + ' ' + ctx.dateCellIso_(r[1]) + ': ' + String(r[8]).slice(0, 110));
 console.log('Erros em DAY_STATUS (' + errs.length + '):\n  ' + errs.slice(0, 8).join('\n  '));
-// Recebimento: ~500 mil remessas por dia gravadas agrupadas (combinações × quantidade).
-const afDays = ctx.allTabRows_('DAYFILES').filter(r => r[0] === 'arrival_flow').map(r => ctx.dateCellIso_(r[1]) + ' ' + r[3] + ' combinações (' + r[5] + ' remessas)');
-const afSt = ctx.allTabRows_('STATUS').filter(r => r[0] === 'arrival_flow').map(r => r[3]).reduce((m, x) => { m[x] = (m[x] || 0) + 1; return m; }, {});
-console.log('Recebimento — situação do detalhe por dia: ' + JSON.stringify(afSt) + '\n  ' + afDays.slice(-8).join('\n  '));
-// Expedição: ~117 mil remessas por dia (uma linha por remessa) e os IDs de viagem consultados.
-const sfDays = ctx.allTabRows_('DAYFILES').filter(r => r[0] === 'send_flow').map(r => ctx.dateCellIso_(r[1]) + ' ' + r[3] + ' remessas');
-const sfSt = ctx.allTabRows_('STATUS').filter(r => r[0] === 'send_flow').map(r => r[3]).reduce((m, x) => { m[x] = (m[x] || 0) + 1; return m; }, {});
-const sfCov = ctx.tripCoverage_('send_flow', from, today);
-console.log('Expedição — situação do detalhe por dia: ' + JSON.stringify(sfSt) + '\n  ' + sfDays.slice(-8).join('\n  ') +
-  '\n  IDs de viagem: ' + Object.keys(sfCov).sort().slice(-8).map(d => d + ' ' + sfCov[d].done + '/' + sfCov[d].total).join(' · ') +
-  '\n  Uso de hoje (teto da Expedição): ' + (ctx.groupedUsedMs_('send_flow') / 60000).toFixed(1) + ' min de ' + ctx.groupedBudgetMin_('send_flow'));
 // Fluxo de Lotes: ~906 sacas por dia (uma linha por saca), tarefa leve (fora do teto diário).
 const lfDays = ctx.allTabRows_('DAYFILES').filter(r => r[0] === 'lot_flow').map(r => ctx.dateCellIso_(r[1]) + ' ' + r[3] + ' sacas');
 const lfSt = ctx.allTabRows_('STATUS').filter(r => r[0] === 'lot_flow').map(r => r[3]).reduce((m, x) => { m[x] = (m[x] || 0) + 1; return m; }, {});
@@ -90,9 +79,7 @@ if (keys.indexOf('sc_dc') >= 0) {
 if (st.byHour) console.log('Consultas por hora (último dia): ' + Object.keys(st.byHour).sort().map(h => h + 'h ' + st.byHour[h]).join(' · '));
 if (process.env.DASH) {
   const t1 = addDays(today, -1);
-  const fDC = {column: ['Chegou'], destCenter: ['DC 3']};
-  [['sc_sc', 1], ['sc_sc', 7], ['sc_sc', 14], ['missing_receipt', 14], ['wrong_send', 14], ['arrival_flow', 1], ['arrival_flow', 7], ['arrival_flow', 7, fDC],
-    ['send_flow', 1], ['send_flow', 3], ['send_flow', 3, {shift: ['T1']}], ['lot_flow', 1], ['lot_flow', 30]].forEach(([k, n, filters]) => {
+  [['sc_sc', 1], ['sc_sc', 7], ['sc_sc', 14], ['missing_receipt', 14], ['wrong_send', 14], ['lot_flow', 1], ['lot_flow', 30]].forEach(([k, n, filters]) => {
     fresh(); const t0 = clock.now, c0 = Date.now();
     let res, err = '';
     try { res = ctx.getDashboardData(k, {from: addDays(t1, -(n - 1)), to: t1, filters: filters}); } catch (e) { err = e.message; }

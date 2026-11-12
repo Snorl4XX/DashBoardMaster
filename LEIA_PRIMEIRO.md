@@ -4,6 +4,28 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.26.0 — Fluxos fora do código, Lotes só no painel dela e Sem Movimentação por último na fila
+
+Pedido: "desativei os dash de fluxo operacional de recebimento e expedição. Retirar do código para não influenciar. Deixar por
+último os dados do Sem Movimentação. Também tirei o dash do lote do principal."
+
+- **Recebimento: fluxo operacional** e **Expedição: fluxo operacional** saíram do código: configuração, consultas ao JMS, download
+  por rota, diagnósticos (`diagnosticarRecebimento`, `diagnosticarExpedicao`), o pacote separado dos fluxos (FLUXOS) e a página
+  `fluxos.html` do Netlify. Nem `PAINEIS` nem `REATIVAR_PAINEIS` trazem de volta.
+- As tarefas deles que ficaram na fila são **encerradas uma vez** ("painel retirado do código (V4.26)") e não contam mais na fila do
+  menu. Os dados antigos ficam no banco, sem uso.
+- **Criação de Lotes:** painel separado. Só aparece no pacote dela (LOTES / LOTES_NODE, porta 3400) ou com `PAINEIS` = `lot_flow`.
+  No principal ela fica fora **mesmo com `PAINEIS_FORA` preenchida** (antes, uma `PAINEIS_FORA` antiga trazia os Lotes de volta).
+- **Fila:** a Sem Movimentação (foto do momento: número e lista) agora roda **depois de tudo** (antes ia na frente). Ordem:
+  1. taxas do dia de todos os painéis (dia mais novo primeiro);
+  2. listas de remessas (com os IDs de viagem do SC → DC e as bipagens da Triagem Errada);
+  3. juntar os arquivos do dia;
+  4. Sem Movimentação.
+
+  Abrir a Sem Movimentação no painel continua buscando a foto de agora na hora.
+- Atualizar: troque os arquivos (Node.js: extraia o ZIP por cima de C:\dashmaster) e abra de novo. Não precisa mexer em
+  Propriedades; se você tinha `PAINEIS_FORA`, pode apagar ou deixar.
+
 ## V4.25.7 — Avaria: os gráficos somam o período inteiro (dias sem lista são baixados na hora)
 
 Pedido (print da Avaria com "PARCIAL" em todos os gráficos e 310 avarias em 30 dias): "não arrumou nada, continua o mesmo problema".

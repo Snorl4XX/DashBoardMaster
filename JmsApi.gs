@@ -480,29 +480,6 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       return {current: pageNo, size: pageSize, organizationCode: centerCode, organizationType: 3, dateType: 1,
         countryId: countryId_(), startDate: isoDate, endDate: isoDate};
 
-    case 'arrival_flow': {
-      // Monitoramento de tipagem de recebimento: resumo pela base (siteCode); detalhe por lista (detailType:
-      // shouldArriverNum = "Deve chegar", totalNum = "Chegou"), pela próxima parada = a base (nextstationcode).
-      if (detail) {
-        const types = cfg.detail.types || [];
-        return {current: pageNo, size: pageSize, detailType: (win && win.type) || (types[0] && types[0].type),
-          startTime: w.start, endTime: w.end, nextstationcode: centerCode, countryId: countryId_()};
-      }
-      return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, siteCode: centerCode, countryId: countryId_()};
-    }
-
-    case 'send_flow': {
-      // Monitoramento de tipagem de expedição: resumo pela estação de remessa (scansitecode), uma linha por rota; detalhe =
-      // número vermelho de UMA rota (nextstation = código da próxima parada) e de uma coluna (detailType), como na captura.
-      if (detail) {
-        const types = cfg.detail.types || [];
-        if (!win || !win.next) throw new Error('Expedição: detalhe sem a rota (nextstation). Use a rota do resumo do dia.');
-        return {current: pageNo, size: pageSize, detailType: win.type || (types[0] && types[0].type),
-          startTime: w.start, endTime: w.end, nextstation: String(win.next), countryId: countryId_()};
-      }
-      return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, scansitecode: centerCode, countryId: countryId_()};
-    }
-
     case 'lot_flow':
       // Estatística de Criação Recorrente de Eco Bag: resumo "Sumário por dia" da unidade SC; detalhe = lista do número
       // vermelho (detailType = coluna do resumo) da nossa base, como nas capturas.
@@ -1398,11 +1375,8 @@ function diagnosticarDetalheJms(indicatorKey, date) {
   const url = endpointFor_(cfg, 'detail');
   const item = {indicador: key, rota: url.split('/').pop(), data: d, cabecalhosDeRotaEnviados: jmsRouteHeaders_(url, jmsReadProperties_())};
   try {
-    // Expedição: o detalhe é por rota — usa a maior rota do resumo do dia.
-    const win = cfg.byRoute ? sendProbeWindow_(key, d) : undefined;
-    if (win) item.rotaTestada = win.name;
     noteFetches_(1);
-    const resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, buildPayload_(key, d, 1, 20, true, win)));
+    const resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, buildPayload_(key, d, 1, 20, true)));
     item.httpStatus = resp.getResponseCode();
     // parseJmsResponse_ dá a MESMA mensagem amigável (401/403/timeout/etc.) que o painel mostraria.
     const json = parseJmsResponse_(resp, url);
@@ -1415,14 +1389,6 @@ function diagnosticarDetalheJms(indicatorKey, date) {
   } catch (e) { item.erro = publicJmsError_(e.message || e); item.erroBruto = String(e && e.message || e).slice(0, 300); }
   console.log(JSON.stringify(item, null, 2));
   return item;
-}
-
-/** Expedição: janela do dia inteiro na maior rota do resumo do JMS (diagnósticos que testam o detalhe). */
-function sendProbeWindow_(indicatorKey, date) {
-  const s = fetchSummaryDay_(indicatorKey, date);
-  const big = (s.empty ? [] : (s.raw.routes || [])).filter(r => r.c).sort((a, b) => Number(b.m.sendcount) - Number(a.m.sendcount))[0];
-  if (!big) throw new Error('Expedição: o resumo de ' + date + ' não tem rota com envio para testar o detalhe.');
-  return Object.assign({type: 'sendcount', next: big.c, name: big.n}, dayWindow_(date, false));
 }
 
 function testJmsConnection() {

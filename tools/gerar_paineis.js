@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Gera os dois pacotes do painel para o Apps Script (desde a V4.3), a partir dos mesmos arquivos do repositório:
- *   <saída>/painel-principal/  → todos os painéis, menos Recebimento e Expedição (fluxo operacional)
- *   <saída>/painel-fluxos/     → só Recebimento e Expedição (fluxo operacional), para OUTRA conta Google
- * e os ZIPs JT_DASHMASTER_<versão>_PRINCIPAL.zip e JT_DASHMASTER_<versão>_FLUXOS.zip.
+ * Gera os pacotes do painel para o Apps Script (desde a V4.3), a partir dos mesmos arquivos do repositório:
+ *   <saída>/painel-principal/  → todos os painéis, menos a Criação de Lotes
+ *   <saída>/painel-lotes/      → só a Criação de Lotes
+ * e os ZIPs JT_DASHMASTER_<versão>_PRINCIPAL.zip e JT_DASHMASTER_<versão>_LOTES.zip. V4.26: sem o pacote dos fluxos (Recebimento e
+ * Expedição: fluxo operacional saíram do código).
  * Os pacotes só diferem na linha PACOTE_PAINEIS_ do Config.gs (e no LEIA_ESTE_PAINEL.md).
  *
  * V4.7: também o pacote da versão Node.js (JT_DASHMASTER_<versão>_NODE.zip, pasta "dashmaster/"): os painéis num servidor só
@@ -25,10 +26,10 @@ const path = require('path');
 const {zip} = require('../node/lib/report');
 
 const ROOT = path.join(__dirname, '..');
-const FLOWS = 'arrival_flow,send_flow';
-// V4.21: o painel de Lotes/Sacas (Criação de Lotes) fica separado do principal.
+// V4.26 (pedido): Recebimento e Expedição (fluxo operacional) saíram do código — sem o pacote dos fluxos.
+// V4.21: o painel de Lotes/Sacas (Criação de Lotes) fica separado do principal (V4.26: separate no Config.gs).
 const LOTS = 'lot_flow';
-const MAIN_OUT = FLOWS + ',' + LOTS;
+const MAIN_OUT = LOTS;
 const LOTS_PACOTE = {so: LOTS, fora: '', nome: 'Criação de Lotes'};
 // Pacote Node.js do painel de Lotes: outra pasta, outra porta (V4.21.2: 3400 — a 3100 é do painel do Sorter, a 3200 da
 // Pesquisa e a 3300 da Expedição Incorreta). V4.22.5 (pedido "porta diferente para cada dash"): o link do Tailscale na porta
@@ -165,54 +166,20 @@ Este pacote é o **painel principal**. Ele mostra:
 - Deslacre (linha secundária) e Deslacre (linha troncal) — V4.17;
 - Resultados.
 
-**V4.21: a Criação de Lotes (sacas) saiu daqui.** Ela tem pacotes próprios: \`JT_DASHMASTER_..._LOTES.zip\` (Apps Script) e \`JT_DASHMASTER_..._LOTES_NODE.zip\` (Node.js, link próprio no Tailscale). Se você tinha colocado \`PAINEIS_FORA\` nas Propriedades do script, troque para \`arrival_flow,send_flow,lot_flow\` (ou apague a propriedade).
+**V4.21: a Criação de Lotes (sacas) saiu daqui.** Ela tem pacotes próprios: \`JT_DASHMASTER_..._LOTES.zip\` (Apps Script) e \`JT_DASHMASTER_..._LOTES_NODE.zip\` (Node.js, link próprio no Tailscale). V4.26: ela fica fora do principal mesmo com \`PAINEIS_FORA\` preenchida.
 
 Desde a V4.8, Envio Errado, Triagem Errada e Falta de Bipagem na Expedição usam as docas e rotas de carregamento da tabela de 11/10 (tabelas em \`DOCKS_EXPEDICAO\` no Config.gs).
 
-**Recebimento e Expedição (fluxo operacional) não estão aqui.** Eles ficam no outro pacote, o painel dos fluxos. Assim este painel gasta cerca de metade da cota diária do Google e não para por falta de cota.
+**V4.26: Recebimento e Expedição (fluxo operacional) saíram do código** (pedido). As tarefas deles que ficaram na fila são encerradas sozinhas.
 
 ## Como instalar (no projeto do Apps Script que você já usa)
 1. No editor do Apps Script, abra cada arquivo e troque todo o conteúdo pelo arquivo de mesmo nome deste pacote: os \`.gs\` e os \`.html\`.
 2. Clique em **Implantar → Gerenciar implantações → ✏️ → Nova versão**. O link do painel não muda.
 3. Recarregue o painel com Ctrl+F5.
 
-Não precisa mexer em Propriedades do script: o pacote já vem sem os fluxos. Se você tinha colocado \`PAINEIS_FORA\`, pode apagar ou deixar.
+Não precisa mexer em Propriedades do script. Se você tinha colocado \`PAINEIS_FORA\`, pode apagar ou deixar.
 
-Os dados antigos do Recebimento e da Expedição continuam na planilha, mas não são mais baixados nem mostrados aqui.
-
-## Arquivos
-${fileList()}
-`
-  },
-  {
-    id: 'fluxos', zip: 'FLUXOS', pacote: {so: FLOWS, fora: '', nome: 'Fluxo operacional'},
-    readme: v => `# Painel dos fluxos — J&T DashMaster ${v}
-
-Este pacote é o **painel dos fluxos**. Ele mostra só **Recebimento: fluxo operacional** e **Expedição: fluxo operacional**, com os Resultados deles. O nome que aparece embaixo do logo é "Fluxo operacional".
-
-**Instale numa OUTRA conta Google, e não na conta do painel principal.** A cota diária do Google (90 min/dia na conta Gmail) é por conta: na mesma conta, os dois painéis dividiriam a mesma cota. Nesta conta, o Recebimento usa até 40 min/dia e a Expedição até 45 min/dia.
-
-## Como instalar (uma vez)
-1. Entre com a **outra conta Google** e abra https://script.google.com → **Novo projeto**. Dê um nome, por exemplo "JT Fluxos".
-2. Para cada arquivo \`.gs\` deste pacote:
-   - crie um arquivo de script com o mesmo nome (botão **+ → Script**, sem o ".gs");
-   - cole o conteúdo.
-
-   O arquivo "Código.gs" que o Google cria pode ser apagado.
-3. Para cada arquivo \`.html\`:
-   - crie um arquivo HTML com o mesmo nome (botão **+ → HTML**, sem o ".html");
-   - cole o conteúdo.
-4. Em **Configurações do projeto** (engrenagem):
-   - marque "Mostrar arquivo de manifesto appsscript.json no editor";
-   - volte ao editor e troque o conteúdo do \`appsscript.json\` pelo deste pacote.
-5. Ainda em Configurações do projeto → **Propriedades do script**, adicione:
-   - todas as propriedades que começam com **JMS_** do painel principal. São as mesmas credenciais, por exemplo \`JMS_AUTHTOKEN\` e \`JMS_AUTH_MODE\`;
-   - **DATA_START_DATE**, o primeiro dia a baixar, no formato AAAA-MM-DD. Na conta Gmail, um histórico curto (7 a 15 dias) fica completo mais rápido.
-6. No editor, escolha a função **setupProject** e clique em ▶ Executar. Autorize. Ela cria a planilha do banco e os gatilhos nesta conta.
-7. Escolha a função **startFullHistory** e clique em ▶ Executar.
-8. Clique em **Implantar → Nova implantação → App da Web**. O link que aparece é o **link do painel dos fluxos**.
-
-**Quando o AuthToken do JMS vencer:** troque \`JMS_AUTHTOKEN\` aqui **e** no painel principal.
+Os dados antigos do Recebimento e da Expedição continuam na planilha, mas não são mais baixados nem mostrados.
 
 ## Arquivos
 ${fileList()}
@@ -220,7 +187,7 @@ ${fileList()}
   }
 ];
 
-// V4.21: painel de Lotes/Sacas separado (Apps Script), como o painel dos fluxos.
+// V4.21: painel de Lotes/Sacas separado (Apps Script).
 PACKAGES.push({
   id: 'lotes', zip: 'LOTES', pacote: LOTS_PACOTE,
   readme: v => `# Painel de Lotes/Sacas — J&T DashMaster ${v}
@@ -432,9 +399,6 @@ const NETLIFY_LINK_TXT = `# J&T DashMaster no Netlify: link do Apps Script
 # 3. Arraste a pasta inteira no Netlify (app.netlify.com/drop, ou na aba Deploys do seu projeto).
 
 principal = 
-
-# So se Recebimento e Expedicao ficam em OUTRO projeto do Apps Script (pagina fluxos.html):
-fluxos = 
 `;
 
 const NETLIFY_LEIA = v => `J&T DASHMASTER ${v} NO NETLIFY
@@ -453,8 +417,7 @@ Apps Script (a busca do JMS roda la, como hoje). Nada e instalado no computador.
 4. Abra app.netlify.com/drop (com sua conta do Netlify) e arraste esta pasta.
    O link https://....netlify.app e o painel.
 
-Paginas: index.html = painel principal; fluxos.html = projeto dos fluxos
-(Recebimento e Expedicao), se ele for outro projeto do Apps Script.
+Pagina: index.html = painel principal.
 `;
 
 /** Monta o Index.html como o doGet fazia, mas estático: o boot vem do endereço da página e o google.script.run vira pedido ao /exec. */
@@ -478,7 +441,7 @@ function netlifyPage(root, info, painel) {
   });
   if (/<\?/.test(html.replace(/<\?xml[^>]*\?>/g, ''))) throw new Error('Index.html tem marcas do Apps Script que o gerador do Netlify não conhece.');
   html = html.replace(/<html([^>]*)>/i, (m, a) => '<html' + a + ' data-painel="' + painel + '">');
-  const head = '\n  <title>' + info.appName.replace(/&/g, '&amp;') + (painel === 'fluxos' ? ' · Fluxo operacional' : '') + '</title>\n' +
+  const head = '\n  <title>' + info.appName.replace(/&/g, '&amp;') + '' + '</title>\n' +
     '  <meta name="viewport" content="width=device-width, initial-scale=1">\n' + NETLIFY_BRIDGE + '\n';
   // Logo depois do <meta charset> (ele tem que ficar nos primeiros bytes da página).
   if (!/<meta charset="UTF-8">/i.test(html)) throw new Error('Index.html sem <meta charset="UTF-8">.');
@@ -508,7 +471,6 @@ function buildNetlify(outDir, opts) {
     files.push({name: 'dashmaster-netlify/' + name, data: Buffer.from(data)});
   };
   put('index.html', netlifyPage(root, info, 'principal'));
-  put('fluxos.html', netlifyPage(root, info, 'fluxos'));
   put('link-apps-script.txt', NETLIFY_LINK_TXT.replace(/\n/g, '\r\n'));
   put('LEIA-ME.txt', NETLIFY_LEIA(version).replace(/\n/g, '\r\n'));
   put('Api.gs', fs.readFileSync(path.join(root, 'Api.gs'), 'utf8'));
@@ -530,4 +492,4 @@ if (require.main === module) {
   console.log('netlify: ' + w.zip + ' (' + w.files.length + ' arquivos)');
 }
 
-module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, FLOWS, LOTS_NODE, SORTER_NODE, MAIN_OUT};
+module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, LOTS_NODE, SORTER_NODE, MAIN_OUT};

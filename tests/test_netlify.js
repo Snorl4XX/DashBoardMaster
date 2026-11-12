@@ -66,10 +66,9 @@ delete ctx.__state.props.SENHA_PAINEL;
 // ---------- 2. Página do Netlify gerada pelo tools/gerar_paineis.js ----------
 const out = fs.mkdtempSync(path.join(os.tmpdir(), 'dm-netlify-'));
 const site = buildNetlify(out);
-check(fs.existsSync(site.zip) && site.files.length === 5, 'ZIP do Netlify gerado', site.files);
+check(fs.existsSync(site.zip) && site.files.length === 4 && !site.files.some(f => /fluxos/.test(f)), 'ZIP do Netlify gerado (V4.26: sem a página dos fluxos)', site.files);
 const index = fs.readFileSync(path.join(site.dir, 'index.html'), 'utf8');
-const fluxos = fs.readFileSync(path.join(site.dir, 'fluxos.html'), 'utf8');
-check(!/<\?!?=/.test(index) && /data-painel="principal"/.test(index) && /data-painel="fluxos"/.test(fluxos), 'páginas montadas, sem marcas do Apps Script');
+check(!/<\?!?=/.test(index) && /data-painel="principal"/.test(index), 'página montada, sem marcas do Apps Script');
 check(index.indexOf('<meta charset="UTF-8">') < 400 && /<title>J&amp;T/.test(index) && /name="viewport"/.test(index), 'charset no começo, título e viewport');
 check(index.indexOf('window.JTCore=(') > 0 && index.indexOf('window.__BOOT__ = (function') > 0, 'núcleo e boot da página no lugar do doGet');
 const scripts = (index.match(/<script(?![^>]*\bsrc=)(?![^>]*application\/json)[^>]*>[\s\S]*?<\/script>/g) || [])
@@ -81,7 +80,7 @@ const bootOf = search => vm.runInNewContext(bootFn[1], {location: {search}, URLS
 check(JSON.stringify(bootOf('?ind=sc_dc&lang=zh&view=results')) === JSON.stringify({lang: 'zh', indicator: 'sc_dc', view: 'results'}) &&
   bootOf('?ind=nao_existe').indicator === '', 'boot pelo endereço igual ao doGet (indicador, idioma, visão)');
 const txt = fs.readFileSync(path.join(site.dir, 'link-apps-script.txt'), 'utf8');
-check(/\r\nprincipal = \r\n/.test(txt) && /\r\nfluxos = \r\n/.test(txt), 'link-apps-script.txt pronto para colar o /exec (Bloco de Notas)');
+check(/\r\nprincipal = \r\n/.test(txt) && !/fluxos/.test(txt), 'link-apps-script.txt pronto para colar o /exec (Bloco de Notas)');
 check(fs.readFileSync(path.join(site.dir, 'Api.gs'), 'utf8') === fs.readFileSync(path.join(ROOT, 'Api.gs'), 'utf8'), 'Api.gs junto na pasta');
 fs.rmSync(out, {recursive: true, force: true});
 

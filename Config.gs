@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.25.7',
+  VERSION: '4.26.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1007,305 +1007,6 @@ const ALL_INDICATORS_ = Object.freeze({
   },
 
   /**
-   * RECEBIMENTO: FLUXO OPERACIONAL (Operação > Monitoramento de dados > Monitoramento de tipagem de recebimento
-   * (novo), /crisbiIndex/ArriveMonitor). Duas colunas principais:
-   *  - DEVE CHEGAR: pedidos previstos para chegar (shouldArriverNum) e os que ainda não chegaram (noArriverNum);
-   *  - CHEGOU: pedidos que chegaram (totalNum) e os pontos de atenção do recebimento (sem bipar expedição na
-   *    etapa anterior, sem bipagem de expedição nesta base, baixas não realizadas, sem armazém de saída).
-   * Resumo (arrivalbyday_total): 1 consulta por dia, os 7 números (gráficos de comparação com os dias anteriores).
-   * Taxa do painel = não chegadas ÷ deve chegar (% do previsto que ainda não chegou); sem meta definida.
-   * Detalhe: as listas de "Deve chegar" e "Chegou" (detailType). São ~170 mil + ~330 mil remessas POR DIA:
-   * ficam AGRUPADAS por combinação de DC destino/base destino/viagem/estação/última parada/digitalizador/turno,
-   * com a quantidade (qty) — os gráficos, filtros e a tabela usam essa quantidade. Só os últimos `days` dias
-   * têm detalhe (os mais antigos ficam só com o resumo) e o detalhe de hoje é atualizado no máximo a cada
-   * `refreshHours` horas. Download agrupado lote a lote (runGroupedDetailJob_): memória limitada e retomada
-   * na execução seguinte se o tempo acabar.
-   */
-  arrival_flow: {
-    key: 'arrival_flow', order: 8, routeKey: 'ARRIVAL',
-    name: {pt: 'Recebimento: fluxo operacional', zh: '到件运营流程'},
-    subtitle: {pt: 'Deve chegar × Chegou (monitoramento de tipagem de recebimento)', zh: '应到 × 已到（到件扫描监控）'},
-    goal: {value: null, direction: 'max', strict: false},
-    apiProfile: 'arrival_flow', detailMatchesErrors: false, grouped: true,
-    summary: {
-      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_total',
-      rateFromCounts: true, rateKeys: [], errorKeys: ['noArriverNum'], totalKeys: ['shouldArriverNum'],
-      metrics: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum', 'noSignNum', 'deliverNum']
-    },
-    detail: {
-      // O endereço do detalhe não estava na captura: o mesmo nome do resumo com "_detail" (padrão das outras telas).
-      // Se o JMS responder 404, as variantes de `candidates` são testadas e a que funcionar fica em
-      // JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL (pode ser cadastrada à mão também).
-      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_detail',
-      candidates: ['arrivalbyday_detail', 'arrivalbyday_detailed', 'arrivalbyday_details', 'arrivalbyday_list'],
-      days: 7, refreshHours: 6, maxPerDay: 900000,
-      // Ordem do download (V3.19): as listas pequenas primeiro (tabelas e IDs sem bipe aparecem em minutos), depois
-      // "Deve chegar" e por último "Chegou" (~330 mil remessas por dia). Não muda o formato dos arquivos.
-      order: ['uploadNoSendNum', 'noSendNum', 'shouldArriverNum', 'totalNum'],
-      // V3.21: turnos sem esperar o download inteiro — a LISTA de cada número consultada em cada horário de turno
-      // (T1 06h–14h, T2 14h–22h, T3 22h–06h) devolve o total de cada turno: 10 consultas (página 1). O RESUMO do JMS
-      // é diário (consultado por horário, devolve o dia inteiro às 00h) e não serve para isso.
-      shiftProbe: ['shouldArriverNum', 'totalNum'],
-      // Uma lista por número clicado na tela (detailType = nome do número no resumo). Cada lista guarda só os
-      // campos dela (keep) e copia o ID de viagem para o campo do filtro dela (copy).
-      //  - Deve chegar: turno pelo "Horário de expedição" na origem (shiftExp → pizza "O que deve chegar").
-      //  - Chegou: turno pelo "Horário descarregamento veículo de chegada" (shift → "Turno que recebeu mais").
-      //  - Sem bipe na etapa anterior / sem bipe nesta base (V3.17): listas pequenas, remessa a remessa, para as
-      //    tabelas com todas as informações. `optional`: se o JMS recusar o detailType, o dia segue sem elas.
-      types: [
-        {type: 'shouldArriverNum', column: 'Deve chegar', copy: {tripExp: 'tripId', shiftExp: 'shift'},
-          keep: ['tripId', 'tripExp', 'station', 'shiftExp']},
-        {type: 'totalNum', column: 'Chegou', copy: {tripRec: 'tripId'},
-          keep: ['tripId', 'tripRec', 'shift', 'destCenter', 'destBase', 'destination', 'login']},
-        {type: 'uploadNoSendNum', column: 'Sem bipe na etapa anterior', optional: true, copy: {tripPrev: 'tripId', waybill: 'shipment'},
-          keep: ['waybill', 'eventTime', 'tripId', 'tripPrev', 'shift', 'station', 'destCenter', 'destBase', 'destination', 'login']},
-        {type: 'noSendNum', column: 'Sem bipe de expedição nesta base', optional: true, copy: {waybill: 'shipment'},
-          keep: ['waybill', 'eventTime', 'tripId', 'shift', 'station', 'destCenter', 'destBase', 'destination', 'login']}
-      ]
-    },
-    fields: {
-      shipment: ['billcode'], eventTime: ['sendTime'], tripId: ['shipmentNo'], destCenter: ['endCenterName'],
-      destBase: ['endArrivalSitename'], station: ['inputsite'], destination: ['nextstation'], login: ['scanuser']
-    },
-    // Linha agrupada: uma por combinação destes campos, com a quantidade de remessas. As listas pequenas guardam
-    // a remessa e o horário (uma linha por remessa); as grandes, só as combinações dos gráficos e da tabela.
-    groupFields: ['column', 'tripId', 'tripExp', 'tripRec', 'tripPrev', 'station', 'shiftExp', 'shift',
-      'destCenter', 'destBase', 'destination', 'login', 'waybill', 'eventTime'],
-    labels: {
-      station: {pt: 'Bases que enviaram', zh: '发件网点'}, destination: {pt: 'Última parada', zh: '上一站'},
-      login: {pt: 'Digitalizador', zh: '扫描员'}, tripId: {pt: 'ID de viagem', zh: '车次号'},
-      shift: {pt: 'Turno (recebimento)', zh: '班次（到件）'}
-    },
-    // Cada filtro vale só para a(s) lista(s) dele; as outras listas passam direto (Core.setFilterScopes).
-    filterScopes: {
-      tripExp: ['Deve chegar'], station: ['Deve chegar'], tripRec: ['Chegou'], tripPrev: ['Sem bipe na etapa anterior'],
-      shift: ['Chegou', 'Sem bipe na etapa anterior', 'Sem bipe de expedição nesta base']
-    },
-    filters: ['shift', 'tripExp', 'tripRec', 'station', 'tripPrev'],
-    topCards: [],
-    hideShiftCards: true,
-    hideEvolution: true, hideTarget: true,
-    // V3.21: cartão vermelho = quantidade RECEBIDA no dia (Chegou, oficial do JMS) com o dia anterior; ao lado, o cartão
-    // grande "Deve chegar no dia" com as encomendas que não chegaram. Depois, um cartão por subcoluna (metricPanels,
-    // menos as dos dois grandes e as com card: false) e os cartões T1/T2/T3 do recebido.
-    heroMetric: {key: 'totalNum', column: 'Chegou',
-      label: {pt: 'Recebido · Total de pedidos que chegaram', zh: '已到总票数'}, labelPeriod: {pt: 'Recebido no período', zh: '期间已到总票数'}},
-    bigMetric: {key: 'shouldArriverNum', column: 'Deve chegar', sub: 'noArriverNum',
-      label: {pt: 'Deve chegar no dia · Quantidade total de pedidos', zh: '当日应到总票数'}, labelPeriod: {pt: 'Deve chegar no período', zh: '期间应到总票数'},
-      subLabel: {pt: 'Encomendas que não chegou', zh: '未到件'}},
-    // Menu lateral: a quantidade que deve chegar HOJE.
-    navMetric: 'shouldArriverNum',
-    metricCards: true,
-    shiftCardsByColumn: {main: 'Chegou', columns: ['Chegou'], summaryMetric: 'totalNum'},
-    // Turnos de cada lista gravados por dia (aba AGG, chave "arrival_flow:<lista>"): dia anterior dos turnos.
-    shiftAggColumns: ['Chegou', 'Sem bipe na etapa anterior', 'Sem bipe de expedição nesta base'],
-    texts: {
-      errors: {pt: 'Não chegadas', zh: '未到件'},
-      errorsDay: {pt: 'Não chegadas no dia', zh: '当日未到件'}, errorsPeriod: {pt: 'Não chegadas no período', zh: '期间未到件'},
-      errorsFiltered: {pt: 'Remessas (com filtro)', zh: '票数（已筛选）'},
-      prevErrorsDay: {pt: 'Não chegadas dia anterior', zh: '前一日未到件'}, prevErrorsPeriod: {pt: 'Não chegadas período anterior', zh: '上一期间未到件'},
-      shiftErrors: {pt: 'Não chegadas {s}', zh: '{s} 未到件'}, shareOfErrors: {pt: '{p} das não chegadas', zh: '占未到件 {p}'},
-      rateOfDay: {pt: '% não chegou · {date}', zh: '{date} 未到件率'}, rateOfPeriod: {pt: '% não chegou no período', zh: '期间未到件率'}
-    },
-    // Números do resumo (primeira tabela da tela). `detail`: lista que tem a remessa a remessa desse número (o
-    // cartão muda com os filtros). card: false = só na tabela "Dados gerais".
-    metricPanels: [
-      {column: 'Deve chegar', title: {pt: 'Deve chegar', zh: '应到'}, metrics: [
-        {key: 'shouldArriverNum', label: {pt: 'Quantidade total de pedidos', zh: '应到总票数'}, detail: 'Deve chegar'},
-        {key: 'noArriverNum', label: {pt: 'Encomendas que não chegou', zh: '未到件总票数'}, bad: true}
-      ]},
-      {column: 'Chegou', title: {pt: 'Chegou', zh: '已到'}, metrics: [
-        {key: 'totalNum', label: {pt: 'Total de pedidos que chegaram', zh: '已到总票数'}, detail: 'Chegou'},
-        {key: 'uploadNoSendNum', label: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}, bad: true, detail: 'Sem bipe na etapa anterior'},
-        {key: 'noSendNum', label: {pt: 'Não realizamos bipe de expedição', zh: '本网点未发件扫描'}, bad: true, detail: 'Sem bipe de expedição nesta base'},
-        {key: 'noSignNum', label: {pt: 'Que não foram registrados no Sistema', zh: '未签收'}, bad: true},
-        {key: 'deliverNum', label: {pt: 'Não há armazém de saída nesse local', zh: '本网点无出仓'}, bad: true, card: false}
-      ]}
-    ],
-    // Gráficos separados, no padrão dos outros painéis. `metric`: número do resumo dia a dia (linha ou colunas);
-    // `dim`: contagem da lista indicada em `where`.
-    charts: [
-      {key: 'mShould', metric: 'shouldArriverNum', type: 'line', days: 30, title: {pt: 'Deve chegar', zh: '应到'}},
-      {key: 'expShift', dim: 'shiftExp', where: {column: 'Deve chegar'}, type: 'doughnut', summaryShift: 'shouldArriverNum', title: {pt: 'O que deve chegar', zh: '应到（按发件班次）'},
-        sub: {pt: 'Turno pelo horário de expedição na base de origem', zh: '按始发网点发件时间划分班次'}},
-      {key: 'mNoArr', metric: 'noArriverNum', type: 'bar', bad: true, title: {pt: 'Encomendas não chegadas', zh: '未到件'}},
-      {key: 'mRec', metric: 'totalNum', type: 'bar', title: {pt: 'Chegou', zh: '已到'}},
-      {key: 'mPrev', metric: 'uploadNoSendNum', type: 'bar', bad: true, title: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}},
-      {key: 'prevTrip', dim: 'tripPrev', where: {column: 'Sem bipe na etapa anterior'}, type: 'bar', top: 10,
-        title: {pt: 'IDs de viagens que não tiveram bipe de expedição no anterior', zh: '上一环节未发件扫描的车次号'}},
-      {key: 'mNoSend', metric: 'noSendNum', type: 'bar', bad: true, title: {pt: 'Não realizamos bipe de expedição', zh: '本网点未发件扫描'}},
-      {key: 'expTrip', dim: 'tripExp', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'IDs de viagens que vamos receber', zh: '将到车次号'}},
-      {key: 'expStation', dim: 'station', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Bases que enviaram', zh: '发件网点'}},
-      {key: 'recTrip', dim: 'tripRec', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'IDs que já recebemos', zh: '已到车次号'}}
-    ],
-    // Tabelas do painel (uma por lista). `table` (abaixo) = todas as colunas, para o relatório e o CSV.
-    tables: [
-      {key: 'tPrev', column: 'Sem bipe na etapa anterior', title: {pt: 'Total que não tiveram o bipe de expedição anterior', zh: '上一环节未发件扫描明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
-          ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação', '网点'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
-          ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员']]},
-      {key: 'tRec', column: 'Chegou', title: {pt: 'Total que foi recebido por nós', zh: '已到明细'},
-        cols: [['date', 'Data', '日期'], ['shift', 'Turno', '班次'], ['tripId', 'ID de viagem', '车次号'], ['destCenter', 'DC destino', '目的中心'],
-          ['destBase', 'Base destino', '目的网点'], ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']]},
-      {key: 'tNoSend', column: 'Sem bipe de expedição nesta base', title: {pt: 'Total de quantos nós não demos bipe de expedição', zh: '本网点未发件扫描明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
-          ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação', '网点'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
-          ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员']]}
-    ],
-    table: [
-      ['date', 'Data', '日期'], ['column', 'Lista', '列表'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
-      ['shiftExp', 'Turno da expedição', '发件班次'], ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação de remessa', '发件网点'],
-      ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'], ['destination', 'Última parada', '上一站'],
-      ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']
-    ]
-  },
-
-  /**
-   * EXPEDIÇÃO: FLUXO OPERACIONAL (Operação > Monitoramento de dados > Monitoramento de tipagem de expedição (novo),
-   * /crisbiIndex/SendOutMonitor). Quantidade que SAIU no dia, por rota (próxima parada).
-   * Resumo (sendbyday_total): uma linha por rota com "Número total de remessas" (sendcount), "Número de encomendas não
-   * chegadas na próxima parada" (noarrivalcount) e "Não entregue" (nosigncount). Os cartões SOMAM essas colunas; cada
-   * rota fica guardada (gráficos de rotas e "rota que mais enviou").
-   * Detalhe (sendbyday_detail): os números vermelhos de CADA rota (nextstation = código da próxima parada; detailType =
-   * coluna), no máximo 100 linhas por página. Cada remessa enviada é gravada UMA vez, com a situação dela em "column";
-   * as listas da tela juntam as situações (columnSets): "Enviados" = todas, "Em trânsito" = lista noarrivalcount,
-   * "Não entregues" = lista nosigncount. Lista com o mesmo total da rota (nenhuma chegou, por exemplo) não precisa ser
-   * baixada: todas as remessas da rota estão nela. Turno e intervalo pelo "Horário de expedição" (sendTime);
-   * login = Escrevente (scanuser). Download por rota e por horário de turno (Expedicao.gs → runSendDetailJob_).
-   * ID de viagem: Rastreamento do pacote (keywordList) de cada remessa — o "número do pedido" (remark2) do bipe
-   * "Encomenda carregada" na nossa base para a próxima parada da rota (Expedicao.gs → runTripJob_).
-   */
-  send_flow: {
-    key: 'send_flow', order: 9, routeKey: 'SEND',
-    name: {pt: 'Expedição: fluxo operacional', zh: '发件运营流程'},
-    subtitle: {pt: 'Quantidade que saiu no dia por rota (monitoramento de tipagem de expedição)', zh: '当日各线路发件量（发件扫描监控）'},
-    goal: {value: null, direction: 'max', strict: false},
-    apiProfile: 'send_flow', detailMatchesErrors: false, grouped: true, byRoute: true,
-    // Um dia inteiro (~120 mil remessas, ~9 MB) vai ao navegador: as três tabelas com todas as remessas. Mais dias: totais
-    // por campo calculados no servidor (tabelas com as 2.000 primeiras de cada situação).
-    clientRows: 150000,
-    summary: {
-      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sendbyday_total',
-      // Uma linha por rota: os números são SOMADOS (cartões) e cada rota fica guardada em raw.routes.
-      sumRecords: true, routeFields: {name: 'nextstation', code: 'nextstationcode'},
-      rateFromCounts: true, rateKeys: [], errorKeys: ['noarrivalcount'], totalKeys: ['sendcount'],
-      metrics: ['sendcount', 'noarrivalcount', 'nosigncount']
-    },
-    detail: {
-      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sendbyday_detail',
-      // "O LIMITE É 100 LINHAS" (a tela do JMS mostra 20 por padrão e no máximo 100).
-      // Hoje: detalhe rebaixado no máximo a cada 6 h (conta Gmail: 12 h); cartões, rotas e turnos seguem de hora em hora pelo
-      // resumo e pela lista por horário. Dia fechado: só a situação muda — atualizada a cada 12 h sem baixar "Enviados" de novo.
-      // Conta Gmail: os 3 últimos dias com detalhe; Google Workspace: 7 (DETAIL_DAYS_SEND_FLOW muda).
-      maxPageSize: 100, days: 7, refreshHours: 6, closedRefreshHours: 12, maxPerDay: 400000,
-      // Lista de cada número vermelho (detailType = nome da coluna no resumo). flag: marca que a lista dá à remessa.
-      types: [
-        {type: 'sendcount', column: 'Enviados'},
-        {type: 'noarrivalcount', column: 'Em trânsito', flag: 'transit'},
-        {type: 'nosigncount', column: 'Não entregues', flag: 'undelivered'}
-      ]
-    },
-    // Rastreamento do pacote: ID de viagem de cada remessa enviada. Bipe "Encomenda carregada" (código 1 / tipo
-    // original 50) na nossa base, para a próxima parada da rota; o ID é o "número do pedido" (remark2).
-    trips: {
-      endpoint: 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList',
-      loadCodes: [1], loadOriginalCodes: [50]
-    },
-    fields: {shipment: ['billcode'], eventTime: ['sendTime'], destination: ['nextstation'], login: ['scanuser']},
-    groupFields: ['column', 'waybill', 'eventTime', 'shift', 'interval', 'destination', 'login', 'tripId'],
-    // Situação de cada remessa (column) → listas da tela.
-    columnSets: {
-      'Enviados': ['Não chegou ao destino', 'Chegou ao destino · não entregue', 'Entregue', 'Entregue · sem bipe de chegada'],
-      'Em trânsito': ['Não chegou ao destino', 'Entregue · sem bipe de chegada'],
-      'Não entregues': ['Não chegou ao destino', 'Chegou ao destino · não entregue']
-    },
-    labels: {
-      destination: {pt: 'Rotas (próxima parada)', zh: '线路（下一站）'}, login: {pt: 'Login', zh: '操作员'},
-      tripId: {pt: 'IDs Viagem', zh: '车次号'}, interval: {pt: 'Intervalo de horários', zh: '时间段'},
-      shift: {pt: 'Turno', zh: '班次'}, column: {pt: 'Situação', zh: '状态'}
-    },
-    // Singular para "Maior rota" / "Menor rota" nos quadros dos gráficos.
-    labelsOne: {destination: {pt: 'Rota', zh: '线路'}, login: {pt: 'Login', zh: '操作员'}, interval: {pt: 'Intervalo', zh: '时间段'},
-      tripId: {pt: 'ID de viagem', zh: '车次号'}},
-    // V3.23: filtro "IDs Viagem" (ID de viagem do Rastreamento do pacote). V4.15: ainda não consultada = "AGUARDANDO CONSULTA";
-    // consultada sem ID de verdade = "NÃO TEM ID".
-    naLabel: {text: {pt: 'AGUARDANDO CONSULTA', zh: '等待查询'}, fields: ['tripId']},
-    filters: ['destination', 'interval', 'shift', 'tripId'],
-    // Cartões "que mais mandou": login, rota e intervalo (lista Enviados).
-    topCards: ['login', 'destination', 'interval'],
-    topCardColumn: 'Enviados',
-    topCardLabels: {
-      login: {pt: 'Login que mais mandou', zh: '发件最多的操作员'}, destination: {pt: 'Rota que mais enviou', zh: '发件最多的线路'},
-      interval: {pt: 'Intervalo que teve mais envio', zh: '发件最多的时间段'}
-    },
-    hideShiftCards: true, hideEvolution: true, hideTarget: true,
-    heroMetric: {key: 'sendcount', column: 'Enviados', icon: 'send_flow',
-      label: {pt: 'Total que está saindo no dia', zh: '当日发件总量'}, labelPeriod: {pt: 'Total que saiu no período', zh: '期间发件总量'}},
-    navMetric: 'sendcount',
-    metricCards: true,
-    // Cartões T1/T2/T3: quantidade que cada turno mandou (horário de expedição). Sem esperar o download inteiro: a lista
-    // de cada rota consultada em cada horário de turno (Expedicao.gs grava em "send_flow:turnos:sendcount").
-    shiftCardsByColumn: {main: 'Enviados', columns: ['Enviados'], summaryMetric: 'sendcount', unit: {pt: 'enviadas', zh: '票'}},
-    shiftAggColumns: ['Enviados', 'Em trânsito', 'Não entregues'],
-    texts: {
-      errors: {pt: 'Não chegaram ao destino', zh: '未到下一站'},
-      errorsDay: {pt: 'Não chegaram no dia', zh: '当日未到下一站'}, errorsPeriod: {pt: 'Não chegaram no período', zh: '期间未到下一站'},
-      errorsFiltered: {pt: 'Remessas (com filtro)', zh: '票数（已筛选）'},
-      prevErrorsDay: {pt: 'Não chegaram dia anterior', zh: '前一日未到下一站'}, prevErrorsPeriod: {pt: 'Não chegaram período anterior', zh: '上一期间未到下一站'},
-      shiftErrors: {pt: 'Enviadas {s}', zh: '{s} 发件'}, shareOfErrors: {pt: '{p} das enviadas', zh: '占发件 {p}'},
-      rateOfDay: {pt: '% não chegou ao destino · {date}', zh: '{date} 未到下一站率'}, rateOfPeriod: {pt: '% não chegou ao destino no período', zh: '期间未到下一站率'},
-      navQty: {pt: 'Saindo · {date}', zh: '发件 · {date}'},
-      listTopNote: {pt: 'Período com mais de um dia: mostrando {n} remessas de cada situação. Escolha um único dia para ver todas.', zh: '多日期间：每种状态显示 {n} 票。选择单日可查看全部。'},
-      dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes; a Expedição roda depois dos outros painéis)', zh: '排队下载中（前面还有 {n} 个任务；发件看板在其他看板之后运行）'},
-      dsBudget: {pt: 'limite diário da Expedição atingido ({m} min, conta Gmail): continua amanhã', zh: '已达发件看板每日上限（{m} 分钟，Gmail账号）：明天继续'},
-      dsHelp: {pt: 'Para saber o motivo em detalhe, rode diagnosticarExpedicao() no editor do Apps Script.', zh: '如需详细原因，请在 Apps Script 编辑器中运行 diagnosticarExpedicao()。'}
-    },
-    // Colunas da tabela principal da tela. Cartões: a soma de cada coluna (oficial do JMS); com filtro, a lista dela.
-    metricPanels: [
-      {column: 'Enviados', title: {pt: 'Expedição do dia', zh: '当日发件'}, metrics: [
-        {key: 'sendcount', label: {pt: 'Número total de remessas', zh: '发件总票数'}, detail: 'Enviados'},
-        {key: 'noarrivalcount', label: {pt: 'Quantidade que ainda não chegou no destino', zh: '未到下一站票数'}, bad: true, detail: 'Em trânsito'},
-        {key: 'nosigncount', label: {pt: 'Não entregue', zh: '未签收'}, bad: true, detail: 'Não entregues'}
-      ]}
-    ],
-    // Gráficos de coluna (na ordem do pedido) e a pizza de turno. routeMetric: sem filtro, o número OFICIAL de cada rota
-    // (tabela principal do JMS); com filtro, as remessas da lista baixada.
-    charts: [
-      {key: 'routes', dim: 'destination', where: {column: 'Enviados'}, type: 'bar', top: 80, routeMetric: 'sendcount',
-        title: {pt: 'Rotas mais enviados', zh: '发件最多的线路'}, sub: {pt: 'Todas as rotas, da que mais mandou para a que menos mandou', zh: '全部线路，按发件量排序'}},
-      {key: 'routesTransit', dim: 'destination', where: {column: 'Em trânsito'}, type: 'bar', top: 80, routeMetric: 'noarrivalcount', bad: true,
-        title: {pt: 'Rotas que ainda não chegou', zh: '未到下一站的线路'}, sub: {pt: 'Encomendas não chegadas na próxima parada, por rota', zh: '各线路未到下一站票数'}},
-      {key: 'routesUndelivered', dim: 'destination', where: {column: 'Não entregues'}, type: 'bar', top: 80, routeMetric: 'nosigncount', bad: true,
-        title: {pt: 'Não entregues', zh: '未签收'}, sub: {pt: 'Não entregue, por rota', zh: '各线路未签收票数'}},
-      {key: 'interval', dim: 'interval', where: {column: 'Enviados'}, type: 'bar', top: 24, ranking: true,
-        title: {pt: 'Intervalos de horários que teve mais entregas', zh: '发件最多的时间段'}},
-      {key: 'logins', dim: 'login', where: {column: 'Enviados'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Logins que mais mandou', zh: '发件最多的操作员'}},
-      {key: 'trips', dim: 'tripId', where: {column: 'Enviados'}, type: 'bar', horizontal: true, top: 10, hideNA: true, trips: true,
-        title: {pt: 'IDs de viagem', zh: '车次号'}, sub: {pt: 'ID que mais enviou (Rastreamento do pacote: bipe "Encomenda carregada")', zh: '发件最多的车次号（包裹轨迹：装车发件）'}},
-      {key: 'shiftPie', dim: 'shift', where: {column: 'Enviados'}, type: 'doughnut', summaryShift: 'sendcount',
-        title: {pt: 'Turno', zh: '班次'}, sub: {pt: 'Quantidade que cada turno mandou (horário de expedição)', zh: '各班次发件量（发件时间）'}}
-    ],
-    // Tabelas: as listas de TODAS as rotas juntas (como abrir cada número vermelho).
-    tables: [
-      {key: 'tSent', column: 'Enviados', title: {pt: 'Enviados', zh: '发件明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
-          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'], ['column', 'Situação', '状态']]},
-      {key: 'tUndelivered', column: 'Não entregues', title: {pt: 'Não entregues', zh: '未签收明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
-          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'], ['column', 'Situação', '状态']]},
-      {key: 'tTransit', column: 'Em trânsito', title: {pt: 'Em trânsito', zh: '在途明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
-          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号']]}
-    ],
-    table: [
-      ['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
-      ['interval', 'Intervalo', '时间段'], ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'],
-      ['column', 'Situação', '状态'], ['qty', 'Quantidade', '数量']
-    ]
-  },
-
-  /**
    * FLUXO DE LOTES (Dispositivo inteligente > Materiais ecológicos > Estatística de Criação Recorrente de Eco Bag): quantidade
    * de SACAS criadas no dia, ecológicas e normais, com a porcentagem de cada uma.
    * Resumo (sdploopbagBuildbagCount, "Sumário por dia", unidade SC): Total de pacotes construídos (packageSum), Número do saco
@@ -1319,7 +1020,9 @@ const ALL_INDICATORS_ = Object.freeze({
    * (columnSets). Volume pequeno (~900 sacas por dia): todos os dias com detalhe, atualizado de hora em hora.
    */
   lot_flow: {
-    key: 'lot_flow', order: 10, routeKey: 'LOTS',
+    // V4.26 (pedido "tirei o dash do lote do principal"): painel separado — só no pacote de Lotes (ou PAINEIS / REATIVAR_PAINEIS
+    // = lot_flow). Não aparece no principal nem entra na fila dele, mesmo com PAINEIS_FORA preenchida.
+    key: 'lot_flow', order: 10, routeKey: 'LOTS', separate: true,
     // V4.24: painel separado (Lotes) — continua com um gráfico por linha (os dois por linha são do painel principal).
     chartsFull: true,
     // V4.18 (pedido "desenvolvendo dashboard de criação de lotes"): o nome do pedido.
@@ -1870,9 +1573,11 @@ const ALL_INDICATORS_ = Object.freeze({
 });
 
 /**
- * V4.2 — painéis deste projeto (Propriedades do script). Permite separar os painéis pesados num outro projeto:
- *   PAINEIS      = só estes (ex.: "arrival_flow,send_flow" no painel separado dos fluxos);
- *   PAINEIS_FORA = todos menos estes (ex.: "arrival_flow,send_flow" no painel principal).
+ * V4.2 — painéis deste projeto (Propriedades do script):
+ *   PAINEIS      = só estes (ex.: "lot_flow" no painel de Lotes);
+ *   PAINEIS_FORA = todos menos estes (ex.: "damage").
+ * V4.26: Recebimento e Expedição (fluxo operacional) saíram do código (pedido); a Criação de Lotes é painel separado (separate):
+ * fica fora do principal mesmo com PAINEIS_FORA preenchida.
  * Painel fora não aparece no menu nem nos Resultados, não entra na fila e não gasta cota. Sem as duas = todos (como antes).
  * Nome errado é ignorado; se nenhum nome valer, ficam todos (o painel nunca abre vazio).
  */
@@ -1898,8 +1603,8 @@ function activeIndicators_(all) {
 }
 /**
  * V4.3 — pacote instalado. O gerador (tools/gerar_paineis.js) troca a linha abaixo em cada pacote:
- *   painel principal  → {so: '', fora: 'arrival_flow,send_flow', nome: ''}
- *   painel dos fluxos → {so: 'arrival_flow,send_flow', fora: '', nome: 'Fluxo operacional'}
+ *   painel principal  → {so: '', fora: 'lot_flow', nome: ''}
+ *   painel de Lotes   → {so: 'lot_flow', fora: '', nome: 'Criação de Lotes'}
  * No repositório (e em quem instalou um único painel com tudo): vazio = todos os painéis.
  * As Propriedades do script PAINEIS / PAINEIS_FORA / NOME_PAINEL, quando preenchidas, valem mais que o pacote.
  */
@@ -1960,7 +1665,7 @@ function getIndicatorConfig_(key) {
     // é para clicar em Executar sem preencher nada antes. Veja "Manutenção" em LEIA_PRIMEIRO.md.
     if (key === undefined || key === null || key === '') {
       throw new Error('Esta função exige um indicador como parâmetro (ex.: "wrong_send", "sorting_error", ' +
-        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage", "arrival_flow", "send_flow", "lot_flow" ou "no_move"). Ela não é para ser executada direto pelo ' +
+        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage", "unseal", "unseal_trunk" ou "no_move"). Ela não é para ser executada direto pelo ' +
         'botão ▶ Executar sem argumentos — chame-a com o parâmetro preenchido (veja "Manutenção" em LEIA_PRIMEIRO.md) ' +
         'ou teste pelo próprio painel (Implantar → App da Web).');
     }

@@ -58,7 +58,7 @@ Para rodar mesmo **sem ninguém entrar no Windows**, use o **Agendador de Tarefa
 
 ## 3. Uso no dia a dia
 
-**Painéis (V4.15.2):** o pacote do Node.js vem sem **Recebimento** e **Expedição** (fluxo operacional), como o painel principal do Google. Para trazer de volta: Configurações → Propriedades → `PAINEIS_FORA` = `nenhum`.
+**Painéis (V4.26):** Recebimento e Expedição (fluxo operacional) saíram do código. A **Criação de Lotes** fica no painel de Lotes (pasta C:\dashmaster-lotes, porta 3400), nunca no principal. Na fila, a Sem Movimentação roda por último.
 
 | O que fazer | Onde |
 |---|---|

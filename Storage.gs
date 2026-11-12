@@ -1381,6 +1381,26 @@ function migrateToV4243_() {
  * que os erros do JMS (página repetida no lugar de outra, contada como completa) voltam uma vez para a fila — agora em fatias de
  * horário de uma página. As fatias são testadas de novo nessas rotas (JMS_NO_SLICE_ apagado; se o JMS ignorar a hora, volta).
  */
+/**
+ * V4.26 (pedido "desativei os dash de fluxo operacional de recebimento e expedição; retirar do código"): as tarefas que ficaram na
+ * fila desses painéis (e de qualquer painel que não existe mais no código) são encerradas uma vez, com o motivo. Os dados antigos
+ * deles ficam no banco, sem uso.
+ */
+function migrateToV426_() {
+  if (getProp_('MIGRATION_V426', '')) return 0;
+  const now = new Date();
+  let n = 0;
+  allTabRows_('JOBS').forEach((r, i) => {
+    const k = String(r[2]), st = String(r[5]);
+    if (ALL_INDICATORS_[k] || HISTORY_INDICATORS_[k] || st === 'DONE') return;
+    writeCells_('JOBS', i + 2, 6, ['DONE']);
+    writeCells_('JOBS', i + 2, 9, [now, 'painel retirado do código (V4.26)']);
+    n++;
+  });
+  setProp_('MIGRATION_V426', now.toISOString());
+  if (n) logSync_('INFO', '', '', 'V4.26: ' + n + ' tarefa(s) de Recebimento/Expedição (fluxo operacional) encerradas: os painéis saíram do código.');
+  return n;
+}
 function migrateToV4254_() {
   if (getProp_('MIGRATION_V4254', '')) return 0;
   const to = isoToday_(), from = addDaysIso_(to, -62);
@@ -1538,12 +1558,13 @@ function recoverStaleRunning_() {
 }
 function pendingJobs_() {
   const prio = {SUMMARY: 0, DETAIL_INIT: 1, DETAIL_PAGE: 1, COMPACT: 2, TRIPS: 2.8, SCANS: 2.8};
-  // Detalhe agrupado (Recebimento: ~500 mil remessas por dia) por último: nunca atrasa os outros painéis. Entre os
-  // dias dele, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
+  // Detalhe agrupado pesado por último: nunca atrasa os outros painéis. Entre os dias dele, primeiro o dia em que o painel abre
+  // (ontem), depois hoje e os mais antigos.
   const anchor = {};
   const rank = j => {
-    // V3.30: Sem Movimentação (foto de hoje, poucas consultas) na frente de tudo — com a fila cheia ela não fica sem dados.
-    if (INDICATORS[j.indicator] && INDICATORS[j.indicator].snapshot && (j.type === 'SUMMARY' || j.type === 'DETAIL_INIT')) return j.type === 'SUMMARY' ? -1 : -0.5;
+    // V4.26 (pedido "deixar por último os dados do Sem Movimentação"): a foto do Sem Movimentação (número e lista) depois de
+    // tudo — antes (V3.30) ia na frente. Abrir o painel dela continua buscando a foto de agora na hora (botão/abertura).
+    if (INDICATORS[j.indicator] && INDICATORS[j.indicator].snapshot && (j.type === 'SUMMARY' || j.type === 'DETAIL_INIT')) return j.type === 'SUMMARY' ? 9 : 9.5;
     // V4.6: IDs de viagem do SC→DC e Consulta das bipagens da Triagem (consultas leves, só as remessas da lista): logo depois
     // da lista do mesmo dia, antes das listas dos dias mais antigos (com o histórico na fila, ficavam para o fim e os IDs não
     // apareciam).
@@ -1930,7 +1951,7 @@ function processSyncQueue(opts) {
   // V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50).
   try { organizePropsCore_(false); } catch (e) { logSync_('WARN', '', '', 'Propriedades não organizadas: ' + String(e && e.message || e).slice(0, 300)); }
   // Antes da checagem de fila ociosa: senão o histórico de um indicador novo esperava até a sincronização horária.
-  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4243_(); migrateToV425_(); migrateToV4254_(); queueNewIndicatorsHistory_(); }
+  try { migrateToV3112_(); migrateToV3114_(); migrateToV313_(); migrateGroupedLayout_(); migrateToV3191_(); migrateToV3201_(); migrateToV325_(); migrateToV327_(); migrateToV335_(); migrateToV41_(); migrateToV44_(); migrateToV46_(); migrateToV48_(); migrateToV412_(); migrateToV4121_(); migrateToV4122_(); migrateToV4243_(); migrateToV425_(); migrateToV4254_(); migrateToV426_(); queueNewIndicatorsHistory_(); }
   catch (e) { logSync_('WARN', '', '', 'Histórico de indicador novo não enfileirado: ' + String(e && e.message || e).slice(0, 300)); }
   // V4.6: modo diário (padrão) — só a AGENDA põe tarefas na fila (6h e 8h; Sem Movimentação a cada 2 h; Lotes a cada 3 h).
   // Fora dos horários, nada é consultado sozinho (o botão Atualizar do painel continua valendo).
@@ -2211,18 +2232,6 @@ function runSummaryJob_(job) {
   }
   // Recebimento: quantidade de cada turno pelo resumo (4 consultas), para os cartões e pizzas sem esperar o detalhe.
   // Dia fechado já consultado e com o mesmo resumo: nada mudou, não consulta de novo.
-  // Expedição: quantidade de cada turno pela lista de cada rota em cada horário de turno (dias da janela de detalhe).
-  if (getIndicatorConfig_(job.indicator).byRoute) {
-    const days = detailDays_(getIndicatorConfig_(job.indicator));
-    if (!days || job.date >= addDaysIso_(isoToday_(), -days)) {
-      try { syncSendShifts_(job.indicator, job.date); }
-      catch (e) {
-        if (errorKind_(String(e && e.message || e)) !== 'OTHER') throw e;
-        logSync_('WARN', job.indicator, job.date, 'Turnos da Expedição pela lista por horário não consultados: ' + String(e && e.message || e).slice(0, 300));
-      }
-    }
-    return 'done';
-  }
   const sw = (getIndicatorConfig_(job.indicator).detail || {}).shiftProbe;
   const same = prev && prev.errorCount === summary.errorCount && prev.totalCount === summary.totalCount &&
     prev.metrics && (sw || []).every(m => Number(prev.metrics[m]) === Number(summary.raw && summary.raw[m]));
@@ -2348,8 +2357,6 @@ function runDetailJob_(job, deadline) {
     updateDayStatus_(job.indicator, job.date, {detailsStatus: 'SKIPPED', error: ''});
     return 'done';
   }
-  // Expedição: o detalhe é por rota (Expedicao.gs).
-  if (cfg.byRoute) return runSendDetailJob_(job, deadline, cfg, st);
   // V4.4: Deslacre — lista de IDs e os Registros de carga e descarga de cada um (Expedicao.gs).
   if (cfg.unseal) return runUnsealDetailJob_(job, deadline, cfg, st);
   // V4.22: Produção do Sorter — cada hora de cada balança de cada sorter (Sorter.gs).
@@ -2521,7 +2528,7 @@ function runGroupedDetailJob_(job, deadline, cfg, st, plan) {
   const forcedPar = Number(getProp_('JMS_PARALLEL', '')), parKey = 'GROUPED_PARALLEL_' + isoToday_();
   let parallel = forcedPar > 0 ? Math.min(8, forcedPar) : Math.max(1, Math.min(8, Number(getProp_(parKey, '')) || APP_CONFIG.GROUPED_FETCH_BATCH));
   let done = start - 1, slowest = 8000;
-  // Progresso por lista (painel e diagnosticarRecebimento): quantas unidades cada lista tem, na ordem do download.
+  // Progresso por lista (painel): quantas unidades cada lista tem, na ordem do download.
   const lists = [];
   // (fatia sem registros = unidade sem páginas: o tipo vem da janela)
   units.forEach((list, u) => {
@@ -3053,7 +3060,8 @@ function computeSyncStatus_() {
   const stats = {PENDING: 0, RUNNING: 0, DONE: 0, ERROR: 0};
   // V3.32: tarefas de fontes só sob demanda (Histórico da Sem Movimentação) não são da fila dos gatilhos.
   // V4.2: tarefas antigas de painel desligado neste projeto (PAINEIS / PAINEIS_FORA) também ficam de fora.
-  allTabRows_('JOBS').forEach(r => { if (!INDICATORS[r[2]] && (HISTORY_INDICATORS_[r[2]] || ALL_INDICATORS_[r[2]])) return; stats[r[5]] = (stats[r[5]] || 0) + 1; });
+  // V4.26: e de painel retirado do código (Recebimento e Expedição: fluxo operacional) — só conta o que a fila deste painel roda.
+  allTabRows_('JOBS').forEach(r => { if (!INDICATORS[r[2]]) return; stats[r[5]] = (stats[r[5]] || 0) + 1; });
   stats.updatedAt = new Date().toISOString();
   return stats;
 }

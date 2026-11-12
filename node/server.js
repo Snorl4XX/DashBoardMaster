@@ -155,8 +155,6 @@ const FN_HELP = {
   getSyncStatus: 'contagem da fila',
   diagnosticarDashboard: 'confere os números do painel',
   diagnosticarTodosOsErros: 'lista os erros recentes',
-  diagnosticarRecebimento: 'Recebimento (data opcional)',
-  diagnosticarExpedicao: 'Expedição (data opcional)',
   diagnosticarViagensSCDC: 'SC → DC: ID de viagem de saída (data opcional)',
   diagnosticarLotes: 'Fluxo de Lotes (data opcional)',
   diagnosticarAvaria: 'Avaria (data opcional)',
