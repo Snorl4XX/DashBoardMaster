@@ -4798,6 +4798,48 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(antes === 'wrong_send:SUMMARY,sorting_error:SCANS,damage:DETAIL_INIT,sorting_error:DETAIL_INIT' &&
     depois === 'wrong_send:SUMMARY,sorting_error:DETAIL_INIT,sorting_error:SCANS,damage:DETAIL_INIT',
     'V4.27: a lista do dia aberto na tela vem logo depois das taxas (antes das listas dos outros painéis)', {antes, depois});
+  // V4.27.1 (pedido "de 1 a 2 meses ele trava"): contas mais rápidas no navegador, com o mesmo resultado de antes.
+  const enc = C.encodeDataset([{date: 'D1', shipment: 'A', shift: 'T1'}, {date: 'D1', shipment: 'B', shift: 'T2'}, {date: 'D1', shipment: 'A', shift: 'T3'},
+    {date: 'D2', shipment: 'A', shift: 'T1', qty: 3}], ['date', 'shipment', 'shift', 'qty']);
+  const one = C.encodeDataset([{date: 'D1', shipment: 'A'}, {date: 'D1', shipment: 'A'}, {date: 'D1', shipment: 'B'}], ['date', 'shipment']);
+  const dec = C.decodeDataset(enc), dec1 = C.decodeDataset(one);
+  const slow = list => { const seen = {}; let n = 0; list.forEach(r => { const id = r.date + '|' + r.shipment; if (!seen[id]) { seen[id] = 1; n += r.qty ? Number(r.qty) : 1; } }); return n; };
+  check(dec.length === 3 && dec.map(r => r.date + r.shipment + r.shift).join() === 'D1AT1,D1BT2,D2AT1' && dec1.length === 2 && dec.__unique === true &&
+    Object.keys(dec).indexOf('__unique') < 0 && C.distinctCount(dec) === 5 && C.distinctCount(dec) === slow(dec),
+    'V4.27.1: remessa repetida continua fora (um dia ou vários) e a contagem é a mesma de antes', dec);
+  const fil = C.applyFilters(dec, {shift: ['T1']}), copia = dec.slice();
+  check(fil.__unique === true && C.distinctCount(fil) === 4 && !copia.__unique && C.distinctCount(copia.concat(copia)) === 5,
+    'V4.27.1: filtro mantém a lista "sem repetição"; lista comum com repetição continua contada sem repetir');
+  const cb1 = C.countBy(dec, 'shift');
+  cb1[0].value = 999; cb1.push({label: 'X', value: 1});
+  const cb2 = C.countBy(dec, 'shift');
+  dec.push({date: 'D3', shipment: 'Z', shift: 'T2'});
+  const cb3 = C.countBy(dec, 'shift');
+  check(cb2.length === 2 && cb2.find(x => x.label === 'T1').value === 4 && cb3.find(x => x.label === 'T2').value === 2,
+    'V4.27.1: contagem guardada devolve cópias e refaz quando a lista muda', {cb2, cb3});
+  const tri = C.decodeDataset(C.encodeDataset([{date: '2026-10-01', shipment: 'A', ev: '2026-10-05 10:00:00'}, {date: '2026-10-02', shipment: 'A', ev: '2026-10-05 11:00:00'}], ['date', 'shipment', 'ev']));
+  C.applyDayOf(tri, {date: 'ev'});
+  check(tri.__unique === false && C.distinctCount(tri) === 1, 'V4.27.1: data trocada pelo horário (Triagem Errada) — a mesma remessa no mesmo dia conta uma vez', tri);
+  // V4.27.1 (erro "Falha de rede ao consultar o JMS: fetch failed (ENOTFOUND)"): sem internet/DNS a fila espera, sem gastar tentativas.
+  let semRede = true;
+  const DN = '2026-09-19';
+  const cn = freshCtx({[DN]: makeDay(DN, 7)}, {onFetch: url => { if (semRede) throw new Error('Exception: fetch failed (ENOTFOUND): ' + String(url).split('?')[0]); }}, {PLATAFORMA: 'node'});
+  cn.queueHistory(DN, DN, true);
+  cn.processSyncQueue({budgetMs: 600000});
+  const pn = cn.publicPauses_(), jn = cn.pendingJobs_();
+  check(pn.length === 1 && pn[0].route === '*' && pn[0].kind === 'NET' && /Sem conexão com o JMS: o computador do painel não alcançou gw\.jtjms-br\.com \(internet ou DNS, ENOTFOUND\)/.test(pn[0].reason) &&
+    jn.length > 0 && jn.every(j => j.attempts === 0) && !(cn.getDayStatus_('wrong_send', DN) || {}).error,
+    'V4.27.1: sem internet/DNS — a fila pausa (aviso claro), sem gastar tentativa nem marcar erro no dia', {pn, n: jn.length});
+  const fetN = cn.__state.fetches.length;
+  cn.processSyncQueue({budgetMs: 600000});
+  check(cn.__state.fetches.length === fetN, 'V4.27.1: durante a pausa a fila não insiste (nenhuma consulta)');
+  semRede = false;
+  const store = JSON.parse(cn.__state.props.SYNC_PAUSE_V37 || cn.getProp_('SYNC_PAUSE_V37', '{}'));
+  Object.keys(store).forEach(k => { store[k].until = Date.now() - 1000; });
+  cn.setProp_('SYNC_PAUSE_V37', JSON.stringify(store));
+  runAll(cn);
+  check(cn.publicPauses_().length === 0 && ['wrong_send', 'sorting_error', 'missing_dispatch'].every(k => cn.getDayStatus_(k, DN).details === 'COMPLETE'),
+    'V4.27.1: a internet voltou — depois dos 5 min a fila baixa tudo sozinha', cn.publicPauses_());
   // Pedido "pensei que foi tirado essa questão de cota": no Node não há cota do Google, com ou sem COTA_GOOGLE.
   const q = freshCtx({}, null, {PLATAFORMA: 'node', COTA_GOOGLE: 'gmail'});
   check(q.googlePlan_() === 'workspace' && q.fetchBudgetMode_() === 'ok' && freshCtx({}, null, {COTA_GOOGLE: 'gmail'}).googlePlan_() === 'gmail',

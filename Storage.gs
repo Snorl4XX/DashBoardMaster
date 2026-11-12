@@ -857,7 +857,7 @@ function setPause_(routeKey, kind, message) {
   const repeat = !!(prev && prev.kind === kind && (kind !== 'AUTH' || prev.sig === sig));
   const count = repeat ? Number(prev.count || 0) + 1 : 0;
   const steps = APP_CONFIG.PAUSE_AUTH_MINUTES;
-  const minutes = kind === 'QUOTA' ? APP_CONFIG.PAUSE_QUOTA_MINUTES : steps[Math.min(count, steps.length - 1)];
+  const minutes = kind === 'QUOTA' ? APP_CONFIG.PAUSE_QUOTA_MINUTES : kind === 'NET' ? APP_CONFIG.PAUSE_NET_MINUTES : steps[Math.min(count, steps.length - 1)];
   all[routeKey] = {kind: kind, reason: String(message || '').slice(0, 400), since: repeat ? prev.since : now,
     until: now + minutes * 60000, sig: kind === 'AUTH' ? sig : '', count: count, lastFail: now};
   writePauseStore_(all);
@@ -2147,6 +2147,17 @@ function processJob_(job, deadline) {
   } catch (e) {
     const message = String(e && e.message || e).slice(0, 950);
     const kind = errorKind_(message);
+    // V4.27.1 (erro "Falha de rede ao consultar o JMS: fetch failed (ENOTFOUND)"): sem internet/DNS no computador do painel, a
+    // culpa não é do dia. Antes cada tarefa gastava as 4 tentativas em poucos minutos e ficava com erro por até 12 h, mesmo com
+    // a internet de volta. Agora a fila inteira espera 5 min e tenta de novo, sem gastar tentativa nem marcar erro no dia.
+    if (networkDown_(message)) {
+      setPause_('*', 'NET', message);
+      writeCells_('JOBS', job.rowNum, 6, ['PENDING']);
+      writeCells_('JOBS', job.rowNum, 9, [new Date(), message]);
+      logSync_('WARN', job.indicator, job.date, 'Sem conexão com o JMS (internet ou DNS deste computador): a fila espera ' + APP_CONFIG.PAUSE_NET_MINUTES +
+        ' min e tenta de novo, sem gastar tentativa. ' + message.slice(0, 300));
+      return 'paused';
+    }
     const st = job.type === 'COMPACT' ? null : getDayStatus_(job.indicator, job.date);
     if (kind === 'AUTH' || kind === 'QUOTA') {
       // Credencial recusada / cota do Google: insistir não resolve. Pausa sem gastar tentativa.

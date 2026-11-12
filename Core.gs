@@ -425,6 +425,8 @@ function JTCoreFactory_() {
   function applyDayOf(rows, dayOf) {
     if (!dayOf || !rows) return rows;
     var keys = Object.keys(dayOf);
+    // A data de cada remessa muda: a mesma remessa pode cair no mesmo dia duas vezes (a contagem volta a conferir).
+    if (keys.indexOf('date') >= 0 && rows.__unique) markUnique(rows, false);
     for (var i = 0; i < rows.length; i++) {
       for (var k = 0; k < keys.length; k++) rows[i][keys[k]] = dayPart(rows[i][dayOf[keys[k]]]);
     }
@@ -662,12 +664,38 @@ function JTCoreFactory_() {
     });
     if (rows && rows.length && keys.length) {
       var fromRows = {};
-      applyFilters(rows, only || {}).forEach(function (r) {
-        var x = fromRows[r.date] || (fromRows[r.date] = {part: 0, total: 0}), w = weight(r);
-        x.total += w;
-        if (keys.every(function (k) { return sets[k][norm(r[k])]; })) x.part += w;
-      });
+      if (keys.length === 1 && keys[0] === 'shift') {
+        // V4.27.1: só turno (cartões T1/T2/T3 e filtro de turno): uma passada guardada por lista, com todos os turnos por dia.
+        var byDay = shiftDayCounts(rows, only);
+        Object.keys(byDay).forEach(function (d) {
+          var c = byDay[d];
+          fromRows[d] = {part: sel.by.shift.reduce(function (n, s) { return n + (c[s] || 0); }, 0), total: c.total};
+        });
+      } else {
+        applyFilters(rows, only || {}).forEach(function (r) {
+          var x = fromRows[r.date] || (fromRows[r.date] = {part: 0, total: 0}), w = weight(r);
+          x.total += w;
+          if (keys.every(function (k) { return sets[k][norm(r[k])]; })) x.part += w;
+        });
+      }
       Object.keys(fromRows).forEach(function (d) { if (fromRows[d].total > 0) out[d] = fromRows[d]; });
+    }
+    return out;
+  }
+  var SHIFT_DAY_MEMO = typeof WeakMap === 'function' ? new WeakMap() : null;
+  /** {data: {T1, T2, T3, 'N/A'…, total}} das linhas (com o recorte `only`), guardado por lista. */
+  function shiftDayCounts(rows, only) {
+    var key = JSON.stringify(only || {}), memo = SHIFT_DAY_MEMO ? SHIFT_DAY_MEMO.get(rows) : null;
+    if (memo && memo.len === rows.length && memo.by[key]) return memo.by[key];
+    var out = {}, list = applyFilters(rows, only || {});
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i], x = out[r.date] || (out[r.date] = {total: 0}), w = weight(r), s = norm(r.shift);
+      x.total += w;
+      x[s] = (x[s] || 0) + w;
+    }
+    if (SHIFT_DAY_MEMO) {
+      if (!memo || memo.len !== rows.length) { memo = {len: rows.length, by: {}}; SHIFT_DAY_MEMO.set(rows, memo); }
+      memo.by[key] = out;
     }
     return out;
   }
@@ -758,13 +786,14 @@ function JTCoreFactory_() {
     var sets = active.map(function (k) {
       var s = {}; filters[k].forEach(function (v) { s[String(v)] = 1; }); return [k, s, FILTER_SCOPES[k] || null];
     });
-    return (rows || []).filter(function (r) {
+    var out = (rows || []).filter(function (r) {
       for (var i = 0; i < sets.length; i++) {
         if (sets[i][2] && !colMatch(sets[i][2], r.column)) continue;
         if (!sets[i][1][norm(r[sets[i][0]])]) return false;
       }
       return true;
     });
+    return rows && rows.__unique ? markUnique(out, true) : out;
   }
   /**
    * Contagem de remessas por valor da dimensão. As linhas já chegam únicas por
@@ -775,16 +804,28 @@ function JTCoreFactory_() {
    * as remessas somadas por combinação de DC/base/viagem/estação/digitalizador/turno, campo qty).
    */
   function weight(r) { var q = r && r.qty; return q === undefined || q === null || q === '' ? 1 : (Number(q) || 0); }
+  // V4.27.1: a mesma lista é contada pelo mesmo campo várias vezes ao montar a tela (opções dos filtros, gráficos, cartões).
+  // Com 700 mil remessas cada contagem custa caro: a conta fica guardada por lista (mesmo array e tamanho) e campo, só com o
+  // peso padrão. Quem recebe ganha cópias (pode ordenar ou mudar à vontade).
+  var COUNT_MEMO = typeof WeakMap === 'function' ? new WeakMap() : null;
   function countBy(rows, key, wf) {
+    var list = rows || [], memo = null;
+    if (!wf && COUNT_MEMO && rows) {
+      memo = COUNT_MEMO.get(rows);
+      if (!memo || memo.len !== list.length) { memo = {len: list.length, by: {}}; COUNT_MEMO.set(rows, memo); }
+      var hit = memo.by['~' + key];
+      if (hit) return hit.map(function (x) { return {label: x.label, value: x.value}; });
+    }
     var map = {};
-    var list = rows || [];
     var w = wf || weight;
     for (var i = 0; i < list.length; i++) {
       var label = norm(list[i][key]);
       map[label] = (map[label] || 0) + w(list[i]);
     }
-    return Object.keys(map).map(function (l) { return {label: l, value: map[l]}; })
+    var out = Object.keys(map).map(function (l) { return {label: l, value: map[l]}; })
       .sort(function (a, b) { return b.value - a.value || compareText(a.label, b.label); });
+    if (memo) memo.by['~' + key] = out.map(function (x) { return {label: x.label, value: x.value}; });
+    return out;
   }
   // V4.27: 2 meses = ~700 mil remessas — a mesma lista é contada várias vezes ao montar a tela (cartões, selos, tabela). A conta
   // fica guardada por lista (mesmo array e mesmo tamanho) e usa Set (o objeto comum ficava lento com centenas de milhares de chaves).
@@ -793,7 +834,10 @@ function JTCoreFactory_() {
     var list = rows || [], memo = DISTINCT_MEMO && rows ? DISTINCT_MEMO.get(rows) : null;
     if (memo && memo.len === list.length) return memo.n;
     var n = 0, i, r, id;
-    if (typeof Set === 'function') {
+    if (list.__unique) {
+      // V4.27.1: lista já sem repetição (decodeDataset / filtros dela): soma das linhas, sem montar "data|remessa".
+      for (i = 0; i < list.length; i++) n += weight(list[i]);
+    } else if (typeof Set === 'function') {
       var seen = new Set();
       for (i = 0; i < list.length; i++) { r = list[i]; id = r.date + '|' + r.shipment; if (!seen.has(id)) { seen.add(id); n += weight(r); } }
     } else {
@@ -1175,19 +1219,38 @@ function JTCoreFactory_() {
     });
     return {v: 1, n: rows.length, fields: fields, dict: dict, cols: cols};
   }
-  function decodeDataset(ds) {
-    if (!ds || !ds.n) return [];
-    var rows = new Array(ds.n), seen = {}, out = [];
-    for (var i = 0; i < ds.n; i++) {
-      var r = {};
-      for (var f = 0; f < ds.fields.length; f++) {
-        var name = ds.fields[f];
-        r[name] = ds.dict[name][ds.cols[name][i]];
-      }
-      rows[i] = r;
+  /** V4.27.1: lista já sem remessa repetida (data + remessa): a contagem de remessas vira a soma das linhas. */
+  function markUnique(list, on) {
+    if (list && typeof list === 'object') {
+      try { Object.defineProperty(list, '__unique', {value: !!on, writable: true, configurable: true, enumerable: false}); } catch (e) { /* lista congelada */ }
     }
-    rows.forEach(function (r) { var id = r.date + '|' + r.shipment; if (!seen[id]) { seen[id] = 1; out.push(r); } });
-    return out;
+    return list;
+  }
+  function decodeDataset(ds) {
+    if (!ds || !ds.n) return markUnique([], true);
+    // V4.27.1: remessa repetida (mesma data e remessa) conferida pelos números do dicionário (cada valor tem um número só),
+    // sem montar o texto "data|remessa" de cada linha — com centenas de milhares de linhas era a parte mais lenta da tela.
+    var out = [], fields = ds.fields, nf = fields.length, dicts = [], cols = [], f;
+    for (f = 0; f < nf; f++) { dicts.push(ds.dict[fields[f]]); cols.push(ds.cols[fields[f]]); }
+    var cD = ds.cols.date, cS = ds.cols.shipment, nS = ds.dict.shipment ? ds.dict.shipment.length : 0;
+    var byIndex = !!(cD && cS && nS && ds.dict.date);
+    var oneDay = byIndex && ds.dict.date.length === 1 && typeof Uint8Array === 'function';
+    var seenDay = oneDay ? new Uint8Array(nS) : null, seen = !oneDay && typeof Set === 'function' ? new Set() : null, seenObj = {};
+    for (var i = 0; i < ds.n; i++) {
+      if (oneDay) { var si = cS[i]; if (seenDay[si]) continue; seenDay[si] = 1; }
+      else if (byIndex && seen) { var key = cD[i] * nS + cS[i]; if (seen.has(key)) continue; seen.add(key); }
+      var r = {};
+      for (f = 0; f < nf; f++) r[fields[f]] = dicts[f][cols[f][i]];
+      if (!byIndex) {
+        var id = r.date + '|' + r.shipment;
+        if (seen) { if (seen.has(id)) continue; seen.add(id); } else { if (seenObj[id]) continue; seenObj[id] = 1; }
+      } else if (!seen && !oneDay) {
+        var id2 = cD[i] + '|' + cS[i];
+        if (seenObj[id2]) continue; seenObj[id2] = 1;
+      }
+      out.push(r);
+    }
+    return markUnique(out, true);
   }
 
   // ---------- tradução de valores vindos do JMS ----------
@@ -1233,7 +1296,7 @@ function JTCoreFactory_() {
     hasFilters: hasFilters, applyFilters: applyFilters, siteKey: siteKey, inSiteList: inSiteList, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
     computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, setFacetColumns: setFacetColumns, chartDefFor: chartDefFor, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
-    encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText, median: median
+    encodeDataset: encodeDataset, decodeDataset: decodeDataset, markUnique: markUnique, localizeValue: localizeValue, compareText: compareText, median: median
   };
 }
 

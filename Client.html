@@ -133,6 +133,8 @@
       budgetReserveText: '{u} de {l} consultas usadas hoje. Os números de hoje e de ontem continuam atualizando; o histórico e as listas antigas continuam amanhã.',
       budgetStopTitle: 'Cota de consultas do Google de hoje quase no fim',
       budgetStopText: '{u} de {l} consultas usadas hoje. A importação continua amanhã; os dados já baixados continuam no painel.',
+      pauseNetTitle: 'Sem conexão com o JMS',
+      pauseNetText: 'Desde {since}, o computador do painel não consegue falar com o JMS (internet ou DNS desse computador). A fila tenta de novo sozinha a cada 5 minutos, sem perder nada. Se continuar, confira a internet desse computador (ou o proxy da empresa). Os dados já baixados continuam no painel.',
       pauseQuotaTitle: 'Sincronização pausada: cota diária do Google atingida',
       pauseQuotaText: 'O Google limita o uso diário do Apps Script. A importação recomeça sozinha por volta de {t}. Os dados já sincronizados continuam no painel.',
       rowsCapBadge: 'Limite de {n} remessas: {d} dia(s) fora dos gráficos',
@@ -321,6 +323,8 @@
       budgetReserveText: '今日已使用 {u} / {l} 次请求。今天和昨天的数据继续更新；历史和较早的列表明天继续。',
       budgetStopTitle: '今日 Google 外部请求配额即将用完',
       budgetStopText: '今日已使用 {u} / {l} 次请求。导入将于明天继续；已同步的数据仍会显示。',
+      pauseNetTitle: '无法连接 JMS',
+      pauseNetText: '自 {since} 起，看板电脑无法连接 JMS（该电脑的网络或 DNS）。队列每 5 分钟自动重试，数据不会丢失。如持续出现，请检查该电脑的网络（或公司代理）。已下载的数据仍会显示。',
       pauseQuotaTitle: '同步已暂停：已达到 Google 每日配额',
       pauseQuotaText: 'Google 限制 Apps Script 每日用量，约在 {t} 自动恢复导入。已同步的数据仍会显示。',
       rowsCapBadge: '单次上限 {n} 票：{d} 天未计入图表',
@@ -732,7 +736,8 @@
     (dd.cached || []).forEach(function (d) { byDate[d] = (byDate[d] || []).concat(Core.decodeDataset(have[d].ds)); });
     var out = [];
     Object.keys(byDate).sort().reverse().forEach(function (d) { var l = byDate[d]; for (var i = 0; i < l.length; i++) out.push(l[i]); });
-    return out;
+    // Cada dia veio sem remessa repetida e os dias são diferentes: a lista toda continua sem repetição.
+    return Core.markUnique(out, true);
   }
   /** getDashboardData com os dias guardados no navegador (só painéis de remessas; Histórico e foto do momento ficam de fora). */
   function fetchDashboard(key, req, c) {
@@ -803,10 +808,12 @@
     state.pauses = pauses || [];
     if (!state.pauses.length) { box.className = 'alert warn hidden'; box.innerHTML = ''; return; }
     var quota = state.pauses.filter(function (p) { return p.kind === 'QUOTA'; })[0];
+    var net = state.pauses.filter(function (p) { return p.kind === 'NET'; })[0];
     var auth = state.pauses.filter(function (p) { return p.kind === 'AUTH'; });
     var budget = state.pauses.filter(function (p) { return p.kind === 'BUDGET'; })[0];
     var html = '';
     if (quota) html += '<div><b>' + esc(t('pauseQuotaTitle')) + '</b>' + esc(t('pauseQuotaText', {t: fmtTs(quota.until)})) + '</div>';
+    if (net) html += '<div><b>' + esc(t('pauseNetTitle')) + '</b>' + esc(t('pauseNetText', {since: fmtTs(net.since)})) + '</div>';
     // V4.4.2: perto da cota diária de consultas externas — economia (hoje e ontem seguem) ou espera do dia seguinte.
     if (budget) html += '<div><b>' + esc(t(budget.mode === 'stop' ? 'budgetStopTitle' : 'budgetReserveTitle')) + '</b>' +
       esc(t(budget.mode === 'stop' ? 'budgetStopText' : 'budgetReserveText', {u: fmtInt(budget.used), l: fmtInt(budget.limit)})) + '</div>';

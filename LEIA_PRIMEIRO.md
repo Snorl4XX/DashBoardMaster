@@ -4,6 +4,29 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.27.1 — Painel não trava com 1 a 2 meses e a fila espera a internet voltar
+
+Pedido: "de 1 mês a 2 meses ele trava e não mostra" e o erro "Falha de rede ao consultar o JMS: fetch failed (ENOTFOUND)".
+
+- **Tela mais rápida com período longo.** Medido num computador 4× mais lento que o de teste (parecido com um notebook comum),
+  Falta de Bipagem na Expedição com 11 mil remessas por dia (fictícias):
+
+  | | Antes | Agora |
+  |---|---|---|
+  | 1 mês (abrir de novo) | ~7 s | 3,1 s |
+  | 2 meses (1ª vez) | 17,5 s | 8,3 s |
+  | 2 meses (abrir de novo) | 13,8 s | 5,4 s |
+  | Tela parada sem responder (2 meses) | 13–14 s | ~4,5 s |
+
+  Por quê: a mesma lista de 700 mil remessas era contada várias vezes (cartões, opções dos filtros, gráficos) e cada remessa
+  repetida era conferida montando um texto "data|remessa". Agora cada conta é feita uma vez e reaproveitada, a conferência usa os
+  números do dicionário e a parte de cada turno sai de uma passada só. Os números são os mesmos de antes.
+- **Sem internet ou sem DNS no computador do painel** (`ENOTFOUND`, `ECONNREFUSED`, `ETIMEDOUT`…): a fila **pausa 5 min e tenta de
+  novo**, sem gastar tentativa e sem marcar erro no dia. Antes cada tarefa gastava as 4 tentativas em poucos minutos e ficava com
+  erro por até 12 h, mesmo com a internet de volta (os dias ficavam sem a lista). O topo do painel mostra "Sem conexão com o JMS
+  desde HH:MM". Se continuar: confira a internet do computador do painel; se o JMS abre no navegador dele e o painel não, a rede
+  usa proxy (veja LEIA_NODE: `HTTPS_PROXY` e `NODE_USE_ENV_PROXY`).
+
 ## V4.27.0 — 2 meses no painel: listas guardadas no navegador, sem limite de 500 mil e sem cota no Node
 
 Pedido: "abrir os 2 meses no painel demora; quero que puxe os dados e armazena eles" e "pensei que foi tirado essa questão de cota".

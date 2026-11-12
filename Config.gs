@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.27.0',
+  VERSION: '4.27.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -31,6 +31,7 @@ const APP_CONFIG = Object.freeze({
   REFRESH_ALL_DETAIL_BUDGET_MS: 270000, // V4.7: em seguida, listas e IDs de todos os painéis (até 4,5 min; a chamada do Google vai até 6)
   PAUSE_AUTH_MINUTES: [15, 60, 180, 360], // credencial recusada: nova tentativa em 15 min, 1 h, 3 h, 6 h (ou assim que o token for trocado)
   PAUSE_QUOTA_MINUTES: 60,     // cota do Google esgotada: nova tentativa em 1 h
+  PAUSE_NET_MINUTES: 5,        // V4.27.1: sem conexão com o JMS (internet/DNS): a fila espera 5 min, sem gastar tentativas
   PROPS_TTL_MS: 10000,         // propriedades do script relidas no máximo a cada 10 s
   MAX_DETAIL_FILES_PER_DASHBOARD: 150,
   MAX_CLIENT_ROWS: 150000,     // remessas enviadas ao navegador por consulta (formato colunar)

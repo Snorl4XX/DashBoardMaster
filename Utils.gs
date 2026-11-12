@@ -317,6 +317,15 @@ function toIsoTimestamp_(v) {
  *  QUOTA → cota diária do Google (UrlFetch, tempo de gatilho, Drive...): pausa tudo por 1 h;
  *  OTHER → erro comum: nova tentativa (até 4).
  */
+/**
+ * V4.27.1: o computador do painel não alcança o JMS (sem internet, sem DNS, conexão recusada/caiu) — não é erro do dia nem da
+ * consulta. Ex.: "Falha de rede ao consultar o JMS: Exception: fetch failed (ENOTFOUND)".
+ */
+function networkDown_(msg) {
+  const s = String(msg || '');
+  return /Falha de rede ao consultar o JMS/i.test(s) &&
+    /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|ECONNRESET|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET|getaddrinfo|DNS/i.test(s);
+}
 function errorKind_(msg) {
   const s = String(msg || '');
   // V4.15.1: a mensagem do Google vem no idioma da conta ("Serviço chamado muitas vezes no mesmo dia: urlfetch." em português).
@@ -340,6 +349,11 @@ function publicJmsError_(s) {
       'Google (20 mil por dia no Gmail) e soma todos os projetos do Apps Script dessa conta';
   }
   if (errorKind_(value) === 'QUOTA') return 'Cota diária do Google esgotada (' + excerpt(90) + '); a importação retoma sozinha';
+  if (networkDown_(value)) {
+    return 'Sem conexão com o JMS: o computador do painel não alcançou ' + ((value.match(/https?:\/\/([^/\s)]+)/) || [])[1] || 'o JMS') +
+      ' (internet ou DNS' + ((value.match(/\((E[A-Z_]+|UND_ERR_[A-Z_]+)\)/) || [])[1] ? ', ' + value.match(/\((E[A-Z_]+|UND_ERR_[A-Z_]+)\)/)[1] : '') +
+      '). A fila tenta de novo sozinha a cada ' + APP_CONFIG.PAUSE_NET_MINUTES + ' min';
+  }
   if (/Sessão do JMS/i.test(value)) {
     const m = value.match(/\(código ([^)]*)\)/);
     return 'Sessão/token do JMS expirado ou recusado' + (m ? ' (código ' + m[1].slice(0, 90) + ')' : '') + ': gere um novo AuthToken e atualize JMS_AUTHTOKEN';
