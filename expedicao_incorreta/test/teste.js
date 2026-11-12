@@ -355,8 +355,9 @@ function abasRotas(comWW) {
   conferir(/PDD de saída/.test(pag.texto) && /id="de"/.test(pag.texto) && /id="ate"/.test(pag.texto) && /Concluído：已完成/.test(pag.texto) &&
     /Em Trânsito：在途/.test(pag.texto) && /id="f-rota"[\s\S]{0,80}Todas/.test(pag.texto) && />Base Destino</.test(pag.texto),
     'tela: PDD de saída fixo, data inicial e final, filtros Status (Concluído e Em Trânsito) e Base Destino');
-  conferir(/id="rotaBusca"/.test(pag.texto) && />Pesquisar rota</.test(pag.texto) && /id="rotasLista"/.test(pag.texto) && /id="emptySearch"/.test(pag.texto) &&
-    /class="view sem-rota"/.test(pag.texto), '2.1: campo Pesquisar rota (com a lista das rotas) e o convite para pesquisar');
+  conferir(/id="rotaBusca"/.test(pag.texto) && />Pesquisar rota</.test(pag.texto) && /id="rotaLista"[^>]*role="listbox"/.test(pag.texto) && /role="combobox"/.test(pag.texto) &&
+    !/<datalist/.test(pag.texto) && /id="emptySearch"/.test(pag.texto) &&
+    /class="view sem-rota"/.test(pag.texto), '2.2: campo Pesquisar rota com a lista de destinos ao digitar (como o JMS) e o convite para pesquisar');
   const ep = (await local('GET', '/api/estado')).json;
   conferir(ep.base === 'SP GRU' && ep.codigoBase === '30001' && !('minutosDiaAnterior' in ep) && ep.maxDias === 31 && ep.acompanhadas.length === 0,
     'PDD de saída SP GRU (30001); busca só hoje (o "ontem a cada 60 min" de um config.json antigo é ignorado)', ep);
@@ -524,7 +525,9 @@ function abasRotas(comWW) {
   const semRota = (await local('GET', '/api/painel?tipo=troncal&dia=' + DIA)).json;
   conferir(semRota.totais.pacotes === 130 && !semRota.pesquisa && !semRota.viagensPorTipo, 'sem rota pesquisada, a API continua respondendo o dia todo (Excel e testes)', semRota.totais);
   const rotasApi = (await local('GET', '/api/rotas')).json;
-  conferir(rotasApi.rotas.join() === 'BASE LOCAL A-ZZ,BASE LOCAL B-ZZ,XX NORTE,YY SUL' && rotasApi.acompanhadas.length === 3, 'lista de rotas para a pesquisa (as duas tabelas)', rotasApi);
+  conferir(rotasApi.rotas.join() === 'BASE LOCAL A-ZZ,BASE LOCAL B-ZZ,XX NORTE,YY SUL' && rotasApi.acompanhadas.length === 3 &&
+    rotasApi.tipos['XX NORTE'].join() === 'troncal' && rotasApi.tipos['BASE LOCAL A-ZZ'].join() === 'secundaria' && pp.rotasTipos['YY SUL'].join() === 'troncal',
+    'lista de destinos para a pesquisa (as duas tabelas, com a linha de cada um)', rotasApi);
   // Configurações: Buscar este dia agora com a rota (só ela) ou vazio (todas).
   const cfgRuim = await local('POST', '/config/api/buscar', {dia: DIA, rota: 'NAO EXISTE'});
   conferir(cfgRuim.status === 400 && /não está na planilha/.test(cfgRuim.json.error), 'Configurações: rota fora da planilha é recusada', cfgRuim.json);

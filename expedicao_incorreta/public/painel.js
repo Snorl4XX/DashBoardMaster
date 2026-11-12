@@ -338,7 +338,7 @@
         $('alerts').innerHTML = '';
         guardarNoEndereco();
         st.ultimaCarga = Date.now();
-        return pedir('api/rotas').then(function (x) { listaRotas(x.rotas); });
+        return pedir('api/rotas').then(function (x) { listaRotas(x.rotas, x.tipos); });
       }).catch(function () {}).then(function () { $('bootScreen').classList.add('done'); });
     }
     st.carregando = true;
@@ -349,7 +349,7 @@
       st.de = r.de; st.ate = r.ate; $('de').value = r.de; $('ate').value = r.ate;
       if (r.pesquisa && r.pesquisa !== st.pesquisa) { st.pesquisa = r.pesquisa; $('rotaBusca').value = r.pesquisa; }
       mostrarEstado(r.estado); mostrarMenu(r.menu);
-      listaRotas(r.rotasPesquisa);
+      listaRotas(r.rotasPesquisa, r.rotasTipos);
       // Logo depois de pesquisar: a rota está na outra página (ex.: rota da tabela troncal lançada como viagem secundária no JMS).
       var outro = tipo === 'troncal' ? 'secundaria' : 'troncal', vt = r.viagensPorTipo;
       if (st.autoTipo && vt && !vt[tipo] && vt[outro]) {
@@ -412,11 +412,66 @@
     });
   });
   // ---------------------------------------------------------------- 2.1: pesquisa de rota
-  var rotasConhecidas = [];
-  function listaRotas(l) {
-    if (!l || l.join('|') === rotasConhecidas.join('|')) return;
+  // 2.2 (pedido: "quando colocamos as letras vai aparecer as opções que devemos selecionar", como a Unidade de destino do JMS):
+  // ao digitar, abre a lista dos destinos da planilha de rotas que têm essas letras; escolher um (clique, Enter ou setas)
+  // pesquisa na hora. Os desta página (Rota Troncal ou Secundária) vêm primeiro.
+  var rotasConhecidas = [], tiposRota = {}, opcoesRota = [], opAtiva = -1;
+  function listaRotas(l, tipos) {
+    if (tipos) tiposRota = tipos;
+    if (!l) return;
     rotasConhecidas = l.slice();
-    $('rotasLista').innerHTML = l.map(function (r) { return '<option value="' + esc(r) + '"></option>'; }).join('');
+    if (!$('rotaLista').hidden) abrirLista();
+  }
+  var semAcento = function (v) { return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim(); };
+  function nomeTipos(r) {
+    var t = tiposRota[r] || [];
+    return t.map(function (x) { return x === 'troncal' ? 'Troncal' : 'Secundária'; }).join(' · ');
+  }
+  /** Destinos com todas as letras/palavras digitadas: os que começam com o texto primeiro, depois os desta página. */
+  function filtrarRotas(txt) {
+    var q = semAcento(txt), partes = q.split(/[\s-]+/).filter(Boolean);
+    var lista = rotasConhecidas.filter(function (r) { var n = semAcento(r); return partes.every(function (p) { return n.indexOf(p) >= 0; }); });
+    var peso = function (r) {
+      var n = semAcento(r), daPagina = (tiposRota[r] || []).indexOf(tipo) >= 0;
+      return (q && n.indexOf(q) === 0 ? 0 : q && n.indexOf(' ' + q) >= 0 ? 1 : 2) * 2 + (daPagina ? 0 : 1);
+    };
+    return lista.sort(function (a, b) { return peso(a) - peso(b) || a.localeCompare(b, 'pt-BR'); }).slice(0, 80);
+  }
+  function marcar(r, txt) {
+    var partes = semAcento(txt).split(/[\s-]+/).filter(Boolean), n = semAcento(r), on = new Array(r.length);
+    partes.forEach(function (p) { var i = n.indexOf(p); if (i >= 0) for (var k = i; k < i + p.length && k < r.length; k++) on[k] = true; });
+    var h = '', aberto = false;
+    for (var i = 0; i < r.length; i++) {
+      if (on[i] && !aberto) { h += '<mark>'; aberto = true; } else if (!on[i] && aberto) { h += '</mark>'; aberto = false; }
+      h += esc(r[i]);
+    }
+    return h + (aberto ? '</mark>' : '');
+  }
+  function abrirLista() {
+    var txt = $('rotaBusca').value, box = $('rotaLista');
+    opcoesRota = filtrarRotas(txt);
+    if (opAtiva >= opcoesRota.length) opAtiva = opcoesRota.length - 1;
+    box.innerHTML = opcoesRota.length ? opcoesRota.map(function (r, i) {
+      return '<div class="rota-op' + (i === opAtiva ? ' ativo' : '') + '" role="option" id="rota-op-' + i + '" data-i="' + i + '" aria-selected="' + (i === opAtiva) + '">' +
+        '<span>' + marcar(r, txt) + '</span><small>' + esc(nomeTipos(r)) + '</small></div>';
+    }).join('') : '<div class="rota-vazio">' + (rotasConhecidas.length ? 'Nenhum destino com “' + esc(txt) + '” na planilha de rotas.' : 'Carregando os destinos…') + '</div>';
+    box.hidden = false;
+    $('rotaBusca').setAttribute('aria-expanded', 'true');
+    if (opAtiva >= 0) $('rotaBusca').setAttribute('aria-activedescendant', 'rota-op-' + opAtiva); else $('rotaBusca').removeAttribute('aria-activedescendant');
+    var at = box.querySelector('.ativo');
+    if (at && at.scrollIntoView) at.scrollIntoView({block: 'nearest'});
+  }
+  function fecharLista() {
+    $('rotaLista').hidden = true; opAtiva = -1;
+    $('rotaBusca').setAttribute('aria-expanded', 'false'); $('rotaBusca').removeAttribute('aria-activedescendant');
+  }
+  function escolherRota(r) {
+    $('rotaBusca').value = r;
+    fecharLista();
+    // Solta o campo: no próximo clique o texto todo fica marcado e o que for digitado substitui o destino anterior.
+    $('rotaBusca').blur();
+    lerDatas('de');
+    pesquisar(r);
   }
   /** Busca a rota no JMS (período do painel) e mostra os pacotes que não pertencem a ela. mesmoFiltro = mudou só o período. */
   function pesquisar(rota, mesmoFiltro) {
@@ -439,12 +494,45 @@
         return carregar();
       }).catch(function () { $('pesquisarBtn').disabled = false; });
   }
-  $('rotaForm').addEventListener('submit', function (ev) { ev.preventDefault(); lerDatas('de'); pesquisar($('rotaBusca').value); });
-  // Escolheu da lista: pesquisa na hora.
-  $('rotaBusca').addEventListener('input', function (ev) {
-    var v = this.value;
-    if ((!ev.inputType || ev.inputType === 'insertReplacementText') && v !== st.pesquisa && rotasConhecidas.indexOf(v) >= 0) { lerDatas('de'); pesquisar(v); }
+  $('rotaForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    // Enter com uma opção marcada (setas) ou com uma só opção na lista: é ela.
+    var v = $('rotaBusca').value;
+    if (!$('rotaLista').hidden && opAtiva >= 0 && opcoesRota[opAtiva]) v = opcoesRota[opAtiva];
+    else if (!$('rotaLista').hidden && opcoesRota.length === 1) v = opcoesRota[0];
+    fecharLista();
+    $('rotaBusca').value = v;
+    $('rotaBusca').blur();
+    lerDatas('de'); pesquisar(v);
   });
+  $('rotaBusca').addEventListener('input', function () { opAtiva = this.value.trim() ? 0 : -1; abrirLista(); });
+  $('rotaBusca').addEventListener('focus', function () { this.select(); abrirLista(); });
+  $('rotaBusca').addEventListener('click', function () {
+    // Clique no destino já pesquisado: marca tudo (digitar troca o destino, como no JMS).
+    if ($('rotaLista').hidden) { if (this.value && this.value === st.pesquisa) this.select(); abrirLista(); }
+  });
+  $('rotaBusca').addEventListener('keydown', function (ev) {
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if ($('rotaLista').hidden) { abrirLista(); return; }
+      var n = opcoesRota.length;
+      if (!n) return;
+      opAtiva = ev.key === 'ArrowDown' ? (opAtiva + 1) % n : (opAtiva <= 0 ? n - 1 : opAtiva - 1);
+      abrirLista();
+    } else if (ev.key === 'Enter' && !$('rotaLista').hidden && (opcoesRota[opAtiva] || opcoesRota.length === 1)) {
+      // Enter com uma opção marcada (ou uma só na lista): é ela (antes do "clique" automático do formulário no botão Pesquisar).
+      ev.preventDefault();
+      escolherRota(opcoesRota[opAtiva] || opcoesRota[0]);
+    } else if (ev.key === 'Escape') { fecharLista(); }
+  });
+  // mousedown (antes de o campo perder o foco) escolhe a opção.
+  $('rotaLista').addEventListener('mousedown', function (ev) {
+    var op = ev.target.closest('.rota-op');
+    ev.preventDefault();
+    if (op) escolherRota(opcoesRota[Number(op.getAttribute('data-i'))]);
+  });
+  $('rotaBusca').addEventListener('blur', function () { setTimeout(fecharLista, 120); });
+  document.addEventListener('click', function (ev) { if (!ev.target.closest('.rota-campo')) fecharLista(); });
   FILTROS.forEach(function (k) {
     $('f-' + k).addEventListener('change', function () { st[k] = this.value; st.pagina = 1; carregar(); });
   });

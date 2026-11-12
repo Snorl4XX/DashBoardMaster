@@ -263,6 +263,18 @@ function rotasDaPlanilha() {
   TIPOS.forEach(t => regras.rotas.regras[t].forEach(r => { if (!m.has(r.rotaNorm)) m.set(r.rotaNorm, r.rota); }));
   return Array.from(m.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
 }
+/** 2.2: em qual tabela está cada rota ({nome: ['troncal', 'secundaria']}), para a lista de destinos ao digitar. */
+function tiposDasRotas() {
+  const out = {};
+  if (!regras.rotas) return out;
+  const nome = new Map();
+  TIPOS.forEach(t => regras.rotas.regras[t].forEach(r => {
+    if (!nome.has(r.rotaNorm)) nome.set(r.rotaNorm, r.rota);
+    const n = nome.get(r.rotaNorm);
+    (out[n] = out[n] || []).indexOf(t) < 0 && out[n].push(t);
+  }));
+  return out;
+}
 /** Rotas pesquisadas nas últimas "horasPesquisa" horas (a busca automática atualiza só elas, no dia de hoje). → [nome] */
 function rotasAcompanhadas() {
   let o = {};
@@ -354,12 +366,12 @@ async function tratar(req, res) {
   if (p === '/api/painel') {
     const {de, ate} = periodoDe(u), f = filtros(u);
     f.pesquisa = f.pesquisa ? acharRota(f.pesquisa) || f.pesquisa : '';
-    const extra = {estado: estadoPublico(), pesquisa: f.pesquisa, rotasPesquisa: rotasDaPlanilha(),
+    const extra = {estado: estadoPublico(), pesquisa: f.pesquisa, rotasPesquisa: rotasDaPlanilha(), rotasTipos: tiposDasRotas(),
       menu: {troncal: painel.errados('troncal', de, ate, f.status, f.pesquisa), secundaria: painel.errados('secundaria', de, ate, f.status, f.pesquisa)}};
     if (f.pesquisa) extra.viagensPorTipo = {troncal: painel.viagensDaRota('troncal', de, ate, f.pesquisa), secundaria: painel.viagensDaRota('secundaria', de, ate, f.pesquisa)};
     return json(res, 200, Object.assign(painel.resumo(tipoDe(u), de, ate, f), extra));
   }
-  if (p === '/api/rotas') return json(res, 200, {rotas: rotasDaPlanilha(), acompanhadas: rotasAcompanhadas()});
+  if (p === '/api/rotas') return json(res, 200, {rotas: rotasDaPlanilha(), tipos: tiposDasRotas(), acompanhadas: rotasAcompanhadas()});
   if (p === '/api/tabela') {
     const {de, ate} = periodoDe(u);
     return json(res, 200, painel.tabela(tipoDe(u), de, ate, filtros(u), u.searchParams.get('pagina'), u.searchParams.get('tamanho'),

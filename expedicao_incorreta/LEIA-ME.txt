@@ -75,6 +75,11 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
   (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
 
+Versão 2.2 (pedido "ao colocar as letras, aparecer as opções para selecionar", como a Unidade de destino do JMS)
+  - Pesquisar rota: ao digitar, abre a lista dos destinos da planilha de rotas com essas letras (as letras ficam em vermelho e
+    cada destino mostra a linha: Troncal ou Secundária; os da página aberta vêm primeiro). Clique (ou toque) no destino, ou use
+    as setas e Enter: o app pesquisa na hora. Clicar de novo no campo marca o destino atual: o que for digitado troca por outro.
+
 Versão 2.1 (pedido "pesquisar a rota")
   - Campo "Pesquisar rota" no painel: o app puxa do JMS só a rota pesquisada e mostra os pacotes que não pertencem a ela.
   - A busca automática não puxa mais todas as rotas: só as pesquisadas nas últimas 12 h ("horasPesquisa" no config.json),
