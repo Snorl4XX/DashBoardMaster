@@ -808,6 +808,37 @@ function abasRotas(comWW) {
     const cv2 = (await fim(rv.json.id)).conferencia;
     conferir(rep.json.ok && !cv2.andamento.erro && cv2.totais.errados === 5 && cv2.totais.semSegmento === 0,
       '3.0: Conferir de novo (com o AuthToken certo) consulta o que faltou', cv2.totais);
+    // 3.0.1: como no JMS de verdade: o campo das remessas da tela não é nenhum dos que o app tenta; sem filtro, devolve 20 remessas
+    // quaisquer. O app para na 1ª página de cada tentativa e o aviso manda copiar o pedido da tela em Configurações.
+    jms.estado.gestao = {campo: 'pedidosJmsTexto', separador: ',', tamanhoFixo: 20};
+    const novas2 = [];
+    for (let i = 0; i < 6; i++) novas2.push(pac('DKCONF0779', i, i < 2 ? 'BASE NORTE A-XX' : 'BASE SUL A-YY', 'XX NORTE', DIA + ' 21:00:00'));
+    jms.estado.dados.troncal.pacotes.DKCONF0779 = novas2;
+    const g2 = jms.estado.gestaoPedidos.length;
+    const rs2 = await local('POST', '/api/conferir', {rota: 'XX NORTE', texto: novas2.map(x => x.billCode).join('\n')});
+    const cs2 = (await fim(rs2.json.id)).conferencia;
+    conferir(/ignorou as remessas pedidas \(devolveu 20 remessas que não foram pedidas/.test(cs2.andamento.erro) && /Configurações › Pedido da Gestão de pedido/.test(cs2.andamento.erro) &&
+      !/AuthToken/.test(cs2.andamento.erro) && jms.estado.gestaoPedidos.length - g2 === 15 && cs2.totais.semSegmento === 6,
+      '3.0.1: JMS que ignora o campo das remessas: uma página por tentativa (a guardada + 14) e o aviso pede o pedido da tela', {erro: cs2.andamento.erro, n: jms.estado.gestaoPedidos.length - g2});
+    // O pedido copiado da tela (Payload do F12): o app guarda, testa e usa com as remessas da conferência.
+    const payload = JSON.stringify({current: 1, size: 20, countryId: '1', pedidosJmsTexto: novas2[0].billCode, timeType: 1,
+      startTime: '2026-11-01 00:00:00', endTime: '2026-11-01 23:59:59'});
+    const semRemModelo = await local('POST', '/config/api/gestao-modelo', {texto: '{"current":1,"size":20}'});
+    const sm = (await local('POST', '/config/api/gestao-modelo', {texto: payload})).json;
+    const estG = (await local('GET', '/config/api/estado')).json.jms.gestao;
+    conferir(semRemModelo.status === 400 && /nenhuma remessa/.test(semRemModelo.json.error) && sm.ok && /campo "pedidosJmsTexto" \(texto\)/.test(sm.linhas[0]) &&
+      /devolveu a remessa .* com o 3 Segmentos NO,901-00,100/.test(sm.linhas[1]) && estG.modelo.campo === 'pedidosJmsTexto' && estG.separador === ',' &&
+      (await remoto('POST', '/config/api/gestao-modelo', {texto: payload})).status === 403,
+      '3.0.1: Configurações guarda o pedido da tela (Payload), testa no JMS e descobre o separador (vírgula)', {sm, estG});
+    const g3 = jms.estado.gestaoPedidos.length;
+    await local('POST', '/api/conferir/repetir', {id: rs2.json.id});
+    const cs3 = (await fim(rs2.json.id)).conferencia, ped3 = jms.estado.gestaoPedidos.slice(g3);
+    conferir(!cs3.andamento.erro && cs3.totais.errados === 4 && cs3.totais.certos === 2 && ped3.length === 1 &&
+      ped3[0].pedidosJmsTexto === novas2.map(x => x.billCode).join(',') && ped3[0].size === 6 && ped3[0].timeType === 1 &&
+      ped3[0].startTime === hojeSp() + ' 00:00:00' && ped3[0].endTime === hojeSp() + ' 23:59:59' &&
+      cs3.turnos.find(x => x.turno === 'T2').errados === 4,
+      '3.0.1: Conferir de novo com o pedido da tela: uma consulta com as 6 remessas, o mesmo período levado para hoje', {t: cs3.totais, ped: ped3[0]});
+    await local('POST', '/config/api/gestao-modelo/apagar', {});
     jms.estado.gestao = null;
   }
 

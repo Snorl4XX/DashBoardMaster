@@ -13,7 +13,8 @@
  *   - 2.0: Gestão de pedido JMS de remessa (shippingWaybillList): desligada por padrão (404). estado.gestao = {campo, max,
  *     ignoraFiltro}: só filtra pelo campo "campo" (outro campo = devolve as remessas mais recentes, sem filtro, como um JMS que
  *     ignora campo desconhecido); "max" = recusa mais remessas que isso numa consulta; "exigeRota" = sem esse Routename responde
- *     "código 401: 页面长时间未操作，请重新登录系统" (2.3, como o JMS na tela do usuário).
+ *     "código 401: 页面长时间未操作，请重新登录系统" (2.3, como o JMS na tela do usuário); 3.0.1: "separador" (só ele separa as
+ *     remessas num texto) e "tamanhoFixo" (sem filtro devolve sempre tantas remessas, como o JMS de verdade com campo desconhecido).
  */
 const http = require('http');
 
@@ -150,11 +151,13 @@ function criar(dia) {
         const b = JSON.parse(Buffer.concat(partes).toString('utf8') || '{}');
         estado.gestaoPedidos.push(b);
         let ws = b[g.campo];
-        if (typeof ws === 'string') ws = ws.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
+        // 3.0.1: "separador" = o único que a tela aceita (o resto vira uma remessa só, que não existe).
+        if (typeof ws === 'string') ws = ws.split(g.separador || /[,\n]/).map(x => x.trim()).filter(Boolean);
         if (Array.isArray(ws) && g.max && ws.length > g.max) return resp({code: 0, msg: 'Quantidade máxima de consulta: ' + g.max, succ: false, fail: true});
         const todas = [];
         [estado.dados].concat(Object.values(estado.outros)).forEach(dd => ['troncal', 'secundaria'].forEach(t => Object.values(dd[t].pacotes).forEach(l => l.forEach(x => todas.push(x)))));
-        const lista = !Array.isArray(ws) || g.ignoraFiltro ? todas.slice(0, Number(b.size) || 20)
+        // "tamanhoFixo" = página fixa (o JMS de verdade devolveu 20, mesmo pedindo 1.000, quando ignorou o filtro).
+        const lista = !Array.isArray(ws) || g.ignoraFiltro ? todas.slice(0, g.tamanhoFixo || Number(b.size) || 20)
           : ws.map(w => pacoteDe(String(w).replace(/-\d{3}$/, ''))).filter(Boolean);
         return resp({code: 1, msg: 'Solicitação concluída', succ: true, fail: false, traceId: 'teste',
           // 3.0: os campos do PDF "INFORMAÇÕES SOBRE O SITE" (Horário da última operação, última operação, base de entrega, cidade).

@@ -280,7 +280,8 @@
   function mostrarAvisos(r) {
     var a = r.andamento || {}, t = r.totais, p = r.pendencias, h = '';
     var ex = function (l) { return l.slice(0, 6).map(function (i) { return i.nome + ' (' + fmtInt(i.qtd) + ')'; }).join(', '); };
-    if (a.erro && !a.rodando) h += alerta(false, 'A consulta na Gestão de pedido parou.', a.erro, ' <button type="button" class="btn btn-light btn-sm js-repetir">Conferir de novo</button>');
+    if (a.erro && !a.rodando) h += alerta(false, 'A consulta na Gestão de pedido parou.', a.erro, ' <button type="button" class="btn btn-light btn-sm js-repetir">Conferir de novo</button>' +
+      (/Configurações/.test(a.erro) && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? ' <a class="btn btn-light btn-sm" href="config">Abrir Configurações</a>' : ''));
     if (!r.rotaNaPlanilha) h += alerta(false, 'A rota ' + r.rota + ' não está mais na planilha de rotas.', 'Inclua a rota na planilha rotas.xlsx ou faça a conferência com outra rota.');
     if (t.semCodigo) h += alerta(true, plural(t.semCodigo, 'remessa', 'remessas') + ' com código fora da tabela de rotas', ex(p.semCodigo) +
       '. Inclua o código na rota certa da aba "Rotas" da planilha rotas.xlsx: a conferência muda na hora.');

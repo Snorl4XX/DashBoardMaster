@@ -66,6 +66,23 @@
         <div class="saida hidden" id="token-res"></div>
       </section>
 
+      <section class="card conf" aria-labelledby="s-gestao">
+        <div class="section-head"><div><span class="kicker">JMS</span><h2 id="s-gestao">Pedido da Gestão de pedido</h2></div></div>
+        <p class="muted small" id="gestao-info" style="margin:0">…</p>
+        <ol class="muted small" style="margin:0;padding-left:18px;line-height:1.6">
+          <li>No JMS, abra <b>Gestão de pedido JMS de remessa</b> e aperte <b>F12</b> › aba <b>Rede</b> (Network).</li>
+          <li>Marque <b>Número de pedido JMS</b>, digite <b>uma</b> remessa e clique em <b>Consultar</b>.</li>
+          <li>Na lista do F12, clique em <b>shippingWaybillList</b> › aba <b>Payload</b> (Carga útil) › <b>ver origem</b> (view source) e copie o texto todo (começa com <b>{</b>).</li>
+          <li>Cole abaixo e clique em <b>Salvar e testar</b>. É uma vez só: o app usa esse pedido com as remessas de cada conferência.</li>
+        </ol>
+        <textarea id="gestao-modelo" autocomplete="off" spellcheck="false" placeholder='Cole aqui o Payload (ex.: {"current":1,"size":20,…})'></textarea>
+        <div class="row">
+          <button type="button" class="btn btn-red" id="salvar-gestao">Salvar e testar</button>
+          <button type="button" class="btn btn-light hidden" id="apagar-gestao">Apagar o pedido guardado</button>
+        </div>
+        <div class="saida hidden" id="gestao-res"></div>
+      </section>
+
       <section class="card conf" aria-labelledby="s-busca">
         <div class="section-head"><div><span class="kicker">JMS</span><h2 id="s-busca">Busca no JMS</h2></div></div>
         <dl class="info" id="busca-info"></dl>

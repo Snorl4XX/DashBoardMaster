@@ -29,6 +29,11 @@
         t.fonte === 'dashmaster' ? 'Em uso: o AuthToken do DashMaster deste computador (o mesmo que você cola lá). Se colar um aqui, este app passa a usar o daqui.' :
           'Nenhum AuthToken: cole abaixo (ou cadastre no DashMaster deste computador).';
       $('apagar-token').classList.toggle('hidden', !t.temProprio);
+      var gm = e.jms.gestao && e.jms.gestao.modelo;
+      $('gestao-info').textContent = gm ? 'Em uso: o pedido copiado da tela (remessas no campo "' + gm.campo + '"' + (e.jms.gestao.separador ? ', separadas por ' +
+        (e.jms.gestao.separador === ',' ? 'vírgula' : 'linha') : '') + '). Para trocar, cole outro abaixo.' :
+        'Nenhum pedido guardado: o app tenta descobrir o formato sozinho. Se a conferência disser que a Gestão de pedido "ignorou as remessas pedidas", siga os passos:';
+      $('apagar-gestao').classList.toggle('hidden', !gm);
       $('brandCenter').textContent = e.config.nomeBase; $('eyebrowCenter').textContent = e.config.nomeBase; $('appVersion').textContent = 'v' + e.versao;
       if (!$('dia-busca').value) $('dia-busca').value = e.hoje;
       var dl = $('rotas-config'), ops = (e.rotasPesquisa || []).map(function (r) { var o = document.createElement('option'); o.value = r; return o; });
@@ -97,6 +102,17 @@
     post('config/api/testar').then(function (r) { resultado('token-res', r.linhas, r.ok); });
   });
   $('apagar-token').addEventListener('click', function () { post('config/api/token/apagar').then(carregar); });
+  $('salvar-gestao').addEventListener('click', function () {
+    var v = $('gestao-modelo').value.trim();
+    if (!v) { resultado('gestao-res', 'Cole o Payload do pedido primeiro.', false); return; }
+    resultado('gestao-res', 'Guardando e testando no JMS…');
+    post('config/api/gestao-modelo', {texto: v}).then(function (r) {
+      if (r.linhas) $('gestao-modelo').value = '';
+      resultado('gestao-res', r.linhas || [r.error], r.ok);
+      carregar();
+    });
+  });
+  $('apagar-gestao').addEventListener('click', function () { post('config/api/gestao-modelo/apagar').then(function () { resultado('gestao-res', 'Pedido apagado.'); carregar(); }); });
   $('testar-segmentos').addEventListener('click', function () {
     resultado('segmentos-res', 'Testando…');
     post('config/api/testar-segmentos', {remessa: $('remessa-teste').value.trim()}).then(function (r) {

@@ -210,7 +210,7 @@ class Conferencias {
       }
     } catch (e) {
       const m = String(e && e.message || e);
-      erro = e && e.indisponivel ? m + ' Confira o AuthToken e teste em Configurações › Testar o 3 Segmentos.'
+      erro = e && e.indisponivel ? m + (e.semFiltro ? '' : ' Confira o AuthToken e teste em Configurações › Testar o 3 Segmentos.')
         : e && e.bloqueio ? 'O JMS bloqueou a Gestão de pedido (consultas demais seguidas). Espere uns 15 minutos e clique em Conferir de novo. ' + m
           : 'Gestão de pedido (3 Segmentos): ' + m.replace(/^Gestão de pedido[^:]*:\s*/, '');
     }

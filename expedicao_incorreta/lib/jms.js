@@ -46,6 +46,56 @@ const GESTAO_VARIANTES = [
   ws => ({waybillNos: ws}), ws => ({waybillIds: ws}), ws => ({waybillNo: ws.join(',')}), ws => ({waybillNoList: ws}),
   ws => ({keywordList: ws}), ws => ({billCodes: ws}), ws => ({waybillNo: ws.join('\n')})
 ];
+/** Remessa J&T dentro de um texto ("888002719738926", "888002719738926-001"). */
+const REMESSA_TXT = /\b[A-Z]{0,4}\d{8,20}(?:-\d{1,4})?\b/i;
+const DATA_RE = /^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?$/;
+/**
+ * 3.0.1: o pedido que a TELA da Gestão de pedido manda (F12 › Rede › shippingWaybillList › Payload › ver origem), com UMA remessa
+ * pesquisada em "Número de pedido JMS". O app usa esse pedido como modelo: troca a remessa pelas da conferência, a página e o
+ * tamanho, e leva as datas para hoje (mesmo período). → {corpo, campo, lista, sep, exemplo, pagina, tamanho, datas}
+ */
+function lerModeloGestao(texto) {
+  const t = String(texto || '').trim().replace(/^\uFEFF/, '');
+  let o = null;
+  try { o = JSON.parse(t); } catch (e) {
+    if (/^[\w.%\[\]-]+=/.test(t)) { o = {}; new URLSearchParams(t).forEach((v, k) => { o[k] = v; }); }
+  }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) {
+    throw new Error('Isto não é o Payload do pedido. No F12, em shippingWaybillList › Payload (Carga útil), clique em "ver origem" e copie o texto todo (começa com {).');
+  }
+  const remessaDe = v => {
+    if (Array.isArray(v)) { const x = v.find(y => (typeof y === 'string' || typeof y === 'number') && REMESSA_TXT.test(String(y))); return x === undefined ? '' : String(x); }
+    if (typeof v !== 'string' && typeof v !== 'number') return '';
+    const m = DATA_RE.test(String(v).trim()) ? null : REMESSA_TXT.exec(String(v));
+    return m ? m[0] : '';
+  };
+  // O campo das remessas: o que tem a remessa pesquisada (só números primeiro; depois o nome parecido com "waybill").
+  const candidatos = Object.keys(o).filter(k => remessaDe(o[k]));
+  if (!candidatos.length) {
+    throw new Error('O pedido não tem nenhuma remessa. Na tela da Gestão de pedido, marque "Número de pedido JMS", pesquise UMA remessa e copie o Payload desse pedido.');
+  }
+  const nota = k => (/^\d+(-\d+)?$/.test(remessaDe(o[k])) ? 2 : 0) + (/waybill|bill|pedido|^no|nos?$|list/i.test(k) ? 1 : 0);
+  const campo = candidatos.sort((a, b) => nota(b) - nota(a))[0], v = o[campo], lista = Array.isArray(v);
+  return {corpo: o, campo, lista, sep: !lista && /\n/.test(v) ? '\n' : !lista && /,/.test(v) ? ',' : '', exemplo: remessaDe(v).toUpperCase(),
+    pagina: ['current', 'pageNum', 'pageNo', 'page'].find(k => k in o) || '', tamanho: ['size', 'pageSize', 'limit', 'rows'].find(k => k in o) || '',
+    datas: Object.keys(o).filter(k => typeof o[k] === 'string' && DATA_RE.test(o[k].trim()))};
+}
+/** Corpo do pedido pelo modelo: as remessas no campo dele, a página, o tamanho e as datas levadas para hoje (o mesmo período). */
+function corpoDoModelo(m, ws, pagina, sep) {
+  const o = JSON.parse(JSON.stringify(m.corpo)), mesmoTipo = (antes, n) => typeof antes === 'string' ? String(n) : n;
+  o[m.campo] = m.lista ? ws.slice() : ws.join(sep || m.sep || '\n');
+  if (m.pagina) o[m.pagina] = mesmoTipo(m.corpo[m.pagina], pagina);
+  if (m.tamanho) o[m.tamanho] = mesmoTipo(m.corpo[m.tamanho], ws.length);
+  if (m.datas.length) {
+    const ms = v => { const x = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}):(\d{2}))?/.exec(v); return Date.UTC(+x[1], x[2] - 1, +x[3], +(x[4] || 0), +(x[5] || 0), +(x[6] || 0)); };
+    const vals = m.datas.map(k => String(m.corpo[k]).trim()), fim = vals.reduce((a, b) => (ms(b) > ms(a) ? b : a));
+    const d = new Date(), hoje = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const desloca = hoje - Date.UTC(new Date(ms(fim)).getUTCFullYear(), new Date(ms(fim)).getUTCMonth(), new Date(ms(fim)).getUTCDate());
+    m.datas.forEach((k, i) => { const iso = new Date(ms(vals[i]) + desloca).toISOString().replace('T', ' '); o[k] = vals[i].length > 10 ? iso.slice(0, 19) : iso.slice(0, 10); });
+  }
+  return o;
+}
+
 /** Recusa por remessas demais numa consulta (o lote é dividido). */
 const TAMANHO_RE = /m[aá]x|limit|超过|最多|too many|exced|acima de \d+/i;
 /** Remessa sem o volume ("888002719738926-001" → "888002719738926"), para achar a resposta da remessa pedida. */
@@ -258,9 +308,39 @@ class Jms {
       return this.segmentosLote(ws);
     }
   }
-  /** Um lote: a variante guardada ou, sem ela, a procura da variante que o JMS aceita e filtra. */
+  /** 3.0.1: o pedido copiado da tela (Configurações), se houver. */
+  modeloGestao() {
+    const t = this.props.get('GESTAO_MODELO');
+    if (!t) return null;
+    try { return JSON.parse(t); } catch (e) { return null; }
+  }
+  /** Um lote: o pedido copiado da tela; sem ele, a variante guardada ou a procura da variante que o JMS aceita e filtra. */
   async segmentosLoteUm(ws) {
     const tamanho = e => TAMANHO_RE.test(String(e && e.message || ''));
+    const modelo = this.modeloGestao();
+    if (modelo) {
+      // Remessas num texto: o separador que a tela aceita ("\n" ou ","), descoberto na 1ª consulta com mais de uma e guardado.
+      const salvoSep = this.props.get('GESTAO_MODELO_SEP');
+      const seps = modelo.lista || ws.length < 2 ? [''] : salvoSep ? [salvoSep] : modelo.sep ? [modelo.sep] : ['\n', ','];
+      let motivo = '', reserva = null;
+      for (const sep of seps) {
+        let r;
+        try { r = await this.tentarGestao(ws, -1, false, modelo, sep); }
+        catch (e) {
+          if ((e.auth && !e.recusa) || e.bloqueio || e.rede) throw e;
+          if (tamanho(e)) throw Object.assign(e, {tamanho: true});
+          motivo = e.message; continue;
+        }
+        if (r.ok && (r.achados.size || seps.length === 1)) {
+          if (sep && seps.length > 1) this.props.set('GESTAO_MODELO_SEP', sep);
+          return r;
+        }
+        if (r.ok) reserva = r; else motivo = r.motivo;
+      }
+      if (reserva) return reserva;
+      throw new ErroJms('A Gestão de pedido não filtrou pelas remessas com o pedido copiado da tela (' + motivo + '). Copie o pedido de novo em ' +
+        'Configurações › Pedido da Gestão de pedido (com uma remessa pesquisada em "Número de pedido JMS").', {indisponivel: true, semFiltro: true});
+    }
     const salvo = this.props.get('GESTAO_VARIANTE');
     if (salvo !== null && salvo !== undefined && salvo !== '') {
       const [i, comData] = String(salvo).split(':').map(Number);
@@ -277,7 +357,7 @@ class Jms {
       this.props.set('GESTAO_VARIANTE', null);
       this.log('aviso', 'Gestão de pedido: o pedido guardado não serve mais (' + motivo + '); procurando de novo.');
     }
-    let ultimo = '';
+    let ultimo = '', semFiltro = false;
     for (const comData of [false, true]) {
       for (let i = 0; i < GESTAO_VARIANTES.length; i++) {
         let r;
@@ -296,32 +376,43 @@ class Jms {
             (comData ? ' com período' : '') + ' (' + r.achados.size + ' de ' + ws.length + ' remessas na 1ª consulta).');
           return r;
         }
+        if (r.fora) semFiltro = true;
         ultimo = r.motivo || ultimo;
       }
     }
+    // 3.0.1: o JMS respondeu, mas devolveu outras remessas: o campo das remessas da tela não é nenhum dos que o app conhece.
+    if (semFiltro) {
+      throw new ErroJms('A Gestão de pedido respondeu, mas ignorou as remessas pedidas (' + ultimo + '): o app ainda não sabe o formato do pedido da ' +
+        'tela. Copie o pedido em Configurações › Pedido da Gestão de pedido (uma vez só).', {indisponivel: true, semFiltro: true});
+    }
     throw new ErroJms('A Gestão de pedido JMS de remessa não devolveu o 3 Segmentos (' + (ultimo || 'nenhuma remessa encontrada') + ').', {indisponivel: true});
   }
-  /** Uma consulta da Gestão de pedido com a variante i. → {ok, achados, faltando, motivo}. Erro de recusa do JMS sobe. */
-  async tentarGestao(ws, i, comData) {
-    const corpo = Object.assign({current: 1, size: ws.length, countryId: '1'}, GESTAO_VARIANTES[i](ws));
-    if (comData) {
+  /**
+   * Uma consulta da Gestão de pedido com a variante i (ou o modelo copiado da tela, com o separador sep). → {ok, achados, faltando,
+   * motivo, fora}. Erro de recusa do JMS sobe.
+   */
+  async tentarGestao(ws, i, comData, modelo, sep) {
+    const corpo = modelo ? corpoDoModelo(modelo, ws, 1, sep) : Object.assign({current: 1, size: ws.length, countryId: '1'}, GESTAO_VARIANTES[i](ws));
+    if (comData && !modelo) {
       const d = new Date(Date.now() - 3 * 3600000), iso = x => x.toISOString().slice(0, 10);
       Object.assign(corpo, {startTime: iso(new Date(d.getTime() - 60 * 86400000)) + ' 00:00:00', endTime: iso(d) + ' 23:59:59'});
     }
     const pedidas = new Set(ws.map(remessaBase)), achados = new Map();
     let registros = [], total = 0, paginas = 1;
+    const campoPag = modelo ? modelo.pagina : 'current';
+    let fora = [];
     for (let pag = 1; pag <= paginas && pag <= 100; pag++) { // 2.3: 1.000 remessas mesmo com o JMS devolvendo páginas pequenas
-      corpo.current = pag;
+      if (campoPag) corpo[campoPag] = modelo && typeof modelo.corpo[campoPag] === 'string' ? String(pag) : pag;
       const json = await this.pedir('gestao', GESTAO, corpo);
       const d = json && json.data;
       const lista = Array.isArray(d) ? d : d && Array.isArray(d.records) ? d.records : [];
       if (d && !Array.isArray(d)) { total = Number(d.total) || 0; paginas = Number(d.pages) || 1; }
       registros = registros.concat(lista);
-      if (!lista.length) break;
+      // 3.0.1: o JMS ignorou o filtro (devolveu remessas que não foram pedidas): para na 1ª página (não folheia o JMS inteiro).
+      fora = registros.filter(x => !pedidas.has(remessaBase(x && x.waybillNo)));
+      if (!lista.length || fora.length || !campoPag) break;
     }
-    // O JMS ignorou o filtro (devolveu remessas que não foram pedidas): esta variante não serve.
-    const fora = registros.filter(x => !pedidas.has(remessaBase(x && x.waybillNo)));
-    if (fora.length) return {ok: false, achados, faltando: ws, motivo: 'devolveu ' + fora.length + ' remessas que não foram pedidas' + (total ? ' (total ' + total + ')' : '')};
+    if (fora.length) return {ok: false, fora: true, achados, faltando: ws, motivo: 'devolveu ' + fora.length + ' remessas que não foram pedidas' + (total ? ' (total ' + total + ')' : '')};
     registros.forEach(x => {
       const cod = x.terminalDispatchCode === null || x.terminalDispatchCode === undefined ? '' : String(x.terminalDispatchCode);
       const p = cod.split(',').map(y => y.trim()), t = v => v === null || v === undefined ? '' : String(v).trim().slice(0, 120);
@@ -400,4 +491,4 @@ function pagina_(json) {
   return {registros, paginas, total};
 }
 
-module.exports = {Jms, ErroJms, JMS, ROTAS_CABECALHO, GESTAO, GESTAO_VARIANTES, remessaBase, q, segmentosDe, detalheDe};
+module.exports = {Jms, ErroJms, JMS, ROTAS_CABECALHO, GESTAO, GESTAO_VARIANTES, remessaBase, q, segmentosDe, detalheDe, lerModeloGestao, corpoDoModelo};

@@ -40,7 +40,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const {Banco} = require('./lib/db');
-const {Jms} = require('./lib/jms');
+const {Jms, lerModeloGestao} = require('./lib/jms');
 const {Regras, lerRotas, TIPOS, norm, tokens} = require('./lib/regras');
 const {Coletor, hojeSp, somaDias, diasEntre} = require('./lib/coletor');
 const {STATUS, codigosStatus, statusDe} = require('./lib/status');
@@ -488,6 +488,7 @@ async function tratarConfig(req, res, u) {
       status: {concluido: Array.from(cfg.statusCodigos.concluido), emTransito: Array.from(cfg.statusCodigos.em_transito)},
       viagensHoje: TIPOS.map(t => ({tipo: t, status: banco.statusDia(t, hojeSp()).map(x => ({estado: x.estado, n: x.n, status: statusDe(x.estado, cfg.statusCodigos)}))})),
       jms: {gestao: {fonte: cfg.fonteSegmentos, pedido: banco.get('GESTAO_VARIANTE') || '', porConsulta: Number(banco.get('GESTAO_TAMANHO')) || cfg.remessasPorConsulta,
+          modelo: resumoModelo(jms.modeloGestao()), separador: banco.get('GESTAO_MODELO_SEP') || '',
           reservaAte: coletor.gestaoFora && coletor.gestaoFora > Date.now() ? coletor.gestaoFora : 0},
         pacotesSecundaria: banco.get('PACOTES_SECUNDARIA') || '', routeTroncal: banco.get('ROUTE_AUTO_TRONCAL') || '',
         routeSecundaria: banco.get('ROUTE_AUTO_SECUNDARIA') || ''}});
@@ -507,6 +508,35 @@ async function tratarConfig(req, res, u) {
     return json(res, 200, {ok: true});
   }
   if (p === '/config/api/testar') return json(res, 200, await testar());
+  // 3.0.1: o pedido da tela da Gestão de pedido (Payload do F12), usado como modelo nas consultas.
+  if (p === '/config/api/gestao-modelo') {
+    const b = await lerJson(req, 256 * 1024);
+    let m;
+    try { m = lerModeloGestao(b.texto); } catch (e) { return json(res, 400, {ok: false, error: e.message}); }
+    banco.set('GESTAO_MODELO', JSON.stringify(m)); banco.set('GESTAO_MODELO_SEP', null); banco.set('GESTAO_TAMANHO', null);
+    coletor.gestaoFora = 0;
+    const r = resumoModelo(m), linhas = ['Pedido guardado: remessas no campo "' + r.campo + '" (' + (r.lista ? 'lista' : 'texto') + ')' +
+      (r.pagina ? ', página em "' + r.pagina + '"' : '') + (r.tamanho ? ', tamanho em "' + r.tamanho + '"' : '') +
+      (r.datas.length ? ', datas ' + r.datas.join(' e ') + ' (o app leva o período para hoje)' : '') + '.'];
+    log('info', 'Gestão de pedido: pedido da tela guardado (' + linhas[0] + ')');
+    // Teste: a remessa do pedido copiado e, para conferir o separador, mais uma guardada.
+    const outra = banco.umaRemessa(), ws = [m.exemplo].concat(outra && outra !== m.exemplo ? [outra] : []);
+    let ok = false;
+    try {
+      jms.novaRodada();
+      const t = await jms.segmentosLote(ws), sg = t.achados.get(m.exemplo);
+      ok = !!sg;
+      linhas.push(sg ? 'Teste: o JMS devolveu a remessa ' + m.exemplo + ' com o 3 Segmentos ' + ([sg.s1, sg.s2, sg.s3].filter(Boolean).join(',') || '(vazio)') +
+        (sg.ultimaOperacao ? ' · última operação ' + sg.ultimaOperacao : '') + '. Pronto: clique em Conferir de novo na conferência.'
+        : 'Teste: o JMS respondeu, mas sem a remessa ' + m.exemplo + '. Confira se o período do pedido inclui a data dela.');
+    } catch (e) { linhas.push('Teste: ' + (e && e.message || e)); }
+    return json(res, 200, {ok, linhas});
+  }
+  if (p === '/config/api/gestao-modelo/apagar') {
+    banco.set('GESTAO_MODELO', null); banco.set('GESTAO_MODELO_SEP', null);
+    log('info', 'Gestão de pedido: pedido da tela apagado (o app volta a procurar o formato sozinho).');
+    return json(res, 200, {ok: true});
+  }
   if (p === '/config/api/testar-segmentos') {
     // Uma remessa (a digitada ou a mais recente guardada) no Rastreamento do pacote: o que o JMS responde.
     const b = await lerJson(req), digitada = String(b.remessa || '').trim().toUpperCase();
@@ -564,6 +594,9 @@ async function tratarConfig(req, res, u) {
   }
   return enviar(res, 404, 'Não encontrado.');
 }
+
+/** O que a tela Configurações mostra do pedido da tela guardado (sem o corpo inteiro). */
+function resumoModelo(m) { return m ? {campo: m.campo, lista: m.lista, pagina: m.pagina, tamanho: m.tamanho, datas: m.datas, exemplo: m.exemplo} : null; }
 
 /** Teste rápido: uma página de viagens de cada rota. */
 async function testar() {

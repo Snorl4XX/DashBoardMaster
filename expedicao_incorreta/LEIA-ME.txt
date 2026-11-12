@@ -111,6 +111,18 @@ Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para 
 como o ajuste_de_rotas_docas.xlsx): o app lê "378-00、01、02" como 378-00, 378-01 e 378-02, as linhas de continuação
 (SP antigo e GRU novo do DC TBT-SP) e as duas docas da mesma rota (SP BRE: docas 21 e 22).
 
+Versão 3.0.1 (aviso "A Gestão de pedido JMS de remessa não devolveu o 3 Segmentos (devolveu 20 remessas que não foram pedidas)")
+  - O JMS respondeu, mas ignorou as remessas: o campo onde a tela manda as remessas não é nenhum dos 7 que o app tentava.
+  - Configurações › Pedido da Gestão de pedido: cole UMA VEZ o pedido que a tela manda e clique em Salvar e testar:
+      1. No JMS, Gestão de pedido JMS de remessa, aperte F12 › aba Rede (Network).
+      2. Marque "Número de pedido JMS", digite UMA remessa e clique em Consultar.
+      3. No F12, clique em shippingWaybillList › aba Payload (Carga útil) › ver origem (view source) e copie o texto todo.
+      4. Cole em Configurações e clique em Salvar e testar. Depois, na conferência, clique em Conferir de novo.
+    O app usa esse pedido com as remessas de cada conferência (1.000 por consulta) e leva as datas do pedido para hoje,
+    com o mesmo período (escolha na tela o maior período que ela deixa antes de copiar).
+  - Quando o JMS ignora as remessas, o app para na 1ª página de cada tentativa (não folheia o JMS inteiro) e o aviso
+    diz o que fazer (não pede AuthToken novo: o AuthToken está certo).
+
 Versão 3.0 (pedidos "eu mando as remessas do ID e a rota, aí vai pesquisar na gestão de remessas; gráficos e um botão para
 baixar a planilha só com os erros" e "SP com 2º segmento que não está nas tabelas de rotas é do BRE")
   - Página nova Conferir remessas (a principal): remessas coladas ou planilha + rota → Gestão de pedido (1.000 por
