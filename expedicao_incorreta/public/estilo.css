@@ -157,6 +157,8 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .rota-op:hover,.rota-op.ativo{background:var(--soft-2)}
 .rota-op.ativo{box-shadow:inset 3px 0 0 var(--red)}
 .rota-vazio{padding:10px 12px;font-size:13px;color:var(--muted)}
+.rota-grupo{padding:8px 12px 4px;font-size:10px;font-weight:800;letter-spacing:.9px;text-transform:uppercase;color:var(--red)}
+.rota-grupo:not(:first-child){margin-top:4px;border-top:1px solid var(--line);padding-top:10px}
 .rota-busca input{width:100%;height:42px;border:1.5px solid var(--red-200);border-radius:12px;background:var(--card);padding:0 12px 0 36px;font-size:14px;font-weight:700;color:var(--ink);outline:none;transition:border-color .18s,box-shadow .18s}
 .rota-busca input::placeholder{font-weight:500;color:var(--muted)}
 .rota-busca input:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}

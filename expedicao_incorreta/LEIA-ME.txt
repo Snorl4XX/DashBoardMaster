@@ -75,6 +75,13 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
   (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
 
+Versão 2.2.1 (pedido "o destino tem que seguir a tabela da nossa rota")
+  - A lista do Pesquisar rota é a tabela de rotas (planilhas/rotas.xlsx) da página aberta: Rota Troncal mostra a tabela
+    troncal e Rota Secundária a secundária, na mesma ordem da planilha, com a doca de cada destino (coluna Observação,
+    ex.: "MG CGE · Doca 19"). Clicar no campo sem digitar mostra a tabela inteira da página.
+  - Se as letras não forem de nenhum destino da página, aparecem os da outra tabela, com o nome dela em cima.
+  - Mudou a tabela (rota nova, doca nova)? Salve a planilha: a lista já sai com ela.
+
 Versão 2.2 (pedido "ao colocar as letras, aparecer as opções para selecionar", como a Unidade de destino do JMS)
   - Pesquisar rota: ao digitar, abre a lista dos destinos da planilha de rotas com essas letras (as letras ficam em vermelho e
     cada destino mostra a linha: Troncal ou Secundária; os da página aberta vêm primeiro). Clique (ou toque) no destino, ou use

@@ -58,6 +58,7 @@ function lerRotas(buf) {
   const cRota = coluna(cab, [c => /ROTA/.test(c), c => /PARADA/.test(c)], 1);
   const c1 = coluna(cab, [c => /^1/.test(c) || /PRIMEIRO/.test(c)], 2);
   const c2 = coluna(cab, [c => /^2/.test(c) || /SEGUNDO|SEGMENTO/.test(c)], 3);
+  const cObs = coluna(cab, [c => /OBSERV/.test(c)], 4);
   const regras = {troncal: [], secundaria: []};
   aba.linhas.slice(1).forEach((l, i) => {
     const rota = String(l[cRota] === undefined ? '' : l[cRota]).trim();
@@ -67,8 +68,10 @@ function lerRotas(buf) {
     const codigos = listaCodigos(l[c1]), segmentos = listaSegmentos(l[c2]);
     if (!codigos.length) { avisos.push('Rotas, linha ' + (i + 2) + ' (' + rota + '): sem código de 1º nível.'); return; }
     let r = regras[tipo].find(x => x.rotaNorm === norm(rota));
-    if (!r) { r = {tipo, rota, rotaNorm: norm(rota), tokens: tokens(rota), entradas: []}; regras[tipo].push(r); }
+    if (!r) { r = {tipo, rota, rotaNorm: norm(rota), tokens: tokens(rota), entradas: [], obs: ''}; regras[tipo].push(r); }
     r.entradas.push({codigos, segmentos});
+    // 2.2.1: a observação (ex.: "Doca 19") mostra a doca na lista de destinos da pesquisa.
+    if (!r.obs && l[cObs] !== undefined && String(l[cObs]).trim()) r.obs = String(l[cObs]).trim();
   });
   if (!regras.troncal.length && !regras.secundaria.length) throw new Error('A aba "Rotas" não tem nenhuma rota válida.');
   return {regras, avisos};

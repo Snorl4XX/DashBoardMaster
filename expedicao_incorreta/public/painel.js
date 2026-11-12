@@ -338,7 +338,7 @@
         $('alerts').innerHTML = '';
         guardarNoEndereco();
         st.ultimaCarga = Date.now();
-        return pedir('api/rotas').then(function (x) { listaRotas(x.rotas, x.tipos); });
+        return pedir('api/rotas').then(function (x) { listaRotas(x.rotas, x.tipos, x.tabela); });
       }).catch(function () {}).then(function () { $('bootScreen').classList.add('done'); });
     }
     st.carregando = true;
@@ -349,7 +349,7 @@
       st.de = r.de; st.ate = r.ate; $('de').value = r.de; $('ate').value = r.ate;
       if (r.pesquisa && r.pesquisa !== st.pesquisa) { st.pesquisa = r.pesquisa; $('rotaBusca').value = r.pesquisa; }
       mostrarEstado(r.estado); mostrarMenu(r.menu);
-      listaRotas(r.rotasPesquisa, r.rotasTipos);
+      listaRotas(r.rotasPesquisa, r.rotasTipos, r.rotasTabela);
       // Logo depois de pesquisar: a rota está na outra página (ex.: rota da tabela troncal lançada como viagem secundária no JMS).
       var outro = tipo === 'troncal' ? 'secundaria' : 'troncal', vt = r.viagensPorTipo;
       if (st.autoTipo && vt && !vt[tipo] && vt[outro]) {
@@ -415,9 +415,13 @@
   // 2.2 (pedido: "quando colocamos as letras vai aparecer as opções que devemos selecionar", como a Unidade de destino do JMS):
   // ao digitar, abre a lista dos destinos da planilha de rotas que têm essas letras; escolher um (clique, Enter ou setas)
   // pesquisa na hora. Os desta página (Rota Troncal ou Secundária) vêm primeiro.
-  var rotasConhecidas = [], tiposRota = {}, opcoesRota = [], opAtiva = -1;
-  function listaRotas(l, tipos) {
+  // 2.2.1 (pedido "o destino tem que seguir a tabela da nossa rota"): a lista é a tabela de rotas desta página (Rota Troncal ou
+  // Secundária), na ordem da planilha (por doca), com a doca de cada destino. Se as letras digitadas não forem de nenhum destino
+  // desta página, aparecem os da outra tabela, com o nome dela em cima.
+  var rotasConhecidas = [], tiposRota = {}, tabelaRotas = [], opcoesRota = [], opAtiva = -1;
+  function listaRotas(l, tipos, tabela) {
     if (tipos) tiposRota = tipos;
+    if (tabela) tabelaRotas = tabela;
     if (!l) return;
     rotasConhecidas = l.slice();
     if (!$('rotaLista').hidden) abrirLista();
@@ -427,15 +431,16 @@
     var t = tiposRota[r] || [];
     return t.map(function (x) { return x === 'troncal' ? 'Troncal' : 'Secundária'; }).join(' · ');
   }
-  /** Destinos com todas as letras/palavras digitadas: os que começam com o texto primeiro, depois os desta página. */
+  /** Destinos com todas as letras/palavras digitadas, na ordem da tabela de rotas: {pagina: [...], outra: [...]} ({rota, tipo, doca}). */
   function filtrarRotas(txt) {
-    var q = semAcento(txt), partes = q.split(/[\s-]+/).filter(Boolean);
-    var lista = rotasConhecidas.filter(function (r) { var n = semAcento(r); return partes.every(function (p) { return n.indexOf(p) >= 0; }); });
-    var peso = function (r) {
-      var n = semAcento(r), daPagina = (tiposRota[r] || []).indexOf(tipo) >= 0;
-      return (q && n.indexOf(q) === 0 ? 0 : q && n.indexOf(' ' + q) >= 0 ? 1 : 2) * 2 + (daPagina ? 0 : 1);
-    };
-    return lista.sort(function (a, b) { return peso(a) - peso(b) || a.localeCompare(b, 'pt-BR'); }).slice(0, 80);
+    var partes = semAcento(txt).split(/[\s-]+/).filter(Boolean);
+    var ok = function (e) { var n = semAcento(e.rota); return partes.every(function (p) { return n.indexOf(p) >= 0; }); };
+    var fonte = tabelaRotas.length ? tabelaRotas : rotasConhecidas.map(function (r) { return {rota: r, tipo: (tiposRota[r] || [tipo])[0], doca: ''}; });
+    var pagina = fonte.filter(function (e) { return e.tipo === tipo && ok(e); }), nomes = {};
+    pagina.forEach(function (e) { nomes[e.rota] = 1; });
+    // A outra tabela só quando nenhum destino desta página tem as letras digitadas (sem digitar nada, é a tabela desta página).
+    var outra = partes.length && !pagina.length ? fonte.filter(function (e) { return e.tipo !== tipo && ok(e) && !nomes[e.rota]; }) : [];
+    return {pagina: pagina, outra: outra};
   }
   function marcar(r, txt) {
     var partes = semAcento(txt).split(/[\s-]+/).filter(Boolean), n = semAcento(r), on = new Array(r.length);
@@ -448,13 +453,19 @@
     return h + (aberto ? '</mark>' : '');
   }
   function abrirLista() {
-    var txt = $('rotaBusca').value, box = $('rotaLista');
-    opcoesRota = filtrarRotas(txt);
+    var txt = $('rotaBusca').value, box = $('rotaLista'), f = filtrarRotas(txt), outro = tipo === 'troncal' ? 'secundaria' : 'troncal';
+    opcoesRota = f.pagina.concat(f.outra).map(function (e) { return e.rota; });
     if (opAtiva >= opcoesRota.length) opAtiva = opcoesRota.length - 1;
-    box.innerHTML = opcoesRota.length ? opcoesRota.map(function (r, i) {
-      return '<div class="rota-op' + (i === opAtiva ? ' ativo' : '') + '" role="option" id="rota-op-' + i + '" data-i="' + i + '" aria-selected="' + (i === opAtiva) + '">' +
-        '<span>' + marcar(r, txt) + '</span><small>' + esc(nomeTipos(r)) + '</small></div>';
-    }).join('') : '<div class="rota-vazio">' + (rotasConhecidas.length ? 'Nenhum destino com “' + esc(txt) + '” na planilha de rotas.' : 'Carregando os destinos…') + '</div>';
+    var i = 0;
+    var item = function (e) {
+      var k = i++;
+      return '<div class="rota-op' + (k === opAtiva ? ' ativo' : '') + '" role="option" id="rota-op-' + k + '" data-i="' + k + '" aria-selected="' + (k === opAtiva) + '">' +
+        '<span>' + marcar(e.rota, txt) + '</span><small>' + esc(e.doca || nomeTipos(e.rota)) + '</small></div>';
+    };
+    var grupo = function (t) { return '<div class="rota-grupo" role="presentation">' + esc(NOME[t].pt) + ' · tabela de rotas</div>'; };
+    box.innerHTML = opcoesRota.length ? (f.pagina.length ? grupo(tipo) + f.pagina.map(item).join('') : '') +
+      (f.outra.length ? grupo(outro) + f.outra.map(item).join('') : '')
+      : '<div class="rota-vazio">' + (rotasConhecidas.length ? 'Nenhum destino com “' + esc(txt) + '” na tabela de rotas.' : 'Carregando os destinos…') + '</div>';
     box.hidden = false;
     $('rotaBusca').setAttribute('aria-expanded', 'true');
     if (opAtiva >= 0) $('rotaBusca').setAttribute('aria-activedescendant', 'rota-op-' + opAtiva); else $('rotaBusca').removeAttribute('aria-activedescendant');

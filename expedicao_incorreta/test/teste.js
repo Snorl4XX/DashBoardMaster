@@ -65,8 +65,9 @@ const coletorRodando = r => !!(r && r.json && r.json.busca && r.json.busca.rodan
 function abasRotas(comWW) {
   return [
     {nome: 'Rotas', linhas: [['Tipo', 'Rota (Próxima parada)', '1º Nível (códigos)', '2º Nível (segmentos, opcional)', 'Observação'],
-      ['Troncal', 'XX NORTE', comWW ? 'NO, WW' : 'NO', '', ''], ['Troncal', 'YY SUL', 'SU', '', ''],
-      ['Secundária', 'BASE LOCAL A-ZZ', 'LOC', '903-01', ''], ['Secundária', 'BASE LOCAL B-ZZ', 'LOC', '903-02', '']]}
+      ['Troncal', 'XX NORTE', comWW ? 'NO, WW' : 'NO', '', ''], ['Troncal', 'YY SUL', 'SU', '', 'Doca 07'],
+      // 2.2.1: B antes de A (a lista de destinos segue a ordem da tabela, não a alfabética) e a doca na Observação.
+      ['Secundária', 'BASE LOCAL B-ZZ', 'LOC', '903-02', 'Docas 02 e 03 · reservado'], ['Secundária', 'BASE LOCAL A-ZZ', 'LOC', '903-01', '']]}
   ];
 }
 
@@ -528,6 +529,10 @@ function abasRotas(comWW) {
   conferir(rotasApi.rotas.join() === 'BASE LOCAL A-ZZ,BASE LOCAL B-ZZ,XX NORTE,YY SUL' && rotasApi.acompanhadas.length === 3 &&
     rotasApi.tipos['XX NORTE'].join() === 'troncal' && rotasApi.tipos['BASE LOCAL A-ZZ'].join() === 'secundaria' && pp.rotasTipos['YY SUL'].join() === 'troncal',
     'lista de destinos para a pesquisa (as duas tabelas, com a linha de cada um)', rotasApi);
+  const tab = rotasApi.tabela.map(e => e.tipo + ':' + e.rota + ':' + e.doca).join('|');
+  conferir(tab === 'troncal:XX NORTE:|troncal:YY SUL:Doca 07|secundaria:BASE LOCAL B-ZZ:Docas 02 e 03|secundaria:BASE LOCAL A-ZZ:' &&
+    pp.rotasTabela.length === 4 && pp.rotasTabela[3].rota === 'BASE LOCAL A-ZZ',
+    '2.2.1: destinos na ordem da tabela de rotas (não alfabética), com a doca da Observação', tab);
   // Configurações: Buscar este dia agora com a rota (só ela) ou vazio (todas).
   const cfgRuim = await local('POST', '/config/api/buscar', {dia: DIA, rota: 'NAO EXISTE'});
   conferir(cfgRuim.status === 400 && /não está na planilha/.test(cfgRuim.json.error), 'Configurações: rota fora da planilha é recusada', cfgRuim.json);

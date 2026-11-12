@@ -263,6 +263,19 @@ function rotasDaPlanilha() {
   TIPOS.forEach(t => regras.rotas.regras[t].forEach(r => { if (!m.has(r.rotaNorm)) m.set(r.rotaNorm, r.rota); }));
   return Array.from(m.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
 }
+/**
+ * 2.2.1 (pedido "o destino tem que seguir a tabela da nossa rota"): os destinos de cada tabela (troncal e secundária) na ordem
+ * da planilha de rotas, com a doca da observação ("Doca 19", "Docas 21 e 22"). → [{rota, tipo, doca}]
+ */
+function tabelaDeRotas() {
+  if (!regras.rotas) return [];
+  const out = [];
+  TIPOS.forEach(t => regras.rotas.regras[t].forEach(r => {
+    const m = /Docas?\s+\d+(?:\s*(?:e|,|a)\s*\d+)*/i.exec(r.obs || '');
+    out.push({rota: r.rota, tipo: t, doca: m ? m[0].replace(/\s+/g, ' ') : ''});
+  }));
+  return out;
+}
 /** 2.2: em qual tabela está cada rota ({nome: ['troncal', 'secundaria']}), para a lista de destinos ao digitar. */
 function tiposDasRotas() {
   const out = {};
@@ -366,12 +379,12 @@ async function tratar(req, res) {
   if (p === '/api/painel') {
     const {de, ate} = periodoDe(u), f = filtros(u);
     f.pesquisa = f.pesquisa ? acharRota(f.pesquisa) || f.pesquisa : '';
-    const extra = {estado: estadoPublico(), pesquisa: f.pesquisa, rotasPesquisa: rotasDaPlanilha(), rotasTipos: tiposDasRotas(),
+    const extra = {estado: estadoPublico(), pesquisa: f.pesquisa, rotasPesquisa: rotasDaPlanilha(), rotasTipos: tiposDasRotas(), rotasTabela: tabelaDeRotas(),
       menu: {troncal: painel.errados('troncal', de, ate, f.status, f.pesquisa), secundaria: painel.errados('secundaria', de, ate, f.status, f.pesquisa)}};
     if (f.pesquisa) extra.viagensPorTipo = {troncal: painel.viagensDaRota('troncal', de, ate, f.pesquisa), secundaria: painel.viagensDaRota('secundaria', de, ate, f.pesquisa)};
     return json(res, 200, Object.assign(painel.resumo(tipoDe(u), de, ate, f), extra));
   }
-  if (p === '/api/rotas') return json(res, 200, {rotas: rotasDaPlanilha(), tipos: tiposDasRotas(), acompanhadas: rotasAcompanhadas()});
+  if (p === '/api/rotas') return json(res, 200, {rotas: rotasDaPlanilha(), tipos: tiposDasRotas(), tabela: tabelaDeRotas(), acompanhadas: rotasAcompanhadas()});
   if (p === '/api/tabela') {
     const {de, ate} = periodoDe(u);
     return json(res, 200, painel.tabela(tipoDe(u), de, ate, filtros(u), u.searchParams.get('pagina'), u.searchParams.get('tamanho'),
