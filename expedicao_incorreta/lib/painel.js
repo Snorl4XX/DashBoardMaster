@@ -216,4 +216,4 @@ class Painel {
   }
 }
 
-module.exports = {Painel, turnoDe, COLUNAS, TURNOS, CODIGOS_SEG2};
+module.exports = {Painel, turnoDe, topDe, COLUNAS, TURNOS, CODIGOS_SEG2};

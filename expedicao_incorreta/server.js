@@ -3,8 +3,11 @@
 /**
  * J&T · EXPEDIÇÃO INCORRETA (app separado do DashMaster)
  * -------------------------------------------------------
- * Confere, quase em tempo real, se os pacotes bipados no carregamento de cada caminhão que SAI da base pertencem à rota do
- * caminhão (ex.: pacote do RJ dentro do caminhão para SP BRE). Dois painéis: Rota Troncal e Rota Secundária.
+ * Confere se os pacotes carregados num caminhão pertencem à rota dele (ex.: pacote do RJ dentro do caminhão para SP BRE).
+ *   - 3.0 (página principal, /conferir): a pessoa cola as remessas do ID (ou envia a planilha) e escolhe a rota; o app consulta o
+ *     "3 Segmentos" de cada remessa na Gestão de pedido JMS de remessa (1.000 por consulta) e mostra cartões, gráficos, a tabela e a
+ *     planilha só com os erros (lib/conferencia.js). Não busca viagens no JMS.
+ * Busca por viagem (anterior), nos painéis Rota Troncal e Rota Secundária:
  *   - 2.1: pesquisa de rota. Busca no JMS (lib/coletor.js, lib/jms.js) só as viagens da rota pesquisada no período (PDD de
  *     saída = a nossa base, fixo; Status Concluído ou Em Trânsito) → Bipe de carregamento da base → lista de pacotes →
  *     "3 Segmentos" só desses pacotes. A rota pesquisada atualiza sozinha (hoje, a cada "minutos") por "horasPesquisa" horas;
@@ -43,6 +46,7 @@ const {Coletor, hojeSp, somaDias, diasEntre} = require('./lib/coletor');
 const {STATUS, codigosStatus, statusDe} = require('./lib/status');
 const {Painel} = require('./lib/painel');
 const {escreverXlsx} = require('./lib/xlsx');
+const {Conferencias, lerRemessas, MAX_REMESSAS} = require('./lib/conferencia');
 
 const VERSAO = require('./package.json').version;
 const DEFAULTS = {
@@ -182,7 +186,7 @@ function credenciais() {
 }
 
 // ------------------------------------------------------------------ peças
-let banco, regras, jms, coletor, painel;
+let banco, regras, jms, coletor, painel, conferencias;
 try {
   banco = new Banco(path.join(cfg.dados, 'expedicao.db'));
   regras = new Regras(cfg.planilhas);
@@ -192,6 +196,7 @@ try {
   if (banco.get('GESTAO_TAMANHO_23') !== '1') { banco.set('GESTAO_TAMANHO', null); banco.set('GESTAO_TAMANHO_23', '1'); }
   painel = new Painel(banco, regras, cfg.statusCodigos);
   coletor = new Coletor({banco, jms, cfg, log, regras, aoMudar: (tipo, dia) => painel.invalidar(tipo, dia)});
+  conferencias = new Conferencias({banco, jms, regras, cfg, log});
 } catch (e) { pararComErro('Não consegui iniciar: ' + (e && e.stack || e)); }
 
 // ------------------------------------------------------------------ acesso
@@ -239,8 +244,8 @@ function lerCorpo(req, limite) {
     req.on('error', reject);
   });
 }
-async function lerJson(req) {
-  const b = (await lerCorpo(req, 1024 * 1024)).toString('utf8');
+async function lerJson(req, limite) {
+  const b = (await lerCorpo(req, limite || 1024 * 1024)).toString('utf8');
   try { return b ? JSON.parse(b) : {}; } catch (e) { throw Object.assign(new Error('Pedido inválido.'), {status: 400}); }
 }
 function filtros(u) {
@@ -324,6 +329,33 @@ function pesquisarRota(b) {
   coletor.coletar(dias.concat(anteriores), {rotas: [rota], forcar: !!b.forcar}).catch(() => {});
   return {status: 200, corpo: {ok: true, rota, de, ate, dias, anteriores, estado: estadoPublico()}};
 }
+// ------------------------------------------------------------------ 3.0: conferência de remessas
+/** Tabela da rota (troncal ou secundária): a 1ª da planilha de rotas que tem a rota. */
+function tipoDaRota(rota) { return (tiposDasRotas()[rota] || ['troncal'])[0]; }
+/** Nova conferência: remessas coladas ou planilha (base64) + rota. → resposta para a página */
+function novaConferencia(b) {
+  const rota = acharRota(b.rota);
+  if (!rota) return {status: 400, corpo: {ok: false, campo: 'rota', error: String(b.rota || '').trim() ? 'A rota "' + String(b.rota).trim().slice(0, 60) +
+    '" não está na planilha de rotas. Escolha uma da lista.' : 'Escolha a rota do caminhão.'}};
+  let lido;
+  try {
+    lido = lerRemessas({texto: typeof b.texto === 'string' ? b.texto : '', arquivo: b.arquivo ? Buffer.from(String(b.arquivo), 'base64') : null, viagem: b.viagem});
+  } catch (e) { return {status: 400, corpo: {ok: false, campo: 'remessas', error: 'Não consegui ler a planilha: ' + (e && e.message || e)}}; }
+  if (!lido.itens.length) {
+    return {status: 400, corpo: {ok: false, campo: 'remessas', error: lido.cientificas ? lido.cientificas + ' remessas vieram como 8,88E+14 (o Excel cortou os números). ' +
+      'Formate a coluna como Texto ou copie e cole as remessas.' : 'Nenhuma remessa encontrada. Cole as remessas do ID (uma por linha) ou envie a planilha.'}};
+  }
+  if (lido.itens.length > MAX_REMESSAS) {
+    return {status: 400, corpo: {ok: false, campo: 'remessas', error: 'São ' + lido.itens.length + ' remessas: o máximo numa conferência é ' + MAX_REMESSAS + '. Divida em partes.'}};
+  }
+  const nome = String(b.nomeArquivo || '').replace(/[\u0000-\u001f]/g, '').slice(0, 80);
+  const id = conferencias.criar({rota, tipo: tipoDaRota(rota), viagem: b.viagem, lido, origem: b.arquivo ? 'Planilha ' + (nome || 'enviada') : 'Remessas coladas'});
+  return {status: 200, corpo: {ok: true, id, rota, total: lido.itens.length, repetidas: lido.repetidas, ignoradas: lido.ignoradas + lido.cientificas, colunas: lido.colunas}};
+}
+function idConferencia(u) { return Number(u.searchParams.get('id')) || banco.ultimaConferencia(); }
+/** Nome de arquivo seguro: "F S-PENHA 03-SP" → "F_S-PENHA_03-SP". */
+const nomeArq = v => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+
 /** Período pedido: de/ate (ou dia). Até hoje, no máximo MAX_DIAS dias. → {de, ate} */
 function periodo(de, ate, dia) {
   const ok = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d) : '';
@@ -361,11 +393,11 @@ async function tratar(req, res) {
   const p = u.pathname;
   regras.atualizar();
 
-  if (p === '/estilo.css' || p === '/painel.js' || p === '/config.js' || p === '/graficos.js') return arquivo(res, p.slice(1));
+  if (p === '/estilo.css' || p === '/painel.js' || p === '/config.js' || p === '/graficos.js' || p === '/conferir.js') return arquivo(res, p.slice(1));
   if (p === '/entrar' && req.method === 'POST') {
     const corpo = (await lerCorpo(req, 4096)).toString('utf8'), senha = new URLSearchParams(corpo).get('senha') || '';
     if (cfg.senha && senha === cfg.senha) {
-      return enviar(res, 303, '', 'text/plain', {Location: './troncal', 'Set-Cookie': 'exp_sessao=' + marcaSenha() + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000'});
+      return enviar(res, 303, '', 'text/plain', {Location: './conferir', 'Set-Cookie': 'exp_sessao=' + marcaSenha() + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000'});
     }
     return arquivo(res, 'entrar.html');
   }
@@ -379,8 +411,40 @@ async function tratar(req, res) {
     if (p.startsWith('/api/')) return json(res, 401, {ok: false, senha: true, error: 'Digite a senha do painel.'});
     return arquivo(res, 'entrar.html');
   }
-  if (p === '/' ) return enviar(res, 302, '', 'text/plain', {Location: './troncal'});
+  if (p === '/') return enviar(res, 302, '', 'text/plain', {Location: './conferir'});
+  if (p === '/conferir') return arquivo(res, 'conferir.html');
   if (p === '/troncal' || p === '/secundaria') return arquivo(res, 'painel.html');
+  // 3.0: conferência das remessas coladas (ou da planilha) contra a rota.
+  if (p === '/api/conferir' && req.method === 'POST') {
+    const r = novaConferencia(await lerJson(req, 40 * 1024 * 1024));
+    return json(res, r.status, r.corpo);
+  }
+  if (p === '/api/conferir/repetir' && req.method === 'POST') {
+    const b = await lerJson(req), id = Number(b.id) || 0;
+    if (!banco.conferencia(id)) return json(res, 404, {ok: false, error: 'Conferência não encontrada.'});
+    conferencias.iniciar(id);
+    return json(res, 200, {ok: true, id, andamento: conferencias.estado(id)});
+  }
+  if (p === '/api/conferencia') {
+    const id = idConferencia(u), r = id ? conferencias.resumo(id) : null;
+    return json(res, 200, {ok: true, app: {versao: VERSAO, base: cfg.nomeBase, porConsulta: Number(banco.get('GESTAO_TAMANHO')) || cfg.remessasPorConsulta,
+      token: !!credenciais().fonte}, conferencia: r, recentes: conferencias.lista(12)});
+  }
+  if (p === '/api/conferencia/estado') {
+    const id = idConferencia(u);
+    return json(res, 200, {ok: true, andamento: id ? conferencias.estado(id) : null});
+  }
+  if (p === '/api/conferencia/tabela') {
+    const g = k => String(u.searchParams.get(k) || '').slice(0, 120), t = conferencias.tabela(idConferencia(u), {situacao: g('situacao'), busca: g('busca')},
+      g('pagina'), g('tamanho'), g('ordem'), g('direcao'));
+    return t ? json(res, 200, t) : json(res, 404, {ok: false, error: 'Conferência não encontrada.'});
+  }
+  if (p === '/api/conferencia/erros.xlsx') {
+    const id = idConferencia(u), c = banco.conferencia(id), aba = id ? conferencias.planilhaErros(id) : null;
+    if (!aba) return enviar(res, 404, 'Conferência não encontrada.');
+    const nome = 'erros_' + nomeArq(c.rota) + (c.viagem ? '_' + nomeArq(c.viagem) : '') + '_' + hojeSp(new Date(c.em)) + '.xlsx';
+    return enviar(res, 200, escreverXlsx([aba]), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', {'Content-Disposition': 'attachment; filename="' + nome + '"'});
+  }
   if (p === '/api/estado') return json(res, 200, estadoPublico());
   if (p === '/api/painel') {
     const {de, ate} = periodoDe(u), f = filtros(u);
@@ -543,13 +607,15 @@ servidor.listen(cfg.porta, cfg.host, () => {
   log('info', 'J&T Expedição Incorreta ' + VERSAO + ' no ar (base ' + cfg.nomeBase + ').');
   enderecos().forEach(a => log('info', '  Painéis: ' + a));
   log('info', '  Configurações (AuthToken e planilhas): http://localhost:' + cfg.porta + '/config');
+  log('info', '  Conferir remessas (cole as remessas do ID e escolha a rota): http://localhost:' + cfg.porta + '/conferir');
   const r = regras.resumo();
   r.erros.forEach(m => log('aviso', m));
   if (r.rotas) log('info', 'Planilha de rotas: ' + r.rotas.troncal + ' rotas troncais e ' + r.rotas.secundaria + ' secundárias.');
   if (!credenciais().fonte) log('aviso', 'Falta o AuthToken do JMS: abra Configurações (ou cadastre no DashMaster deste computador).');
+  conferencias.retomar(); // conferência que o app fechou no meio continua
   if (process.env.EXPEDICAO_SEM_AGENDADOR === '1') return;
-  log('info', 'Busca no JMS: só a rota pesquisada no painel. Cada rota pesquisada continua atualizando sozinha (dia de hoje, a cada ' + cfg.minutos +
-    ' min) por ' + cfg.horasPesquisa + ' h. Deixe esta janela aberta.');
+  log('info', 'Busca por viagem (anterior): só a rota pesquisada nos painéis Rota Troncal e Rota Secundária. Cada rota pesquisada continua atualizando ' +
+    'sozinha (dia de hoje, a cada ' + cfg.minutos + ' min) por ' + cfg.horasPesquisa + ' h. Deixe esta janela aberta.');
   const ac = rotasAcompanhadas();
   if (ac.length) log('info', 'Rotas acompanhadas agora: ' + ac.join(', ') + '.');
   // Com AuthToken vencido tenta do mesmo jeito (uma consulta): volta sozinho quando o token for trocado aqui ou no DashMaster.

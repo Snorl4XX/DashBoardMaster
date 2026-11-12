@@ -87,8 +87,17 @@ function colName(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = St
  * Abas do .xlsx → [{nome, linhas: [[valor, …], …]}]. Valores: texto ou número; célula vazia = ''. Linhas vazias no fim saem.
  * Aguenta a rotinha real (40 MB de XML, com 245 mil linhas só de formatação).
  */
+/**
+ * Tags com prefixo de namespace ("<x:sheet>", "<x:c>", de planilhas geradas por alguns sistemas, como a tabela de rotas de 24/10)
+ * → sem prefixo ("<sheet>", "<c>"). Os atributos (r:id) ficam como estão.
+ */
+function semPrefixo(xml) {
+  const s = xml === undefined || xml === null ? '' : String(xml);
+  return /<[A-Za-z_][\w.-]*:[A-Za-z]/.test(s.slice(0, 4000)) ? s.replace(/<(\/?)[A-Za-z_][\w.-]*:/g, '<$1') : s;
+}
 function lerXlsx(buf) {
   const files = unzip(buf);
+  ['xl/workbook.xml', 'xl/sharedStrings.xml'].forEach(k => { if (files[k]) files[k] = semPrefixo(files[k]); });
   const wb = files['xl/workbook.xml'];
   if (!wb) throw new Error('Este arquivo não é uma planilha do Excel (.xlsx).');
   const rels = {};
@@ -110,7 +119,7 @@ function lerXlsx(buf) {
   });
   return sheets.map((s, i) => {
     const xml = files[s.arquivo] || files['xl/worksheets/sheet' + (i + 1) + '.xml'];
-    return {nome: s.nome, linhas: xml ? lerAba(xml.toString('utf8'), shared) : []};
+    return {nome: s.nome, linhas: xml ? lerAba(semPrefixo(xml.toString('utf8')), shared) : []};
   });
 }
 function lerAba(xml, shared) {

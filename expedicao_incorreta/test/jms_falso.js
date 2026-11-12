@@ -157,7 +157,10 @@ function criar(dia) {
         const lista = !Array.isArray(ws) || g.ignoraFiltro ? todas.slice(0, Number(b.size) || 20)
           : ws.map(w => pacoteDe(String(w).replace(/-\d{3}$/, ''))).filter(Boolean);
         return resp({code: 1, msg: 'Solicitação concluída', succ: true, fail: false, traceId: 'teste',
-          data: lista.map(x => ({id: 'id' + x.billCode, waybillNo: x.billCode, customerName: 'CLIENTE TESTE', terminalDispatchCode: (SEGMENTOS_FALSOS[x.destsite] || [null])[0]}))});
+          // 3.0: os campos do PDF "INFORMAÇÕES SOBRE O SITE" (Horário da última operação, última operação, base de entrega, cidade).
+          data: lista.map(x => ({id: 'id' + x.billCode, waybillNo: x.billCode, customerName: 'CLIENTE TESTE', terminalDispatchCode: (SEGMENTOS_FALSOS[x.destsite] || [null])[0],
+            latestScanTime: x.scanTime, latestScanTypeName: 'Envio do centro', latestScanNetworkName: 'SP GRU', lastUpdateTime: x.scanTime,
+            dispatchNetworkName: x.destsite, receiverCityName: x.destsiteCity, receiverName: 'Y!CIFRADO***==', receiverMobilePhone: '*******0000'}))});
       }
       const m = /^\/transportation\/(trackingDeatil|tmsBranchTrackingDetail)\/(loading|unloading)\/scan\/(list|page)$/.exec(p);
       if (m) {

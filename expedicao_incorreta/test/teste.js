@@ -15,12 +15,13 @@ const os = require('os');
 const path = require('path');
 const {spawn, spawnSync} = require('child_process');
 const {criar, pac} = require('./jms_falso');
-const {escreverXlsx, lerXlsx, zip} = require('../lib/xlsx');
-const {Regras, norm} = require('../lib/regras');
+const {escreverXlsx, lerXlsx, zip, unzip} = require('../lib/xlsx');
+const {Regras, norm, lerRotas} = require('../lib/regras');
 const {Painel, turnoDe} = require('../lib/painel');
 const {codigosStatus, statusDe} = require('../lib/status');
 const {Coletor, somaDias, diasEntre, hojeSp} = require('../lib/coletor');
 const {Banco} = require('../lib/db');
+const {lerRemessas} = require('../lib/conferencia');
 
 const DIA = '2026-10-20', DIA_ANTES = '2026-10-19';
 const SERVER = path.join(__dirname, '..', 'server.js');
@@ -140,9 +141,11 @@ function abasRotas(comWW) {
   const cf = (o, parada) => R.conferir('troncal', Object.assign({proximaParada: parada || 'XX NORTE'}, o), '');
   const casos = [
     [{seg1: 'NO', seg2: '901-00', seg3: '100'}, 'certo', 'XX NORTE', 'código da rota do caminhão'],
-    // 2.0 (PDF): caminhão da troncal confere só o 1º segmento — NO é da XX NORTE, mesmo com uma linha específica NO 901-07 na YY SUL.
-    [{seg1: 'NO', seg2: '901-07'}, 'certo', 'XX NORTE', 'troncal: só o 1º segmento (linha específica de outra rota não conta)'],
-    [{seg1: 'NO', seg2: '901-09'}, 'certo', 'XX NORTE', 'troncal: segmento de uma rota secundária, mas o 1º segmento é da rota'],
+    // 3.0 (pedido "SP com 2º segmento que não está nas tabelas é do BRE"): a linha que cita o 2º segmento vence a linha geral —
+    // NO 901-07 é da YY SUL e NO 901-09 da BASE LOCAL C-ZZ, mesmo o NO sendo da XX NORTE.
+    [{seg1: 'NO', seg2: '901-07'}, 'errado', 'YY SUL', 'linha específica de outra rota vence a linha geral (troncal)'],
+    [{seg1: 'NO', seg2: '901-09'}, 'errado', 'BASE LOCAL C-ZZ (secundária)', 'linha específica de uma rota secundária vence a linha geral'],
+    [{seg1: 'NO', seg2: '901-55'}, 'certo', 'XX NORTE', 'troncal: 2º segmento em nenhuma linha específica fica na linha geral (1º segmento)'],
     [{seg1: 'SU', seg2: '902-00'}, 'errado', 'YY SUL', 'código de outra rota'],
     [{seg1: 'XA', seg2: '950-00'}, 'certo', 'XX NORTE', 'rota com dois códigos'],
     [{seg1: 'CE1', seg2: '960-00'}, 'errado', 'XX CENTRO', 'código escrito "DC—CE1" na tabela'],
@@ -186,11 +189,11 @@ function abasRotas(comWW) {
     buscados: () => new Set()
   };
   const rs = new Painel(bancoFalso, RP, codigosStatus()).resumo('troncal', DIA, DIA, {});
-  // 2.0: SP,395-05 no caminhão XX BRE (troncal, leva SP) é certo — a troncal confere só o 1º segmento.
-  conferir(rs.totais.errados === 8 && rs.top.codigos1[0].nome === 'VDC' && rs.top.codigos1[0].qtd === 4 && rs.top.codigos1.length === 3 &&
+  // 3.0: SP,395-05 no caminhão XX BRE é errado — a linha do DC XX-GRU cita o 395-05 (SP sem linha específica é que fica no BRE).
+  conferir(rs.totais.errados === 10 && rs.top.codigos1[0].nome === 'VDC' && rs.top.codigos1[0].qtd === 4 && rs.top.codigos1.length === 4 &&
     rs.maisAfetados.codigo1.nome === 'VDC', 'gráfico e cartão do 1º segmento (todos os códigos dos errados)', rs.top.codigos1);
-  conferir(rs.seg2.errados === 4 && rs.seg2.codigos.join() === 'GRU,MOO,SP,SP1,SBN' &&
-    rs.top.segmentos2.map(i => i.nome + ':' + i.qtd + ':' + i.rota).join(' | ') === '381-00:3:1º segmento GRU | 375-00:1:1º segmento SBN' &&
+  conferir(rs.seg2.errados === 6 && rs.seg2.codigos.join() === 'GRU,MOO,SP,SP1,SBN' &&
+    rs.top.segmentos2.map(i => i.nome + ':' + i.qtd + ':' + i.rota).join(' | ') === '381-00:3:1º segmento GRU | 395-05:2:1º segmento SP | 375-00:1:1º segmento SBN' &&
     rs.maisAfetados.segmento2.nome === '381-00', 'gráfico e cartão do 2º segmento: só 1º segmento GRU, MOO, SP, SP1 ou SBN (VDC fica fora)', rs.top.segmentos2);
 
   // "3 Segmentos" na busca: uma consulta por remessa e guardado; JMS recusando tudo para depois de 20 tentativas; token vencido para tudo.
@@ -288,13 +291,51 @@ function abasRotas(comWW) {
   conferir(['TO', 'MRB', 'RO', 'AC', 'RBR'].every(c => rota(c, '100-00') === 'SP BRE') && rota('DF', '100-00') === 'DF BSB' &&
     rota('CDG', '100-00') === 'RJ SJM' && rota('JPN', '100-00') === 'MT CGB',
   'padrão de 10/11: TO, MRB, RO, AC e RBR → SP BRE; DF → DF BSB; CDG → RJ SJM; JPN → MT CGB', ['TO', 'MRB', 'RO', 'AC', 'DF'].map(c => c + '→' + rota(c, '100-00')));
+  // 3.0 (pedido "SP,397-00 não está nas duas tabelas de rotas, então mandar para BRE"; "se for BRE as remessas têm que ter os
+  // segmentos da tabela, ex.: MRB"): na tabela padrão do SC.
+  const cfp = (rota, s1, s2, tipo) => padrao.conferir(tipo || 'troncal', {proximaParada: rota, seg1: s1, seg2: s2}, '');
+  conferir(cfp('SP BRE', 'SP', '397-00').situacao === 'certo' && cfp('SP BRE', 'MRB', '100-00').situacao === 'certo' &&
+    cfp('SP BRE', 'SP', '395-05').situacao === 'errado' && cfp('SP BRE', 'SP', '395-05').rotaCerta === 'DC GRU-SP' &&
+    cfp('DC GRU-SP', 'SP', '397-00').situacao === 'errado' && cfp('DC GRU-SP', 'SP', '397-00').rotaCerta === 'SP BRE' &&
+    cfp('DC GRU-SP', 'SP', '395-05').situacao === 'certo' && cfp('SP BRE', 'SP', '364-00').rotaCerta === 'DC S-MOO 02-SP (secundária)' &&
+    cfp('DC S-MOO 02-SP', 'SP', '364-00', 'secundaria').situacao === 'certo' && cfp('SP BRE', 'CDG', '100-00').situacao === 'errado' &&
+    cfp('MG CGE', 'SP', '397-00').rotaCerta === 'SP BRE',
+    '3.0: SP com 2º segmento fora das tabelas é do SP BRE (SP,397-00); SP,395-05 é do DC GRU-SP; MRB é do SP BRE; CDG não é');
+  // 3.0: a tabela de rotas do SC como ela vem (abas "Rotas de Linha" e "Rotas Regionais", título, cabeçalho em chinês e português,
+  // "378-00、01、02", linha de continuação sem rota, "(Antigo)", "—", "-" = doca vazia), também com as tags com prefixo "x:".
+  const abasSc = [
+    {nome: 'Rotas Regionais', linhas: [['10月24日支线装车码头进行调整（更新10.24）\nAjuste das Docas de Carregamento das Rotas Regionais'],
+      ['DWS摆轮线路\nLinha de desvio do DWS', '新码头号码\nNovo número da doca', '调整后的装车线路\nRota de Carregamento Após o Ajuste', '一段码\n1º Nível', '二段码\n2º Nível', '备注\nObservações'],
+      ['6', '08', 'DC SSZ-SP', 'GRU', '378-00、01、02、03、05、06', '有立柱Com coluna de sustentação'], ['', '09', 'DC SSZ-SP', 'GRU', '378-00、01、02、03、05、06'],
+      ['5', '11', 'DC S-MOO 02-SP', 'SP', '（Antigo）364-00、435-00\n430—01、05', '重新调整Reajustado'], ['', '12', '', 'MOO', '（Novo）430—00、01、02'],
+      ['', '21', '-', '-', '-'], ['', '24', 'F S-PENHA 03-SP', 'GRU', '404-06']]},
+    {nome: 'Rotas de Linha', linhas: [['10月24日干线装车码头进行调整（更新10.24）'],
+      ['DWS摆轮线路\nLinha de desvio do DWS', '新码头号码\nNovo número da doca', '原码头号码\nNúmero original da doca', '调整后的装车线路\nRota de Carregamento Após o Ajuste', '段码\n1º Nível', '二段码\n2º Nível', '备注\nObservações'],
+      ['2', '21', '保持原码头\nManter na doca original', 'SP BRE', 'AC、AM、MRB、\nSP、SP1、TO', '', 'Excluir CDG'], ['', '22', '', 'SP BRE', 'AC、AM、MRB、\nSP、SP1、TO', '', 'Excluir CDG'],
+      ['3', '44', '保持原码头', 'DC GRU-SP', 'SP（Antigo）', '395—05、06、07\n381—04', '378-04启用时间待定\n378-04 — Data de ativação a definir.'],
+      ['', '', '', '', 'GRU（Novo）', '381—00、01\n05、11'], ['', '17', '', 'PE JGS', 'PE、DC—BYE']]}
+  ];
+  const scBuf = escreverXlsx(abasSc), arqs = unzip(scBuf);
+  const scPrefixo = zip(Object.keys(arqs).map(n => ({name: n, data: /^xl\/(workbook|worksheets\/)/.test(n) ? arqs[n].toString('utf8').replace(/<(\/?)([A-Za-z])/g, '<$1x:$2') : arqs[n]})));
+  [['SC', scBuf], ['SC com prefixo x:', scPrefixo]].forEach(([nome, buf]) => {
+    const rr = lerRotas(buf), tr = rr.regras.troncal, sr = rr.regras.secundaria, ach = (l, n) => l.find(x => x.rota === n);
+    const moo = ach(sr, 'DC S-MOO 02-SP'), gru = ach(tr, 'DC GRU-SP'), ssz = ach(sr, 'DC SSZ-SP'), bre = ach(tr, 'SP BRE');
+    conferir(tr.length === 3 && sr.length === 3 && ssz.entradas[0].segmentos.join() === '378-00,378-01,378-02,378-03,378-05,378-06' && ssz.obs === 'Docas 08 e 09 · Com coluna de sustentação' &&
+      moo.entradas.length === 2 && moo.entradas[0].codigos.join() === 'SP' && moo.entradas[0].segmentos.join() === '364-00,435-00,430-01,430-05' &&
+      moo.entradas[1].codigos.join() === 'MOO' && moo.entradas[1].segmentos.join() === '430-00,430-01,430-02' && moo.obs === 'Docas 11 e 12 · Reajustado' &&
+      gru.entradas[0].segmentos.join() === '395-05,395-06,395-07,381-04' && gru.entradas[1].codigos.join() === 'GRU' && gru.entradas[1].segmentos.join() === '381-00,381-01,381-05,381-11' &&
+      gru.obs === 'Doca 44 · 378-04 — Data de ativação a definir.' && bre.entradas[0].codigos.join() === 'AC,AM,MRB,SP,SP1,TO' && bre.obs === 'Docas 21 e 22 · Excluir CDG' &&
+      ach(tr, 'PE JGS').entradas[0].codigos.join() === 'PE,BYE' && !rr.avisos.length,
+      '3.0: tabela de rotas do SC do jeito que ela vem (' + nome + ')', {tr, sr});
+  });
+
   const tbt = padrao.acharRegra('troncal', 'DC TBT-SP');
   conferir(tbt && tbt.entradas.length === 2 && tbt.entradas[1].segmentos.indexOf('402-04') >= 0 && padrao.acharRegra('troncal', 'PI THE').rota === 'PI THE' &&
     padrao.acharRegra('troncal', 'THE').rota === 'PI THE' && padrao.acharRegra('secundaria', 'F S-SAP 02 -SP').rota === 'F S-SAP 02-SP',
     'padrão: DC TBT-SP com SP (antigo) e GRU (novo); "THE" acha "PI THE"; parada com espaço acha a rota');
 
   // Pacote ZIP: só o app (sem testes, banco, config.json nem planilhas de quem gerou).
-  const {unzip} = require('../lib/xlsx');
+  // (unzip vem do lib/xlsx lá em cima)
   const pacote = unzip(fs.readFileSync(require('../gerar-zip').gerar(fs.mkdtempSync(path.join(os.tmpdir(), 'exp-zip-')))));
   const nomes = Object.keys(pacote);
   conferir(nomes.indexOf('expedicao_incorreta/server.js') >= 0 && nomes.indexOf('expedicao_incorreta/LEIA-ME.txt') >= 0 &&
@@ -304,6 +345,29 @@ function abasRotas(comWW) {
   conferir(bats.every(b => b && /\r\n/.test(b.toString('latin1')) && !/[^\r]\n/.test(b.toString('latin1'))) && /where node/.test(bats[0].toString()) &&
     /funnel --bg --https=10000 3300/.test(bats[1].toString()) && !/8443 3300/.test(bats[1].toString()),
     'pacote com iniciar.bat e link-publico.bat (CRLF); o link fica na porta 10000 (no lugar do Lotes)');
+
+  // 3.0: remessas coladas ou da planilha (uma por linha, lista, colunas do Excel com e sem cabeçalho, .xlsx, .csv).
+  const lr = (texto, o) => lerRemessas(Object.assign({texto}, o || {}));
+  const l1 = lr('888002719738926\n 888002719738927 \n888002719738926\n\n888002719738928-001\nNúmero de pedido JMS\nlinha 12345');
+  conferir(l1.itens.map(i => i.billCode).join() === '888002719738926,888002719738927,888002719738928-001' && l1.repetidas === 1 && l1.ignoradas === 1 &&
+    !l1.colunas.length, '3.0: remessas uma por linha (repetida conta uma vez; volume "-001" fica; linha que não é remessa sai)', l1);
+  conferir(lr('888002719738926, 888002719738927;888002719738928').itens.length === 3, '3.0: remessas separadas por vírgula, ponto e vírgula ou espaço');
+  const l3 = lr('Número de pedido JMS\tNúmero do lote\tDigitalizado por\tTempo de digitalização\tID de viagem\n' +
+    '888002719738926\tLT1\tOP UM\t2026-10-20 10:00:00\tDBGX26102400131\n888002719738927\t\tOP DOIS\t2026-10-20 23:10:00\tDBGX26102400131');
+  conferir(l3.itens.length === 2 && l3.colunas.join() === 'lote,login,horario,viagem' && l3.itens[0].lote === 'LT1' && l3.itens[1].login === 'OP DOIS' &&
+    l3.itens[1].horario === '2026-10-20 23:10:00' && l3.itens[0].viagem === 'DBGX26102400131', '3.0: colunas copiadas do Excel com cabeçalho (lote, login, horário, ID de viagem)', l3);
+  const l4 = lr('DBGX26102400131\t888002719738926\tLT1\nDBGX26102400131\t888002719738927\tLT2\nDBGX26102400131\t888002719738928\tLT3', {viagem: 'dbgx26102400131'});
+  conferir(l4.itens.map(i => i.billCode).join() === '888002719738926,888002719738927,888002719738928' && l4.itens.every(i => i.viagem === 'DBGX26102400131') &&
+    l4.colunas.join() === 'viagem', '3.0: colunas sem cabeçalho: a coluna com mais remessas diferentes (o ID de viagem repetido fica de fora)', l4);
+  const xlLista = escreverXlsx([{nome: 'Lista', linhas: [['Relatório do carregamento'], ['Número de pedido JMS', 'Número do lote', 'Tempo de digitalização'],
+    [888002719738926, 'LT1', 46315.4375], ['888002719738927', '', '2026-10-20 15:00:00']]}]);
+  const l5 = lerRemessas({arquivo: xlLista}), l6 = lerRemessas({arquivo: Buffer.from('Waybill;Package code\r\n888002719738926;BAG1\r\n')});
+  conferir(l5.itens.map(i => i.billCode).join() === '888002719738926,888002719738927' && l5.itens[0].horario === '2026-10-20 10:30:00' && l5.colunas.join() === 'lote,horario' &&
+    l6.itens.length === 1 && l6.itens[0].lote === 'BAG1', '3.0: planilha .xlsx (número e data do Excel) e .csv', {l5, l6});
+  conferir(lr('8.88003E+14\n8,88003E+14').cientificas === 2 && /xls antiga/.test((() => { try { lerRemessas({arquivo: Buffer.from([0xD0, 0xCF, 0x11, 0xE0])}); } catch (e) { return e.message; } })()),
+    '3.0: remessa cortada pelo Excel (8,88E+14) e planilha .xls antiga avisam');
+  conferir(['expedicao_incorreta/lib/conferencia.js', 'expedicao_incorreta/public/conferir.html', 'expedicao_incorreta/public/conferir.js'].every(n => nomes.indexOf(n) >= 0),
+    '3.0: pacote ZIP com a página Conferir remessas');
 
   // ---------- 2. Servidor com JMS de mentira ----------
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-teste-'));
@@ -321,7 +385,7 @@ function abasRotas(comWW) {
   const porta = await portaLivre();
   const cfgArq = path.join(pasta, 'config.json');
   fs.writeFileSync(cfgArq, JSON.stringify({porta, host: '127.0.0.1', senha: 'senha-teste', viagemGrande: 100, minutosViagemGrande: 30,
-    dashmaster: dmDb, tamanhoPagina: 100, consultasPorSegundo: 1000, segundosPorRemessa: 0, minutosDiaAnterior: 60, remessasPorConsulta: 100}));
+    dashmaster: dmDb, tamanhoPagina: 100, consultasPorSegundo: 1000, segundosPorRemessa: 0, minutosDiaAnterior: 60, remessasPorConsulta: 100, segundosEntreLotes: 0}));
   const filho = spawn(process.execPath, [SERVER], {env: Object.assign({}, process.env, {EXPEDICAO_CONFIG: cfgArq, EXPEDICAO_JMS_URL: 'http://127.0.0.1:' + portaJms,
     EXPEDICAO_SEM_AGENDADOR: '1'}), stdio: ['ignore', 'pipe', 'pipe']});
   filhos.push(filho);
@@ -653,6 +717,100 @@ function abasRotas(comWW) {
   e = await buscar();
   conferir(e.busca.ultimo.ok && !e.busca.authVencido, 'com o AuthToken novo a busca volta a funcionar');
 
+  // ---------- 8a. 3.0: Conferir remessas (coladas ou planilha) contra a rota, pela Gestão de pedido ----------
+  {
+    const pagConf = await local('GET', '/conferir'), raiz = await local('GET', '/');
+    conferir(pagConf.status === 200 && /id="remessas"/.test(pagConf.texto) && /id="rotaBusca"[^>]*role="combobox"/.test(pagConf.texto) && /id="viagem"/.test(pagConf.texto) &&
+      /id="arquivo"[^>]*accept="\.xlsx,\.csv,\.txt"/.test(pagConf.texto) && /id="errosBtn"/.test(pagConf.texto) && /conferir\.js/.test(pagConf.texto) &&
+      raiz.status === 302 && raiz.headers.location === './conferir' && /href="conferir"/.test((await local('GET', '/troncal')).texto),
+      '3.0: página Conferir remessas (remessas, ID de viagem, rota, planilha e botão dos erros) é a página inicial; link no menu dos painéis');
+    // 1.500 remessas de um ID que nunca foram consultadas (10% do YY SUL) + as 7 da DKTESTE0001 já guardadas + 1 repetida + 1 linha que não é remessa.
+    const conf = [], novas = [];
+    for (let i = 0; i < 1500; i++) conf.push(pac('DKCONF0777', i, i % 10 === 0 ? 'BASE SUL A-YY' : 'BASE NORTE A-XX', 'XX NORTE', DIA + ' 10:00:00'));
+    for (let i = 0; i < 5; i++) novas.push(pac('DKCONF0778', i, 'BASE SUL A-YY', 'XX NORTE', DIA + ' 11:00:00'));
+    // Só a Gestão de pedido conhece estas remessas (não há viagem delas na lista de viagens).
+    jms.estado.dados.troncal.pacotes.DKCONF0777 = conf; jms.estado.dados.troncal.pacotes.DKCONF0778 = novas;
+    jms.estado.gestao = {campo: 'waybillIds', max: 1000, exigeRota: 'sendWaybillSite'};
+    // As 7 primeiras da DKTESTE0001 (3 NO, 2 SU, 1 WW e 1 sem código), já guardadas pela busca por viagem.
+    const guardadas = jms.estado.dados.troncal.pacotes.DKTESTE0001.slice(0, 7).map(x => x.billCode);
+    const texto = conf.map(x => x.billCode).concat(guardadas, [conf[0].billCode, 'linha 12345 qualquer']).join('\r\n');
+    const g0 = jms.estado.gestaoPedidos.length, r0 = jms.estado.pedidos['/transportation/tmsShipment/page'] || 0;
+    const fim = async id => {
+      for (let i = 0; i < 300; i++) {
+        const x = (await local('GET', '/api/conferencia?id=' + id)).json;
+        if (!x.conferencia.andamento.rodando) return x;
+        await esperar(100);
+      }
+      throw new Error('a conferência não terminou');
+    };
+    const rc = await local('POST', '/api/conferir', {rota: 'xx norte', viagem: 'dkconf0777', texto});
+    conferir(rc.status === 200 && rc.json.ok && rc.json.rota === 'XX NORTE' && rc.json.total === 1507 && rc.json.repetidas === 1 && rc.json.ignoradas === 1,
+      '3.0: conferência criada (1.507 remessas; repetida e linha que não é remessa ficam de fora)', rc.json);
+    const x1 = await fim(rc.json.id), c1 = x1.conferencia, t1 = c1.totais;
+    const pedidosConf = jms.estado.gestaoPedidos.slice(g0).filter(b => Array.isArray(b.waybillIds));
+    conferir(t1.remessas === 1507 && t1.errados === 152 && t1.certos === 1354 && t1.semSegmento === 1 && t1.semCodigo === 0 && Math.abs(t1.taxa - 152 / 1507 * 100) < 1e-9 &&
+      c1.pendencias.semSegmento.semCodigo === 1, '3.0: 152 remessas no caminhão errado (SU na rota XX NORTE), 1.354 certas e 1 sem código no JMS', t1);
+    // As 7 guardadas vieram do Rastreamento do pacote (busca por viagem): vão à Gestão de pedido também, pelo Horário da última operação.
+    conferir(pedidosConf.map(b => b.waybillIds.length).join() === '1000,507' && c1.andamento.consultas === 2 && c1.andamento.pendentes === 1507 &&
+      (jms.estado.pedidos['/transportation/tmsShipment/page'] || 0) === r0 && !c1.andamento.erro,
+      '3.0: Gestão de pedido com 1.000 remessas por consulta (as já guardadas não vão de novo; nenhuma viagem buscada); o "código 401" testa o Routename da tela',
+      {lotes: pedidosConf.map(b => b.waybillIds.length), and: c1.andamento});
+    conferir(c1.top.destinos[0].nome === 'YY SUL' && c1.top.destinos[0].qtd === 152 && c1.top.codigos1[0].nome === 'SU' && c1.maisAfetados.destino.nome === 'YY SUL' &&
+      c1.situacoes.find(x => x.chave === 'errado').qtd === 152 && c1.viagem === 'DKCONF0777' && c1.colunas.join() === 'viagem' && !c1.top.lotes &&
+      c1.turnos.map(x => x.turno + ':' + x.errados).join() === 'T1:150,T2:2,T3:0' && c1.fonteTurno === 'Horário da última operação' &&
+      c1.top.basesEntrega[0].nome === 'BASE SUL A-YY' && c1.top.basesEntrega[0].qtd === 152 &&
+      c1.linhaRota === 'troncal' && x1.recentes[0].id === rc.json.id && x1.recentes[0].errados === 152 && x1.app.porConsulta === 1000,
+      '3.0: gráficos (situação, destino correto, 1º e 2º segmento) e atalho da conferência recente', {top: c1.top, rec: x1.recentes[0]});
+    const tab = (await local('GET', '/api/conferencia/tabela?id=' + rc.json.id + '&situacao=errado&tamanho=10')).json;
+    const achou = (await local('GET', '/api/conferencia/tabela?id=' + rc.json.id + '&busca=' + conf[10].billCode)).json;
+    conferir(tab.total === 152 && tab.linhas.length === 10 && tab.linhas.every(l => l.situacao === 'errado' && l.rotaCerta === 'YY SUL' && l.tresSegmentos === 'SU,902-00,200' &&
+      l.viagem === 'DKCONF0777' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(l.ultimaOperacao) && l.turno && l.tipoOperacao === 'Envio do centro' && l.baseEntrega === 'BASE SUL A-YY') &&
+      ['viagem', 'ultimaOperacao', 'turno', 'tipoOperacao', 'baseOperacao', 'baseEntrega', 'cidade'].every(c => tab.colunas.some(k => k[0] === c)) &&
+      !tab.colunas.some(k => k[0] === 'lote') && achou.total === 1 && JSON.stringify(tab).indexOf('CIFRADO') < 0 && JSON.stringify(tab).indexOf('*****') < 0,
+      '3.0: tabela dos erros (destino correto e 3 Segmentos) e localizar remessa', tab.linhas[0]);
+    const esperadosErro = new Set(conf.filter((x, i) => i % 10 === 0).map(x => x.billCode).concat(guardadas.slice(3, 5)));
+    const xl = await local('GET', '/api/conferencia/erros.xlsx?id=' + rc.json.id), abaErros = lerXlsx(xl.buf)[0].linhas, cabE = abaErros[0];
+    const iDest = cabE.indexOf('Destino correto');
+    conferir(xl.status === 200 && /attachment; filename="erros_XX_NORTE_DKCONF0777_\d{4}-\d{2}-\d{2}\.xlsx"/.test(xl.headers['content-disposition']) &&
+      abaErros.length === 153 && cabE[0] === 'Número de pedido JMS' && cabE[1] === 'Rota do caminhão' && cabE.indexOf('Situação') < 0 && iDest > 0 &&
+      cabE.indexOf('Horário da última operação') > 0 && cabE.indexOf('Turno') > 0 && cabE.indexOf('Base de entrega') > 0 &&
+      abaErros.slice(1).every(l => l[iDest] === 'YY SUL' && l[1] === 'XX NORTE' && esperadosErro.has(String(l[0]))) &&
+      new Set(abaErros.slice(1).map(l => String(l[0]))).size === 152,
+      '3.0: planilha SÓ com os erros (152 remessas, todas no caminhão errado, com o destino correto)', {cab: cabE, n: abaErros.length, disp: xl.headers['content-disposition']});
+    // Planilha com lote, login e horário: gráficos de saca, login e turno. Remessas já guardadas: nenhuma consulta ao JMS.
+    const linhasXl = [['Número de pedido JMS', 'Número do lote', 'Digitalizado por', 'Tempo de digitalização']];
+    conf.slice(0, 20).forEach((x, i) => linhasXl.push([x.billCode, i % 2 ? 'LT-A' : '', i < 10 ? 'OP UM' : 'OP DOIS', DIA + (i < 5 ? ' 23:30:00' : ' 15:00:00')]));
+    const g1 = jms.estado.gestaoPedidos.length;
+    const rx = await local('POST', '/api/conferir', {rota: 'XX NORTE', arquivo: escreverXlsx([{nome: 'Carga', linhas: linhasXl}]).toString('base64'), nomeArquivo: 'carga.xlsx'});
+    const c2 = (await fim(rx.json.id)).conferencia;
+    const tn2 = {};
+    (c2.turnos || []).forEach(x => { tn2[x.turno] = x.errados; });
+    conferir(rx.json.ok && c2.totais.remessas === 20 && c2.totais.errados === 2 && c2.colunas.join() === 'lote,login,horario' && c2.origem === 'Planilha carga.xlsx' &&
+      tn2.T3 === 1 && tn2.T2 === 1 && c2.fonteTurno === 'Tempo de digitalização' && c2.top.lotes.some(i => i.nome === 'VOLUMOSO') && c2.top.logins.map(i => i.nome).sort().join() === 'OP DOIS,OP UM' &&
+      jms.estado.gestaoPedidos.length === g1 && c2.andamento.consultas === 0,
+      '3.0: planilha enviada com lote, login e horário: turnos, sacas (sem lote = VOLUMOSO) e logins; remessas guardadas não vão ao JMS', c2);
+    // Pedidos errados.
+    const semRota = await local('POST', '/api/conferir', {rota: 'ROTA QUE NAO EXISTE', texto});
+    const semRem = await local('POST', '/api/conferir', {rota: 'XX NORTE', texto: 'nada aqui'});
+    const cortadas = await local('POST', '/api/conferir', {rota: 'XX NORTE', texto: '8.88003E+14'});
+    conferir(semRota.status === 400 && semRota.json.campo === 'rota' && semRem.status === 400 && /Nenhuma remessa/.test(semRem.json.error) &&
+      cortadas.status === 400 && /8,88E\+14/.test(cortadas.json.error) && (await remoto('GET', '/api/conferencia')).status === 401 &&
+      (await remoto('POST', '/api/conferir', {rota: 'XX NORTE', texto})).status === 401,
+      '3.0: rota fora da planilha, sem remessas e números cortados pelo Excel avisam; de fora, sem senha, nada abre', {semRota: semRota.json, semRem: semRem.json});
+    // AuthToken vencido no meio: a conferência para, diz onde foi e o que fazer; com o token novo, "Conferir de novo" termina.
+    jms.estado.token = 'TOKEN-TROCADO-FICTICIO';
+    const rv = await local('POST', '/api/conferir', {rota: 'XX NORTE', texto: novas.map(x => x.billCode).join('\n')});
+    const cv = (await fim(rv.json.id)).conferencia;
+    conferir(/^Gestão de pedido \(3 Segmentos\): .*AuthToken novo/.test(cv.andamento.erro) && cv.totais.semSegmento === 5 && cv.pendencias.semSegmento.aguardando === 5,
+      '3.0: AuthToken vencido na Gestão de pedido: a conferência para e o aviso pede um AuthToken novo', cv.andamento);
+    jms.estado.token = 'TOKEN-NOVO-FICTICIO';
+    const rep = await local('POST', '/api/conferir/repetir', {id: rv.json.id});
+    const cv2 = (await fim(rv.json.id)).conferencia;
+    conferir(rep.json.ok && !cv2.andamento.erro && cv2.totais.errados === 5 && cv2.totais.semSegmento === 0,
+      '3.0: Conferir de novo (com o AuthToken certo) consulta o que faltou', cv2.totais);
+    jms.estado.gestao = null;
+  }
+
   // ---------- 8b. 2.0: 3 Segmentos pela Gestão de pedido JMS de remessa (várias remessas por consulta) ----------
   {
     const {Jms} = require('../lib/jms');
@@ -766,7 +924,7 @@ function abasRotas(comWW) {
     const s3 = await subir(cfg3);
     await esperar(4500);
     const e3 = (await pedido(porta3, 'GET', '/api/estado')).json;
-    conferir(total() === t0b && !e3.busca.ultimo && e3.acompanhadas.length === 0 && /só a rota pesquisada no painel/.test(s3.txt()),
+    conferir(total() === t0b && !e3.busca.ultimo && e3.acompanhadas.length === 0 && /só a rota pesquisada nos painéis/.test(s3.txt()),
       'busca automática sem rota pesquisada: nenhuma consulta ao JMS', {pedidos: total() - t0b, txt: s3.txt()});
     await parar(s3.c);
   }

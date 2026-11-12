@@ -13,7 +13,9 @@
  *              …/unloading/scan/page?… (o endereço da captura). O que funcionar fica guardado.
  * ("trackingDeatil" está escrito assim mesmo no JMS.)
  * GESTÃO DE PEDIDO JMS DE REMESSA (2.0, PDF "INFORMAÇÕES SOBRE O SITE"; tela sendWaybillSite) — várias remessas por consulta
- *   3 Segmentos: POST /networkmanagement/omsWaybill/shippingWaybillList → data[] {waybillNo, terminalDispatchCode "VCP,362-28,203"}
+ *   3 Segmentos: POST /networkmanagement/omsWaybill/shippingWaybillList → data[] {waybillNo, terminalDispatchCode "VCP,362-28,203",
+ *                latestScanTime (Horário da última operação), latestScanTypeName, latestScanNetworkName, dispatchNetworkName
+ *                (Base de entrega), receiverCityName}
  *                O campo das remessas no pedido é descoberto na 1ª vez (variantes de GESTAO_VARIANTES) e guardado: só vale a
  *                variante em que o JMS devolve SÓ as remessas pedidas (se ele ignorar o filtro, devolveria outras).
  * RASTREAMENTO DO PACOTE — Informação básica (uma remessa por consulta; usado quando a Gestão de pedido não responde)
@@ -322,8 +324,12 @@ class Jms {
     if (fora.length) return {ok: false, achados, faltando: ws, motivo: 'devolveu ' + fora.length + ' remessas que não foram pedidas' + (total ? ' (total ' + total + ')' : '')};
     registros.forEach(x => {
       const cod = x.terminalDispatchCode === null || x.terminalDispatchCode === undefined ? '' : String(x.terminalDispatchCode);
-      const p = cod.split(',').map(y => y.trim());
-      achados.set(remessaBase(x.waybillNo), {s1: p[0] || '', s2: p[1] || '', s3: p[2] || '', centro: ''});
+      const p = cod.split(',').map(y => y.trim()), t = v => v === null || v === undefined ? '' : String(v).trim().slice(0, 120);
+      // 3.0 (PDF "INFORMAÇÕES SOBRE O SITE"): também o Horário da última operação (o turno sai dele), a última operação, a base de
+      // entrega e a cidade de destino. Nada de dado pessoal (nome, endereço, telefone) é guardado.
+      achados.set(remessaBase(x.waybillNo), {s1: p[0] || '', s2: p[1] || '', s3: p[2] || '', centro: '', gestao: true,
+        ultimaOperacao: t(x.latestScanTime || x.lastUpdateTime).replace(/\.\d+$/, ''), tipoOperacao: t(x.latestScanTypeName),
+        baseOperacao: t(x.latestScanNetworkName), baseEntrega: t(x.dispatchNetworkName), cidade: t(x.receiverCityName || x.destinationName)});
     });
     // Resposta por remessa pedida (a pedida pode ter o volume "-001"; a resposta vem pela remessa).
     const out = new Map();

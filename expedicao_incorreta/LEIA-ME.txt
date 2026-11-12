@@ -1,8 +1,39 @@
 J&T · EXPEDIÇÃO INCORRETA (app separado do DashMaster)
 =====================================================
 
-O que faz
----------
+O que faz (versão 3.0: CONFERIR REMESSAS, a página principal)
+------------------------------------------------------------
+Você COLA AS REMESSAS DO ID (ou envia a planilha) e ESCOLHE A ROTA do caminhão. O app consulta cada remessa na Gestão de
+pedido JMS de remessa e mostra as que NÃO PERTENCEM à rota (ex.: pacote do RJ dentro do caminhão para SP BRE).
+Não busca viagens no JMS. Página: http://localhost:3300/conferir (o endereço principal já abre nela).
+
+1. Remessas do ID: cole uma por linha (ou separadas por vírgula), ou as colunas copiadas da planilha do JMS com o
+   cabeçalho, ou clique em "Enviar planilha" (.xlsx, .csv ou .txt). Remessa repetida conta uma vez. Com as colunas
+   Número do lote, Digitalizado por, Tempo de digitalização e ID de viagem, aparecem também os gráficos de saca, login,
+   turno e ID. O ID de viagem também pode ser digitado no campo "ID de viagem" (opcional).
+2. Rota do caminhão: digite e escolha na lista (a tabela de rotas do SC, com a doca de cada destino).
+3. Conferir: o app consulta a Gestão de pedido, 1.000 remessas por consulta (45 mil remessas = 46 consultas), uma consulta
+   de cada vez com pausa de 2 s. Os números aparecem conforme chegam. Remessa consultada nas últimas 6 h não vai de novo.
+   Da Gestão de pedido vêm: 3 Segmentos (ex.: VCP,362-28,203), Horário da última operação (o TURNO sai dele, quando a lista
+   não traz o Tempo de digitalização), Última operação, Base da última operação, Base de entrega e Cidade de destino.
+   Nada de nome, endereço ou telefone é guardado.
+4. Conferência pela tabela de rotas do SC:
+   - linha TRONCAL (sem 2º nível): o 1º segmento. Ex.: SP BRE leva AC, AM, BAU, MRB, SP, SP1, TO…; MRB no SP BRE = certo.
+   - linha SECUNDÁRIA (com 2º nível): o 1º e o 2º segmento juntos. Ex.: F S-PENHA 03-SP leva só GRU,404-06.
+   - a linha que cita o 2º segmento vence a linha geral: SP,395-05 é do DC GRU-SP; SP,402-01 do DC TBT-SP; SP,364-00 do
+     DC S-MOO 02-SP. SP com 2º segmento que NÃO está em nenhuma das duas tabelas é do SP BRE (ex.: SP,397-00 → SP BRE).
+   Não pertence → ERRADO, e "Destino correto" diz para onde a remessa devia ir.
+5. Resultado: cartões (remessas no caminhão errado, por turno, certas, taxa de erro, sem 3 Segmentos, código fora da
+   tabela, destino correto e 1º/2º segmento mais frequentes), gráficos (situação das remessas, destino correto dos erros,
+   1º segmento, 2º segmento GRU/MOO/SP/SP1/SBN, turnos, base de entrega e, com as colunas da planilha, IDs, sacas e
+   logins) e a tabela com tudo (abre em "Errado").
+6. BAIXAR PLANILHA DE ERROS: só as remessas no caminhão errado (todas), com a rota do caminhão, o destino correto, o
+   3 Segmentos, o horário da última operação, o turno e as colunas que vieram na lista.
+7. As últimas conferências ficam como atalhos (até 50 guardadas). Se a consulta parar (AuthToken vencido, JMS fora),
+   o aviso diz o motivo: troque o AuthToken e clique em "Conferir de novo".
+
+Busca por viagem (anterior, menu "Busca por viagem")
+-----------------------------------------------------
 Você PESQUISA A ROTA (versão 2.1) e o painel mostra os pacotes que NÃO PERTENCEM a ela (ex.: pacote do RJ dentro do
 caminhão para SP BRE). Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA (o painel vai sozinho para o da rota pesquisada).
 
@@ -19,7 +50,8 @@ caminhão para SP BRE). Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA (o painel
    Se a Gestão de pedido não responder, o app usa o Rastreamento do pacote > Informação básica, como antes (uma remessa
    por vez, pausa de 30 s) e tenta a Gestão de novo depois de 1 h. Configurações mostra qual dos dois está sendo usado.
    Se o JMS bloquear, o app pausa 15 min. O registro mostra o título da página que o JMS devolveu.
-4. Confere se a remessa PERTENCE à rota do caminhão (Próxima parada), pela planilha de rotas do SC (tabelas vermelhas):
+4. Confere se a remessa PERTENCE à rota do caminhão (Próxima parada), pela planilha de rotas do SC (tabelas vermelhas),
+   com a mesma regra da conferência de remessas (3.0: SP com 2º segmento fora das tabelas é do SP BRE):
    - linha TRONCAL (sem 2º nível): só o 1º segmento. Ex.: caminhão RJ SJM leva RJ, RJ1, VDC e CDG.
    - linha SECUNDÁRIA (com 2º nível): o 1º e o 2º segmento juntos. Ex.: F S-PENHA 03-SP leva só GRU,404-06.
      DC TBT-SP, DC GRU-SP e SBN são conferidos assim (são da linha secundária).
@@ -65,7 +97,8 @@ Instalar (no computador onde já roda o DashMaster, sem administrador)
 5. Abra http://localhost:3300/config
    - AuthToken: se o DashMaster está neste computador, o app já usa o mesmo AuthToken dele. Clique em "Testar a conexão".
      (Sem DashMaster: cole o AuthToken e clique em "Salvar e testar".)
-6. Painéis: http://localhost:3300/troncal e http://localhost:3300/secundaria > Pesquisar rota.
+6. Conferir remessas: http://localhost:3300/conferir (cole as remessas do ID, escolha a rota, Conferir).
+   Busca por viagem (anterior): http://localhost:3300/troncal e http://localhost:3300/secundaria > Pesquisar rota.
 
 Planilha de rotas (C:\expedicao_incorreta\planilhas\rotas.xlsx)
 ---------------------------------------------------------------
@@ -74,6 +107,19 @@ Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
   Quando as docas mudarem, mude aqui. Duas linhas da mesma rota = qualquer uma vale.
   (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
 Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
+3.0: em Configurações dá para enviar também a TABELA DO SC DO JEITO QUE ELA VEM (abas "Rotas de Linha" e "Rotas Regionais",
+como o ajuste_de_rotas_docas.xlsx): o app lê "378-00、01、02" como 378-00, 378-01 e 378-02, as linhas de continuação
+(SP antigo e GRU novo do DC TBT-SP) e as duas docas da mesma rota (SP BRE: docas 21 e 22).
+
+Versão 3.0 (pedidos "eu mando as remessas do ID e a rota, aí vai pesquisar na gestão de remessas; gráficos e um botão para
+baixar a planilha só com os erros" e "SP com 2º segmento que não está nas tabelas de rotas é do BRE")
+  - Página nova Conferir remessas (a principal): remessas coladas ou planilha + rota → Gestão de pedido (1.000 por
+    consulta) → cartões, gráficos, tabela com tudo e o botão Baixar planilha de erros (só os erros).
+  - Turno pelo Horário da última operação da Gestão de pedido (PDF "Informações sobre o site").
+  - Regra do SP: a linha que cita o 2º segmento vence a linha geral; SP com 2º segmento fora das duas tabelas = SP BRE.
+    Vale também na busca por viagem.
+  - Configurações aceita a tabela de rotas do SC do jeito que ela vem (inclusive o .xlsx gerado com tags "x:").
+  - Os painéis Rota Troncal e Rota Secundária (busca por viagem) continuam no menu, em "Busca por viagem (anterior)".
 
 Versão 2.3 (pedido "pesquisar em 1000, o JMS só permite esse limite")
   - 3 Segmentos pela Gestão de pedido: 1.000 remessas em cada consulta (antes 100). 45 mil pacotes = 46 consultas.

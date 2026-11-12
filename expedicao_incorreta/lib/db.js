@@ -41,7 +41,20 @@ class Banco {
       CREATE INDEX IF NOT EXISTS pacotes_so_dia ON pacotes (dia);
       CREATE INDEX IF NOT EXISTS pacotes_viagem ON pacotes (shipmentNo);
       CREATE TABLE IF NOT EXISTS pesquisas (rota TEXT NOT NULL, dia TEXT NOT NULL, em INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (rota, dia));
+      CREATE TABLE IF NOT EXISTS conferencias (id INTEGER PRIMARY KEY AUTOINCREMENT, em INTEGER NOT NULL, rota TEXT NOT NULL, tipo TEXT NOT NULL,
+        viagem TEXT NOT NULL DEFAULT '', origem TEXT NOT NULL DEFAULT '', colunas TEXT NOT NULL DEFAULT '', total INTEGER NOT NULL DEFAULT 0,
+        repetidas INTEGER NOT NULL DEFAULT 0, ignoradas INTEGER NOT NULL DEFAULT 0, errados INTEGER NOT NULL DEFAULT -1,
+        consultas INTEGER NOT NULL DEFAULT 0, fim INTEGER NOT NULL DEFAULT 0, erro TEXT NOT NULL DEFAULT '');
+      CREATE TABLE IF NOT EXISTS conferencia_itens (conferencia INTEGER NOT NULL, n INTEGER NOT NULL, billCode TEXT NOT NULL,
+        viagem TEXT NOT NULL DEFAULT '', lote TEXT NOT NULL DEFAULT '', login TEXT NOT NULL DEFAULT '', horario TEXT NOT NULL DEFAULT '',
+        baseDestino TEXT NOT NULL DEFAULT '', proximaParada TEXT NOT NULL DEFAULT '', PRIMARY KEY (conferencia, n));
     `);
+    // 3.0: o que a Gestão de pedido diz da remessa além do 3 Segmentos (Horário da última operação → turno; base de entrega…).
+    const colsSeg = this.db.prepare('PRAGMA table_info(segmentos)').all().map(c => c.name);
+    [['ultimaOperacao', "TEXT NOT NULL DEFAULT ''"], ['tipoOperacao', "TEXT NOT NULL DEFAULT ''"], ['baseOperacao', "TEXT NOT NULL DEFAULT ''"],
+      ['baseEntrega', "TEXT NOT NULL DEFAULT ''"], ['cidade', "TEXT NOT NULL DEFAULT ''"], ['gestaoEm', 'INTEGER NOT NULL DEFAULT 0']].forEach(([c, t]) => {
+      if (colsSeg.indexOf(c) < 0) this.db.exec('ALTER TABLE segmentos ADD COLUMN ' + c + ' ' + t);
+    });
     // 1.2: status da viagem quando a lista de pacotes foi conferida (viagem concluída e conferida não muda mais).
     if (!this.db.prepare('PRAGMA table_info(viagens)').all().some(c => c.name === 'estadoBusca')) this.db.exec('ALTER TABLE viagens ADD COLUMN estadoBusca TEXT');
     // Dias buscados pela versão 1.1 (antes desta tabela) contam como buscados.
@@ -79,9 +92,11 @@ class Banco {
       umaRemessa: this.db.prepare('SELECT billCode FROM pacotes ORDER BY dia DESC, horario DESC LIMIT 1'),
       semSegmento: this.db.prepare(`SELECT DISTINCT p.billCode FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode
         WHERE p.dia = ? AND (s.billCode IS NULL OR (s.erro <> '' AND s.em < ?)) LIMIT ?`),
-      salvarSegmento: this.db.prepare(`INSERT INTO segmentos (billCode, s1, s2, s3, centro, em, erro) VALUES (?, ?, ?, ?, ?, ?, ?)
+      salvarSegmento: this.db.prepare(`INSERT INTO segmentos (billCode, s1, s2, s3, centro, em, erro, ultimaOperacao, tipoOperacao, baseOperacao,
+          baseEntrega, cidade, gestaoEm) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (billCode) DO UPDATE SET s1 = excluded.s1, s2 = excluded.s2, s3 = excluded.s3, centro = excluded.centro, em = excluded.em,
-          erro = excluded.erro`),
+          erro = excluded.erro, ultimaOperacao = excluded.ultimaOperacao, tipoOperacao = excluded.tipoOperacao, baseOperacao = excluded.baseOperacao,
+          baseEntrega = excluded.baseEntrega, cidade = excluded.cidade, gestaoEm = excluded.gestaoEm`),
       contarSegmentos: this.db.prepare(`SELECT COUNT(DISTINCT p.billCode) AS total,
           COUNT(DISTINCT CASE WHEN s.billCode IS NOT NULL AND s.erro = '' THEN p.billCode END) AS feitos,
           COUNT(DISTINCT CASE WHEN s.erro <> '' THEN p.billCode END) AS comErro
@@ -94,7 +109,28 @@ class Banco {
       // 2.1: dias buscados de cada rota pesquisada (rota = nome normalizado).
       marcarRotaDia: this.db.prepare('INSERT INTO pesquisas (rota, dia, em) VALUES (?, ?, ?) ON CONFLICT (rota, dia) DO UPDATE SET em = excluded.em'),
       rotaDia: this.db.prepare('SELECT em FROM pesquisas WHERE rota = ? AND dia = ?'),
-      buscadosRota: this.db.prepare('SELECT dia FROM pesquisas WHERE rota = ? AND dia BETWEEN ? AND ?')
+      buscadosRota: this.db.prepare('SELECT dia FROM pesquisas WHERE rota = ? AND dia BETWEEN ? AND ?'),
+      // 3.0: conferência de remessas coladas (lib/conferencia.js).
+      novaConferencia: this.db.prepare(`INSERT INTO conferencias (em, rota, tipo, viagem, origem, colunas, total, repetidas, ignoradas)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      itemConferencia: this.db.prepare(`INSERT INTO conferencia_itens (conferencia, n, billCode, viagem, lote, login, horario, baseDestino, proximaParada)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      conferencia: this.db.prepare('SELECT * FROM conferencias WHERE id = ?'),
+      ultimaConferencia: this.db.prepare('SELECT id FROM conferencias ORDER BY id DESC LIMIT 1'),
+      listaConferencias: this.db.prepare('SELECT * FROM conferencias ORDER BY id DESC LIMIT ?'),
+      abertas: this.db.prepare('SELECT * FROM conferencias WHERE fim = 0 ORDER BY id'),
+      reabrir: this.db.prepare("UPDATE conferencias SET fim = 0, erro = '' WHERE id = ?"),
+      fimConferencia: this.db.prepare('UPDATE conferencias SET fim = ?, erro = ?, consultas = consultas + ?, errados = ? WHERE id = ?'),
+      contarItens: this.db.prepare('SELECT COUNT(*) AS n FROM conferencia_itens WHERE conferencia = ?'),
+      // Vão ao JMS: sem o "3 Segmentos" guardado, com erro na consulta, sem código ou não consultadas na Gestão de pedido nas últimas
+      // horas (o Horário da última operação muda).
+      pendentesConferencia: this.db.prepare(`SELECT i.billCode FROM conferencia_itens i LEFT JOIN segmentos s ON s.billCode = i.billCode
+        WHERE i.conferencia = ? AND (s.billCode IS NULL OR s.erro <> '' OR s.s1 = '' OR s.gestaoEm < ?) ORDER BY i.n`),
+      itensConferencia: this.db.prepare(`SELECT i.*, s.s1 AS seg1, s.s2 AS seg2, s.s3 AS seg3, s.billCode AS segFeito, s.erro AS segErro,
+          s.ultimaOperacao, s.tipoOperacao, s.baseOperacao, s.baseEntrega, s.cidade
+        FROM conferencia_itens i LEFT JOIN segmentos s ON s.billCode = i.billCode WHERE i.conferencia = ? ORDER BY i.n`),
+      podarItens: this.db.prepare('DELETE FROM conferencia_itens WHERE conferencia IN (SELECT id FROM conferencias ORDER BY id DESC LIMIT -1 OFFSET ?)'),
+      podar: this.db.prepare('DELETE FROM conferencias WHERE id IN (SELECT id FROM conferencias ORDER BY id DESC LIMIT -1 OFFSET ?)')
     };
   }
   get(k) { const r = this.st.get.get(String(k)); return r ? r.v : null; }
@@ -127,8 +163,9 @@ class Banco {
   semSegmento(dia, limite) { return this.st.semSegmento.all(dia, Date.now() - 30 * 60000, limite || 2000).map(r => r.billCode); }
   /** Guarda o "3 Segmentos" da remessa (r = {s1, s2, s3, centro}) ou o erro da consulta. */
   salvarSegmento(billCode, r, erro) {
-    const o = r || {};
-    this.st.salvarSegmento.run(String(billCode), o.s1 || '', o.s2 || '', o.s3 || '', o.centro || '', Date.now(), erro || '');
+    const o = r || {}, agora = Date.now();
+    this.st.salvarSegmento.run(String(billCode), o.s1 || '', o.s2 || '', o.s3 || '', o.centro || '', agora, erro || '', o.ultimaOperacao || '',
+      o.tipoOperacao || '', o.baseOperacao || '', o.baseEntrega || '', o.cidade || '', o.gestao ? agora : 0);
   }
   /** Para a tela Configurações: as mensagens de erro mais comuns do 3 Segmentos no dia e quantos o JMS respondeu sem código. */
   errosSegmentos(dia) { return this.st.errosSegmentos.all(dia); }
@@ -165,6 +202,35 @@ class Banco {
         COUNT(DISTINCT CASE WHEN s.erro <> '' THEN p.billCode END) AS comErro
       FROM pacotes p LEFT JOIN segmentos s ON s.billCode = p.billCode WHERE p.shipmentNo IN (${ids.map(() => '?').join(',')})`).get(...ids);
   }
+  // ---------------------------------------------------------------- 3.0: conferências de remessas
+  /** Grava a conferência e as remessas (numa transação). o = {rota, tipo, viagem, origem, colunas, repetidas, ignoradas, itens}. → id */
+  criarConferencia(o) {
+    const t = v => String(v === null || v === undefined ? '' : v).slice(0, 200);
+    this.db.exec('BEGIN');
+    try {
+      const id = Number(this.st.novaConferencia.run(Date.now(), o.rota, o.tipo, t(o.viagem), t(o.origem), (o.colunas || []).join(','), o.itens.length,
+        o.repetidas || 0, o.ignoradas || 0).lastInsertRowid);
+      o.itens.forEach((x, n) => this.st.itemConferencia.run(id, n, x.billCode, t(x.viagem), t(x.lote), t(x.login), t(x.horario), t(x.baseDestino), t(x.proximaParada)));
+      this.db.exec('COMMIT');
+      return id;
+    } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+  }
+  /** → {id, em, rota, tipo, viagem, origem, colunas: [], total, repetidas, ignoradas, errados, consultas, fim, erro} | null */
+  conferencia(id) {
+    const c = this.st.conferencia.get(Number(id) || 0);
+    return c ? Object.assign({}, c, {colunas: c.colunas ? c.colunas.split(',') : []}) : null;
+  }
+  ultimaConferencia() { const r = this.st.ultimaConferencia.get(); return r ? r.id : 0; }
+  listaConferencias(n) { return this.st.listaConferencias.all(n || 12); }
+  conferenciasAbertas() { return this.st.abertas.all(); }
+  reabrirConferencia(id) { this.st.reabrir.run(id); }
+  fimConferencia(id, erro, consultas, errados) { this.st.fimConferencia.run(Date.now(), erro || '', consultas || 0, errados === undefined ? -1 : errados, id); }
+  contarItensConferencia(id) { return this.st.contarItens.get(id).n; }
+  /** desde = consultas da Gestão de pedido mais velhas que isto (ms) vão de novo. */
+  pendentesConferencia(id, desde) { return this.st.pendentesConferencia.all(id, desde || 0).map(r => r.billCode); }
+  itensConferencia(id) { return this.st.itensConferencia.all(id); }
+  /** Só as "manter" conferências mais novas ficam guardadas. */
+  podarConferencias(manter) { this.st.podarItens.run(manter); this.st.podar.run(manter); }
   /** {n, de, ate}: quantos dias estão guardados. */
   diasSalvos() { return this.st.diasSalvos.get(); }
   fechar() { try { this.db.close(); } catch (e) { /* já fechado */ } }

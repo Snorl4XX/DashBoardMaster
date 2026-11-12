@@ -54,7 +54,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none}
 a{color:inherit}
-.hidden{display:none!important}
+.hidden,[hidden]{display:none!important}
 .muted{color:var(--muted)} .small{font-size:12px}
 :focus-visible{outline:2px solid var(--red);outline-offset:2px;border-radius:6px}
 
@@ -311,6 +311,54 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .pager span{font-size:12px;color:var(--muted);padding:0 6px}
 .empty-row td{text-align:center;color:var(--muted);padding:26px!important}
 
+/* ---------- 3.0: Conferir remessas ---------- */
+.nova{margin-top:4px;padding:16px 18px}
+.nova-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:12px;margin-top:14px}
+.field label small{text-transform:none;letter-spacing:0;font-weight:600;color:var(--muted-2);margin-left:4px}
+.campo{width:100%;height:42px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:0 12px;font-size:13.5px;font-weight:600;outline:none;transition:border-color .18s,box-shadow .18s}
+.campo:hover{border-color:var(--field-line-2)}
+.campo:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}
+.rota-busca input.invalido{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.14)}
+.remessas-campo{margin-top:12px}
+.remessas{width:100%;min-height:160px;max-height:420px;resize:vertical;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:10px 12px;font:13px/1.5 ui-monospace,Consolas,monospace;outline:none;transition:border-color .18s,box-shadow .18s,opacity .18s}
+.remessas:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(230,0,18,.10)}
+.remessas.com-arquivo{opacity:.45}
+.remessas-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.remessas-foot .grow{flex:1}
+.remessas-foot .btn{height:38px}
+.remessas-foot label.btn{text-transform:none;letter-spacing:0;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer}
+.arquivo-chip{display:inline-flex;align-items:center;gap:7px;max-width:100%;background:var(--red-50);color:var(--red-700);border:1px solid var(--red-200);border-radius:999px;padding:4px 6px 4px 11px;font-size:12px;font-weight:700}
+.arquivo-chip[hidden]{display:none}
+.arquivo-chip svg{width:15px;height:15px}
+.arquivo-chip b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.arquivo-chip button{border:0;background:transparent;color:inherit;width:24px;height:24px;border-radius:50%;font-size:12px}
+.arquivo-chip button:hover{background:var(--red-100)}
+.nova-acoes{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
+.nova-acoes .note{flex:1 1 420px;margin:0;line-height:1.5}
+.nova-acoes .note b{color:var(--ink-2)}
+.btn-lg{height:46px;padding:0 22px;font-size:14.5px;border-radius:13px}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:9px;margin-top:8px}
+.recentes{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.recentes:empty{display:none}
+.recentes small{flex:1 1 100%;color:var(--muted);font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.9px}
+.recentes .chip b{color:var(--red-600)}
+.recentes .chip .muted{font-weight:600}
+.result-head{margin-top:12px;padding:18px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:14px;border-top:3px solid var(--red)}
+.result-copy{flex:1 1 320px;min-width:0}
+.result-copy h2{margin:2px 0 4px;font-size:21px;letter-spacing:-.4px;overflow-wrap:anywhere}
+.result-copy p{margin:0;font-size:12.5px}
+.result-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.andamento{flex:1 1 100%;border:1px solid var(--warn-line);background:var(--warn-bg);border-radius:14px;padding:12px 14px;display:grid;gap:8px}
+.andamento[hidden]{display:none}
+.andamento-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.andamento-top b{font-size:13.5px}
+.andamento-top span{font-size:20px;font-weight:900;color:var(--warn);font-variant-numeric:tabular-nums}
+.andamento small{color:var(--ink-2);font-size:12px}
+.bar.big{height:10px}
+.bar.big i{background:linear-gradient(90deg,var(--red),#FF4D5E)}
+.kpi.warn-kpi .kpi-value{color:var(--warn)}
+.alert .btn-sm{display:inline-flex}
+
 /* ---------- Configurações ---------- */
 .conf{margin-top:12px;padding:16px 18px;display:grid;gap:12px}
 .conf textarea{width:100%;min-height:72px;border:1px solid var(--field-line);border-radius:12px;background:var(--card);padding:10px 12px;font:12.5px/1.45 ui-monospace,Consolas,monospace;outline:none}
@@ -365,6 +413,7 @@ label.btn input[type=file]{display:none}
   .main{padding:0 20px 32px}
 }
 @media (max-width:860px){
+  .nova-grid{grid-template-columns:1fr}
   .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .kpi-hero{grid-column:span 2}
   .kpi.span2{grid-column:span 2}
@@ -386,6 +435,9 @@ label.btn input[type=file]{display:none}
   .kpi-value{font-size:24px}
   .kpi-hero .kpi-value{font-size:44px}
   .btn-red span,.btn-light span{display:none}
+  .btn-lg span,.result-actions .btn span,.remessas-foot .btn span{display:inline}
+  .result-actions,.result-actions .btn{width:100%;justify-content:center}
+  .nova-acoes .btn-lg{width:100%;justify-content:center}
   .btn{padding:9px 11px}
   .find input{width:100%}
   .table-tools,.find,.table-tools .select-wrap{width:100%}
