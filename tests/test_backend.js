@@ -4722,15 +4722,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     return c;
   };
   const gs = semear(freshCtx({})), nd = semear(freshCtx({}, null, {PLATAFORMA: 'node'}));
-  check(gs.maxClientRows_() === 150000 && nd.maxClientRows_() === 500000 && nd.maxDetailFiles_() >= 3000 && nd.loadBudgetMs_() >= 60000 &&
+  check(gs.maxClientRows_() === 150000 && nd.maxClientRows_() === 1000000 && nd.maxDetailFiles_() >= 3000 && nd.loadBudgetMs_() >= 60000 &&
     gs.maxDetailFiles_() === 150 && gs.loadBudgetMs_() === 22000 &&
     freshCtx({}, null, {PLATAFORMA: 'node', DASHBOARD_MAX_ROWS: '800000'}).maxClientRows_() === 800000 &&
     freshCtx({}, null, {DASHBOARD_MAX_ROWS: '800000'}).maxClientRows_() === 400000,
-    'V4.25.3: limites por consulta — Apps Script como antes (150 mil, 150 arquivos, 22 s); Node 500 mil (DASHBOARD_MAX_ROWS muda, até 1 milhão)');
+    'V4.25.3: limites por consulta — Apps Script como antes (150 mil, 150 arquivos, 22 s); Node 1 milhão (V4.27; DASHBOARD_MAX_ROWS muda, até 1 milhão)');
   const total = DIAS * POR_DIA;
   const rG = gs.getDashboardData('missing_dispatch', {from, to}), rN = nd.getDashboardData('missing_dispatch', {from, to});
   check(!rG.meta.archive.fullyLoaded && rG.meta.rowsLoaded <= 150000 && rG.meta.archive.notLoaded.length > 0 &&
-    rN.meta.archive.fullyLoaded && rN.meta.archive.loadedDates.length === DIAS && rN.meta.rowsLoaded === total && rN.meta.archive.maxRows === 500000,
+    rN.meta.archive.fullyLoaded && rN.meta.archive.loadedDates.length === DIAS && rN.meta.rowsLoaded === total && rN.meta.archive.maxRows === 1000000,
     'V4.25.3: Node — os 30 dias da Falta de Bipagem na Expedição chegam ao painel (antes: dias fora por causa do limite do Apps Script)',
     {gs: [rG.meta.rowsLoaded, rG.meta.archive.loadedDates.length], node: [rN.meta.rowsLoaded, rN.meta.archive.loadedDates.length]});
   [gs, nd].forEach(c => { c.UrlFetchApp.fetch = () => ({getResponseCode: () => 200, getBlob: () => c.Utilities.newBlob('PK', 'application/zip', 'x')}); });
@@ -4743,6 +4743,65 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     c.dayFilesMap_ = () => ({'2026-10-10': {rows: 120000, fileId: 'x'}}); return c.groupedNeedsSummary_('no_move', '2026-10-10', '2026-10-10', {}); };
   check(big(gb) === true && big(ga) === false, 'V4.25.3: agrupados com 120 mil combinações — Apps Script em totais por campo; Node manda tudo (tabela completa)');
   check(Date.now() - T0 < 120000, 'V4.25.3: testes de volume em menos de 2 min', Date.now() - T0);
+}
+
+// ---------- V4.27 (pedido "abrir 2 meses demora; quero que puxe os dados e armazena eles"): lista de cada dia guardada no navegador ----------
+{
+  const c = freshCtx({}, null, {PLATAFORMA: 'node'});
+  const days = Array.from({length: 5}, (_, i) => c.addDaysIso_('2026-10-20', -i)).reverse();
+  const rowsOf = d => Array.from({length: 40}, (_, k) => ({date: d, shipment: 'TST' + d.replace(/-/g, '') + String(k).padStart(4, '0'), eventTime: d + ' 1' + (k % 10) + ':00:00',
+    shift: ['T1', 'T2', 'T3'][k % 3], login: 'OPERADOR FICTICIO ' + (k % 4), segment: 'SP', segmentRaw: 'SP,977-00', segmentFull: 'SP,977-00,000', client: 'CLIENTE TESTE', lot: 'BR' + (k % 5)}));
+  days.forEach(d => {
+    c.saveDayDataset_('wrong_send', d, c.encodeDayFile_(rowsOf(d)), 1, 40);
+    c.upsertRate_({indicator: 'wrong_send', date: d, rate: 0.5, errorCount: 40, totalCount: 8000, raw: {}});
+    c.updateDayStatus_('wrong_send', d, {summaryStatus: 'COMPLETE', detailsStatus: 'COMPLETE', expectedPages: 1, savedPages: 1, expectedRecords: 40, savedRows: 40});
+  });
+  const from = days[0], to = days[4], keyOf = r => r.date + '|' + r.shipment;
+  const plain = c.getDashboardData('wrong_send', {from, to});
+  const all = C.decodeDataset(plain.dataset).map(keyOf).sort().join();
+  // 1ª vez (navegador sem nada guardado): cada dia vai separado, com a assinatura.
+  const r1 = c.getDashboardData('wrong_send', {from, to, dayCache: {}});
+  const sigs = {};
+  Object.keys(r1.dayData.days).forEach(d => { sigs[d] = r1.dayData.days[d].sig; });
+  const rows1 = [].concat(C.decodeDataset(r1.dataset), ...Object.keys(r1.dayData.days).map(d => C.decodeDataset(r1.dayData.days[d].ds)));
+  check(!plain.dayData && r1.dayData && Object.keys(sigs).sort().join() === days.join() && r1.dataset.n === 0 && r1.dayData.cached.length === 0 &&
+    rows1.map(keyOf).sort().join() === all && r1.meta.rowsLoaded === 200 && plain.meta.rowsLoaded === 200,
+    'V4.27: sem nada guardado — cada dia vai separado, com a assinatura (as mesmas remessas de antes)', {sigs, n: r1.dataset.n});
+  // 2ª vez com os 5 dias guardados: nenhum arquivo lido, nenhuma remessa mandada.
+  const reads0 = c.__state.fileReads || 0;
+  const r2 = c.getDashboardData('wrong_send', {from, to, dayCache: sigs});
+  check(r2.dayData.cached.slice().sort().join() === days.join() && Object.keys(r2.dayData.days).length === 0 && r2.dataset.n === 0 &&
+    r2.meta.rowsLoaded === 200 && r2.meta.archive.fullyLoaded && r2.meta.archive.loadedDates.length === 5 && r2.meta.archive.readFiles === 0,
+    'V4.27: com os dias guardados — o servidor não lê nem manda nada (o painel usa o que está no navegador)', {cached: r2.dayData.cached, read: r2.meta.archive.readFiles});
+  // Dia regravado (ex.: download novo, IDs de viagem) muda a assinatura: só ele vai de novo.
+  const rows3 = rowsOf(days[2]).concat([{date: days[2], shipment: 'TSTNOVA0001', shift: 'T1', segment: 'SP', segmentRaw: 'SP,977-00', segmentFull: 'SP,977-00,000'}]);
+  c.saveDayDataset_('wrong_send', days[2], c.encodeDayFile_(rows3), 1, 41);
+  const r3 = c.getDashboardData('wrong_send', {from, to, dayCache: sigs});
+  check(Object.keys(r3.dayData.days).join() === days[2] && r3.dayData.days[days[2]].sig !== sigs[days[2]] && r3.dayData.days[days[2]].ds.n === 41 &&
+    r3.dayData.cached.length === 4 && r3.meta.rowsLoaded === 201,
+    'V4.27: dia regravado — assinatura nova, só esse dia vai de novo', {days: Object.keys(r3.dayData.days), cached: r3.dayData.cached});
+  // Assinatura de fora, de outro painel ou de outra versão: o dia vai inteiro.
+  const r4 = c.getDashboardData('wrong_send', {from, to, dayCache: {[days[0]]: 'x:40:velha', 'não-é-data': 'y'}});
+  check(Object.keys(r4.dayData.days).length === 5 && r4.dayData.cached.length === 0, 'V4.27: assinatura que não bate (outra versão) — o dia vai inteiro');
+  // Painéis agrupados (Lotes, Sem Movimentação) e o Histórico ficam como antes.
+  const g = freshCtx({}, null, {PLATAFORMA: 'node', REATIVAR_PAINEIS: 'lot_flow'});
+  check(!g.getDashboardData('lot_flow', {from, to, dayCache: {}}).dayData && !g.getDashboardData('no_move', {dayCache: {}}).dayData,
+    'V4.27: painéis agrupados e a foto do momento continuam vindo inteiros (sem guardar no navegador)');
+  // Fila: as listas dos dias abertos na tela passam na frente das listas dos outros painéis (depois das taxas).
+  const f = freshCtx({}, null, {PLATAFORMA: 'node'});
+  const OLD = f.addDaysIso_(f.isoToday_(), -40), NEW = f.addDaysIso_(f.isoToday_(), -2);
+  f.enqueueJobs_([['DETAIL_INIT', 'damage', NEW, 1], ['DETAIL_INIT', 'sorting_error', OLD, 1], ['SUMMARY', 'wrong_send', NEW, 0], ['SCANS', 'sorting_error', NEW, 0]], {});
+  const antes = f.pendingJobs_().map(j => j.indicator + ':' + j.type).join();
+  f.markScreenDays_('sorting_error', [OLD]);
+  reset(f);
+  const depois = f.pendingJobs_().map(j => j.indicator + ':' + j.type).join();
+  check(antes === 'wrong_send:SUMMARY,sorting_error:SCANS,damage:DETAIL_INIT,sorting_error:DETAIL_INIT' &&
+    depois === 'wrong_send:SUMMARY,sorting_error:DETAIL_INIT,sorting_error:SCANS,damage:DETAIL_INIT',
+    'V4.27: a lista do dia aberto na tela vem logo depois das taxas (antes das listas dos outros painéis)', {antes, depois});
+  // Pedido "pensei que foi tirado essa questão de cota": no Node não há cota do Google, com ou sem COTA_GOOGLE.
+  const q = freshCtx({}, null, {PLATAFORMA: 'node', COTA_GOOGLE: 'gmail'});
+  check(q.googlePlan_() === 'workspace' && q.fetchBudgetMode_() === 'ok' && freshCtx({}, null, {COTA_GOOGLE: 'gmail'}).googlePlan_() === 'gmail',
+    'V4.27: Node sem cota do Google (COTA_GOOGLE não vale no Node; no Apps Script continua)');
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

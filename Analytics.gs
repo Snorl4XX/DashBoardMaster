@@ -790,6 +790,34 @@ function getDailySeries(indicatorKey, params) {
  * compactados do período. Filtros, cartões e gráficos são calculados no navegador
  * com o mesmo núcleo (Core.gs) — trocar filtros é instantâneo.
  */
+/**
+ * V4.27 (pedido "abrir 2 meses demora; quero que puxe os dados e armazena eles"): o navegador guarda a lista de cada dia e manda
+ * em params.dayCache a assinatura de cada dia que tem ({AAAA-MM-DD: assinatura}). Dia inteiro (arquivo do dia, completo) com a
+ * mesma assinatura não é lido nem mandado de novo (dayData.cached); os outros dias inteiros vão separados (dayData.days), para o
+ * navegador guardar. Assinatura = arquivo do dia (muda a cada regravação: IDs de viagem, lote/login, novo download) + versão do
+ * painel + campos e preenchimentos do painel. Só painéis de remessas (não agrupados, sem foto do momento e sem Histórico).
+ */
+function dayCacheFor_(cfg, params) {
+  const have = params && params.dayCache;
+  if (!have || typeof have !== 'object' || Array.isArray(have) || cfg.grouped || cfg.snapshot || cfg.historyOf) return null;
+  const fields = clientFields_(cfg), fill = fillEmpty_(cfg);
+  const base = hashText_([APP_CONFIG.VERSION, DERIVE_VERSION_, fields.join(','), JSON.stringify(fill)].join('|'));
+  const ok = {};
+  Object.keys(have).slice(0, 400).forEach(d => { if (isIso_(d) && typeof have[d] === 'string' && have[d].length < 200) ok[d] = have[d]; });
+  let extra = 0;
+  const out = {have: ok, cached: [], days: {},
+    sig: df => String(df.fileId) + ':' + df.rows + ':' + base,
+    count: n => { extra += Number(n) || 0; },
+    fresh: (date, sig, enc) => {
+      const b = DatasetBuilder_(fields, fill);
+      b.addEncoded(enc);
+      out.days[date] = {sig: sig, ds: b.build()};
+      extra += enc.n || 0;
+    },
+    sink: builder => ({count: () => builder.count() + extra, addRows: rows => builder.addRows(rows), addEncoded: ds => builder.addEncoded(ds)})};
+  return out;
+}
+
 function getDashboardData(indicatorKey, params) {
   const cfg = getIndicatorConfig_(indicatorKey);
   JTCore_.setFilterScopes(cfg.filterScopes || {});
@@ -802,8 +830,12 @@ function getDashboardData(indicatorKey, params) {
   const filters = summaryMode ? normalizeFilters_(params && params.filters) : null;
   const builder = summaryMode ? GroupSummarySink_(cfg, filters, APP_CONFIG.GROUPED_TOP_ROWS) : DatasetBuilder_(clientFields_(cfg), fillEmpty_(cfg));
   const maxRows = summaryMode ? Infinity : maxClientRows_();
+  // V4.27: dias que o navegador já guardou (iguais) não são lidos nem mandados de novo; os outros vão um por dia.
+  const dayCache = summaryMode ? null : dayCacheFor_(cfg, params);
+  const sink = dayCache ? dayCache.sink(builder) : builder;
   const archive = historyListBlocked_(cfg, indicatorKey, p.to) ? blockedArchive_(p.to)
-    : scanArchive_(indicatorKey, p.from, p.to, summaryMode ? {maxRows: maxRows, deadline: Date.now() + APP_CONFIG.GROUPED_SUMMARY_BUDGET_MS} : {maxRows: maxRows}, builder);
+    : scanArchive_(indicatorKey, p.from, p.to, summaryMode ? {maxRows: maxRows, deadline: Date.now() + APP_CONFIG.GROUPED_SUMMARY_BUDGET_MS}
+      : {maxRows: maxRows, dayCache: dayCache}, sink);
   const built = summaryMode ? builder.build() : null;
   const out = safeReturn_({
     meta: {
@@ -816,7 +848,7 @@ function getDashboardData(indicatorKey, params) {
       archive: {loadedDates: archive.loadedDates, partialDates: archive.partialDates, staleDates: archive.staleDates,
         notDownloaded: archive.notDownloaded, notLoaded: archive.notLoaded, emptyDates: archive.emptyDates,
         readFiles: archive.readFiles, fullyLoaded: archive.fullyLoaded, maxRows: summaryMode ? null : maxRows},
-      rowsLoaded: summaryMode ? built.cubeRows : builder.count(),
+      rowsLoaded: summaryMode ? built.cubeRows : sink.count(),
       // Por que falta detalhe (fila, partes baixadas de cada lista, erro): o painel mostra no lugar de "sem dados".
       detailProgress: archive.fullyLoaded ? null : safeCall_(() => detailProgress_(indicatorKey, p.from, p.to)),
       // Recebimento: números que o JMS não separa por horário no resumo (turnos só pelo detalhe).
@@ -877,6 +909,7 @@ function getDashboardData(indicatorKey, params) {
     out.summary = {marginals: built.marginals, top: built.top, topLimit: built.topLimit, totalQty: built.totalQty,
       cubeRows: built.cubeRows, filters: filters};
   } else out.dataset = builder.build();
+  if (dayCache) out.dayData = {days: dayCache.days, cached: dayCache.cached};
   // V3.34: Sem Movimentação — só a lista da linha dos cartões (nada de outras linhas juntas).
   const rowCol = summaryMode ? null : rowListType_(cfg, indicatorKey, p.to);
   if (rowCol !== null) {

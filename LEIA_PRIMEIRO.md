@@ -4,6 +4,29 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.27.0 — 2 meses no painel: listas guardadas no navegador, sem limite de 500 mil e sem cota no Node
+
+Pedido: "abrir os 2 meses no painel demora; quero que puxe os dados e armazena eles" e "pensei que foi tirado essa questão de cota".
+
+Medido com volume parecido com o real (Falta de Bipagem na Expedição, 62 dias × 11 mil = 682 mil remessas, dados fictícios):
+
+| | Antes | Agora |
+|---|---|---|
+| Remessas nos gráficos | 500 mil (17 dias fora: "Limite de 500.000 remessas") | 682 mil (os 62 dias) |
+| Baixado pelo navegador ao abrir de novo | 27 MB toda vez | 8 KB (os dias já guardados não vêm de novo) |
+| Tempo na tela (abrir de novo) | 6,3 s | 3,0 s |
+
+- **Listas guardadas no navegador:** a lista de cada dia fica guardada no navegador (IndexedDB). Ao abrir um período, o painel
+  manda o que já tem e o servidor só manda os dias novos ou que mudaram (hoje, um dia baixado de novo, IDs de viagem novos).
+  A 1ª vez em cada navegador baixa tudo; depois, só o que mudou. Dias com mais de 100 dias saem sozinhos. Vale para os painéis
+  de remessas (não para Sem Movimentação e Lotes). Janela anônima ou navegador sem espaço: funciona como antes.
+- **Node: até 1 milhão de remessas por consulta** (antes 500 mil). Os 2 meses da Falta de Bipagem na Expedição cabem inteiros.
+- **Contagem de remessas mais rápida** na tela (era contada várias vezes, com 700 mil linhas levava mais de 2 s).
+- **Fila:** a lista de um dia que você abriu na tela (período sem a lista) é baixada logo depois das taxas, antes das listas dos
+  outros painéis (vale 6 h).
+- **Cota:** no Node não existe cota do Google. A propriedade `COTA_GOOGLE` (e `RECEBIMENTO_MIN_POR_DIA` / `EXPEDICAO_MIN_POR_DIA`)
+  era gravada pelo próprio Node para desligar os tetos; agora sai sozinha e não aparece mais em Configurações.
+
 ## V4.26.0 — Fluxos fora do código, Lotes só no painel dela e Sem Movimentação por último na fila
 
 Pedido: "desativei os dash de fluxo operacional de recebimento e expedição. Retirar do código para não influenciar. Deixar por

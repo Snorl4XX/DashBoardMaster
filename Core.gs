@@ -786,9 +786,21 @@ function JTCoreFactory_() {
     return Object.keys(map).map(function (l) { return {label: l, value: map[l]}; })
       .sort(function (a, b) { return b.value - a.value || compareText(a.label, b.label); });
   }
+  // V4.27: 2 meses = ~700 mil remessas — a mesma lista é contada várias vezes ao montar a tela (cartões, selos, tabela). A conta
+  // fica guardada por lista (mesmo array e mesmo tamanho) e usa Set (o objeto comum ficava lento com centenas de milhares de chaves).
+  var DISTINCT_MEMO = typeof WeakMap === 'function' ? new WeakMap() : null;
   function distinctCount(rows) {
-    var seen = {}, n = 0;
-    (rows || []).forEach(function (r) { var id = r.date + '|' + r.shipment; if (!seen[id]) { seen[id] = 1; n += weight(r); } });
+    var list = rows || [], memo = DISTINCT_MEMO && rows ? DISTINCT_MEMO.get(rows) : null;
+    if (memo && memo.len === list.length) return memo.n;
+    var n = 0, i, r, id;
+    if (typeof Set === 'function') {
+      var seen = new Set();
+      for (i = 0; i < list.length; i++) { r = list[i]; id = r.date + '|' + r.shipment; if (!seen.has(id)) { seen.add(id); n += weight(r); } }
+    } else {
+      var obj = {};
+      for (i = 0; i < list.length; i++) { r = list[i]; id = r.date + '|' + r.shipment; if (!obj[id]) { obj[id] = 1; n += weight(r); } }
+    }
+    if (DISTINCT_MEMO && rows) DISTINCT_MEMO.set(rows, {len: list.length, n: n});
     return n;
   }
   function compareText(a, b) {

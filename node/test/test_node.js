@@ -191,7 +191,7 @@ function firstDiff(a, b, p) {
       const b = normalize(await api('getDashboardData', [ind, params]));
       // V4.25.3: o limite de remessas por consulta é do ambiente (Apps Script 150 mil, Node 500 mil); o resto tem de ser igual.
       const lim = [a, b].map(x => x.meta && x.meta.archive ? x.meta.archive.maxRows : undefined);
-      if ((lim[0] === 150000 || lim[0] === null) && lim[1] === (lim[0] === null ? null : 500000)) { delete a.meta.archive.maxRows; delete b.meta.archive.maxRows; }
+      if ((lim[0] === 150000 || lim[0] === null) && lim[1] === (lim[0] === null ? null : 1000000)) { delete a.meta.archive.maxRows; delete b.meta.archive.maxRows; }
       const d = firstDiff(a, b, ind);
       check(!d, 'painel igual ao do Apps Script: ' + ind + ' ' + params.from + '→' + params.to, d);
     }

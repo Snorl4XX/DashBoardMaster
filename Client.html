@@ -641,6 +641,121 @@
     });
   }
 
+  // ------------------------------------------------------------------ V4.27: lista de cada dia guardada no navegador
+  /**
+   * Pedido "abrir 2 meses demora; quero que puxe os dados e armazena eles": a lista de remessas de cada dia fica guardada neste
+   * navegador (IndexedDB). Ao abrir um período, o painel manda a assinatura de cada dia que já tem e o servidor só manda os
+   * dias novos ou que mudaram (hoje, um dia baixado de novo, IDs de viagem novos). Sem IndexedDB (janela anônima, navegador
+   * antigo, sem espaço), tudo vem do servidor como antes.
+   */
+  var DayStore = (function () {
+    var NAME = 'jt_dashmaster_dias', ST = 'dias', KEEP_DAYS = 100, dbp = null;
+    function open() {
+      if (dbp) return dbp;
+      dbp = new Promise(function (resolve) {
+        try {
+          if (!window.indexedDB) { resolve(null); return; }
+          var rq = indexedDB.open(NAME, 1);
+          rq.onupgradeneeded = function () { if (!rq.result.objectStoreNames.contains(ST)) rq.result.createObjectStore(ST, {keyPath: 'k'}); };
+          rq.onsuccess = function () { resolve(rq.result); };
+          rq.onerror = function () { resolve(null); };
+          rq.onblocked = function () { resolve(null); };
+        } catch (e) { resolve(null); }
+      });
+      return dbp;
+    }
+    function timeout(p, ms, v) { return Promise.race([p, new Promise(function (r) { setTimeout(function () { r(v); }, ms); })]); }
+    /** Colunas como números de 32 bits: metade do espaço e cópia rápida. */
+    function compact(ds) {
+      var cols = {};
+      Object.keys(ds.cols || {}).forEach(function (f) { cols[f] = window.Uint32Array && Uint32Array.from ? Uint32Array.from(ds.cols[f]) : ds.cols[f]; });
+      return {v: ds.v, n: ds.n, fields: ds.fields, dict: ds.dict, cols: cols};
+    }
+    return {
+      /** Dias guardados do painel no período: {AAAA-MM-DD: {sig, ds}}. */
+      range: function (ind, from, to) {
+        if (!ind || !from || !to) return Promise.resolve({});
+        return timeout(open().then(function (db) {
+          if (!db) return {};
+          return new Promise(function (resolve) {
+            try {
+              var out = {}, rq = db.transaction(ST, 'readonly').objectStore(ST).openCursor(IDBKeyRange.bound(ind + '|' + from, ind + '|' + to));
+              rq.onsuccess = function () {
+                var cur = rq.result;
+                if (!cur) { resolve(out); return; }
+                var e = cur.value;
+                if (e && e.sig && e.ds && e.ds.n >= 0) out[e.date] = e;
+                cur.continue();
+              };
+              rq.onerror = function () { resolve({}); };
+            } catch (e) { resolve({}); }
+          });
+        }), 5000, {});
+      },
+      /** Guarda os dias que o servidor mandou (em segundo plano; sem espaço, segue sem guardar). */
+      put: function (ind, days) {
+        var keys = Object.keys(days || {});
+        if (!keys.length) return;
+        open().then(function (db) {
+          if (!db) return;
+          try {
+            var s = db.transaction(ST, 'readwrite').objectStore(ST), now = Date.now();
+            keys.forEach(function (d) { s.put({k: ind + '|' + d, ind: ind, date: d, sig: days[d].sig, ds: compact(days[d].ds), at: now}); });
+          } catch (e) { /* sem espaço */ }
+        });
+      },
+      /** Apaga os dias com mais de 100 dias (o painel mostra até 2 meses + o período anterior). */
+      prune: function (today) {
+        open().then(function (db) {
+          if (!db || !today) return;
+          var cut = Core.addDays(today, -KEEP_DAYS);
+          try {
+            var rq = db.transaction(ST, 'readwrite').objectStore(ST).openCursor();
+            rq.onsuccess = function () { var cur = rq.result; if (!cur) return; if (!cur.value || !(cur.value.date >= cut)) cur.delete(); cur.continue(); };
+          } catch (e) { /* nada */ }
+        });
+      }
+    };
+  })();
+  /**
+   * Linhas do período: as que vieram juntas (dias pela metade) + os dias inteiros que vieram agora + os guardados no navegador,
+   * na mesma ordem de antes (dia mais novo primeiro). null = faltou um dia guardado (o painel pede tudo de novo).
+   */
+  function periodRows(res, have) {
+    var dd = res.dayData, rows = Core.decodeDataset(res.dataset);
+    if (!dd) return rows;
+    var byDate = {};
+    var missing = (dd.cached || []).some(function (d) { return !have || !have[d]; });
+    if (missing) return null;
+    rows.forEach(function (r) { (byDate[r.date] = byDate[r.date] || []).push(r); });
+    Object.keys(dd.days || {}).forEach(function (d) { byDate[d] = (byDate[d] || []).concat(Core.decodeDataset(dd.days[d].ds)); });
+    (dd.cached || []).forEach(function (d) { byDate[d] = (byDate[d] || []).concat(Core.decodeDataset(have[d].ds)); });
+    var out = [];
+    Object.keys(byDate).sort().reverse().forEach(function (d) { var l = byDate[d]; for (var i = 0; i < l.length; i++) out.push(l[i]); });
+    return out;
+  }
+  /** getDashboardData com os dias guardados no navegador (só painéis de remessas; Histórico e foto do momento ficam de fora). */
+  function fetchDashboard(key, req, c) {
+    var useDays = !!(c && !c.grouped && !c.snapshot && !isHist() && req.from && req.to);
+    var haveP = useDays ? DayStore.range(key, req.from, req.to) : Promise.resolve(null);
+    return haveP.then(function (have) {
+      var r = Object.assign({}, req);
+      if (have) { r.dayCache = {}; Object.keys(have).forEach(function (d) { r.dayCache[d] = have[d].sig; }); }
+      return call('getDashboardData', key, r).then(function (res) {
+        var rows = periodRows(res, have);
+        // Um dia guardado sumiu no meio (outra aba limpou): pede o período inteiro de novo, sem os guardados.
+        if (rows === null) return call('getDashboardData', key, Object.assign({}, req, {dayCache: {}})).then(function (res2) {
+          res2.rowsDecoded = periodRows(res2, {});
+          if (res2.dayData) setTimeout(function () { DayStore.put(key, res2.dayData.days); }, 0);
+          return res2;
+        });
+        res.rowsDecoded = rows;
+        if (res.dayData) setTimeout(function () { DayStore.put(key, res.dayData.days); }, 0);
+        return res;
+      });
+    });
+  }
+
   // ------------------------------------------------------------------ avisos e carregamento
   function toast(msg, type, opts) {
     opts = opts || {};
@@ -732,6 +847,8 @@
         if (state.view === 'results') renderResults(); else if (state.data) renderDashboard();
       });
       state.boot = boot;
+      // V4.27: dias guardados no navegador com mais de 100 dias saem (em segundo plano).
+      setTimeout(function () { DayStore.prune(boot.today); }, 5000);
       state.catalog = boot.catalog || [];
       state.catalog.forEach(function (c) { state.catalogMap[c.key] = c; });
       $('#appVersion').textContent = 'v' + boot.app.version;
@@ -1117,14 +1234,14 @@
     if (isLive() && state.boot && state.boot.today) { state.from = state.boot.today; state.to = state.boot.today; }
     var req = isHist() ? {from: state.hist.from, to: state.hist.to} : {from: state.from, to: state.to};
     if (c && c.grouped) req.filters = filtersObj();
-    return call('getDashboardData', key, req).then(function (res) {
+    return fetchDashboard(key, req, c).then(function (res) {
       if (seq !== state.seq) return;
       renderSyncBanner(res.meta.pauses);
       var sm = res.summary;
       state.dailyF = null;  // V4.23.3: dados novos — a Evolução diária com filtro é buscada de novo
       state.data = {meta: res.meta, rates: res.rates || [], rateVariants: res.rateVariants || null, agg: res.agg || [], colAgg: res.colAgg || {},
         shiftSum: res.shiftSum || {}, routes: res.routes || null,
-        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applyV425(Core.applySegmentBase(Core.applyDocks(Core.applyAliases(Core.decodeDataset(res.dataset), c && c.valueAliases), c && c.docks), c && c.segmentBase), c), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
+        rows: Core.applyDayOf(Core.applyOrderKinds(Core.applyV425(Core.applySegmentBase(Core.applyDocks(Core.applyAliases(res.rowsDecoded || Core.decodeDataset(res.dataset), c && c.valueAliases), c && c.docks), c && c.segmentBase), c), c && c.orderKinds, res.orderKindTags), c && c.dayOf),
         // Recebimento com período grande: totais por campo prontos (filtros aplicados no servidor).
         summary: sm ? {byDim: Core.marginalsByDim(sm.marginals), top: Core.decodeDataset(sm.top), topLimit: sm.topLimit,
           totalQty: sm.totalQty, cubeRows: sm.cubeRows} : null};

@@ -166,10 +166,10 @@ class GasRuntime {
     ensureDbSpreadsheet(this.db, 'J&T Dashboard - Banco de Dados');
     const set = (k, v) => { if (props.getProperty(k) === null) props.setProperty(k, v); };
     set('DB_SPREADSHEET_ID', DB_ID);
-    // Sem cota diária: a fila usa o tempo que precisar (os downloads pesados já ficam por último na fila).
-    set('COTA_GOOGLE', 'workspace');
-    set('RECEBIMENTO_MIN_POR_DIA', '0');
-    set('EXPEDICAO_MIN_POR_DIA', '0');
+    // V4.27 (pedido "pensei que foi tirado essa questão de cota"): no Node não existe cota do Google. As propriedades que a
+    // versão antiga gravava para desligar os tetos (COTA_GOOGLE, RECEBIMENTO_MIN_POR_DIA, EXPEDICAO_MIN_POR_DIA) saem:
+    // o código já trata o Node como "sem cota" (googlePlan_ e fetchBudgetMode_).
+    ['COTA_GOOGLE', 'RECEBIMENTO_MIN_POR_DIA', 'EXPEDICAO_MIN_POR_DIA'].forEach(k => { if (props.getProperty(k) !== null) props.deleteProperty(k); });
     set('PLATAFORMA', 'node');
     // V4.5: o Apps Script baixa cada dia uma vez (modo diário, por causa da cota); aqui a coleta continua o dia todo.
     set('MODO_ATUALIZACAO', 'continuo');

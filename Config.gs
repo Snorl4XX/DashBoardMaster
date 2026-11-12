@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.26.0',
+  VERSION: '4.27.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -37,7 +37,7 @@ const APP_CONFIG = Object.freeze({
   DASHBOARD_LOAD_BUDGET_MS: 22000,
   // V4.25.3: no Node.js (notebook/nuvem) os arquivos são locais e não há o teto de 6 min/50 MB do Google. Com os limites do
   // Apps Script, "30 dias" da Falta de Bipagem na Expedição (~11 mil remessas/dia) mostrava só 13 dias e o Excel parava em 60 mil.
-  NODE_MAX_CLIENT_ROWS: 500000,      // remessas no navegador por consulta (DASHBOARD_MAX_ROWS muda, até 1 milhão)
+  NODE_MAX_CLIENT_ROWS: 1000000,     // remessas no navegador por consulta (V4.27: 2 meses da Falta de Bipagem na Expedição cabem inteiros)
   NODE_MAX_DETAIL_FILES: 3000,       // arquivos de detalhe lidos por consulta (páginas de dias ainda não juntados)
   NODE_LOAD_BUDGET_MS: 90000,        // tempo de leitura dos detalhes por consulta
   NODE_MAX_REPORT_DETAIL_ROWS: 500000, // relatório Excel/PDF: mesmas remessas do painel (a aba Dados do PDF continua com 1.500)

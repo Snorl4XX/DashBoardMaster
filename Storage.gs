@@ -731,6 +731,14 @@ function scanArchive_(indicator, from, to, opts, sink) {
       files = pages.map(p => p.fileId).filter((f, k, a) => a.indexOf(f) === k);
       kind = s && s.details === 'COMPLETE' ? 'pages' : 'partial';
     }
+    // V4.27: dia inteiro (arquivo do dia) que o navegador já tem igual (mesma assinatura): não lê o arquivo nem manda de novo.
+    const dc = opts.dayCache && kind === 'day' && files.length === 1 ? opts.dayCache : null;
+    const sig = dc ? dc.sig(df) : '';
+    if (dc && dc.have[date] === sig) {
+      if (loaded.length && sink.count() + df.rows > maxRows) { notLoaded.push(date); stop = true; continue; }
+      dc.cached.push(date); dc.count(df.rows); loaded.push(date);
+      continue;
+    }
     // O dia mais recente sempre é tentado (mesmo acima do limite de arquivos), respeitando o tempo.
     if ((loaded.length && readFiles + files.length > maxFiles) || sink.count() >= maxRows || Date.now() > deadline) {
       notLoaded.push(date); stop = true; continue;
@@ -747,6 +755,8 @@ function scanArchive_(indicator, from, to, opts, sink) {
     const day = dayPayload_(indicator, parts);
     const n = day.encoded ? day.encoded.n : day.rows.length;
     if (loaded.length && sink.count() + n > maxRows) { notLoaded.push(date); stop = true; continue; }
+    // V4.27: dia inteiro vai separado, com a assinatura, para o navegador guardar.
+    if (dc && day.encoded && kind === 'day') { dc.fresh(date, sig, day.encoded); loaded.push(date); continue; }
     if (day.encoded) sink.addEncoded(day.encoded); else sink.addRows(day.rows);
     loaded.push(date);
     if (kind === 'partial') partial.push(date);
@@ -1479,8 +1489,28 @@ function queueMissingDetails_(indicator, from, to, archive) {
     if (!ativo('DETAIL_INIT', d)) fila.push(['DETAIL_INIT', indicator, d, 1]);
   });
   const n = fila.length ? enqueueJobs_(fila.slice(0, 124), {reset: true}) : 0;
+  // V4.27: os dias que a pessoa abriu na tela passam na frente das listas dos outros painéis (por 6 h).
+  if (want.length) markScreenDays_(indicator, want);
   if (n) logSync_('INFO', indicator, to, 'Período aberto no painel: ' + n + ' download(s) de dia(s) sem a lista pedido(s) agora (' + want.length + ' dia(s) sem a lista).');
   return {days: want.length, queued: n};
+}
+/**
+ * V4.27 (pedido "abrir 2 meses demora; quero que puxe os dados e armazena eles"): dias pedidos pela tela (período aberto sem a
+ * lista) — a fila baixa essas listas logo depois das taxas, antes das listas dos outros painéis. Vale 6 h; no máximo 400 dias.
+ */
+const SCREEN_DAYS_PROP_ = 'FILA_TELA';
+function markScreenDays_(indicator, dates) {
+  const now = Date.now(), cur = safeJsonParse_(getProp_(SCREEN_DAYS_PROP_, ''), {}) || {}, out = {};
+  Object.keys(cur).forEach(k => { if (now - Number(cur[k]) < 6 * 3600000) out[k] = cur[k]; });
+  dates.forEach(d => { out[indicator + '|' + d] = now; });
+  const keys = Object.keys(out).sort((a, b) => out[b] - out[a]).slice(0, 400), keep = {};
+  keys.forEach(k => { keep[k] = out[k]; });
+  setProp_(SCREEN_DAYS_PROP_, JSON.stringify(keep));
+}
+function screenDays_() {
+  const now = Date.now(), cur = safeJsonParse_(getProp_(SCREEN_DAYS_PROP_, ''), {}) || {}, out = {};
+  Object.keys(cur).forEach(k => { if (now - Number(cur[k]) < 6 * 3600000) out[k] = 1; });
+  return out;
 }
 /** Downloads de lista (DETAIL_INIT) na fila ou rodando: {"indicador|data": 1}. */
 function activeDetailJobs_() {
@@ -1560,8 +1590,10 @@ function pendingJobs_() {
   const prio = {SUMMARY: 0, DETAIL_INIT: 1, DETAIL_PAGE: 1, COMPACT: 2, TRIPS: 2.8, SCANS: 2.8};
   // Detalhe agrupado pesado por último: nunca atrasa os outros painéis. Entre os dias dele, primeiro o dia em que o painel abre
   // (ontem), depois hoje e os mais antigos.
-  const anchor = {};
+  const anchor = {}, screen = screenDays_();
   const rank = j => {
+    // V4.27: lista de um dia que a pessoa abriu na tela: logo depois das taxas (dia mais novo primeiro).
+    if (j.type === 'DETAIL_INIT' && screen[j.indicator + '|' + j.date] && !heavyGrouped_(INDICATORS[j.indicator])) return 0.5;
     // V4.26 (pedido "deixar por último os dados do Sem Movimentação"): a foto do Sem Movimentação (número e lista) depois de
     // tudo — antes (V3.30) ia na frente. Abrir o painel dela continua buscando a foto de agora na hora (botão/abertura).
     if (INDICATORS[j.indicator] && INDICATORS[j.indicator].snapshot && (j.type === 'SUMMARY' || j.type === 'DETAIL_INIT')) return j.type === 'SUMMARY' ? 9 : 9.5;
@@ -2791,6 +2823,8 @@ function onlyHeavyFlows_() {
 function sendBudgetKey_(indicator) { return !!(indicator && INDICATORS[indicator] && INDICATORS[indicator].byRoute); }
 /** "gmail" | "workspace": dono da planilha do banco (escopo do Drive, já autorizado). COTA_GOOGLE manda. */
 function googlePlan_() {
+  // V4.27: no Node não há cota do Google (nada de teto de conta Gmail), com ou sem a propriedade COTA_GOOGLE.
+  if (onNode_()) return 'workspace';
   const forced = String(getProp_('COTA_GOOGLE', '')).toLowerCase();
   if (forced === 'gmail' || forced === 'workspace') return forced;
   const cached = getProp_('GOOGLE_PLAN_AUTO', '');
