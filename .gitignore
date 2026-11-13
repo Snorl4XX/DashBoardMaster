@@ -23,3 +23,7 @@ controle-patio/config.json
 controle-patio/dist/
 painel-operacional/config.json
 painel-operacional/dist/
+rota_certa/dados/
+rota_certa/config.json
+rota_certa/planilhas/
+rota_certa/dist/

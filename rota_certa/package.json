@@ -1,0 +1,16 @@
+{
+  "name": "jt-rota-certa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "J&T Rota Certa: painel em tempo real das remessas carregadas na rota errada (linha principal e secundária do SP GRU), pelo 3 Segmentos da Gestão de pedido do JMS e a tabela de rotas do SC.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/teste.js",
+    "zip": "node gerar-zip.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "UNLICENSED"
+}
