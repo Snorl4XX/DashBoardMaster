@@ -3896,12 +3896,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const seg = (c, d) => { const r = CB.applyDocks([{segmentRaw: CB.segmentHead2(c), segment: CB.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
   const stop = (v, d) => { const r = CB.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
   const est = (v, d) => { const r = CB.applyDocks([{destination: v, date: d}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
-  const MID = '2026-11-09', BACK = '2026-11-10', LATER = '2026-11-25', wrong = [];
+  const MID = '2026-11-09', BACK = '2026-11-10', LATER = '2026-11-15', wrong = []; // V4.28: de 16/11 valem as tabelas novas
   const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
   [['TO,1', 'TO PMW'], ['MRB,1', 'PA MRB'], ['RO,1', 'RO PVH'], ['AC,1', 'AC RBR'], ['RBR,1', 'DC RBR-AC']].forEach(([c, p]) => {
     want(seg(c, MID), 'DF BSB | DOCA 38', 'código ' + c + ' em 09/11 (histórico)');
     want(seg(c, BACK), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 10/11');
-    want(seg(c, LATER), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 25/11');
+    want(seg(c, LATER), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 15/11');
     want(stop(p, MID), 'DF BSB | DOCA 38', 'parada ' + p + ' em 09/11');
     want(stop(p, BACK), 'SP BRE | DOCA 21/22', 'parada ' + p + ' em 10/11');
     want(est(p, MID), 'DF BSB | Esteira 3', 'esteira de ' + p + ' em 09/11');
@@ -3925,6 +3925,74 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     sb('RO,3', BACK) === 'SP BRE' && sb('RBR,6', BACK) === 'SP BRE' && sb('RBR,6', MID) === 'DF BSB' && sb('CDG,4', BACK) === 'RJ SJM' && sb('DF,1', BACK) === 'DF BSB' &&
     sb('JPN,1', BACK) === 'MT CGB' && mix.join('|') === 'SP BRE|DF BSB|SP BRE',
   'segmento (base) de 10/11: TO/MRB/RO/AC/RBR no SP BRE; de 01/11 a 09/11 no DF BSB; CDG no RJ SJM', [sb('TO,1', BACK), sb('RBR,6', BACK), mix.join('|')]);
+}
+
+// ---------- V4.28: tabelas de 16/11 — docas novas da linha principal e da secundária ----------
+{
+  const vmN = require('vm');
+  const cN = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CN = cN.JTCore_, DEXP = vmN.runInContext('DOCKS_EXPEDICAO', cN), DPP = vmN.runInContext('DOCKS_PROXIMA_PARADA', cN);
+  const EST = vmN.runInContext('ESTEIRAS_SC_DC', cN);
+  const seg = (c, d) => { const r = CN.applyDocks([{segmentRaw: CN.segmentHead2(c), segment: CN.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CN.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d) => { const r = CN.applyDocks([{destination: v, date: d}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const OLD = '2026-11-15', NEW = '2026-11-16', LATER = '2026-11-30', wrong = [];
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  // [código de três segmentos, rota, doca, linha de desvio do DWS] — como nas duas tabelas de 16/11.
+  const TAB = [
+    ['GO,100-00,1', 'GO GYN', 'DOCA 05', 7], ['SC1,1', 'SC BNU', 'DOCA 06', 7], ['RS,1', 'RS NSR', 'DOCA 07', 7],
+    ['GRU,402-03,1', 'DC TBT-SP', 'DOCA 08', 7], ['SP,421-00,1', 'DC TBT-SP', 'DOCA 08', 7], ['GRU,402-04,1', 'DC TBT-SP', 'DOCA 08', 7],
+    ['GRU,402-10,1', 'DC TBT-SP', 'DOCA 08', 7], ['SNS,1', 'BA FEC', 'DOCA 09', 7], ['CHV,1', 'MG CGE', 'DOCA 10', 7],
+    ['CE,1', 'CE FOR', 'DOCA 15', 4], ['CAC,1', 'PR SJS', 'DOCA 16', 4], ['BYE,1', 'PE JGS', 'DOCA 17', 4],
+    ['SP,368-00,1', 'SP BRE', 'DOCA 18', 4], ['SP,397-00,1', 'SP BRE', 'DOCA 18', 4], ['NAT,1', 'SP BRE', 'DOCA 18', 4], ['LDB,1', 'SP BRE', 'DOCA 18', 4],
+    ['MIA,1', 'SP BRE', 'DOCA 18', 4], ['MA,1', 'SP BRE', 'DOCA 18', 4], ['GRU,381-07,1', 'DC JND 02-SP', 'DOCA 18', 4], ['AL,1', 'SE AJU', 'DOCA 19', 4],
+    ['AM,1', 'AM MAO', 'DOCA 20', 2], ['BVB,1', 'AM MAO', 'DOCA 20', 2], ['RJ1,1', 'RJ SJM', 'DOCA 21/22', 2], ['CDG,1', 'RJ SJM', 'DOCA 21/22', 2],
+    ['SP,395-05,1', 'DC GRU-SP', 'DOCA 23', 2], ['GRU,381-00,1', 'DC GRU-SP', 'DOCA 23', 2], ['GRU,378-04,1', 'DC GRU-SP', 'DOCA 23', 2],
+    ['DF,1', 'DF BSB', 'DOCA 44', 3], ['MRB,1', 'DF BSB', 'DOCA 44', 3], ['RO,1', 'DF BSB', 'DOCA 44', 3], ['TO,1', 'DF BSB', 'DOCA 44', 3],
+    ['AC,1', 'DF BSB', 'DOCA 44', 3], ['RBR,1', 'DF BSB', 'DOCA 44', 3], ['SBN,375-10,1', 'DC SBN-SP', 'DOCA 43', 3], ['IMP,1', 'PI THE', 'DOCA 42', 3],
+    ['PA,1', 'PA ANA', 'DOCA 41', 3], ['NE1,1', 'SP RBP', 'DOCA 40', 3], ['JPN,1', 'MT CGB', 'DOCA 39', 3], ['ES,1', 'ES SRR', 'DOCA 38', 3],
+    // Rotas secundárias: "Esteira" + o número da tabela; o DC SSZ-SP é doca.
+    ['VLANA,1', 'DC S-VLANA-SP', 'Esteira 01', 6], ['GRU,404-09,1', 'F S-PQBOTU-SP', 'Esteira 02', 6], ['GRU,404-08,1', 'F S-MGUE 02-SP', 'Esteira 03', 6],
+    ['GRU,404-10,1', 'F VLMT-SP', 'Esteira 04', 6], ['GRU,404-01,1', 'S-MGUE-SP', 'Esteira 05', 6], ['GRU,404-11,1', 'F S-JBO-SP', 'Esteira 06', 6],
+    ['GRU,378-05,1', 'DC SSZ-SP', 'DOCA 07 · DC SSZ-SP', 6], ['GRU,404-13,1', 'S-MGUE 02-SP', 'Esteira 09', 6],
+    ['MOO,430-03,1', 'DC S-MOO 02-SP', 'Esteira 10', 6], ['SP,364-00,1', 'DC S-MOO 02-SP', 'Esteira 10', 6],
+    ['GRU,404-12,1', 'F S-SAP 02-SP', 'Esteira 12', 5], ['GRU,404-06,1', 'F S-PENHA 03-SP', 'Esteira 13', 5], ['GRU,404-00,1', 'S-SRAF-SP', 'Esteira 15', 5],
+    ['GRU,404-05,1', 'F S-PENHA-SP', 'Esteira 17', 5], ['NOD,1', 'DC NOD-SP', 'Esteira 18', 5], ['GRU,404-04,1', 'F S-MGUE-SP', 'Esteira 19', 5],
+    ['GRU,404-03,1', 'S-SAPOP-SP', 'Esteira 20', 5], ['JDF,1', 'DC JDF-MG', 'Esteira 21', 5], ['BAU,1', 'DC BAU-SP', 'Esteira 22', 5],
+    ['MS,1', 'MS CGR', 'Esteira 23', 5], ['GRU,404-02,1', 'S-PENHA-SP', 'Esteira 24', 5], ['GRU,404-07,1', 'F S-PENHA 02-SP', 'Esteira 25', 5]
+  ];
+  TAB.forEach(([c, r, d]) => { want(seg(c, NEW), r + ' | ' + d, 'código ' + c + ' em 16/11'); want(seg(c, LATER), r + ' | ' + d, 'código ' + c + ' em 30/11'); });
+  // Até 15/11 o histórico continua com as docas da época.
+  [['SP,368-00,1', 'SP BRE | DOCA 21/22'], ['AM,1', 'SP BRE | DOCA 21/22'], ['BAU,1', 'SP BRE | DOCA 21/22'], ['MRB,1', 'SP BRE | DOCA 21/22'],
+    ['CE,1', 'CE FOR | DOCA 09'], ['MS,1', 'MS CGR | DOCA 43'], ['RJ,1', 'RJ SJM | DOCA 10'], ['GRU,404-02,1', 'S-PENHA-SP | Esteira 13'],
+    ['GRU,402-03,1', 'DC TBT-SP | DOCA 23'], ['SBN,375-01,1', 'SBN | DOCA 08'], ['GRU,378-05,1', 'DC SSZ-SP | DOCA 08/09']]
+    .forEach(([c, e]) => want(seg(c, OLD), e, 'código ' + c + ' em 15/11 (histórico)'));
+  // Próxima parada (Envio Errado, Triagem Errada, SC → SC) e esteira do SC → DC (linha de desvio do DWS).
+  [['SP BRE', 'SP BRE', 'DOCA 18', 4], ['DC MAO-AM', 'AM MAO', 'DOCA 20', 2], ['AM MAO', 'AM MAO', 'DOCA 20', 2], ['TO PMW', 'DF BSB', 'DOCA 44', 3],
+    ['DC RBR-AC', 'DF BSB', 'DOCA 44', 3], ['PA MRB', 'DF BSB', 'DOCA 44', 3], ['DC BAU-SP', 'DC BAU-SP', 'Esteira 22', 5], ['DC JDF-MG', 'DC JDF-MG', 'Esteira 21', 5],
+    ['MS CGR', 'MS CGR', 'Esteira 23', 5], ['DC CDG-RJ', 'RJ SJM', 'DOCA 21/22', 2], ['BA FEC', 'BA FEC', 'DOCA 09', 7], ['MG BHZ', 'MG CGE', 'DOCA 10', 7],
+    ['DC SBN', 'DC SBN-SP', 'DOCA 43', 3], ['DC SBN-SP', 'DC SBN-SP', 'DOCA 43', 3], ['PI THE', 'PI THE', 'DOCA 42', 3], ['F SJC-SP', 'DC TBT-SP', 'DOCA 08', 7],
+    ['DC GRU-SP', 'DC GRU-SP', 'DOCA 23', 2], ['DC SSZ-SP', 'DC SSZ-SP', 'DOCA 07 · DC SSZ-SP', 6], ['DC MOOCA2', 'DC S-MOO 02-SP', 'Esteira 10', 6],
+    ['S-PENHA-SP', 'S-PENHA-SP', 'Esteira 24', 5], ['DC JPN', 'MT CGB', 'DOCA 39', 3]].forEach(([p, r, d, l]) => {
+    want(stop(p, NEW), r + ' | ' + d, 'parada ' + p + ' em 16/11');
+    want(est(p, NEW), r + ' | Esteira ' + l, 'esteira de ' + p + ' em 16/11');
+  });
+  want(stop('SP BRE', OLD), 'SP BRE | DOCA 21/22', 'parada SP BRE em 15/11');
+  want(est('SP BRE', OLD), 'SP BRE | Esteira 2', 'esteira do SP BRE em 15/11');
+  want(est('DC BAU-SP', OLD), 'SP BRE | Esteira 2', 'esteira do DC BAU-SP em 15/11');
+  check(!wrong.length, 'tabelas de 16/11: docas novas da linha principal (SP BRE na 18, AM MAO na 20, RJ SJM na 21/22, DF BSB com MRB/RO/TO/AC…) ' +
+    'e da secundária (JDF, BAU e MS na tabela secundária); até 15/11 continua como era', wrong);
+  // Expedição A/B/C pela doca nova.
+  const exps = vmN.runInContext('EXPEDICOES_', cN), ex = d => CN.expeditionOf(d, exps);
+  check(ex('DOCA 18') === 'Expedição B' && ex('DOCA 08') === 'Expedição A' && ex('DOCA 44') === 'Expedição C' && ex('DOCA 07 · DC SSZ-SP') === 'Expedição A' &&
+    ex('Esteira 22') === 'Esteiras', 'Expedição A/B/C com as docas de 16/11 (DC SSZ-SP continua doca)', [ex('DOCA 18'), ex('DOCA 07 · DC SSZ-SP')]);
+  // Segmento (base) pela fórmula do WPS, pelo dia da remessa.
+  const sb = (code, date) => CN.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
+  const got = {AM: sb('AM,1', NEW), BVB: sb('BVB,1', NEW), BAU: sb('BAU,1', NEW), JDF: sb('JDF,1', NEW), MRB: sb('MRB,1', NEW), RBR: sb('RBR,1', NEW),
+    TO: sb('TO,1', LATER), CDG: sb('CDG,1', NEW), STM: sb('STM,1', NEW), JPN: sb('JPN,1', NEW), MRBold: sb('MRB,1', OLD), BAUold: sb('BAU,1', OLD)};
+  check(got.AM === 'AM MAO' && got.BVB === 'AM MAO' && got.BAU === 'DC BAU-SP' && got.JDF === 'DC JDF-MG' && got.MRB === 'DF BSB' && got.RBR === 'DF BSB' &&
+    got.TO === 'DF BSB' && got.CDG === 'RJ SJM' && got.STM === 'SP BRE' && got.JPN === 'MT CGB' && got.MRBold === 'SP BRE' && got.BAUold === 'SP BRE',
+  'segmento (base) de 16/11: AM/BVB no AM MAO, BAU no DC BAU-SP, JDF no DC JDF-MG, MRB/RO/TO/AC no DF BSB; até 15/11 no SP BRE', got);
 }
 
 // ---------- V4.24.3: Falta de Bipagem na Expedição com mais de 10 mil remessas no dia (lista travada no limite do JMS) ----------

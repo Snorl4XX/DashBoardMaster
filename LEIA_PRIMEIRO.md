@@ -4,6 +4,31 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.28.0 — Docas e rotas de 16/11
+
+Pedido: as tabelas "Alteração das docas de carregamento das rotas de longa distância a partir de 16 de novembro" e "… das rotas
+secundárias a partir de 16 de novembro" (atualizadas em 16/11) — "trocaram as docas dos destinos, mudaram tudo".
+
+- **Linha principal, docas novas** (vale pelo dia da remessa, desde 16/11; até 15/11 continua com as docas da época):
+
+  | Esteira (DWS) | Doca → rota |
+  |---|---|
+  | 7 | 05 GO GYN · 06 SC BNU · 07 RS NSR · 08 DC TBT-SP (era 23) · 09 BA FEC (era 18) · 10 MG CGE (era 19) |
+  | 4 | 15 CE FOR (era 09) · 16 PR SJS · 17 PE JGS · **18 SP BRE (era 21/22)** · 19 SE AJU (era 15) |
+  | 2 | **20 AM MAO (rota nova: AM e BVB)** · 21/22 RJ SJM (era 10) · 23 DC GRU-SP (era 44) |
+  | 3 | 44 DF BSB (era 38) · 43 DC SBN-SP (era 08) · 42 PI THE (era 41) · 41 PA ANA (era 20) · 40 SP RBP (era 39) · 39 MT CGB (era 42) · 38 ES SRR (era 40) |
+
+- **SP BRE sem BAU, JDF, AM, BVB, MRB, RO, TO e AC** ("Excluir" da tabela): MRB, RO, TO e AC (RBR) vão para o **DF BSB**, AM e BVB para
+  o **AM MAO**, JDF para o **DC JDF-MG** e BAU para o **DC BAU-SP**. O DC JND 02-SP (BRE 381-06/07/12), carregado com o SP BRE, vai junto
+  para a doca 18.
+- **Rotas secundárias** (esteiras 6 e 5) nas posições novas (ex.: S-PENHA-SP = Esteira 24, F S-PENHA 02-SP = Esteira 25, DC S-MOO 02-SP =
+  Esteira 10); **DC JDF-MG, DC BAU-SP e MS CGR** entram na tabela secundária (21, 22 e 23, "Docagem de carreta"). O DC SSZ-SP continua
+  doca: "DOCA 07 · DC SSZ-SP" (para não somar com a DOCA 07 do RS NSR).
+- Nomes da tabela: "SBN" agora é **DC SBN-SP** e "THE" é **PI THE** (a partir de 16/11).
+- Vale para as docas da Expedição, a próxima parada (Envio Errado, Triagem Errada, SC → SC), as esteiras do SC → DC e o segmento
+  pela fórmula do WPS (AM/BVB → AM MAO, BAU → DC BAU-SP, JDF → DC JDF-MG, MRB/RO/TO/AC → DF BSB). Nada precisa ser baixado de novo:
+  as docas são calculadas na leitura.
+
 ## V4.27.1 — Painel não trava com 1 a 2 meses e a fila espera a internet voltar
 
 Pedido: "de 1 mês a 2 meses ele trava e não mostra" e o erro "Falha de rede ao consultar o JMS: fetch failed (ENOTFOUND)".

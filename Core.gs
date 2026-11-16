@@ -310,8 +310,18 @@ function JTCoreFactory_() {
    * no RJ SJM. De 01/11 a 09/11 continua DF BSB (o histórico fica como era). Mesma data de Config.gs → BRE_BACK_FROM_2026_11_10_.
    */
   var SEG_FIRST_FROM_2026_11_10_ = {RBR: 'SP BRE', CDG: 'RJ SJM'};
-  /** Período das rotas pelo dia da remessa: 0 = até 31/10 · 1 = 01/11 a 09/11 (TO/MRB/RO/AC no DF BSB) · 2 = desde 10/11. */
-  function segPeriod_(date) { var d = date ? String(date) : ''; return d >= '2026-11-10' ? 2 : d >= '2026-11-01' ? 1 : 0; }
+  /**
+   * V4.28 (tabelas de 16/11): o SP BRE perde BAU, JDF, AM, BVB, MRB, RO, TO e AC — MRB, RO, TO e AC (RBR) vão para o DF BSB, AM e
+   * BVB para a rota nova AM MAO, JDF para o DC JDF-MG e BAU para o DC BAU-SP; CDG continua no RJ SJM. Mesma data de Config.gs →
+   * ROUTES_FROM_2026_11_16_.
+   */
+  var SEG_FIRST_FROM_2026_11_16_ = {AM: 'AM MAO', BVB: 'AM MAO', BAU: 'DC BAU-SP', JDF: 'DC JDF-MG', TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB',
+    AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM'};
+  /**
+   * Período das rotas pelo dia da remessa: 0 = até 31/10 · 1 = 01/11 a 09/11 (TO/MRB/RO/AC no DF BSB) · 2 = 10/11 a 15/11 ·
+   * 3 = desde 16/11 (tabelas de 16/11).
+   */
+  function segPeriod_(date) { var d = date ? String(date) : ''; return d >= '2026-11-16' ? 3 : d >= '2026-11-10' ? 2 : d >= '2026-11-01' ? 1 : 0; }
   function segmentBase(v, date) {
     if (blank(v)) return '';
     var c = String(v).trim(), up = c.toUpperCase();
@@ -324,6 +334,7 @@ function JTCoreFactory_() {
     if (up.slice(0, 4) === 'SBN,') return c.indexOf('375-') >= 0 ? 'SBN' : 'REVISAR SBN';
     if (up.slice(0, 4) === 'MOO,') return has(SEG_MOO_) ? 'MOOCA' : 'REVISAR MOO';
     var first = up.split(',')[0], per = segPeriod_(date);
+    if (per === 3 && SEG_FIRST_FROM_2026_11_16_[first]) return SEG_FIRST_FROM_2026_11_16_[first];
     if (per === 2 && SEG_FIRST_FROM_2026_11_10_[first]) return SEG_FIRST_FROM_2026_11_10_[first];
     if (per === 1 && SEG_FIRST_FROM_2026_11_01_[first]) return SEG_FIRST_FROM_2026_11_01_[first];
     for (var f = 0; f < SEG_FIRST_.length; f++) if (SEG_FIRST_[f][0].indexOf(first) >= 0) return SEG_FIRST_[f][1];

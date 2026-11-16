@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.27.1',
+  VERSION: '4.28.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -324,6 +324,86 @@ const MOVES_2026_11_01_ = [
 ];
 const DOCK_TABLE_2026_11_01_ = withBsb_(DOCK_TABLE_2026_10_30_, MOVES_2026_11_01_);
 const DOCK_TABLE_2026_11_10_ = withBreBack_(DOCK_TABLE_2026_10_30_, MOVES_2026_11_01_);
+/**
+ * V4.28 (tabelas "Alteração das docas de carregamento das rotas de longa distância a partir de 16 de novembro" e "… das rotas
+ * secundárias a partir de 16 de novembro", atualizadas em 16/11): docas trocadas em quase todas as rotas.
+ *  - Linha principal (linha de desvio do DWS):
+ *      7 = GO GYN 05 · SC BNU 06 · RS NSR 07 · DC TBT-SP 08 (era 23) · BA FEC 09 (era 18) · MG CGE 10 (era 19);
+ *      4 = CE FOR 15 (era 09) · PR SJS 16 · PE JGS 17 · SP BRE 18 (era 21/22) · SE AJU 19 (era 15);
+ *      2 = AM MAO 20 (rota nova, com AM e BVB) · RJ SJM 21/22 (era 10) · DC GRU-SP 23 (era 44);
+ *      3 = DF BSB 44 (era 38) · DC SBN-SP 43 (era 08) · PI THE 42 (era 41) · PA ANA 41 (era 20) · SP RBP 40 (era 39) ·
+ *          MT CGB 39 (era 42) · ES SRR 38 (era 40).
+ *  - SP BRE sem BAU, JDF, AM, BVB, MRB, RO, TO e AC ("Excluir" da tabela): MRB, RO, TO e AC (RBR) vão para o DF BSB ("Adicionar
+ *    novo código inicial"), AM e BVB para o AM MAO, JDF para o DC JDF-MG e BAU para o DC BAU-SP.
+ *  - Rotas secundárias (linhas 6 e 5): posições novas; DC JDF-MG (JDF), DC BAU-SP (BAU) e MS CGR (MS) entram na tabela
+ *    secundária (21, 22 e 23, "Docagem de carreta").
+ *  - "SBN" passa a se chamar DC SBN-SP e "THE" passa a PI THE, como na tabela.
+ *  - DC JND 02-SP (BRE 381-06/07/12), carregado com o SP BRE, vai junto para a DOCA 18.
+ * Como na V4.25: rota da tabela secundária = "Esteira" + número da tabela; o DC SSZ-SP continua DOCA ("DOCA 07 · DC SSZ-SP", para
+ * não somar com a DOCA 07 do RS NSR). Vale pelo dia da remessa, desde 16/11 (o histórico antes continua com as docas da época).
+ */
+const ROUTES_FROM_2026_11_16_ = '2026-11-16';
+const TRONCAL_2026_11_16_ = {
+  'GO GYN': ['DOCA 05', 7], 'SC BNU': ['DOCA 06', 7], 'RS NSR': ['DOCA 07', 7], 'DC TBT-SP': ['DOCA 08', 7], 'BA FEC': ['DOCA 09', 7],
+  'MG CGE': ['DOCA 10', 7], 'CE FOR': ['DOCA 15', 4], 'PR SJS': ['DOCA 16', 4], 'PE JGS': ['DOCA 17', 4], 'SP BRE': ['DOCA 18', 4],
+  'DC JND 02-SP': ['DOCA 18', 4], 'SE AJU': ['DOCA 19', 4], 'AM MAO': ['DOCA 20', 2], 'RJ SJM': ['DOCA 21/22', 2], 'DC GRU-SP': ['DOCA 23', 2],
+  'DF BSB': ['DOCA 44', 3], 'DC SBN-SP': ['DOCA 43', 3], 'PI THE': ['DOCA 42', 3], 'PA ANA': ['DOCA 41', 3], 'SP RBP': ['DOCA 40', 3],
+  'MT CGB': ['DOCA 39', 3], 'ES SRR': ['DOCA 38', 3]
+};
+const RENAME_2026_11_16_ = {SBN: 'DC SBN-SP', THE: 'PI THE'};
+// Saem do SP BRE (códigos e nomes de parada); os do DF BSB entram nele.
+const OUT_OF_BRE_2026_11_16_ = {codes: ['BAU', 'JDF', 'AM', 'BVB', 'MRB', 'RO', 'TO', 'AC', 'RBR'],
+  stops: ['DC BAU-SP', 'DC JDF-MG', 'DC MAO-AM', 'PA MRB', 'RO PVH', 'TO PMW', 'DC RBR-AC', 'AC RBR']};
+const BSB_2026_11_16_ = {codes: ['MRB', 'RO', 'TO', 'AC', 'RBR'], stops: ['TO PMW', 'PA MRB', 'RO PVH', 'DC RBR-AC', 'AC RBR']};
+const AM_MAO_2026_11_16_ = {dock: 'DOCA 20', line: 2, route: 'AM MAO', codes: ['AM', 'BVB'], stops: ['DC MAO-AM']};
+/** Tabela secundária de 16/11 (Last Mile, linhas 6 e 5): "Esteira" + o número da tabela; o DC SSZ-SP é doca. */
+const SECONDARY_2026_11_16_ = [
+  {dock: 'Esteira 01', line: 6, route: 'DC S-VLANA-SP', codes: ['VLANA']},
+  {dock: 'Esteira 02', line: 6, route: 'F S-PQBOTU-SP', codes: ['GRU 404-09']},
+  {dock: 'Esteira 03', line: 6, route: 'F S-MGUE 02-SP', codes: ['GRU 404-08']},
+  {dock: 'Esteira 04', line: 6, route: 'F VLMT-SP', codes: ['GRU 404-10']},
+  {dock: 'Esteira 05', line: 6, route: 'S-MGUE-SP', codes: ['GRU 404-01']},
+  {dock: 'Esteira 06', line: 6, route: 'F S-JBO-SP', codes: ['GRU 404-11']},
+  {dock: 'DOCA 07 · DC SSZ-SP', line: 6, route: 'DC SSZ-SP', codes: DOCK_SUB_('GRU', ['378-00', '378-01', '378-02', '378-03', '378-05', '378-06'])
+    .concat(DOCK_SUB_('SP', ['378-00', '378-01', '378-02', '378-03'])), stops: ['DC SSZ']},
+  {dock: 'Esteira 09', line: 6, route: 'S-MGUE 02-SP', codes: ['GRU 404-13']},
+  {dock: 'Esteira 10', line: 6, route: 'DC S-MOO 02-SP', codes: ['MOO'].concat(
+    DOCK_SUB_('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01', '430-05', '430-07', '430-08', '430-09', '398-00', '404-00']),
+    DOCK_SUB_('MOO', ['430-00', '430-01', '430-02', '430-03', '430-04', '430-05', '430-06', '430-07', '430-08', '430-09'])), stops: ['DC MOOCA2', 'DC MOOCA']},
+  {dock: 'Esteira 12', line: 5, route: 'F S-SAP 02-SP', codes: ['GRU 404-12']},
+  {dock: 'Esteira 13', line: 5, route: 'F S-PENHA 03-SP', codes: ['GRU 404-06']},
+  {dock: 'Esteira 15', line: 5, route: 'S-SRAF-SP', codes: ['GRU 404-00']},
+  {dock: 'Esteira 17', line: 5, route: 'F S-PENHA-SP', codes: ['GRU 404-05']},
+  {dock: 'Esteira 18', line: 5, route: 'DC NOD-SP', codes: ['NOD']},
+  {dock: 'Esteira 19', line: 5, route: 'F S-MGUE-SP', codes: ['GRU 404-04']},
+  {dock: 'Esteira 20', line: 5, route: 'S-SAPOP-SP', codes: ['GRU 404-03']},
+  {dock: 'Esteira 21', line: 5, route: 'DC JDF-MG', codes: ['JDF']},
+  {dock: 'Esteira 22', line: 5, route: 'DC BAU-SP', codes: ['BAU']},
+  {dock: 'Esteira 23', line: 5, route: 'MS CGR', codes: ['MS']},
+  {dock: 'Esteira 24', line: 5, route: 'S-PENHA-SP', codes: ['GRU 404-02']},
+  {dock: 'Esteira 25', line: 5, route: 'F S-PENHA 02-SP', codes: ['GRU 404-07']}
+];
+/**
+ * Tabela de 16/11 a partir da tabela anterior (docas ou esteiras): as rotas da linha principal ficam com os códigos e as paradas
+ * que já tinham (unidades novas do DC TBT-SP, CDG no RJ SJM, JPN no MT CGB…), na doca e linha novas; as rotas da tabela
+ * secundária vêm da tabela nova.
+ */
+const table2026_11_16_ = base => {
+  const secondary = SECONDARY_2026_11_16_.map(e => e.route), add = (list, more) => list.concat(more.filter(c => list.indexOf(c) < 0));
+  return base.filter(e => secondary.indexOf(e.route) < 0 && !/^esteira/i.test(e.dock)).map(e => {
+    const route = RENAME_2026_11_16_[e.route] || e.route, pos = TRONCAL_2026_11_16_[route];
+    let codes = e.codes || [], stops = e.stops || [];
+    if (route === 'SP BRE') {
+      codes = codes.filter(c => OUT_OF_BRE_2026_11_16_.codes.indexOf(c) < 0);
+      stops = stops.filter(x => OUT_OF_BRE_2026_11_16_.stops.indexOf(x) < 0);
+    }
+    if (route === 'DF BSB') { codes = add(codes, BSB_2026_11_16_.codes); stops = add(stops, BSB_2026_11_16_.stops); }
+    const out = Object.assign({}, e, {route: route, codes: codes, stops: stops});
+    if (pos) { out.dock = pos[0]; out.line = pos[1]; }
+    return out;
+  }).concat([AM_MAO_2026_11_16_], SECONDARY_2026_11_16_);
+};
+const DOCK_TABLE_2026_11_16_ = table2026_11_16_(DOCK_TABLE_2026_11_10_);
 const DOCKS_EXPEDICAO = Object.freeze({
   versions: [
     {
@@ -356,7 +436,8 @@ const DOCKS_EXPEDICAO = Object.freeze({
     {from: '2026-10-24', entries: DOCK_TABLE_2026_10_24_},
     {from: '2026-10-30', entries: DOCK_TABLE_2026_10_30_},
     {from: '2026-11-01', entries: DOCK_TABLE_2026_11_01_},
-    {from: BRE_BACK_FROM_2026_11_10_, entries: DOCK_TABLE_2026_11_10_}
+    {from: BRE_BACK_FROM_2026_11_10_, entries: DOCK_TABLE_2026_11_10_},
+    {from: ROUTES_FROM_2026_11_16_, entries: DOCK_TABLE_2026_11_16_}
   ],
   fallback: 'SEM DOCA'
 });
@@ -427,15 +508,18 @@ const ESTEIRA_TABLE_2026_10_24_ = [
 /**
  * Esteiras do SC → DC (o valor mostrado é "Esteira N"): a tabela de 24/10 vale até 29/10; V4.19: de 30/10, com as unidades
  * novas do DC TBT-SP (Esteira 2); de 01/11, com TO, MRB, RO e AC no DF BSB (Esteira 3, antes Esteira 2 com o SP BRE);
- * V4.24.2: de 10/11, TO, MRB, RO e AC de volta ao SP BRE (Esteira 2).
+ * V4.24.2: de 10/11, TO, MRB, RO e AC de volta ao SP BRE (Esteira 2). V4.28: de 16/11, as tabelas novas (abaixo).
  */
 const ESTEIRA_TABLE_2026_10_30_ = withNewTbt_(ESTEIRA_TABLE_2026_10_24_);
 const ESTEIRA_TABLE_2026_11_01_ = withBsb_(ESTEIRA_TABLE_2026_10_30_);
 const ESTEIRA_TABLE_2026_11_10_ = withBreBack_(ESTEIRA_TABLE_2026_10_30_);
+/** V4.28: de 16/11, as linhas de desvio do DWS das tabelas de 16/11 (ex.: SP BRE na Esteira 4, RJ SJM na Esteira 2, MS CGR na 5). */
+const ESTEIRA_TABLE_2026_11_16_ = table2026_11_16_(ESTEIRA_TABLE_2026_11_10_);
 const ESTEIRAS_SC_DC = Object.freeze({
   source: 'destination', show: 'line', linePrefix: 'Esteira ',
   versions: [{from: '', entries: ESTEIRA_TABLE_2026_10_24_}, {from: '2026-10-30', entries: ESTEIRA_TABLE_2026_10_30_},
-    {from: '2026-11-01', entries: ESTEIRA_TABLE_2026_11_01_}, {from: BRE_BACK_FROM_2026_11_10_, entries: ESTEIRA_TABLE_2026_11_10_}],
+    {from: '2026-11-01', entries: ESTEIRA_TABLE_2026_11_01_}, {from: BRE_BACK_FROM_2026_11_10_, entries: ESTEIRA_TABLE_2026_11_10_},
+    {from: ROUTES_FROM_2026_11_16_, entries: ESTEIRA_TABLE_2026_11_16_}],
   fallback: 'SEM ESTEIRA'
 });
 
