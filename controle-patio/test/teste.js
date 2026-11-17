@@ -176,8 +176,8 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     pagina.indexOf('.yard-stats .stat-main{grid-row:span 1}') > 0 && pagina.indexOf('.table-wrap th,.table-wrap td{white-space:nowrap') > 0,
   'design do painel principal: borda cinza, 12 px entre os blocos, cartões sem buraco e tabelas sem quebrar palavras');
   confere(pagina.indexOf("$('dateStart').value = fmtDate(") > 0 && pagina.indexOf("openYardDetail('Destino: '+dest") > 0 &&
-    pagina.indexOf('function tipoExpedicao(v)') > 0 && pagina.indexOf("$('unloadDay').value=keys().today;") > 0 && pagina.indexOf('CONCLUIDA(v.status)') > 0,
-  'dados: datas do filtro, nome do destino, tipo SC/DC, dia operacional de hoje e status com emoji');
+    pagina.indexOf('function tipoExpedicao(v)') > 0 && pagina.indexOf("$('unloadDay').value=shiftDay(Date.now());") > 0 && pagina.indexOf('CONCLUIDA(v.status)') > 0,
+  'dados: datas do filtro, nome do destino, tipo SC/DC, dia do turno atual e status com emoji');
   const ini = {...contagem};
   j = await (await chamar(A, 'buscarVeiculosPatio')).json();
   confere(j.ok && j.result.length === 150, 'buscarVeiculosPatio: 150 veículos (2 páginas do Feishu)');
@@ -327,6 +327,24 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   const pg = fs.readFileSync(path.join(APP, 'Index.html'), 'utf8');
   confere(pg.indexOf("yardStatus(v.fluxo)==='RECEBIMENTO'") < 0 && /function isRecebimento\(v\)/.test(pg) && /semFluxo = !vehicles\.some/.test(pg) &&
     /RECEB\|DESCARG/.test(pg), 'FLUXO: aceita variações de "RECEBIMENTO"; tabela sem FLUXO não zera as descargas, docagens e a fila');
+  // 17/11 (pedido): T3 do dia = a noite ANTERIOR (22h do dia anterior até 05h59), na Portaria e na FIFO.
+  {
+    const vmT = require('vm'), ctx = vmT.createContext({Intl, Date, Number, String});
+    const fn = nome => { const m = pg.match(new RegExp('function ' + nome + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}')); return m ? m[0] : ''; };
+    vmT.runInContext(['dateParts', 'dateKey', 'shiftDay', 't3Range', 'shiftFromTime', 'operationalDate'].map(fn).join('\n'), ctx);
+    const sp = (d, h, mi) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), h + 3, mi || 0); // horário de São Paulo
+    const dia = (d, h, mi) => ctx.shiftDay(sp(d, h, mi)), turno = (d, h) => ctx.shiftFromTime(sp(d, h));
+    confere(dia('2026-11-16', 22) === '2026-11-17' && dia('2026-11-16', 23, 59) === '2026-11-17' && dia('2026-11-17', 0) === '2026-11-17' &&
+      dia('2026-11-17', 5, 59) === '2026-11-17' && dia('2026-11-17', 6) === '2026-11-17' && dia('2026-11-17', 21, 59) === '2026-11-17' &&
+      dia('2026-11-17', 22) === '2026-11-18' && dia('2026-11-30', 23) === '2026-12-01' && turno('2026-11-16', 22) === 'T3' && turno('2026-11-17', 5) === 'T3' &&
+      ctx.t3Range('2026-11-17') === '16/11 22h → 17/11 06h' && ctx.t3Range('2026-12-01') === '30/11 22h → 01/12 06h',
+      'Portaria/FIFO: T3 de 17/11 = 16/11 22h até 17/11 05h59 (a noite anterior); 22h de 17/11 já é o T3 de 18/11');
+    // A Expedição continua com a regra dela (Hoje/Amanhã pela saída da viagem).
+    confere(ctx.operationalDate(sp('2026-11-17', 2)) === '2026-11-16' && /allowed\.includes\(operationalDate\(t\)\)/.test(pg) &&
+      !/shiftDay\(ms\(v\.saida\)\)/.test(pg) && (pg.match(/shiftDay\(ms\(v\.horaDocagem\)\)/g) || []).length >= 4 &&
+      /shiftDay\(ms\(v\.fimDescarga\)\)/.test(pg) && /\$\('unloadDay'\)\.value=shiftDay\(Date\.now\(\)\)/.test(pg),
+      'Portaria (turnos, horários, docas, lista) e FIFO usam o dia do turno; a Expedição não muda');
+  }
   const dg = await (await fetch(A.url + '/diagnostico')).text();
   confere(/TABELA PATIO_VEICULO: 150 registros/.test(dg) && /CHECK_OUT depois da docagem/.test(dg) && /Valores de STATUS PATIO/.test(dg) &&
     dg.indexOf('TST1000') < 0 && dg.indexOf('Motorista Teste') < 0 && dg.indexOf(SEGREDO) < 0,

@@ -432,7 +432,7 @@ tbody tr:hover {background:var(--row-hover)}
   <div class="sidebar-footer">
     <div><span class="live"></span><strong id="liveLabel">Atualização automática</strong></div>
     <div id="updatedAt">Aguardando atualização</div>
-    <div>Versão 2.3 · DashMaster</div>
+    <div>Versão 2.4 · DashMaster</div>
     <div>Feito por Marcelo Wesley</div>
   </div>
 </aside>
@@ -679,7 +679,7 @@ tbody tr:hover {background:var(--row-hover)}
         <div class="table-tools">
           <div>
             <h2>Veículos docados por turno / 各班次靠台车辆</h2>
-            <p class="muted">Contagem pelo horário de docagem (HORA_DOCAGEM). Indica entrada na doca, não confirmação de descarga concluída. T3 atravessa a meia-noite.</p>
+            <p class="muted">Contagem pelo horário de docagem (HORA_DOCAGEM). Indica entrada na doca, não confirmação de descarga concluída. T3 = a noite anterior (22h do dia anterior até 05h59 do dia escolhido).</p>
           </div>
           <div class="field" style="min-width:190px">
             <label for="unloadDay">DIA OPERACIONAL / 运营日期</label>
@@ -1636,8 +1636,26 @@ function operationalDate(t) {
   // 00h–05h59 pertencem ao T3 do dia anterior.
   return dateKey(Date.parse(d+'T12:00:00Z')-86400000);
 }
+/**
+ * Dia do TURNO (Portaria e FIFO, pedido de 17/11): o T3 de um dia é a noite ANTERIOR — das 22h do dia anterior até 05h59 do dia.
+ * Assim o dia D = T3 (D-1 22h → D 05h59) + T1 (06h–13h59) + T2 (14h–21h59); docagem às 22h ou 23h já conta no dia seguinte.
+ * (Antes o T3 do dia D era a noite seguinte, D 22h → D+1 05h59, e de dia o T3 de hoje aparecia zerado.)
+ * A Expedição continua com operationalDate (Hoje/Amanhã pela saída da viagem).
+ */
+function shiftDay(t) {
+  const p = dateParts(t);
+  const d = dateKey(t);
+  if (Number(p.hour) < 22) return d;
+  return dateKey(Date.parse(d+'T12:00:00Z')+86400000);
+}
+/** "16/11 22h → 17/11 06h": a noite do T3 do dia (AAAA-MM-DD). */
+function t3Range(day) {
+  const prev = dateKey(Date.parse(day+'T12:00:00Z')-86400000);
+  const dm = k => k.slice(8,10)+'/'+k.slice(5,7);
+  return dm(prev)+' 22h → '+dm(day)+' 06h';
+}
 function operationalSelection() {
-  return $('unloadDay').value || keys().today;
+  return $('unloadDay').value || shiftDay(Date.now());
 }
 function vehicleShift(v) {
   const t=ms(v.checkin);
@@ -1651,7 +1669,7 @@ function filteredYardBase() {
   return vehicles.filter(v=>
     (!type || norm(v.tipoVeiculo)===type) &&
     (!turno || assignedShift(v)===turno) &&
-    (!dayKey || (ms(v.horaDocagem)!=null && operationalDate(ms(v.horaDocagem))===dayKey)) &&
+    (!dayKey || (ms(v.horaDocagem)!=null && shiftDay(ms(v.horaDocagem))===dayKey)) &&
     (!scope || (scope==='active' && isActiveYard(v)) ||
       (scope==='carretas' && isActiveYard(v) && norm(v.tipoVeiculo)==='CARRETA')));
 }
@@ -1724,13 +1742,13 @@ function renderUnloadStats() {
   const base=filteredYardBase();
   // A data operacional de docagem é independente do filtro de data do check-in.
   const valid=base.filter(v=>isRecebimento(v) && ms(v.horaDocagem)!=null);
-  const countable=valid.filter(v=>operationalDate(ms(v.horaDocagem))===selected);
+  const countable=valid.filter(v=>shiftDay(ms(v.horaDocagem))===selected);
   const groups={T1:[],T2:[],T3:[]};
   countable.forEach(v=>groups[shiftFromTime(ms(v.horaDocagem))].push(v));
   const tiles=[
     ['T1','06:00–13:59',groups.T1],
     ['T2','14:00–21:59',groups.T2],
-    ['T3','22:00–05:59 do dia seguinte',groups.T3],
+    ['T3',yardText('22:00–05:59 · '+t3Range(selected),'22:00–05:59 · '+t3Range(selected)),groups.T3],
     [yardText('TOTAL DOCADOS','已靠台总数'),yardText('Entradas em doca','靠台次数'),countable]
   ];
   tiles.forEach(([label,hours,list])=>{
@@ -1740,8 +1758,8 @@ function renderUnloadStats() {
     root.append(cell);
   });
   txt('unloadNote',yardText(
-    `Dia operacional da docagem: ${selected.split('-').reverse().join('/')} · ${countable.length} registros. Clique em qualquer turno para ver as placas. T3 começa às 22h do dia selecionado e termina às 05h59 do dia seguinte. Docagem não comprova descarga concluída.`,
-    `靠台运营日：${selected} · ${countable.length} 条记录。点击班次查看车牌。T3从当天22:00到次日05:59；靠台不等于卸货完成。`));
+    `Dia operacional da docagem: ${selected.split('-').reverse().join('/')} · ${countable.length} registros. Clique em qualquer turno para ver as placas. T3 = a noite anterior: começa às 22h do dia anterior e termina às 05h59 do dia selecionado (${t3Range(selected)}). Docagem não comprova descarga concluída.`,
+    `靠台运营日：${selected} · ${countable.length} 条记录。点击班次查看车牌。T3为前一晚：前一天22:00到当天05:59（${t3Range(selected)}）；靠台不等于卸货完成。`));
 }
 function dockMinutes(v) {
   const start=ms(v.horaDocagem), end=ms(v.fimDescarga);
@@ -1777,7 +1795,7 @@ function renderDockEfficiency() {
   const selected=operationalSelection();
   // O turno e a data são SEMPRE derivados da docagem, nunca do check-in.
   const base=vehicles.filter(v=>isRecebimento(v) &&
-    ms(v.horaDocagem)!=null && operationalDate(ms(v.horaDocagem))===selected &&
+    ms(v.horaDocagem)!=null && shiftDay(ms(v.horaDocagem))===selected &&
     (!norm($('vehicleType').value)||norm(v.tipoVeiculo)===norm($('vehicleType').value)) &&
     (!$('vehicleShift').value||assignedShift(v)===$('vehicleShift').value) &&
     (!$('vehicleStatus').value||v.status===$('vehicleStatus').value) &&
@@ -1824,7 +1842,7 @@ function yardHourKey(v) {
   const t=ms(v.horaDocagem);
   if(t==null)return '';
   const p=dateParts(t);
-  return operationalDate(t)+'|'+p.hour;
+  return shiftDay(t)+'|'+p.hour;
 }
 function yardHourlyRows() {
   const selected=operationalSelection();
@@ -1835,7 +1853,7 @@ function yardHourlyRows() {
   const scope=$('vehicleScope').value;
   return vehicles.filter(v=>{
     const t=ms(v.horaDocagem);
-    return t!=null && operationalDate(t)===selected &&
+    return t!=null && shiftDay(t)===selected &&
       isRecebimento(v) &&
       (!type||norm(v.tipoVeiculo)===type) &&
       (!turno||assignedShift(v)===turno) &&
@@ -1852,6 +1870,7 @@ function renderYardHourly() {
   const groups=[
     {name:'T1',hours:[6,7,8,9,10,11,12,13]},
     {name:'T2',hours:[14,15,16,17,18,19,20,21]},
+    // T3 = a noite anterior (22h do dia anterior até 05h59 do dia selecionado).
     {name:'T3',hours:[22,23,0,1,2,3,4,5]}
   ];
   const counts=new Map();
@@ -1862,7 +1881,7 @@ function renderYardHourly() {
     const panel=el('div','hourly-shift');
     const head=el('div','hourly-shift-head');
     const total=group.hours.reduce((a,h)=>a+(counts.get(selected+'|'+String(h).padStart(2,'0'))||0),0);
-    head.append(el('strong','',group.name),el('span','',nfmt(total)+' docagens'));
+    head.append(el('strong','',group.name),el('span','',(group.name==='T3'?t3Range(selected)+' · ':'')+nfmt(total)+' docagens'));
     panel.append(head);
     const slots=el('div','hourly-slots');
     const occupied=group.hours.filter(h=>counts.get(selected+'|'+String(h).padStart(2,'0'))>0);
@@ -1890,7 +1909,7 @@ function renderYardHourly() {
     panel.append(slots);root.append(panel);
   });
   const summary=$('yardHourlySummary');summary.replaceChildren();
-  summary.append(el('strong','',nfmt(rows.length)+' veículos docados no dia operacional '+selected.split('-').reverse().join('/')));
+  summary.append(el('strong','',nfmt(rows.length)+' veículos docados no dia operacional '+selected.split('-').reverse().join('/')+' (T3: '+t3Range(selected)+')'));
   summary.append(el('span','muted',yardSelectedHour?'· Horário selecionado: '+yardSelectedHour.split('|')[1]+':00–'+yardSelectedHour.split('|')[1]+':59':'· Clique em uma faixa para ver as placas. Horários sem docagem ficam ocultos.'));
 }
 function clearYardHour() {
@@ -1965,11 +1984,11 @@ function renderFIFO(){
   fifoFillTable('fifoWaitingBody',waiting,'waiting',fifoWaitPage);
   fifoSetPager('fifoWait',fifoWaitPage,waiting.length);
 
-  const selected=$('fifoDoneDay').value||keys().today;
+  const selected=$('fifoDoneDay').value||shiftDay(Date.now());
   const turno=$('fifoDoneShift').value;
-  // Dia operacional da CONCLUSÃO: entre 00h e 05h59 conta no dia anterior.
+  // Dia do turno da CONCLUSÃO: entre 22h e 23h59 já conta no dia seguinte (T3 = noite anterior).
   const completed=vehicles.filter(v=>isRecebimento(v)&&ms(v.fimDescarga)!=null&&
-    operationalDate(ms(v.fimDescarga))===selected&&(!turno||assignedShift(v)===turno)&&matches(v));
+    shiftDay(ms(v.fimDescarga))===selected&&(!turno||assignedShift(v)===turno)&&matches(v));
   completed.sort((a,b)=>(ms(a.fimDescarga)??0)-(ms(b.fimDescarga)??0));
   fifoCurrentDone=completed;
   const dsig=[selected,turno,type,query,vehicles.length].join('|');
@@ -1986,7 +2005,7 @@ function renderFIFO(){
   const anyFinished=vehicles.some(v=>ms(v.fimDescarga)!=null);
   const byCheckout=completed.filter(v=>v.campoFimDescarga==='CHECK_OUT').length;
   txt('fifoDoneNote',anyFinished
-    ?'Data selecionada: '+selected.split('-').reverse().join('/')+'. T3 da data inclui 00h–05h59 do dia seguinte. Turno responsável = turno da docagem, não do check-in.'+
+    ?'Data selecionada: '+selected.split('-').reverse().join('/')+'. T3 da data = a noite anterior ('+t3Range(selected)+'). Turno responsável = turno da docagem, não do check-in.'+
       (byCheckout?' Fim pelo CHECK_OUT (a tabela não tem FIM_DESCARGA): '+nfmt(byCheckout)+' de '+nfmt(completed.length)+'.':'')
     :'Nenhum veículo docado com FIM_DESCARGA/FIM_OPERACAO ou CHECK_OUT depois da docagem nos registros consultados.');
 }
@@ -2039,7 +2058,7 @@ function renderVehicles() {
     list=list.filter(v=>yardHourKey(v)===yardSelectedHour);
   }else if($('yardListPeriod').value==='day'){
     const selected=operationalSelection();
-    list=list.filter(v=>ms(v.horaDocagem)!=null&&operationalDate(ms(v.horaDocagem))===selected);
+    list=list.filter(v=>ms(v.horaDocagem)!=null&&shiftDay(ms(v.horaDocagem))===selected);
   }
   list.sort((a,b)=>((ms(fifo?a.checkin:a.horaDocagem)??Infinity)-(ms(fifo?b.checkin:b.horaDocagem)??Infinity))*($('vehicleOrder').value==='new'&&!fifo?-1:1));
   yardCurrentList=list;
@@ -2180,9 +2199,9 @@ function init() {
   }
 
   updateThemeIcon();
-  // Abre no dia operacional atual (antes abria no dia anterior e o movimento de hoje não aparecia).
-  $('unloadDay').value=keys().today;
-  $('fifoDoneDay').value=keys().today;
+  // Abre no dia do turno atual: de dia, hoje (com o T3 da noite anterior); a partir das 22h, o dia seguinte (o T3 que começou).
+  $('unloadDay').value=shiftDay(Date.now());
+  $('fifoDoneDay').value=shiftDay(Date.now());
   setLanguage('pt');
   switchPage('Portaria');
   loadVehicles();

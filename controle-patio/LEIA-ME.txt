@@ -1,6 +1,16 @@
 J&T · CONTROLE DE PÁTIO | SP GRU — Node.js (Portaria, Fila FIFO, Docas e Expedição do Feishu)
 =============================================================================================
 
+Novidades da 2.4 (T3 da Portaria)
+---------------------------------
+- Portaria e Fila FIFO: o T3 de um dia agora é a NOITE ANTERIOR — das 22h do dia anterior até 05h59 do dia escolhido
+  (ex.: T3 de 17/11 = 16/11 22h até 17/11 06h). Antes o T3 do dia era a noite seguinte, e durante o dia o T3 de hoje
+  aparecia zerado em "Veículos docados por turno" e em "Veículos por horário de docagem".
+- O dia vai das 22h do dia anterior às 21h59: docagem às 22h ou 23h já conta no dia seguinte. A partir das 22h o painel abre
+  no dia seguinte (o T3 que começou); escolha a data para ver outro dia.
+- Vale para turnos, horários, eficiência por doca, carretas, lista "docagens do dia" e descargas concluídas da FIFO.
+  A Expedição (Hoje/Amanhã pela saída da viagem) não mudou.
+
 Novidades da 2.3 (dados que não apareciam)
 -------------------------------------------
 - "Veículos descarregados no dia", tempo em doca e conclusões: a tabela PATIO_VEICULO não tem campo de fim da descarga
