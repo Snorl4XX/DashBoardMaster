@@ -3944,12 +3944,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     ['GRU,402-03,1', 'DC TBT-SP', 'DOCA 08', 7], ['SP,421-00,1', 'DC TBT-SP', 'DOCA 08', 7], ['GRU,402-04,1', 'DC TBT-SP', 'DOCA 08', 7],
     ['GRU,402-10,1', 'DC TBT-SP', 'DOCA 08', 7], ['SNS,1', 'BA FEC', 'DOCA 09', 7], ['CHV,1', 'MG CGE', 'DOCA 10', 7],
     ['CE,1', 'CE FOR', 'DOCA 15', 4], ['CAC,1', 'PR SJS', 'DOCA 16', 4], ['BYE,1', 'PE JGS', 'DOCA 17', 4],
-    ['SP,368-00,1', 'SP BRE', 'DOCA 18', 4], ['SP,397-00,1', 'SP BRE', 'DOCA 18', 4], ['NAT,1', 'SP BRE', 'DOCA 18', 4], ['LDB,1', 'SP BRE', 'DOCA 18', 4],
-    ['MIA,1', 'SP BRE', 'DOCA 18', 4], ['MA,1', 'SP BRE', 'DOCA 18', 4], ['GRU,381-07,1', 'DC JND 02-SP', 'DOCA 18', 4], ['AL,1', 'SE AJU', 'DOCA 19', 4],
-    ['AM,1', 'AM MAO', 'DOCA 20', 2], ['BVB,1', 'AM MAO', 'DOCA 20', 2], ['RJ1,1', 'RJ SJM', 'DOCA 21/22', 2], ['CDG,1', 'RJ SJM', 'DOCA 21/22', 2],
+    ['SP,368-00,1', 'SP BRE', 'DOCA 21/22', 2], ['SP,397-00,1', 'SP BRE', 'DOCA 21/22', 2], ['NAT,1', 'SP BRE', 'DOCA 21/22', 2], ['LDB,1', 'SP BRE', 'DOCA 21/22', 2],
+    ['MIA,1', 'SP BRE', 'DOCA 21/22', 2], ['MA,1', 'SP BRE', 'DOCA 21/22', 2], ['GRU,381-07,1', 'DC JND 02-SP', 'DOCA 21/22', 2], ['AL,1', 'SE AJU', 'DOCA 19', 4],
+    ['AM,1', 'AM MAO', 'DOCA 20', 2], ['BVB,1', 'AM MAO', 'DOCA 20', 2], ['RJ1,1', 'RJ SJM', 'DOCA 18', 4], ['CDG,1', 'RJ SJM', 'DOCA 18', 4],
     ['SP,395-05,1', 'DC GRU-SP', 'DOCA 23', 2], ['GRU,381-00,1', 'DC GRU-SP', 'DOCA 23', 2], ['GRU,378-04,1', 'DC GRU-SP', 'DOCA 23', 2],
     ['DF,1', 'DF BSB', 'DOCA 44', 3], ['MRB,1', 'DF BSB', 'DOCA 44', 3], ['RO,1', 'DF BSB', 'DOCA 44', 3], ['TO,1', 'DF BSB', 'DOCA 44', 3],
-    ['AC,1', 'DF BSB', 'DOCA 44', 3], ['RBR,1', 'DF BSB', 'DOCA 44', 3], ['SBN,375-10,1', 'DC SBN-SP', 'DOCA 43', 3], ['IMP,1', 'PI THE', 'DOCA 42', 3],
+    ['AC,1', 'DF BSB', 'DOCA 44', 3], ['RBR,1', 'DF BSB', 'DOCA 44', 3], ['SBN,375-10,1', 'DC SBN-SP', 'DOCA 43', 3], ['SBN,375-11,1', 'DC SBN-SP', 'DOCA 43', 3], ['IMP,1', 'PI THE', 'DOCA 42', 3],
     ['PA,1', 'PA ANA', 'DOCA 41', 3], ['NE1,1', 'SP RBP', 'DOCA 40', 3], ['JPN,1', 'MT CGB', 'DOCA 39', 3], ['ES,1', 'ES SRR', 'DOCA 38', 3],
     // Rotas secundárias: "Esteira" + o número da tabela; o DC SSZ-SP é doca.
     ['VLANA,1', 'DC S-VLANA-SP', 'Esteira 01', 6], ['GRU,404-09,1', 'F S-PQBOTU-SP', 'Esteira 02', 6], ['GRU,404-08,1', 'F S-MGUE 02-SP', 'Esteira 03', 6],
@@ -3968,9 +3968,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     ['GRU,402-03,1', 'DC TBT-SP | DOCA 23'], ['SBN,375-01,1', 'SBN | DOCA 08'], ['GRU,378-05,1', 'DC SSZ-SP | DOCA 08/09']]
     .forEach(([c, e]) => want(seg(c, OLD), e, 'código ' + c + ' em 15/11 (histórico)'));
   // Próxima parada (Envio Errado, Triagem Errada, SC → SC) e esteira do SC → DC (linha de desvio do DWS).
-  [['SP BRE', 'SP BRE', 'DOCA 18', 4], ['DC MAO-AM', 'AM MAO', 'DOCA 20', 2], ['AM MAO', 'AM MAO', 'DOCA 20', 2], ['TO PMW', 'DF BSB', 'DOCA 44', 3],
+  [['SP BRE', 'SP BRE', 'DOCA 21/22', 2], ['DC MAO-AM', 'AM MAO', 'DOCA 20', 2], ['AM MAO', 'AM MAO', 'DOCA 20', 2], ['TO PMW', 'DF BSB', 'DOCA 44', 3],
     ['DC RBR-AC', 'DF BSB', 'DOCA 44', 3], ['PA MRB', 'DF BSB', 'DOCA 44', 3], ['DC BAU-SP', 'DC BAU-SP', 'Esteira 22', 5], ['DC JDF-MG', 'DC JDF-MG', 'Esteira 21', 5],
-    ['MS CGR', 'MS CGR', 'Esteira 23', 5], ['DC CDG-RJ', 'RJ SJM', 'DOCA 21/22', 2], ['BA FEC', 'BA FEC', 'DOCA 09', 7], ['MG BHZ', 'MG CGE', 'DOCA 10', 7],
+    ['MS CGR', 'MS CGR', 'Esteira 23', 5], ['DC CDG-RJ', 'RJ SJM', 'DOCA 18', 4], ['RJ SJM', 'RJ SJM', 'DOCA 18', 4], ['BA FEC', 'BA FEC', 'DOCA 09', 7], ['MG BHZ', 'MG CGE', 'DOCA 10', 7],
     ['DC SBN', 'DC SBN-SP', 'DOCA 43', 3], ['DC SBN-SP', 'DC SBN-SP', 'DOCA 43', 3], ['PI THE', 'PI THE', 'DOCA 42', 3], ['F SJC-SP', 'DC TBT-SP', 'DOCA 08', 7],
     ['DC GRU-SP', 'DC GRU-SP', 'DOCA 23', 2], ['DC SSZ-SP', 'DC SSZ-SP', 'DOCA 07 · DC SSZ-SP', 6], ['DC MOOCA2', 'DC S-MOO 02-SP', 'Esteira 10', 6],
     ['S-PENHA-SP', 'S-PENHA-SP', 'Esteira 24', 5], ['DC JPN', 'MT CGB', 'DOCA 39', 3]].forEach(([p, r, d, l]) => {
@@ -3980,11 +3980,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   want(stop('SP BRE', OLD), 'SP BRE | DOCA 21/22', 'parada SP BRE em 15/11');
   want(est('SP BRE', OLD), 'SP BRE | Esteira 2', 'esteira do SP BRE em 15/11');
   want(est('DC BAU-SP', OLD), 'SP BRE | Esteira 2', 'esteira do DC BAU-SP em 15/11');
-  check(!wrong.length, 'tabelas de 16/11: docas novas da linha principal (SP BRE na 18, AM MAO na 20, RJ SJM na 21/22, DF BSB com MRB/RO/TO/AC…) ' +
+  check(!wrong.length, 'tabelas de 16/11 (versão atualizada): docas novas da linha principal (RJ SJM na 18, AM MAO na 20, SP BRE na 21/22, DF BSB com MRB/RO/TO/AC, SBN 375-11…) ' +
     'e da secundária (JDF, BAU e MS na tabela secundária); até 15/11 continua como era', wrong);
   // Expedição A/B/C pela doca nova.
   const exps = vmN.runInContext('EXPEDICOES_', cN), ex = d => CN.expeditionOf(d, exps);
-  check(ex('DOCA 18') === 'Expedição B' && ex('DOCA 08') === 'Expedição A' && ex('DOCA 44') === 'Expedição C' && ex('DOCA 07 · DC SSZ-SP') === 'Expedição A' &&
+  check(ex('DOCA 18') === 'Expedição B' && ex('DOCA 21/22') === 'Expedição B' && ex('DOCA 08') === 'Expedição A' && ex('DOCA 44') === 'Expedição C' && ex('DOCA 07 · DC SSZ-SP') === 'Expedição A' &&
     ex('Esteira 22') === 'Esteiras', 'Expedição A/B/C com as docas de 16/11 (DC SSZ-SP continua doca)', [ex('DOCA 18'), ex('DOCA 07 · DC SSZ-SP')]);
   // Segmento (base) pela fórmula do WPS, pelo dia da remessa.
   const sb = (code, date) => CN.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
@@ -4101,7 +4101,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'BAU 484-00,200': 'Troncal|BAU|', 'GRU,391-18,1': 'Troncal|GRU|', 'GRU': 'Troncal|GRU|', 'SP,378-00,1': 'Troncal|SP|', '': '||',
     'GRU,404-04,020': 'Secundária||GRU,404-04', 'GRU,404-11,1': 'Secundária||GRU,404-11', 'GRU,378-06,1': 'Secundária||GRU,378-06',
     'SP,364-00,1': 'Secundária||SP,364-00', 'SP,430-09,1': 'Secundária||SP,430-09', 'MOO,430-02,1': 'Secundária||MOO,430-02', 'NOD,1': 'Secundária||NOD',
-    'VLANA': 'Secundária||VLANA', 'SBN,375-10,420': 'Secundária||SBN,375-10', 'SP,402-01,1': 'Secundária||SP,402-01', 'GRU,402-04,1': 'Secundária||GRU,402-04',
+    'VLANA': 'Secundária||VLANA', 'SBN,375-10,420': 'Secundária||SBN,375-10', 'SBN,375-11,1': 'Secundária||SBN,375-11', 'SP,402-01,1': 'Secundária||SP,402-01', 'GRU,402-04,1': 'Secundária||GRU,402-04',
     'SP,395-06,1': 'Secundária||SP,395-06', 'GRU,381-21,1': 'Secundária||GRU,381-21', 'GRU,378-04,1': 'Secundária||GRU,378-04', 'SP,381-04,1': 'Secundária||SP,381-04'};
   const lnWrong = Object.keys(LN).filter(k => ln(k) !== LN[k]).map(k => k + ' → ' + ln(k) + ' (esperado ' + LN[k] + ')');
   check(!lnWrong.length, 'V4.25.1: linha secundária só com os pares das tabelas (GRU,404-04…); PA,722-00 e RJ,314-00 ficam na principal', lnWrong);

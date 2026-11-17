@@ -4,6 +4,17 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.29.1 — Tabela de 16/11 atualizada (2ª versão)
+
+Pedido: a tabela "Alteração das docas de carregamento das rotas de longa distância a partir de 16 de novembro" foi atualizada.
+Em relação à versão anterior (V4.28):
+
+- **RJ SJM na DOCA 18** (esteira 4) e **SP BRE nas DOCAS 21/22** (esteira 2). A 1ª versão da tabela tinha os dois trocados
+  (SP BRE na 18 e RJ SJM nas 21/22). O DC JND 02-SP, carregado com o SP BRE, fica nas 21/22 com ele.
+- **DC SBN-SP com o SBN 375-11** ("Adicionar novo código inicial"), também como segmento da linha secundária no Recebimento.
+- O resto da tabela é o mesmo da V4.28 (AM MAO na 20 confirmado; GRU 402-09/10 no DC TBT-SP, que já estavam).
+- Vale desde 16/11, como a tabela: os dias 16/11 em diante passam a mostrar as docas certas na hora (nada é baixado de novo).
+
 ## V4.29.0 — Trocar o AuthToken pelo link (página /token)
 
 Pedido: "colocar a config dele como link compartilhável".
@@ -28,8 +39,8 @@ secundárias a partir de 16 de novembro" (atualizadas em 16/11) — "trocaram as
   | Esteira (DWS) | Doca → rota |
   |---|---|
   | 7 | 05 GO GYN · 06 SC BNU · 07 RS NSR · 08 DC TBT-SP (era 23) · 09 BA FEC (era 18) · 10 MG CGE (era 19) |
-  | 4 | 15 CE FOR (era 09) · 16 PR SJS · 17 PE JGS · **18 SP BRE (era 21/22)** · 19 SE AJU (era 15) |
-  | 2 | **20 AM MAO (rota nova: AM e BVB)** · 21/22 RJ SJM (era 10) · 23 DC GRU-SP (era 44) |
+  | 4 | 15 CE FOR (era 09) · 16 PR SJS · 17 PE JGS · **18 RJ SJM (era 10; corrigido na V4.29.1)** · 19 SE AJU (era 15) |
+  | 2 | **20 AM MAO (rota nova: AM e BVB)** · **21/22 SP BRE** (corrigido na V4.29.1) · 23 DC GRU-SP (era 44) |
   | 3 | 44 DF BSB (era 38) · 43 DC SBN-SP (era 08) · 42 PI THE (era 41) · 41 PA ANA (era 20) · 40 SP RBP (era 39) · 39 MT CGB (era 42) · 38 ES SRR (era 40) |
 
 - **SP BRE sem BAU, JDF, AM, BVB, MRB, RO, TO e AC** ("Excluir" da tabela): MRB, RO, TO e AC (RBR) vão para o **DF BSB**, AM e BVB para

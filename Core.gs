@@ -395,8 +395,8 @@ function JTCoreFactory_() {
     // DC S-MOO 02-SP: SP (antigo) e MOO (novo)
     add('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01', '430-05', '430-07', '430-08', '430-09']);
     add('MOO', range('430', 0, 9));
-    // SBN (doca 08)
-    add('SBN', range('375', 0, 10));
+    // SBN (doca 08; V4.29.1: 375-11 na tabela de 16/11, DC SBN-SP)
+    add('SBN', range('375', 0, 11));
     // DC TBT-SP (doca 23): SP (antigo) e GRU (novo); 402-09 e 402-10 = unidades novas do comunicado de 30/10 (F UBT-SP, F CRZ-SP)
     add('SP', ['402-01', '402-03', '402-05', '421-00']);
     add('GRU', range('402', 0, 10));

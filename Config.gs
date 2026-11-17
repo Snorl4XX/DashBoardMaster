@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.29.0',
+  VERSION: '4.29.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -329,8 +329,8 @@ const DOCK_TABLE_2026_11_10_ = withBreBack_(DOCK_TABLE_2026_10_30_, MOVES_2026_1
  * secundárias a partir de 16 de novembro", atualizadas em 16/11): docas trocadas em quase todas as rotas.
  *  - Linha principal (linha de desvio do DWS):
  *      7 = GO GYN 05 · SC BNU 06 · RS NSR 07 · DC TBT-SP 08 (era 23) · BA FEC 09 (era 18) · MG CGE 10 (era 19);
- *      4 = CE FOR 15 (era 09) · PR SJS 16 · PE JGS 17 · SP BRE 18 (era 21/22) · SE AJU 19 (era 15);
- *      2 = AM MAO 20 (rota nova, com AM e BVB) · RJ SJM 21/22 (era 10) · DC GRU-SP 23 (era 44);
+ *      4 = CE FOR 15 (era 09) · PR SJS 16 · PE JGS 17 · RJ SJM 18 (era 10) · SE AJU 19 (era 15);
+ *      2 = AM MAO 20 (rota nova, com AM e BVB) · SP BRE 21/22 (continua) · DC GRU-SP 23 (era 44);
  *      3 = DF BSB 44 (era 38) · DC SBN-SP 43 (era 08) · PI THE 42 (era 41) · PA ANA 41 (era 20) · SP RBP 40 (era 39) ·
  *          MT CGB 39 (era 42) · ES SRR 38 (era 40).
  *  - SP BRE sem BAU, JDF, AM, BVB, MRB, RO, TO e AC ("Excluir" da tabela): MRB, RO, TO e AC (RBR) vão para o DF BSB ("Adicionar
@@ -338,15 +338,17 @@ const DOCK_TABLE_2026_11_10_ = withBreBack_(DOCK_TABLE_2026_10_30_, MOVES_2026_1
  *  - Rotas secundárias (linhas 6 e 5): posições novas; DC JDF-MG (JDF), DC BAU-SP (BAU) e MS CGR (MS) entram na tabela
  *    secundária (21, 22 e 23, "Docagem de carreta").
  *  - "SBN" passa a se chamar DC SBN-SP e "THE" passa a PI THE, como na tabela.
- *  - DC JND 02-SP (BRE 381-06/07/12), carregado com o SP BRE, vai junto para a DOCA 18.
+ *  - DC JND 02-SP (BRE 381-06/07/12), carregado com o SP BRE, continua com ele (DOCAS 21/22).
+ *  - V4.29.1 (tabela de 16/11 atualizada, 2ª versão): SP BRE fica nas DOCAS 21/22 (esteira 2) e o RJ SJM vai para a DOCA 18
+ *    (esteira 4) — a 1ª versão tinha os dois trocados; o DC SBN-SP ganha o SBN 375-11 ("Adicionar novo código inicial").
  * Como na V4.25: rota da tabela secundária = "Esteira" + número da tabela; o DC SSZ-SP continua DOCA ("DOCA 07 · DC SSZ-SP", para
  * não somar com a DOCA 07 do RS NSR). Vale pelo dia da remessa, desde 16/11 (o histórico antes continua com as docas da época).
  */
 const ROUTES_FROM_2026_11_16_ = '2026-11-16';
 const TRONCAL_2026_11_16_ = {
   'GO GYN': ['DOCA 05', 7], 'SC BNU': ['DOCA 06', 7], 'RS NSR': ['DOCA 07', 7], 'DC TBT-SP': ['DOCA 08', 7], 'BA FEC': ['DOCA 09', 7],
-  'MG CGE': ['DOCA 10', 7], 'CE FOR': ['DOCA 15', 4], 'PR SJS': ['DOCA 16', 4], 'PE JGS': ['DOCA 17', 4], 'SP BRE': ['DOCA 18', 4],
-  'DC JND 02-SP': ['DOCA 18', 4], 'SE AJU': ['DOCA 19', 4], 'AM MAO': ['DOCA 20', 2], 'RJ SJM': ['DOCA 21/22', 2], 'DC GRU-SP': ['DOCA 23', 2],
+  'MG CGE': ['DOCA 10', 7], 'CE FOR': ['DOCA 15', 4], 'PR SJS': ['DOCA 16', 4], 'PE JGS': ['DOCA 17', 4], 'RJ SJM': ['DOCA 18', 4],
+  'SE AJU': ['DOCA 19', 4], 'AM MAO': ['DOCA 20', 2], 'SP BRE': ['DOCA 21/22', 2], 'DC JND 02-SP': ['DOCA 21/22', 2], 'DC GRU-SP': ['DOCA 23', 2],
   'DF BSB': ['DOCA 44', 3], 'DC SBN-SP': ['DOCA 43', 3], 'PI THE': ['DOCA 42', 3], 'PA ANA': ['DOCA 41', 3], 'SP RBP': ['DOCA 40', 3],
   'MT CGB': ['DOCA 39', 3], 'ES SRR': ['DOCA 38', 3]
 };
@@ -356,6 +358,8 @@ const OUT_OF_BRE_2026_11_16_ = {codes: ['BAU', 'JDF', 'AM', 'BVB', 'MRB', 'RO', 
   stops: ['DC BAU-SP', 'DC JDF-MG', 'DC MAO-AM', 'PA MRB', 'RO PVH', 'TO PMW', 'DC RBR-AC', 'AC RBR']};
 const BSB_2026_11_16_ = {codes: ['MRB', 'RO', 'TO', 'AC', 'RBR'], stops: ['TO PMW', 'PA MRB', 'RO PVH', 'DC RBR-AC', 'AC RBR']};
 const AM_MAO_2026_11_16_ = {dock: 'DOCA 20', line: 2, route: 'AM MAO', codes: ['AM', 'BVB'], stops: ['DC MAO-AM']};
+// Códigos novos da tabela de 16/11 nas rotas que já existiam (V4.29.1: SBN 375-11 no DC SBN-SP).
+const NEW_CODES_2026_11_16_ = {'DC SBN-SP': ['SBN 375-11']};
 /** Tabela secundária de 16/11 (Last Mile, linhas 6 e 5): "Esteira" + o número da tabela; o DC SSZ-SP é doca. */
 const SECONDARY_2026_11_16_ = [
   {dock: 'Esteira 01', line: 6, route: 'DC S-VLANA-SP', codes: ['VLANA']},
@@ -398,6 +402,7 @@ const table2026_11_16_ = base => {
       stops = stops.filter(x => OUT_OF_BRE_2026_11_16_.stops.indexOf(x) < 0);
     }
     if (route === 'DF BSB') { codes = add(codes, BSB_2026_11_16_.codes); stops = add(stops, BSB_2026_11_16_.stops); }
+    if (NEW_CODES_2026_11_16_[route]) codes = add(codes, NEW_CODES_2026_11_16_[route]);
     const out = Object.assign({}, e, {route: route, codes: codes, stops: stops});
     if (pos) { out.dock = pos[0]; out.line = pos[1]; }
     return out;
@@ -513,7 +518,7 @@ const ESTEIRA_TABLE_2026_10_24_ = [
 const ESTEIRA_TABLE_2026_10_30_ = withNewTbt_(ESTEIRA_TABLE_2026_10_24_);
 const ESTEIRA_TABLE_2026_11_01_ = withBsb_(ESTEIRA_TABLE_2026_10_30_);
 const ESTEIRA_TABLE_2026_11_10_ = withBreBack_(ESTEIRA_TABLE_2026_10_30_);
-/** V4.28: de 16/11, as linhas de desvio do DWS das tabelas de 16/11 (ex.: SP BRE na Esteira 4, RJ SJM na Esteira 2, MS CGR na 5). */
+/** V4.28: de 16/11, as linhas de desvio do DWS das tabelas de 16/11 (ex.: RJ SJM na Esteira 4, SP BRE na 2, MS CGR na 5). */
 const ESTEIRA_TABLE_2026_11_16_ = table2026_11_16_(ESTEIRA_TABLE_2026_11_10_);
 const ESTEIRAS_SC_DC = Object.freeze({
   source: 'destination', show: 'line', linePrefix: 'Esteira ',
