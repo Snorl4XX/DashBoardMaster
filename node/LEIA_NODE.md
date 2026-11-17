@@ -70,6 +70,12 @@ Para rodar mesmo **sem ninguém entrar no Windows**, use o **Agendador de Tarefa
 
 A tela Configurações **só abre no próprio computador do servidor** (http://localhost:3000/config). Para abrir de outro lugar, defina `senhaConfig` no `config.json` (veja a seção 4).
 
+**Trocar o AuthToken pelo link (V4.29):** o link do painel com **`/token`** no fim (ex.: `https://nome-do-computador.xxxx.ts.net/token`)
+abre uma página só para trocar o AuthToken do JMS quando ele vencer. Qualquer pessoa da equipe com o link usa, sem entrar no
+computador do servidor. O painel **testa o AuthToken no JMS antes de salvar**: token errado ou vencido é recusado e nada muda.
+A página não mostra o token salvo nem mexe em mais nada. Se o painel tem `senha`, ela pede a mesma senha do painel.
+Para desligar: `"trocaTokenPeloLink": false` no `config.json`.
+
 Os mesmos comandos também funcionam sem navegador. Abra o Prompt na pasta `node` e use:
 
 ```
@@ -89,6 +95,7 @@ O arquivo é criado na primeira vez que o servidor abre. Edite-o com o Bloco de 
 | `host` | `0.0.0.0` | `0.0.0.0` aceita acesso pela rede; `127.0.0.1` só deste computador |
 | `senha` | vazio | Senha para abrir o painel. Vazio = qualquer um com o link abre (como o link do Google) |
 | `senhaConfig` | vazio | Senha da tela Configurações. Vazio = ela só abre neste computador |
+| `trocaTokenPeloLink` | `true` | Página `/token` pelo link (trocar o AuthToken; só salva o que o JMS aceitar). `false` desliga |
 | `pastaDados` | `./dados` | Onde ficam o banco e os arquivos baixados |
 | `filaCadaSegundos` | `60` | De quanto em quanto tempo a fila do JMS roda |
 | `trabalhadores` | `3` | Quantas consultas do painel rodam ao mesmo tempo |

@@ -4,6 +4,20 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.29.0 — Trocar o AuthToken pelo link (página /token)
+
+Pedido: "colocar a config dele como link compartilhável".
+
+- **Página `/token` no link do painel** (ex.: `https://nome-do-computador.xxxx.ts.net/token`), igual à do Monitor de Recebimento:
+  qualquer pessoa da equipe com o link troca o AuthToken do JMS quando ele vencer, sem entrar no computador do servidor.
+- **Só salva o que o JMS aceitar:** o painel testa o AuthToken numa consulta pequena ao JMS antes de salvar. Token errado ou vencido
+  é recusado e o painel continua com o anterior. Depois de salvar, a fila recomeça sozinha.
+- A página não mostra o token salvo e não mexe em mais nada (a tela Configurações continua só no computador do servidor, ou com
+  `senhaConfig`). Se o painel tem `senha`, a página pede a mesma senha do painel. Muitas tentativas seguidas: espera 1 minuto.
+- O aviso de "token vencido" do painel passa a dizer para colar o AuthToken novo na página `/token` do mesmo link, e a tela
+  Configurações mostra esse link.
+- Desligar: `"trocaTokenPeloLink": false` no `node/config.json`.
+
 ## V4.28.0 — Docas e rotas de 16/11
 
 Pedido: as tabelas "Alteração das docas de carregamento das rotas de longa distância a partir de 16 de novembro" e "… das rotas

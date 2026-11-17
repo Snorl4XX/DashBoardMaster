@@ -135,7 +135,9 @@ function firstDiff(a, b, p) {
 
   // ---------- 2. Servidor Node.js + JMS simulado por HTTP ----------
   const jport = await freePort(), port = await freePort();
-  const fake = await startFakeJms(jport, mkDays());
+  // V4.29: o JMS recusa o AuthToken "TOKEN-RECUSADO" (como com a sessão vencida), para o teste da página /token.
+  const fake = await startFakeJms(jport, mkDays(), {intercept: (route, headers) =>
+    headers.authtoken === 'TOKEN-RECUSADO' ? [200, {code: 135010030, msg: 'token失效，请重新登录', data: null}] : null});
   const srv = await startServer({porta: port, navegadorPdf: process.env.DASHMASTER_TEST_BROWSER || ''}, {DASHMASTER_JMS_URL: 'http://127.0.0.1:' + jport});
   const api = async (fn, args) => {
     const r = await request(port, 'POST', '/api/run', {fn, args: args || []});
@@ -215,6 +217,31 @@ function firstDiff(a, b, p) {
   const cfgPage = await request(port, 'GET', '/config');
   check(cfgPage.status === 200 && /Salvar e testar a conexão/.test(cfgPage.text) && !badScripts(cfgPage.text).length && !badScripts(page.text).length,
     'scripts da tela Configurações e do painel sem erro de sintaxe (os botões funcionam)', badScripts(cfgPage.text).map(x => x.slice(0, 80)));
+
+  // ---------- 4b. V4.29: página /token (troca do AuthToken pelo link, só se o JMS aceitar) ----------
+  const TUN = {'X-Forwarded-For': '10.0.0.9'}, TOK = Object.assign({'X-DashMaster-Token': '1'}, TUN);
+  const tokPage = await request(port, 'GET', '/token', undefined, TUN);
+  check(tokPage.status === 200 && /Trocar o AuthToken/.test(tokPage.text) && !badScripts(tokPage.text).length && !/FAKE/.test(tokPage.text),
+    '/token abre pelo link (fora do computador do servidor), com script sem erro e sem mostrar o token salvo');
+  check((await request(port, 'GET', '/token/', undefined, TUN)).headers.location === '/token', '/token/ redireciona para /token');
+  const tokEst = await request(port, 'GET', '/token/estado', undefined, TOK);
+  check(tokEst.status === 200 && JSON.parse(tokEst.text).token === true && !/FAKE/.test(tokEst.text), '/token/estado: só diz se há AuthToken, sem o valor');
+  check((await request(port, 'GET', '/token/estado', undefined, TUN)).status === 403, '/token: ações só com o cabeçalho da própria página');
+  check((await request(port, 'POST', '/token/salvar', {texto: 'NOVO-TOKEN-OK-123'}, Object.assign({Origin: 'http://outro-site.example'}, TOK))).status === 403,
+    '/token: outro site não troca o AuthToken (CSRF)');
+  const fetchesAntes = fake.state.fetches.length;
+  let ts = JSON.parse((await request(port, 'POST', '/token/salvar', {texto: 'TOKEN-RECUSADO'}, TOK)).text);
+  check(ts.ok === false && /não aceitou/.test(ts.error) && fake.state.fetches.slice(fetchesAntes).some(f => /tmsShipment\/page/.test(f.url) && f.headers.authtoken === 'TOKEN-RECUSADO'),
+    '/token: AuthToken recusado pelo JMS não é salvo', ts);
+  ts = JSON.parse((await request(port, 'POST', '/token/salvar', {texto: 'curto'}, TOK)).text);
+  check(ts.ok === false && /não parece/.test(ts.error), '/token: texto que não é AuthToken é recusado sem ir ao JMS', ts);
+  ts = JSON.parse((await request(port, 'POST', '/token/salvar', {texto: 'authtoken: "FAKE-TOKEN-NOVO-123"'}, TOK)).text);
+  const estTok = await admin('estado');
+  check(ts.ok === true && estTok.token === true && fake.state.fetches.slice(fetchesAntes).some(f => /tmsShipment\/page/.test(f.url) && f.headers.authtoken === 'FAKE-TOKEN-NOVO-123'),
+    '/token: AuthToken aceito pelo JMS é salvo ("authtoken: ..." e aspas são limpos)', ts);
+  check(/\/token/.test(cfgPage.text) && estTok.trocaTokenPeloLink === true, 'Configurações mostra o link /token para a equipe');
+  check(/colar na página \/token deste mesmo link/.test(page.text) && !/JMS_AUTHTOKEN nas Propriedades/.test(page.text),
+    'aviso de token vencido no painel aponta para a página /token');
 
   // ---------- 5. Segurança das chamadas ----------
   const deny = await request(port, 'POST', '/api/run', {fn: 'setupProject', args: []});
@@ -303,6 +330,11 @@ function firstDiff(a, b, p) {
   check(right.status === 303 && right.headers.location === '/?ind=sc_sc' && /^jt_painel=/.test(cookie), 'senha certa entra e volta para a página pedida');
   const authed = await request(port2, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, {Cookie: cookie});
   check(authed.status === 200 && JSON.parse(authed.text).ok, 'API com login funciona');
+  const tokNo = await request(port2, 'GET', '/token', undefined, {'X-Forwarded-For': '10.0.0.9'});
+  const tokYes = await request(port2, 'GET', '/token', undefined, {'X-Forwarded-For': '10.0.0.9', Cookie: cookie});
+  const tokApiNo = await request(port2, 'GET', '/token/estado', undefined, {'X-Forwarded-For': '10.0.0.9', 'X-DashMaster-Token': '1'});
+  check(tokNo.status === 303 && tokNo.headers.location === '/entrar?volta=%2Ftoken' && tokYes.status === 200 && tokApiNo.status === 401,
+    'painel com senha: /token pede a senha do painel e depois abre', [tokNo.status, tokNo.headers.location, tokYes.status, tokApiNo.status]);
   const evil = await request(port2, 'POST', '/entrar', 'senha=segredo-teste&volta=%2F%2Fevil.example', {'Content-Type': 'application/x-www-form-urlencoded'});
   check(evil.headers.location === '/', 'não redireciona para outro site depois do login');
   srv2.child.kill();

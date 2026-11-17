@@ -60,6 +60,9 @@ const auth = new Auth(cfg);
 
 // Textos do painel que falam do Apps Script: na versão Node.js, apontam para a tela Configurações.
 const NODE_TEXT = [
+  // V4.29: token vencido → a página /token do mesmo link (qualquer um da equipe troca; o painel testa no JMS antes de salvar).
+  [/e atualizar JMS_AUTHTOKEN nas Propriedades do script/g, 'e colar na página /token deste mesmo link (ou em Configurações)'],
+  [/并在脚本属性中更新 JMS_AUTHTOKEN/g, '并粘贴到本链接的 /token 页面（或设置页面）'],
   [/O responsável deve abrir o Apps Script, executar setupProject e iniciar a importação com startFullHistory\./g,
     'O responsável deve abrir Configurações (endereço /config no computador do servidor), cadastrar o AuthToken do JMS e clicar em Baixar histórico.'],
   [/请管理员在 Apps Script 中运行 setupProject，并用 startFullHistory 开始导入。/g, '请管理员打开设置页面（服务器上的 /config），填写 JMS AuthToken 并开始导入历史数据。'],
@@ -354,6 +357,7 @@ async function configApi(req, res, name) {
     sendJson(res, 200, {
       ok: true, versaoPainel: panelVersion(), versaoServidor: SERVER_VERSION, token: !!all.JMS_AUTHTOKEN, semJms: !!cfg.semJms,
       senhaPainel: !!cfg.senha, senhaConfig: !!cfg.senhaConfig, linkPublico: cfg.linkPublico, linkNetlify: cfg.linkNetlify,
+      trocaTokenPeloLink: tokenPageOn() && !cfg.semJms,
       dataInicial: all.DATA_START_DATE || '', fila, filaTexto,
       agendador: {rodando: sched.running, pendentes: sched.pending.slice(),
         ultima: last ? new Date(last).toLocaleString('pt-BR') + ' · ' + sched.lastSummary : ''},
@@ -402,6 +406,72 @@ async function configApi(req, res, name) {
     } catch (e) {
       sendJson(res, 200, {ok: false, error: nodeText(e.message), logs: e.logs || []});
     }
+    return;
+  }
+  sendJson(res, 404, {ok: false, error: 'Não encontrado.'});
+}
+
+// ------------------------------------------------------------------ página /token (V4.29)
+// Pedido "colocar a config dele como link compartilhável": a equipe troca o AuthToken pelo link público, como no Monitor de
+// Recebimento. Só troca o AuthToken (Configurações continua só neste computador ou com "senhaConfig"). Se o painel tem senha,
+// a página pede a mesma senha do painel. O token só é salvo se o JMS aceitar. "trocaTokenPeloLink": false desliga a página.
+const tokenPageOn = () => cfg.trocaTokenPeloLink !== false;
+/** O que a pessoa colou: o valor, "authtoken: valor", entre aspas ou o JSON {"authToken": "..."} → o token (ou erro). */
+function tokenFromText(text) {
+  let s = String(text || '').trim();
+  if (!s) throw new Error('Cole o AuthToken do JMS.');
+  if (s.charAt(0) === '{') {
+    let o;
+    try { o = JSON.parse(s); } catch (e) { throw new Error('O texto começa com { mas não é um JSON válido.'); }
+    const k = o && typeof o === 'object' ? Object.keys(o).find(x => /^auth-?token$/i.test(x)) : '';
+    if (!k || !o[k]) throw new Error('O JSON não tem o authToken.');
+    s = String(o[k]);
+  }
+  s = s.replace(/^["'`]+|["'`]+$/g, '').replace(/^(auth-?token|token)\s*[:=]\s*/i, '').replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, '');
+  if (!/^[\x21-\x7e]{8,4000}$/.test(s)) throw new Error('Isso não parece um AuthToken. Copie só o valor (sem espaços).');
+  return s;
+}
+/** Testa o AuthToken numa consulta pequena ao JMS (Consulta de Viagens, 1 registro). '' = o JMS aceitou; senão, o motivo. */
+async function testTokenOnJms(token) {
+  const all = props.getProperties(), hoje = new Date().toLocaleDateString('en-CA', {timeZone: 'America/Sao_Paulo'});
+  const q = new URLSearchParams({current: '1', size: '1', shipmentState: '4', endCode: '30001', startDateTime: hoje + ' 00:00:00',
+    endDateTime: hoje + ' 23:59:59', searchType: 'manage'});
+  const url = (cfg.jmsUrl || 'https://gw.jtjms-br.com').replace(/\/+$/, '') + '/transportation/tmsShipment/page?' + q;
+  const headers = {Accept: 'application/json, text/plain, */*', Lang: all.JMS_LANG || 'PT', Langtype: all.JMS_LANGTYPE || 'PT',
+    Timezone: all.JMS_TIMEZONE || 'GMT-0300', AuthToken: token};
+  let r;
+  try { r = await fetch(url, {headers, redirect: 'manual', signal: AbortSignal.timeout(20000)}); }
+  catch (e) { return 'Não consegui falar com o JMS agora (internet do computador do painel?). Tente de novo em alguns minutos.'; }
+  if (r.status !== 200) return 'O JMS não aceitou esse AuthToken (HTTP ' + r.status + '). Pegue um novo no JMS.';
+  let body;
+  try { body = await r.json(); } catch (e) { return 'O JMS não aceitou esse AuthToken. Pegue um novo no JMS.'; }
+  const code = body && body.code !== undefined && body.code !== null ? Number(body.code) : 1;
+  const payload = (body && (body.data != null ? body.data : body.result != null ? body.result : body)) || {};
+  const rows = Array.isArray(payload) ? payload : payload.records || payload.rows || payload.list;
+  return (code === 1 || code === 200) && Array.isArray(rows) ? '' : 'O JMS não aceitou esse AuthToken (sessão vencida ou token errado). Pegue um novo no JMS.';
+}
+async function tokenApi(req, res, name) {
+  // Só a própria página manda este cabeçalho (outro site aberto no navegador não consegue).
+  if (req.headers['x-dashmaster-token'] !== '1') { sendJson(res, 403, {ok: false, error: 'Pedido sem o cabeçalho da página.'}); return; }
+  if (!tokenPageOn() || cfg.semJms) { sendJson(res, 403, {ok: false, error: 'A troca do AuthToken pelo link está desligada.'}); return; }
+  if (name === 'estado' && req.method === 'GET') {
+    const last = sched.last.processSyncQueue;
+    sendJson(res, 200, {ok: true, token: !!props.getProperty('JMS_AUTHTOKEN'), rodando: !!sched.running,
+      ultima: last ? new Date(last).toLocaleString('pt-BR', {timeZone: 'America/Sao_Paulo'}) : ''});
+    return;
+  }
+  if (name === 'salvar' && req.method === 'POST') {
+    if (!sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
+    if (!auth.allowAttempt('token:' + clientIp(req))) { sendJson(res, 429, {ok: false, error: 'Muitas tentativas. Espere 1 minuto.'}); return; }
+    const body = await readJson(req);
+    let tok;
+    try { tok = tokenFromText(body.texto); } catch (e) { sendJson(res, 200, {ok: false, error: e.message}); return; }
+    const recusa = await testTokenOnJms(tok);
+    if (recusa) { log('aviso', 'Página /token: AuthToken recusado pelo JMS, nada mudou.'); sendJson(res, 200, {ok: false, error: recusa}); return; }
+    props.setProperty('JMS_AUTHTOKEN', tok);
+    log('info', 'AuthToken do JMS trocado pela página /token (aceito pelo JMS).');
+    setTimeout(() => enqueue('processSyncQueue'), 1000);
+    sendJson(res, 200, {ok: true});
     return;
   }
   sendJson(res, 404, {ok: false, error: 'Não encontrado.'});
@@ -456,7 +526,7 @@ async function handle(req, res) {
   const configOk = cfg.senhaConfig ? auth.valid(req, CONFIG_SCOPE, cfg.senhaConfig) : isLocal(req);
 
   // "/config/" → "/config" (os endereços relativos da tela dependem disso).
-  if (url.pathname !== p && (p === '/config' || p === '/entrar')) { send(res, 301, '', {Location: B + p + url.search}); return; }
+  if (url.pathname !== p && (p === '/config' || p === '/entrar' || p === '/token')) { send(res, 301, '', {Location: B + p + url.search}); return; }
   if (p === '/saude') {
     sendJson(res, 200, {ok: true, versao: panelVersion(), servidor: SERVER_VERSION, fila: {rodando: sched.running, pendentes: sched.pending}});
     return;
@@ -478,6 +548,18 @@ async function handle(req, res) {
     return;
   }
   if (p === '/sair') { send(res, 303, '', {Location: B + '/', 'Set-Cookie': 'jt_' + PANEL_SCOPE + '=; Path=/; Max-Age=0'}); return; }
+
+  // ----- página /token (V4.29): troca do AuthToken pelo link; com senha no painel, pede a mesma senha
+  if (p === '/token' || p.indexOf('/token/') === 0) {
+    if (!panelOk) {
+      if (p !== '/token') { sendJson(res, 401, {ok: false, error: 'Sessão expirada: recarregue a página e entre com a senha do painel.'}); return; }
+      send(res, 303, '', {Location: B + '/entrar?volta=' + encodeURIComponent('/token')});
+      return;
+    }
+    if (p === '/token') { sendHtml(req, res, 200, pages.tokenPage({on: tokenPageOn(), semJms: !!cfg.semJms})); return; }
+    await tokenApi(req, res, p.slice('/token/'.length));
+    return;
+  }
 
   // ----- Configurações
   if (p === '/config/entrar') {

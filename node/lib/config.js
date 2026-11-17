@@ -17,6 +17,9 @@ const DEFAULTS = {
   senha: '',
   // Senha da tela Configurações (/config). Vazio = a tela só abre neste computador (localhost).
   senhaConfig: '',
+  // V4.29: página /token pelo link público — a equipe troca o AuthToken do JMS quando vencer (só salva se o JMS aceitar; com
+  // "senha", pede a senha do painel). false = desliga a página.
+  trocaTokenPeloLink: true,
   // Onde ficam o banco (SQLite), os arquivos baixados e os relatórios.
   pastaDados: './dados',
   // Onde ficam os arquivos do painel (.gs e .html). Padrão: a pasta acima de node/.

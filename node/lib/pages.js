@@ -68,6 +68,57 @@ function deniedPage() {
 }
 
 /**
+ * V4.29 (pedido "colocar a config dele como link compartilhável"): página /token, que abre pelo link público (como a do Monitor
+ * de Recebimento). Quem tem o link do painel troca o AuthToken do JMS quando vencer, sem entrar no computador do servidor.
+ * Só troca o AuthToken: não mostra o token salvo nem mexe no resto. O servidor só salva o que o JMS aceitar.
+ */
+function tokenPage(opts) {
+  const corpo = !opts.on
+    ? `<p>A troca do AuthToken pelo link está <b>desligada</b> neste painel (<code>"trocaTokenPeloLink": false</code> no
+<code>node/config.json</code>).</p>`
+    : opts.semJms
+      ? '<p>Este painel não usa o JMS: não tem AuthToken para trocar.</p>'
+      : `<section class="card"><h2>Situação</h2><div id="sit" class="hint">Carregando…</div></section>
+<section class="card"><h2>Trocar o AuthToken do JMS</h2>
+<p class="hint">Use quando o painel avisar que o AuthToken venceu (ou parou de atualizar). O painel testa o AuthToken no JMS
+antes de salvar: se o JMS não aceitar, nada muda. O AuthToken salvo nunca aparece aqui.</p>
+<label for="tok">AuthToken</label><textarea id="tok" autocomplete="off" spellcheck="false" placeholder="cole aqui o authToken do JMS"></textarea>
+<div class="actions"><button id="salvar">Testar e salvar</button><a class="btn ghost" href="./">Abrir o painel</a></div>
+<div id="msg"></div>
+<p class="hint">Como pegar: abra o JMS no navegador e entre. Aperte F12 › aba Rede (Network) › clique em qualquer consulta do
+gw.jtjms-br.com › Cabeçalhos (Headers) › <b>authtoken</b>. Copie só o valor.</p></section>
+<script>${TOKEN_JS}</script>`;
+  return `<!DOCTYPE html><html lang="pt-BR" translate="no"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate"><meta name="robots" content="noindex"><meta name="color-scheme" content="dark light">
+<title>DashMaster · Trocar o AuthToken</title><style>${BASE_CSS}</style></head><body><div class="wrap" style="max-width:640px">
+<header class="top"><span class="logo">J&amp;T</span><h1>DashMaster · Trocar o AuthToken</h1></header>
+${corpo}</div></body></html>`;
+}
+const TOKEN_JS = `
+var $ = function (id) { return document.getElementById(id); };
+var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); };
+function situacao() {
+  fetch('token/estado', {headers: {'X-DashMaster-Token': '1'}, credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (e) {
+    var t = e.token ? '<p class="ok">AuthToken cadastrado.</p>' : '<p class="bad">Nenhum AuthToken cadastrado.</p>';
+    if (e.rodando) t += '<p><b>Baixando do JMS agora…</b></p>';
+    if (e.ultima) t += '<p class="small">Última atualização da fila: ' + esc(e.ultima) + '</p>';
+    $('sit').innerHTML = t;
+  }).catch(function () { $('sit').innerHTML = '<p class="bad">Não consegui ler a situação do painel.</p>'; });
+}
+$('salvar').onclick = function () {
+  var b = this; b.disabled = true; $('msg').innerHTML = '<p class="hint">Testando o AuthToken no JMS…</p>';
+  fetch('token/salvar', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-DashMaster-Token': '1'},
+    body: JSON.stringify({texto: $('tok').value})}).then(function (r) { return r.json().catch(function () { return {ok: false, error: 'HTTP ' + r.status}; }); })
+    .then(function (j) {
+      if (j.ok) { $('tok').value = ''; $('msg').innerHTML = '<p class="ok">O JMS aceitou e o AuthToken foi salvo. A fila recomeçou: em alguns minutos o painel atualiza.</p>'; }
+      else $('msg').innerHTML = '<p class="bad">' + esc(j.error || 'Não deu certo.') + '</p>';
+    }).catch(function (e) { $('msg').innerHTML = '<p class="bad">' + esc(e.message) + '</p>'; })
+    .then(function () { b.disabled = false; situacao(); });
+};
+situacao(); setInterval(situacao, 15000);
+`;
+
+/**
  * V4.22: pacote sem JMS (Produção do Sorter): no lugar do AuthToken, o endereço do sorter da base e a troca do Sorter A
  * (Propriedades SORTER_URL e SORTER_TROCA_A), com o teste diagnosticarSorter.
  */
@@ -113,6 +164,7 @@ function configPageHtml(opts) {
 <section class="card"><h2>AuthToken do JMS</h2>
 <p class="hint">Quando o JMS derrubar a sessão (token vencido), gere um novo no JMS e cole aqui. A fila recomeça sozinha.
 O valor salvo não aparece de novo nesta tela.</p>
+<p class="hint" id="tokLink"></p>
 <label for="tok">AuthToken</label><textarea id="tok" autocomplete="off" spellcheck="false" placeholder="cole aqui o authToken do JMS"></textarea>
 <label for="cookie">Cookie (só se o JMS exigir)</label><textarea id="cookie" autocomplete="off" spellcheck="false" style="min-height:52px"></textarea>
 <div class="actions"><button id="saveTok">Salvar e testar a conexão</button></div>
@@ -175,6 +227,9 @@ O valor salvo não aparece de novo nesta tela.</p>
         stat('Link público', s.linkPublico ? '<a href="' + escH(s.linkPublico) + '">' + escH(s.linkPublico.replace(/^https?:[/][/]/, '')) + '</a>' : 'não configurado') +
         stat('Link do Netlify', s.linkNetlify ? '<a href="' + escH(s.linkNetlify) + '">' + escH(s.linkNetlify.replace(/^https?:[/][/]/, '')) + '</a>' : 'não configurado') +
         stat('Senha do painel', s.senhaPainel ? 'sim' : (s.linkPublico ? 'não: defina "senha"' : 'não'), s.senhaPainel ? 'ok' : (s.linkPublico ? 'bad' : ''));
+      if ($('#tokLink')) $('#tokLink').innerHTML = s.trocaTokenPeloLink ? 'A equipe também troca o AuthToken pelo link, sem entrar neste computador: ' +
+        (s.linkPublico ? '<a href="' + escH(s.linkPublico.replace(/[/]+$/, '') + '/token') + '"><b>' + escH(s.linkPublico.replace(/[/]+$/, '') + '/token') + '</b></a>'
+          : '<b>link do painel + /token</b>') + ' (só aceita um AuthToken que o JMS confirmar).' : '';
       $('#addrs').innerHTML = 'Endereços do painel: ' + s.enderecos.map(function (a) { return '<a href="' + escH(a) + '">' + escH(a) + '</a>'; }).join(' · ');
       $('#start').value = s.dataInicial || '';
       if ($('#feishuState')) {
@@ -286,4 +341,4 @@ O valor salvo não aparece de novo nesta tela.</p>
 </script></body></html>`;
 }
 
-module.exports = {loginPage, deniedPage, configPage, esc};
+module.exports = {loginPage, deniedPage, configPage, tokenPage, esc};
