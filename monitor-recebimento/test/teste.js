@@ -220,6 +220,8 @@ async function testeServidor(tmp, jms) {
       'horários da parada SP GRU (traceDetail)', t1);
     confere(t1 && t1.ultimoBipe === dia + ' 15:30:00' && t1.bipeDescargaRegistrado === true && t1.detalheSituacao === 'verificado', 'bipe de descarga', t1);
     confere(b1 && b1.line === 'branch' && b1.jmsDetailId === 'jms:123' && b1.turnoPrevisto === 'T3', 'secundária', b1);
+    confere(t1 && t1.plateNumber === 'AAA0A00' && t1.plateNumberTwo === 'EEE0E00' && t1.tipoVeiculo === 'Cavalo' && b1 && !b1.plateNumberTwo,
+      'V1.9: placas do cavalo e da carreta guardadas (e o tipo do veículo)', t1);
     confere(rec.filter(x => x.detalheConsultadoEm).length === 20, 'detalhes: 20 por rodada', rec.filter(x => x.detalheConsultadoEm).length);
     const pedidosJms = jms.estado.pedidos;
     confere(pedidosJms.length > 0 && pedidosJms.every(x => x.cabecalhos.authtoken === 'tok-teste-12345' && x.cabecalhos.lang === 'PT'), 'cabeçalhos do JMS');
@@ -291,6 +293,23 @@ async function testeServidor(tmp, jms) {
     confere(e.token.fonte === 'app' && e.coleta.ultima.ok === true, '/token sem senha: coleta com o token novo', e.coleta.ultima);
     const linTok = lerBanco(path.join(pasta, 'dados', 'recebimento.db'), "SELECT v FROM props WHERE k = 'JMS_HEADERS_JSON'");
     confere(linTok.length === 1 && JSON.parse(linTok[0].v).AuthToken === 'outro-token-678', '/token: token salvo no banco');
+
+    // V1.9: viagem Em trânsito cancelada no JMS (deixa de vir como Em trânsito) sai do painel. Sem horário de partida para
+    // conferir (TESTE-B1), fica até o JMS confirmar.
+    jms.estado.cancelados = ['TESTE-T1', 'TESTE-B1'];
+    const antesCanc = Date.now();
+    await pedido(porta, 'POST', '/config/coletar', {corpo: {}, cabecalhos: CFG});
+    e = await esperarColeta(porta, antesCanc);
+    d = await dados(porta);
+    const idsCanc = d.result.records.map(x => x.shipmentNo);
+    confere(e.coleta.ultima.ok === true && idsCanc.indexOf('TESTE-T1') < 0 && idsCanc.indexOf('TESTE-B1') >= 0 && idsCanc.length === 27,
+      'V1.9: viagem cancelada (não vem mais como Em trânsito, partida no período) sai do painel; sem partida para conferir, fica', idsCanc.length);
+    jms.estado.cancelados = [];
+    const antesVolta = Date.now();
+    await pedido(porta, 'POST', '/config/coletar', {corpo: {}, cabecalhos: CFG});
+    await esperarColeta(porta, antesVolta);
+    d = await dados(porta);
+    confere(d.result.records.length === 28 && d.result.records.some(x => x.shipmentNo === 'TESTE-T1'), 'V1.9: se voltar a Em trânsito no JMS, entra de novo');
 
     // link-publico.bat: node lib/link.js config
     const linha = execFileSync(process.execPath, [path.join(APP, 'lib', 'link.js'), 'config'], {env: Object.assign({}, process.env, {RECEBIMENTO_CONFIG: path.join(pasta, 'config.json')}), encoding: 'utf8'}).trim();

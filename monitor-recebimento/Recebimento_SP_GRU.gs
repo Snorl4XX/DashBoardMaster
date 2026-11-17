@@ -7,7 +7,10 @@ const RECEBIMENTO = {
   fields: ['shipmentNo','line','shipmentState','startName','endCode','plateNumber',
     'scanMainWaybillNum','plannedDepartureTime','actualDepartureTime','plannedArrivalTime',
     'turnoPrevisto','dataOperacional','actualArrivalTime','unlockTime','unloadStartTime','updateTime','jmsDetailId',
-    'unloadEndTime','ultimoBipe','bipeDescargaRegistrado','detalheDisponivel','detalheSituacao','situacaoBipagem','detalheConsultadoEm']
+    'unloadEndTime','ultimoBipe','bipeDescargaRegistrado','detalheDisponivel','detalheSituacao','situacaoBipagem','detalheConsultadoEm',
+    // V1.9 (pedido): placas do veículo/cavalo (plateNumber), da carreta (plateNumberTwo; na troncal às vezes trailerNumber) e o tipo
+    // do veículo (Cavalo, Truck…), para a Agenda de chegadas por hora.
+    'plateNumberTwo','trailerNumber','tipoVeiculo']
 };
 
 function instalarRecebimento15min() {
@@ -37,7 +40,8 @@ function atualizarRecebimento() {
     const primeiroDia = new Date(date(0).slice(0,7) + '-01T12:00:00Z');
     primeiroDia.setUTCDate(0);
     const hoje = date(0);
-    const reconciliar = props.getProperty('RECEBIMENTO_ULTIMA_REVISAO') !== hoje;
+    // V1.9: a 1ª coleta depois da atualização revisa o mês todo (tira as viagens canceladas que ficaram como Em trânsito).
+    const reconciliar = props.getProperty('RECEBIMENTO_ULTIMA_REVISAO') !== hoje || props.getProperty('RECEBIMENTO_REVISAO_CANCELADAS') !== '1';
     const inicioMes = primeiroDia.toISOString().slice(0,10);
     const start = (reconciliar ? inicioMes : date(-2)) + ' 00:00:00';
     const end = date(1) + ' 23:59:59';
@@ -68,6 +72,17 @@ function atualizarRecebimento() {
       }
       records.set(key,atual);
     }
+    // V1.9 (pedido "parar de aparecer os IDs cancelados"): a busca só traz Em trânsito (3) e Concluído (4). Uma viagem guardada como
+    // Em trânsito que não veio em nenhuma das duas, com a partida dentro do período consultado, mudou de status no JMS (ex.:
+    // Cancelado：已作废) e sai do painel. Sem horário de partida para conferir, ou partida fora do período, ela fica até a revisão
+    // do mês (1ª coleta de cada dia). Se voltar a Em trânsito no JMS, entra de novo na próxima coleta.
+    let retiradas = 0;
+    for (const [key,row] of records) {
+      if (Number(row.shipmentState) !== 3 || novos.has(key)) continue;
+      const partidas = [row.plannedDepartureTime,row.actualDepartureTime].filter(time => typeof time === 'string' && /^\d{4}-\d{2}-\d{2}/.test(time));
+      if (partidas.length && partidas.every(time => time >= start && time <= end)) { records.delete(key); retiradas++; }
+    }
+    if (retiradas) console.log('Viagens que deixaram de estar Em trânsito no JMS (ex.: canceladas), retiradas do painel: ' + retiradas);
     const lote = Array.from(records.values()).filter(row => {
       const fimConfirmado = Number(row.shipmentState) === 4 && row.actualArrivalTime && row.unlockTime &&
         row.unloadStartTime && row.unloadEndTime && row.ultimoBipe;
@@ -88,7 +103,7 @@ function atualizarRecebimento() {
     tab.getRange(1, 1, height, RECEBIMENTO.fields.length).setValues(values);
     tab.setFrozenRows(1);
     props.setProperty('RECEBIMENTO_ULTIMO_SUCESSO', new Date().toISOString());
-    if (reconciliar) props.setProperty('RECEBIMENTO_ULTIMA_REVISAO',hoje);
+    if (reconciliar) { props.setProperty('RECEBIMENTO_ULTIMA_REVISAO',hoje); props.setProperty('RECEBIMENTO_REVISAO_CANCELADAS','1'); }
     props.deleteProperty('RECEBIMENTO_FALHA');
     console.log('Coleta completa. Viagens únicas: ' + records.size + '. Detalhes consultados: ' + lote.length);
   } catch (error) {
@@ -131,7 +146,8 @@ function coletarPaginasRecebimento_(path, line, query, headers, records) {
       if (currentRow && (currentRow.shipmentState > state ||
           (currentRow.shipmentState === state && (currentRow.updateTime || '') > (row.updateTime || '')))) continue;
       records.set(key, {...row, ...turnoRecebimento_(row.plannedArrivalTime), line,
-        jmsDetailId:typeof row.id === 'string' ? 'jms:' + row.id : '', shipmentState:state, unlockTime:row.unlockTime ?? row.actualUnlockTime});
+        jmsDetailId:typeof row.id === 'string' ? 'jms:' + row.id : '', shipmentState:state, unlockTime:row.unlockTime ?? row.actualUnlockTime,
+        tipoVeiculo:row.vehicletypeName || row.vehicleClassName || row.actualVehicleTypegroup || row.vehicleTypegroup || ''});
     }
     const pages = Number(payload.pages ?? payload.totalPages);
     const total = Number(payload.total);

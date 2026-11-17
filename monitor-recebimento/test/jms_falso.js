@@ -19,6 +19,7 @@ function criar() {
   const h = hm => dia + ' ' + hm + ':00';
   const troncal3 = [
     {shipmentNo: 'TESTE-T1', shipmentState: 3, endCode: 30001, startName: '=Base Teste A', plateNumber: 'AAA0A00', scanMainWaybillNum: 10,
+      plateNumberTwo: 'EEE0E00', plateNumberTwoVehicleType: 'Carreta', vehicletypeName: 'Cavalo', vehicleTypegroup: 'Carreta',
       plannedDepartureTime: h('10:00'), actualDepartureTime: h('10:05'), plannedArrivalTime: h('15:00'), updateTime: h('11:00'), id: 'nao-numerico'},
     {shipmentNo: 'TESTE-T9', shipmentState: 3, endCode: 30002, startName: 'Base Teste Z', plannedArrivalTime: h('15:00'), updateTime: h('11:00')}
   ];
@@ -30,7 +31,9 @@ function criar() {
   const secundaria4 = [{shipmentNo: 'TESTE-B2', shipmentState: 4, endCode: '30001', startName: 'Base Teste D', plateNumber: 'DDD0D00',
     plannedArrivalTime: h('05:30'), actualArrivalTime: h('05:40'), updateTime: h('06:00'), id: '456'}];
 
-  const estado = {token: 'tok-teste-12345', pedidos: [], dia};
+  // cancelados: viagens que o JMS deixou de listar como Em trânsito (ex.: Cancelado：已作废).
+  const estado = {token: 'tok-teste-12345', pedidos: [], dia, cancelados: []};
+  const semCanceladas = lista => lista.filter(v => estado.cancelados.indexOf(v.shipmentNo) < 0);
   const pagina = (lista, atual, tam) => ({code: 1, data: {records: lista.slice((atual - 1) * tam, atual * tam), total: lista.length,
     pages: Math.max(1, Math.ceil(lista.length / tam)), current: atual, size: tam}});
 
@@ -45,13 +48,13 @@ function criar() {
       if (req.headers.authtoken !== estado.token) { responder({code: 135010030, msg: 'token inválido (teste)', data: null}); return; }
       const p = url.pathname, q = url.searchParams;
       if (p === '/transportation/tmsShipment/page' && req.method === 'GET') {
-        const lista = q.get('shipmentState') === '3' ? troncal3 : troncal4;
+        const lista = q.get('shipmentState') === '3' ? semCanceladas(troncal3) : troncal4;
         responder(pagina(lista, Number(q.get('current')), Number(q.get('size'))));
         return;
       }
       if (p === '/transportation/tmsBranchTrackingDetail/page' && req.method === 'POST') {
         const b = JSON.parse(corpo || '{}');
-        responder(pagina(Number(b.shipmentState) === 3 ? secundaria3 : secundaria4, Number(b.current), Number(b.size)));
+        responder(pagina(Number(b.shipmentState) === 3 ? semCanceladas(secundaria3) : secundaria4, Number(b.current), Number(b.size)));
         return;
       }
       if (p === '/transportation/tmsShipment/traceDetail') {

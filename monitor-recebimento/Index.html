@@ -274,6 +274,7 @@ tbody tr:hover td{background:var(--row-hover)}
 .agenda-list summary small{margin-left:8px;font-weight:500}
 .agenda-list .tablebox{max-height:none;background:var(--card);border:0;border-top:1px solid var(--line);border-radius:0 0 12px 12px}
 .agenda-list th{padding:8px 10px}
+.agenda-list td .plate-kind{display:block;color:var(--muted);font-size:11px;margin-top:2px}
 
 /* ---------- telas menores ---------- */
 @media(max-width:1080px){
@@ -470,7 +471,9 @@ function renderAgenda(rows){
   if(!groups.has(hour))groups.set(hour,[]);
   groups.get(hour).push(row);
  }
- const labels=[['Chegada prevista','计划到达'],['Viagem','车次编号'],['Placa','车牌'],['Origem','始发站'],['Linha','线路'],['Status JMS','运输状态'],['Turno previsto','预计班次'],['Pedidos-mãe','主运单']];
+ // V1.9 (pedido): placa do veículo/cavalo (com o tipo: Cavalo, Truck…) e placa da carreta.
+ const labels=[['Chegada prevista','计划到达'],['Viagem','车次编号'],['Placa do veículo / cavalo','车牌 / 车头'],['Placa da carreta','挂车车牌'],['Origem','始发站'],['Linha','线路'],['Status JMS','运输状态'],['Turno previsto','预计班次'],['Pedidos-mãe','主运单']];
+ const NUM=labels.length-1;
  by('agendaIcon').innerHTML=icon('clock');
  agenda.innerHTML=[...groups.keys()].sort().map((hour,index)=>{
   const trips=groups.get(hour).sort((a,b)=>a.plannedArrivalTime.localeCompare(b.plannedArrivalTime));
@@ -479,10 +482,12 @@ function renderAgenda(rows){
   const known=trips.filter(row=>row.volume!==null);
   const volume=known.length?number(known.reduce((sum,row)=>sum+row.volume,0)):'—';
   const details=trips.map(row=>{
-   const fields=[row.plannedArrivalTime.slice(11,19),row.shipmentNo,row.plateNumber,row.startName,lineName(row.line),statusName(row.shipmentState),shiftDisplay(row.expected),display(row.volume)];
-   return '<tr>'+fields.map((field,i)=>'<td class="'+(i===7?'num':'')+'" data-label="'+esc(tr(...labels[i]))+'">'+esc(field??'—')+'</td>').join('')+'</tr>';
+   const carreta=row.plateNumberTwo||row.trailerNumber||'';
+   const fields=[row.plannedArrivalTime.slice(11,19),row.shipmentNo,row.plateNumber,carreta,row.startName,lineName(row.line),statusName(row.shipmentState),shiftDisplay(row.expected),display(row.volume)];
+   return '<tr>'+fields.map((field,i)=>'<td class="'+(i===NUM?'num':'')+'" data-label="'+esc(tr(...labels[i]))+'">'+esc(field||field===0?field:'—')+
+    (i===2&&row.tipoVeiculo?'<small class="plate-kind">'+esc(row.tipoVeiculo)+'</small>':'')+'</td>').join('')+'</tr>';
   }).join('');
-  return '<details data-hour="'+esc(hour)+'" '+(expanded.has(hour)||(firstRender&&index===0)?'open':'')+'><summary><b>'+date+' · '+time+':00–'+time+':59</b> <small>'+number(trips.length)+' '+tr('viagens','车次')+' · '+volume+' '+tr('pedidos-mãe','主运单')+(known.length<trips.length?' · '+number(trips.length-known.length)+' '+tr('sem volumetria','缺少货量'):'')+'</small></summary><div class="tablebox"><table><thead><tr>'+labels.map(([pt,zh],i)=>'<th scope="col" class="'+(i===7?'num':'')+'">'+tr(pt,zh)+'<small>'+tr(zh,pt)+'</small></th>').join('')+'</tr></thead><tbody>'+details+'</tbody></table></div></details>';
+  return '<details data-hour="'+esc(hour)+'" '+(expanded.has(hour)||(firstRender&&index===0)?'open':'')+'><summary><b>'+date+' · '+time+':00–'+time+':59</b> <small>'+number(trips.length)+' '+tr('viagens','车次')+' · '+volume+' '+tr('pedidos-mãe','主运单')+(known.length<trips.length?' · '+number(trips.length-known.length)+' '+tr('sem volumetria','缺少货量'):'')+'</small></summary><div class="tablebox"><table><thead><tr>'+labels.map(([pt,zh],i)=>'<th scope="col" class="'+(i===NUM?'num':'')+'">'+tr(pt,zh)+'<small>'+tr(zh,pt)+'</small></th>').join('')+'</tr></thead><tbody>'+details+'</tbody></table></div></details>';
  }).join('')+(missing?'<small>'+number(missing)+' '+tr('viagens sem horário previsto','车次缺少预计时间')+'</small>':'');
  if(!groups.size&&!missing)agenda.textContent=tr('Nenhuma chegada prevista para os filtros aplicados.','当前筛选无计划到达。');
 }
