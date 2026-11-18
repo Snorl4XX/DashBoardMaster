@@ -95,15 +95,35 @@ function JTCoreFactory_() {
     return a && b ? a + ',' + b : '';
   }
   function normStop(s) { return String(s || '').toUpperCase().replace(/[\s\-–—_,;\/]+/g, ' ').trim(); }
+  /** "2026-11-18 11:32:05" / "18/11/2026 11:32" → "2026-11-18 11:32" (sem horário → ''). */
+  function stampOf(v) {
+    if (blank(v)) return '';
+    var s = String(v), m = s.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3] + ' ' + pad2(m[4]) + ':' + m[5];
+    m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})/);
+    return m ? m[3] + '-' + pad2(m[2]) + '-' + pad2(m[1]) + ' ' + pad2(m[4]) + ':' + m[5] : '';
+  }
+  /**
+   * A tabela que começa em `from` já vale para a remessa do dia `d`? `from` só com dia ("2026-11-16") = pelo dia da remessa.
+   * V4.29.2: `from` com horário ("2026-11-18 11:30") = no próprio dia, pelo horário do bipe (time); sem horário, já vale.
+   */
+  function fromReached(from, d, time) {
+    if (!from || !d) return true;
+    if (from.length <= 10) return from <= d;
+    var fd = from.slice(0, 10);
+    if (fd !== d) return fd < d;
+    var t = stampOf(time);
+    return !t || t >= from;
+  }
   /** Tabela de docas que vale no dia (V4.8: docks.versions, a mais nova com from <= dia; sem dia, a mais nova). */
-  function dockVersionIndex(docks, date) {
+  function dockVersionIndex(docks, date, time) {
     var vs = docks.versions;
     if (!vs) return -1;
     var d = String(date || '').slice(0, 10), pick = 0;
-    for (var i = 0; i < vs.length; i++) if (!vs[i].from || !d || vs[i].from <= d) pick = i;
+    for (var i = 0; i < vs.length; i++) if (fromReached(vs[i].from, d, time)) pick = i;
     return pick;
   }
-  function dockVersion(docks, date) { var i = dockVersionIndex(docks, date); return i < 0 ? docks : docks.versions[i]; }
+  function dockVersion(docks, date, time) { var i = dockVersionIndex(docks, date, time); return i < 0 ? docks : docks.versions[i]; }
   /** Índices de uma tabela de docas (formato antigo: map/destinationGroups; formato novo: entries). */
   function dockIndex(docks) {
     if (docks.entries) return entryIndex(docks);
@@ -233,7 +253,7 @@ function JTCoreFactory_() {
     var indexFor = function (vi) { return ixs[vi] || (ixs[vi] = dockIndex(vi < 0 ? docks : docks.versions[vi])); };
     var bySource = docks.source && docks.source !== 'segment';
     for (var i = 0; i < rows.length; i++) {
-      var r = rows[i], vi = dockVersionIndex(docks, r.date), ix = indexFor(vi), key, m;
+      var r = rows[i], vi = dockVersionIndex(docks, r.date, r.eventTime), ix = indexFor(vi), key, m;
       if (bySource) {
         var v = blank(r[docks.source]) ? '' : String(r[docks.source]);
         key = vi + '\u0001' + v;
@@ -318,11 +338,21 @@ function JTCoreFactory_() {
   var SEG_FIRST_FROM_2026_11_16_ = {AM: 'AM MAO', BVB: 'AM MAO', BAU: 'DC BAU-SP', JDF: 'DC JDF-MG', TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB',
     AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM'};
   /**
-   * Período das rotas pelo dia da remessa: 0 = até 31/10 · 1 = 01/11 a 09/11 (TO/MRB/RO/AC no DF BSB) · 2 = 10/11 a 15/11 ·
-   * 3 = desde 16/11 (tabelas de 16/11).
+   * V4.29.2 (comunicado de 18/11): a partir das 11h30 de 18/11 o XAP vai pela rota SC BNU (sai do SP BRE). Mesmo horário de Config.gs
+   * → ROUTES_FROM_2026_11_18_.
    */
-  function segPeriod_(date) { var d = date ? String(date) : ''; return d >= '2026-11-16' ? 3 : d >= '2026-11-10' ? 2 : d >= '2026-11-01' ? 1 : 0; }
-  function segmentBase(v, date) {
+  var SEG_FIRST_FROM_2026_11_18_ = {AM: 'AM MAO', BVB: 'AM MAO', BAU: 'DC BAU-SP', JDF: 'DC JDF-MG', TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB',
+    AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM', XAP: 'SC BNU'};
+  /**
+   * Período das rotas pelo dia da remessa: 0 = até 31/10 · 1 = 01/11 a 09/11 (TO/MRB/RO/AC no DF BSB) · 2 = 10/11 a 15/11 ·
+   * 3 = desde 16/11 (tabelas de 16/11) · 4 = desde 18/11, 11h30 (XAP no SC BNU; no dia 18, pelo horário do bipe).
+   */
+  function segPeriod_(date, time) {
+    var d = date ? String(date).slice(0, 10) : '';
+    if (d && fromReached('2026-11-18 11:30', d, time)) return 4;
+    return d >= '2026-11-16' ? 3 : d >= '2026-11-10' ? 2 : d >= '2026-11-01' ? 1 : 0;
+  }
+  function segmentBase(v, date, time) {
     if (blank(v)) return '';
     var c = String(v).trim(), up = c.toUpperCase();
     var has = function (list) { for (var i = 0; i < list.length; i++) if (c.indexOf(list[i]) >= 0) return true; return false; };
@@ -333,7 +363,8 @@ function JTCoreFactory_() {
     if (up.slice(0, 3) === 'SP,') return 'SP BRE';
     if (up.slice(0, 4) === 'SBN,') return c.indexOf('375-') >= 0 ? 'SBN' : 'REVISAR SBN';
     if (up.slice(0, 4) === 'MOO,') return has(SEG_MOO_) ? 'MOOCA' : 'REVISAR MOO';
-    var first = up.split(',')[0], per = segPeriod_(date);
+    var first = up.split(',')[0], per = segPeriod_(date, time);
+    if (per === 4 && SEG_FIRST_FROM_2026_11_18_[first]) return SEG_FIRST_FROM_2026_11_18_[first];
     if (per === 3 && SEG_FIRST_FROM_2026_11_16_[first]) return SEG_FIRST_FROM_2026_11_16_[first];
     if (per === 2 && SEG_FIRST_FROM_2026_11_10_[first]) return SEG_FIRST_FROM_2026_11_10_[first];
     if (per === 1 && SEG_FIRST_FROM_2026_11_01_[first]) return SEG_FIRST_FROM_2026_11_01_[first];
@@ -349,8 +380,8 @@ function JTCoreFactory_() {
     var memo = {};
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i], src = !blank(r.segmentFull) ? r.segmentFull : !blank(r.segmentRaw) ? r.segmentRaw : r.segment;
-      var k = blank(src) ? '' : String(src), per = segPeriod_(r.date), mk = per + '|' + k;
-      r.segmentBase = memo.hasOwnProperty(mk) ? memo[mk] : (memo[mk] = segmentBase(k, per ? r.date : ''));
+      var k = blank(src) ? '' : String(src), per = segPeriod_(r.date, r.eventTime), mk = per + '|' + k;
+      r.segmentBase = memo.hasOwnProperty(mk) ? memo[mk] : (memo[mk] = segmentBase(k, per ? r.date : '', r.eventTime));
     }
     return rows;
   }

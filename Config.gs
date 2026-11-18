@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.29.1',
+  VERSION: '4.29.2',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -140,7 +140,8 @@ const FILTER_LABELS = Object.freeze({
 
 /**
  * DOCAS DE CARREGAMENTO, por período (V4.8). Vale, para cada remessa, a tabela mais nova que já tinha começado no dia dela
- * (`from`): o histórico continua com as docas da época. Destino/rota e doca são calculados na leitura (nada fica gravado):
+ * (`from`): o histórico continua com as docas da época. V4.29.2: `from` com horário ("2026-11-18 11:30") vale pelo horário do
+ * bipe da remessa (eventTime) naquele dia. Destino/rota e doca são calculados na leitura (nada fica gravado):
  * mudar uma tabela vale na hora para os dias dela.
  *
  * Formato antigo (até 03/10/2026 — planilha "Falta Expedição", V3.8–V4.7): DESTINO = código do 1º segmento, menos os
@@ -409,6 +410,21 @@ const table2026_11_16_ = base => {
   }).concat([AM_MAO_2026_11_16_], SECONDARY_2026_11_16_);
 };
 const DOCK_TABLE_2026_11_16_ = table2026_11_16_(DOCK_TABLE_2026_11_10_);
+/**
+ * V4.29.2 (comunicado "线路调整通知" de 18/11 e a tabela "Atualizado em 18/11"): a partir das 11h30 de 18/11 as cargas de XAP vão
+ * pela rota SC BNU (DOCA 06, esteira 7) e deixam o SP BRE (docas 21/22): "Adicionar novo código inicial: XAP" no SC BNU e "Excluir …
+ * XAP" no SP BRE. O resto da tabela é igual à de 16/11. Vale pelo HORÁRIO do bipe da remessa (eventTime): no dia 18/11, antes das
+ * 11h30 continua a tabela de 16/11; remessa sem horário fica com a tabela nova (Core.dockVersionIndex).
+ */
+const ROUTES_FROM_2026_11_18_ = '2026-11-18 11:30';
+const XAP_2026_11_18_ = {codes: ['XAP'], stops: ['DC XAP-SC']};
+const table2026_11_18_ = base => base.map(e => {
+  const sem = (list, out) => (list || []).filter(x => out.indexOf(x) < 0), com = (list, more) => (list || []).concat(more.filter(x => (list || []).indexOf(x) < 0));
+  if (e.route === 'SP BRE') return Object.assign({}, e, {codes: sem(e.codes, XAP_2026_11_18_.codes), stops: sem(e.stops, XAP_2026_11_18_.stops)});
+  if (e.route === 'SC BNU') return Object.assign({}, e, {codes: com(e.codes, XAP_2026_11_18_.codes), stops: com(e.stops, XAP_2026_11_18_.stops)});
+  return e;
+});
+const DOCK_TABLE_2026_11_18_ = table2026_11_18_(DOCK_TABLE_2026_11_16_);
 const DOCKS_EXPEDICAO = Object.freeze({
   versions: [
     {
@@ -442,7 +458,8 @@ const DOCKS_EXPEDICAO = Object.freeze({
     {from: '2026-10-30', entries: DOCK_TABLE_2026_10_30_},
     {from: '2026-11-01', entries: DOCK_TABLE_2026_11_01_},
     {from: BRE_BACK_FROM_2026_11_10_, entries: DOCK_TABLE_2026_11_10_},
-    {from: ROUTES_FROM_2026_11_16_, entries: DOCK_TABLE_2026_11_16_}
+    {from: ROUTES_FROM_2026_11_16_, entries: DOCK_TABLE_2026_11_16_},
+    {from: ROUTES_FROM_2026_11_18_, entries: DOCK_TABLE_2026_11_18_}
   ],
   fallback: 'SEM DOCA'
 });
@@ -520,11 +537,13 @@ const ESTEIRA_TABLE_2026_11_01_ = withBsb_(ESTEIRA_TABLE_2026_10_30_);
 const ESTEIRA_TABLE_2026_11_10_ = withBreBack_(ESTEIRA_TABLE_2026_10_30_);
 /** V4.28: de 16/11, as linhas de desvio do DWS das tabelas de 16/11 (ex.: RJ SJM na Esteira 4, SP BRE na 2, MS CGR na 5). */
 const ESTEIRA_TABLE_2026_11_16_ = table2026_11_16_(ESTEIRA_TABLE_2026_11_10_);
+/** V4.29.2: de 18/11, 11h30, o XAP no SC BNU (Esteira 7). */
+const ESTEIRA_TABLE_2026_11_18_ = table2026_11_18_(ESTEIRA_TABLE_2026_11_16_);
 const ESTEIRAS_SC_DC = Object.freeze({
   source: 'destination', show: 'line', linePrefix: 'Esteira ',
   versions: [{from: '', entries: ESTEIRA_TABLE_2026_10_24_}, {from: '2026-10-30', entries: ESTEIRA_TABLE_2026_10_30_},
     {from: '2026-11-01', entries: ESTEIRA_TABLE_2026_11_01_}, {from: BRE_BACK_FROM_2026_11_10_, entries: ESTEIRA_TABLE_2026_11_10_},
-    {from: ROUTES_FROM_2026_11_16_, entries: ESTEIRA_TABLE_2026_11_16_}],
+    {from: ROUTES_FROM_2026_11_16_, entries: ESTEIRA_TABLE_2026_11_16_}, {from: ROUTES_FROM_2026_11_18_, entries: ESTEIRA_TABLE_2026_11_18_}],
   fallback: 'SEM ESTEIRA'
 });
 
@@ -1801,6 +1820,8 @@ function clientFields_(cfg) {
     if (src === 'segment') { set.segmentRaw = 1; set.segment = 1; } else set[src] = 1;
     // V4.8: tabela de docas do dia de cada remessa.
     if (cfg.docks.versions) set.date = 1;
+    // V4.29.2: tabela que começa num horário ("2026-11-18 11:30") — vale pelo horário do bipe (eventTime).
+    if (cfg.docks.versions && cfg.fields && cfg.fields.eventTime && cfg.docks.versions.some(v => String(v.from || '').length > 10)) set.eventTime = 1;
   }
   // V4.12.6: a fórmula do segmento (Core.applySegmentBase) lê o código completo, ou o 1º + 2º segmento dos dias antigos.
   if (cfg.segmentBase) { set.segmentFull = 1; set.segment = 1; if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') set.segmentRaw = 1; }

@@ -3825,11 +3825,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     tabKeys.indexOf('dock') >= 0 && catDC.labels.dock.pt === 'Esteira',
     'SC → DC: gráfico das rotas pela próxima parada, gráfico/filtro/coluna "Esteira"', {chartKeys, tabKeys});
   const rowsDC = C.applyDocks(C.decodeDataset(cDC.getDashboardData('sc_dc', {from: DSC, to: DSC}).dataset), catDC.docks);
-  const espDC = {'S-MGUE-SP': 'Esteira 6', 'DC SSZ-SP': 'Esteira 6', 'DC S-MOO 02-SP': 'Esteira 5', 'RJ SJM': 'Esteira 7'};
+  // O dia do teste é "hoje − 2": desde 16/11 valem as esteiras das tabelas de 16/11 (DC S-MOO 02-SP na 6, RJ SJM na 4).
+  const novasDC = DSC >= '2026-11-16';
+  const espDC = novasDC ? {'S-MGUE-SP': 'Esteira 6', 'DC SSZ-SP': 'Esteira 6', 'DC S-MOO 02-SP': 'Esteira 6', 'RJ SJM': 'Esteira 4'}
+    : {'S-MGUE-SP': 'Esteira 6', 'DC SSZ-SP': 'Esteira 6', 'DC S-MOO 02-SP': 'Esteira 5', 'RJ SJM': 'Esteira 7'};
+  const filtroDC = novasDC ? ['Esteira 4', 'RJ SJM'] : ['Esteira 5', 'DC S-MOO 02-SP'];
   check(rowsDC.length > 0 && rowsDC.every(r => r.dock === espDC[r.destination]), 'SC → DC: a esteira sai da próxima parada já gravada (sem baixar de novo)',
     rowsDC.slice(0, 4).map(r => r.destination + '→' + r.dock));
-  const repDC = cDC.computeDashboard_('sc_dc', {from: DSC, to: DSC, filters: {dock: ['Esteira 5']}});
-  check(repDC.rows.length > 0 && repDC.rows.every(r => r.dock === 'Esteira 5' && r.destination === 'DC S-MOO 02-SP'),
+  const repDC = cDC.computeDashboard_('sc_dc', {from: DSC, to: DSC, filters: {dock: [filtroDC[0]]}});
+  check(repDC.rows.length > 0 && repDC.rows.every(r => r.dock === filtroDC[0] && r.destination === filtroDC[1]),
     'SC → DC: relatório com filtro de esteira', repDC.rows.length);
 }
 
@@ -3995,6 +3999,40 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   'segmento (base) de 16/11: AM/BVB no AM MAO, BAU no DC BAU-SP, JDF no DC JDF-MG, MRB/RO/TO/AC no DF BSB; até 15/11 no SP BRE', got);
 }
 
+// ---------- V4.29.2: comunicado de 18/11 — XAP do SP BRE para o SC BNU a partir das 11h30 ----------
+{
+  const vmX = require('vm');
+  const cX = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CX = cX.JTCore_, DEXP = vmX.runInContext('DOCKS_EXPEDICAO', cX), DPP = vmX.runInContext('DOCKS_PROXIMA_PARADA', cX);
+  const EST = vmX.runInContext('ESTEIRAS_SC_DC', cX);
+  const seg = (c, d, t) => { const r = CX.applyDocks([{segmentRaw: CX.segmentHead2(c), segment: CX.firstSegment(c), date: d, eventTime: t}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d, t) => { const r = CX.applyDocks([{destination: v, date: d, eventTime: t}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d, t) => { const r = CX.applyDocks([{destination: v, date: d, eventTime: t}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const sb = (c, d, t) => CX.applySegmentBase([{segmentFull: c, date: d, eventTime: t}], true)[0].segmentBase;
+  const D = '2026-11-18', got = {
+    antes: seg('XAP,1', D, D + ' 11:29:59'), depois: seg('XAP,1', D, D + ' 11:30:00'), br: seg('XAP,1', D, '18/11/2026 14:05'), semHora: seg('XAP,1', D, ''),
+    dia17: seg('XAP,1', '2026-11-17', '2026-11-17 15:00:00'), dia19: seg('XAP,1', '2026-11-19', ''), dia30: seg('XAP,1', '2026-11-30', '2026-11-30 03:00:00'),
+    sc: seg('SC1,1', D, D + ' 12:00:00'), bre: seg('LDB,1', D, D + ' 12:00:00'), am: seg('AM,1', D, D + ' 12:00:00'), rj: seg('RJ,1', D, D + ' 12:00:00'),
+    parada: stop('DC XAP-SC', D, D + ' 13:00:00'), paradaAntes: stop('DC XAP-SC', D, D + ' 09:00:00'), esteira: est('DC XAP-SC', D, D + ' 13:00:00'),
+    esteiraAntes: est('DC XAP-SC', D, D + ' 09:00:00'), breParada: stop('SP BRE', D, D + ' 13:00:00'),
+    sbDepois: sb('XAP,1', D, D + ' 11:45:00'), sbAntes: sb('XAP,1', D, D + ' 08:00:00'), sb19: sb('XAP,1', '2026-11-19', ''), sb17: sb('XAP,1', '2026-11-17', ''),
+    sbAm: sb('AM,1', D, D + ' 12:00:00'), sbStm: sb('STM,1', D, D + ' 12:00:00')
+  };
+  check(got.antes === 'SP BRE | DOCA 21/22' && got.depois === 'SC BNU | DOCA 06' && got.br === 'SC BNU | DOCA 06' && got.semHora === 'SC BNU | DOCA 06' &&
+    got.dia17 === 'SP BRE | DOCA 21/22' && got.dia19 === 'SC BNU | DOCA 06' && got.dia30 === 'SC BNU | DOCA 06' && got.sc === 'SC BNU | DOCA 06' &&
+    got.bre === 'SP BRE | DOCA 21/22' && got.am === 'AM MAO | DOCA 20' && got.rj === 'RJ SJM | DOCA 18' &&
+    got.parada === 'SC BNU | DOCA 06' && got.paradaAntes === 'SP BRE | DOCA 21/22' && got.esteira === 'SC BNU | Esteira 7' && got.esteiraAntes === 'SP BRE | Esteira 2' &&
+    got.breParada === 'SP BRE | DOCA 21/22' && got.sbDepois === 'SC BNU' && got.sbAntes === 'SP BRE' && got.sb19 === 'SC BNU' && got.sb17 === 'SP BRE' &&
+    got.sbAm === 'AM MAO' && got.sbStm === 'SP BRE',
+    'V4.29.2: XAP do SP BRE para o SC BNU (DOCA 06, esteira 7) a partir das 11h30 de 18/11, pelo horário do bipe; antes continua SP BRE', got);
+  // O horário do bipe vai para o navegador nos painéis com docas (a tabela começa às 11h30), e a tabela de 18/11 só mexe no XAP.
+  const comHora = vmX.runInContext("Object.keys(INDICATORS).filter(k => INDICATORS[k].docks).map(k => k + ':' + (clientFields_(getIndicatorConfig_(k)).indexOf('eventTime') >= 0))", cX);
+  const t16 = vmX.runInContext('DOCK_TABLE_2026_11_16_', cX), t18 = vmX.runInContext('DOCK_TABLE_2026_11_18_', cX);
+  const mudou = t18.map((e, i) => JSON.stringify(e) === JSON.stringify(t16[i]) ? '' : e.route).filter(Boolean);
+  check(comHora.length >= 4 && comHora.every(x => /:true$/.test(x)) && mudou.join() === 'SC BNU,SP BRE' && t18.length === t16.length,
+    'V4.29.2: o horário do bipe vai junto para o navegador; a tabela de 18/11 só muda o SC BNU e o SP BRE', {comHora, mudou});
+}
+
 // ---------- V4.24.3: Falta de Bipagem na Expedição com mais de 10 mil remessas no dia (lista travada no limite do JMS) ----------
 {
   const DT = '2026-09-19';
@@ -4133,7 +4171,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   dd[DN].mr = [['GO,795-00,002', 'T1'], ['GRU,404-04,020', 'T1'], ['GRU,404-04,021', 'T2'], ['SP,402-01,1', 'T2'], ['SP,977-00,1', 'T3'], ['MG,330-00,1', 'T1']]
     .map((x, i) => ({billcode: 'TST' + i, threeSegmentCode: x[0], loadPackageTime: DN + ' ' + {T1: '08', T2: '15', T3: '23'}[x[1]] + ':00:00',
       nextStop: 'SP BRE', loadPackageEmp: 'OPERADOR FICTICIO 01', customerName: 'CLIENTE TESTE'}));
-  dd[DN].md = [['GO,1', 'DOCA 05'], ['SP,977-00,1', 'DOCA 21/22'], ['PA,1', 'DOCA 20'], ['DF,1', 'DOCA 38'], ['GRU,404-04,1', 'Esteira 20']]
+  // O dia do teste é "hoje − 2": AM fica na Expedição B antes (SP BRE, 21/22) e depois de 16/11 (AM MAO, 20); a esteira do GRU 404-04 muda em 16/11.
+  const estE = DN >= '2026-11-16' ? 'Esteira 19' : 'Esteira 20';
+  dd[DN].md = [['GO,1', 'DOCA 05'], ['SP,977-00,1', 'DOCA 21/22'], ['AM,1', 'DOCA 20'], ['DF,1', 'DOCA 38'], ['GRU,404-04,1', estE]]
     .map((x, i) => ({billcode: 'TSD' + i, threeSegmentCode: x[0], unloadArriveTime: DN + ' 10:00:00', unloadPackageEmp: 'OPERADOR FICTICIO 02',
       customerName: 'CLIENTE TESTE', arriveOrder: 'TESTE-1', nextStop: ''}));
   const cE = freshCtx(dd, {}, {DATA_START_DATE: DN});
@@ -4154,7 +4194,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const rowsD = CV5.applyV425(CV5.applyDocks(CV5.decodeDataset(cE.getDashboardData('missing_dispatch', {from: DN, to: DN}).dataset), catE('missing_dispatch').docks), catE('missing_dispatch'));
   const byExp = cnt => rowsD.filter(r => r.expedition === cnt).length;
   check(compR.rows.length === 2 && compR.rows.every(r => r.segSub === 'GRU,404-04') && compD.rows.length === 2 && compD.rows.every(r => r.expedition === 'Expedição B') &&
-    byExp('Expedição A') === 1 && byExp('Expedição C') === 1 && byExp('Esteiras') === 1 && rowsD.find(r => r.shipment === 'TSD4').dock === 'Esteira 20',
+    byExp('Expedição A') === 1 && byExp('Expedição C') === 1 && byExp('Esteiras') === 1 && rowsD.find(r => r.shipment === 'TSD4').dock === estE,
     'filtros novos no servidor (relatório): Segmentos Secundários e Expedição; doca → Expedição A/B/C e Esteiras', rowsD.map(r => r.dock + '→' + r.expedition));
   // Atualização: o Recebimento baixa de novo os últimos 31 dias uma vez (para guardar o 2º segmento).
   delete cE.__state.props.MIGRATION_V425;

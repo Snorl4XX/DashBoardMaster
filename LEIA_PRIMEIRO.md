@@ -4,6 +4,17 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.29.2 — XAP pela rota SC BNU (comunicado de 18/11)
+
+Pedido: comunicado "Alteração de rota" e a tabela "Atualizado em 18/11".
+
+- **A partir das 11h30 de 18/11, o XAP vai pela rota SC BNU (DOCA 06, esteira 7)** e sai do SP BRE (docas 21/22): código XAP,
+  "BRE - XAP" e a próxima parada DC XAP-SC. O segmento pela fórmula do WPS também passa a ser SC BNU.
+- **Vale pelo horário do bipe da remessa:** no dia 18/11, o que foi bipado antes das 11h30 continua no SP BRE; das 11h30 em diante,
+  SC BNU. Dias 19/11 em diante: SC BNU. Remessa sem horário no dia 18/11 fica com a rota nova.
+- O resto da tabela de 18/11 é igual ao da V4.29.1 (conferido linha a linha). Nada é baixado de novo: as docas são calculadas na leitura.
+- Os apps separados Expedição Incorreta e Rota Certa têm a tabela de rotas própria (na tela de rotas de cada um) e não mudam com esta versão.
+
 ## V4.29.1 — Tabela de 16/11 atualizada (2ª versão)
 
 Pedido: a tabela "Alteração das docas de carregamento das rotas de longa distância a partir de 16 de novembro" foi atualizada.
