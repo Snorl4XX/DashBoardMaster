@@ -1,39 +1,138 @@
 @echo off
-chcp 65001 >nul
+rem JT DashMaster - link publico do painel pelo Tailscale Funnel (gratis, endereco https fixo).
+rem V4.17.1: a janela NUNCA fecha sozinha. Cada problema mostra o que fazer e espera uma tecla (antes, um erro do Tailscale
+rem podia fechar a janela antes de dar para ler). Sem "chcp 65001": no Windows 7/8 ele fazia o .bat parar no meio.
+rem V4.22.4: com dois cliques, o arquivo roda dentro de um "cmd /k", que fica aberto mesmo se o Windows parar o arquivo no meio
+rem (antes a janela sumia e nao dava para ler o erro). V4.22.6: na MESMA janela (antes abria outra e a primeira piscava e fechava).
+if /i not "%~1"=="--na-janela" (
+  cmd /k call "%~f0" --na-janela
+  exit /b
+)
 cd /d "%~dp0"
 title Link publico do DashMaster (Tailscale Funnel)
-set "TS=%ProgramFiles%\Tailscale\tailscale.exe"
-if not exist "%TS%" (
-  echo.
-  echo   O Tailscale nao esta instalado neste computador.
-  echo   1^) Instale em https://tailscale.com/download/windows
-  echo   2^) Entre com sua conta ^(Google, Microsoft ou e-mail^)
-  echo   3^) Abra este arquivo de novo.
-  echo.
-  pause
-  exit /b 1
-)
+echo.
+echo   ===== Link publico do DashMaster (Tailscale) =====
+echo.
+
+rem ---------- 1. Tailscale instalado? ----------
+set "TS="
+if exist "%ProgramFiles%\Tailscale\tailscale.exe" set "TS=%ProgramFiles%\Tailscale\tailscale.exe"
+if not defined TS if exist "%ProgramFiles(x86)%\Tailscale\tailscale.exe" set "TS=%ProgramFiles(x86)%\Tailscale\tailscale.exe"
+if not defined TS for /f "delims=" %%p in ('where tailscale 2^>nul') do if not defined TS set "TS=%%p"
+if not defined TS goto semTailscale
+echo   [1/4] Tailscale encontrado: %TS%
+
+rem ---------- 2. Porta do painel e do link (padrao.json do pacote; config.json vale mais) ----------
+rem Painel de Lotes: porta 3400 e link na 10000; Sorter: porta 3500 e link na 8443 (padrao.json de cada pacote).
 set PORTA=3000
+set PORTALINK=443
+set "CAMINHO="
+if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"porta\"" padrao.json') do set PORTA=%%a
+if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"portaLink\"" padrao.json') do set PORTALINK=%%a
+if exist padrao.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"caminho\"" padrao.json') do set "CAMINHO=%%~a"
 if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"porta\"" config.json') do set PORTA=%%a
-echo.
-echo   Publicando o painel (porta %PORTA%) na internet com o Tailscale Funnel...
-echo.
-"%TS%" funnel --bg %PORTA%
-if errorlevel 1 (
-  echo.
-  echo   Nao deu certo ainda. Se apareceu um link acima, abra-o no navegador, autorize o Funnel
-  echo   na sua conta do Tailscale e abra este arquivo de novo. Se pedir permissao, clique com o
-  echo   botao direito neste arquivo e escolha "Executar como administrador".
-  echo.
-  pause
-  exit /b 1
+rem config.json de antes do caminho (sem "caminho"): o link fica o do pacote (iniciar.bat atualiza o config.json).
+set "LINKCFG=1"
+if defined CAMINHO set "LINKCFG="
+if exist config.json findstr /c:"\"caminho\"" config.json >nul 2>nul && set "LINKCFG=1"
+if defined LINKCFG if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"portaLink\"" config.json') do set PORTALINK=%%a
+if defined LINKCFG if exist config.json for /f "tokens=2 delims=:, " %%a in ('findstr /c:"\"caminho\"" config.json') do set "CAMINHO=%%~a"
+rem V4.21.5: com "caminho" (ex.: /lotes), o painel fica no mesmo link do principal com o caminho no fim (https://NOME.ts.net/lotes).
+rem V4.22.5: cada painel na sua porta do link (principal 443, Sorter 8443, Lotes 10000). Com o Node.js, o config.json recebe a
+rem mudanca do pacote e as portas vem dele (lib\link.js); sem o Node.js, valem as lidas acima.
+set "NODEOK="
+where node >nul 2>nul && set "NODEOK=1"
+if not exist "%~dp0lib\link.js" set "NODEOK="
+if defined NODEOK for /f "tokens=1-3" %%a in ('node "%~dp0lib\link.js" config 2^>nul') do (
+  set "PORTA=%%a"
+  set "PORTALINK=%%b"
+  set "CAMINHO=%%c"
 )
+if "%CAMINHO%"=="-" set "CAMINHO="
+echo   [2/4] Porta do painel: %PORTA% - porta do link: %PORTALINK% - caminho: %CAMINHO%
+netstat -an | findstr /r /c:":%PORTA% .*LISTENING" >nul
+if errorlevel 1 (
+  echo         AVISO: o painel nao esta aberto agora. Abra o atalho DashMaster depois - o link so mostra o painel com ele aberto.
+)
+
+rem ---------- 3. Tailscale ligado e com a conta? ----------
+"%TS%" status >nul 2>nul
+if not errorlevel 1 goto conectado
+echo   [3/4] O Tailscale esta desligado ou sem conta. Tentando ligar...
+echo         Se aparecer um link https://login.tailscale.com/... abra no navegador e entre com a sua conta.
+echo.
+"%TS%" up
+if errorlevel 1 goto semConta
+"%TS%" status >nul 2>nul
+if errorlevel 1 goto semConta
+:conectado
+echo   [3/4] Tailscale ligado.
+
+rem ---------- 4. Funnel ----------
+rem V4.22.5: o endereco ja leva para OUTRO painel deste computador? Avisa e pergunta antes de trocar.
+if not defined NODEOK goto funnelPublicar
+node "%~dp0lib\link.js" livre "%TS%" %PORTALINK% %PORTA% %CAMINHO%
+if errorlevel 2 goto ocupado
+goto funnelPublicar
+:ocupado
+echo.
+choice /c SN /n /m "  Trocar mesmo assim? S = sim, N = nao: "
+if errorlevel 2 goto fim
+:funnelPublicar
+echo   [4/4] Publicando o painel na internet (Funnel)...
+echo         Na primeira vez aparece um link para AUTORIZAR o Funnel: abra, clique em Enable e espere aqui.
+echo.
+if defined CAMINHO goto funnelCaminho
+if "%PORTALINK%"=="443" goto funnel443
+"%TS%" funnel --bg --https=%PORTALINK% %PORTA%
+goto funnelFeito
+:funnelCaminho
+"%TS%" funnel --bg --https=%PORTALINK% --set-path=%CAMINHO% http://127.0.0.1:%PORTA%%CAMINHO%
+goto funnelFeito
+:funnel443
+"%TS%" funnel --bg %PORTA%
+:funnelFeito
+if errorlevel 1 goto funnelErro
+rem V4.22.5: links antigos deste painel (ex.: /lotes na 443 depois de passar para a 10000) saem do ar.
+if defined NODEOK node "%~dp0lib\link.js" limpar "%TS%" %PORTALINK% %PORTA% %CAMINHO%
 echo.
 "%TS%" funnel status
 echo.
-echo   Pronto. O endereco https://....ts.net acima e o LINK PUBLICO do painel: ele nao muda e
-echo   continua valendo depois de reiniciar o computador.
+echo   PRONTO. O endereco https://....ts.net acima e o LINK PUBLICO do painel (com :%PORTALINK% no fim, se nao for 443, e %CAMINHO%).
+echo   Ele nao muda e continua valendo depois de reiniciar o computador (nao precisa deixar esta janela aberta).
 echo   Coloque-o em "linkPublico" no config.json e defina uma "senha" para o painel.
-echo   Para tirar do ar:  "%TS%" funnel reset
+if defined CAMINHO echo   Para tirar do ar so este link: "%TS%" funnel --https=%PORTALINK% --set-path=%CAMINHO% off
+if not defined CAMINHO echo   Para tirar do ar so este link: "%TS%" funnel --https=%PORTALINK% off
+goto fim
+
+:semTailscale
+echo   O Tailscale nao esta instalado neste computador.
+echo     1. Instale em https://tailscale.com/download/windows
+echo     2. Entre com a sua conta - Google, Microsoft ou e-mail.
+echo     3. Abra este arquivo de novo.
+goto fim
+
+:semConta
 echo.
-pause
+echo   O Tailscale nao conectou. Faca assim:
+echo     1. Menu Iniciar - digite Tailscale - abra.
+echo        Ele NAO abre janela: aparece um icone perto do relogio - clique na setinha ^^ ao lado do relogio.
+echo     2. Clique no icone do Tailscale - Log in - entre com a sua conta no navegador.
+echo     3. Abra este arquivo de novo.
+echo   Se a mensagem acima falar em "Access denied" ou "permissao": clique com o botao direito neste arquivo
+echo   e escolha "Executar como administrador".
+goto fim
+
+:funnelErro
+echo.
+echo   O Funnel nao foi ligado. Veja a mensagem acima:
+echo     - Se apareceu um link: abra no navegador, autorize o Funnel - Enable - e abra este arquivo de novo.
+echo     - "Access denied" ou "permissao": botao direito neste arquivo - Executar como administrador.
+echo     - "Funnel not available" ou "HTTPS": no site do Tailscale - DNS - ligue MagicDNS e HTTPS Certificates.
+echo   Se nao resolver, tire um print desta janela e mande.
+goto fim
+
+:fim
+echo.
+echo   Pode fechar esta janela (X) depois de ler.
+exit /b 0

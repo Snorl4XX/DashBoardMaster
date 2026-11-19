@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Rota Certa · Remessas na rota errada</title>
+  <script>
+    /* Tema ESCURO por padrão, como o painel principal; quem escolher o claro no botão fica com o claro neste navegador. */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('jt_theme'); } catch (e) {}
+      if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    /* Chart.js com CDN reserva, como o painel principal. Sem rede para os dois, o painel mostra tabelas no lugar dos gráficos. */
+    window.__chartLibs = (function () {
+      function load(srcs) {
+        return new Promise(function (resolve) {
+          var i = 0;
+          (function next() {
+            if (i >= srcs.length) { resolve(false); return; }
+            var s = document.createElement('script');
+            s.src = srcs[i++]; s.async = false;
+            s.onload = function () { resolve(true); };
+            s.onerror = function () { s.remove(); next(); };
+            document.head.appendChild(s);
+          })();
+        });
+      }
+      return load([
+        'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js'
+      ]).then(function (ok) {
+        return ok ? load([
+          'https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js',
+          'https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js'
+        ]) : false;
+      });
+    })();
+  </script>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="scrim" id="scrim" hidden></div>
+
+    <!-- ============ MENU LATERAL ============ -->
+    <aside class="sidebar" id="sidebar" aria-label="Menu">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">J&amp;T</div>
+        <div class="brand-copy">
+          <strong>EXPRESS</strong>
+          <small><span class="js-base">SP GRU</span> · Rota Certa</small>
+        </div>
+      </div>
+      <nav class="side-nav" aria-label="Páginas">
+        <div class="nav-label">Painéis</div>
+        <a class="nav-item active" href="./" aria-current="page">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span>
+          <span class="nav-copy"><b>Remessas na rota errada</b><small>错发 · linha principal e secundária</small></span>
+          <span class="nav-rate" id="navRate"><i></i>–</span>
+        </a>
+        <div class="nav-label">Sistema</div>
+        <a class="nav-item" href="config">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></span>
+          <span class="nav-copy"><b>Configurações</b><small>设置 · só no computador do app</small></span>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="sync-line"><span class="sync-dot warn" id="syncDot"></span><div><b>Atualização automática</b><small id="lastSync">—</small></div></div>
+        <div class="queue-line" id="queueLine"></div>
+        <span class="version" id="appVersion"></span>
+        <span class="made-by">Feito por Caike Oliveira</span>
+      </div>
+    </aside>
+
+    <!-- ============ CONTEÚDO ============ -->
+    <main class="main" id="main">
+      <header class="topbar">
+        <button class="icon-btn only-mobile" id="menuBtn" type="button" aria-label="Menu" aria-controls="sidebar" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <div class="title-wrap">
+          <div class="eyebrow"><span>J&amp;T EXPRESS</span><span class="dot-sep"></span><span class="js-base">SP GRU</span></div>
+          <h1>Remessas na rota errada</h1>
+          <p id="pageSubtitle">错发 · Remessas enviadas no caminhão de outra rota</p>
+        </div>
+        <div class="top-actions">
+          <button type="button" class="theme-btn" id="themeBtn" aria-pressed="true" title="Tema claro" aria-label="Tema claro">
+            <svg class="ico-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+            <svg class="ico-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          </button>
+          <button type="button" class="btn btn-light" id="refreshBtn" title="Busca agora no JMS (a busca automática é a cada 30 min)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg><span>Atualizar</span>
+          </button>
+          <button type="button" class="btn btn-red" id="excelBtn" title="Planilha só com as remessas na rota errada (com os filtros)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg><span>Baixar erros</span>
+          </button>
+        </div>
+      </header>
+      <div class="progress" id="progress" aria-hidden="true"><span></span></div>
+
+      <!-- Filtros (pedido): data, 1º segmento, 2º segmento, turno e doca/esteira -->
+      <section class="card toolbar" aria-label="Data e filtros">
+        <div class="field field-date">
+          <label for="dia">Data</label>
+          <input type="date" id="dia">
+        </div>
+        <div class="field">
+          <label for="f-seg1">1º segmento</label>
+          <div class="select-wrap"><select id="f-seg1"><option value="">Todos</option></select></div>
+        </div>
+        <div class="field">
+          <label for="f-seg2">2º segmento</label>
+          <div class="select-wrap"><select id="f-seg2"><option value="">Todos</option></select></div>
+        </div>
+        <div class="field">
+          <label for="f-turno">Turno</label>
+          <div class="select-wrap"><select id="f-turno"><option value="">Todos</option><option value="T1">T1 · 06h–14h</option><option value="T2">T2 · 14h–22h</option><option value="T3">T3 · 22h–06h</option></select></div>
+        </div>
+        <div class="field field-indicator">
+          <label for="f-local">Doca / Esteira</label>
+          <div class="select-wrap"><select id="f-local"><option value="">Todas</option></select></div>
+        </div>
+        <div class="presets" id="presets" role="group" aria-label="Atalhos">
+          <button type="button" class="chip" data-p="hoje">Hoje</button>
+          <button type="button" class="chip" data-p="ontem">Ontem</button>
+          <button type="button" class="chip" id="limparBtn">Limpar filtros</button>
+          <span class="badges" id="badges"></span>
+        </div>
+      </section>
+
+      <div id="alerts"></div>
+
+      <section id="viewDashboard" class="view">
+        <section class="kpi-grid" id="kpiGrid" aria-live="polite"></section>
+
+        <section class="charts-grid charts-2" id="chartsGrid"></section>
+
+        <section class="card table-card" id="detailCard">
+          <div class="section-head">
+            <div>
+              <span class="kicker">Detalhamento · 错发明细</span>
+              <h2>Remessas enviadas na rota errada</h2>
+            </div>
+            <div class="table-tools">
+              <label class="find">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
+                <input type="text" id="tableFind" autocomplete="off" placeholder="Localizar remessa, ID, lote, login, destino…">
+              </label>
+              <span class="count" id="tableCount">—</span>
+            </div>
+          </div>
+          <div class="table-scroll"><table class="data-table" id="dataTable"><thead></thead><tbody></tbody></table></div>
+          <div class="table-foot">
+            <span class="note">Só remessas na rota errada. Clique no cabeçalho para ordenar. "Baixar erros" traz todas elas numa planilha, com os filtros.</span>
+            <div class="pager" id="pager"></div>
+          </div>
+        </section>
+      </section>
+
+      <footer class="foot">Fonte: JMS (Consulta de Viagens e Consulta de Viagens Secundárias, Digitalização de carregamento do SP GRU, Gestão de pedido JMS de remessa) · tabela de rotas do SC<span class="made-by">Feito por Caike Oliveira</span></footer>
+    </main>
+  </div>
+
+  <div class="boot" id="bootScreen">
+    <div class="boot-card">
+      <div class="brand-mark big" aria-hidden="true">J&amp;T</div>
+      <div class="loader" aria-hidden="true"></div>
+      <strong>Carregando painel…</strong>
+      <small>正在加载看板…</small>
+      <small class="made-by">Feito por Caike Oliveira · 由 Caike Oliveira 制作</small>
+    </div>
+  </div>
+
+  <script src="graficos.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

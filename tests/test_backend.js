@@ -5,12 +5,11 @@ function check(cond, name, extra) { if (!cond) { console.error('FALHOU: ' + name
 function hasDate(o) { if (o instanceof Date) return true; if (o && typeof o === 'object') return Object.keys(o).some(k => hasDate(o[k])); return false; }
 
 const days = {'2026-09-17': makeDay('2026-09-17', 11), '2026-09-18': makeDay('2026-09-18', 23), '2026-09-19': makeDay('2026-09-19', 37)};
-// DETAIL_DAYS_ARRIVAL_FLOW: os dias dos testes (setembro) ficam dentro da janela de detalhe do Recebimento.
 // ATUALIZACAO_MIN 60: os testes antigos contam a fila sem a atualização rápida de hoje (V3.24 tem testes próprios).
 // MODO_ATUALIZACAO continuo: os testes antigos conferem a atualização contínua (opção); o modo diário (padrão da V4.5) tem os seus.
-// REATIVAR_PAINEIS lot_flow,unseal: o Fluxo de Lotes (V4.7) e o Deslacre (V4.12.3) foram retirados (pedido); os testes antigos
+// REATIVAR_PAINEIS lot_flow,unseal: o Fluxo de Lotes (V4.7) e o Deslacre (V4.12.3; de volta na V4.17) foram retirados (pedido); os testes antigos
 // deles continuam valendo com eles de volta.
-const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', DETAIL_DAYS_ARRIVAL_FLOW: '120', ATUALIZACAO_MIN: '60',
+const baseProps = {JMS_AUTHTOKEN: 'FAKE', JMS_AUTH_MODE: 'AUTHTOKEN', DATA_START_DATE: '2026-09-17', ATUALIZACAO_MIN: '60',
   MODO_ATUALIZACAO: 'continuo', REATIVAR_PAINEIS: 'lot_flow,unseal'};
 const ctx = createContext({props: baseProps, jms: fakeJms(days), quiet: true});
 const S = ctx.__state;
@@ -136,15 +135,15 @@ check(ctx.getDashboardData('wrong_send', {}).meta.to === '2026-09-19', 'período
 
 // ---------- 6. Resultados ----------
 const results = ctx.getResultsData({from: '2026-09-17', to: '2026-09-19'});
-const QTY_R = {arrival_flow: 'totalNum', send_flow: 'sendcount', lot_flow: 'packageSum'};
-// (Expedição: dias fora da janela de detalhe não têm turnos — nem detalhe nem a lista por horário.)
-check(results.series.length === 11 && results.series.every(s => s.rates.length === 3 && s.agg.length === (s.key === 'send_flow' ? 0 : 3) &&
+const QTY_R = {lot_flow: 'packageSum'};
+// V4.17: + Deslacre troncal. V4.26: sem Recebimento e Expedição (fluxo operacional), que saíram do código = 10.
+check(results.series.length === 10 && results.series.every(s => s.rates.length === 3 && s.agg.length === 3 &&
     (QTY_R[s.key] ? s.rates.every(r => typeof r.value === 'number' && r.value === ctx.getRateDay_(s.key, r.date).metrics[QTY_R[s.key]]) &&
       s.agg.every(a => a.T1 + a.T2 + a.T3 + a.NA === a.total && a.total === s.rates.filter(r => r.date === a.date)[0].value) : s.rates.every(r => r.value === undefined))) && !hasDate(results),
-  'resultados de todos os indicadores; Recebimento, Expedição e Lotes com a quantidade do dia e os turnos dela',
+  'resultados de todos os indicadores; Lotes com a quantidade do dia e os turnos dela',
   results.series.filter(s => QTY_R[s.key]).map(s => ({k: s.key, r: s.rates.map(r => r.value), a: s.agg.map(a => a.total)})));
-const qtyWeek = C.aggregateQtyResults(results.series.filter(s => s.key === 'send_flow')[0].rates, 'week', '2026-09-17', '2026-09-19');
-const sfVals = results.series.filter(s => s.key === 'send_flow')[0].rates.map(r => r.value);
+const qtyWeek = C.aggregateQtyResults(results.series.filter(s => s.key === 'lot_flow')[0].rates, 'week', '2026-09-17', '2026-09-19');
+const sfVals = results.series.filter(s => s.key === 'lot_flow')[0].rates.map(r => r.value);
 check(qtyWeek.length === 1 && qtyWeek[0].value === sfVals.reduce((a, b) => a + b, 0) && qtyWeek[0].days === 3 && Math.abs(qtyWeek[0].avg - qtyWeek[0].value / 3) < 1e-9,
   'Resultados por quantidade: soma do período e média por dia', qtyWeek);
 const weekly = C.aggregateResults(results.series[0].rates, cfgWs.goal, 'week', '2026-09-17', '2026-09-19');
@@ -310,6 +309,7 @@ check(detA.length && detA.every(f => f.payload.size === 1000), 'detalhe pede 100
 check(ALL.every(k => cA.getDayStatus_(k, D19).details === 'COMPLETE'), 'todos os indicadores completos', ALL.map(k => cA.getDayStatus_(k, D19).details));
 // (a foto de hoje da Sem Movimentação entra na fila sozinha e grava o arquivo de hoje: fora da conta deste dia)
 // (arquivos na lixeira não contam: o SC→DC regrava o dia com os IDs de viagem de saída e descarta o anterior)
+// V4.17: + Deslacre troncal = 11 arquivos. V4.26: sem Recebimento (fluxo operacional) = 10.
 const filesA = Object.keys(cA.__state.files).filter(id => !cA.__state.files[id].trashed && !/^no_move__/.test(cA.__state.files[id].name || '') && !/__viagens/.test(cA.__state.files[id].name || ''));
 check(filesA.length === 10, 'um arquivo por dia e indicador, nenhum arquivo por página', filesA.map(id => cA.__state.files[id].name));
 // V4.1: o SC→DC grava também o mapa remessa → ID de viagem de saída (Rastreamento do pacote), um por dia.
@@ -377,15 +377,16 @@ cG.queueHistory(D19, D19, true);
 cG.processSyncQueue({budgetMs: 600000});
 const pausesG = cG.publicPauses_();
 // V3.29: 10 rotas — a foto de hoje da Sem Movimentação também entra na fila sozinha. V4.4: + Deslacre (UNSEAL) = 11.
-check(pausesG.length === 11 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason) && pausesG.some(p => p.route === 'NOMOVE') &&
-  pausesG.some(p => p.route === 'UNSEAL'), 'token expirado pausa as 11 rotas com aviso claro', pausesG);
-check(cG.__state.fetches.length === 11, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
+// V4.17: + Deslacre da linha troncal (UNSEAL_TRUNK) = 12. V4.26: sem Recebimento e Expedição (fluxo operacional) = 10.
+check(pausesG.length === 10 && pausesG.every(p => p.kind === 'AUTH') && /token do JMS expirado/.test(pausesG[0].reason) && pausesG.some(p => p.route === 'NOMOVE') &&
+  pausesG.some(p => p.route === 'UNSEAL') && pausesG.some(p => p.route === 'UNSEAL_TRUNK'), 'token expirado pausa as 10 rotas com aviso claro', pausesG);
+check(cG.__state.fetches.length === 10, 'uma única requisição por rota até trocar o token', cG.__state.fetches.length);
 // (+ o resumo de hoje de cada painel, da atualização rápida de hoje — V3.24)
-check(cG.pendingJobs_().filter(j => j.date !== ctx.isoToday_()).length === 22 && cG.pendingJobs_().filter(j => j.date === ctx.isoToday_()).every(j => j.type === 'SUMMARY') &&
+check(cG.pendingJobs_().filter(j => j.date !== ctx.isoToday_()).length === 20 && cG.pendingJobs_().filter(j => j.date === ctx.isoToday_()).every(j => j.type === 'SUMMARY') &&
   cG.pendingJobs_().every(j => j.attempts === 0), 'jobs continuam pendentes, sem gastar tentativas');
 cG.processSyncQueue({budgetMs: 600000});
-check(cG.__state.fetches.length === 11, 'fila pausada não insiste no JMS');
-check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 11 && cG.getAppBootstrap().pauses.length === 11, 'pausa chega ao painel');
+check(cG.__state.fetches.length === 10, 'fila pausada não insiste no JMS');
+check(cG.getDashboardData('wrong_send', {from: D19, to: D19}).meta.pauses.length === 10 && cG.getAppBootstrap().pauses.length === 10, 'pausa chega ao painel');
 delete optsG.appError;
 cG.__state.props.JMS_AUTHTOKEN = 'TOKEN_NOVO';
 runAll(cG);
@@ -395,7 +396,7 @@ check(cG.publicPauses_().length === 0 && ALL.every(k => cG.getDayStatus_(k, D19)
 const cH = freshCtx({'2026-09-19': makeDay(D19, 3)}, {html: true});
 cH.queueHistory(D19, D19, true);
 cH.processSyncQueue({budgetMs: 600000});
-check(cH.publicPauses_().length === 11 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
+check(cH.publicPauses_().length === 10 && /Sessão\/token do JMS/.test(cH.publicPauses_()[0].reason), 'HTML no lugar de JSON = sessão expirada', cH.publicPauses_()[0]);
 
 // (i) Cota diária do Google esgotada: pausa geral por 1 h, sem marcar erro nos jobs.
 const cI = freshCtx({'2026-09-19': makeDay(D19, 3)}, {onFetch: () => { throw new Error('Service invoked too many times for one day: urlfetch.'); }});
@@ -409,6 +410,11 @@ check(cI.__state.fetches.length === 1 && cI.pendingJobs_().every(j => j.attempts
 check(ctx.publicJmsError_('Detalhe retornou 14013 registros, mas o resumo tem 4012 erros: payload do detalhe sem filtro.') === 'Detalhe bloqueado: retorno maior que o resumo',
   'número "401" dentro da mensagem não é erro de autenticação');
 check(!/HTTP 403|permissão/.test(ctx.publicJmsError_('JMS informou 4031 registros no resumo, mas entregou 4029 em sc_sc 2026-09-19')), 'número "403" idem');
+// V4.15.1: a mensagem da cota vem no idioma da conta Google.
+check(['Serviço chamado muitas vezes no mesmo dia: urlfetch.', 'Falha de rede ao consultar o JMS: Serviço chamado muitas vezes no mesmo dia: urlfetch.',
+  'Servicio invocado demasiadas veces en un día: urlfetch.'].every(m => ctx.errorKind_(m) === 'QUOTA') &&
+  /Cota diária de consultas externas do Google \(UrlFetch\) esgotada/.test(ctx.publicJmsError_('Serviço chamado muitas vezes no mesmo dia: urlfetch.')),
+  'cota do Google em português/espanhol reconhecida (não vira "falha de rede")');
 check(ctx.errorKind_('HTTP 401 em x') === 'AUTH' && ctx.errorKind_('Sessão do JMS expirada') === 'AUTH' && ctx.errorKind_('Service invoked too many times for one day: urlfetch.') === 'QUOTA' &&
   ctx.errorKind_('Detalhe retornou 4013 registros') === 'OTHER', 'classificação dos erros da fila');
 
@@ -434,7 +440,8 @@ check(diagL.campos && diagL.campos.shipment.encontrado === null && diagL.campos.
   'diagnosticarDetalheJms mostra o mapeamento de campos', diagL.campos && diagL.campos.shipment);
 
 // (m) Dia retomado: tempo acabando grava os pedaços em ordem e a próxima execução continua de onde parou.
-const cM = freshCtx(withBig(D19, 1234), {maxPageSize: 50});
+// (V4.25.4: com fatias de uma página o dia vem inteiro no planejamento; a retomada vale para a paginação — JMS_PAGINAR.)
+const cM = freshCtx(withBig(D19, 1234), {maxPageSize: 50}, {JMS_PAGINAR: '1'});
 cM.queueHistory(D19, D19, true);
 cM.processJob_(cM.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'wrong_send')[0], Date.now() + 600000);
 const rM1 = cM.processJob_(cM.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'wrong_send')[0], Date.now() + 30000);
@@ -664,7 +671,8 @@ for (let i = 0; i < 4; i++) { cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.T
 cQ.STORAGE_CACHE_ = null; cQ.TAB_CACHE_ = {}; cQ.TAB_INDEX_ = {};
 const qQ = cQ.queueReport_(1100);
 // V3.29: 11 resumos com erro — a foto de hoje da Sem Movimentação também entra na fila sozinha. V4.4: + Deslacre = 12.
-check(qQ.erros === 12 && qQ.esperandoTaxa === 11 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 12 &&
+// V4.17: + Deslacre da linha troncal = 13. V4.26: sem Recebimento e Expedição (fluxo operacional) = 11.
+check(qQ.erros === 11 && qQ.esperandoTaxa === 10 && qQ.prontos === 0 && qQ.causasDeErro[0].n === 11 &&
   /código 500: Erro interno do relatório/.test(qQ.texto) && /esperando a taxa do dia/.test(qQ.texto), 'fila explicada: pendentes esperando a taxa e erros por causa', qQ.texto);
 
 // ---------- 14. V3.8: docas na Falta de Bipagem na Expedição (planilha do usuário) ----------
@@ -745,11 +753,15 @@ check(smp.amostra === 5 && smp.docas[0].doca === 'DOCA 21' && smp.docas[0].pct =
 check(ctx.dockSampleReport_('missing_receipt', [{billcode: '1'}]) === null, 'amostra de docas só onde há docas (V4.8: a Triagem Errada passou a ter)');
 
 // (b) Painel: filtro de docas, 2 gráficos novos, colunas Destino/Doca — sem tirar nada do que existia.
-check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,destination,dock', 'filtro de docas adicionado no fim, filtros antigos mantidos');
+// V4.25 (pedido): filtros "Destinos afetados" (segmentBase) e "Expedição".
+check(catMD.filters.map(f => f.key).join() === 'shift,login,interval,client,tripId,segment,segmentBase,destination,dock,expedition', 'filtro de docas, Destinos afetados e Expedição; filtros antigos mantidos', catMD.filters.map(f => f.key));
 // V4.12.6 (pedido): sem "Top 4 segmentos por turno" e sem "Turno + rota de carregamento + doca"; segmentos pela fórmula do WPS.
-check(catMD.charts.map(c => c.key).join() === 'shift,segmentBase,login,tripId,client,interval' && catMD.segmentBase === true,
-  'V4.12.6: gráficos da Falta de Bipagem na Expedição (sem o Top 4 por turno; segmentos pela fórmula)', catMD.charts.map(c => c.key));
-check(catMD.rankPanels.map(p => p.key).join() === 'dockOverview,dockByShift', 'V4.12.6: painéis de docas sem "Turno + rota de carregamento + doca"', catMD.rankPanels.map(p => p.key));
+// V4.25 (pedido): saíram "Logins mais ofensores", "IDs de viagem de recebimento" e "Docas por turno"; "Destinos afetados" e "Expedições ofensoras".
+check(catMD.charts.map(c => c.key).join() === 'shift,segmentBase,expedition,client,interval' && catMD.segmentBase === true &&
+  catMD.charts[1].title.pt === 'Destinos afetados' && catMD.labels.segmentBase.pt === 'Destinos afetados' && catMD.filters.find(f => f.key === 'segmentBase').label.pt === 'Destinos afetados',
+  'V4.25: gráficos da Falta de Bipagem na Expedição (Destinos afetados, Expedições ofensoras; sem logins, IDs de viagem)', catMD.charts.map(c => c.key));
+check(catMD.rankPanels.map(p => p.key).join() === 'dockOverview', 'V4.25: painéis de docas sem "Docas por turno"', catMD.rankPanels.map(p => p.key));
+const DBS = {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom'};
 check(catMD.labels.dock.pt === 'Doca' && catMD.labels.dockDest.pt === 'Rota de carregamento' && catMD.table.some(c => c[0] === 'dock'), 'rótulos e colunas novas (V4.8: destino = rota de carregamento)');
 const cfMD = vm.runInContext('clientFields_(INDICATORS.missing_dispatch)', ctx);
 check(cfMD.indexOf('segmentRaw') >= 0 && cfMD.indexOf('dock') < 0 && cfMD.indexOf('dockDest') < 0, 'doca é calculada no navegador a partir do 1º segmento completo', cfMD);
@@ -762,7 +774,7 @@ const expOver = desc(cnt(fxRows, r => r.dock || null));
 check(pOver.total === 8473 && pOver.items.length === 15 && pOver.items.map(i => i.value + '=' + i.count).join() === expOver.map(e => e[0] + '=' + e[1]).join() &&
   pOver.max.value === 'DOCA 21' && pOver.max.count === 4024 && Math.abs(pOver.max.pct - 47.4920) < 0.001 && pOver.min.value === 'DOCA 06' && pOver.min.count === 43,
   'painel "Distribuição geral por docas": todas as docas, maior/menor e % do total (igual à planilha: DOCA 21 = 4024 = 47,49%)', pOver.items.slice(0, 4));
-const pShift = C.rankPanel(fxRows, RP('dockByShift'));
+const pShift = C.rankPanel(fxRows, DBS);
 const topOf = (rows, dim, s, n) => desc(cnt(rows.filter(r => r.shift === s), r => r[dim] || null)).slice(0, n);
 const expShift = ['T1', 'T2', 'T3'].map(s => topOf(fxRows, 'dock', s, 5));
 const shownShift = expShift.reduce((a, g) => a + g.reduce((b, e) => b + e[1], 0), 0);
@@ -777,7 +789,7 @@ check(t3.slice(0, 5).map(x => x.value + '|' + x.extra + '=' + x.count).join() ==
   'painel "Turno + segmento + doca": top 5 destinos por turno com a doca (T3 igual à planilha), maior combinação', t3);
 const oldRows = [{date: FX.data, shipment: 'OLD1', segment: 'BRE', shift: 'T1'}];
 C.applyDocks(oldRows, catMD.docks);
-check(oldRows[0].dock === '' && C.rankPanel(oldRows, RP('dockOverview')).total === 0 && C.rankPanel(oldRows, RP('dockByShift')).groups.length === 0,
+check(oldRows[0].dock === '' && C.rankPanel(oldRows, RP('dockOverview')).total === 0 && C.rankPanel(oldRows, DBS).groups.length === 0,
   'dado antigo só com "BRE" (ambíguo): "Sem informação", fora dos painéis');
 
 // (c) Pipeline completo: JMS → arquivo diário → painel e relatório com docas; filtro por doca.
@@ -931,11 +943,12 @@ delete cDm.__state.props.MIGRATION_V3114;
 const migLoc = cDm.migrateToV3114_();
 check(migLoc === 1 && cDm.migrateToV3114_() === 0 && cDm.allTabRows_('JOBS').some(r => r[1] === 'DETAIL_INIT' && r[2] === 'damage' && r[5] === 'PENDING'),
   'atualização: detalhe da Avaria baixado de novo uma vez para trazer o local', migLoc);
-// (e) Meta 90: a taxa precisa ficar ABAIXO (292,78 = fora da meta). Sem valor = "Meta não definida".
+// (e) Meta 120 ppm (V4.25; antes 90): a taxa precisa ficar ABAIXO (292,78 = fora da meta). Sem valor = "Meta não definida".
 const cardsDm = C.computeCards(cfgDm, dashDm.rates, rowsDm, {}, D19, D19);
-check(cfgDm.goal.value === 90 && cardsDm.rate === rateDm.rate && cardsDm.targetMet === false && C.goalMet(292.78, cfgDm.goal) === false &&
-  C.goalMet(85, cfgDm.goal) === true && C.goalMet(90, cfgDm.goal) === true && C.goalMet(85, Object.assign({}, cfgDm.goal, {value: null})) === null,
-  'meta da Avaria (≤ 90): 292,78 fora da meta, 85 na meta; sem valor = sem avaliação', cardsDm.targetMet);
+check(cfgDm.goal.value === 120 && cardsDm.rate === rateDm.rate && cardsDm.targetMet === false && C.goalMet(292.78, cfgDm.goal) === false &&
+  C.goalMet(85, cfgDm.goal) === true && C.goalMet(110, cfgDm.goal) === true && C.goalMet(120.5, cfgDm.goal) === false &&
+  C.goalMet(85, Object.assign({}, cfgDm.goal, {value: null})) === null,
+  'meta da Avaria (120 ppm): 292,78 e 120,5 fora da meta, 110 na meta; sem valor = sem avaliação', cardsDm.targetMet);
 const prDm = C.periodRate([{rate: 292.78, errorCount: 152, totalCount: 519159}, {rate: 250, errorCount: 100, totalCount: 400000}], cfgDm.goal);
 check(prDm.method === 'weighted' && Math.abs(prDm.rate - 252 / 919159 * 1e6) < 1e-6, 'taxa de vários dias como o JMS = Σavarias ÷ Σvolume × 1.000.000', prDm);
 const shDm = C.aggregateShiftResults([{date: D19, T1: 10, T2: 20, T3: 30, total: 60}], 'day', 'T2', D19, D19, [{date: D19, totalCount: 500000}], C.rateScale(cfgDm.goal));
@@ -1049,9 +1062,9 @@ runAll(cSC);
 const catSC = cSC.getPublicCatalog_().filter(x => x.key === 'sc_sc')[0], catWS = cSC.getPublicCatalog_().filter(x => x.key === 'wrong_send')[0];
 const dashSC = cSC.getDashboardData('sc_sc', {from: D19, to: D19});
 const rowsSC = C.applyDocks(C.decodeDataset(dashSC.dataset), catSC.docks);
-// V3.15: SC → SC sem "Docas por turno"; turno + próxima parada + doca = "Horário de saída do Motorista".
+// V3.15: SC → SC sem "Docas por turno"; turno + próxima parada + doca = "Horário de saída do Motorista". V4.25: o Envio Errado também sem.
 check(catSC.filters.some(f => f.key === 'dock') && catSC.rankPanels.map(p => p.key).join() === 'dockOverview,stopDockByShift' &&
-  catSC.rankPanels[1].title.pt === 'Horário de saída do Motorista' && catWS.rankPanels.some(p => p.key === 'dockByShift') && rowsSC.length > 0 &&
+  catSC.rankPanels[1].title.pt === 'Horário de saída do Motorista' && !catWS.rankPanels.some(p => p.key === 'dockByShift') && rowsSC.length > 0 &&
   rowsSC.every(r => r.dock === stopCases[r.destination][1]) && dashSC.dataset.fields.indexOf('segmentRaw') < 0,
   'SC → SC: filtro e gráficos de docas; a doca sai da próxima parada já gravada (sem baixar de novo)', catSC.rankPanels.map(p => p.key));
 const compSC = cSC.computeDashboard_('sc_sc', {from: D19, to: D19, filters: {dock: ['DOCA 19']}});
@@ -1059,8 +1072,8 @@ check(compSC.rows.length > 0 && compSC.rows.every(r => r.dock === 'DOCA 19' && /
   'SC → SC: relatório com filtro de doca e tabela dinâmica doca × próxima parada', compSC.rows.length);
 const dashWS = cSC.getDashboardData('wrong_send', {from: D19, to: D19});
 const rowsWS = C.applyDocks(C.decodeDataset(dashWS.dataset), catWS.docks);
-check(catWS.docks.source === 'destination' && catWS.filters.some(f => f.key === 'dock') && catWS.rankPanels.length === 3 &&
-  catWS.rankPanels[2].dim === 'destination' && dashWS.dataset.fields.indexOf('segmentRaw') < 0 && rowsWS.length > 0 &&
+check(catWS.docks.source === 'destination' && catWS.filters.some(f => f.key === 'dock') && catWS.rankPanels.length === 2 &&
+  catWS.rankPanels[1].dim === 'destination' && dashWS.dataset.fields.indexOf('segmentRaw') < 0 && rowsWS.length > 0 &&
   rowsWS.every(r => r.dock === stopCases[r.destination][1]),
   'Envio Errado: doca pela próxima parada (para onde a saca foi enviada), mesma regra do SC → SC', rowsWS.slice(0, 3).map(r => r.destination + '→' + r.dock));
 const compWS = cSC.computeDashboard_('wrong_send', {from: D19, to: D19, filters: {dock: ['DOCA 22']}});
@@ -1208,260 +1221,11 @@ runAll(cOld, 12);
 const mapOld = JSON.parse(cOld.__state.props.JMS_ORDERKIND_DAMAGE || '{}');
 check(mapOld.main === 'MAIN' && mapOld.sub === 'SUB' && !cOld.getRates_('damage:main', D19, D19)[0].estimated, '"sem suporte" antigo refeito com a regra nova', mapOld);
 
-// ---------- 21. V3.14: RECEBIMENTO: FLUXO OPERACIONAL (Deve chegar × Chegou) ----------
-const cfgAF = ctx.getIndicatorConfig_('arrival_flow');
-const pAS = ctx.buildPayload_('arrival_flow', '2026-10-01', 1, 20, false);
-const pAD = ctx.buildPayload_('arrival_flow', '2026-10-01', 1, 100, true, {start: '2026-10-01 00:00:00', end: '2026-10-01 23:59:59', type: 'shouldArriverNum'});
-check(JSON.stringify(pAS) === JSON.stringify({current: 1, size: 20, startTime: '2026-10-01 00:00:00', endTime: '2026-10-01 23:59:59', siteCode: '30001', countryId: '1'}) &&
-  JSON.stringify(pAD) === JSON.stringify({current: 1, size: 100, detailType: 'shouldArriverNum', startTime: '2026-10-01 00:00:00', endTime: '2026-10-01 23:59:59', nextstationcode: '30001', countryId: '1'}),
-  'payloads do resumo e do detalhe = captura', {pAS: pAS, pAD: pAD});
-check(ctx.jmsRouteHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_total', {}).Routename === 'ArriveMonitor', 'Routename da tela');
-// (a) Sincronização: resumo com os 7 números; detalhe das duas listas AGRUPADO.
-const dAF = {}; dAF[D19] = makeDay(D19, 101);
-const cAF = freshCtx(dAF);
-cAF.queueHistory(D19, D19, true);
-runAll(cAF);
-const afD = dAF[D19].af, rAF = cAF.getRates_('arrival_flow', D19, D19)[0];
-check(rAF && rAF.errorCount === afD.noArriverNum && rAF.totalCount === afD.should.length && Math.abs(rAF.rate - afD.noArriverNum / afD.should.length * 100) < 1e-9 &&
-  rAF.metrics.totalNum === afD.total.length && rAF.metrics.noSendNum === afD.noSendNum && rAF.metrics.deliverNum === afD.total.length,
-  'resumo: taxa = não chegadas ÷ deve chegar; os 7 números guardados', rAF);
-const dashAF = cAF.getDashboardData('arrival_flow', {from: D19, to: D19});
-const rowsAF = C.decodeDataset(dashAF.dataset);
+// Ajudantes usados adiante (vinham das seções do Recebimento: fluxo operacional, que saíram na V4.26).
 const sumQ = (rows, col) => rows.filter(r => !col || r.column === col).reduce((a, r) => a + Number(r.qty), 0);
-const COL_PREV = 'Sem bipe na etapa anterior', COL_NOSEND = 'Sem bipe de expedição nesta base';
-check(cAF.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' && rowsAF.length < afD.should.length + afD.total.length &&
-  sumQ(rowsAF, 'Deve chegar') === afD.should.length && sumQ(rowsAF, 'Chegou') === afD.total.length &&
-  sumQ(rowsAF, COL_PREV) === afD.prev.length && sumQ(rowsAF, COL_NOSEND) === afD.noSend.length && rowsAF.every(r => r.shipment && /^G\d+$/.test(r.shipment)),
-  'detalhe das quatro listas (deve chegar, chegou, sem bipe anterior, sem bipe nesta base); somas = listas do JMS',
-  {linhas: rowsAF.length, deve: sumQ(rowsAF, 'Deve chegar'), chegou: sumQ(rowsAF, 'Chegou'), prev: sumQ(rowsAF, COL_PREV)});
-const exRows = rowsAF.filter(r => r.column === 'Deve chegar'), recRows = rowsAF.filter(r => r.column === 'Chegou'), prevRows = rowsAF.filter(r => r.column === COL_PREV);
-check(exRows.every(r => r.tripExp === r.tripId && !r.tripRec && !r.shift && /^T[123]$/.test(r.shiftExp) && !r.destCenter && !r.waybill) &&
-  recRows.every(r => r.tripRec === r.tripId && !r.tripExp && /^T[123]$/.test(r.shift) && !r.station && !r.waybill && !r.eventTime) &&
-  prevRows.every(r => r.tripPrev === r.tripId && r.waybill && r.eventTime && Number(r.qty) === 1) && prevRows.length === afD.prev.length &&
-  JSON.stringify(prevRows.map(r => r.waybill).sort()) === JSON.stringify(afD.prev.map(r => r.billcode).sort()),
-  'cada lista só com os campos dela; listas pequenas remessa a remessa (remessa e horário); ID de viagem no campo do filtro de cada lista');
-const tripsOf = list => list.reduce((o, r) => { const k = r.shipmentNo || 'N/A'; o[k] = (o[k] || 0) + 1; return o; }, {});
-const chTrip = C.buildChart(cfgAF.charts.filter(d => d.key === 'expTrip')[0], rowsAF, {}), tExp = tripsOf(afD.should);
-check(chTrip.dim === 'tripExp' && chTrip.labels.every((l, i) => chTrip.datasets[0].data[i] === tExp[l]) && chTrip.total === afD.should.length,
-  'gráfico "IDs de viagens que vamos receber" conta a lista Deve chegar pela quantidade', {labels: chTrip.labels});
-const chPrev = C.buildChart(cfgAF.charts.filter(d => d.key === 'prevTrip')[0], rowsAF, {}), tPrev = tripsOf(afD.prev);
-check(chPrev.total === afD.prev.length && chPrev.labels.every((l, i) => chPrev.datasets[0].data[i] === tPrev[l]),
-  'gráfico "IDs de viagens que não tiveram bipe de expedição no anterior" = lista do JMS desse número');
-// Filtros com escopo: o filtro de uma lista não mexe nas outras.
-C.setFilterScopes(cfgAF.filterScopes);
-const tX = chTrip.labels.filter(l => l !== 'N/A')[0], fTrip = C.applyFilters(rowsAF, {tripExp: [tX]});
-check(sumQ(fTrip, 'Deve chegar') === tExp[tX] && sumQ(fTrip, 'Chegou') === afD.total.length && sumQ(fTrip, COL_PREV) === afD.prev.length,
-  'filtro "IDs de viagem que devem chegar" só filtra a lista Deve chegar (as outras listas passam inteiras)');
-const facT = C.facets(rowsAF, {}, ['tripRec', 'station']);
-check(facT.tripRec.reduce((a, o) => a + o.total, 0) === afD.total.length && facT.station.reduce((a, o) => a + o.total, 0) === afD.should.length,
-  'opções de cada filtro saem só da lista dele (sem "Sem informação" das outras listas)');
-check(dashAF.rates[0].metrics && dashAF.rates[0].metrics.uploadNoSendNum === afD.uploadNoSendNum &&
-  C.distinctCount(rowsAF) === afD.should.length + afD.total.length + afD.prev.length + afD.noSend.length,
-  'painel recebe os números do resumo e a contagem pondera a quantidade');
-const catAF = cAF.getPublicCatalog_().filter(x => x.key === 'arrival_flow')[0];
-check(catAF.grouped && catAF.metricPanels.length === 2 && catAF.metricPanels[1].metrics.length === 5 && catAF.tables.length === 3 &&
-  catAF.filters.map(f => f.key).join() === 'shift,tripExp,tripRec,station,tripPrev' && catAF.hideTarget && catAF.hideEvolution &&
-  catAF.filterScopes.tripExp[0] === 'Deve chegar' && dashAF.dataset.fields.indexOf('qty') >= 0 && dashAF.dataset.fields.indexOf('waybill') >= 0,
-  'catálogo: filtros por lista, 3 tabelas, sem quadro de meta e sem evolução da taxa');
-cAF.UrlFetchApp.fetch = (() => { const f = cAF.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cAF.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
-const repAF = cAF.generateReport('arrival_flow', {from: D19, to: D19}, 'xlsx');
-check(repAF.ok, 'relatório do Recebimento', repAF);
-// (b) Janela de detalhe: dias antigos ficam só com o resumo (SKIPPED), sem voltar para a fila.
-const cWin = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: ''});
-cWin.queueHistory(D19, D19, true);
-runAll(cWin);
-const stWin = cWin.getDayStatus_('arrival_flow', D19);
-const fWin = cWin.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url));
-check(stWin.summary === 'COMPLETE' && stWin.details === 'SKIPPED' && fWin.length === 0 && cWin.getCoverage_('arrival_flow', D19, D19).skippedDetails.length === 1 &&
-  cWin.getCoverage_('arrival_flow', D19, D19).incompleteDetails.length === 0 && cWin.healQueue_(50) === 0,
-  'dia fora da janela (7 dias): só o resumo, nenhuma consulta ao detalhe e nada volta para a fila', stWin);
-// (c) Endereço do detalhe diferente do padrão: descoberto e guardado.
-const cEp = freshCtx(dAF, {arrivalDetailRoute: 'arrivalbyday_detailed'});
-cEp.queueHistory(D19, D19, true);
-runAll(cEp);
-check(/arrivalbyday_detailed$/.test(cEp.__state.props.JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL || '') && cEp.getDayStatus_('arrival_flow', D19).details === 'COMPLETE',
-  'endereço do detalhe descoberto sozinho (404 no padrão) e guardado', cEp.__state.props.JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL);
-// (d) Dia grande: fatias de horário por lista (cada fatia leva a lista certa).
-const cBig = freshCtx(dAF, null, {JMS_DETAIL_MAX_OFFSET: '300'});
-cBig.queueHistory(D19, D19, true);
-runAll(cBig);
-const rowsBig = C.decodeDataset(cBig.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
-const sliceF = cBig.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.startTime !== D19 + ' 00:00:00');
-check(sumQ(rowsBig, 'Deve chegar') === afD.should.length && sumQ(rowsBig, 'Chegou') === afD.total.length && sliceF.length > 0 &&
-  sliceF.every(f => f.payload.detailType === 'shouldArriverNum' || f.payload.detailType === 'totalNum'),
-  'dia grande baixado em fatias de horário, cada uma com a lista dela', {fatias: sliceF.length});
-// (e) Hoje muda o tempo todo: novo download do detalhe no máximo a cada 3 h.
-const stNow = {details: 'COMPLETE'};
-check(cAF.detailNeedsRefresh_('arrival_flow', D19, {errorCount: 1, totalCount: 2}, {errorCount: 5, totalCount: 2}, stNow, false) === false,
-  'contagem mudou num dia recém-baixado: espera o intervalo (6 h) em vez de baixar 500 mil linhas de novo');
-// (f) Dia em pedaços (download que não coube numa execução): leitura soma as combinações.
-const accG = cAF.GroupAccumulator_(cfgAF);
-[{date: D19, column: 'Chegou', destCenter: 'BA FEC', shift: 'T1'}, {date: D19, column: 'Chegou', destCenter: 'BA FEC', shift: 'T1', qty: '4'},
-  {date: D19, column: 'Chegou', destCenter: 'SP BRE', shift: 'T2'}].forEach(r => accG.addRow(r));
-const grp = C.decodeDataset(accG.build());
-check(grp.length === 2 && grp.filter(r => r.destCenter === 'BA FEC')[0].qty === '5' && accG.total() === 6, 'agrupamento soma remessas e linhas já agrupadas');
-
-// (g) Download agrupado que não cabe numa execução: cada lote já entra no agrupamento; com o tempo
-//     acabando, grava um arquivo para os pedaços já somados e a execução seguinte continua do próximo.
-const cGp = freshCtx(dAF, {maxPageSize: 100}, {JMS_PARALLEL: '2'});
-cGp.queueHistory(D19, D19, true);
-cGp.processJob_(cGp.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
-const realNowG = vm.runInContext('Date.now', cGp);
-let fakeTG = realNowG();
-vm.runInContext('Date', cGp).now = () => fakeTG;
-const origBatchG = cGp.fetchDetailBatch_;
-let batchesG = 0;
-cGp.fetchDetailBatch_ = function () { batchesG++; fakeTG += 10000; return origBatchG.apply(null, arguments); };
-const rGp1 = cGp.processJob_(cGp.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0], fakeTG + 40000);
-vm.runInContext('Date', cGp).now = realNowG;
-const stGp1 = cGp.getDayStatus_('arrival_flow', D19), jobGp1 = cGp.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
-const pagesGp1 = cGp.archiveIndexMap_('arrival_flow', D19, D19)[D19] || [];
-const filesGp1 = pagesGp1.map(p => p.fileId).filter((f, k, a) => a.indexOf(f) === k);
-check(rGp1 === 'partial' && stGp1.details === 'PARTIAL' && stGp1.expectedPages > 10 && jobGp1 && jobGp1.page > 2 && jobGp1.page <= stGp1.expectedPages &&
-  pagesGp1.length === jobGp1.page - 1 && filesGp1.length === 1 && batchesG < stGp1.expectedPages,
-  'tempo acabando: um arquivo para os pedaços já somados e o cursor no próximo', {r: rGp1, st: stGp1, cursor: jobGp1 && jobGp1.page, pages: pagesGp1.length, files: filesGp1.length});
-const fGp = cGp.__state.fetches.length;
-const keyGp = f => f.payload.detailType + '|' + f.payload.startTime + '|' + f.payload.current;
-const firstRunGp = cGp.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.current > 1).map(keyGp);
-cGp.fetchDetailBatch_ = origBatchG;
-const rGp2 = cGp.processJob_(jobGp1, Date.now() + 600000);
-const againGp = cGp.__state.fetches.slice(fGp).filter(f => /arrivalbyday_detail/.test(f.url));
-cGp.STORAGE_CACHE_ = null; cGp.TAB_CACHE_ = {}; cGp.TAB_INDEX_ = {};
-const rowsGp = C.decodeDataset(cGp.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
-check(rGp2 === 'done' && cGp.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' && againGp.length > 0 && againGp.every(f => f.payload.current === 1 || firstRunGp.indexOf(keyGp(f)) < 0) &&
-  sumQ(rowsGp, 'Deve chegar') === afD.should.length && sumQ(rowsGp, 'Chegou') === afD.total.length && rowsGp.length === rowsAF.length,
-  'retomada baixa só o restante e o dia fecha igual ao download de uma vez', {r: rGp2, again: againGp.map(keyGp), antes: firstRunGp, linhas: rowsGp.length, esperado: rowsAF.length});
-
-// (g2) Dia em andamento fatiado por horário: o total cresce entre as execuções e mesmo assim a retomada
-//      continua das fatias que faltam (antes recomeçava da 1ª página a cada execução e o dia nunca fechava).
-const dGs = {}; dGs[D19] = makeDay(D19, 101);
-const cGs = freshCtx(dGs, {maxPageSize: 100}, {JMS_DETAIL_MAX_OFFSET: '300', JMS_PARALLEL: '2'});
-cGs.queueHistory(D19, D19, true);
-cGs.processJob_(cGs.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
-const realNowS = vm.runInContext('Date.now', cGs);
-let fakeTS = realNowS();
-vm.runInContext('Date', cGs).now = () => fakeTS;
-const origBatchS = cGs.fetchDetailBatch_;
-cGs.fetchDetailBatch_ = function () { fakeTS += 10000; return origBatchS.apply(null, arguments); };
-const rGs1 = cGs.processJob_(cGs.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0], fakeTS + 70000);
-vm.runInContext('Date', cGs).now = realNowS;
-cGs.fetchDetailBatch_ = origBatchS;
-const stGs1 = cGs.getDayStatus_('arrival_flow', D19), jobGs1 = cGs.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
-const keyGs = f => f.payload.detailType + '|' + f.payload.startTime + '|' + f.payload.current;
-const firstRunGs = cGs.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.current > 1).map(keyGs);
-for (let i = 0; i < 30; i++) dGs[D19].af.total.push(Object.assign({}, dGs[D19].af.total[i], {billcode: '7770000' + String(i).padStart(6, '0'), sendTime: D19 + ' 23:58:' + String(i).padStart(2, '0')}));
-const fGs = cGs.__state.fetches.length;
-cGs.STORAGE_CACHE_ = null; cGs.TAB_CACHE_ = {}; cGs.TAB_INDEX_ = {};
-const rGs2 = cGs.processJob_(jobGs1, Date.now() + 600000);
-const againGs = cGs.__state.fetches.slice(fGs).filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.current > 1).map(keyGs);
-cGs.STORAGE_CACHE_ = null; cGs.TAB_CACHE_ = {}; cGs.TAB_INDEX_ = {};
-const rowsGs = C.decodeDataset(cGs.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
-const stGs2 = cGs.getDayStatus_('arrival_flow', D19);
-check(rGs1 === 'partial' && stGs1.details === 'PARTIAL' && jobGs1.page > 1 && jobGs1.page <= stGs1.expectedPages && rGs2 === 'done' &&
-  stGs2.details === 'COMPLETE' && stGs2.expectedPages === stGs1.expectedPages && againGs.every(k => firstRunGs.indexOf(k) < 0) &&
-  sumQ(rowsGs, 'Chegou') === dGs[D19].af.total.length && sumQ(rowsGs, 'Deve chegar') === dGs[D19].af.should.length &&
-  !cGs.__state.props.GROUPED_PLAN_ARRIVAL_FLOW_2026_09_19 && !Object.keys(cGs.__state.props).some(k => /^GROUPED_PLAN_/.test(k)),
-  'dia crescendo: retomada pelas fatias que faltam (não recomeça) e fecha com o total novo',
-  {r1: rGs1, cursor: jobGs1 && jobGs1.page, unidades: stGs1.expectedPages, r2: rGs2, st: stGs2.details, chegou: sumQ(rowsGs, 'Chegou'), esperado: dGs[D19].af.total.length});
-// Recomeço (formato do plano mudou): linhas de uma tentativa anterior saem do índice, sem somar duas vezes.
-const pagesBefore = cGs.archiveIndexMap_('arrival_flow', D19, D19)[D19].filter(p => p.page >= 1).length;
-cGs.saveDetailRange_('arrival_flow', D19, 1, 2, cGs.GroupAccumulator_(cfgAF).build(), 2, 10, [5, 5]);
-cGs.STORAGE_CACHE_ = null; cGs.TAB_CACHE_ = {}; cGs.TAB_INDEX_ = {};
-const pagesAfter = cGs.archiveIndexMap_('arrival_flow', D19, D19)[D19].filter(p => p.page >= 1);
-check(pagesBefore > 2 && pagesAfter.length === 2 && pagesAfter.every(p => p.page <= 2), 'recomeço tira do índice as unidades antigas além das regravadas', {antes: pagesBefore, depois: pagesAfter.length});
-
-// (g3) Recebimento pesado: detalhe por último na fila; com o JMS limitado a 100 por página, 3 dias e hoje a cada 12 h.
-const cOrd = freshCtx(dAF);
-cOrd.queueHistory(D19, D19, true);
-cOrd.pendingJobs_().filter(j => j.type === 'SUMMARY').forEach(j => cOrd.processJob_(j, Date.now() + 600000));
-cOrd.STORAGE_CACHE_ = null; cOrd.TAB_CACHE_ = {}; cOrd.TAB_INDEX_ = {};
-const ordJobs = cOrd.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
-const afPos = ordJobs.findIndex(j => j.indicator === 'arrival_flow'), sfPos = ordJobs.findIndex(j => j.indicator === 'send_flow');
-check(ordJobs.length > 3 && afPos >= ordJobs.length - 2 && sfPos >= ordJobs.length - 2,
-  'detalhe do Recebimento e da Expedição por último na fila (não atrasam os outros painéis)', ordJobs.map(j => j.indicator));
-const cLim = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: '', JMS_PAGE_SIZE_ARRIVAL: '100'});
-const cFull = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: ''});
-const stLim = {details: 'COMPLETE'};
-const today0 = cLim.isoToday_();
-// Arquivo do dia de hoje baixado há 8 h nos dois cenários.
-[cLim, cFull].forEach(c => {
-  c.saveDayDataset_('arrival_flow', today0, c.GroupAccumulator_(cfgAF).build(), 1, 1);
-  const rn = c.findRowKey_('DAYFILES', 'arrival_flow', today0);
-  c.writeCells_('DAYFILES', rn, 7, [new Date(Date.now() - 8 * 3600e3)]);
-  c.STORAGE_CACHE_ = null; c.TAB_CACHE_ = {}; c.TAB_INDEX_ = {};
-});
-check(cLim.detailDays_(cfgAF) === 3 && cFull.detailDays_(cfgAF) === 7 && cLim.heavyDetailLimited_(cfgAF) && !cFull.heavyDetailLimited_(cfgAF) &&
-  cLim.detailNeedsRefresh_('arrival_flow', today0, {errorCount: 1, totalCount: 2}, {errorCount: 5, totalCount: 2}, stLim, false) === false &&
-  cFull.detailNeedsRefresh_('arrival_flow', today0, {errorCount: 1, totalCount: 2}, {errorCount: 5, totalCount: 2}, Object.assign({}, stLim), false) === true,
-  'JMS com 100 por página: detalhe dos últimos 3 dias e hoje no máximo a cada 12 h (com 1.000: 7 dias e 6 h)');
-
-// (g4) Pouco tempo na execução: o detalhe do Recebimento espera a próxima (antes começava só para replanejar e parava).
-const cW = freshCtx(dAF);
-cW.queueHistory(D19, D19, true);
-cW.pendingJobs_().filter(j => j.type === 'SUMMARY').forEach(j => cW.processJob_(j, Date.now() + 600000));
-cW.STORAGE_CACHE_ = null; cW.TAB_CACHE_ = {}; cW.TAB_INDEX_ = {};
-cW.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator !== 'arrival_flow').forEach(j => cW.processJob_(j, Date.now() + 600000));
-cW.STORAGE_CACHE_ = null; cW.TAB_CACHE_ = {}; cW.TAB_INDEX_ = {};
-const fW = cW.__state.fetches.length;
-cW.processSyncQueue({budgetMs: 120000});
-cW.STORAGE_CACHE_ = null; cW.TAB_CACHE_ = {}; cW.TAB_INDEX_ = {};
-check(!cW.__state.fetches.slice(fW).some(f => /arrivalbyday_detail/.test(f.url)) && cW.pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow'),
-  'execução com menos de 2,5 min livres: o detalhe do Recebimento fica para a próxima');
-// (g5) Hoje: o detalhe cresce entre o resumo e o download — não é "payload sem filtro".
-const todayT = cW.isoToday_(), dTd = {}; dTd[todayT] = makeDay(todayT, 77);
-const cTd = freshCtx(dTd);
-cTd.queueHistory(todayT, todayT, true);
-cTd.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow').forEach(j => cTd.processJob_(j, Date.now() + 600000));
-const extra = dTd[todayT].af.should.length * 4;
-for (let i = 0; i < extra; i++) dTd[todayT].af.should.push(Object.assign({}, dTd[todayT].af.should[i % 50], {billcode: '8889' + String(i).padStart(9, '0')}));
-cTd.STORAGE_CACHE_ = null; cTd.TAB_CACHE_ = {}; cTd.TAB_INDEX_ = {};
-const rTd = cTd.processJob_(cTd.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
-check(rTd === 'done' && /COMPLETE|CHECK_COUNTS/.test(cTd.getDayStatus_('arrival_flow', todayT).details),
-  'hoje: detalhe 5× maior que o resumo de mais cedo é aceito (o dia cresce)', [rTd, cTd.getDayStatus_('arrival_flow', todayT)]);
-cAF.STORAGE_CACHE_ = null; cAF.TAB_CACHE_ = {}; cAF.TAB_INDEX_ = {};
-check(cAF.getRateDay_('arrival_flow', D19) && /sem filtro/.test((() => { try { cAF.validateDetailTotal_(cfgAF, 'arrival_flow', D19, 999999, 'shouldArriverNum'); return ''; } catch (e) { return e.message; } })()),
-  'dia fechado continua conferindo contra o resumo (payload sem filtro bloqueado)');
-
-// (h) Período grande (SP GRU: ~150 mil combinações por dia): totais por campo prontos no servidor,
-//     com os filtros aplicados lá (com o escopo de cada filtro). Tudo tem que bater com a conta nas combinações.
 const sameChart = (a, b) => JSON.stringify([a.labels, a.datasets[0].data, a.total]) === JSON.stringify([b.labels, b.datasets[0].data, b.total]);
-const dimCharts = cfgAF.charts.filter(d => !d.metric);
-const smAll = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true});
-const byAll = C.marginalsByDim(smAll.summary.marginals), totAll = C.decodeDataset(smAll.dataset);
-C.setFilterScopes(cfgAF.filterScopes);
-check(smAll.summary && sumQ(totAll, 'Deve chegar') === afD.should.length && sumQ(totAll, 'Chegou') === afD.total.length && sumQ(totAll, COL_PREV) === afD.prev.length &&
-  smAll.summary.totalQty === C.distinctCount(rowsAF) && smAll.summary.cubeRows === rowsAF.length &&
-  dimCharts.every(def => sameChart(C.buildChart(def, C.summaryChartRows(def, byAll, {})), C.buildChart(def, rowsAF))),
-  'totais por campo: gráficos iguais aos das combinações; totais por dia e lista = listas do JMS',
-  {tot: totAll.length, marg: smAll.summary.marginals.n});
-const recTripX = C.buildChart(cfgAF.charts.filter(d => d.key === 'recTrip')[0], rowsAF).labels.filter(l => l !== 'N/A')[0];
-const fSm = {shift: ['T1'], tripRec: [recTripX]};
-const smF = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true, filters: fSm});
-const byF = C.marginalsByDim(smF.summary.marginals), totF = C.decodeDataset(smF.dataset), topF = C.decodeDataset(smF.summary.top);
-const cubeF = C.applyFilters(rowsAF, fSm);
-const facetCube = C.facets(rowsAF, fSm, ['tripRec', 'shift', 'tripExp']);
-const facetSm = k => { const o = {}; if (fSm[k]) o[k] = fSm[k]; return C.facets(byF[k] || [], o, [k])[k]; };
-const facetEq = k => JSON.stringify(facetCube[k].filter(o => o.count).map(o => [o.value, o.count]).sort()) === JSON.stringify(facetSm(k).filter(o => o.count).map(o => [o.value, o.count]).sort());
-check(dimCharts.every(def => sameChart(C.buildChart(def, C.summaryChartRows(def, byF, fSm)), C.buildChart(def, cubeF))) &&
-  facetEq('tripRec') && facetEq('shift') && facetEq('tripExp') && facetSm('tripRec').length > 1 &&
-  ['Deve chegar', 'Chegou', COL_PREV, COL_NOSEND].every(col => sumQ(totF, col) === sumQ(cubeF, col)) && sumQ(totF, 'Deve chegar') === afD.should.length,
-  'com filtros (aplicados no servidor, cada um na sua lista): gráficos, listas dos filtros e totais iguais às combinações',
-  {f: facetSm('tripRec').slice(0, 3)});
-check(topF.length > 0 && ['Chegou', COL_PREV, COL_NOSEND].every(col => topF.filter(r => r.column === col).length === Math.min(smF.summary.topLimit, cubeF.filter(r => r.column === col).length)) &&
-  topF.filter(r => r.column === 'Chegou').every(r => r.shift === 'T1' && r.tripRec === recTripX),
-  'tabelas: as maiores combinações de CADA lista com o filtro (as listas pequenas também aparecem)');
-const cAuto = freshCtx(dAF, null, {GROUPED_CLIENT_ROWS: '100'});
-cAuto.queueHistory(D19, D19, true);
-runAll(cAuto);
-const dAuto = cAuto.getDashboardData('arrival_flow', {from: D19, to: D19});
-const repSm = cAuto.computeDashboard_('arrival_flow', {from: D19, to: D19, filters: fSm});
-C.setFilterScopes(cfgAF.filterScopes);
-check(dAuto.summary && dAuto.meta.rowsLoaded === rowsAF.length && repSm.summaryMode && repSm.rows.length === topF.length &&
-  repSm.charts.length === dimCharts.length && repSm.charts.every((ch, i) => sameChart(ch, C.buildChart(dimCharts[i], cubeF))),
-  'acima do limite o painel e o relatório passam sozinhos para os totais por campo');
-cAuto.UrlFetchApp.fetch = (() => { const f = cAuto.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cAuto.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
-const repSmX = cAuto.generateReport('arrival_flow', {from: D19, to: D19, filters: fSm}, 'xlsx');
-check(repSmX.ok && repSmX.rows === topF.length, 'relatório Excel no modo de totais', repSmX);
+const sameMap = (a, b) => ['T1', 'T2', 'T3'].every(k => (a[k] || 0) === (b[k] || 0));
+const reset = c => { c.STORAGE_CACHE_ = null; c.TAB_CACHE_ = {}; c.TAB_INDEX_ = {}; };
 
 // ---------- 22. V3.15: filtro de turno — a taxa vira a parte do turno na taxa oficial ----------
 const D18 = '2026-09-18';
@@ -1535,268 +1299,6 @@ if (dDMt.rateVariants && dDMt.rateVariants.main && dDMt.rateVariants.main.length
     'Avaria: Pedido principal + T1 = taxa oficial da opção × participação do T1 (dia anterior sem agregado por opção)');
 } else check(false, 'Avaria sem taxa por opção no teste');
 
-// ---------- 23. V3.16/V3.17: Recebimento por quantidade e por turno ----------
-const byShiftList = list => list.reduce((o, r) => { const sh = C.shiftOf(r.sendTime); o[sh] = (o[sh] || 0) + 1; return o; }, {});
-const expS = byShiftList(afD.should), recS = byShiftList(afD.total);
-const pieExp = C.buildChart(cfgAF.charts.filter(d => d.key === 'expShift')[0], rowsAF);
-const pieOf = ch => ch.labels.reduce((o, l, i) => { o[l] = ch.datasets[0].data[i]; return o; }, {});
-const sameMap = (a, b) => ['T1', 'T2', 'T3'].every(k => (a[k] || 0) === (b[k] || 0));
-check(recRows.every(r => /^T[123]$/.test(r.shift)) && sameMap(pieOf(pieExp), expS) && pieExp.type === 'doughnut' &&
-  pieExp.title.pt === 'O que deve chegar' && !cfgAF.charts.some(d => d.key === 'recShift'),
-  'turnos: "O que deve chegar" pelo horário de expedição (Deve chegar); "Turno que recebeu mais" excluído (V3.21)', {exp: pieOf(pieExp), esperado: expS});
-const fT1 = {shift: ['T1']}, rT1 = C.applyFilters(rowsAF, fT1);
-check(sumQ(rT1, 'Chegou') === recS.T1 && sumQ(rT1, 'Deve chegar') === afD.should.length && sumQ(rT1, COL_PREV) === byShiftList(afD.prev).T1,
-  'filtro de turno vale nas listas do recebimento (Chegou e as listas pequenas); Deve chegar passa inteira');
-check(catAF.heroMetric.key === 'totalNum' && catAF.bigMetric.key === 'shouldArriverNum' && catAF.bigMetric.sub === 'noArriverNum' && catAF.metricCards &&
-  catAF.shiftCardsByColumn.main === 'Chegou' && catAF.filters[0].key === 'shift' && cfgAF.table.some(c => c[0] === 'shift') &&
-  catAF.metricPanels[1].metrics.filter(m => m.card === false).map(m => m.key).join() === 'deliverNum' &&
-  catAF.metricPanels[1].metrics.map(m => m.label.pt).join('|') === 'Total de pedidos que chegaram|Sem bipar expedição na etapa anterior|Não realizamos bipe de expedição|Que não foram registrados no Sistema|Não há armazém de saída nesse local',
-  'catálogo: cartão vermelho = recebido, cartão grande = deve chegar no dia; nomes dos cartões; "Não há armazém" só na tabela Dados gerais');
-const smS = cAF.getDashboardData('arrival_flow', {from: D19, to: D19, summary: true});
-const bySm = C.marginalsByDim(smS.summary.marginals).shift || [];
-check(['T1', 'T2', 'T3'].every(sh => bySm.filter(r => r.shift === sh && r.column === 'Chegou').reduce((a, r) => a + Number(r.qty), 0) === recS[sh]),
-  'modo de totais (período grande): totais por turno para os cartões e a pizza');
-// Turnos de cada lista gravados por dia (dia anterior dos cartões de turno).
-const aggRec = (dashAF.colAgg || {}).Chegou || [], aggPrev = (dashAF.colAgg || {})[COL_PREV] || [];
-check(aggRec.length === 1 && aggRec[0].date === D19 && sameMap(aggRec[0], recS) && aggRec[0].total === afD.total.length &&
-  aggPrev.length === 1 && aggPrev[0].total === afD.prev.length,
-  'turnos de cada lista do dia gravados (aba AGG) e enviados ao painel', aggRec);
-// Resultados (V3.24): turnos do RECEBIDO (lista "Chegou"), sem misturar as outras listas.
-const resAF = cAF.getResultsData({from: D19, to: D19}).series.filter(x => x.key === 'arrival_flow')[0];
-check(resAF.agg.length === 1 && sameMap(resAF.agg[0], recS) && resAF.agg[0].total === afD.total.length && resAF.rates[0].value === afD.total.length,
-  'Resultados do Recebimento: quantidade recebida e os turnos dela (só a lista "Chegou")', resAF);
-// Menu lateral: a quantidade que deve chegar no lugar da taxa.
-const bootAF = cAF.getAppBootstrap().latestByIndicator.arrival_flow;
-check(bootAF && bootAF.qty === afD.should.length && bootAF.qtyDate === D19, 'menu lateral: quantidade que deve chegar (no lugar da taxa)', bootAF);
-// Listas pequenas opcionais: se o JMS recusar o detailType delas, o dia fecha com as duas listas grandes.
-const cOpt = freshCtx(dAF, {arrivalNoSmallLists: true});
-cOpt.queueHistory(D19, D19, true);
-runAll(cOpt);
-const rowsOpt = C.decodeDataset(cOpt.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
-check(/COMPLETE|CHECK_COUNTS/.test(cOpt.getDayStatus_('arrival_flow', D19).details) && sumQ(rowsOpt, 'Chegou') === afD.total.length && sumQ(rowsOpt, COL_PREV) === 0 &&
-  cOpt.allTabRows_('LOG').some(r => /Sem bipe na etapa anterior/.test(String(r[4]))),
-  'JMS recusa as listas pequenas: o dia fecha com Deve chegar e Chegou e o aviso fica no log', cOpt.getDayStatus_('arrival_flow', D19));
-// Migração por formato: dias baixados no formato antigo baixam de novo uma vez, só na janela de detalhe.
-const cMig = freshCtx(dAF);
-cMig.queueHistory(D19, D19, true);
-runAll(cMig);
-cMig.__state.props.GROUPED_LAYOUT_ARRIVAL_FLOW = 'formato-antigo';
-cMig.STORAGE_CACHE_ = null; cMig.TAB_CACHE_ = {}; cMig.TAB_INDEX_ = {};
-const mig1 = cMig.migrateGroupedLayout_(), mig2 = cMig.migrateGroupedLayout_();
-cMig.STORAGE_CACHE_ = null; cMig.TAB_CACHE_ = {}; cMig.TAB_INDEX_ = {};
-const migJobs = cMig.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
-check(mig1 === 1 && mig2 === 0 && migJobs.length === 1 && migJobs[0].indicator === 'arrival_flow' && migJobs[0].date === D19,
-  'formato novo do detalhe: dias do Recebimento na janela baixados de novo uma vez', {mig1, mig2, jobs: migJobs.map(j => j.indicator + ' ' + j.date)});
-const cMig2 = freshCtx(dAF, null, {DETAIL_DAYS_ARRIVAL_FLOW: ''});
-cMig2.queueHistory(D19, D19, true);
-runAll(cMig2);
-cMig2.__state.props.GROUPED_LAYOUT_ARRIVAL_FLOW = 'formato-antigo';
-cMig2.STORAGE_CACHE_ = null; cMig2.TAB_CACHE_ = {}; cMig2.TAB_INDEX_ = {};
-check(cMig2.migrateGroupedLayout_() === 0, 'dias fora da janela de detalhe (só resumo) não são baixados de novo');
-
-// ---------- 24. V3.19: Recebimento sem valores no painel — download robusto, turnos pelo resumo, situação na tela ----------
-const reset = c => { c.STORAGE_CACHE_ = null; c.TAB_CACHE_ = {}; c.TAB_INDEX_ = {}; };
-// (a) Turnos pelo resumo do JMS consultado por horário: os cartões T1/T2/T3 e as pizzas não dependem do detalhe.
-const ssRec = ((dashAF.shiftSum || {}).totalNum || [])[0], ssExp = ((dashAF.shiftSum || {}).shouldArriverNum || [])[0];
-const isWin = f => !(f.payload.startTime.slice(11) === '00:00:00' && f.payload.endTime.slice(11) === '23:59:59');
-const winReq = cAF.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.size === 10 && isWin(f));
-check(ssRec && ssExp && sameMap(ssRec, recS) && sameMap(ssExp, expS) && ssRec.total === afD.total.length && winReq.length === 8 &&
-  ['06:00:00', '14:00:00', '00:00:00', '22:00:00'].every(h => winReq.some(f => f.payload.startTime.slice(11) === h && f.payload.detailType === 'totalNum')) &&
-  !cAF.__state.fetches.some(f => /arrivalbyday_total/.test(f.url) && isWin(f)),
-  'turnos pela LISTA do JMS por horário (Chegou e Deve chegar, 10 consultas): iguais aos do detalhe e somando o dia; o resumo diário não é usado',
-  {ssRec, recS, req: winReq.length});
-// Dia fechado com o mesmo resumo: a atualização seguinte não consulta os horários de novo.
-const fWin19 = cAF.__state.fetches.length;
-cAF.enqueueJobs_([['SUMMARY', 'arrival_flow', D19, 0]], {reset: true});
-reset(cAF);
-cAF.processJob_(cAF.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
-const winAgain = cAF.__state.fetches.slice(fWin19).filter(f => /arrivalbyday_/.test(f.url));
-check(winAgain.length === 1, 'dia fechado sem mudança no resumo: os horários não são consultados de novo', winAgain.length);
-// (b) Lista que também é diária (dia inteiro na janela da 00h): desliga só ela; o resto segue (e nunca T3 = 100%).
-const cIg = freshCtx(dAF, {detailDailyFor: ['shouldArriverNum']});
-cIg.queueHistory(D19, D19, true);
-runAll(cIg);
-const offIg = JSON.parse(cIg.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL || '{}'), ssIg = cIg.getDashboardData('arrival_flow', {from: D19, to: D19});
-check(/um horário tem o dia inteiro/.test(offIg.shouldArriverNum || '') && !offIg.totalNum && (ssIg.shiftSum.shouldArriverNum || []).length === 0 &&
-  sameMap((ssIg.shiftSum.totalNum || [])[0] || {}, recS) && cIg.allTabRows_('LOG').some(r => /Turnos pela lista por horário desligados/.test(String(r[4]))) &&
-  JSON.stringify(ssIg.meta.summaryShiftsOff) === JSON.stringify(offIg),
-  'lista diária no JMS (dia inteiro às 00h): turnos por horário desligados só nela, sem T3 = 100%', offIg);
-// Hoje com tudo na madrugada é normal (não desliga nada).
-check(C && cIg.shiftProbeCheck_(5000, [0, 0, 5000, 0]).ok === false && cIg.shiftProbeCheck_(5000, [2000, 1500, 1000, 500]).ok === true &&
-  cIg.shiftProbeCheck_(100, [0, 0, 100, 0]).ok === true, 'conferência: dia inteiro num horário (dia grande) é rejeitado; dia pequeno passa');
-// Fatias do download: lista diária num dia fechado (tudo na fatia da 00h) desliga as fatias (paginação normal) e o dia fecha.
-const cDl = freshCtx(dAF, {detailDailyFor: ['totalNum'], maxPageSize: 1000}, {JMS_DETAIL_MAX_OFFSET: '300'});
-const bigAF = {}; bigAF[D19] = makeDay(D19, 101);
-cDl.queueHistory(D19, D19, true);
-runAll(cDl);
-const rowsDl = C.decodeDataset(cDl.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
-check(sumQ(rowsDl, 'Chegou') === afD.total.length && /COMPLETE|CHECK_COUNTS/.test(cDl.getDayStatus_('arrival_flow', D19).details) &&
-  (afD.total.length < 1000 || cDl.__state.props.JMS_NO_SLICE_ARRIVAL === '1'),
-  'lista diária no download: sem repetir remessas (o dia fecha com o total certo)', {chegou: sumQ(rowsDl, 'Chegou'), esperado: afD.total.length});
-// Atualização para a V3.21: decisões antigas (resumo) esquecidas e os dias recentes consultam os turnos pela lista.
-const cMgV = freshCtx(dAF);
-cMgV.queueHistory(D19, D19, true);
-runAll(cMgV);
-const shAggV = cMgV.tab_('AGG');
-shAggV.data = shAggV.data.filter(r => !/:turnos:/.test(String((r || [])[0])));
-cMgV.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL = JSON.stringify({totalNum: 'decidido pelo resumo'});
-delete cMgV.__state.props.MIGRATION_V321;
-reset(cMgV); cMgV.invalidateProps_();
-const migNV = cMgV.migrateToV321_(), migN2V = cMgV.migrateToV321_();
-runAll(cMgV);
-reset(cMgV);
-check(migNV === 1 && migN2V === 0 && !cMgV.__state.props.JMS_SUMMARY_SHIFTS_OFF_ARRIVAL && cMgV.allTabRows_('AGG').filter(r => /:turnos:totalNum/.test(r[0])).length === 1,
-  'V3.21: turnos pela lista consultados nos dias recentes e o "desligado" do resumo esquecido', {migNV, migN2V});
-// (c) Ordem do download: as listas pequenas primeiro, "Chegou" (a maior) por último.
-reset(cAF);
-const firstDetAF = cAF.__state.fetches.filter(f => /arrivalbyday_detail/.test(f.url) && f.payload.size !== 10)[0];
-check(cAF.detailTypeOrder_(cfgAF).join() === 'uploadNoSendNum,noSendNum,shouldArriverNum,totalNum' && firstDetAF.payload.detailType === 'uploadNoSendNum' &&
-  cAF.detailTypeOrder_(ctx.getIndicatorConfig_('wrong_send')).join() === '',
-  'ordem do download: sem bipe anterior → sem bipe nesta base → deve chegar → chegou', firstDetAF.payload.detailType);
-// (d) Erro no meio do download: as partes já fechadas ficam gravadas (PARCIAL, com o erro) e a nova tentativa continua dali.
-const cEr = freshCtx(dAF, {maxPageSize: 100}, {JMS_DETAIL_MAX_OFFSET: '300', JMS_PARALLEL: '2'});
-cEr.queueHistory(D19, D19, true);
-cEr.processJob_(cEr.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
-const origEr = cEr.fetchDetailBatch_;
-let callsEr = 0;
-cEr.fetchDetailBatch_ = function (ind, d, items) {
-  if (ind === 'arrival_flow' && items.some(it => it.page > 1) && ++callsEr === 6) throw new Error('Falha simulada no meio do download');
-  return origEr.apply(null, arguments);
-};
-const jobEr = cEr.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
-const rEr1 = cEr.processJob_(jobEr, Date.now() + 600000);
-cEr.fetchDetailBatch_ = origEr;
-reset(cEr);
-const stEr1 = cEr.getDayStatus_('arrival_flow', D19), jobEr2 = cEr.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
-const planKeyEr = 'GROUPED_PLANDATA_ARRIVAL_FLOW_' + D19;
-const savedPlanEr = !!cEr.__state.props[planKeyEr];
-check(rEr1 === 'error' && stEr1.details === 'PARTIAL' && stEr1.savedPages > 0 && /Falha simulada/.test(stEr1.error) && jobEr2 && jobEr2.page === stEr1.savedPages + 1 &&
-  jobEr2.attempts === 1 && cEr.allTabRows_('PAGES').filter(r => r[0] === 'arrival_flow' && Number(r[2]) >= 1).length === stEr1.savedPages && savedPlanEr,
-  'erro no meio: as partes fechadas ficam gravadas, o dia fica PARCIAL com o erro e o cursor na parte seguinte', {r: rEr1, st: stEr1, job: jobEr2 && jobEr2.page});
-// Painel durante o erro: o que já veio aparece e a situação diz o progresso de cada lista e o erro.
-const dashEr = cEr.getDashboardData('arrival_flow', {from: D19, to: D19});
-const dpEr = dashEr.meta.detailProgress, dEr = dpEr && dpEr.days[0];
-check(dEr && dEr.date === D19 && dEr.details === 'PARTIAL' && dEr.lists.map(l => l.column).join('|') === [COL_PREV, COL_NOSEND, 'Deve chegar', 'Chegou'].join('|') &&
-  dEr.lists[0].done === dEr.lists[0].units && dEr.lists[3].done < dEr.lists[3].units && /Falha simulada/.test(dEr.progressError || dEr.error) &&
-  dEr.job && dEr.job.status === 'PENDING' && dashEr.dataset.n > 0 && dpEr.budget && dpEr.budget.minPerDay === 35,
-  'painel: situação do download do dia (partes de cada lista, erro, fila) e o que já foi baixado', dEr);
-// (e) Nova tentativa num dia fechado: usa o plano gravado (sem refazer a 1ª página de todas as fatias) e fecha igual.
-const fEr = cEr.__state.fetches.length;
-const rEr2 = cEr.processJob_(jobEr2, Date.now() + 600000);
-reset(cEr);
-const againEr = cEr.__state.fetches.slice(fEr).filter(f => /arrivalbyday_detail/.test(f.url));
-const sliceP1 = againEr.filter(f => f.payload.current === 1 && !(f.payload.startTime.slice(11) === '00:00:00' && f.payload.endTime.slice(11) === '23:59:59'));
-const rowsEr = C.decodeDataset(cEr.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
-check(rEr2 === 'done' && /COMPLETE/.test(cEr.getDayStatus_('arrival_flow', D19).details) && sumQ(rowsEr, 'Chegou') === afD.total.length &&
-  sumQ(rowsEr, 'Deve chegar') === afD.should.length && sumQ(rowsEr, COL_PREV) === afD.prev.length && sliceP1.length < stEr1.expectedPages - stEr1.savedPages + 1 &&
-  againEr.filter(f => f.payload.current === 1 && f.payload.startTime.slice(11) === '00:00:00' && f.payload.endTime.slice(11) === '23:59:59').length === 4 &&
-  !cEr.__state.props[planKeyEr] && !cEr.__state.props.GROUPED_PLAN_ARRIVAL_FLOW_2026_09_19,
-  'retomada com o plano gravado: 1 conferência por lista, só as fatias que faltam, dia completo', {r: rEr2, fatias: sliceP1.length, faltavam: stEr1.expectedPages - stEr1.savedPages});
-// (f) JMS entrega bem menos que o informado (paginação limitada): grava o que veio em vez de recomeçar para sempre.
-const cSh = freshCtx(dAF, {maxPageSize: 100}, {JMS_DETAIL_MAX_OFFSET: '0'});
-const origSh = cSh.fetchDetailBatch_;
-cSh.fetchDetailBatch_ = function (ind, d, items) { const r = origSh.apply(null, arguments); return ind === 'arrival_flow' ? r.map((x, i) => items[i].page > 3 ? Object.assign({}, x, {records: []}) : x) : r; };
-cSh.queueHistory(D19, D19, true);
-runAll(cSh);
-const rowsSh = C.decodeDataset(cSh.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
-check(cSh.getDayStatus_('arrival_flow', D19).details === 'CHECK_COUNTS' && sumQ(rowsSh, 'Chegou') === 300 && sumQ(rowsSh, COL_PREV) === afD.prev.length &&
-  cSh.allTabRows_('LOG').some(r => /paginação limitada/.test(String(r[4]))),
-  'JMS para de paginar: o que veio fica gravado ("contagem diferente", conferido de novo depois) e o motivo vai para o log', cSh.getDayStatus_('arrival_flow', D19));
-// (g) Teto diário do Recebimento numa conta Gmail: os outros painéis seguem; com RECEBIMENTO_MIN_POR_DIA = 0, sem teto.
-const cBu = freshCtx(dAF, null, {COTA_GOOGLE: 'gmail'});
-cBu.__state.props['GROUPED_USED_MS_' + cBu.isoToday_()] = String(35 * 60000);
-cBu.queueHistory(D19, D19, true);
-runAll(cBu);
-const afterBu = cBu.getDayStatus_('arrival_flow', D19).details, otherBu = cBu.getDayStatus_('wrong_send', D19).details;
-// Só sobrou o Recebimento acima do teto: o gatilho de 5 min dorme (não gasta a cota acordando à toa).
-reset(cBu); cBu.invalidateProps_();
-const hintBu = JSON.parse(cBu.__state.props.QUEUE_HINT_V37 || '{}'), idleBu = cBu.processSyncQueue();
-check(hintBu.s === 'BUDGET' && idleBu.idle === true && cBu.queueLooksIdle_(), 'teto atingido: a fila dorme até o dia seguinte ou até entrar job novo', {hintBu, idleBu});
-cBu.enqueueJobs_([['SUMMARY', 'wrong_send', D19, 0]], {reset: true});
-check(!cBu.queueLooksIdle_(), 'job novo (atualização horária) acorda a fila mesmo com o teto atingido');
-cBu.__state.props.RECEBIMENTO_MIN_POR_DIA = '0';
-reset(cBu); cBu.invalidateProps_();
-runAll(cBu);
-check(afterBu === 'PENDING' && otherBu === 'COMPLETE' && cBu.getDayStatus_('arrival_flow', D19).details === 'COMPLETE' &&
-  freshCtx({}, null, {COTA_GOOGLE: 'workspace'}).groupedBudgetMin_() === 90 && freshCtx({}, null, {COTA_GOOGLE: 'workspace'}).groupedBudgetMin_('send_flow') === 150 &&
-  freshCtx({}, null, {COTA_GOOGLE: 'workspace', RECEBIMENTO_MIN_POR_DIA: '0'}).groupedBudgetMin_() === 0 &&
-  cBu.getDashboardData('arrival_flow', {from: D19, to: D19}).meta.detailProgress === null,
-  'teto diário (Gmail, 35 min): o Recebimento espera e os outros painéis seguem; RECEBIMENTO_MIN_POR_DIA=0 libera; Workspace (V3.24): 90 min Recebimento e 150 min Expedição', {afterBu, otherBu});
-// (h) Fila: no detalhe do Recebimento, primeiro o dia em que o painel abre (ontem), depois hoje e os mais antigos.
-const cQ19 = freshCtx({});
-const tQ19 = cQ19.isoToday_(), yQ19 = cQ19.addDaysIso_(tQ19, -1), oQ19 = cQ19.addDaysIso_(tQ19, -3);
-cQ19.enqueueJobs_([['DETAIL_INIT', 'arrival_flow', tQ19, 1], ['DETAIL_INIT', 'arrival_flow', oQ19, 1], ['DETAIL_INIT', 'arrival_flow', yQ19, 1], ['SUMMARY', 'wrong_send', oQ19, 0]], {});
-reset(cQ19);
-const orderQ19 = cQ19.pendingJobs_().map(j => j.type === 'SUMMARY' ? 'S' : j.date);
-check(orderQ19.join() === ['S', yQ19, tQ19, oQ19].join(), 'fila do Recebimento: ontem (o dia em que o painel abre) antes de hoje e dos antigos', orderQ19);
-// (i) diagnosticarRecebimento(): as 4 listas, os turnos pelo resumo e o download, sem segredos no texto.
-const dgR = cAF.diagnosticarRecebimento(D19);
-check(dgR.listas.length === 4 && dgR.listas.every(x => x.total === x.resumo && x.pagina > 0 && !x.erro) && dgR.turnosPelaLista &&
-  ['shouldArriverNum', 'totalNum'].every(m => dgR.turnosPelaLista[m] && dgR.turnosPelaLista[m].ok) &&
-  /funcionam sem esperar o detalhe/.test(dgR.texto) && /diário, não separa por hora/.test(dgR.texto) &&
-  [COL_PREV, COL_NOSEND, 'Deve chegar', 'Chegou', 'Turnos pela lista do JMS por horário', 'Download dos últimos dias', 'consultas por dia'].every(x => dgR.texto.indexOf(x) >= 0) &&
-  dgR.texto.indexOf('FAKE') < 0 && /todos os usados preenchidos/.test(dgR.texto),
-  'diagnosticarRecebimento: cada lista × resumo, turnos pelo resumo, volume e situação do download (sem AuthToken)', dgR.texto);
-const dgBad = freshCtx(dAF, {arrivalDetailRoute: 'nao_existe'}).diagnosticarRecebimento(D19);
-check(dgBad.listas.every(x => x.erro) && /Payload/.test(dgBad.texto), 'endereço do detalhe errado: cada lista mostra o erro e o texto pede a captura', dgBad.listas.map(x => x.erro));
-// (j) Catálogo: pizzas e cartões de turno sabem qual número do resumo usar.
-const catAF2 = ctx.getPublicCatalog_().filter(x => x.key === 'arrival_flow')[0];
-check(catAF2.routeKey === 'ARRIVAL' && catAF2.shiftCardsByColumn.summaryMetric === 'totalNum' &&
-  catAF2.charts.filter(d => d.summaryShift).map(d => d.key + ':' + d.summaryShift).join() === 'expShift:shouldArriverNum',
-  'catálogo: pizza e cartões de turno com a lista correspondente');
-
-// ---------- 25. V3.20: Recebimento mostra dados mais cedo ----------
-// (a) Fatias de horário em ordem espalhada (0h, 12h, 6h, 18h...): com parte do dia baixada, a prévia cobre o dia todo.
-check(ctx.spreadOrder_(8).join() === '0,4,2,6,1,5,3,7' && ctx.spreadOrder_(5).join() === '0,4,2,1,3' && ctx.spreadOrder_(1).join() === '0',
-  'ordem espalhada das fatias (inverso dos bits)', ctx.spreadOrder_(8));
-const cSp = freshCtx(dAF, {maxPageSize: 100}, {JMS_DETAIL_MAX_OFFSET: '300', JMS_PARALLEL: '2'});
-cSp.queueHistory(D19, D19, true);
-cSp.processJob_(cSp.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'arrival_flow')[0], Date.now() + 600000);
-const origSp = cSp.fetchDetailBatch_;
-let recSp = 0;
-cSp.fetchDetailBatch_ = function (ind, d, items) {
-  if (items.some(it => it.page > 1 && it.win && it.win.type === 'totalNum') && ++recSp === 4) throw new Error('Falha simulada no Chegou');
-  return origSp.apply(null, arguments);
-};
-const jobSp = cSp.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
-cSp.processJob_(jobSp, Date.now() + 600000);
-cSp.fetchDetailBatch_ = origSp;
-reset(cSp);
-const rowsSp = C.decodeDataset(cSp.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset).filter(r => r.column === 'Chegou');
-const shSp = {}; rowsSp.forEach(r => { shSp[r.shift] = (shSp[r.shift] || 0) + Number(r.qty); });
-const sigSp = JSON.parse(cSp.__state.props['GROUPED_PLAN_ARRIVAL_FLOW_' + D19] || '{}');
-check(sigSp.o === 'spread' && rowsSp.length > 0 && sumQ(rowsSp) < afD.total.length && ['T1', 'T2', 'T3'].filter(x => shSp[x] > 0).length >= 2,
-  'download parcial do "Chegou" já cobre turnos diferentes (não só a madrugada)', {shSp, total: afD.total.length});
-// Retomada: a 2ª execução usa o plano gravado (ordem espalhada) e o dia fecha igual ao download de uma vez.
-const jobSp2 = cSp.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow')[0];
-cSp.processJob_(jobSp2, Date.now() + 600000);
-reset(cSp);
-const rowsSp2 = C.decodeDataset(cSp.getDashboardData('arrival_flow', {from: D19, to: D19}).dataset);
-check(/COMPLETE/.test(cSp.getDayStatus_('arrival_flow', D19).details) && sumQ(rowsSp2, 'Chegou') === afD.total.length && sumQ(rowsSp2, 'Deve chegar') === afD.should.length &&
-  sumQ(rowsSp2, COL_PREV) === afD.prev.length && sumQ(rowsSp2, COL_NOSEND) === afD.noSend.length,
-  'ordem espalhada + plano gravado: o dia fecha com todas as remessas, sem repetir nem faltar');
-// Download que já estava pela metade na ordem antiga (V3.19) continua nela.
-check(cSp.groupedSpread_({indicator: 'arrival_flow', date: '2026-09-18', page: 1}, null) === true &&
-  (() => { cSp.__state.props['GROUPED_PLAN_ARRIVAL_FLOW_2026-09-18'] = JSON.stringify({totalNum: 32}); cSp.invalidateProps_();
-    return cSp.groupedSpread_({indicator: 'arrival_flow', date: '2026-09-18', page: 5}, {details: 'PARTIAL'}) === false; })(),
-  'download pela metade na ordem antiga continua nela (não perde o que já foi baixado)');
-// (b) Paralelismo: 8 por vez no Recebimento; se o JMS recusar consultas da rajada, 4 pelo resto do dia.
-const failedPar = {};
-const cPa = freshCtx(dAF, {maxPageSize: 100, intercept: (route, h, body) => {
-  const k = body.detailType + body.current + body.startTime;
-  if (route === 'arrivalbyday_detail' && body.detailType === 'shouldArriverNum' && body.current === 2 && !failedPar[k] && Object.keys(failedPar).length < 1) { failedPar[k] = 1; return [502, {}]; }
-  return null;
-}}, {JMS_DETAIL_MAX_OFFSET: '300'});
-const fa = cPa.UrlFetchApp.fetchAll, sizesPa = [];
-cPa.UrlFetchApp.fetchAll = reqs => { if (reqs.some(r => /arrivalbyday_detail/.test(r.url))) sizesPa.push(reqs.length); return fa(reqs); };
-cPa.queueHistory(D19, D19, true);
-runAll(cPa);
-const parAfter = cPa.__state.props['GROUPED_PARALLEL_' + cPa.isoToday_()];
-const firstBig = sizesPa.indexOf(8), afterFail = sizesPa.slice(sizesPa.lastIndexOf(8) + 1);
-check(firstBig >= 0 && parAfter === '4' && afterFail.length > 0 && afterFail.every(n => n <= 4 || n > 8) && /COMPLETE/.test(cPa.getDayStatus_('arrival_flow', D19).details) &&
-  cPa.allTabRows_('LOG').some(r => /baixa 4 por vez/.test(String(r[4]))),
-  'paralelismo: 8 por vez; com recusa do JMS, 4 pelo resto do dia (e o dia fecha)', {sizesPa: sizesPa.slice(0, 30), parAfter});
-
 // ---------- 26. V3.20.1: Avaria — taxa de cada opção = 总破损率 da tabela principal do JMS ----------
 const rawMain = cOK.fetchSummaryDay_('damage', D19, {mainSubCode: 'MAIN'}).raw, rawSub = cOK.fetchSummaryDay_('damage', D19, {mainSubCode: 'SUB'}).raw;
 check(rawMain.breakageRate !== rawMain.breakageRateTotal && mainR.rate === rawMain.breakageRateTotal && subR.rate === rawSub.breakageRateTotal &&
@@ -1835,269 +1337,6 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   'atualização: "sem suporte" refeito no resumo (sem esperar o detalhe) e a taxa oficial de cada opção em todos os dias', {nUp, mapUp, subUp});
 
 
-// ---------- V3.22: Expedição: fluxo operacional (rotas e remessas fictícias) ----------
-{
-  const SF = {DETAIL_DAYS_SEND_FLOW: '120'};
-  const sfDays = () => ({'2026-09-18': makeDay('2026-09-18', 23), [D19]: makeDay(D19, 37)});
-  // Verdade do simulado: situação e ID de viagem de cada remessa enviada.
-  const truthOf = day => {
-    const t = {}, n = {sent: 0, transit: 0, und: 0, T1: 0, T2: 0, T3: 0};
-    day.sf.routes.forEach(r => r.sent.forEach(x => {
-      t[x.billcode] = x; n.sent++; if (x.transit) n.transit++; if (x.undelivered) n.und++;
-      n[ctx.JTCore_.shiftOf(x.sendTime)]++;
-    }));
-    return {t: t, n: n};
-  };
-  const exact = (c, day, date) => {
-    const tr = truthOf(day), rows = c.getArchivedRange_('send_flow', date, date).rows;
-    let st = 0, trip = 0, extra = 0;
-    rows.forEach(r => {
-      const x = tr.t[r.waybill];
-      if (!x) { extra++; return; }
-      if (r.column !== c.sendState_(x.transit, x.undelivered)) st++;
-      // V4.15: sem o bipe de carregamento na base = "NÃO TEM ID" (dia antigo: a resposta é final).
-      if ((r.tripId === 'N/A' ? '' : r.tripId) !== (x.trip === null || x.trip === '' ? 'NÃO TEM ID' : x.trip)) trip++;
-    });
-    return {rows: rows.length, sent: tr.n.sent, st: st, trip: trip, extra: extra, n: tr.n};
-  };
-
-  // 1. Payloads e cabeçalhos iguais à captura.
-  const cP = freshCtx(sfDays(), null, SF);
-  const pSum = cP.buildPayload_('send_flow', D19, 1, 20, false);
-  check(Object.keys(pSum).sort().join() === 'countryId,current,endTime,scansitecode,size,startTime' && pSum.scansitecode === '30001' &&
-    pSum.countryId === '1' && pSum.startTime === D19 + ' 00:00:00' && pSum.endTime === D19 + ' 23:59:59', 'Expedição: payload do resumo igual à captura', pSum);
-  const pDet = cP.buildPayload_('send_flow', D19, 2, 100, true, {start: D19 + ' 00:00:00', end: D19 + ' 23:59:59', type: 'noarrivalcount', next: '86700'});
-  check(Object.keys(pDet).sort().join() === 'countryId,current,detailType,endTime,nextstation,size,startTime' && pDet.nextstation === '86700' &&
-    pDet.detailType === 'noarrivalcount' && pDet.current === 2, 'Expedição: payload do detalhe igual à captura (rota + coluna)', pDet);
-  let noRoute = '';
-  try { cP.buildPayload_('send_flow', D19, 1, 100, true); } catch (e) { noRoute = e.message; }
-  check(/sem a rota/.test(noRoute), 'Expedição: detalhe nunca sai sem a rota (payload sem filtro)');
-  const hS = cP.jmsHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sendbyday_detail');
-  const hT = cP.jmsHeaders_('https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList');
-  check(hS.Routename === 'SendOutMonitor' && !!hS.Routernamelist && !hT.Routename && !hT.Routernamelist && hT.AuthToken === 'FAKE',
-    'Expedição: Routename SendOutMonitor; Rastreamento sem cabeçalho de rota (variantes só se o JMS recusar)');
-  check(cP.detailPageSize_(cP.getIndicatorConfig_('send_flow')) === 100, 'Expedição: no máximo 100 linhas por página');
-
-  // 2. Dia completo: soma das colunas, rotas, situação e ID de viagem de cada remessa.
-  const dA = sfDays(), cA = freshCtx(dA, null, SF);
-  cA.queueHistory('2026-09-18', D19, true);
-  runAll(cA, 12);
-  const rA = cA.getRateDay_('send_flow', D19), tA = truthOf(dA[D19]);
-  check(rA.metrics.sendcount === tA.n.sent && rA.metrics.noarrivalcount === tA.n.transit && rA.metrics.nosigncount === tA.n.und &&
-    rA.routes.length === 5 && rA.routes.every(r => r.c && r.n && r.m.sendcount > 0) && Math.abs(rA.rate - tA.n.transit / tA.n.sent * 100) < 1e-9,
-    'Expedição: cartões = soma das colunas da tabela principal; cada rota guardada', rA.metrics);
-  const eA = exact(cA, dA[D19], D19);
-  check(eA.rows === eA.sent && eA.st === 0 && eA.trip === 0 && eA.extra === 0 && cA.getDayStatus_('send_flow', D19).details === 'COMPLETE',
-    'Expedição: uma linha por remessa enviada, situação e ID de viagem exatos', eA);
-  const fA = cA.__state.fetches.filter(f => /sendbyday_detail/.test(f.url));
-  const routeOf = code => dA[D19].sf.routes.filter(r => r.code === code)[0];
-  // Lista igual ao total da rota (nenhuma chegou) e lista zerada (dia fechado) não são baixadas.
-  const needless = fA.filter(f => f.payload.startTime.slice(0, 10) === D19 && f.payload.detailType !== 'sendcount' && (() => {
-    const r = routeOf(f.payload.nextstation), n = r.sent.filter(x => f.payload.detailType === 'noarrivalcount' ? x.transit : x.undelivered).length;
-    return n === 0 || n === r.sent.length;
-  })());
-  check(!needless.length && fA.every(f => f.payload.size <= 100) && fA.some(f => f.payload.detailType === 'noarrivalcount'),
-    'Expedição: só baixa "Em trânsito"/"Não entregues" quando a lista difere do total da rota; páginas de até 100', needless.length);
-  const aggP = cA.getAgg_('send_flow:turnos:sendcount', D19, D19)[0], aggE = cA.getAgg_('send_flow:Enviados', D19, D19)[0];
-  const aggT = cA.getAgg_('send_flow:Em trânsito', D19, D19)[0], aggU = cA.getAgg_('send_flow:Não entregues', D19, D19)[0];
-  check(aggP && aggE && aggP.T1 === tA.n.T1 && aggP.T2 === tA.n.T2 && aggP.T3 === tA.n.T3 && aggE.T1 === tA.n.T1 && aggE.total === tA.n.sent &&
-    aggT.total === tA.n.transit && aggU.total === tA.n.und,
-    'Expedição: turnos pela lista de cada rota por horário (sem esperar o download) = turnos do detalhe; listas pelas situações', {aggP, aggE});
-  // V4.15: dia de 2+ dias atrás — remessa consultada sem o bipe de carregamento na base é resposta final ("NÃO TEM ID").
-  const covA = cA.tripCoverage_('send_flow', D19, D19)[D19], miss = Object.keys(tA.t).filter(w => tA.t[w].trip === null).length;
-  check(covA && covA.total === tA.n.sent && covA.done === tA.n.sent && miss > 0 && covA.found === Object.keys(tA.t).filter(w => tA.t[w].trip).length,
-    'Expedição: IDs de viagem consultados; dia antigo sem o bipe de carregamento = resposta final (NÃO TEM ID)', covA);
-  const dfA = cA.dayFilesMap_('send_flow', D19, D19)[D19], trips1 = cA.__state.tripCalls;
-  // Nova tarefa do dia: nada a consultar de novo; a página 1 (migração/Atualizar) consulta de novo as remessas sem ID (uma por
-  // consulta) e o arquivo regravado mantém a data do download (o intervalo de atualização do detalhe continua valendo).
-  cA.enqueueJobs_([['TRIPS', 'send_flow', D19, 0]], {reset: true});
-  runAll(cA, 4);
-  const calls0 = cA.__state.tripCalls - trips1;
-  cA.enqueueJobs_([['TRIPS', 'send_flow', D19, 1]], {reset: true});
-  runAll(cA, 4);
-  const dfA2 = cA.dayFilesMap_('send_flow', D19, D19)[D19], noId = Object.keys(tA.t).filter(w => !tA.t[w].trip).length;
-  check(calls0 === 0 && cA.__state.tripCalls - trips1 === noId && dfA2.createdAt === dfA.createdAt && exact(cA, dA[D19], D19).trip === 0,
-    'Expedição: dia já consultado não repete; página 1 consulta só as remessas sem ID; arquivo do dia mantém a data do download',
-    {calls0, calls: cA.__state.tripCalls - trips1, noId, a: dfA.createdAt, b: dfA2.createdAt});
-
-  // 2b. Dia fechado com remessas chegando: só a situação é atualizada (sem baixar "Enviados" de novo).
-  {
-    const dF = sfDays(), cF = freshCtx(dF, null, SF);
-    cF.queueHistory(D19, D19, true);
-    runAll(cF, 12);
-    dF[D19].sf.routes.forEach((r, k) => r.sent.forEach((x, i) => { if (x.transit && (k === 0 || k === 1) && i % 3 === 0) x.transit = false; }));
-    reset(cF);
-    cF.runSummaryJob_({type: 'SUMMARY', indicator: 'send_flow', date: D19});
-    reset(cF);
-    cF.enqueueJobs_([['DETAIL_INIT', 'send_flow', D19, 1]], {reset: true});
-    const f0 = cF.__state.fetches.length;
-    const jF = cF.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'send_flow')[0];
-    const rF = cF.processJob_(jF, Date.now() + 600000);
-    reset(cF);
-    const newF = cF.__state.fetches.slice(f0).filter(f => /sendbyday_detail/.test(f.url));
-    const eF = exact(cF, dF[D19], D19);
-    check(rF === 'done' && newF.length > 0 && newF.every(f => f.payload.detailType !== 'sendcount') && eF.st === 0 && eF.trip === 0 && eF.rows === eF.sent &&
-      cF.getAgg_('send_flow:Em trânsito', D19, D19)[0].total === eF.n.transit && cF.allTabRows_('LOG').some(r => /situação atualizada/.test(String(r[4]))),
-      'Expedição: dia fechado atualiza só a situação (sem "Enviados": só as listas de situação; IDs mantidos)', {r: rF, req: newF.length, eF});
-  }
-
-  // 3. Painel: rotas oficiais, cobertura dos IDs, turnos por horário, listas que juntam situações.
-  const dash = cA.getDashboardData('send_flow', {from: D19, to: D19});
-  const rowsD = cA.JTCore_.decodeDataset(dash.dataset);
-  cA.JTCore_.setColumnSets(cA.getIndicatorConfig_('send_flow').columnSets);
-  const qty = col => rowsD.filter(r => cA.JTCore_.colMatch(col, r.column)).reduce((a, r) => a + Number(r.qty || 1), 0);
-  check(dash.routes && dash.routes[D19].length === 5 && dash.routes['2026-09-18'] && dash.meta.tripCoverage[D19].total === tA.n.sent &&
-    dash.shiftSum.sendcount.some(a => a.date === D19 && a.T3 === tA.n.T3) && qty('Enviados') === tA.n.sent && qty('Em trânsito') === tA.n.transit &&
-    qty('Não entregues') === tA.n.und && !dash.summary && !hasDate(dash),
-    'Expedição: painel com rotas oficiais, IDs consultados, turnos e as três listas', {routes: Object.keys(dash.routes || {})});
-  const chTr = cA.JTCore_.buildChart(cA.getIndicatorConfig_('send_flow').charts[1], rowsD, {});
-  check(chTr.total === tA.n.transit && chTr.labels.indexOf('RT GAMA') < 0, 'Expedição: gráfico "Rotas que ainda não chegou" pela lista Em trânsito', chTr.labels);
-  const catSF = cA.getPublicCatalog_().filter(x => x.key === 'send_flow')[0];
-  check(catSF && catSF.columnSets && catSF.topCards.join() === 'login,destination,interval' && catSF.filters.map(f => f.key).join() === 'destination,interval,shift,tripId' && catSF.filters[3].label.pt === 'IDs Viagem' &&
-    catSF.tables.map(tb => tb.column).join() === 'Enviados,Não entregues,Em trânsito' && catSF.charts.length === 7,
-    'Expedição: catálogo com filtros, cartões "que mais", 7 gráficos e 3 tabelas na ordem do pedido');
-  cA.UrlFetchApp.fetch = (() => { const f = cA.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cA.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
-  const repSF = cA.generateReport('send_flow', {from: D19, to: D19, filters: {shift: ['T1']}}, 'xlsx'), repSFp = cA.generateReport('send_flow', {from: D19, to: D19}, 'pdf');
-  check(repSF.ok && repSF.rows === tA.n.T1 && repSFp.ok, 'Expedição: relatório Excel (com filtro de turno) e PDF', repSF);
-  // Período grande (totais por campo no servidor): as tabelas e gráficos continuam com as situações.
-  cA.__state.props.GROUPED_CLIENT_ROWS = '50';
-  const dashS = cA.getDashboardData('send_flow', {from: '2026-09-18', to: D19, filters: {shift: ['T1']}});
-  const mS = cA.JTCore_.marginalsByDim(dashS.summary.marginals);
-  const destT1 = (mS.destination || []).filter(r => r.date === D19 && cA.JTCore_.colMatch('Enviados', r.column)).reduce((a, r) => a + Number(r.qty), 0);
-  check(dashS.summary && destT1 === tA.n.T1 && cA.JTCore_.decodeDataset(dashS.summary.top).length > 0,
-    'Expedição: período grande com totais por campo no servidor (filtro de turno aplicado)', destT1);
-  // Filtro "IDs Viagem" (V3.23): no navegador, no servidor (período grande) e no relatório.
-  const tripOne = Object.keys(tA.t).map(w => tA.t[w].trip).filter(Boolean)[0], nTrip = Object.keys(tA.t).filter(w => tA.t[w].trip === tripOne).length;
-  const dashTr = cA.getDashboardData('send_flow', {from: D19, to: D19, filters: {tripId: [tripOne]}});
-  const mTr = cA.JTCore_.marginalsByDim(dashTr.summary.marginals);
-  const destTr = (mTr.destination || []).filter(r => cA.JTCore_.colMatch('Enviados', r.column)).reduce((a, r) => a + Number(r.qty), 0);
-  const optTr = (mTr.tripId || []).filter(r => cA.JTCore_.colMatch('Enviados', r.column) && r.tripId === tripOne).reduce((a, r) => a + Number(r.qty), 0);
-  delete cA.__state.props.GROUPED_CLIENT_ROWS;
-  const cliTr = cA.JTCore_.applyFilters(rowsD, {tripId: [tripOne]}).filter(r => cA.JTCore_.colMatch('Enviados', r.column)).reduce((a, r) => a + Number(r.qty || 1), 0);
-  const repTr = cA.generateReport('send_flow', {from: D19, to: D19, filters: {tripId: [tripOne]}}, 'xlsx');
-  check(nTrip > 0 && dashTr.summary && destTr === nTrip && optTr === nTrip && cliTr === nTrip && repTr.ok && repTr.rows === nTrip,
-    'Expedição: filtro "IDs Viagem" no navegador, no servidor (período grande) e no relatório', {nTrip, destTr, optTr, cliTr, rep: repTr.rows});
-
-  // 4. JMS que não separa por horário: cada rota baixada inteira; turnos do detalhe.
-  [['sendIgnoresTime', {sendIgnoresTime: true}], ['sendDailyAt00', {sendDailyAt00: true}]].forEach(([nm, o]) => {
-    const dI = sfDays(), cI = freshCtx(dI, o, SF);
-    cI.queueHistory(D19, D19, true);
-    runAll(cI, 12);
-    const eI = exact(cI, dI[D19], D19), aggI = cI.getAgg_('send_flow:Enviados', D19, D19)[0];
-    check(cI.__state.props.JMS_NO_SLICE_SEND === '1' && eI.rows === eI.sent && eI.st === 0 && eI.trip === 0 && aggI.T1 === eI.n.T1 &&
-      !cI.getAgg_('send_flow:turnos:sendcount', D19, D19).length && cI.getDashboardData('send_flow', {from: D19, to: D19}).meta.summaryShiftsOff.sendcount,
-      'Expedição: ' + nm + ' → sem horário, rota inteira, dados exatos e turnos do detalhe', eI);
-  });
-
-  // 5. Rastreamento com limite por consulta: aprende sozinho.
-  // (V4.1: o SC→DC também consulta o rastreamento e o limite aprendido é o mesmo — recusa: fica entre a metade e o limite)
-  // (V4.14: o padrão é 1 remessa por consulta; aqui parte de um lote de 100 aprendido antes, para exercitar o aprendizado)
-  [['tripLimit', {tripLimit: 20}, n => n === 20], ['tripReject', {tripReject: 10}, n => n >= 5 && n <= 10]].forEach(([nm, o, ok]) => {
-    const dL = sfDays(), cL = freshCtx(dL, o, Object.assign({JMS_TRIP_BATCH: '100'}, SF));
-    cL.queueHistory(D19, D19, true);
-    runAll(cL, 12);
-    check(ok(Number(cL.__state.props.JMS_TRIP_BATCH)) && exact(cL, dL[D19], D19).trip === 0,
-      'Expedição: ' + nm + ' → remessas por consulta dentro do limite do JMS, IDs exatos', cL.__state.props.JMS_TRIP_BATCH);
-  });
-  // V4.14: JMS real — uma remessa por consulta. Com o padrão (1 por consulta, várias ao mesmo tempo) todos os IDs saem.
-  const d1 = sfDays(), c1 = freshCtx(d1, {tripLimit: 1}, SF);
-  c1.queueHistory(D19, D19, true);
-  runAll(c1, 12);
-  const e1 = exact(c1, d1[D19], D19);
-  check(e1.trip === 0 && !c1.__state.props.JMS_TRIP_BATCH && c1.__state.tripMaxPar > 4,
-    'Expedição: JMS com 1 remessa por consulta → uma por consulta, várias ao mesmo tempo, IDs exatos',
-    {trip: e1.trip, lote: c1.__state.props.JMS_TRIP_BATCH, par: c1.__state.tripMaxPar});
-  // V4.14: JMS ocupado (só 6 consultas por vez): as que falham voltam para a fila, o ritmo cai e todos os IDs saem.
-  const dBz = sfDays(), cBz = freshCtx(dBz, {tripLimit: 1, tripBusy: 6}, SF);
-  cBz.queueHistory(D19, D19, true);
-  runAll(cBz, 12);
-  const eBz = exact(cBz, dBz[D19], D19);
-  check(eBz.trip === 0 && cBz.__state.tripBusyHits > 0,
-    'Expedição: JMS ocupado → consultas recusadas voltam para a fila, ritmo menor, IDs exatos', {trip: eBz.trip, hits: cBz.__state.tripBusyHits});
-  // V4.14.1: JMS ocupado que responde "concluído" SEM os bipes (como na Pesquisa no Rastreamento). Antes contava como "sem bipe"
-  // e a remessa era abandonada: o ID ficava vazio na tabela. Agora é conferida de novo no fim, devagar.
-  [['vazio', {tripLimit: 1, tripEmpty: 6}], ['bipes vazios', {tripLimit: 1, tripEmpty: 6, tripEmptyMode: 'details'}]].forEach(([nm, o]) => {
-    const dE = sfDays(), cE = freshCtx(dE, o, SF);
-    cE.queueHistory(D19, D19, true);
-    runAll(cE, 12);
-    const eE = exact(cE, dE[D19], D19), mE = cE.loadTripMap_('send_flow', D19);
-    const falsas = Object.keys(mE.miss).filter(w => mE.ids[w] === undefined && (dE[D19].sf.routes || []).some(r => r.sent.some(x => x.billcode === w && x.trip !== null)));
-    check(eE.trip === 0 && cE.__state.tripEmptyHits > 0 && !falsas.length,
-      'Expedição: JMS respondendo ' + nm + ' com consultas demais → conferidas de novo, IDs exatos, nenhuma marcada "sem bipe" à toa',
-      {trip: eE.trip, hits: cE.__state.tripEmptyHits, falsas: falsas.length});
-  });
-
-  // 6. Tempo acabando: grava as unidades prontas e a execução seguinte continua da próxima.
-  const dT = sfDays(), cT = freshCtx(dT, null, Object.assign({JMS_PARALLEL: '1', JMS_DETAIL_MAX_OFFSET: '150'}, SF));
-  cT.queueHistory(D19, D19, true);
-  cT.pendingJobs_().filter(j => j.type === 'SUMMARY' && j.indicator === 'send_flow').forEach(j => cT.processJob_(j, Date.now() + 600000));
-  reset(cT);
-  const realNow = vm.runInContext('Date.now', cT);
-  let fakeT = realNow();
-  vm.runInContext('Date', cT).now = () => fakeT;
-  const origB = cT.fetchDetailBatch_;
-  cT.fetchDetailBatch_ = function () { fakeT += 2500; return origB.apply(null, arguments); };
-  const jobT = cT.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'send_flow')[0];
-  const rT1 = cT.processJob_(jobT, fakeT + 90000);
-  vm.runInContext('Date', cT).now = realNow;
-  cT.fetchDetailBatch_ = origB;
-  reset(cT);
-  const stT1 = cT.getDayStatus_('send_flow', D19), jobT1 = cT.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'send_flow')[0];
-  const firstRun = cT.__state.fetches.filter(f => /sendbyday_detail/.test(f.url) && f.payload.current > 1).length;
-  check(rT1 === 'partial' && stT1.details === 'PARTIAL' && jobT1 && jobT1.page > 1 && jobT1.page <= stT1.expectedPages && stT1.expectedPages > 20,
-    'Expedição: tempo acabando grava as unidades prontas e guarda o cursor', {r: rT1, st: stT1, cursor: jobT1 && jobT1.page});
-  const before = cT.__state.fetches.length;
-  runAll(cT, 12);
-  const eT = exact(cT, dT[D19], D19);
-  const again = cT.__state.fetches.slice(before).filter(f => /sendbyday_detail/.test(f.url) && f.payload.current > 1).length;
-  check(eT.rows === eT.sent && eT.st === 0 && eT.trip === 0 && cT.getDayStatus_('send_flow', D19).details === 'COMPLETE' && again < firstRun + 40,
-    'Expedição: retomada fecha o dia exato (horário com muitas remessas dividido em partes)', {eT, again, firstRun});
-
-  // 7. Proteção: o JMS ignorando a rota (todas as remessas da base em cada rota) não é gravado.
-  const dX = sfDays(), cX = freshCtx(dX, {intercept: (route, h, body) => {
-    if (route !== 'sendbyday_detail' || !body.nextstation) return null;
-    let list = []; dX[D19].sf.routes.forEach(r => r.sent.forEach(x => list.push(x)));
-    return [200, {code: 1, data: {records: list.slice(0, body.size).map(x => ({billcode: x.billcode, sendTime: x.sendTime, nextstation: x.route})), total: list.length * 5,
-      size: body.size, current: body.current, pages: 99}, succ: true, fail: false}];
-  }}, SF);
-  cX.queueHistory(D19, D19, true);
-  runAll(cX, 6);
-  const stX = cX.getDayStatus_('send_flow', D19);
-  check(stX.details !== 'COMPLETE' && /sem filtro/.test(stX.error || '') && !cX.dayFilesMap_('send_flow', D19, D19)[D19],
-    'Expedição: detalhe sem filtro de rota bloqueado (nada gravado)', stX);
-
-  // 8. Turnos de hoje de hora em hora: só horários já começados; horário fechado não é consultado de novo.
-  const TODAY = ctx.isoToday_();
-  const dH = {[TODAY]: makeDay(TODAY, 41)};
-  // Hoje no simulado: remessas só até agora (as do futuro saem).
-  const nowTxt = ctx.Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'yyyy-MM-dd HH:mm:ss');
-  dH[TODAY].sf.routes.forEach(r => { r.sent = r.sent.filter(x => x.sendTime <= nowTxt); });
-  // (horário já aprovado num dia fechado: JMS_SLICE_OK_SEND)
-  const cH = freshCtx(dH, null, Object.assign({DATA_START_DATE: TODAY, JMS_SLICE_OK_SEND: D19}, SF));
-  cH.runSummaryJob_({type: 'SUMMARY', indicator: 'send_flow', date: TODAY});
-  const n1 = cH.__state.fetches.filter(f => /sendbyday_detail/.test(f.url)).length;
-  cH.syncSendShifts_('send_flow', TODAY);
-  const n2 = cH.__state.fetches.filter(f => /sendbyday_detail/.test(f.url)).length;
-  const routesH = cH.sendRoutes_('send_flow', TODAY).length, started = cH.sendWindows_(TODAY).filter(w => w.start <= nowTxt).length;
-  const st8 = cH.readSendShifts_(TODAY), fin = st8.fin.filter(Boolean).length;
-  check(routesH > 0 && n2 - n1 === routesH * (started - fin) && cH.getAgg_('send_flow:turnos:sendcount', TODAY, TODAY).length === 1,
-    'Expedição: turnos de hoje pela lista por horário; horário fechado não é consultado de novo', {n1, n2, routesH, started, fin});
-
-  // 9. Teto diário próprio da Expedição (conta Gmail) e diagnóstico sem número de remessa.
-  const cB = freshCtx(sfDays(), null, Object.assign({COTA_GOOGLE: 'gmail'}, SF));
-  cB.addGroupedUsedMs_(5 * 60000, 'send_flow');
-  check(cB.groupedBudgetMin_('send_flow') === 20 && cB.groupedBudgetMin_() === 35 && cB.groupedUsedMs_('send_flow') === 300000 && cB.groupedUsedMs_() === 0 &&
-    freshCtx({}, null, {COTA_GOOGLE: 'gmail', EXPEDICAO_MIN_POR_DIA: '0'}).groupedBudgetLeftMs_('send_flow') === Infinity,
-    'Expedição: teto diário próprio (20 min na conta Gmail; EXPEDICAO_MIN_POR_DIA muda), separado do Recebimento');
-  cB.queueHistory(D19, D19, true);
-  runAll(cB, 12);
-  const diag = cB.diagnosticarExpedicao(D19);
-  const wbs = Object.keys(truthOf(sfDays()[D19]).t);
-  check(/Expedição: fluxo operacional/.test(diag.texto) && diag.resumo.sendcount > 0 && diag.respeitaHorario === true && diag.rastreamento &&
-    /VIAGEM/.test(String(diag.rastreamento.idViagem)) && !wbs.some(w => diag.texto.indexOf(w) >= 0),
-    'diagnosticarExpedicao: resumo, rota, horário, listas e Rastreamento, sem número de remessa', diag.texto);
-}
-
 // ---------- V3.23: Fluxo de Lotes (sacas e destinos fictícios) ----------
 {
   const lfDays = () => ({'2026-09-18': makeDay('2026-09-18', 23), [D19]: makeDay(D19, 37)});
@@ -2119,11 +1358,34 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     pD.current === 2 && cP.detailPageSize_(cP.getIndicatorConfig_('lot_flow')) === 100,
     'Lotes: payload da lista "Total de pacotes construídos" igual à captura, até 100 por página', pD);
   const hL = cP.jmsHeaders_('https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sdploopbagBuildbagDetail');
-  check(hL.AuthToken === 'FAKE' && !hL.Routename && !hL.Routernamelist, 'Lotes: sem cabeçalho de rota (variantes só se o JMS recusar)');
-  check(!cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'lot_flow'}) && cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'send_flow'}),
-    'Lotes: tarefa leve (fora do teto diário do Recebimento/Expedição)');
+  // V4.21.4: cabeçalhos capturados no DevTools (tela /app/crisbiIndex/CirculationBagReport) — Routename e Routernamelist codificado.
+  const LOTS_LIST_ENC = '%E6%99%BA%E8%83%BD%E8%AE%BE%E5%A4%87%3E%E7%8E%AF%E4%BF%9D%E7%89%A9%E6%96%99%3E%E7%BB%9F%E8%AE%A1%E6%8A%A5%E8%A1%A8%3E' +
+    '%E5%BE%AA%E7%8E%AF%E5%BB%BA%E5%8C%85%E7%BB%9F%E8%AE%A1';
+  check(hL.AuthToken === 'FAKE' && hL.Routename === 'CirculationBagReport|crisbiIndex' && hL.Routernamelist === LOTS_LIST_ENC,
+    'Lotes: Routename e Routernamelist iguais aos da tela do JMS (captura do DevTools)', hL);
+  // JMS que exige os dois cabeçalhos como a tela (HTTP 403 sem eles): consulta de primeira, nada a aprender, nada pausado.
+  const want403 = h => h.Routename === 'CirculationBagReport|crisbiIndex' && h.Routernamelist === LOTS_LIST_ENC;
+  const cL403 = freshCtx(lfDays(), {intercept: (route, h) => /sdploopbagBuildbag/.test(route) && !want403(h) ? [403, {}] : null});
+  cL403.queueHistory(D19, D19, true);
+  runAll(cL403, 12);
+  const fL403 = cL403.__state.fetches.filter(f => /sdploopbagBuildbag/.test(f.url));
+  check(cL403.getRateDay_('lot_flow', D19) && cL403.getDayStatus_('lot_flow', D19).details === 'COMPLETE' && fL403.every(f => want403(f.headers)) &&
+    !cL403.__state.props.JMS_ROUTE_AUTO_LOTS && !cL403.publicPauses_().some(p => p.route === 'LOTS'),
+    'Lotes: com os cabeçalhos da tela o JMS responde de primeira (antes: HTTP 403)', {auto: cL403.__state.props.JMS_ROUTE_AUTO_LOTS, n: fL403.length});
+  // JMS que recusa o Routernamelist (só o Routename): o painel acha sozinho a variante sem a lista e segue.
+  const cLn = freshCtx(lfDays(), {intercept: (route, h) => /sdploopbagBuildbag/.test(route) && h.Routernamelist ? [403, {}] : null});
+  cLn.queueHistory(D19, D19, true);
+  runAll(cLn, 12);
+  check(cLn.getDayStatus_('lot_flow', D19).details === 'COMPLETE' && cLn.__state.props.JMS_ROUTE_AUTO_LOTS === '1',
+    'Lotes: Routernamelist recusado — a variante só com o Routename é aprendida (JMS_ROUTE_AUTO_LOTS)', cLn.__state.props.JMS_ROUTE_AUTO_LOTS);
+  // V4.21.4: a variante aprendida na V4.21.3 é esquecida uma vez (a ordem das variantes mudou).
+  cLn.__state.props.JMS_ROUTE_AUTO_LOTS = '3';
+  delete cLn.__state.props.MIGRATION_V4214;
+  check(cLn.migrateToV4214_() === 1 && !cLn.__state.props.JMS_ROUTE_AUTO_LOTS && cLn.migrateToV4214_() === 0,
+    'Lotes: variante aprendida antes da V4.21.4 esquecida uma vez');
+  check(!cP.isHeavyJob_({type: 'DETAIL_INIT', indicator: 'lot_flow'}), 'Lotes: tarefa leve (sem teto diário)');
 
-  // 2. Dia completo: cartões do resumo ("o restante" calculado), uma linha por saca, Chegada/Partida e turnos.
+  // 2. Dia completo: cartões do resumo ("o restante" calculado), uma linha por saca, Entrada/Saída de porto e turnos.
   const dA = lfDays(), cA = freshCtx(dA);
   cA.queueHistory('2026-09-18', D19, true);
   runAll(cA, 12);
@@ -2136,45 +1398,111 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   cA.JTCore_.setColumnSets(cfgL.columnSets);
   const qL = f => rowsA.filter(f).reduce((a, r) => a + Number(r.qty || 1), 0), cm = (col, r) => cA.JTCore_.colMatch(col, r.column);
   check(qL(r => cm('Sacas criadas', r)) === tA.n && qL(r => cm('Sacas ecológicas', r)) === tA.eco && qL(r => cm('Sacas não ecológicas', r)) === tA.n - tA.eco &&
-    qL(r => r.port === 'Chegada') === tA.arr && qL(r => r.port === 'Partida') === tA.dep && ['T1', 'T2', 'T3'].every(s => qL(r => r.shift === s) === tA.sh[s]) &&
+    qL(r => r.port === 'Entrada') === tA.arr && qL(r => r.port === 'Saída de porto') === tA.dep && ['T1', 'T2', 'T3'].every(s => qL(r => r.shift === s) === tA.sh[s]) &&
     rowsA.every(r => r.packType === 'Saco normal' && r.lot && (r.sackType === 'Ecológica') === (r.column === 'Ecológica')) &&
     cA.getDayStatus_('lot_flow', D19).details === 'COMPLETE',
-    'Lotes: uma linha por saca; ecológica pelo isLoopPag; 进港 = Chegada, 出港 = Partida; turno pelo tempo de ensacamento', {rows: rowsA.length});
+    'Lotes: uma linha por saca; ecológica pelo isLoopPag; 进港 = Entrada, 出港 = Saída de porto (V4.18, nomes da tela); turno pelo tempo de ensacamento', {rows: rowsA.length});
   const fL = cA.__state.fetches.filter(f => /sdploopbagBuildbagDetail/.test(f.url));
   check(fL.length > 0 && fL.every(f => f.payload.size <= 100 && f.payload.detailType === 'packageSum' && f.payload.proxySiteCode === '30001'),
     'Lotes: só a lista "Total de pacotes construídos" é baixada (a ecológica sai da coluna Saca), páginas de até 100', fL.length);
   const agL = n => cA.getAgg_('lot_flow:' + n, D19, D19)[0] || {};
   check(agL('Sacas criadas').total === tA.n && agL('Sacas criadas').T1 === tA.sh.T1 && agL('Sacas ecológicas').total === tA.eco &&
-    agL('Sacas não ecológicas').total === tA.n - tA.eco && agL('arrivals').total === tA.arr && agL('departures').total === tA.dep,
-    'Lotes: turnos de cada lista e de Chegada/Partida por dia (aba AGG, dia anterior dos cartões)', {arr: agL('arrivals'), dep: agL('departures')});
+    agL('Sacas não ecológicas').total === tA.n - tA.eco,
+    'Lotes: turnos de cada lista por dia (aba AGG, dia anterior dos cartões de turno)', agL('Sacas criadas'));
 
   // 3. Painel: gráficos de lotes com mais pacotes (soma dos itens), catálogo e período grande.
   const dashL = cA.getDashboardData('lot_flow', {from: D19, to: D19});
   const rowsD = cA.JTCore_.decodeDataset(dashL.dataset), chDef = k => cfgL.charts.filter(c => c.key === k)[0];
-  const topT = dA[D19].lt.reduce((a, b) => Math.max(a, b.packageQty), 0);
-  const chTop = cA.JTCore_.buildChart(chDef('topLots'), rowsD, {}), chEco = cA.JTCore_.buildChart(chDef('topEco'), rowsD, {});
-  const chNon = cA.JTCore_.buildChart(chDef('topNonEco'), rowsD, {}), chPort = cA.JTCore_.buildChart(chDef('ports'), rowsD, {});
-  check(chTop.total === tA.items && chTop.datasets[0].data[0] === topT && chTop.labels.length === 10 && chEco.total === tA.ecoItems &&
-    chNon.total === tA.items - tA.ecoItems && chPort.labels.join() === (tA.dep >= tA.arr ? 'Partida,Chegada' : 'Chegada,Partida') &&
-    dashL.colAgg.arrivals.some(a => a.date === D19 && a.total === tA.arr) && !dashL.summary && !hasDate(dashL),
-    'Lotes: gráficos de lotes/sacas com mais pacotes = soma de "Quantidade de itens na embalagem"; entradas/partidas', {top: chTop.datasets[0].data[0], topT});
+  // V4.20: o gráfico dos números das sacas saiu; a soma das remessas fica em sumDefs (remessas por turno, cartões com filtro).
+  const sumDef = cfgL.sumDefs[0], chPort = cA.JTCore_.buildChart(chDef('ports'), rowsD, {});
+  const chTop = cA.JTCore_.buildChart(sumDef, rowsD, {});
+  const chEco = cA.JTCore_.buildChart(sumDef, cA.JTCore_.applyFilters(rowsD, {sackType: ['Ecológica']}), {});
+  const chNon = cA.JTCore_.buildChart(sumDef, cA.JTCore_.applyFilters(rowsD, {sackType: ['Não ecológica']}), {});
+  check(chTop.total === tA.items && chEco.total === tA.ecoItems && !chDef('topLots') &&
+    chNon.total === tA.items - tA.ecoItems && chPort.labels.join() === (tA.dep >= tA.arr ? 'Saída de porto,Entrada' : 'Entrada,Saída de porto') &&
+    !dashL.summary && !hasDate(dashL),
+    'Lotes: remessas dentro das sacas (as duas juntas; com o filtro, só a escolhida); entrada/saída', {total: chTop.total, items: tA.items});
+  const byDest = {};
+  rowsD.forEach(r => { if (cA.JTCore_.colMatch('Sacas criadas', r.column)) byDest[r.destination] = (byDest[r.destination] || 0) + Number(r.qty || 1); });
+  const topDestT = Object.keys(byDest).filter(k => k !== 'N/A').sort((a, b) => byDest[b] - byDest[a])[0];
+  const chDest = cA.JTCore_.buildChart(chDef('topDest'), rowsD, {});
+  check(chDest.labels[0] === topDestT && chDest.datasets[0].data[0] === byDest[topDestT] && chDest.labels.length <= 10,
+    'Lotes: gráfico "Destinos com maior envio" (sacas por destino de desembalagem)', {g: chDest.labels.slice(0, 3), topDestT});
   const catL = cA.getPublicCatalog_().filter(x => x.key === 'lot_flow')[0];
-  check(catL && catL.filters.map(f => f.key).join() === 'shift,lot,port,sackType' && catL.filters[1].label.pt === 'Lotes (número da saca)' &&
-    catL.charts.length === 6 && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' && catL.detailCards.length === 2 &&
-    catL.metricPanels.length === 2 && catL.shiftCardsByColumn.split.length === 2,
-    'Lotes: catálogo com 4 filtros, 6 gráficos, cartões de Chegada/Partida, turnos com ecológicas/não ecológicas e a tabela Geral');
+  // V4.18 (PDF "desenvolvendo dashboard de criação de lotes"): filtros, cartões e gráficos do pedido, na ordem dele.
+  const cardsL = catL.metricPanels[0].metrics.filter(x => x.card !== false).map(x => x.key);
+  check(catL && catL.name.pt === 'Criação de Lotes' && catL.filters.map(f => f.key).join() === 'sackType,port,lot,destination,shift' &&
+    catL.filters.map(f => f.label.pt).join() === 'Tipo de sacas,Tipo de entrada e saída,Número dos lotes,Destinos,Turnos' &&
+    catL.charts.map(x => x.key).join() === 'shiftPie,mDaily,ports,sackTypes,topDest,ecoWrong,ecoWrongShift,ecoRight' && catL.tables.length === 1 && catL.tables[0].column === 'Sacas criadas' &&
+    !(catL.detailCards || []).length && catL.heroMetric.sub === 'waybillSum' && catL.prevCard && catL.prevCard.sub === 'waybillSum' &&
+    cardsL.join() === 'packageSum,loopRate,noloopRate,loopSum,noloopSum' &&
+    catL.metricPanels[0].metrics.filter(x => x.subMetric).map(x => x.subMetric.key).join() === 'loopWaybillSum,noloopWaybillSum' &&
+    catL.metricPanels[1].metrics.every(x => x.card === false) && catL.shiftCardsByColumn.split.length === 2,
+    'Lotes: catálogo do pedido — filtros (tipo de sacas, entrada/saída, lotes, destinos, turnos), cartões com as remessas embaixo e 8 gráficos',
+    {f: catL.filters.map(f => f.key), ch: catL.charts.map(x => x.key), cards: cardsL});
   const both = tA.items + truthL(dA['2026-09-18'].lt).items, arrBoth = tA.arrItems + truthL(dA['2026-09-18'].lt).arrItems;
   cA.__state.props.GROUPED_CLIENT_ROWS = '10';
   const dS = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {}});
-  const dSf = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {port: ['Chegada']}});
+  const dSf = cA.getDashboardData('lot_flow', {from: '2026-09-18', to: D19, filters: {port: ['Entrada']}});
   delete cA.__state.props.GROUPED_CLIENT_ROWS;
   const mS = cA.JTCore_.marginalsByDim(dS.summary.marginals), mSf = cA.JTCore_.marginalsByDim(dSf.summary.marginals);
-  const chS = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mS, {}), {});
-  const chSf = cA.JTCore_.buildChart(chDef('topLots'), cA.JTCore_.summaryChartRows(chDef('topLots'), mSf, {port: ['Chegada']}), {});
-  const topBoth = Math.max(topT, dA['2026-09-18'].lt.reduce((a, b) => Math.max(a, b.packageQty), 0));
-  check(dS.summary && chS.total === both && chS.datasets[0].data[0] === topBoth,
-    'Lotes: período grande (totais no servidor) com a soma de itens por saca', {total: chS.total, both});
+  const chS = cA.JTCore_.buildChart(sumDef, cA.JTCore_.summaryChartRows(sumDef, mS, {}), {});
+  const chSf = cA.JTCore_.buildChart(sumDef, cA.JTCore_.summaryChartRows(sumDef, mSf, {port: ['Entrada']}), {});
+  check(dS.summary && chS.total === both,
+    'Lotes: período grande (totais no servidor) com a soma das remessas (sumDefs, sem gráfico próprio)', {total: chS.total, both});
+  // Sacas ecológicas: os destinos do JMS falso estão fora da lista do comunicado → todas "enviadas incorretamente".
+  const ecoBoth = tA.eco + truthL(dA['2026-09-18'].lt).eco;
+  const chWS = cA.JTCore_.buildChart(chDef('ecoWrong'), cA.JTCore_.summaryChartRows(chDef('ecoWrong'), mS, {}), {});
+  const chRS = cA.JTCore_.buildChart(chDef('ecoRight'), cA.JTCore_.summaryChartRows(chDef('ecoRight'), mS, {}), {});
+  check(chWS.total === ecoBoth && chRS.total === 0, 'Lotes: período grande — sacas ecológicas por destino autorizado ou não', {w: chWS.total, r: chRS.total, ecoBoth});
+  const chTS = cA.JTCore_.buildChart(chDef('ecoWrongShift'), cA.JTCore_.summaryChartRows(chDef('ecoWrongShift'), mS, {}), {});
+  check(chTS.total === ecoBoth && chTS.labels.slice(0, 3).join() === 'T1,T2,T3' && chTS.datasets[0].data.reduce((a, v) => a + v, 0) === ecoBoth,
+    'Lotes: período grande — turnos que enviaram sacas ecológicas incorretamente (totais no servidor)', {t: chTS.total, l: chTS.labels, d: chTS.datasets[0].data, ecoBoth});
   check(dSf.summary && chSf.total === arrBoth, 'Lotes: período grande com filtro de Entrada/Saída aplicado no servidor', {total: chSf.total, arrBoth});
+
+  // 3a. V4.20 (pedido): destinos das sacas ecológicas (vermelhas com chip) pela lista do comunicado "Envio de sacas vermelhas com
+  // chip": corretas = SC/DC da lista ("DC VCP-SP" = "DC VCP"; maiúsculas e hífens não contam); incorretas = fora dela. Só as
+  // ecológicas; sem destino não conta.
+  // Uma linha por saca (número fictício): [tipo, destino, quantas sacas].
+  const ecoRows = [];
+  [['Ecológica', 'DC VCP-SP', 1], ['Ecológica', 'dc itj 001-pr', 1], ['Ecológica', 'SP GRU', 2], ['Ecológica', 'JND-SP', 1],
+    ['Ecológica', 'RT ALFA', 3], ['Ecológica', 'DC FICTICIO-AL', 1], ['Ecológica', 'N/A', 4], ['Ecológica', 'DC GRU 02-SP', 1],
+    ['Não ecológica', 'RT ALFA', 9], ['Não ecológica', 'SP GRU', 9]].forEach(([col, dest, n]) => {
+    for (let i = 0; i < n; i++) ecoRows.push({column: col, destination: dest, shipment: 'BRFICECO' + ecoRows.length, qty: 1});
+  });
+  const chW = cA.JTCore_.buildChart(chDef('ecoWrong'), ecoRows, {}), chR = cA.JTCore_.buildChart(chDef('ecoRight'), ecoRows, {});
+  check(chW.total === 5 && chW.labels[0] === 'RT ALFA' && chW.labels.indexOf('DC GRU 02-SP') >= 0 && chW.labels.indexOf('N/A') < 0 &&
+    chR.total === 5 && chR.labels[0] === 'SP GRU' && ['DC VCP-SP', 'dc itj 001-pr', 'JND-SP'].every(x => chR.labels.indexOf(x) >= 0) &&
+    chDef('ecoWrong').title.pt === 'Sacas ecológicas enviadas incorretamente' && chDef('ecoRight').title.pt === 'Destinos que receberam as sacas ecológicas corretamente',
+    'Lotes: sacas ecológicas enviadas incorretamente / corretamente pela lista de SCs e DCs do comunicado', {w: chW.labels, r: chR.labels, tw: chW.total, tr: chR.total});
+  // V4.21.6 (pedido): turnos que enviaram errado as sacas ecológicas — só as ecológicas com destino fora da lista, por turno.
+  // [tipo, destino, turno, quantas sacas]
+  const shRows = [];
+  [['Ecológica', 'RT ALFA', 'T1', 2], ['Ecológica', 'DC FICTICIO-AL', 'T3', 1], ['Ecológica', 'DC VCP-SP', 'T2', 4], ['Ecológica', 'N/A', 'T2', 3],
+    ['Não ecológica', 'RT ALFA', 'T2', 5], ['Ecológica', 'RT ALFA', 'T3', 1]].forEach(([col, dest, sh, n]) => {
+    for (let i = 0; i < n; i++) shRows.push({date: D19, column: col, sackType: col, destination: dest, shift: sh, lot: 'BRFICSH' + shRows.length, shipment: 'BRFICSH' + shRows.length, qty: 1});
+  });
+  const chT = cA.JTCore_.buildChart(chDef('ecoWrongShift'), shRows, {});
+  const sumView = f => { const sk = cA.GroupSummarySink_(cfgL, f, 10); sk.addRows(JSON.parse(JSON.stringify(shRows))); return cA.groupSummaryView_(cfgL, sk.build(), f).charts.filter(c => c.key === 'ecoWrongShift')[0]; };
+  const chTS0 = sumView({}), chTS1 = sumView({shift: ['T1']}), chTSd = sumView({destination: ['DC FICTICIO-AL']});
+  check(chT.total === 4 && chT.labels.join() === 'T1,T2,T3' && chT.datasets[0].data.join() === '2,0,2' && chT.type === 'bar' &&
+    chTS0.datasets[0].data.join() === '2,0,2' && chTS1.datasets[0].data.join() === '2,0,0' && chTSd.datasets[0].data.join() === '0,0,1' &&
+    chDef('ecoWrongShift').title.pt === 'Turnos que enviaram sacas ecológicas incorretamente',
+    'Lotes: gráfico dos turnos que enviaram sacas ecológicas incorretamente (destino fora do comunicado; sem destino e não ecológica não contam)',
+    {t: chT.datasets[0].data, s0: chTS0.datasets[0].data, s1: chTS1.datasets[0].data, sd: chTSd.datasets[0].data});
+
+  // 3b. V4.18: dias baixados antes (gravados como "Partida"/"Chegada") aparecem com os nomes da tela, na leitura normal e no
+  // resumo de período grande, sem baixar de novo.
+  const oldRows = [{date: D19, column: 'Ecológica', sackType: 'Ecológica', lot: 'BRFICVELHA1', port: 'Partida', shift: 'T1', items: 5, qty: 1},
+    {date: D19, column: 'Não ecológica', sackType: 'Não ecológica', lot: 'BRFICVELHA2', port: 'Chegada', shift: 'T2', items: 7, qty: 1}];
+  const alRows = cA.JTCore_.applyAliases(JSON.parse(JSON.stringify(oldRows)), cfgL.valueAliases);
+  const sinkA = cA.GroupSummarySink_(cfgL, {port: ['Saída de porto']}, 10);
+  sinkA.addRows(JSON.parse(JSON.stringify(oldRows)));
+  const viewA = cA.groupSummaryView_(cfgL, sinkA.build(), {port: ['Saída de porto']});
+  const portsA = (viewA.byDim.port || []).map(x => x.port);
+  check(alRows.map(r => r.port).join() === 'Saída de porto,Entrada' && portsA.indexOf('Partida') < 0 && portsA.indexOf('Saída de porto') >= 0 &&
+    viewA.top.every(r => r.port !== 'Partida' && r.port !== 'Chegada'),
+    'Lotes: "Partida"/"Chegada" dos dias antigos viram "Saída de porto"/"Entrada" na leitura e no resumo de período grande', {alRows, portsA});
 
   // 4. Resumo com a linha de outra base: o painel usa a nossa (30001).
   const cO = freshCtx(lfDays(), {lotOtherSite: true});
@@ -2193,7 +1521,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   catch (e) { otherErr = e.message; }
   const okSite = cP.normalizeRecords_('lot_flow', D19, [{packageCode: 'BRTESTE2', proxySiteName: ' sp  gru ', isLoopPag: 'N', portName: '进港', packageQty: 4,
     scanDateTime: D19 + ' 07:10:00'}], 'packageSum');
-  check(/sem filtro/.test(otherErr) && okSite.length === 1 && okSite[0].column === 'Não ecológica' && okSite[0].port === 'Chegada' && okSite[0].shift === 'T1',
+  check(/sem filtro/.test(otherErr) && okSite.length === 1 && okSite[0].column === 'Não ecológica' && okSite[0].port === 'Entrada' && okSite[0].shift === 'T1',
     'Lotes: saca de outra base na lista bloqueia a importação (hoje também)', otherErr);
 
   // 6. Hoje: lista nova no máximo de hora em hora (Google Workspace) ou a cada 3 h (conta Gmail: cota de 90 min/dia).
@@ -2227,14 +1555,13 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     c.queueRecentRefresh_();
     reset(c);
     const js = c.pendingJobs_().filter(j => j.type === 'SUMMARY');
-    return {lots: js.filter(j => j.indicator === 'lot_flow').map(j => j.date).sort().join(), send: js.filter(j => j.indicator === 'send_flow').length};
+    return {lots: js.filter(j => j.indicator === 'lot_flow').map(j => j.date).sort().join()};
   };
   const T0 = ctx.isoToday_(), T1 = ctx.addDaysIso_(T0, -1), T2 = ctx.addDaysIso_(T0, -2);
   const gm4 = lotJobsAt('gmail', 4), gm6 = lotJobsAt('gmail', 6), gm3 = lotJobsAt('gmail', 12), ws4 = lotJobsAt('workspace', 4);
   // V3.26: o Fluxo de Lotes segue a regra dos outros painéis (antes, na conta Gmail, ontem só às 3h e hoje a cada 3 h).
   // Conta Gmail: hoje e ontem toda hora; anteontem a cada 6 h (às 4h, só hoje e ontem; às 6h e 12h, os três).
-  check(gm4.lots === [T1, T0].join() && gm4.send === 2 && gm6.send === 3 && gm6.lots === [T2, T1, T0].join() && gm3.lots === [T2, T1, T0].join() &&
-    ws4.lots === [T2, T1, T0].join() && ws4.send === 3,
+  check(gm4.lots === [T1, T0].join() && gm6.lots === [T2, T1, T0].join() && gm3.lots === [T2, T1, T0].join() && ws4.lots === [T2, T1, T0].join(),
     'Lotes: ontem e hoje consultados de hora em hora também na conta Gmail (como os outros painéis)', {gm4, gm6, gm3, ws4});
 
   // 6c. V3.26: o cartão mostra quando o número foi consultado no JMS; o diagnóstico compara o JMS de agora com o gravado.
@@ -2251,9 +1578,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
 
   // 7. diagnosticarLotes(): resumo, lista, contas da lista inteira × resumo, sem número de saca.
   const dg = cA.diagnosticarLotes(D19);
-  check(/Fluxo de Lotes/.test(dg.texto) && dg.lista.total === tA.n && dg.listaInteira.ecologicas === tA.eco && dg.listaInteira.pacotes === tA.items &&
-    dg.listaInteira.chegada === tA.arr && /isLoopPag: \d+ ✓/.test(dg.texto.replace(/\./g, '')) && !dA[D19].lt.some(b => dg.texto.indexOf(b.packageCode) >= 0) &&
-    !/FAKE/.test(dg.texto), 'diagnosticarLotes: lista × resumo (ecológicas pelo isLoopPag, pacotes, Chegada/Partida), sem número de saca', dg.texto);
+  check(/Criação de Lotes/.test(dg.texto) && dg.lista.total === tA.n && dg.listaInteira.ecologicas === tA.eco && dg.listaInteira.pacotes === tA.items &&
+    dg.listaInteira.entrada === tA.arr && /isLoopPag: \d+ ✓/.test(dg.texto.replace(/\./g, '')) && !dA[D19].lt.some(b => dg.texto.indexOf(b.packageCode) >= 0) &&
+    !/FAKE/.test(dg.texto), 'diagnosticarLotes: lista × resumo (ecológicas pelo isLoopPag, pacotes, Entrada/Saída de porto), sem número de saca', dg.texto);
 }
 
 // ---------- V3.24: atualização mais rápida (resumos em paralelo, hoje mais vezes, carimbo para o navegador) ----------
@@ -2321,20 +1648,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const tBefore = Date.now();
   cT.processSyncQueue({budgetMs: 600000, force: true});
   reset(cT);
-  const st24 = cT.dataStamps_().wrong_send, up0 = cT.getUpdateStamp(0), upK = cT.getUpdateStamp(st24 && st24.t);
+  // V4.26: a foto da Sem Movimentação (que entra na fila sozinha) roda depois: "nada novo" = depois do carimbo mais recente.
+  const stAll = cT.dataStamps_(), tMax = Math.max.apply(null, Object.keys(stAll).map(k => Number(stAll[k].t) || 0));
+  const st24 = stAll.wrong_send, up0 = cT.getUpdateStamp(0), upK = cT.getUpdateStamp(tMax);
   const dsh = cT.getDashboardData('wrong_send', {from: D19, to: D19});
   check(st24 && st24.t >= tBefore && st24.d[D19] === st24.t && up0.stamps.wrong_send.t === st24.t && up0.latestByIndicator && up0.latestByIndicator.wrong_send &&
     upK.latestByIndicator === null && dsh.meta.stamp && dsh.meta.stamp.t === st24.t && !hasDate(up0) && cT.getAppBootstrap().stamps.wrong_send.t === st24.t,
     'carimbo por painel e por dia: o navegador só recarrega quando o período aberto mudou', {st24, up0: Object.keys(up0)});
   check(typeof cT.getResultsData({from: D19, to: D19}).stampT === 'number' && cT.getResultsData({from: D19, to: D19}).stampT >= st24.t, 'Resultados levam o carimbo');
 
-  // 3b. Fila: IDs de viagem do dia em que o painel abre logo depois do detalhe dele, antes dos dias antigos.
-  const cQ24 = freshCtx(days24());
-  const anc = cQ24.lastClosedDate_('send_flow'), old = cQ24.addDaysIso_(anc, -3);
-  cQ24.enqueueJobs_([['DETAIL_INIT', 'send_flow', old, 1], ['TRIPS', 'send_flow', anc, 0], ['TRIPS', 'send_flow', old, 0], ['DETAIL_INIT', 'send_flow', anc, 1]], {});
-  reset(cQ24);
-  const ord = cQ24.pendingJobs_().filter(j => j.indicator === 'send_flow').map(j => j.type + ':' + (j.date === anc ? 'abre' : 'antigo')).join();
-  check(ord === 'DETAIL_INIT:abre,TRIPS:abre,DETAIL_INIT:antigo,TRIPS:antigo', 'fila da Expedição: detalhe e IDs de viagem do dia que o painel abre primeiro', ord);
 
   // 4. Botão "Atualizar": os dias do período consultados de uma vez.
   const cB24 = freshCtx(days24());
@@ -2550,11 +1872,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     rowsU.reduce((a, x) => a + (Number(x.qty) || 1), 0) === mU.total &&
     cU.__state.fetches.slice(fU).every(f => !/trajectory_monitor_detail/.test(f.url) || f.payload.operateType[0] === ops[mU.refType - 1]),
     'botão Atualizar na Sem Movimentação: consulta só hoje e baixa a lista da linha do horário mais recente na hora', {listNow: rU.listNow, total: mU.total});
-  // Fila cheia (histórico de outros painéis): os trabalhos da Sem Movimentação vêm primeiro.
+  // V4.26 (pedido): fila cheia (histórico de outros painéis) — os trabalhos da Sem Movimentação vêm por último.
   const cP = freshCtx(nmDays());
   cP.enqueueJobs_([['SUMMARY', 'wrong_send', T, 0], ['SUMMARY', 'damage', Y, 0], ['DETAIL_INIT', 'lot_flow', Y, 1], ['SUMMARY', 'no_move', T, 0], ['DETAIL_INIT', 'no_move', T, 1]], {});
   const orderP = cP.pendingJobs_().map(j => j.indicator + ':' + j.type);
-  check(orderP[0] === 'no_move:SUMMARY' && orderP[1] === 'no_move:DETAIL_INIT', 'fila: a Sem Movimentação (foto de hoje) vem antes dos outros trabalhos', orderP);
+  check(orderP.length === 5 && orderP[3] === 'no_move:SUMMARY' && orderP[4] === 'no_move:DETAIL_INIT', 'fila: a Sem Movimentação (foto de hoje) vem depois de todos os outros trabalhos', orderP);
   // Foto gravada em outro dia (V3.28) não vale; a primeira foto do dia entra na fila sozinha.
   const cW2 = freshCtx(nmDays());
   cW2.appendRow_('RATES', ['no_move', Y, 0.5, 100, 100, JSON.stringify({total: 100}), new Date()]);
@@ -2930,9 +2252,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const after = c41b.getArchivedRange_('sc_dc', D19, D19).rows;
   check(after.every(r => want[r.shipment] === tid(r)), 'depois da fila: ID de saída no arquivo antigo');
   // Recusa só do Rastreamento: pausa a rota TRACKING, nunca o download do SC→DC.
-  check(c41.jobPauseKey_({type: 'TRIPS', indicator: 'sc_dc'}) === 'TRACKING' && c41.jobPauseKey_({type: 'DETAIL_INIT', indicator: 'sc_dc'}) === 'SC_DC' &&
-    c41.jobPauseKey_({type: 'TRIPS', indicator: 'send_flow'}) === c41.getIndicatorConfig_('send_flow').routeKey,
-    'rastreamento recusado não pausa o SC→DC (Expedição continua como antes)');
+  check(c41.jobPauseKey_({type: 'TRIPS', indicator: 'sc_dc'}) === 'TRACKING' && c41.jobPauseKey_({type: 'DETAIL_INIT', indicator: 'sc_dc'}) === 'SC_DC',
+    'rastreamento recusado não pausa o SC→DC');
   const c41c = freshCtx(days41, {intercept: (route) => (route === 'keywordList' ? [200, {code: 401, msg: 'token expired', fail: true}] : null)});
   c41c.queueHistory(D19, D19, true);
   runAll(c41c);
@@ -2947,51 +2268,47 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'diagnosticarViagensSCDC: remessas sem ID consultadas uma por vez, com o motivo e as bases do carregamento, sem número de remessa', dg.texto.slice(0, 900));
 }
 
-// ---------- V4.2: painel separado dos fluxos (PAINEIS / PAINEIS_FORA) ----------
+// ---------- V4.2: PAINEIS / PAINEIS_FORA · V4.26: fluxos fora do código, Lotes só no pacote dela ----------
 {
-  const FLOWS = ['arrival_flow', 'send_flow'];
   const keysOf = c => require('vm').runInContext('Object.keys(INDICATORS)', c);
   const all = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
-  // Painel principal: tudo menos Recebimento e Expedição (fluxo operacional).
-  const cM = freshCtx({[D19]: makeDay(D19, 42)}, null, {PAINEIS_FORA: 'arrival_flow, send_flow', NOME_PAINEL: 'Indicadores'});
+  check(['arrival_flow', 'send_flow'].every(k => all.indexOf(k) < 0 && !require('vm').runInContext('ALL_INDICATORS_', createContext({quiet: true}))[k]),
+    'V4.26: Recebimento e Expedição (fluxo operacional) não existem mais no código', all);
+  // Painel principal com um painel desligado e o nome do painel.
+  const cM = freshCtx({[D19]: makeDay(D19, 42)}, null, {PAINEIS_FORA: 'damage', NOME_PAINEL: 'Indicadores'});
   const keysM = keysOf(cM);
-  check(keysM.length === all.length - 2 && FLOWS.every(k => keysM.indexOf(k) < 0) && cM.getPublicCatalog_().every(c => FLOWS.indexOf(c.key) < 0),
-    'PAINEIS_FORA: Recebimento e Expedição fora do menu', keysM);
+  check(keysM.length === all.length - 1 && keysM.indexOf('damage') < 0 && cM.getPublicCatalog_().every(c => c.key !== 'damage'),
+    'PAINEIS_FORA: o painel sai do menu', keysM);
   cM.queueHistory(D19, D19, true);
   runAll(cM);
   const urlsM = cM.__state.fetches.map(f => f.url);
-  check(!urlsM.some(u => /arrivalbyday|sendbyday/.test(u)) && urlsM.some(u => /center_wrong_send/.test(u)) && urlsM.some(u => /keywordList/.test(u)),
-    'painel principal: nenhuma consulta dos fluxos (o SC→DC continua com o rastreamento dos IDs de saída)');
-  check(cM.getResultsData({from: D19, to: D19}).series.every(x => FLOWS.indexOf(x.key) < 0) && cM.getAppBootstrap().app.panel === 'Indicadores',
-    'Resultados sem os fluxos e nome do painel (NOME_PAINEL)');
-  // Tarefas antigas do Recebimento (de antes de separar) não travam a contagem da fila.
+  check(!urlsM.some(u => /BreakageRate|breakage/i.test(u)) && urlsM.some(u => /center_wrong_send/.test(u)) && urlsM.some(u => /keywordList/.test(u)),
+    'painel desligado: nenhuma consulta dele (o SC→DC continua com o rastreamento dos IDs de saída)');
+  check(cM.getResultsData({from: D19, to: D19}).series.every(x => x.key !== 'damage') && cM.getAppBootstrap().app.panel === 'Indicadores',
+    'Resultados sem o painel desligado e nome do painel (NOME_PAINEL)');
+  // V4.26: tarefas antigas do Recebimento/Expedição (fluxo operacional) não contam na fila e são encerradas uma vez.
   cM.appendRow_('JOBS', ['x1', 'DETAIL_INIT', 'arrival_flow', D19, 1, 'PENDING', 0, new Date(), new Date(), '']);
+  cM.appendRow_('JOBS', ['x2', 'TRIPS', 'send_flow', D19, 0, 'ERROR', 4, new Date(), new Date(), 'erro antigo']);
   cM.TAB_CACHE_ = {}; cM.TAB_INDEX_ = {};
-  check(cM.computeSyncStatus_().PENDING === 0 && !cM.pendingJobs_().some(j => j.indicator === 'arrival_flow'), 'fila do principal ignora tarefas dos fluxos', cM.computeSyncStatus_());
-  let errD = '';
-  try { cM.diagnosticarRecebimento(D19); } catch (e) { errD = e.message; }
-  check(/não está ativo neste projeto/.test(errD), 'diagnóstico de painel desligado explica onde rodar', errD);
-  // Painel dos fluxos: só Recebimento e Expedição (sem Sem Movimentação → sem o Histórico dela).
-  const cF = freshCtx({}, null, {PAINEIS: 'arrival_flow,send_flow'});
-  check(keysOf(cF).sort().join() === FLOWS.slice().sort().join() && cF.getPublicCatalog_().map(c => c.key).sort().join() === FLOWS.slice().sort().join() &&
-    !cF.indicatorCfg_('no_move_hist'), 'PAINEIS: só os dois fluxos (e nada da Sem Movimentação)', keysOf(cF));
-  const qF = cF.queueHistory(D19, D19, true);
-  check(cF.pendingJobs_().every(j => FLOWS.indexOf(j.indicator) >= 0) && cF.pendingJobs_().length > 0, 'fila do painel dos fluxos só com os fluxos', qF);
-  // Tetos diários: no projeto só dos fluxos a cota é toda deles; no principal (e no projeto com tudo) ficam como antes.
-  const cFg = freshCtx({}, null, {PAINEIS: 'arrival_flow,send_flow', COTA_GOOGLE: 'gmail'});
-  const cAll = freshCtx({}, null, {COTA_GOOGLE: 'gmail'});
-  check(cFg.groupedBudgetMin_('arrival_flow') === 40 && cFg.groupedBudgetMin_('send_flow') === 45 &&
-    cAll.groupedBudgetMin_('arrival_flow') === 35 && cAll.groupedBudgetMin_('send_flow') === 20,
-    'painel só dos fluxos (Gmail): Recebimento 40 + Expedição 45 min/dia (antes 35 + 20, dividindo com os outros painéis)');
-  const cOne = freshCtx({}, null, {PAINEIS: 'send_flow', COTA_GOOGLE: 'gmail'});
-  check(cOne.groupedBudgetMin_('send_flow') === 85 && freshCtx({}, null, {PAINEIS: 'arrival_flow,send_flow', COTA_GOOGLE: 'gmail', EXPEDICAO_MIN_POR_DIA: '30'}).groupedBudgetMin_('send_flow') === 30,
-    'um fluxo sozinho fica com 85 min; EXPEDICAO_MIN_POR_DIA continua mandando');
+  check(cM.computeSyncStatus_().PENDING === 0 && cM.computeSyncStatus_().ERROR === 0 && !cM.pendingJobs_().some(j => /_flow$/.test(j.indicator) && j.indicator !== 'lot_flow'),
+    'fila ignora tarefas dos painéis retirados', cM.computeSyncStatus_());
+  delete cM.__state.props.MIGRATION_V426;
+  const nMig = cM.migrateToV426_();
+  cM.TAB_CACHE_ = {}; cM.TAB_INDEX_ = {};
+  const jobsOld = cM.allTabRows_('JOBS').filter(r => r[2] === 'arrival_flow' || r[2] === 'send_flow');
+  check(nMig === 2 && jobsOld.every(r => r[5] === 'DONE' && /retirado/.test(r[9])) && cM.migrateToV426_() === 0,
+    'V4.26: tarefas dos fluxos encerradas uma vez, com o motivo', jobsOld.map(r => [r[5], r[9]]));
+  // V4.26 (pedido "tirei o dash do lote do principal"): a Criação de Lotes fica fora do principal mesmo com PAINEIS_FORA preenchida.
+  const semLotes = keysOf(createContext({props: {PAINEIS_FORA: 'damage'}, jms: fakeJms({}), quiet: true}));
+  const soLotes = keysOf(createContext({props: {PAINEIS: 'lot_flow'}, jms: fakeJms({}), quiet: true}));
+  check(semLotes.indexOf('lot_flow') < 0 && keysOf(createContext({props: {}, jms: fakeJms({}), quiet: true})).indexOf('lot_flow') < 0 && soLotes.join() === 'lot_flow',
+    'Criação de Lotes: só no painel dela (PAINEIS = lot_flow); fora do principal, com ou sem PAINEIS_FORA', {semLotes, soLotes});
   // Nome errado não esvazia o painel.
   const cX = createContext({props: Object.assign({}, baseProps, {PAINEIS: 'recebimento'}), jms: fakeJms({}), quiet: true});
   check(keysOf(cX).length === all.length, 'PAINEIS com nome errado: todos os painéis (nunca vazio)');
 }
 
-// ---------- V4.3: dois pacotes gerados (painel principal / painel dos fluxos), cada um já configurado ----------
+// ---------- V4.3: pacotes gerados (painel principal / painel de Lotes), cada um já configurado ----------
 {
   const os = require('os'), pathM = require('path'), fsM = require('fs'), vmM = require('vm');
   const {build} = require('../tools/gerar_paineis');
@@ -2999,13 +2316,17 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const res = build(out);
   const keysOf = c => vmM.runInContext('Object.keys(INDICATORS)', c);
   const ctxOf = (id, props) => createContext({root: res.filter(r => r.id === id)[0].dir, props: Object.assign({}, baseProps, props || {}), jms: fakeJms({}), quiet: true});
+  check(res.every(r => !fsM.existsSync(pathM.join(r.dir, 'Sorter.gs'))) && fsM.existsSync(pathM.join(res[0].dir, 'Expedicao.gs')),
+    'V4.22: pacotes do Apps Script sem o Sorter.gs (o Google não enxerga a rede da base); o painel roda sem ele');
   const full = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
-  const pP = ctxOf('principal'), pF = ctxOf('fluxos');
-  check(keysOf(pP).length === full.length - 2 && keysOf(pP).every(k => k !== 'arrival_flow' && k !== 'send_flow') && pP.getAppBootstrap().app.panel === '',
-    'pacote principal: tudo menos os fluxos, sem precisar de propriedade', keysOf(pP));
-  check(keysOf(pF).sort().join() === 'arrival_flow,send_flow' && pF.getAppBootstrap().app.panel === 'Fluxo operacional',
-    'pacote dos fluxos: só Recebimento e Expedição, com o nome "Fluxo operacional"', keysOf(pF));
-  check(keysOf(ctxOf('fluxos', {PAINEIS: 'arrival_flow'})).join() === 'arrival_flow' && ctxOf('fluxos', {NOME_PAINEL: 'Fluxos GRU'}).getAppBootstrap().app.panel === 'Fluxos GRU',
+  const pP = ctxOf('principal'), pL = ctxOf('lotes');
+  // V4.21 (pedido): a Criação de Lotes sai do principal e tem pacote próprio. V4.26: sem o pacote dos fluxos.
+  check(res.map(r => r.id).join() === 'principal,lotes' && keysOf(pP).length === full.length - 1 && keysOf(pP).every(k => k !== 'lot_flow') && pP.getAppBootstrap().app.panel === '',
+    'pacote principal: tudo menos a Criação de Lotes, sem precisar de propriedade', keysOf(pP));
+  check(keysOf(pL).join() === 'lot_flow' && pL.getAppBootstrap().app.panel === 'Criação de Lotes' &&
+    /painel de Lotes\/Sacas/.test(fsM.readFileSync(pathM.join(res.filter(r => r.id === 'lotes')[0].dir, 'LEIA_ESTE_PAINEL.md'), 'utf8')),
+    'pacote de Lotes (Apps Script): só a Criação de Lotes, com o nome embaixo do logo', keysOf(pL));
+  check(keysOf(ctxOf('principal', {PAINEIS: 'damage'})).join() === 'damage' && ctxOf('lotes', {NOME_PAINEL: 'Lotes GRU'}).getAppBootstrap().app.panel === 'Lotes GRU',
     'Propriedades do script valem mais que o pacote');
   const files = d => fsM.readdirSync(d).sort();
   const gsP = files(res[0].dir), gsF = files(res[1].dir);
@@ -3013,10 +2334,152 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'os dois pacotes com todos os arquivos do Apps Script', gsP);
   const differ = gsP.filter(f => fsM.readFileSync(pathM.join(res[0].dir, f), 'utf8') !== fsM.readFileSync(pathM.join(res[1].dir, f), 'utf8'));
   check(differ.sort().join() === 'Config.gs,LEIA_ESTE_PAINEL.md', 'pacotes iguais, menos a linha do Config.gs e o LEIA', differ);
-  check(res.every(r => fsM.readFileSync(r.zip).slice(0, 2).toString() === 'PK') && /OUTRA conta Google/.test(fsM.readFileSync(pathM.join(res[1].dir, 'LEIA_ESTE_PAINEL.md'), 'utf8')),
-    'ZIP de cada pacote e instrução da outra conta no painel dos fluxos');
+  check(res.every(r => fsM.readFileSync(r.zip).slice(0, 2).toString() === 'PK'), 'ZIP de cada pacote');
   // Repositório (sem pacote): todos os painéis, como antes.
   check(/^const PACOTE_PAINEIS_ = \{so: '', fora: '', nome: ''\};$/m.test(fsM.readFileSync(pathM.join(__dirname, '..', 'Config.gs'), 'utf8')), 'Config.gs do repositório com todos os painéis');
+  fsM.rmSync(out, {recursive: true, force: true});
+}
+
+// ---------- V4.15.2 (pedido): pacote do Node.js com os painéis do principal ----------
+{
+  const os = require('os'), pathM = require('path'), fsM = require('fs'), vmM = require('vm'), zlibM = require('zlib');
+  const {buildNode} = require('../tools/gerar_paineis');
+  const out = fsM.mkdtempSync(pathM.join(os.tmpdir(), 'jt-node-'));
+  const zipBuf = fsM.readFileSync(buildNode(out).zip), dir = pathM.join(out, 'extraido');
+  // Extrai o ZIP (cabeçalhos locais + deflate) como ficaria em C:\dashmaster.
+  for (let i = 0; zipBuf.readUInt32LE(i) === 0x04034b50;) {
+    const size = zipBuf.readUInt32LE(i + 18), nameLen = zipBuf.readUInt16LE(i + 26), start = i + 30 + nameLen + zipBuf.readUInt16LE(i + 28);
+    const file = pathM.join(dir, zipBuf.slice(i + 30, i + 30 + nameLen).toString('utf8'));
+    fsM.mkdirSync(pathM.dirname(file), {recursive: true});
+    fsM.writeFileSync(file, zlibM.inflateRawSync(zipBuf.slice(start, start + size)));
+    i = start + size;
+  }
+  const root = pathM.join(dir, 'dashmaster');
+  const keysOf = c => vmM.runInContext('Object.keys(INDICATORS)', c);
+  const ctxNode = props => createContext({root, props: Object.assign({}, baseProps, props || {}), jms: fakeJms({}), quiet: true});
+  const full = keysOf(createContext({props: baseProps, jms: fakeJms({}), quiet: true}));
+  check(keysOf(ctxNode()).length === full.length - 1 && keysOf(ctxNode()).every(k => k !== 'lot_flow'),
+    'pacote Node.js: sem a Criação de Lotes (V4.21), sem precisar de propriedade', keysOf(ctxNode()));
+  check(keysOf(ctxNode({PAINEIS_FORA: 'nenhum'})).length === full.length, 'pacote Node.js: PAINEIS_FORA = nenhum traz todos de volta');
+  const noLine = t => t.replace(/^const PACOTE_PAINEIS_ = .*$/m, '');
+  const cfgRepo = fsM.readFileSync(pathM.join(__dirname, '..', 'Config.gs'), 'utf8'), cfgNode = fsM.readFileSync(pathM.join(root, 'Config.gs'), 'utf8');
+  check(noLine(cfgNode) === noLine(cfgRepo) && /^const PACOTE_PAINEIS_ = \{so: '', fora: 'lot_flow', nome: ''\};$/m.test(cfgNode),
+    'pacote Node.js: só a linha do pacote muda no Config.gs');
+  check(fsM.existsSync(pathM.join(root, 'node', 'server.js')) && !fsM.existsSync(pathM.join(root, 'node', 'test')) && !fsM.existsSync(pathM.join(root, 'node', 'padrao.json')),
+    'pacote Node.js com o servidor, sem os testes e sem padrao.json (porta 3000, link na 443)');
+  // V4.21: painel de Lotes separado (Node.js) — outra pasta, porta 3400, link do Tailscale na 10000, atalho próprio.
+  const {LOTS_NODE} = require('../tools/gerar_paineis');
+  const zipL = fsM.readFileSync(buildNode(out, {variant: LOTS_NODE}).zip), dirL = pathM.join(out, 'extraido-lotes');
+  for (let i = 0; zipL.readUInt32LE(i) === 0x04034b50;) {
+    const size = zipL.readUInt32LE(i + 18), nameLen = zipL.readUInt16LE(i + 26), start = i + 30 + nameLen + zipL.readUInt16LE(i + 28);
+    const file = pathM.join(dirL, zipL.slice(i + 30, i + 30 + nameLen).toString('utf8'));
+    fsM.mkdirSync(pathM.dirname(file), {recursive: true});
+    fsM.writeFileSync(file, zlibM.inflateRawSync(zipL.slice(start, start + size)));
+    i = start + size;
+  }
+  const rootL = pathM.join(dirL, 'dashmaster-lotes');
+  const ctxL = createContext({root: rootL, props: Object.assign({}, baseProps), jms: fakeJms({}), quiet: true});
+  const cfgModL = require(pathM.join(rootL, 'node', 'lib', 'config.js'));
+  const cfgFileL = pathM.join(out, 'config-lotes.json');
+  const prevEnv = process.env.DASHMASTER_CONFIG;
+  process.env.DASHMASTER_CONFIG = cfgFileL;
+  const confL = cfgModL.loadConfig();
+  if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
+  const created = JSON.parse(fsM.readFileSync(cfgFileL, 'utf8'));
+  const batW = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar-com-windows.bat'), 'utf8'), batI = fsM.readFileSync(pathM.join(rootL, 'node', 'iniciar.bat'), 'utf8');
+  check(keysOf(ctxL).join() === 'lot_flow' && ctxL.getAppBootstrap().app.panel === 'Criação de Lotes' && confL.porta === 3400 && confL.portaLink === 10000 &&
+    confL.caminho === '' && created.porta === 3400 && created.portaLink === 10000 && created.caminho === '' && created.linkVersao === 2 && /JT DashMaster Lotes\.lnk/.test(batW) && !/JT DashMaster\.lnk/.test(batW) && /DashMaster Lotes/.test(batI) &&
+    fsM.existsSync(pathM.join(rootL, 'LEIA_LOTES.md')) && fsM.existsSync(pathM.join(rootL, 'node', 'link-publico.bat')),
+    'pacote Node.js de Lotes: só a Criação de Lotes, porta 3400, link na porta 10000 e atalho próprio', {keys: keysOf(ctxL), porta: confL.porta, link: confL.portaLink});
+  // V4.22.5 (pedido "porta diferente para cada dash"): o config.json de quem usava /lotes (V4.21.5 a 4.22.4) ou :10000 (V4.21.4)
+  // passa para a porta 10000, sem caminho, uma vez só; depois vale o que a pessoa escolher.
+  process.env.DASHMASTER_CONFIG = cfgFileL;
+  fsM.writeFileSync(cfgFileL, JSON.stringify({porta: 3400, portaLink: 443, caminho: '/lotes', senha: 'x', linkPublico: 'https://painel.exemplo.ts.net/lotes'}, null, 2));
+  const migL = cfgModL.loadConfig();
+  const migFile = JSON.parse(fsM.readFileSync(cfgFileL, 'utf8'));
+  fsM.writeFileSync(cfgFileL, JSON.stringify({porta: 3400, portaLink: 10000, senha: 'x', linkPublico: 'https://painel.exemplo.ts.net:10000/'}, null, 2));
+  const migOld = cfgModL.loadConfig();
+  fsM.writeFileSync(cfgFileL, JSON.stringify(Object.assign({}, migFile, {caminho: '/lotes', portaLink: 443})));
+  const keptL = cfgModL.loadConfig();
+  if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
+  check(migL.caminho === '' && migL.portaLink === 10000 && migL.linkPublico === 'https://painel.exemplo.ts.net:10000' && migFile.senha === 'x' &&
+    migFile.linkVersao === 2 && migOld.portaLink === 10000 && migOld.caminho === '' && migOld.linkPublico === 'https://painel.exemplo.ts.net:10000' &&
+    keptL.caminho === '/lotes' && keptL.portaLink === 443,
+    'config.json com o link /lotes (ou o :10000 antigo) vai para a porta 10000 uma vez; depois vale o que a pessoa escolher',
+    {migL: [migL.caminho, migL.portaLink, migL.linkPublico], migOld: [migOld.caminho, migOld.portaLink, migOld.linkPublico], keptL: [keptL.caminho, keptL.portaLink]});
+  const batLink = fsM.readFileSync(pathM.join(rootL, 'node', 'link-publico.bat'), 'utf8');
+  check(/funnel --bg --https=%PORTALINK% --set-path=%CAMINHO% http:\/\/127\.0\.0\.1:%PORTA%%CAMINHO%/.test(batLink) && /\r\n/.test(batLink) &&
+    /--set-path=%CAMINHO% off/.test(batLink) && /^[\x00-\x7f]*$/.test(batLink), 'link-publico.bat liga o link no caminho (/lotes) do mesmo endereço');
+  // V4.22.4: com dois cliques, ele roda dentro de um "cmd /k" (não some se o Windows parar o arquivo no meio). V4.22.6: na mesma
+  // janela (sem "start": a primeira janela não pisca e fecha); sem o lib\link.js (pacote antigo), segue sem a conferência.
+  check(/^@echo off\r\n(?:rem [^\r\n]*\r\n)*if \/i not "%~1"=="--na-janela" \(\r\n  cmd \/k call "%~f0" --na-janela\r\n  exit \/b\r\n\)/.test(batLink) &&
+    !/\bstart\b/i.test(batLink) && /if not exist "%~dp0lib\\link\.js" set "NODEOK="/.test(batLink) &&
+    !/pause/i.test(batLink.split(':fim')[1]), 'link-publico.bat roda numa janela só, que fica aberta (cmd /k)');
+  // V4.22.5: o .bat lê as portas pelo lib\link.js (aplica o pacote no config.json), confere se o endereço já leva para OUTRO painel
+  // (pergunta antes de trocar) e desliga os links antigos deste painel.
+  check(/node "%~dp0lib\\link\.js" config 2\^>nul/.test(batLink) && /node "%~dp0lib\\link\.js" livre "%TS%" %PORTALINK% %PORTA% %CAMINHO%\r\nif errorlevel 2 goto ocupado/.test(batLink) &&
+    /choice \/c SN/.test(batLink) && /node "%~dp0lib\\link\.js" limpar/.test(batLink) && fsM.existsSync(pathM.join(rootL, 'node', 'lib', 'link.js')),
+    'link-publico.bat confere a porta do link antes de trocar e desliga os links antigos do mesmo painel');
+  {
+    // Tailscale simulado: "serve status --json" com o principal na 443, a Expedição Incorreta na 8443 e o /lotes antigo na 443.
+    const {execFileSync: runF} = require('child_process');
+    const tsDir = fsM.mkdtempSync(pathM.join(os.tmpdir(), 'jt-ts-')), tsFake = pathM.join(tsDir, 'tailscale'), tsLog = pathM.join(tsDir, 'chamadas.txt');
+    const status = {Web: {'pc.exemplo.ts.net:443': {Handlers: {'/': {Proxy: 'http://127.0.0.1:3000'}, '/lotes': {Proxy: 'http://127.0.0.1:3400/lotes'}}},
+      'pc.exemplo.ts.net:8443': {Handlers: {'/': {Proxy: 'http://127.0.0.1:3300'}}}}};
+    fsM.writeFileSync(tsFake, '#!/usr/bin/env node\nconst fs = require("fs");\nfs.appendFileSync(' + JSON.stringify(tsLog) + ', process.argv.slice(2).join(" ") + "\\n");\n' +
+      'if (process.argv[2] === "serve") process.stdout.write(' + JSON.stringify(JSON.stringify(status)) + ');\n');
+    fsM.chmodSync(tsFake, 0o755);
+    const linkJs = pathM.join(rootL, 'node', 'lib', 'link.js');
+    const run = args => { try { return {code: 0, out: runF(process.execPath, [linkJs].concat(args), {encoding: 'utf8'})}; } catch (e) { return {code: e.status, out: String(e.stdout || '')}; } };
+    const sorter8443 = run(['livre', tsFake, '8443', '3500']), lotes10000 = run(['livre', tsFake, '10000', '3400']), same = run(['livre', tsFake, '8443', '3300']);
+    const limpa = run(['limpar', tsFake, '10000', '3400']);
+    const calls = fsM.readFileSync(tsLog, 'utf8');
+    check(sorter8443.code === 2 && /pc\.exemplo\.ts\.net:8443 ja leva para OUTRO painel deste computador \(porta 3300\)/.test(sorter8443.out) &&
+      lotes10000.code === 0 && same.code === 0 && /Link antigo deste painel desligado: https:\/\/pc\.exemplo\.ts\.net\/lotes/.test(limpa.out) &&
+      /funnel --https=443 --set-path=\/lotes off/.test(calls) && !/funnel --https=443 off/.test(calls) && !/--https=8443 .*off/.test(calls),
+      'link.js: avisa quando a porta do link já é de outro painel (Expedição na 8443) e desliga só o /lotes antigo do mesmo painel',
+      {sorter8443, lotes10000: lotes10000.code, limpa: limpa.out, calls});
+    fsM.rmSync(tsDir, {recursive: true, force: true});
+  }
+  // V4.21.2: a porta do painel de Lotes não pode ser a de outro app no mesmo computador (a 3100 era a do Sorter).
+  const portOf = f => Number((fsM.readFileSync(pathM.join(__dirname, '..', f), 'utf8').match(/^\s*porta:\s*(\d+)/m) || [])[1]);
+  const others = {DashMaster: 3000, Sorter: portOf('sorter/server.js'), Pesquisa: portOf('pesquisa/server.js'), 'Expedição Incorreta': portOf('expedicao_incorreta/server.js')};
+  check(Object.keys(others).every(k => others[k] > 0 && others[k] !== LOTS_NODE.padrao.porta) && LOTS_NODE.padrao.portaLink === 10000 && LOTS_NODE.padrao.caminho === '',
+    'painel de Lotes numa porta livre (nenhum outro app usa a ' + LOTS_NODE.padrao.porta + ')', others);
+  // V4.22: Produção do Sorter separada — pasta dashmaster-sorter, porta 3500, link /sorter, sem JMS, atalho próprio.
+  const {SORTER_NODE} = require('../tools/gerar_paineis');
+  const zipS = fsM.readFileSync(buildNode(out, {variant: SORTER_NODE}).zip), dirS = pathM.join(out, 'extraido-sorter');
+  for (let i = 0; zipS.readUInt32LE(i) === 0x04034b50;) {
+    const size = zipS.readUInt32LE(i + 18), nameLen = zipS.readUInt16LE(i + 26), start = i + 30 + nameLen + zipS.readUInt16LE(i + 28);
+    const file = pathM.join(dirS, zipS.slice(i + 30, i + 30 + nameLen).toString('utf8'));
+    fsM.mkdirSync(pathM.dirname(file), {recursive: true});
+    fsM.writeFileSync(file, zlibM.inflateRawSync(zipS.slice(start, start + size)));
+    i = start + size;
+  }
+  const rootS = pathM.join(dirS, 'dashmaster-sorter');
+  const ctxS = createContext({root: rootS, props: {}, jms: fakeJms({}), quiet: true});
+  const cfgModS = require(pathM.join(rootS, 'node', 'lib', 'config.js'));
+  const cfgFileS = pathM.join(out, 'config-sorter.json');
+  process.env.DASHMASTER_CONFIG = cfgFileS;
+  const confS = cfgModS.loadConfig();
+  if (prevEnv === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnv;
+  const batWS = fsM.readFileSync(pathM.join(rootS, 'node', 'iniciar-com-windows.bat'), 'utf8');
+  const pagesS = require(pathM.join(rootS, 'node', 'lib', 'pages.js'));
+  const cfgPageS = pagesS.configPage({version: 'x', dataDir: 'y', semJms: true}), cfgPageM = pagesS.configPage({version: 'x', dataDir: 'y'});
+  check(keysOf(ctxS).join() === 'sorter_flow' && ctxS.getAppBootstrap().app.panel === 'Produção do Sorter' && confS.porta === 3500 &&
+    confS.portaLink === 8443 && confS.caminho === '' && confS.semJms === true && /JT DashMaster Sorter\.lnk/.test(batWS) &&
+    fsM.existsSync(pathM.join(rootS, 'LEIA_SORTER.md')) && !fsM.existsSync(pathM.join(rootS, 'LEIA_LOTES.md')) &&
+    /Sorter da base/.test(cfgPageS) && !/AuthToken do JMS/.test(cfgPageS) && /AuthToken do JMS/.test(cfgPageM) && !/Sorter da base/.test(cfgPageM) &&
+    Object.keys(others).concat(['Lotes']).every(k => (k === 'Lotes' ? LOTS_NODE.padrao.porta : others[k]) !== SORTER_NODE.padrao.porta),
+    'pacote Node.js da Produção do Sorter: só ela, porta 3500, link na porta 8443, Configurações com o sorter no lugar do AuthToken',
+    {keys: keysOf(ctxS), porta: confS.porta, caminho: confS.caminho});
+  // V4.22.5: cada painel na sua porta do link (o Funnel só aceita 443, 8443 e 10000): principal 443, Sorter 8443, Lotes 10000.
+  const linkPorts = [443, SORTER_NODE.padrao.portaLink, LOTS_NODE.padrao.portaLink];
+  check(new Set(linkPorts).size === 3 && linkPorts.every(p => [443, 8443, 10000].indexOf(p) >= 0) && !SORTER_NODE.padrao.caminho && !LOTS_NODE.padrao.caminho,
+    'cada painel na sua porta do link do Tailscale (443, 8443, 10000)', linkPorts);
+  // O painel do Sorter nunca aparece no principal (nem no pacote Node.js principal, nem com PAINEIS_FORA do usuário).
+  check(keysOf(ctxNode()).indexOf('sorter_flow') < 0 && keysOf(ctxNode({PAINEIS_FORA: 'damage'})).indexOf('sorter_flow') < 0 &&
+    full.indexOf('sorter_flow') < 0, 'Produção do Sorter fora do painel principal (painel separado)');
   fsM.rmSync(out, {recursive: true, force: true});
 }
 
@@ -3097,7 +2560,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(lists.length && lists.every(f => f.payload.endCode === '30001' && f.payload.shipmentState === 4 && f.payload.countryId === '1' && f.payload.size === 100),
     'Consulta de Viagens Secundárias como a captura (PDD de chegada 30001, Concluído)', lists.slice(0, 1).map(f => f.payload));
   check(lists.some(f => f.payload.startDepartureTime === D18 + ' 00:00:00' && f.payload.endDepartureTime === D19 + ' 23:59:59'), 'saídas da véspera e do dia');
-  const unl = SU.fetches.filter(f => /loading\/scan\/list/.test(f.url));
+  const unl = SU.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url));
   check(unl.length && unl.every(f => f.method === 'get' && /\?shipmentNo=SETRFIC\d+$/.test(f.url)), 'Registros de carga e descarga de cada ID (GET ?shipmentNo=)');
   const all = [].concat(daysU[D18].us, daysU[D19].us), unloads = Object.assign({}, daysU[D18].usUnloads, daysU[D19].usUnloads);
   const evT = t => t.unlockTime || t.actualArrivalTime;
@@ -3111,10 +2574,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   mine.forEach(t => {
     const u = t.unlockTime ? (unloads[t.shipmentNo] || []).filter(x => x.loadingTypeName === '2') : [];
     exp[t.shipmentNo] = {sit: t.unlockTime ? 'Com bipe de deslacre' : 'Sem bipe de deslacre', shift: C.shiftOf(evT(t)),
-      min: u.length ? String(Math.round(med(u.map(x => (ms(x.scanEndTime) - ms(t.unlockTime)) / 60000)) * 10) / 10) : '', end: u.map(x => x.scanEndTime).sort().pop() || ''};
+      min: u.length ? String(Math.round(med(u.map(x => (ms(x.scanStartTime) - ms(t.unlockTime)) / 60000)) * 10) / 10) : '', end: u.map(x => x.scanStartTime).sort()[0] || ''};
   });
   const badU = rowsU.filter(r => { const e = exp[r.shipment]; return r.situation !== e.sit || String(r.minutes || '') !== e.min || r.shift !== e.shift || String(r.receiptTime || '') !== e.end; });
-  check(!badU.length, 'tempo de cada ID = mediana de (Data final − deslacre) dos registros de descarregamento; turno pelo deslacre (sem ele, pela chegada)',
+  check(!badU.length, 'tempo de cada ID = mediana de (Data inicial − deslacre) dos registros de descarregamento (V4.20); turno pelo deslacre (sem ele, pela chegada)',
     badU.slice(0, 2).map(r => [r.situation, r.minutes, r.shift, exp[r.shipment]]));
   check(rowsU.some(r => r.minutes === '' && r.situation === 'Com bipe de deslacre') && mine.some(t => (unloads[t.shipmentNo] || []).filter(x => x.loadingTypeName === '2').length === 2),
     'ID com deslacre sem registro de descarga fica sem tempo; dois registros = mediana dos dois');
@@ -3148,7 +2611,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const nUnl = unl.length;
   cU.enqueueJobs_([['DETAIL_INIT', 'unseal', D19, 1]], {reset: true});
   runAll(cU);
-  check(SU.fetches.filter(f => /loading\/scan\/list/.test(f.url)).length === nUnl && cU.getArchivedRange_('unseal', D19, D19).rows.length === mine.length,
+  check(SU.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url)).length === nUnl && cU.getArchivedRange_('unseal', D19, D19).rows.length === mine.length,
     'detalhe rebaixado reaproveita os Registros já consultados');
   // Painel: catálogo com os cartões próprios, filtros e a tabela "Informações gerais".
   const catU = cU.getPublicCatalog_().filter(x => x.key === 'unseal')[0];
@@ -3167,12 +2630,117 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const repU = cU.generateReport('unseal', {from: D19, to: D19}, 'xlsx');
   check(repU.ok, 'relatório do Deslacre (Excel)', repU);
   const dgU = cU.diagnosticarDeslacre(D19);
-  check(/IDs do dia/.test(dgU.texto) && /Data final/.test(dgU.texto) && !/MOTORISTA|FIC\d{4}/.test(dgU.texto), 'diagnosticarDeslacre() sem placa nem motorista', dgU.texto);
+  check(/IDs do dia/.test(dgU.texto) && /Data inicial/.test(dgU.texto) && !/MOTORISTA|FIC\d{4}/.test(dgU.texto), 'diagnosticarDeslacre() sem placa nem motorista', dgU.texto);
   // Hoje: a lista é refeita pelo intervalo mesmo sem mudar a contagem (descarregamento em andamento), sem marcar desatualizado.
   const today = cU.isoToday_();
   const st0 = {summary: 'COMPLETE', details: 'COMPLETE'}, same = {errorCount: 1, totalCount: 5};
   check(cU.detailNeedsRefresh_('unseal', today, same, same, st0, false) === true && cU.detailNeedsRefresh_('wrong_send', today, same, same, st0, false) === false,
     'Deslacre de hoje: lista refeita pelo intervalo mesmo com a mesma contagem');
+}
+
+// ---------- V4.17: Deslacre da linha troncal — PDF "deslacre da troncal" (dados FICTÍCIOS) ----------
+{
+  const D18 = '2026-09-18';
+  const daysT = {[D18]: makeDay(D18, 71), [D19]: makeDay(D19, 72)};
+  const cT = freshCtx(daysT);
+  cT.queueHistory(D18, D19, true);
+  runAll(cT);
+  const ST = cT.__state;
+  const lists = ST.fetches.filter(f => /\/tmsShipment\/page\?/.test(f.url));
+  const q = u => { const o = {}; u.split('?')[1].split('&').forEach(kv => { const i = kv.indexOf('='); o[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, ' ')); }); return o; };
+  check(lists.length && lists.every(f => f.method === 'get' && !Object.keys(f.payload).length && q(f.url).endCode === '30001' && q(f.url).shipmentState === '4' &&
+    q(f.url).searchType === 'manage' && q(f.url).size === '100'), 'Consulta de Viagens da troncal como a captura (GET, PDD de chegada 30001, Concluído, searchType manage)',
+    lists.slice(0, 1).map(f => f.url));
+  check(lists.some(f => /startDateTime=2026-09-17\+00:00:00&endDateTime=2026-09-20\+23:59:59/.test(f.url)), 'datas na URL como o navegador (2 dias antes e 1 depois)',
+    lists.map(f => f.url.split('?')[1]).slice(0, 2));
+  check(lists.every(f => !f.headers.Routename && !f.headers.Routernamelist), 'sem cabeçalhos de rota por padrão (como a secundária)');
+  const unl = ST.fetches.filter(f => /trackingDeatil\/loading\/scan\/list/.test(f.url));
+  check(unl.length && unl.every(f => f.method === 'get' && /\?shipmentNo=DBGXFIC\d+$/.test(f.url)) && !ST.fetches.some(f => /tmsBranchTrackingDetail\/loading.*DBGX/.test(f.url)),
+    'Registros de carga e descarga de cada ID da troncal (trackingDeatil, GET ?shipmentNo=)');
+  const all = [].concat(daysT[D18].ut, daysT[D19].ut), unloads = Object.assign({}, daysT[D18].utUnloads, daysT[D19].utUnloads);
+  const evT = t => t.actualUnlockTime || t.actualArrivalTime;
+  const mine = all.filter(t => t.endCode === '30001' && t.shipmentState === 4 && evT(t).slice(0, 10) === D19);
+  check(mine.some(t => t.plannedDepartureTime.slice(0, 10) < D18), 'cenário: viagem que saiu 2 dias antes e foi deslacrada no dia');
+  const rowsT = cT.getArchivedRange_('unseal_trunk', D19, D19).rows;
+  check(rowsT.length === mine.length && new Set(rowsT.map(r => r.shipment)).size === mine.length && rowsT.every(r => mine.some(t => t.shipmentNo === r.shipment)) &&
+    !rowsT.some(r => /OUTRA|TRANS/.test(r.shipment)), 'troncal: um ID por linha (chega na SP GRU, Concluído, deslacre ou chegada no dia)', [rowsT.length, mine.length]);
+  const ms = s => Date.parse(s.replace(' ', 'T') + 'Z');
+  const med = a => { a = a.slice().sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+  const C = cT.JTCore_, exp = {};
+  const atBase = no => (unloads[no] || []).filter(x => x.loadingTypeName === '2' && x.scanNetworkCode === '30001');
+  mine.forEach(t => {
+    const u = t.actualUnlockTime ? atBase(t.shipmentNo) : [];
+    exp[t.shipmentNo] = {sit: t.actualUnlockTime ? 'Com bipe de deslacre' : 'Sem bipe de deslacre', shift: C.shiftOf(evT(t)), unlock: t.actualUnlockTime || '',
+      min: u.length ? String(Math.round(med(u.map(x => (ms(x.scanStartTime) - ms(t.actualUnlockTime)) / 60000)) * 10) / 10) : '', end: u.map(x => x.scanStartTime).sort()[0] || ''};
+  });
+  const badT = rowsT.filter(r => { const e = exp[r.shipment]; return r.situation !== e.sit || String(r.minutes || '') !== e.min || r.shift !== e.shift ||
+    String(r.receiptTime || '') !== e.end || String(r.unlockTime || '') !== e.unlock; });
+  check(!badT.length, 'troncal: deslacre = actualUnlockTime; tempo = mediana de (Data inicial − deslacre) das descargas na nossa base; turno pelo deslacre',
+    badT.slice(0, 2).map(r => [r.situation, r.minutes, r.unlockTime, r.shift, exp[r.shipment]]));
+  check(mine.some(t => t.actualUnlockTime && (unloads[t.shipmentNo] || []).some(x => x.loadingTypeName === '2' && x.scanNetworkCode !== '30001')) &&
+    mine.some(t => atBase(t.shipmentNo).length === 2) && rowsT.some(r => r.minutes === '' && r.situation === 'Com bipe de deslacre'),
+    'cenário: descarga numa parada do caminho (não conta), dois registros na base (mediana) e deslacre sem descarga (sem tempo)');
+  const missN = mine.filter(t => !t.actualUnlockTime).length;
+  const mins = Object.values(exp).filter(e => e.min !== '').map(e => Number(e.min));
+  const rT = cT.getRateDay_('unseal_trunk', D19);
+  check(rT && rT.errorCount === missN && rT.totalCount === mine.length && rT.metrics.noUnlockNum === missN && rT.metrics.tripNum === mine.length &&
+    rT.metrics.medianMin === Math.round(med(mins) * 10) / 10 && rT.metrics.timedNum === mins.length, 'troncal: resumo do dia (IDs, sem deslacre e tempo mediano)', rT);
+  const aggT = cT.getAgg_('unseal_trunk', D19, D19)[0];
+  const missBy = s => mine.filter(t => !t.actualUnlockTime && exp[t.shipmentNo].shift === s).length;
+  check(aggT && aggT.T1 === missBy('T1') && aggT.T2 === missBy('T2') && aggT.T3 === missBy('T3') && aggT.total === missN, 'troncal: Resultados com os IDs sem deslacre por turno', aggT);
+  const compT = cT.computeDashboard_('unseal_trunk', {from: D19, to: D19});
+  const chT = k => compT.charts.filter(x => x.key === k)[0];
+  check(chT('missShift').datasets[0].data.join() === [missBy('T1'), missBy('T2'), missBy('T3')].join() && chT('medShift').valueAgg === 'median' &&
+    chT('topTime').labels.length === Math.min(10, mins.length) && chT('origin') && chT('missOrigin'),
+    'troncal: gráficos (turnos sem deslacre, tempo mediano por turno, top 10 IDs, PDD de saída)');
+  // A secundária do mesmo dia não mistura com a troncal.
+  const rowsS = cT.getArchivedRange_('unseal', D19, D19).rows;
+  check(rowsS.length && rowsS.every(r => /^SETR/.test(r.shipment)) && rowsT.every(r => /^DBGX/.test(r.shipment)), 'secundária só com SETR…, troncal só com DBGX…');
+  // Detalhe de novo (dia fechado): reaproveita os Registros já consultados.
+  const nUnl = unl.length;
+  cT.enqueueJobs_([['DETAIL_INIT', 'unseal_trunk', D19, 1]], {reset: true});
+  runAll(cT);
+  check(ST.fetches.filter(f => /trackingDeatil\/loading\/scan\/list/.test(f.url)).length === nUnl && cT.getArchivedRange_('unseal_trunk', D19, D19).rows.length === mine.length,
+    'troncal: detalhe rebaixado reaproveita os Registros já consultados');
+  const catT = cT.getPublicCatalog_().filter(x => x.key === 'unseal_trunk')[0], catS = cT.getPublicCatalog_().filter(x => x.key === 'unseal')[0];
+  check(catT && catT.name.pt === 'Deslacre (linha troncal)' && catS.name.pt === 'Deslacre (linha secundária)' && catT.order > catS.order && catT.unsealCards &&
+    catT.filters.map(x => x.key).join() === 'tripId,route,station,shift' && catT.texts.shipmentTable.pt === 'Informações gerais' &&
+    JSON.stringify(catT.table) === JSON.stringify(catS.table) && JSON.stringify(catT.charts) === JSON.stringify(catS.charts),
+    'menu: Deslacre (linha troncal) logo depois da secundária, com os mesmos cartões, filtros, gráficos e tabela');
+  const dsT = C.decodeDataset(cT.getDashboardData('unseal_trunk', {from: D19, to: D19}).dataset);
+  check(dsT.length === mine.length && dsT.every(r => r.tripId && r.route && r.station && 'minutes' in r), 'painel da troncal recebe ID, viagem, PDD de saída e tempo');
+  const repT = (() => {
+    cT.UrlFetchApp.fetch = (() => { const f = cT.UrlFetchApp.fetch; return (u, r) => /export\?|\/pdf/.test(String(u)) ? {getResponseCode: () => 200, getBlob: () => cT.Utilities.newBlob('PDF', 'application/pdf', 'x')} : f(u, r); })();
+    return cT.generateReport('unseal_trunk', {from: D19, to: D19}, 'xlsx');
+  })();
+  check(repT.ok, 'relatório do Deslacre da troncal (Excel)', repT);
+  const dgT = cT.diagnosticarDeslacreTroncal(D19);
+  check(/Deslacre \(linha troncal\)/.test(dgT.texto) && /actualUnlockTime sim/.test(dgT.texto) && /IDs do dia/.test(dgT.texto) && /Data inicial/.test(dgT.texto) &&
+    /Dados de monitoramento > Consulta de Viagens/.test(dgT.texto) && !/MOTORISTA|FIC\d{4}|DBGX/.test(dgT.texto), 'diagnosticarDeslacreTroncal() sem placa, motorista nem ID', dgT.texto);
+  const dgS = cT.diagnosticarDeslacre(D19);
+  check(/Deslacre \(linha secundária\)/.test(dgS.texto) && /unlockTime sim/.test(dgS.texto) && dgS.ids === rowsS.length, 'diagnosticarDeslacre() continua sendo o da secundária');
+  // Credencial recusada só na lista da troncal: pausa só a troncal.
+  const trunkList = (route, h, body) => route === 'page' && !body.startDepartureTime;
+  const cTr = freshCtx({[D19]: makeDay(D19, 72)}, {intercept: (route, h, body) => trunkList(route, h, body) ? [200, {code: 135010037, msg: 'token失效，请重新登录', fail: true}] : null});
+  cTr.queueHistory(D19, D19, true);
+  runAll(cTr);
+  check(cTr.publicPauses_().some(p => p.route === 'UNSEAL_TRUNK') && !cTr.publicPauses_().some(p => p.route === 'UNSEAL') && cTr.getRateDay_('unseal', D19),
+    'credencial recusada na Consulta de Viagens da troncal pausa só o Deslacre da troncal');
+  // JMS que entrega só 5 IDs por página (mesmo pedindo 100): as próximas páginas seguem esse tamanho e nenhum ID se perde.
+  const cCap = freshCtx({[D19]: makeDay(D19, 72)}, {trunkPageCap: 5});
+  cCap.queueHistory(D19, D19, true);
+  runAll(cCap);
+  const capLists = cCap.__state.fetches.filter(f => /\/tmsShipment\/page\?/.test(f.url));
+  check(cCap.getRateDay_('unseal_trunk', D19).totalCount === mine.length && capLists.some(f => q(f.url).current === '3') &&
+    capLists.every(f => q(f.url).current === '1' || q(f.url).size === '5'),
+    'troncal: JMS com páginas menores que o pedido — lista completa', [cCap.getRateDay_('unseal_trunk', D19).totalCount, mine.length, capLists.map(f => q(f.url).current + '/' + q(f.url).size)]);
+  // JMS que exige o Routename da tela: o painel testa as variantes sozinho e guarda a que funcionou.
+  const cRn = freshCtx({[D19]: makeDay(D19, 72)}, {intercept: (route, h, body) =>
+    trunkList(route, h, body) && h.Routename !== 'monitoringSearch' ? [200, {code: 500, msg: 'routename inválido', fail: true}] : null});
+  cRn.queueHistory(D19, D19, true);
+  runAll(cRn);
+  check(cRn.getRateDay_('unseal_trunk', D19) && cRn.getRateDay_('unseal_trunk', D19).totalCount === mine.length && cRn.getProp_('JMS_ROUTE_AUTO_UNSEAL_TRUNK', '') === '1',
+    'Routename recusado: a troncal acha sozinha o "monitoringSearch" (JMS_ROUTE_AUTO_UNSEAL_TRUNK)', cRn.getRateDay_('unseal_trunk', D19));
 }
 
 // ---------- V4.4.1: Propriedades do script só com as configurações (o editor do Apps Script não edita mais de 50) ----------
@@ -3247,6 +2815,22 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   cQ2.updateDayStatus_('wrong_send', D19, {error: 'Cota diária do Google esgotada ao consultar o JMS: Service invoked too many times for one day: urlfetch.'});
   check(cQ2.lastErrorFor_('wrong_send', D19, D19) === null, 'erro antigo da cota no dia não vira o aviso vermelho');
   cQ2.UrlFetchApp.fetch = realFetch; cQ2.UrlFetchApp.fetchAll = realAll;
+  // (a2) V4.15.1: a mesma cota com a mensagem em PORTUGUÊS (conta Google em português). Antes virava "Falha de rede", sem pausa,
+  // e a fila tentava de novo a cada hora com o aviso vermelho. Agora: pausa, sem erro no dia, e a fila espera o dia seguinte
+  // (a cota é da conta: outros projetos do Apps Script gastam e o contador daqui não vê).
+  const cPT = freshCtx({[D19]: makeDay(D19, 75)}, null, {COTA_GOOGLE: 'gmail'});
+  const realPT = cPT.UrlFetchApp.fetch, realPTAll = cPT.UrlFetchApp.fetchAll;
+  const boomPT = () => { throw new Error('Serviço chamado muitas vezes no mesmo dia: urlfetch.'); };
+  cPT.UrlFetchApp.fetch = boomPT; cPT.UrlFetchApp.fetchAll = boomPT;
+  cPT.queueHistory(D19, D19, true);
+  runAll(cPT, 2);
+  const stPT = cPT.allTabRows_('STATUS').filter(r => r[8]);
+  check(cPT.publicPauses_().some(p => p.kind === 'QUOTA') && !stPT.some(r => /urlfetch|Cota diária|Falha de rede/i.test(String(r[8]))) &&
+    cPT.pendingJobs_().length > 0 && cPT.pendingJobs_().every(j => j.attempts === 0),
+    'cota em português: pausa, nenhum erro vermelho no dia, nenhuma tentativa gasta', {p: cPT.publicPauses_(), st: stPT.map(r => r[8])});
+  check(Number(cPT.__state.props['URLFETCH_' + today]) >= 20000 && cPT.fetchBudgetMode_() === 'stop',
+    'cota recusada pelo Google: contador de hoje no limite, a fila espera o dia seguinte', cPT.__state.props['URLFETCH_' + today]);
+  cPT.UrlFetchApp.fetch = realPT; cPT.UrlFetchApp.fetchAll = realPTAll;
   // (b) Contagem: cada consulta externa conta no contador do dia.
   const cC = freshCtx({[D19]: makeDay(D19, 72)}, null, {COTA_GOOGLE: 'gmail'});
   cC.queueHistory(D19, D19, true);
@@ -3284,12 +2868,12 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
 {
   const c0 = createContext({props: {}, jms: fakeJms({}), quiet: true});
   const keys0 = require('vm').runInContext('Object.keys(INDICATORS)', c0);
-  // (V4.7: o Fluxo de Lotes foi retirado — fora de INDICATORS sem REATIVAR_PAINEIS; a agenda dele continua na configuração.)
+  // (V4.7: o Fluxo de Lotes foi retirado. V4.18: de volta como Criação de Lotes, com a agenda dele.)
   const lotCfg = c => require('vm').runInContext('ALL_INDICATORS_.lot_flow', c);
   check(c0.dailyMode_() === true && c0.updateHours_().join() === '6,8' && c0.updateHour_() === 6 && c0.updateHoursSc_().join() === '15,17' &&
     c0.agendaEveryHours_(c0.getIndicatorConfig_('no_move')) === 2 && c0.agendaEveryHours_(lotCfg(c0)) === 3 &&
     keys0.filter(k => c0.getIndicatorConfig_(k).agendaEvery).sort().join() === 'no_move',
-    'padrão: agenda às 6h e 8h; Sem Movimentação a cada 2 h; Fluxo de Lotes (se reativado) a cada 3 h');
+    'padrão: agenda às 6h e 8h; Sem Movimentação a cada 2 h; Criação de Lotes a cada 3 h');
   const c1 = createContext({props: {HORAS_ATUALIZACAO: '9h e 7h', HORAS_ATUALIZACAO_SC: '16h', SEM_MOVIMENTACAO_HORAS: '4', LOTES_HORAS: '0'}, jms: fakeJms({}), quiet: true});
   check(c1.updateHours_().join() === '7,9' && c1.updateHoursSc_().join() === '16' && c1.agendaEveryHours_(c1.getIndicatorConfig_('no_move')) === 4 &&
     c1.agendaEveryHours_(lotCfg(c1)) === 3, 'HORAS_ATUALIZACAO ("9h e 7h"), HORAS_ATUALIZACAO_SC, SEM_MOVIMENTACAO_HORAS e LOTES_HORAS (valor inválido = padrão)');
@@ -3435,7 +3019,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   c7.__state.props['URLFETCH_' + today] = '18500';
   check(c7.fetchBudgetMode_() === 'reserve' && c7.fetchBudgetAllows_({type: 'TRIPS', indicator: 'sc_dc', date: Y}) &&
     c7.fetchBudgetAllows_({type: 'SCANS', indicator: 'sorting_error', date: Y}) && c7.fetchBudgetAllows_({type: 'SUMMARY', indicator: 'sc_dc', date: c7.addDaysIso_(today, -2)}) &&
-    !c7.fetchBudgetAllows_({type: 'TRIPS', indicator: 'sc_dc', date: OLD}) && !c7.fetchBudgetAllows_({type: 'TRIPS', indicator: 'send_flow', date: Y}),
+    !c7.fetchBudgetAllows_({type: 'TRIPS', indicator: 'sc_dc', date: OLD}),
     'perto do limite: IDs de viagem e bipagens dos dias recentes continuam (antes paravam)');
   // Botão Atualizar: taxa, lista e IDs de saída na hora (refreshNow + refreshDetailsNow), sem esperar a fila.
   const days8 = {[Y]: makeDay(Y, 62)};
@@ -3447,8 +3031,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const rows8 = c8.getArchivedRange_('sc_dc', Y, Y).rows, tid = r => (r.tripId === 'N/A' || r.tripId === 'NÃO TEM ID' ? '' : String(r.tripId || ''));
   check(r8.updated === 1 && r8.detailsQueued === 1 && x8.done >= 2 && x8.pending === 0 && rows8.length === days8[Y].dc.length && rows8.every(r => want[r.shipment] === tid(r)),
     'Atualizar no SC→DC: lista e IDs de viagem de saída na hora', {r8, x8: {done: x8.done, pending: x8.pending}});
-  check(c8.refreshDetailsNow('wrong_send', Y, Y).done === 0 && c8.refreshDetailsNow('arrival_flow', Y, Y).skipped === true,
-    'sem nada na fila: nada a fazer; painéis pesados ficam com a fila');
+  check(c8.refreshDetailsNow('wrong_send', Y, Y).done === 0, 'sem nada na fila: nada a fazer');
   // Migração V4.6: dias com remessas sem ID (inclusive as que vieram sem a linha de carregamento) consultados de novo, uma vez.
   const map = c8.loadTripMap_('sc_dc', Y);
   Object.keys(map.ids).forEach(w => { delete map.ids[w]; map.miss[w] = 2; });
@@ -3530,47 +3113,50 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     {hits: cDE.__state.tripEmptyHits, rows: rowsE.length, com: rowsE.filter(r => r.tripId && r.tripId !== 'N/A').length});
 }
 
-// ---------- V4.7: Fluxo de Lotes retirado; Atualizar atualiza TODOS os painéis de uma vez ----------
+// ---------- V4.7: Fluxo de Lotes retirado (V4.18: de volta como Criação de Lotes); Atualizar atualiza TODOS os painéis ----------
 {
   const vmR = require('vm');
   const keysOf = c => vmR.runInContext('Object.keys(INDICATORS)', c);
   const cR = createContext({props: {}, jms: fakeJms({}), quiet: true});
-  check(keysOf(cR).indexOf('lot_flow') < 0 && vmR.runInContext('!!ALL_INDICATORS_.lot_flow.retired', cR) && !cR.getPublicCatalog_().some(c => c.key === 'lot_flow'),
-    'Fluxo de Lotes retirado: fora do menu, dos Resultados e da fila (a configuração continua no código)');
-  let msg = '';
-  try { cR.activeCfg_('lot_flow'); } catch (e) { msg = e.message; }
-  check(/REATIVAR_PAINEIS = lot_flow/.test(msg), 'diagnosticarLotes explica como trazer de volta', msg);
+  // V4.18 (pedido "Colocar esse dashboard no dash principal"): sem retired. V4.26 (pedido "tirei o dash do lote do principal"): a
+  // Criação de Lotes é painel separado — só no pacote dela (PAINEIS = lot_flow) ou com REATIVAR_PAINEIS.
+  const menuL = cR.getPublicCatalog_().filter(c => c.key === 'lot_flow')[0];
+  check(keysOf(cR).indexOf('lot_flow') < 0 && !vmR.runInContext('Object.keys(ALL_INDICATORS_).some(k => ALL_INDICATORS_[k].retired)', cR) && !menuL,
+    'V4.26: Criação de Lotes fora do painel principal (menu, Resultados e fila)');
   const cB = createContext({props: {REATIVAR_PAINEIS: 'lot_flow'}, jms: fakeJms({}), quiet: true});
   const cP = createContext({props: {PAINEIS: 'lot_flow,wrong_send'}, jms: fakeJms({}), quiet: true});
-  const cF = createContext({props: {PAINEIS_FORA: 'arrival_flow,send_flow'}, jms: fakeJms({}), quiet: true});
-  check(keysOf(cB).indexOf('lot_flow') >= 0 && keysOf(cP).join() === 'wrong_send,lot_flow' && keysOf(cF).indexOf('lot_flow') < 0 && keysOf(cF).length === 8,
-    'REATIVAR_PAINEIS (ou PAINEIS) traz de volta; painel principal com 8 painéis (V4.12.3: sem o Deslacre)', [keysOf(cP), keysOf(cF)]);
-  // V4.12.3 (pedido): Deslacre retirado do mesmo jeito.
-  let msgU = '';
-  try { cR.activeCfg_('unseal'); } catch (e) { msgU = e.message; }
+  const cF = createContext({props: {PAINEIS_FORA: 'damage'}, jms: fakeJms({}), quiet: true});
+  check(keysOf(cB).indexOf('lot_flow') >= 0 && keysOf(cP).join() === 'wrong_send,lot_flow' && keysOf(cF).indexOf('lot_flow') < 0 && keysOf(cR).length === 10,
+    'PAINEIS escolhe os painéis; painel principal com 10 painéis (V4.17: Deslacre secundária e troncal; V4.26: sem Lotes e sem os fluxos)', [keysOf(cP), keysOf(cR)]);
+  // V4.12.3: Deslacre retirado. V4.17 (pedido): de volta no painel principal, com a linha secundária e a linha troncal, sem
+  // precisar de REATIVAR_PAINEIS (quem já tinha a propriedade com "unseal" não muda nada).
   const cU = createContext({props: {REATIVAR_PAINEIS: 'unseal'}, jms: fakeJms({}), quiet: true});
-  check(keysOf(cR).indexOf('unseal') < 0 && keysOf(cF).indexOf('unseal') < 0 && !cR.getPublicCatalog_().some(c => c.key === 'unseal') &&
-    /REATIVAR_PAINEIS = unseal/.test(msgU) && keysOf(cU).indexOf('unseal') >= 0 && keysOf(cU).indexOf('lot_flow') < 0,
-    'Deslacre retirado: fora do menu, dos Resultados e da fila; REATIVAR_PAINEIS = unseal traz de volta', msgU);
-  // Nenhuma consulta dos Lotes e Resultados sem eles.
+  const menuR = cR.getPublicCatalog_().filter(c => /^unseal/.test(c.key));
+  check(['unseal', 'unseal_trunk'].every(k => keysOf(cR).indexOf(k) >= 0 && keysOf(cF).indexOf(k) >= 0 && keysOf(cU).indexOf(k) >= 0) &&
+    !vmR.runInContext('!!ALL_INDICATORS_.unseal.retired', cR) && keysOf(cU).indexOf('lot_flow') < 0 &&
+    menuR.map(c => c.name.pt).join() === 'Deslacre (linha secundária),Deslacre (linha troncal)',
+    'Deslacre de volta no painel principal: linha secundária e linha troncal no menu, nos Resultados e na fila', menuR.map(c => c.name.pt));
+  // Histórico do painel principal: o Deslacre consultado (V4.26: a Criação de Lotes não); Resultados com ele.
   const today = cR.isoToday_(), ago = n => cR.addDaysIso_(today, -n), Y = ago(1), Y2 = ago(2), Y3 = ago(3);
   const daysR = {[today]: makeDay(today, 91), [Y]: makeDay(Y, 92), [Y2]: makeDay(Y2, 93), [Y3]: makeDay(Y3, 94)};
-  const PRINC = {REATIVAR_PAINEIS: '', PAINEIS_FORA: 'arrival_flow,send_flow', MODO_ATUALIZACAO: 'diario', DATA_START_DATE: Y3};
+  const PRINC = {REATIVAR_PAINEIS: '', PAINEIS_FORA: 'arrival_flow,send_flow', MODO_ATUALIZACAO: 'diario', DATA_START_DATE: Y3}; // PAINEIS_FORA antiga: ignorada
   const cL = freshCtx(daysR, null, PRINC);
   cL.queueHistory(Y3, Y, true);
   runAll(cL);
   const lotEp = vmR.runInContext('ALL_INDICATORS_.lot_flow.summary.endpoint', cL);
-  const unsealEp = vmR.runInContext('ALL_INDICATORS_.unseal.summary.endpoint', cL);
-  check(!cL.__state.fetches.some(f => [lotEp, unsealEp].indexOf(f.url.split('?')[0]) >= 0) && !cL.allTabRows_('JOBS').some(r => r[2] === 'lot_flow' || r[2] === 'unseal'),
-    'histórico do painel principal sem nenhuma consulta dos Lotes nem do Deslacre');
+  const unsealEps = ['unseal', 'unseal_trunk'].map(k => vmR.runInContext('ALL_INDICATORS_.' + k + '.summary.endpoint', cL));
+  check(!cL.__state.fetches.some(f => f.url.split('?')[0] === lotEp) && !cL.getRateDay_('lot_flow', Y) &&
+    unsealEps.every(ep => cL.__state.fetches.some(f => f.url.split('?')[0] === ep)) && ['unseal', 'unseal_trunk'].every(k => cL.getRateDay_(k, Y)),
+    'histórico do painel principal com o Deslacre (secundária e troncal), sem consultar a Criação de Lotes');
   const res = cL.getResultsData({from: Y3, to: Y});
-  check(res && !JSON.stringify(res).includes('lot_flow') && !JSON.stringify(res).includes('unseal'), 'Resultados sem o Fluxo de Lotes e sem o Deslacre');
+  check(res && ['unseal', 'unseal_trunk'].every(k => res.series.some(s => s.key === k)) && !res.series.some(s => s.key === 'lot_flow'),
+    'Resultados com o Deslacre (secundária e troncal), sem a Criação de Lotes');
   // Atualizar: todos os painéis de uma vez (taxas e cartões; depois listas, IDs de viagem e bipagens), o aberto primeiro.
   const cA = freshCtx(daysR, null, PRINC);
   const r1 = cA.refreshAllNow('wrong_send', Y, Y);
   const panels = keysOf(cA);
-  check(r1.ok && r1.panels === panels.length && r1.panelsTotal === 8 && r1.failed === 0 && r1.detailsQueued >= 7,
-    'Atualizar: taxa e cartões dos 8 painéis numa chamada', {panels: r1.panels, total: r1.panelsTotal, q: r1.detailsQueued, err: r1.errors});
+  check(r1.ok && r1.panels === panels.length && r1.panelsTotal === 10 && r1.failed === 0 && r1.detailsQueued >= 9,
+    'Atualizar: taxa e cartões dos 10 painéis numa chamada', {panels: r1.panels, total: r1.panelsTotal, q: r1.detailsQueued, err: r1.errors});
   check(cA.refreshAllNow('wrong_send', Y, Y).cooldown === true, 'clique repetido em seguida não consulta de novo');
   const x1 = cA.refreshAllDetailsNow('wrong_send', Y, Y);
   const complete = (k, d) => !!cA.getDayStatus_(k, d) && cA.getDayStatus_(k, d).details === 'COMPLETE';
@@ -3585,11 +3171,6 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cO = freshCtx(daysR, null, PRINC);
   cO.refreshAllNow('damage', Y3, Y);
   check([Y, Y2, Y3].every(d => cO.getRateDay_('damage', d)), 'painel aberto: o período da tela (3 dias) também é atualizado');
-  // Painéis pesados (fluxos) no outro projeto: taxas na hora, listas pela fila.
-  const cFl = freshCtx(daysR, null, {REATIVAR_PAINEIS: '', PAINEIS: 'arrival_flow,send_flow', MODO_ATUALIZACAO: 'diario', DATA_START_DATE: Y3, DETAIL_DAYS_ARRIVAL_FLOW: '120'});
-  const rF = cFl.refreshAllNow('arrival_flow', Y, Y), xF = cFl.refreshAllDetailsNow('arrival_flow', Y, Y);
-  check(rF.panels === 2 && xF.done === 0 && cFl.pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === 'arrival_flow'),
-    'painel dos fluxos: taxas na hora; listas pesadas ficam com a fila', {rF: rF.panels, xF});
 }
 
 // ---------- V4.8: docas e rotas novas (tabela "Ajuste das docas de carregamento em 4 de outubro", atualizada em 11/10) ----------
@@ -3662,6 +3243,14 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     ['DC SSZ-SP|DOCA 14', 'DC GRU|DOCA 44', 'SBN|DOCA 40', 'GO GYN|DOCA 05'].every(x => rowsM8.some(r => r.dockDest + '|' + r.dock === x)),
     'Falta de Bipagem na Expedição: 1º e 2º segmento gravados e cada remessa na doca nova', rowsM8.slice(0, 4).map(r => r.segmentRaw + '→' + r.dockDest + '/' + r.dock));
   delete cM8.__state.props.MIGRATION_V48;
+  // A migração olha só os últimos 31 dias: o relógio fica em 20/10/2026, a época do teste (senão o teste "vence" com o calendário).
+  const RD48 = Date, off48 = RD48.parse('2026-10-20T12:00:00-03:00') - RD48.now();
+  class Date48 extends RD48 {
+    constructor(...a) { if (a.length) super(...a); else super(RD48.now() + off48); }
+    static now() { return RD48.now() + off48; }
+    static [Symbol.hasInstance](x) { return x instanceof RD48; }
+  }
+  cM8.Date = Date48;
   const q48 = cM8.migrateToV48_();
   const pend48 = cM8.pendingJobs_().filter(j => j.type === 'DETAIL_INIT');
   check(q48 === 1 && pend48.length === 1 && pend48[0].indicator === 'missing_dispatch' && pend48[0].date === V1 && cM8.migrateToV48_() === 0,
@@ -3835,8 +3424,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     cfgS.table.some(c => c[0] === 'segmentPair') && cS.clientFields_(cfgS).indexOf('segmentPair') >= 0,
     'Triagem Errada: painel de segmentos no lugar dos 2 painéis de docas por turno, cartão "Segmento mais ofensor" e coluna na tabela');
   const others = ['wrong_send', 'missing_dispatch', 'sc_sc'].map(k => cS.getIndicatorConfig_(k));
-  check(others[0].rankPanels.some(p => p.key === 'dockByShift') && others.every(c => !c.topCards || c.topCards.indexOf('segmentPair') < 0),
-    'os outros indicadores não mudam (Envio Errado continua com "Docas por turno")');
+  // V4.25 (pedido): o Envio Errado também perdeu "Docas por turno".
+  check(!others[0].rankPanels.some(p => p.key === 'dockByShift') && others.every(c => !c.topCards || c.topCards.indexOf('segmentPair') < 0),
+    'os outros indicadores sem o cartão de segmento (V4.25: Envio Errado sem "Docas por turno")');
 
   // Dia baixado: segmento gravado, cartão e painel (top 15, percentual sobre todos os erros).
   const DS = '2026-10-14', dS = {[DS]: makeDay(DS, 95)};
@@ -4205,6 +3795,1163 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // Falta de Bipagem na Expedição: dias antigos usam o 1º + 2º segmento já guardado (segmentRaw).
   check(C.applySegmentBase([{segment: 'GRU', segmentRaw: 'GRU,402-05'}, {segment: 'SBN', segmentRaw: 'SBN,375-03'}], true).map(r => r.segmentBase).join() === 'DC TBT-SP,SBN',
     'Falta de Bipagem na Expedição: dias já baixados usam o 1º + 2º segmento guardado (sem baixar de novo)');
+}
+
+// ---------- V4.16: Expedição SC → DC — rotas pela próxima parada e esteiras (tabelas de 24/10, troncal e Last Mile) ----------
+{
+  const EST = vm.runInContext('ESTEIRAS_SC_DC', ctx);
+  const casosEst = {'S-MGUE-SP': ['S-MGUE-SP', 'Esteira 6'], 'F S-MGUE-SP': ['F S-MGUE-SP', 'Esteira 5'], 'DC SSZ-SP': ['DC SSZ-SP', 'Esteira 6'],
+    'DC S-MOO 02-SP': ['DC S-MOO 02-SP', 'Esteira 5'], 'S-PENHA-SP': ['S-PENHA-SP', 'Esteira 5'], 'DC NOD-SP': ['DC NOD-SP', 'Esteira 5'],
+    'RJ SJM': ['RJ SJM', 'Esteira 7'], 'BA VDC': ['RJ SJM', 'Esteira 7'], 'DC MCZ-AL': ['SE AJU', 'Esteira 4'], 'DC TBT-SP': ['DC TBT-SP', 'Esteira 2'],
+    'DC GRU-SP': ['DC GRU-SP', 'Esteira 3'], 'SP BRE': ['SP BRE', 'Esteira 2'], 'PA STM': ['SP BRE', 'Esteira 2'], 'MT CGB': ['MT CGB', 'Esteira 3'],
+    'XX YYY': ['XX', 'SEM ESTEIRA'], '': ['', 'SEM ESTEIRA']};
+  const rowsEst = C.applyDocks(Object.keys(casosEst).map(v => ({destination: v, date: '2026-10-28'})), EST);
+  check(rowsEst.every(r => r.dockDest === casosEst[r.destination][0] && r.dock === casosEst[r.destination][1]),
+    'SC → DC: esteira (linha do DWS) pela próxima parada, tabelas de 24/10 da troncal e da Last Mile', rowsEst.map(r => r.destination + '→' + r.dockDest + '/' + r.dock));
+  const oldDay = C.applyDocks([{destination: 'S-MGUE-SP', date: '2026-09-01'}], EST)[0];
+  check(oldDay.dock === 'Esteira 6' && C.applyDocks([{destination: 'BA FEC', date: '2026-10-28'}], DPP)[0].dock !== 'Esteira 4',
+    'SC → DC: a tabela de 24/10 vale para todo o histórico do painel; as docas do SC → SC e do Envio Errado não mudam');
+  const DSC = C.addDays(ctx.isoToday_(), -2), dSC = makeDay(DSC, 77);
+  const pars = ['S-MGUE-SP', 'DC SSZ-SP', 'DC S-MOO 02-SP', 'RJ SJM'];
+  dSC.dc = dSC.dc.map((r, i) => Object.assign({}, r, {sendNextStation: pars[i % 4]}));
+  const cDC = freshCtx({[DSC]: dSC}, null, {DATA_START_DATE: DSC});
+  cDC.queueHistory(DSC, DSC, true);
+  runAll(cDC);
+  const catDC = cDC.getPublicCatalog_().filter(x => x.key === 'sc_dc')[0];
+  const chartKeys = catDC.charts.map(c => c.key), tabKeys = catDC.table.map(c => c[0]);
+  check(chartKeys.indexOf('destination') >= 0 && chartKeys.indexOf('dock') >= 0 && chartKeys.indexOf('route') < 0 &&
+    catDC.charts.filter(c => c.key === 'destination')[0].title.pt === 'Rotas com mais ofensores (próxima parada)' &&
+    catDC.filters.some(f => f.key === 'dock') && catDC.filters.some(f => f.key === 'destination') && tabKeys.indexOf('destination') >= 0 &&
+    tabKeys.indexOf('dock') >= 0 && catDC.labels.dock.pt === 'Esteira',
+    'SC → DC: gráfico das rotas pela próxima parada, gráfico/filtro/coluna "Esteira"', {chartKeys, tabKeys});
+  const rowsDC = C.applyDocks(C.decodeDataset(cDC.getDashboardData('sc_dc', {from: DSC, to: DSC}).dataset), catDC.docks);
+  // O dia do teste é "hoje − 2": desde 16/11 valem as esteiras das tabelas de 16/11 (DC S-MOO 02-SP na 6, RJ SJM na 4).
+  const novasDC = DSC >= '2026-11-16';
+  const espDC = novasDC ? {'S-MGUE-SP': 'Esteira 6', 'DC SSZ-SP': 'Esteira 6', 'DC S-MOO 02-SP': 'Esteira 6', 'RJ SJM': 'Esteira 4'}
+    : {'S-MGUE-SP': 'Esteira 6', 'DC SSZ-SP': 'Esteira 6', 'DC S-MOO 02-SP': 'Esteira 5', 'RJ SJM': 'Esteira 7'};
+  const filtroDC = novasDC ? ['Esteira 4', 'RJ SJM'] : ['Esteira 5', 'DC S-MOO 02-SP'];
+  check(rowsDC.length > 0 && rowsDC.every(r => r.dock === espDC[r.destination]), 'SC → DC: a esteira sai da próxima parada já gravada (sem baixar de novo)',
+    rowsDC.slice(0, 4).map(r => r.destination + '→' + r.dock));
+  const repDC = cDC.computeDashboard_('sc_dc', {from: DSC, to: DSC, filters: {dock: [filtroDC[0]]}});
+  check(repDC.rows.length > 0 && repDC.rows.every(r => r.dock === filtroDC[0] && r.destination === filtroDC[1]),
+    'SC → DC: relatório com filtro de esteira', repDC.rows.length);
+}
+
+// ---------- V4.19: rotas de 01/11 (TO, MRB, RO e AC pelo DF BSB) e unidades novas do DC TBT-SP de 30/10 ----------
+{
+  const vmV = require('vm');
+  const cV = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CV = cV.JTCore_, DEXP = vmV.runInContext('DOCKS_EXPEDICAO', cV), DPP = vmV.runInContext('DOCKS_PROXIMA_PARADA', cV);
+  const EST = vmV.runInContext('ESTEIRAS_SC_DC', cV);
+  const seg = (c, d) => { const r = CV.applyDocks([{segmentRaw: CV.segmentHead2(c), segment: CV.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CV.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d) => { const r = CV.applyDocks([{destination: v, date: d}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const BEFORE = '2026-10-31', AFTER = '2026-11-01', wrong = [];
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  // Comunicado de 01/11: TO, MRB, RO e AC (códigos e paradas) saem do SP BRE para o DF BSB. Antes, continua SP BRE.
+  [['TO,1', 'TO PMW'], ['MRB,1', 'PA MRB'], ['RO,1', 'RO PVH'], ['AC,1', 'DC RBR-AC']].forEach(([c, p]) => {
+    want(seg(c, BEFORE), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 31/10');
+    want(seg(c, AFTER), 'DF BSB | DOCA 38', 'código ' + c + ' em 01/11');
+    want(stop(p, BEFORE), 'SP BRE | DOCA 21/22', 'parada ' + p + ' em 31/10');
+    want(stop(p, AFTER), 'DF BSB | DOCA 38', 'parada ' + p + ' em 01/11');
+    want(est(p, BEFORE), 'SP BRE | Esteira 2', 'esteira de ' + p + ' em 31/10');
+    want(est(p, AFTER), 'DF BSB | Esteira 3', 'esteira de ' + p + ' em 01/11');
+  });
+  want(seg('BRE - TO', AFTER), 'DF BSB | DOCA 38', 'código antigo "BRE - TO" em 01/11');
+  // V4.21.1: tabela atualizada — "AC RBR" no SP GRU-BSB.
+  want(stop('AC RBR', AFTER), 'DF BSB | DOCA 38', 'parada AC RBR em 01/11');
+  want(est('AC RBR', AFTER), 'DF BSB | Esteira 3', 'esteira de AC RBR em 01/11');
+  want(stop('AC RBR', BEFORE), 'SP BRE | DOCA 21/22', 'parada AC RBR em 31/10');
+  // AC = RBR: o código RBR e uma parada com RBR no nome também vão pelo DF BSB.
+  want(seg('RBR,1', AFTER), 'DF BSB | DOCA 38', 'código RBR em 01/11');
+  want(stop('DC RBR', AFTER), 'DF BSB | DOCA 38', 'parada DC RBR em 01/11');
+  want(est('DC RBR', AFTER), 'DF BSB | Esteira 3', 'esteira de DC RBR em 01/11');
+  // Tabela de 01/11: CDG no SP GRU-SJM, JPN no SP GRU-CGB; o resto do SP BRE continua lá.
+  want(seg('CDG,1', AFTER), 'RJ SJM | DOCA 10', 'CDG em 01/11');
+  want(stop('DC CDG-RJ', AFTER), 'RJ SJM | DOCA 10', 'parada DC CDG-RJ em 01/11');
+  want(seg('JPN,1', AFTER), 'MT CGB | DOCA 42', 'JPN em 01/11');
+  want(seg('CDG,1', BEFORE), 'SP BRE | DOCA 21/22', 'CDG em 31/10 (tabela de 11/10)');
+  ['STM,1', 'PPB,1', 'NAT,1', 'BAU 484-00,1', 'SOD,1', 'VCP,1', 'MA,1', 'AM,1'].forEach(c => want(seg(c, AFTER), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 01/11'));
+  ['PA STM', 'DC PPB-SP', 'DC MAO-AM', 'DC VCP-SP'].forEach(p => { want(stop(p, AFTER), 'SP BRE | DOCA 21/22', 'parada ' + p + ' em 01/11'); want(est(p, AFTER), 'SP BRE | Esteira 2', 'esteira de ' + p); });
+  want(seg('DF,1', AFTER), 'DF BSB | DOCA 38', 'DF em 01/11');
+  // Comunicado de 30/10: F SJC-SP (402-08), F UBT-SP (402-09) e F CRZ-SP (402-10) pelo DC TBT-SP.
+  // V4.25: desde 24/10 o DC TBT-SP é a DOCA 23 (tabela de 24/10; antes, 14).
+  ['GRU,402-08,1', 'GRU,402-09,1', 'GRU,402-10,1'].forEach(c => { want(seg(c, '2026-10-30'), 'DC TBT-SP | DOCA 23', 'código ' + c + ' em 30/10'); want(seg(c, AFTER), 'DC TBT-SP | DOCA 23', 'código ' + c + ' em 01/11'); });
+  ['F SJC-SP', 'F UBT-SP', 'F CRZ-SP'].forEach(p => {
+    want(stop(p, '2026-10-30'), 'DC TBT-SP | DOCA 23', 'parada ' + p + ' em 30/10');
+    want(est(p, '2026-10-30'), 'DC TBT-SP | Esteira 2', 'esteira de ' + p + ' em 30/10');
+  });
+  check(!wrong.length, 'rotas de 01/11 (TO, MRB, RO, AC pelo DF BSB; CDG no SJM; JPN no CGB) e unidades novas do DC TBT-SP de 30/10, com o histórico da época', wrong);
+  // Segmento (base) pela fórmula do WPS (Envio Errado e Falta de Bipagem na Expedição): pelo dia da remessa.
+  const sb = (code, date) => CV.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
+  check(sb('TO,123-00,000', BEFORE) === 'SP BRE' && sb('TO,123-00,000', AFTER) === 'DF BSB' && sb('AC,1', AFTER) === 'DF BSB' && sb('MRB,2', AFTER) === 'DF BSB' &&
+    sb('RO,3', AFTER) === 'DF BSB' && sb('RBR,6', AFTER) === 'DF BSB' && sb('CDG,4', AFTER) === 'RJ SJM' && sb('CDG,4', BEFORE) === 'SP BRE' && sb('STM,5', AFTER) === 'SP BRE' &&
+    sb('GRU,402-09,1', BEFORE) === 'DC TBT-SP' && sb('GRU,402-10,1', AFTER) === 'DC TBT-SP' && sb('GRU,402-08,1', AFTER) === 'DC TBT-SP',
+    'segmento (base): TO/MRB/RO/AC no DF BSB e CDG no RJ SJM a partir de 01/11; GRU 402-08/09/10 no DC TBT-SP',
+    [sb('TO,123-00,000', AFTER), sb('GRU,402-09,1', BEFORE), sb('CDG,4', AFTER)]);
+}
+
+// ---------- V4.24.2: aviso de 10/11 — TO, MRB, RO e AC (RBR) voltam do DF BSB para o SP BRE ----------
+{
+  const vmB = require('vm');
+  const cB = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CB = cB.JTCore_, DEXP = vmB.runInContext('DOCKS_EXPEDICAO', cB), DPP = vmB.runInContext('DOCKS_PROXIMA_PARADA', cB);
+  const EST = vmB.runInContext('ESTEIRAS_SC_DC', cB);
+  const seg = (c, d) => { const r = CB.applyDocks([{segmentRaw: CB.segmentHead2(c), segment: CB.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CB.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d) => { const r = CB.applyDocks([{destination: v, date: d}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const MID = '2026-11-09', BACK = '2026-11-10', LATER = '2026-11-15', wrong = []; // V4.28: de 16/11 valem as tabelas novas
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  [['TO,1', 'TO PMW'], ['MRB,1', 'PA MRB'], ['RO,1', 'RO PVH'], ['AC,1', 'AC RBR'], ['RBR,1', 'DC RBR-AC']].forEach(([c, p]) => {
+    want(seg(c, MID), 'DF BSB | DOCA 38', 'código ' + c + ' em 09/11 (histórico)');
+    want(seg(c, BACK), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 10/11');
+    want(seg(c, LATER), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 15/11');
+    want(stop(p, MID), 'DF BSB | DOCA 38', 'parada ' + p + ' em 09/11');
+    want(stop(p, BACK), 'SP BRE | DOCA 21/22', 'parada ' + p + ' em 10/11');
+    want(est(p, MID), 'DF BSB | Esteira 3', 'esteira de ' + p + ' em 09/11');
+    want(est(p, BACK), 'SP BRE | Esteira 2', 'esteira de ' + p + ' em 10/11');
+  });
+  want(stop('DC RBR', BACK), 'SP BRE | DOCA 21/22', 'parada DC RBR em 10/11');
+  want(seg('BRE - TO', BACK), 'SP BRE | DOCA 21/22', 'código antigo "BRE - TO" em 10/11');
+  // O resto da tabela de 01/11 continua: SP GRU-BSB só com DF, CDG no SJM, JPN no CGB.
+  want(seg('DF,1', BACK), 'DF BSB | DOCA 38', 'DF em 10/11');
+  want(seg('CDG,1', BACK), 'RJ SJM | DOCA 10', 'CDG em 10/11');
+  want(stop('DC CDG-RJ', BACK), 'RJ SJM | DOCA 10', 'parada DC CDG-RJ em 10/11');
+  want(est('DC CDG-RJ', BACK), 'RJ SJM | Esteira 7', 'esteira de DC CDG-RJ em 10/11');
+  want(seg('JPN,1', BACK), 'MT CGB | DOCA 42', 'JPN em 10/11');
+  want(stop('DC JPN', BACK), 'MT CGB | DOCA 42', 'parada DC JPN em 10/11');
+  ['STM,1', 'PPB,1', 'NAT,1', 'SOD,1', 'VCP,1', 'MA,1', 'AM,1', 'BJE,1', 'XAP,1'].forEach(c => want(seg(c, BACK), 'SP BRE | DOCA 21/22', 'código ' + c + ' em 10/11'));
+  ['GRU,402-08,1', 'GRU,402-10,1'].forEach(c => want(seg(c, BACK), 'DC TBT-SP | DOCA 23', 'código ' + c + ' em 10/11'));
+  check(!wrong.length, 'rotas de 10/11: TO, MRB, RO e AC (RBR) de volta ao SP BRE (docas 21/22, Esteira 2); 01/11 a 09/11 continua DF BSB', wrong);
+  const sb = (code, date) => CB.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
+  const mix = CB.applySegmentBase([{segmentFull: 'TO,1', date: '2026-10-31'}, {segmentFull: 'TO,1', date: MID}, {segmentFull: 'TO,1', date: BACK}], true).map(r => r.segmentBase);
+  check(sb('TO,123-00,000', MID) === 'DF BSB' && sb('TO,123-00,000', BACK) === 'SP BRE' && sb('AC,1', BACK) === 'SP BRE' && sb('MRB,2', BACK) === 'SP BRE' &&
+    sb('RO,3', BACK) === 'SP BRE' && sb('RBR,6', BACK) === 'SP BRE' && sb('RBR,6', MID) === 'DF BSB' && sb('CDG,4', BACK) === 'RJ SJM' && sb('DF,1', BACK) === 'DF BSB' &&
+    sb('JPN,1', BACK) === 'MT CGB' && mix.join('|') === 'SP BRE|DF BSB|SP BRE',
+  'segmento (base) de 10/11: TO/MRB/RO/AC/RBR no SP BRE; de 01/11 a 09/11 no DF BSB; CDG no RJ SJM', [sb('TO,1', BACK), sb('RBR,6', BACK), mix.join('|')]);
+}
+
+// ---------- V4.28: tabelas de 16/11 — docas novas da linha principal e da secundária ----------
+{
+  const vmN = require('vm');
+  const cN = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CN = cN.JTCore_, DEXP = vmN.runInContext('DOCKS_EXPEDICAO', cN), DPP = vmN.runInContext('DOCKS_PROXIMA_PARADA', cN);
+  const EST = vmN.runInContext('ESTEIRAS_SC_DC', cN);
+  const seg = (c, d) => { const r = CN.applyDocks([{segmentRaw: CN.segmentHead2(c), segment: CN.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CN.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d) => { const r = CN.applyDocks([{destination: v, date: d}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const OLD = '2026-11-15', NEW = '2026-11-16', LATER = '2026-11-30', wrong = [];
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  // [código de três segmentos, rota, doca, linha de desvio do DWS] — como nas duas tabelas de 16/11.
+  const TAB = [
+    ['GO,100-00,1', 'GO GYN', 'DOCA 05', 7], ['SC1,1', 'SC BNU', 'DOCA 06', 7], ['RS,1', 'RS NSR', 'DOCA 07', 7],
+    ['GRU,402-03,1', 'DC TBT-SP', 'DOCA 08', 7], ['SP,421-00,1', 'DC TBT-SP', 'DOCA 08', 7], ['GRU,402-04,1', 'DC TBT-SP', 'DOCA 08', 7],
+    ['GRU,402-10,1', 'DC TBT-SP', 'DOCA 08', 7], ['SNS,1', 'BA FEC', 'DOCA 09', 7], ['CHV,1', 'MG CGE', 'DOCA 10', 7],
+    ['CE,1', 'CE FOR', 'DOCA 15', 4], ['CAC,1', 'PR SJS', 'DOCA 16', 4], ['BYE,1', 'PE JGS', 'DOCA 17', 4],
+    ['SP,368-00,1', 'SP BRE', 'DOCA 21/22', 2], ['SP,397-00,1', 'SP BRE', 'DOCA 21/22', 2], ['NAT,1', 'SP BRE', 'DOCA 21/22', 2], ['LDB,1', 'SP BRE', 'DOCA 21/22', 2],
+    ['MIA,1', 'SP BRE', 'DOCA 21/22', 2], ['MA,1', 'SP BRE', 'DOCA 21/22', 2], ['GRU,381-07,1', 'DC JND 02-SP', 'DOCA 21/22', 2], ['AL,1', 'SE AJU', 'DOCA 19', 4],
+    ['AM,1', 'AM MAO', 'DOCA 20', 2], ['BVB,1', 'AM MAO', 'DOCA 20', 2], ['RJ1,1', 'RJ SJM', 'DOCA 18', 4], ['CDG,1', 'RJ SJM', 'DOCA 18', 4],
+    ['SP,395-05,1', 'DC GRU-SP', 'DOCA 23', 2], ['GRU,381-00,1', 'DC GRU-SP', 'DOCA 23', 2], ['GRU,378-04,1', 'DC GRU-SP', 'DOCA 23', 2],
+    ['DF,1', 'DF BSB', 'DOCA 44', 3], ['MRB,1', 'DF BSB', 'DOCA 44', 3], ['RO,1', 'DF BSB', 'DOCA 44', 3], ['TO,1', 'DF BSB', 'DOCA 44', 3],
+    ['AC,1', 'DF BSB', 'DOCA 44', 3], ['RBR,1', 'DF BSB', 'DOCA 44', 3], ['SBN,375-10,1', 'DC SBN-SP', 'DOCA 43', 3], ['SBN,375-11,1', 'DC SBN-SP', 'DOCA 43', 3], ['IMP,1', 'PI THE', 'DOCA 42', 3],
+    ['PA,1', 'PA ANA', 'DOCA 41', 3], ['NE1,1', 'SP RBP', 'DOCA 40', 3], ['JPN,1', 'MT CGB', 'DOCA 39', 3], ['ES,1', 'ES SRR', 'DOCA 38', 3],
+    // Rotas secundárias: "Esteira" + o número da tabela; o DC SSZ-SP é doca.
+    ['VLANA,1', 'DC S-VLANA-SP', 'Esteira 01', 6], ['GRU,404-09,1', 'F S-PQBOTU-SP', 'Esteira 02', 6], ['GRU,404-08,1', 'F S-MGUE 02-SP', 'Esteira 03', 6],
+    ['GRU,404-10,1', 'F VLMT-SP', 'Esteira 04', 6], ['GRU,404-01,1', 'S-MGUE-SP', 'Esteira 05', 6], ['GRU,404-11,1', 'F S-JBO-SP', 'Esteira 06', 6],
+    ['GRU,378-05,1', 'DC SSZ-SP', 'DOCA 07 · DC SSZ-SP', 6], ['GRU,404-13,1', 'S-MGUE 02-SP', 'Esteira 09', 6],
+    ['MOO,430-03,1', 'DC S-MOO 02-SP', 'Esteira 10', 6], ['SP,364-00,1', 'DC S-MOO 02-SP', 'Esteira 10', 6],
+    ['GRU,404-12,1', 'F S-SAP 02-SP', 'Esteira 12', 5], ['GRU,404-06,1', 'F S-PENHA 03-SP', 'Esteira 13', 5], ['GRU,404-00,1', 'S-SRAF-SP', 'Esteira 15', 5],
+    ['GRU,404-05,1', 'F S-PENHA-SP', 'Esteira 17', 5], ['NOD,1', 'DC NOD-SP', 'Esteira 18', 5], ['GRU,404-04,1', 'F S-MGUE-SP', 'Esteira 19', 5],
+    ['GRU,404-03,1', 'S-SAPOP-SP', 'Esteira 20', 5], ['JDF,1', 'DC JDF-MG', 'Esteira 21', 5], ['BAU,1', 'DC BAU-SP', 'Esteira 22', 5],
+    ['MS,1', 'MS CGR', 'Esteira 23', 5], ['GRU,404-02,1', 'S-PENHA-SP', 'Esteira 24', 5], ['GRU,404-07,1', 'F S-PENHA 02-SP', 'Esteira 25', 5]
+  ];
+  TAB.forEach(([c, r, d]) => { want(seg(c, NEW), r + ' | ' + d, 'código ' + c + ' em 16/11'); want(seg(c, LATER), r + ' | ' + d, 'código ' + c + ' em 30/11'); });
+  // Até 15/11 o histórico continua com as docas da época.
+  [['SP,368-00,1', 'SP BRE | DOCA 21/22'], ['AM,1', 'SP BRE | DOCA 21/22'], ['BAU,1', 'SP BRE | DOCA 21/22'], ['MRB,1', 'SP BRE | DOCA 21/22'],
+    ['CE,1', 'CE FOR | DOCA 09'], ['MS,1', 'MS CGR | DOCA 43'], ['RJ,1', 'RJ SJM | DOCA 10'], ['GRU,404-02,1', 'S-PENHA-SP | Esteira 13'],
+    ['GRU,402-03,1', 'DC TBT-SP | DOCA 23'], ['SBN,375-01,1', 'SBN | DOCA 08'], ['GRU,378-05,1', 'DC SSZ-SP | DOCA 08/09']]
+    .forEach(([c, e]) => want(seg(c, OLD), e, 'código ' + c + ' em 15/11 (histórico)'));
+  // Próxima parada (Envio Errado, Triagem Errada, SC → SC) e esteira do SC → DC (linha de desvio do DWS).
+  [['SP BRE', 'SP BRE', 'DOCA 21/22', 2], ['DC MAO-AM', 'AM MAO', 'DOCA 20', 2], ['AM MAO', 'AM MAO', 'DOCA 20', 2], ['TO PMW', 'DF BSB', 'DOCA 44', 3],
+    ['DC RBR-AC', 'DF BSB', 'DOCA 44', 3], ['PA MRB', 'DF BSB', 'DOCA 44', 3], ['DC BAU-SP', 'DC BAU-SP', 'Esteira 22', 5], ['DC JDF-MG', 'DC JDF-MG', 'Esteira 21', 5],
+    ['MS CGR', 'MS CGR', 'Esteira 23', 5], ['DC CDG-RJ', 'RJ SJM', 'DOCA 18', 4], ['RJ SJM', 'RJ SJM', 'DOCA 18', 4], ['BA FEC', 'BA FEC', 'DOCA 09', 7], ['MG BHZ', 'MG CGE', 'DOCA 10', 7],
+    ['DC SBN', 'DC SBN-SP', 'DOCA 43', 3], ['DC SBN-SP', 'DC SBN-SP', 'DOCA 43', 3], ['PI THE', 'PI THE', 'DOCA 42', 3], ['F SJC-SP', 'DC TBT-SP', 'DOCA 08', 7],
+    ['DC GRU-SP', 'DC GRU-SP', 'DOCA 23', 2], ['DC SSZ-SP', 'DC SSZ-SP', 'DOCA 07 · DC SSZ-SP', 6], ['DC MOOCA2', 'DC S-MOO 02-SP', 'Esteira 10', 6],
+    ['S-PENHA-SP', 'S-PENHA-SP', 'Esteira 24', 5], ['DC JPN', 'MT CGB', 'DOCA 39', 3]].forEach(([p, r, d, l]) => {
+    want(stop(p, NEW), r + ' | ' + d, 'parada ' + p + ' em 16/11');
+    want(est(p, NEW), r + ' | Esteira ' + l, 'esteira de ' + p + ' em 16/11');
+  });
+  want(stop('SP BRE', OLD), 'SP BRE | DOCA 21/22', 'parada SP BRE em 15/11');
+  want(est('SP BRE', OLD), 'SP BRE | Esteira 2', 'esteira do SP BRE em 15/11');
+  want(est('DC BAU-SP', OLD), 'SP BRE | Esteira 2', 'esteira do DC BAU-SP em 15/11');
+  check(!wrong.length, 'tabelas de 16/11 (versão atualizada): docas novas da linha principal (RJ SJM na 18, AM MAO na 20, SP BRE na 21/22, DF BSB com MRB/RO/TO/AC, SBN 375-11…) ' +
+    'e da secundária (JDF, BAU e MS na tabela secundária); até 15/11 continua como era', wrong);
+  // Expedição A/B/C pela doca nova.
+  const exps = vmN.runInContext('EXPEDICOES_', cN), ex = d => CN.expeditionOf(d, exps);
+  check(ex('DOCA 18') === 'Expedição B' && ex('DOCA 21/22') === 'Expedição B' && ex('DOCA 08') === 'Expedição A' && ex('DOCA 44') === 'Expedição C' && ex('DOCA 07 · DC SSZ-SP') === 'Expedição A' &&
+    ex('Esteira 22') === 'Esteiras', 'Expedição A/B/C com as docas de 16/11 (DC SSZ-SP continua doca)', [ex('DOCA 18'), ex('DOCA 07 · DC SSZ-SP')]);
+  // Segmento (base) pela fórmula do WPS, pelo dia da remessa.
+  const sb = (code, date) => CN.applySegmentBase([{segmentFull: code, date: date}], true)[0].segmentBase;
+  const got = {AM: sb('AM,1', NEW), BVB: sb('BVB,1', NEW), BAU: sb('BAU,1', NEW), JDF: sb('JDF,1', NEW), MRB: sb('MRB,1', NEW), RBR: sb('RBR,1', NEW),
+    TO: sb('TO,1', LATER), CDG: sb('CDG,1', NEW), STM: sb('STM,1', NEW), JPN: sb('JPN,1', NEW), MRBold: sb('MRB,1', OLD), BAUold: sb('BAU,1', OLD)};
+  check(got.AM === 'AM MAO' && got.BVB === 'AM MAO' && got.BAU === 'DC BAU-SP' && got.JDF === 'DC JDF-MG' && got.MRB === 'DF BSB' && got.RBR === 'DF BSB' &&
+    got.TO === 'DF BSB' && got.CDG === 'RJ SJM' && got.STM === 'SP BRE' && got.JPN === 'MT CGB' && got.MRBold === 'SP BRE' && got.BAUold === 'SP BRE',
+  'segmento (base) de 16/11: AM/BVB no AM MAO, BAU no DC BAU-SP, JDF no DC JDF-MG, MRB/RO/TO/AC no DF BSB; até 15/11 no SP BRE', got);
+}
+
+// ---------- V4.29.2: comunicado de 18/11 — XAP do SP BRE para o SC BNU a partir das 11h30 ----------
+{
+  const vmX = require('vm');
+  const cX = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CX = cX.JTCore_, DEXP = vmX.runInContext('DOCKS_EXPEDICAO', cX), DPP = vmX.runInContext('DOCKS_PROXIMA_PARADA', cX);
+  const EST = vmX.runInContext('ESTEIRAS_SC_DC', cX);
+  const seg = (c, d, t) => { const r = CX.applyDocks([{segmentRaw: CX.segmentHead2(c), segment: CX.firstSegment(c), date: d, eventTime: t}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d, t) => { const r = CX.applyDocks([{destination: v, date: d, eventTime: t}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d, t) => { const r = CX.applyDocks([{destination: v, date: d, eventTime: t}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const sb = (c, d, t) => CX.applySegmentBase([{segmentFull: c, date: d, eventTime: t}], true)[0].segmentBase;
+  const D = '2026-11-18', got = {
+    antes: seg('XAP,1', D, D + ' 11:29:59'), depois: seg('XAP,1', D, D + ' 11:30:00'), br: seg('XAP,1', D, '18/11/2026 14:05'), semHora: seg('XAP,1', D, ''),
+    dia17: seg('XAP,1', '2026-11-17', '2026-11-17 15:00:00'), dia19: seg('XAP,1', '2026-11-19', ''), dia30: seg('XAP,1', '2026-11-30', '2026-11-30 03:00:00'),
+    sc: seg('SC1,1', D, D + ' 12:00:00'), bre: seg('LDB,1', D, D + ' 12:00:00'), am: seg('AM,1', D, D + ' 12:00:00'), rj: seg('RJ,1', D, D + ' 12:00:00'),
+    parada: stop('DC XAP-SC', D, D + ' 13:00:00'), paradaAntes: stop('DC XAP-SC', D, D + ' 09:00:00'), esteira: est('DC XAP-SC', D, D + ' 13:00:00'),
+    esteiraAntes: est('DC XAP-SC', D, D + ' 09:00:00'), breParada: stop('SP BRE', D, D + ' 13:00:00'),
+    sbDepois: sb('XAP,1', D, D + ' 11:45:00'), sbAntes: sb('XAP,1', D, D + ' 08:00:00'), sb19: sb('XAP,1', '2026-11-19', ''), sb17: sb('XAP,1', '2026-11-17', ''),
+    sbAm: sb('AM,1', D, D + ' 12:00:00'), sbStm: sb('STM,1', D, D + ' 12:00:00')
+  };
+  check(got.antes === 'SP BRE | DOCA 21/22' && got.depois === 'SC BNU | DOCA 06' && got.br === 'SC BNU | DOCA 06' && got.semHora === 'SC BNU | DOCA 06' &&
+    got.dia17 === 'SP BRE | DOCA 21/22' && got.dia19 === 'SC BNU | DOCA 06' && got.dia30 === 'SC BNU | DOCA 06' && got.sc === 'SC BNU | DOCA 06' &&
+    got.bre === 'SP BRE | DOCA 21/22' && got.am === 'AM MAO | DOCA 20' && got.rj === 'RJ SJM | DOCA 18' &&
+    got.parada === 'SC BNU | DOCA 06' && got.paradaAntes === 'SP BRE | DOCA 21/22' && got.esteira === 'SC BNU | Esteira 7' && got.esteiraAntes === 'SP BRE | Esteira 2' &&
+    got.breParada === 'SP BRE | DOCA 21/22' && got.sbDepois === 'SC BNU' && got.sbAntes === 'SP BRE' && got.sb19 === 'SC BNU' && got.sb17 === 'SP BRE' &&
+    got.sbAm === 'AM MAO' && got.sbStm === 'SP BRE',
+    'V4.29.2: XAP do SP BRE para o SC BNU (DOCA 06, esteira 7) a partir das 11h30 de 18/11, pelo horário do bipe; antes continua SP BRE', got);
+  // O horário do bipe vai para o navegador nos painéis com docas (a tabela começa às 11h30), e a tabela de 18/11 só mexe no XAP.
+  const comHora = vmX.runInContext("Object.keys(INDICATORS).filter(k => INDICATORS[k].docks).map(k => k + ':' + (clientFields_(getIndicatorConfig_(k)).indexOf('eventTime') >= 0))", cX);
+  const t16 = vmX.runInContext('DOCK_TABLE_2026_11_16_', cX), t18 = vmX.runInContext('DOCK_TABLE_2026_11_18_', cX);
+  const mudou = t18.map((e, i) => JSON.stringify(e) === JSON.stringify(t16[i]) ? '' : e.route).filter(Boolean);
+  check(comHora.length >= 4 && comHora.every(x => /:true$/.test(x)) && mudou.join() === 'SC BNU,SP BRE' && t18.length === t16.length,
+    'V4.29.2: o horário do bipe vai junto para o navegador; a tabela de 18/11 só muda o SC BNU e o SP BRE', {comHora, mudou});
+}
+
+// ---------- V4.24.3: Falta de Bipagem na Expedição com mais de 10 mil remessas no dia (lista travada no limite do JMS) ----------
+{
+  const DT = '2026-09-19';
+  // Dia como o de 04/11 da planilha do usuário: 10.906 remessas espalhadas no dia (remessas, operador e cliente fictícios).
+  const bigMd = (n, date) => {
+    const o = {}; o[date] = makeDay(date, 5);
+    o[date].md = new Array(n).fill(0).map((_, i) => ({billcode: 'TST' + String(i).padStart(9, '0'), threeSegmentCode: 'SP,977-00,000',
+      unloadArriveTime: date + ' ' + String(Math.floor(i * 24 / n)).padStart(2, '0') + ':' + String(i % 60).padStart(2, '0') + ':00',
+      unloadPackageEmp: 'OPERADOR FICTICIO 01', customerName: 'CLIENTE TESTE', arriveOrder: 'TESTE-1', nextStop: 'SP BRE'}));
+    return o;
+  };
+  const runMd = (n, opts, props) => {
+    const c = freshCtx(bigMd(n, DT), opts, props);
+    c.queueHistory(DT, DT, true);
+    runAll(c);
+    const st = c.getDayStatus_('missing_dispatch', DT);
+    return {c, st, rows: c.getArchivedRange_('missing_dispatch', DT, DT).rows.length};
+  };
+  // (a) O JMS informa no máximo 10 mil no total da lista e não entrega além disso; a hora é respeitada → fatias pegam tudo.
+  const a = runMd(10906, {totalCap: 10000});
+  const fa = a.c.__state.fetches.filter(f => /center_missscan_next_detail/.test(f.url) && f.payload.detailType === 'billcodeOut');
+  check(a.rows === 10906 && a.st.details === 'COMPLETE' && a.st.savedRows === 10906 && fa.some(f => f.payload.startTime !== DT + ' 00:00:00') &&
+    !a.c.__state.props.JMS_NO_SLICE_MISSING_SCAN,
+    'lista travada em 10 mil (dia com 10.906): o painel divide o dia em horários e grava as 10.906 (antes: 10 mil como se fosse o dia todo)',
+    {rows: a.rows, st: a.st});
+  // (b) Dia bem maior (25 mil) também travado em 10 mil: as fatias se dividem até ficarem abaixo do limite.
+  const b = runMd(25000, {totalCap: 10000});
+  check(b.rows === 25000 && b.st.details === 'COMPLETE', 'lista travada com 25 mil no dia: fatias menores até caber, 25 mil gravadas', {rows: b.rows, st: b.st});
+  // (c) O JMS ignora a hora E trava em 10 mil: não tem como pegar o resto; grava 10 mil, mas o dia NÃO fica como completo.
+  const cc = runMd(10906, {totalCap: 10000, ignoreTime: true});
+  check(cc.rows === 10000 && cc.st.details === 'CHECK_COUNTS' && cc.st.expectedRecords === 10906 && cc.c.__state.props.JMS_NO_SLICE_MISSING_SCAN === '1',
+    'JMS que ignora a hora e trava em 10 mil: grava o que vem, com o dia marcado "contagem diferente" (10.906 no resumo)', cc.st);
+  const shortC = cc.c.getDashboardData('missing_dispatch', {from: DT, to: DT}).meta.shortDays, shortA = a.c.getDashboardData('missing_dispatch', {from: DT, to: DT}).meta.shortDays;
+  check(shortC.length === 1 && shortC[0].date === DT && shortC[0].saved === 10000 && shortC[0].expected === 10906 && shortA.length === 0,
+    'painel avisa os dias em que o JMS entregou menos que o resumo (10.000 de 10.906); dia completo sem aviso', {shortC, shortA});
+  // (d) O JMS ignora a hora e recusa as páginas além de 10 mil: antes o dia ficava com ERRO (e a lista de horas antes);
+  // agora grava as 10 mil que o JMS entrega, com o aviso.
+  const d = runMd(10906, {resultWindow: 10000, ignoreTime: true});
+  check(d.rows === 10000 && d.st.details === 'CHECK_COUNTS' && d.st.expectedRecords === 10906,
+    'JMS que ignora a hora e recusa a paginação além de 10 mil: grava as 10 mil com aviso, sem erro no dia', d.st);
+  // (e) Sem trava (o JMS informa 10.906 e pagina tudo): igual a antes.
+  const e = runMd(10906, {});
+  check(e.rows === 10906 && e.st.details === 'COMPLETE', 'sem trava do JMS: 10.906 gravadas como antes', e.st);
+  // (f) Conferência das fatias: lista travada (cada fatia com o dia inteiro = hora ignorada) × fatias travadas (hora respeitada).
+  const cf = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  check(cf.sliceProblem_([10000, 10000], 10000, 10906, DT, 10000) === '' && /dia inteiro/.test(cf.sliceProblem_([5000, 5000], 5000, 5000, DT, 10000)) &&
+    cf.sliceProblem_([2400, 3100, 3300, 2106], 10000, 10906, DT, 10000) === '' && /< total/.test(cf.sliceProblem_([2000, 2000, 2000, 2000], 10000, 10906, DT, 10000)) &&
+    /dia inteiro/.test(cf.sliceProblem_([10000, 0, 0, 0], 10000, 10906, DT, 10000)) && cf.sliceProblem_([10000, 10000, 3000, 2000], 10000, 25000, DT, 10000) === '',
+    'conferência das fatias: fatias no limite são divididas de novo (não desligam as fatias); hora ignorada continua desligando');
+  // (g) Atualização: os dias gravados travados em 10 mil (versão anterior) são baixados de novo uma vez, com as fatias testadas de novo.
+  // A atualização olha os últimos 31 dias: aqui, ontem.
+  const DG = cf.addDaysIso_(cf.isoToday_(), -1);
+  const g = freshCtx(bigMd(10906, DG), {totalCap: 10000}, {DATA_START_DATE: DG});
+  const ds = g.encodeDayFile_(new Array(10000).fill(0).map((_, i) => ({date: DG, shipment: 'TST' + String(i).padStart(9, '0'), shift: 'T1'})),
+    require('vm').runInContext('STORE_FIELDS_', g));
+  g.queueHistory(DG, DG, true);
+  runAll(g);
+  g.saveDayDataset_('missing_dispatch', DG, ds, 10, 10000);
+  g.updateDayStatus_('missing_dispatch', DG, {detailsStatus: 'COMPLETE', expectedPages: 10, savedPages: 10, expectedRecords: 10000, savedRows: 10000});
+  g.__state.props.JMS_NO_SLICE_MISSING_SCAN = '1';
+  delete g.__state.props.MIGRATION_V4243;
+  const nG = g.migrateToV4243_(), againG = g.migrateToV4243_();
+  runAll(g);
+  check(nG >= 1 && againG === 0 && g.getArchivedRange_('missing_dispatch', DG, DG).rows.length === 10906 && g.getDayStatus_('missing_dispatch', DG).details === 'COMPLETE',
+    'V4.24.3: uma vez, os dias travados em 10 mil voltam para a fila (fatias testadas de novo) e ficam com as 10.906', {nG, againG, st: g.getDayStatus_('missing_dispatch', DG)});
+}
+
+// ---------- V4.25: mudanças nos gráficos (PDF "Mudanças nos gráficos dos dashboards") ----------
+{
+  const vmV = require('vm');
+  const cV = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CV5 = cV.JTCore_, DEXP = vmV.runInContext('DOCKS_EXPEDICAO', cV), DPP = vmV.runInContext('DOCKS_PROXIMA_PARADA', cV);
+  const seg = (c, d) => { const r = CV5.applyDocks([{segmentRaw: CV5.segmentHead2(c), segment: CV5.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CV5.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const NOV = '2026-11-05', OCT20 = '2026-10-20', wrong = [];
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  // Esteiras (Last Mile, tabela de 24/10): "Esteira" + o número da doca da tabela regional.
+  [['GRU,404-11,1', 'F S-JBO-SP | Esteira 02'], ['GRU,404-04,020', 'F S-MGUE-SP | Esteira 20'], ['GRU,404-00,1', 'S-SRAF-SP | Esteira 15/16'],
+    ['VLANA,1', 'DC S-VLANA-SP | Esteira 01'], ['NOD,1', 'DC NOD-SP | Esteira 17/18'], ['MOO,430-02,1', 'DC S-MOO 02-SP | Esteira 11/12'],
+    ['SP,364-00,1', 'DC S-MOO 02-SP | Esteira 11/12'], ['GRU,404-13,1', 'S-MGUE 02-SP | Esteira 10'], ['GRU,404-06,1', 'F S-PENHA 03-SP | Esteira 24'],
+    // Docas: DC SSZ-SP é doca (08/09), DC TBT-SP na 23, DC GRU-SP na 44 (com SP 395-05/06/07), SBN na 08 (até 375-10).
+    ['GRU,378-05,1', 'DC SSZ-SP | DOCA 08/09'], ['GRU,378-00,1', 'DC SSZ-SP | DOCA 08/09'], ['GRU,402-02,1', 'DC TBT-SP | DOCA 23'], ['SP,402-01,1', 'DC TBT-SP | DOCA 23'],
+    ['SP,395-06,1', 'DC GRU-SP | DOCA 44'], ['GRU,381-20,1', 'DC GRU-SP | DOCA 44'], ['SBN,375-10,1', 'SBN | DOCA 08'], ['GO,1', 'GO GYN | DOCA 05'],
+    ['SP,977-00,1', 'SP BRE | DOCA 21/22']].forEach(([c, e]) => want(seg(c, NOV), e, 'código ' + c + ' em 05/11'));
+  // Antes de 24/10 o histórico continua com as docas da época.
+  want(seg('GRU,404-04,1', OCT20), 'DC GRU | DOCA 44', 'código GRU,404-04 em 20/10');
+  want(seg('MOO,430-02,1', OCT20), 'MOO | DOCA 23', 'código MOO em 20/10');
+  want(seg('GRU,402-05,1', OCT20), 'DC TBT-SP | DOCA 14', 'código GRU,402-05 em 20/10');
+  // Pela próxima parada (Envio Errado, Triagem Errada): o nome da unidade da Last Mile → esteira.
+  [['F S-MGUE-SP', 'F S-MGUE-SP | Esteira 20'], ['S-MGUE-SP', 'S-MGUE-SP | Esteira 07'], ['DC NOD-SP', 'DC NOD-SP | Esteira 17/18'],
+    ['DC MOOCA2', 'DC S-MOO 02-SP | Esteira 11/12'], ['DC SSZ-SP', 'DC SSZ-SP | DOCA 08/09'], ['DC GRU-SP', 'DC GRU-SP | DOCA 44'],
+    ['DC TBT-SP', 'DC TBT-SP | DOCA 23'], ['BA FEC', 'BA FEC | DOCA 18']].forEach(([v, e]) => want(stop(v, NOV), e, 'parada ' + v + ' em 05/11'));
+  check(!wrong.length, 'V4.25: docas × esteiras desde 24/10 (esteira = "Esteira" + nº da tabela regional; DC SSZ-SP continua doca)', wrong);
+  // Expedição A/B/C pela doca.
+  const EX = vmV.runInContext('EXPEDICOES_', cV), ex = d => CV5.expeditionOf(d, EX);
+  check(ex('DOCA 05') === 'Expedição A' && ex('DOCA 14') === 'Expedição A' && ex('DOCA 08/09') === 'Expedição A' && ex('DOCA 15') === 'Expedição B' &&
+    ex('DOCA 21/22') === 'Expedição B' && ex('DOCA 23') === 'Expedição B' && ex('DOCA 38') === 'Expedição C' && ex('DOCA 44') === 'Expedição C' &&
+    ex('Esteira 20') === 'Esteiras' && ex('SEM DOCA') === '' && ex('DOCA 30') === '' && ex('') === '',
+    'Expedição A = docas 05–14, B = 15–23, C = 38–44; esteira = Esteiras; sem doca = sem informação');
+  // Linha troncal × secundária (Falta de Bipagem no Recebimento). V4.25.1: secundária = só os pares das tabelas de 24/10;
+  // o resto é da troncal (principal). segMain só na troncal, segSub só na secundária.
+  const ln = c => { const x = CV5.segLineOf(c); return x.line + '|' + x.main + '|' + x.sub; };
+  const LN = {'GO,795-00,002': 'Troncal|GO|', 'PA,722-00,1': 'Troncal|PA|', 'RJ,314-00,1': 'Troncal|RJ|', 'SP,977-00,1': 'Troncal|SP|',
+    'BAU 484-00,200': 'Troncal|BAU|', 'GRU,391-18,1': 'Troncal|GRU|', 'GRU': 'Troncal|GRU|', 'SP,378-00,1': 'Troncal|SP|', '': '||',
+    'GRU,404-04,020': 'Secundária||GRU,404-04', 'GRU,404-11,1': 'Secundária||GRU,404-11', 'GRU,378-06,1': 'Secundária||GRU,378-06',
+    'SP,364-00,1': 'Secundária||SP,364-00', 'SP,430-09,1': 'Secundária||SP,430-09', 'MOO,430-02,1': 'Secundária||MOO,430-02', 'NOD,1': 'Secundária||NOD',
+    'VLANA': 'Secundária||VLANA', 'SBN,375-10,420': 'Secundária||SBN,375-10', 'SBN,375-11,1': 'Secundária||SBN,375-11', 'SP,402-01,1': 'Secundária||SP,402-01', 'GRU,402-04,1': 'Secundária||GRU,402-04',
+    'SP,395-06,1': 'Secundária||SP,395-06', 'GRU,381-21,1': 'Secundária||GRU,381-21', 'GRU,378-04,1': 'Secundária||GRU,378-04', 'SP,381-04,1': 'Secundária||SP,381-04'};
+  const lnWrong = Object.keys(LN).filter(k => ln(k) !== LN[k]).map(k => k + ' → ' + ln(k) + ' (esperado ' + LN[k] + ')');
+  check(!lnWrong.length, 'V4.25.1: linha secundária só com os pares das tabelas (GRU,404-04…); PA,722-00 e RJ,314-00 ficam na principal', lnWrong);
+  // Catálogo: gráficos e filtros pedidos.
+  const cat = k => cV.getPublicCatalog_().filter(x => x.key === k)[0];
+  const mr = cat('missing_receipt'), md = cat('missing_dispatch'), ws = cat('wrong_send'), se = cat('sorting_error'), dm = cat('damage');
+  check(mr.charts.map(c => c.key).join() === 'shift,segTrunk,segSecondary,client,interval' && mr.segLines === true &&
+    mr.filters.map(f => f.key).join() === 'shift,login,interval,client,destination,segMain,segSub' &&
+    mr.filters.find(f => f.key === 'segMain').label.pt === 'Segmentos Principais' && mr.filters.find(f => f.key === 'segSub').label.pt === 'Segmentos Secundários' &&
+    cV.clientFields_(cV.getIndicatorConfig_('missing_receipt')).indexOf('segmentFull') >= 0 && cV.clientFields_(cV.getIndicatorConfig_('missing_receipt')).indexOf('segLine') < 0,
+    'Falta de Bipagem no Recebimento: sem logins e destinos; segmentos em linha troncal e secundária; filtros Segmentos Principais e Secundários', mr.charts.map(c => c.key));
+  check(ws.charts.some(c => c.key === 'expedition') && ws.filters.some(f => f.key === 'expedition') && ws.expeditions && md.expeditions &&
+    md.charts.some(c => c.key === 'expedition') && ws.filters.find(f => f.key === 'expedition').label.pt === 'Expedição',
+    'Envio Errado e Falta de Bipagem na Expedição: gráfico "Expedições ofensoras" e filtro Expedição');
+  check(se.naLabel.text.pt === 'VOLUMOSOS' && se.naLabel.fields.join() === 'lot' && cV.reportValue_(cV.getIndicatorConfig_('sorting_error'), 'lot', '') === 'VOLUMOSOS' &&
+    cV.reportValue_(cV.getIndicatorConfig_('sorting_error'), 'offenderBase', '') !== 'VOLUMOSOS',
+    'Triagem Errada: lote sem numeração = VOLUMOSOS (tela e relatório)');
+  check(dm.goal.value === 120 && dm.goal.unit === 'ppm', 'Avaria: meta 120 ppm');
+  // V4.25.2 (pedido): o cartão "Sobre o indicador" saiu de todos os painéis.
+  check(cV.getPublicCatalog_().every(x => x.about === undefined), 'V4.25.2: sem a explicação do indicador no catálogo');
+  // Página: sem o aviso do Maomao e sem o cartão "Sobre o indicador" (V4.25.2).
+  const fsV = require('fs'), pathV = require('path');
+  const idx = fsV.readFileSync(pathV.join(__dirname, '..', 'Index.html'), 'utf8'), cli = fsV.readFileSync(pathV.join(__dirname, '..', 'Client.html'), 'utf8');
+  check(idx.indexOf('targetBanner') < 0 && idx.indexOf("include('Mascot')") < 0 && idx.indexOf('aboutCard') < 0 && cli.indexOf('renderAbout') < 0 &&
+    cli.indexOf('renderTarget') < 0, 'aviso "Fora da meta" do Maomao e cartão "Sobre o indicador" fora de todos os painéis');
+  // Dados de ponta a ponta: Recebimento com o código completo gravado; Expedição filtrada por Expedição B.
+  const DN = cV.addDaysIso_(cV.isoToday_(), -2), dd = {};
+  dd[DN] = makeDay(DN, 9);
+  dd[DN].mr = [['GO,795-00,002', 'T1'], ['GRU,404-04,020', 'T1'], ['GRU,404-04,021', 'T2'], ['SP,402-01,1', 'T2'], ['SP,977-00,1', 'T3'], ['MG,330-00,1', 'T1']]
+    .map((x, i) => ({billcode: 'TST' + i, threeSegmentCode: x[0], loadPackageTime: DN + ' ' + {T1: '08', T2: '15', T3: '23'}[x[1]] + ':00:00',
+      nextStop: 'SP BRE', loadPackageEmp: 'OPERADOR FICTICIO 01', customerName: 'CLIENTE TESTE'}));
+  // O dia do teste é "hoje − 2": AM fica na Expedição B antes (SP BRE, 21/22) e depois de 16/11 (AM MAO, 20); a esteira do GRU 404-04 muda em 16/11.
+  const estE = DN >= '2026-11-16' ? 'Esteira 19' : 'Esteira 20';
+  dd[DN].md = [['GO,1', 'DOCA 05'], ['SP,977-00,1', 'DOCA 21/22'], ['AM,1', 'DOCA 20'], ['DF,1', 'DOCA 38'], ['GRU,404-04,1', estE]]
+    .map((x, i) => ({billcode: 'TSD' + i, threeSegmentCode: x[0], unloadArriveTime: DN + ' 10:00:00', unloadPackageEmp: 'OPERADOR FICTICIO 02',
+      customerName: 'CLIENTE TESTE', arriveOrder: 'TESTE-1', nextStop: ''}));
+  const cE = freshCtx(dd, {}, {DATA_START_DATE: DN});
+  cE.queueHistory(DN, DN, true);
+  runAll(cE);
+  const catE = k => cE.getPublicCatalog_().filter(x => x.key === k)[0];
+  const rowsR = CV5.applyV425(CV5.decodeDataset(cE.getDashboardData('missing_receipt', {from: DN, to: DN}).dataset), catE('missing_receipt'));
+  const trunk = CV5.buildChart(catE('missing_receipt').charts[1], rowsR), sec = CV5.buildChart(catE('missing_receipt').charts[2], rowsR);
+  const fac = CV5.facets(rowsR, {}, ['segMain', 'segSub']), vals = k => fac[k].map(o => o.value).filter(v => v !== 'N/A').sort().join();
+  check(vals('segMain') === 'GO,MG,SP' && vals('segSub') === 'GRU,404-04,SP,402-01' && catE('missing_receipt').hideNAFilters.join() === 'segMain,segSub',
+    'V4.25.1: filtro Segmentos Secundários só com os pares das tabelas; Segmentos Principais só com a troncal (sem "Sem informação")',
+    {main: vals('segMain'), sub: vals('segSub')});
+  check(trunk.total === 3 && trunk.labels.join() === 'GO,MG,SP' && sec.total === 3 && sec.labels.join() === 'GRU,404-04,SP,402-01' && sec.datasets[0].data.join() === '2,1',
+    'gráficos de segmentos: linha troncal (GO, MG, SP) e linha secundária (GRU,404-04 = 2; SP,402-01 = 1), cada um com o total da sua linha',
+    {trunk: trunk.labels, sec: sec.labels});
+  const compR = cE.computeDashboard_('missing_receipt', {from: DN, to: DN, filters: {segSub: ['GRU,404-04']}});
+  const compD = cE.computeDashboard_('missing_dispatch', {from: DN, to: DN, filters: {expedition: ['Expedição B']}});
+  const rowsD = CV5.applyV425(CV5.applyDocks(CV5.decodeDataset(cE.getDashboardData('missing_dispatch', {from: DN, to: DN}).dataset), catE('missing_dispatch').docks), catE('missing_dispatch'));
+  const byExp = cnt => rowsD.filter(r => r.expedition === cnt).length;
+  check(compR.rows.length === 2 && compR.rows.every(r => r.segSub === 'GRU,404-04') && compD.rows.length === 2 && compD.rows.every(r => r.expedition === 'Expedição B') &&
+    byExp('Expedição A') === 1 && byExp('Expedição C') === 1 && byExp('Esteiras') === 1 && rowsD.find(r => r.shipment === 'TSD4').dock === estE,
+    'filtros novos no servidor (relatório): Segmentos Secundários e Expedição; doca → Expedição A/B/C e Esteiras', rowsD.map(r => r.dock + '→' + r.expedition));
+  // Atualização: o Recebimento baixa de novo os últimos 31 dias uma vez (para guardar o 2º segmento).
+  delete cE.__state.props.MIGRATION_V425;
+  const nM = cE.migrateToV425_(), againM = cE.migrateToV425_();
+  check(nM >= 1 && againM === 0 && cE.allTabRows_('JOBS').some(r => r[1] === 'DETAIL_INIT' && r[2] === 'missing_receipt' && r[5] === 'PENDING'),
+    'V4.25: a Falta de Bipagem no Recebimento é baixada de novo uma vez (2º segmento)', {nM, againM});
+}
+
+// ---------- V4.20: Deslacre pela Data inicial — dias gravados antes (Data final) são refeitos uma vez ----------
+{
+  const vmD = require('vm');
+  const DD = '2026-09-19', dD = {'2026-09-18': makeDay('2026-09-18', 51), [DD]: makeDay(DD, 52)};
+  const cD = freshCtx(dD);
+  cD.queueHistory('2026-09-18', DD, true);
+  runAll(cD);
+  const fieldsD = vmD.runInContext('STORE_FIELDS_.concat(UNSEAL_FIELDS_)', cD);
+  // Como um dia gravado na V4.19: sem o campo timing e com o tempo de antes (aqui, 999).
+  const old = cD.fileRows_(cD.loadDetailFile_(cD.dayFilesMap_('unseal', DD, DD)[DD].fileId)).map(r => Object.assign({}, r, {timing: '', minutes: r.unlockTime ? '999' : ''}));
+  cD.saveDayDataset_('unseal', DD, cD.encodeDayFile_(old, fieldsD), 1, old.length);
+  const before = cD.__state.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url)).length;
+  const nMig = cD.migrateToV420_(), again = cD.migrateToV420_();
+  runAll(cD);
+  const rowsD = cD.getArchivedRange_('unseal', DD, DD).rows, withUnlock = rowsD.filter(r => r.unlockTime).length;
+  const after = cD.__state.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url)).length;
+  check(nMig > 0 && again === 0 && after - before >= withUnlock && rowsD.every(r => r.minutes !== '999') &&
+    rowsD.filter(r => r.unlockTime).every(r => r.timing === 'inicio') && cD.getRateDay_('unseal', DD).metrics.medianMin !== 999,
+    'V4.20: uma vez, os dias do Deslacre gravados pela Data final são refeitos (Registros consultados de novo, tempo pela Data inicial)',
+    {nMig, again, consultas: after - before, withUnlock});
+  // Só a linha "Bipe de descarregamento" da SP GRU conta: pelo código e, sem ele, pelo nome do site.
+  const cfgD = cD.getIndicatorConfig_('unseal');
+  const tm = cD.unsealTiming_(cfgD, '2026-09-19 10:00:00', [
+    {loadingTypeName: '1', scanNetworkName: 'SP GRU', scanStartTime: '2026-09-19 08:00:00', scanEndTime: '2026-09-19 09:00:00'},
+    {loadingTypeName: '2', scanNetworkName: 'PR SJS', scanStartTime: '2026-09-19 10:05:00', scanEndTime: '2026-09-19 10:30:00'},
+    {loadingTypeName: '2', scanNetworkName: 'SP GRU', scanStartTime: '2026-09-19 10:40:00', scanEndTime: '2026-09-19 15:11:19'}]);
+  check(tm.minutes === '40' && tm.end === '2026-09-19 10:40:00' && tm.unloads === '1',
+    'tempo do ID = Data inicial do Bipe de descarregamento da SP GRU − deslacre (sem a linha de outra base nem a de carregamento)', tm);
+}
+
+// ---------- V4.22: Produção do Sorter (monitor do sorter da base, gravado como os painéis do JMS) ----------
+{
+  const {createFakeSorter, dayTotals, feederTotals, hourRow} = require('./sorter_falso');
+  const DS = '2026-10-31', DS2 = '2026-11-01';
+  const TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: '_token=copiado-do-navegador&device_id=3'});
+  const sorterCtx = (props, fakeOpts) => {
+    const site = createFakeSorter(fakeOpts), jmsF = fakeJms({});
+    const c = createContext({props: Object.assign({DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home', SORTER_MAX_BALANCAS: '15', SORTER_TROCA_A: TROCA_A}, props || {}),
+      jms: (url, req, state) => (/^http:\/\/sorter\.falso/.test(url) ? site.fetchMock(url, req) : jmsF(url, req, state)), quiet: true});
+    c.setupProject();
+    return {c, site};
+  };
+  const {c: cS, site: siteS} = sorterCtx();
+  const A = dayTotals('A', DS), B = dayTotals('B', DS);
+  // Sem AuthToken do JMS: o projeto só com o Sorter baixa o histórico (o JMS não é consultado).
+  const histS = cS.startFullHistory();
+  runAll(cS);
+  const st = cS.getDayStatus_('sorter_flow', DS), rate = cS.getRateDay_('sorter_flow', DS);
+  check(histS.ok && st.summary === 'COMPLETE' && st.details === 'COMPLETE' && cS.__state.fetches.length === 0,
+    'Sorter: Baixar histórico sem AuthToken do JMS (nenhuma consulta ao JMS)', {st, jms: cS.__state.fetches.length});
+  check(rate.totalCount === A.total + B.total && rate.errorCount === A.noInfo + B.noInfo && rate.metrics.sortTotalA === A.total &&
+    rate.metrics.sortTotalB === B.total && rate.metrics.validTotal === A.valid + B.valid && rate.metrics.abnormal === A.abnormal + B.abnormal &&
+    Math.abs(rate.rate - (A.noInfo + B.noInfo) / (A.total + B.total) * 100) < 1e-9,
+    'Sorter: resumo do dia = Sorter A + Sorter B (Sort total, Valid total, No Sort Code, Anormais)', {rate, A, B});
+  // A troca leva o _token da sessão (o copiado do navegador é trocado; o site falso recusa outro com 419).
+  check(siteS.log.some(x => x.method === 'POST' && x.path === '/home/switchDevice') && siteS.log.some(x => x.path === '/statis/summary.data' && x.device === 'A'),
+    'Sorter: troca para o Sorter A com o _token da sessão (lido da página)');
+  const rowsS = cS.getArchivedRange_('sorter_flow', DS, DS).rows;
+  const sumOf = (col, f) => rowsS.filter(r => r.column === col && (!f || f(r))).reduce((a, r) => a + Number(r.qty), 0);
+  check(sumOf('Sort total') === A.total + B.total && sumOf('Valid total') === A.valid + B.valid && sumOf('No Sort Code') === A.noInfo + B.noInfo &&
+    sumOf('Anormais') === A.abnormal + B.abnormal && sumOf('Sort total', r => r.sorter === 'Sorter A') === A.total &&
+    sumOf('Layer1 total') + sumOf('Layer2 total') + sumOf('Layer3 total') === A.total + B.total,
+    'Sorter: linhas do dia (hora × balança × sorter) somam o resumo em cada número da tela', {st: sumOf('Sort total'), A, B});
+  // V4.22.8: a quantidade de cada balança vem da tela "feeder feed quantity" (lista Alimentação); os totais não têm balança.
+  const fA = feederTotals('A', DS), fB = feederTotals('B', DS);
+  const feedOk = Object.keys(fA).every(n => sumOf('Alimentação', r => r.sorter === 'Sorter A' && r.induction === 'Balança ' + String(n).padStart(2, '0')) === fA[n] &&
+    sumOf('Alimentação', r => r.sorter === 'Sorter B' && r.induction === 'Balança ' + String(n).padStart(2, '0')) === fB[n]);
+  check(feedOk && !rowsS.some(r => r.induction === 'Balança 13' || r.induction === 'Balança 14') &&
+    rowsS.filter(r => r.column !== 'Alimentação').every(r => !r.induction || r.induction === 'N/A') &&
+    rowsS.every(r => /^(T[123])$/.test(r.shift) && /^\d{2}h - \d{2}h$/.test(r.interval)),
+    'Sorter: quantidade por balança pela tela "feeder feed quantity" (total_1…; nulas ficam de fora); turno e horário de cada hora',
+    {a1: sumOf('Alimentação', r => r.sorter === 'Sorter A' && r.induction === 'Balança 01'), fA1: fA[1]});
+  // Painel: cartões e gráficos (evolução por hora em ordem, 24 horas; motivos; balanças sem o N/A).
+  const dS = cS.getDashboardData('sorter_flow', {from: DS, to: DS, filters: {}});
+  const cfgS = cS.getIndicatorConfig_('sorter_flow'), chDefS = k => cfgS.charts.filter(x => x.key === k)[0];
+  const rowsD = cS.JTCore_.decodeDataset(dS.dataset || dS.rows);
+  const hourCh = cS.JTCore_.buildChart(chDefS('byHour'), rowsD, {}), indCh = cS.JTCore_.buildChart(chDefS('topInd'), rowsD, {});
+  const reasonCh = cS.JTCore_.buildChart(chDefS('reasons'), rowsD, {});
+  check(hourCh.labels.length === 24 && hourCh.labels[0] === '00h - 01h' && hourCh.labels[23] === '23h - 00h' && hourCh.datasets[0].data[4] === 0 &&
+    hourCh.datasets[0].data.reduce((a, v) => a + v, 0) === A.total + B.total && indCh.labels.indexOf('N/A') < 0 && indCh.labels.length === 10 &&
+    reasonCh.labels.every(l => ['No Sort Code', 'No plan', 'Chute', 'Intercept', 'No Read', 'Multi', 'Outros'].indexOf(l) >= 0) &&
+    reasonCh.total === A.abnormal + B.abnormal,
+    'Sorter: gráficos — evolução por hora (24 h em ordem), top 10 balanças sem o N/A, motivos de falha = Anormais',
+    {h: hourCh.labels.slice(0, 3), ind: indCh.labels, r: reasonCh.labels, rt: reasonCh.total});
+  // V4.22.8: o filtro de balança vale só para a quantidade alimentada (filterScopes): o Sort total do sorter não some.
+  cS.JTCore_.setFilterScopes(cfgS.filterScopes);
+  const fRows = cS.JTCore_.applyFilters(rowsD, {induction: ['Balança 01']});
+  const fSum = col => fRows.filter(r => r.column === col).reduce((x, r) => x + Number(r.qty), 0);
+  check(fSum('Sort total') === A.total + B.total && fSum('Alimentação') === fA[1] + fB[1],
+    'Sorter: filtro de balança só na quantidade alimentada (os totais do sorter continuam)', {st: fSum('Sort total'), al: fSum('Alimentação')});
+  cS.JTCore_.setFilterScopes({});
+  // Período grande (totais no servidor): mesmos totais por balança.
+  cS.__state.props.GROUPED_CLIENT_ROWS = '10';
+  const dSum = cS.getDashboardData('sorter_flow', {from: DS, to: DS, filters: {sorter: ['Sorter A']}});
+  delete cS.__state.props.GROUPED_CLIENT_ROWS;
+  const mSum = cS.JTCore_.marginalsByDim(dSum.summary.marginals);
+  const indSum = cS.JTCore_.buildChart(chDefS('topInd'), cS.JTCore_.summaryChartRows(chDefS('topInd'), mSum, {sorter: ['Sorter A']}), {});
+  const indRow = cS.JTCore_.buildChart(chDefS('topInd'), rowsD.filter(r => r.sorter === 'Sorter A'), {});
+  check(dSum.summary && indSum.total === indRow.total && indSum.labels.join() === indRow.labels.join(),
+    'Sorter: período grande com filtro de sorter (totais no servidor) = os mesmos números', {s: indSum.total, r: indRow.total});
+  // Catálogo: separado, com a tabela por horário e a fonte "sorter" (a tela troca "JMS" por "sorter").
+  const catS = cS.getPublicCatalog_()[0];
+  check(catS.key === 'sorter_flow' && catS.crossTables[0].rowDim === 'interval' && catS.source.pt === 'sorter' &&
+    catS.filters.map(f => f.key).join() === 'sorter,induction,shift,interval',
+    'Sorter: catálogo com filtros (sorter, balança, turno, horário), tabela por horário e a fonte "sorter"');
+
+  // Sem a troca do Sorter A (e o site sem jeito de trocar): só o B é lido, com aviso no LOG (uma vez por dia).
+  const {c: cB} = sorterCtx({SORTER_TROCA_A: ''}, {modo: 'nenhum'});
+  cB.queueHistory(DS, DS2, true);
+  runAll(cB);
+  const warns = cB.allTabRows_('LOG').filter(r => /Sorter A fora da leitura/.test(String(r[4])));
+  check(cB.getRateDay_('sorter_flow', DS).totalCount === B.total && cB.getRateDay_('sorter_flow', DS).metrics.sortTotalA === null && warns.length === 1,
+    'Sorter: sem a troca do Sorter A, lê só o B e avisa uma vez', {t: cB.getRateDay_('sorter_flow', DS).totalCount, B: B.total, warns: warns.length});
+  // Troca que não troca (device errado): os dois sorters com os mesmos números — o dia não é gravado e o erro diz o motivo.
+  const {c: cE} = sorterCtx({SORTER_TROCA_A: JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: 'device_id=9'})});
+  cE.queueHistory(DS, DS, true);
+  runAll(cE);
+  const stE = cE.getDayStatus_('sorter_flow', DS);
+  check(stE.summary !== 'COMPLETE' && /mesmos números: a troca de sorter não funcionou/.test(stE.error) && !cE.getRateDay_('sorter_flow', DS),
+    'Sorter: troca que não troca nada não grava o dia (o mesmo sorter somado duas vezes)', stE);
+  // Sorter fora do ar: erro claro (sem pausar a fila como credencial).
+  const {c: cD} = sorterCtx({}, {down: true});
+  cD.queueHistory(DS, DS, true);
+  runAll(cD);
+  const stD = cD.getDayStatus_('sorter_flow', DS);
+  check(/O sorter respondeu código 500/.test(stD.error) && cD.errorKind_(stD.error) === 'OTHER', 'Sorter: site fora do ar — erro claro, nova tentativa', stD.error);
+  // V4.22.1: sem SORTER_TROCA_A, o painel descobre sozinho como o site troca para o Sorter A e grava (auto).
+  const {c: cP} = sorterCtx({SORTER_TROCA_A: ''});
+  cP.queueHistory(DS, DS, true);
+  runAll(cP);
+  const trP = JSON.parse(cP.__state.props.SORTER_TROCA_A || '{}');
+  check(cP.getRateDay_('sorter_flow', DS).totalCount === A.total + B.total && trP.auto === true && trP.caminho === '/home/switchDevice' &&
+    trP.corpo === 'device_id=3' && cP.allTabRows_('LOG').some(r => /troca descoberta sozinha/.test(String(r[4]))),
+    'Sorter A: troca descoberta sozinha (pedido no script da página) e o dia com A + B', trP);
+  const discover = modo => {
+    const {c, site} = sorterCtx({SORTER_TROCA_A: ''}, {modo});
+    return {d: c.diagnosticarSorter(), c, site};
+  };
+  const dJs = discover('js'), dCk = discover('cookie'), dGl = discover('global'), dXa = discover('xadmin');
+  // V4.22.3: o site real (HTML do usuário): "switch device" abre a janela /dbselectview?from=top; o botão (data-connectionname DB2 = A)
+  // vai para o campo oculto "selecteddb" e o $.ajax manda POST /dbselect {_token, selecteddb}; a página fica "(A套)".
+  const trX = JSON.parse(dXa.c.__state.props.SORTER_TROCA_A || '{}');
+  check(trX.metodo === 'POST' && trX.caminho === '/dbselect' && trX.corpo === 'selecteddb=DB2' && trX.pagina === '/dbselectview?from=top' &&
+    dXa.d.sorters[1].hoje.sortTotal === dayTotals('A', dXa.c.isoToday_()).total && /\(A套\)/.test(dXa.d.sorters[1].pagina) && /\(B套\)/.test(dXa.d.sorters[0].pagina) &&
+    dXa.d.sorters[1].descoberta.some(l => /janela \/dbselectview\?from=top: lida/.test(l)) &&
+    dXa.d.sorters[1].descoberta.some(l => /connectionname=DB2 \[atributo data-connectionname\]/.test(l)) &&
+    dXa.d.sorters[1].descoberta.some(l => /✓ POST \/dbselect \(selecteddb=DB2\).*\(A套\)/.test(l)) && !dXa.site.log.some(x => x.method === 'GET' && x.path === '/dbselect'),
+    'Sorter A: troca do site real descoberta (janela /dbselectview, botão DB2 → selecteddb, POST /dbselect; página "(A套)")', {trX, rel: dXa.d.sorters[1].descoberta});
+  const dXo = discover('xadmin-oculto'), trO = JSON.parse(dXo.c.__state.props.SORTER_TROCA_A || '{}');
+  check(trO.caminho === '/dbselect' && trO.corpo === 'selecteddb=DB2' && dXo.d.sorters[1].hoje.sortTotal === dayTotals('A', dXo.c.isoToday_()).total,
+    'Sorter A: só pelo formulário (action /dbselect, campo oculto vazio selecteddb), sem o script', trO);
+  // Troca descoberta que parou de valer (A e B iguais): esquecida, para ser descoberta de novo.
+  cP.__state.props.SORTER_TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/home/switchDevice', corpo: 'device_id=9', auto: true});
+  cP.queueHistory(DS2, DS2, true);
+  runAll(cP);
+  const A2 = dayTotals('A', DS2), B2 = dayTotals('B', DS2), trP2 = JSON.parse(cP.__state.props.SORTER_TROCA_A || '{}');
+  check(cP.getRateDay_('sorter_flow', DS2).totalCount === A2.total + B2.total && trP2.corpo === 'device_id=3' && trP2.auto === true &&
+    cP.allTabRows_('LOG').some(r => /mesmos números/.test(String(r[4]))),
+    'Sorter A: troca descoberta que parou de valer é esquecida e descoberta de novo na próxima tentativa (o dia fica certo)', trP2);
+  // V4.22.7 (PDF "ALTERAÇÃO NO DASH SORTER"): as 40 balanças vinham com o total do sorter (o site devolve o total para um número de
+  // balança que não vale para ele) e o painel somava 40 vezes; A e B podiam estar trocados.
+  const runS = (fakeOpts, props) => {
+    const {c, site} = sorterCtx(Object.assign({SORTER_TROCA_A: '', SORTER_MAX_BALANCAS: '40'}, props || {}), Object.assign({modo: 'xadmin'}, fakeOpts));
+    c.queueHistory(DS, DS, true);
+    runAll(c);
+    const rows = c.getArchivedRange_('sorter_flow', DS, DS).rows;
+    const sum = (col, f) => rows.filter(r => r.column === col && (!f || f(r))).reduce((x, r) => x + Number(r.qty), 0);
+    return {c, site, rows, sum, rate: c.getRateDay_('sorter_flow', DS), logs: c.allTabRows_('LOG').map(r => String(r[4]))};
+  };
+  const kL = runS({codigos: true}), kN = runS({semOutlets: true}), kA = runS({padraoA: true});
+  check(kL.sum('Sort total') === A.total + B.total && kL.sum('Alimentação') === Object.values(fA).concat(Object.values(fB)).reduce((x, v) => x + v, 0) &&
+    kL.rows.some(r => r.induction === 'Balança 12') && !kL.rows.some(r => r.column !== 'Alimentação' && /^Balança/.test(r.induction)),
+    'Sorter: os números 1…40 do summary.data não são mais usados: Sort total certo (não 40 vezes) e as balanças pela tela feeder feed quantity',
+    {total: kL.sum('Sort total'), esperado: A.total + B.total});
+  check(kN.sum('Sort total') === A.total + B.total && !kN.rows.some(r => r.column === 'Alimentação') &&
+    kN.c.getDayStatus_('sorter_flow', DS).details === 'COMPLETE' && kN.logs.some(l => /Quantidade por balança \(feeder feed quantity\) — os totais do sorter estão certos: .*código 500/.test(l)),
+    'Sorter: sem a tela feeder feed quantity, o dia fica com os totais (aviso no LOG)', {total: kN.sum('Sort total')});
+  // V4.22.9: o horário da tela "feeder feed quantity" em outros formatos não apaga as balanças (antes ficavam vazias); a linha
+  // "Total" não é somada.
+  const feedAll = Object.values(fA).concat(Object.values(fB)).reduce((x, v) => x + v, 0);
+  const hCurto = runS({horario: 'curto', linhaTotal: true}), hSem = runS({horario: 'semZero'}), hEst = runS({horario: 'estranho'});
+  const h7 = k => k.sum('Alimentação', r => r.interval === '07h - 08h');
+  const want7 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].reduce((x, n) => x + ['A', 'B'].reduce((y, dv) => y + ((hourRow(dv, DS, n, 7) || {}).sorter_sorttotal || 0), 0), 0);
+  check([hCurto, hSem, hEst].every(k => k.sum('Alimentação') === feedAll) && [hCurto, hSem, hEst].every(k => h7(k) === want7) &&
+    hEst.logs.some(l => /formato desconhecido \(ex\.: "Período 1"\), lido pela ordem das linhas/.test(l)) && !hCurto.logs.some(l => /formato desconhecido/.test(l)),
+    'Sorter: horário da tela feeder feed quantity em outros formatos ("07:00", "2026-11-4 7:00", desconhecido) — as balanças aparecem, sem somar a linha Total',
+    {curto: hCurto.sum('Alimentação'), sem: hSem.sum('Alimentação'), est: hEst.sum('Alimentação'), feedAll, h7: [h7(hCurto), h7(hSem), h7(hEst)], want7});
+  // V4.22.11 (print do usuário: "Sorter B 1.122.969" no filtro): o número de cada opção do filtro é o Sort total, não a soma de
+  // todos os números da tela (Sort total + Valid total + andares + balanças…); o filtro de balança conta a quantidade alimentada.
+  const Cf = cS.JTCore_;
+  Cf.setFilterScopes(cfgS.filterScopes); Cf.setFacetColumns(cfgS.facetColumns);
+  const fc = Cf.facets(rowsD, {}, ['sorter', 'induction', 'shift']), optOf = (k, v) => (fc[k].filter(o => o.value === v)[0] || {});
+  const fcA = Cf.facets(rowsD, {sorter: ['Sorter A']}, ['shift']);
+  check(optOf('sorter', 'Sorter A').total === A.total && optOf('sorter', 'Sorter B').total === B.total &&
+    optOf('induction', 'Balança 01').total === fA[1] + fB[1] && fc.shift.reduce((a, o) => a + o.total, 0) === A.total + B.total &&
+    fcA.shift.reduce((a, o) => a + o.count, 0) === A.total,
+    'Sorter: o número ao lado de cada opção do filtro é o Sort total (não a soma de todos os números da tela)',
+    {A: optOf('sorter', 'Sorter A'), B: optOf('sorter', 'Sorter B'), want: [A.total, B.total]});
+  // V4.22.12 (pedido "quando troco os filtros, cartões e gráficos ficam fixos"): com o filtro de balança, os gráficos por hora,
+  // turno e sorter usam a quantidade alimentada (o site não dá o Sort total por balança); sem ele, o Sort total.
+  const fB1 = {induction: ['Balança 01']}, bh = Cf.chartDefFor(chDefS('byHour'), fB1), bh0 = Cf.chartDefFor(chDefS('byHour'), {sorter: ['Sorter A']});
+  const chB1 = Cf.buildChart(bh, Cf.applyFilters(rowsD, fB1), {});
+  check(bh.where.column === 'Alimentação' && /alimentada/.test(bh.title.pt) && bh0.where.column === 'Sort total' && chB1.total === fA[1] + fB[1] &&
+    ['shiftPie', 'bySorter'].every(k => Cf.chartDefFor(chDefS(k), fB1).where.column === 'Alimentação') && cfgS.scopeNotes && cfgS.scopeNotes.induction &&
+    cfgS.heroMetric.byFilter.induction.column === 'Alimentação',
+    'Sorter: com o filtro de balança, os gráficos por hora/turno/sorter mostram a quantidade alimentada (e o aviso explica)', {total: chB1.total, want: fA[1] + fB[1]});
+  // V4.22.13: com o filtro de balança, as listas dos outros filtros contam a quantidade alimentada (como os gráficos).
+  Cf.setFacetColumns(cfgS.facetByFilter.induction);
+  const fcB = Cf.facets(rowsD, fB1, ['sorter']), oB = v => (fcB.sorter.filter(o => o.value === v)[0] || {}).count;
+  check(oB('Sorter A') === fA[1] && oB('Sorter B') === fB[1], 'Sorter: com o filtro de balança, a lista de sorters bate com o gráfico (quantidade alimentada)',
+    {a: oB('Sorter A'), fA1: fA[1], b: oB('Sorter B'), fB1: fB[1]});
+  // A lista do dia é refeita junto com o resumo (cartões, filtros e gráficos do mesmo momento), mesmo logo depois da última.
+  const stS = cS.getDayStatus_('sorter_flow', DS);
+  check(cS.detailNeedsRefresh_('sorter_flow', DS, {errorCount: 1, totalCount: 1}, {errorCount: 2, totalCount: 5}, stS, false) === true &&
+    cS.detailNeedsRefresh_('sorter_flow', DS, {errorCount: 2, totalCount: 5}, {errorCount: 2, totalCount: 5}, stS, false) === false,
+    'Sorter: a lista do dia acompanha o resumo (sem esperar 1 h), e não é refeita se nada mudou', stS);
+  // V4.23.1 (pedido "Eliminar Tabela de remessas"): a Produção do Sorter sem a tabela de remessas; os outros painéis continuam com ela.
+  const catHT = cS.getAppBootstrap().catalog || [];
+  check(cfgS.hideDetailTable === true && catHT.filter(x => x.key === 'sorter_flow').every(x => x.hideDetailTable === true) &&
+    (require('fs').readFileSync(require('path').join(__dirname, '..', 'Config.gs'), 'utf8').match(/^\s*hideDetailTable: true,/gm) || []).length === 1,
+    'Produção do Sorter sem a tabela de remessas (só ela)', {cfg: cfgS.hideDetailTable, cat: catHT.map(x => [x.key, x.hideDetailTable])});
+  // V4.23.3 (pedido "ao trocar os filtros, a Evolução diária deve mostrar o resultado do filtro"): a série do dia com o filtro.
+  const ds = (col, f) => cS.getDailySeries('sorter_flow', {from: DS, to: DS, column: col, filters: f}).values[DS];
+  const dsBad = (() => { try { cS.getDailySeries('sorter_flow', {from: DS, to: DS, column: 'Valid total', filters: {}}); return false; } catch (e) { return true; } })();
+  check(ds('Sort total', {}) === A.total + B.total && ds('Sort total', {sorter: ['Sorter A']}) === A.total &&
+    ds('Alimentação', {induction: ['Balança 01']}) === fA[1] + fB[1] && ds('Sort total', {shift: ['T1']}) === sumOf('Sort total', r => r.shift === 'T1') &&
+    dsBad && Cf.chartDefFor(chDefS('mDaily'), {induction: ['Balança 01']}).detail === 'Alimentação',
+    'Sorter: Evolução diária com filtro = a lista de cada dia com o filtro (sorter, turno; balança = quantidade alimentada)',
+    {all: ds('Sort total', {}), a: ds('Sort total', {sorter: ['Sorter A']}), b1: ds('Alimentação', {induction: ['Balança 01']})});
+  Cf.setFacetColumns(null);
+  const fcOld = Cf.facets(rowsD, {}, ['sorter']);
+  check(fcOld.sorter.filter(o => o.value === 'Sorter A')[0].total > A.total * 3, 'sem facetColumns, a lista soma todas as linhas (como nos outros painéis)');
+  Cf.setFilterScopes({});
+  const dgH = hSem.c.diagnosticarSorter().sorters[0];
+  check(dgH.telaBalancas && dgH.telaBalancas.linhas === 1 && /^\d{4}-\d{2}-\d{2} 00:00~\d{4}-\d{2}-\d{2} 23:59$/.test(dgH.telaBalancas.exemploHorario) &&
+    dgH.telaBalancas.linhasPorHora === 24 && dgH.telaBalancas.colunas === 14 && /^2026-\d+-\d+ \d+:00$/.test(dgH.telaBalancas.exemploHora) &&
+    dgH.hoje.balancas === 14 && dgH.hoje.alimentacao > 0, 'diagnosticarSorter mostra o que a tela feeder feed quantity devolveu (linhas, horário, colunas)', dgH.telaBalancas);
+  // V4.22.10 (print do usuário: a tela "no group by" mostra "2026-11-04 00:00~2026-11-04 23:59" e as balanças): o pedido igual ao
+  // da tela (data sem zero, sem page/limit) e, sem a quantidade por hora, o total do dia de cada balança (sem turno e horário).
+  const today = hSem.c.isoToday_(), siteDay = today.split('-').map(Number).join('-');
+  const outQ = hSem.site.log.filter(x => x.path === '/statis/outlets' && /start=/.test(x.query)).map(x => new URLSearchParams(x.query));
+  const dayQ = outQ.filter(q => q.get('start') === siteDay + ' 00:00:00' && q.get('end') === siteDay + ' 23:59:59');
+  check(dayQ.some(q => q.get('group') === '0' && q.get('page') === '1' && q.get('limit') === '10' && q.has('nc')) &&
+    dayQ.some(q => q.get('group') === '60') && outQ.every(q => q.has('nc')),
+    'Sorter: balanças com o pedido dos prints (data "' + siteDay + '", 00:00:00 → 23:59:59, no group by, page 1 / limit 10) e por hora',
+    outQ.map(q => q.toString()));
+  const sumQ = hSem.site.log.filter(x => x.path === '/statis/summary.data').map(x => new URLSearchParams(x.query));
+  check(sumQ.some(q => q.get('start') === siteDay + ' 00:00:00' && q.get('group') === '0' && q.get('inductionno') === '0' && q.get('layerno') === '0' &&
+    q.get('limit') === '10'), 'Sorter: total do dia com os filtros dos prints (no group by, Induction All, By Layer All)', sumQ.map(q => q.toString()));
+  const pVaz = runS({porHora: 'vazio'}), pErr = runS({porHora: 'erro'}), pIgn = runS({porHora: 'ignora'});
+  const diaOk = k => k.sum('Alimentação') === feedAll && k.rows.filter(r => r.column === 'Alimentação').every(r => r.shift === 'N/A' && r.interval === 'N/A') &&
+    k.sum('Sort total') === A.total + B.total && k.sum('Alimentação', r => r.induction === 'Balança 01') === fA[1] + fB[1];
+  check(diaOk(pVaz) && diaOk(pErr) && diaOk(pIgn),
+    'Sorter: sem a quantidade por hora (vazio, erro ou só o dia), as balanças aparecem com o total do dia (no group by)',
+    {vaz: pVaz.sum('Alimentação'), err: pErr.sum('Alimentação'), ign: pIgn.sum('Alimentação'), feedAll});
+  check(pVaz.logs.some(l => /sem a quantidade por hora \(por hora veio sem quantidade .*usei o total do dia de cada balança/.test(l)) &&
+    pErr.logs.some(l => /sem a quantidade por hora \(.*código 500.*usei o total do dia/.test(l)) &&
+    pIgn.logs.some(l => /por hora veio sem quantidade \(1 linha\(s\), ex\.: "\d{4}-\d{2}-\d{2} 00:00~\d{4}-\d{2}-\d{2} 23:59"\)/.test(l)) &&
+    !pIgn.rows.some(r => r.column === 'Alimentação' && r.interval === '00h - 01h'),
+    'Sorter: o dia inteiro ("00:00~23:59") não vai para a hora 0, e o LOG diz de onde veio', pIgn.logs.filter(l => /balança/i.test(l)));
+  const dgV = pVaz.c.diagnosticarSorter().sorters[0];
+  check(dgV.telaBalancas && dgV.telaBalancas.horas === 'dia inteiro' && /por hora veio sem quantidade/.test(dgV.telaBalancas.porHora) && dgV.hoje.alimentacao > 0,
+    'diagnosticarSorter mostra quando as balanças vieram do total do dia (e por quê)', dgV.telaBalancas);
+  const chV = cS.JTCore_.buildChart(chDefS('topInd'), pVaz.rows, {});
+  check(chV.total === feedAll && chV.labels.length === 10 && chV.labels.every(l => /^Balança \d{2}$/.test(l)),
+    'Sorter: o Top 10 balanças mostra o total do dia (sem turno)', {total: chV.total, labels: chV.labels});
+  // O total do dia sem agrupar (prints) manda: o que as horas não têm fica sem turno e horário, nos cartões e nas balanças.
+  const pX = runS({diaExtra: 7});
+  check(pX.rate.metrics.sortTotal === A.total + B.total + 14 && pX.rate.metrics.sortTotalA === A.total + 7 && pX.sum('Sort total') === A.total + B.total + 14 &&
+    pX.sum('Sort total', r => r.interval === 'N/A') === 14 && pX.sum('Sort total', r => r.interval !== 'N/A') === A.total + B.total &&
+    pX.sum('Alimentação', r => r.induction === 'Balança 01') === fA[1] + fB[1] + 14 &&
+    pX.sum('Alimentação', r => r.induction === 'Balança 01' && r.interval === 'N/A') === 14 && pX.sum('Alimentação') === feedAll + 14 &&
+    !pX.logs.some(l => /Quantidade por balança/.test(l)),
+    'Sorter: os números do dia são os da tela sem agrupar (prints); as horas dividem o dia e o resto fica sem horário',
+    {st: pX.rate.metrics.sortTotal, want: A.total + B.total + 14, b1: pX.sum('Alimentação', r => r.induction === 'Balança 01'), fb1: fA[1] + fB[1] + 14});
+  const dgX = pX.c.diagnosticarSorter().sorters[0];
+  check(dgX.hoje.sortTotal === dgX.hoje.somaDasHoras + 7 && dgX.telaBalancas.horas === 'hora' && dgX.telaBalancas.semHora === 7,
+    'diagnosticarSorter: hoje com os números da tela sem agrupar (como nos prints) e a soma das horas', dgX.hoje);
+  check(kA.rate.metrics.sortTotalA === A.total && kA.rate.metrics.sortTotalB === B.total && kA.sum('Sort total', r => r.sorter === 'Sorter A') === A.total &&
+    JSON.parse(kA.c.__state.props.SORTER_TROCA_A).corpo === 'selecteddb=DB2' && JSON.parse(kA.c.__state.props.SORTER_TROCA_B).corpo === 'selecteddb=DB1',
+    'Sorter: o site com o A como padrão — A (DB2) e B (DB1) escolhidos de propósito, sem trocar os números', kA.rate.metrics);
+  // Trocas configuradas invertidas (A = DB1, B = DB2): o título da página ("(A套)" / "(B套)") manda.
+  const pg = '/dbselectview?from=top';
+  const kT = runS({}, {SORTER_TROCA_A: JSON.stringify({metodo: 'POST', caminho: '/dbselect', corpo: 'selecteddb=DB1', pagina: pg}),
+    SORTER_TROCA_B: JSON.stringify({metodo: 'POST', caminho: '/dbselect', corpo: 'selecteddb=DB2', pagina: pg})});
+  check(kT.rate.metrics.sortTotalA === A.total && kT.rate.metrics.sortTotalB === B.total && kT.logs.some(l => /Os sorters estavam trocados/.test(l)),
+    'Sorter: sessões invertidas são corrigidas pelo nome que o site mostra (A套 / B套)', kT.rate.metrics);
+  // Uma vez: os dias já baixados entram na fila de novo e a troca antiga (só a do A) é esquecida.
+  kL.c.__state.props.SORTER_TROCA_A = JSON.stringify({metodo: 'POST', caminho: '/dbselect', corpo: 'selecteddb=DB2', auto: true});
+  delete kL.c.__state.props.SORTER_TROCA_B;
+  delete kL.c.__state.props.SORTER_DADOS_VERSAO;
+  const mig1 = kL.c.migrateSorterDados_(), mig2 = kL.c.migrateSorterDados_();
+  check(mig1 === 1 && mig2 === 0 && !kL.c.__state.props.SORTER_TROCA_A && kL.c.pendingJobs_().some(j => j.indicator === 'sorter_flow' && j.type === 'DETAIL_INIT' && j.date === DS),
+    'V4.22.7/V4.22.8: os dias da Produção do Sorter são baixados de novo, uma vez por versão (e a troca só do A é descoberta de novo)', {mig1, mig2});
+  const diag = cS.diagnosticarSorter();
+  check(diag.sorters.length === 2 && diag.sorters.every(x => x.hoje && x.hoje.sortTotal > 0) && !/tok\d+k|sess\d+x/.test(JSON.stringify(diag)) &&
+    diag.sorters[1].cookies.indexOf('laravel_session') >= 0, 'diagnosticarSorter: os dois sorters, sem mostrar token nem cookie (só os nomes)', diag);
+  // V4.23 (pedido "bot que avise no grupo do Feishu") + V4.23.5 ("tem que mandar em 1 hora, 1 hora: das 01h até 02h, os dados desse
+  // período"): às HH:05, os dados da hora que fechou direto do site (janela HH:00:00 → HH:59:59, "no group by") — Sort total (A + B),
+  // Valid total, No Sort Code, as balanças (3 que mais, 3 que menos e todas); no fim de cada turno, o total do turno.
+  {
+    const msgs = [];
+    let reply = {code: 0, msg: 'success'}, longe = false;
+    const siteF = createFakeSorter({modo: 'xadmin'}), jmsFF = fakeJms({});
+    const HOOK = 'https://open.feishu.cn/open-apis/bot/v2/hook/teste-falso', SEG = 'segredo-falso';
+    const cF = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home', FEISHU_WEBHOOK: HOOK, FEISHU_SEGREDO: SEG},
+    jms: (url, req, state) => {
+      if (url.indexOf('https://open.feishu.cn/') === 0) {
+        msgs.push(JSON.parse(req.payload));
+        const r = reply;
+        return {getResponseCode: () => 200, getContentText: () => JSON.stringify(r)};
+      }
+      if (/^http:\/\/sorter\.falso/.test(url)) {
+        if (longe) throw new Error('Exception: Address unavailable: http://sorter.falso');
+        return siteF.fetchMock(url, req);
+      }
+      return jmsFF(url, req, state);
+    }, quiet: true});
+    cF.setupProject();
+    const at = (h, m, d) => Date.parse((d || DS) + 'T' + String(h + 3).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':00Z');  // São Paulo = UTC-3
+    const tot = (h, d, f) => ['A', 'B'].reduce((a, dv) => a + ((hourRow(dv, d || DS, 0, h) || {})[f || 'sorter_sorttotal'] || 0), 0);
+    const early = cF.feishuSorterTick_(at(12, 3)), t1 = cF.feishuSorterTick_(at(12, 7)), t2 = cF.feishuSorterTick_(at(12, 20));
+    const m = msgs[0] || {}, text = JSON.stringify(m.card || {});
+    // A hora 11h–12h: só os números dessa hora.
+    const feeds = [];
+    ['A', 'B'].forEach(dv => { for (let n = 1; n <= 12; n++) feeds.push({name: 'Sorter ' + dv + ' · Balança ' + String(n).padStart(2, '0'), q: hourRow(dv, DS, n, 11).sorter_sorttotal}); });
+    feeds.sort((a, b) => b.q - a.q || (a.name < b.name ? -1 : 1));
+    const low = feeds.slice().sort((a, b) => a.q - b.q || (a.name < b.name ? -1 : 1));
+    const sign = require('crypto').createHmac('sha256', m.timestamp + '\n' + SEG).update('').digest('base64');
+    const hourQs = siteF.log.filter(x => /^\/statis\/(summary\.data|outlets)$/.test(x.path)).map(x => new URLSearchParams(x.query))
+      .filter(q => /11:00:00$/.test(q.get('start') || ''));
+    check(early === null && t1 && t1.ok && t2 === null && msgs.length === 1 && m.msg_type === 'interactive' && /11h–12h/.test(m.card.header.title.content) &&
+      text.indexOf('📦 **' + cF.feishuN_(tot(11)) + '** volumes') >= 0 && text.indexOf('✅ Deu certo (Valid total) / 有效: **' + cF.feishuN_(tot(11, DS, 'sorter_validtotal')) + '**') >= 0 &&
+      text.indexOf('无分拣码: **' + cF.feishuN_(tot(11, DS, 'sorter_noinfototal')) + '**') >= 0 && text.indexOf('🌅 Turno T1 (06h–14h)') >= 0 &&
+      text.indexOf('🥇 ' + feeds[0].name + ' / 供包台' + feeds[0].name.slice(-2) + ': **' + cF.feishuN_(feeds[0].q) + '**') >= 0 &&
+      text.indexOf('🔻 ' + low[0].name + ' / 供包台' + low[0].name.slice(-2) + ': **' + cF.feishuN_(low[0].q) + '**') >= 0 &&
+      text.indexOf('Fechamento do turno') < 0 && text.indexOf('11:00 às 11:59') >= 0 && m.sign === sign &&
+      hourQs.length >= 4 && hourQs.every(q => q.get('group') === '0' && /11:59:59$/.test(q.get('end'))),
+      'Bot do Feishu: às 12:07 manda só a hora 11h–12h (janela 11:00:00 → 11:59:59 no site, sem agrupar): Sort total, Valid, No Sort Code e balanças',
+      {early, t1, t2, n: msgs.length, tot: tot(11), top: feeds[0], low: low[0], text: text.slice(0, 700)});
+    // Todas as balanças de cada sorter na hora, em duas colunas (V4.23.2), "Balança / 供包台" (V4.23.4).
+    const fieldsOf = sn => ((m.card.elements || []).map((e, i, a) => (/Todas as balanças · /.test(JSON.stringify(e)) &&
+      JSON.stringify(e).indexOf(sn) >= 0 ? a[i + 1] : null)).filter(Boolean)[0] || {}).fields || [];
+    const cellOk = (fd, dv) => fd.length === 14 && fd.every((f, i) => f.is_short && f.text.content === 'Balança ' + String(i + 1).padStart(2, '0') + ' / 供包台' +
+      String(i + 1).padStart(2, '0') + ': ' + (i < 12 ? '**' + cF.feishuN_(hourRow(dv, DS, i + 1, 11).sorter_sorttotal) + '**' : '0'));
+    check(cellOk(fieldsOf('Sorter A'), 'A') && cellOk(fieldsOf('Sorter B'), 'B'),
+      'Bot do Feishu: todas as balanças de cada sorter na hora (as sem produção com 0)', fieldsOf('Sorter A').slice(0, 3));
+    // Fim do turno: às 14:07 (hora 13h–14h), o fechamento do T1; às 06:07, o do T3 (22h do dia anterior → 06h).
+    const t1Tot = [6, 7, 8, 9, 10, 11, 12, 13].reduce((a, h) => a + tot(h), 0);
+    cF.feishuSorterTick_(at(14, 7));
+    const mT1 = JSON.stringify((msgs[msgs.length - 1] || {}).card || {});
+    const D0 = DS, Dm1 = new Date(Date.parse(DS + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
+    cF.feishuSorterTick_(at(6, 56, D0));  // 05h–06h: sorter parado no simulado (hora vazia) — sai no minuto 55
+    const mT3 = JSON.stringify((msgs[msgs.length - 1] || {}).card || {}), t3Tot = tot(22, Dm1) + tot(23, Dm1) + [0, 1, 2, 3, 4, 5].reduce((a, h) => a + tot(h, D0), 0);
+    check(/13h–14h/.test(mT1) && mT1.indexOf('🏁 **Fechamento do turno T1 (06h–14h) / 班次结束**\\n📦 **' + cF.feishuN_(t1Tot) + '**') >= 0 &&
+      /05h–06h/.test(mT3) && mT3.indexOf('Fechamento do turno T3 (22h–06h) / 班次结束**\\n📦 **' + cF.feishuN_(t3Tot) + '**') >= 0,
+      'Bot do Feishu: no fim do turno, o total do turno (T1 às 14h; T3 das 22h do dia anterior às 06h)', {t1Tot, t3Tot});
+    reply = {code: 19021, msg: 'sign match fail or timestamp is not within one hour from current time'};
+    const bad = cF.testarFeishu(), bad1 = cF.feishuSorterTick_(at(15, 6)), bad2 = cF.feishuSorterTick_(at(15, 7)), bad3 = cF.feishuSorterTick_(at(15, 8));
+    const bad4 = cF.feishuSorterTick_(at(15, 9));
+    check(bad.ok === false && /assinatura não confere/.test(bad.erro) && bad1.ok === false && bad2.ok === false && bad3.ok === false && bad4 === null &&
+      cF.__state.props.FEISHU_ULTIMA === DS + ' 14' && cF.allTabRows_('LOG').some(r => /Bot do Feishu \(.* tentativa 3\)/.test(String(r[4]))),
+      'Bot do Feishu: recusa com dica (assinatura) e no máximo 3 tentativas por hora (aviso no LOG)', {bad, bad1, ultima: cF.__state.props.FEISHU_ULTIMA});
+    reply = {code: 0, msg: 'success'};
+    // Sem acesso ao sorter: UM aviso no grupo (não cartões com zero a cada hora); quando volta, o cartão diz que voltou.
+    longe = true;
+    const n0 = msgs.length;
+    [6, 7, 8].forEach(mi => cF.feishuSorterTick_(at(16, mi)));
+    [6, 7, 8].forEach(mi => cF.feishuSorterTick_(at(17, mi)));
+    const avisos = msgs.slice(n0);
+    longe = false;
+    cF.feishuSorterTick_(at(18, 6));
+    const back = JSON.stringify((msgs[msgs.length - 1] || {}).card || {});
+    check(avisos.length === 1 && /sem acesso ao sorter/.test(avisos[0].card.header.title.content) && /O acesso ao sorter voltou/.test(back) && /17h–18h/.test(back) &&
+      !cF.__state.props.FEISHU_FALHA, 'Bot do Feishu: sem acesso ao sorter, um aviso só; quando volta, segue com a hora', {avisos: avisos.length});
+    // V4.23.8 (pedido "quando o sorter não produzir nada, deixar zerado"): hora sem produção sai ZERADA (espera só até o minuto 15,
+    // caso o site ainda feche a hora): os dois sorters com 0, sem lista de balanças nem número de outro período.
+    const nV = msgs.length, w1 = cF.feishuSorterTick_(at(4, 7)), w2 = cF.feishuSorterTick_(at(4, 9)), w3 = cF.feishuSorterTick_(at(4, 13)),
+      w5 = cF.feishuSorterTick_(at(4, 16)), w4 = cF.feishuSorterTick_(at(4, 56));
+    const zc = JSON.stringify((msgs[nV] || {}).card || {});
+    check(w1 && w1.aguardando && w2 === null && w3 && w3.aguardando && w5 && w5.ok && w4 === null && msgs.length === nV + 1 &&
+      /03h–04h/.test(msgs[nV].card.header.title.content) && zc.indexOf('📦 **0** volumes (Sorter A 0 · Sorter B 0)') >= 0 &&
+      /Sem produção nesta hora/.test(zc) && zc.indexOf('Todas as balanças · Sorter A / 所有供包台** — 03h–04h: **0** (sem produção nesta hora') >= 0 &&
+      zc.indexOf('Todas as balanças · Sorter B / 所有供包台** — 03h–04h: **0**') >= 0 && !/供包台01: \*\*/.test(zc) && !/fields/.test(zc),
+      'Bot do Feishu: hora sem produção sai zerada (Sorter A 0 · Sorter B 0, sem números de outro período), no máximo no minuto 15', {w1, w2, w3, w5, w4, zc: zc.slice(0, 400)});
+    const ok = cF.testarFeishu(), js = JSON.stringify(ok);
+    check(ok.ok && /Mensagem enviada/.test(ok.enviado) && ok.numeros.maisProcessaram.length === 3 && ok.numeros.menosProcessaram.length === 3 &&
+      /:00:00 → .*:59:59$/.test(ok.periodo) && js.indexOf('teste-falso') < 0 && js.indexOf(SEG) < 0,
+      'testarFeishu: manda a última hora e mostra o período e os números, sem o webhook nem o segredo', ok);
+    delete cF.__state.props.FEISHU_WEBHOOK;
+    const nMsgs = msgs.length;
+    check(cF.feishuSorterTick_(at(19, 10)) === null && msgs.length === nMsgs && cF.testarFeishu().ok === false, 'Bot do Feishu: sem webhook, nada é enviado');
+  }
+  // V4.23.8: o bot mostra exatamente o que o site mostra na janela da hora — site zerado (nenhuma linha ou linha com nulos) = cartão
+  // zerado, sem buscar números de outra consulta; e um sorter parado na hora aparece com 0 enquanto o outro mostra a produção.
+  ['janelaVazia', 'janelaNula', 'paradoB'].forEach(modoJ => {
+    const msgs = [], fo = {modo: 'xadmin'};
+    if (modoJ === 'paradoB') fo.parado = {B: [13]}; else fo[modoJ] = true;
+    const siteV = createFakeSorter(fo), jmsV = fakeJms({});
+    const cV = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home', FEISHU_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/teste-v'},
+    jms: (url, req, state) => url.indexOf('https://open.feishu.cn/') === 0 ? (msgs.push(JSON.parse(req.payload)), {getResponseCode: () => 200, getContentText: () => '{"code":0}'})
+      : /^http:\/\/sorter\.falso/.test(url) ? siteV.fetchMock(url, req) : jmsV(url, req, state), quiet: true});
+    cV.setupProject();
+    const r = cV.testarFeishu(DS + ' 13'), txt = JSON.stringify((msgs[0] || {}).card || {});
+    if (modoJ === 'paradoB') {
+      const a13 = hourRow('A', DS, 0, 13).sorter_sorttotal;
+      check(r.ok && txt.indexOf('📦 **' + cV.feishuN_(a13) + '** volumes (Sorter A ' + cV.feishuN_(a13) + ' · Sorter B 0)') >= 0 &&
+        txt.indexOf('Todas as balanças · Sorter B / 所有供包台** — 13h–14h: **0** (sem produção nesta hora') >= 0 &&
+        txt.indexOf('Balança 01 / 供包台01: **' + cV.feishuN_(hourRow('A', DS, 1, 13).sorter_sorttotal) + '**') >= 0 && !/Sorter B · Balança/.test(txt),
+        'Bot do Feishu: o Sorter B parado na hora aparece com 0 (sem números de antes); o Sorter A com a produção da hora', txt.slice(0, 500));
+    } else {
+      check(r.ok && txt.indexOf('📦 **0** volumes (Sorter A 0 · Sorter B 0)') >= 0 && /Sem produção nesta hora/.test(txt) &&
+        txt.indexOf('Fechamento do turno T1 (06h–14h) / 班次结束**\\n📦 **0**') >= 0 && !/供包台01: \*\*/.test(txt) && !cV.__state.props.FEISHU_ULTIMA,
+        'Bot do Feishu: site zerado na janela (' + modoJ + ') = cartão zerado, sem buscar números de outra consulta', {r, txt: txt.slice(0, 500)});
+    }
+  });
+  // V4.23.9 (pedido "adicionar o bot em outro grupo que mostre os mesmos valores"): até 5 grupos, um webhook (e segredo) por grupo;
+  // a mesma mensagem vai para todos; numa nova tentativa, só para os que faltaram (sem repetir no grupo que já recebeu).
+  {
+    const sent = [];
+    let falha2 = 1;
+    const siteG = createFakeSorter({modo: 'xadmin'}), jmsG = fakeJms({});
+    const cG = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home', FEISHU_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/g1',
+      FEISHU_WEBHOOK_2: 'https://open.feishu.cn/open-apis/bot/v2/hook/g2', FEISHU_SEGREDO_2: 'seg2'},
+    jms: (url, req, state) => {
+      if (url.indexOf('https://open.feishu.cn/') === 0) {
+        const g = url.slice(-2);
+        let body = {code: 0, msg: 'success'};
+        if (g === 'g2' && falha2 > 0) { falha2--; body = {code: 9499, msg: 'Bad Request'}; }
+        sent.push({g, p: JSON.parse(req.payload)});
+        return {getResponseCode: () => 200, getContentText: () => JSON.stringify(body)};
+      }
+      return /^http:\/\/sorter\.falso/.test(url) ? siteG.fetchMock(url, req) : jmsG(url, req, state);
+    }, quiet: true});
+    cG.setupProject();
+    const at = (h, m) => Date.parse(DS + 'T' + String(h + 3).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':00Z');
+    const g1 = cG.feishuSorterTick_(at(12, 7)), g2 = cG.feishuSorterTick_(at(12, 8)), g3 = cG.feishuSorterTick_(at(12, 9));
+    const s1 = sent.filter(x => x.g === 'g1'), s2 = sent.filter(x => x.g === 'g2'), last2 = (s2[s2.length - 1] || {}).p || {};
+    const sig2 = require('crypto').createHmac('sha256', last2.timestamp + '\n' + 'seg2').update('').digest('base64');
+    check(g1 && g1.ok === false && /Grupo 2: o Feishu recusou/.test(g1.erro) && g2 && g2.ok && g3 === null && s1.length === 1 && s2.length === 2 &&
+      !s1[0].p.sign && last2.sign === sig2 && JSON.stringify(s1[0].p.card) === JSON.stringify(last2.card),
+      'Bot do Feishu: a mesma mensagem nos 2 grupos (cada um com o seu segredo); a nova tentativa manda só para o grupo que faltou',
+      {g1, g2, g3, s1: s1.length, s2: s2.length});
+    const n0 = sent.length, tg2 = cG.testarFeishu('', 2), tAll = cG.testarFeishu(''), tg3 = cG.testarFeishu('', 3);
+    const after = sent.slice(n0).map(x => x.g);
+    check(tg2.ok && /grupo\(s\) 2:/.test(tg2.enviado) && tAll.ok && /grupo\(s\) 1, 2:/.test(tAll.enviado) && after.join(',') === 'g2,g1,g2' &&
+      tg3.ok === false && /grupo 3 não tem webhook/.test(tg3.erro) && tAll.gruposLigados.join('|') === 'Grupo 1 (sem segredo)|Grupo 2 (com segredo)' &&
+      !/hook\/g[12]|seg2/.test(JSON.stringify([tg2, tAll])),
+      'testarFeishu: um grupo (o do botão) ou todos; grupo sem webhook avisa; sem mostrar webhook nem segredo', {tg2, after});
+  }
+  // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
+  check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&
+    (() => { try { createContext({props: {}, jms: fakeJms({}), quiet: true}).validateJmsAuth_(); return false; } catch (e) { return true; } })(),
+    'AuthToken exigido só quando algum painel usa o JMS');
+}
+
+// V4.24 (pedido): Triagem Errada na meta com a taxa MENOR OU IGUAL a 0,50% (0,50% está na meta), comparando com 2 casas como na tela;
+// gráficos dois por linha no painel principal (Lotes e Produção do Sorter continuam um por linha).
+{
+  const cM = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const gS = cM.getIndicatorConfig_('sorting_error').goal, gW = cM.getIndicatorConfig_('wrong_send').goal, met = (r, g) => cM.JTCore_.goalMet(r, g);
+  check(met(0.50, gS) === true && met(0.504, gS) === true && met(0.49, gS) === true && met(0.51, gS) === false && met(0.6, gS) === false &&
+    met(1.00, gW) === false && met(0.99, gW) === true,
+    'Triagem Errada: 0,50% está na meta (≤ 0,50%, com 2 casas: 0,504% = 0,50%); 0,51% fora; o Envio Errado continua "abaixo de 1,00%"',
+    {a: met(0.50, gS), b: met(0.504, gS), c: met(0.51, gS)});
+  const catM = cM.getAppBootstrap().catalog || [], cfgTxt = require('fs').readFileSync(require('path').join(__dirname, '..', 'Config.gs'), 'utf8');
+  check(catM.length && catM.every(x => x.chartsFull === (x.key === 'lot_flow' || x.key === 'sorter_flow')) &&
+    (cfgTxt.match(/^\s*chartsFull: true,/gm) || []).length === 2,
+    'gráficos dois por linha no painel principal; Lotes e Produção do Sorter com chartsFull (um por linha)', catM.map(x => [x.key, x.chartsFull]));
+}
+
+// ---------- V4.25.4 (pedido "os dados não estão batendo com o JMS"): Triagem Errada e Falta de Bipagem com 9.140 no JMS e 8.140 no
+// painel — o JMS pagina a lista sem ordem fixa e devolveu uma página de 1.000 repetida no lugar de outra; o robô conferia o total
+// BRUTO (9.140 recebidos = 9.140 do JMS) e o dia ficava "completo" com 8.140 remessas diferentes. ----------
+{
+  const DT = '2026-09-19', N = 9140;
+  const hora = (date, i) => {
+    // 40% das remessas entre 14h e 15h (pico: a fatia do pico é dividida de novo até caber numa página).
+    const h = i % 10 < 4 ? 14 : (i * 7) % 24;
+    return date + ' ' + String(h).padStart(2, '0') + ':' + String((i * 13) % 60).padStart(2, '0') + ':' + String((i * 31) % 60).padStart(2, '0');
+  };
+  const bigDay = date => {
+    const o = {}; o[date] = makeDay(date, 5);
+    o[date].md = Array.from({length: N}, (_, i) => ({billcode: 'TST' + String(i).padStart(9, '0'), threeSegmentCode: 'SP,977-00,000',
+      unloadArriveTime: hora(date, i), unloadPackageEmp: 'OPERADOR FICTICIO 01', customerName: 'CLIENTE TESTE', arriveOrder: 'TESTE-1', nextStop: 'SP BRE'}));
+    o[date].se = Array.from({length: N}, (_, i) => ({billcode: 'TSTE' + String(i).padStart(9, '0'), dt: date, orderFirstCode: 'SP', orderSecondCode: '402-03',
+      packageNo: 'BR1043', scanuser: 'OPERADOR FICTICIO 02', baggingNetworkName: 'SP GRU', transferCenterNextName: 'DC GRU-SP', transferCenterSendTime: hora(date, i),
+      orderSourceName: 'CLIENTE TESTE', wrongType: '末端人为错分一错扫|Erro humano de triagem Last Mile — bipe incorreto'}));
+    return o;
+  };
+  const runD = (opts, props, date) => {
+    const d = date || DT, c = freshCtx(bigDay(d), opts, Object.assign({DATA_START_DATE: d}, props || {}));
+    c.queueHistory(d, d, true);
+    runAll(c);
+    const r = k => ({rows: c.getArchivedRange_(k, d, d).rows.length, st: c.getDayStatus_(k, d)});
+    return {c, md: r('missing_dispatch'), se: r('sorting_error')};
+  };
+  const isMd = f => /center_missscan_next_detail/.test(f.url) && f.payload.detailType === 'billcodeOut';
+  const isSe = f => /center_error_rate_new_detail/.test(f.url);
+  // (a) O caso do print: a página 5 volta repetida (a 4 de novo) toda vez. Com fatias de uma página não há página 2 em diante.
+  const a = runD({repeatPage: {page: 5}});
+  const fa = a.c.__state.fetches.filter(isMd), fs = a.c.__state.fetches.filter(isSe);
+  check(a.md.rows === N && a.md.st.details === 'COMPLETE' && a.md.st.savedRows === N && a.se.rows === N && a.se.st.details === 'COMPLETE' &&
+    fa.every(f => f.payload.current === 1) && fs.every(f => f.payload.current === 1) && fa.length < 90 && fs.length < 90 && !a.c.__state.repeated,
+    'V4.25.4: JMS repetindo uma página (9.140 no JMS) — Falta de Bipagem e Triagem Errada gravam as 9.140, em fatias de horário de uma página (sem paginação)',
+    {md: a.md, se: a.se, consultas: [fa.length, fs.length]});
+  const md = a.c.getDashboardData('missing_dispatch', {from: DT, to: DT});
+  check(md.meta.rowsLoaded === N && md.meta.shortDays.length === 0 && md.meta.archive.fullyLoaded, 'V4.25.4: o painel mostra as 9.140 (o número dos erros do JMS)', md.meta.rowsLoaded);
+  // (b) Antes: mesmo JMS, só com paginação (JMS_PAGINAR) e conferência pelo total bruto, ficava com 8.140 e "completo".
+  //     Agora a conferência é pelos registros DIFERENTES: as páginas são baixadas de novo, uma por vez e com outros cortes.
+  const b = runD({repeatPage: {page: 5}}, {JMS_PAGINAR: '1'});
+  const logB = b.c.allTabRows_('LOG').map(r => String(r[4]));
+  check(b.md.rows === N && b.md.st.details === 'COMPLETE' && b.se.rows === N && b.se.st.details === 'COMPLETE' && b.c.__state.repeated > 0 &&
+    logB.some(t => /repetiu registros entre as páginas da lista \(8140 diferentes de 9140 recebidos/.test(t)),
+    'V4.25.4: só com paginação — 8.140 diferentes de 9.140 é percebido e as páginas baixadas de novo recuperam as 1.000 (antes: "completo" com 8.140)',
+    {md: b.md, se: b.se});
+  // (c) Paginação e uma falha que nunca se resolve (a última página sempre repetida, em qualquer tamanho): grava o que veio,
+  //     sem dizer "completo", e o painel avisa quantas faltam.
+  const c = runD({repeatPage: {page: 'last'}, ignoreTime: true});
+  const shortC = c.c.getDashboardData('missing_dispatch', {from: DT, to: DT}).meta.shortDays;
+  check(c.md.rows === 9000 && c.md.st.details === 'CHECK_COUNTS' && c.md.st.savedRows === 9000 && c.md.st.expectedRecords === N &&
+    c.c.__state.props.JMS_NO_SLICE_MISSING_SCAN === '1' && shortC.length === 1 && shortC[0].saved === 9000 && shortC[0].expected === N,
+    'V4.25.4: JMS sem hora e com a última página sempre repetida — grava 9.000, marca "contagem diferente" e o painel avisa (9.000 de 9.140)', {st: c.md.st, shortC});
+  // (d) Atualização: dia gravado antes com 8.140 de 9.140 (marcado completo) volta para a fila uma vez e fica com as 9.140.
+  const cfx = createContext({props: {}, jms: fakeJms({}), quiet: true}), DG = cfx.addDaysIso_(cfx.isoToday_(), -1);
+  const g = runD({repeatPage: {page: 5}}, {}, DG).c;
+  const FIELDS = require('vm').runInContext('STORE_FIELDS_', g);
+  g.saveDayDataset_('missing_dispatch', DG, g.encodeDayFile_(Array.from({length: 8140}, (_, i) => ({date: DG, shipment: 'TST' + String(i).padStart(9, '0'), shift: 'T1'})), FIELDS), 10, N);
+  g.updateDayStatus_('missing_dispatch', DG, {detailsStatus: 'COMPLETE', expectedPages: 10, savedPages: 10, expectedRecords: N, savedRows: N});
+  g.__state.props.JMS_NO_SLICE_MISSING_SCAN = '1';
+  delete g.__state.props.MIGRATION_V4254;
+  const nG = g.migrateToV4254_(), againG = g.migrateToV4254_();
+  const slicedAgain = !g.__state.props.JMS_NO_SLICE_MISSING_SCAN;
+  runAll(g);
+  check(nG === 1 && againG === 0 && slicedAgain && g.getArchivedRange_('missing_dispatch', DG, DG).rows.length === N && g.getDayStatus_('missing_dispatch', DG).details === 'COMPLETE',
+    'V4.25.4: uma vez, os dias gravados com menos remessas que o JMS são baixados de novo (fatias testadas de novo) e ficam com as 9.140',
+    {nG, againG, st: g.getDayStatus_('missing_dispatch', DG)});
+  // (d2) V4.25.5: conferência de hora em hora (não só a atualização, uma vez) e aviso no painel. Dia fechado com a lista menor que
+  //      os erros do JMS: o painel diz "baixando de novo"; com a lista gravada há mais de 1 h, volta para a fila sozinho.
+  const h = runD({}, {}, DG).c;
+  h.saveDayDataset_('missing_dispatch', DG, h.encodeDayFile_(Array.from({length: 8140}, (_, i) => ({date: DG, shipment: 'TST' + String(i).padStart(9, '0'), shift: 'T1'})), FIELDS), 10, N);
+  h.updateDayStatus_('missing_dispatch', DG, {detailsStatus: 'COMPLETE', expectedPages: 10, savedPages: 10, expectedRecords: N, savedRows: N});
+  const gap0 = h.detailGapDays_('missing_dispatch', DG, DG), fresh = h.healDetailGaps_();
+  const view0 = h.getDashboardData('missing_dispatch', {from: DG, to: DG}).meta.detailGap;
+  const realFiles = h.dayFilesMap_;
+  h.dayFilesMap_ = function (ind, f, t) { const m = realFiles(ind, f, t); Object.keys(m).forEach(d => { m[d].createdAt = '2026-01-01T00:00:00.000Z'; }); return m; };
+  const nH = h.healDetailGaps_(), againH = h.healDetailGaps_();
+  const view1 = h.getDashboardData('missing_dispatch', {from: DG, to: DG}).meta.detailGap;
+  h.dayFilesMap_ = realFiles;
+  runAll(h);
+  const view2 = h.getDashboardData('missing_dispatch', {from: DG, to: DG}).meta.detailGap;
+  check(gap0.length === 1 && gap0[0].saved === 8140 && gap0[0].expected === N && fresh === 0 && view0 && view0.days[0].queued === false &&
+    nH === 1 && againH === 0 && view1.days[0].queued === true && view2 === null && h.getArchivedRange_('missing_dispatch', DG, DG).rows.length === N &&
+    /healDetailGaps_\(\)/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'Triggers.gs'), 'utf8')),
+    'V4.25.5: dia com 8.140 de 9.140 — o painel avisa, a conferência de hora em hora põe na fila (uma vez) e o dia fica com as 9.140',
+    {gap0, fresh, view0, nH, againH, view1, view2});
+  // Hoje (dia aberto) não entra: a lista acompanha o resumo de hora em hora.
+  check(h.detailGapDays_('missing_dispatch', h.isoToday_(), h.isoToday_()).length === 0, 'V4.25.5: hoje fora da conferência (dia ainda aberto no JMS)');
+  // (e) Registro igual repetido x mesma remessa com outro bipe: só o igual conta como repetido.
+  check(g.recordKey_({billcode: 'TST1', t: '10:00', ROW_ID: 1}) === g.recordKey_({ROW_ID: 7, t: '10:00', billcode: 'TST1'}) &&
+    g.recordKey_({billcode: 'TST1', t: '10:00'}) !== g.recordKey_({billcode: 'TST1', t: '10:01'}),
+    'V4.25.4: identidade do registro (sem o número da linha; outro horário = outro registro)');
+}
+
+// ---------- V4.25.7 (pedido "Avaria: coloco 30 dias e os gráficos não somam o período"): dias do período sem a lista (download com
+// erro) ficavam esperando a autocorreção diária (12 h) e os gráficos somavam só os dias com lista ("PARCIAL"). Agora o painel pede
+// esses dias na hora em que o período é aberto. ----------
+{
+  const {makeDamage} = require('./mocks');
+  const c0 = createContext({props: {}, jms: fakeJms({}), quiet: true}), hoje = c0.isoToday_(), add = (d, n) => c0.addDaysIso_(d, n);
+  const dias = {};
+  for (let i = 1; i <= 12; i++) { const d = add(hoje, -i); dias[d] = makeDay(d, 20 + i); Object.assign(dias[d], makeDamage(d, 200 + i)); }
+  const corte = add(hoje, -3);
+  let falhar = true;
+  const cD = createContext({props: Object.assign({}, baseProps, {DATA_START_DATE: add(hoje, -12), PAINEIS: 'damage', REPEDIR_LISTA_MIN: '0'}),
+    jms: fakeJms(dias, {intercept: (route, h, body) => falhar && route === 'detailBreakageRateData' && String(body.statisticalStartDate) < corte
+      ? [200, {code: 500, msg: 'Erro temporário do JMS (teste)', fail: true, succ: false}] : null}), quiet: true});
+  cD.setupProject();
+  cD.queueHistory(add(hoje, -12), add(hoje, -1), true);
+  for (let k = 0; k < 6; k++) runAll(cD);
+  falhar = false;
+  const de = add(hoje, -10), ate = add(hoje, -1);
+  const r1 = cD.getDashboardData('damage', {from: de, to: ate});
+  const pend = cD.pendingJobs_().filter(j => j.type === 'DETAIL_INIT' && j.indicator === 'damage').length;
+  runAll(cD);
+  const r2 = cD.getDashboardData('damage', {from: de, to: ate});
+  const total = Object.keys(dias).filter(d => d >= de && d <= ate).reduce((a, d) => a + dias[d].dm.length, 0);
+  check(!r1.meta.archive.fullyLoaded && r1.meta.detailFetch && r1.meta.detailFetch.days === 7 && r1.meta.detailFetch.queued >= 7 && pend >= 7 &&
+    r2.meta.archive.fullyLoaded && !r2.meta.detailFetch && r2.meta.rowsLoaded === total,
+    'V4.25.7: Avaria com 7 de 10 dias sem a lista (erro do JMS) — ao abrir o período, os 7 dias vão para a fila e o painel fica com o período inteiro',
+    {f1: r1.meta.detailFetch, pend, linhas: [r1.meta.rowsLoaded, r2.meta.rowsLoaded, total]});
+  // Dia que acabou de dar erro não é pedido de novo a cada abertura (padrão: 10 min).
+  const cE = createContext({props: Object.assign({}, baseProps, {DATA_START_DATE: add(hoje, -12), PAINEIS: 'damage'}),
+    jms: fakeJms(dias, {intercept: (route) => route === 'detailBreakageRateData' ? [200, {code: 500, msg: 'Erro do JMS (teste)', fail: true}] : null}), quiet: true});
+  cE.setupProject();
+  cE.queueHistory(add(hoje, -4), add(hoje, -1), true);
+  for (let k = 0; k < 6; k++) runAll(cE);
+  const fE = cE.getDashboardData('damage', {from: add(hoje, -4), to: add(hoje, -1)}).meta.detailFetch;
+  check(fE && fE.days === 4 && fE.queued === 0, 'V4.25.7: dia com erro há menos de 10 min não é pedido de novo (sem repetir a consulta que falhou)', fE);
+}
+
+// V4.25.3 (pedido "No dash principal está faltando dados para analisar"): no Node.js, "30 dias" da Falta de Bipagem na Expedição
+// (~11 mil remessas por dia) carregava só 13 dias — limite de 150 mil remessas por consulta, feito para o Apps Script — e o
+// relatório Excel parava em 60 mil remessas. No Node os arquivos são locais: o painel e o Excel recebem o período inteiro.
+{
+  const T0 = Date.now();
+  const FIELDS = require('vm').runInContext('STORE_FIELDS_', freshCtx({}));
+  const DIAS = 30, POR_DIA = 5100, from = '2026-10-01', to = '2026-10-30';
+  const segs = ['GO,795-00,002', 'SP,977-00,000', 'GRU,404-04,020', 'MG,330-00,1', 'BA,500-00,1'];
+  const semear = c => {
+    c.dateRangeIso_(from, to).forEach(d => {
+      const rows = Array.from({length: POR_DIA}, (_, k) => ({date: d, shipment: 'TST' + d.replace(/-/g, '') + String(k).padStart(6, '0'),
+        eventTime: d + ' ' + String(k % 24).padStart(2, '0') + ':10:00', shift: ['T1', 'T2', 'T3'][k % 3], login: 'OPERADOR FICTICIO 0' + (k % 9),
+        segment: segs[k % 5].split(',')[0], segmentRaw: segs[k % 5].split(',').slice(0, 2).join(','), segmentFull: segs[k % 5], client: 'CLIENTE TESTE',
+        interval: String(k % 24).padStart(2, '0') + 'h - ' + String((k + 1) % 24).padStart(2, '0') + 'h', tripId: 'TESTE-' + (k % 50)}));
+      c.saveDayDataset_('missing_dispatch', d, c.encodeDayFile_(rows, FIELDS), 1, POR_DIA);
+      c.upsertRate_({indicator: 'missing_dispatch', date: d, rate: 0.5, errorCount: POR_DIA, totalCount: POR_DIA * 100, raw: {}});
+      c.updateDayStatus_('missing_dispatch', d, {summaryStatus: 'COMPLETE', detailsStatus: 'COMPLETE', expectedPages: 1, savedPages: 1,
+        expectedRecords: POR_DIA, savedRows: POR_DIA});
+    });
+    return c;
+  };
+  const gs = semear(freshCtx({})), nd = semear(freshCtx({}, null, {PLATAFORMA: 'node'}));
+  check(gs.maxClientRows_() === 150000 && nd.maxClientRows_() === 1000000 && nd.maxDetailFiles_() >= 3000 && nd.loadBudgetMs_() >= 60000 &&
+    gs.maxDetailFiles_() === 150 && gs.loadBudgetMs_() === 22000 &&
+    freshCtx({}, null, {PLATAFORMA: 'node', DASHBOARD_MAX_ROWS: '800000'}).maxClientRows_() === 800000 &&
+    freshCtx({}, null, {DASHBOARD_MAX_ROWS: '800000'}).maxClientRows_() === 400000,
+    'V4.25.3: limites por consulta — Apps Script como antes (150 mil, 150 arquivos, 22 s); Node 1 milhão (V4.27; DASHBOARD_MAX_ROWS muda, até 1 milhão)');
+  const total = DIAS * POR_DIA;
+  const rG = gs.getDashboardData('missing_dispatch', {from, to}), rN = nd.getDashboardData('missing_dispatch', {from, to});
+  check(!rG.meta.archive.fullyLoaded && rG.meta.rowsLoaded <= 150000 && rG.meta.archive.notLoaded.length > 0 &&
+    rN.meta.archive.fullyLoaded && rN.meta.archive.loadedDates.length === DIAS && rN.meta.rowsLoaded === total && rN.meta.archive.maxRows === 1000000,
+    'V4.25.3: Node — os 30 dias da Falta de Bipagem na Expedição chegam ao painel (antes: dias fora por causa do limite do Apps Script)',
+    {gs: [rG.meta.rowsLoaded, rG.meta.archive.loadedDates.length], node: [rN.meta.rowsLoaded, rN.meta.archive.loadedDates.length]});
+  [gs, nd].forEach(c => { c.UrlFetchApp.fetch = () => ({getResponseCode: () => 200, getBlob: () => c.Utilities.newBlob('PK', 'application/zip', 'x')}); });
+  const xG = gs.generateReport('missing_dispatch', {from, to}, 'xlsx'), xN = nd.generateReport('missing_dispatch', {from, to}, 'xlsx');
+  check(xG.ok && xG.rows <= 60000 && !xG.coverageComplete && xN.ok && xN.rows === total && xN.coverageComplete,
+    'V4.25.3: Node — o relatório Excel leva as mesmas remessas do painel (antes parava em 60 mil)', {gs: xG.rows, node: xN.rows});
+  // Recebimento/Expedição/Sem Movimentação (agrupados): no Node, as combinações vão ao navegador até o limite do painel.
+  const ga = freshCtx({}, null, {PLATAFORMA: 'node'}), gb = freshCtx({});
+  const big = c => { c.saveDayDataset_('no_move', '2026-10-10', c.encodeDayFile_([{date: '2026-10-10', shipment: 'TST1'}], FIELDS), 1, 1);
+    c.dayFilesMap_ = () => ({'2026-10-10': {rows: 120000, fileId: 'x'}}); return c.groupedNeedsSummary_('no_move', '2026-10-10', '2026-10-10', {}); };
+  check(big(gb) === true && big(ga) === false, 'V4.25.3: agrupados com 120 mil combinações — Apps Script em totais por campo; Node manda tudo (tabela completa)');
+  check(Date.now() - T0 < 120000, 'V4.25.3: testes de volume em menos de 2 min', Date.now() - T0);
+}
+
+// ---------- V4.27 (pedido "abrir 2 meses demora; quero que puxe os dados e armazena eles"): lista de cada dia guardada no navegador ----------
+{
+  const c = freshCtx({}, null, {PLATAFORMA: 'node'});
+  const days = Array.from({length: 5}, (_, i) => c.addDaysIso_('2026-10-20', -i)).reverse();
+  const rowsOf = d => Array.from({length: 40}, (_, k) => ({date: d, shipment: 'TST' + d.replace(/-/g, '') + String(k).padStart(4, '0'), eventTime: d + ' 1' + (k % 10) + ':00:00',
+    shift: ['T1', 'T2', 'T3'][k % 3], login: 'OPERADOR FICTICIO ' + (k % 4), segment: 'SP', segmentRaw: 'SP,977-00', segmentFull: 'SP,977-00,000', client: 'CLIENTE TESTE', lot: 'BR' + (k % 5)}));
+  days.forEach(d => {
+    c.saveDayDataset_('wrong_send', d, c.encodeDayFile_(rowsOf(d)), 1, 40);
+    c.upsertRate_({indicator: 'wrong_send', date: d, rate: 0.5, errorCount: 40, totalCount: 8000, raw: {}});
+    c.updateDayStatus_('wrong_send', d, {summaryStatus: 'COMPLETE', detailsStatus: 'COMPLETE', expectedPages: 1, savedPages: 1, expectedRecords: 40, savedRows: 40});
+  });
+  const from = days[0], to = days[4], keyOf = r => r.date + '|' + r.shipment;
+  const plain = c.getDashboardData('wrong_send', {from, to});
+  const all = C.decodeDataset(plain.dataset).map(keyOf).sort().join();
+  // 1ª vez (navegador sem nada guardado): cada dia vai separado, com a assinatura.
+  const r1 = c.getDashboardData('wrong_send', {from, to, dayCache: {}});
+  const sigs = {};
+  Object.keys(r1.dayData.days).forEach(d => { sigs[d] = r1.dayData.days[d].sig; });
+  const rows1 = [].concat(C.decodeDataset(r1.dataset), ...Object.keys(r1.dayData.days).map(d => C.decodeDataset(r1.dayData.days[d].ds)));
+  check(!plain.dayData && r1.dayData && Object.keys(sigs).sort().join() === days.join() && r1.dataset.n === 0 && r1.dayData.cached.length === 0 &&
+    rows1.map(keyOf).sort().join() === all && r1.meta.rowsLoaded === 200 && plain.meta.rowsLoaded === 200,
+    'V4.27: sem nada guardado — cada dia vai separado, com a assinatura (as mesmas remessas de antes)', {sigs, n: r1.dataset.n});
+  // 2ª vez com os 5 dias guardados: nenhum arquivo lido, nenhuma remessa mandada.
+  const reads0 = c.__state.fileReads || 0;
+  const r2 = c.getDashboardData('wrong_send', {from, to, dayCache: sigs});
+  check(r2.dayData.cached.slice().sort().join() === days.join() && Object.keys(r2.dayData.days).length === 0 && r2.dataset.n === 0 &&
+    r2.meta.rowsLoaded === 200 && r2.meta.archive.fullyLoaded && r2.meta.archive.loadedDates.length === 5 && r2.meta.archive.readFiles === 0,
+    'V4.27: com os dias guardados — o servidor não lê nem manda nada (o painel usa o que está no navegador)', {cached: r2.dayData.cached, read: r2.meta.archive.readFiles});
+  // Dia regravado (ex.: download novo, IDs de viagem) muda a assinatura: só ele vai de novo.
+  const rows3 = rowsOf(days[2]).concat([{date: days[2], shipment: 'TSTNOVA0001', shift: 'T1', segment: 'SP', segmentRaw: 'SP,977-00', segmentFull: 'SP,977-00,000'}]);
+  c.saveDayDataset_('wrong_send', days[2], c.encodeDayFile_(rows3), 1, 41);
+  const r3 = c.getDashboardData('wrong_send', {from, to, dayCache: sigs});
+  check(Object.keys(r3.dayData.days).join() === days[2] && r3.dayData.days[days[2]].sig !== sigs[days[2]] && r3.dayData.days[days[2]].ds.n === 41 &&
+    r3.dayData.cached.length === 4 && r3.meta.rowsLoaded === 201,
+    'V4.27: dia regravado — assinatura nova, só esse dia vai de novo', {days: Object.keys(r3.dayData.days), cached: r3.dayData.cached});
+  // Assinatura de fora, de outro painel ou de outra versão: o dia vai inteiro.
+  const r4 = c.getDashboardData('wrong_send', {from, to, dayCache: {[days[0]]: 'x:40:velha', 'não-é-data': 'y'}});
+  check(Object.keys(r4.dayData.days).length === 5 && r4.dayData.cached.length === 0, 'V4.27: assinatura que não bate (outra versão) — o dia vai inteiro');
+  // Painéis agrupados (Lotes, Sem Movimentação) e o Histórico ficam como antes.
+  const g = freshCtx({}, null, {PLATAFORMA: 'node', REATIVAR_PAINEIS: 'lot_flow'});
+  check(!g.getDashboardData('lot_flow', {from, to, dayCache: {}}).dayData && !g.getDashboardData('no_move', {dayCache: {}}).dayData,
+    'V4.27: painéis agrupados e a foto do momento continuam vindo inteiros (sem guardar no navegador)');
+  // Fila: as listas dos dias abertos na tela passam na frente das listas dos outros painéis (depois das taxas).
+  const f = freshCtx({}, null, {PLATAFORMA: 'node'});
+  const OLD = f.addDaysIso_(f.isoToday_(), -40), NEW = f.addDaysIso_(f.isoToday_(), -2);
+  f.enqueueJobs_([['DETAIL_INIT', 'damage', NEW, 1], ['DETAIL_INIT', 'sorting_error', OLD, 1], ['SUMMARY', 'wrong_send', NEW, 0], ['SCANS', 'sorting_error', NEW, 0]], {});
+  const antes = f.pendingJobs_().map(j => j.indicator + ':' + j.type).join();
+  f.markScreenDays_('sorting_error', [OLD]);
+  reset(f);
+  const depois = f.pendingJobs_().map(j => j.indicator + ':' + j.type).join();
+  check(antes === 'wrong_send:SUMMARY,sorting_error:SCANS,damage:DETAIL_INIT,sorting_error:DETAIL_INIT' &&
+    depois === 'wrong_send:SUMMARY,sorting_error:DETAIL_INIT,sorting_error:SCANS,damage:DETAIL_INIT',
+    'V4.27: a lista do dia aberto na tela vem logo depois das taxas (antes das listas dos outros painéis)', {antes, depois});
+  // V4.27.1 (pedido "de 1 a 2 meses ele trava"): contas mais rápidas no navegador, com o mesmo resultado de antes.
+  const enc = C.encodeDataset([{date: 'D1', shipment: 'A', shift: 'T1'}, {date: 'D1', shipment: 'B', shift: 'T2'}, {date: 'D1', shipment: 'A', shift: 'T3'},
+    {date: 'D2', shipment: 'A', shift: 'T1', qty: 3}], ['date', 'shipment', 'shift', 'qty']);
+  const one = C.encodeDataset([{date: 'D1', shipment: 'A'}, {date: 'D1', shipment: 'A'}, {date: 'D1', shipment: 'B'}], ['date', 'shipment']);
+  const dec = C.decodeDataset(enc), dec1 = C.decodeDataset(one);
+  const slow = list => { const seen = {}; let n = 0; list.forEach(r => { const id = r.date + '|' + r.shipment; if (!seen[id]) { seen[id] = 1; n += r.qty ? Number(r.qty) : 1; } }); return n; };
+  check(dec.length === 3 && dec.map(r => r.date + r.shipment + r.shift).join() === 'D1AT1,D1BT2,D2AT1' && dec1.length === 2 && dec.__unique === true &&
+    Object.keys(dec).indexOf('__unique') < 0 && C.distinctCount(dec) === 5 && C.distinctCount(dec) === slow(dec),
+    'V4.27.1: remessa repetida continua fora (um dia ou vários) e a contagem é a mesma de antes', dec);
+  const fil = C.applyFilters(dec, {shift: ['T1']}), copia = dec.slice();
+  check(fil.__unique === true && C.distinctCount(fil) === 4 && !copia.__unique && C.distinctCount(copia.concat(copia)) === 5,
+    'V4.27.1: filtro mantém a lista "sem repetição"; lista comum com repetição continua contada sem repetir');
+  const cb1 = C.countBy(dec, 'shift');
+  cb1[0].value = 999; cb1.push({label: 'X', value: 1});
+  const cb2 = C.countBy(dec, 'shift');
+  dec.push({date: 'D3', shipment: 'Z', shift: 'T2'});
+  const cb3 = C.countBy(dec, 'shift');
+  check(cb2.length === 2 && cb2.find(x => x.label === 'T1').value === 4 && cb3.find(x => x.label === 'T2').value === 2,
+    'V4.27.1: contagem guardada devolve cópias e refaz quando a lista muda', {cb2, cb3});
+  const tri = C.decodeDataset(C.encodeDataset([{date: '2026-10-01', shipment: 'A', ev: '2026-10-05 10:00:00'}, {date: '2026-10-02', shipment: 'A', ev: '2026-10-05 11:00:00'}], ['date', 'shipment', 'ev']));
+  C.applyDayOf(tri, {date: 'ev'});
+  check(tri.__unique === false && C.distinctCount(tri) === 1, 'V4.27.1: data trocada pelo horário (Triagem Errada) — a mesma remessa no mesmo dia conta uma vez', tri);
+  // V4.27.1 (erro "Falha de rede ao consultar o JMS: fetch failed (ENOTFOUND)"): sem internet/DNS a fila espera, sem gastar tentativas.
+  let semRede = true;
+  const DN = '2026-09-19';
+  const cn = freshCtx({[DN]: makeDay(DN, 7)}, {onFetch: url => { if (semRede) throw new Error('Exception: fetch failed (ENOTFOUND): ' + String(url).split('?')[0]); }}, {PLATAFORMA: 'node'});
+  cn.queueHistory(DN, DN, true);
+  cn.processSyncQueue({budgetMs: 600000});
+  const pn = cn.publicPauses_(), jn = cn.pendingJobs_();
+  check(pn.length === 1 && pn[0].route === '*' && pn[0].kind === 'NET' && /Sem conexão com o JMS: o computador do painel não alcançou gw\.jtjms-br\.com \(internet ou DNS, ENOTFOUND\)/.test(pn[0].reason) &&
+    jn.length > 0 && jn.every(j => j.attempts === 0) && !(cn.getDayStatus_('wrong_send', DN) || {}).error,
+    'V4.27.1: sem internet/DNS — a fila pausa (aviso claro), sem gastar tentativa nem marcar erro no dia', {pn, n: jn.length});
+  const fetN = cn.__state.fetches.length;
+  cn.processSyncQueue({budgetMs: 600000});
+  check(cn.__state.fetches.length === fetN, 'V4.27.1: durante a pausa a fila não insiste (nenhuma consulta)');
+  semRede = false;
+  const store = JSON.parse(cn.__state.props.SYNC_PAUSE_V37 || cn.getProp_('SYNC_PAUSE_V37', '{}'));
+  Object.keys(store).forEach(k => { store[k].until = Date.now() - 1000; });
+  cn.setProp_('SYNC_PAUSE_V37', JSON.stringify(store));
+  runAll(cn);
+  check(cn.publicPauses_().length === 0 && ['wrong_send', 'sorting_error', 'missing_dispatch'].every(k => cn.getDayStatus_(k, DN).details === 'COMPLETE'),
+    'V4.27.1: a internet voltou — depois dos 5 min a fila baixa tudo sozinha', cn.publicPauses_());
+  // Pedido "pensei que foi tirado essa questão de cota": no Node não há cota do Google, com ou sem COTA_GOOGLE.
+  const q = freshCtx({}, null, {PLATAFORMA: 'node', COTA_GOOGLE: 'gmail'});
+  check(q.googlePlan_() === 'workspace' && q.fetchBudgetMode_() === 'ok' && freshCtx({}, null, {COTA_GOOGLE: 'gmail'}).googlePlan_() === 'gmail',
+    'V4.27: Node sem cota do Google (COTA_GOOGLE não vale no Node; no Apps Script continua)');
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

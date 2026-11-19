@@ -1,0 +1,74 @@
+J&T · ROTA CERTA (app separado do DashMaster) · versão 1.0
+==========================================================
+
+O que faz
+---------
+Painel em tempo real das REMESSAS ENVIADAS NA ROTA ERRADA (remessa carregada no caminhão de outra rota), na linha
+principal e na linha secundária do SP GRU. Mostra SÓ as remessas erradas: cartões, gráficos, tabela e planilha.
+
+A cada 30 minutos (só o dia de hoje), o app:
+1. Pega as viagens com partida planejada hoje que SAEM do SP GRU (código 30001):
+   - linha principal: Consulta de Viagens;
+   - linha secundária: Consulta de Viagens Secundárias;
+   - só Status da tarefa Concluído：已完成 e Em Trânsito：在途.
+   A ROTA DO CAMINHÃO é a coluna "Unidade de destino" da viagem, procurada na tabela de rotas do SC. Viagem com destino
+   fora da tabela (ex.: coleta PA SHOPEE-GRU-SP) não é conferida.
+2. Em cada viagem, abre a linha "SP GRU · Bipe de carregamento" (Info de carga e descarga / Registros de carga e
+   descarga) e baixa as remessas da Digitalização de carregamento (100 por página). O TURNO sai do "Tempo de
+   digitalização": T1 06h–14h, T2 14h–22h, T3 22h–06h. Viagem concluída e já baixada não vai ao JMS de novo; viagem em
+   trânsito só é baixada de novo quando o número de bipes muda.
+3. Consulta o "3 Segmentos" de cada remessa na Gestão de pedido JMS de remessa (1.000 remessas por consulta; cada
+   remessa uma vez só). Nada de nome, endereço, telefone ou CPF é guardado.
+4. Confere a remessa na tabela de rotas do SC:
+   - remessa que começa com SP, SBN, MOO ou GRU (linha secundária): as duas primeiras informações.
+     Ex.: GRU,348-00,123 → GRU,348-00.
+   - as outras iniciais (linha principal): só a primeira. Ex.: BAU,412-02,015 → BAU.
+   - a rota que cita o 2º segmento vence a geral: SP,395-05 é do DC GRU-SP.
+   - SP com 2º segmento que não está em nenhuma tabela é do SP BRE (ex.: SP,397-00 → SP BRE).
+   A rota da tabela não é a do caminhão → ERRADA, e "Destino correto" diz para onde a remessa devia ir.
+   GRU, SBN ou MOO com 2º segmento que não está na tabela fica como "fora da tabela" (não conta como errada).
+
+Painel (só remessas na rota errada)
+-----------------------------------
+- Filtros: Data, 1º segmento, 2º segmento, Turno e Doca/Esteira. Valem para cartões, gráficos, tabela e planilha.
+  O 2º segmento mostra só os do 1º escolhido. O link da página guarda os filtros (dá para mandar já filtrado).
+- Cartões: remessas na rota errada (linha principal e secundária, por turno), viagens com erro, linha principal,
+  linha secundária, logins com erro, T1/T2/T3, turno com mais erros e os mais ofensores: destino, doca, esteira,
+  login, ID de viagem, segmento da linha principal, segmento da linha secundária e destino correto.
+- Gráficos: Turnos, IDs de viagem com mais erros, Segmentos da linha principal, Segmentos da linha secundária,
+  Logins do bipe de carregamento, Destinos mais ofensores, Docas com mais erros e Esteiras com mais erros.
+  Cada gráfico tem o botão "Tabela".
+- Tabela com todas as informações: remessa, ID de viagem, linha, Unidade de destino (rota do caminhão), doca, esteira,
+  destino correto, 3 Segmentos, 1º e 2º segmento, segmento conferido, turno, tempo de digitalização, digitalizado por,
+  lote, próxima parada, unidade de destino da remessa, município, base de entrega e horário da última operação.
+  Clique no cabeçalho para ordenar; "Localizar" procura remessa, ID, lote, login e destino.
+- "Baixar erros": planilha com todas as remessas na rota errada, com os filtros.
+- "Atualizar": busca no JMS agora (a automática é a cada 30 min). A página se atualiza sozinha.
+
+Como abrir
+----------
+1. Descompacte a pasta rota_certa em qualquer lugar do computador do DashMaster (ex.: C:\rota_certa).
+2. Abra iniciar.bat. Ele usa o Node.js do DashMaster (22.13 ou mais novo). Deixe a janela aberta.
+3. Painel: http://localhost:3800 · Configurações: http://localhost:3800/config (só neste computador).
+4. AuthToken: o app usa o mesmo do DashMaster deste computador. Se quiser outro, cole em Configurações.
+   Quando o AuthToken vencer, o painel avisa e mostra os números da última busca; troque o AuthToken e clique em
+   Atualizar.
+5. Link para a equipe: abra link-publico.bat (Tailscale). O link fica https://NOME.ts.net/rota-certa, no mesmo endereço
+   do DashMaster. Para pedir senha a quem abre pelo link, escreva "senha": "..." no config.json e abra iniciar.bat de novo.
+
+Tabela de rotas
+---------------
+Na primeira vez o app cria planilhas\rotas.xlsx com a tabela do SC de 24/10 (21 rotas da linha principal e 18 da
+secundária, com doca e esteira). Quando as rotas ou docas mudarem, envie a tabela nova em Configurações do jeito que
+o SC manda (abas "Rotas de Linha" e "Rotas Regionais", como o ajuste_de_rotas_docas.xlsx). O dia é conferido de novo
+na hora, sem ir ao JMS.
+
+config.json (criado na primeira vez)
+------------------------------------
+porta 3800 · minutos 30 · remessasPorConsulta 1000 · segundosEntreConsultas 1 · consultasPorSegundo 4 ·
+consultasAoMesmoTempo 3 · diasGuardados 7 · codigoBase 30001 · nomeBase SP GRU · senha (vazio = sem senha) ·
+dashmaster (pasta do DashMaster; vazio = procura em C:\dashmaster) · caminho /rota-certa.
+
+Arquivos do app: dados\rota_certa.db (banco), dados\rota_certa.log (registro), planilhas\rotas.xlsx (tabela de rotas).
+
+Feito por Caike Oliveira

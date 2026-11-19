@@ -91,7 +91,8 @@ function startFakeJms(port, days, options) {
     req.on('data', c => chunks.push(c));
     req.on('end', () => {
       try {
-        const r = jms('https://gw.jtjms-br.com' + req.url, {headers: req.headers, payload: Buffer.concat(chunks).toString('utf8')}, state);
+        // method: GET (Registros de carga e descarga; V4.17: lista da troncal) e POST, como no UrlFetchApp do Apps Script.
+        const r = jms('https://gw.jtjms-br.com' + req.url, {method: req.method.toLowerCase(), headers: req.headers, payload: Buffer.concat(chunks).toString('utf8')}, state);
         res.writeHead(r.getResponseCode(), {'Content-Type': 'application/json;charset=UTF-8'});
         res.end(r.getContentText());
       } catch (e) { res.writeHead(500); res.end(String(e && e.message || e)); }
@@ -134,11 +135,15 @@ function firstDiff(a, b, p) {
 
   // ---------- 2. Servidor Node.js + JMS simulado por HTTP ----------
   const jport = await freePort(), port = await freePort();
-  const fake = await startFakeJms(jport, mkDays());
+  // V4.29: o JMS recusa o AuthToken "TOKEN-RECUSADO" (como com a sessão vencida), para o teste da página /token.
+  const fake = await startFakeJms(jport, mkDays(), {intercept: (route, headers) =>
+    headers.authtoken === 'TOKEN-RECUSADO' ? [200, {code: 135010030, msg: 'token失效，请重新登录', data: null}] : null});
   const srv = await startServer({porta: port, navegadorPdf: process.env.DASHMASTER_TEST_BROWSER || ''}, {DASHMASTER_JMS_URL: 'http://127.0.0.1:' + jport});
   const api = async (fn, args) => {
     const r = await request(port, 'POST', '/api/run', {fn, args: args || []});
-    const j = JSON.parse(r.text);
+    let j = JSON.parse(r.text);
+    // Chamada demorada (> esperaApiMs): pergunta de novo, como a página faz.
+    while (j.ok && j.pendente) j = JSON.parse((await request(port, 'GET', '/api/resultado?id=' + j.pendente)).text);
     if (!j.ok) throw new Error(fn + ': ' + j.error);
     return j.result;
   };
@@ -186,6 +191,9 @@ function firstDiff(a, b, p) {
     for (const params of [{from: '2026-09-17', to: '2026-09-19'}, {from: '2026-09-19', to: '2026-09-19'}]) {
       const a = normalize(JSON.parse(JSON.stringify(ref.getDashboardData(ind, params))));
       const b = normalize(await api('getDashboardData', [ind, params]));
+      // V4.25.3: o limite de remessas por consulta é do ambiente (Apps Script 150 mil, Node 500 mil); o resto tem de ser igual.
+      const lim = [a, b].map(x => x.meta && x.meta.archive ? x.meta.archive.maxRows : undefined);
+      if ((lim[0] === 150000 || lim[0] === null) && lim[1] === (lim[0] === null ? null : 1000000)) { delete a.meta.archive.maxRows; delete b.meta.archive.maxRows; }
       const d = firstDiff(a, b, ind);
       check(!d, 'painel igual ao do Apps Script: ' + ind + ' ' + params.from + '→' + params.to, d);
     }
@@ -209,6 +217,31 @@ function firstDiff(a, b, p) {
   const cfgPage = await request(port, 'GET', '/config');
   check(cfgPage.status === 200 && /Salvar e testar a conexão/.test(cfgPage.text) && !badScripts(cfgPage.text).length && !badScripts(page.text).length,
     'scripts da tela Configurações e do painel sem erro de sintaxe (os botões funcionam)', badScripts(cfgPage.text).map(x => x.slice(0, 80)));
+
+  // ---------- 4b. V4.29: página /token (troca do AuthToken pelo link, só se o JMS aceitar) ----------
+  const TUN = {'X-Forwarded-For': '10.0.0.9'}, TOK = Object.assign({'X-DashMaster-Token': '1'}, TUN);
+  const tokPage = await request(port, 'GET', '/token', undefined, TUN);
+  check(tokPage.status === 200 && /Trocar o AuthToken/.test(tokPage.text) && !badScripts(tokPage.text).length && !/FAKE/.test(tokPage.text),
+    '/token abre pelo link (fora do computador do servidor), com script sem erro e sem mostrar o token salvo');
+  check((await request(port, 'GET', '/token/', undefined, TUN)).headers.location === '/token', '/token/ redireciona para /token');
+  const tokEst = await request(port, 'GET', '/token/estado', undefined, TOK);
+  check(tokEst.status === 200 && JSON.parse(tokEst.text).token === true && !/FAKE/.test(tokEst.text), '/token/estado: só diz se há AuthToken, sem o valor');
+  check((await request(port, 'GET', '/token/estado', undefined, TUN)).status === 403, '/token: ações só com o cabeçalho da própria página');
+  check((await request(port, 'POST', '/token/salvar', {texto: 'NOVO-TOKEN-OK-123'}, Object.assign({Origin: 'http://outro-site.example'}, TOK))).status === 403,
+    '/token: outro site não troca o AuthToken (CSRF)');
+  const fetchesAntes = fake.state.fetches.length;
+  let ts = JSON.parse((await request(port, 'POST', '/token/salvar', {texto: 'TOKEN-RECUSADO'}, TOK)).text);
+  check(ts.ok === false && /não aceitou/.test(ts.error) && fake.state.fetches.slice(fetchesAntes).some(f => /tmsShipment\/page/.test(f.url) && f.headers.authtoken === 'TOKEN-RECUSADO'),
+    '/token: AuthToken recusado pelo JMS não é salvo', ts);
+  ts = JSON.parse((await request(port, 'POST', '/token/salvar', {texto: 'curto'}, TOK)).text);
+  check(ts.ok === false && /não parece/.test(ts.error), '/token: texto que não é AuthToken é recusado sem ir ao JMS', ts);
+  ts = JSON.parse((await request(port, 'POST', '/token/salvar', {texto: 'authtoken: "FAKE-TOKEN-NOVO-123"'}, TOK)).text);
+  const estTok = await admin('estado');
+  check(ts.ok === true && estTok.token === true && fake.state.fetches.slice(fetchesAntes).some(f => /tmsShipment\/page/.test(f.url) && f.headers.authtoken === 'FAKE-TOKEN-NOVO-123'),
+    '/token: AuthToken aceito pelo JMS é salvo ("authtoken: ..." e aspas são limpos)', ts);
+  check(/\/token/.test(cfgPage.text) && estTok.trocaTokenPeloLink === true, 'Configurações mostra o link /token para a equipe');
+  check(/colar na página \/token deste mesmo link/.test(page.text) && !/JMS_AUTHTOKEN nas Propriedades/.test(page.text),
+    'aviso de token vencido no painel aponta para a página /token');
 
   // ---------- 5. Segurança das chamadas ----------
   const deny = await request(port, 'POST', '/api/run', {fn: 'setupProject', args: []});
@@ -297,9 +330,197 @@ function firstDiff(a, b, p) {
   check(right.status === 303 && right.headers.location === '/?ind=sc_sc' && /^jt_painel=/.test(cookie), 'senha certa entra e volta para a página pedida');
   const authed = await request(port2, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, {Cookie: cookie});
   check(authed.status === 200 && JSON.parse(authed.text).ok, 'API com login funciona');
+  const tokNo = await request(port2, 'GET', '/token', undefined, {'X-Forwarded-For': '10.0.0.9'});
+  const tokYes = await request(port2, 'GET', '/token', undefined, {'X-Forwarded-For': '10.0.0.9', Cookie: cookie});
+  const tokApiNo = await request(port2, 'GET', '/token/estado', undefined, {'X-Forwarded-For': '10.0.0.9', 'X-DashMaster-Token': '1'});
+  check(tokNo.status === 303 && tokNo.headers.location === '/entrar?volta=%2Ftoken' && tokYes.status === 200 && tokApiNo.status === 401,
+    'painel com senha: /token pede a senha do painel e depois abre', [tokNo.status, tokNo.headers.location, tokYes.status, tokApiNo.status]);
   const evil = await request(port2, 'POST', '/entrar', 'senha=segredo-teste&volta=%2F%2Fevil.example', {'Content-Type': 'application/x-www-form-urlencoded'});
   check(evil.headers.location === '/', 'não redireciona para outro site depois do login');
   srv2.child.kill();
+
+  // ---------- 9b. V4.21.5: painel num caminho do link (Lotes em https://NOME.ts.net/lotes, o mesmo link do principal) ----------
+  const portC = await freePort();
+  const srvC = await startServer({porta: portC, senha: 'segredo-lotes', caminho: 'lotes/'});
+  const funnel = {'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'painel.exemplo.ts.net', 'Tailscale-Funnel-Request': '?1'};
+  const semBarra = await request(portC, 'GET', '/lotes?x=1', undefined, funnel);
+  check(semBarra.status === 301 && semBarra.headers.location === '/lotes/?x=1', '/lotes sem a barra vai para /lotes/', semBarra.headers);
+  const loginC = await request(portC, 'GET', '/lotes/', undefined, funnel);
+  check(loginC.status === 303 && loginC.headers.location === '/lotes/entrar?volta=%2F', 'pelo link /lotes: login dentro do /lotes', loginC.headers);
+  const telaC = await request(portC, 'GET', '/lotes/entrar?volta=%2F', undefined, funnel);
+  check(telaC.status === 200 && telaC.text.includes('<base href="/lotes/">') && /action="entrar"/.test(telaC.text), 'tela de login com os endereços dentro do /lotes');
+  const rightC = await request(portC, 'POST', '/lotes/entrar', 'senha=segredo-lotes&volta=%2F%3Fx%3D1',
+    Object.assign({'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://painel.exemplo.ts.net'}, funnel));
+  const cookieC = String(rightC.headers['set-cookie'] || '').split(';')[0];
+  check(rightC.status === 303 && rightC.headers.location === '/lotes/?x=1' && /^jt_painel_lotes=/.test(cookieC),
+    'senha certa volta para /lotes e o login tem cookie próprio (não briga com o do principal)', rightC.headers);
+  const outroCookie = await request(portC, 'GET', '/lotes/', undefined, Object.assign({Cookie: cookieC.replace(/^jt_painel_lotes=/, 'jt_painel=')}, funnel));
+  check(outroCookie.status === 303, 'o login do painel principal (jt_painel) não abre o painel de /lotes');
+  const paginaC = await request(portC, 'GET', '/lotes/', undefined, Object.assign({Cookie: cookieC}, funnel));
+  check(paginaC.status === 200 && paginaC.text.includes('<base href="/lotes/">'), 'painel abre em /lotes/ (api/run fica dentro do /lotes)');
+  const apiC = await request(portC, 'POST', '/lotes/api/run', {fn: 'getAppBootstrap', args: []}, Object.assign({Cookie: cookieC}, funnel));
+  check(apiC.status === 200 && JSON.parse(apiC.text).ok, 'API pelo /lotes/api/run');
+  // Tailscale que tira o /lotes antes de repassar: o servidor percebe pelo túnel e mantém os endereços no /lotes.
+  const tirado = await request(portC, 'GET', '/', undefined, funnel);
+  check(tirado.status === 303 && tirado.headers.location === '/lotes/entrar?volta=%2F', 'Tailscale sem o /lotes no pedido: continua no /lotes', tirado.headers);
+  const local = await request(portC, 'GET', '/');
+  check(local.status === 303 && local.headers.location === '/entrar?volta=%2F', 'neste computador (localhost:PORTA) o painel segue na raiz', local.headers);
+  const sairC = await request(portC, 'GET', '/lotes/sair', undefined, Object.assign({Cookie: cookieC}, funnel));
+  check(sairC.status === 303 && sairC.headers.location === '/lotes/' && /^jt_painel_lotes=;/.test(String(sairC.headers['set-cookie'] || '')), 'sair volta para /lotes/');
+  srvC.child.kill();
+
+  // ---------- 9c. V4.22: Produção do Sorter (pacote sem JMS) — sorter falso por HTTP, com sessão (cookies) e _token ----------
+  const {createFakeSorter, dayTotals} = require(path.join(ROOT, 'tests', 'sorter_falso.js'));
+  const siteS = createFakeSorter({modo: 'xadmin'});
+  const portSite = await freePort();
+  const srvSite = http.createServer(siteS.handler);
+  servers.push(srvSite);
+  await new Promise(r => srvSite.listen(portSite, '127.0.0.1', r));
+  const portS = await freePort();
+  const srvS = await startServer({porta: portS, semJms: true});
+  const adminS = async (name, body) => {
+    const r = await request(portS, body === undefined ? 'GET' : 'POST', '/config/api/' + name, body);
+    const j = JSON.parse(r.text);
+    if (!j.ok) throw new Error(name + ': ' + j.error);
+    return j;
+  };
+  const isoS = d => new Date(Date.now() + d * 864e5).toLocaleDateString('sv-SE', {timeZone: 'America/Sao_Paulo'});
+  const dS1 = isoS(-2), dS2 = isoS(-1);
+  // V4.22.1: sem SORTER_TROCA_A — a troca do Sorter A é descoberta sozinha pela rede (página, _token e cookies de verdade).
+  const propsS = {PAINEIS: 'sorter_flow', SORTER_URL: 'http://127.0.0.1:' + portSite + '/home', SORTER_MAX_BALANCAS: '14', DATA_START_DATE: dS1};
+  for (const k of Object.keys(propsS)) await adminS('propriedade', {k, v: propsS[k]});
+  const histS = await adminS('executar', {fn: 'startFullHistory', args: []});
+  check(histS.result && histS.result.ok && histS.result.indicators === 1, 'Sorter: histórico enfileirado sem AuthToken do JMS', histS.result);
+  for (let g = 0; g < 8; g++) {
+    const r = await adminS('executar', {fn: 'processSyncQueue', args: [{budgetMs: 600000}]});
+    if (r.result && (r.result.idle || r.result.remaining === 0)) break;
+  }
+  const apiS = async (fn, args) => {
+    let j = JSON.parse((await request(portS, 'POST', '/api/run', {fn, args})).text);
+    while (j.ok && j.pendente) j = JSON.parse((await request(portS, 'GET', '/api/resultado?id=' + j.pendente)).text);
+    if (!j.ok) throw new Error(fn + ': ' + j.error);
+    return j.result;
+  };
+  const dashS = await apiS('getDashboardData', ['sorter_flow', {from: dS1, to: dS2}]);
+  const want = [dS1, dS2].reduce((a, d) => a + dayTotals('A', d).total + dayTotals('B', d).total, 0);
+  const got = (dashS.rates || []).reduce((a, r) => a + (Number(r.totalCount) || 0), 0);
+  check(got === want && (dashS.rates || []).every(r => r.metrics && r.metrics.sortTotalA > 0 && r.metrics.sortTotalB > 0),
+    'Sorter pelo Node.js: Sorter A (sessão com cookies e _token) + Sorter B gravados dia a dia', {got, want});
+  const trS = ((await adminS('estado')).props.filter(p => p.k === 'SORTER_TROCA_A')[0] || {}).v || '';
+  check(siteS.log.some(x => x.path === '/statis/summary.data' && x.device === 'A') && /"auto":true/.test(trS),
+    'Sorter pelo Node.js: troca do A descoberta sozinha e valendo na sessão (Set-Cookie guardado)');
+  const cfgS = await request(portS, 'GET', '/config'), estS = await adminS('estado');
+  check(/Sorter da base/.test(cfgS.text) && !/AuthToken do JMS/.test(cfgS.text) && estS.semJms === true && !/AuthToken do JMS ainda não cadastrado/.test(srvS.out()),
+    'pacote do Sorter: Configurações com o sorter, sem pedir AuthToken do JMS');
+  const pageS = await request(portS, 'GET', '/?ind=sorter_flow');
+  check(pageS.status === 200 && /Produção do Sorter/.test(pageS.text), 'página da Produção do Sorter');
+  // V4.23: bot do Feishu — Configurações com o cartão; testarFeishu manda o cartão no webhook (Feishu falso local) com assinatura;
+  // o webhook e o segredo ficam escondidos na lista de propriedades.
+  const feishuGot = [];
+  const srvF = http.createServer((q, r) => { const c = []; q.on('data', d => c.push(d)); q.on('end', () => {
+    feishuGot.push({path: q.url, body: JSON.parse(Buffer.concat(c).toString('utf8'))});
+    r.writeHead(200, {'content-type': 'application/json'}); r.end(JSON.stringify({code: 0, msg: 'success', data: {}}));
+  }); });
+  servers.push(srvF);
+  const portF = await freePort();
+  await new Promise(r => srvF.listen(portF, '127.0.0.1', r));
+  await adminS('propriedade', {k: 'FEISHU_WEBHOOK', v: 'http://127.0.0.1:' + portF + '/open-apis/bot/v2/hook/teste-node'});
+  await adminS('propriedade', {k: 'FEISHU_SEGREDO', v: 'segredo-node'});
+  const tf = await adminS('executar', {fn: 'testarFeishu', args: []}), estF = await adminS('estado');
+  const fb = (feishuGot[0] || {}).body || {}, sigOk = fb.sign === require('crypto').createHmac('sha256', fb.timestamp + '\n' + 'segredo-node').update('').digest('base64');
+  const pF = estF.props.filter(p => /^FEISHU_(WEBHOOK|SEGREDO)$/.test(p.k));
+  check(/Bot do Feishu/.test(cfgS.text) && tf.result && tf.result.ok && feishuGot.length === 1 && fb.msg_type === 'interactive' && sigOk &&
+    /Produção do Sorter/.test(fb.card.header.title.content) && pF.length === 2 && pF.every(p => p.secret && !p.interna && !/teste-node|segredo-node/.test(p.v)) &&
+    !/teste-node|segredo-node/.test(JSON.stringify(tf)),
+    'pacote do Sorter: bot do Feishu pelo Node.js (cartão com assinatura; webhook e segredo escondidos)', {tf: tf.result, n: feishuGot.length, pF});
+  srvS.child.kill();
+
+  // ---------- 10. Link do Netlify (grátis) repassando para o link público (Tailscale) ----------
+  const viaNetlify = {Origin: 'https://jt-teste.netlify.app', 'X-Forwarded-Host': 'painel.exemplo.ts.net', 'X-Forwarded-Proto': 'https'};
+  const noNetlify = await request(port, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, viaNetlify);
+  check(noNetlify.status === 403 && /linkNetlify.*jt-teste\.netlify\.app/.test(JSON.parse(noNetlify.text).error),
+    'pelo Netlify sem "linkNetlify": diz o que colocar no config.json', noNetlify.text);
+  check(!fs.existsSync(path.join(srv.tmp, 'link-netlify')), 'sem link público: nada de pasta para o Netlify');
+  const port3 = await freePort();
+  const srv3 = await startServer({porta: port3, linkPublico: 'https://painel.exemplo.ts.net/', linkNetlify: 'https://jt-teste.netlify.app'},
+    {DASHMASTER_ESPERA_API_MS: '1'});
+  const redirects = fs.readFileSync(path.join(srv3.tmp, 'link-netlify', '_redirects'), 'utf8');
+  check(/^\/\*  https:\/\/painel\.exemplo\.ts\.net\/:splat  200!$/m.test(redirects) && fs.existsSync(path.join(srv3.tmp, 'link-netlify', 'index.html')),
+    'pasta link-netlify pronta para arrastar no Netlify (repassa para o link público)', redirects);
+  // As linhas dos endereços chegam logo depois de "no ar.": espera um pouco por elas.
+  for (let i = 0; i < 50 && !/\(link do Netlify\)/.test(srv3.out()); i++) await new Promise(r => setTimeout(r, 100));
+  check(/https:\/\/jt-teste\.netlify\.app  \(link do Netlify\)/.test(srv3.out()), 'janela mostra o link do Netlify', srv3.out().slice(-600));
+  // Chamada que passa do tempo de espera: responde "ainda processando" (202) e a página pergunta de novo.
+  const first = await request(port3, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, viaNetlify);
+  const pend = JSON.parse(first.text);
+  check(first.status === 202 && pend.ok && /^[0-9a-f]{32}$/.test(pend.pendente), 'chamada demorada responde "ainda processando"', first.text);
+  let fim = pend, polls = 0;
+  while (fim.ok && fim.pendente && polls < 200) { fim = JSON.parse((await request(port3, 'GET', '/api/resultado?id=' + fim.pendente)).text); polls++; }
+  check(fim.ok && fim.result && typeof fim.result === 'object', 'depois de perguntar de novo, chega o resultado', {polls, fim: JSON.stringify(fim).slice(0, 200)});
+  const gone = await request(port3, 'GET', '/api/resultado?id=' + pend.pendente);
+  check(gone.status === 404, 'resultado entregue não fica guardado');
+  const otherNetlify = await request(port3, 'POST', '/api/run', {fn: 'getAppBootstrap', args: []}, Object.assign({}, viaNetlify, {Origin: 'https://outro.netlify.app'}));
+  check(otherNetlify.status === 403, 'outro site do Netlify continua bloqueado');
+  const cfgNetlify = await request(port3, 'GET', '/config/api/estado', undefined, viaNetlify);
+  check(cfgNetlify.status === 401, 'Configurações não abrem pelo link do Netlify');
+  srv3.child.kill();
+
+  // Erro ao abrir: pelo atalho do Windows a janela fica aberta com o motivo (aqui o Windows e a espera são simulados).
+  const tmpErr = fs.mkdtempSync(path.join(os.tmpdir(), 'dm-node-erro-'));
+  const fakeWindows = path.join(tmpErr, 'janela-windows.js');
+  fs.writeFileSync(fakeWindows, "Object.defineProperty(process, 'platform', {value: 'win32'});\nprocess.stdout.isTTY = true;\n" +
+    "Atomics.wait = function () { process.stderr.write('ESPEROU ' + arguments[3] + '\\n'); return 'timed-out'; };\n");
+  const startFails = (configText, env, preload) => new Promise(resolve => {
+    const file = path.join(fs.mkdtempSync(path.join(tmpErr, 'cfg-')), 'config.json');
+    fs.writeFileSync(file, configText);
+    const child = spawn(process.execPath, (preload ? ['-r', preload] : []).concat(path.join(__dirname, '..', 'server.js')), {
+      env: Object.assign({}, process.env, {DASHMASTER_CONFIG: file, DASHMASTER_SEM_AGENDADOR: '1'}, env || {}), stdio: ['ignore', 'pipe', 'pipe']});
+    children.push(child);
+    let out = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.on('data', d => { out += d; });
+    const timer = setTimeout(() => { child.kill(); resolve({code: 'parado', out}); }, 30000);
+    child.on('exit', code => { clearTimeout(timer); resolve({code, out}); });
+  });
+  const badCfg = await startFails('{"porta": 3000,,}');
+  check(badCfg.code === 1 && /\[erro\] Não consegui iniciar: config\.json inválido/.test(badCfg.out) && !/ESPEROU/.test(badCfg.out),
+    'config.json inválido: mostra o motivo e sai (fora do Windows, sem esperar)', badCfg.out);
+  const badCfgWin = await startFails('{"porta": 3000,,}', {}, fakeWindows);
+  check(badCfgWin.code === 1 && /config\.json inválido/.test(badCfgWin.out) && /O painel NÃO está no ar/.test(badCfgWin.out) &&
+    /feche no X/.test(badCfgWin.out) && /ESPEROU 1800000/.test(badCfgWin.out), 'atalho do Windows: a janela fica aberta com o erro', badCfgWin.out);
+  const badCfgBat = await startFails('{"porta": 3000,,}', {DASHMASTER_SEM_PAUSA: '1'}, fakeWindows);
+  check(badCfgBat.code === 1 && /config\.json inválido/.test(badCfgBat.out) && !/ESPEROU/.test(badCfgBat.out),
+    'pelo iniciar.bat (que já segura a janela): sai sem esperar', badCfgBat.out);
+  const busy = await startFails(JSON.stringify({host: '127.0.0.1', porta: port, pastaDados: path.join(tmpErr, 'dados'), pastaCodigo: ROOT}), {}, fakeWindows);
+  check(busy.code === 1 && /A porta \d+ já está em uso/.test(busy.out) && /ESPEROU 1800000/.test(busy.out),
+    'porta em uso (painel já aberto): a janela mostra o motivo', busy.out);
+  check(fs.readFileSync(path.join(tmpErr, 'dados', 'servidor.log'), 'utf8').includes('já está em uso'), 'o motivo também fica no servidor.log');
+
+  // ---------- 11. V4.25.3: Excel grande (mês inteiro) — formatação por intervalo e arquivo comprimido em pedaços ----------
+  {
+    const {MemSpreadsheet} = require(path.join(ROOT, 'node', 'lib', 'sheets.js'));
+    const {toXlsx} = require(path.join(ROOT, 'node', 'lib', 'report.js'));
+    const ss = new MemSpreadsheet('teste', 'TESTE'), sh = ss.getSheets()[0];
+    const N = 30000, rows = Array.from({length: N}, (_, i) => ['TST' + String(i).padStart(9, '0'), '0' + (i % 10), 'OPERADOR FICTICIO ' + (i % 7)]);
+    sh.getRange(1, 2).setNumberFormat('0.00').setFontColor('#B42318');   // célula com formato antes do intervalo grande
+    sh.getRange(1, 1, 1, 3).setValues([['Remessa', 'Código', 'Login']]);
+    sh.getRange(2, 1, N, 3).setNumberFormat('@').setValues(rows);         // 90 mil células: um registro só
+    sh.getRange(5, 3).setFontWeight('bold');                              // célula com estilo depois do intervalo
+    const st5 = sh.styleOf(5, 3), stHead = sh.styleOf(1, 2);
+    check(sh.blocks.length === 1 && sh.styles.size < 10 && st5.numberFormat === '@' && st5.bold === true && stHead.numberFormat === '0.00' &&
+      stHead.color === '#B42318' && sh.getRange(3, 2).getValue() === '01' && sh.styleOf(N + 5, 1) === null,
+      'V4.25.3: formatação de intervalo grande num registro só (antes um por célula: 3 GB no Excel do mês); texto "01" continua texto');
+    const buf = toXlsx(ss), cd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    let xml = '';
+    for (let i = 0; i < buf.length - 30; i++) {
+      if (buf.readUInt32LE(i) !== 0x04034b50) continue;
+      const nl = buf.readUInt16LE(i + 26), name = buf.slice(i + 30, i + 30 + nl).toString(), size = buf.readUInt32LE(i + 18);
+      if (name === 'xl/worksheets/sheet1.xml') xml = zlib.inflateRawSync(buf.slice(i + 30 + nl, i + 30 + nl + size)).toString('utf8');
+    }
+    const nRows = (xml.match(/<row /g) || []).length;
+    check(cd > 0 && nRows === N + 1 && /<\/worksheet>$/.test(xml) && xml.indexOf('TST000029999') > 0 && /t="inlineStr"><is><t xml:space="preserve">01</.test(xml),
+      'V4.25.3: Excel com ' + N + ' remessas em pedaços comprimidos — abre inteiro (todas as linhas)', {nRows, fim: xml.slice(-40)});
+  }
 
   srv.child.kill();
   cleanup();

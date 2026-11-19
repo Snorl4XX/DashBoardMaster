@@ -1,14 +1,23 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Gera os dois pacotes do painel para o Apps Script (desde a V4.3), a partir dos mesmos arquivos do repositório:
- *   <saída>/painel-principal/  → todos os painéis, menos Recebimento e Expedição (fluxo operacional)
- *   <saída>/painel-fluxos/     → só Recebimento e Expedição (fluxo operacional), para OUTRA conta Google
- * e os ZIPs JT_DASHMASTER_<versão>_PRINCIPAL.zip e JT_DASHMASTER_<versão>_FLUXOS.zip.
+ * Gera os pacotes do painel para o Apps Script (desde a V4.3), a partir dos mesmos arquivos do repositório:
+ *   <saída>/painel-principal/  → todos os painéis, menos a Criação de Lotes
+ *   <saída>/painel-lotes/      → só a Criação de Lotes
+ * e os ZIPs JT_DASHMASTER_<versão>_PRINCIPAL.zip e JT_DASHMASTER_<versão>_LOTES.zip. V4.26: sem o pacote dos fluxos (Recebimento e
+ * Expedição: fluxo operacional saíram do código).
  * Os pacotes só diferem na linha PACOTE_PAINEIS_ do Config.gs (e no LEIA_ESTE_PAINEL.md).
  *
- * V4.7: também o pacote da versão Node.js (JT_DASHMASTER_<versão>_NODE.zip, pasta "dashmaster/"): TODOS os painéis num
- * servidor só (sem cota do Google), com a pasta node (instalador da Oracle Cloud, link público e o passo a passo).
+ * V4.7: também o pacote da versão Node.js (JT_DASHMASTER_<versão>_NODE.zip, pasta "dashmaster/"): os painéis num servidor só
+ * (sem cota do Google), com a pasta node (instalador da Oracle Cloud, link público e o passo a passo). V4.15.2 (pedido): os
+ * mesmos painéis do pacote principal, sem Recebimento e Expedição (fluxo operacional).
+ *
+ * V4.21 (pedido "Separar o DASHBOARD DE LOTE/SACA do Dash principal"): a Criação de Lotes sai do painel principal e ganha
+ * pacotes próprios — JT_DASHMASTER_<versão>_LOTES.zip (Apps Script, outro projeto) e JT_DASHMASTER_<versão>_LOTES_NODE.zip
+ * (pasta "dashmaster-lotes/": porta 3400 e link do Tailscale na porta 10000, no mesmo computador do painel principal).
+ *
+ * Netlify: também a página do painel para um site do Netlify (JT_DASHMASTER_<versão>_NETLIFY.zip, pasta "dashmaster-netlify/"):
+ * a mesma tela, já montada, pedindo os dados ao Apps Script (Api.gs) pelo link /exec — nada instalado no computador.
  *
  * Uso: node tools/gerar_paineis.js [pasta de saída]   (padrão: dist/)
  */
@@ -17,14 +26,136 @@ const path = require('path');
 const {zip} = require('../node/lib/report');
 
 const ROOT = path.join(__dirname, '..');
-const FLOWS = 'arrival_flow,send_flow';
+// V4.26 (pedido): Recebimento e Expedição (fluxo operacional) saíram do código — sem o pacote dos fluxos.
+// V4.21: o painel de Lotes/Sacas (Criação de Lotes) fica separado do principal (V4.26: separate no Config.gs).
+const LOTS = 'lot_flow';
+const MAIN_OUT = LOTS;
+const LOTS_PACOTE = {so: LOTS, fora: '', nome: 'Criação de Lotes'};
+// Pacote Node.js do painel de Lotes: outra pasta, outra porta (V4.21.2: 3400 — a 3100 é do painel do Sorter, a 3200 da
+// Pesquisa e a 3300 da Expedição Incorreta). V4.22.5 (pedido "porta diferente para cada dash"): o link do Tailscale na porta
+// 10000 (https://NOME.xxxx.ts.net:10000); o principal fica na 443 e o Sorter na 8443 (o Funnel só aceita 443, 8443 e 10000).
+// linkVersao: o config.json de quem instalou antes recebe a porta nova uma vez (node/lib/config.js → migrateLinkPort).
+const LOTS_NODE = {folder: 'dashmaster-lotes', zip: 'LOTES_NODE', pacote: LOTS_PACOTE,
+  padrao: {porta: 3400, portaLink: 10000, caminho: '', linkVersao: 2},
+  // Atalho e janela com nome próprio (o atalho "JT DashMaster" do principal não é trocado).
+  replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster Lotes.lnk'], ['"JT DashMaster"', '"JT DashMaster Lotes"'],
+    ['o DashMaster vai abrir', 'o painel de Lotes vai abrir']],
+    'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster Lotes (Node.js) - porta 3400']]},
+  readme: v => `# Painel de Lotes/Sacas (Node.js) — J&T DashMaster ${v}
 
-const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Analytics', 'Report', 'Triggers', 'Code'];
+Painel **separado** do principal, só com a **Criação de Lotes** (sacas ecológicas e não ecológicas). Roda no mesmo computador
+do painel principal, sem misturar: pasta, dados, porta e link próprios.
+
+| | Painel principal | Painel de Lotes |
+|---|---|---|
+| Pasta | C:\\dashmaster | **C:\\dashmaster-lotes** |
+| Neste computador | http://localhost:3000 | **http://localhost:3400** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net:10000** |
+
+## Instalar (uma vez)
+1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-lotes). Não extraia por cima do C:\\dashmaster.
+2. Abra C:\\dashmaster-lotes\\node e dê dois cliques em **iniciar.bat**. Deixe a janela preta aberta.
+3. Neste computador, abra **http://localhost:3400/config**: cole o AuthToken do JMS, escolha a Data inicial e clique em
+   **Baixar histórico**.
+4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Lotes").
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. Ele liga o link na porta **10000**:
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000. Cada painel tem a sua porta no link: principal 443, Sorter 8443, Lotes
+   10000. Se a porta já levar para outro painel deste computador, ele avisa e pergunta antes de trocar. Coloque esse link em
+   \`"linkPublico"\` no config.json e escolha uma \`"senha"\` (a senha deste painel é separada da do principal).
+
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=10000 off\`
+
+## Quem usava o link com /lotes (versões 4.21.5 a 4.22.4)
+Feche a janela preta do painel de Lotes, extraia o ZIP novo em C:\\ (Substituir) e dê dois cliques em **link-publico.bat**. Ele
+troca sozinho o config.json para a porta 10000, liga o link https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000 e desliga o /lotes.
+Depois abra o **iniciar.bat**.
+`};
+// V4.22 (pedido "dashboard no mesmo esquema que o principal para http://10.1.166.9"): Produção do Sorter, separada do principal —
+// outra pasta, porta 3500 (3000 principal, 3100 Painel do Sorter, 3200 Pesquisa, 3300 Expedição Incorreta, 3400 Lotes). V4.22.5:
+// link do Tailscale na porta 8443 (cada painel na sua porta). Sem JMS (semJms): a tela Configurações pede o sorter.
+const SORTER = 'sorter_flow';
+const SORTER_PACOTE = {so: SORTER, fora: '', nome: 'Produção do Sorter'};
+const SORTER_NODE = {folder: 'dashmaster-sorter', zip: 'SORTER_NODE', pacote: SORTER_PACOTE, readmeName: 'LEIA_SORTER.md',
+  padrao: {porta: 3500, portaLink: 8443, caminho: '', semJms: true, linkVersao: 2},
+  replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster Sorter.lnk'], ['"JT DashMaster"', '"JT DashMaster Sorter"'],
+    ['o DashMaster vai abrir', 'o painel do Sorter vai abrir']],
+    'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster Sorter (Node.js) - porta 3500']]},
+  readme: v => `# Produção do Sorter (Node.js) — J&T DashMaster ${v}
+
+Painel **separado** do principal, no mesmo esquema dele: lê o monitor do sorter da base (**http://10.1.166.9**, tela
+"summary statistics of sorter operation") e **salva cada dia** no banco deste computador, como o painel principal faz com o JMS.
+Mesmo visual (cartões, gráficos, filtros, tabela), Data inicial, Baixar histórico e atualização de hora em hora.
+
+| | Painel principal | Produção do Sorter |
+|---|---|---|
+| Pasta | C:\\dashmaster | **C:\\dashmaster-sorter** |
+| Neste computador | http://localhost:3000 | **http://localhost:3500** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net:8443** |
+
+**Importante:** o computador precisa estar **na rede da base** (abrir http://10.1.166.9 no navegador dele). O Google não enxerga a
+rede interna: este painel só funciona na versão Node.js.
+
+## O que aparece
+- **Cartões:** Total produzido (Sort total), Deu certo (Valid total) e %, Não deu certo (No Sort Code) e %, Anormais, dia anterior
+  e um cartão por turno (T1 06h–14h, T2 14h–22h, T3 22h–06h).
+- **Gráficos:** evolução diária, evolução por hora, No Sort Code por hora, produção por turno, por sorter (A e B), top 10 balanças
+  pela quantidade alimentada (tela "feeder feed quantity"), motivos de falha (No Sort Code, No plan, Chute, Intercept, No Read,
+  Multi, Outros) e produção por andar (Layer1/2/3).
+- **Filtros:** Sorter, Balança (Induction No.), Turno e Horário.
+- **Tabelas:** por horário (as mesmas colunas da tela do sorter e o Total no fim) e a quantidade alimentada por balança.
+
+## Instalar (uma vez)
+1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-sorter). Não extraia por cima do C:\\dashmaster.
+2. Abra C:\\dashmaster-sorter\\node e dê dois cliques em **iniciar.bat**. Deixe a janela preta aberta.
+3. Neste computador, abra **http://localhost:3500/config**:
+   - **Sorter da base:** o endereço já vem http://10.1.166.9. Clique em **Salvar e testar o sorter**. O teste mostra os números de
+     hoje de cada sorter.
+   - **Sorter A:** o B é o que o site mostra sem trocar. Para o A, o painel **descobre sozinho** como o site troca (pedido da
+     página, arquivo .js do site ou cookie) e guarda. O teste mostra o relatório "descoberta". Se ele não achar, mande um print
+     desse relatório. Também dá para colar a troca à mão em "Troca do Sorter A".
+   - **Histórico:** escolha a Data inicial, clique em **Salvar data** e depois em **Baixar histórico**.
+4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Sorter").
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica na porta **8443**:
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net:8443 (principal 443, Lotes 10000). Coloque esse link em \`"linkPublico"\` no config.json
+   e escolha uma \`"senha"\`.
+   - O Funnel do Tailscale só tem 3 portas (443, 8443 e 10000). A Expedição Incorreta também usa a 8443: se ela estiver no mesmo
+     computador, o link-publico.bat avisa. Nesse caso, deixe o Sorter num caminho do link principal: no config.json,
+     \`"portaLink": 443\` e \`"caminho": "/sorter"\` (link https://NOME-DO-COMPUTADOR.xxxx.ts.net/sorter).
+
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=8443 off\`
+
+## Ajustes (Configurações → Propriedades)
+| Propriedade | Para que serve |
+|---|---|
+| SORTER_URL | endereço do sorter (padrão http://10.1.166.9) |
+| SORTER_TROCA_A | pedido de troca para o Sorter A: {"metodo", "caminho", "corpo"} |
+| SORTERS | sorters lidos, na ordem (padrão "B,A") |
+| SORTER_PADRAO | o sorter que o site mostra sem trocar (padrão "B") |
+
+Se os dois sorters vierem com os mesmos números, o painel não grava o dia e avisa: a troca não trocou nada. Cada sorter é conferido
+pelo título da página do site ("(A套)" / "(B套)"). Os números do dia são os da tela com os filtros 00:00 → 23:59, "no group by",
+Induction All e By Layer All (summary statistics); a consulta por hora só divide o dia. As balanças vêm da tela "feeder feed
+quantity" (/statis/outlets), do mesmo jeito; se ela não responder, o dia fica com os totais e o LOG avisa.
+
+## Bot do Feishu (opcional)
+De hora em hora (minuto 5), um cartão no grupo do Feishu com os dados da hora que fechou (ex.: às 13:05, das 12:00 às 12:59):
+produção (Sorter A + B), Valid total, No Sort Code e as balanças (3 que mais, 3 que menos e todas); no fim de cada turno, o total do
+turno. No grupo: Configurações do grupo → Bots → Adicionar bot → Bot
+personalizado; copie o webhook. Em http://localhost:3500/config, seção **Bot do Feishu**: cole o webhook (e o segredo, se ligou a
+assinatura) e clique em **Salvar e mandar um teste**. O computador precisa de internet. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
+`};
+const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
+// V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.
+const NODE_PACOTE = {so: '', fora: MAIN_OUT, nome: ''};
+
+const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Sorter', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
+// V4.22: Sorter.gs (Produção do Sorter) só vai nos pacotes Node.js — o Google não enxerga a rede da base.
+const GS_APPS = GS_ORDER.filter(f => f !== 'Sorter');
 const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
 
 const PACKAGES = [
   {
-    id: 'principal', zip: 'PRINCIPAL', pacote: {so: '', fora: FLOWS, nome: ''},
+    id: 'principal', zip: 'PRINCIPAL', pacote: {so: '', fora: MAIN_OUT, nome: ''},
     readme: v => `# Painel principal — J&T DashMaster ${v}
 
 Este pacote é o **painel principal**. Ele mostra:
@@ -32,56 +163,23 @@ Este pacote é o **painel principal**. Ele mostra:
 - Falta de Bipagem no Recebimento e na Expedição;
 - Expedição SC → SC e SC → DC;
 - Avaria e Sem Movimentação;
+- Deslacre (linha secundária) e Deslacre (linha troncal) — V4.17;
 - Resultados.
 
-Retirados (os dados antigos ficam na planilha): Fluxo de Lotes (V4.7) e Deslacre (V4.12.3). \`REATIVAR_PAINEIS\` = \`lot_flow,unseal\` traz de volta.
+**V4.21: a Criação de Lotes (sacas) saiu daqui.** Ela tem pacotes próprios: \`JT_DASHMASTER_..._LOTES.zip\` (Apps Script) e \`JT_DASHMASTER_..._LOTES_NODE.zip\` (Node.js, link próprio no Tailscale). V4.26: ela fica fora do principal mesmo com \`PAINEIS_FORA\` preenchida.
 
 Desde a V4.8, Envio Errado, Triagem Errada e Falta de Bipagem na Expedição usam as docas e rotas de carregamento da tabela de 11/10 (tabelas em \`DOCKS_EXPEDICAO\` no Config.gs).
 
-**Recebimento e Expedição (fluxo operacional) não estão aqui.** Eles ficam no outro pacote, o painel dos fluxos. Assim este painel gasta cerca de metade da cota diária do Google e não para por falta de cota.
+**V4.26: Recebimento e Expedição (fluxo operacional) saíram do código** (pedido). As tarefas deles que ficaram na fila são encerradas sozinhas.
 
 ## Como instalar (no projeto do Apps Script que você já usa)
 1. No editor do Apps Script, abra cada arquivo e troque todo o conteúdo pelo arquivo de mesmo nome deste pacote: os \`.gs\` e os \`.html\`.
 2. Clique em **Implantar → Gerenciar implantações → ✏️ → Nova versão**. O link do painel não muda.
 3. Recarregue o painel com Ctrl+F5.
 
-Não precisa mexer em Propriedades do script: o pacote já vem sem os fluxos. Se você tinha colocado \`PAINEIS_FORA\`, pode apagar ou deixar.
+Não precisa mexer em Propriedades do script. Se você tinha colocado \`PAINEIS_FORA\`, pode apagar ou deixar.
 
-Os dados antigos do Recebimento e da Expedição continuam na planilha, mas não são mais baixados nem mostrados aqui.
-
-## Arquivos
-${fileList()}
-`
-  },
-  {
-    id: 'fluxos', zip: 'FLUXOS', pacote: {so: FLOWS, fora: '', nome: 'Fluxo operacional'},
-    readme: v => `# Painel dos fluxos — J&T DashMaster ${v}
-
-Este pacote é o **painel dos fluxos**. Ele mostra só **Recebimento: fluxo operacional** e **Expedição: fluxo operacional**, com os Resultados deles. O nome que aparece embaixo do logo é "Fluxo operacional".
-
-**Instale numa OUTRA conta Google, e não na conta do painel principal.** A cota diária do Google (90 min/dia na conta Gmail) é por conta: na mesma conta, os dois painéis dividiriam a mesma cota. Nesta conta, o Recebimento usa até 40 min/dia e a Expedição até 45 min/dia.
-
-## Como instalar (uma vez)
-1. Entre com a **outra conta Google** e abra https://script.google.com → **Novo projeto**. Dê um nome, por exemplo "JT Fluxos".
-2. Para cada arquivo \`.gs\` deste pacote:
-   - crie um arquivo de script com o mesmo nome (botão **+ → Script**, sem o ".gs");
-   - cole o conteúdo.
-
-   O arquivo "Código.gs" que o Google cria pode ser apagado.
-3. Para cada arquivo \`.html\`:
-   - crie um arquivo HTML com o mesmo nome (botão **+ → HTML**, sem o ".html");
-   - cole o conteúdo.
-4. Em **Configurações do projeto** (engrenagem):
-   - marque "Mostrar arquivo de manifesto appsscript.json no editor";
-   - volte ao editor e troque o conteúdo do \`appsscript.json\` pelo deste pacote.
-5. Ainda em Configurações do projeto → **Propriedades do script**, adicione:
-   - todas as propriedades que começam com **JMS_** do painel principal. São as mesmas credenciais, por exemplo \`JMS_AUTHTOKEN\` e \`JMS_AUTH_MODE\`;
-   - **DATA_START_DATE**, o primeiro dia a baixar, no formato AAAA-MM-DD. Na conta Gmail, um histórico curto (7 a 15 dias) fica completo mais rápido.
-6. No editor, escolha a função **setupProject** e clique em ▶ Executar. Autorize. Ela cria a planilha do banco e os gatilhos nesta conta.
-7. Escolha a função **startFullHistory** e clique em ▶ Executar.
-8. Clique em **Implantar → Nova implantação → App da Web**. O link que aparece é o **link do painel dos fluxos**.
-
-**Quando o AuthToken do JMS vencer:** troque \`JMS_AUTHTOKEN\` aqui **e** no painel principal.
+Os dados antigos do Recebimento e da Expedição continuam na planilha, mas não são mais baixados nem mostrados.
 
 ## Arquivos
 ${fileList()}
@@ -89,11 +187,41 @@ ${fileList()}
   }
 ];
 
+// V4.21: painel de Lotes/Sacas separado (Apps Script).
+PACKAGES.push({
+  id: 'lotes', zip: 'LOTES', pacote: LOTS_PACOTE,
+  readme: v => `# Painel de Lotes/Sacas — J&T DashMaster ${v}
+
+Este pacote é o **painel de Lotes/Sacas** separado do principal (pedido V4.21). Ele mostra só a **Criação de Lotes** (sacas
+ecológicas e não ecológicas, destinos das sacas vermelhas com chip), com os Resultados dela. O nome embaixo do logo é
+"Criação de Lotes".
+
+## Como instalar (uma vez)
+1. Abra https://script.google.com → **Novo projeto** (de preferência noutra conta Google: a cota diária é por conta). Nome: "JT Lotes".
+2. Crie cada arquivo \`.gs\` (**+ → Script**) e cada \`.html\` (**+ → HTML**) com o mesmo nome deste pacote, sem a extensão, e cole o conteúdo.
+3. Em **Configurações do projeto**, marque "Mostrar arquivo de manifesto appsscript.json" e cole o \`appsscript.json\` deste pacote.
+4. Em **Propriedades do script**, adicione as propriedades **JMS_** do painel principal (ex.: \`JMS_AUTHTOKEN\` e \`JMS_AUTH_MODE\`) e **DATA_START_DATE** (AAAA-MM-DD).
+5. Rode **setupProject** (▶ Executar, autorize) e depois **startFullHistory**.
+6. **Implantar → Nova implantação → App da Web**. O link que aparece é o link do painel de Lotes.
+
+**Quando o AuthToken do JMS vencer:** troque \`JMS_AUTHTOKEN\` aqui **e** no painel principal.
+
+## Arquivos
+${fileList()}
+`
+});
+
 function fileList() {
-  return GS_ORDER.map(f => '- `' + f + '.gs`').concat(HTML.map(f => '- `' + f + '.html`'), ['- `appsscript.json`']).join('\n');
+  return GS_APPS.map(f => '- `' + f + '.gs`').concat(HTML.map(f => '- `' + f + '.html`'), ['- `appsscript.json`']).join('\n');
 }
 
 function versionOf(config) { const m = config.match(/VERSION:\s*'([^']+)'/); return m ? m[1] : '?'; }
+
+/** Linha PACOTE_PAINEIS_ do Config.gs de um pacote ({so, fora, nome}). */
+function pacoteLine(pacote) {
+  return 'const PACOTE_PAINEIS_ = ' + JSON.stringify(pacote).replace(/"/g, "'").replace(/,'/g, ", '").replace(/':/g, "': ")
+    .replace(/^\{/, '{').replace(/'(so|fora|nome)': /g, '$1: ') + ';';
+}
 
 /** Monta os pacotes em `outDir`. Devolve [{id, dir, zip}]. */
 function build(outDir, opts) {
@@ -102,8 +230,7 @@ function build(outDir, opts) {
   const extra = fs.readdirSync(root).filter(f => /\.gs$/.test(f) && GS_ORDER.indexOf(f.slice(0, -3)) < 0).map(f => f.slice(0, -3));
   if (extra.length) throw new Error('Arquivo .gs fora da lista do gerador: ' + extra.join(', ') + ' (inclua em GS_ORDER).');
   const config = fs.readFileSync(path.join(root, 'Config.gs'), 'utf8');
-  const lineRe = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
-  if (!lineRe.test(config)) throw new Error('Config.gs sem a linha PACOTE_PAINEIS_ (o gerador não sabe separar os painéis).');
+  if (!PACOTE_RE.test(config)) throw new Error('Config.gs sem a linha PACOTE_PAINEIS_ (o gerador não sabe separar os painéis).');
   const version = versionOf(config);
   // 4.4.0 → V4_4; 4.4.1 → V4_4_1 (correção com nome próprio, para não confundir com o ZIP anterior).
   const parts = version.split('.');
@@ -115,12 +242,11 @@ function build(outDir, opts) {
     fs.mkdirSync(dir, {recursive: true});
     const files = [];
     const put = (name, data) => { fs.writeFileSync(path.join(dir, name), data); files.push({name, data: Buffer.from(data)}); };
-    const line = 'const PACOTE_PAINEIS_ = ' + JSON.stringify(pkg.pacote).replace(/"/g, "'").replace(/,'/g, ", '").replace(/':/g, "': ")
-      .replace(/^\{/, '{').replace(/'(so|fora|nome)': /g, '$1: ') + ';';
+    const line = pacoteLine(pkg.pacote);
     put('LEIA_ESTE_PAINEL.md', pkg.readme(version));
-    GS_ORDER.forEach(f => {
+    GS_APPS.forEach(f => {
       let text = fs.readFileSync(path.join(root, f + '.gs'), 'utf8');
-      if (f === 'Config') text = text.replace(lineRe, line);
+      if (f === 'Config') text = text.replace(PACOTE_RE, line);
       put(f + '.gs', text);
     });
     HTML.forEach(f => put(f + '.html', fs.readFileSync(path.join(root, f + '.html'), 'utf8')));
@@ -133,21 +259,32 @@ function build(outDir, opts) {
 }
 
 /**
- * Pacote da versão Node.js: os arquivos do repositório como estão (Config.gs com todos os painéis — sem cota, o Recebimento e
- * a Expedição cabem no mesmo servidor) e a pasta node, sem os testes, os dados e o config.json de quem gerou.
+ * Pacote da versão Node.js: os arquivos do repositório e a pasta node, sem os testes, os dados e o config.json de quem gerou.
+ * V4.15.2 (pedido): Config.gs com a linha do pacote principal (sem Recebimento e Expedição). A Propriedade PAINEIS_FORA,
+ * preenchida em Configurações, vale mais que o pacote (ex.: "nenhum" traz os dois de volta).
  */
 function buildNode(outDir, opts) {
   opts = opts || {};
   const root = opts.root || ROOT;
+  // V4.21: opts.variant = LOTS_NODE (painel de Lotes separado: outra pasta, porta, atalho e link).
+  const vr = opts.variant || null, folder = vr ? vr.folder : 'dashmaster';
   const config = fs.readFileSync(path.join(root, 'Config.gs'), 'utf8');
   const parts = versionOf(config).split('.');
   const tag = 'V' + (parts[2] && parts[2] !== '0' ? parts.slice(0, 3) : parts.slice(0, 2)).join('_');
+  if (!PACOTE_RE.test(config)) throw new Error('Config.gs sem a linha PACOTE_PAINEIS_ (o gerador não sabe separar os painéis).');
   const files = [];
-  const add = rel => files.push({name: 'dashmaster/' + rel.split(path.sep).join('/'), data: fs.readFileSync(path.join(root, rel))});
-  GS_ORDER.forEach(f => add(f + '.gs'));
+  const fix = (rel, buf) => {
+    const subs = vr && vr.replace && vr.replace[rel.split(path.sep).join('/')];
+    if (!subs) return buf;
+    let t = buf.toString('utf8');
+    subs.forEach(([a, b]) => { if (t.indexOf(a) < 0) throw new Error('Pacote ' + vr.zip + ': "' + a + '" não está em ' + rel); t = t.split(a).join(b); });
+    return Buffer.from(t);
+  };
+  const add = (rel, data) => files.push({name: folder + '/' + rel.split(path.sep).join('/'), data: fix(rel, data || fs.readFileSync(path.join(root, rel)))});
+  GS_ORDER.forEach(f => add(f + '.gs', f === 'Config' ? Buffer.from(config.replace(PACOTE_RE, pacoteLine(vr ? vr.pacote : NODE_PACOTE))) : null));
   HTML.forEach(f => add(f + '.html'));
-  ['appsscript.json', 'LEIA_PRIMEIRO.md'].forEach(add);
-  const skip = /^node\/(test|dados|node_modules)(\/|$)|^node\/config\.json$|^node\/.*\.log$/;
+  ['appsscript.json', 'LEIA_PRIMEIRO.md'].forEach(f => add(f));
+  const skip = /^node\/(test|dados|node_modules|link-netlify)(\/|$)|^node\/config\.json$|^node\/.*\.log$/;
   (function walk(rel) {
     fs.readdirSync(path.join(root, rel), {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name)).forEach(d => {
       const r = rel + '/' + d.name;
@@ -155,10 +292,191 @@ function buildNode(outDir, opts) {
       if (d.isDirectory()) walk(r); else add(r);
     });
   })('node');
+  // Padrões do pacote (porta e porta do link): uma chave por linha, para o link-publico.bat ler cada uma.
+  if (vr && vr.padrao) add(path.join('node', 'padrao.json'), Buffer.from(JSON.stringify(vr.padrao, null, 2) + '\n'));
+  if (vr && vr.readme) add(vr.readmeName || 'LEIA_LOTES.md', Buffer.from(vr.readme(versionOf(config))));
   fs.mkdirSync(outDir, {recursive: true});
-  const zipPath = path.join(outDir, 'JT_DASHMASTER_' + tag + '_NODE.zip');
+  const zipPath = path.join(outDir, 'JT_DASHMASTER_' + tag + '_' + (vr ? vr.zip : 'NODE') + '.zip');
   fs.writeFileSync(zipPath, zip(files));
   return {zip: zipPath, files: files.map(f => f.name)};
+}
+
+// ------------------------------------------------------------------ Netlify
+// google.script.run do navegador → POST no link /exec do Apps Script (Api.gs). O link fica em link-apps-script.txt (a pessoa
+// cola com o Bloco de Notas antes de arrastar a pasta no Netlify). Texto puro no corpo: sem pré-verificação de CORS.
+const NETLIFY_BRIDGE = String.raw`<script>
+(function () {
+  var painel = document.documentElement.getAttribute('data-painel') || 'principal';
+  var KEY = 'jt_senha_' + painel;
+  var LINK_MSG = 'Falta o link do Apps Script: abra o arquivo link-apps-script.txt (no Bloco de Notas), cole o link do App da Web ' +
+    '(termina em /exec) e arraste a pasta de novo no Netlify.';
+  var REDE_MSG = 'Não consegui falar com o Apps Script. Confira o link em link-apps-script.txt e se a implantação do App da Web ' +
+    'está com "Quem pode acessar: Qualquer pessoa".';
+  var JSON_MSG = 'O Apps Script não respondeu como esperado. Confira se o arquivo Api.gs foi colado no projeto e se a implantação ' +
+    'foi atualizada (Implantar → Gerenciar implantações → editar → Nova versão), com "Quem pode acessar: Qualquer pessoa".';
+  var link = fetch('link-apps-script.txt', {cache: 'no-store'}).then(function (r) { return r.ok ? r.text() : ''; }, function () { return ''; })
+    .then(function (t) {
+      var o = {};
+      String(t || '').split(/\r?\n/).forEach(function (l) { var m = l.match(/^\s*(principal|fluxos)\s*=\s*(\S*)/); if (m) o[m[1]] = m[2]; });
+      var url = (o[painel] || o.principal || '').trim();
+      return /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url) || /^http:\/\/(127\.0\.0\.1|localhost):\d+\//.test(url) ? url : '';
+    });
+  function lerSenha() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
+  function guardarSenha(v) { try { if (v) localStorage.setItem(KEY, v); else localStorage.removeItem(KEY); } catch (e) { /* só nesta visita */ } }
+  var senhaAtual = lerSenha(), pedindo = null;
+  /** Pergunta a senha uma vez (vários pedidos ao mesmo tempo esperam a mesma resposta). */
+  function pedirSenha(erro) {
+    if (pedindo) return pedindo;
+    pedindo = new Promise(function (resolve) {
+      var box = document.createElement('div');
+      box.setAttribute('style', 'position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:rgba(10,12,16,.72);font:15px system-ui,sans-serif');
+      box.innerHTML = '<form style="background:#fff;color:#1f2430;border-radius:14px;padding:24px;width:min(92vw,340px);display:grid;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.35)">' +
+        '<b style="font-size:18px">Painel J&amp;T</b><label for="jtSenha">Senha do painel</label>' +
+        '<input id="jtSenha" type="password" autocomplete="current-password" style="font-size:16px;padding:10px;border:1px solid #c9ccd3;border-radius:8px">' +
+        '<span id="jtSenhaErro" style="color:#c62828;font-size:13px"></span>' +
+        '<button style="background:#E60012;color:#fff;border:0;border-radius:8px;padding:11px;font-weight:700;font-size:15px">Entrar</button></form>';
+      document.body.appendChild(box);
+      box.querySelector('#jtSenhaErro').textContent = erro || '';
+      var input = box.querySelector('#jtSenha');
+      input.focus();
+      box.querySelector('form').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        if (!input.value) return;
+        senhaAtual = input.value;
+        guardarSenha(senhaAtual);
+        box.remove();
+        pedindo = null;
+        resolve();
+      });
+    });
+    return pedindo;
+  }
+  function chamar(url, fn, args, tentativa) {
+    var enviada = senhaAtual;
+    return fetch(url, {method: 'POST', redirect: 'follow', credentials: 'omit', headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({fn: fn, args: args, senha: enviada})})
+      .then(function (r) { return r.text(); }, function () { throw new Error(REDE_MSG); })
+      .then(function (t) {
+        var j;
+        try { j = JSON.parse(t); } catch (e) { throw new Error(JSON_MSG); }
+        if (j && j.senha && tentativa < 5) {
+          // Outro pedido já trocou a senha: tenta com a nova antes de perguntar.
+          if (senhaAtual && senhaAtual !== enviada) return chamar(url, fn, args, tentativa + 1);
+          if (enviada) { senhaAtual = ''; guardarSenha(''); }
+          return pedirSenha(enviada ? 'Senha incorreta.' : '').then(function () { return chamar(url, fn, args, tentativa + 1); });
+        }
+        return j;
+      });
+  }
+  function runner(ok, fail) {
+    return new Proxy({}, {get: function (_, name) {
+      if (name === 'withSuccessHandler') return function (fn) { return runner(fn, fail); };
+      if (name === 'withFailureHandler') return function (fn) { return runner(ok, fn); };
+      if (name === 'withUserObject') return function () { return runner(ok, fail); };
+      if (typeof name !== 'string') return undefined;
+      return function () {
+        var args = Array.prototype.slice.call(arguments);
+        var onFail = function (e) { if (fail) fail(e); else if (window.console) console.error(e); };
+        link.then(function (url) {
+          if (!url) throw new Error(LINK_MSG);
+          return chamar(url, name, args, 0);
+        }).then(function (j) {
+          if (j && j.ok) { if (ok) ok(j.result); } else onFail(new Error(j && j.error || 'Erro no Apps Script.'));
+        }).catch(function (e) { onFail(e instanceof Error ? e : new Error(String(e))); });
+      };
+    }});
+  }
+  window.google = window.google || {};
+  window.google.script = {run: runner(null, null), host: {close: function () {}, setHeight: function () {}, setWidth: function () {}}};
+  window.__PLATAFORMA__ = 'netlify';
+})();
+</script>`;
+
+const NETLIFY_LINK_TXT = `# J&T DashMaster no Netlify: link do Apps Script
+#
+# 1. No Apps Script: Implantar > Gerenciar implantacoes > copie a URL do App da Web (termina em /exec).
+# 2. Cole o link depois do sinal de igual, na linha "principal" (sem aspas), e salve.
+# 3. Arraste a pasta inteira no Netlify (app.netlify.com/drop, ou na aba Deploys do seu projeto).
+
+principal = 
+`;
+
+const NETLIFY_LEIA = v => `J&T DASHMASTER ${v} NO NETLIFY
+================================
+
+A tela do painel fica no Netlify (gratis). Os dados continuam vindo do seu
+Apps Script (a busca do JMS roda la, como hoje). Nada e instalado no computador.
+
+1. No Apps Script do painel: Arquivo + > Script > nome Api > cole o Api.gs >
+   Salvar. Em Configuracoes do projeto > Propriedades do script, crie
+   SENHA_PAINEL com a senha da equipe (recomendado).
+2. Implantar > Gerenciar implantacoes > editar (lapis) > Versao: Nova versao >
+   Quem pode acessar: Qualquer pessoa > Implantar. Copie a URL (termina em /exec).
+3. Nesta pasta: botao direito em link-apps-script.txt > Abrir com > Bloco de
+   Notas > cole a URL depois de "principal =" > Salvar.
+4. Abra app.netlify.com/drop (com sua conta do Netlify) e arraste esta pasta.
+   O link https://....netlify.app e o painel.
+
+Pagina: index.html = painel principal.
+`;
+
+/** Monta o Index.html como o doGet fazia, mas estático: o boot vem do endereço da página e o google.script.run vira pedido ao /exec. */
+function netlifyPage(root, info, painel) {
+  const read = n => fs.readFileSync(path.join(root, n), 'utf8');
+  const boot = '(function () { var p = new URLSearchParams(location.search), ind = p.get("ind") || "", lang = p.get("lang") || "";' +
+    ' var IND = ' + JSON.stringify(info.indicators) + ';' +
+    ' return {lang: lang === "zh" || lang === "pt" ? lang : "", indicator: IND.indexOf(ind) >= 0 ? ind : "", view: p.get("view") === "results" ? "results" : "dashboard"}; })()';
+  let html = read('Index.html');
+  const parts = [
+    [/<\?!=\s*include\('Styles'\);?\s*\?>/, () => read('Styles.html')],
+    // V4.25: o Maomao saiu da página (o aviso "Fora da meta" saiu de todos os painéis); o Mascot.html continua no pacote.
+    [/<\?!=\s*boot\s*\?>/, () => boot],
+    [/<\?!=\s*coreSource_\(\);?\s*\?>/, () => info.core],
+    [/<\?!=\s*include\('Client'\);?\s*\?>/, () => read('Client.html')]
+  ];
+  parts.forEach(([re, fn]) => {
+    if (!re.test(html)) throw new Error('Index.html sem ' + re + ' (o gerador do Netlify precisa ser atualizado).');
+    const text = fn();
+    html = html.replace(re, () => text);
+  });
+  if (/<\?/.test(html.replace(/<\?xml[^>]*\?>/g, ''))) throw new Error('Index.html tem marcas do Apps Script que o gerador do Netlify não conhece.');
+  html = html.replace(/<html([^>]*)>/i, (m, a) => '<html' + a + ' data-painel="' + painel + '">');
+  const head = '\n  <title>' + info.appName.replace(/&/g, '&amp;') + '' + '</title>\n' +
+    '  <meta name="viewport" content="width=device-width, initial-scale=1">\n' + NETLIFY_BRIDGE + '\n';
+  // Logo depois do <meta charset> (ele tem que ficar nos primeiros bytes da página).
+  if (!/<meta charset="UTF-8">/i.test(html)) throw new Error('Index.html sem <meta charset="UTF-8">.');
+  return html.replace(/<meta charset="UTF-8">/i, m => m + head);
+}
+
+/** Pasta e ZIP do site do Netlify. Devolve {dir, zip, files}. */
+function buildNetlify(outDir, opts) {
+  opts = opts || {};
+  const root = opts.root || ROOT;
+  const {createContext} = require(path.join(root, 'tests', 'mocks.js'));
+  const ctx = createContext({quiet: true, root});
+  // INDICATORS e APP_CONFIG são const no Config.gs: não ficam no objeto global, só no escopo do script.
+  const vm = require('vm');
+  const info = {core: ctx.coreSource_(), indicators: vm.runInContext('Object.keys(INDICATORS)', ctx),
+    appName: String(vm.runInContext('APP_CONFIG.APP_NAME', ctx) || 'J&T Express')};
+  if (info.core.indexOf('</script') >= 0) throw new Error('Core.gs não pode conter </script.');
+  const version = versionOf(fs.readFileSync(path.join(root, 'Config.gs'), 'utf8'));
+  const parts = version.split('.');
+  const tag = 'V' + (parts[2] && parts[2] !== '0' ? parts.slice(0, 3) : parts.slice(0, 2)).join('_');
+  const dir = path.join(outDir, 'dashmaster-netlify');
+  fs.rmSync(dir, {recursive: true, force: true});
+  fs.mkdirSync(dir, {recursive: true});
+  const files = [];
+  const put = (name, data) => {
+    fs.writeFileSync(path.join(dir, name), data);
+    files.push({name: 'dashmaster-netlify/' + name, data: Buffer.from(data)});
+  };
+  put('index.html', netlifyPage(root, info, 'principal'));
+  put('link-apps-script.txt', NETLIFY_LINK_TXT.replace(/\n/g, '\r\n'));
+  put('LEIA-ME.txt', NETLIFY_LEIA(version).replace(/\n/g, '\r\n'));
+  put('Api.gs', fs.readFileSync(path.join(root, 'Api.gs'), 'utf8'));
+  const zipPath = path.join(outDir, 'JT_DASHMASTER_' + tag + '_NETLIFY.zip');
+  fs.writeFileSync(zipPath, zip(files));
+  return {dir, zip: zipPath, files: files.map(f => f.name)};
 }
 
 if (require.main === module) {
@@ -166,6 +484,12 @@ if (require.main === module) {
   build(out).forEach(r => console.log(r.id + ': ' + r.dir + '\n  ' + r.zip + '\n  ' + r.line));
   const n = buildNode(out);
   console.log('node: ' + n.zip + ' (' + n.files.length + ' arquivos)');
+  const nl = buildNode(out, {variant: LOTS_NODE});
+  console.log('node (lotes): ' + nl.zip + ' (' + nl.files.length + ' arquivos)');
+  const ns = buildNode(out, {variant: SORTER_NODE});
+  console.log('node (sorter): ' + ns.zip + ' (' + ns.files.length + ' arquivos)');
+  const w = buildNetlify(out);
+  console.log('netlify: ' + w.zip + ' (' + w.files.length + ' arquivos)');
 }
 
-module.exports = {build, buildNode, PACKAGES, FLOWS};
+module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, LOTS_NODE, SORTER_NODE, MAIN_OUT};

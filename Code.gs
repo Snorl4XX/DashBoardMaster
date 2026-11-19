@@ -236,6 +236,8 @@ function refreshAllNow(indicatorKey, from, to) {
   if (open && INDICATORS[open].snapshot) add(open, today);
   agendaDailyJobs_().forEach(j => { if (j[0] === 'SUMMARY') add(j[1], j[2]); else details.push(j); });
   Object.keys(INDICATORS).filter(k => INDICATORS[k].agendaEvery).forEach(k => agendaEveryJobs_(k).forEach(j => add(j[1], j[2])));
+  // V4.22.5: e o último dia fechado deles (antes do horário da agenda, ex.: 0h–6h, ontem ficava de fora do Atualizar).
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].agendaEvery && !INDICATORS[k].snapshot).forEach(k => add(k, lastClosedDate_(k)));
   const deadline = Date.now() + APP_CONFIG.REFRESH_ALL_BUDGET_MS;
   try { prefetchSummaries_(pairs.slice(0, 150)); } catch (e) { /* um por um */ }
   const result = {ok: true, updated: 0, empty: 0, failed: 0, pendingDays: 0, detailsQueued: 0, errors: [], panels: 0};
@@ -779,11 +781,7 @@ function diagnosticoCompleto(date) {
       item.resumo = s.empty ? 'sem registros' : {taxa: s.rate, erros: s.errorCount, base: s.totalCount};
     } catch (e) { item.resumo = {erro: publicJmsError_(e.message), erroBruto: String(e.message).slice(0, 300)}; }
     try {
-      // Expedição: o detalhe é por rota (a maior rota do dia); diagnosticarExpedicao() testa tudo em detalhe.
-      const probe = cfg.byRoute ? timed(() => {
-        const w = sendProbeWindow_(key, d), size = detailPageSize_(cfg), g = fetchDetailPage_(key, d, 1, size, w);
-        return {records: g.records, total: g.total, size: size};
-      }) : timed(() => probeDetail_(key, d));
+      const probe = timed(() => probeDetail_(key, d));
       const rt = JMS_ROUTES_.filter(r => r.key === cfg.routeKey && r.alt)[0];
       if (rt) {
         const pp = jmsReadProperties_(), v = routeVariant_(rt, pp);
@@ -854,8 +852,6 @@ function diagnosticoCompleto(date) {
           'filho: código ainda sendo procurado (' + okp + '=' + cfg.orderKinds.candidates.join('/') + ')')));
     }
     if (item.rota) lines.push('  Cabeçalho de rota: Routename "' + item.rota.routename + '" · Routernamelist "' + item.rota.routernamelist + '" (' + item.rota.origem + ')');
-    if (cfg.byRoute) lines.push('  (Expedição: o teste acima é só da maior rota. Para as listas, os turnos, o Rastreamento do pacote e o download, rode diagnosticarExpedicao().)');
-    else if (cfg.grouped) lines.push('  (Recebimento: o teste acima é só da 1ª lista. Para as 4 listas, os turnos e o download, rode diagnosticarRecebimento().)');
     const dk = item.docas;
     if (dk && dk.amostra) {
       lines.push('  Docas (1ª página do detalhe, ' + dk.amostra + ' remessas): ' + dk.docas.slice(0, 6).map(x => x.doca + ' ' + x.pct + '%').join(' · '));
@@ -893,152 +889,12 @@ function diagnosticoCompleto(date) {
 }
 
 /**
- * Diagnóstico só do Recebimento: fluxo operacional (V3.19). Rode no editor (▶ Executar) e copie o texto do
- * "Registro de execução" — ele não mostra AuthToken nem Cookie. Testa no JMS, sem gravar nada no banco:
- *  - o resumo do dia e o resumo por horário (turnos T1/T2/T3 sem o detalhe);
- *  - cada uma das 4 listas do detalhe: endereço, total × número do resumo, tamanho de página aceito,
- *    se o JMS respeita o horário (fatias) e a paginação longa, e os campos que chegam;
- * e mostra a situação do download dos últimos dias, a fila, o teto diário (conta Gmail) e os últimos avisos.
- * `date` (opcional, AAAA-MM-DD): padrão = ontem.
- */
-function diagnosticarRecebimento(date) {
-  const key = 'arrival_flow', cfg = activeCfg_(key);
-  const d = isIso_(date) ? date : lastClosedDate_(key);
-  const lines = [], out = {versao: APP_CONFIG.VERSION, data: d, listas: []};
-  const add = x => lines.push(x);
-  const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
-  const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
-  const cred = authConfigSafe_();
-  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico do Recebimento: fluxo operacional — dia ' + humanDatePt_(d));
-  add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · conta Google: ' + googlePlan_() +
-    ' (teto diário do detalhe: ' + (groupedBudgetMin_() ? groupedBudgetMin_() + ' min; usado hoje ' + (Math.round(groupedUsedMs_() / 6000) / 10) + ' min' : 'sem teto') + ')');
-  (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
-  let day = null;
-  const latencies = [];
-  const timed = fn => { const t0 = Date.now(); try { return fn(); } finally { latencies.push(Date.now() - t0); } };
-  try {
-    const s = timed(() => fetchSummaryDay_(key, d));
-    day = s.empty ? null : s.raw;
-    add('Resumo: ' + (s.empty ? 'SEM REGISTROS neste dia' : (cfg.summary.metrics || []).map(m => m + ' ' + fmt(s.raw[m])).join(' · ')));
-  } catch (e) { add('Resumo: ERRO — ' + err(e)); }
-  try {
-    // Turnos sem esperar o download: a LISTA de cada número consultada em cada horário de turno.
-    const probe = (cfg.detail.shiftProbe || []), full = dayWindow_(d, false), off = summaryShiftsOff_(cfg);
-    if (probe.length) {
-      const items = [];
-      probe.forEach(t => { items.push({page: 1, size: 10, win: Object.assign({type: t}, full)});
-        SHIFT_WINDOWS_.forEach(w => items.push({page: 1, size: 10, win: {start: d + ' ' + w[1], end: d + ' ' + w[2], type: t}})); });
-      const res = timed(() => fetchDetailBatch_(key, d, items));
-      add('Turnos pela lista do JMS por horário (cartões T1/T2/T3 e pizza sem esperar o download):');
-      out.turnosPelaLista = {};
-      probe.forEach((t, k) => {
-        const td = (cfg.detail.types || []).filter(x => x.type === t)[0] || {};
-        const r = res.slice(k * 5, k * 5 + 5), wins = r.slice(1).map(x => Number(x.total) || 0), chk = shiftProbeCheck_(Number(r[0].total) || 0, wins);
-        const sh = {T1: wins[0], T2: wins[1], T3: wins[2] + wins[3]};
-        out.turnosPelaLista[t] = {ok: chk.ok, turnos: sh, dia: chk.day};
-        add('  · "' + td.column + '": T1 ' + fmt(sh.T1) + ' · T2 ' + fmt(sh.T2) + ' · T3 ' + fmt(sh.T3) + ' = ' + fmt(chk.sum) + ' × dia ' + fmt(chk.day) +
-          (chk.ok ? ' ✓' : !chk.spread ? ' ✗ um horário tem o dia inteiro (o JMS não separa por hora)' : ' ✗ não fecha com o dia') + (off[t] ? ' · desligado: ' + off[t] : ''));
-      });
-      const rec = out.turnosPelaLista.totalNum;
-      add('  → cartões T1/T2/T3 ' + (rec && rec.ok && !off.totalNum ? 'funcionam sem esperar o detalhe' : 'dependem da lista "Chegou" baixada'));
-    }
-    if (day) {
-      // Referência: o RESUMO por horário (é diário no JMS; só para conferência).
-      const per = timed(() => fetchSummaryMetricsBatch_(key, d, SHIFT_WINDOWS_.map(w => ({start: d + ' ' + w[1], end: d + ' ' + w[2]}))));
-      const rs = per.map(x => Number(x.totalNum) || 0);
-      add('  (resumo por horário, "Chegou": ' + rs.map(fmt).join(' · ') + ' — ' + (shiftProbeCheck_(Number(day.totalNum) || 0, rs).ok ? 'separa por hora' : 'diário, não separa por hora') + ')');
-    }
-  } catch (e) { add('Turnos por horário: ERRO — ' + err(e)); }
-  let url = '';
-  try { url = endpointFor_(cfg, 'detail'); } catch (e) { add('Endereço do detalhe: ERRO — ' + err(e)); }
-  const own = getProp_('JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL', '');
-  add('Endereço do detalhe: ' + (url.split('/').slice(-3).join('/') || '—') + (own ? ' (propriedade JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL)' : ' (padrão, não capturado)'));
-  try {
-    const rt = JMS_ROUTES_.filter(r => r.key === cfg.routeKey)[0], pp = jmsReadProperties_(), v = routeVariant_(rt, pp);
-    add('Cabeçalho de rota: Routename "' + (pp['JMS_ROUTENAME_' + rt.key] || v.name) + '" · Routernamelist "' + (pp['JMS_ROUTENAMELIST_' + rt.key] || v.list) + '"');
-  } catch (e) { /* sem rota */ }
-  const full = dayWindow_(d, false), maxOff = detailMaxOffset_();
-  let requests = 0;
-  add('Listas do detalhe (ordem do download):');
-  detailTypeOrder_(cfg).forEach(t => {
-    const td = (cfg.detail.types || []).filter(x => x.type === t)[0] || {};
-    const item = {lista: td.column, detailType: t};
-    try {
-      const pr = timed(() => probeDetail_(key, d, t));
-      const exp = day ? Number(day[t]) : null;
-      item.total = pr.total; item.resumo = exp; item.pagina = pr.size;
-      const pages = Math.ceil(pr.total / pr.size);
-      requests += pages;
-      const match = exp === null || isNaN(exp) ? '' : pr.total === exp ? ' (resumo ' + fmt(exp) + ' ✓)' :
-        pr.total > exp * 3 + 1000 ? ' (resumo ' + fmt(exp) + ' ✗ MUITO MAIOR: o filtro da base não pegou)' : pr.total === 0 && exp > 0 ? ' (resumo ' + fmt(exp) + ' ✗ ZERADO: detailType ou filtro errado)' : ' (resumo ' + fmt(exp) + ')';
-      add('  · "' + td.column + '" (' + t + '): ' + fmt(pr.total) + ' registros' + match + ' · página de ' + pr.size + ' · ' + fmt(pages) + ' consulta(s) por dia');
-      if (pr.total > pr.size * 2) {
-        const half = splitWindow_(full, 2).map(w => Object.assign(w, {type: t}));
-        const hs = half.map(w => timed(() => fetchDetailPage_(key, d, 1, pr.size, w)).total);
-        const okH = Math.abs(hs[0] + hs[1] - pr.total) <= Math.max(3, pr.total * 0.01) && !(d < isoToday_() && pr.total >= 1000 && Math.max(hs[0], hs[1]) >= pr.total * 0.95);
-        item.respeitaHorario = okH;
-        add('      horário: manhã+tarde ' + fmt(hs[0]) + ' + ' + fmt(hs[1]) + ' = ' + fmt(hs[0] + hs[1]) + (okH ? ' → respeita a hora (download em fatias OK)' : ' → IGNORA a hora (sem fatias; paginação longa)'));
-      }
-      if (maxOff > 0 && pr.total > maxOff) {
-        const deep = Math.floor(maxOff / pr.size) + 2;
-        try {
-          const dp = timed(() => fetchDetailPage_(key, d, deep, pr.size, Object.assign({type: t}, full)));
-          item.paginaLonga = dp.records.length > 0;
-          add('      página ' + deep + ' (além de ' + fmt(maxOff) + ' registros): ' + (dp.records.length ? dp.records.length + ' registros → paginação longa OK' : 'VAZIA → o JMS limita a paginação (as fatias de horário resolvem)'));
-        } catch (e) { item.paginaLonga = false; add('      página ' + deep + ': ERRO — ' + err(e) + ' (o JMS limita a paginação; as fatias de horário resolvem)'); }
-      }
-      if (pr.records.length) {
-        const map = fieldMappingReport_(key, pr.records), keep = td.keep || [];
-        const want = Object.keys(map.campos).filter(k => keep.indexOf(k) >= 0 || (td.copy && Object.keys(td.copy).some(c => td.copy[c] === k && keep.indexOf(c) >= 0)) || (k === 'eventTime' && keep.indexOf('shift') >= 0) || (k === 'shipment' && keep.indexOf('waybill') >= 0));
-        const bad = want.filter(k => map.campos[k].situacao !== 'ok');
-        add('      campos: ' + (bad.length ? 'FALTAM ' + bad.map(k => k + ' (' + map.campos[k].configurado + ': ' + map.campos[k].situacao + ')').join(', ') : 'todos os usados preenchidos') +
-          ' · recebidos: ' + map.camposRecebidos.slice(0, 30).join(', '));
-        item.campos = map.campos;
-      } else if (pr.total > 0) add('      a 1ª página veio sem registros apesar do total ' + fmt(pr.total));
-    } catch (e) { item.erro = err(e); add('  · "' + td.column + '" (' + t + '): ERRO — ' + item.erro); }
-    out.listas.push(item);
-  });
-  const avg = latencies.length ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0;
-  out.tempoMedioJmsMs = Math.round(avg);
-  if (requests) {
-    const par = Math.max(1, Math.min(8, Number(getProp_('JMS_PARALLEL', '')) || APP_CONFIG.FETCH_ALL_BATCH));
-    add('Volume: ~' + fmt(requests) + ' consultas por dia de detalhe · JMS ' + (avg / 1000).toFixed(1) + ' s por consulta · ~' +
-      Math.max(1, Math.round(requests * avg / 1000 / Math.min(par, 3) / 60)) + ' min de execução por dia (' + par + ' em paralelo)');
-  }
-  try {
-    const back = addDaysIso_(isoToday_(), -3);
-    const dp = detailProgress_(key, back, isoToday_());
-    if (d < back) dp.days = dp.days.concat(detailProgress_(key, d, d).days);
-    add('Download dos últimos dias' + (d < back ? ' e do dia ' + humanDatePt_(d) : '') + ':');
-    dp.days.forEach(x => {
-      const lists = (x.lists || []).map(l => l.column + ' ' + (l.units ? Math.round(l.done / l.units * 100) : 0) + '%').join(' · ');
-      const job = x.job ? ' · tarefa ' + x.job.status + (x.job.ahead !== null && x.job.ahead !== undefined ? ' (' + x.job.ahead + ' antes na fila)' : '') + (x.job.attempts ? ', ' + x.job.attempts + ' falha(s)' : '') : ' · sem tarefa';
-      add('  ' + humanDatePt_(x.date) + ': resumo ' + x.summary + ' · detalhe ' + x.details + (x.expected ? ' ' + x.saved + '/' + x.expected : '') + job +
-        (lists ? ' · ' + lists : '') + ((x.skipped || []).length ? ' · NÃO BAIXADAS: ' + x.skipped.map(k => k.column + ' (' + k.reason + ')').join('; ') : '') +
-        (x.error || x.progressError ? ' · erro: ' + (x.progressError || x.error) : ''));
-    });
-    out.dias = dp.days;
-  } catch (e) { add('Download dos últimos dias: ERRO ao ler — ' + err(e)); }
-  try {
-    const logs = allTabRows_('LOG').filter(r => String(r[2]) === key && (r[1] === 'WARN' || r[1] === 'ERROR')).slice(-8);
-    if (logs.length) {
-      add('Últimos avisos do LOG (' + key + '):');
-      logs.forEach(r => add('  ' + (toIsoTimestamp_(r[0]) || '').slice(0, 16).replace('T', ' ') + ' ' + r[1] + ' ' + humanDatePt_(dateCellIso_(r[3])) + ': ' + String(r[4]).slice(0, 260)));
-    } else add('LOG: nenhum aviso ou erro do Recebimento.');
-  } catch (e) { /* sem banco */ }
-  add('Dica: se uma lista der ERRO ou "ZERADO", abra a tela no JMS, F12 → Rede, clique no número dessa coluna e mande a URL e o "Payload" da requisição (sem AuthToken e sem Cookie).');
-  console.log(lines.join('\n'));
-  out.texto = lines.join('\n');
-  return out;
-}
-
-/**
- * Diagnóstico só do Fluxo de Lotes (V3.23). Rode no editor (▶ Executar) e copie o texto do "Registro de execução" —
+ * Diagnóstico só da Criação de Lotes (antes "Fluxo de Lotes"; V3.23). Rode no editor (▶ Executar) e copie o texto do "Registro de execução" —
  * ele não mostra AuthToken, Cookie nem número de saca. Testa no JMS, sem gravar nada no banco:
  *  - o resumo do dia (sdploopbagBuildbagCount: colunas da tabela principal e as calculadas "o restante");
  *  - a lista do número vermelho "Total de pacotes construídos" (packageSum): total × resumo, página aceita, campos;
  *  - a lista INTEIRA do dia (poucas páginas): ecológicas pelo campo isLoopPag × "Número do saco ecológico" do resumo,
- *    pacotes somados × "Número total de conteúdo do pacote", 进港/出港 (Chegada/Partida) e turnos;
+ *    pacotes somados × "Número total de conteúdo do pacote", 进港/出港 (Entrada/Saída de porto) e turnos;
  *  - as listas das colunas ecológicas e não ecológicas (loopSum / noloopSum) só para conferência;
  * e mostra a situação do download dos últimos dias e os últimos avisos. `date` (opcional, AAAA-MM-DD): padrão = ontem.
  */
@@ -1050,7 +906,7 @@ function diagnosticarLotes(date) {
   const fmt = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('pt-BR');
   const err = e => { const m = String(e && e.message || e); return publicJmsError_(m) + (publicJmsError_(m) !== m ? ' [' + m.slice(0, 220) + ']' : ''); };
   const cred = authConfigSafe_();
-  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico do Fluxo de Lotes — dia ' + humanDatePt_(d) + ' · base ' + centerName_() + ' (' + centerCode_() + ')');
+  add('J&T DashMaster ' + APP_CONFIG.VERSION + ' — diagnóstico da Criação de Lotes — dia ' + humanDatePt_(d) + ' · base ' + centerName_() + ' (' + centerCode_() + ')');
   add('Credenciais: modo ' + cred.modo + ' · AuthToken ' + (cred.authToken ? 'OK' : 'AUSENTE') + ' · conta Google: ' + googlePlan_() + ' (tarefa leve, fora do teto diário)');
   (publicPauses_() || []).filter(p => p.route === cfg.routeKey || p.route === '*').forEach(p => add('PAUSA ' + p.route + ' (' + p.kind + '): ' + p.reason));
   try {
@@ -1100,14 +956,14 @@ function diagnosticarLotes(date) {
       const cnt = f => uniq.filter(f).length, sumI = l => l.reduce((a, x) => a + (Number(x.items) || 0), 0);
       const eco = uniq.filter(x => x.sackType === 'Ecológica'), sites = {}, ports = {}, sacks = {};
       all.forEach(x => { sites[String(x.proxySiteName || '—')] = 1; ports[String(x.portName || '—')] = (ports[String(x.portName || '—')] || 0) + 1; sacks[String(x.isLoopPag || '—')] = (sacks[String(x.isLoopPag || '—')] || 0) + 1; });
-      out.listaInteira = {sacas: uniq.length, ecologicas: eco.length, pacotes: sumI(uniq), pacotesEco: sumI(eco), chegada: cnt(x => x.port === 'Chegada'), partida: cnt(x => x.port === 'Partida')};
+      out.listaInteira = {sacas: uniq.length, ecologicas: eco.length, pacotes: sumI(uniq), pacotesEco: sumI(eco), entrada: cnt(x => x.port === 'Entrada'), saida: cnt(x => x.port === 'Saída de porto')};
       const ok = (a, b) => b === null || b === undefined || isNaN(b) ? '' : Number(a) === Number(b) ? ' ✓' : ' ✗ resumo ' + fmt(b);
       add('  lista inteira: ' + fmt(uniq.length) + ' sacas (' + fmt(all.length - uniq.length) + ' repetidas) · bases na lista: ' + Object.keys(sites).join(', '));
       add('  ecológicas pelo campo isLoopPag: ' + fmt(eco.length) + ok(eco.length, day && day.loopSum) + ' · valores de isLoopPag: ' +
         Object.keys(sacks).map(k => k + ' ' + fmt(sacks[k])).join(', '));
       add('  pacotes (soma de "Quantidade de itens na embalagem"): ' + fmt(sumI(uniq)) + ok(sumI(uniq), day && day.waybillSum) + ' · na ecológica ' + fmt(sumI(eco)) + ok(sumI(eco), day && day.loopWaybillSum));
-      add('  tipo de entrada e saída: ' + Object.keys(ports).map(k => k + ' ' + fmt(ports[k])).join(' · ') + ' → Chegada (进港) ' + fmt(out.listaInteira.chegada) +
-        ' · Partida (出港) ' + fmt(out.listaInteira.partida));
+      add('  tipo de entrada e saída: ' + Object.keys(ports).map(k => k + ' ' + fmt(ports[k])).join(' · ') + ' → Entrada (进港) ' + fmt(out.listaInteira.entrada) +
+        ' · Saída de porto (出港) ' + fmt(out.listaInteira.saida));
       add('  turnos pelo tempo de ensacamento: T1 ' + fmt(cnt(x => x.shift === 'T1')) + ' · T2 ' + fmt(cnt(x => x.shift === 'T2')) + ' · T3 ' + fmt(cnt(x => x.shift === 'T3')) +
         (cnt(x => !x.shift) ? ' · sem horário ' + fmt(cnt(x => !x.shift)) : ''));
     }
@@ -1135,7 +991,7 @@ function diagnosticarLotes(date) {
     if (logs.length) {
       add('Últimos avisos do LOG (' + key + '):');
       logs.forEach(r => add('  ' + (toIsoTimestamp_(r[0]) || '').slice(0, 16).replace('T', ' ') + ' ' + r[1] + ' ' + humanDatePt_(dateCellIso_(r[3])) + ': ' + String(r[4]).slice(0, 260)));
-    } else add('LOG: nenhum aviso ou erro do Fluxo de Lotes.');
+    } else add('LOG: nenhum aviso ou erro da Criação de Lotes.');
   } catch (e) { /* sem banco */ }
   add('Dica: se algo der ERRO ou ✗, abra a tela no JMS, F12 → Rede, clique no número e mande a URL e o "Payload" (sem AuthToken e sem Cookie).');
   console.log(lines.join('\n'));

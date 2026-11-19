@@ -5,11 +5,26 @@
  * Uso: node server.js   (ou iniciar.bat no Windows). Configuração em node/config.json.
  */
 process.env.TZ = 'America/Sao_Paulo';
+
+/**
+ * Erro que impede o painel de abrir. Pelo atalho do Windows (node.exe server.js), a janela fecharia na hora, sem dar para
+ * ler o motivo: ali ela fica aberta (até o X ou 30 min). Pelo iniciar.bat (DASHMASTER_SEM_PAUSA) e fora do Windows, sai na hora.
+ */
+function stopOnError(message, log) {
+  if (log) log('erro', message);
+  else console.error('[erro] ' + message);
+  if (process.platform === 'win32' && process.stdout.isTTY && !process.env.DASHMASTER_SEM_PAUSA) {
+    console.error('\nO painel NÃO está no ar. Tire um print desta janela para pedir ajuda (sem o AuthToken).\n' +
+      'Esta janela fica aberta para você ler: feche no X.');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30 * 60000);
+  }
+  process.exit(1);
+}
+
 const [MAJOR, MINOR] = process.versions.node.split('.').map(Number);
 if (MAJOR < 22 || (MAJOR === 22 && MINOR < 13)) {
-  console.error('\nEste servidor precisa do Node.js 22.13 ou mais novo (você tem ' + process.version + ').\n' +
-    'Baixe a versão LTS em https://nodejs.org e rode de novo.\n');
-  process.exit(1);
+  stopOnError('Este servidor precisa do Node.js 22.13 ou mais novo (você tem ' + process.version + ').\n' +
+    'Baixe a versão LTS em https://nodejs.org e rode de novo.');
 }
 require('./lib/quiet');
 const http = require('http');
@@ -27,7 +42,8 @@ const {safeId} = require('./lib/drive');
 const SERVER_VERSION = require('./package.json').version;
 
 // ------------------------------------------------------------------ início
-const cfg = loadConfig();
+let cfg;
+try { cfg = loadConfig(); } catch (e) { stopOnError('Não consegui iniciar: ' + (e && e.message || e)); }
 const log = makeLogger(cfg.dataDir);
 let main;
 try {
@@ -35,8 +51,7 @@ try {
   const setup = main.bootstrap();
   if (setup) log('info', 'Banco criado em ' + cfg.dbFile);
 } catch (e) {
-  log('erro', 'Não consegui iniciar: ' + (e && e.stack || e));
-  process.exit(1);
+  stopOnError('Não consegui iniciar: ' + (e && e.stack || e), log);
 }
 const props = main.props();
 const web = new Pool(cfg, cfg.trabalhadores, 'painel', main.db, log);
@@ -45,6 +60,9 @@ const auth = new Auth(cfg);
 
 // Textos do painel que falam do Apps Script: na versão Node.js, apontam para a tela Configurações.
 const NODE_TEXT = [
+  // V4.29: token vencido → a página /token do mesmo link (qualquer um da equipe troca; o painel testa no JMS antes de salvar).
+  [/e atualizar JMS_AUTHTOKEN nas Propriedades do script/g, 'e colar na página /token deste mesmo link (ou em Configurações)'],
+  [/并在脚本属性中更新 JMS_AUTHTOKEN/g, '并粘贴到本链接的 /token 页面（或设置页面）'],
   [/O responsável deve abrir o Apps Script, executar setupProject e iniciar a importação com startFullHistory\./g,
     'O responsável deve abrir Configurações (endereço /config no computador do servidor), cadastrar o AuthToken do JMS e clicar em Baixar histórico.'],
   [/请管理员在 Apps Script 中运行 setupProject，并用 startFullHistory 开始导入。/g, '请管理员打开设置页面（服务器上的 /config），填写 JMS AuthToken 并开始导入历史数据。'],
@@ -81,8 +99,26 @@ const POLYFILL = `<script>
             if (r.status === 401) throw new Error('Sessão expirada: recarregue a página e entre com a senha.');
             return r.json().catch(function () { throw new Error('Resposta inválida do servidor (HTTP ' + r.status + ').'); });
           })
-          .then(function (j) { if (j && j.ok) { if (ok) ok(j.result); } else onFail(new Error(j && j.error || 'Erro no servidor.')); })
+          .then(function (j) { done(j, 0); })
           .catch(function (e) { onFail(e instanceof Error ? e : new Error(String(e))); });
+        // Chamada demorada: o servidor responde {pendente} e a página pergunta de novo até ter o resultado.
+        function done(j, falhas) {
+          if (j && j.ok && j.pendente) { wait(j.pendente, falhas); return; }
+          if (j && j.ok) { if (ok) ok(j.result); } else onFail(new Error(j && j.error || 'Erro no servidor.'));
+        }
+        function wait(id, falhas) {
+          fetch('api/resultado?id=' + encodeURIComponent(id), {credentials: 'same-origin', cache: 'no-store'})
+            .then(function (r) {
+              if (r.status === 401) throw new Error('Sessão expirada: recarregue a página e entre com a senha.');
+              if (r.status >= 500) throw Object.assign(new Error('O painel demorou para responder (HTTP ' + r.status + ').'), {retry: true});
+              return r.json();
+            })
+            .then(function (j) { done(j, 0); })
+            .catch(function (e) {
+              if (e && e.retry && falhas < 5) setTimeout(function () { wait(id, falhas + 1); }, 3000);
+              else onFail(e instanceof Error ? e : new Error(String(e)));
+            });
+        }
       };
     }});
   }
@@ -122,12 +158,12 @@ const FN_HELP = {
   getSyncStatus: 'contagem da fila',
   diagnosticarDashboard: 'confere os números do painel',
   diagnosticarTodosOsErros: 'lista os erros recentes',
-  diagnosticarRecebimento: 'Recebimento (data opcional)',
-  diagnosticarExpedicao: 'Expedição (data opcional)',
   diagnosticarViagensSCDC: 'SC → DC: ID de viagem de saída (data opcional)',
   diagnosticarLotes: 'Fluxo de Lotes (data opcional)',
   diagnosticarAvaria: 'Avaria (data opcional)',
   diagnosticarSemMovimentacao: 'Sem Movimentação',
+  diagnosticarSorter: 'Produção do Sorter: endereço, Sorter A/B e os números de hoje',
+  testarFeishu: 'Bot do Feishu: manda agora a última hora para todos os grupos (ou a hora do parâmetro, ex.: "16" = 16:00 às 16:59 de hoje)',
   baixarHistoricoAvaria: 'Avaria: baixa o histórico agora',
   testProjectInstallation: 'confere se os arquivos do painel carregaram'
 };
@@ -136,7 +172,7 @@ function publicFunctions() {
   const names = new Set();
   const re = /^function ([A-Za-z0-9]+)\s*\(/gm;
   let m;
-  while ((m = re.exec(main.source))) if (!/_$/.test(m[1]) && m[1] !== 'doGet' && m[1] !== 'include') names.add(m[1]);
+  while ((m = re.exec(main.source))) if (!/_$/.test(m[1]) && m[1] !== 'doGet' && m[1] !== 'doPost' && m[1] !== 'include') names.add(m[1]);
   const first = Object.keys(FN_HELP).filter(n => names.has(n));
   const rest = Array.from(names).filter(n => !FN_HELP[n]).sort();
   return first.concat(rest).map(n => ({nome: n, desc: FN_HELP[n] || ''}));
@@ -207,6 +243,11 @@ function send(res, code, body, headers) {
 }
 function sendJson(res, code, obj) { send(res, code, JSON.stringify(obj), {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}); }
 function sendHtml(req, res, code, html, extra) {
+  // V4.21.5: painel num caminho do link (ex.: /lotes): os endereços relativos da página (api/run, entrar…) ficam dentro dele.
+  if (req.jtBaseHref) {
+    const tag = '<base href="' + req.jtBaseHref + '">';
+    html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => m + tag) : tag + html;
+  }
   const body = Buffer.from(html, 'utf8');
   const headers = Object.assign({'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'}, extra || {});
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || '')) && body.length > 2048) {
@@ -235,8 +276,12 @@ async function readJson(req) {
 }
 async function readForm(req) { return Object.fromEntries(new URLSearchParams(await readBody(req, 64 * 1024))); }
 function baseUrl(req) {
+  // Pelo Netlify, os links de arquivo (relatórios) ficam no endereço do Netlify. V4.21.5: com o caminho do painel (ex.: /lotes).
+  if (req.headers.origin && sameOrigin(req)) {
+    try { return new URL(String(req.headers.origin)).origin + (req.jtBase || ''); } catch (e) { /* segue abaixo */ }
+  }
   const proto = String(req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')).split(',')[0].trim();
-  return proto + '://' + String(req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + cfg.porta)).split(',')[0].trim();
+  return proto + '://' + String(req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + cfg.porta)).split(',')[0].trim() + (req.jtBase || '');
 }
 /**
  * POST de outro site (CSRF): o navegador manda Origin; tem que ser este mesmo painel. Pelo link público, o túnel pode trocar
@@ -249,8 +294,18 @@ function sameOrigin(req) {
   try { host = new URL(o).host.toLowerCase(); } catch (e) { return false; }
   const first = v => String(v || '').split(',')[0].trim().toLowerCase();
   const ok = [first(req.headers.host), first(req.headers['x-forwarded-host'])];
-  if (cfg.linkPublico) { try { ok.push(new URL(cfg.linkPublico).host.toLowerCase()); } catch (e) { /* link inválido no config */ } }
+  [cfg.linkPublico, cfg.linkNetlify].forEach(link => {
+    if (link) { try { ok.push(new URL(link).host.toLowerCase()); } catch (e) { /* link inválido no config */ } }
+  });
   return ok.some(h => h && h === host);
+}
+/** Mensagem de "origem não permitida": pelo Netlify sem o linkNetlify no config.json, diz o que fazer. */
+function originError(req) {
+  let host = '';
+  try { host = new URL(String(req.headers.origin || '')).host.toLowerCase(); } catch (e) { /* sem Origin */ }
+  return /\.netlify\.app$/.test(host)
+    ? 'Origem não permitida: coloque "linkNetlify": "https://' + host + '" no config.json e abra o painel de novo (feche a janela preta e abra o atalho DashMaster).'
+    : 'Origem não permitida.';
 }
 /**
  * Endereço de quem tenta a senha (limite de tentativas). Direto da rede: o do próprio socket. Pelo túnel (socket local):
@@ -266,7 +321,7 @@ function isSecure(req) { return String(req.headers['x-forwarded-proto'] || '').i
 function safeBack(v, def) { const s = String(v || ''); return /^\/(?!\/)[^\s]*$/.test(s) ? s : def; }
 
 function addresses() {
-  const out = (cfg.linkPublico ? [cfg.linkPublico] : []).concat(['http://localhost:' + cfg.porta]);
+  const out = [cfg.linkNetlify, cfg.linkPublico].filter(Boolean).concat(['http://localhost:' + cfg.porta]);
   if (cfg.host === '127.0.0.1' || cfg.host === 'localhost') return out;
   Object.values(os.networkInterfaces()).forEach(list => (list || []).forEach(a => {
     if (a.family === 'IPv4' && !a.internal) out.push('http://' + a.address + ':' + cfg.porta);
@@ -275,7 +330,8 @@ function addresses() {
 }
 
 function maskProp(k, v) {
-  const secret = /^JMS_(AUTHTOKEN|COOKIE|AUTHORIZATION)$/.test(k) || /TOKEN|COOKIE|SENHA|SECRET|PASSWORD|AUTHORIZATION/i.test(k);
+  // V4.23: o webhook do bot do Feishu e o segredo também (quem tem o endereço manda mensagem no grupo).
+  const secret = /^JMS_(AUTHTOKEN|COOKIE|AUTHORIZATION)$/.test(k) || /TOKEN|COOKIE|SENHA|SECRET|PASSWORD|AUTHORIZATION|WEBHOOK|SEGREDO/i.test(k);
   const interna = !USER_PROP.test(k);
   if (secret) return {k, v: '•••••• (' + String(v).length + ' caracteres)', secret: true, interna};
   const s = String(v);
@@ -283,7 +339,7 @@ function maskProp(k, v) {
 }
 const INTERNAL_PROPS = ['DB_SPREADSHEET_ID', 'DATA_FOLDER_ID', 'REPORT_FOLDER_ID', 'PLATAFORMA'];
 /** Propriedades de configuração (as que o LEIA_PRIMEIRO/DIAGNOSTICO mandam ajustar); o resto é controle interno do painel. */
-const USER_PROP = /^(JMS_|DATA_START_DATE$|ATUALIZACAO_MIN$|COTA_GOOGLE$|DETAIL_|DASHBOARD_MAX_ROWS$|MAX_CLIENT_ROWS$|GROUPED_CLIENT_ROWS$|EXPEDICAO_IDS_|DOCKS_|PAGE_SIZE$|ARRIVAL_CAP$|[A-Z_]+_MIN_POR_DIA$)/;
+const USER_PROP = /^(JMS_|DATA_START_DATE$|ATUALIZACAO_MIN$|DETAIL_|DASHBOARD_MAX_ROWS$|MAX_CLIENT_ROWS$|GROUPED_CLIENT_ROWS$|EXPEDICAO_IDS_|DOCKS_|PAGE_SIZE$|ARRIVAL_CAP$|[A-Z_]+_MIN_POR_DIA$|SORTER_URL$|SORTER_TROCA_[A-Z]$|FEISHU_(WEBHOOK|SEGREDO)(_[2-5])?$|FEISHU_(MINUTO|ESPERA)$)/;
 
 async function configApi(req, res, name) {
   if (name === 'estado' && req.method === 'GET') {
@@ -299,8 +355,9 @@ async function configApi(req, res, name) {
     } catch (e) { filaTexto = 'indisponível (' + String(e.message).slice(0, 80) + ')'; }
     const last = sched.last.processSyncQueue;
     sendJson(res, 200, {
-      ok: true, versaoPainel: panelVersion(), versaoServidor: SERVER_VERSION, token: !!all.JMS_AUTHTOKEN,
-      senhaPainel: !!cfg.senha, senhaConfig: !!cfg.senhaConfig, linkPublico: cfg.linkPublico,
+      ok: true, versaoPainel: panelVersion(), versaoServidor: SERVER_VERSION, token: !!all.JMS_AUTHTOKEN, semJms: !!cfg.semJms,
+      senhaPainel: !!cfg.senha, senhaConfig: !!cfg.senhaConfig, linkPublico: cfg.linkPublico, linkNetlify: cfg.linkNetlify,
+      trocaTokenPeloLink: tokenPageOn() && !cfg.semJms,
       dataInicial: all.DATA_START_DATE || '', fila, filaTexto,
       agendador: {rodando: sched.running, pendentes: sched.pending.slice(),
         ultima: last ? new Date(last).toLocaleString('pt-BR') + ' · ' + sched.lastSummary : ''},
@@ -354,14 +411,122 @@ async function configApi(req, res, name) {
   sendJson(res, 404, {ok: false, error: 'Não encontrado.'});
 }
 
+// ------------------------------------------------------------------ página /token (V4.29)
+// Pedido "colocar a config dele como link compartilhável": a equipe troca o AuthToken pelo link público, como no Monitor de
+// Recebimento. Só troca o AuthToken (Configurações continua só neste computador ou com "senhaConfig"). Se o painel tem senha,
+// a página pede a mesma senha do painel. O token só é salvo se o JMS aceitar. "trocaTokenPeloLink": false desliga a página.
+const tokenPageOn = () => cfg.trocaTokenPeloLink !== false;
+/** O que a pessoa colou: o valor, "authtoken: valor", entre aspas ou o JSON {"authToken": "..."} → o token (ou erro). */
+function tokenFromText(text) {
+  let s = String(text || '').trim();
+  if (!s) throw new Error('Cole o AuthToken do JMS.');
+  if (s.charAt(0) === '{') {
+    let o;
+    try { o = JSON.parse(s); } catch (e) { throw new Error('O texto começa com { mas não é um JSON válido.'); }
+    const k = o && typeof o === 'object' ? Object.keys(o).find(x => /^auth-?token$/i.test(x)) : '';
+    if (!k || !o[k]) throw new Error('O JSON não tem o authToken.');
+    s = String(o[k]);
+  }
+  s = s.replace(/^["'`]+|["'`]+$/g, '').replace(/^(auth-?token|token)\s*[:=]\s*/i, '').replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, '');
+  if (!/^[\x21-\x7e]{8,4000}$/.test(s)) throw new Error('Isso não parece um AuthToken. Copie só o valor (sem espaços).');
+  return s;
+}
+/** Testa o AuthToken numa consulta pequena ao JMS (Consulta de Viagens, 1 registro). '' = o JMS aceitou; senão, o motivo. */
+async function testTokenOnJms(token) {
+  const all = props.getProperties(), hoje = new Date().toLocaleDateString('en-CA', {timeZone: 'America/Sao_Paulo'});
+  const q = new URLSearchParams({current: '1', size: '1', shipmentState: '4', endCode: '30001', startDateTime: hoje + ' 00:00:00',
+    endDateTime: hoje + ' 23:59:59', searchType: 'manage'});
+  const url = (cfg.jmsUrl || 'https://gw.jtjms-br.com').replace(/\/+$/, '') + '/transportation/tmsShipment/page?' + q;
+  const headers = {Accept: 'application/json, text/plain, */*', Lang: all.JMS_LANG || 'PT', Langtype: all.JMS_LANGTYPE || 'PT',
+    Timezone: all.JMS_TIMEZONE || 'GMT-0300', AuthToken: token};
+  let r;
+  try { r = await fetch(url, {headers, redirect: 'manual', signal: AbortSignal.timeout(20000)}); }
+  catch (e) { return 'Não consegui falar com o JMS agora (internet do computador do painel?). Tente de novo em alguns minutos.'; }
+  if (r.status !== 200) return 'O JMS não aceitou esse AuthToken (HTTP ' + r.status + '). Pegue um novo no JMS.';
+  let body;
+  try { body = await r.json(); } catch (e) { return 'O JMS não aceitou esse AuthToken. Pegue um novo no JMS.'; }
+  const code = body && body.code !== undefined && body.code !== null ? Number(body.code) : 1;
+  const payload = (body && (body.data != null ? body.data : body.result != null ? body.result : body)) || {};
+  const rows = Array.isArray(payload) ? payload : payload.records || payload.rows || payload.list;
+  return (code === 1 || code === 200) && Array.isArray(rows) ? '' : 'O JMS não aceitou esse AuthToken (sessão vencida ou token errado). Pegue um novo no JMS.';
+}
+async function tokenApi(req, res, name) {
+  // Só a própria página manda este cabeçalho (outro site aberto no navegador não consegue).
+  if (req.headers['x-dashmaster-token'] !== '1') { sendJson(res, 403, {ok: false, error: 'Pedido sem o cabeçalho da página.'}); return; }
+  if (!tokenPageOn() || cfg.semJms) { sendJson(res, 403, {ok: false, error: 'A troca do AuthToken pelo link está desligada.'}); return; }
+  if (name === 'estado' && req.method === 'GET') {
+    const last = sched.last.processSyncQueue;
+    sendJson(res, 200, {ok: true, token: !!props.getProperty('JMS_AUTHTOKEN'), rodando: !!sched.running,
+      ultima: last ? new Date(last).toLocaleString('pt-BR', {timeZone: 'America/Sao_Paulo'}) : ''});
+    return;
+  }
+  if (name === 'salvar' && req.method === 'POST') {
+    if (!sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
+    if (!auth.allowAttempt('token:' + clientIp(req))) { sendJson(res, 429, {ok: false, error: 'Muitas tentativas. Espere 1 minuto.'}); return; }
+    const body = await readJson(req);
+    let tok;
+    try { tok = tokenFromText(body.texto); } catch (e) { sendJson(res, 200, {ok: false, error: e.message}); return; }
+    const recusa = await testTokenOnJms(tok);
+    if (recusa) { log('aviso', 'Página /token: AuthToken recusado pelo JMS, nada mudou.'); sendJson(res, 200, {ok: false, error: recusa}); return; }
+    props.setProperty('JMS_AUTHTOKEN', tok);
+    log('info', 'AuthToken do JMS trocado pela página /token (aceito pelo JMS).');
+    setTimeout(() => enqueue('processSyncQueue'), 1000);
+    sendJson(res, 200, {ok: true});
+    return;
+  }
+  sendJson(res, 404, {ok: false, error: 'Não encontrado.'});
+}
+
+// ------------------------------------------------------------------ chamadas demoradas
+// O Netlify (e outros proxies) cortam a resposta em ~30 s, mas "Atualizar" pode levar minutos. Depois de esperaApiMs sem
+// terminar, a página recebe {pendente: id} e pergunta de novo em /api/resultado (cada pergunta espera mais um pouco).
+const PENDING = new Map();
+const PENDING_TTL = 15 * 60000;
+async function answerOrWait(res, job, id) {
+  let timer;
+  const wait = new Promise(resolve => { timer = setTimeout(() => resolve(null), cfg.esperaApiMs); });
+  const r = await Promise.race([job, wait]);
+  clearTimeout(timer);
+  if (r) {
+    if (id) PENDING.delete(id);
+    if (r.ok) send(res, 200, '{"ok":true,"result":' + r.json + '}', {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+    else sendJson(res, 200, {ok: false, error: r.error});
+    return;
+  }
+  if (!id) {
+    id = require('crypto').randomBytes(16).toString('hex');
+    PENDING.set(id, {id, job, exp: Date.now() + PENDING_TTL});
+    PENDING.forEach((v, k) => { if (v.exp < Date.now()) PENDING.delete(k); });
+  }
+  sendJson(res, 202, {ok: true, pendente: id});
+}
+
+/** V4.21.5: cookie do painel com nome próprio quando ele fica num caminho (ex.: jt_painel_lotes), para não brigar com o principal. */
+const SCOPE_SUFFIX = cfg.caminho ? cfg.caminho.replace(/[^A-Za-z0-9]/g, '_') : '';
+const PANEL_SCOPE = 'painel' + SCOPE_SUFFIX;
+const CONFIG_SCOPE = 'config' + SCOPE_SUFFIX;
+
 async function handle(req, res) {
-  const url = new URL(req.url, 'http://localhost');
+  let url = new URL(req.url, 'http://localhost');
+  // V4.21.5: painel num caminho do link público (config "caminho", ex.: /lotes → https://NOME.ts.net/lotes). O Tailscale repassa
+  // com o caminho (destino http://127.0.0.1:PORTA/lotes) ou sem ele (versões que tiram o caminho): os dois funcionam.
+  req.jtBase = '';
+  if (cfg.caminho) {
+    if (url.pathname === cfg.caminho) { send(res, 301, '', {Location: cfg.caminho + '/' + url.search}); return; }
+    if (url.pathname.indexOf(cfg.caminho + '/') === 0) {
+      url = new URL(url.pathname.slice(cfg.caminho.length) + url.search, 'http://localhost');
+      req.jtBase = cfg.caminho;
+    } else if (viaTunnel(req)) req.jtBase = cfg.caminho;
+  }
+  const B = req.jtBase;
+  // Pasta da página no link público: os endereços relativos (api/run, entrar…) continuam certos mesmo se o Tailscale tirar o caminho.
+  req.jtBaseHref = B ? B + url.pathname.replace(/[^/]*$/, '') : '';
   const p = url.pathname.replace(/\/+$/, '') || '/';
-  const panelOk = auth.valid(req, 'painel', cfg.senha);
-  const configOk = cfg.senhaConfig ? auth.valid(req, 'config', cfg.senhaConfig) : isLocal(req);
+  const panelOk = auth.valid(req, PANEL_SCOPE, cfg.senha);
+  const configOk = cfg.senhaConfig ? auth.valid(req, CONFIG_SCOPE, cfg.senhaConfig) : isLocal(req);
 
   // "/config/" → "/config" (os endereços relativos da tela dependem disso).
-  if (url.pathname !== p && (p === '/config' || p === '/entrar')) { send(res, 301, '', {Location: p + url.search}); return; }
+  if (url.pathname !== p && (p === '/config' || p === '/entrar' || p === '/token')) { send(res, 301, '', {Location: B + p + url.search}); return; }
   if (p === '/saude') {
     sendJson(res, 200, {ok: true, versao: panelVersion(), servidor: SERVER_VERSION, fila: {rodando: sched.running, pendentes: sched.pending}});
     return;
@@ -371,27 +536,39 @@ async function handle(req, res) {
   // ----- entrar / sair do painel
   if (p === '/entrar') {
     if (req.method === 'POST') {
-      if (!sameOrigin(req)) { send(res, 403, 'Origem não permitida.'); return; }
+      if (!sameOrigin(req)) { send(res, 403, originError(req), {'Content-Type': 'text/plain; charset=utf-8'}); return; }
       const f = await readForm(req);
       if (!auth.allowAttempt(clientIp(req))) { sendHtml(req, res, 429, pages.loginPage({title: 'Painel J&T', text: 'Muitas tentativas. Espere 1 minuto.', action: 'entrar', back: f.volta})); return; }
       if (auth.check(cfg.senha, f.senha || '')) {
-        send(res, 303, '', {Location: safeBack(f.volta, '/'), 'Set-Cookie': auth.cookie('painel', cfg.senha, 24 * 30, isSecure(req))});
+        send(res, 303, '', {Location: B + safeBack(f.volta, '/'), 'Set-Cookie': auth.cookie(PANEL_SCOPE, cfg.senha, 24 * 30, isSecure(req))});
       } else sendHtml(req, res, 401, pages.loginPage({title: 'Painel J&T', text: 'Digite a senha do painel.', error: 'Senha incorreta.', action: 'entrar', back: f.volta}));
       return;
     }
     sendHtml(req, res, 200, pages.loginPage({title: 'Painel J&T', text: 'Digite a senha do painel.', action: 'entrar', back: url.searchParams.get('volta') || '/'}));
     return;
   }
-  if (p === '/sair') { send(res, 303, '', {Location: '/', 'Set-Cookie': 'jt_painel=; Path=/; Max-Age=0'}); return; }
+  if (p === '/sair') { send(res, 303, '', {Location: B + '/', 'Set-Cookie': 'jt_' + PANEL_SCOPE + '=; Path=/; Max-Age=0'}); return; }
+
+  // ----- página /token (V4.29): troca do AuthToken pelo link; com senha no painel, pede a mesma senha
+  if (p === '/token' || p.indexOf('/token/') === 0) {
+    if (!panelOk) {
+      if (p !== '/token') { sendJson(res, 401, {ok: false, error: 'Sessão expirada: recarregue a página e entre com a senha do painel.'}); return; }
+      send(res, 303, '', {Location: B + '/entrar?volta=' + encodeURIComponent('/token')});
+      return;
+    }
+    if (p === '/token') { sendHtml(req, res, 200, pages.tokenPage({on: tokenPageOn(), semJms: !!cfg.semJms})); return; }
+    await tokenApi(req, res, p.slice('/token/'.length));
+    return;
+  }
 
   // ----- Configurações
   if (p === '/config/entrar') {
-    if (!cfg.senhaConfig) { send(res, 303, '', {Location: '/config'}); return; }
+    if (!cfg.senhaConfig) { send(res, 303, '', {Location: B + '/config'}); return; }
     if (req.method === 'POST') {
       if (!sameOrigin(req)) { send(res, 403, 'Origem não permitida.'); return; }
       const f = await readForm(req);
       if (!auth.allowAttempt(clientIp(req))) { sendHtml(req, res, 429, pages.loginPage({title: 'Configurações', text: 'Muitas tentativas. Espere 1 minuto.', action: 'entrar'})); return; }
-      if (auth.check(cfg.senhaConfig, f.senha || '')) send(res, 303, '', {Location: '/config', 'Set-Cookie': auth.cookie('config', cfg.senhaConfig, 12, isSecure(req))});
+      if (auth.check(cfg.senhaConfig, f.senha || '')) send(res, 303, '', {Location: B + '/config', 'Set-Cookie': auth.cookie(CONFIG_SCOPE, cfg.senhaConfig, 12, isSecure(req))});
       else sendHtml(req, res, 401, pages.loginPage({title: 'Configurações', text: 'Senha da tela Configurações.', error: 'Senha incorreta.', action: 'entrar'}));
       return;
     }
@@ -401,11 +578,11 @@ async function handle(req, res) {
   if (p === '/config' || p.indexOf('/config/') === 0) {
     if (!configOk) {
       if (p.indexOf('/config/api/') === 0) { sendJson(res, 401, {ok: false, error: 'Acesso negado às Configurações.'}); return; }
-      if (cfg.senhaConfig) { send(res, 303, '', {Location: '/config/entrar'}); return; }
+      if (cfg.senhaConfig) { send(res, 303, '', {Location: B + '/config/entrar'}); return; }
       sendHtml(req, res, 403, pages.deniedPage());
       return;
     }
-    if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir})); return; }
+    if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir, semJms: !!cfg.semJms})); return; }
     if (p.indexOf('/config/api/') === 0) {
       if (req.method === 'POST' && !sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
       await configApi(req, res, p.slice('/config/api/'.length));
@@ -423,7 +600,7 @@ async function handle(req, res) {
   }
   if (!panelOk) {
     if (p === '/api/run') { sendJson(res, 401, {ok: false, error: 'Sessão expirada: recarregue a página e entre com a senha.'}); return; }
-    send(res, 303, '', {Location: '/entrar?volta=' + encodeURIComponent(url.pathname + url.search)});
+    send(res, 303, '', {Location: B + '/entrar?volta=' + encodeURIComponent(url.pathname + url.search)});
     return;
   }
   if (p === '/' || p === '/index.html' || p === '/exec') {
@@ -445,16 +622,19 @@ async function handle(req, res) {
   }
   if (p === '/api/run') {
     if (req.method !== 'POST') { sendJson(res, 405, {ok: false, error: 'Use POST.'}); return; }
-    if (!sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
+    if (!sameOrigin(req)) { sendJson(res, 403, {ok: false, error: originError(req)}); return; }
     const body = await readJson(req);
     const fn = String(body.fn || '');
     if (!allowed(fn)) { sendJson(res, 403, {ok: false, error: 'Função não permitida: ' + fn}); return; }
-    try {
-      const out = await web.run({fn, args: Array.isArray(body.args) ? body.args : []}, {timeoutMs: 6 * 60000, baseUrl: baseUrl(req)});
-      send(res, 200, '{"ok":true,"result":' + out.json + '}', {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
-    } catch (e) {
-      sendJson(res, 200, {ok: false, error: nodeText(e.message)});
-    }
+    const job = web.run({fn, args: Array.isArray(body.args) ? body.args : []}, {timeoutMs: 6 * 60000, baseUrl: baseUrl(req)})
+      .then(out => ({ok: true, json: out.json}), e => ({ok: false, error: nodeText(e.message)}));
+    await answerOrWait(res, job, null);
+    return;
+  }
+  if (p === '/api/resultado') {
+    const item = PENDING.get(String(url.searchParams.get('id') || ''));
+    if (!item) { sendJson(res, 404, {ok: false, error: 'O resultado expirou. Clique de novo.'}); return; }
+    await answerOrWait(res, item.job, item.id);
     return;
   }
   const file = p.match(/^\/arquivo\/([A-Za-z0-9_-]+)$/);
@@ -473,6 +653,26 @@ async function handle(req, res) {
   send(res, 404, 'Não encontrado.', {'Content-Type': 'text/plain; charset=utf-8'});
 }
 
+/**
+ * Pasta para o Netlify (grátis): arrastada em app.netlify.com/drop, vira um link https://….netlify.app que repassa tudo para
+ * o linkPublico (Tailscale Funnel). O painel continua rodando aqui; o Netlify só repassa.
+ */
+function writeNetlifyFolder() {
+  if (!/^https:\/\//.test(cfg.linkPublico)) return '';
+  const dir = path.join(cfg.configDir, 'link-netlify');
+  try {
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(path.join(dir, '_redirects'), '# Gerado pelo J&T DashMaster: o link do Netlify repassa tudo para o painel neste computador (Tailscale).\n' +
+      '/*  ' + cfg.linkPublico + '/:splat  200!\n');
+    fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><meta charset="utf-8"><title>Painel J&amp;T</title>' +
+      '<p>O Netlify não está repassando para o painel. Arraste de novo a pasta link-netlify no projeto do Netlify.</p>\n');
+    return dir;
+  } catch (e) {
+    log('aviso', 'Não consegui criar a pasta link-netlify: ' + e.message);
+    return '';
+  }
+}
+
 const server = http.createServer((req, res) => {
   handle(req, res).catch(e => {
     const status = e && e.status || 500;
@@ -483,16 +683,22 @@ const server = http.createServer((req, res) => {
 });
 server.keepAliveTimeout = 65000;
 server.on('error', e => {
-  if (e.code === 'EADDRINUSE') log('erro', 'A porta ' + cfg.porta + ' já está em uso: o servidor já está aberto em outra janela? Feche-a ou troque "porta" no config.json.');
-  else log('erro', 'Servidor: ' + (e && e.stack || e));
-  process.exit(1);
+  stopOnError(e.code === 'EADDRINUSE'
+    ? 'A porta ' + cfg.porta + ' já está em uso: o servidor já está aberto em outra janela? Feche-a ou troque "porta" no config.json.'
+    : 'Servidor: ' + (e && e.stack || e), log);
 });
 server.listen(cfg.porta, cfg.host, () => {
+  const netlifyDir = writeNetlifyFolder();
   log('info', 'J&T DashMaster (Node.js ' + SERVER_VERSION + ', painel ' + panelVersion() + ') no ar.');
-  addresses().forEach(a => log('info', '  Painel: ' + a + (a === cfg.linkPublico ? '  (link público)' : '')));
+  addresses().forEach(a => log('info', '  Painel: ' + a + (a === cfg.linkPublico ? '  (link público)' : a === cfg.linkNetlify ? '  (link do Netlify)' : '')));
   if (cfg.linkPublico && !cfg.senha) log('aviso', 'Há link público e o painel está sem senha: defina "senha" no config.json.');
+  if (netlifyDir && !cfg.linkNetlify) {
+    log('info', '  Link no Netlify (grátis): arraste a pasta ' + netlifyDir + ' em https://app.netlify.com/drop e coloque o link que ' +
+      'aparecer em "linkNetlify" no config.json.');
+  }
   log('info', '  Configurações (AuthToken, histórico, diagnósticos): http://localhost:' + cfg.porta + '/config');
-  if (!props.getProperty('JMS_AUTHTOKEN')) log('aviso', 'AuthToken do JMS ainda não cadastrado: abra Configurações.');
+  // V4.22: o pacote da Produção do Sorter (semJms) não usa o JMS: sem aviso de AuthToken.
+  if (!cfg.semJms && !props.getProperty('JMS_AUTHTOKEN')) log('aviso', 'AuthToken do JMS ainda não cadastrado: abra Configurações.');
   if (cfg.agendador === false) log('aviso', 'Agendador desligado: a fila do JMS só roda pela tela Configurações.');
   else log('info', 'A fila do JMS roda a cada ' + cfg.filaCadaSegundos + ' s, sem limite diário. Deixe esta janela aberta.');
 });

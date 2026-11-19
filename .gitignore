@@ -1,6 +1,29 @@
 # Versão Node.js: banco, arquivos baixados do JMS e configuração local (senhas) ficam só no computador.
 node/dados/
 node/config.json
+# Pasta que o servidor cria para arrastar no Netlify (tem o link do Tailscale de quem rodou).
+node/link-netlify/
 node_modules/
 # Pacotes gerados por tools/gerar_paineis.js (painel principal / painel dos fluxos).
 dist/
+# Cache do Python (testes do jms_segmentos).
+__pycache__/
+# App Expedição Incorreta: banco, configuração e planilhas do computador (a rotinha é da pessoa); pacote gerado.
+expedicao_incorreta/dados/
+expedicao_incorreta/config.json
+expedicao_incorreta/planilhas/
+expedicao_incorreta/dist/
+# Monitor de Recebimento: dados do computador (planilha local, AuthToken), configuração e pacote gerado.
+monitor-recebimento/dados/
+monitor-recebimento/config.json
+monitor-recebimento/dist/
+# Controle de Pátio: dados do Feishu do servidor (App Secret), configuração e pacote gerado.
+controle-patio/dados/
+controle-patio/config.json
+controle-patio/dist/
+painel-operacional/config.json
+painel-operacional/dist/
+rota_certa/dados/
+rota_certa/config.json
+rota_certa/planilhas/
+rota_certa/dist/

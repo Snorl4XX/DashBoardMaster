@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.15.0',
+  VERSION: '4.29.2',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -31,10 +31,17 @@ const APP_CONFIG = Object.freeze({
   REFRESH_ALL_DETAIL_BUDGET_MS: 270000, // V4.7: em seguida, listas e IDs de todos os painéis (até 4,5 min; a chamada do Google vai até 6)
   PAUSE_AUTH_MINUTES: [15, 60, 180, 360], // credencial recusada: nova tentativa em 15 min, 1 h, 3 h, 6 h (ou assim que o token for trocado)
   PAUSE_QUOTA_MINUTES: 60,     // cota do Google esgotada: nova tentativa em 1 h
+  PAUSE_NET_MINUTES: 5,        // V4.27.1: sem conexão com o JMS (internet/DNS): a fila espera 5 min, sem gastar tentativas
   PROPS_TTL_MS: 10000,         // propriedades do script relidas no máximo a cada 10 s
   MAX_DETAIL_FILES_PER_DASHBOARD: 150,
   MAX_CLIENT_ROWS: 150000,     // remessas enviadas ao navegador por consulta (formato colunar)
   DASHBOARD_LOAD_BUDGET_MS: 22000,
+  // V4.25.3: no Node.js (notebook/nuvem) os arquivos são locais e não há o teto de 6 min/50 MB do Google. Com os limites do
+  // Apps Script, "30 dias" da Falta de Bipagem na Expedição (~11 mil remessas/dia) mostrava só 13 dias e o Excel parava em 60 mil.
+  NODE_MAX_CLIENT_ROWS: 1000000,     // remessas no navegador por consulta (V4.27: 2 meses da Falta de Bipagem na Expedição cabem inteiros)
+  NODE_MAX_DETAIL_FILES: 3000,       // arquivos de detalhe lidos por consulta (páginas de dias ainda não juntados)
+  NODE_LOAD_BUDGET_MS: 90000,        // tempo de leitura dos detalhes por consulta
+  NODE_MAX_REPORT_DETAIL_ROWS: 500000, // relatório Excel/PDF: mesmas remessas do painel (a aba Dados do PDF continua com 1.500)
   // Indicador agrupado (Recebimento) acima disso no período: o painel recebe totais prontos por campo
   // (filtros aplicados no servidor) em vez das combinações. Propriedade GROUPED_CLIENT_ROWS ajusta.
   MAX_GROUPED_CLIENT_ROWS: 60000,
@@ -71,6 +78,11 @@ const FILTER_LABELS = Object.freeze({
   expeditionShift: {pt: 'Turno da expedição', zh: '发件班次'},
   login:           {pt: 'Login', zh: '操作员'},
   segment:         {pt: 'Segmento', zh: '一段码'},
+  // V4.25: grupos de docas (Expedição A/B/C), linha do segmento e os dois filtros de segmento da Falta de Bipagem no Recebimento.
+  expedition:      {pt: 'Expedição', zh: '发件区'},
+  segLine:         {pt: 'Linha', zh: '线路'},
+  segMain:         {pt: 'Segmentos Principais', zh: '一段码'},
+  segSub:          {pt: 'Segmentos Secundários', zh: '一段码+二段码'},
   destination:     {pt: 'Próxima parada', zh: '下一站'},
   correctDest:     {pt: 'Destino correto', zh: '应发下一站'},
   lot:             {pt: 'Lote / Saca', zh: '包号'},
@@ -128,7 +140,8 @@ const FILTER_LABELS = Object.freeze({
 
 /**
  * DOCAS DE CARREGAMENTO, por período (V4.8). Vale, para cada remessa, a tabela mais nova que já tinha começado no dia dela
- * (`from`): o histórico continua com as docas da época. Destino/rota e doca são calculados na leitura (nada fica gravado):
+ * (`from`): o histórico continua com as docas da época. V4.29.2: `from` com horário ("2026-11-18 11:30") vale pelo horário do
+ * bipe da remessa (eventTime) naquele dia. Destino/rota e doca são calculados na leitura (nada fica gravado):
  * mudar uma tabela vale na hora para os dias dela.
  *
  * Formato antigo (até 03/10/2026 — planilha "Falta Expedição", V3.8–V4.7): DESTINO = código do 1º segmento, menos os
@@ -217,6 +230,201 @@ const DOCK_TABLE_2026_10_11_ = DOCK_TABLE_2026_10_04_.map(e => {
   {dock: 'DOCA 21/22', line: 2, route: 'DC JND 02-SP',
     codes: DOCK_SUB_('GRU', ['381-06', '381-07', '381-12']).concat(DOCK_SUB_('SP', ['395-05', '395-06', '395-07']), DOCK_SUB_('BRE', ['381-06', '381-07', '381-12']))}
 ]);
+/**
+ * V4.19 (comunicados de 30/10 e 01/11 e a tabela "Código de alocação de carga das rotas tronco e de distribuição do SP GRU"):
+ *  - 30/10/2026: unidades novas atendidas pelo DC TBT-SP — F SJC-SP (GRU 402-08), F UBT-SP (GRU 402-09) e F CRZ-SP
+ *    (GRU 402-10);
+ *  - 01/11/2026: as cargas de TO, MRB, RO e AC (TO PMW, PA MRB, RO PVH e DC RBR-AC) passam a ir pela rota DF BSB, e
+ *    a tabela da mesma data tem CDG (DC CDG-RJ) no SP GRU-SJM e JPN no SP GRU-CGB, fora do SP BRE.
+ * V4.21.1: a tabela atualizada confirma — SP GRU-BSB = DF, PA MRB, TO PMW, RO PVH e AC RBR (o AC saiu do SP GRU-BRE). A parada
+ * "AC RBR" (nome da tabela) entra junto com "DC RBR-AC".
+ */
+const NEW_TBT_CODES_2026_10_30_ = DOCK_SUB_('GRU', ['402-08', '402-09', '402-10']);
+const NEW_TBT_STOPS_2026_10_30_ = ['F SJC-SP', 'F UBT-SP', 'F CRZ-SP'];
+// AC = RBR (Rio Branco): o código RBR vale como AC.
+const BSB_CODES_2026_11_01_ = ['TO', 'MRB', 'RO', 'AC', 'RBR'];
+const BSB_STOPS_2026_11_01_ = ['TO PMW', 'PA MRB', 'RO PVH', 'DC RBR-AC', 'AC RBR'];
+/** Tabela com as unidades novas do DC TBT-SP (a partir de 30/10). */
+const withNewTbt_ = table => table.map(e => e.route !== 'DC TBT-SP' ? e :
+  Object.assign({}, e, {codes: e.codes.concat(NEW_TBT_CODES_2026_10_30_.filter(c => e.codes.indexOf(c) < 0)),
+    stops: (e.stops || []).concat(NEW_TBT_STOPS_2026_10_30_)}));
+/**
+ * Tabela com as rotas de 01/11: `bsb` = TO/MRB/RO/AC (e as paradas deles) saem do SP BRE para o DF BSB; `moves` = outros
+ * códigos que a tabela de 01/11 tira do SP BRE ({route, codes, stops}).
+ */
+const withRoutes_ = (table, moves, bsb) => table.map(e => {
+  const bsbCodes = bsb ? BSB_CODES_2026_11_01_ : [], bsbStops = bsb ? BSB_STOPS_2026_11_01_ : [];
+  const out = [].concat(bsbCodes, ...(moves || []).map(m => m.codes));
+  const outStops = [].concat(bsbStops, ...(moves || []).map(m => m.stops || []));
+  if (e.route === 'SP BRE') return Object.assign({}, e, {codes: e.codes.filter(c => out.indexOf(c) < 0), stops: (e.stops || []).filter(x => outStops.indexOf(x) < 0)});
+  if (e.route === 'DF BSB') return bsb ? Object.assign({}, e, {codes: e.codes.concat(bsbCodes), stops: (e.stops || []).concat(bsbStops)}) : e;
+  const m = (moves || []).filter(x => x.route === e.route)[0];
+  return m ? Object.assign({}, e, {codes: e.codes.concat(m.codes.filter(c => e.codes.indexOf(c) < 0)),
+    stops: (e.stops || []).concat((m.stops || []).filter(x => (e.stops || []).indexOf(x) < 0))}) : e;
+});
+const withBsb_ = (table, moves) => withRoutes_(table, moves, true);
+/**
+ * V4.24.2 (aviso urgente de 10/11/2026 e a tabela atualizada "Código de alocação de carga das rotas tronco e de distribuição do
+ * SP GRU"): PA MRB, TO PMW, RO PVH e AC RBR VOLTAM do DF BSB para o SP BRE (SP GRU-BRE); o SP GRU-BSB fica só com DF. CDG continua
+ * no SP GRU-SJM e JPN no SP GRU-CGB. Vale pelo dia: de 01/11 a 09/11 o histórico continua no DF BSB, como era.
+ * AC = RBR: o código RBR e a parada "AC RBR" (nome da tabela) também ficam no SP BRE.
+ */
+const BRE_BACK_FROM_2026_11_10_ = '2026-11-10';
+const withBreBack_ = (table, moves) => withRoutes_(table, moves, false).map(e => e.route !== 'SP BRE' ? e : Object.assign({}, e, {
+  codes: e.codes.concat(['RBR'].filter(c => e.codes.indexOf(c) < 0)),
+  stops: (e.stops || []).concat(['AC RBR', 'DC RBR-AC', 'TO PMW', 'PA MRB', 'RO PVH'].filter(x => (e.stops || []).indexOf(x) < 0))}));
+/**
+ * V4.25 (pedido, PDF "Mudanças nos gráficos dos dashboards"): as tabelas de 24/10 ("10月24日干线装车码头进行调整" e "Ajuste das
+ * Docas de Carregamento das Rotas Regionais") separam DOCAS e ESTEIRAS:
+ *  - DOCAS (troncal e os DCs): DC TBT-SP passa para a DOCA 23 (era 14), DC GRU-SP fica na 44 (com SP 395-05/06/07 e GRU 381-15/18 a
+ *    21), SBN na 08 (até 375-10) e o DC SSZ-SP na DOCA 08/09 (378-00 a 06) — "o DC SSZ-SP é doca, não colocar em esteira";
+ *  - ESTEIRAS (Last Mile, linhas 6 e 5 do DWS): os segmentos da tabela regional mostram "Esteira" + o número da doca da tabela
+ *    (ex.: GRU,404-04 → Esteira 20; DC S-MOO 02-SP → Esteira 11/12), e não mais a doca do DC GRU (44) ou do MOO (23).
+ * Vale pelo dia da remessa, desde 24/10 (o histórico antes continua com as docas da época).
+ */
+const DOCK_ESTEIRAS_2026_10_24_ = [
+  {dock: 'Esteira 01', line: 6, route: 'DC S-VLANA-SP', codes: ['VLANA']},
+  {dock: 'Esteira 02', line: 6, route: 'F S-JBO-SP', codes: ['GRU 404-11']},
+  {dock: 'Esteira 03', line: 6, route: 'F S-SAP 02-SP', codes: ['GRU 404-12']},
+  {dock: 'Esteira 04', line: 6, route: 'F S-MGUE 02-SP', codes: ['GRU 404-08']},
+  {dock: 'Esteira 05', line: 6, route: 'F S-PQBOTU-SP', codes: ['GRU 404-09']},
+  {dock: 'Esteira 06', line: 6, route: 'F VLMT-SP', codes: ['GRU 404-10']},
+  {dock: 'Esteira 07', line: 6, route: 'S-MGUE-SP', codes: ['GRU 404-01']},
+  {dock: 'Esteira 10', line: 6, route: 'S-MGUE 02-SP', codes: ['GRU 404-13']},
+  {dock: 'Esteira 11/12', line: 5, route: 'DC S-MOO 02-SP', codes: ['MOO'].concat(
+    DOCK_SUB_('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01', '430-05', '430-07', '430-08', '430-09', '398-00', '404-00']),
+    DOCK_SUB_('MOO', ['430-00', '430-01', '430-02', '430-03', '430-04', '430-05', '430-06', '430-07', '430-08', '430-09'])), stops: ['DC MOOCA2', 'DC MOOCA']},
+  {dock: 'Esteira 13', line: 5, route: 'S-PENHA-SP', codes: ['GRU 404-02']},
+  {dock: 'Esteira 14', line: 5, route: 'F S-PENHA 02-SP', codes: ['GRU 404-07']},
+  {dock: 'Esteira 15/16', line: 5, route: 'S-SRAF-SP', codes: ['GRU 404-00']},
+  {dock: 'Esteira 17/18', line: 5, route: 'DC NOD-SP', codes: ['NOD']},
+  {dock: 'Esteira 19', line: 5, route: 'S-SAPOP-SP', codes: ['GRU 404-03']},
+  {dock: 'Esteira 20', line: 5, route: 'F S-MGUE-SP', codes: ['GRU 404-04']},
+  {dock: 'Esteira 22', line: 5, route: 'F S-PENHA-SP', codes: ['GRU 404-05']},
+  {dock: 'Esteira 24', line: 5, route: 'F S-PENHA 03-SP', codes: ['GRU 404-06']}
+];
+const DOCK_ESTEIRA_CODES_ = [].concat(...DOCK_ESTEIRAS_2026_10_24_.map(e => e.codes));
+const DOCK_TABLE_2026_10_24_ = DOCK_TABLE_2026_10_11_.filter(e => e.route !== 'MOO').map(e => {
+  const set = x => Object.assign({}, e, x), add = (list, more) => list.concat(more.filter(c => list.indexOf(c) < 0));
+  const codes = (e.codes || []).filter(c => DOCK_ESTEIRA_CODES_.indexOf(c) < 0);
+  switch (e.route) {
+    // GRU 402-02 e 402-04 (antes no DC GRU) e 402-06/07/08 no DC TBT-SP, como na tabela.
+    case 'DC TBT-SP': return set({dock: 'DOCA 23', line: 2, codes: add(codes, DOCK_SUB_('GRU', ['402-02', '402-04', '402-06', '402-07', '402-08']))});
+    case 'DC SSZ-SP': return set({dock: 'DOCA 08/09', codes: add(codes, DOCK_SUB_('GRU', ['378-05', '378-06']))});
+    case 'DC GRU': return set({route: 'DC GRU-SP', codes: add(codes.filter(c => c !== 'GRU 402-02' && c !== 'GRU 402-04'), DOCK_SUB_('SP', ['395-05', '395-06', '395-07']).concat(
+      DOCK_SUB_('GRU', ['381-15', '381-18', '381-19', '381-20', '381-21']))), stops: ['DC GRU']});
+    case 'DC JND 02-SP': return set({codes: codes.filter(c => ['SP 395-05', 'SP 395-06', 'SP 395-07'].indexOf(c) < 0)});
+    case 'SBN': return set({codes: add(codes, ['SBN 375-10'])});
+    default: return codes.length === (e.codes || []).length ? e : set({codes: codes});
+  }
+}).concat(DOCK_ESTEIRAS_2026_10_24_);
+const DOCK_TABLE_2026_10_30_ = withNewTbt_(DOCK_TABLE_2026_10_24_);
+const MOVES_2026_11_01_ = [
+  {route: 'RJ SJM', codes: ['CDG'], stops: ['DC CDG-RJ']},
+  {route: 'MT CGB', codes: ['JPN'], stops: ['DC JPN']}
+];
+const DOCK_TABLE_2026_11_01_ = withBsb_(DOCK_TABLE_2026_10_30_, MOVES_2026_11_01_);
+const DOCK_TABLE_2026_11_10_ = withBreBack_(DOCK_TABLE_2026_10_30_, MOVES_2026_11_01_);
+/**
+ * V4.28 (tabelas "Alteração das docas de carregamento das rotas de longa distância a partir de 16 de novembro" e "… das rotas
+ * secundárias a partir de 16 de novembro", atualizadas em 16/11): docas trocadas em quase todas as rotas.
+ *  - Linha principal (linha de desvio do DWS):
+ *      7 = GO GYN 05 · SC BNU 06 · RS NSR 07 · DC TBT-SP 08 (era 23) · BA FEC 09 (era 18) · MG CGE 10 (era 19);
+ *      4 = CE FOR 15 (era 09) · PR SJS 16 · PE JGS 17 · RJ SJM 18 (era 10) · SE AJU 19 (era 15);
+ *      2 = AM MAO 20 (rota nova, com AM e BVB) · SP BRE 21/22 (continua) · DC GRU-SP 23 (era 44);
+ *      3 = DF BSB 44 (era 38) · DC SBN-SP 43 (era 08) · PI THE 42 (era 41) · PA ANA 41 (era 20) · SP RBP 40 (era 39) ·
+ *          MT CGB 39 (era 42) · ES SRR 38 (era 40).
+ *  - SP BRE sem BAU, JDF, AM, BVB, MRB, RO, TO e AC ("Excluir" da tabela): MRB, RO, TO e AC (RBR) vão para o DF BSB ("Adicionar
+ *    novo código inicial"), AM e BVB para o AM MAO, JDF para o DC JDF-MG e BAU para o DC BAU-SP.
+ *  - Rotas secundárias (linhas 6 e 5): posições novas; DC JDF-MG (JDF), DC BAU-SP (BAU) e MS CGR (MS) entram na tabela
+ *    secundária (21, 22 e 23, "Docagem de carreta").
+ *  - "SBN" passa a se chamar DC SBN-SP e "THE" passa a PI THE, como na tabela.
+ *  - DC JND 02-SP (BRE 381-06/07/12), carregado com o SP BRE, continua com ele (DOCAS 21/22).
+ *  - V4.29.1 (tabela de 16/11 atualizada, 2ª versão): SP BRE fica nas DOCAS 21/22 (esteira 2) e o RJ SJM vai para a DOCA 18
+ *    (esteira 4) — a 1ª versão tinha os dois trocados; o DC SBN-SP ganha o SBN 375-11 ("Adicionar novo código inicial").
+ * Como na V4.25: rota da tabela secundária = "Esteira" + número da tabela; o DC SSZ-SP continua DOCA ("DOCA 07 · DC SSZ-SP", para
+ * não somar com a DOCA 07 do RS NSR). Vale pelo dia da remessa, desde 16/11 (o histórico antes continua com as docas da época).
+ */
+const ROUTES_FROM_2026_11_16_ = '2026-11-16';
+const TRONCAL_2026_11_16_ = {
+  'GO GYN': ['DOCA 05', 7], 'SC BNU': ['DOCA 06', 7], 'RS NSR': ['DOCA 07', 7], 'DC TBT-SP': ['DOCA 08', 7], 'BA FEC': ['DOCA 09', 7],
+  'MG CGE': ['DOCA 10', 7], 'CE FOR': ['DOCA 15', 4], 'PR SJS': ['DOCA 16', 4], 'PE JGS': ['DOCA 17', 4], 'RJ SJM': ['DOCA 18', 4],
+  'SE AJU': ['DOCA 19', 4], 'AM MAO': ['DOCA 20', 2], 'SP BRE': ['DOCA 21/22', 2], 'DC JND 02-SP': ['DOCA 21/22', 2], 'DC GRU-SP': ['DOCA 23', 2],
+  'DF BSB': ['DOCA 44', 3], 'DC SBN-SP': ['DOCA 43', 3], 'PI THE': ['DOCA 42', 3], 'PA ANA': ['DOCA 41', 3], 'SP RBP': ['DOCA 40', 3],
+  'MT CGB': ['DOCA 39', 3], 'ES SRR': ['DOCA 38', 3]
+};
+const RENAME_2026_11_16_ = {SBN: 'DC SBN-SP', THE: 'PI THE'};
+// Saem do SP BRE (códigos e nomes de parada); os do DF BSB entram nele.
+const OUT_OF_BRE_2026_11_16_ = {codes: ['BAU', 'JDF', 'AM', 'BVB', 'MRB', 'RO', 'TO', 'AC', 'RBR'],
+  stops: ['DC BAU-SP', 'DC JDF-MG', 'DC MAO-AM', 'PA MRB', 'RO PVH', 'TO PMW', 'DC RBR-AC', 'AC RBR']};
+const BSB_2026_11_16_ = {codes: ['MRB', 'RO', 'TO', 'AC', 'RBR'], stops: ['TO PMW', 'PA MRB', 'RO PVH', 'DC RBR-AC', 'AC RBR']};
+const AM_MAO_2026_11_16_ = {dock: 'DOCA 20', line: 2, route: 'AM MAO', codes: ['AM', 'BVB'], stops: ['DC MAO-AM']};
+// Códigos novos da tabela de 16/11 nas rotas que já existiam (V4.29.1: SBN 375-11 no DC SBN-SP).
+const NEW_CODES_2026_11_16_ = {'DC SBN-SP': ['SBN 375-11']};
+/** Tabela secundária de 16/11 (Last Mile, linhas 6 e 5): "Esteira" + o número da tabela; o DC SSZ-SP é doca. */
+const SECONDARY_2026_11_16_ = [
+  {dock: 'Esteira 01', line: 6, route: 'DC S-VLANA-SP', codes: ['VLANA']},
+  {dock: 'Esteira 02', line: 6, route: 'F S-PQBOTU-SP', codes: ['GRU 404-09']},
+  {dock: 'Esteira 03', line: 6, route: 'F S-MGUE 02-SP', codes: ['GRU 404-08']},
+  {dock: 'Esteira 04', line: 6, route: 'F VLMT-SP', codes: ['GRU 404-10']},
+  {dock: 'Esteira 05', line: 6, route: 'S-MGUE-SP', codes: ['GRU 404-01']},
+  {dock: 'Esteira 06', line: 6, route: 'F S-JBO-SP', codes: ['GRU 404-11']},
+  {dock: 'DOCA 07 · DC SSZ-SP', line: 6, route: 'DC SSZ-SP', codes: DOCK_SUB_('GRU', ['378-00', '378-01', '378-02', '378-03', '378-05', '378-06'])
+    .concat(DOCK_SUB_('SP', ['378-00', '378-01', '378-02', '378-03'])), stops: ['DC SSZ']},
+  {dock: 'Esteira 09', line: 6, route: 'S-MGUE 02-SP', codes: ['GRU 404-13']},
+  {dock: 'Esteira 10', line: 6, route: 'DC S-MOO 02-SP', codes: ['MOO'].concat(
+    DOCK_SUB_('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01', '430-05', '430-07', '430-08', '430-09', '398-00', '404-00']),
+    DOCK_SUB_('MOO', ['430-00', '430-01', '430-02', '430-03', '430-04', '430-05', '430-06', '430-07', '430-08', '430-09'])), stops: ['DC MOOCA2', 'DC MOOCA']},
+  {dock: 'Esteira 12', line: 5, route: 'F S-SAP 02-SP', codes: ['GRU 404-12']},
+  {dock: 'Esteira 13', line: 5, route: 'F S-PENHA 03-SP', codes: ['GRU 404-06']},
+  {dock: 'Esteira 15', line: 5, route: 'S-SRAF-SP', codes: ['GRU 404-00']},
+  {dock: 'Esteira 17', line: 5, route: 'F S-PENHA-SP', codes: ['GRU 404-05']},
+  {dock: 'Esteira 18', line: 5, route: 'DC NOD-SP', codes: ['NOD']},
+  {dock: 'Esteira 19', line: 5, route: 'F S-MGUE-SP', codes: ['GRU 404-04']},
+  {dock: 'Esteira 20', line: 5, route: 'S-SAPOP-SP', codes: ['GRU 404-03']},
+  {dock: 'Esteira 21', line: 5, route: 'DC JDF-MG', codes: ['JDF']},
+  {dock: 'Esteira 22', line: 5, route: 'DC BAU-SP', codes: ['BAU']},
+  {dock: 'Esteira 23', line: 5, route: 'MS CGR', codes: ['MS']},
+  {dock: 'Esteira 24', line: 5, route: 'S-PENHA-SP', codes: ['GRU 404-02']},
+  {dock: 'Esteira 25', line: 5, route: 'F S-PENHA 02-SP', codes: ['GRU 404-07']}
+];
+/**
+ * Tabela de 16/11 a partir da tabela anterior (docas ou esteiras): as rotas da linha principal ficam com os códigos e as paradas
+ * que já tinham (unidades novas do DC TBT-SP, CDG no RJ SJM, JPN no MT CGB…), na doca e linha novas; as rotas da tabela
+ * secundária vêm da tabela nova.
+ */
+const table2026_11_16_ = base => {
+  const secondary = SECONDARY_2026_11_16_.map(e => e.route), add = (list, more) => list.concat(more.filter(c => list.indexOf(c) < 0));
+  return base.filter(e => secondary.indexOf(e.route) < 0 && !/^esteira/i.test(e.dock)).map(e => {
+    const route = RENAME_2026_11_16_[e.route] || e.route, pos = TRONCAL_2026_11_16_[route];
+    let codes = e.codes || [], stops = e.stops || [];
+    if (route === 'SP BRE') {
+      codes = codes.filter(c => OUT_OF_BRE_2026_11_16_.codes.indexOf(c) < 0);
+      stops = stops.filter(x => OUT_OF_BRE_2026_11_16_.stops.indexOf(x) < 0);
+    }
+    if (route === 'DF BSB') { codes = add(codes, BSB_2026_11_16_.codes); stops = add(stops, BSB_2026_11_16_.stops); }
+    if (NEW_CODES_2026_11_16_[route]) codes = add(codes, NEW_CODES_2026_11_16_[route]);
+    const out = Object.assign({}, e, {route: route, codes: codes, stops: stops});
+    if (pos) { out.dock = pos[0]; out.line = pos[1]; }
+    return out;
+  }).concat([AM_MAO_2026_11_16_], SECONDARY_2026_11_16_);
+};
+const DOCK_TABLE_2026_11_16_ = table2026_11_16_(DOCK_TABLE_2026_11_10_);
+/**
+ * V4.29.2 (comunicado "线路调整通知" de 18/11 e a tabela "Atualizado em 18/11"): a partir das 11h30 de 18/11 as cargas de XAP vão
+ * pela rota SC BNU (DOCA 06, esteira 7) e deixam o SP BRE (docas 21/22): "Adicionar novo código inicial: XAP" no SC BNU e "Excluir …
+ * XAP" no SP BRE. O resto da tabela é igual à de 16/11. Vale pelo HORÁRIO do bipe da remessa (eventTime): no dia 18/11, antes das
+ * 11h30 continua a tabela de 16/11; remessa sem horário fica com a tabela nova (Core.dockVersionIndex).
+ */
+const ROUTES_FROM_2026_11_18_ = '2026-11-18 11:30';
+const XAP_2026_11_18_ = {codes: ['XAP'], stops: ['DC XAP-SC']};
+const table2026_11_18_ = base => base.map(e => {
+  const sem = (list, out) => (list || []).filter(x => out.indexOf(x) < 0), com = (list, more) => (list || []).concat(more.filter(x => (list || []).indexOf(x) < 0));
+  if (e.route === 'SP BRE') return Object.assign({}, e, {codes: sem(e.codes, XAP_2026_11_18_.codes), stops: sem(e.stops, XAP_2026_11_18_.stops)});
+  if (e.route === 'SC BNU') return Object.assign({}, e, {codes: com(e.codes, XAP_2026_11_18_.codes), stops: com(e.stops, XAP_2026_11_18_.stops)});
+  return e;
+});
+const DOCK_TABLE_2026_11_18_ = table2026_11_18_(DOCK_TABLE_2026_11_16_);
 const DOCKS_EXPEDICAO = Object.freeze({
   versions: [
     {
@@ -245,7 +453,13 @@ const DOCKS_EXPEDICAO = Object.freeze({
       }
     },
     {from: '2026-10-04', entries: DOCK_TABLE_2026_10_04_},
-    {from: '2026-10-11', entries: DOCK_TABLE_2026_10_11_}
+    {from: '2026-10-11', entries: DOCK_TABLE_2026_10_11_},
+    {from: '2026-10-24', entries: DOCK_TABLE_2026_10_24_},
+    {from: '2026-10-30', entries: DOCK_TABLE_2026_10_30_},
+    {from: '2026-11-01', entries: DOCK_TABLE_2026_11_01_},
+    {from: BRE_BACK_FROM_2026_11_10_, entries: DOCK_TABLE_2026_11_10_},
+    {from: ROUTES_FROM_2026_11_16_, entries: DOCK_TABLE_2026_11_16_},
+    {from: ROUTES_FROM_2026_11_18_, entries: DOCK_TABLE_2026_11_18_}
   ],
   fallback: 'SEM DOCA'
 });
@@ -256,8 +470,165 @@ const DOCKS_EXPEDICAO = Object.freeze({
  */
 const DOCKS_PROXIMA_PARADA = Object.freeze(Object.assign({}, DOCKS_EXPEDICAO, {source: 'destination'}));
 
+/**
+ * V4.16 (pedido, Expedição SC → DC): ESTEIRAS pelas tabelas de 24/10 — "10月24日干线装车码头进行调整" (troncal, linhas de desvio
+ * do DWS 7, 4, 2 e 3) e "Ajuste das Docas de Carregamento das Rotas Regionais" (Last Mile, linhas 6 e 5). As duas tabelas
+ * repetem os números de doca (doca 05 é GO GYN na troncal e F S-PQBOTU-SP na Last Mile): por isso o painel mostra a
+ * "Esteira (número)" = linha de desvio do DWS, e não a doca. A esteira sai da PRÓXIMA PARADA (nome da rota, de uma parada
+ * da linha, o código da base no nome ou o código), como as docas do SC → SC.
+ */
+const ESTEIRA_TABLE_2026_10_24_ = [
+  // ---------- troncal ----------
+  {dock: 'DOCA 05', line: 7, route: 'GO GYN', codes: ['GO']},
+  {dock: 'DOCA 06', line: 7, route: 'SC BNU', codes: ['SC', 'SC1']},
+  {dock: 'DOCA 07', line: 7, route: 'RS NSR', codes: ['RS', 'RS1']},
+  {dock: 'DOCA 08', line: 7, route: 'SBN', codes: ['SBN'].concat(DOCK_SUB_('SBN', ['375-00', '375-01', '375-02', '375-03', '375-04', '375-05',
+    '375-06', '375-07', '375-08', '375-09', '375-10'])), stops: ['DC SBN', 'DC SBN-SP']},
+  {dock: 'DOCA 09', line: 7, route: 'CE FOR', codes: ['CE']},
+  {dock: 'DOCA 10', line: 7, route: 'RJ SJM', codes: ['RJ', 'RJ1', 'VDC', 'CDG'], stops: ['BA VDC', 'DC CDG-RJ']},
+  {dock: 'DOCA 15', line: 4, route: 'SE AJU', codes: ['SE', 'AL', 'MCZ'], stops: ['DC MCZ-AL']},
+  {dock: 'DOCA 16', line: 4, route: 'PR SJS', codes: ['PR', 'PR1', 'CAC'], stops: ['DC CAC']},
+  {dock: 'DOCA 17', line: 4, route: 'PE JGS', codes: ['PE', 'BYE', 'DC-BYE'], stops: ['DC BYE-PB']},
+  {dock: 'DOCA 18', line: 4, route: 'BA FEC', codes: ['BA', 'SBA', 'SNS'], stops: ['DC SNS-PE', 'DC SBA-BA']},
+  {dock: 'DOCA 19', line: 4, route: 'MG CGE', codes: ['MG', 'MG1', 'CHV']},
+  {dock: 'DOCA 20', line: 4, route: 'PA ANA', codes: ['PA']},
+  {dock: 'DOCA 21/22', line: 2, route: 'SP BRE', codes: ['AC', 'AM', 'BAU', 'BVB', 'JDF', 'LDB', 'MIA', 'MRB', 'RO', 'SJP', 'SOD', 'SP', 'SP1',
+    'STM', 'TO', 'VCP', 'XAP', 'BJE', 'MA', 'PPB', 'NAT', 'BRE'], prefixes: ['BRE - '], stops: DOCK_STOPS_SP_BRE_.filter(x => x !== 'DC CDG-RJ')},
+  {dock: 'DOCA 23', line: 2, route: 'DC TBT-SP', codes: DOCK_SUB_('SP', ['402-01', '402-03', '402-05', '421-00'])
+    .concat(DOCK_SUB_('GRU', ['402-00', '402-01', '402-02', '402-03', '402-04', '402-05', '402-06', '402-07', '402-08'])), stops: ['DC TBT']},
+  {dock: 'DOCA 44', line: 3, route: 'DC GRU-SP', codes: DOCK_SUB_('SP', ['395-05', '395-06', '395-07', '381-04'])
+    .concat(DOCK_SUB_('GRU', ['381-00', '381-01', '381-02', '381-03', '381-04', '381-05', '381-11', '381-13', '381-14', '381-15', '381-18', '381-19',
+      '381-20', '381-21', '378-04'])), stops: ['DC GRU']},
+  {dock: 'DOCA 43', line: 3, route: 'MS CGR', codes: ['MS']},
+  {dock: 'DOCA 42', line: 3, route: 'MT CGB', codes: ['MT', 'JPN'], stops: ['DC JPN']},
+  {dock: 'DOCA 41', line: 3, route: 'THE', codes: ['PI', 'IMP'], stops: ['PI THE', 'DC IMP-MA']},
+  {dock: 'DOCA 40', line: 3, route: 'ES SRR', codes: ['ES']},
+  {dock: 'DOCA 39', line: 3, route: 'SP RBP', codes: ['NE', 'NE1']},
+  {dock: 'DOCA 38', line: 3, route: 'DF BSB', codes: ['DF']},
+  // ---------- Last Mile (rotas regionais) ----------
+  {dock: 'DOCA 01', line: 6, route: 'DC S-VLANA-SP', codes: ['VLANA']},
+  {dock: 'DOCA 02', line: 6, route: 'F S-JBO-SP', codes: ['GRU 404-11']},
+  {dock: 'DOCA 03', line: 6, route: 'F S-SAP 02-SP', codes: ['GRU 404-12']},
+  {dock: 'DOCA 04', line: 6, route: 'F S-MGUE 02-SP', codes: ['GRU 404-08']},
+  {dock: 'DOCA 05', line: 6, route: 'F S-PQBOTU-SP', codes: ['GRU 404-09']},
+  {dock: 'DOCA 06', line: 6, route: 'F VLMT-SP', codes: ['GRU 404-10']},
+  {dock: 'DOCA 07', line: 6, route: 'S-MGUE-SP', codes: ['GRU 404-01']},
+  {dock: 'DOCA 08/09', line: 6, route: 'DC SSZ-SP', codes: DOCK_SUB_('GRU', ['378-00', '378-01', '378-02', '378-03', '378-05', '378-06']), stops: ['DC SSZ']},
+  {dock: 'DOCA 10', line: 6, route: 'S-MGUE 02-SP', codes: ['GRU 404-13']},
+  {dock: 'DOCA 11/12', line: 5, route: 'DC S-MOO 02-SP', codes: ['MOO'].concat(DOCK_SUB_('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01',
+    '430-05', '430-07', '430-08', '430-09']), DOCK_SUB_('MOO', ['430-00', '430-01', '430-02', '430-03', '430-04', '430-05', '430-06', '430-07', '430-08',
+    '430-09'])), stops: ['DC MOOCA2', 'DC MOOCA']},
+  {dock: 'DOCA 13', line: 5, route: 'S-PENHA-SP', codes: ['GRU 404-02']},
+  {dock: 'DOCA 14', line: 5, route: 'F S-PENHA 02-SP', codes: ['GRU 404-07']},
+  {dock: 'DOCA 15/16', line: 5, route: 'S-SRAF-SP', codes: ['GRU 404-00']},
+  {dock: 'DOCA 17/18', line: 5, route: 'DC NOD-SP', codes: ['NOD']},
+  {dock: 'DOCA 19', line: 5, route: 'S-SAPOP-SP', codes: ['GRU 404-03']},
+  {dock: 'DOCA 20', line: 5, route: 'F S-MGUE-SP', codes: ['GRU 404-04']},
+  {dock: 'DOCA 22', line: 5, route: 'F S-PENHA-SP', codes: ['GRU 404-05']},
+  {dock: 'DOCA 24', line: 5, route: 'F S-PENHA 03-SP', codes: ['GRU 404-06']}
+];
+/**
+ * Esteiras do SC → DC (o valor mostrado é "Esteira N"): a tabela de 24/10 vale até 29/10; V4.19: de 30/10, com as unidades
+ * novas do DC TBT-SP (Esteira 2); de 01/11, com TO, MRB, RO e AC no DF BSB (Esteira 3, antes Esteira 2 com o SP BRE);
+ * V4.24.2: de 10/11, TO, MRB, RO e AC de volta ao SP BRE (Esteira 2). V4.28: de 16/11, as tabelas novas (abaixo).
+ */
+const ESTEIRA_TABLE_2026_10_30_ = withNewTbt_(ESTEIRA_TABLE_2026_10_24_);
+const ESTEIRA_TABLE_2026_11_01_ = withBsb_(ESTEIRA_TABLE_2026_10_30_);
+const ESTEIRA_TABLE_2026_11_10_ = withBreBack_(ESTEIRA_TABLE_2026_10_30_);
+/** V4.28: de 16/11, as linhas de desvio do DWS das tabelas de 16/11 (ex.: RJ SJM na Esteira 4, SP BRE na 2, MS CGR na 5). */
+const ESTEIRA_TABLE_2026_11_16_ = table2026_11_16_(ESTEIRA_TABLE_2026_11_10_);
+/** V4.29.2: de 18/11, 11h30, o XAP no SC BNU (Esteira 7). */
+const ESTEIRA_TABLE_2026_11_18_ = table2026_11_18_(ESTEIRA_TABLE_2026_11_16_);
+const ESTEIRAS_SC_DC = Object.freeze({
+  source: 'destination', show: 'line', linePrefix: 'Esteira ',
+  versions: [{from: '', entries: ESTEIRA_TABLE_2026_10_24_}, {from: '2026-10-30', entries: ESTEIRA_TABLE_2026_10_30_},
+    {from: '2026-11-01', entries: ESTEIRA_TABLE_2026_11_01_}, {from: BRE_BACK_FROM_2026_11_10_, entries: ESTEIRA_TABLE_2026_11_10_},
+    {from: ROUTES_FROM_2026_11_16_, entries: ESTEIRA_TABLE_2026_11_16_}, {from: ROUTES_FROM_2026_11_18_, entries: ESTEIRA_TABLE_2026_11_18_}],
+  fallback: 'SEM ESTEIRA'
+});
+
+/**
+ * V4.20 (pedido, Criação de Lotes): bases que podem receber as SACAS VERMELHAS COM CHIP (sacas ecológicas) — comunicado
+ * "Envio de sacas vermelhas com chip", a partir de 24/08/2026: "Envie somente para os DCs autorizados acima". Comparado com
+ * o "Destino de desembalagem" de cada saca (maiúsculas, hífens e o "-UF" do fim não contam: "DC VCP-SP" = "DC VCP").
+ */
+const ECO_BAG_SITES_2026_08_24_ = [
+  // SCs que podemos realizar envio (UF + base)
+  'SP BRE', 'MG CGE', 'BA FEC', 'PE JGS', 'PR SJS', 'RJ SJM', 'CE FOR', 'SE RAO', 'SP GRU', 'SC BNU', 'PA ANA', 'PI THE',
+  'DC SRR-ES', 'ES SRR', // nº 13 do comunicado; "ES SRR" = o mesmo SC com o nome da rota (tabela das docas)
+  'RS NSR', 'MT CGB', 'GO GYN', 'DF BSB', 'RO PVH', 'SE AJU', 'BA VDC', 'PA STM', 'PA MRB', 'TO PMW', 'MS CGR', 'SC BLU', 'MA SLZ',
+  'PE SNS', 'MG CHV', 'SP RBP', 'AM MAO', 'BA SBA',
+  // DCs para envio
+  'DC MGF-PR', 'DC JDF-MG', 'DC VCP', 'DC BJE-PI', 'DC BAU-SP', 'DC NOD-SP', 'DC S-VLANA-SP', 'DC JND-SP', 'JND-SP', 'DC GRU-SP',
+  'DC SBN-SP', 'DC ITJ 001-PR', 'DC LDB-PR', 'DC SJP-SP', 'DC MAO-AM', 'DC NSR-MG', 'DC QDF 001', 'DC MTC-MG', 'DC TFL 001', 'DC CUV',
+  'DC VAG 001', 'DC PPY-MG', 'DC UBA-MG', 'DC CDG-RJ', 'DC SOO 02-SP', 'DC EXT-MG'
+];
+
 /** Cores fixas por turno (validadas para daltonismo). A cor segue o turno em todos os gráficos. */
 const SHIFT_COLORS = Object.freeze({T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7', 'N/A': '#9CA3AF'});
+
+/**
+ * V4.17 — o que o Deslacre da linha secundária e o da linha troncal têm em comum: o resumo do dia, os cartões
+ * (Client.html → renderUnsealKpis), os gráficos, os filtros e a tabela "Informações gerais". `own` = o que é de cada linha:
+ * chave, nome, consultas do JMS (summary.endpoint/method, detail, unload), listTitle e listMenu (a tela no JMS), diagnostic
+ * (função de diagnóstico) e fields (o campo do horário de deslacração muda: unlockTime / actualUnlockTime).
+ */
+function unsealPanel_(own) {
+  return Object.assign({
+    subtitle: {pt: 'IDs sem bipe de deslacre e tempo do deslacre até o bipe de recebimento', zh: '未解封扫描车次及解封至卸车扫描时长'},
+    goal: {value: null, direction: 'max', strict: false},
+    detailMatchesErrors: false, light: true, unseal: true,
+    shipmentState: 4,
+    labels: {
+      tripId: {pt: 'Número do ID', zh: '车次号'}, route: {pt: 'Nome da viagem', zh: '车次名称'}, station: {pt: 'PDD de saída', zh: '始发网点'},
+      shift: {pt: 'Turno', zh: '班次'}, situation: {pt: 'Bipe de deslacre', zh: '解封扫描'}, minutes: {pt: 'Tempo mediano', zh: '中位时长'},
+      eventTime: {pt: 'Horário de deslacração do veículo', zh: '解封时间'}, receiptTime: {pt: 'Bipe de recebimento (Data inicial)', zh: '卸车开始时间'}
+    },
+    situations: {missing: 'Sem bipe de deslacre', done: 'Com bipe de deslacre'},
+    filters: ['tripId', 'route', 'station', 'shift'],
+    topCards: [],
+    hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    // Cartões próprios (Client.html → renderUnsealKpis): IDs sem deslacre, tempo mediano, ID de maior tempo e um cartão por turno.
+    unsealCards: true,
+    texts: {
+      errors: {pt: 'IDs sem bipe de deslacre', zh: '未解封扫描车次'},
+      errorsDay: {pt: 'IDs sem bipe de deslacre no dia', zh: '当日未解封扫描车次'}, errorsPeriod: {pt: 'IDs sem bipe de deslacre no período', zh: '期间未解封扫描车次'},
+      errorsFiltered: {pt: 'IDs sem bipe de deslacre (com filtro)', zh: '未解封扫描车次（已筛选）'},
+      prevErrorsDay: {pt: 'Dia anterior', zh: '前一日'}, prevErrorsPeriod: {pt: 'Período anterior', zh: '上一期间'},
+      shiftErrors: {pt: 'Sem deslacre {s}', zh: '{s} 未解封'}, shareOfErrors: {pt: '{p} dos IDs sem deslacre', zh: '占未解封车次 {p}'},
+      rateOfDay: {pt: '% de IDs sem bipe de deslacre · {date}', zh: '{date} 未解封扫描率'}, rateOfPeriod: {pt: '% de IDs sem bipe de deslacre no período', zh: '期间未解封扫描率'},
+      distinctShipments: {pt: 'IDs de viagem', zh: '车次'}, tableCount: {pt: '{n} IDs', zh: '{n} 车次'},
+      tableCountOf: {pt: '{n} de {m} IDs', zh: '{n} / {m} 车次'}, detailsOk: {pt: 'Detalhes completos · {n} IDs de viagem', zh: '明细完整 · {n} 车次'},
+      shipments: {pt: 'IDs', zh: '车次'},
+      shipmentTable: {pt: 'Informações gerais', zh: '基本信息'}, tableFind: {pt: 'Localizar ID na tabela', zh: '在表中查找车次'}
+    },
+    charts: [
+      {key: 'missShift', dim: 'shift', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', top: 4, allShifts: true,
+        title: {pt: 'Turnos com maior falta de bipe de deslacre', zh: '未解封扫描最多的班次'},
+        sub: {pt: 'Turno pelo horário do deslacre (sem deslacre, pela chegada do veículo)', zh: '按解封时间划分班次（未解封按车辆到达时间）'}},
+      {key: 'mNoUnlock', metric: 'noUnlockNum', type: 'bar', bad: true, days: 15,
+        title: {pt: 'Evolução: dias com mais falta de bipe de deslacre', zh: '每日未解封扫描车次'}},
+      {key: 'medShift', dim: 'shift', agg: 'median', valueField: 'minutes', type: 'bar', top: 4, unit: 'min', allShifts: true,
+        title: {pt: 'Tempo mediano do deslacre até o bipe de recebimento por turno', zh: '各班次解封至卸车扫描中位时长'}},
+      {key: 'topTime', dim: 'tripId', agg: 'max', valueField: 'minutes', type: 'bar', horizontal: true, top: 10, unit: 'min',
+        title: {pt: 'IDs que mais demoraram do deslacre ao bipe de recebimento (top 10)', zh: '解封至卸车扫描最慢的车次（前10）'}},
+      {key: 'origin', dim: 'station', type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'PDD de saída que mais mandou', zh: '发车最多的始发网点'}},
+      {key: 'missOrigin', dim: 'station', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'PDD de saída dos IDs sem bipe de deslacre', zh: '未解封车次的始发网点'}}
+    ],
+    table: [
+      ['date', 'Data', '日期'], ['tripId', 'Número do ID', '车次号'], ['route', 'Nome da viagem', '车次名称'],
+      ['station', 'PDD de saída', '始发网点'], ['situation', 'Bipe de deslacre', '解封扫描'], ['shift', 'Turno', '班次'],
+      ['arrivalTime', 'Tempo real de chegada', '实际到达时间'], ['unlockTime', 'Horário de deslacração do veículo', '解封时间'],
+      ['receiptTime', 'Bipe de recebimento (Data inicial)', '卸车开始时间'], ['minutes', 'Tempo mediano (deslacre → recebimento)', '中位时长'],
+      ['plate', 'Placa do carro', '车牌'], ['carrier', 'Transportadora', '承运商']
+    ]
+  }, own, {
+    summary: Object.assign({rateFromCounts: true, rateKeys: [], errorKeys: ['noUnlockNum'], totalKeys: ['tripNum'],
+      metrics: ['tripNum', 'noUnlockNum', 'unlockNum', 'medianMin', 'timedNum']}, own.summary)
+  });
+}
 
 /**
  * goal.direction:
@@ -267,6 +638,17 @@ const SHIFT_COLORS = Object.freeze({T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7',
  *   Protege contra payloads sem filtro (que baixariam todas as remessas processadas).
  * routeKey: identifica os cabeçalhos Routename/Routernamelist (ver JmsApi.gs).
  */
+/**
+ * V4.25 (pedido): "Expedições ofensoras" — as docas em três grupos: Expedição A = docas 05 a 14, Expedição B = 15 a 23,
+ * Expedição C = 38 a 44 (pelo número da doca: "DOCA 21/22" → 21 → B; "DOCA 08/09" → A). Esteira (Last Mile) = "Esteiras";
+ * sem doca = sem informação. Calculado na leitura (Core.applyExpeditions), depois das docas.
+ */
+const EXPEDICOES_ = Object.freeze({groups: [{name: 'Expedição A', from: 5, to: 14}, {name: 'Expedição B', from: 15, to: 23},
+  {name: 'Expedição C', from: 38, to: 44}], esteiras: 'Esteiras'});
+const EXPEDITION_CHART_ = {key: 'expedition', type: 'bar', top: 6, title: {pt: 'Expedições ofensoras', zh: '高频发件区'},
+  sub: {pt: 'Expedição A = docas 05 a 14 · B = 15 a 23 · C = 38 a 44', zh: '发件区 A = 05–14 号码头 · B = 15–23 · C = 38–44'},
+  stats: {max: {pt: 'Expedição mais ofensora', zh: '最多发件区'}, min: {pt: 'Expedição menos ofensora', zh: '最少发件区'}}};
+
 const ALL_INDICATORS_ = Object.freeze({
   wrong_send: {
     key: 'wrong_send', order: 1, routeKey: 'WRONG_SEND',
@@ -293,7 +675,9 @@ const ALL_INDICATORS_ = Object.freeze({
     // Docas pela PRÓXIMA PARADA (destino para onde a saca foi enviada): mostra em que doca estão
     // colocando mais sacas erradas.
     docks: DOCKS_PROXIMA_PARADA,
-    filters: ['shift', 'login', 'segment', 'destination', 'interval', 'lot', 'client', 'dock'],
+    // V4.25 (pedido): "Expedições ofensoras" (docas em Expedição A/B/C) e o filtro de Expedição.
+    expeditions: EXPEDICOES_,
+    filters: ['shift', 'login', 'segment', 'destination', 'interval', 'lot', 'client', 'dock', 'expedition'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
@@ -301,14 +685,14 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'lot', type: 'bar', horizontal: true, top: 10, title: {pt: 'Sacas / lotes mais ofensores', zh: '高频包号'}},
       {key: 'segmentBase', type: 'bar', top: 10, title: {pt: 'Primeiro segmento afetado', zh: '受影响一段码'}},
       {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Destinos incorretos ofensores', zh: '高频错发下一站'}},
+      EXPEDITION_CHART_,
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
     rankPanels: [
       {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
         title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
         stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
-      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
-        title: {pt: 'Docas por turno', zh: '各班次码头分布'}},
+      // V4.25 (pedido): saiu "Docas por turno".
       {key: 'stopDockByShift', kind: 'byShift', dim: 'destination', extra: 'dock', top: 5, accent: 'count', bands: 'top',
         title: {pt: 'Turno + próxima parada + doca', zh: '班次、下一站与码头'},
         sub: {pt: 'Quantidade e porcentagem por combinação de turno, próxima parada e doca · top {n} por turno', zh: '按班次、下一站与码头的数量及占比 · 每个班次前 {n} 名'},
@@ -336,7 +720,8 @@ const ALL_INDICATORS_ = Object.freeze({
     key: 'sorting_error', order: 2, routeKey: 'SORTING_ERROR',
     name: {pt: 'Triagem Errada', zh: '错分'},
     subtitle: {pt: 'Taxa de triagem incorreta nesta etapa', zh: '本环节错分率'},
-    goal: {value: 0.50, direction: 'max', strict: true},
+    // V4.24 (pedido): na meta com a taxa MENOR OU IGUAL a 0,50% (0,50% está na meta), comparando com 2 casas como na tela.
+    goal: {value: 0.50, direction: 'max', strict: false, roundTo: 2},
     apiProfile: 'sorting_error', detailMatchesErrors: true,
     // Resposta real (center_error_rate_new_total): sendCount, wrongType12Count, wrongRate2 = "Taxa de Triagem Incorreta nesta Etapa".
     summary: {
@@ -354,6 +739,9 @@ const ALL_INDICATORS_ = Object.freeze({
         'terminalDispatchCode', 'orderThirdCode', 'threeSegmentCode', 'orderFirstCode']
     },
     labels: {destination: {pt: 'Base destino', zh: '目的网点'}, lot: {pt: 'Número do lote', zh: '包号'}},
+    // V4.25 (pedido): lote sem numeração = VOLUMOSOS (no lugar de "Sem informação"). Só na tela e no relatório: o lote vazio
+    // continua vazio no arquivo, para a Consulta das bipagens ainda procurar o lote dele.
+    naLabel: {text: {pt: 'VOLUMOSOS', zh: '大件'}, fields: ['lot']},
     // O JMS manda a base ofensora (baggingNetworkName) VAZIA quando a própria base é a responsável:
     // vazio = SP GRU (nome da base em JMS_CENTER_NAME), somado ao SP GRU que já vem preenchido.
     // V4.4 (pedido): é também a regra para a "Unidade de Empacotamento" sem informação (Base de escaneamento = SP GRU).
@@ -429,15 +817,28 @@ const ALL_INDICATORS_ = Object.freeze({
     fields: {
       shipment: ['billcode'], eventTime: ['loadPackageTime', 'nextStationScanTime'], login: ['loadPackageEmp'],
       segment: ['threeSegmentCode'], destination: ['nextStop'], client: ['customerName'],
-      tripId: ['arriveOrder'], route: ['lastStop']
+      tripId: ['arriveOrder'], route: ['lastStop'],
+      // V4.25: código de três segmentos completo — a linha secundária usa o 1º + 2º segmento juntos ("GRU,404-04").
+      segmentFull: ['threeSegmentCode']
     },
-    filters: ['shift', 'login', 'interval', 'client', 'destination', 'segment'],
+    // V4.25 (pedido): segmentos em linha troncal (1º segmento: GO, SC, MG…) e linha secundária (1º + 2º segmento: GRU,404-04),
+    // pelas tabelas de docas e esteiras de 24/10 (V4.25.1: secundária = só os pares das tabelas). Calculado na leitura (Core.applySegLines).
+    segLines: true,
+    labelsOne: {segMain: {pt: 'Segmento', zh: '段码'}, segSub: {pt: 'Segmento', zh: '段码'}},
+    // V4.25.1: cada filtro de segmento lista só a sua linha (sem o "Sem informação" das remessas da outra linha).
+    hideNAFilters: ['segMain', 'segSub'],
+    // V4.25 (pedido): o filtro de Segmento virou dois — Segmentos Principais (só o 1º segmento) e Segmentos Secundários (1º + 2º).
+    filters: ['shift', 'login', 'interval', 'client', 'destination', 'segMain', 'segSub'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
-      {key: 'login', type: 'bar', horizontal: true, top: 10, title: {pt: 'Logins mais ofensores', zh: '高频责任操作员'}},
-      {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Destinos ofensores (próxima parada)', zh: '高频下一站'}},
-      {key: 'segment', type: 'bar', top: 10, title: {pt: 'Segmentos ofensores', zh: '高频一段码'}},
+      // V4.25 (pedido): saíram "Logins mais ofensores" e "Destinos ofensores (próxima parada)"; "Segmentos ofensores" virou dois.
+      {key: 'segTrunk', dim: 'segMain', where: {segLine: 'Troncal'}, type: 'bar', top: 10,
+        title: {pt: 'Segmentos ofensores — linha troncal', zh: '高频一段码（干线）'},
+        sub: {pt: '1º segmento (siglas da linha troncal)', zh: '一段码（干线）'}},
+      {key: 'segSecondary', dim: 'segSub', where: {segLine: 'Secundária'}, type: 'bar', top: 10,
+        title: {pt: 'Segmentos ofensores — linha secundária', zh: '高频段码（支线）'},
+        sub: {pt: '1º e 2º segmento juntos (ex.: GRU,404-04)', zh: '一段码+二段码（例：GRU,404-04）'}},
       {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
@@ -468,16 +869,20 @@ const ALL_INDICATORS_ = Object.freeze({
     },
     // V4.12.6 (pedido): "Segmentos ofensores (1º segmento)" pela fórmula do WPS do usuário (coluna segmentBase).
     segmentBase: true,
-    labels: {login: {pt: 'Login (descarga)', zh: '卸车操作员'}, tripId: {pt: 'ID viagem recebimento', zh: '到件车次号'}},
+    labels: {login: {pt: 'Login (descarga)', zh: '卸车操作员'}, tripId: {pt: 'ID viagem recebimento', zh: '到件车次号'},
+      segmentBase: {pt: 'Destinos afetados', zh: '受影响目的地'}},
+    labelsOne: {segmentBase: {pt: 'Destino afetado', zh: '受影响目的地'}},
     docks: DOCKS_EXPEDICAO,
-    filters: ['shift', 'login', 'interval', 'client', 'tripId', 'segment', 'destination', 'dock'],
+    expeditions: EXPEDICOES_,
+    // V4.25 (pedido): filtros "Destinos afetados" (valores do gráfico) e "Expedição".
+    filters: ['shift', 'login', 'interval', 'client', 'tripId', 'segment', 'segmentBase', 'destination', 'dock', 'expedition'],
     topCards: ['segment'],
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Participação por turno', zh: '班次占比'}},
       // V4.12.6 (pedido): saiu "Top 4 segmentos por turno"; os segmentos ofensores seguem a fórmula do WPS.
-      {key: 'segmentBase', type: 'bar', top: 10, title: {pt: 'Segmentos ofensores (1º segmento)', zh: '高频一段码'}},
-      {key: 'login', type: 'bar', horizontal: true, top: 10, title: {pt: 'Logins mais ofensores', zh: '高频卸车操作员'}},
-      {key: 'tripId', type: 'bar', horizontal: true, top: 10, title: {pt: 'IDs de viagem de recebimento', zh: '高频到件车次号'}},
+      // V4.25 (pedido): o gráfico virou "Destinos afetados"; saíram "Logins mais ofensores" e "IDs de viagem de recebimento".
+      {key: 'segmentBase', type: 'bar', top: 10, title: {pt: 'Destinos afetados', zh: '受影响目的地'}},
+      EXPEDITION_CHART_,
       {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
       {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalos ofensores', zh: '高频时间段'}}
     ],
@@ -487,9 +892,7 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'dockOverview', kind: 'overview', dim: 'dock', accent: 'count',
         title: {pt: 'Distribuição geral por docas', zh: '码头总体分布'},
         stats: {max: {pt: 'Maior doca', zh: '最多码头'}, min: {pt: 'Menor doca', zh: '最少码头'}}},
-      {key: 'dockByShift', kind: 'byShift', dim: 'dock', top: 5, accent: 'pct', colors: 'rank', bands: 'bottom',
-        title: {pt: 'Docas por turno', zh: '各班次码头分布'}}
-      // V4.12.6 (pedido): saiu o painel "Turno + rota de carregamento + doca".
+      // V4.12.6 (pedido): saiu o painel "Turno + rota de carregamento + doca". V4.25 (pedido): saiu "Docas por turno".
     ],
     // Mesmo formato das tabelas dinâmicas da planilha "Falta Expedição" (aba Planilha2): só no relatório (PDF/Excel).
     pivotTables: [
@@ -585,10 +988,13 @@ const ALL_INDICATORS_ = Object.freeze({
       destination: ['sendNextStation'], lot: ['sendPackageCode'],
       client: ['orderSourceName'], route: ['arrivalShipmentName', 'lastCenterName'], reason: ['isTimely']
     },
-    labels: {tripId: {pt: 'ID viagem de saída', zh: '发件车次号'}, route: {pt: 'Rota do veículo de chegada', zh: '到件车辆线路'}},
+    labels: {tripId: {pt: 'ID viagem de saída', zh: '发件车次号'}, route: {pt: 'Rota do veículo de chegada', zh: '到件车辆线路'},
+      destination: {pt: 'Próxima parada', zh: '下一站'}, dock: {pt: 'Esteira', zh: '摆轮线路'}, dockDest: {pt: 'Rota de carregamento', zh: '装车线路'}},
+    // V4.16 (pedido): esteira (linha de desvio do DWS) pela próxima parada, tabelas de 24/10 (troncal e Last Mile).
+    docks: ESTEIRAS_SC_DC,
     // V4.15: remessa ainda não consultada no Rastreamento do pacote (as consultadas sem ID mostram "NÃO TEM ID").
     naLabel: {text: {pt: 'AGUARDANDO CONSULTA', zh: '等待查询'}, fields: ['tripId']},
-    filters: ['receiptShift', 'expeditionShift', 'tripId', 'interval', 'route'],
+    filters: ['receiptShift', 'expeditionShift', 'tripId', 'interval', 'destination', 'dock', 'route'],
     topCards: ['tripId'],
     hideShiftCards: true,
     charts: [
@@ -596,10 +1002,13 @@ const ALL_INDICATORS_ = Object.freeze({
       {key: 'expeditionShift', type: 'doughnut', title: {pt: 'Turno que fez a expedição', zh: '发件班次'}},
       {key: 'tripId', type: 'bar', horizontal: true, top: 10, hideNA: true, trips: true,
         title: {pt: 'IDs de viagem de saída mais ofensores', zh: '高频发件车次号'}},
-      {key: 'route', type: 'bar', horizontal: true, top: 10, title: {pt: 'Rotas com mais ofensores', zh: '高频线路'}}
+      // V4.16 (pedido): as rotas pela PRÓXIMA PARADA (antes: rota do veículo de chegada) e as esteiras.
+      {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Rotas com mais ofensores (próxima parada)', zh: '高频下一站'}},
+      {key: 'dock', type: 'bar', horizontal: true, top: 10, title: {pt: 'Esteiras com mais ofensores', zh: '高频摆轮线路'}}
     ],
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Número de pedido JMS', 'JMS运单号'],
+      ['destination', 'Próxima parada', '下一站'], ['dock', 'Esteira', '摆轮线路'],
       ['route', 'Rota veículo de chegada', '到件车辆线路'], ['tripId', 'ID viagem de saída', '发件车次号'],
       ['receiptTime', 'Horário descarregamento veículo de chegada', '到件车辆卸车时间'],
       ['expeditionTime', 'Horário de expedição', '发件时间']
@@ -620,8 +1029,9 @@ const ALL_INDICATORS_ = Object.freeze({
     name: {pt: 'Avaria', zh: '破损'},
     subtitle: {pt: 'Taxa de avaria do JMS (Relatório de Taxa de Avaria)', zh: 'JMS 破损率（破损率报表）'},
     // Meta: taxa ABAIXO de 90 (direction 'max'; na escala do JMS, informada pela operação). null = "Meta não definida".
-    // V3.38 (pedido): a taxa da Avaria é mostrada em ppm (por milhão), como o número do JMS: "189,72 ppm", meta ≤ 90 ppm.
-    goal: {value: 90, direction: 'max', strict: false, scale: 1000000, unit: 'ppm'},
+    // V3.38 (pedido): a taxa da Avaria é mostrada em ppm (por milhão), como o número do JMS: "189,72 ppm".
+    // V4.25 (pedido): a meta mudou para 120 ppm (antes 90) — tem que ficar abaixo dela.
+    goal: {value: 120, direction: 'max', strict: false, scale: 1000000, unit: 'ppm'},
     apiProfile: 'damage', detailMatchesErrors: true,
     summary: {
       endpoint: 'https://gw.jtjms-br.com/servicequality/breakage/rate/getBreakageRateData',
@@ -706,305 +1116,6 @@ const ALL_INDICATORS_ = Object.freeze({
   },
 
   /**
-   * RECEBIMENTO: FLUXO OPERACIONAL (Operação > Monitoramento de dados > Monitoramento de tipagem de recebimento
-   * (novo), /crisbiIndex/ArriveMonitor). Duas colunas principais:
-   *  - DEVE CHEGAR: pedidos previstos para chegar (shouldArriverNum) e os que ainda não chegaram (noArriverNum);
-   *  - CHEGOU: pedidos que chegaram (totalNum) e os pontos de atenção do recebimento (sem bipar expedição na
-   *    etapa anterior, sem bipagem de expedição nesta base, baixas não realizadas, sem armazém de saída).
-   * Resumo (arrivalbyday_total): 1 consulta por dia, os 7 números (gráficos de comparação com os dias anteriores).
-   * Taxa do painel = não chegadas ÷ deve chegar (% do previsto que ainda não chegou); sem meta definida.
-   * Detalhe: as listas de "Deve chegar" e "Chegou" (detailType). São ~170 mil + ~330 mil remessas POR DIA:
-   * ficam AGRUPADAS por combinação de DC destino/base destino/viagem/estação/última parada/digitalizador/turno,
-   * com a quantidade (qty) — os gráficos, filtros e a tabela usam essa quantidade. Só os últimos `days` dias
-   * têm detalhe (os mais antigos ficam só com o resumo) e o detalhe de hoje é atualizado no máximo a cada
-   * `refreshHours` horas. Download agrupado lote a lote (runGroupedDetailJob_): memória limitada e retomada
-   * na execução seguinte se o tempo acabar.
-   */
-  arrival_flow: {
-    key: 'arrival_flow', order: 8, routeKey: 'ARRIVAL',
-    name: {pt: 'Recebimento: fluxo operacional', zh: '到件运营流程'},
-    subtitle: {pt: 'Deve chegar × Chegou (monitoramento de tipagem de recebimento)', zh: '应到 × 已到（到件扫描监控）'},
-    goal: {value: null, direction: 'max', strict: false},
-    apiProfile: 'arrival_flow', detailMatchesErrors: false, grouped: true,
-    summary: {
-      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_total',
-      rateFromCounts: true, rateKeys: [], errorKeys: ['noArriverNum'], totalKeys: ['shouldArriverNum'],
-      metrics: ['shouldArriverNum', 'noArriverNum', 'totalNum', 'uploadNoSendNum', 'noSendNum', 'noSignNum', 'deliverNum']
-    },
-    detail: {
-      // O endereço do detalhe não estava na captura: o mesmo nome do resumo com "_detail" (padrão das outras telas).
-      // Se o JMS responder 404, as variantes de `candidates` são testadas e a que funcionar fica em
-      // JMS_ENDPOINT_ARRIVAL_FLOW_DETAIL (pode ser cadastrada à mão também).
-      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/arrivalbyday_detail',
-      candidates: ['arrivalbyday_detail', 'arrivalbyday_detailed', 'arrivalbyday_details', 'arrivalbyday_list'],
-      days: 7, refreshHours: 6, maxPerDay: 900000,
-      // Ordem do download (V3.19): as listas pequenas primeiro (tabelas e IDs sem bipe aparecem em minutos), depois
-      // "Deve chegar" e por último "Chegou" (~330 mil remessas por dia). Não muda o formato dos arquivos.
-      order: ['uploadNoSendNum', 'noSendNum', 'shouldArriverNum', 'totalNum'],
-      // V3.21: turnos sem esperar o download inteiro — a LISTA de cada número consultada em cada horário de turno
-      // (T1 06h–14h, T2 14h–22h, T3 22h–06h) devolve o total de cada turno: 10 consultas (página 1). O RESUMO do JMS
-      // é diário (consultado por horário, devolve o dia inteiro às 00h) e não serve para isso.
-      shiftProbe: ['shouldArriverNum', 'totalNum'],
-      // Uma lista por número clicado na tela (detailType = nome do número no resumo). Cada lista guarda só os
-      // campos dela (keep) e copia o ID de viagem para o campo do filtro dela (copy).
-      //  - Deve chegar: turno pelo "Horário de expedição" na origem (shiftExp → pizza "O que deve chegar").
-      //  - Chegou: turno pelo "Horário descarregamento veículo de chegada" (shift → "Turno que recebeu mais").
-      //  - Sem bipe na etapa anterior / sem bipe nesta base (V3.17): listas pequenas, remessa a remessa, para as
-      //    tabelas com todas as informações. `optional`: se o JMS recusar o detailType, o dia segue sem elas.
-      types: [
-        {type: 'shouldArriverNum', column: 'Deve chegar', copy: {tripExp: 'tripId', shiftExp: 'shift'},
-          keep: ['tripId', 'tripExp', 'station', 'shiftExp']},
-        {type: 'totalNum', column: 'Chegou', copy: {tripRec: 'tripId'},
-          keep: ['tripId', 'tripRec', 'shift', 'destCenter', 'destBase', 'destination', 'login']},
-        {type: 'uploadNoSendNum', column: 'Sem bipe na etapa anterior', optional: true, copy: {tripPrev: 'tripId', waybill: 'shipment'},
-          keep: ['waybill', 'eventTime', 'tripId', 'tripPrev', 'shift', 'station', 'destCenter', 'destBase', 'destination', 'login']},
-        {type: 'noSendNum', column: 'Sem bipe de expedição nesta base', optional: true, copy: {waybill: 'shipment'},
-          keep: ['waybill', 'eventTime', 'tripId', 'shift', 'station', 'destCenter', 'destBase', 'destination', 'login']}
-      ]
-    },
-    fields: {
-      shipment: ['billcode'], eventTime: ['sendTime'], tripId: ['shipmentNo'], destCenter: ['endCenterName'],
-      destBase: ['endArrivalSitename'], station: ['inputsite'], destination: ['nextstation'], login: ['scanuser']
-    },
-    // Linha agrupada: uma por combinação destes campos, com a quantidade de remessas. As listas pequenas guardam
-    // a remessa e o horário (uma linha por remessa); as grandes, só as combinações dos gráficos e da tabela.
-    groupFields: ['column', 'tripId', 'tripExp', 'tripRec', 'tripPrev', 'station', 'shiftExp', 'shift',
-      'destCenter', 'destBase', 'destination', 'login', 'waybill', 'eventTime'],
-    labels: {
-      station: {pt: 'Bases que enviaram', zh: '发件网点'}, destination: {pt: 'Última parada', zh: '上一站'},
-      login: {pt: 'Digitalizador', zh: '扫描员'}, tripId: {pt: 'ID de viagem', zh: '车次号'},
-      shift: {pt: 'Turno (recebimento)', zh: '班次（到件）'}
-    },
-    // Cada filtro vale só para a(s) lista(s) dele; as outras listas passam direto (Core.setFilterScopes).
-    filterScopes: {
-      tripExp: ['Deve chegar'], station: ['Deve chegar'], tripRec: ['Chegou'], tripPrev: ['Sem bipe na etapa anterior'],
-      shift: ['Chegou', 'Sem bipe na etapa anterior', 'Sem bipe de expedição nesta base']
-    },
-    filters: ['shift', 'tripExp', 'tripRec', 'station', 'tripPrev'],
-    topCards: [],
-    hideShiftCards: true,
-    hideEvolution: true, hideTarget: true,
-    // V3.21: cartão vermelho = quantidade RECEBIDA no dia (Chegou, oficial do JMS) com o dia anterior; ao lado, o cartão
-    // grande "Deve chegar no dia" com as encomendas que não chegaram. Depois, um cartão por subcoluna (metricPanels,
-    // menos as dos dois grandes e as com card: false) e os cartões T1/T2/T3 do recebido.
-    heroMetric: {key: 'totalNum', column: 'Chegou',
-      label: {pt: 'Recebido · Total de pedidos que chegaram', zh: '已到总票数'}, labelPeriod: {pt: 'Recebido no período', zh: '期间已到总票数'}},
-    bigMetric: {key: 'shouldArriverNum', column: 'Deve chegar', sub: 'noArriverNum',
-      label: {pt: 'Deve chegar no dia · Quantidade total de pedidos', zh: '当日应到总票数'}, labelPeriod: {pt: 'Deve chegar no período', zh: '期间应到总票数'},
-      subLabel: {pt: 'Encomendas que não chegou', zh: '未到件'}},
-    // Menu lateral: a quantidade que deve chegar HOJE.
-    navMetric: 'shouldArriverNum',
-    metricCards: true,
-    shiftCardsByColumn: {main: 'Chegou', columns: ['Chegou'], summaryMetric: 'totalNum'},
-    // Turnos de cada lista gravados por dia (aba AGG, chave "arrival_flow:<lista>"): dia anterior dos turnos.
-    shiftAggColumns: ['Chegou', 'Sem bipe na etapa anterior', 'Sem bipe de expedição nesta base'],
-    texts: {
-      errors: {pt: 'Não chegadas', zh: '未到件'},
-      errorsDay: {pt: 'Não chegadas no dia', zh: '当日未到件'}, errorsPeriod: {pt: 'Não chegadas no período', zh: '期间未到件'},
-      errorsFiltered: {pt: 'Remessas (com filtro)', zh: '票数（已筛选）'},
-      prevErrorsDay: {pt: 'Não chegadas dia anterior', zh: '前一日未到件'}, prevErrorsPeriod: {pt: 'Não chegadas período anterior', zh: '上一期间未到件'},
-      shiftErrors: {pt: 'Não chegadas {s}', zh: '{s} 未到件'}, shareOfErrors: {pt: '{p} das não chegadas', zh: '占未到件 {p}'},
-      rateOfDay: {pt: '% não chegou · {date}', zh: '{date} 未到件率'}, rateOfPeriod: {pt: '% não chegou no período', zh: '期间未到件率'}
-    },
-    // Números do resumo (primeira tabela da tela). `detail`: lista que tem a remessa a remessa desse número (o
-    // cartão muda com os filtros). card: false = só na tabela "Dados gerais".
-    metricPanels: [
-      {column: 'Deve chegar', title: {pt: 'Deve chegar', zh: '应到'}, metrics: [
-        {key: 'shouldArriverNum', label: {pt: 'Quantidade total de pedidos', zh: '应到总票数'}, detail: 'Deve chegar'},
-        {key: 'noArriverNum', label: {pt: 'Encomendas que não chegou', zh: '未到件总票数'}, bad: true}
-      ]},
-      {column: 'Chegou', title: {pt: 'Chegou', zh: '已到'}, metrics: [
-        {key: 'totalNum', label: {pt: 'Total de pedidos que chegaram', zh: '已到总票数'}, detail: 'Chegou'},
-        {key: 'uploadNoSendNum', label: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}, bad: true, detail: 'Sem bipe na etapa anterior'},
-        {key: 'noSendNum', label: {pt: 'Não realizamos bipe de expedição', zh: '本网点未发件扫描'}, bad: true, detail: 'Sem bipe de expedição nesta base'},
-        {key: 'noSignNum', label: {pt: 'Que não foram registrados no Sistema', zh: '未签收'}, bad: true},
-        {key: 'deliverNum', label: {pt: 'Não há armazém de saída nesse local', zh: '本网点无出仓'}, bad: true, card: false}
-      ]}
-    ],
-    // Gráficos separados, no padrão dos outros painéis. `metric`: número do resumo dia a dia (linha ou colunas);
-    // `dim`: contagem da lista indicada em `where`.
-    charts: [
-      {key: 'mShould', metric: 'shouldArriverNum', type: 'line', days: 30, title: {pt: 'Deve chegar', zh: '应到'}},
-      {key: 'expShift', dim: 'shiftExp', where: {column: 'Deve chegar'}, type: 'doughnut', summaryShift: 'shouldArriverNum', title: {pt: 'O que deve chegar', zh: '应到（按发件班次）'},
-        sub: {pt: 'Turno pelo horário de expedição na base de origem', zh: '按始发网点发件时间划分班次'}},
-      {key: 'mNoArr', metric: 'noArriverNum', type: 'bar', bad: true, title: {pt: 'Encomendas não chegadas', zh: '未到件'}},
-      {key: 'mRec', metric: 'totalNum', type: 'bar', title: {pt: 'Chegou', zh: '已到'}},
-      {key: 'mPrev', metric: 'uploadNoSendNum', type: 'bar', bad: true, title: {pt: 'Sem bipar expedição na etapa anterior', zh: '上一环节未发件扫描'}},
-      {key: 'prevTrip', dim: 'tripPrev', where: {column: 'Sem bipe na etapa anterior'}, type: 'bar', top: 10,
-        title: {pt: 'IDs de viagens que não tiveram bipe de expedição no anterior', zh: '上一环节未发件扫描的车次号'}},
-      {key: 'mNoSend', metric: 'noSendNum', type: 'bar', bad: true, title: {pt: 'Não realizamos bipe de expedição', zh: '本网点未发件扫描'}},
-      {key: 'expTrip', dim: 'tripExp', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'IDs de viagens que vamos receber', zh: '将到车次号'}},
-      {key: 'expStation', dim: 'station', where: {column: 'Deve chegar'}, type: 'bar', top: 10, title: {pt: 'Bases que enviaram', zh: '发件网点'}},
-      {key: 'recTrip', dim: 'tripRec', where: {column: 'Chegou'}, type: 'bar', top: 10, title: {pt: 'IDs que já recebemos', zh: '已到车次号'}}
-    ],
-    // Tabelas do painel (uma por lista). `table` (abaixo) = todas as colunas, para o relatório e o CSV.
-    tables: [
-      {key: 'tPrev', column: 'Sem bipe na etapa anterior', title: {pt: 'Total que não tiveram o bipe de expedição anterior', zh: '上一环节未发件扫描明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
-          ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação', '网点'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
-          ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员']]},
-      {key: 'tRec', column: 'Chegou', title: {pt: 'Total que foi recebido por nós', zh: '已到明细'},
-        cols: [['date', 'Data', '日期'], ['shift', 'Turno', '班次'], ['tripId', 'ID de viagem', '车次号'], ['destCenter', 'DC destino', '目的中心'],
-          ['destBase', 'Base destino', '目的网点'], ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']]},
-      {key: 'tNoSend', column: 'Sem bipe de expedição nesta base', title: {pt: 'Total de quantos nós não demos bipe de expedição', zh: '本网点未发件扫描明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
-          ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação', '网点'], ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'],
-          ['destination', 'Última parada', '上一站'], ['login', 'Digitalizador', '扫描员']]}
-    ],
-    table: [
-      ['date', 'Data', '日期'], ['column', 'Lista', '列表'], ['waybill', 'Remessa', '运单号'], ['eventTime', 'Horário', '时间'], ['shift', 'Turno', '班次'],
-      ['shiftExp', 'Turno da expedição', '发件班次'], ['tripId', 'ID de viagem', '车次号'], ['station', 'Estação de remessa', '发件网点'],
-      ['destCenter', 'DC destino', '目的中心'], ['destBase', 'Base destino', '目的网点'], ['destination', 'Última parada', '上一站'],
-      ['login', 'Digitalizador', '扫描员'], ['qty', 'Quantidade', '数量']
-    ]
-  },
-
-  /**
-   * EXPEDIÇÃO: FLUXO OPERACIONAL (Operação > Monitoramento de dados > Monitoramento de tipagem de expedição (novo),
-   * /crisbiIndex/SendOutMonitor). Quantidade que SAIU no dia, por rota (próxima parada).
-   * Resumo (sendbyday_total): uma linha por rota com "Número total de remessas" (sendcount), "Número de encomendas não
-   * chegadas na próxima parada" (noarrivalcount) e "Não entregue" (nosigncount). Os cartões SOMAM essas colunas; cada
-   * rota fica guardada (gráficos de rotas e "rota que mais enviou").
-   * Detalhe (sendbyday_detail): os números vermelhos de CADA rota (nextstation = código da próxima parada; detailType =
-   * coluna), no máximo 100 linhas por página. Cada remessa enviada é gravada UMA vez, com a situação dela em "column";
-   * as listas da tela juntam as situações (columnSets): "Enviados" = todas, "Em trânsito" = lista noarrivalcount,
-   * "Não entregues" = lista nosigncount. Lista com o mesmo total da rota (nenhuma chegou, por exemplo) não precisa ser
-   * baixada: todas as remessas da rota estão nela. Turno e intervalo pelo "Horário de expedição" (sendTime);
-   * login = Escrevente (scanuser). Download por rota e por horário de turno (Expedicao.gs → runSendDetailJob_).
-   * ID de viagem: Rastreamento do pacote (keywordList) de cada remessa — o "número do pedido" (remark2) do bipe
-   * "Encomenda carregada" na nossa base para a próxima parada da rota (Expedicao.gs → runTripJob_).
-   */
-  send_flow: {
-    key: 'send_flow', order: 9, routeKey: 'SEND',
-    name: {pt: 'Expedição: fluxo operacional', zh: '发件运营流程'},
-    subtitle: {pt: 'Quantidade que saiu no dia por rota (monitoramento de tipagem de expedição)', zh: '当日各线路发件量（发件扫描监控）'},
-    goal: {value: null, direction: 'max', strict: false},
-    apiProfile: 'send_flow', detailMatchesErrors: false, grouped: true, byRoute: true,
-    // Um dia inteiro (~120 mil remessas, ~9 MB) vai ao navegador: as três tabelas com todas as remessas. Mais dias: totais
-    // por campo calculados no servidor (tabelas com as 2.000 primeiras de cada situação).
-    clientRows: 150000,
-    summary: {
-      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sendbyday_total',
-      // Uma linha por rota: os números são SOMADOS (cartões) e cada rota fica guardada em raw.routes.
-      sumRecords: true, routeFields: {name: 'nextstation', code: 'nextstationcode'},
-      rateFromCounts: true, rateKeys: [], errorKeys: ['noarrivalcount'], totalKeys: ['sendcount'],
-      metrics: ['sendcount', 'noarrivalcount', 'nosigncount']
-    },
-    detail: {
-      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/sendbyday_detail',
-      // "O LIMITE É 100 LINHAS" (a tela do JMS mostra 20 por padrão e no máximo 100).
-      // Hoje: detalhe rebaixado no máximo a cada 6 h (conta Gmail: 12 h); cartões, rotas e turnos seguem de hora em hora pelo
-      // resumo e pela lista por horário. Dia fechado: só a situação muda — atualizada a cada 12 h sem baixar "Enviados" de novo.
-      // Conta Gmail: os 3 últimos dias com detalhe; Google Workspace: 7 (DETAIL_DAYS_SEND_FLOW muda).
-      maxPageSize: 100, days: 7, refreshHours: 6, closedRefreshHours: 12, maxPerDay: 400000,
-      // Lista de cada número vermelho (detailType = nome da coluna no resumo). flag: marca que a lista dá à remessa.
-      types: [
-        {type: 'sendcount', column: 'Enviados'},
-        {type: 'noarrivalcount', column: 'Em trânsito', flag: 'transit'},
-        {type: 'nosigncount', column: 'Não entregues', flag: 'undelivered'}
-      ]
-    },
-    // Rastreamento do pacote: ID de viagem de cada remessa enviada. Bipe "Encomenda carregada" (código 1 / tipo
-    // original 50) na nossa base, para a próxima parada da rota; o ID é o "número do pedido" (remark2).
-    trips: {
-      endpoint: 'https://gw.jtjms-br.com/operatingplatform/podTracking/inner/query/keywordList',
-      loadCodes: [1], loadOriginalCodes: [50]
-    },
-    fields: {shipment: ['billcode'], eventTime: ['sendTime'], destination: ['nextstation'], login: ['scanuser']},
-    groupFields: ['column', 'waybill', 'eventTime', 'shift', 'interval', 'destination', 'login', 'tripId'],
-    // Situação de cada remessa (column) → listas da tela.
-    columnSets: {
-      'Enviados': ['Não chegou ao destino', 'Chegou ao destino · não entregue', 'Entregue', 'Entregue · sem bipe de chegada'],
-      'Em trânsito': ['Não chegou ao destino', 'Entregue · sem bipe de chegada'],
-      'Não entregues': ['Não chegou ao destino', 'Chegou ao destino · não entregue']
-    },
-    labels: {
-      destination: {pt: 'Rotas (próxima parada)', zh: '线路（下一站）'}, login: {pt: 'Login', zh: '操作员'},
-      tripId: {pt: 'IDs Viagem', zh: '车次号'}, interval: {pt: 'Intervalo de horários', zh: '时间段'},
-      shift: {pt: 'Turno', zh: '班次'}, column: {pt: 'Situação', zh: '状态'}
-    },
-    // Singular para "Maior rota" / "Menor rota" nos quadros dos gráficos.
-    labelsOne: {destination: {pt: 'Rota', zh: '线路'}, login: {pt: 'Login', zh: '操作员'}, interval: {pt: 'Intervalo', zh: '时间段'},
-      tripId: {pt: 'ID de viagem', zh: '车次号'}},
-    // V3.23: filtro "IDs Viagem" (ID de viagem do Rastreamento do pacote). V4.15: ainda não consultada = "AGUARDANDO CONSULTA";
-    // consultada sem ID de verdade = "NÃO TEM ID".
-    naLabel: {text: {pt: 'AGUARDANDO CONSULTA', zh: '等待查询'}, fields: ['tripId']},
-    filters: ['destination', 'interval', 'shift', 'tripId'],
-    // Cartões "que mais mandou": login, rota e intervalo (lista Enviados).
-    topCards: ['login', 'destination', 'interval'],
-    topCardColumn: 'Enviados',
-    topCardLabels: {
-      login: {pt: 'Login que mais mandou', zh: '发件最多的操作员'}, destination: {pt: 'Rota que mais enviou', zh: '发件最多的线路'},
-      interval: {pt: 'Intervalo que teve mais envio', zh: '发件最多的时间段'}
-    },
-    hideShiftCards: true, hideEvolution: true, hideTarget: true,
-    heroMetric: {key: 'sendcount', column: 'Enviados', icon: 'send_flow',
-      label: {pt: 'Total que está saindo no dia', zh: '当日发件总量'}, labelPeriod: {pt: 'Total que saiu no período', zh: '期间发件总量'}},
-    navMetric: 'sendcount',
-    metricCards: true,
-    // Cartões T1/T2/T3: quantidade que cada turno mandou (horário de expedição). Sem esperar o download inteiro: a lista
-    // de cada rota consultada em cada horário de turno (Expedicao.gs grava em "send_flow:turnos:sendcount").
-    shiftCardsByColumn: {main: 'Enviados', columns: ['Enviados'], summaryMetric: 'sendcount', unit: {pt: 'enviadas', zh: '票'}},
-    shiftAggColumns: ['Enviados', 'Em trânsito', 'Não entregues'],
-    texts: {
-      errors: {pt: 'Não chegaram ao destino', zh: '未到下一站'},
-      errorsDay: {pt: 'Não chegaram no dia', zh: '当日未到下一站'}, errorsPeriod: {pt: 'Não chegaram no período', zh: '期间未到下一站'},
-      errorsFiltered: {pt: 'Remessas (com filtro)', zh: '票数（已筛选）'},
-      prevErrorsDay: {pt: 'Não chegaram dia anterior', zh: '前一日未到下一站'}, prevErrorsPeriod: {pt: 'Não chegaram período anterior', zh: '上一期间未到下一站'},
-      shiftErrors: {pt: 'Enviadas {s}', zh: '{s} 发件'}, shareOfErrors: {pt: '{p} das enviadas', zh: '占发件 {p}'},
-      rateOfDay: {pt: '% não chegou ao destino · {date}', zh: '{date} 未到下一站率'}, rateOfPeriod: {pt: '% não chegou ao destino no período', zh: '期间未到下一站率'},
-      navQty: {pt: 'Saindo · {date}', zh: '发件 · {date}'},
-      listTopNote: {pt: 'Período com mais de um dia: mostrando {n} remessas de cada situação. Escolha um único dia para ver todas.', zh: '多日期间：每种状态显示 {n} 票。选择单日可查看全部。'},
-      dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes; a Expedição roda depois dos outros painéis)', zh: '排队下载中（前面还有 {n} 个任务；发件看板在其他看板之后运行）'},
-      dsBudget: {pt: 'limite diário da Expedição atingido ({m} min, conta Gmail): continua amanhã', zh: '已达发件看板每日上限（{m} 分钟，Gmail账号）：明天继续'},
-      dsHelp: {pt: 'Para saber o motivo em detalhe, rode diagnosticarExpedicao() no editor do Apps Script.', zh: '如需详细原因，请在 Apps Script 编辑器中运行 diagnosticarExpedicao()。'}
-    },
-    // Colunas da tabela principal da tela. Cartões: a soma de cada coluna (oficial do JMS); com filtro, a lista dela.
-    metricPanels: [
-      {column: 'Enviados', title: {pt: 'Expedição do dia', zh: '当日发件'}, metrics: [
-        {key: 'sendcount', label: {pt: 'Número total de remessas', zh: '发件总票数'}, detail: 'Enviados'},
-        {key: 'noarrivalcount', label: {pt: 'Quantidade que ainda não chegou no destino', zh: '未到下一站票数'}, bad: true, detail: 'Em trânsito'},
-        {key: 'nosigncount', label: {pt: 'Não entregue', zh: '未签收'}, bad: true, detail: 'Não entregues'}
-      ]}
-    ],
-    // Gráficos de coluna (na ordem do pedido) e a pizza de turno. routeMetric: sem filtro, o número OFICIAL de cada rota
-    // (tabela principal do JMS); com filtro, as remessas da lista baixada.
-    charts: [
-      {key: 'routes', dim: 'destination', where: {column: 'Enviados'}, type: 'bar', top: 80, routeMetric: 'sendcount',
-        title: {pt: 'Rotas mais enviados', zh: '发件最多的线路'}, sub: {pt: 'Todas as rotas, da que mais mandou para a que menos mandou', zh: '全部线路，按发件量排序'}},
-      {key: 'routesTransit', dim: 'destination', where: {column: 'Em trânsito'}, type: 'bar', top: 80, routeMetric: 'noarrivalcount', bad: true,
-        title: {pt: 'Rotas que ainda não chegou', zh: '未到下一站的线路'}, sub: {pt: 'Encomendas não chegadas na próxima parada, por rota', zh: '各线路未到下一站票数'}},
-      {key: 'routesUndelivered', dim: 'destination', where: {column: 'Não entregues'}, type: 'bar', top: 80, routeMetric: 'nosigncount', bad: true,
-        title: {pt: 'Não entregues', zh: '未签收'}, sub: {pt: 'Não entregue, por rota', zh: '各线路未签收票数'}},
-      {key: 'interval', dim: 'interval', where: {column: 'Enviados'}, type: 'bar', top: 24, ranking: true,
-        title: {pt: 'Intervalos de horários que teve mais entregas', zh: '发件最多的时间段'}},
-      {key: 'logins', dim: 'login', where: {column: 'Enviados'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Logins que mais mandou', zh: '发件最多的操作员'}},
-      {key: 'trips', dim: 'tripId', where: {column: 'Enviados'}, type: 'bar', horizontal: true, top: 10, hideNA: true, trips: true,
-        title: {pt: 'IDs de viagem', zh: '车次号'}, sub: {pt: 'ID que mais enviou (Rastreamento do pacote: bipe "Encomenda carregada")', zh: '发件最多的车次号（包裹轨迹：装车发件）'}},
-      {key: 'shiftPie', dim: 'shift', where: {column: 'Enviados'}, type: 'doughnut', summaryShift: 'sendcount',
-        title: {pt: 'Turno', zh: '班次'}, sub: {pt: 'Quantidade que cada turno mandou (horário de expedição)', zh: '各班次发件量（发件时间）'}}
-    ],
-    // Tabelas: as listas de TODAS as rotas juntas (como abrir cada número vermelho).
-    tables: [
-      {key: 'tSent', column: 'Enviados', title: {pt: 'Enviados', zh: '发件明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
-          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'], ['column', 'Situação', '状态']]},
-      {key: 'tUndelivered', column: 'Não entregues', title: {pt: 'Não entregues', zh: '未签收明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
-          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'], ['column', 'Situação', '状态']]},
-      {key: 'tTransit', column: 'Em trânsito', title: {pt: 'Em trânsito', zh: '在途明细'},
-        cols: [['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
-          ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号']]}
-    ],
-    table: [
-      ['date', 'Data', '日期'], ['waybill', 'Número de pedido JMS', '运单号'], ['eventTime', 'Horário de expedição', '发件时间'], ['shift', 'Turno', '班次'],
-      ['interval', 'Intervalo', '时间段'], ['destination', 'Próxima parada', '下一站'], ['login', 'Login', '操作员'], ['tripId', 'ID de viagem', '车次号'],
-      ['column', 'Situação', '状态'], ['qty', 'Quantidade', '数量']
-    ]
-  },
-
-  /**
    * FLUXO DE LOTES (Dispositivo inteligente > Materiais ecológicos > Estatística de Criação Recorrente de Eco Bag): quantidade
    * de SACAS criadas no dia, ecológicas e normais, com a porcentagem de cada uma.
    * Resumo (sdploopbagBuildbagCount, "Sumário por dia", unidade SC): Total de pacotes construídos (packageSum), Número do saco
@@ -1018,15 +1129,19 @@ const ALL_INDICATORS_ = Object.freeze({
    * (columnSets). Volume pequeno (~900 sacas por dia): todos os dias com detalhe, atualizado de hora em hora.
    */
   lot_flow: {
-    key: 'lot_flow', order: 10, routeKey: 'LOTS',
-    name: {pt: 'Fluxo de Lotes', zh: '建包流程'},
-    subtitle: {pt: 'Sacas criadas no dia: ecológicas e normais (estatística de criação recorrente de Eco Bag)', zh: '当日建包：环保袋与普通袋（循环袋建包统计）'},
+    // V4.26 (pedido "tirei o dash do lote do principal"): painel separado — só no pacote de Lotes (ou PAINEIS / REATIVAR_PAINEIS
+    // = lot_flow). Não aparece no principal nem entra na fila dele, mesmo com PAINEIS_FORA preenchida.
+    key: 'lot_flow', order: 10, routeKey: 'LOTS', separate: true,
+    // V4.24: painel separado (Lotes) — continua com um gráfico por linha (os dois por linha são do painel principal).
+    chartsFull: true,
+    // V4.18 (pedido "desenvolvendo dashboard de criação de lotes"): o nome do pedido.
+    name: {pt: 'Criação de Lotes', zh: '建包统计'},
+    subtitle: {pt: 'Sacas ecológicas e não ecológicas criadas (Estatística de Criação Recorrente de Eco Bag)', zh: '环保袋与非环保袋建包（循环袋建包统计）'},
     // Taxa do indicador = Taxa de uso de Saca Ecológica (quanto maior melhor); sem meta definida.
     goal: {value: null, direction: 'min', strict: false},
     apiProfile: 'lot_flow', detailMatchesErrors: false, grouped: true, light: true,
-    // V4.7 (pedido): painel RETIRADO — fora do menu, dos Resultados e da fila (não gasta cota). Os dados antigos continuam na
-    // planilha. Para trazer de volta: Propriedade do script REATIVAR_PAINEIS = lot_flow.
-    retired: true,
+    // V4.7: painel retirado (pedido). V4.18 (pedido "Colocar esse dashboard no dash principal"): de volta, no painel principal,
+    // seguindo os PDFs "desenvolvendo dashboard de criação de lotes" e "INFORMAÇÕES PARA PUXAR DADOS SOBRE SACAS".
     // V4.6 (pedido): agenda própria — hoje a cada LOTES_HORAS (padrão 3 h: 0h, 3h, 6h…), fora da agenda só pelo Atualizar.
     agendaEvery: {prop: 'LOTES_HORAS', hours: 3},
     summary: {
@@ -1057,11 +1172,14 @@ const ALL_INDICATORS_ = Object.freeze({
       items: ['packageQty'], packType: ['packageName'], source: ['packageSourceName'], chip: ['chipNo'], destination: ['openSiteName']
     },
     // Valores do JMS em chinês/código → como a tela mostra.
+    // V4.18: "Tipo de entrada e saída" com os nomes da tela do JMS (Todos / Saída de porto / Entrada).
     valueMaps: {
-      port: {'出港': 'Partida', '进港': 'Chegada'},
+      port: {'出港': 'Saída de porto', '进港': 'Entrada'},
       sackType: {Y: 'Ecológica', N: 'Não ecológica'},
       packType: {'普通包': 'Saco normal'}
     },
+    // Dias baixados antes da V4.18 (gravados como Partida / Chegada) aparecem com o nome novo, sem baixar de novo.
+    valueAliases: {port: {'Partida': 'Saída de porto', 'Chegada': 'Entrada'}},
     // Situação de cada saca na coluna principal: ecológica ou não (listas de cada número vermelho).
     columnFrom: 'sackType',
     columnSets: {
@@ -1071,29 +1189,33 @@ const ALL_INDICATORS_ = Object.freeze({
     },
     groupFields: ['column', 'sackType', 'lot', 'eventTime', 'shift', 'interval', 'port', 'items', 'packType', 'source', 'chip', 'destination'],
     labels: {
-      lot: {pt: 'Lotes (número da saca)', zh: '包号'}, port: {pt: 'Entrada/Saída', zh: '进出港类型'}, sackType: {pt: 'Sacas', zh: '袋类型'},
-      shift: {pt: 'Turnos', zh: '班次'}, items: {pt: 'Quantidade de itens na embalagem', zh: '包内件数'}, destination: {pt: 'Destino de desembalagem', zh: '拆包网点'},
+      lot: {pt: 'Número dos lotes', zh: '包号'}, port: {pt: 'Tipo de entrada e saída', zh: '进出港类型'}, sackType: {pt: 'Tipo de sacas', zh: '袋类型'},
+      shift: {pt: 'Turnos', zh: '班次'}, items: {pt: 'Remessas na saca', zh: '包内件数'}, destination: {pt: 'Destinos', zh: '拆包网点'},
       packType: {pt: 'Tipo de ensacamento', zh: '建包类型'}, source: {pt: 'Origem da criação', zh: '建包来源'}, chip: {pt: 'Chip nº', zh: '芯片号'}
     },
-    labelsOne: {lot: {pt: 'Saca', zh: '包号'}, port: {pt: 'Tipo', zh: '类型'}, sackType: {pt: 'Tipo de saca', zh: '袋类型'}, shift: {pt: 'Turno', zh: '班次'}},
-    filters: ['shift', 'lot', 'port', 'sackType'],
+    labelsOne: {lot: {pt: 'Saca', zh: '包号'}, port: {pt: 'Tipo', zh: '类型'}, sackType: {pt: 'Tipo de saca', zh: '袋类型'}, shift: {pt: 'Turno', zh: '班次'},
+      destination: {pt: 'Destino', zh: '拆包网点'}},
+    // V4.18: filtros do pedido, na ordem dele (a data fica no topo, como em todos os painéis).
+    filters: ['sackType', 'port', 'lot', 'destination', 'shift'],
     topCards: [],
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
+    // Cartão vermelho: sacas criadas no dia (as duas juntas) e, embaixo, as remessas dentro delas (V4.18). Com filtro, a lista.
     heroMetric: {key: 'packageSum', column: 'Sacas criadas', icon: 'lot',
-      label: {pt: 'Quantidade de sacas criadas', zh: '建包数量'}, labelPeriod: {pt: 'Sacas criadas no período', zh: '期间建包数量'}},
+      label: {pt: 'Quantidade de sacas criadas', zh: '建包数量'}, labelPeriod: {pt: 'Sacas criadas no período', zh: '期间建包数量'},
+      // subNoPct: remessas ÷ sacas não é porcentagem (no Recebimento, o número de baixo é parte do de cima).
+      sub: 'waybillSum', subSum: 'items', subNoPct: true, subLabel: {pt: 'Remessas nos lotes criados', zh: '包内件数'}},
+    // V4.18: "Mostrar a quantidade gerada no dia anterior" — cartão próprio, com as remessas embaixo.
+    prevCard: {key: 'packageSum', sub: 'waybillSum', label: {pt: 'Quantidade gerada no dia anterior', zh: '前一日建包数量'},
+      labelPeriod: {pt: 'Quantidade gerada no período anterior', zh: '上一期间建包数量'}, subLabel: {pt: 'Remessas nos lotes criados', zh: '包内件数'},
+      metricBy: {field: 'sackType', values: {'Ecológica': ['loopSum', 'loopWaybillSum'], 'Não ecológica': ['noloopSum', 'noloopWaybillSum']}}},
     navMetric: 'packageSum',
     metricCards: true,
     // Cartões de turno: quantidade criada, % de cada turno e, em cada turno, ecológicas e não ecológicas.
     shiftCardsByColumn: {main: 'Sacas criadas', columns: ['Sacas criadas'], unit: {pt: 'sacas', zh: '袋'},
       split: [{column: 'Sacas ecológicas', label: {pt: 'Ecológicas', zh: '环保袋'}}, {column: 'Sacas não ecológicas', label: {pt: 'Não ecológicas', zh: '非环保袋'}}]},
-    // Turnos de cada lista por dia (aba AGG) e de Chegada/Partida: o dia anterior dos cartões sem carregar o dia anterior.
-    shiftAggColumns: ['Sacas criadas', 'Sacas ecológicas', 'Sacas não ecológicas',
-      {name: 'arrivals', column: 'Sacas criadas', where: {port: 'Chegada'}}, {name: 'departures', column: 'Sacas criadas', where: {port: 'Partida'}}],
-    // Chegada e Partida: contadas na coluna "Tipo de entrada e saída" da lista (进港 / 出港).
-    detailCards: [
-      {key: 'arrivals', column: 'Sacas criadas', where: {port: 'Chegada'}, icon: 'arrival', label: {pt: 'Chegada', zh: '进港'}, sub: {pt: 'Sacas com tipo de entrada e saída 进港 (Chegada)', zh: '进港建包数'}},
-      {key: 'departures', column: 'Sacas criadas', where: {port: 'Partida'}, icon: 'departure', label: {pt: 'Partida', zh: '出港'}, sub: {pt: 'Sacas com tipo de entrada e saída 出港 (Partida)', zh: '出港建包数'}}
-    ],
+    // Turnos de cada lista por dia (aba AGG): o dia anterior dos cartões de turno sem carregar o dia anterior. V4.18: sem os
+    // cartões de Chegada/Partida (o pedido não tem; Entrada e Saída de porto ficam no gráfico e no filtro).
+    shiftAggColumns: ['Sacas criadas', 'Sacas ecológicas', 'Sacas não ecológicas'],
     texts: {
       navQty: {pt: 'Sacas criadas · {date}', zh: '建包 · {date}'},
       errors: {pt: 'Sacas não ecológicas', zh: '非环保袋'},
@@ -1104,57 +1226,83 @@ const ALL_INDICATORS_ = Object.freeze({
       dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes)', zh: '排队下载中（前面还有 {n} 个任务）'},
       listTopNote: {pt: 'Período grande: mostrando {n} sacas de cada tipo. Escolha um período menor para ver todas.', zh: '期间较长：每种类型显示 {n} 袋。选择较短期间可查看全部。'},
       distinctShipments: {pt: 'Sacas da lista "Total de pacotes construídos"', zh: '建包明细中的包'},
-      sumRows: {pt: 'Pacotes dentro das sacas', zh: '包内件数'}, sumCount: {pt: '{n} pacotes', zh: '{n} 件'},
+      sumRows: {pt: 'Remessas dentro das sacas', zh: '包内件数'}, sumCount: {pt: '{n} remessas', zh: '{n} 件'},
       tableCount: {pt: '{n} sacas', zh: '{n} 袋'}, listRows: {pt: '{n} sacas', zh: '{n} 袋'}, shipments: {pt: 'sacas', zh: '袋'},
       detailsOk: {pt: 'Detalhes completos · {n} sacas', zh: '明细完整 · {n} 袋'}, tableFind: {pt: 'Localizar saca na tabela', zh: '在表格中查找包号'}
     },
     // Colunas da tabela principal da tela. Cartões: o número oficial; com filtro, a lista baixada (detail / detailSum / detailRate).
+    // V4.18: cartões na ordem do pedido — % de criação da ecológica e da não ecológica (o restante), sacas ecológicas e não
+    // ecológicas com as remessas dentro delas embaixo (subMetric; não ecológica = o restante). As remessas não têm cartão
+    // próprio (card: false) e continuam na tabela "Dados gerais".
     metricPanels: [
       {column: 'Sacas criadas', title: {pt: 'Sacas', zh: '建包'}, metrics: [
         {key: 'packageSum', label: {pt: 'Quantidade de sacas criadas', zh: '建包总数'}, detail: 'Sacas criadas'},
-        {key: 'loopSum', label: {pt: 'Quantidade de sacas ecológicas', zh: '环保袋数'}, detail: 'Sacas ecológicas', good: true},
-        {key: 'noloopSum', label: {pt: 'Quantidade de sacas não ecológicas', zh: '非环保袋数'}, detail: 'Sacas não ecológicas', bad: true},
-        {key: 'loopRate', label: {pt: 'Taxa de criação de sacas ecológicas', zh: '环保袋使用率'}, pct: true, good: true,
+        {key: 'loopRate', label: {pt: 'Porcentagem de criação da Saca Ecológica', zh: '环保袋使用率'}, pct: true, good: true,
           rateOf: {num: 'loopSum', den: 'packageSum'}, detailRate: {num: 'Sacas ecológicas', den: 'Sacas criadas'}},
-        {key: 'noloopRate', label: {pt: 'Taxa de criação de sacas não ecológicas', zh: '非环保袋占比'}, pct: true, bad: true,
-          rateOf: {num: 'noloopSum', den: 'packageSum'}, detailRate: {num: 'Sacas não ecológicas', den: 'Sacas criadas'}}
+        {key: 'noloopRate', label: {pt: 'Porcentagem de criação da Saca Não Ecológica', zh: '非环保袋占比'}, pct: true, bad: true,
+          rateOf: {num: 'noloopSum', den: 'packageSum'}, detailRate: {num: 'Sacas não ecológicas', den: 'Sacas criadas'}},
+        {key: 'loopSum', label: {pt: 'Número de sacas ecológicas criadas', zh: '环保袋数'}, detail: 'Sacas ecológicas', good: true,
+          subMetric: {key: 'loopWaybillSum', detailSum: 'items', label: {pt: 'Remessas dentro da Saca Ecológica', zh: '环保袋内件数'}}},
+        {key: 'noloopSum', label: {pt: 'Número de sacas não ecológicas criadas', zh: '非环保袋数'}, detail: 'Sacas não ecológicas', bad: true,
+          subMetric: {key: 'noloopWaybillSum', detailSum: 'items', label: {pt: 'Remessas dentro da Saca Não Ecológica', zh: '非环保袋内件数'}}}
       ]},
-      {column: 'Sacas criadas', title: {pt: 'Pacotes dentro das sacas', zh: '包内件数'}, metrics: [
-        {key: 'waybillSum', label: {pt: 'Quantidade de pacotes dentro das sacas', zh: '包内总件数'}, detail: 'Sacas criadas', detailSum: 'items'},
-        {key: 'loopWaybillSum', label: {pt: 'Quantidade de pacotes na ecológica', zh: '环保袋内件数'}, detail: 'Sacas ecológicas', detailSum: 'items',
-          pctKey: 'loopWaybillRate', good: true},
-        {key: 'noloopWaybillSum', label: {pt: 'Quantidade de pacotes na não ecológica', zh: '非环保袋内件数'}, detail: 'Sacas não ecológicas', detailSum: 'items',
-          pctKey: 'noloopWaybillRate', bad: true},
+      {column: 'Sacas criadas', title: {pt: 'Remessas dentro das sacas', zh: '包内件数'}, metrics: [
+        {key: 'waybillSum', label: {pt: 'Remessas nos lotes criados', zh: '包内总件数'}, detail: 'Sacas criadas', detailSum: 'items', card: false},
+        {key: 'loopWaybillSum', label: {pt: 'Remessas dentro da Saca Ecológica', zh: '环保袋内件数'}, detail: 'Sacas ecológicas', detailSum: 'items',
+          pctKey: 'loopWaybillRate', good: true, card: false},
+        {key: 'noloopWaybillSum', label: {pt: 'Remessas dentro da Saca Não Ecológica', zh: '非环保袋内件数'}, detail: 'Sacas não ecológicas', detailSum: 'items',
+          pctKey: 'noloopWaybillRate', bad: true, card: false},
         {key: 'loopWaybillRate', label: {pt: 'Percentual de volume de Saca Ecológica', zh: '环保袋件量占比'}, pct: true, card: false,
           rateOf: {num: 'loopWaybillSum', den: 'waybillSum'}},
         {key: 'noloopWaybillRate', label: {pt: 'Percentual de volume na não ecológica', zh: '非环保袋件量占比'}, pct: true, card: false,
           rateOf: {num: 'noloopWaybillSum', den: 'waybillSum'}}
       ]}
     ],
+    // V4.18: gráficos do pedido, na ordem dele. Por padrão as duas sacas juntas (lista "Sacas criadas"); com o filtro "Tipo de
+    // sacas", só a escolhida (a evolução diária usa o número oficial dela: metricBy).
     charts: [
       {key: 'shiftPie', dim: 'shift', where: {column: 'Sacas criadas'}, type: 'doughnut',
         title: {pt: 'Turnos', zh: '班次'}, sub: {pt: 'Sacas criadas em cada turno (tempo de ensacamento)', zh: '各班次建包数（建包时间）'}},
+      {key: 'mDaily', metric: 'packageSum', type: 'bar', days: 15,
+        metricBy: {field: 'sackType', values: {'Ecológica': 'loopSum', 'Não ecológica': 'noloopSum'}},
+        title: {pt: 'Evolução diária', zh: '每日建包'}},
+      {key: 'ports', dim: 'port', where: {column: 'Sacas criadas'}, type: 'bar', top: 2, hideNA: true,
+        title: {pt: 'Entrada / saída', zh: '进港 / 出港'}, sub: {pt: 'Tipo de entrada e saída: Entrada (进港) e Saída de porto (出港)', zh: '进出港类型'}},
       {key: 'sackTypes', dim: 'sackType', where: {column: 'Sacas criadas'}, type: 'bar', top: 2,
         summaryBars: [{value: 'Ecológica', metric: 'loopSum'}, {value: 'Não ecológica', metric: 'noloopSum'}],
-        title: {pt: 'Sacas ecológicas / não ecológicas', zh: '环保袋 / 非环保袋'}},
-      {key: 'ports', dim: 'port', where: {column: 'Sacas criadas'}, type: 'bar', top: 2, hideNA: true,
-        title: {pt: 'Entradas / partidas', zh: '进港 / 出港'}, sub: {pt: 'Tipo de entrada e saída: 进港 (Chegada) e 出港 (Partida)', zh: '进出港类型'}},
-      {key: 'topLots', dim: 'lot', sumField: 'items', where: {column: 'Sacas criadas'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Lotes/sacas com mais quantidade de pacotes', zh: '包内件数最多的包'}, sub: {pt: 'Quantidade de itens na embalagem por número da saca', zh: '各包号包内件数'}},
-      {key: 'topNonEco', dim: 'lot', sumField: 'items', where: {column: 'Sacas não ecológicas'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Não ecológicas', zh: '非环保袋'}, sub: {pt: 'Lotes com mais quantidade (Número de sacas não ecológicas)', zh: '件数最多的非环保袋'}},
-      {key: 'topEco', dim: 'lot', sumField: 'items', where: {column: 'Sacas ecológicas'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'Ecológicas', zh: '环保袋'}, sub: {pt: 'Lotes com mais quantidade (Número do saco ecológico)', zh: '件数最多的环保袋'}}
+        title: {pt: 'Sacas ecológicas / sacas não ecológicas', zh: '环保袋 / 非环保袋'}},
+      {key: 'topDest', dim: 'destination', where: {column: 'Sacas criadas'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Destinos com maior envio', zh: '发往最多的拆包网点'}, sub: {pt: 'Sacas por destino de desembalagem (top 10)', zh: '各拆包网点建包数（前10）'}},
+      // V4.20 (pedido): sai o gráfico dos números das sacas; entram os destinos das sacas ecológicas (vermelhas com chip) pela
+      // lista do comunicado "Envio de sacas vermelhas com chip" — enviadas incorretamente e corretamente.
+      {key: 'ecoWrong', dim: 'destination', where: {column: 'Sacas ecológicas'}, siteList: ECO_BAG_SITES_2026_08_24_, siteMode: 'out',
+        type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Sacas ecológicas enviadas incorretamente', zh: '红色芯片袋错发网点'},
+        sub: {pt: 'Destinos fora da lista do comunicado "Envio de sacas vermelhas com chip" (desde 24/08/2026) · top 10',
+          zh: '不在《红色芯片袋发送通知》授权名单内的拆包网点（前10）'}},
+      // V4.21.6 (pedido): turnos que enviaram errado as sacas ecológicas — as mesmas sacas do gráfico acima (destino fora da
+      // lista do comunicado), contadas pelo turno do tempo de ensacamento. T1, T2 e T3 sempre, na ordem.
+      {key: 'ecoWrongShift', dim: 'shift', where: {column: 'Sacas ecológicas'}, siteList: ECO_BAG_SITES_2026_08_24_, siteMode: 'out',
+        siteField: 'destination', type: 'bar', allShifts: true,
+        title: {pt: 'Turnos que enviaram sacas ecológicas incorretamente', zh: '各班次红色芯片袋错发数'},
+        sub: {pt: 'Sacas ecológicas para destinos fora da lista do comunicado "Envio de sacas vermelhas com chip", por turno (tempo de ensacamento)',
+          zh: '发往授权名单外网点的红色芯片袋，按班次（建包时间）'}},
+      {key: 'ecoRight', dim: 'destination', where: {column: 'Sacas ecológicas'}, siteList: ECO_BAG_SITES_2026_08_24_, siteMode: 'in',
+        type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Destinos que receberam as sacas ecológicas corretamente', zh: '红色芯片袋正确发往的网点'},
+        sub: {pt: 'SCs e DCs autorizados no comunicado "Envio de sacas vermelhas com chip" · top 10', zh: '通知中授权的 SC 与 DC（前10）'}}
     ],
+    // Soma das remessas por turno (sem gráfico próprio): os cartões com filtro em período grande (Client.html → listSum).
+    sumDefs: [{key: 'itemsByShift', dim: 'shift', sumField: 'items', where: {column: 'Sacas criadas'}}],
     tables: [
       {key: 'tGeneral', column: 'Sacas criadas', title: {pt: 'Geral', zh: '建包明细'},
         cols: [['date', 'Data', '日期'], ['lot', 'Número da saca', '包号'], ['port', 'Tipo de entrada e saída', '进出港类型'], ['packType', 'Tipo de ensacamento', '建包类型'],
-          ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Saca', '袋类型'], ['items', 'Quantidade de itens na embalagem', '包内件数'],
+          ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Tipo de saca', '袋类型'], ['items', 'Quantidade de remessas na saca', '包内件数'],
           ['eventTime', 'Tempo de ensacamento', '建包时间'], ['shift', 'Turno', '班次'], ['destination', 'Destino de desembalagem', '拆包网点']]}
     ],
     table: [
       ['date', 'Data', '日期'], ['lot', 'Número da saca', '包号'], ['port', 'Tipo de entrada e saída', '进出港类型'], ['packType', 'Tipo de ensacamento', '建包类型'],
-      ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Saca', '袋类型'], ['items', 'Quantidade de itens na embalagem', '包内件数'],
+      ['source', 'Origem da Criação', '建包来源'], ['chip', 'Chip nº', '芯片号'], ['sackType', 'Tipo de saca', '袋类型'], ['items', 'Quantidade de remessas na saca', '包内件数'],
       ['eventTime', 'Tempo de ensacamento', '建包时间'], ['shift', 'Turno', '班次'], ['interval', 'Intervalo', '时间段'], ['destination', 'Destino de desembalagem', '拆包网点']
     ]
   },
@@ -1342,90 +1490,203 @@ const ALL_INDICATORS_ = Object.freeze({
    * de viagens de linha secundária > Consulta de Viagens Secundárias (tmsBranchTrackingDetail/page), com os filtros da tela:
    * PDD de chegada = a nossa base (endCode 30001) e Status = Concluído (shipmentState 4). Uma linha por ID de viagem.
    *  - "Horário de deslacração do veículo" (unlockTime) vazio = ID SEM bipe de deslacre.
-   *  - Bipe de recebimento = "Data final" do Bipe de descarregamento nos Registros de carga e descarga do ID
-   *    (tmsBranchTrackingDetail/loading/scan/list?shipmentNo=…, scanEndTime). Tempo do ID = mediana de (Data final −
+   *  - Bipe de recebimento = "Data inicial" (V4.20; antes "Data final") do Bipe de descarregamento da SP GRU nos Registros de
+   *    carga e descarga do ID (tmsBranchTrackingDetail/loading/scan/list?shipmentNo=…, scanStartTime). Tempo do ID = mediana de (Data inicial −
    *    deslacre) dos registros de descarregamento, em minutos (Expedicao.gs → runUnsealDetailJob_).
    *  - Dia e turno pelo horário do deslacre ("vamos medir pela data dessa coluna"); ID sem deslacre: pela chegada do veículo.
    * Taxa guardada = IDs sem deslacre ÷ IDs do dia (%), sem meta. A lista é consultada com 1 dia antes (saídas da véspera que
    * chegam no dia).
+   * V4.12.3: retirado (pedido). V4.17 (pedido "No dashboard principal colocar o dash de deslacre troncal e secundária"): de volta,
+   * ao lado do Deslacre da linha troncal (unseal_trunk). Cartões, gráficos e tabela: unsealPanel_ (os mesmos nos dois).
    */
-  unseal: {
+  unseal: unsealPanel_({
     key: 'unseal', order: 12, routeKey: 'UNSEAL',
     name: {pt: 'Deslacre (linha secundária)', zh: '解封（支线）'},
-    subtitle: {pt: 'IDs sem bipe de deslacre e tempo do deslacre até o bipe de recebimento', zh: '未解封扫描车次及解封至卸车扫描时长'},
-    goal: {value: null, direction: 'max', strict: false},
-    apiProfile: 'unseal', detailMatchesErrors: false, light: true, unseal: true,
-    // V4.12.3 (pedido): painel RETIRADO, como o Fluxo de Lotes na V4.7 — fora do menu, dos Resultados e da fila (não gasta
-    // cota). Os dados antigos continuam na planilha. Para trazer de volta: Propriedade do script REATIVAR_PAINEIS = unseal.
-    retired: true,
-    summary: {
-      endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page',
-      rateFromCounts: true, rateKeys: [], errorKeys: ['noUnlockNum'], totalKeys: ['tripNum'],
-      metrics: ['tripNum', 'noUnlockNum', 'unlockNum', 'medianMin', 'timedNum']
-    },
+    apiProfile: 'unseal', listTitle: 'Consulta de Viagens Secundárias', diagnostic: 'diagnosticarDeslacre',
+    listMenu: 'Transporte > Transporte de linha secundária > Gestão de viagens de linha secundária > Consulta de Viagens Secundárias',
+    summary: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page'},
     // refreshHours: hoje, a lista e os Registros de carga e descarga são consultados de novo no máximo de hora em hora
     // (conta Gmail: a cada 3 h). Só os IDs novos ou ainda descarregando consultam os Registros de novo.
     detail: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page', refreshHours: 1},
     unload: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/loading/scan/list', unloadTypes: ['2']},
-    shipmentState: 4,
     fields: {
       shipment: ['shipmentNo'], tripId: ['shipmentNo'], route: ['shipmentName'], station: ['startName'],
       eventTime: ['__eventTime'], receiptTime: ['__unloadEnd'], unlockTime: ['unlockTime'],
       arrivalTime: ['actualArrivalTime', 'appArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
-      plate: ['plateNumber'], carrier: ['carrierShortName', 'carrierName'], unloads: ['__unloads']
+      plate: ['plateNumber'], carrier: ['carrierShortName', 'carrierName'], unloads: ['__unloads'], timing: ['__timing']
+    }
+  }),
+
+  /**
+   * DESLACRE (linha troncal) — V4.17 (pedido "deslacre da troncal"). Transporte > Análise de dados > Dados de monitoramento >
+   * Consulta de Viagens (tmsShipment/page, GET com os filtros na URL, como a captura): PDD de chegada = a nossa base
+   * (endCode 30001), Status = Concluído (shipmentState 4), searchType manage. Uma linha por ID de viagem (DBGX…).
+   *  - "Horário de deslacração do veículo" = actualUnlockTime; vazio = ID SEM bipe de deslacre.
+   *  - Bipe de recebimento = "Data inicial" (scanStartTime; V4.20) do Bipe de descarregamento (loadingTypeName "2") na nossa base nos
+   *    Registros de carga e descarga do ID (trackingDeatil/loading/scan/list?shipmentNo=…). O carregamento na origem (tipo "1")
+   *    e a descarga em outra base não contam.
+   *  - Mesmo cálculo, cartões, gráficos e tabela da linha secundária (unsealPanel_).
+   * A lista é consultada com 2 dias antes e 1 depois (viagens longas e chegadas adiantadas); o dia de cada ID sai do deslacre.
+   */
+  unseal_trunk: unsealPanel_({
+    key: 'unseal_trunk', order: 13, routeKey: 'UNSEAL_TRUNK',
+    name: {pt: 'Deslacre (linha troncal)', zh: '解封（干线）'},
+    apiProfile: 'unseal_trunk', listTitle: 'Consulta de Viagens (linha troncal)', diagnostic: 'diagnosticarDeslacreTroncal',
+    listMenu: 'Transporte > Análise de dados > Dados de monitoramento > Consulta de Viagens',
+    summary: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsShipment/page', method: 'get'},
+    detail: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsShipment/page', refreshHours: 1},
+    unload: {endpoint: 'https://gw.jtjms-br.com/transportation/trackingDeatil/loading/scan/list', unloadTypes: ['2']},
+    fields: {
+      shipment: ['shipmentNo'], tripId: ['shipmentNo'], route: ['shipmentName', 'lineSimpleName'], station: ['startName'],
+      eventTime: ['__eventTime'], receiptTime: ['__unloadEnd'], unlockTime: ['actualUnlockTime'],
+      arrivalTime: ['actualArrivalTime', 'appTrackArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
+      plate: ['plateNumber'], carrier: ['carrierName', 'carrierShortName'], unloads: ['__unloads'], timing: ['__timing']
+    }
+  }),
+
+  /**
+   * V4.22 (pedido "dashboard no mesmo esquema que o principal para http://10.1.166.9"): Produção do Sorter — o monitor do
+   * sorter da base (巴西GRU分拣机, tela "summary statistics of sorter operation"), gravado dia a dia como os outros painéis
+   * (Sorter.gs). Painel SEPARADO (separate): só aparece no pacote dele (dashmaster-sorter) ou com PAINEIS = sorter_flow;
+   * nunca no principal. Só na versão Node.js num computador da rede da base.
+   * Cada hora de cada balança vira uma linha agrupada por número da tela (coluna principal = Sort total, Valid total,
+   * Anormais, cada motivo e cada andar; quantidade = o número).
+   */
+  sorter_flow: {
+    key: 'sorter_flow', order: 14, routeKey: 'SORTER', separate: true, sorter: true,
+    // Fonte dos números: no pacote só com este painel, "JMS" nos textos da tela vira "sorter".
+    source: {pt: 'sorter', zh: '分拣机'},
+    // Selo "Dados completos · N volumes": N = Sort total (não a soma de todos os números da tela).
+    detailsOkColumn: 'Sort total',
+    name: {pt: 'Produção do Sorter', zh: '分拣机产量'},
+    subtitle: {pt: 'Produção do sorter (summary statistics of sorter operation)', zh: '分拣机运行统计'},
+    // Taxa do painel = % Não deu certo (No Sort Code ÷ Sort total): quanto menor melhor; sem meta definida.
+    goal: {value: null, direction: 'max', strict: false},
+    apiProfile: 'sorter_flow', detailMatchesErrors: false, grouped: true, light: true,
+    summary: {rateFromCounts: true, rateKeys: [], errorKeys: ['noSortCode'], totalKeys: ['sortTotal'],
+      metrics: ['sortTotal', 'validTotal', 'abnormal', 'noSortCode', 'noPlan', 'chute', 'intercept', 'noRead', 'multi', 'other',
+        'layer1', 'layer2', 'layer3', 'validRate', 'noSortRate', 'abnormalRate', 'sortTotalA', 'sortTotalB'],
+      percentMetrics: ['validRate', 'noSortRate', 'abnormalRate']},
+    // Hoje: as linhas são lidas de novo a cada hora (o sorter não para); dias fechados só quando o total muda.
+    detail: {days: 0, refreshHours: 1, maxPerDay: 500000},
+    fields: {},
+    columnSets: {
+      'Motivos de falha': ['No Sort Code', 'No plan', 'Chute', 'Intercept', 'No Read', 'Multi', 'Outros'],
+      'Andares': ['Layer1 total', 'Layer2 total', 'Layer3 total']
     },
+    groupFields: ['column', 'sorter', 'induction', 'shift', 'interval'],
     labels: {
-      tripId: {pt: 'Número do ID', zh: '车次号'}, route: {pt: 'Nome da viagem', zh: '车次名称'}, station: {pt: 'PDD de saída', zh: '始发网点'},
-      shift: {pt: 'Turno', zh: '班次'}, situation: {pt: 'Bipe de deslacre', zh: '解封扫描'}, minutes: {pt: 'Tempo mediano', zh: '中位时长'},
-      eventTime: {pt: 'Horário de deslacração do veículo', zh: '解封时间'}, receiptTime: {pt: 'Bipe de recebimento (Data final)', zh: '卸车结束时间'}
+      sorter: {pt: 'Sorter', zh: '分拣机'}, induction: {pt: 'Balança (Induction No.)', zh: '供包台'}, shift: {pt: 'Turnos', zh: '班次'},
+      interval: {pt: 'Horário', zh: '时间段'}, column: {pt: 'Número da tela', zh: '统计项'}
     },
-    situations: {missing: 'Sem bipe de deslacre', done: 'Com bipe de deslacre'},
-    filters: ['tripId', 'route', 'station', 'shift'],
+    labelsOne: {sorter: {pt: 'Sorter', zh: '分拣机'}, induction: {pt: 'Balança', zh: '供包台'}, shift: {pt: 'Turno', zh: '班次'},
+      interval: {pt: 'Horário', zh: '时间段'}},
+    filters: ['sorter', 'induction', 'shift', 'interval'],
+    // V4.22.8: a balança só existe na quantidade alimentada (tela "feeder feed quantity"): o filtro vale só para ela; os totais
+    // (Sort total, Valid total, motivos) são do sorter inteiro e não mudam com o filtro de balança.
+    filterScopes: {induction: ['Alimentação']},
+    // V4.22.11: o número ao lado de cada opção do filtro (Sorter, Turno, Horário) = o Sort total, não a soma de todos os números.
+    facetColumns: ['Sort total'],
+    // V4.22.13: com o filtro de balança, as listas dos outros filtros contam a quantidade alimentada (como os gráficos).
+    facetByFilter: {induction: ['Alimentação']},
+    // V4.22.12 (pedido "quando troco os filtros, os cartões e gráficos ficam fixos"): com o filtro de balança, o cartão vermelho e
+    // os gráficos por hora, turno e sorter passam a mostrar a quantidade alimentada; o aviso diz o que continua do sorter inteiro.
+    scopeNotes: {induction: {
+      pt: 'Filtro de balança: o site do sorter só separa por balança a quantidade alimentada (feeder feed quantity). Mudam o cartão ' +
+        'vermelho, os gráficos por hora, por turno e por sorter, o Top 10 e a tabela por balança. Valid total, No Sort Code, motivos ' +
+        'e andares continuam do sorter inteiro.',
+      zh: '供包台筛选：分拣机系统只按供包台提供供包量（feeder feed quantity）。红色卡片、每小时/班次/分拣机图表、前10和供包台表会变化；' +
+        '有效分拣、无分拣码、异常原因和各层仍为整台分拣机数据。'}},
     topCards: [],
     hideShiftCards: true, hideEvolution: true, hideTarget: true,
-    // Cartões próprios (Client.html → renderUnsealKpis): IDs sem deslacre, tempo mediano, ID de maior tempo e um cartão por turno.
-    unsealCards: true,
+    // V4.23.1 (pedido "Eliminar Tabela de remessas"): sem a tabela de remessas no fim do painel.
+    hideDetailTable: true,
+    // V4.24: os gráficos dois por linha são do painel principal; a Produção do Sorter continua com um gráfico por linha.
+    chartsFull: true,
+    heroMetric: {key: 'sortTotal', column: 'Sort total', icon: 'qty',
+      byFilter: {induction: {column: 'Alimentação', label: {pt: 'Alimentado na balança', zh: '供包台供包量'}}},
+      label: {pt: 'Total produzido (Sort total)', zh: '分拣总量'}, labelPeriod: {pt: 'Total produzido no período', zh: '期间分拣总量'},
+      sub: 'validTotal', subLabel: {pt: 'Deu certo (Valid total)', zh: '有效分拣'}, subOf: {pt: 'do total', zh: '占总量'}},
+    prevCard: {key: 'sortTotal', sub: 'validTotal', label: {pt: 'Produção do dia anterior', zh: '前一日分拣总量'},
+      labelPeriod: {pt: 'Produção do período anterior', zh: '上一期间分拣总量'}, subLabel: {pt: 'Deu certo (Valid total)', zh: '有效分拣'}},
+    navMetric: 'sortTotal',
+    metricCards: true,
+    // Cartões de turno: Sort total de cada turno, com o que deu certo e o que não deu certo (No Sort Code) dentro dele.
+    shiftCardsByColumn: {main: 'Sort total', columns: ['Sort total'], unit: {pt: 'volumes', zh: '件'},
+      split: [{column: 'Valid total', label: {pt: 'Deu certo', zh: '有效'}}, {column: 'No Sort Code', label: {pt: 'Não deu certo', zh: '无分拣码'}}]},
+    shiftAggColumns: ['Sort total', 'Valid total', 'No Sort Code'],
     texts: {
-      errors: {pt: 'IDs sem bipe de deslacre', zh: '未解封扫描车次'},
-      errorsDay: {pt: 'IDs sem bipe de deslacre no dia', zh: '当日未解封扫描车次'}, errorsPeriod: {pt: 'IDs sem bipe de deslacre no período', zh: '期间未解封扫描车次'},
-      errorsFiltered: {pt: 'IDs sem bipe de deslacre (com filtro)', zh: '未解封扫描车次（已筛选）'},
-      prevErrorsDay: {pt: 'Dia anterior', zh: '前一日'}, prevErrorsPeriod: {pt: 'Período anterior', zh: '上一期间'},
-      shiftErrors: {pt: 'Sem deslacre {s}', zh: '{s} 未解封'}, shareOfErrors: {pt: '{p} dos IDs sem deslacre', zh: '占未解封车次 {p}'},
-      rateOfDay: {pt: '% de IDs sem bipe de deslacre · {date}', zh: '{date} 未解封扫描率'}, rateOfPeriod: {pt: '% de IDs sem bipe de deslacre no período', zh: '期间未解封扫描率'},
-      distinctShipments: {pt: 'IDs de viagem', zh: '车次'}, tableCount: {pt: '{n} IDs', zh: '{n} 车次'},
-      tableCountOf: {pt: '{n} de {m} IDs', zh: '{n} / {m} 车次'}, detailsOk: {pt: 'Detalhes completos · {n} IDs de viagem', zh: '明细完整 · {n} 车次'},
-      shipments: {pt: 'IDs', zh: '车次'},
-      shipmentTable: {pt: 'Informações gerais', zh: '基本信息'}, tableFind: {pt: 'Localizar ID na tabela', zh: '在表中查找车次'}
+      navQty: {pt: 'Sort total · {date}', zh: '分拣总量 · {date}'},
+      errors: {pt: 'Não deu certo (No Sort Code)', zh: '无分拣码'},
+      errorsDay: {pt: 'Não deu certo no dia', zh: '当日无分拣码'}, errorsPeriod: {pt: 'Não deu certo no período', zh: '期间无分拣码'},
+      errorsFiltered: {pt: 'Volumes (com filtro)', zh: '件数（已筛选）'},
+      mcNoScope: {pt: 'Sorter inteiro: o site não separa este número por balança', zh: '整台分拣机：系统未按供包台拆分此数字'},
+      rateOfDay: {pt: '% Não deu certo · {date}', zh: '{date} 无分拣码占比'}, rateOfPeriod: {pt: '% Não deu certo no período', zh: '期间无分拣码占比'},
+      dsHelp: {pt: 'Para saber o motivo em detalhe, rode diagnosticarSorter() (Configurações → Diagnósticos).', zh: '如需详细原因，请运行 diagnosticarSorter()。'},
+      dsQueued: {pt: 'na fila do download ({n} tarefa(s) antes)', zh: '排队下载中（前面还有 {n} 个任务）'},
+      distinctShipments: {pt: 'Volumes do sorter', zh: '分拣件数'},
+      tableCount: {pt: '{n} volumes', zh: '{n} 件'}, listRows: {pt: '{n} volumes', zh: '{n} 件'}, shipments: {pt: 'volumes', zh: '件'},
+      detailsOk: {pt: 'Dados completos · {n} volumes', zh: '数据完整 · {n} 件'}, tableFind: {pt: 'Localizar na tabela', zh: '在表格中查找'}
     },
+    metricPanels: [
+      {column: 'Sort total', title: {pt: 'Produção do sorter', zh: '分拣机产量'}, metrics: [
+        {key: 'sortTotal', label: {pt: 'Total produzido (Sort total)', zh: '分拣总量'}, detail: 'Sort total'},
+        {key: 'validTotal', label: {pt: 'Deu certo (Valid total)', zh: '有效分拣'}, detail: 'Valid total', good: true},
+        {key: 'validRate', label: {pt: '% Deu certo', zh: '有效分拣率'}, pct: true, good: true,
+          rateOf: {num: 'validTotal', den: 'sortTotal'}, detailRate: {num: 'Valid total', den: 'Sort total'}},
+        {key: 'noSortCode', label: {pt: 'Não deu certo (No Sort Code)', zh: '无分拣码'}, detail: 'No Sort Code', bad: true},
+        {key: 'noSortRate', label: {pt: '% Não deu certo', zh: '无分拣码占比'}, pct: true, bad: true,
+          rateOf: {num: 'noSortCode', den: 'sortTotal'}, detailRate: {num: 'No Sort Code', den: 'Sort total'}},
+        {key: 'abnormal', label: {pt: 'Anormais (todos os motivos)', zh: '异常总数'}, detail: 'Anormais', bad: true}
+      ]}
+    ],
     charts: [
-      {key: 'missShift', dim: 'shift', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', top: 4, allShifts: true,
-        title: {pt: 'Turnos com maior falta de bipe de deslacre', zh: '未解封扫描最多的班次'},
-        sub: {pt: 'Turno pelo horário de chegada do veículo', zh: '按车辆到达时间划分班次'}},
-      {key: 'mNoUnlock', metric: 'noUnlockNum', type: 'bar', bad: true, days: 15,
-        title: {pt: 'Evolução: dias com mais falta de bipe de deslacre', zh: '每日未解封扫描车次'}},
-      {key: 'medShift', dim: 'shift', agg: 'median', valueField: 'minutes', type: 'bar', top: 4, unit: 'min', allShifts: true,
-        title: {pt: 'Tempo mediano do deslacre até o bipe de recebimento por turno', zh: '各班次解封至卸车扫描中位时长'}},
-      {key: 'topTime', dim: 'tripId', agg: 'max', valueField: 'minutes', type: 'bar', horizontal: true, top: 10, unit: 'min',
-        title: {pt: 'IDs que mais demoraram do deslacre ao bipe de recebimento (top 10)', zh: '解封至卸车扫描最慢的车次（前10）'}},
-      {key: 'origin', dim: 'station', type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'PDD de saída que mais mandou', zh: '发车最多的始发网点'}},
-      {key: 'missOrigin', dim: 'station', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'PDD de saída dos IDs sem bipe de deslacre', zh: '未解封车次的始发网点'}}
+      // V4.23.3: com filtro, a soma da lista do dia com o filtro (detail); com o filtro de balança, a quantidade alimentada.
+      {key: 'mDaily', metric: 'sortTotal', type: 'bar', days: 15, title: {pt: 'Evolução diária · Sort total', zh: '每日分拣总量'},
+        detail: 'Sort total', byFilter: {induction: {detail: 'Alimentação', title: {pt: 'Evolução diária · quantidade alimentada', zh: '每日供包量'}}}},
+      {key: 'byHour', dim: 'interval', where: {column: 'Sort total'}, type: 'bar', top: 24, timeline: true,
+        title: {pt: 'Evolução por hora · Sort total', zh: '每小时分拣总量'}, sub: {pt: 'Volumes por hora do dia', zh: '各时段分拣量'},
+        byFilter: {induction: {where: {column: 'Alimentação'}, title: {pt: 'Evolução por hora · quantidade alimentada', zh: '每小时供包量'},
+          sub: {pt: 'Volumes alimentados na(s) balança(s) escolhida(s)', zh: '所选供包台的供包量'}}}},
+      {key: 'noSortHour', dim: 'interval', where: {column: 'No Sort Code'}, type: 'bar', top: 24, timeline: true,
+        title: {pt: 'Não deu certo por hora · No Sort Code', zh: '每小时无分拣码'}},
+      {key: 'shiftPie', dim: 'shift', where: {column: 'Sort total'}, type: 'doughnut',
+        byFilter: {induction: {where: {column: 'Alimentação'}, title: {pt: 'Quantidade alimentada por turno', zh: '各班次供包量'}}},
+        title: {pt: 'Produção por turno', zh: '各班次产量'}, sub: {pt: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', zh: 'T1 06–14 · T2 14–22 · T3 22–06'}},
+      {key: 'bySorter', dim: 'sorter', where: {column: 'Sort total'}, type: 'bar', top: 4, hideNA: true,
+        byFilter: {induction: {where: {column: 'Alimentação'}, title: {pt: 'Quantidade alimentada por sorter', zh: '各分拣机供包量'}}},
+        title: {pt: 'Produção por sorter', zh: '各分拣机产量'}},
+      // V4.22.8: pela tela "feeder feed quantity" (quantidade alimentada em cada balança). O site não dá o No Sort Code por balança.
+      {key: 'topInd', dim: 'induction', where: {column: 'Alimentação'}, type: 'bar', horizontal: true, top: 10, hideNA: true,
+        title: {pt: 'Top 10 balanças · quantidade alimentada', zh: '供包台供包量前10'},
+        sub: {pt: 'Volumes alimentados em cada balança (feeder feed quantity)', zh: '各供包台供包量（feeder feed quantity）'}},
+      {key: 'reasons', dim: 'column', where: {column: 'Motivos de falha'}, type: 'bar', horizontal: true, top: 10,
+        title: {pt: 'Motivos de falha', zh: '异常原因'}, sub: {pt: 'No Sort Code, No plan, Chute, Intercept, No Read, Multi e outros', zh: '各异常原因数量'}},
+      {key: 'layers', dim: 'column', where: {column: 'Andares'}, type: 'bar', top: 3,
+        title: {pt: 'Produção por andar', zh: '各层产量'}, sub: {pt: 'Layer1 / Layer2 / Layer3 total', zh: '第1/2/3层分拣量'}}
+    ],
+    // Tabela da tela do sorter: uma linha por horário, uma coluna por número, e o Total no fim.
+    crossTables: [
+      {key: 'tHours', rowDim: 'interval', title: {pt: 'Tabela por horário (como na tela do sorter)', zh: '分时段统计表'},
+        cols: ['Sort total', 'Valid total', 'No Sort Code', 'No plan', 'Chute', 'Intercept', 'No Read', 'Multi', 'Outros', 'Anormais',
+          'Layer1 total', 'Layer2 total', 'Layer3 total', 'Alimentação']},
+      // V4.22.8: todas as balanças, com a quantidade alimentada (tela "feeder feed quantity").
+      {key: 'tFeeders', rowDim: 'induction', title: {pt: 'Quantidade alimentada por balança (feeder feed quantity)', zh: '各供包台供包量'},
+        cols: ['Alimentação']}
     ],
     table: [
-      ['date', 'Data', '日期'], ['tripId', 'Número do ID', '车次号'], ['route', 'Nome da viagem', '车次名称'],
-      ['station', 'PDD de saída', '始发网点'], ['situation', 'Bipe de deslacre', '解封扫描'], ['shift', 'Turno', '班次'],
-      ['arrivalTime', 'Tempo real de chegada', '实际到达时间'], ['unlockTime', 'Horário de deslacração do veículo', '解封时间'],
-      ['receiptTime', 'Bipe de recebimento (Data final)', '卸车结束时间'], ['minutes', 'Tempo mediano (deslacre → recebimento)', '中位时长'],
-      ['plate', 'Placa do carro', '车牌'], ['carrier', 'Transportadora', '承运商']
+      ['date', 'Data', '日期'], ['sorter', 'Sorter', '分拣机'], ['induction', 'Balança', '供包台'], ['shift', 'Turno', '班次'],
+      ['interval', 'Horário', '时间段'], ['column', 'Número da tela', '统计项'], ['qty', 'Quantidade', '数量']
     ]
   }
 });
 
 /**
- * V4.2 — painéis deste projeto (Propriedades do script). Permite separar os painéis pesados num outro projeto:
- *   PAINEIS      = só estes (ex.: "arrival_flow,send_flow" no painel separado dos fluxos);
- *   PAINEIS_FORA = todos menos estes (ex.: "arrival_flow,send_flow" no painel principal).
+ * V4.2 — painéis deste projeto (Propriedades do script):
+ *   PAINEIS      = só estes (ex.: "lot_flow" no painel de Lotes);
+ *   PAINEIS_FORA = todos menos estes (ex.: "damage").
+ * V4.26: Recebimento e Expedição (fluxo operacional) saíram do código (pedido); a Criação de Lotes é painel separado (separate):
+ * fica fora do principal mesmo com PAINEIS_FORA preenchida.
  * Painel fora não aparece no menu nem nos Resultados, não entra na fila e não gasta cota. Sem as duas = todos (como antes).
  * Nome errado é ignorado; se nenhum nome valer, ficam todos (o painel nunca abre vazio).
  */
@@ -1442,7 +1703,8 @@ function activeIndicators_(all) {
   const list = x => x.split(/[\s,;]+/).map(k => k.trim()).filter(k => k && all[k]);
   const keep = list(only), out = list(drop), revived = list(back);
   // V4.7: painel retirado (Config: retired, ex.: Fluxo de Lotes) fica fora, a não ser que PAINEIS ou REATIVAR_PAINEIS o nomeie.
-  const retired = k => !!all[k].retired && keep.indexOf(k) < 0 && revived.indexOf(k) < 0;
+  // V4.22: painel separado (Config: separate, ex.: Produção do Sorter) só aparece no pacote dele (ou PAINEIS / REATIVAR_PAINEIS).
+  const retired = k => (!!all[k].retired || !!all[k].separate) && keep.indexOf(k) < 0 && revived.indexOf(k) < 0;
   if (!keep.length && !out.length && !Object.keys(all).some(retired)) return all;
   const res = {};
   Object.keys(all).forEach(k => { if ((!keep.length || keep.indexOf(k) >= 0) && out.indexOf(k) < 0 && !retired(k)) res[k] = all[k]; });
@@ -1450,8 +1712,8 @@ function activeIndicators_(all) {
 }
 /**
  * V4.3 — pacote instalado. O gerador (tools/gerar_paineis.js) troca a linha abaixo em cada pacote:
- *   painel principal  → {so: '', fora: 'arrival_flow,send_flow', nome: ''}
- *   painel dos fluxos → {so: 'arrival_flow,send_flow', fora: '', nome: 'Fluxo operacional'}
+ *   painel principal  → {so: '', fora: 'lot_flow', nome: ''}
+ *   painel de Lotes   → {so: 'lot_flow', fora: '', nome: 'Criação de Lotes'}
  * No repositório (e em quem instalou um único painel com tudo): vazio = todos os painéis.
  * As Propriedades do script PAINEIS / PAINEIS_FORA / NOME_PAINEL, quando preenchidas, valem mais que o pacote.
  */
@@ -1512,7 +1774,7 @@ function getIndicatorConfig_(key) {
     // é para clicar em Executar sem preencher nada antes. Veja "Manutenção" em LEIA_PRIMEIRO.md.
     if (key === undefined || key === null || key === '') {
       throw new Error('Esta função exige um indicador como parâmetro (ex.: "wrong_send", "sorting_error", ' +
-        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage", "arrival_flow", "send_flow", "lot_flow" ou "no_move"). Ela não é para ser executada direto pelo ' +
+        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage", "unseal", "unseal_trunk" ou "no_move"). Ela não é para ser executada direto pelo ' +
         'botão ▶ Executar sem argumentos — chame-a com o parâmetro preenchido (veja "Manutenção" em LEIA_PRIMEIRO.md) ' +
         'ou teste pelo próprio painel (Implantar → App da Web).');
     }
@@ -1545,7 +1807,7 @@ function usedFields_(cfg) {
   return Object.keys(set);
 }
 /** Calculadas na leitura (Core.applyDocks / Core.applyOrderKinds / Core.applyDayOf): não vão no conjunto de dados. */
-const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1, orderKind: 1, segmentBase: 1};
+const DERIVED_CLIENT_FIELDS_ = {dock: 1, dockDest: 1, orderKind: 1, segmentBase: 1, expedition: 1, segLine: 1, segMain: 1, segSub: 1};
 
 /** Campos da linha normalizada que o navegador precisa receber para este indicador. */
 function clientFields_(cfg) {
@@ -1558,9 +1820,13 @@ function clientFields_(cfg) {
     if (src === 'segment') { set.segmentRaw = 1; set.segment = 1; } else set[src] = 1;
     // V4.8: tabela de docas do dia de cada remessa.
     if (cfg.docks.versions) set.date = 1;
+    // V4.29.2: tabela que começa num horário ("2026-11-18 11:30") — vale pelo horário do bipe (eventTime).
+    if (cfg.docks.versions && cfg.fields && cfg.fields.eventTime && cfg.docks.versions.some(v => String(v.from || '').length > 10)) set.eventTime = 1;
   }
   // V4.12.6: a fórmula do segmento (Core.applySegmentBase) lê o código completo, ou o 1º + 2º segmento dos dias antigos.
   if (cfg.segmentBase) { set.segmentFull = 1; set.segment = 1; if (cfg.docks && (cfg.docks.source || 'segment') === 'segment') set.segmentRaw = 1; }
+  // V4.25: linhas troncal/secundária (Core.applySegLines) pelo código completo; Expedição A/B/C pela doca.
+  if (cfg.segLines) { set.segmentFull = 1; set.segment = 1; }
   return Object.keys(set);
 }
 
@@ -1588,20 +1854,27 @@ function catalogEntry_(cfg) {
     docks: cfg.docks || null,
     dayOf: cfg.dayOf || null, scans: !!cfg.scans, segmentBase: !!cfg.segmentBase,
     emptyLotLabel: cfg.emptyLotLabel || null,
+    // V4.25: grupos de Expedição (A/B/C) e linhas troncal/secundária dos segmentos (V4.25.2: sem o "Sobre o indicador").
+    expeditions: cfg.expeditions || null, segLines: !!cfg.segLines, hideNAFilters: cfg.hideNAFilters || null,
     hideShiftCards: !!cfg.hideShiftCards,
     valueCards: cfg.valueCards || [],
     texts: cfg.texts || null,
     metricPanels: cfg.metricPanels || [], heroMetric: cfg.heroMetric || null, bigMetric: cfg.bigMetric || null, metricCards: !!cfg.metricCards,
-    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, tables: cfg.tables || null,
+    // V4.18 (Criação de Lotes): cartão do dia anterior e os nomes novos dos valores gravados antes.
+    prevCard: cfg.prevCard || null, valueAliases: cfg.valueAliases || null, sumDefs: cfg.sumDefs || null,
+    shiftCardsByColumn: cfg.shiftCardsByColumn || null, filterScopes: cfg.filterScopes || null, facetColumns: cfg.facetColumns || null, facetByFilter: cfg.facetByFilter || null, scopeNotes: cfg.scopeNotes || null, tables: cfg.tables || null,
+    // V4.22 (Produção do Sorter): tabela cruzada — uma linha por valor de rowDim, uma coluna por lista (cols) e o Total.
+    crossTables: cfg.crossTables || null, source: cfg.source || null, detailsOkColumn: cfg.detailsOkColumn || null,
     columnSets: cfg.columnSets || null, topCardColumn: cfg.topCardColumn || null, topCardLabels: cfg.topCardLabels || null, byRoute: !!cfg.byRoute,
     snapshot: !!cfg.snapshot,
-    // V4.6: agenda do painel — a cada N horas (Sem Movimentação, Fluxo de Lotes); sem isso, às HORAS_ATUALIZACAO.
+    // V4.6: agenda do painel — a cada N horas (Sem Movimentação, Criação de Lotes); sem isso, às HORAS_ATUALIZACAO.
     agendaEvery: cfg.agendaEvery ? agendaEveryHours_(cfg) : null,
     // V4.4 (Deslacre): cartões próprios e o texto de cada situação do bipe de deslacre.
     unsealCards: !!cfg.unsealCards, situations: cfg.situations || null,
     // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).
     refTypes: cfg.detail && cfg.detail.typeFromSummary ? (cfg.detail.types || []).map(t => t.column) : null,
-    labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null,
+    labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null, hideDetailTable: !!cfg.hideDetailTable,
+    chartsFull: !!cfg.chartsFull,
     hideEvolution: !!cfg.hideEvolution, hideTarget: !!cfg.hideTarget,
     grouped: !!cfg.grouped, routeKey: cfg.routeKey,
     detailDays: cfg.detail && cfg.detail.days || null,

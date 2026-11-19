@@ -1,0 +1,242 @@
+J&T · EXPEDIÇÃO INCORRETA (app separado do DashMaster)
+=====================================================
+
+O que faz (versão 3.0: CONFERIR REMESSAS, a página principal)
+------------------------------------------------------------
+Você COLA AS REMESSAS DO ID (ou envia a planilha) e ESCOLHE A ROTA do caminhão. O app consulta cada remessa na Gestão de
+pedido JMS de remessa e mostra as que NÃO PERTENCEM à rota (ex.: pacote do RJ dentro do caminhão para SP BRE).
+Não busca viagens no JMS. Página: http://localhost:3300/conferir (o endereço principal já abre nela).
+
+1. Remessas do ID: cole uma por linha (ou separadas por vírgula), ou as colunas copiadas da planilha do JMS com o
+   cabeçalho, ou clique em "Enviar planilha" (.xlsx, .csv ou .txt). Remessa repetida conta uma vez. Com as colunas
+   Número do lote, Digitalizado por, Tempo de digitalização e ID de viagem, aparecem também os gráficos de saca, login,
+   turno e ID. O ID de viagem também pode ser digitado no campo "ID de viagem" (opcional).
+2. Rota do caminhão: digite e escolha na lista (a tabela de rotas do SC, com a doca de cada destino).
+3. Conferir: o app consulta a Gestão de pedido, 1.000 remessas por consulta (45 mil remessas = 46 consultas), uma consulta
+   de cada vez com pausa de 2 s. Os números aparecem conforme chegam. Remessa consultada nas últimas 6 h não vai de novo.
+   Da Gestão de pedido vêm: 3 Segmentos (ex.: VCP,362-28,203), Horário da última operação (o TURNO sai dele, quando a lista
+   não traz o Tempo de digitalização), Última operação, Base da última operação, Base de entrega e Cidade de destino.
+   Nada de nome, endereço ou telefone é guardado.
+4. Conferência pela tabela de rotas do SC:
+   - linha TRONCAL (sem 2º nível): o 1º segmento. Ex.: SP BRE leva AC, AM, BAU, MRB, SP, SP1, TO…; MRB no SP BRE = certo.
+   - linha SECUNDÁRIA (com 2º nível): o 1º e o 2º segmento juntos. Ex.: F S-PENHA 03-SP leva só GRU,404-06.
+   - a linha que cita o 2º segmento vence a linha geral: SP,395-05 é do DC GRU-SP; SP,402-01 do DC TBT-SP; SP,364-00 do
+     DC S-MOO 02-SP. SP com 2º segmento que NÃO está em nenhuma das duas tabelas é do SP BRE (ex.: SP,397-00 → SP BRE).
+   Não pertence → ERRADO, e "Destino correto" diz para onde a remessa devia ir.
+5. Resultado: cartões (remessas no caminhão errado, por turno, certas, taxa de erro, sem 3 Segmentos, código fora da
+   tabela, destino correto e 1º/2º segmento mais frequentes), gráficos (situação das remessas, destino correto dos erros,
+   1º segmento, 2º segmento GRU/MOO/SP/SP1/SBN, turnos, base de entrega e, com as colunas da planilha, IDs, sacas e
+   logins) e a tabela com tudo (abre em "Errado").
+6. BAIXAR PLANILHA DE ERROS: só as remessas no caminhão errado (todas), com a rota do caminhão, o destino correto, o
+   3 Segmentos, o horário da última operação, o turno e as colunas que vieram na lista.
+7. As últimas conferências ficam como atalhos (até 50 guardadas). Se a consulta parar (AuthToken vencido, JMS fora),
+   o aviso diz o motivo: troque o AuthToken e clique em "Conferir de novo".
+
+Busca por viagem (anterior, menu "Busca por viagem")
+-----------------------------------------------------
+Você PESQUISA A ROTA (versão 2.1) e o painel mostra os pacotes que NÃO PERTENCEM a ela (ex.: pacote do RJ dentro do
+caminhão para SP BRE). Dois painéis: ROTA TRONCAL e ROTA SECUNDÁRIA (o painel vai sozinho para o da rota pesquisada).
+
+1. Pega no JMS só os caminhões da ROTA PESQUISADA que SAEM da base no período (Consulta de viagens troncais e Consulta
+   de Viagens Secundárias), com PDD de saída = SP GRU (fixo) e Status Concluído：已完成 ou Em Trânsito：在途 (os outros
+   ficam de fora). A rota do caminhão é o destino da viagem, procurado na planilha de rotas.
+2. Em cada viagem, abre a linha "SP GRU · Bipe de carregamento" (Info / Registros de carga e descarga) e pega a lista de
+   pacotes: pedido, lote, próxima parada, Base Destino, digitalizado por e tempo de digitalização.
+3. Procura o "3 Segmentos" de cada remessa na Gestão de pedido JMS de remessa (versão 2.0): coluna 3 Segmentos, ex.:
+   VCP,362-28,203 (VCP = 1º segmento, 362-28 = 2º segmento). Várias remessas numa consulta (padrão 100), uma consulta
+   a cada 2 segundos: o dia inteiro fica conferido. Cada remessa é consultada uma vez só (fica guardado).
+   A conferência é SÓ pelo JMS. Na 1ª busca o app descobre sozinho o pedido que o JMS aceita e só usa a resposta se ela
+   trouxer exatamente as remessas pedidas.
+   Se a Gestão de pedido não responder, o app usa o Rastreamento do pacote > Informação básica, como antes (uma remessa
+   por vez, pausa de 30 s) e tenta a Gestão de novo depois de 1 h. Configurações mostra qual dos dois está sendo usado.
+   Se o JMS bloquear, o app pausa 15 min. O registro mostra o título da página que o JMS devolveu.
+4. Confere se a remessa PERTENCE à rota do caminhão (Próxima parada), pela planilha de rotas do SC (tabelas vermelhas),
+   com a mesma regra da conferência de remessas (3.0: SP com 2º segmento fora das tabelas é do SP BRE):
+   - linha TRONCAL (sem 2º nível): só o 1º segmento. Ex.: caminhão RJ SJM leva RJ, RJ1, VDC e CDG.
+   - linha SECUNDÁRIA (com 2º nível): o 1º e o 2º segmento juntos. Ex.: F S-PENHA 03-SP leva só GRU,404-06.
+     DC TBT-SP, DC GRU-SP e SBN são conferidos assim (são da linha secundária).
+   Não pertence → ERRADO, e a coluna "Destino correto" diz para onde a remessa devia ir.
+   A rota do caminhão é procurada nas duas tabelas (o JMS lança, por exemplo, DC GRU-SP como viagem secundária).
+5. Não puxa mais todas as rotas. A rota pesquisada continua atualizando sozinha (o dia de hoje, a cada 15 minutos) por
+   12 horas depois da pesquisa (só baixa de novo a lista das viagens que mudaram). Sem rota pesquisada, o app não
+   consulta o JMS.
+6. Guarda tudo no banco. Dia que já passou e já foi buscado para a rota não vai ao JMS de novo (a carga não muda mais).
+
+No painel
+---------
+- Pesquisar rota: digite a rota (ex.: SP BRE; a lista mostra as rotas da planilha) e clique em Pesquisar. O app busca
+  no JMS as viagens dessa rota no período, os pacotes delas e o 3 Segmentos só desses pacotes. Os números aparecem
+  conforme chegam; a tabela abre em "Errado" (os pacotes que não pertencem à rota). Período de até 7 dias: busca também
+  o período anterior, para o cartão "Dia anterior". As rotas pesquisadas nas últimas 12 h aparecem como atalhos.
+- Data inicial e Data final (até 31 dias) e os atalhos Hoje, Ontem, Últimos 7 dias e Este mês: com uma rota pesquisada,
+  trocar o período busca a rota no período novo. O botão Atualizar busca de novo a rota pesquisada.
+- PDD de saída: SP GRU, fixo.
+- Filtros: Status (Concluído：已完成 / Em Trânsito：在途), Base Destino (as bases da tabela de rotas do SC:
+  21 da troncal, 18 da secundária), Turno, Destino correto, Código de 1º segmento e Login.
+  Valem para cartões, gráficos, tabela e Excel.
+- Cartões: quantidade de erro do dia com a participação de cada turno e a comparação com o dia anterior; dia anterior;
+  taxa de erro; T1, T2 e T3; ID de viagem, Próxima parada, saca, Base Destino, login, 1º segmento e 2º segmento
+  mais ofensores.
+- Gráficos: Próxima parada, IDs de viagem, Turnos, Sacas (sem lote = VOLUMOSO), Logins, Base Destino, 1º segmento
+  (Código de primeiro segmento) e 2º segmento (Código de dois segmentos, só dos pacotes com 1º segmento GRU, MOO, SP,
+  SP1 ou SBN).
+- Tabela: todos os pacotes, com Turno e Destino correto (e o 3 Segmentos de cada um).
+
+Não mexe no DashMaster: pasta, porta (3300) e link próprios.
+
+Instalar (no computador onde já roda o DashMaster, sem administrador)
+---------------------------------------------------------------------
+1. No ZIP: botão direito > Propriedades > marque "Desbloquear" > OK.
+2. Botão direito no ZIP > Extrair tudo... > destino C:\  > Extrair. Fica a pasta C:\expedicao_incorreta.
+3. Abra a pasta C:\expedicao_incorreta e dê dois cliques no iniciar.bat. A janela preta mostra "no ar". Deixe aberta.
+   (Ele usa o Node.js do DashMaster, o instalado no Windows; se der erro, a janela fica aberta com o motivo.)
+   Na 1ª vez ele cria as pastas "dados" e "planilhas" dentro de C:\expedicao_incorreta.
+4. Atalho na Área de Trabalho: botão direito no iniciar.bat > Enviar para > Área de trabalho (criar atalho).
+   Renomeie para Expedição Incorreta. (2.0.1: o atalho antigo para C:\dashmaster\node\node.exe não funciona quando o
+   Node.js é o instalado no Windows; apague esse atalho e use este.)
+5. Abra http://localhost:3300/config
+   - AuthToken: se o DashMaster está neste computador, o app já usa o mesmo AuthToken dele. Clique em "Testar a conexão".
+     (Sem DashMaster: cole o AuthToken e clique em "Salvar e testar".)
+6. Conferir remessas: http://localhost:3300/conferir (cole as remessas do ID, escolha a rota, Conferir).
+   Busca por viagem (anterior): http://localhost:3300/troncal e http://localhost:3300/secundaria > Pesquisar rota.
+
+Planilha de rotas (C:\expedicao_incorreta\planilhas\rotas.xlsx)
+---------------------------------------------------------------
+Vem preenchida com as tabelas de 24/10 (troncal e secundária). Aba "Rotas":
+  Tipo | Rota (Próxima parada) | 1º Nível (códigos) | 2º Nível (segmentos, opcional) | Observação.
+  Quando as docas mudarem, mude aqui. Duas linhas da mesma rota = qualquer uma vale.
+  (A rotinha e a aba "Códigos 1º nível" não são mais usadas.)
+Salvou a planilha (com o app aberto)? O painel já usa a nova. Também dá para enviar pela tela Configurações.
+3.0: em Configurações dá para enviar também a TABELA DO SC DO JEITO QUE ELA VEM (abas "Rotas de Linha" e "Rotas Regionais",
+como o ajuste_de_rotas_docas.xlsx): o app lê "378-00、01、02" como 378-00, 378-01 e 378-02, as linhas de continuação
+(SP antigo e GRU novo do DC TBT-SP) e as duas docas da mesma rota (SP BRE: docas 21 e 22).
+
+Versão 3.0.1 (aviso "A Gestão de pedido JMS de remessa não devolveu o 3 Segmentos (devolveu 20 remessas que não foram pedidas)")
+  - O JMS respondeu, mas ignorou as remessas: o campo onde a tela manda as remessas não é nenhum dos 7 que o app tentava.
+  - Configurações › Pedido da Gestão de pedido: cole UMA VEZ o pedido que a tela manda e clique em Salvar e testar:
+      1. No JMS, Gestão de pedido JMS de remessa, aperte F12 › aba Rede (Network).
+      2. Marque "Número de pedido JMS", digite UMA remessa e clique em Consultar.
+      3. No F12, clique em shippingWaybillList › aba Payload (Carga útil) › ver origem (view source) e copie o texto todo.
+      4. Cole em Configurações e clique em Salvar e testar. Depois, na conferência, clique em Conferir de novo.
+    O app usa esse pedido com as remessas de cada conferência (1.000 por consulta) e leva as datas do pedido para hoje,
+    com o mesmo período (escolha na tela o maior período que ela deixa antes de copiar).
+  - Quando o JMS ignora as remessas, o app para na 1ª página de cada tentativa (não folheia o JMS inteiro) e o aviso
+    diz o que fazer (não pede AuthToken novo: o AuthToken está certo).
+
+Versão 3.0 (pedidos "eu mando as remessas do ID e a rota, aí vai pesquisar na gestão de remessas; gráficos e um botão para
+baixar a planilha só com os erros" e "SP com 2º segmento que não está nas tabelas de rotas é do BRE")
+  - Página nova Conferir remessas (a principal): remessas coladas ou planilha + rota → Gestão de pedido (1.000 por
+    consulta) → cartões, gráficos, tabela com tudo e o botão Baixar planilha de erros (só os erros).
+  - Turno pelo Horário da última operação da Gestão de pedido (PDF "Informações sobre o site").
+  - Regra do SP: a linha que cita o 2º segmento vence a linha geral; SP com 2º segmento fora das duas tabelas = SP BRE.
+    Vale também na busca por viagem.
+  - Configurações aceita a tabela de rotas do SC do jeito que ela vem (inclusive o .xlsx gerado com tags "x:").
+  - Os painéis Rota Troncal e Rota Secundária (busca por viagem) continuam no menu, em "Busca por viagem (anterior)".
+
+Versão 2.3 (pedido "pesquisar em 1000, o JMS só permite esse limite")
+  - 3 Segmentos pela Gestão de pedido: 1.000 remessas em cada consulta (antes 100). 45 mil pacotes = 46 consultas.
+    Quem tinha o 100 antigo no config.json passa para 1.000 sozinho.
+  - Erro "código 401: 页面长时间未操作，请重新登录系统" (= a página do JMS ficou muito tempo sem uso, entre de novo): o app
+    testa os outros cabeçalhos da tela da Gestão de pedido uma vez; se continuar, o aviso diz que foi na Gestão de pedido e
+    pede um AuthToken novo (Configurações ou DashMaster).
+  - Enquanto uma busca nova roda, o erro da busca anterior sai da tela.
+
+Versão 2.2.1 (pedido "o destino tem que seguir a tabela da nossa rota")
+  - A lista do Pesquisar rota é a tabela de rotas (planilhas/rotas.xlsx) da página aberta: Rota Troncal mostra a tabela
+    troncal e Rota Secundária a secundária, na mesma ordem da planilha, com a doca de cada destino (coluna Observação,
+    ex.: "MG CGE · Doca 19"). Clicar no campo sem digitar mostra a tabela inteira da página.
+  - Se as letras não forem de nenhum destino da página, aparecem os da outra tabela, com o nome dela em cima.
+  - Mudou a tabela (rota nova, doca nova)? Salve a planilha: a lista já sai com ela.
+
+Versão 2.2 (pedido "ao colocar as letras, aparecer as opções para selecionar", como a Unidade de destino do JMS)
+  - Pesquisar rota: ao digitar, abre a lista dos destinos da planilha de rotas com essas letras (as letras ficam em vermelho e
+    cada destino mostra a linha: Troncal ou Secundária; os da página aberta vêm primeiro). Clique (ou toque) no destino, ou use
+    as setas e Enter: o app pesquisa na hora. Clicar de novo no campo marca o destino atual: o que for digitado troca por outro.
+
+Versão 2.1 (pedido "pesquisar a rota")
+  - Campo "Pesquisar rota" no painel: o app puxa do JMS só a rota pesquisada e mostra os pacotes que não pertencem a ela.
+  - A busca automática não puxa mais todas as rotas: só as pesquisadas nas últimas 12 h ("horasPesquisa" no config.json),
+    o dia de hoje, a cada 15 min.
+  - Configurações > Buscar este dia agora: com a rota, só ela; vazio, todas as rotas do dia (pedido na mão).
+  - Os dias já guardados continuam no banco: pesquise a rota e eles aparecem.
+
+Versão 2.0 (pedido "localizar remessas carregadas na rota errada")
+  - 3 Segmentos pela Gestão de pedido JMS de remessa, várias remessas por consulta (antes: uma a cada 30 s, cerca de
+    2.500 por dia, e o resto ficava "Sem 3 Segmentos · aguardando").
+  - Troncal confere só o 1º segmento; secundária confere 1º e 2º juntos (ex.: GRU,404-06). Antes, na troncal, a linha que
+    citava o 2º segmento vencia: SP,402-01 no caminhão SP BRE era "Errado"; agora é "Certo" (SP é da SP BRE).
+  - Busca a cada 15 minutos (o config.json com o padrão antigo, 10, passa para 15 sozinho).
+  - Gráficos: Turnos, Próxima parada (destinos ofensores), 1º e 2º segmento (segmentos com mais erros) e IDs de viagem
+    mais afetados; tabela com todas as remessas. Filtros: datas, Base Destino, Destino correto e Código de 1º segmento.
+  - Atualizar: igual às outras versões (extraia o ZIP por cima da pasta; dados, config.json e planilha continuam).
+
+Rotas de 10/11 (versão 1.9.3) — aviso urgente: PA MRB, TO PMW, RO PVH e AC RBR VOLTAM do DF BSB para o SP BRE
+  A planilha padrão já vem assim: linha SP BRE com TO, MRB, RO, AC (e RBR); linha DF BSB só com DF.
+  Quem já tem o app continua com a planilha antiga. Para atualizar, escolha um jeito:
+  - na tela Configurações → "Enviar planilha de rotas (.xlsx)", envie o arquivo rotas.xlsx novo (substitui a planilha inteira);
+  - ou edite a sua planilha: na linha DF BSB, deixe só "DF"; na linha SP BRE, acrescente "TO, MRB, RO, AC, RBR".
+  Atenção: o app confere com a planilha de agora, inclusive nos dias que já estavam no painel. Depois da troca, um pacote de
+  TO, MRB, RO ou AC no caminhão do DF BSB entre 01/11 e 09/11 (certo naqueles dias) aparece como Errado. Olhe os dias a
+  partir de 10/11.
+
+Rotas de 30/10 e 01/11 (versão 1.9.2)
+  A planilha padrão já vem com os comunicados:
+  - desde 30/10: F SJC-SP (402-08), F UBT-SP (402-09) e F CRZ-SP (402-10) na linha DC TBT-SP / GRU;
+  - desde 01/11: TO, MRB, RO e AC na linha DF BSB (saíram da linha SP BRE).
+  Quem já tinha o app continua com a planilha antiga. Para atualizar, escolha um jeito:
+  - na tela Configurações → "Enviar planilha de rotas (.xlsx)", envie o arquivo rotas.xlsx novo (substitui a planilha inteira);
+  - ou edite a sua planilha: na linha SP BRE, apague TO, MRB, RO e AC; na linha DF BSB, escreva "DF, TO, MRB, RO, AC";
+    na linha DC TBT-SP / GRU, acrescente 402-09 e 402-10.
+  Atenção: o app confere com a planilha de agora, inclusive nos dias que já estavam no painel. Depois da troca, um pacote de
+  TO, MRB, RO ou AC no caminhão do SP BRE em 31/10 (certo naquele dia) aparece como Errado. Olhe os dias a partir de 01/11.
+
+Situações na tabela
+-------------------
+Errado                 pacote fora da rota do caminhão (conta como erro). A coluna "Destino correto" diz onde devia ir.
+Certo                  pacote da rota
+Sem 3 Segmentos        · aguardando: ainda não consultado · não consultado: dia que passou (pesquise a rota de novo)
+                       · erro no JMS: a consulta deu erro (tenta de novo em 30 min)
+                       · JMS sem código: o Rastreamento do pacote não tem o Código de primeiro segmento
+Código fora da tabela  o código do pacote não está em nenhuma rota da aba "Rotas" (inclua)
+Rota sem regra         a próxima parada não está na aba "Rotas"
+
+Turnos (pelo tempo de digitalização): T1 06h-14h · T2 14h-22h · T3 22h-06h.
+
+Link para a equipe (Tailscale, o mesmo do DashMaster)
+-----------------------------------------------------
+1. Dois cliques no link-publico.bat (na pasta C:\expedicao_incorreta). Ele liga o link da Expedição na porta 10000, no
+   lugar do painel de Lotes (2.0.3, pedido): https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000/troncal.
+   DashMaster (443) e Sorter (8443) continuam como estão. O painel de Lotes continua neste computador
+   (http://localhost:3400), sem o link público. Se o link da 2.0.2 (/expedicao) estava ligado, ele é desligado.
+   O link continua ligado depois de fechar a janela e de reiniciar o computador.
+2. Senha (recomendado): abra C:\expedicao_incorreta\config.json no Bloco de Notas, escreva a senha em "senha",
+   cole o link em "linkPublico", salve e abra o atalho do app de novo.
+3. Ligar sozinho com o Windows: Windows + R > shell:startup > cole ali o atalho do iniciar.bat.
+
+config.json (criado na 1ª vez)
+------------------------------
+porta 3300 · senha · codigoBase "30001" / nomeBase "SP GRU" (a nossa base, PDD de saída) · minutos 15 (busca automática
+de hoje das rotas pesquisadas) · horasPesquisa 12 (por quanto tempo a rota pesquisada continua atualizando sozinha) · fonteSegmentos "gestao" ("rastreio" = só o Rastreamento do pacote) · remessasPorConsulta 1000 e segundosEntreLotes 2
+(Gestão de pedido) · caminho "/expedicao" (caminho no link do Tailscale) · status {"concluido": [4], "emTransito": [3]} (códigos do
+Status no JMS; a tela Configurações mostra quantas viagens de hoje estão em cada código) · consultasSegmentos 3
+(consultas do "3 Segmentos" ao mesmo tempo) · consultasPorSegundo 5 (viagens e bipes: ritmo máximo das consultas ao JMS) · segundosPorRemessa 30
+(3 Segmentos: pausa depois de cada resposta, em segundos) ·
+viagemGrande 3000 / minutosViagemGrande 30 (viagem grande baixa no máximo a cada 30 min) · dashmaster (pasta do DashMaster;
+"nao" = não usar o AuthToken dele). Mudou? Feche a janela preta e abra o atalho de novo.
+
+Se der problema
+---------------
+- Painel avisa "AuthToken do JMS vencido": pegue um novo no JMS e cole no DashMaster ou em Configurações deste app.
+- "A porta 3300 já está em uso": o app já está aberto em outra janela.
+- Muitos "Sem 3 Segmentos": Configurações > Testar o 3 Segmentos. Mostra o que o JMS responde para uma remessa
+  (HTTP, se veio dado ou página, a mensagem do JMS e o código). Mande um print (sem o AuthToken).
+- "O JMS bloqueou as consultas do Rastreamento do pacote": o app pausa 15 min e continua sozinho. Se acontecer sempre,
+  aumente "segundosPorRemessa" no config.json e mande um print da linha do registro com "página:".
+- Janela mostra "O painel NÃO está no ar": leia a linha [erro] e mande um print (sem o AuthToken).
+- "Falha de rede ao consultar o JMS" e o JMS abre no navegador: a empresa usa proxy (veja o LEIA_NODE do DashMaster:
+  variáveis HTTPS_PROXY e NODE_USE_ENV_PROXY da sua conta).
+
+Teste (para quem mexe no código)
+--------------------------------
+node test/teste.js   (JMS de mentira e planilhas fictícias)
+node gerar-zip.js    (gera dist/EXPEDICAO_INCORRETA_V<versão>.zip)

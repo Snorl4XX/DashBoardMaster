@@ -1,8 +1,1189 @@
-# J&T DASHMASTER V4.15 — Painel de Indicadores (Google Apps Script ou Node.js)
+# J&T DASHMASTER V4.25.7 — Painel de Indicadores (Google Apps Script ou Node.js)
 
 Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, publicado como Web App do Google Apps Script — um link para toda a equipe.
 
 *Feito por Caike Oliveira.*
+
+## V4.29.2 — XAP pela rota SC BNU (comunicado de 18/11)
+
+Pedido: comunicado "Alteração de rota" e a tabela "Atualizado em 18/11".
+
+- **A partir das 11h30 de 18/11, o XAP vai pela rota SC BNU (DOCA 06, esteira 7)** e sai do SP BRE (docas 21/22): código XAP,
+  "BRE - XAP" e a próxima parada DC XAP-SC. O segmento pela fórmula do WPS também passa a ser SC BNU.
+- **Vale pelo horário do bipe da remessa:** no dia 18/11, o que foi bipado antes das 11h30 continua no SP BRE; das 11h30 em diante,
+  SC BNU. Dias 19/11 em diante: SC BNU. Remessa sem horário no dia 18/11 fica com a rota nova.
+- O resto da tabela de 18/11 é igual ao da V4.29.1 (conferido linha a linha). Nada é baixado de novo: as docas são calculadas na leitura.
+- Os apps separados Expedição Incorreta e Rota Certa têm a tabela de rotas própria (na tela de rotas de cada um) e não mudam com esta versão.
+
+## V4.29.1 — Tabela de 16/11 atualizada (2ª versão)
+
+Pedido: a tabela "Alteração das docas de carregamento das rotas de longa distância a partir de 16 de novembro" foi atualizada.
+Em relação à versão anterior (V4.28):
+
+- **RJ SJM na DOCA 18** (esteira 4) e **SP BRE nas DOCAS 21/22** (esteira 2). A 1ª versão da tabela tinha os dois trocados
+  (SP BRE na 18 e RJ SJM nas 21/22). O DC JND 02-SP, carregado com o SP BRE, fica nas 21/22 com ele.
+- **DC SBN-SP com o SBN 375-11** ("Adicionar novo código inicial"), também como segmento da linha secundária no Recebimento.
+- O resto da tabela é o mesmo da V4.28 (AM MAO na 20 confirmado; GRU 402-09/10 no DC TBT-SP, que já estavam).
+- Vale desde 16/11, como a tabela: os dias 16/11 em diante passam a mostrar as docas certas na hora (nada é baixado de novo).
+
+## V4.29.0 — Trocar o AuthToken pelo link (página /token)
+
+Pedido: "colocar a config dele como link compartilhável".
+
+- **Página `/token` no link do painel** (ex.: `https://nome-do-computador.xxxx.ts.net/token`), igual à do Monitor de Recebimento:
+  qualquer pessoa da equipe com o link troca o AuthToken do JMS quando ele vencer, sem entrar no computador do servidor.
+- **Só salva o que o JMS aceitar:** o painel testa o AuthToken numa consulta pequena ao JMS antes de salvar. Token errado ou vencido
+  é recusado e o painel continua com o anterior. Depois de salvar, a fila recomeça sozinha.
+- A página não mostra o token salvo e não mexe em mais nada (a tela Configurações continua só no computador do servidor, ou com
+  `senhaConfig`). Se o painel tem `senha`, a página pede a mesma senha do painel. Muitas tentativas seguidas: espera 1 minuto.
+- O aviso de "token vencido" do painel passa a dizer para colar o AuthToken novo na página `/token` do mesmo link, e a tela
+  Configurações mostra esse link.
+- Desligar: `"trocaTokenPeloLink": false` no `node/config.json`.
+
+## V4.28.0 — Docas e rotas de 16/11
+
+Pedido: as tabelas "Alteração das docas de carregamento das rotas de longa distância a partir de 16 de novembro" e "… das rotas
+secundárias a partir de 16 de novembro" (atualizadas em 16/11) — "trocaram as docas dos destinos, mudaram tudo".
+
+- **Linha principal, docas novas** (vale pelo dia da remessa, desde 16/11; até 15/11 continua com as docas da época):
+
+  | Esteira (DWS) | Doca → rota |
+  |---|---|
+  | 7 | 05 GO GYN · 06 SC BNU · 07 RS NSR · 08 DC TBT-SP (era 23) · 09 BA FEC (era 18) · 10 MG CGE (era 19) |
+  | 4 | 15 CE FOR (era 09) · 16 PR SJS · 17 PE JGS · **18 RJ SJM (era 10; corrigido na V4.29.1)** · 19 SE AJU (era 15) |
+  | 2 | **20 AM MAO (rota nova: AM e BVB)** · **21/22 SP BRE** (corrigido na V4.29.1) · 23 DC GRU-SP (era 44) |
+  | 3 | 44 DF BSB (era 38) · 43 DC SBN-SP (era 08) · 42 PI THE (era 41) · 41 PA ANA (era 20) · 40 SP RBP (era 39) · 39 MT CGB (era 42) · 38 ES SRR (era 40) |
+
+- **SP BRE sem BAU, JDF, AM, BVB, MRB, RO, TO e AC** ("Excluir" da tabela): MRB, RO, TO e AC (RBR) vão para o **DF BSB**, AM e BVB para
+  o **AM MAO**, JDF para o **DC JDF-MG** e BAU para o **DC BAU-SP**. O DC JND 02-SP (BRE 381-06/07/12), carregado com o SP BRE, vai junto
+  para a doca 18.
+- **Rotas secundárias** (esteiras 6 e 5) nas posições novas (ex.: S-PENHA-SP = Esteira 24, F S-PENHA 02-SP = Esteira 25, DC S-MOO 02-SP =
+  Esteira 10); **DC JDF-MG, DC BAU-SP e MS CGR** entram na tabela secundária (21, 22 e 23, "Docagem de carreta"). O DC SSZ-SP continua
+  doca: "DOCA 07 · DC SSZ-SP" (para não somar com a DOCA 07 do RS NSR).
+- Nomes da tabela: "SBN" agora é **DC SBN-SP** e "THE" é **PI THE** (a partir de 16/11).
+- Vale para as docas da Expedição, a próxima parada (Envio Errado, Triagem Errada, SC → SC), as esteiras do SC → DC e o segmento
+  pela fórmula do WPS (AM/BVB → AM MAO, BAU → DC BAU-SP, JDF → DC JDF-MG, MRB/RO/TO/AC → DF BSB). Nada precisa ser baixado de novo:
+  as docas são calculadas na leitura.
+
+## V4.27.1 — Painel não trava com 1 a 2 meses e a fila espera a internet voltar
+
+Pedido: "de 1 mês a 2 meses ele trava e não mostra" e o erro "Falha de rede ao consultar o JMS: fetch failed (ENOTFOUND)".
+
+- **Tela mais rápida com período longo.** Medido num computador 4× mais lento que o de teste (parecido com um notebook comum),
+  Falta de Bipagem na Expedição com 11 mil remessas por dia (fictícias):
+
+  | | Antes | Agora |
+  |---|---|---|
+  | 1 mês (abrir de novo) | ~7 s | 3,1 s |
+  | 2 meses (1ª vez) | 17,5 s | 8,3 s |
+  | 2 meses (abrir de novo) | 13,8 s | 5,4 s |
+  | Tela parada sem responder (2 meses) | 13–14 s | ~4,5 s |
+
+  Por quê: a mesma lista de 700 mil remessas era contada várias vezes (cartões, opções dos filtros, gráficos) e cada remessa
+  repetida era conferida montando um texto "data|remessa". Agora cada conta é feita uma vez e reaproveitada, a conferência usa os
+  números do dicionário e a parte de cada turno sai de uma passada só. Os números são os mesmos de antes.
+- **Sem internet ou sem DNS no computador do painel** (`ENOTFOUND`, `ECONNREFUSED`, `ETIMEDOUT`…): a fila **pausa 5 min e tenta de
+  novo**, sem gastar tentativa e sem marcar erro no dia. Antes cada tarefa gastava as 4 tentativas em poucos minutos e ficava com
+  erro por até 12 h, mesmo com a internet de volta (os dias ficavam sem a lista). O topo do painel mostra "Sem conexão com o JMS
+  desde HH:MM". Se continuar: confira a internet do computador do painel; se o JMS abre no navegador dele e o painel não, a rede
+  usa proxy (veja LEIA_NODE: `HTTPS_PROXY` e `NODE_USE_ENV_PROXY`).
+
+## V4.27.0 — 2 meses no painel: listas guardadas no navegador, sem limite de 500 mil e sem cota no Node
+
+Pedido: "abrir os 2 meses no painel demora; quero que puxe os dados e armazena eles" e "pensei que foi tirado essa questão de cota".
+
+Medido com volume parecido com o real (Falta de Bipagem na Expedição, 62 dias × 11 mil = 682 mil remessas, dados fictícios):
+
+| | Antes | Agora |
+|---|---|---|
+| Remessas nos gráficos | 500 mil (17 dias fora: "Limite de 500.000 remessas") | 682 mil (os 62 dias) |
+| Baixado pelo navegador ao abrir de novo | 27 MB toda vez | 8 KB (os dias já guardados não vêm de novo) |
+| Tempo na tela (abrir de novo) | 6,3 s | 3,0 s |
+
+- **Listas guardadas no navegador:** a lista de cada dia fica guardada no navegador (IndexedDB). Ao abrir um período, o painel
+  manda o que já tem e o servidor só manda os dias novos ou que mudaram (hoje, um dia baixado de novo, IDs de viagem novos).
+  A 1ª vez em cada navegador baixa tudo; depois, só o que mudou. Dias com mais de 100 dias saem sozinhos. Vale para os painéis
+  de remessas (não para Sem Movimentação e Lotes). Janela anônima ou navegador sem espaço: funciona como antes.
+- **Node: até 1 milhão de remessas por consulta** (antes 500 mil). Os 2 meses da Falta de Bipagem na Expedição cabem inteiros.
+- **Contagem de remessas mais rápida** na tela (era contada várias vezes, com 700 mil linhas levava mais de 2 s).
+- **Fila:** a lista de um dia que você abriu na tela (período sem a lista) é baixada logo depois das taxas, antes das listas dos
+  outros painéis (vale 6 h).
+- **Cota:** no Node não existe cota do Google. A propriedade `COTA_GOOGLE` (e `RECEBIMENTO_MIN_POR_DIA` / `EXPEDICAO_MIN_POR_DIA`)
+  era gravada pelo próprio Node para desligar os tetos; agora sai sozinha e não aparece mais em Configurações.
+
+## V4.26.0 — Fluxos fora do código, Lotes só no painel dela e Sem Movimentação por último na fila
+
+Pedido: "desativei os dash de fluxo operacional de recebimento e expedição. Retirar do código para não influenciar. Deixar por
+último os dados do Sem Movimentação. Também tirei o dash do lote do principal."
+
+- **Recebimento: fluxo operacional** e **Expedição: fluxo operacional** saíram do código: configuração, consultas ao JMS, download
+  por rota, diagnósticos (`diagnosticarRecebimento`, `diagnosticarExpedicao`), o pacote separado dos fluxos (FLUXOS) e a página
+  `fluxos.html` do Netlify. Nem `PAINEIS` nem `REATIVAR_PAINEIS` trazem de volta.
+- As tarefas deles que ficaram na fila são **encerradas uma vez** ("painel retirado do código (V4.26)") e não contam mais na fila do
+  menu. Os dados antigos ficam no banco, sem uso.
+- **Criação de Lotes:** painel separado. Só aparece no pacote dela (LOTES / LOTES_NODE, porta 3400) ou com `PAINEIS` = `lot_flow`.
+  No principal ela fica fora **mesmo com `PAINEIS_FORA` preenchida** (antes, uma `PAINEIS_FORA` antiga trazia os Lotes de volta).
+- **Fila:** a Sem Movimentação (foto do momento: número e lista) agora roda **depois de tudo** (antes ia na frente). Ordem:
+  1. taxas do dia de todos os painéis (dia mais novo primeiro);
+  2. listas de remessas (com os IDs de viagem do SC → DC e as bipagens da Triagem Errada);
+  3. juntar os arquivos do dia;
+  4. Sem Movimentação.
+
+  Abrir a Sem Movimentação no painel continua buscando a foto de agora na hora.
+- Atualizar: troque os arquivos (Node.js: extraia o ZIP por cima de C:\dashmaster) e abra de novo. Não precisa mexer em
+  Propriedades; se você tinha `PAINEIS_FORA`, pode apagar ou deixar.
+
+## V4.25.7 — Avaria: os gráficos somam o período inteiro (dias sem lista são baixados na hora)
+
+Pedido (print da Avaria com "PARCIAL" em todos os gráficos e 310 avarias em 30 dias): "não arrumou nada, continua o mesmo problema".
+- **Causa de verdade:** os gráficos somam a **lista** de avarias de cada dia. Os dias em que o download da lista deu erro no
+  JMS ficavam esperando a autocorreção diária (12 h depois do erro); com 30 dias, os gráficos somavam só os 2 ou 3 dias que
+  tinham a lista (por isso o "PARCIAL" e 310), enquanto o cartão mostrava o total do JMS. Reproduzido: 360 nos gráficos
+  contra 3.600 no cartão, e continuava assim depois de o JMS voltar.
+- **Agora:** ao abrir um período, os dias sem a lista (erro, nunca baixados ou pela metade) vão para a fila **na hora**. No
+  alto aparece "Baixando a lista de N dia(s) do período" e o painel confere a cada 30 s: conforme os dias chegam, os
+  gráficos se completam sozinhos, sem recarregar a página (teste: 360 → 3.600, "Detalhes completos").
+- Se o JMS continuar recusando a lista de algum dia, o selo vermelho "Erro: …" mostra a mensagem do JMS.
+- Dia que acabou de dar erro não é pedido de novo antes de 10 min (propriedade `REPEDIR_LISTA_MIN`).
+- Vale para todos os painéis (não só a Avaria).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_7_NODE.zip`.
+
+## V4.25.6 — Avaria (e todos os painéis): o período escolhido sempre chega aos gráficos
+
+Pedido: "no dashboard de Avaria, coloco o período de 30 dias, ele não atualiza os dados do gráfico e dá erro".
+- **Causa:** a tela era desenhada de uma vez; um erro em **qualquer** parte (ex.: os cartões) parava o resto. As datas mudavam
+  para os 30 dias, aparecia "Não foi possível carregar os dados" e os gráficos ficavam com o período anterior.
+- **Agora:** cada parte (cartões, gráficos, Resultados, painéis, tabela) é desenhada separada, e cada gráfico também. Se uma
+  parte falhar, o resto atualiza com o período e o aviso diz **qual parte e o motivo** ("Cartões: …"). Gráfico com erro mostra
+  o motivo no próprio cartão.
+- No servidor, as listas e taxas de "Pedidos principais/filhos" (só da Avaria) não derrubam mais o painel: sem elas, o filtro
+  usa o sufixo "-001".
+- Se o aviso aparecer, mande um print dele: ele diz exatamente o que corrigir.
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_6_NODE.zip`.
+
+## V4.25.5 — Lista menor que o JMS: conferência de hora em hora e aviso no cartão
+
+Pedido: "novamente com os problemas". Na V4.25.4 os dias com falta eram baixados de novo **uma vez só**, na atualização, e o painel
+continuava mostrando "Detalhes completos" sem aviso até o download terminar (e um dia que o JMS corrigisse depois ficava velho).
+- **Conferência de hora em hora:** todo dia fechado dos últimos 62 dias em que a lista tem menos remessas que o "Erros no dia" do
+  JMS volta para a fila sozinho (dias com "contagem diferente": últimos 7, a cada 6 h). Ao abrir um dia assim no painel, ele já
+  entra na fila na hora.
+- **Aviso no cartão "Erros no dia"** (em vermelho): "Lista com 8.140 de 9.140 do JMS: baixando de novo (na fila)", ou "nova
+  conferência em até 1 h", ou "O JMS entregou 8.140 de 9.140 na lista" quando o próprio JMS não entrega tudo. No alto, o selo
+  "Lista menor que o JMS em N dia(s)" no lugar de "Detalhes completos" (passe o mouse para ver os dias).
+- Hoje (dia ainda aberto no JMS) fica fora: a lista acompanha o resumo de hora em hora.
+- O rodapé do menu mostra a versão: confira se está **v4.25.5** no computador/servidor que você abre (notebook e Oracle são
+  atualizados separadamente).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_5_NODE.zip` (inclui a correção da V4.25.4).
+
+## V4.25.4 — Detalhe igual ao JMS (Triagem Errada e Falta de Bipagem com 1.000 a menos)
+
+Pedido: "os dados não estão batendo com a quantidade do JMS" (Erros no dia 9.140 · 8.140 remessas no detalhe).
+- **Causa:** o JMS entrega a lista em páginas de 1.000 **sem ordem fixa**. De uma página para outra ele repetiu uma página
+  inteira (a 4 de novo no lugar da 5) e os 1.000 registros dela nunca chegaram. O robô conferia o total **bruto** (9.140
+  recebidos = 9.140 do JMS) e marcava o dia como completo, mas o painel guarda cada remessa uma vez: 8.140.
+- **Correção 1 — sem paginação:** a lista do dia vai em **fatias de horário de no máximo uma página** cada (1.000). Cada fatia vem
+  inteira, então não tem página para repetir ou pular. O horário de pico é dividido de novo até caber.
+- **Correção 2 — conferência pelas remessas diferentes:** o dia só fica completo quando os registros **diferentes** batem com o
+  JMS. Se faltar (rota em que o JMS ignora a hora), as páginas são baixadas de novo uma por vez, com outros tamanhos, até completar;
+  se mesmo assim faltar, o dia fica "contagem diferente" e o painel avisa quantas faltam (antes ficava "completo" calado).
+- **Dias já gravados:** os dos últimos 62 dias com menos remessas que os erros do JMS são baixados de novo, uma vez, sozinhos.
+- Vale para Envio Errado, Triagem Errada, Falta de Bipagem no Recebimento e na Expedição, SC → SC e SC → DC (Avaria: só a
+  conferência, a lista dela não tem horário).
+- Propriedade `JMS_PAGINAR` = `1` volta para a paginação (só para diagnóstico).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_4_NODE.zip`. Depois de ligar, a fila baixa de novo os dias com falta
+(a barra "Fila" mostra o andamento); em seguida o "Erros no dia" e as remessas no detalhe ficam iguais.
+
+## V4.25.3 — Painel principal (Node.js): o período inteiro chega ao painel e ao relatório
+
+Pedido: "no dash principal está faltando dados para analisar; analisa cada parte e encontre o motivo". O que cortava dados:
+- **Painel — limite de 150 mil remessas por consulta.** O limite foi feito para o Google Apps Script (6 min e 50 MB por chamada).
+  A Falta de Bipagem na Expedição tem ~11 mil remessas por dia: em **"30 dias" só 13 dias entravam** nos gráficos, nos filtros e
+  na tabela (o resto ficava no aviso "Limite de 150.000 remessas"). No Node.js (notebook e Oracle) o limite agora é
+  **500 mil remessas**, com 3.000 arquivos e 90 s de leitura por consulta: o mês inteiro entra (teste com 330 mil: ~3 s na tela).
+- **Relatório (Excel/PDF) — parava em 60 mil remessas.** Excel de 7 dias da Expedição saía com 55 mil de 77 mil; gráficos, totais
+  e a aba Dados ficavam menores que a tela. No Node, o relatório lê as **mesmas remessas do painel** (a aba Dados do PDF continua
+  com as 1.500 primeiras e o aviso; o Excel leva todas).
+- **Excel do mês — 3 GB de memória.** A formatação da aba Dados era guardada célula por célula. Agora é guardada por intervalo e o
+  arquivo é comprimido em pedaços: o Excel de 330 mil remessas sai em ~20 s e coube em 1,5 GB.
+- **Recebimento/Expedição/Sem Movimentação (agrupados):** no Node, as combinações vão inteiras ao navegador até o mesmo limite
+  (antes, acima de 60 mil, a tabela mostrava só as 2.000 maiores).
+- Conferido e sem corte: limite do JMS de 10 mil por consulta (resolvido na V4.24.3), teto de segurança de 200 mil por dia,
+  tabela em páginas de 50 e listas dos filtros.
+- **Google Apps Script: sem mudança** (continua 150 mil no painel e 60 mil no relatório, por causa da cota do Google).
+  A propriedade `DASHBOARD_MAX_ROWS` continua mudando o limite (no Node, até 1 milhão).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_3_NODE.zip` (os dados já baixados aparecem na hora, sem baixar de novo).
+
+## V4.25.2 — Sem o cartão "Sobre o indicador"
+
+Pedido: "retirar essa parte". O cartão **"Sobre o indicador"** (explicação do indicador, da V4.25) saiu de **todos os painéis**.
+Os filtros vão direto para os cartões da taxa. O resto da V4.25 e da V4.25.1 continua igual.
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_2_NODE.zip`.
+
+## V4.25.1 — Falta de Bipagem no Recebimento: segmentos secundários pelas tabelas
+
+Pedido: "os valores do segmento secundário estão errados, devem seguir essas tabelas; tem segmento que pertence à principal".
+- **Linha secundária = só os pares de 1º + 2º segmento das tabelas de 24/10**:
+  - a das esteiras: GRU 404-00 a 404-13, DC SSZ-SP (GRU 378-00/01/02/03/05/06), DC S-MOO 02-SP (SP 364-00, 435-00, 350-00,
+    365-00, 381-12, 430-01/05/07/08/09 e MOO 430-00 a 09), NOD e VLANA;
+  - a dos DCs: SBN 375-00 a 10, DC TBT-SP (SP 402-01/03/05, 421-00; GRU 402-00 a 08 e 402-09/10 do comunicado de 30/10)
+    e DC GRU-SP (SP 395-05/06/07, 381-04; GRU 381-00 a 05, 11, 13, 14, 15, 18 a 21; 378-04).
+- **Todo o resto é da linha troncal (principal)**, com o 1º segmento: PA,722-00 → PA; RJ,314-00 → RJ.
+- Filtros: **Segmentos Secundários** lista só os pares das tabelas (ex.: GRU,404-04); **Segmentos Principais** só os da troncal.
+  Nenhum dos dois tem mais o "Sem informação" das remessas da outra linha.
+- Vale na hora, também para os dias já baixados (calculado na leitura).
+
+**Atualizar:** igual à V4.25, com o `JT_DASHMASTER_V4_25_1_NODE.zip`.
+
+## V4.25.0 — Mudanças nos gráficos (PDF "Mudanças nos gráficos dos dashboards")
+
+**Todos os painéis**
+- Saiu o aviso **"Fora da meta / Na meta" do Maomao**. No lugar, o cartão **"Sobre o indicador"** (saiu na V4.25.2) com a explicação de cada
+  indicador (o que é, impacto ou causa, meta), em PT e 中文. Dá para recolher; o painel lembra a escolha.
+  - Erro de Abrangência (registrado como N23c) aparece junto com a **Triagem Errada**;
+  - "Expedido, mas não chegou" (N29a, 6 h depois do bipe de deslacre) aparece nos dois painéis do **Deslacre**.
+
+**Avaria:** meta **120 ppm** (antes 90): tem que ficar abaixo.
+
+**Falta de Bipagem na Expedição**
+- Saíram **Logins mais ofensores**, **IDs de viagem de recebimento** e **Docas por turno**.
+- "Segmentos ofensores (1º segmento)" virou **Destinos afetados**, com um **filtro Destinos afetados** (os mesmos valores).
+- Novo gráfico **Expedições ofensoras** e **filtro Expedição**: Expedição A = docas 05 a 14, B = 15 a 23, C = 38 a 44.
+  Esteira = "Esteiras"; sem doca = "Sem informação".
+- **Docas × esteiras** (tabelas de 24/10): os segmentos da tabela regional (linhas 6 e 5 do DWS) mostram **"Esteira" + o número**
+  da tabela, por exemplo GRU,404-04 → **Esteira 20**, DC S-MOO 02-SP → **Esteira 11/12**, NOD → Esteira 17/18.
+  - O **DC SSZ-SP continua doca** (DOCA 08/09).
+  - Pela mesma tabela: DC TBT-SP na **DOCA 23** (era 14), DC GRU-SP na 44 (com SP 395-05/06/07), SBN na 08.
+  - Vale desde 24/10, pelo dia da remessa; os dias antes continuam com as docas da época.
+
+**Envio Errado:** saiu **Docas por turno**; entraram o gráfico **Expedições ofensoras** e o **filtro Expedição** (docas pela
+próxima parada, com as esteiras da Last Mile).
+
+**Triagem Errada**
+- Lote sem numeração aparece como **VOLUMOSOS** (antes "Sem informação"), na tela e no relatório.
+- Docas e esteiras pela mesma tabela de 24/10. Por exemplo, a base destino F S-MGUE-SP → Esteira 20.
+
+**Falta de Bipagem no Recebimento**
+- Saíram **Logins mais ofensores** e **Destinos ofensores (próxima parada)**.
+- "Segmentos ofensores" virou **dois gráficos**:
+  - **linha troncal**: 1º segmento, as siglas GO, SC, MG, SP…;
+  - **linha secundária**: 1º + 2º segmento juntos, por exemplo **GRU,404-04**. São SBN, DC TBT-SP, DC GRU-SP, DC SSZ-SP, MOOCA,
+    NOD, VLANA e as esteiras GRU 404-xx.
+- O filtro de Segmento virou dois: **Segmentos Principais** (só o 1º segmento) e **Segmentos Secundários** (os dois juntos).
+- Os dias já baixados guardavam só o 1º segmento. Na primeira execução da versão nova, os **últimos 31 dias são baixados de novo**
+  sozinhos (só a lista, que é pequena). Enquanto isso, a linha sai só pelo 1º segmento.
+
+**Atualizar (painel principal, Node.js):** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_25_NODE.zip` em `C:\`
+(Substituir tudo) e abra o `C:\dashmaster\node\iniciar.bat` (ou o atalho). No navegador, **Ctrl+F5**.
+
+## V4.24.3 — Falta de Bipagem na Expedição: dias com mais de 10 mil remessas
+
+Pedido: o painel não mostrava todos os dados, faltavam ~mil. A planilha do JMS de 04/11 tem **10.906** remessas; o painel
+mostrava **10.000**.
+- **Causa:** a lista do JMS informa no máximo **10.000** no total (limite do JMS) e não entrega além disso. O painel só
+  dividia o dia em horários **acima** de 10 mil; com o total travado em exatamente 10.000, baixava 10.000 e marcava o dia como
+  completo.
+- **Correção:** com a lista no limite (10 mil ou mais), o dia é baixado em **fatias de horário** (2, 4, 8… até 32 partes, cada
+  uma abaixo do limite). O tamanho real do dia é conferido pelo **número do resumo** (o mesmo dos cartões). Vale para todos os
+  painéis do JMS com lista grande.
+- **Dias já baixados:** na primeira execução da versão nova, os dias dos últimos 31 com a lista travada em 10 mil (ou com menos
+  remessas que o resumo) são **baixados de novo** sozinhos, só a lista. Leva alguns minutos (fila).
+- **Se o JMS não separar por horário** (o painel confere sozinho): o painel grava o que o JMS entrega e
+  mostra embaixo da tabela **"O JMS entregou X de Y remessas em DD/MM (limite do JMS)"**, em vez de esconder a diferença. Antes,
+  nesse caso, o dia dava erro e ficava com a lista de horas antes.
+
+**Atualizar (painel principal, Node.js):** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_24_3_NODE.zip` em `C:\`
+(Substituir tudo) e abra o `C:\dashmaster\node\iniciar.bat` (ou o atalho). No navegador, **Ctrl+F5**. Em uns 10 a 20 minutos
+(fila), confira 04/11 na Falta de Bipagem na Expedição: a tabela deve mostrar **10.906 remessas**, igual à planilha.
+
+## V4.24.2 — Rotas de 10/11: PA MRB, TO PMW, RO PVH e AC RBR de volta ao SP BRE
+
+Aviso urgente de 10/11/2026 e a tabela atualizada "Código de alocação de carga das rotas tronco e de distribuição do SP GRU":
+**PA MRB, TO PMW, RO PVH e AC RBR voltam do DF BSB para o SP BRE** (SP GRU-BRE). O SP GRU-BSB fica só com DF. O resto da
+tabela não mudou (CDG no SP GRU-SJM, JPN no SP GRU-CGB, VDC no SP GRU-SJM…).
+- **Vale pelo dia da remessa**, como as trocas anteriores: **desde 10/11** TO, MRB, RO e AC (e RBR) vão para o **SP BRE**
+  (docas 21/22, Esteira 2); **de 01/11 a 09/11** continuam no **DF BSB** (doca 38, Esteira 3); antes de 01/11, SP BRE.
+- Muda em todos os painéis que usam as rotas: **Envio Errado**, **Triagem Errada**, **Falta de Bipagem na Expedição**,
+  **Expedição SC → SC** e **SC → DC** (docas, esteiras e "segmento"), todos do **painel principal**. Os painéis de Lotes,
+  Produção do Sorter e fluxos não usam as rotas (não precisam atualizar).
+- Os dias já baixados mudam sozinhos (as docas e o segmento são calculados na hora de mostrar): não precisa baixar de novo.
+- App **Expedição Incorreta 1.9.3:** planilha padrão de rotas com a mesma troca (veja o LEIA-ME do app para atualizar a sua).
+- Testes: o da migração V4.8 usava "hoje" e venceu com o calendário (só olha 31 dias); agora fixa o relógio em 20/10/2026.
+
+**Atualizar (painel principal, Node.js):** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_24_2_NODE.zip` em `C:\`
+(Substituir tudo) e abra o `C:\dashmaster\node\iniciar.bat` (ou o atalho). No navegador, **Ctrl+F5**.
+**Atalho que não abre:** confira se o atalho aponta para a pasta certa (`"C:\dashmaster\node\node.exe" "C:\dashmaster\node\server.js"`
+só funciona com o `node.exe` dentro de `C:\dashmaster\node`; com o Node.js instalado, use o `iniciar.bat`), se o Windows
+bloqueou o arquivo (botão direito → Propriedades → **Desbloquear**) e se o painel já não está aberto em outra janela ("porta 3000
+já está em uso"). O `iniciar.bat` mostra o motivo na janela preta.
+
+## V4.24.1 — Nuvem (Oracle): principal, Lotes e Monitor de Recebimento no mesmo servidor
+
+Pedido: não depender do computador ligado. Os painéis do JMS podem ficar num servidor grátis da Oracle, ligado 24 h.
+- **`node/instalar-oracle.sh`:** um serviço por painel, com o nome da pasta (`dashmaster` = principal, `dashmaster-lotes` =
+  Lotes). Antes, instalar o Lotes no mesmo servidor trocava o serviço do principal e usava a porta 3000 dele; agora o Lotes
+  fica na 3400 (`padrao.json` do pacote).
+- **`node/link-publico.sh`:** usa a porta do link e o caminho do `config.json`, como o `link-publico.bat`: principal na 443,
+  Lotes na 10000 (`https://NOME.ts.net:10000`).
+- **Monitor de Recebimento** (pacote próprio, 1.4): `instalar-nuvem.sh` e `link-publico.sh`, link na **8443** e o mesmo
+  AuthToken do principal do servidor.
+- **A Produção do Sorter e o bot do Feishu não vão para a nuvem:** o site do sorter (10.1.166.9) só abre na rede da base.
+- Passo a passo: **`node/ORACLE_CLOUD.md`** (seção 6b: Lotes e Monitor no mesmo servidor).
+
+**No Windows não muda nada** (só os arquivos `.sh` e o guia da nuvem). Pacotes: `JT_DASHMASTER_V4_24_1_NODE.zip` e
+`JT_DASHMASTER_V4_24_1_LOTES_NODE.zip`.
+
+## V4.24.0 — Painel principal: meta da Triagem Errada (≤ 0,50%) e gráficos lado a lado
+
+- **Triagem Errada:** na meta com a taxa **menor ou igual a 0,50%** — 0,50% está na meta. A comparação usa as 2 casas da tela
+  (0,504% aparece e conta como 0,50%). O selo mostra "Meta ≤ 0,50%" e o texto do Maomao diz "até 0,50%".
+- **Gráficos lado a lado:** no painel principal, os gráficos ficam **dois por linha** em telas largas (a partir de 1200 px);
+  a Evolução diária continua na linha inteira, e com número ímpar de gráficos o último ocupa a linha. Em tela menor (notebook
+  pequeno, celular), um por linha. Os painéis separados (Lotes e Produção do Sorter) continuam com um gráfico por linha.
+
+**Atualizar (painel principal, Node.js):** feche a janela preta do painel principal, extraia o `JT_DASHMASTER_V4_24_NODE.zip` em
+`C:\` (Substituir), abra o `iniciar.bat` e aperte **Ctrl+F5** no navegador. (Apps Script: `JT_DASHMASTER_V4_24_PRINCIPAL.zip`.)
+
+## V4.23.9 — Bot do Feishu em mais de um grupo
+
+Pedido "adicionar o bot em outro grupo que mostre os mesmos valores": no Feishu, cada grupo tem o seu bot e o seu webhook; o painel
+agora manda **a mesma mensagem para até 5 grupos**.
+- Em Configurações → **Bot do Feishu**, escolha **Grupo 2** (3, 4, 5), cole o webhook do bot desse grupo (e o segredo, se ligou a
+  assinatura) e clique em **Salvar e mandar um teste** — o teste vai só para esse grupo. **Desligar o bot deste grupo** apaga só
+  o dele. O Grupo 1 continua sendo o de antes (`FEISHU_WEBHOOK`); os outros ficam em `FEISHU_WEBHOOK_2`… e `FEISHU_SEGREDO_2`…
+- De hora em hora, todos os grupos recebem o mesmo cartão. Se um grupo falhar, a nova tentativa manda só para ele (o grupo que já
+  recebeu não recebe de novo). `testarFeishu` sem parâmetro de grupo manda para todos.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_9_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`.
+
+## V4.23.8 — Bot do Feishu: período sem produção = zerado
+
+Pedido: "quando o sorter não produzir nada, deixar zerado; quando não houver dados no período, mostrar zerado — ele está mostrando
+dados de período anterior mesmo quando um dos sorters não produziu". A V4.23.4 misturava a hora com números acumulados do dia
+(total, turnos e balanças desde 00:00), então um sorter parado continuava aparecendo com números de antes.
+- Cada cartão mostra **só a hora que fechou**, exatamente como o site mostra essa janela (ex.: 16:00 às 16:59, "no group by"),
+  **sorter por sorter**: sorter parado = **0** ("Sorter A 1.035 · Sorter B 0"); balança parada na hora = 0.
+- Hora sem produção: "😴 Sem produção nesta hora", tudo zerado; a lista de balanças de um sorter parado vira uma linha com 0.
+- Sem busca em outra consulta: o bot não usa mais números de outro período (a "consulta por hora" da V4.23.6/7 saiu).
+- Hora zerada espera só até o minuto 15 (`FEISHU_ESPERA`) caso o site ainda feche a hora; depois sai com 0.
+- No fim de cada turno (14h, 22h e 06h), o total do turno. `testarFeishu` com o parâmetro `16` manda a hora das 16:00 às 16:59.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_8_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`.
+
+## V4.23.7 — Bot do Feishu: hora com linha zerada
+
+Print do usuário (17:11): o cartão das 16h–17h veio com tudo 0, mas com a lista das balanças — o site respondeu a janela de uma
+hora com **uma linha zerada** (nulos), não com "nenhuma linha", e a V4.23.6 só usava a consulta por hora quando não vinha linha.
+- Agora a consulta por hora entra sempre que a janela vem **zerada** (totais, balanças e fechamento do turno).
+- Hora ainda vazia: o bot espera e tenta de 5 em 5 minutos até o minuto **55** (`FEISHU_ESPERA`); se sair zerado, o cartão diz
+  "O site do sorter não tinha números para esta hora".
+- `testarFeishu` com o parâmetro `16` mostra em `oQueOSiteRespondeu`, para cada sorter: `totaisDaJanela`,
+  `totaisPelaConsultaPorHora`, `horasComDadosNoSite` (ex.: "0h até 15h" = o site ainda não tem as 16h) e `totalDoDiaNoSite`.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_7_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`.
+
+## V4.23.6 — Bot do Feishu: hora com zero (16h–17h)
+
+Print do usuário: o cartão das 16h–17h chegou com tudo **0** e sem nenhuma balança — o site devolveu **nenhuma linha** para a
+janela de uma hora (16:00 às 16:59), nos dois sorters.
+- **Sem linha na janela:** os números da hora vêm da consulta por hora (a mesma dos gráficos "por hora" do painel): Sort total,
+  Valid total, No Sort Code e as balanças da hora; o fechamento do turno, somando as horas do turno.
+- **Hora ainda vazia** (o site pode demorar alguns minutos para fechar a hora): o bot espera e tenta de 5 em 5 minutos até o
+  minuto 30; depois manda como estiver (sorter parado = zero).
+- **Mandar uma hora escolhida:** Configurações → Executar função → `testarFeishu` com o parâmetro `16` (16:00 às 16:59 de hoje)
+  ou `2026-11-04 16`. O resultado mostra `oQueOSiteRespondeu` (linhas da janela e o número da consulta por hora) — mande um print
+  dele se algo não bater.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_6_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`.
+
+## V4.23.5 — Bot do Feishu: os dados de cada hora
+
+Pedido "tem que mandar em 1 hora, 1 hora: das 01h até 02h, os dados desse período; das 12h às 13h, desse período": cada cartão
+traz **só os números da hora que fechou**, pedidos ao site do sorter para essa janela (ex.: às 13:05, de 12:00:00 a 12:59:59,
+"no group by", Induction All, By Layer All — os mesmos filtros dos prints):
+- ⏱️ Sort total da hora (Sorter A + B e cada um), ✅ Valid total e ❌ No Sort Code (com %), e o turno da hora;
+- 🏆 as 3 balanças que mais e 🐢 as 3 que menos processaram **na hora**, e 📋 todas as balanças de cada sorter na hora
+  (sem produção = 0 ⚠️);
+- 🏁 **no fim de cada turno** (cartões das 13h–14h, 21h–22h e 05h–06h): o total do turno que fechou (T1 06h–14h, T2 14h–22h,
+  T3 22h–06h, que começa no dia anterior).
+
+Sem acesso ao sorter (computador fora da rede da base), o grupo recebe **um aviso só** em vez de cartões com zero; quando o acesso
+volta, o cartão seguinte diz "O acesso ao sorter voltou".
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_5_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. Para ver na hora: Configurações → Bot do Feishu → **Salvar e mandar um teste**.
+
+## V4.23.4 — Bot do Feishu: cartão com emojis e "Balança" em chinês
+
+Pedido "deixar as mensagens do bot mais bonitas, com emojis; colocar em chinês a palavra Balança": o cartão ganhou emojis
+(📊 título, ⏱️ hora, 📦 volumes, 📈 total do dia, 🌅🌇🌙 turnos, 🥇🥈🥉 as que mais processaram, 🔻 as que menos, 📋 todas as
+balanças, ⚠️ balança parada) e cada balança aparece também em chinês: "Balança 07 / 供包台07".
+
+- **Figurinhas/imagens:** o bot personalizado (webhook) do Feishu não manda imagem — para isso o Feishu exige subir a imagem por
+  um app da empresa (app_id e segredo do app). Os emojis funcionam.
+- **Foto do bot (ex.: MAOMAO):** é escolhida no próprio Feishu, ao adicionar o bot no grupo (nome, descrição e foto). Se o bot já
+  existe e o Feishu não deixar trocar a foto, remova e adicione de novo com a foto — o webhook muda: cole o novo em Configurações.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_4_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. Para ver o cartão novo: Configurações → Bot do Feishu → **Salvar e mandar um teste**.
+
+## V4.23.3 — Produção do Sorter: Evolução diária com os filtros
+
+Pedido "quando trocar os filtros, o gráfico de Evolução Diária deve mostrar os resultados desse filtro": sem filtro, o gráfico
+continua com o número oficial do sorter de cada dia; **com filtro** (Sorter, Turno, Horário), cada coluna é o Sort total do dia
+com o filtro — e com o filtro de **Balança**, a quantidade alimentada na(s) balança(s) ("Evolução diária · quantidade
+alimentada"). O texto embaixo do título diz "Com os filtros". Os cartões Dia escolhido / Maior / Menor / Média acompanham.
+Dias sem a lista baixada ficam sem coluna. (Servidor: `getDailySeries`.)
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_3_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e aperte **Ctrl+F5** no navegador.
+
+## V4.23.2 — Bot do Feishu: todas as balanças
+
+Pedido "o bot mostre todos os dados das balanças": depois das 3 que mais e das 3 que menos processaram, o cartão do Feishu traz
+**todas as balanças de cada sorter** (Sorter A e Sorter B), com a quantidade alimentada no dia e o total do sorter, em duas
+colunas. Balança que não alimentou nada no dia aparece com **0 ⚠️**.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_2_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. O webhook do bot continua salvo. Para ver na hora: Configurações → Bot do Feishu →
+**Salvar e mandar um teste** (sem colar nada de novo).
+
+## V4.23.1 — Produção do Sorter: sem a "Tabela de remessas"
+
+Pedido "Eliminar Tabela de remessas": a Produção do Sorter não mostra mais a tabela de remessas no fim do painel (Config.gs →
+`hideDetailTable`). As tabelas por horário, por balança e os Dados gerais continuam. Os outros painéis não mudam.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_1_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e aperte **Ctrl+F5** no navegador.
+
+## V4.23.0 — Produção do Sorter: bot do Feishu (resumo de hora em hora no grupo)
+
+De hora em hora (no minuto 5), o painel da Produção do Sorter atualiza o dia no sorter e manda no grupo do Feishu um cartão com:
+- **Produção da hora que fechou** (Sort total, Sorter A + B, e cada sorter) e o **total do dia até agora**;
+- **Produção por turno** no dia (T1 06h–14h, T2 14h–22h, T3 22h–06h);
+- **As 3 balanças que mais processaram** e **as 3 que menos processaram** no dia (quantidade alimentada; sorter + balança —
+  a Balança 19 do A é outra máquina que a do B; balanças sem produção no dia não entram).
+
+Os números são os mesmos do painel. Se o sorter não responder, a mensagem sai com os números da última atualização e um aviso.
+
+**Ligar:**
+1. No grupo do Feishu: Configurações do grupo → **Bots** → **Adicionar bot** → **Bot personalizado**. Copie o endereço do webhook
+   (`https://open.feishu.cn/open-apis/bot/v2/hook/…`). Em segurança, pode ligar a **Assinatura** (copie o segredo) ou colocar a
+   palavra-chave **Sorter**.
+2. Em `http://localhost:3500/config`, seção **Bot do Feishu**: cole o webhook (e o segredo, se ligou a assinatura) e clique em
+   **Salvar e mandar um teste**. A mensagem chega no grupo na hora.
+3. Pronto: depois disso, uma mensagem por hora, enquanto o painel estiver ligado. **Desligar o bot** apaga o webhook.
+
+O webhook e o segredo ficam só neste computador (Propriedades `FEISHU_WEBHOOK` e `FEISHU_SEGREDO`, escondidas na tela). Outro
+minuto: Propriedade `FEISHU_MINUTO` (padrão 5). O computador precisa de internet para falar com o Feishu.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_23_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`.
+
+## V4.22.13 — Produção do Sorter: filtros, cartões e gráficos com os mesmos números
+
+"Os valores do filtro não batem com os gráficos":
+- **Mesmo momento:** os cartões vêm do resumo do dia e os filtros/gráficos, da lista do dia. A lista só era refeita se a anterior
+  tivesse mais de 1 h — na prática ficava até 2 h atrás dos cartões. Agora ela é refeita junto com o resumo (sempre que o número
+  do sorter muda): cartões, filtros e gráficos do mesmo momento. (Com `ATUALIZACAO_MIN` = 5 em Configurações → Propriedades,
+  tudo passa a atualizar a cada 5 minutos.)
+- **Filtro de balança:** com ele, as listas dos outros filtros (Sorter, Turno, Horário) contam a quantidade alimentada, como os
+  gráficos e o cartão vermelho (antes contavam o Sort total do sorter inteiro).
+- Sem filtro: a soma da lista de sorters = o cartão vermelho (Sort total).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_13_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e aperte **Ctrl+F5** no navegador. Para ver na hora, clique em **Atualizar** no painel.
+
+## V4.22.12 — Produção do Sorter: filtro de balança muda cartão e gráficos
+
+"Quando troco os filtros, os cartões e gráficos ficam fixos": os filtros **Sorter**, **Turno** e **Horário** já mudavam tudo, mas o
+filtro **Balança** só mudava o Top 10 e a tabela por balança — o site do sorter só separa por balança a quantidade alimentada
+(tela "feeder feed quantity"); Sort total, Valid total, No Sort Code, motivos e andares vêm só do sorter inteiro.
+
+- Com o filtro de balança, o **cartão vermelho** mostra o que foi **alimentado na(s) balança(s)** escolhida(s) (com o oficial do
+  sorter embaixo), e os gráficos **por hora**, **por turno** e **por sorter** mostram a quantidade alimentada.
+- Um aviso embaixo dos filtros diz o que muda e o que continua do sorter inteiro; os cartões que não mudam dizem "Sorter inteiro".
+- Inclui a V4.22.11 (o número ao lado de cada opção do filtro é o Sort total, não 1 milhão).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_12_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. No navegador, aperte **Ctrl+F5**.
+
+## V4.22.11 — Produção do Sorter: número do filtro (1 milhão)
+
+Na lista do filtro **Sorter** aparecia "Sorter B 1.122.969": o número ao lado de cada opção somava todos os números da tela juntos
+(Sort total + Valid total + andares + balanças…), e o mesmo volume entrava umas 4 vezes. Agora ele é o **Sort total** do período
+(Sorter, Turno e Horário); no filtro **Balança**, a quantidade alimentada. Só o número da lista mudou: cartões, gráficos e o filtro
+em si já estavam certos. Não precisa baixar os dias de novo.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_11_SORTER_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. No navegador, aperte **Ctrl+F5**.
+
+## V4.22.10 — Produção do Sorter: números com os filtros dos prints
+
+Os prints e as respostas enviados (GRU-B) mostraram como o site entrega os números: `start` 00:00 → `end` 23:59, **time group by
+= no group by**, **Induction No. = All**, **By Layer = All**. A tela "feeder feed quantity" assim devolve uma linha só
+(`2026-11-04 00:00~2026-11-04 23:59`) com a quantidade de cada balança (`total_1` … `total_36`).
+
+- **Total do dia = o da tela:** o painel pede o `summary.data` e a tela das balanças com esses mesmos filtros (o mesmo pedido do
+  navegador: data como `2026-11-4`, `page=1&limit=10`, `group=0`). Os cartões (Sort total, Valid total, No Sort Code…) e a
+  quantidade de cada balança são esses números.
+- **Por hora:** a consulta por hora (`group=60`) só divide o dia em horas, para os gráficos por hora e por turno. O que ela não
+  tiver fica sem turno e horário ("N/A"); se ela não responder, as balanças aparecem com o total do dia.
+- O horário `00:00~23:59` (o dia inteiro) não vai mais para a hora 0.
+- O teste em **Configurações → Salvar e testar o sorter** mostra, em cada sorter, `hoje.sortTotal` (o número da tela, para
+  comparar com o print), `hoje.somaDasHoras` e `telaBalancas` (linhas, horário, colunas e se veio por hora).
+- Os dias já baixados são baixados de novo (uma vez).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_10_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e clique em **Salvar e testar o sorter** em `http://localhost:3500/config`.
+
+## V4.22.9 — Produção do Sorter: balanças vazias
+
+O painel não mostrava os valores das balanças. A leitura da tela "feeder feed quantity" só aceitava o horário como
+`2026-11-04 07:00`. Em outro formato (ex.: `2026-11-4 7:00`, sem o zero, como o site escreve as datas), cada linha era
+descartada sem aviso.
+
+- Agora ela aceita `2026-11-4 7:00`, `11-4 7:00` e `07:00`, e ignora a linha "Total" da tabela.
+- Se o horário vier num formato desconhecido, as balanças não somem mais: com 24 linhas, vale a ordem das linhas como a hora;
+  senão, a quantidade do dia inteiro (sem turno e horário). O LOG avisa e mostra um exemplo do horário.
+- O teste em **Configurações → Salvar e testar o sorter** mostra, em cada sorter, o que essa tela devolveu (`telaBalancas`:
+  linhas, exemplo de horário, colunas de balança e como as horas foram lidas), além de quantas balanças e quanto alimentaram hoje.
+- Os dias já baixados são baixados de novo (uma vez).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_9_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e clique em **Salvar e testar o sorter** em `http://localhost:3500/config`.
+
+## V4.22.8 — Produção do Sorter: balanças pela tela "feeder feed quantity"
+
+O HTML enviado mostrou de onde o site tira os números de cada balança: a tela **"feeder feed quantity"** (`/statis/outlets`).
+Ela busca no mesmo endereço (pedido AJAX com `start`, `end` e `group`) e devolve, por horário, uma coluna por balança
+(`total_1` … `total_36`), para o sorter escolhido na sessão. A consulta de totais (`summary.data`) não serve para balança: com
+`inductionno` 1…40, ela devolvia o total do sorter inteiro.
+
+- Os totais (Sort total, Valid total, No Sort Code, motivos e andares) continuam vindo da consulta de totais, **sem balança**.
+- A quantidade de cada balança vira a lista **Alimentação**, com uma consulta por sorter por dia (antes eram 40).
+- **Gráfico** "Top 10 balanças · quantidade alimentada" e **tabela nova** "Quantidade alimentada por balança", com todas as
+  balanças e o Total. A tabela por horário ganhou a coluna Alimentação.
+- O site não dá o No Sort Code por balança: o gráfico "Top 10 balanças · No Sort Code" saiu.
+- O filtro **Balança** vale só para a quantidade alimentada. Os totais do sorter não mudam com ele.
+- Se a tela "feeder feed quantity" não responder, o dia fica com os totais (aviso no LOG).
+- **Uma vez:** os dias já baixados são baixados de novo. O teste em Configurações mostra, para cada sorter, quantas balanças e
+  quanto alimentaram hoje.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_8_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**.
+
+## V4.22.7 — Produção do Sorter: balanças somadas 40 vezes e A/B conferidos (PDF "ALTERAÇÃO NO DASH SORTER")
+
+**O que estava errado:**
+- As 40 balanças vinham com o mesmo número (505.017 de Sort total e 92 de No Sort Code). O site devolve o **total do sorter
+  inteiro** quando o número da balança não vale para ele, e o painel perguntava as balanças "1 a 40". Cada uma vinha com o total,
+  e o painel somava 40 vezes (20.200.680 = 40 × 505.017). Isso afetava os gráficos de balança, o "Produção por sorter" e a
+  tabela; os cartões (número oficial) estavam certos.
+- O Sorter B era lido sem escolher (o que o site mostra numa sessão nova). Se o padrão do site fosse outro, A e B se misturavam.
+
+**O que mudou:**
+- **Balanças:** se duas ou mais balanças vierem iguais ao total, o painel não soma nada por balança. Ele procura a lista certa no
+  `<select>` "Induction No./区" da tela de estatística do site (`/statis/...`) e lê de novo com ela (fica em
+  `SORTER_BALANCAS_SITE`). Se não achar, guarda só o total (balança "N/A"), avisa no LOG e os gráficos de balança ficam vazios até
+  a lista certa (Propriedade `SORTER_BALANCAS`, os valores do "Induction No./区").
+- **A e B:** a descoberta grava a troca dos dois: A = `selecteddb=DB2` e B = `selecteddb=DB1`. Cada sessão escolhe o seu
+  sorter de propósito, e o painel confere pelo título da página do site ("(A套)" / "(B套)"). Se uma sessão mostrar o outro sorter,
+  vale o que o site mostra (aviso no LOG); se as duas mostrarem o mesmo, o dia não é gravado.
+- **Uma vez:** os dias já baixados entram na fila de novo, e a troca antiga (só a do A) é descoberta de novo com a do B.
+- O teste em Configurações mostra, para cada sorter, a página "(A套)" / "(B套)" e de onde vem a lista de balanças.
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_7_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**. Os dias antigos
+são refeitos sozinhos pela fila.
+
+## V4.22.6 — link-publico.bat numa janela só
+
+Na V4.22.4, o `link-publico.bat` abria uma segunda janela e a primeira piscava e fechava. Parecia que tinha fechado sozinho.
+Agora ele roda numa janela só, que fica aberta até você fechar no X. Sem o `node\lib\link.js` (pacote antigo), ele liga o link
+sem a conferência de porta, sem mostrar erro.
+
+**Atalho na Área de Trabalho:** aponte para o `link-publico.bat` do painel, e não para o `tailscale.exe`. O `tailscale.exe`
+aberto direto sempre fecha na hora, porque é um comando, sem janela. Para criar o atalho: botão direito no `link-publico.bat` →
+**Enviar para** → **Área de trabalho (criar atalho)**. Depois renomeie (ex.: "Link Sorter").
+
+## V4.22.5 — Uma porta do link para cada painel
+
+Pedido: "porta diferente para cada dash". O Funnel do Tailscale só aceita **3 portas** no link público (443, 8443 e 10000).
+Então fica assim:
+
+| Painel | Porta no computador | Link do Tailscale |
+|---|---|---|
+| Principal | 3000 | `https://NOME.ts.net` (443) |
+| Produção do Sorter | 3500 | `https://NOME.ts.net:8443` |
+| Lotes/Sacas | 3400 | `https://NOME.ts.net:10000` |
+
+- Quem instalou antes (Lotes em `/lotes`, Sorter em `/sorter`): o `link-publico.bat` troca sozinho o `config.json` para a
+  porta nova, uma vez só (`"linkVersao": 2`), liga o link novo e desliga o `/lotes` / `/sorter` antigo do mesmo painel.
+- **Antes de ligar**, o `link-publico.bat` confere se a porta do link já leva para **outro** painel deste computador. Se levar,
+  ele avisa qual e pergunta se é para trocar (S/N), em vez de derrubar o outro sem avisar.
+- A **Expedição Incorreta** também usa a 8443. Se ela estiver no mesmo computador do Sorter, não sobra porta: deixe o Sorter
+  num caminho do link principal (no `config.json` do Sorter: `"portaLink": 443` e `"caminho": "/sorter"`).
+- O `link-publico.bat` usa o Node.js (`node\lib\link.js`) para isso; sem o Node.js, ele liga o link como antes, sem conferir.
+- **Atualizar** (painel principal): entre 0h e 6h, o botão não atualizava o dia de ontem dos painéis que se atualizam a cada
+  poucas horas (Criação de Lotes). Agora atualiza.
+
+**Atualizar:** em cada painel (Lotes e Sorter), feche a janela preta, extraia o ZIP novo em `C:\` (Substituir), dê dois cliques
+no `link-publico.bat` e depois abra o `iniciar.bat`. No principal, só troque o `link-publico.bat` (e a pasta `node\lib`).
+
+## V4.22.4 — link-publico.bat não some mais
+
+Com dois cliques, o `link-publico.bat` fechava antes de dar para ler a mensagem. Agora ele se abre de novo numa janela
+`cmd /k`, que fica aberta mesmo se o Windows parar o arquivo no meio. No fim, a janela continua aberta: feche no X depois de ler.
+
+**Vários painéis no mesmo computador e no mesmo link do Tailscale** (na V4.22.5 cada um passou a ter a sua porta do link):
+- Cada painel tem a **sua porta** no computador: principal 3000, Lotes 3400, Sorter 3500.
+- Dois painéis **na mesma porta do link e sem caminho** (ex.: os dois em `:10000`) dão errado: o último `link-publico.bat` que
+  rodar fica com o link, e o outro some.
+- Para ver o que está ligado: `"C:\Program Files\Tailscale\tailscale.exe" funnel status`. Para desligar um link antigo na
+  10000: `"C:\Program Files\Tailscale\tailscale.exe" funnel --https=10000 off`.
+
+**Atualizar:** troque o `link-publico.bat` da pasta `node` de cada painel pelo novo (é o mesmo arquivo nos três).
+
+## V4.22.3 — Produção do Sorter: o pedido exato da troca (selecteddb)
+
+O HTML da janela "device choose" (`/dbselectview?from=top`) mostrou o pedido que o site faz:
+- `<form method="post" action="http://10.1.166.9/dbselect">`, com um botão por sorter (`data-connectionname` DB1 = B, DB2 = A), o
+  campo oculto vazio `selecteddb` e o `_token`;
+- o clique copia o DB do botão para o `selecteddb` e manda `$.ajax` **POST /dbselect** com `{_token, selecteddb}`. Resposta
+  `code` 1 (ou -1) = trocou, e a página vai para `/home`.
+
+A descoberta agora lê isso direto do formulário e do script:
+- o campo oculto vazio recebe o valor do botão;
+- o mesmo pedido no formulário e no `$.ajax` vira um só;
+- ela lê `$.ajax` longos e não confunde `dataType` com o método.
+
+A troca do Sorter A fica `{"metodo": "POST", "caminho": "/dbselect", "corpo": "selecteddb=DB2", "pagina": "/dbselectview?from=top"}`.
+O `_token` é sempre o da sessão, lido da janela na hora. O teste em Configurações mostra o título da página de cada sorter
+("(B套)" / "(A套)").
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_3_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**.
+
+## V4.22.2 — Produção do Sorter: a troca do Sorter A como o site faz de verdade
+
+O HTML do site mostrou como ele troca de sorter:
+- "switch device" abre uma janela à parte: `xadmin.open('device choose', 'http://10.1.166.9/dbselectview?from=top', 500, 350)`;
+- nela há um botão por sorter: `<input value="Cross-belt GRU-A" type="button" lay-filter="login" data-connectionname="DB2">` (o B é o
+  `DB1`). O site troca a **conexão** (o banco do sorter A ou do B), e a página passa a mostrar "巴西GRU分拣机(A套)" no título.
+
+A descoberta da V4.22.1 não abria essa janela e não lia o `data-connectionname`. Agora ela:
+- abre as janelas chamadas por `xadmin.open` / `layer.open` / iframe (só janelas e links, nunca o endereço de um pedido);
+- lê o valor do botão (`connectionname=DB2`) e os campos fixos do pedido;
+- testa primeiro os pedidos que usam esse campo, inclusive `/login`. Se o código do clique não estiver em nenhum arquivo que o
+  painel lê, testa o endereço da janela sem o "view" (`/dbselect`);
+- no relatório, mostra o título da página depois da troca (deve aparecer "(A套)").
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_2_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**.
+
+## V4.22.1 — Produção do Sorter: o Sorter A é descoberto sozinho
+
+A captura do DevTools mostrou as consultas do Sorter A, mas nenhum pedido de troca. Agora o painel **descobre sozinho** como o
+site escolhe o sorter:
+- abre a página `/home` e os arquivos `.js` do próprio site que ela carrega (sem as bibliotecas, como jQuery e layui);
+- acha a opção "GRU-A" (valor da lista, data-id, onclick, link ou script), os pedidos que o código faz e os cookies que ele grava;
+- testa cada jeito numa sessão nova e compara o Sort total dos últimos 7 dias com o do sorter padrão. Tem que mudar, e não pode
+  mudar o site para todo mundo (se mudar, o painel não usa e volta o site para o B);
+- grava o que funcionou em `SORTER_TROCA_A` (com `"auto": true`). Se um dia parar de valer, ele esquece e descobre de novo.
+
+Isso roda sozinho uma vez por dia enquanto falta a troca, e na hora em **Configurações → Salvar e testar o sorter**. O teste
+mostra o relatório "descoberta", só com nomes e números (nunca token nem valor de cookie da sessão).
+
+**Atualizar:** feche a janela preta da Produção do Sorter, extraia o `JT_DASHMASTER_V4_22_1_SORTER_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e, em `http://localhost:3500/config`, clique em **Salvar e testar o sorter**.
+
+## V4.22.0 — Produção do Sorter, no esquema do principal (painel separado)
+
+Painel novo e **separado** do principal: **Produção do Sorter**. Ele lê o monitor do sorter da base (`http://10.1.166.9`, tela
+"summary statistics of sorter operation") e **salva cada dia** no banco do computador, como o principal faz com o JMS.
+
+**Como funciona:**
+- Mesmo visual do principal: cartões, gráficos, filtros, tabela, Data inicial, Baixar histórico e atualização de hora em hora.
+- Cada hora de cada balança (Induction No.) de cada sorter (A e B) vira uma linha por número da tela: Sort total, Valid total,
+  Anormais, cada motivo (No Sort Code, No plan, Chute, Intercept, No Read, Multi, Outros) e cada andar (Layer1/2/3).
+- **Cartões:** Total produzido, Deu certo e %, Não deu certo (No Sort Code) e %, Anormais, dia anterior e um cartão por turno.
+- **Gráficos:** evolução diária, evolução por hora (24 h em ordem), No Sort Code por hora, turnos, por sorter, top 10 balanças
+  (Sort total e No Sort Code), motivos de falha e andares.
+- **Filtros:** Sorter, Balança, Turno e Horário.
+- **Tabela por horário** igual à da tela do sorter, com o Total no fim.
+
+**Onde roda:**
+- Só na versão Node.js, num computador **dentro da rede da base**. O Google (Apps Script) não enxerga a rede interna, por isso o
+  `Sorter.gs` não vai nos pacotes do Apps Script.
+- Pacote próprio: `JT_DASHMASTER_V4_22_SORTER_NODE.zip`, pasta `C:\dashmaster-sorter`, porta **3500**.
+- Link do Tailscale: o mesmo endereço do principal com **/sorter** no fim.
+- Não pede AuthToken do JMS: a tela Configurações mostra **Sorter da base** (endereço e troca do Sorter A) no lugar dele.
+- Nunca aparece no painel principal, nem com `PAINEIS_FORA`.
+
+**Sorter A e B:** o site mostra um sorter por sessão. O B é o que o site mostra sem trocar. O A precisa do pedido de troca
+(`SORTER_TROCA_A`), o mesmo que o Painel do Sorter (porta 3100) usa; o `_token` é sempre o da sessão. Se os dois vierem com os
+mesmos números, o dia não é gravado e o erro explica (a troca não trocou nada). Diagnóstico: `diagnosticarSorter`.
+
+**Instalar:** passo a passo no `LEIA_SORTER.md` do ZIP.
+
+**Painel principal e Lotes:** nada muda (só a versão).
+
+## V4.21.6 — Turnos que enviaram errado as sacas ecológicas (painel de Lotes)
+
+Gráfico novo no painel de Lotes/Sacas, logo depois de "Sacas ecológicas enviadas incorretamente": **Turnos que enviaram
+sacas ecológicas incorretamente**. São as mesmas sacas daquele gráfico (ecológicas com destino fora da lista do comunicado
+"Envio de sacas vermelhas com chip"), contadas pelo turno do tempo de ensacamento. T1, T2 e T3 aparecem sempre, na ordem
+(turno sem erro fica com 0). Sacas sem destino e sacas não ecológicas não contam. Funciona com os filtros e em período grande.
+
+**Atualizar:** feche a janela preta do painel de Lotes, extraia o `JT_DASHMASTER_V4_21_6_LOTES_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. Os dados, a senha e o link `/lotes` continuam.
+
+## V4.21.5 — Link do painel de Lotes igual ao do principal (/lotes)
+
+O painel de Lotes/Sacas sai da porta 10000 e passa para o mesmo endereço do principal, com **/lotes** no fim:
+`https://NOME-DO-COMPUTADOR.xxxx.ts.net/lotes`. O `link-publico.bat` do pacote de Lotes liga o Funnel na porta 443 só no
+caminho `/lotes` (`--set-path=/lotes`), sem mexer no link do principal (a raiz do mesmo endereço).
+- O servidor de Lotes atende com e sem o `/lotes` no pedido. Neste computador continua em `http://localhost:3400`.
+- A senha do painel de Lotes usa um cookie próprio, para não sair do principal quando entra no de Lotes (e vice-versa).
+- Novo no `config.json`: `"caminho"` (ex.: `"/lotes"`). Vazio = painel na raiz do link, como o principal.
+
+**Atualizar (quem usava o link com :10000):**
+1. Desligue o link antigo: `"C:\Program Files\Tailscale\tailscale.exe" funnel --https=10000 off`
+2. Feche a janela preta do painel de Lotes, extraia o `JT_DASHMASTER_V4_21_5_LOTES_NODE.zip` em `C:\` (Substituir) e abra
+   o `iniciar.bat`. Ele troca sozinho no `config.json`: `"caminho": "/lotes"`, `"portaLink": 443` e o `"linkPublico"`
+   sem o `:10000`.
+3. Dois cliques no `link-publico.bat`. Link novo: `https://NOME-DO-COMPUTADOR.xxxx.ts.net/lotes`.
+
+## V4.21.4 — Criação de Lotes com os cabeçalhos da tela do JMS
+
+O print do DevTools (tela "Estatística de Criação Recorrente de Eco Bag") mostrou os cabeçalhos que o JMS espera. O painel
+agora manda os mesmos:
+- **Routename:** `CirculationBagReport|crisbiIndex`;
+- **Routernamelist:** `智能设备>环保物料>统计报表>循环建包统计` (Dispositivo inteligente > Materiais ecológicos >
+  Relatório de estatística > Estatística de criação recorrente). O navegador manda codificado (`%E6%99%BA…`), e o painel
+  também.
+
+A variante aprendida na V4.21.3, se houver, é esquecida uma vez. Se o JMS recusar a lista, o painel testa sozinho a variante só
+com o Routename.
+
+**Atualizar:** feche a janela preta do painel de Lotes, extraia o `JT_DASHMASTER_V4_21_4_LOTES_NODE.zip` em `C:\`
+(Substituir), abra o `iniciar.bat` e clique em **Atualizar**. A porta (3400), a senha, o link e os dados continuam.
+
+## V4.21.3 — Criação de Lotes: "HTTP 403: sem permissão no JMS"
+
+**O que aparecia:** "Não foi possível atualizar: HTTP 403: sem permissão no JMS (Criação de Lotes)".
+
+**Por quê:** o JMS confere o cabeçalho **Routename** (o nome da tela). O painel consultava as sacas sem ele.
+
+**Agora:**
+- O painel manda **Routename = CirculationBagReport**, o nome da tela "Estatística de Criação Recorrente de Eco Bag"
+  (`/app/crisbiIndex/CirculationBagReport`, no PDF das sacas).
+- Se o JMS ainda recusar, o painel testa sozinho `CirculationBagReport|crisbiIndex`, sem cabeçalho e os nomes antigos.
+  Ele guarda o que funcionar e usa nas próximas consultas. Isso vale também no botão Atualizar.
+
+**Atualizar:** feche a janela preta do painel de Lotes, extraia o `JT_DASHMASTER_V4_21_3_LOTES_NODE.zip` em `C:\`
+(Substituir) e abra o `iniciar.bat`. O `config.json` (porta, senha, link) e os dados continuam. Depois clique em **Atualizar**.
+
+**Se continuar o 403**, o nome certo está na tela do JMS:
+1. Abra a tela no JMS e aperte F12 → Rede (Network) → Consultar.
+2. Clique na linha `sdploopbagBuildbagCount` → Cabeçalhos da solicitação.
+3. Copie só os valores de **routename** e **routernamelist**. **Nunca** copie o AuthToken nem o Cookie.
+4. Em `C:\dashmaster-lotes\node`, rode:
+   `node dashmaster.js propriedade JMS_ROUTENAME_LOTS <valor>` e `node dashmaster.js propriedade JMS_ROUTENAMELIST_LOTS <valor>`.
+
+Outra causa possível: o usuário do AuthToken não tem acesso à tela no JMS. Nesse caso, o navegador também mostra
+"sem permissão" ao abrir a tela.
+
+## V4.21.2 — Painel de Lotes/Sacas na porta 3400
+
+**O que acontecia:** "a porta já está sendo usada". A porta 3100 do painel de Lotes é a mesma do painel do **Sorter**.
+
+**Agora:** o painel de Lotes usa a porta **3400** (http://localhost:3400). Portas dos apps no mesmo computador:
+
+| App | Porta |
+|---|---|
+| Painel principal | 3000 |
+| Sorter | 3100 |
+| Pesquisa no Rastreamento | 3200 |
+| Expedição Incorreta | 3300 |
+| **Lotes/Sacas** | **3400** |
+
+O link do Tailscale do painel de Lotes continua na porta **10000** (`https://NOME.xxxx.ts.net:10000`).
+
+**Quem já extraiu o ZIP de Lotes** (o `config.json` já foi criado com a 3100):
+1. Feche a janela preta do painel de Lotes.
+2. Abra `C:\dashmaster-lotes\node\config.json` no Bloco de Notas, troque `"porta": 3100` por `"porta": 3400` e salve.
+3. Dois cliques em `iniciar.bat`.
+4. No cmd, rode `"C:\Program Files\Tailscale\tailscale.exe" funnel --https=10000 off`. Depois dê dois cliques em `link-publico.bat`:
+   o link :10000 passa a abrir o painel da porta 3400.
+
+## V4.21.1 — Tabela de rotas atualizada: AC RBR no SP GRU-BSB
+
+**Pedido:** "Mudanças nas rotas, mudar o dashboard", com a tabela "Código de alocação de carga das rotas tronco e de
+distribuição do SP GRU" atualizada.
+
+- A tabela confirma a V4.19: **SP GRU-BSB = DF, PA MRB, TO PMW, RO PVH e AC RBR**, e o AC saiu do SP GRU-BRE. O painel já
+  fazia assim desde 01/11 (o comunicado dizia o mesmo).
+- Nova: **AC = RBR** (Rio Branco). A parada escrita **"AC RBR"** (nome da tabela) e o código **RBR** entram na rota DF BSB,
+  junto com "DC RBR-AC" e o código AC. Isso vale:
+  - no Envio Errado, na Triagem Errada e no SC → SC (doca 38);
+  - na Falta de Bipagem na Expedição e no Segmento (base);
+  - no SC → DC (Esteira 3).
+
+  Antes de 01/11, o AC continua no SP BRE.
+- As outras linhas da tabela são iguais às do painel: nada mais muda.
+
+**Atualizar:** Node.js — extraia o `JT_DASHMASTER_V4_21_1_NODE.zip` em `C:\` (Substituir). Apps Script — troque o `Config.gs`
+(ou todos os arquivos do `JT_DASHMASTER_V4_21_1_PRINCIPAL.zip`) e faça uma Nova versão. O painel de Lotes não usa rotas.
+
+## V4.21 — Painel de Lotes/Sacas separado do principal, com link próprio no Tailscale
+
+**Pedido:** "Separar o DASHBOARD DE LOTE/SACA do Dash principal. Quero fazer separadamente e crie um link com tails."
+
+- O **painel principal** não tem mais a Criação de Lotes (menu, Resultados e fila).
+- A Criação de Lotes ganhou **pacotes próprios**:
+
+| Pacote | Para quê |
+|---|---|
+| `JT_DASHMASTER_V4_21_LOTES_NODE.zip` | **Node.js**, no mesmo computador do principal: pasta `C:\dashmaster-lotes`, porta **3400** (V4.21.2), link do Tailscale na porta **10000** |
+| `JT_DASHMASTER_V4_21_LOTES.zip` | Apps Script, num projeto novo (de preferência noutra conta Google) |
+
+**Três painéis no mesmo computador, cada um com o seu link:**
+
+| | Pasta | Neste computador | Link do Tailscale |
+|---|---|---|---|
+| Painel principal | `C:\dashmaster` | http://localhost:3000 | `https://NOME.xxxx.ts.net` (porta 443) |
+| Expedição Incorreta | `C:\expedicao_incorreta` | http://localhost:3300 | `https://NOME.xxxx.ts.net:8443` |
+| **Lotes/Sacas** | `C:\dashmaster-lotes` | **http://localhost:3400** | **`https://NOME.xxxx.ts.net:10000`** |
+
+O Tailscale Funnel só aceita as portas 443, 8443 e 10000: as três estão em uso.
+
+**Instalar o painel de Lotes (Node.js):**
+1. Extraia o `JT_DASHMASTER_V4_21_LOTES_NODE.zip` em `C:\`. Fica a pasta `C:\dashmaster-lotes` (não extraia por cima do
+   `C:\dashmaster`).
+2. Em `C:\dashmaster-lotes\node`, dois cliques em **iniciar.bat**. A janela preta fica aberta.
+3. Abra **http://localhost:3400/config**:
+   - cole o AuthToken do JMS;
+   - escolha a Data inicial;
+   - clique em **Baixar histórico**.
+4. Dois cliques em **iniciar-com-windows.bat**. Ele cria o atalho "JT DashMaster Lotes" e não mexe no do principal.
+5. Dois cliques em **link-publico.bat**. Ele liga o link `https://NOME.xxxx.ts.net:10000` e não mexe nos outros links.
+6. Coloque esse link em `"linkPublico"` no `C:\dashmaster-lotes\node\config.json` e escolha uma `"senha"`. Depois
+   reinicie a janela preta.
+
+**Atualizar o painel principal:**
+- **Node.js:** extraia o `JT_DASHMASTER_V4_21_NODE.zip` em `C:\` (Substituir).
+- **Apps Script:** troque os arquivos pelos do `JT_DASHMASTER_V4_21_PRINCIPAL.zip` e faça uma Nova versão.
+- **Se você colocou `PAINEIS_FORA`** nas propriedades, ela vale mais que o pacote. Troque por
+  `arrival_flow,send_flow,lot_flow`. No Node.js, na pasta `C:\dashmaster\node`:
+  `node dashmaster.js propriedade PAINEIS_FORA arrival_flow,send_flow,lot_flow`.
+- Os dados de Lotes já baixados no principal continuam lá (nada é apagado), mas não aparecem mais.
+
+**Novo no Node.js:** `node/padrao.json` (vem no ZIP de Lotes) define a porta do painel e a do link; o `config.json` de quem
+instalou vale mais. O `link-publico.bat` lê a porta do link (`portaLink`: 443, 8443 ou 10000).
+
+## V4.20 — Sacas ecológicas por destino (Criação de Lotes) e Deslacre pela Data inicial
+
+### Criação de Lotes: destinos das sacas ecológicas
+**Pedido:** tirar o gráfico com os números das sacas e mostrar os destinos que receberam a saca ecológica (vermelha com chip):
+os enviados incorretamente e os corretos, pela tabela do comunicado "Envio de sacas vermelhas com chip".
+
+- **Saiu:** o gráfico "Sacas com maior quantidade" (números das sacas). O filtro "Número dos lotes" e a tabela continuam.
+- **Novo — Sacas ecológicas enviadas incorretamente:** sacas ecológicas cujo "Destino de desembalagem" **não** está na lista
+  do comunicado (top 10).
+- **Novo — Destinos que receberam as sacas ecológicas corretamente:** sacas ecológicas para os SCs e DCs da lista (top 10).
+- **Lista autorizada** (comunicado de 24/08/2026), em `ECO_BAG_SITES_2026_08_24_` no Config.gs:
+  - **31 SCs**, por exemplo SP BRE, MG CGE, BA FEC e PR SJS;
+  - **26 DCs**, por exemplo DC MGF-PR, DC JDF-MG, DC VCP, DC CDG-RJ e DC EXT-MG.
+- Na comparação dos nomes, maiúsculas, hífens e o "-UF" do fim não contam: "DC VCP-SP" é o "DC VCP" da lista.
+- Saca sem destino não entra nos dois gráficos.
+- Vale para todo o histórico, sem baixar nada de novo (o destino já está gravado).
+- **Para mudar a lista:** edite `ECO_BAG_SITES_2026_08_24_` no Config.gs.
+
+### Deslacre (secundária e troncal): tempo até a Data inicial
+**Pedido:** medir do deslacre até o **início** do bipe de recebimento, e não mais até o último.
+- Antes: "Data final" do Bipe de descarregamento. Agora: **Data inicial**.
+- Sempre a linha "Bipe de descarregamento" do Site de carga e descarga **SP GRU**, pelo código da base e, sem ele, pelo nome.
+- Tempo de cada ID = Data inicial − horário de deslacração. Se houver mais de um descarregamento na SP GRU, vale a mediana.
+- O tempo mediano, o cartão do ID de maior tempo, os gráficos por turno e o top 10 usam o tempo novo.
+- A coluna da tabela passa a ser **"Bipe de recebimento (Data inicial)"**.
+- **Dias já baixados:** uma vez, os dias do Deslacre dos últimos 62 entram na fila de novo. Os Registros de carga e
+  descarga de cada ID são consultados de novo e o tempo é refeito pela Data inicial. Dias mais antigos que isso ficam
+  com o cálculo antigo.
+
+**Atualizar:**
+- **Apps Script:** troque todos os arquivos pelos do `JT_DASHMASTER_V4_20_PRINCIPAL.zip` e faça Implantar → Gerenciar
+  implantações → ✏️ → Nova versão. Não precisa rodar nenhuma função: a fila refaz os dias do Deslacre sozinha.
+- **Node.js:** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_20_NODE.zip` em `C:\` (Substituir) e abra o
+  atalho DashMaster.
+
+## V4.19 — Rotas de 01/11 (TO, MRB, RO e AC pelo DF BSB) e unidades novas do DC TBT-SP
+
+**Pedido:** "Alterações nas rotas, mudar os indicadores que mexem com rotas". Vieram três comunicados e a tabela "Código de
+alocação de carga das rotas tronco e de distribuição do SP GRU".
+
+**O que mudou, com a data de cada um** (os dias anteriores continuam com as rotas da época):
+
+| Desde | Mudança |
+|---|---|
+| 30/10/2026 | F SJC-SP (GRU 402-08), F UBT-SP (GRU 402-09) e F CRZ-SP (GRU 402-10) vão pelo **DC TBT-SP** |
+| 01/11/2026 | TO, MRB, RO e AC (TO PMW, PA MRB, RO PVH e DC RBR-AC) saem do **SP BRE** e vão pelo **DF BSB** |
+| 01/11/2026 | Pela tabela da mesma data: CDG (DC CDG-RJ) no **SP GRU-SJM** e JPN no **SP GRU-CGB**, fora do SP BRE |
+
+**Painéis que mudam** (tudo é calculado na leitura, sem baixar nada de novo):
+- **Envio Errado, Triagem Errada e Expedição SC → SC:** rota e doca pela próxima parada. "PA MRB" desde 01/11 → DF BSB,
+  doca 38. As unidades novas (F SJC-SP, F UBT-SP, F CRZ-SP) → DC TBT-SP.
+- **Falta de Bipagem na Expedição:** rota e doca pelo código do segmento ("TO" desde 01/11 → DF BSB). No Envio Errado
+  e aqui, a coluna **Segmento (base)** (fórmula do WPS) também segue as datas.
+- **Expedição SC → DC:** esteira pela próxima parada. Desde 01/11, TO PMW, PA MRB, RO PVH e DC RBR-AC → DF BSB, **Esteira 3**
+  (antes Esteira 2, com o SP BRE). As unidades novas → DC TBT-SP, Esteira 2.
+
+**Atenção:** a tabela ainda mostra "AC" na linha SP GRU-BRE. Segui o comunicado: as cargas de AC vão pelo DF BSB.
+(V4.21.1: a tabela atualizada confirma — AC RBR no SP GRU-BSB.)
+
+**App Expedição Incorreta (separado):** a planilha padrão de rotas (versão 1.9.2) já vem com essas mudanças. Quem já usa o app
+envia o `rotas.xlsx` novo em Configurações → "Enviar planilha de rotas", ou edita a planilha como no LEIA-ME do app.
+
+**Atualizar:**
+- **Apps Script:** troque `Config.gs` e `Core.gs` (ou todos os arquivos do `JT_DASHMASTER_V4_19_PRINCIPAL.zip`) e faça
+  Implantar → Gerenciar implantações → ✏️ → Nova versão. O painel dos fluxos (Recebimento e Expedição) não usa essas
+  tabelas e pode ficar como está.
+- **Node.js:** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_19_NODE.zip` em `C:\` (Substituir) e abra o
+  atalho DashMaster.
+
+## V4.18 — Criação de Lotes no painel principal
+
+**Pedido (arquivos "desenvolvendo dashboard de criação de lotes" e "INFORMAÇÕES PARA PUXAR DADOS SOBRE SACAS"):**
+"Colocar esse dashboard no dash principal. Seguir as instruções fornecidas."
+
+O painel **Criação de Lotes** (antes "Fluxo de Lotes", retirado na V4.7) volta ao menu do painel principal, refeito como o
+pedido. Os dados vêm da mesma tela do JMS: Dispositivo inteligente > Materiais ecológicos > Relatório de estatística >
+**Estatística de Criação Recorrente de Eco Bag**.
+- O resumo do dia é o `sdploopbagBuildbagCount`.
+- A lista do número vermelho "Total de pacotes construídos" é o `sdploopbagBuildbagDetail`, com `detailType` igual a `packageSum`.
+  A coluna **Saca** de cada linha diz se ela é ecológica ou não.
+
+**Por padrão, as duas sacas juntas.** Gráficos e cartões mostram ecológicas e não ecológicas somadas. Com o filtro
+**Tipo de sacas**, tudo passa a mostrar só a escolhida, inclusive a evolução diária e o dia anterior.
+
+**Filtros:** data · Tipo de sacas (Todos / Ecológica / Não ecológica) · Tipo de entrada e saída (Todos / Saída de porto /
+Entrada, como na tela do JMS) · Número dos lotes · Destinos (Destino de desembalagem) · Turnos (pelo Tempo de ensacamento).
+
+**Cartões:**
+- **Quantidade de sacas criadas** no dia e, embaixo, as **remessas nos lotes criados**.
+- **Quantidade gerada no dia anterior**, com as remessas.
+- **Porcentagem de criação da Saca Ecológica** (Taxa de uso de Saca Ecológica do JMS) e **da Não Ecológica** (o restante).
+- **Número de sacas ecológicas criadas** com as **remessas dentro da Saca Ecológica** embaixo.
+- **Número de sacas não ecológicas criadas** com as remessas dentro dela embaixo (o restante: total − ecológica).
+- Um cartão por turno (T1, T2, T3) com a quantidade criada.
+
+**Gráficos:**
+- Turnos;
+- Evolução diária;
+- Entrada / saída;
+- Sacas ecológicas / não ecológicas;
+- **Destinos com maior envio** (novo);
+- Sacas com maior quantidade (remessas dentro da saca).
+
+Os gráficos separados de ecológicas e de não ecológicas saíram: o filtro faz isso.
+
+**Tabela "Geral":** todas as colunas da lista do JMS:
+- Número da saca e Tipo de entrada e saída;
+- Tipo de ensacamento, Origem da criação e Chip;
+- Tipo de saca e **Quantidade de remessas na saca**;
+- Tempo de ensacamento e **Turno**;
+- Destino de desembalagem.
+
+Embaixo, a tabela "Dados gerais" mostra os números do resumo, dia a dia.
+
+**Dias já baixados antes da V4.7:** "Chegada" e "Partida" aparecem como **Entrada** e **Saída de porto**, sem baixar de novo.
+
+**Atualização e cota:** atualiza sozinho a cada 3 horas (Propriedade `LOTES_HORAS`), como antes da V4.7. O botão **Atualizar**
+consulta na hora. Na simulação da conta Gmail (painel principal, 7 dias de histórico), o uso por dia ficou em
+**10,3 min** (antes 6,6 min, de 90 min), com 535 consultas ao JMS por dia (de 20 mil). Nenhuma execução foi barrada pela cota.
+
+**Se der erro:** no editor do Apps Script, rode **`diagnosticarLotes`**. Ele compara a lista com o resumo, sem mostrar
+número de saca.
+
+**Atualizar:**
+- **Apps Script:** troque todos os arquivos pelos do `JT_DASHMASTER_V4_18_PRINCIPAL.zip` e faça Implantar → Gerenciar
+  implantações → ✏️ → Nova versão. Não precisa rodar nenhuma função nem mexer em `REATIVAR_PAINEIS`: os dias entram na fila sozinhos.
+- **Node.js:** feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_18_NODE.zip` em `C:\` (Substituir) e abra o
+  atalho DashMaster.
+
+## V4.17.1 — Link público (Tailscale): a janela não fecha mais sozinha
+
+**O que acontecia:** "o Tailscale não quer abrir o terminal, ele está fechando sozinho".
+
+**Por quê:**
+- O `tailscale.exe` (pasta `C:\Program Files\Tailscale`) é um comando, não um programa com tela. Dois cliques nele abrem
+  uma janela preta que fecha na hora. O programa Tailscale também não abre janela: ele fica num ícone perto do relógio.
+- No atalho do LEIA_NODE (`tailscale.exe funnel 3000`), qualquer erro fechava a janela antes de dar para ler.
+
+**Agora (`node\link-publico.bat`):**
+- A janela **nunca fecha sozinha**. Ela confere em 4 passos:
+  1. se o Tailscale está instalado;
+  2. em que porta o painel está e se ele está aberto;
+  3. se o Tailscale está ligado e com a conta. Se não estiver, tenta ligar e mostra o link de login;
+  4. liga o Funnel e mostra o link `https://….ts.net`.
+- Se algo faltar, ela diz o que fazer e espera uma tecla.
+- O atalho sem `.bat` do LEIA_NODE agora usa `cmd /k`, que deixa a janela aberta.
+- Nenhuma mudança nos painéis: só o `link-publico.bat` e o passo a passo (`node\LEIA_NODE.md`, seção 5).
+
+**Atualizar (Node.js):** extraia o `JT_DASHMASTER_V4_17_1_NODE.zip` em `C:\` (Substituir) e dê dois cliques em
+`C:\dashmaster\node\link-publico.bat`. O painel do Apps Script não muda.
+
+## V4.17 — Deslacre da linha troncal e da linha secundária no painel principal
+
+**Pedido (arquivos "deslacre da troncal" e "DASHBOARD DE DESLACRE"):** "No dashboard principal colocar o dash de deslacre
+troncal e secundária."
+
+O menu do painel principal ganha **dois painéis**, um embaixo do outro:
+- **Deslacre (linha secundária)**: o painel da V4.4, que estava retirado desde a V4.12.3, de volta. Os dias já baixados continuam lá.
+- **Deslacre (linha troncal)**: novo, com as mesmas contas, cartões, gráficos, filtros e tabela.
+
+**De onde vêm os dados da troncal:**
+- **Lista de IDs (DBGX…):** Transporte > Análise de dados > Dados de monitoramento > **Consulta de Viagens**
+  (`tmsShipment/page`), com os filtros da captura:
+  - PDD de chegada = **SP GRU (30001)**;
+  - Status = **Concluído**.
+
+  A consulta pega 2 dias antes e 1 depois, porque viagem longa sai antes e às vezes chega adiantada. O dia de cada ID sai do horário do deslacre.
+- **Bipe de deslacre:** coluna **"Horário de deslacração do veículo"** (`actualUnlockTime`). Vazia = **ID sem bipe de deslacre**.
+- **Bipe de recebimento:** nos **Registros de carga e descarga** do ID (`trackingDeatil/loading/scan/list`), a **"Data final"**
+  do Bipe de descarregamento **na SP GRU**. Não contam o carregamento na origem (tipo 1) nem uma descarga em outra base no caminho.
+- **Tempo de cada ID:** Data final − horário do deslacre, em minutos (com mais de um descarregamento, vale a **mediana**).
+- **Dia e turno:** pelo horário do deslacre. O ID sem deslacre usa a chegada do veículo, que é o turno que deveria ter dado o bipe.
+
+**O que o painel mostra (troncal e secundária, como os PDFs pedem):**
+- **Cartões:**
+  - IDs sem bipe de deslacre;
+  - tempo mediano do deslacre até o bipe de recebimento;
+  - ID com o maior tempo mediano;
+  - IDs de viagem;
+  - um cartão por turno (T1, T2, T3) com os IDs sem deslacre, o tempo mediano e o **ID de maior mediana** do turno.
+- **Gráficos:**
+  - turnos com maior falta de bipe de deslacre;
+  - evolução por dia;
+  - tempo mediano por turno;
+  - os 10 IDs que mais demoraram;
+  - PDD de saída que mais mandou;
+  - PDD de saída dos IDs sem deslacre.
+- **Filtros:** Número do ID · Nome da viagem · PDD de saída · Turno.
+- **Tabela "Informações gerais":** uma linha por ID, com o **tempo mediano de cada ID**.
+- Os dois também aparecem nos **Resultados** e no relatório PDF/Excel.
+
+**Atualização e cota:**
+- Os dois atualizam sozinhos junto com os outros painéis (às 6h e às 8h). O botão **Atualizar** consulta na hora.
+- Os Registros de carga e descarga só são consultados de novo para IDs novos ou ainda descarregando.
+- Os dois painéis entram sozinhos na fila. Não precisa mexer em `REATIVAR_PAINEIS`. Quem tinha `unseal` nela pode apagar ou deixar.
+- O painel dos fluxos (Recebimento e Expedição) não muda.
+
+| Simulação da conta Gmail (painel principal, 7 dias de histórico) | Sem os Deslacres | Com os dois |
+|---|---|---|
+| Uso por dia, depois do histórico | 5,5 min | **6,6 min** (de 90) |
+| Consultas ao JMS por dia | 401 | **464** (de 20 mil) |
+| Dia do histórico | 34,0 min | 36,1 min |
+| Execuções barradas pela cota | 0 | **0** |
+
+**Se der erro:** no editor do Apps Script, rode **`diagnosticarDeslacreTroncal`** (troncal) ou **`diagnosticarDeslacre`**
+(secundária). Cada um testa a lista e os registros de até 5 IDs, sem mostrar placa, motorista nem o número do ID.
+
+Os cabeçalhos de rota da Consulta de Viagens não aparecem na captura. O painel tenta primeiro sem eles e, se o JMS recusar,
+testa sozinho o nome da tela (`monitoringSearch`). Para forçar um valor, use as Propriedades do script
+`JMS_ROUTENAME_UNSEAL_TRUNK` / `JMS_ROUTENAMELIST_UNSEAL_TRUNK`.
+
+**Não foi possível conferir no JMS real:** se a Consulta de Viagens aceita 100 IDs por página (a tela pede 20). Se mandar
+menos, o painel pede as outras páginas com o mesmo tamanho e nenhum ID fica de fora.
+
+**Atualizar:**
+- **Apps Script:** troque todos os arquivos pelos do ZIP `JT_DASHMASTER_V4_17_PRINCIPAL.zip` e faça Implantar → Gerenciar
+  implantações → ✏️ → Nova versão. Não precisa rodar nenhuma função: os dias dos dois painéis entram na fila sozinhos.
+- **Node.js:** feche a janela preta do painel, extraia o ZIP `JT_DASHMASTER_V4_17_NODE.zip` em `C:\` (Substituir) e abra o
+  atalho DashMaster.
+
+## V4.16 — Expedição SC → DC: rotas pela próxima parada e esteiras
+
+**Pedido (arquivo "ALTERAÇÕES"):** no painel **Expedição SC → DC**, o gráfico "Rotas com mais ofensores" pela coluna
+**Próxima parada** e as rotas pelas tabelas de 24/10, chamando de **"Esteira (número)"** no lugar da doca.
+
+- O gráfico **Rotas com mais ofensores (próxima parada)** conta as remessas pela próxima parada (antes: rota do veículo de chegada).
+- Gráfico novo **Esteiras com mais ofensores**, filtros **Próxima parada** e **Esteira** e as colunas **Próxima parada** e
+  **Esteira** na tabela (e no relatório).
+- Esteira = linha de desvio do DWS das tabelas de 24/10: troncal (esteiras 7, 4, 2 e 3) e Last Mile (esteiras 6 e 5). As duas
+  tabelas repetem os números de doca, por isso o painel mostra a esteira. Ex.: S-MGUE-SP → Esteira 6; DC S-MOO 02-SP →
+  Esteira 5; RJ SJM → Esteira 7; DC TBT-SP → Esteira 2. Próxima parada fora das tabelas = SEM ESTEIRA.
+- Vale para todo o histórico do SC → DC, sem baixar nada de novo (a próxima parada já está gravada). Tabela em
+  `ESTEIRA_TABLE_2026_10_24_` no Config.gs.
+- Os outros painéis (Envio Errado, SC → SC, Falta de Bipagem na Expedição) continuam com as docas da tabela de 11/10.
+
+**Atualizar:** Node.js — feche a janela preta do painel, extraia o ZIP `JT_DASHMASTER_V4_16_NODE.zip` em `C:\` (Substituir) e
+abra o atalho DashMaster. Apps Script — troque `Config.gs` e `Core.gs` (ou todos os arquivos) e faça Implantar → Gerenciar
+implantações → ✏️ → Nova versão.
+
+## V4.15.2 — Versão Node.js sem Recebimento e Expedição
+
+**Pedido:** tirar os painéis **Recebimento: fluxo operacional** e **Expedição: fluxo operacional** do painel no Node.js.
+
+- O ZIP `JT_DASHMASTER_V4_15_2_NODE.zip` já vem sem os dois (como o painel principal do Google): não aparecem no menu nem
+  nos Resultados e não entram na fila do JMS. Os outros painéis não mudam.
+- Os dias já baixados deles ficam guardados em `node\dados` (nada é apagado).
+- Para trazer de volta: Configurações (`http://localhost:3000/config`) → Propriedades → `PAINEIS_FORA` = `nenhum`.
+- Instalar: feche a janela preta do painel, extraia o ZIP em `C:\` (Substituir) e abra o atalho DashMaster.
+- Apps Script: nada muda (o pacote principal já era sem os fluxos).
+
+## V4.15.1 — Cota do Google em português: sem o aviso vermelho de "Falha de rede"
+
+**O que aparecia:** "Erro de sincronização: Falha de rede ao consultar o JMS: Serviço chamado muitas vezes no mesmo dia: urlfetch."
+
+**Causa:** a cota diária de consultas externas do Google (UrlFetch) acabou. O painel já sabia tratar a cota (pausa e aviso no topo),
+mas só reconhecia a mensagem em inglês ("Service invoked too many times"). Com a conta Google em português, a cota virava
+"falha de rede": sem pausa, a fila tentava de novo a cada hora e o painel mostrava o erro vermelho.
+
+**Agora:**
+- A mensagem em português (e em espanhol) é reconhecida como cota: a fila pausa, o dia não ganha erro e o aviso do topo diz
+  que a cota acabou e que volta sozinho no dia seguinte. Erros antigos gravados com essa mensagem também somem.
+- Quando o Google recusa por cota, o contador de hoje vai para o limite e a fila espera o dia seguinte (antes, tentava de novo).
+
+**Por que a cota acaba:** ela é da **conta Google** (20 mil consultas por dia no Gmail, 100 mil no Workspace) e soma **todos os
+projetos do Apps Script dessa conta**: o painel principal, o projeto dos fluxos (se estiver na mesma conta), a Pesquisa no
+Rastreamento e o JMS Segmentos. O painel conta só as consultas dele (`diagnosticoCompleto` mostra quantas). Para não faltar:
+deixe a Pesquisa e o JMS Segmentos (que consultam milhares de remessas) em **outra conta Google**. Se a conta for Gmail, não use
+`COTA_GOOGLE = workspace` nas Propriedades do script.
+
+**Atualizar:** troque `Config.gs`, `Utils.gs` e `JmsApi.gs` (ou todos os arquivos) e faça Implantar → Gerenciar implantações →
+✏️ → Nova versão.
+
+## Painel no Netlify — sem instalar nada no computador (a partir da V4.15)
+
+Para quem não pode instalar programas (notebook da empresa travado): a **tela** do painel fica num site grátis do Netlify e
+os **dados** continuam vindo deste projeto do Apps Script (a busca do JMS e os gatilhos não mudam). Tudo pelo navegador.
+
+1. Neste projeto do Apps Script: **Arquivo +** → **Script** → nome **Api** → cole o arquivo **`Api.gs`** → Salvar.
+2. **Configurações do projeto → Propriedades do script:** crie **`SENHA_PAINEL`** com a senha da equipe (recomendado; sem ela,
+   quem tiver o link abre o painel).
+3. **Implantar → Gerenciar implantações → ✏️ → Versão: Nova versão → Quem pode acessar: Qualquer pessoa → Implantar.**
+   Copie a URL do App da Web (termina em `/exec`).
+4. No ZIP **`JT_DASHMASTER_V4_15_NETLIFY.zip`**, pasta `dashmaster-netlify`: abra **`link-apps-script.txt`** no Bloco de Notas,
+   cole a URL depois de `principal =` e salve.
+5. Crie uma conta grátis em **app.netlify.com**, abra **app.netlify.com/drop** e arraste a pasta `dashmaster-netlify`.
+   O link `https://….netlify.app` é o painel (pede a senha uma vez em cada navegador).
+
+Como funciona: a página (`index.html`) é o mesmo Index/Client/Styles/Mascot, já montado. O `google.script.run` virou um pedido ao
+link `/exec` (`doPost` do `Api.gs`), que só responde as funções que a página usa e confere a `SENHA_PAINEL`. O projeto dos fluxos
+(Recebimento e Expedição em outro Apps Script): repita 1 a 3 nele, cole o link em `fluxos =` e abra `/fluxos.html`.
+Gerar a pasta de novo: `node tools/gerar_paineis.js`. Testes: `node tests/test_netlify.js`.
 
 ## V4.15 — Todos os IDs de viagem localizados; "NÃO TEM ID" só para quem realmente não tem
 **Pedido:** o painel não puxava todos os IDs de viagem. Gráficos e filtros mostravam "Sem informação" no lugar dos IDs. Puxar e localizar todos os IDs, e colocar **NÃO TEM ID** só nas remessas que realmente não têm.
@@ -199,6 +1380,7 @@ Para mudar os horários da tarde: Propriedade do script **`HORAS_ATUALIZACAO_SC`
 - O painel **Deslacre (linha secundária)** saiu do menu, dos Resultados e da fila (não gasta cota). Foi feito como o Fluxo de Lotes na V4.7.
 - Os dados antigos continuam na planilha.
 - Para trazer de volta: Propriedade do script **`REATIVAR_PAINEIS`** = `unseal` (com o Fluxo de Lotes também: `lot_flow,unseal`).
+- **V4.17:** o Deslacre voltou ao painel principal, junto com o da linha troncal (sem precisar de `REATIVAR_PAINEIS`).
 
 ### Como instalar
 - **Google:** troque os `.gs` e `.html` pelos do ZIP V4.12.3 e publique uma **Nova versão**. Não precisa rodar nenhuma função.
@@ -518,6 +1700,7 @@ Os dias anteriores continuam com a tabela antiga.
 - Sai do menu, dos Resultados, da agenda e da fila. Não consulta mais o JMS nem gasta cota.
 - Os dados antigos continuam na planilha.
 - **Para trazer de volta:** Propriedade do script `REATIVAR_PAINEIS` = `lot_flow`.
+- **V4.18:** de volta no painel principal, como **Criação de Lotes** (sem precisar de `REATIVAR_PAINEIS`).
 - **Simulação da conta Gmail, painel principal:** **5,2 min por dia** (V4.6: 9 min) e 240 consultas por dia, de 20 mil. Das 9h às 23h, só a foto da Sem Movimentação a cada 2 h.
 
 ### Botão Atualizar: todos os indicadores de uma vez
@@ -1322,6 +2505,8 @@ Mostra as **sacas criadas no dia**, ecológicas e normais, com as porcentagens d
 |---|---|
 | `JMS_ROUTENAME_LOTS` / `JMS_ROUTENAMELIST_LOTS` | Cabeçalhos de rota da tela (padrão: nenhum; a captura não mostra) |
 | `JMS_ROUTENAME_NOMOVE` / `JMS_ROUTENAMELIST_NOMOVE` | Sem Movimentação (V3.28): cabeçalhos de rota da tela (padrão: `TrackRealTimeMonitoringNew`; a captura não mostra) |
+| `JMS_ROUTENAME_UNSEAL` / `JMS_ROUTENAMELIST_UNSEAL` | Deslacre da linha secundária (V4.4): cabeçalhos de rota (padrão: nenhum) |
+| `JMS_ROUTENAME_UNSEAL_TRUNK` / `JMS_ROUTENAMELIST_UNSEAL_TRUNK` | Deslacre da linha troncal (V4.17): cabeçalhos de rota (padrão: nenhum; se o JMS recusar, `monitoringSearch`) |
 
 **Não foi possível conferir no JMS real (rode `diagnosticarLotes()` depois de instalar):**
 - o **Routename** da tela (não aparece na captura). Se o JMS recusar, o painel testa as variantes sozinho;
@@ -2096,7 +3281,7 @@ O diagnóstico completo, com evidências e números de antes e depois, está em 
 | `DETAIL_REFRESH_HOURS` | Intervalo mínimo para rebaixar o detalhe de hoje/ontem (padrão `3`). |
 | `ATUALIZACAO_MIN` | (V3.24) Minutos entre as atualizações do resumo de hoje (padrão: Workspace `15`, Gmail `30`; `60` = só de hora em hora). |
 | `JMS_PARALELO_RESUMO` | (V3.24) Resumos pedidos ao JMS por rajada (padrão `6`, máximo `10`). |
-| `DASHBOARD_MAX_ROWS` | Remessas por consulta no painel (padrão `150000`). Diminua se computadores fracos ficarem lentos. |
+| `DASHBOARD_MAX_ROWS` | Remessas por consulta no painel (padrão `150000` no Apps Script e `500000` no Node.js, até 1 milhão). Diminua se computadores fracos ficarem lentos. |
 
 ## O que mudou na V3 (histórico)
 

@@ -8,14 +8,16 @@
 #   1. fuso horário de São Paulo;
 #   2. Node.js 22 (NodeSource), se não houver um 22.13+;
 #   3. config.json com o painel só no próprio servidor (o link para a equipe passa pelo Tailscale: link-publico.sh);
-#   4. serviço do sistema "dashmaster" (liga sozinho com o servidor e reinicia se parar);
+#   4. serviço do sistema com o nome da pasta do painel — "dashmaster" (principal), "dashmaster-lotes" (Lotes) — que liga
+#      sozinho com o servidor e reinicia se parar. V4.24.1: vários painéis no mesmo servidor, cada um na sua porta;
 #   5. AuthToken do JMS, data inicial, modo de atualização e o histórico na fila (só o que ainda faltar).
 set -euo pipefail
 cd "$(dirname "$0")"
 NODE_DIR="$(pwd)"
 APP_DIR="$(dirname "$NODE_DIR")"
 USER_NAME="$(id -un)"
-SERVICE=dashmaster
+# V4.24.1: um serviço por painel, com o nome da pasta (dashmaster, dashmaster-lotes…): o 2º painel não apaga o 1º.
+SERVICE="$(basename "$APP_DIR" | tr -c 'A-Za-z0-9_.\n-' '-')"
 
 say() { printf '\n\033[1;31m==> %s\033[0m\n' "$*"; }
 ask() { local q="$1" def="${2:-}" a; read -r -p "$q" a </dev/tty || true; printf '%s' "${a:-$def}"; }
@@ -41,9 +43,10 @@ echo "Node.js $(node -v)"
 say "3/5 Configuração (config.json)"
 if [ ! -f config.json ]; then
   # Só no próprio servidor (127.0.0.1): ninguém acessa pela internet direto. A equipe usa o link https do Tailscale
-  # (link-publico.sh); a tela Configurações abre pelo túnel SSH (passo a passo, seção 6).
-  node -e "const {DEFAULTS}=require('./lib/config');require('fs').writeFileSync('config.json',JSON.stringify(Object.assign({},DEFAULTS,{host:'127.0.0.1'}),null,2)+'\n')"
-  echo "config.json criado (painel em 127.0.0.1:3000)."
+  # (link-publico.sh); a tela Configurações abre pelo túnel SSH (passo a passo, seção 7).
+  # V4.24.1: com os padrões do pacote (padrao.json: Lotes na porta 3400 e link na 10000), não os do principal.
+  node -e "const {DEFAULTS,packageDefaults}=require('./lib/config');require('fs').writeFileSync('config.json',JSON.stringify(Object.assign({},DEFAULTS,packageDefaults(),{host:'127.0.0.1'}),null,2)+'\n')"
+  echo "config.json criado (painel em 127.0.0.1:$(node -p "require('./lib/config').loadConfig().porta"))."
 else
   echo "config.json já existe: mantido."
 fi
@@ -52,7 +55,7 @@ PORT="$(node -p "require('./lib/config').loadConfig().porta")"
 say "4/5 Serviço do sistema ($SERVICE)"
 sudo tee /etc/systemd/system/$SERVICE.service >/dev/null <<EOF
 [Unit]
-Description=J&T DashMaster (Node.js)
+Description=J&T DashMaster (Node.js) - $SERVICE
 After=network-online.target
 Wants=network-online.target
 

@@ -39,9 +39,10 @@ O único limite que sobra é o do próprio JMS (100 linhas por página).
 ### Sem permissão de administrador (computador da empresa)
 Se o Windows bloquear o instalador do Node.js ou os arquivos `.bat`:
 1. **Node.js sem instalar:** em https://nodejs.org/dist/latest-v22.x/ baixe o arquivo que termina em `-win-x64.zip`. Abra o ZIP, copie só o **`node.exe`** e cole na pasta `node` do painel.
-2. **Atalho no lugar do `iniciar.bat`:** na Área de Trabalho, botão direito → **Novo → Atalho** → cole `"C:\dashmaster\node\node.exe" "C:\dashmaster\node\server.js"` (troque pelo caminho da sua pasta) → nome **DashMaster**. Dois cliques abrem a janela do servidor.
+2. **Atalho no lugar do `iniciar.bat`:** na Área de Trabalho, botão direito → **Novo → Atalho** → cole `"C:\dashmaster\node\node.exe" "C:\dashmaster\node\server.js"` (troque pelo caminho da sua pasta) → nome **DashMaster**. Dois cliques abrem a janela do servidor. Se der erro ao abrir, a janela não fecha: mostra o motivo (linha `[erro]`) e "O painel NÃO está no ar"; feche no X depois de ler.
 3. **Aviso do Firewall pedindo administrador:** clique em **Cancelar**. O painel funciona neste computador e pelo link público; só não abre pelo IP para outros computadores da rede.
 4. **Abrir sozinho:** **Windows + R** → `shell:startup` → cole o atalho nessa pasta.
+5. **"O Controle de Aplicativo Inteligente bloqueou um arquivo que pode não ser seguro":** o Windows marcou os arquivos como vindos da internet. Botão direito → **Propriedades** → marque **Desbloquear** → OK: no ZIP do painel (antes de extrair; se já extraiu, extraia de novo por cima), no `node.exe` e no atalho (ou crie o atalho de novo). Não desligue o Controle de Aplicativo Inteligente: desligado, ele só volta reinstalando o Windows.
 
 ### Abrir sozinho quando o Windows ligar
 
@@ -57,6 +58,8 @@ Para rodar mesmo **sem ninguém entrar no Windows**, use o **Agendador de Tarefa
 
 ## 3. Uso no dia a dia
 
+**Painéis (V4.26):** Recebimento e Expedição (fluxo operacional) saíram do código. A **Criação de Lotes** fica no painel de Lotes (pasta C:\dashmaster-lotes, porta 3400), nunca no principal. Na fila, a Sem Movimentação roda por último.
+
 | O que fazer | Onde |
 |---|---|
 | **AuthToken venceu** (o painel avisa que o JMS não aceita o token) | Gere um novo no JMS → **Configurações → AuthToken do JMS** → Salvar. A fila recomeça sozinha. |
@@ -66,6 +69,12 @@ Para rodar mesmo **sem ninguém entrar no Windows**, use o **Agendador de Tarefa
 | Relatório PDF / Excel | Botão **Baixar relatório** do painel, como antes |
 
 A tela Configurações **só abre no próprio computador do servidor** (http://localhost:3000/config). Para abrir de outro lugar, defina `senhaConfig` no `config.json` (veja a seção 4).
+
+**Trocar o AuthToken pelo link (V4.29):** o link do painel com **`/token`** no fim (ex.: `https://nome-do-computador.xxxx.ts.net/token`)
+abre uma página só para trocar o AuthToken do JMS quando ele vencer. Qualquer pessoa da equipe com o link usa, sem entrar no
+computador do servidor. O painel **testa o AuthToken no JMS antes de salvar**: token errado ou vencido é recusado e nada muda.
+A página não mostra o token salvo nem mexe em mais nada. Se o painel tem `senha`, ela pede a mesma senha do painel.
+Para desligar: `"trocaTokenPeloLink": false` no `config.json`.
 
 Os mesmos comandos também funcionam sem navegador. Abra o Prompt na pasta `node` e use:
 
@@ -86,11 +95,13 @@ O arquivo é criado na primeira vez que o servidor abre. Edite-o com o Bloco de 
 | `host` | `0.0.0.0` | `0.0.0.0` aceita acesso pela rede; `127.0.0.1` só deste computador |
 | `senha` | vazio | Senha para abrir o painel. Vazio = qualquer um com o link abre (como o link do Google) |
 | `senhaConfig` | vazio | Senha da tela Configurações. Vazio = ela só abre neste computador |
+| `trocaTokenPeloLink` | `true` | Página `/token` pelo link (trocar o AuthToken; só salva o que o JMS aceitar). `false` desliga |
 | `pastaDados` | `./dados` | Onde ficam o banco e os arquivos baixados |
 | `filaCadaSegundos` | `60` | De quanto em quanto tempo a fila do JMS roda |
 | `trabalhadores` | `3` | Quantas consultas do painel rodam ao mesmo tempo |
 | `navegadorPdf` | vazio | Caminho do Edge/Chrome para o PDF. Vazio = procura sozinho |
 | `linkPublico` | vazio | O link público do painel (seção 5), para aparecer na janela e em Configurações |
+| `linkNetlify` | vazio | O link do Netlify que repassa para o link público (seção 5.1). Sem ele, as chamadas que chegam pelo Netlify são recusadas |
 
 Para abrir o painel de fora da base, veja a seção 5 (link público).
 
@@ -104,8 +115,14 @@ Sozinho, o servidor só abre na rede da base. Para ter um **link `https://` que 
 
 1. Instale o Tailscale neste computador: https://tailscale.com/download/windows.
 2. Entre com uma conta Google, Microsoft ou e-mail.
-3. Dê dois cliques em **`link-publico.bat`** (pasta `node`).
-   - Na primeira vez, ele mostra um link para **autorizar o Funnel** na sua conta. Abra o link, autorize e rode o `link-publico.bat` de novo.
+   - **O Tailscale não abre janela nem terminal.** Ele fica num **ícone perto do relógio** (clique na setinha **^** ao lado
+     do relógio). É por esse ícone que se entra na conta (**Log in**).
+   - Dar dois cliques no `tailscale.exe` (pasta `C:\Program Files\Tailscale`) abre uma janela preta que **fecha sozinha
+     na hora**. Isso é normal: ele é um comando, não um programa com tela. Use o `link-publico.bat`.
+3. Dê dois cliques em **`link-publico.bat`** (pasta `node`, ex.: `C:\dashmaster\node`).
+   - A janela **não fecha sozinha** (V4.17.1). Ela confere, em 4 passos, se o Tailscale está instalado, se o painel está
+     aberto, se o Tailscale está ligado com a conta e liga o Funnel. Se algo faltar, ela diz o que fazer e espera uma tecla.
+   - Na primeira vez, ele mostra um link para **autorizar o Funnel** na sua conta. Abra o link, clique em **Enable** e espere na janela.
    - Se pedir permissão, clique com o botão direito no arquivo → **Executar como administrador**.
 4. O `link-publico.bat` mostra o endereço, algo como **`https://nome-do-computador.nome-da-conta.ts.net`**. Esse é o link público do painel.
 5. No `config.json`, coloque esse endereço em `"linkPublico"` e escolha uma **`"senha"`**. Depois reinicie o servidor.
@@ -114,7 +131,26 @@ Sozinho, o servidor só abre na rede da base. Para ter um **link `https://` que 
 
 Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.exe" funnel reset`.
 
-**Sem o `link-publico.bat`** (arquivos `.bat` bloqueados): crie um atalho com `"C:\Program Files\Tailscale\tailscale.exe" funnel 3000` e dê dois cliques. A janela mostra o link `https://….ts.net` e precisa ficar aberta (coloque o atalho também em `shell:startup`). Na primeira vez, ela mostra um endereço para ativar o Funnel na sua conta do Tailscale.
+**Painel de Lotes/Sacas separado (V4.21):** o ZIP `JT_DASHMASTER_..._LOTES_NODE.zip` instala outro painel em
+`C:\dashmaster-lotes` (porta 3400). O `link-publico.bat` dele liga o link na porta **10000**
+(`https://NOME.xxxx.ts.net:10000`; V4.22.5 — entre a V4.21.5 e a V4.22.4 era `/lotes`), sem mexer no link do painel principal.
+Passo a passo no `LEIA_LOTES.md` do ZIP. Em qualquer pacote, `"caminho"` no `config.json` põe o painel num caminho do link.
+
+**Produção do Sorter separada (V4.22):** o ZIP `JT_DASHMASTER_..._SORTER_NODE.zip` instala outro painel em `C:\dashmaster-sorter`
+(porta 3500, link `https://NOME.xxxx.ts.net:8443`). Ele lê o monitor do sorter da base (http://10.1.166.9) e salva cada dia,
+sem JMS (`"semJms": true` no `padrao.json`). O computador precisa estar na rede da base. Passo a passo no `LEIA_SORTER.md` do ZIP.
+
+**Sem o `link-publico.bat`** (arquivos `.bat` bloqueados): crie um atalho (botão direito na Área de Trabalho → Novo → Atalho) com
+`C:\Windows\System32\cmd.exe /k ""C:\Program Files\Tailscale\tailscale.exe" funnel --bg 3000"` e dê dois cliques.
+O `cmd /k` deixa a janela aberta depois do comando, para dar para ler o link `https://….ts.net` ou o erro (sem ele, a janela
+fecha sozinha). Na primeira vez, ela mostra um endereço para ativar o Funnel na sua conta do Tailscale.
+
+**A janela do Tailscale fecha sozinha / não abre:**
+- Abriu o `tailscale.exe` direto (ou um atalho para ele)? Ele fecha na hora; é normal. Use o `link-publico.bat` (ou o atalho
+  com `cmd /k` acima). Atalho na Área de Trabalho: botão direito no `link-publico.bat` → Enviar para → Área de trabalho.
+- O programa Tailscale (Menu Iniciar) não abre janela: procure o ícone perto do relógio (setinha **^**).
+- O `link-publico.bat` de uma versão antiga fechou? Use o da V4.17.1 ou mais nova: ele não fecha. Se aparecer um erro, tire um
+  print da janela e mande.
 
 **Segurança:**
 - A tela **Configurações nunca abre pelo link público**, mesmo sem `senhaConfig`. O servidor reconhece pedidos vindos de túnel, e a tela só abre no próprio computador (ou com `senhaConfig`).
@@ -125,6 +161,26 @@ Para tirar o link do ar, rode no Prompt: `"C:\Program Files\Tailscale\tailscale.
 - **Cloudflare Tunnel:** link fixo, mas precisa de conta e de um domínio próprio. Sem domínio, o link `trycloudflare.com` muda toda vez que reinicia e serve só para teste.
 - **Servidor na nuvem, grátis (Oracle Cloud "Always Free"):** passo a passo em **`ORACLE_CLOUD.md`**, com o instalador `instalar-oracle.sh` (Ubuntu) e o `link-publico.sh` (Tailscale Funnel no Linux).
 
+
+### 5.1 Link no Netlify (grátis)
+
+O Netlify não roda o painel: ele só dá um endereço `https://….netlify.app` que **repassa** para o link do Tailscale. O painel
+continua no seu computador (que precisa ficar ligado).
+
+1. Faça a seção 5 e coloque o link do Tailscale em `"linkPublico"` no `config.json`. Abra o painel de novo.
+   - A janela preta mostra: **"Link no Netlify (grátis): arraste a pasta …\node\link-netlify …"**. O servidor cria essa pasta sozinho.
+2. Abra https://app.netlify.com e crie uma conta grátis (Google, GitHub ou e-mail).
+3. Abra https://app.netlify.com/drop e **arraste a pasta `link-netlify`** para a página. Espere aparecer o link `https://….netlify.app`.
+4. Para trocar o nome do link: no projeto do Netlify, **Project configuration → Change project name** (ex.: `jt-dashmaster-gru`).
+5. No `config.json`, coloque o link em `"linkNetlify"` (ex.: `"https://jt-dashmaster-gru.netlify.app"`) e abra o painel de novo.
+6. Teste no celular com 4G: o link do Netlify abre o painel e pede a senha.
+
+Se o link do Tailscale mudar, abra o painel de novo (a pasta é refeita) e, no projeto do Netlify, em **Deploys**, arraste a
+pasta `link-netlify` outra vez.
+
+**Como funciona:** o arquivo `_redirects` da pasta manda o Netlify repassar tudo para o link do Tailscale. O Netlify corta
+respostas que demoram mais de ~30 s; por isso, quando uma chamada da página (como **Atualizar**) passa de 20 s, o servidor
+responde "ainda processando" e a página pergunta de novo até ter o resultado. Computador desligado: o link do Netlify mostra erro.
 
 ## 6. Atualizar para uma versão nova do painel
 
@@ -147,11 +203,12 @@ Se você trocar só os `.gs`/`.html`, o servidor recarrega sozinho em poucos seg
 
 | Mensagem | O que fazer |
 |---|---|
+| Navegador: "Não é possível acessar esse site" / `ERR_CONNECTION_REFUSED` em `localhost:3000` | O servidor não está aberto. Abra o atalho **DashMaster** (ou o `iniciar.bat`) e deixe a janela preta aberta, com "no ar". Se ela mostrar "O painel NÃO está no ar", o motivo está na linha `[erro]` logo acima |
 | "precisa do Node.js 22.13 ou mais novo" | Instale a versão LTS de https://nodejs.org |
 | "A porta 3000 já está em uso" | O servidor já está aberto em outra janela. Feche-a ou troque `porta` no `config.json` |
 | Outro computador não abre o painel | Firewall do Windows: permita o Node.js em redes privadas. Confira o IP na janela preta |
 | "Sessão do JMS expirada…" | Novo AuthToken em Configurações |
-| "Falha de rede ao consultar o JMS" (e o JMS abre no navegador) | A empresa usa proxy: no `iniciar.bat`, tire o `rem` das linhas `set HTTPS_PROXY=…` e `set NODE_USE_ENV_PROXY=1` e coloque o endereço do proxy |
+| "Falha de rede ao consultar o JMS" (e o JMS abre no navegador) | A empresa usa proxy: no `iniciar.bat`, tire o `rem` das linhas `set HTTPS_PROXY=…` e `set NODE_USE_ENV_PROXY=1` e coloque o endereço do proxy. Com o atalho (sem `.bat`): menu Iniciar → **Editar as variáveis de ambiente para sua conta** (sem administrador) → crie `HTTPS_PROXY` e `NODE_USE_ENV_PROXY` = `1` e abra o atalho de novo |
 | PDF não sai | Use o Excel ou informe `navegadorPdf` com o caminho do `msedge.exe` |
 
 Se a página ficar em branco, abra a janela preta: o erro aparece lá e também em `node/dados/servidor.log`.

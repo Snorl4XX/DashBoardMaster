@@ -1,0 +1,136 @@
+J&T · CONTROLE DE PÁTIO | SP GRU — Node.js (Portaria, Fila FIFO, Docas e Expedição do Feishu)
+=============================================================================================
+
+Novidades da 2.4 (T3 da Portaria)
+---------------------------------
+- Portaria e Fila FIFO: o T3 de um dia agora é a NOITE ANTERIOR — das 22h do dia anterior até 05h59 do dia escolhido
+  (ex.: T3 de 17/11 = 16/11 22h até 17/11 06h). Antes o T3 do dia era a noite seguinte, e durante o dia o T3 de hoje
+  aparecia zerado em "Veículos docados por turno" e em "Veículos por horário de docagem".
+- O dia vai das 22h do dia anterior às 21h59: docagem às 22h ou 23h já conta no dia seguinte. A partir das 22h o painel abre
+  no dia seguinte (o T3 que começou); escolha a data para ver outro dia.
+- Vale para turnos, horários, eficiência por doca, carretas, lista "docagens do dia" e descargas concluídas da FIFO.
+  A Expedição (Hoje/Amanhã pela saída da viagem) não mudou.
+
+Novidades da 2.3 (dados que não apareciam)
+-------------------------------------------
+- "Veículos descarregados no dia", tempo em doca e conclusões: a tabela PATIO_VEICULO não tem campo de fim da descarga
+  (FIM_DESCARGA/FIM_OPERACAO). Agora, sem ele, a descarga conta como concluída pelo CHECK_OUT do veículo que foi docado
+  (CHECK_OUT depois da HORA_DOCAGEM, como o LIBERADO da tabela). Veículo sem docagem ou cancelado não conta.
+- Docagens por turno e por hora, eficiência por doca, carretas e a Fila FIFO só contavam FLUXO = "RECEBIMENTO" exato.
+  Agora aceitam variações (RECEBIMENTO, DESCARGA…) e, se a tabela não tiver o campo FLUXO, contam todos os veículos.
+- Diagnóstico pelo link: abra o endereço do painel com /diagnostico no fim (no Painel Operacional:
+  https://NOME.ts.net/patio/diagnostico). Mostra os campos de cada tabela, quantos têm valor e os valores de status,
+  fluxo e tipo — sem placas nem nomes. Se alguma parte continuar sem dados, mande um print dessa página.
+
+O que é
+-------
+O painel de Portaria, Fila FIFO, Controle de Docas e Expedição, em Node.js. NÃO usa o Google Apps Script:
+  - o servidor (Node.js) lê o Feishu direto, SOMENTE LEITURA (nada é alterado no Feishu);
+  - roda num servidor da Oracle ligado 24 h (Linux) ou no seu computador com Windows;
+  - a equipe abre pelo link do Tailscale (Oracle: https://dashmaster.xxxx.ts.net:10000 · Windows:
+    https://NOTEBOOK.xxxx.ts.net/patio), com senha se você quiser;
+  - com várias pessoas abertas, cada tabela é consultada no Feishu no máximo 1 vez a cada 30 s (o painel se atualiza
+    sozinho a cada 1 min);
+  - os dados de acesso ao Feishu ficam no arquivo dados/feishu.json da pasta do painel (no servidor, só o seu usuário
+    lê). O App Secret nunca aparece na tela, no registro nem no link.
+
+Os 6 dados do Feishu (o instalador pede um por um)
+--------------------------------------------------
+  FEISHU_APP_ID e FEISHU_APP_SECRET
+      open.feishu.cn/app (entre com a conta do Feishu) > clique no app que lê a base > "Credenciais e informações
+      básicas" (凭证与基础信息). Copie o App ID e o App Secret (clique no olho para ver o Secret).
+  FEISHU_APP_TOKEN
+      Abra a base (Bitable) no navegador. O endereço fica assim:
+        https://xxxx.feishu.cn/base/AQUI_O_APP_TOKEN?table=tblXXXXXXXX&view=vewXXXXXXXX
+      O FEISHU_APP_TOKEN é o pedaço depois de /base/ e antes do "?".
+  FEISHU_TABLE_PATIO, FEISHU_TABLE_DOCAS e FEISHU_TABLE_EXPEDICAO
+      Clique em cada tabela da base (PATIO_VEICULO, CONTROLE_DOCAS e PROGRAMACAO_EXPEDICAO) e copie o que vem depois de
+      "table=" no endereço (começa com tbl), até o "&".
+  O app precisa ter permissão de leitura na base (se já funcionava antes, já tem).
+  O endereço da base começa com /wiki/ em vez de /base/? Então o token é outro: me avise que eu mostro como pegar.
+
+Instalar na Oracle (no mesmo servidor do Monitor de Recebimento)
+------------------------------------------------------------------
+É leve (não guarda histórico: só consulta o Feishu quando alguém abre o painel), então cabe no servidor do Monitor.
+1. No console da Oracle, abra o Cloud Shell (ícone >_ no topo).
+2. Engrenagem do Cloud Shell > Upload > envie o CONTROLE_PATIO_V2_3.zip.
+3. Mande para o servidor e entre nele (o mesmo IP do Monitor):
+     scp -i ~/chave.key ~/CONTROLE_PATIO_V2_3.zip ubuntu@IP_DO_SERVIDOR:~/
+     ssh -i ~/chave.key ubuntu@IP_DO_SERVIDOR
+4. No servidor:
+     cd ~ && unzip -o CONTROLE_PATIO_V2_3.zip
+     cd ~/controle-patio && bash instalar-nuvem.sh
+   Ele confere o Node.js, pede os 6 dados do Feishu (o App Secret não aparece enquanto você cola) e testa.
+   Tem que aparecer "CONEXÃO COM FEISHU REALIZADA COM SUCESSO!" e "Tudo certo com o Feishu."
+5. Link para a equipe (Tailscale):
+     bash link-publico.sh
+   Ele pede uma senha para o painel (recomendado: o painel mostra placas e nomes de motoristas; Enter = sem senha).
+   No fim aparece o link: https://dashmaster.xxxx.ts.net:10000
+
+Portas no servidor do Monitor: 8443 = Monitor de Recebimento, 10000 = Controle de Pátio (a 443 fica livre).
+Para mudar a porta do link: "portaLink" no config.json (443, 8443 ou 10000) e bash link-publico.sh de novo.
+
+No computador com Windows
+-------------------------
+Usa o mesmo node.exe do DashMaster (C:\dashmaster\node). O computador precisa ficar ligado para o painel funcionar.
+1. No ZIP: botão direito > Propriedades > marque "Desbloquear" > OK.
+2. Botão direito no ZIP > Extrair tudo... > destino C:\  > Extrair. Fica a pasta C:\controle-patio.
+3. Dois cliques em C:\controle-patio\iniciar.bat. Na 1ª vez ele pede os 6 dados do Feishu (cole com o botão direito do
+   mouse; o App Secret não aparece) e testa. Depois abre a janela preta do painel: deixe aberta (pode minimizar).
+   Se o Windows perguntar sobre o Firewall, clique em Permitir.
+4. Painel: http://localhost:3700
+5. Link para a equipe: dois cliques no link-publico.bat. O link fica https://NOME-DO-NOTEBOOK.xxxx.ts.net/patio
+   (o mesmo endereço do painel principal, com /patio no fim: as portas 443, 8443 e 10000 já são dos outros painéis).
+6. Ligar sozinho com o Windows: dois cliques em iniciar-com-windows.bat (uma vez só).
+Atalho na Área de Trabalho: botão direito > Novo > Atalho. Cole (com as aspas):
+     "C:\dashmaster\node\node.exe" "C:\controle-patio\server.js"
+   Avançar > nome: Controle de Pátio > Concluir. Atalho para abrir no navegador: Novo > Atalho com http://localhost:3700
+Trocar os dados do Feishu: dois cliques no configurar.bat. Senha do painel: "senha" no config.json (feche e abra de novo).
+Use o notebook OU a Oracle para a equipe (os dois funcionam, mas mande só um link).
+
+Comandos (pasta controle-patio)
+-------------------------------
+  node patio.js status                  mostra os dados do Feishu cadastrados (o App Secret não aparece) e o link
+  node patio.js testar                  testa a conexão e a 1ª página de cada tabela (pátio, docas e expedição)
+  node patio.js diagnosticar            confere os campos das 3 tabelas: existe? tem valor? data OK? (somente leitura)
+  bash configurar.sh / configurar.bat   troca os dados do Feishu (Enter vazio = mantém); vale na hora
+Só no servidor:
+  sudo systemctl restart controle-patio reinicia o painel
+  sudo journalctl -u controle-patio -f  mostra o que o painel está fazendo (Ctrl+C sai)
+
+Atualizar para uma versão nova
+------------------------------
+Oracle: envie o ZIP novo pelo Cloud Shell (passos 2 e 3) e, no servidor:
+  cd ~ && unzip -o CONTROLE_PATIO_V<versão>.zip && sudo systemctl restart controle-patio
+Responda A (substituir todos) se ele perguntar. Os dados do Feishu, a senha e o config.json ficam (não estão no ZIP).
+Windows: feche a janela preta, extraia o ZIP novo por cima da pasta C:\controle-patio e abra o iniciar.bat.
+Veio da versão 1.x? Os dados do Feishu já gravados continuam valendo (dados/propriedades.json vira dados/feishu.json).
+
+config.json (criado na instalação ou ao abrir pela 1ª vez)
+----------------------------------------------------------
+porta 3700 · host (Oracle: 127.0.0.1; Windows: 0.0.0.0 = abre também pela rede) · senha (vazio = quem tem o link
+abre) · cacheSegundos 30 (tempo que uma consulta ao Feishu é reaproveitada) · portaLink / caminho (link: Oracle 10000 e
+""; Windows 443 e "/patio") · linkPublico (só para mostrar).
+Mudou? Oracle: sudo systemctl restart controle-patio · Windows: feche a janela preta e abra o iniciar.bat de novo.
+
+Se der problema
+---------------
+- Painel mostra "Faltam os dados do Feishu": rode bash configurar.sh (Windows: configurar.bat).
+- "Falha na autenticação com Feishu": App ID ou App Secret errado. Rode bash configurar.sh (Windows: configurar.bat).
+- Alguma tabela ou gráfico sem dados: abra /diagnostico (veja Novidades da 2.3) e confira se o campo usado existe na tabela.
+- "Erro ao consultar Feishu: ...": o FEISHU_APP_TOKEN ou o ID de alguma tabela está errado, ou o app do Feishu não tem
+  permissão na base. Rode node patio.js testar para ver qual tabela.
+- "Sem acesso ao Feishu": a internet do servidor/computador. No Windows, se a empresa usa proxy, veja as linhas
+  "rem set HTTPS_PROXY" no iniciar.bat.
+- Alguma parte do painel fica vazia ou com "—"? Rode node patio.js diagnosticar e mande um print: ele mostra, para as 3
+  tabelas, se cada campo que o painel usa existe, em quantos registros tem valor, se as datas dão para ler e os valores
+  de fluxo, status e tipos (nunca placas nem nomes). Assim dá para ver qual nome de campo ou formato está diferente.
+- O painel abre no dia operacional de hoje (das 06h às 05h59). Para ver outro dia, troque em "DIA OPERACIONAL".
+- O link não abre: Oracle: sudo systemctl status controle-patio e bash link-publico.sh de novo. Windows: veja se a
+  janela preta está aberta e rode o link-publico.bat de novo.
+
+Para quem mexe no código
+------------------------
+lib/feishu.js (leitura do Feishu) · server.js (painel e api) · Index.html (tela)
+node test/teste.js   (Feishu de mentira, dados fictícios)
+node gerar-zip.js    (gera dist/CONTROLE_PATIO_V<versão>.zip)

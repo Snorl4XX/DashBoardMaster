@@ -17,7 +17,8 @@ const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expediti
 const EXTRA_FIELDS_ = ['port', 'sackType', 'items', 'packType', 'source', 'chip',
   'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase',
   // V4.4 (Deslacre): horários do ID, tempo mediano, situação do bipe de deslacre, placa, transportadora, registros de descarregamento.
-  'unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads'];
+  // V4.20: timing = regra do tempo do ID ("inicio" = pela Data inicial do descarregamento).
+  'unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads', 'timing'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */
 const DERIVE_VERSION_ = 1;
 
@@ -108,6 +109,17 @@ function segmentPairOf_(raw, row, keys) {
  * campo da remessa, é erro de mapeamento: antes o dia era gravado vazio e os
  * gráficos ficavam "sem dados" sem nenhum aviso.
  */
+/** V4.24.3: dias do período com a lista gravada abaixo do total do JMS (CHECK_COUNTS): {date, saved, expected}. */
+function shortDetailDays_(indicatorKey, from, to) {
+  const sm = statusMap_(indicatorKey, from, to), out = [];
+  Object.keys(sm).forEach(key => {
+    const st = sm[key];
+    if (st.details !== 'CHECK_COUNTS' || !(st.expectedRecords > st.savedRows + countTolerance_(st.expectedRecords))) return;
+    out.push({date: key.slice(indicatorKey.length + 1), saved: st.savedRows, expected: st.expectedRecords});
+  });
+  return out.sort((a, b) => a.date < b.date ? -1 : 1);
+}
+
 function normalizeRecords_(indicatorKey, date, records, type) {
   // Avaria: antes de normalizar, junta os dados da Consulta de Pacote Problemático (tabela 2).
   if (getIndicatorConfig_(indicatorKey).registration && records.length) enrichRegistrations_(indicatorKey, records);
@@ -482,7 +494,11 @@ function GroupSummarySink_(cfg, filters, topLimit) {
   const active = dims.filter(k => filters && filters[k] && filters[k].length);
   const sets = {}, scopes = cfg.filterScopes || {};
   active.forEach(k => { sets[k] = {}; filters[k].forEach(v => { sets[k][String(v)] = 1; }); });
+  // V4.18: valores antigos com o nome novo (Config.gs → valueAliases), como na leitura normal (JTCore_.applyAliases).
+  const al = cfg.valueAliases || {};
+  const alias = (f, v) => (al[f] && v !== null && v !== undefined && Object.prototype.hasOwnProperty.call(al[f], v) ? al[f][v] : v);
   const norm = (f, v) => {
+    v = alias(f, v);
     v = v === null || v === undefined ? '' : String(v);
     if (fill[f] && v.trim() === '') v = fill[f];
     return v.trim() === '' ? 'N/A' : v;
@@ -491,13 +507,24 @@ function GroupSummarySink_(cfg, filters, topLimit) {
   dims.forEach(k => { marg[k] = new Map(); });
   // Gráfico que soma um campo (Fluxo de Lotes: itens na embalagem por saca): total do campo por valor ("lot:items").
   const sums = [];
-  (cfg.charts || []).forEach(c => {
+  // V4.20: sumDefs = somas sem gráfico próprio (Criação de Lotes: remessas por turno, para os cartões com filtro).
+  (cfg.charts || []).concat(cfg.sumDefs || []).forEach(c => {
     const d = c.dim || c.key;
     if (c.sumField && dims.indexOf(d) >= 0 && (cfg.groupFields || []).indexOf(c.sumField) >= 0 && !sums.some(x => x.dim === d && x.field === c.sumField)) {
       sums.push({dim: d, field: c.sumField, name: d + ':' + c.sumField});
     }
   });
   sums.forEach(x => { marg[x.name] = new Map(); });
+  // V4.21.6: gráfico de um campo só nas linhas com a base de OUTRO campo dentro/fora da lista (Criação de Lotes: turnos que
+  // enviaram sacas ecológicas para destinos fora do comunicado): total por valor só dessas linhas ("shift@ecoWrongShift").
+  const crosses = [];
+  (cfg.charts || []).forEach(c => {
+    const d = c.dim || c.key, sf = c.siteField;
+    if (c.siteList && sf && sf !== d && dims.indexOf(d) >= 0 && (cfg.groupFields || []).indexOf(sf) >= 0) {
+      crosses.push({dim: d, field: sf, list: c.siteList, keep: c.siteMode !== 'out', name: d + '@' + c.key});
+    }
+  });
+  crosses.forEach(x => { marg[x.name] = new Map(); });
   // Maiores combinações POR LISTA (tabelas do painel: uma por lista; as listas pequenas têm quantidade 1).
   const tops = {}, floors = {};
   let cubeRows = 0, totalQty = 0, outCount = 0;
@@ -522,6 +549,17 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       acc[x.name] = new Float64Array(dDate.length * nCol * vals[x.dim].length);
       fv[x.name] = {vals: (ds.dict[x.field] || ['']).map(v => Number(v) || 0), col: idxOf(x.field)};
     });
+    // Linha conta no gráfico cruzado se a base dela (sem "N/A") está dentro/fora da lista, como no JTCore_.chartRows.
+    const cx = {};
+    crosses.forEach(x => {
+      acc[x.name] = new Float64Array(dDate.length * nCol * vals[x.dim].length);
+      cx[x.name] = {ok: (ds.dict[x.field] || ['']).map(v => { const s = norm(x.field, v); return !JTCore_.noValue(s) && JTCore_.inSiteList(s, x.list) === x.keep; }),
+        col: idxOf(x.field)};
+    });
+    const crossAdd = (x, base, i, q) => {
+      const c = cols[x.dim], k = cx[x.name];
+      if (k.ok[k.col ? k.col[i] : 0]) acc[x.name][base * vals[x.dim].length + (c ? c[i] : 0)] += q;
+    };
     for (let i = 0; i < n; i++) {
       const q = cQty ? qd[cQty[i]] : 1;
       cubeRows++; totalQty += q;
@@ -538,6 +576,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
         const c = cols[failK];
         acc[failK][base * vals[failK].length + (c ? c[i] : 0)] += q;
         sums.forEach(x => { if (x.dim !== failK) return; const f = fv[x.name]; acc[x.name][base * vals[failK].length + (c ? c[i] : 0)] += q * (f.col ? f.vals[f.col[i]] : 0); });
+        crosses.forEach(x => { if (x.dim === failK) crossAdd(x, base, i, q); });
         continue;
       }
       tot[base] += q;
@@ -546,10 +585,11 @@ function GroupSummarySink_(cfg, filters, topLimit) {
         const x = sums[a], c = cols[x.dim], f = fv[x.name];
         acc[x.name][base * vals[x.dim].length + (c ? c[i] : 0)] += q * (f.col ? f.vals[f.col[i]] : 0);
       }
+      for (let a = 0; a < crosses.length; a++) crossAdd(crosses[a], base, i, q);
       const colV = vals.column[ci], tl = tops[colV] || (tops[colV] = []), fl = floors[colV] || 0;
       if (topLimit && (q > fl || tl.length < topLimit)) {
         const r = {};
-        fields.forEach(f => { const c = ds.cols[f]; r[f] = c ? ds.dict[f][c[i]] : ''; });
+        fields.forEach(f => { const c = ds.cols[f]; r[f] = c ? alias(f, ds.dict[f][c[i]]) : ''; });
         r.qty = q;
         tl.push(r);
         if (tl.length >= topLimit * 2) { tl.sort((x, y) => y.qty - x.qty); tops[colV] = tl.slice(0, topLimit); floors[colV] = tops[colV][topLimit - 1].qty; }
@@ -563,7 +603,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
           const a = acc[k], m = vals[k].length;
           for (let v = 0; v < m; v++) if (a[b * m + v]) bump(marg[k], key + '\u0001' + vals[k][v], a[b * m + v]);
         });
-        sums.forEach(x => {
+        sums.concat(crosses).forEach(x => {
           const a = acc[x.name], m = vals[x.dim].length;
           for (let v = 0; v < m; v++) if (a[b * m + v]) bump(marg[x.name], key + '\u0001' + vals[x.dim][v], a[b * m + v]);
         });
@@ -580,7 +620,7 @@ function GroupSummarySink_(cfg, filters, topLimit) {
       const tb = DatasetBuilder_(['date', 'column', 'shipment', 'qty'], null);
       totals.forEach((q, key) => { const p = key.split('\u0001'); tb.addRows([{date: p[0], column: p[1], shipment: 'T' + (++seq), qty: String(q)}]); });
       const mb = DatasetBuilder_(['date', 'column', 'shipment', '_m', 'value', 'qty'], null);
-      dims.concat(sums.map(x => x.name)).forEach(k => marg[k].forEach((q, key) => {
+      dims.concat(sums.map(x => x.name), crosses.map(x => x.name)).forEach(k => marg[k].forEach((q, key) => {
         const p = key.split('\u0001');
         mb.addRows([{date: p[0], column: p[1], shipment: 'M' + (++seq), _m: k, value: p[2], qty: String(q)}]);
       }));
@@ -599,7 +639,8 @@ function groupedNeedsSummary_(indicatorKey, from, to, params) {
   if (params && params.summary !== undefined && params.summary !== null) return !!params.summary;
   const v = Number(getProp_('GROUPED_CLIENT_ROWS', '')), ic = indicatorCfg_(indicatorKey) || {};
   // Expedição (uma linha por remessa): um dia inteiro (~120 mil) vai ao navegador — as tabelas mostram todas as remessas.
-  const limit = v >= 1 ? v : ic.clientRows || APP_CONFIG.MAX_GROUPED_CLIENT_ROWS;
+  // V4.25.3: no Node, as combinações vão ao navegador até o mesmo limite do painel (a tabela mostra todas, não só as 2.000 maiores).
+  const limit = v >= 1 ? v : Math.max(ic.clientRows || APP_CONFIG.MAX_GROUPED_CLIENT_ROWS, onNode_() ? maxClientRows_() : 0);
   const files = dayFilesMap_(indicatorKey, from, to), st = statusMap_(indicatorKey, from, to);
   let est = 0;
   dateRangeIso_(from, to).forEach(d => {
@@ -613,7 +654,8 @@ function groupSummaryView_(cfg, built, filters) {
   const byDim = JTCore_.marginalsByDim(built.marginals);
   const totals = JTCore_.decodeDataset(built.totals);
   return {byDim: byDim, totals: totals, top: JTCore_.decodeDataset(built.top),
-    charts: (cfg.charts || []).filter(def => !def.metric).map(def => JTCore_.buildChart(def, JTCore_.summaryChartRows(def, byDim, filters), {}))};
+    charts: (cfg.charts || []).filter(def => !def.metric).map(def => JTCore_.chartDefFor(def, filters))
+      .map(def => JTCore_.buildChart(def, JTCore_.summaryChartRows(def, byDim, filters), {}))};
 }
 
 function normalizeFilters_(filters) {
@@ -708,9 +750,39 @@ function blockedArchive_(day) {
   return {rows: [], loadedDates: [], partialDates: [], staleDates: [], notDownloaded: [day], notLoaded: [], emptyDates: [], readFiles: 0, fullyLoaded: false};
 }
 
+/** V4.25.3: rodando no Node.js (notebook ou nuvem), não no Google Apps Script. */
+function onNode_() { return getProp_('PLATAFORMA', '') === 'node'; }
 function maxClientRows_() {
   const v = Number(getProp_('DASHBOARD_MAX_ROWS', ''));
-  return v >= 1000 ? Math.min(400000, Math.floor(v)) : APP_CONFIG.MAX_CLIENT_ROWS;
+  if (v >= 1000) return Math.min(onNode_() ? 1000000 : 400000, Math.floor(v));
+  return onNode_() ? APP_CONFIG.NODE_MAX_CLIENT_ROWS : APP_CONFIG.MAX_CLIENT_ROWS;
+}
+/** Arquivos de detalhe e tempo de leitura por consulta do painel (no Node os arquivos estão no disco). */
+function maxDetailFiles_() { return onNode_() ? APP_CONFIG.NODE_MAX_DETAIL_FILES : APP_CONFIG.MAX_DETAIL_FILES_PER_DASHBOARD; }
+function loadBudgetMs_() { return onNode_() ? APP_CONFIG.NODE_LOAD_BUDGET_MS : APP_CONFIG.DASHBOARD_LOAD_BUDGET_MS; }
+
+/**
+ * V4.23.3 (Produção do Sorter, pedido "quando trocar os filtros, a Evolução diária deve mostrar o resultado do filtro"): a
+ * quantidade da lista `column` em cada dia de from..to, com os filtros — dias com a lista baixada (sem ela, o dia fica sem número).
+ * Só para gráficos de número do resumo que dizem a lista (charts[].detail, ou byFilter[].detail): até 93 dias.
+ */
+function getDailySeries(indicatorKey, params) {
+  const cfg = getIndicatorConfig_(indicatorKey);
+  params = params || {};
+  const to = isIso_(params.to) ? params.to : isoToday_();
+  let from = isIso_(params.from) ? params.from : addDaysIso_(to, -14);
+  if (from < addDaysIso_(to, -92)) from = addDaysIso_(to, -92);
+  const column = String(params.column || '');
+  const ok = (cfg.charts || []).some(c => c.metric && (c.detail === column || Object.keys(c.byFilter || {}).some(k => c.byFilter[k].detail === column)));
+  if (!column || !ok) throw new Error('Lista sem série diária: ' + column);
+  JTCore_.setFilterScopes(cfg.filterScopes || {});
+  JTCore_.setColumnSets(cfg.columnSets || {});
+  const archive = getArchivedRange_(indicatorKey, from, to), values = {};
+  (archive.loadedDates || []).concat(archive.partialDates || []).forEach(d => { values[d] = 0; });
+  JTCore_.applyFilters(archive.rows || [], normalizeFilters_(params.filters)).forEach(r => {
+    if (values[r.date] !== undefined && JTCore_.colMatch(column, r.column)) values[r.date] += Number(r.qty) || 0;
+  });
+  return safeReturn_({from: from, to: to, column: column, values: values});
 }
 
 /**
@@ -718,6 +790,34 @@ function maxClientRows_() {
  * compactados do período. Filtros, cartões e gráficos são calculados no navegador
  * com o mesmo núcleo (Core.gs) — trocar filtros é instantâneo.
  */
+/**
+ * V4.27 (pedido "abrir 2 meses demora; quero que puxe os dados e armazena eles"): o navegador guarda a lista de cada dia e manda
+ * em params.dayCache a assinatura de cada dia que tem ({AAAA-MM-DD: assinatura}). Dia inteiro (arquivo do dia, completo) com a
+ * mesma assinatura não é lido nem mandado de novo (dayData.cached); os outros dias inteiros vão separados (dayData.days), para o
+ * navegador guardar. Assinatura = arquivo do dia (muda a cada regravação: IDs de viagem, lote/login, novo download) + versão do
+ * painel + campos e preenchimentos do painel. Só painéis de remessas (não agrupados, sem foto do momento e sem Histórico).
+ */
+function dayCacheFor_(cfg, params) {
+  const have = params && params.dayCache;
+  if (!have || typeof have !== 'object' || Array.isArray(have) || cfg.grouped || cfg.snapshot || cfg.historyOf) return null;
+  const fields = clientFields_(cfg), fill = fillEmpty_(cfg);
+  const base = hashText_([APP_CONFIG.VERSION, DERIVE_VERSION_, fields.join(','), JSON.stringify(fill)].join('|'));
+  const ok = {};
+  Object.keys(have).slice(0, 400).forEach(d => { if (isIso_(d) && typeof have[d] === 'string' && have[d].length < 200) ok[d] = have[d]; });
+  let extra = 0;
+  const out = {have: ok, cached: [], days: {},
+    sig: df => String(df.fileId) + ':' + df.rows + ':' + base,
+    count: n => { extra += Number(n) || 0; },
+    fresh: (date, sig, enc) => {
+      const b = DatasetBuilder_(fields, fill);
+      b.addEncoded(enc);
+      out.days[date] = {sig: sig, ds: b.build()};
+      extra += enc.n || 0;
+    },
+    sink: builder => ({count: () => builder.count() + extra, addRows: rows => builder.addRows(rows), addEncoded: ds => builder.addEncoded(ds)})};
+  return out;
+}
+
 function getDashboardData(indicatorKey, params) {
   const cfg = getIndicatorConfig_(indicatorKey);
   JTCore_.setFilterScopes(cfg.filterScopes || {});
@@ -730,8 +830,12 @@ function getDashboardData(indicatorKey, params) {
   const filters = summaryMode ? normalizeFilters_(params && params.filters) : null;
   const builder = summaryMode ? GroupSummarySink_(cfg, filters, APP_CONFIG.GROUPED_TOP_ROWS) : DatasetBuilder_(clientFields_(cfg), fillEmpty_(cfg));
   const maxRows = summaryMode ? Infinity : maxClientRows_();
+  // V4.27: dias que o navegador já guardou (iguais) não são lidos nem mandados de novo; os outros vão um por dia.
+  const dayCache = summaryMode ? null : dayCacheFor_(cfg, params);
+  const sink = dayCache ? dayCache.sink(builder) : builder;
   const archive = historyListBlocked_(cfg, indicatorKey, p.to) ? blockedArchive_(p.to)
-    : scanArchive_(indicatorKey, p.from, p.to, summaryMode ? {maxRows: maxRows, deadline: Date.now() + APP_CONFIG.GROUPED_SUMMARY_BUDGET_MS} : {maxRows: maxRows}, builder);
+    : scanArchive_(indicatorKey, p.from, p.to, summaryMode ? {maxRows: maxRows, deadline: Date.now() + APP_CONFIG.GROUPED_SUMMARY_BUDGET_MS}
+      : {maxRows: maxRows, dayCache: dayCache}, sink);
   const built = summaryMode ? builder.build() : null;
   const out = safeReturn_({
     meta: {
@@ -744,12 +848,18 @@ function getDashboardData(indicatorKey, params) {
       archive: {loadedDates: archive.loadedDates, partialDates: archive.partialDates, staleDates: archive.staleDates,
         notDownloaded: archive.notDownloaded, notLoaded: archive.notLoaded, emptyDates: archive.emptyDates,
         readFiles: archive.readFiles, fullyLoaded: archive.fullyLoaded, maxRows: summaryMode ? null : maxRows},
-      rowsLoaded: summaryMode ? built.cubeRows : builder.count(),
+      rowsLoaded: summaryMode ? built.cubeRows : sink.count(),
       // Por que falta detalhe (fila, partes baixadas de cada lista, erro): o painel mostra no lugar de "sem dados".
       detailProgress: archive.fullyLoaded ? null : safeCall_(() => detailProgress_(indicatorKey, p.from, p.to)),
       // Recebimento: números que o JMS não separa por horário no resumo (turnos só pelo detalhe).
       summaryShiftsOff: cfg.byRoute ? (getProp_('JMS_NO_SLICE_' + cfg.routeKey, '') ? {sendcount: 'a lista do JMS não separa por horário'} : {})
         : ((cfg.detail || {}).shiftProbe || []).length ? summaryShiftsOff_(cfg) : null,
+      // V4.24.3: dias em que o JMS entregou menos remessas que o resumo (lista travada no limite do JMS; o painel avisa).
+      shortDays: cfg.grouped || summaryMode ? [] : safeCall_(() => shortDetailDays_(indicatorKey, p.from, p.to)) || [],
+      // V4.25.7: dias do período sem a lista → fila na hora (o painel se completa sozinho e avisa enquanto baixa).
+      detailFetch: summaryMode || archive.fullyLoaded ? null : safeCall_(() => queueMissingDetails_(indicatorKey, p.from, p.to, archive)) || null,
+      // V4.25.5: dias fechados com a lista menor que os erros do JMS e se já estão sendo baixados de novo (o cartão avisa).
+      detailGap: cfg.grouped || summaryMode ? null : safeCall_(() => detailGapView_(indicatorKey, p.from, p.to)) || null,
       // Expedição: remessas já consultadas no Rastreamento do pacote (IDs de viagem) por dia.
       tripCoverage: cfg.trips ? safeCall_(() => tripCoverage_(indicatorKey, p.from, p.to)) : null,
       // V4.12.1 (Triagem Errada): lote/login pela Consulta das bipagens — completadas, sem o bipe, na fila, erro.
@@ -759,7 +869,7 @@ function getDashboardData(indicatorKey, params) {
       // V3.24: carimbo dos dados deste painel na hora da leitura (o navegador confere a cada 2 min se mudou).
       stamp: dataStamps_()[indicatorKey] || null,
       // Avaria: situação dos códigos de "Pedidos principais/filhos" no JMS (o painel explica quando falta a taxa da opção).
-      orderKind: cfg.orderKinds ? orderKindStatus_(indicatorKey) : null,
+      orderKind: cfg.orderKinds ? safeCall_(() => orderKindStatus_(indicatorKey)) : null,
       // V3.32: Histórico (Sem Movimentação): o período escolhido; from/to = o dia mostrado (o mais recente com linha).
       source: cfg.historyOf ? 'hist' : null, rangeFrom: p.rangeFrom || null, rangeTo: p.rangeTo || null
     },
@@ -785,12 +895,13 @@ function getDashboardData(indicatorKey, params) {
       return o;
     }, {}),
     // Avaria: remessas de cada opção pela lista do JMS (o filtro separa como a tela).
-    orderKindTags: cfg.orderKinds ? orderKindTags_(indicatorKey, p.from, p.to) : null,
+    // V4.25.6: protegido — erro aqui não derruba o painel (sem as listas, o filtro usa o sufixo "-001").
+    orderKindTags: cfg.orderKinds ? safeCall_(() => orderKindTags_(indicatorKey, p.from, p.to)) : null,
     // Avaria: taxa oficial de cada opção de "Pedidos principais/filhos" (o painel troca a taxa pelo filtro).
-    rateVariants: cfg.orderKinds ? ['main', 'sub'].reduce((o, k) => {
+    rateVariants: cfg.orderKinds ? safeCall_(() => ['main', 'sub'].reduce((o, k) => {
       o[k] = getRates_(indicatorKey + ':' + k, null, null).map(r => ({date: r.date, rate: r.rate, errorCount: r.errorCount, totalCount: r.totalCount, estimated: r.estimated}));
       return o;
-    }, {}) : null
+    }, {})) : null
   });
   // O conjunto de remessas só tem textos e números (sem Date): vai direto, sem cópia extra.
   if (summaryMode) {
@@ -798,6 +909,7 @@ function getDashboardData(indicatorKey, params) {
     out.summary = {marginals: built.marginals, top: built.top, topLimit: built.topLimit, totalQty: built.totalQty,
       cubeRows: built.cubeRows, filters: filters};
   } else out.dataset = builder.build();
+  if (dayCache) out.dayData = {days: dayCache.days, cached: dayCache.cached};
   // V3.34: Sem Movimentação — só a lista da linha dos cartões (nada de outras linhas juntas).
   const rowCol = summaryMode ? null : rowListType_(cfg, indicatorKey, p.to);
   if (rowCol !== null) {
@@ -921,8 +1033,10 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
   // V3.34: Sem Movimentação — só a lista da linha dos cartões.
   const rowCol = rowListType_(cfg, indicatorKey, p.to);
   if (rowCol !== null) archive.rows = archive.rows.filter(r => r.column === rowCol);
+  if (cfg.valueAliases) JTCore_.applyAliases(archive.rows, cfg.valueAliases);
   if (cfg.docks) JTCore_.applyDocks(archive.rows, cfg.docks);
   if (cfg.segmentBase) JTCore_.applySegmentBase(archive.rows, true);
+  JTCore_.applyV425(archive.rows, cfg);
   if (cfg.dayOf) JTCore_.applyDayOf(archive.rows, cfg.dayOf);
   if (cfg.orderKinds) JTCore_.applyOrderKinds(archive.rows, cfg.orderKinds, orderKindTags_(indicatorKey, p.from, p.to));
   const rows = JTCore_.applyFilters(archive.rows, filters);
@@ -937,7 +1051,7 @@ function computeDashboard_(indicatorKey, params, archiveOpts) {
     cards: JTCore_.computeCards(cfg, rv ? rv.rates : allRates, rows, rv ? rv.filters : filters, p.from, p.to,
       {shares: shares, shiftRows: sel ? JTCore_.applyFilters(archive.rows, filters, 'shift') : null,
         partRows: (cfg.filters || []).indexOf('shift') >= 0 && !cfg.grouped ? archive.rows : null, agg: getAgg_(indicatorKey, null, null), only: only}),
-    charts: cfg.charts.filter(def => !def.metric).map(def => JTCore_.buildChart(def, rows, {})),
+    charts: cfg.charts.filter(def => !def.metric).map(def => JTCore_.buildChart(JTCore_.chartDefFor(def, filters), rows, {})),
     summary: JTCore_.summaryTable(cfg, rows),
     pivots: (cfg.pivotTables || []).map(def => JTCore_.pivot(rows, def))
   };

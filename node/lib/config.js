@@ -17,6 +17,9 @@ const DEFAULTS = {
   senha: '',
   // Senha da tela Configurações (/config). Vazio = a tela só abre neste computador (localhost).
   senhaConfig: '',
+  // V4.29: página /token pelo link público — a equipe troca o AuthToken do JMS quando vencer (só salva se o JMS aceitar; com
+  // "senha", pede a senha do painel). false = desliga a página.
+  trocaTokenPeloLink: true,
   // Onde ficam o banco (SQLite), os arquivos baixados e os relatórios.
   pastaDados: './dados',
   // Onde ficam os arquivos do painel (.gs e .html). Padrão: a pasta acima de node/.
@@ -30,8 +33,58 @@ const DEFAULTS = {
   // false = não roda a fila sozinho (só para testes/manutenção).
   agendador: true,
   // Link público do painel (ex.: https://computador.nome.ts.net, do Tailscale Funnel). Só para mostrar na janela e em Configurações.
-  linkPublico: ''
+  linkPublico: '',
+  // Link do Netlify que repassa para o linkPublico (ex.: https://jt-dashmaster.netlify.app). Com ele, o painel aceita as
+  // chamadas que chegam por esse endereço.
+  linkNetlify: '',
+  // Porta do link público no Tailscale Funnel (link-publico.bat): 443 (padrão, link sem número), 8443 ou 10000.
+  portaLink: 443,
+  // V4.21.5: caminho do painel no link público (ex.: "/lotes" → https://NOME.xxxx.ts.net/lotes, o mesmo link do principal com
+  // o caminho no fim). Vazio = o painel fica na raiz do link.
+  caminho: '',
+  // V4.22: pacote sem JMS (Produção do Sorter): a tela Configurações mostra o sorter no lugar do AuthToken.
+  semJms: false
 };
+/**
+ * V4.21: padrões do pacote (node/padrao.json, vem no ZIP). Ex.: o painel de Lotes separado usa a porta 3400 e o link na
+ * 10000, para rodar no mesmo computador que o painel principal (3000 / 443). O config.json de quem instalou vale mais.
+ */
+function packageDefaults() {
+  const file = path.join(NODE_DIR, 'padrao.json');
+  if (!fs.existsSync(file)) return {};
+  try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) || {}; }
+  catch (e) { return {}; }
+}
+
+/**
+ * V4.21.5: o pacote passou a ter um caminho no link (ex.: Lotes em https://NOME.ts.net/lotes, no lugar do :10000). Um
+ * config.json de antes (sem "caminho") recebe o caminho, a porta do link do pacote e o "linkPublico" sem a porta, uma vez só.
+ */
+function migrateLinkPath(file, user) {
+  const pkg = packageDefaults();
+  if (!pkg.caminho || !user || typeof user !== 'object' || Object.prototype.hasOwnProperty.call(user, 'caminho')) return;
+  user.caminho = pkg.caminho;
+  if (pkg.portaLink) user.portaLink = pkg.portaLink;
+  const m = /^(https:\/\/[^/:]+)(:\d+)?\/*$/.exec(String(user.linkPublico || '').trim());
+  if (m) user.linkPublico = m[1] + '/' + String(pkg.caminho).replace(/^\/+|\/+$/g, '');
+  try { fs.writeFileSync(file, JSON.stringify(user, null, 2) + '\n'); } catch (e) { /* pasta só leitura: vale só nesta execução */ }
+}
+
+/**
+ * V4.22.5 (pedido "porta diferente para cada dash"): cada painel na sua porta do link (principal 443, Sorter 8443, Lotes 10000),
+ * sem caminho. Um config.json de antes (sem "linkVersao" do pacote) recebe a porta e o caminho do pacote e o "linkPublico"
+ * com a porta nova, uma vez só; depois vale o que a pessoa escolher.
+ */
+function migrateLinkPort(file, user) {
+  const pkg = packageDefaults();
+  if (!pkg.linkVersao || !user || typeof user !== 'object' || Number(user.linkVersao) >= Number(pkg.linkVersao)) return;
+  user.portaLink = Number(pkg.portaLink) || 443;
+  user.caminho = pkg.caminho || '';
+  const m = /^(https:\/\/[^/:?#\s]+)/.exec(String(user.linkPublico || '').trim());
+  if (m) user.linkPublico = m[1] + (user.portaLink !== 443 ? ':' + user.portaLink : '') + (user.caminho ? '/' + String(user.caminho).replace(/^\/+|\/+$/g, '') : '');
+  user.linkVersao = pkg.linkVersao;
+  try { fs.writeFileSync(file, JSON.stringify(user, null, 2) + '\n'); } catch (e) { /* pasta só leitura: vale só nesta execução */ }
+}
 
 function configPath() {
   return process.env.DASHMASTER_CONFIG ? path.resolve(process.env.DASHMASTER_CONFIG) : path.join(NODE_DIR, 'config.json');
@@ -45,10 +98,12 @@ function loadConfig(opts) {
     const text = fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
     try { user = JSON.parse(text); }
     catch (e) { throw new Error('config.json inválido (' + e.message + '). Corrija o arquivo ou apague-o para recriar.'); }
+    migrateLinkPath(file, user);
+    migrateLinkPort(file, user);
   } else if (opts.create !== false) {
-    try { fs.writeFileSync(file, JSON.stringify(DEFAULTS, null, 2) + '\n'); } catch (e) { /* pasta só leitura: usa os padrões */ }
+    try { fs.writeFileSync(file, JSON.stringify(Object.assign({}, DEFAULTS, packageDefaults()), null, 2) + '\n'); } catch (e) { /* pasta só leitura: usa os padrões */ }
   }
-  const cfg = Object.assign({}, DEFAULTS, user);
+  const cfg = Object.assign({}, DEFAULTS, packageDefaults(), user);
   if (process.env.DASHMASTER_PORT) cfg.porta = Number(process.env.DASHMASTER_PORT);
   if (process.env.DASHMASTER_DATA) cfg.pastaDados = process.env.DASHMASTER_DATA;
   const base = path.dirname(file);
@@ -57,7 +112,14 @@ function loadConfig(opts) {
   cfg.dbFile = path.join(cfg.dataDir, 'dashmaster.db');
   cfg.filesDir = path.join(cfg.dataDir, 'arquivos');
   cfg.porta = Number(cfg.porta) || DEFAULTS.porta;
+  // "/lotes", "lotes", "/lotes/" → "/lotes"; só letras, números, - e _.
+  const cam = String(cfg.caminho || '').trim().replace(/^\/+|\/+$/g, '');
+  cfg.caminho = /^[A-Za-z0-9_-]+$/.test(cam) ? '/' + cam : '';
   cfg.linkPublico = String(cfg.linkPublico || '').trim().replace(/\/+$/, '');
+  cfg.linkNetlify = String(cfg.linkNetlify || '').trim().replace(/\/+$/, '');
+  cfg.configDir = base;
+  // Quanto tempo uma chamada da página espera antes de responder "ainda processando" (o Netlify corta em ~30 s).
+  cfg.esperaApiMs = Number(process.env.DASHMASTER_ESPERA_API_MS) > 0 ? Number(process.env.DASHMASTER_ESPERA_API_MS) : 20000;
   cfg.filaCadaSegundos = Math.max(15, Number(cfg.filaCadaSegundos) || DEFAULTS.filaCadaSegundos);
   cfg.trabalhadores = Math.max(1, Math.min(8, Number(cfg.trabalhadores) || DEFAULTS.trabalhadores));
   if (process.env.DASHMASTER_SEM_AGENDADOR === '1') cfg.agendador = false;
@@ -68,4 +130,4 @@ function loadConfig(opts) {
   return cfg;
 }
 
-module.exports = {loadConfig, DEFAULTS, NODE_DIR};
+module.exports = {loadConfig, DEFAULTS, NODE_DIR, packageDefaults, migrateLinkPath, migrateLinkPort};

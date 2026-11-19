@@ -14,6 +14,8 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+rem Erro ao abrir: a janela continua aberta por este arquivo (ele reinicia o servidor), sem a pausa do server.js.
+set DASHMASTER_SEM_PAUSA=1
 :inicio
 node server.js
 echo.

@@ -203,6 +203,8 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .dd-empty{padding:16px;color:var(--muted);font-size:12.5px;text-align:center}
 .dd-sheet-title{display:none}
 .chips-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center}
+.scope-note{flex-basis:100%;display:flex;align-items:flex-start;gap:6px;margin:4px 0 0;font-size:12px;line-height:1.45;color:var(--muted)}
+.scope-note svg{flex:none;width:14px;height:14px;margin-top:2px}
 .fchip{display:inline-flex;align-items:center;gap:6px;background:var(--red-50);border:1px solid var(--red-200);color:var(--red-700);border-radius:999px;padding:4px 6px 4px 11px;font-size:12px;font-weight:650;max-width:320px}
 .fchip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fchip button{border:0;background:var(--card);color:var(--red-600);border-radius:50%;width:20px;height:20px;display:grid;place-items:center;padding:0;flex:none}
@@ -220,6 +222,8 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .top-kpi .kpi-value.text{font-size:17px;line-height:1.25;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
 .kpi-sub{font-size:12px;color:var(--muted);margin-top:6px}
 .kpi-sub b{color:var(--ink-2)}
+.kpi-gap{display:flex;align-items:flex-start;gap:6px;margin-top:6px;color:var(--bad);font-weight:600;line-height:1.35}
+.kpi-gap svg{width:14px;height:14px;flex:0 0 14px;margin-top:1px}
 .kpi-foot{margin-top:auto;padding-top:10px}
 .bar{height:6px;border-radius:99px;background:var(--soft-2);overflow:hidden}
 .bar i{display:block;height:100%;border-radius:99px;width:0;transition:width .7s cubic-bezier(.2,.8,.2,1)}
@@ -340,6 +344,8 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .charts-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:12px}
 .chart-card{padding:18px 20px 16px;min-width:0;display:flex;flex-direction:column;border-top:3px solid var(--red)}
 .chart-card.full{grid-column:1/-1}
+/* V4.24: dois gráficos por linha (painel principal) em telas largas; o último de um número ímpar ocupa a linha. */
+@media (min-width:1200px){.charts-grid.two-col{grid-template-columns:repeat(2,minmax(0,1fr))}.charts-grid.two-col .chart-card.odd-last{grid-column:1/-1}}
 .chart-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .chart-ico{width:34px;height:34px;border-radius:10px;background:var(--red-50);color:var(--red);display:grid;place-items:center;flex:none}
 .chart-titles{flex:1 1 180px;min-width:0}
@@ -388,6 +394,9 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
 .data-table thead th{position:sticky;top:0;z-index:2;background:var(--red);color:#fff;text-align:left;padding:10px 12px;font-weight:700;white-space:nowrap;border-right:1px solid rgba(255,255,255,.16);cursor:pointer;user-select:none}
 .data-table thead th:last-child{border-right:0}
+/* V4.22 (Produção do Sorter): tabela por horário — linha de Total e espaço entre as tabelas */
+.cross-table{margin-bottom:18px}
+.cross-table tr.cross-total td{background:var(--soft-2);border-top:2px solid var(--red)}
 .data-table thead th small{display:block;font-weight:500;opacity:.8;font-size:10.5px;margin-top:1px}
 .data-table thead th .sort{opacity:.55;margin-left:4px;font-size:10px}
 .data-table thead th[aria-sort] .sort{opacity:1}

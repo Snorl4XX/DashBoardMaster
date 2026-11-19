@@ -95,15 +95,35 @@ function JTCoreFactory_() {
     return a && b ? a + ',' + b : '';
   }
   function normStop(s) { return String(s || '').toUpperCase().replace(/[\s\-–—_,;\/]+/g, ' ').trim(); }
+  /** "2026-11-18 11:32:05" / "18/11/2026 11:32" → "2026-11-18 11:32" (sem horário → ''). */
+  function stampOf(v) {
+    if (blank(v)) return '';
+    var s = String(v), m = s.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3] + ' ' + pad2(m[4]) + ':' + m[5];
+    m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})/);
+    return m ? m[3] + '-' + pad2(m[2]) + '-' + pad2(m[1]) + ' ' + pad2(m[4]) + ':' + m[5] : '';
+  }
+  /**
+   * A tabela que começa em `from` já vale para a remessa do dia `d`? `from` só com dia ("2026-11-16") = pelo dia da remessa.
+   * V4.29.2: `from` com horário ("2026-11-18 11:30") = no próprio dia, pelo horário do bipe (time); sem horário, já vale.
+   */
+  function fromReached(from, d, time) {
+    if (!from || !d) return true;
+    if (from.length <= 10) return from <= d;
+    var fd = from.slice(0, 10);
+    if (fd !== d) return fd < d;
+    var t = stampOf(time);
+    return !t || t >= from;
+  }
   /** Tabela de docas que vale no dia (V4.8: docks.versions, a mais nova com from <= dia; sem dia, a mais nova). */
-  function dockVersionIndex(docks, date) {
+  function dockVersionIndex(docks, date, time) {
     var vs = docks.versions;
     if (!vs) return -1;
     var d = String(date || '').slice(0, 10), pick = 0;
-    for (var i = 0; i < vs.length; i++) if (!vs[i].from || !d || vs[i].from <= d) pick = i;
+    for (var i = 0; i < vs.length; i++) if (fromReached(vs[i].from, d, time)) pick = i;
     return pick;
   }
-  function dockVersion(docks, date) { var i = dockVersionIndex(docks, date); return i < 0 ? docks : docks.versions[i]; }
+  function dockVersion(docks, date, time) { var i = dockVersionIndex(docks, date, time); return i < 0 ? docks : docks.versions[i]; }
   /** Índices de uma tabela de docas (formato antigo: map/destinationGroups; formato novo: entries). */
   function dockIndex(docks) {
     if (docks.entries) return entryIndex(docks);
@@ -210,19 +230,36 @@ function JTCoreFactory_() {
    * V3.8 (só com o código do 1º segmento) usa esse código; "BRE" sozinho é ambíguo nesse caso (pode ter sido "BRE - SP") e
    * fica "Sem informação" até o dia ser baixado de novo.
    */
+  /**
+   * V4.18: valores antigos com o nome novo, na leitura (Config.gs → valueAliases; ex.: Criação de Lotes, "Partida" gravado
+   * antes → "Saída de porto", como a tela do JMS). Os dias já baixados não precisam ser baixados de novo.
+   */
+  function applyAliases(rows, aliases) {
+    if (!aliases || !rows) return rows;
+    var keys = Object.keys(aliases);
+    for (var i = 0; i < rows.length; i++) {
+      for (var j = 0; j < keys.length; j++) {
+        var k = keys[j], m = aliases[k], v = rows[i][k];
+        if (v !== undefined && v !== null && Object.prototype.hasOwnProperty.call(m, v)) rows[i][k] = m[v];
+      }
+    }
+    return rows;
+  }
   function applyDocks(rows, docks) {
     if (!docks || !rows) return rows;
+    // V4.16: docks.show 'line' = mostra a linha de desvio do DWS ("Esteira 6") no lugar da doca (SC → DC).
+    var valor = function (e) { return docks.show === 'line' ? (e.line ? (docks.linePrefix || '') + e.line : docks.fallback) : e.dock || docks.fallback; };
     var ixs = {}, memo = {};
     var indexFor = function (vi) { return ixs[vi] || (ixs[vi] = dockIndex(vi < 0 ? docks : docks.versions[vi])); };
     var bySource = docks.source && docks.source !== 'segment';
     for (var i = 0; i < rows.length; i++) {
-      var r = rows[i], vi = dockVersionIndex(docks, r.date), ix = indexFor(vi), key, m;
+      var r = rows[i], vi = dockVersionIndex(docks, r.date, r.eventTime), ix = indexFor(vi), key, m;
       if (bySource) {
         var v = blank(r[docks.source]) ? '' : String(r[docks.source]);
         key = vi + '\u0001' + v;
         m = memo[key];
         if (!m) {
-          if (ix.entries) { var es = entryForStop(v, ix); m = es ? [es.route, es.dock || docks.fallback] : ['', docks.fallback]; }
+          if (ix.entries) { var es = entryForStop(v, ix); m = es ? [es.route, es.dock ? valor(es) : docks.fallback] : ['', docks.fallback]; }
           else { var d = stopDestination(v, ix); m = [d, d ? (ix.byDest[d.toUpperCase()] || docks.fallback) : docks.fallback]; }
           memo[key] = m;
         }
@@ -233,7 +270,7 @@ function JTCoreFactory_() {
         if (!m) {
           var legacy = !raw && !blank(r.segment), src = legacy ? r.segment : raw;
           if (legacy && String(r.segment).trim().toUpperCase() === 'BRE') m = ['', ''];
-          else if (ix.entries) { var ec = entryForCode(src, ix); m = ec ? [ec.route, ec.dock || docks.fallback] : ['', docks.fallback]; }
+          else if (ix.entries) { var ec = entryForCode(src, ix); m = ec ? [ec.route, ec.dock ? valor(ec) : docks.fallback] : ['', docks.fallback]; }
           else { var dest = destinationOf(src, ix); m = [dest, dest ? (ix.byDest[dest.toUpperCase()] || docks.fallback) : docks.fallback]; }
           memo[key] = m;
         }
@@ -267,7 +304,8 @@ function JTCoreFactory_() {
    */
   var SEG_GRU_ = [
     [['378-00', '378-01', '378-02', '378-03', '378-05', '378-06'], 'DC SSZ-SP'],
-    [['402-00', '402-01', '402-03', '402-05', '402-06', '402-07'], 'DC TBT-SP'],
+    // V4.19: F SJC-SP (402-08), F UBT-SP (402-09) e F CRZ-SP (402-10), unidades novas do DC TBT-SP desde 30/10/2026.
+    [['402-00', '402-01', '402-03', '402-05', '402-06', '402-07', '402-08', '402-09', '402-10'], 'DC TBT-SP'],
     [['404-00', '404-03', '404-09', '404-10', '404-11', '404-12'], 'MOOCA'],
     [['381-00', '381-01', '381-02', '381-03', '381-04', '381-05', '381-11', '381-13', '381-14', '381-15', '404-01', '404-02', '404-04',
       '404-05', '404-06', '404-07', '404-08', '378-04', '402-02', '402-04'], 'DC GRU'],
@@ -281,7 +319,40 @@ function JTCoreFactory_() {
     [['AC', 'AM', 'BAU', 'BVB', 'CDG', 'JDF', 'LDB', 'MIA', 'MRB', 'RO', 'SJP', 'SOD', 'SP1', 'STM', 'TO', 'VCP', 'XAP', 'BJE', 'MA', 'PPB', 'NAT'], 'SP BRE'],
     [['MS'], 'MS CGR'], [['MT', 'JPN'], 'MT CGB'], [['PI', 'IMP'], 'THE'], [['ES'], 'ES SRR'], [['NE', 'NE1'], 'SP RBP'], [['DF'], 'DF BSB']
   ];
-  function segmentBase(v) {
+  /**
+   * V4.19 (comunicado): a partir de 01/11/2026 as cargas de TO, MRB, RO e AC vão pela rota DF BSB; a tabela de alocação da
+   * mesma data tem CDG no SP GRU-SJM. Vale pelo dia da remessa (o histórico continua como era).
+   */
+  // AC = RBR (Rio Branco): o código RBR vale como AC (V4.21.1).
+  var SEG_FIRST_FROM_2026_11_01_ = {TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB', AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM'};
+  /**
+   * V4.24.2 (aviso urgente de 10/11/2026 e a tabela atualizada): TO, MRB, RO e AC (RBR) VOLTAM do DF BSB para o SP BRE; CDG continua
+   * no RJ SJM. De 01/11 a 09/11 continua DF BSB (o histórico fica como era). Mesma data de Config.gs → BRE_BACK_FROM_2026_11_10_.
+   */
+  var SEG_FIRST_FROM_2026_11_10_ = {RBR: 'SP BRE', CDG: 'RJ SJM'};
+  /**
+   * V4.28 (tabelas de 16/11): o SP BRE perde BAU, JDF, AM, BVB, MRB, RO, TO e AC — MRB, RO, TO e AC (RBR) vão para o DF BSB, AM e
+   * BVB para a rota nova AM MAO, JDF para o DC JDF-MG e BAU para o DC BAU-SP; CDG continua no RJ SJM. Mesma data de Config.gs →
+   * ROUTES_FROM_2026_11_16_.
+   */
+  var SEG_FIRST_FROM_2026_11_16_ = {AM: 'AM MAO', BVB: 'AM MAO', BAU: 'DC BAU-SP', JDF: 'DC JDF-MG', TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB',
+    AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM'};
+  /**
+   * V4.29.2 (comunicado de 18/11): a partir das 11h30 de 18/11 o XAP vai pela rota SC BNU (sai do SP BRE). Mesmo horário de Config.gs
+   * → ROUTES_FROM_2026_11_18_.
+   */
+  var SEG_FIRST_FROM_2026_11_18_ = {AM: 'AM MAO', BVB: 'AM MAO', BAU: 'DC BAU-SP', JDF: 'DC JDF-MG', TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB',
+    AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM', XAP: 'SC BNU'};
+  /**
+   * Período das rotas pelo dia da remessa: 0 = até 31/10 · 1 = 01/11 a 09/11 (TO/MRB/RO/AC no DF BSB) · 2 = 10/11 a 15/11 ·
+   * 3 = desde 16/11 (tabelas de 16/11) · 4 = desde 18/11, 11h30 (XAP no SC BNU; no dia 18, pelo horário do bipe).
+   */
+  function segPeriod_(date, time) {
+    var d = date ? String(date).slice(0, 10) : '';
+    if (d && fromReached('2026-11-18 11:30', d, time)) return 4;
+    return d >= '2026-11-16' ? 3 : d >= '2026-11-10' ? 2 : d >= '2026-11-01' ? 1 : 0;
+  }
+  function segmentBase(v, date, time) {
     if (blank(v)) return '';
     var c = String(v).trim(), up = c.toUpperCase();
     var has = function (list) { for (var i = 0; i < list.length; i++) if (c.indexOf(list[i]) >= 0) return true; return false; };
@@ -292,7 +363,11 @@ function JTCoreFactory_() {
     if (up.slice(0, 3) === 'SP,') return 'SP BRE';
     if (up.slice(0, 4) === 'SBN,') return c.indexOf('375-') >= 0 ? 'SBN' : 'REVISAR SBN';
     if (up.slice(0, 4) === 'MOO,') return has(SEG_MOO_) ? 'MOOCA' : 'REVISAR MOO';
-    var first = up.split(',')[0];
+    var first = up.split(',')[0], per = segPeriod_(date, time);
+    if (per === 4 && SEG_FIRST_FROM_2026_11_18_[first]) return SEG_FIRST_FROM_2026_11_18_[first];
+    if (per === 3 && SEG_FIRST_FROM_2026_11_16_[first]) return SEG_FIRST_FROM_2026_11_16_[first];
+    if (per === 2 && SEG_FIRST_FROM_2026_11_10_[first]) return SEG_FIRST_FROM_2026_11_10_[first];
+    if (per === 1 && SEG_FIRST_FROM_2026_11_01_[first]) return SEG_FIRST_FROM_2026_11_01_[first];
     for (var f = 0; f < SEG_FIRST_.length; f++) if (SEG_FIRST_[f][0].indexOf(first) >= 0) return SEG_FIRST_[f][1];
     return 'REVISAR SEGMENTO';
   }
@@ -305,9 +380,84 @@ function JTCoreFactory_() {
     var memo = {};
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i], src = !blank(r.segmentFull) ? r.segmentFull : !blank(r.segmentRaw) ? r.segmentRaw : r.segment;
-      var k = blank(src) ? '' : String(src);
-      r.segmentBase = memo.hasOwnProperty(k) ? memo[k] : (memo[k] = segmentBase(k));
+      var k = blank(src) ? '' : String(src), per = segPeriod_(r.date, r.eventTime), mk = per + '|' + k;
+      r.segmentBase = memo.hasOwnProperty(mk) ? memo[mk] : (memo[mk] = segmentBase(k, per ? r.date : '', r.eventTime));
     }
+    return rows;
+  }
+  /**
+   * V4.25 (pedido): Expedição A/B/C pela doca (Config.gs → EXPEDICOES_): o número da doca ("DOCA 21/22" → 21) cai num grupo
+   * (A = 05–14, B = 15–23, C = 38–44); esteira (Last Mile) = "Esteiras"; sem doca ou fora dos grupos = sem informação.
+   */
+  function expeditionOf(dock, exps) {
+    if (blank(dock)) return '';
+    var s = String(dock).trim();
+    if (/^esteira/i.test(s)) return exps.esteiras || '';
+    var m = s.match(/\d+/);
+    if (!m) return '';
+    var n = Number(m[0]), gs = exps.groups || [];
+    for (var i = 0; i < gs.length; i++) if (n >= gs[i].from && n <= gs[i].to) return gs[i].name;
+    return '';
+  }
+  function applyExpeditions(rows, exps) {
+    if (!exps || !rows) return rows;
+    var memo = {};
+    for (var i = 0; i < rows.length; i++) {
+      var d = rows[i].dock === undefined || rows[i].dock === null ? '' : String(rows[i].dock);
+      rows[i].expedition = memo.hasOwnProperty(d) ? memo[d] : (memo[d] = expeditionOf(d, exps));
+    }
+    return rows;
+  }
+  /**
+   * V4.25 (pedido, Falta de Bipagem no Recebimento): linha TRONCAL ou SECUNDÁRIA de cada remessa.
+   * V4.25.1 (pedido: "os valores do segmento secundário devem seguir essas tabelas"): SECUNDÁRIA = só os pares de 1º + 2º
+   * segmento das tabelas de 24/10 — a das esteiras (Last Mile: GRU 404-xx, DC SSZ-SP, DC S-MOO 02-SP, NOD, VLANA) e a dos DCs
+   * (SBN 375-xx, DC TBT-SP, DC GRU-SP) —, mostrados juntos ("GRU,404-04"); VLANA e NOD só com o 1º (a tabela não tem o 2º).
+   * Todo o resto é da linha TRONCAL (principal), com o 1º segmento (GO, PA, RJ, SP…). segMain só nas remessas da troncal e
+   * segSub só nas da secundária: cada filtro lista só os valores da sua linha.
+   */
+  var SEG_SEC_FIRST_ONLY_ = {VLANA: 1, NOD: 1};
+  var SEG_SEC_PAIRS_ = (function () {
+    var o = {}, add = function (first, list) { list.forEach(function (x) { o[first + ',' + x] = 1; }); };
+    var range = function (pre, a, b) { var out = []; for (var n = a; n <= b; n++) out.push(pre + '-' + (n < 10 ? '0' : '') + n); return out; };
+    // Esteiras (Last Mile) e DC SSZ-SP
+    add('GRU', ['404-00', '404-01', '404-02', '404-03', '404-04', '404-05', '404-06', '404-07', '404-08', '404-09', '404-10', '404-11', '404-12', '404-13',
+      '378-00', '378-01', '378-02', '378-03', '378-05', '378-06']);
+    // DC S-MOO 02-SP: SP (antigo) e MOO (novo)
+    add('SP', ['364-00', '435-00', '350-00', '365-00', '381-12', '430-01', '430-05', '430-07', '430-08', '430-09']);
+    add('MOO', range('430', 0, 9));
+    // SBN (doca 08; V4.29.1: 375-11 na tabela de 16/11, DC SBN-SP)
+    add('SBN', range('375', 0, 11));
+    // DC TBT-SP (doca 23): SP (antigo) e GRU (novo); 402-09 e 402-10 = unidades novas do comunicado de 30/10 (F UBT-SP, F CRZ-SP)
+    add('SP', ['402-01', '402-03', '402-05', '421-00']);
+    add('GRU', range('402', 0, 10));
+    // DC GRU-SP (doca 44): SP (antigo) e GRU (novo)
+    add('SP', ['395-05', '395-06', '395-07', '381-04']);
+    add('GRU', ['381-00', '381-01', '381-02', '381-03', '381-04', '381-05', '381-11', '381-13', '381-14', '381-15', '381-18', '381-19', '381-20', '381-21', '378-04']);
+    return o;
+  })();
+  function segLineOf(code) {
+    var first = segmentCode(code), second = secondSegment(code);
+    if (!first) return {line: '', main: '', sub: ''};
+    if (SEG_SEC_FIRST_ONLY_[first]) return {line: 'Secundária', main: '', sub: first};
+    if (second && SEG_SEC_PAIRS_[first + ',' + second]) return {line: 'Secundária', main: '', sub: first + ',' + second};
+    return {line: 'Troncal', main: first, sub: ''};
+  }
+  function applySegLines(rows, on) {
+    if (!on || !rows) return rows;
+    var memo = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i], src = !blank(r.segmentFull) ? r.segmentFull : !blank(r.segmentRaw) ? r.segmentRaw : r.segment;
+      var k = blank(src) ? '' : String(src), x = memo.hasOwnProperty(k) ? memo[k] : (memo[k] = segLineOf(k));
+      r.segLine = x.line; r.segMain = x.main; r.segSub = x.sub;
+    }
+    return rows;
+  }
+  /** V4.25: os campos calculados na leitura depois das docas (Expedição A/B/C e linhas do segmento). */
+  function applyV425(rows, c) {
+    if (!c || !rows) return rows;
+    if (c.expeditions) applyExpeditions(rows, c.expeditions);
+    if (c.segLines) applySegLines(rows, true);
     return rows;
   }
   /**
@@ -317,6 +467,8 @@ function JTCoreFactory_() {
   function applyDayOf(rows, dayOf) {
     if (!dayOf || !rows) return rows;
     var keys = Object.keys(dayOf);
+    // A data de cada remessa muda: a mesma remessa pode cair no mesmo dia duas vezes (a contagem volta a conferir).
+    if (keys.indexOf('date') >= 0 && rows.__unique) markUnique(rows, false);
     for (var i = 0; i < rows.length; i++) {
       for (var k = 0; k < keys.length; k++) rows[i][keys[k]] = dayPart(rows[i][dayOf[keys[k]]]);
     }
@@ -479,6 +631,8 @@ function JTCoreFactory_() {
   function goalMet(rate, goal) {
     if (!isNum(rate) || !goal || !isNum(goal.value)) return null;
     rate = Number(rate);
+    // V4.24: goal.roundTo = casas da tela (ex.: 2 → 0,503% conta como 0,50%, a mesma que aparece).
+    if (isNum(goal.roundTo)) { var f = Math.pow(10, Number(goal.roundTo)); rate = Math.round(rate * f) / f; }
     var v = Number(goal.value);
     if (goal.direction === 'min') return goal.strict ? rate > v : rate >= v;
     return goal.strict ? rate < v : rate <= v;
@@ -552,12 +706,38 @@ function JTCoreFactory_() {
     });
     if (rows && rows.length && keys.length) {
       var fromRows = {};
-      applyFilters(rows, only || {}).forEach(function (r) {
-        var x = fromRows[r.date] || (fromRows[r.date] = {part: 0, total: 0}), w = weight(r);
-        x.total += w;
-        if (keys.every(function (k) { return sets[k][norm(r[k])]; })) x.part += w;
-      });
+      if (keys.length === 1 && keys[0] === 'shift') {
+        // V4.27.1: só turno (cartões T1/T2/T3 e filtro de turno): uma passada guardada por lista, com todos os turnos por dia.
+        var byDay = shiftDayCounts(rows, only);
+        Object.keys(byDay).forEach(function (d) {
+          var c = byDay[d];
+          fromRows[d] = {part: sel.by.shift.reduce(function (n, s) { return n + (c[s] || 0); }, 0), total: c.total};
+        });
+      } else {
+        applyFilters(rows, only || {}).forEach(function (r) {
+          var x = fromRows[r.date] || (fromRows[r.date] = {part: 0, total: 0}), w = weight(r);
+          x.total += w;
+          if (keys.every(function (k) { return sets[k][norm(r[k])]; })) x.part += w;
+        });
+      }
       Object.keys(fromRows).forEach(function (d) { if (fromRows[d].total > 0) out[d] = fromRows[d]; });
+    }
+    return out;
+  }
+  var SHIFT_DAY_MEMO = typeof WeakMap === 'function' ? new WeakMap() : null;
+  /** {data: {T1, T2, T3, 'N/A'…, total}} das linhas (com o recorte `only`), guardado por lista. */
+  function shiftDayCounts(rows, only) {
+    var key = JSON.stringify(only || {}), memo = SHIFT_DAY_MEMO ? SHIFT_DAY_MEMO.get(rows) : null;
+    if (memo && memo.len === rows.length && memo.by[key]) return memo.by[key];
+    var out = {}, list = applyFilters(rows, only || {});
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i], x = out[r.date] || (out[r.date] = {total: 0}), w = weight(r), s = norm(r.shift);
+      x.total += w;
+      x[s] = (x[s] || 0) + w;
+    }
+    if (SHIFT_DAY_MEMO) {
+      if (!memo || memo.len !== rows.length) { memo = {len: rows.length, by: {}}; SHIFT_DAY_MEMO.set(rows, memo); }
+      memo.by[key] = out;
     }
     return out;
   }
@@ -609,6 +789,23 @@ function JTCoreFactory_() {
    */
   var FILTER_SCOPES = {};
   function setFilterScopes(scopes) { FILTER_SCOPES = scopes || {}; }
+  /**
+   * V4.22.11: contagem da lista de cada filtro só nestas colunas (ex.: Produção do Sorter: "Sort total"). Sem isso, a lista somava
+   * todos os números da tela juntos (Sort total + Valid total + andares + balanças…) e o mesmo volume aparecia umas 4 vezes. Só a
+   * contagem: o filtro continua valendo para todas as linhas. Filtro com escopo (filterScopes) conta as linhas do escopo dele.
+   */
+  var FACET_COLUMNS = null;
+  /**
+   * V4.22.12: gráfico com outra lista quando um filtro está escolhido (def.byFilter = {campo: {where, title, sub}}). Ex.: Produção
+   * do Sorter — com o filtro de balança, "por hora" mostra a quantidade alimentada (o site não dá o Sort total por balança).
+   */
+  function chartDefFor(def, filters) {
+    var bf = def && def.byFilter;
+    if (!bf) return def;
+    var k = Object.keys(bf).filter(function (x) { return filters && filters[x] && filters[x].length; })[0];
+    return k ? Object.assign({}, def, bf[k], {byFilter: null}) : def;
+  }
+  function setFacetColumns(cols) { FACET_COLUMNS = cols && cols.length ? cols : null; }
   function inScope(k, r) { var sc = FILTER_SCOPES[k]; return !sc || sc.some(function (c) { return colMatch(c, r.column); }); }
   /**
    * Listas formadas por várias situações (Expedição: "Enviados" = todas as remessas; "Em trânsito" e "Não entregues"
@@ -631,13 +828,14 @@ function JTCoreFactory_() {
     var sets = active.map(function (k) {
       var s = {}; filters[k].forEach(function (v) { s[String(v)] = 1; }); return [k, s, FILTER_SCOPES[k] || null];
     });
-    return (rows || []).filter(function (r) {
+    var out = (rows || []).filter(function (r) {
       for (var i = 0; i < sets.length; i++) {
         if (sets[i][2] && !colMatch(sets[i][2], r.column)) continue;
         if (!sets[i][1][norm(r[sets[i][0]])]) return false;
       }
       return true;
     });
+    return rows && rows.__unique ? markUnique(out, true) : out;
   }
   /**
    * Contagem de remessas por valor da dimensão. As linhas já chegam únicas por
@@ -648,20 +846,47 @@ function JTCoreFactory_() {
    * as remessas somadas por combinação de DC/base/viagem/estação/digitalizador/turno, campo qty).
    */
   function weight(r) { var q = r && r.qty; return q === undefined || q === null || q === '' ? 1 : (Number(q) || 0); }
+  // V4.27.1: a mesma lista é contada pelo mesmo campo várias vezes ao montar a tela (opções dos filtros, gráficos, cartões).
+  // Com 700 mil remessas cada contagem custa caro: a conta fica guardada por lista (mesmo array e tamanho) e campo, só com o
+  // peso padrão. Quem recebe ganha cópias (pode ordenar ou mudar à vontade).
+  var COUNT_MEMO = typeof WeakMap === 'function' ? new WeakMap() : null;
   function countBy(rows, key, wf) {
+    var list = rows || [], memo = null;
+    if (!wf && COUNT_MEMO && rows) {
+      memo = COUNT_MEMO.get(rows);
+      if (!memo || memo.len !== list.length) { memo = {len: list.length, by: {}}; COUNT_MEMO.set(rows, memo); }
+      var hit = memo.by['~' + key];
+      if (hit) return hit.map(function (x) { return {label: x.label, value: x.value}; });
+    }
     var map = {};
-    var list = rows || [];
     var w = wf || weight;
     for (var i = 0; i < list.length; i++) {
       var label = norm(list[i][key]);
       map[label] = (map[label] || 0) + w(list[i]);
     }
-    return Object.keys(map).map(function (l) { return {label: l, value: map[l]}; })
+    var out = Object.keys(map).map(function (l) { return {label: l, value: map[l]}; })
       .sort(function (a, b) { return b.value - a.value || compareText(a.label, b.label); });
+    if (memo) memo.by['~' + key] = out.map(function (x) { return {label: x.label, value: x.value}; });
+    return out;
   }
+  // V4.27: 2 meses = ~700 mil remessas — a mesma lista é contada várias vezes ao montar a tela (cartões, selos, tabela). A conta
+  // fica guardada por lista (mesmo array e mesmo tamanho) e usa Set (o objeto comum ficava lento com centenas de milhares de chaves).
+  var DISTINCT_MEMO = typeof WeakMap === 'function' ? new WeakMap() : null;
   function distinctCount(rows) {
-    var seen = {}, n = 0;
-    (rows || []).forEach(function (r) { var id = r.date + '|' + r.shipment; if (!seen[id]) { seen[id] = 1; n += weight(r); } });
+    var list = rows || [], memo = DISTINCT_MEMO && rows ? DISTINCT_MEMO.get(rows) : null;
+    if (memo && memo.len === list.length) return memo.n;
+    var n = 0, i, r, id;
+    if (list.__unique) {
+      // V4.27.1: lista já sem repetição (decodeDataset / filtros dela): soma das linhas, sem montar "data|remessa".
+      for (i = 0; i < list.length; i++) n += weight(list[i]);
+    } else if (typeof Set === 'function') {
+      var seen = new Set();
+      for (i = 0; i < list.length; i++) { r = list[i]; id = r.date + '|' + r.shipment; if (!seen.has(id)) { seen.add(id); n += weight(r); } }
+    } else {
+      var obj = {};
+      for (i = 0; i < list.length; i++) { r = list[i]; id = r.date + '|' + r.shipment; if (!obj[id]) { obj[id] = 1; n += weight(r); } }
+    }
+    if (DISTINCT_MEMO && rows) DISTINCT_MEMO.set(rows, {len: list.length, n: n});
     return n;
   }
   function compareText(a, b) {
@@ -688,8 +913,11 @@ function JTCoreFactory_() {
       var all = {}, cnt = {};
       // Filtro com escopo: as opções e as contagens saem só das linhas da(s) lista(s) dele.
       var own = FILTER_SCOPES[k] ? (rows || []).filter(function (r) { return inScope(k, r); }) : rows;
-      countBy(own, k).forEach(function (x) { all[x.label] = x.value; });
-      countBy(applyFilters(own, filters, k), k).forEach(function (x) { cnt[x.label] = x.value; });
+      var counted = !FILTER_SCOPES[k] && FACET_COLUMNS ?
+        (own || []).filter(function (r) { return FACET_COLUMNS.some(function (c) { return colMatch(c, r.column); }); }) : own;
+      if (counted !== own) countBy(own, k).forEach(function (x) { all[x.label] = 0; });
+      countBy(counted, k).forEach(function (x) { all[x.label] = x.value; });
+      countBy(applyFilters(counted, filters, k), k).forEach(function (x) { cnt[x.label] = x.value; });
       if (SHIFT_KEYS[k]) SHIFTS.forEach(function (s) { if (all[s] === undefined) all[s] = 0; });
       (filters && filters[k] || []).forEach(function (v) { if (all[v] === undefined) all[v] = 0; });
       out[k] = orderOptions(k, Object.keys(all).map(function (v) {
@@ -701,12 +929,33 @@ function JTCoreFactory_() {
 
   // ---------- gráficos ----------
   /** Linhas do recorte do gráfico (def.where, ex.: {column: 'Chegou'}): um painel com duas colunas principais. */
+  /**
+   * V4.20: nome de base comparável — maiúsculas, hífens e espaços iguais e sem o "-UF" do fim ("DC VCP-SP" = "DC VCP",
+   * "DC ITJ 001-PR" = "DC ITJ 001"). "SP GRU" continua "SP GRU" (a base tem 3 letras).
+   */
+  function siteKey(s) { return String(s === null || s === undefined ? '' : s).toUpperCase().replace(/[\s\-\u2013\u2014_]+/g, ' ').trim().replace(/ [A-Z]{2}$/, ''); }
+  var SITE_SETS = [];
+  function inSiteList(name, list) {
+    var e = null;
+    for (var i = 0; i < SITE_SETS.length && !e; i++) if (SITE_SETS[i].list === list) e = SITE_SETS[i];
+    if (!e) { e = {list: list, set: {}}; (list || []).forEach(function (n) { e.set[siteKey(n)] = 1; }); SITE_SETS.push(e); }
+    return !!e.set[siteKey(name)];
+  }
   function chartRows(def, rows) {
-    if (!def.where) return rows || [];
-    var keys = Object.keys(def.where);
-    return (rows || []).filter(function (r) {
-      return keys.every(function (k) { return k === 'column' ? colMatch(def.where[k], r[k]) : r[k] === def.where[k]; });
-    });
+    var out = rows || [];
+    if (def.where) {
+      var keys = Object.keys(def.where);
+      out = out.filter(function (r) {
+        return keys.every(function (k) { return k === 'column' ? colMatch(def.where[k], r[k]) : r[k] === def.where[k]; });
+      });
+    }
+    // V4.20 (Criação de Lotes): só os destinos da lista (siteMode 'in') ou só os de fora ('out'); sem destino não conta.
+    // V4.21.6: _siteOk = linha de total já filtrada pela lista no servidor (período grande; ex.: turnos × destino).
+    if (def.siteList) {
+      var f = def.siteField || def.dim, keep = def.siteMode !== 'out';
+      out = out.filter(function (r) { var v = r[f]; return r._siteOk || (!blank(v) && !noValue(v) && inSiteList(v, def.siteList) === keep); });
+    }
+    return out;
   }
   /**
    * Recebimento com período grande (servidor manda totais por campo): {campo: [{date, column, campo: valor, qty}]}.
@@ -716,14 +965,19 @@ function JTCoreFactory_() {
     var out = {};
     decodeDataset(ds).forEach(function (r) {
       var o = {date: r.date, column: r.column, shipment: r.shipment, qty: r.qty};
-      // "lot:items" = soma de itens por saca: o valor vai no campo da dimensão (lot).
-      o[String(r._m).split(':')[0]] = r.value;
+      // "lot:items" = soma de itens por saca: o valor vai no campo da dimensão (lot). V4.21.6: "shift@ecoWrongShift" = turnos
+      // só das linhas com o destino fora/dentro da lista do gráfico (já filtradas no servidor).
+      var m = String(r._m).split(':')[0];
+      if (m.indexOf('@') > 0) { m = m.split('@')[0]; o._siteOk = 1; }
+      o[m] = r.value;
       (out[r._m] || (out[r._m] = [])).push(o);
     });
     return out;
   }
   function summaryChartRows(def, byDim, filters) {
     var k = def.dim || def.key, f = {}, sk = def.sumField ? k + ':' + def.sumField : null;
+    // V4.21.6: gráfico de um campo com a lista de bases em OUTRO campo (turnos × destino): os totais só dessas linhas.
+    if (def.siteList && def.siteField && def.siteField !== k) sk = k + '@' + def.key;
     if (filters && filters[k]) f[k] = filters[k];
     return applyFilters((byDim && ((sk && byDim[sk]) || byDim[k])) || [], f);
   }
@@ -766,7 +1020,8 @@ function JTCoreFactory_() {
       base.datasets = [{label: 'qty', data: labels.map(function (l) { return map[l] || 0; })}];
       return base;
     }
-    if (def.key === 'interval' && opts.intervalMode === 'timeline') {
+    // V4.22: timeline no gráfico = sempre as 24 horas em ordem (Produção do Sorter: evolução por hora).
+    if (def.key === 'interval' && (opts.intervalMode === 'timeline' || def.timeline)) {
       var byLabel = {}; groups.forEach(function (g) { byLabel[g.label] = g.value; });
       var hours = []; for (var h = 0; h < 24; h++) hours.push(intervalLabel(h));
       base.ranking = false; base.timeline = true;
@@ -1006,32 +1261,52 @@ function JTCoreFactory_() {
     });
     return {v: 1, n: rows.length, fields: fields, dict: dict, cols: cols};
   }
-  function decodeDataset(ds) {
-    if (!ds || !ds.n) return [];
-    var rows = new Array(ds.n), seen = {}, out = [];
-    for (var i = 0; i < ds.n; i++) {
-      var r = {};
-      for (var f = 0; f < ds.fields.length; f++) {
-        var name = ds.fields[f];
-        r[name] = ds.dict[name][ds.cols[name][i]];
-      }
-      rows[i] = r;
+  /** V4.27.1: lista já sem remessa repetida (data + remessa): a contagem de remessas vira a soma das linhas. */
+  function markUnique(list, on) {
+    if (list && typeof list === 'object') {
+      try { Object.defineProperty(list, '__unique', {value: !!on, writable: true, configurable: true, enumerable: false}); } catch (e) { /* lista congelada */ }
     }
-    rows.forEach(function (r) { var id = r.date + '|' + r.shipment; if (!seen[id]) { seen[id] = 1; out.push(r); } });
-    return out;
+    return list;
+  }
+  function decodeDataset(ds) {
+    if (!ds || !ds.n) return markUnique([], true);
+    // V4.27.1: remessa repetida (mesma data e remessa) conferida pelos números do dicionário (cada valor tem um número só),
+    // sem montar o texto "data|remessa" de cada linha — com centenas de milhares de linhas era a parte mais lenta da tela.
+    var out = [], fields = ds.fields, nf = fields.length, dicts = [], cols = [], f;
+    for (f = 0; f < nf; f++) { dicts.push(ds.dict[fields[f]]); cols.push(ds.cols[fields[f]]); }
+    var cD = ds.cols.date, cS = ds.cols.shipment, nS = ds.dict.shipment ? ds.dict.shipment.length : 0;
+    var byIndex = !!(cD && cS && nS && ds.dict.date);
+    var oneDay = byIndex && ds.dict.date.length === 1 && typeof Uint8Array === 'function';
+    var seenDay = oneDay ? new Uint8Array(nS) : null, seen = !oneDay && typeof Set === 'function' ? new Set() : null, seenObj = {};
+    for (var i = 0; i < ds.n; i++) {
+      if (oneDay) { var si = cS[i]; if (seenDay[si]) continue; seenDay[si] = 1; }
+      else if (byIndex && seen) { var key = cD[i] * nS + cS[i]; if (seen.has(key)) continue; seen.add(key); }
+      var r = {};
+      for (f = 0; f < nf; f++) r[fields[f]] = dicts[f][cols[f][i]];
+      if (!byIndex) {
+        var id = r.date + '|' + r.shipment;
+        if (seen) { if (seen.has(id)) continue; seen.add(id); } else { if (seenObj[id]) continue; seenObj[id] = 1; }
+      } else if (!seen && !oneDay) {
+        var id2 = cD[i] + '|' + cS[i];
+        if (seenObj[id2]) continue; seenObj[id2] = 1;
+      }
+      out.push(r);
+    }
+    return markUnique(out, true);
   }
 
   // ---------- tradução de valores vindos do JMS ----------
   var VALUE_ZH_PT = {
     '上环节建包异常': 'Erro de ensacamento na etapa anterior', '一段码异常': 'Erro no 1º segmento', '人为因素': 'Fator humano',
     '错发': 'Envio errado', '移动端': 'Coletor móvel', '自动分拣设备': 'Sorter automático', '中心': 'Centro', '集散': 'Distribuição',
-    '出港': 'Partida', '进港': 'Chegada', '普通包': 'Saco normal'
+    '出港': 'Saída de porto', '进港': 'Entrada', '普通包': 'Saco normal'
   };
-  var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
+  var VALUE_PT_ZH = {'Fora do prazo': '超时', 'No prazo': '及时', 'Volumosos': '大件', 'VOLUMOSOS': '大件', 'N/A': '无', 'SEM DOCA': '无月台',
+    'Expedição A': '发件区 A', 'Expedição B': '发件区 B', 'Expedição C': '发件区 C', 'Esteiras': '分拣线', 'Troncal': '干线', 'Secundária': '支线',
     'Pedido principal': '主单', 'Pedido secundário': '子单', 'Deve chegar': '应到', 'Sem bipe na etapa anterior': '上一环节未发件扫描', 'Sem bipe de expedição nesta base': '本网点未发件扫描', 'Chegou': '已到',
     'Enviados': '已发件', 'Em trânsito': '在途（未到下一站）', 'Não entregues': '未签收', 'Não chegou ao destino': '未到下一站',
     'Chegou ao destino · não entregue': '已到下一站·未签收', 'Entregue': '已签收', 'Entregue · sem bipe de chegada': '已签收·无到件扫描',
-    'Chegada': '进港', 'Partida': '出港', 'Ecológica': '环保袋', 'Não ecológica': '非环保袋', 'Saco normal': '普通包',
+    'Chegada': '进港', 'Partida': '出港', 'Saída de porto': '出港', 'Entrada': '进港', 'Ecológica': '环保袋', 'Não ecológica': '非环保袋', 'Saco normal': '普通包',
     'Sacas criadas': '建包', 'Sacas ecológicas': '环保袋', 'Sacas não ecológicas': '非环保袋',
     'Sem movimentação': '断更件', 'Bipe de expedição': '发件扫描', 'Bipe de pacote problemático': '问题件扫描', 'Chegadas ao centro': '中心到件',
     'Encomenda inserida em lote': '建包扫描', 'Entrada no galpão de pacote não expedido': '留仓件入仓', 'Encomenda retirada do lote': '拆包扫描'};
@@ -1057,13 +1332,13 @@ function JTCoreFactory_() {
     SHIFTS: SHIFTS, NO_TRIP_ID: NO_TRIP_ID, noValue: noValue, timePart: timePart, hourOf: hourOf, shiftOf: shiftOf, intervalOf: intervalOf,
     intervalLabel: intervalLabel, firstSegment: firstSegment, segmentHead: segmentHead, segmentHead2: segmentHead2, secondSegment: secondSegment, segmentPair: segmentPair, segmentCode: segmentCode, isIso: isIso, addDays: addDays,
     dockDestination: dockDestination, stopDestination: function (v, docks, date) { return docks ? stopDestination(v, dockIndex(dockVersion(docks, date))) : ''; },
-    dockVersion: dockVersion, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
+    dockVersion: dockVersion, applyAliases: applyAliases, applyDocks: applyDocks, segmentBase: segmentBase, applySegmentBase: applySegmentBase, applyExpeditions: applyExpeditions, expeditionOf: expeditionOf, applySegLines: applySegLines, segLineOf: segLineOf, applyV425: applyV425, applyOrderKinds: applyOrderKinds, dayPart: dayPart, applyDayOf: applyDayOf, pivot: pivot, rankPanel: rankPanel,
     dateRange: dateRange, daysBetween: daysBetween, isoWeek: isoWeek, bucketKey: bucketKey,
     goalMet: goalMet, periodRate: periodRate, rateScale: rateScale, sumErrors: sumErrors, ratesBetween: ratesBetween,
-    hasFilters: hasFilters, applyFilters: applyFilters, countBy: countBy, distinctCount: distinctCount,
+    hasFilters: hasFilters, applyFilters: applyFilters, siteKey: siteKey, inSiteList: inSiteList, countBy: countBy, distinctCount: distinctCount,
     facets: facets, buildChart: buildChart, buildEvolution: buildEvolution, summaryTable: summaryTable,
-    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
-    encodeDataset: encodeDataset, decodeDataset: decodeDataset, localizeValue: localizeValue, compareText: compareText, median: median
+    computeCards: computeCards, weight: weight, setFilterScopes: setFilterScopes, setFacetColumns: setFacetColumns, chartDefFor: chartDefFor, inScope: inScope, setColumnSets: setColumnSets, colMatch: colMatch, shiftSelection: shiftSelection, shiftShares: shiftShares, shiftPart: shiftPart, shiftSeries: shiftSeries, chartRows: chartRows, marginalsByDim: marginalsByDim, summaryChartRows: summaryChartRows, aggregateResults: aggregateResults, aggregateShiftResults: aggregateShiftResults, aggregateQtyResults: aggregateQtyResults,
+    encodeDataset: encodeDataset, decodeDataset: decodeDataset, markUnique: markUnique, localizeValue: localizeValue, compareText: compareText, median: median
   };
 }
 

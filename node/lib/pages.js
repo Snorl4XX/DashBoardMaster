@@ -67,7 +67,92 @@ function deniedPage() {
 <div class="actions"><a class="btn ghost" href="./">Abrir o painel</a></div></div></div></body></html>`;
 }
 
+/**
+ * V4.29 (pedido "colocar a config dele como link compartilhável"): página /token, que abre pelo link público (como a do Monitor
+ * de Recebimento). Quem tem o link do painel troca o AuthToken do JMS quando vencer, sem entrar no computador do servidor.
+ * Só troca o AuthToken: não mostra o token salvo nem mexe no resto. O servidor só salva o que o JMS aceitar.
+ */
+function tokenPage(opts) {
+  const corpo = !opts.on
+    ? `<p>A troca do AuthToken pelo link está <b>desligada</b> neste painel (<code>"trocaTokenPeloLink": false</code> no
+<code>node/config.json</code>).</p>`
+    : opts.semJms
+      ? '<p>Este painel não usa o JMS: não tem AuthToken para trocar.</p>'
+      : `<section class="card"><h2>Situação</h2><div id="sit" class="hint">Carregando…</div></section>
+<section class="card"><h2>Trocar o AuthToken do JMS</h2>
+<p class="hint">Use quando o painel avisar que o AuthToken venceu (ou parou de atualizar). O painel testa o AuthToken no JMS
+antes de salvar: se o JMS não aceitar, nada muda. O AuthToken salvo nunca aparece aqui.</p>
+<label for="tok">AuthToken</label><textarea id="tok" autocomplete="off" spellcheck="false" placeholder="cole aqui o authToken do JMS"></textarea>
+<div class="actions"><button id="salvar">Testar e salvar</button><a class="btn ghost" href="./">Abrir o painel</a></div>
+<div id="msg"></div>
+<p class="hint">Como pegar: abra o JMS no navegador e entre. Aperte F12 › aba Rede (Network) › clique em qualquer consulta do
+gw.jtjms-br.com › Cabeçalhos (Headers) › <b>authtoken</b>. Copie só o valor.</p></section>
+<script>${TOKEN_JS}</script>`;
+  return `<!DOCTYPE html><html lang="pt-BR" translate="no"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate"><meta name="robots" content="noindex"><meta name="color-scheme" content="dark light">
+<title>DashMaster · Trocar o AuthToken</title><style>${BASE_CSS}</style></head><body><div class="wrap" style="max-width:640px">
+<header class="top"><span class="logo">J&amp;T</span><h1>DashMaster · Trocar o AuthToken</h1></header>
+${corpo}</div></body></html>`;
+}
+const TOKEN_JS = `
+var $ = function (id) { return document.getElementById(id); };
+var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); };
+function situacao() {
+  fetch('token/estado', {headers: {'X-DashMaster-Token': '1'}, credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (e) {
+    var t = e.token ? '<p class="ok">AuthToken cadastrado.</p>' : '<p class="bad">Nenhum AuthToken cadastrado.</p>';
+    if (e.rodando) t += '<p><b>Baixando do JMS agora…</b></p>';
+    if (e.ultima) t += '<p class="small">Última atualização da fila: ' + esc(e.ultima) + '</p>';
+    $('sit').innerHTML = t;
+  }).catch(function () { $('sit').innerHTML = '<p class="bad">Não consegui ler a situação do painel.</p>'; });
+}
+$('salvar').onclick = function () {
+  var b = this; b.disabled = true; $('msg').innerHTML = '<p class="hint">Testando o AuthToken no JMS…</p>';
+  fetch('token/salvar', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-DashMaster-Token': '1'},
+    body: JSON.stringify({texto: $('tok').value})}).then(function (r) { return r.json().catch(function () { return {ok: false, error: 'HTTP ' + r.status}; }); })
+    .then(function (j) {
+      if (j.ok) { $('tok').value = ''; $('msg').innerHTML = '<p class="ok">O JMS aceitou e o AuthToken foi salvo. A fila recomeçou: em alguns minutos o painel atualiza.</p>'; }
+      else $('msg').innerHTML = '<p class="bad">' + esc(j.error || 'Não deu certo.') + '</p>';
+    }).catch(function (e) { $('msg').innerHTML = '<p class="bad">' + esc(e.message) + '</p>'; })
+    .then(function () { b.disabled = false; situacao(); });
+};
+situacao(); setInterval(situacao, 15000);
+`;
+
+/**
+ * V4.22: pacote sem JMS (Produção do Sorter): no lugar do AuthToken, o endereço do sorter da base e a troca do Sorter A
+ * (Propriedades SORTER_URL e SORTER_TROCA_A), com o teste diagnosticarSorter.
+ */
+const SORTER_CARD = `<section class="card"><h2>Sorter da base</h2>
+<p class="hint">O painel lê o monitor do sorter pela rede da base (este computador precisa abrir o endereço no navegador).
+O Sorter B é o que o site mostra sem trocar. Para o Sorter A, cole o pedido de troca (switch device → Cross-belt GRU-A) como no
+Painel do Sorter: {"metodo": "POST", "caminho": "/…", "corpo": "_token=…&…"}. O _token é sempre o da sessão.</p>
+<label for="sUrl">Endereço do sorter</label><input id="sUrl" placeholder="http://10.1.166.9">
+<label for="sTroca" style="margin-top:10px">Troca do Sorter A (opcional)</label><textarea id="sTroca" autocomplete="off" spellcheck="false" style="min-height:52px" placeholder='{"metodo": "POST", "caminho": "/home/…", "corpo": "_token=x&device_id=…"}'></textarea>
+<div class="actions"><button id="saveSorter">Salvar e testar o sorter</button></div>
+<pre class="out" id="sorterOut"></pre></section>
+
+<section class="card"><h2>Bot do Feishu</h2>
+<p class="hint">De hora em hora (minuto 5), o painel manda no grupo do Feishu os dados da hora que fechou (ex.: às 13:05, das 12:00
+às 12:59): produção (Sorter A + B), Valid total, No Sort Code e as balanças (as 3 que mais, as 3 que menos e todas). No fim de cada
+turno (14h, 22h e 06h), também o total do turno. No grupo do Feishu: Configurações do grupo
+→ Bots → Adicionar bot → Bot personalizado; copie o endereço do webhook. Se ligar a "Assinatura" no bot, cole o segredo também.
+Os valores salvos não aparecem de novo nesta tela. Para mandar os mesmos números em outro grupo, adicione um bot nesse grupo,
+escolha "Grupo 2" abaixo e cole o webhook dele (até 5 grupos).</p>
+<p class="small" id="feishuState"></p>
+<label for="fGrupo">Grupo</label><select id="fGrupo"><option value="1">Grupo 1</option><option value="2">Grupo 2</option>
+<option value="3">Grupo 3</option><option value="4">Grupo 4</option><option value="5">Grupo 5</option></select>
+<label for="fHook" style="margin-top:10px">Webhook do bot desse grupo</label><input id="fHook" autocomplete="off" spellcheck="false" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…">
+<label for="fSeg" style="margin-top:10px">Segredo da assinatura (opcional)</label><input id="fSeg" type="password" autocomplete="new-password">
+<div class="actions"><button id="saveFeishu">Salvar e mandar um teste</button><button class="ghost" id="offFeishu">Desligar o bot deste grupo</button></div>
+<pre class="out" id="feishuOut"></pre></section>`;
+
 function configPage(opts) {
+  const page = configPageHtml(opts);
+  if (!opts.semJms) return page;
+  return page.replace(/<section class="card"><h2>AuthToken do JMS<\/h2>[\s\S]*?<\/section>/, () => SORTER_CARD)
+    .replace('Primeiro dia que o painel deve baixar do JMS', 'Primeiro dia que o painel deve baixar do sorter');
+}
+function configPageHtml(opts) {
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light"><title>Configurações · DashMaster</title><style>${BASE_CSS}</style></head><body>
 <div class="wrap">
@@ -79,6 +164,7 @@ function configPage(opts) {
 <section class="card"><h2>AuthToken do JMS</h2>
 <p class="hint">Quando o JMS derrubar a sessão (token vencido), gere um novo no JMS e cole aqui. A fila recomeça sozinha.
 O valor salvo não aparece de novo nesta tela.</p>
+<p class="hint" id="tokLink"></p>
 <label for="tok">AuthToken</label><textarea id="tok" autocomplete="off" spellcheck="false" placeholder="cole aqui o authToken do JMS"></textarea>
 <label for="cookie">Cookie (só se o JMS exigir)</label><textarea id="cookie" autocomplete="off" spellcheck="false" style="min-height:52px"></textarea>
 <div class="actions"><button id="saveTok">Salvar e testar a conexão</button></div>
@@ -134,14 +220,28 @@ O valor salvo não aparece de novo nesta tela.</p>
       var q = s.fila || {};
       $('#stats').innerHTML =
         stat('Painel', escH(s.versaoPainel)) +
-        stat('AuthToken', s.token ? 'cadastrado' : 'não cadastrado', s.token ? 'ok' : 'bad') +
-        stat('Fila do JMS', escH(s.filaTexto || '—')) +
+        (s.semJms ? '' : stat('AuthToken', s.token ? 'cadastrado' : 'não cadastrado', s.token ? 'ok' : 'bad')) +
+        stat(s.semJms ? 'Fila de downloads' : 'Fila do JMS', escH(s.filaTexto || '—')) +
         stat('Última execução da fila', escH(s.agendador.ultima || '—')) +
         stat('Agora', escH(s.agendador.rodando ? 'rodando ' + s.agendador.rodando : 'parada, esperando a próxima')) +
         stat('Link público', s.linkPublico ? '<a href="' + escH(s.linkPublico) + '">' + escH(s.linkPublico.replace(/^https?:[/][/]/, '')) + '</a>' : 'não configurado') +
+        stat('Link do Netlify', s.linkNetlify ? '<a href="' + escH(s.linkNetlify) + '">' + escH(s.linkNetlify.replace(/^https?:[/][/]/, '')) + '</a>' : 'não configurado') +
         stat('Senha do painel', s.senhaPainel ? 'sim' : (s.linkPublico ? 'não: defina "senha"' : 'não'), s.senhaPainel ? 'ok' : (s.linkPublico ? 'bad' : ''));
+      if ($('#tokLink')) $('#tokLink').innerHTML = s.trocaTokenPeloLink ? 'A equipe também troca o AuthToken pelo link, sem entrar neste computador: ' +
+        (s.linkPublico ? '<a href="' + escH(s.linkPublico.replace(/[/]+$/, '') + '/token') + '"><b>' + escH(s.linkPublico.replace(/[/]+$/, '') + '/token') + '</b></a>'
+          : '<b>link do painel + /token</b>') + ' (só aceita um AuthToken que o JMS confirmar).' : '';
       $('#addrs').innerHTML = 'Endereços do painel: ' + s.enderecos.map(function (a) { return '<a href="' + escH(a) + '">' + escH(a) + '</a>'; }).join(' · ');
       $('#start').value = s.dataInicial || '';
+      if ($('#feishuState')) {
+        var ligados = [1, 2, 3, 4, 5].filter(function (n) { return s.props.some(function (p) { return p.k === feishuKey('FEISHU_WEBHOOK', n); }); });
+        $('#feishuState').textContent = ligados.length ? 'Bot ligado nos grupos: ' + ligados.map(function (n) {
+          return n + (s.props.some(function (p) { return p.k === feishuKey('FEISHU_SEGREDO', n); }) ? ' (com segredo)' : '');
+        }).join(', ') + '. Manda o resumo de hora em hora.' : 'Bot desligado: cole o webhook do bot para ligar.';
+      }
+      if ($('#sUrl') && !$('#sUrl').value) {
+        var su = s.props.filter(function (p) { return p.k === 'SORTER_URL'; })[0];
+        $('#sUrl').value = su ? su.v : 'http://10.1.166.9';
+      }
       var row = function (p) {
         return '<tr><td class="k">' + escH(p.k) + '</td><td class="v">' + escH(p.v) + '</td><td style="white-space:nowrap">' +
           (p.secret ? '' : '<button class="ghost" data-edit="' + escH(p.k) + '">Editar</button> ') +
@@ -164,7 +264,37 @@ O valor salvo não aparece de novo nesta tela.</p>
     return api('executar', {fn: fn, args: args}).then(function (j) { show(out, fmtRun(j)); })
       .catch(function (e) { show(out, e.message, true); }).then(function () { busy(btn, false); load(); });
   }
-  $('#saveTok').onclick = function () {
+  if ($('#saveSorter')) $('#saveSorter').onclick = function () {
+    var url = $('#sUrl').value.trim(), troca = $('#sTroca').value.trim(), out = $('#sorterOut'), btn = this;
+    if (!/^https?:[/][/][^/ ]+/i.test(url)) { show(out, 'Endereço inválido. Exemplo: http://10.1.166.9', true); return; }
+    if (troca) { try { var tj = JSON.parse(troca); if (!tj || typeof tj !== 'object') throw new Error('x'); } catch (e) { show(out, 'A troca do Sorter A não é um JSON válido.', true); return; } }
+    busy(btn, true);
+    api('propriedade', {k: 'SORTER_URL', v: url}).then(function () {
+      return troca ? api('propriedade', {k: 'SORTER_TROCA_A', v: troca}) : null;
+    }).then(function () { $('#sTroca').value = ''; return runFn('diagnosticarSorter', [], out, btn); })
+      .catch(function (e) { show(out, e.message, true); busy(btn, false); });
+  };
+  function feishuKey(base, n) { return Number(n) > 1 ? base + '_' + n : base; }
+  if ($('#saveFeishu')) $('#saveFeishu').onclick = function () {
+    var hook = $('#fHook').value.trim(), seg = $('#fSeg').value.trim(), out = $('#feishuOut'), btn = this, g = Number($('#fGrupo').value) || 1;
+    var has = (window.__props || []).some(function (p) { return p.k === feishuKey('FEISHU_WEBHOOK', g); });
+    if (!hook && !has) { show(out, 'Cole o endereço do webhook do bot do grupo ' + g + '.', true); return; }
+    if (hook && !/^https:[/][/]open[.](feishu[.]cn|larksuite[.]com)[/]open-apis[/]bot[/]v2[/]hook[/][A-Za-z0-9-]+$/.test(hook)) {
+      show(out, 'Endereço inválido. Ele começa com https://open.feishu.cn/open-apis/bot/v2/hook/', true); return;
+    }
+    busy(btn, true);
+    (hook ? api('propriedade', {k: feishuKey('FEISHU_WEBHOOK', g), v: hook}) : Promise.resolve(null)).then(function () {
+      return seg ? api('propriedade', {k: feishuKey('FEISHU_SEGREDO', g), v: seg}) : null;
+    }).then(function () { $('#fHook').value = ''; $('#fSeg').value = ''; return runFn('testarFeishu', ['', g], out, btn); })
+      .catch(function (e) { show(out, e.message, true); busy(btn, false); });
+  };
+  if ($('#offFeishu')) $('#offFeishu').onclick = function () {
+    var out = $('#feishuOut'), g = Number($('#fGrupo').value) || 1;
+    api('remover', {k: feishuKey('FEISHU_WEBHOOK', g)}).then(function () { return api('remover', {k: feishuKey('FEISHU_SEGREDO', g)}); })
+      .then(function () { show(out, 'Bot do grupo ' + g + ' desligado (webhook e segredo apagados).'); load(); })
+      .catch(function (e) { show(out, e.message, true); });
+  };
+  if ($('#saveTok')) $('#saveTok').onclick = function () {
     var tok = $('#tok').value.trim(), cookie = $('#cookie').value.trim(), out = $('#tokOut'), btn = this;
     if (!tok && !cookie) { show(out, 'Cole o AuthToken antes de salvar.', true); return; }
     busy(btn, true);
@@ -211,4 +341,4 @@ O valor salvo não aparece de novo nesta tela.</p>
 </script></body></html>`;
 }
 
-module.exports = {loginPage, deniedPage, configPage, esc};
+module.exports = {loginPage, deniedPage, configPage, tokenPage, esc};

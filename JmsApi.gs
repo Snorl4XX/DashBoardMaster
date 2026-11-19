@@ -61,7 +61,7 @@ function credentialSignature_() {
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
  * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS | NOMOVE
- *          | SCANQUERY | UNSEAL
+ *          | SCANQUERY | UNSEAL | UNSEAL_TRUNK
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -90,10 +90,16 @@ const JMS_ROUTES_ = [
   // recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_TRACKING / JMS_ROUTENAMELIST_TRACKING mandam).
   {key: 'TRACKING', pattern: /\/podTracking\/inner\/query\/keywordList(?:\?|$)/, name: 'NONE', list: 'NONE',
     alt: [{name: 'trackingExpress', list: 'NONE'}, {name: 'waybillTracking', list: 'NONE'}, {name: 'packageTracking', list: 'NONE'}]},
-  // Fluxo de Lotes (Dispositivo inteligente > Materiais ecológicos > Estatística de Criação Recorrente de Eco Bag). Os cabeçalhos de
-  // rota não aparecem na captura: primeiro sem eles; se o JMS recusar, as variantes de `alt` são testadas sozinhas.
-  {key: 'LOTS', pattern: /\/bigdataReport\/detail\/sdploopbagBuildbag\w+(?:\?|$)/, name: 'NONE', list: 'NONE',
-    alt: [{name: 'sdploopbagBuildbag', list: 'NONE'}, {name: 'LoopBagBuildBag', list: 'NONE'}, {name: 'ecoBagStatistics', list: 'NONE'}]},
+  // Criação de Lotes (Dispositivo inteligente > Materiais ecológicos > Relatório de estatística > Estatística de Criação Recorrente
+  // de Eco Bag). V4.21.3: o JMS respondeu HTTP 403 sem o cabeçalho de rota. V4.21.4: capturado ao vivo no DevTools (print do
+  // usuário, tela /app/crisbiIndex/CirculationBagReport): Routename "CirculationBagReport|crisbiIndex" e Routernamelist
+  // "智能设备>环保物料>统计报表>循环建包统计" (o navegador manda codificado, como headerSafe_). Se o JMS recusar, as variantes
+  // de `alt` são testadas sozinhas (a que funcionar fica em JMS_ROUTE_AUTO_LOTS); JMS_ROUTENAME_LOTS / JMS_ROUTENAMELIST_LOTS
+  // sobrepõem tudo.
+  {key: 'LOTS', pattern: /\/bigdataReport\/detail\/sdploopbagBuildbag\w+(?:\?|$)/, name: 'CirculationBagReport|crisbiIndex',
+    list: '智能设备>环保物料>统计报表>循环建包统计',
+    alt: [{name: 'CirculationBagReport|crisbiIndex', list: 'NONE'}, {name: 'CirculationBagReport', list: '智能设备>环保物料>统计报表>循环建包统计'},
+      {name: 'CirculationBagReport', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
   // Sem Movimentação (Indicadores de Negócios > Monitoramento de movimentação em tempo real (novo),
   // /businessIndicatorIndex/TrackRealTimeMonitoringNew). Routename = nome da página (regra das outras telas); os cabeçalhos
   // não aparecem na captura: se o JMS recusar, as variantes de `alt` são testadas sozinhas.
@@ -108,6 +114,11 @@ const JMS_ROUTES_ = [
   // Secundárias (lista) e os Registros de carga e descarga de cada ID. Cabeçalhos de rota não capturados: variantes em `alt`.
   {key: 'UNSEAL', pattern: /\/transportation\/(?:tmsBranchTrackingDetail|tmsnewBranchShipment)\//, name: 'NONE', list: 'NONE',
     alt: [{name: 'branchTrackingDetail', list: 'NONE'}, {name: 'tmsBranchTrackingDetail', list: 'NONE'}]},
+  // V4.17: Deslacre da linha troncal — Transporte > Análise de dados > Dados de monitoramento > Consulta de Viagens
+  // (/transportPlatformIndex/monitoringSearch: tmsShipment/page) e os Registros de carga e descarga de cada ID
+  // (trackingDeatil/loading/scan/list, grafia do JMS). Cabeçalhos de rota não capturados: variantes em `alt`.
+  {key: 'UNSEAL_TRUNK', pattern: /\/transportation\/(?:tmsShipment|trackingDeatil)\//, name: 'NONE', list: 'NONE',
+    alt: [{name: 'monitoringSearch', list: 'NONE'}, {name: 'tmsShipment', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -184,7 +195,11 @@ function jmsHeaders_(url) {
   return headers;
 }
 
+/** V4.22: algum painel deste projeto consulta o JMS? (o pacote da Produção do Sorter só lê o sorter da base) */
+function usesJms_() { return Object.keys(INDICATORS).some(k => !INDICATORS[k].sorter); }
 function validateJmsAuth_() {
+  // V4.22: projeto só com a Produção do Sorter — não precisa de AuthToken (Baixar histórico, Atualizar…).
+  if (!usesJms_()) return;
   const p = jmsReadProperties_();
   const mode = jmsAuthMode_(p);
   mode.split('_').forEach(function (key) {
@@ -256,7 +271,10 @@ function urlFetch_(req) {
   try { return UrlFetchApp.fetch(req.url, req); }
   catch (e) {
     const m = String(e && e.message || e).slice(0, 200);
-    if (errorKind_(m) === 'QUOTA') throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m);
+    if (errorKind_(m) === 'QUOTA') {
+      noteFetchQuotaHit_(m);
+      throw new Error('Cota diária do Google esgotada ao consultar o JMS: ' + m);
+    }
     throw new Error('Falha de rede ao consultar o JMS: ' + m);
   }
 }
@@ -264,7 +282,8 @@ function urlFetch_(req) {
 /** Várias consultas de uma vez (UrlFetchApp.fetchAll), contadas na cota do dia (V4.4.2). */
 function fetchAll_(reqs) {
   noteFetches_(reqs.length);
-  return UrlFetchApp.fetchAll(reqs);
+  try { return UrlFetchApp.fetchAll(reqs); }
+  catch (e) { noteFetchQuotaHit_(String(e && e.message || e)); throw e; }
 }
 
 function isRetryable_(e) {
@@ -461,29 +480,6 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       return {current: pageNo, size: pageSize, organizationCode: centerCode, organizationType: 3, dateType: 1,
         countryId: countryId_(), startDate: isoDate, endDate: isoDate};
 
-    case 'arrival_flow': {
-      // Monitoramento de tipagem de recebimento: resumo pela base (siteCode); detalhe por lista (detailType:
-      // shouldArriverNum = "Deve chegar", totalNum = "Chegou"), pela próxima parada = a base (nextstationcode).
-      if (detail) {
-        const types = cfg.detail.types || [];
-        return {current: pageNo, size: pageSize, detailType: (win && win.type) || (types[0] && types[0].type),
-          startTime: w.start, endTime: w.end, nextstationcode: centerCode, countryId: countryId_()};
-      }
-      return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, siteCode: centerCode, countryId: countryId_()};
-    }
-
-    case 'send_flow': {
-      // Monitoramento de tipagem de expedição: resumo pela estação de remessa (scansitecode), uma linha por rota; detalhe =
-      // número vermelho de UMA rota (nextstation = código da próxima parada) e de uma coluna (detailType), como na captura.
-      if (detail) {
-        const types = cfg.detail.types || [];
-        if (!win || !win.next) throw new Error('Expedição: detalhe sem a rota (nextstation). Use a rota do resumo do dia.');
-        return {current: pageNo, size: pageSize, detailType: win.type || (types[0] && types[0].type),
-          startTime: w.start, endTime: w.end, nextstation: String(win.next), countryId: countryId_()};
-      }
-      return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, scansitecode: centerCode, countryId: countryId_()};
-    }
-
     case 'lot_flow':
       // Estatística de Criação Recorrente de Eco Bag: resumo "Sumário por dia" da unidade SC; detalhe = lista do número
       // vermelho (detailType = coluna do resumo) da nossa base, como nas capturas.
@@ -522,6 +518,13 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
         endCode: centerCode, shipmentState: cfg.shipmentState || 4, countryId: countryId_()};
     }
 
+    case 'unseal_trunk': {
+      // V4.17: Consulta de Viagens da linha troncal (captura do pedido; GET, os filtros vão na URL — Expedicao.gs → unsealListUrl_).
+      // PDD de chegada = a nossa base, Status = Concluído. Dois dias antes e um depois: o dia de cada ID sai do deslacre.
+      return {current: pageNo, size: pageSize, shipmentState: cfg.shipmentState || 4, endCode: centerCode,
+        startDateTime: addDaysIso_(isoDate, -2) + ' 00:00:00', endDateTime: addDaysIso_(isoDate, 1) + ' 23:59:59', searchType: 'manage'};
+    }
+
     case 'sc_dc':
       if (detail) {
         return {current: pageNo, size: pageSize, startTime1: w.start, endTime1: w.end,
@@ -557,6 +560,8 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   const cfg = getIndicatorConfig_(indicatorKey);
   // V4.4: Deslacre — a "tabela" do dia é a própria lista de IDs (Expedicao.gs → unsealSummary_).
   if (cfg.unseal) return unsealSummary_(indicatorKey, isoDate);
+  // V4.22: Produção do Sorter — o monitor do sorter da base, não o JMS (Sorter.gs).
+  if (cfg.sorter) return sorterSummary_(indicatorKey, isoDate);
   const endpoint = endpointFor_(cfg, 'summary');
   const payloadOf = page => Object.assign(buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, false), extra || {});
   const json = jmsPost_(endpoint, payloadOf(1), 2);
@@ -987,7 +992,8 @@ function planDetailDownload_(indicatorKey, isoDate, validateTotal) {
     p.chunks.forEach(c => chunks.push({w: c.w + off, page: c.page}));
   });
   // Tamanho de página: o menor aceito (todas as listas usam o mesmo endereço).
-  return {size: Math.min.apply(null, plans.map(p => p.size)), total: plans.reduce((a, p) => a + p.total, 0), windows: windows, chunks: chunks,
+  return {size: Math.min.apply(null, plans.map(p => p.size)), total: plans.reduce((a, p) => a + p.total, 0),
+    known: plans.reduce((a, p) => a + (p.known || p.total), 0), windows: windows, chunks: chunks,
     sliced: plans.some(p => p.sliced), types: plans.map(p => p.windows[0] ? p.windows[0].type : null), skipped: skipped};
 }
 /**
@@ -1029,28 +1035,55 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
   let windows = [{start: full.start, end: full.end, type: type, total: probe.total, first: probe.records}];
   let sliced = false;
   const limit = detailMaxOffset_();
+  // V4.24.3 (Falta de Bipagem na Expedição com 10.906 remessas e o painel com 10 mil): o total da lista pode vir TRAVADO no
+  // limite do JMS (10.000) com mais remessas no dia. Com o total no limite (>=, não só acima), o dia vai em fatias de horário,
+  // e o tamanho real do dia é o maior entre a lista e o número do resumo (erros do dia).
+  const capped = limit > 0 && probe.total >= limit;
+  // Total EXATAMENTE no limite = suspeito de trava: vale o resumo, se for maior. Acima do limite o total é real (Recebimento).
+  const known = limit > 0 && probe.total === limit ? Math.max(probe.total, summaryErrorsFor_(cfg, indicatorKey, isoDate, type)) : probe.total;
+  // V4.25.4 (Triagem Errada e Falta de Bipagem: 9.140 no JMS e 8.140 no painel): o JMS pagina a lista SEM ordem fixa
+  // (current/size, sem ordenação) e, de uma página para outra, repete registros e pula outros — uma página de 1.000 inteira
+  // voltou repetida. Lista com mais de uma página vai em fatias de horário de no máximo UMA página cada: sem paginação, nada
+  // se repete nem some. (Avaria não tem horário no pedido; agrupados têm o próprio download.)
+  if (onePageSliceable_(cfg) && known > probe.size) {
+    const r = onePageWindows_(indicatorKey, isoDate, full, type, probe.size, probe.total, known, limit);
+    if (r.why) {
+      setProp_('JMS_NO_SLICE_' + cfg.routeKey, '1');
+      logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': ' + r.why +
+        '. Usando paginação normal, com conferência das remessas repetidas.');
+    } else {
+      windows = r.windows;
+      sliced = true;
+    }
+  }
   // detail.noSlice (Sem Movimentação): a lista não tem horário — fatias de horário trariam a lista inteira em cada uma.
-  if (limit > 0 && probe.total > limit && !(cfg.detail && cfg.detail.noSlice) && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
-    let n = Math.min(32, nextPow2_(Math.ceil(probe.total / (limit * 0.5))));
-    for (let round = 0; round < 3; round++) {
+  else if (capped && !(cfg.detail && cfg.detail.noSlice) && !getProp_('JMS_NO_SLICE_' + cfg.routeKey, '')) {
+    let n = Math.min(32, nextPow2_(Math.ceil(known / (limit * 0.5))));
+    for (let round = 0; round < 4; round++) {
       const parts = splitWindow_(full, n).map(w => Object.assign(w, type ? {type: type} : {}));
       const firsts = fetchDetailBatch_(indicatorKey, isoDate, parts.map(w => ({page: 1, size: probe.size, win: w})));
-      const sum = firsts.reduce((s, f) => s + f.total, 0), top = firsts.reduce((m, f) => Math.max(m, f.total), 0);
-      // Dia fechado com quase tudo numa fatia: o JMS também ignora a hora (devolve o dia na janela da 00h).
-      const oneSlice = isoDate < isoToday_() && probe.total >= 1000 && top >= probe.total * 0.95;
-      if (oneSlice || Math.abs(sum - probe.total) > Math.max(countTolerance_(probe.total), probe.total * 0.05)) {
+      const totals = firsts.map(f => f.total);
+      let why = sliceProblem_(totals, probe.total, known, isoDate, limit);
+      // Todas as fatias no limite, iguais à lista do dia: ou o JMS ignora a hora, ou cada fatia também veio travada.
+      // Uma janela de 2 segundos às 00h decide: com a hora ignorada, ela traz o dia inteiro.
+      if (!why && totals.length > 1 && totals.every(x => x === probe.total)) {
+        const tiny = fetchDetailBatch_(indicatorKey, isoDate, [{page: 1, size: probe.size,
+          win: Object.assign({start: full.start, end: full.start.slice(0, 17) + '01'}, type ? {type: type} : {})}])[0];
+        if (tiny.total >= probe.total * 0.5) why = 'uma janela de 2 segundos trouxe ' + tiny.total + ' de ' + probe.total + ' (o JMS ignora a hora)';
+      }
+      if (why) {
         // A soma das fatias não bate com o dia: o JMS ignora a hora (ou filtra outro campo).
         setProp_('JMS_NO_SLICE_' + cfg.routeKey, '1');
-        logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': soma das fatias ' + sum +
-          ' ≠ total do dia ' + probe.total + '. Usando paginação normal.');
+        logSync_('WARN', indicatorKey, isoDate, 'Fatias de horário desativadas para ' + cfg.routeKey + ': ' + why + '. Usando paginação normal.');
         windows = [{start: full.start, end: full.end, type: type, total: probe.total, first: probe.records}];
         sliced = false;
         break;
       }
       windows = parts.map((w, i) => ({start: w.start, end: w.end, type: type, total: firsts[i].total, first: firsts[i].records}));
       sliced = true;
+      // Fatia com o total no limite também pode estar travada: divide mais.
       const worst = firsts.reduce((m, f) => Math.max(m, f.total), 0);
-      if (worst <= limit || n >= 32) break;
+      if (worst < limit || n >= 32) break;
       n = Math.min(32, n * nextPow2_(Math.ceil(worst / (limit * 0.8))));
     }
   }
@@ -1059,7 +1092,112 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
     const pages = Math.ceil(w.total / probe.size);
     for (let p = 1; p <= pages; p++) chunks.push({w: wi, page: p});
   });
-  return {size: probe.size, total: probe.total, windows: windows, chunks: chunks, sliced: sliced};
+  // Com fatias, a soma delas é o total do dia (a lista do dia inteiro pode ter vindo travada no limite).
+  const total = sliced ? Math.max(probe.total, windows.reduce((s, w) => s + w.total, 0)) : probe.total;
+  return {size: probe.size, total: total, known: Math.max(known, total), windows: windows, chunks: chunks, sliced: sliced};
+}
+
+/** V4.25.4: a lista do indicador pode ir em fatias de horário de uma página (pedido com startTime/endTime). */
+function onePageSliceable_(cfg) {
+  if (cfg.grouped || cfg.byRoute || cfg.unseal || cfg.sorter || cfg.apiProfile === 'damage') return false;
+  if ((cfg.detail && cfg.detail.noSlice) || getProp_('JMS_NO_SLICE_' + cfg.routeKey, '') || getProp_('JMS_PAGINAR', '')) return false;
+  return true;
+}
+/**
+ * V4.25.4: fatias do dia com no máximo uma página cada (a 1ª página de cada fatia já é a fatia inteira). Fatia com mais de uma
+ * página é dividida de novo (até 2 minutos); a que ainda passar (pico raro) é paginada. {windows} ou {why} quando o JMS não
+ * respeita a hora (a soma das fatias não bate com o dia).
+ */
+function onePageWindows_(indicatorKey, isoDate, full, type, size, dayTotal, known, limit) {
+  const tag = w => (type ? Object.assign(w, {type: type}) : w);
+  const firsts = parts => {
+    const out = [];
+    for (let i = 0; i < parts.length; i += 16) {
+      fetchDetailBatch_(indicatorKey, isoDate, parts.slice(i, i + 16).map(w => ({page: 1, size: size, win: w}))).forEach(r => out.push(r));
+    }
+    return out;
+  };
+  const secs = w => (Date.parse(w.end.replace(' ', 'T') + 'Z') - Date.parse(w.start.replace(' ', 'T') + 'Z')) / 1000 + 1;
+  const parts = splitWindow_(full, Math.min(64, nextPow2_(Math.ceil(known / (size * 0.5))))).map(tag);
+  const f1 = firsts(parts);
+  let why = sliceProblem_(f1.map(f => f.total), dayTotal, known, isoDate, limit);
+  // Todas as fatias com o total do dia: uma janela de 2 segundos às 00h decide se o JMS ignora a hora.
+  if (!why && f1.length > 1 && f1.every(f => f.total === dayTotal)) {
+    const tiny = firsts([tag({start: full.start, end: full.start.slice(0, 17) + '01'})])[0];
+    if (tiny.total >= dayTotal * 0.5) why = 'uma janela de 2 segundos trouxe ' + tiny.total + ' de ' + dayTotal + ' (o JMS ignora a hora)';
+  }
+  if (why) return {why: why};
+  let windows = parts.map((w, i) => ({start: w.start, end: w.end, type: type, total: f1[i].total, first: f1[i].records}));
+  for (let round = 0; round < 6; round++) {
+    const keep = [], big = [];
+    windows.forEach(w => (w.total > size && secs(w) >= 120 ? big : keep).push(w));
+    if (!big.length) break;
+    const subs = [];
+    big.forEach(w => splitWindow_(w, Math.min(16, nextPow2_(Math.ceil(w.total / (size * 0.6))))).forEach(x => subs.push(tag(x))));
+    const f2 = firsts(subs);
+    subs.forEach((x, i) => keep.push({start: x.start, end: x.end, type: type, total: f2[i].total, first: f2[i].records}));
+    windows = keep.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+  }
+  return {windows: windows};
+}
+/**
+ * V4.25.4: identidade de um registro do JMS (todos os campos, menos o número da linha na página). Página repetida = registros
+ * iguais; a mesma remessa com outro bipe (outro horário) é outro registro.
+ */
+const ROW_NUMBER_FIELDS_ = /^(PAGEHELPER_ROW_ID|ROW_ID|ROWNUM|rowId|rowNum|rownum|row_num|rn|RN)$/;
+function recordKey_(r) {
+  let s = '';
+  Object.keys(r || {}).sort().forEach(k => {
+    if (ROW_NUMBER_FIELDS_.test(k)) return;
+    const v = r[k];
+    s += k + '\u0001' + (v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)) + '\u0002';
+  });
+  // cyrb53: 53 bits (sem guardar o texto do registro na memória).
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
+/**
+ * V4.24.3: número do resumo do dia para a lista (erros do dia; Recebimento: o número da lista no resumo). 0 sem resumo ou
+ * quando a lista não é a mesma coisa que o número do resumo (detailMatchesErrors falso).
+ */
+function summaryErrorsFor_(cfg, indicatorKey, isoDate, type) {
+  try {
+    const r = getRateDay_(indicatorKey, isoDate);
+    if (!r) return 0;
+    if (type) return Number(r.metrics && r.metrics[type]) || 0;
+    return cfg.detailMatchesErrors ? Number(r.errorCount) || 0 : 0;
+  } catch (e) { return 0; }
+}
+
+/**
+ * V4.24.3: as fatias de horário servem? Devolve o motivo quando não servem ('' = servem).
+ *  - toda fatia com o mesmo total da lista do dia: o JMS ignora a hora (devolve o dia inteiro em cada uma);
+ *  - dia fechado com quase tudo numa fatia: o JMS devolve o dia na janela da 00h;
+ *  - soma das fatias bem abaixo do dia (pelo resumo, quando a lista vem travada no limite);
+ *  - soma bem acima do dia (só com a lista sem trava: travada, o dia real é maior que o total informado).
+ */
+function sliceProblem_(totals, dayTotal, known, isoDate, limit) {
+  const sum = totals.reduce((s, x) => s + x, 0), top = totals.reduce((m, x) => Math.max(m, x), 0);
+  const margin = Math.max(countTolerance_(known), known * 0.05);
+  // Total exatamente no limite pode estar travado (o dia real é maior); acima dele, é o total real (como antes da V4.24.3).
+  const capped = limit > 0 && dayTotal === limit;
+  // Fatia exatamente no limite também pode estar travada: a soma das fatias não diz o tamanho do dia.
+  const sliceCapped = limit > 0 && totals.some(x => x === limit);
+  if (totals.length > 1 && dayTotal > 0 && totals.every(x => x === dayTotal)) {
+    // Todas no limite: quem decide é a janela de 2 segundos (planDetailType_).
+    return sliceCapped ? '' : 'cada fatia trouxe o dia inteiro (' + dayTotal + ')';
+  }
+  if (isoDate < isoToday_() && dayTotal >= 1000 && top >= dayTotal * 0.95 && sum - top < dayTotal * 0.05) {
+    return 'uma fatia trouxe ' + top + ' de ' + dayTotal + ' (o dia inteiro)';
+  }
+  if (!sliceCapped && sum < known - margin) return 'soma das fatias ' + sum + ' < total do dia ' + known;
+  if (!capped && sum > known + margin) return 'soma das fatias ' + sum + ' > total do dia ' + known;
+  if (top > dayTotal && !capped) return 'uma fatia trouxe ' + top + ', mais que o dia (' + dayTotal + ')';
+  return '';
 }
 
 // ------------------------------------------------------------------ Avaria: tabela 2 (Consulta de Pacote Problemático)
@@ -1237,11 +1375,8 @@ function diagnosticarDetalheJms(indicatorKey, date) {
   const url = endpointFor_(cfg, 'detail');
   const item = {indicador: key, rota: url.split('/').pop(), data: d, cabecalhosDeRotaEnviados: jmsRouteHeaders_(url, jmsReadProperties_())};
   try {
-    // Expedição: o detalhe é por rota — usa a maior rota do resumo do dia.
-    const win = cfg.byRoute ? sendProbeWindow_(key, d) : undefined;
-    if (win) item.rotaTestada = win.name;
     noteFetches_(1);
-    const resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, buildPayload_(key, d, 1, 20, true, win)));
+    const resp = UrlFetchApp.fetch(url, jmsRequestObject_(url, buildPayload_(key, d, 1, 20, true)));
     item.httpStatus = resp.getResponseCode();
     // parseJmsResponse_ dá a MESMA mensagem amigável (401/403/timeout/etc.) que o painel mostraria.
     const json = parseJmsResponse_(resp, url);
@@ -1254,14 +1389,6 @@ function diagnosticarDetalheJms(indicatorKey, date) {
   } catch (e) { item.erro = publicJmsError_(e.message || e); item.erroBruto = String(e && e.message || e).slice(0, 300); }
   console.log(JSON.stringify(item, null, 2));
   return item;
-}
-
-/** Expedição: janela do dia inteiro na maior rota do resumo do JMS (diagnósticos que testam o detalhe). */
-function sendProbeWindow_(indicatorKey, date) {
-  const s = fetchSummaryDay_(indicatorKey, date);
-  const big = (s.empty ? [] : (s.raw.routes || [])).filter(r => r.c).sort((a, b) => Number(b.m.sendcount) - Number(a.m.sendcount))[0];
-  if (!big) throw new Error('Expedição: o resumo de ' + date + ' não tem rota com envio para testar o detalhe.');
-  return Object.assign({type: 'sendcount', next: big.c, name: big.n}, dayWindow_(date, false));
 }
 
 function testJmsConnection() {

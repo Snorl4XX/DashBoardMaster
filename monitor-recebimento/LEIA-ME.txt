@@ -1,0 +1,140 @@
+J&T · MONITOR DE RECEBIMENTO | SP GRU (no notebook, como os painéis do DashMaster)
+==================================================================================
+
+Novidades da 1.9 (Em trânsito e Agenda de chegadas por hora)
+--------------------------------------------------------------
+- Viagens canceladas no JMS (Status da tarefa "Cancelado：已作废") não aparecem mais como Em trânsito. A coleta só busca Em trânsito e
+  Concluído; a viagem guardada como Em trânsito que não vem mais em nenhuma das duas, com a partida dentro do período consultado,
+  sai do painel. A 1ª coleta depois de atualizar revisa o mês todo (as canceladas antigas já saem). Se a viagem voltar a Em
+  trânsito no JMS, entra de novo na próxima coleta.
+- Agenda de chegadas por hora: colunas "Placa do veículo / cavalo" (com o tipo: Cavalo, Truck…) e "Placa da carreta"
+  (vazia quando a viagem não tem carreta). As placas chegam na próxima coleta de cada viagem.
+
+O que faz
+---------
+Mostra os caminhões que estão vindo para a SP GRU (30001): troncal e secundária, em trânsito e concluídos, com chegada,
+desbloqueio, início e fim da descarga e o último bipe. São os SEUS arquivos do Apps Script:
+  Recebimento_SP_GRU.gs   a coleta do JMS (atualizarRecebimento)
+  Painel.gs               os dados do painel (dadosPainelRecebimento) e os detalhes de cada viagem
+  Index.html              o painel, com o mesmo visual do DashMaster (topo, filtros, cartões e tabelas;
+                          tema escuro e claro). As seções ocupam a largura toda.
+                          Filtros: Status da viagem, Linha, Turno previsto e ID da viagem (procure pelo ID, placa
+                          ou origem e marque um ou vários). Valem para todos os cartões, tabelas e gráficos,
+                          na hora em que você troca (não precisa clicar em Aplicar).
+                          O navegador não traduz o painel: use PT-BR / 中文.
+                          Menu "Falta de deslacre": viagens Concluídas sem deslacre registrado. O número grande é a
+                          quantidade de viagens (os pedidos-mãe aparecem pequenos). Cartões: total, Secundária e Troncal
+                          (somam o total; com o filtro Linha aparece só a escolhida), dia anterior, ID com mais
+                          remessas e cada turno com a % de participação. Gráficos: por turno, evolução diária e IDs
+                          da secundária e da troncal com mais remessas; tabela. "Baixar relatório" baixa essa tabela.
+O que muda é só ONDE roda: no notebook, e não no Google.
+  - A coleta roda ao abrir e depois a cada 15 min (no Google era o acionador de 15 min).
+  - NÃO precisa da planilha do Google. Tudo fica no banco local C:\monitor-recebimento\dados\recebimento.db,
+    igual ao DashMaster principal (o dashmaster.db): a aba "Recebimento JMS" nas tabelas sheets/rows (uma linha da aba =
+    uma linha do banco) e as Propriedades do script na tabela props. O JMS_HEADERS_JSON vem da tela Configurações
+    (ou do DashMaster deste computador: o Monitor usa o mesmo AuthToken dele).
+
+Não mexe no DashMaster: pasta, porta (3600) e link próprios.
+
+Histórico: a primeira coleta de cada dia revisa o mês todo no JMS (desde o último dia do mês anterior), como o
+Apps Script fazia. Por isso o banco já começa com o mês atual; não precisa copiar nada da planilha do Google.
+Veio da versão 1.0 (arquivos planilha.json / propriedades.json / jms.json)? Na 1ª vez o Monitor leva tudo para o banco
+sozinho e renomeia os arquivos para *.importado (pode apagar depois).
+Cópia de segurança: feche a janela preta e copie a pasta C:\monitor-recebimento\dados.
+
+Instalar (no notebook onde já roda o DashMaster)
+------------------------------------------------
+1. No ZIP: botão direito > Propriedades > marque "Desbloquear" > OK.
+2. Botão direito no ZIP > Extrair tudo... > destino C:\  > Extrair. Fica a pasta C:\monitor-recebimento.
+3. Dois cliques em C:\monitor-recebimento\iniciar.bat. Abre uma janela preta com o endereço do painel. Deixe aberta
+   (pode minimizar). Se o Windows perguntar sobre o Firewall, clique em Permitir.
+4. Abra http://localhost:3600/config no navegador.
+   - Se o DashMaster está neste notebook, aparece "Em uso: o AuthToken do DashMaster deste computador". Pronto.
+   - Se não: cole o AuthToken do JMS (ou o mesmo JMS_HEADERS_JSON que estava nas Propriedades do script)
+     e clique em "Salvar e coletar".
+   - Espere "Última coleta OK" (a primeira do dia demora um pouco mais: ela revisa o mês todo).
+5. Abra o painel: http://localhost:3600
+6. Ligar sozinho com o Windows: dois cliques em iniciar-com-windows.bat (uma vez só).
+
+Atalho na Área de Trabalho (igual ao do DashMaster e da Expedição)
+--------------------------------------------------------------------
+1. Na Área de Trabalho: botão direito > Novo > Atalho. Cole (com as aspas):
+     "C:\dashmaster\node\node.exe" "C:\monitor-recebimento\server.js"
+   Avançar > nome: Monitor de Recebimento > Concluir. (Usa o mesmo node.exe do DashMaster.)
+   Node.js instalado no Windows? Pode usar: "C:\Program Files\nodejs\node.exe" "C:\monitor-recebimento\server.js"
+2. Dois cliques no atalho: abre a janela preta do Monitor. Deixe aberta (pode minimizar).
+   Se der erro ao abrir, a janela não fecha: mostra o motivo; tire um print e feche no X.
+3. Abrir sozinho com o Windows: Windows + R > shell:startup > cole o atalho nessa pasta.
+   Use o atalho OU o iniciar-com-windows.bat, não os dois (o segundo avisa "porta 3600 já está em uso").
+4. Atalho do link público: botão direito no link-publico.bat > Enviar para > Área de trabalho (criar atalho).
+   Arquivos .bat bloqueados? Novo > Atalho com:
+     C:\Windows\System32\cmd.exe /k ""C:\Program Files\Tailscale\tailscale.exe" funnel --bg --set-path=/recebimento http://127.0.0.1:3600/recebimento"
+5. Atalho para abrir o painel no navegador: Novo > Atalho com  http://localhost:3600  > nome: Painel Recebimento.
+
+Link para a equipe (Tailscale, o mesmo do DashMaster)
+-----------------------------------------------------
+Dois cliques em link-publico.bat. O link fica:  https://NOME-DO-NOTEBOOK.xxxx.ts.net/recebimento
+(o mesmo endereço do painel principal, com /recebimento no fim; as portas 443, 8443 e 10000 já são dos outros painéis).
+O link continua valendo depois de reiniciar o notebook. Para tirar do ar só este link:
+  "C:\Program Files\Tailscale\tailscale.exe" funnel --https=443 --set-path=/recebimento off
+
+Link numa porta só do Monitor (ex.: https://NOME.ts.net:10000)
+O Tailscale Funnel só tem 3 portas: 443 (painel principal), 8443 (Sorter) e 10000 (Lotes). Para o Monitor ter uma
+porta só dele, um outro painel passa para um caminho. Exemplo, Lotes vai para https://NOME.ts.net/lotes:
+  1. Lotes: feche a janela preta do Lotes. No Bloco de Notas, abra C:\dashmaster-lotes\node\config.json e troque
+     "portaLink": 10000 por "portaLink": 443 e "caminho": "" por "caminho": "/lotes". Salve, abra o Lotes de novo
+     e dê dois cliques no link-publico.bat do Lotes (a porta 10000 fica livre).
+  2. Monitor: feche a janela preta do Monitor. Abra C:\monitor-recebimento\config.json e troque
+     "caminho": "/recebimento" por "caminho": "" e "portaLink": 443 por "portaLink": 10000. Salve, abra o Monitor de novo
+     e dê dois cliques no link-publico.bat do Monitor.
+  3. Links: Monitor https://NOME.ts.net:10000 · Lotes https://NOME.ts.net/lotes (avise quem usava o link antigo do Lotes).
+Monitor em OUTRO computador (com Tailscale)? Lá ele pode usar a 443 sozinho: "portaLink": 443 e "caminho": "".
+
+Na nuvem (servidor grátis da Oracle, ligado 24 h — o notebook pode ficar desligado)
+-------------------------------------------------------------------------------------
+Passo a passo completo no DashMaster: node/ORACLE_CLOUD.md (seção 6b). Resumo, no servidor (Ubuntu), com o DashMaster
+principal já instalado em ~/dashmaster:
+  cd ~ && unzip -o MONITOR_RECEBIMENTO_V1_9.zip
+  cd ~/monitor-recebimento && bash instalar-nuvem.sh && bash link-publico.sh
+- Fica no ar como o serviço "monitor-recebimento" (liga sozinho e reinicia se parar).
+- Link: https://dashmaster.xxxx.ts.net:8443 (na nuvem a 443 é do principal e a 10000 do Lotes).
+- AuthToken: usa o mesmo do DashMaster do servidor. Quando vencer, troque no DashMaster: cd ~/dashmaster/node && node dashmaster.js token
+- Tela Configurações, do seu computador: no PowerShell, ssh -i C:\DashMaster\chave.key -L 3600:localhost:3600 ubuntu@IP
+  (deixe aberto) e abra http://localhost:3600/config
+- Comandos: sudo systemctl restart monitor-recebimento · sudo journalctl -u monitor-recebimento -f
+- Atualizar: envie o ZIP novo, unzip -o MONITOR_RECEBIMENTO_V<versão>.zip e sudo systemctl restart monitor-recebimento
+
+A equipe troca o AuthToken pelo link (página /token)
+----------------------------------------------------
+Outras pessoas trocam o AuthToken vencido SEM acesso ao servidor, à conta da Oracle ou à chave:
+1. Mande para a equipe o link do Monitor com /token no fim (ex.: https://dashmaster.xxxx.ts.net:8443/token).
+   A página já vem ligada e SEM senha.
+2. Quando o painel avisar "Dados desatualizados", a pessoa abre o /token, cola o AuthToken novo e clica em
+   "Salvar e coletar". O Monitor testa o token no JMS antes de salvar: token errado ou vencido é recusado e nada muda.
+   A página mostra se a coleta voltou a funcionar.
+Quem abre a página só troca o AuthToken: não vê o token salvo, não abre Configurações e não entra no servidor.
+Opcional, no servidor (pasta monitor-recebimento):
+  bash senha-token.sh            põe uma senha na página (Enter vazio = sem senha)
+  bash senha-token.sh desligar   desliga a página
+No notebook: no config.json, "senhaToken" (senha, mínimo 8 caracteres) e "trocaTokenPeloLink": false (desliga).
+
+config.json (criado na 1ª vez, ao lado do server.js)
+----------------------------------------------------
+porta 3600 · senha (vazio = quem tem o link abre; com senha, o painel pede a senha) · coletaMinutos 15 ·
+linkPublico (só para mostrar) · portaLink 443 / caminho "/recebimento" (link público) ·
+dashmaster (pasta do DashMaster; vazio = procura em C:\dashmaster; "nao" = não usar o AuthToken dele).
+Mudou? Feche a janela preta e abra o iniciar.bat de novo.
+
+Se der problema
+---------------
+- Painel mostra "Falha ao ler a planilha": a primeira coleta ainda não terminou (ou não tem AuthToken).
+  Abra http://localhost:3600/config e veja a "Coleta do JMS".
+- "O AuthToken do JMS pode ter vencido": pegue um novo no JMS e cole em Configurações (ou no DashMaster).
+- "Sem acesso ao JMS": confira a internet. Se a empresa usa proxy, veja as linhas "rem set HTTPS_PROXY" no iniciar.bat.
+- "A porta 3600 já está em uso": o Monitor já está aberto em outra janela.
+- Mande um print da tela Configurações (o AuthToken nunca aparece nela).
+
+Para quem mexe no código
+------------------------
+node test/teste.js   (JMS de mentira, viagens fictícias)
+node gerar-zip.js    (gera dist/MONITOR_RECEBIMENTO_V<versão>.zip)

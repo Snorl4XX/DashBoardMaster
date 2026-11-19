@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Configurações · Rota Certa</title>
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('jt_theme'); } catch (e) {}
+      if (t !== 'light') document.documentElement.setAttribute('data-theme', 'dark');
+    })();
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Menu">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">J&amp;T</div>
+        <div class="brand-copy"><strong>EXPRESS</strong><small><span class="js-base">SP GRU</span> · Rota Certa</small></div>
+      </div>
+      <nav class="side-nav" aria-label="Páginas">
+        <div class="nav-label">Painéis</div>
+        <a class="nav-item" href="./">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span>
+          <span class="nav-copy"><b>Remessas na rota errada</b><small>错发 · linha principal e secundária</small></span>
+        </a>
+        <div class="nav-label">Sistema</div>
+        <a class="nav-item active" href="config" aria-current="page">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></span>
+          <span class="nav-copy"><b>Configurações</b><small>设置 · só no computador do app</small></span>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="version" id="appVersion"></span>
+        <span class="made-by">Feito por Caike Oliveira</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="title-wrap">
+          <div class="eyebrow"><span>J&amp;T EXPRESS</span><span class="dot-sep"></span><span class="js-base">SP GRU</span></div>
+          <h1>Configurações</h1>
+          <p>设置 · Esta tela só abre no computador do app. Quem abre pelo link não vê esta página.</p>
+        </div>
+      </header>
+
+      <section class="card conf" aria-labelledby="s-token">
+        <div class="section-head"><div><span class="kicker">Acesso</span><h2 id="s-token">AuthToken do JMS</h2></div></div>
+        <p class="muted small" id="token-fonte">…</p>
+        <label for="token" class="muted small">Cole só o valor do AuthToken (JMS › F12 › Rede › item do gw.jtjms-br.com › Cabeçalhos › authtoken):</label>
+        <textarea id="token" autocomplete="off" spellcheck="false" placeholder="Cole aqui só o valor"></textarea>
+        <div class="row">
+          <button type="button" class="btn btn-red" id="salvar-token">Salvar e testar</button>
+          <button type="button" class="btn btn-light" id="testar">Testar a conexão</button>
+          <button type="button" class="btn btn-light hidden" id="apagar-token">Usar o do DashMaster</button>
+        </div>
+        <div class="saida hidden" id="token-res"></div>
+      </section>
+
+      <section class="card conf" aria-labelledby="s-busca">
+        <div class="section-head"><div><span class="kicker">JMS</span><h2 id="s-busca">Busca no JMS</h2></div></div>
+        <dl class="info" id="busca-info"></dl>
+        <div class="row">
+          <button type="button" class="btn btn-red" id="buscar">Buscar agora</button>
+        </div>
+        <div class="saida hidden" id="busca-res"></div>
+      </section>
+
+      <section class="card conf" aria-labelledby="s-rotas">
+        <div class="section-head"><div><span class="kicker">Regras</span><h2 id="s-rotas">Tabela de rotas do SC</h2></div></div>
+        <p class="muted small" style="margin:0">Envie a tabela de rotas do SC do jeito que ela vem (abas "Rotas de Linha" e "Rotas Regionais", como o
+          ajuste_de_rotas_docas.xlsx) ou a planilha do app (aba "Rotas"). O app confere o dia de novo na hora.<br>
+          Linha principal: confere o 1º segmento (ex.: <b>BAU</b>,412-02,015 → BAU). Linha secundária: remessas com SP, SBN, MOO ou GRU conferem o 1º e o 2º
+          (ex.: <b>GRU,348-00</b>,123). SP com 2º segmento que não está em nenhuma rota vai para o SP BRE.</p>
+        <dl class="info" id="rotas-info"></dl>
+        <div class="row">
+          <label class="btn btn-light">Enviar tabela de rotas (.xlsx)<input type="file" accept=".xlsx" id="up-rotas" hidden></label>
+          <a class="btn btn-light" href="config/api/rotas.xlsx">Baixar a tabela de rotas atual</a>
+        </div>
+        <div class="saida hidden" id="rotas-res"></div>
+        <div class="table-scroll"><table class="data-table" id="rotas-tab"><thead><tr><th>Linha</th><th>Rota</th><th>Doca</th><th>Esteira</th><th>Segmentos</th><th>Observação</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="card conf" aria-labelledby="s-end">
+        <div class="section-head"><div><span class="kicker">Link</span><h2 id="s-end">Endereços do painel</h2></div></div>
+        <dl class="info" id="end-info"></dl>
+      </section>
+
+      <section class="card conf" aria-labelledby="s-log">
+        <div class="section-head"><div><span class="kicker">Registro</span><h2 id="s-log">O que o app fez</h2></div></div>
+        <div class="saida" id="registro"></div>
+      </section>
+
+      <footer class="foot">J&amp;T Rota Certa<span class="made-by">Feito por Caike Oliveira</span></footer>
+    </main>
+  </div>
+  <script src="config.js"></script>
+</body>
+</html>

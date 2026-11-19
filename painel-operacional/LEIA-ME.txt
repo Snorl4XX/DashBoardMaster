@@ -1,0 +1,59 @@
+PAINEL OPERACIONAL | SP GRU — Monitor de Recebimento + Controle de Pátio num link só
+====================================================================================
+
+O QUE É
+-------
+Um link só para os dois painéis que rodam no servidor da Oracle:
+  - menu principal com o Monitor de Recebimento e o Controle de Pátio;
+  - ao escolher um deles, aparece o submenu com as telas dele:
+      Monitor de Recebimento: Visão geral, Em trânsito, Concluído, Falta de deslacre
+      Controle de Pátio:      Portaria, Fila FIFO, Controle de Docas, Expedição DC, Expedição SC
+  - o painel escolhido aparece ao lado, sem o menu próprio dele (o menu é este).
+
+Os dois painéis continuam iguais e rodando no serviço deles (Monitor na porta 3600, Controle de Pátio na 3700).
+O Painel Operacional só junta os dois no mesmo endereço (porta 3800, link na 443). Ele não guarda dados.
+
+Link direto para uma tela (para favoritos): https://NOME.ts.net/#recebimento/deslacre ou https://NOME.ts.net/#patio/docas
+(telas: geral, transito, concluido, deslacre · portaria, fifo, docas, expedicao-dc, expedicao-sc).
+
+COMO INSTALAR NO SERVIDOR DA ORACLE (uns 5 minutos)
+---------------------------------------------------
+Precisa: o Monitor de Recebimento e o Controle de Pátio já instalados no servidor (pastas monitor-recebimento e
+controle-patio na pasta do usuário, como no passo a passo de cada um).
+
+1. Abra o Cloud Shell da Oracle (ícone >_ no topo do site cloud.oracle.com).
+2. No menu do Cloud Shell (engrenagem), clique em "Upload" e envie o arquivo PAINEL_OPERACIONAL_V1_0.zip.
+3. Mande o ZIP para o servidor (troque IP_DO_SERVIDOR pelo IP público do servidor):
+     scp -i ~/chave.key PAINEL_OPERACIONAL_V1_0.zip ubuntu@IP_DO_SERVIDOR:~/
+4. Entre no servidor:
+     ssh -i ~/chave.key ubuntu@IP_DO_SERVIDOR
+   (o começo da linha muda para ubuntu@... = você está DENTRO do servidor)
+5. Extraia e instale:
+     unzip -o PAINEL_OPERACIONAL_V1_0.zip
+     cd painel-operacional
+     bash instalar-nuvem.sh
+   Ele acerta o "caminho" dos dois painéis (/recebimento e /patio), reinicia os dois e liga o Painel Operacional.
+   No fim aparece "Monitor de Recebimento: no ar" e "Controle de Pátio: no ar".
+6. Crie o link único:
+     bash link-publico.sh
+   No fim aparece o link (https://NOME.ts.net). Mande esse link para a equipe.
+
+Para sair do servidor: exit
+
+OS LINKS ANTIGOS
+----------------
+Os links antigos continuam funcionando (Monitor com :8443 no fim, Controle de Pátio com :10000). Quando a equipe já
+estiver usando o link único, dá para tirar os antigos do ar (no servidor):
+     sudo tailscale funnel --https=8443 off      (Monitor de Recebimento)
+     sudo tailscale funnel --https=10000 off     (Controle de Pátio)
+
+SE ALGO DER ERRADO
+------------------
+- "Monitor de Recebimento não respondeu" ou "Controle de Pátio não respondeu" no lugar do painel: o serviço dele parou.
+  No servidor:  sudo systemctl restart monitor-recebimento   ou   sudo systemctl restart controle-patio
+- O rodapé do menu mostra se cada painel está "no ar" (atualiza a cada minuto).
+- O painel abre mas fica sem dados: é o próprio painel (AuthToken do JMS no Monitor; dados do Feishu no Controle de
+  Pátio). Resolva como sempre, no painel dele.
+- Ver o que o Painel Operacional está fazendo:  sudo journalctl -u painel-operacional -n 50
+- Reiniciar o Painel Operacional:               sudo systemctl restart painel-operacional
+- Atualizar para uma versão nova: repita os passos 2 a 5 (o config.json é mantido).

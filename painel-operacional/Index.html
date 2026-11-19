@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark" translate="no" class="notranslate">
+<head>
+<meta charset="UTF-8">
+<meta name="google" content="notranslate">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SP GRU | Painel Operacional</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* Painel Operacional: menu principal (Monitor de Recebimento e Controle de Pátio) e, ao escolher um, o submenu dele.
+   Cada painel aparece ao lado, dentro desta página, sem o menu próprio (o menu é este). Mesmas cores dos dois painéis. */
+:root{
+  --red:#E60012;--red-600:#C8000F;--red-50:#FFF1F2;
+  --ink:#1F2430;--ink-2:#434A5B;--muted:#6B7280;--muted-2:#9AA0AB;
+  --line:#ECECEF;--bg:#F6F6F8;--card:#FFFFFF;--soft:#F6F6F8;--soft-2:#F1F1F4;
+  --ok:#16A34A;--bad:#DC2626;--side:268px;
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --red:#E60012;--red-600:#FF5A67;--red-50:rgba(230,0,18,.16);
+  --ink:#F2F3F5;--ink-2:#C9CCD4;--muted:#9BA1AD;--muted-2:#727885;
+  --line:#2A2D36;--bg:#0E0F13;--card:#17191F;--soft:#1E2028;--soft-2:#23262F;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* ---------- menu ---------- */
+.side{position:fixed;left:0;top:0;bottom:0;width:var(--side);background:var(--card);border-right:1px solid var(--line);z-index:40;display:flex;flex-direction:column}
+.side:before{content:"";height:4px;flex:none;background:linear-gradient(90deg,#E60012,#FF4D5E)}
+.logo{display:flex;align-items:center;gap:12px;padding:18px 18px 14px}
+.jt{width:46px;height:46px;border-radius:13px;background:#E60012;color:#fff;display:grid;place-items:center;font-weight:900;font-size:15px;letter-spacing:-.3px;box-shadow:0 8px 18px rgba(230,0,18,.28);flex:none}
+.logo-name{font-weight:900;color:#E60012;letter-spacing:1.4px;font-size:15px}
+.logo-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.nav{flex:1;overflow:auto;padding:6px 12px 12px}
+.nav-caption{padding:10px 8px 8px;font-size:10.5px;letter-spacing:1.3px;color:var(--muted-2);font-weight:800}
+.grupo+.grupo{margin-top:6px}
+.nav-main{display:flex;align-items:center;gap:11px;width:100%;border:0;background:transparent;text-align:left;padding:9px 10px;border-radius:12px;color:var(--ink-2);transition:background .18s,color .18s}
+.nav-main:hover{background:var(--soft);color:var(--ink)}
+.nav-main .ico{width:36px;height:36px;border-radius:11px;background:var(--soft-2);display:grid;place-items:center;color:var(--red);transition:.18s;flex:none}
+.grupo.ativo .nav-main{background:var(--red-50);color:var(--red-600)}
+.grupo.ativo .nav-main .ico{background:var(--red);color:#fff;box-shadow:0 6px 14px rgba(230,0,18,.25)}
+.nav-copy{min-width:0;flex:1}
+.nav-copy b{display:block;font-size:13.5px;font-weight:700;line-height:1.25}
+.nav-copy small{display:block;font-size:11px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seta{width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .2s;margin-right:4px;flex:none}
+.grupo.aberto .seta{transform:rotate(45deg)}
+.sub{display:none;margin:4px 0 2px 28px;padding-left:12px;border-left:2px solid var(--line)}
+.grupo.aberto .sub{display:block}
+.sub-item{display:flex;align-items:center;gap:9px;width:100%;border:0;background:transparent;text-align:left;padding:7px 9px;border-radius:10px;color:var(--ink-2);margin:1px 0}
+.sub-item:hover{background:var(--soft);color:var(--ink)}
+.sub-item svg{width:16px;height:16px;color:var(--muted)}
+.sub-item[aria-current="true"]{background:var(--red-50);color:var(--red-600);font-weight:700}
+.sub-item[aria-current="true"] svg{color:var(--red)}
+.sub-item .nav-copy b{font-size:12.5px;font-weight:inherit}
+.sub-item .nav-copy small{font-size:10.5px}
+.conta{font-size:11px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:5px}
+.conta:empty{display:none}
+.conta i{width:7px;height:7px;border-radius:50%;background:var(--red);display:inline-block}
+.side-foot{border-top:1px solid var(--line);padding:12px 18px 14px;font-size:11.5px;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+.estado{display:flex;align-items:center;gap:8px}
+.estado i{width:8px;height:8px;border-radius:50%;background:var(--muted-2);flex:none}
+.estado.ok i{background:var(--ok);box-shadow:0 0 0 3px rgba(22,163,74,.18)}
+.estado.fora i{background:var(--bad);box-shadow:0 0 0 3px rgba(220,38,38,.18)}
+.estado.fora b{color:var(--bad)}
+.versao{font-size:10.5px;color:var(--muted-2)}
+
+/* ---------- painel escolhido ---------- */
+.area{position:fixed;left:var(--side);right:0;top:0;bottom:0}
+.area iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg)}
+.area iframe[hidden]{display:none}
+.topo{display:none}
+.shade{display:none}
+
+/* ---------- celular e telas menores: o menu vira gaveta ---------- */
+@media (max-width:1080px){
+  .side{transform:translateX(-100%);transition:transform .2s;box-shadow:0 0 40px rgba(0,0,0,.25)}
+  body.menu .side{transform:translateX(0)}
+  body.menu .shade{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:35}
+  .topo{display:flex;align-items:center;gap:10px;position:fixed;left:0;right:0;top:0;height:50px;padding:0 12px;background:var(--card);border-bottom:1px solid var(--line);z-index:30}
+  .topo button{border:1px solid var(--line);background:var(--soft);border-radius:10px;width:38px;height:34px;display:grid;place-items:center}
+  .topo b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topo small{color:var(--muted);font-size:12px;white-space:nowrap}
+  .area{left:0;top:50px}
+}
+</style>
+</head>
+<body>
+<div class="shade" id="shade"></div>
+<aside class="side" id="side" aria-label="Menu principal">
+  <div class="logo">
+    <div class="jt">J&amp;T</div>
+    <div><div class="logo-name">EXPRESS</div><div class="logo-sub">SP GRU · Painel Operacional</div></div>
+  </div>
+  <nav class="nav" id="nav"><div class="nav-caption">PAINÉIS / 面板</div></nav>
+  <div class="side-foot" id="foot"></div>
+</aside>
+<header class="topo"><button type="button" id="abrirMenu" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><b id="topoTitulo"></b><small id="topoSub"></small></header>
+<main class="area" id="area"></main>
+
+<script>
+(function () {
+  'use strict';
+  var ICONES = {
+    truck: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>',
+    yard: '<path d="M3 21V9l9-5 9 5v12"/><path d="M7 21v-8h10v8M7 17h10"/>',
+    chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    route: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7"/>',
+    box: '<path d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8M12 13v8"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    door: '<path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17M3 21h18"/><path d="M15 12h.5"/>',
+    fila: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.5M3 12h.5M3 18h.5"/>',
+    dock: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10M15 10v10"/>',
+    send: '<path d="M4 12h12M12 6l6 6-6 6"/><path d="M20 4v16"/>'
+  };
+  function icone(n) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONES[n] || ICONES.chart) + '</svg>'; }
+  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
+
+  /**
+   * Os dois painéis e as telas de cada um (os mesmos nomes do menu de cada painel).
+   *  - Monitor de Recebimento: o submenu clica no botão do menu dele (sel);
+   *  - Controle de Pátio: o submenu chama a troca de tela dele (switchPage).
+   * css = o que some do painel quando ele está aqui dentro (o menu dele e o botão ☰ do celular).
+   */
+  var APPS = {
+    recebimento: {pt: 'Monitor de Recebimento', zh: '到件监控', icone: 'truck', url: 'recebimento/',
+      css: 'aside#sidebar,#drawer,.shade{display:none!important}main{margin-left:0!important}',
+      subs: [
+        {id: 'geral', pt: 'Visão geral', zh: '总览', icone: 'chart', sel: '#nav [data-status=""]'},
+        {id: 'transito', pt: 'Em trânsito', zh: '在途', icone: 'route', sel: '#nav [data-status="3"]'},
+        {id: 'concluido', pt: 'Concluído', zh: '已完成', icone: 'box', sel: '#nav [data-status="4"]'},
+        {id: 'deslacre', pt: 'Falta de deslacre', zh: '未解封', icone: 'lock', sel: '#nav [data-view="deslacre"]'}
+      ]},
+    patio: {pt: 'Controle de Pátio', zh: '场院管理', icone: 'yard', url: 'patio/',
+      css: '.sidebar,.mobile-menu{display:none!important}.workspace{margin-left:0!important}',
+      subs: [
+        {id: 'portaria', pt: 'Portaria', zh: '门卫登记', icone: 'door', page: 'Portaria'},
+        {id: 'fifo', pt: 'Fila FIFO', zh: '先进先出队列', icone: 'fila', page: 'Fila FIFO'},
+        {id: 'docas', pt: 'Controle de Docas', zh: '月台管理', icone: 'dock', page: 'Controle de Docas'},
+        {id: 'expedicao-dc', pt: 'Expedição DC', zh: '配送中心发运', icone: 'send', page: 'Expedição DC'},
+        {id: 'expedicao-sc', pt: 'Expedição SC', zh: '分拨中心发运', icone: 'send', page: 'Expedição SC'}
+      ]}
+  };
+  var ORDEM = ['recebimento', 'patio'];
+  var $ = function (id) { return document.getElementById(id); };
+  var frames = {}, pedido = {}, atual = {app: '', sub: ''}, lidos = {};
+
+  // ------------------------------------------------------------------ tema (o mesmo dos painéis)
+  function lerArmazenado(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function gravar(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* navegador sem armazenamento */ } }
+  document.documentElement.dataset.theme = lerArmazenado('jt-painel-tema') || 'dark';
+
+  // ------------------------------------------------------------------ menu
+  function montarMenu() {
+    var nav = $('nav');
+    ORDEM.forEach(function (k) {
+      var a = APPS[k], g = document.createElement('div');
+      g.className = 'grupo';
+      g.setAttribute('data-app', k);
+      g.innerHTML = '<button type="button" class="nav-main" aria-expanded="false"><span class="ico">' + icone(a.icone) + '</span>' +
+        '<span class="nav-copy"><b>' + esc(a.pt) + '</b><small>' + esc(a.zh) + '</small></span><span class="seta"></span></button>' +
+        '<div class="sub" role="group" aria-label="' + esc(a.pt) + '">' + a.subs.map(function (s) {
+          return '<button type="button" class="sub-item" data-sub="' + s.id + '" aria-current="false">' + icone(s.icone) +
+            '<span class="nav-copy"><b>' + esc(s.pt) + '</b><small>' + esc(s.zh) + '</small></span><span class="conta"></span></button>';
+        }).join('') + '</div>';
+      g.querySelector('.nav-main').addEventListener('click', function () { escolher(k, ''); });
+      g.querySelectorAll('.sub-item').forEach(function (b) {
+        b.addEventListener('click', function () { escolher(k, b.getAttribute('data-sub')); fecharMenu(); });
+      });
+      nav.appendChild(g);
+    });
+  }
+  function fecharMenu() { document.body.classList.remove('menu'); }
+  $('abrirMenu').addEventListener('click', function () { document.body.classList.add('menu'); });
+  $('shade').addEventListener('click', fecharMenu);
+
+  // ------------------------------------------------------------------ painel escolhido
+  function frameDe(k) {
+    if (frames[k]) return frames[k];
+    var f = document.createElement('iframe');
+    f.title = APPS[k].pt;
+    f.setAttribute('data-app', k);
+    f.addEventListener('load', function () { preparar(k); aplicar(k); });
+    f.src = APPS[k].url;
+    $('area').appendChild(f);
+    frames[k] = f;
+    return f;
+  }
+  function docDe(k) { try { return frames[k] && frames[k].contentDocument; } catch (e) { return null; } }
+  function winDe(k) { try { return frames[k] && frames[k].contentWindow; } catch (e) { return null; } }
+
+  /** Tira o menu próprio do painel (o menu é o desta página) e faz os links dele abrirem aqui dentro. */
+  function preparar(k) {
+    var doc = docDe(k);
+    if (!doc || !doc.head) return;
+    if (!doc.getElementById('painel-operacional-css')) {
+      var st = doc.createElement('style');
+      st.id = 'painel-operacional-css';
+      st.textContent = APPS[k].css;
+      doc.head.appendChild(st);
+    }
+    doc.querySelectorAll('base[target]').forEach(function (b) { b.setAttribute('target', '_self'); });
+  }
+
+  function escolher(k, sub) {
+    atual.app = k;
+    // Sem tela pedida: fica a que o painel já está mostrando (o menu marca na próxima leitura).
+    atual.sub = sub || '';
+    if (sub) pedido[k] = {sub: sub, ate: Date.now() + 20000};
+    ORDEM.forEach(function (x) {
+      var g = document.querySelector('.grupo[data-app="' + x + '"]'), on = x === k;
+      g.classList.toggle('ativo', on);
+      g.classList.toggle('aberto', on);
+      g.querySelector('.nav-main').setAttribute('aria-expanded', String(on));
+    });
+    var f = frameDe(k);
+    ORDEM.forEach(function (x) { if (frames[x]) frames[x].hidden = x !== k; });
+    f.hidden = false;
+    aplicar(k);
+    marcar();
+    var h = '#' + k + (sub ? '/' + sub : '');
+    if (location.hash !== h) history.replaceState(null, '', h);
+  }
+
+  /** Leva o painel para a tela pedida no submenu (espera ele terminar de carregar, até 20 s). */
+  function aplicar(k) {
+    var pd = pedido[k];
+    if (!pd) return;
+    if (Date.now() > pd.ate) { delete pedido[k]; return; }
+    var s = APPS[k].subs.filter(function (x) { return x.id === pd.sub; })[0], doc = docDe(k), win = winDe(k), feito = false;
+    if (s && doc) {
+      if (s.sel) {
+        var b = doc.querySelector(s.sel);
+        if (b) { if (b.getAttribute('aria-pressed') !== 'true') b.click(); feito = true; }
+      } else if (s.page && win && typeof win.switchPage === 'function' && doc.getElementById('navigation')) {
+        try { win.switchPage(s.page); feito = true; } catch (e) { /* tela ainda carregando */ }
+      }
+    }
+    if (feito) delete pedido[k];
+    else setTimeout(function () { aplicar(k); }, 300);
+  }
+
+  /** Qual tela cada painel está mostrando (mesmo quando a troca é feita dentro dele) e os números do Monitor. */
+  function lerTelas() {
+    ORDEM.forEach(function (k) {
+      var doc = docDe(k), info = {sub: '', contas: {}};
+      if (doc && doc.body) {
+        if (k === 'recebimento') {
+          APPS[k].subs.forEach(function (s) {
+            var b = doc.querySelector(s.sel);
+            if (!b) return;
+            if (b.getAttribute('aria-pressed') === 'true') info.sub = s.id;
+            var r = b.querySelector('.nav-rate');
+            info.contas[s.id] = r ? r.textContent.trim() : '';
+          });
+        } else {
+          var itens = doc.querySelectorAll('#navigation .nav-item');
+          for (var i = 0; i < itens.length; i++) if (itens[i].classList.contains('active') && APPS[k].subs[i]) info.sub = APPS[k].subs[i].id;
+        }
+      }
+      lidos[k] = info;
+    });
+  }
+  function marcar() {
+    lerTelas();
+    ORDEM.forEach(function (k) {
+      var info = lidos[k] || {sub: '', contas: {}};
+      document.querySelectorAll('.grupo[data-app="' + k + '"] .sub-item').forEach(function (b) {
+        var id = b.getAttribute('data-sub');
+        b.setAttribute('aria-current', String(k === atual.app && info.sub === id));
+        var c = b.querySelector('.conta'), n = info.contas[id] || '';
+        if (c.getAttribute('data-n') !== n) { c.setAttribute('data-n', n); c.innerHTML = n ? '<i></i>' + esc(n) : ''; }
+      });
+    });
+    var a = APPS[atual.app], info = lidos[atual.app] || {};
+    if (a) {
+      var s = a.subs.filter(function (x) { return x.id === info.sub; })[0];
+      $('topoTitulo').textContent = a.pt;
+      $('topoSub').textContent = s ? '· ' + s.pt : '';
+      document.title = 'SP GRU | ' + a.pt + (s ? ' · ' + s.pt : '');
+      if (info.sub && info.sub !== atual.sub && !pedido[atual.app]) {
+        atual.sub = info.sub;
+        history.replaceState(null, '', '#' + atual.app + '/' + info.sub);
+      }
+    }
+    sincronizarTema();
+  }
+
+  /** Tema claro/escuro: o botão de tema de cada painel continua valendo; o menu e o outro painel acompanham. */
+  function temaDe(k) { var d = docDe(k); return d && d.documentElement ? d.documentElement.dataset.theme || 'light' : ''; }
+  function sincronizarTema() {
+    var t = temaDe(atual.app), raiz = document.documentElement;
+    if (!t) return;
+    if (raiz.dataset.theme !== t) { raiz.dataset.theme = t; gravar('jt-painel-tema', t); }
+    ORDEM.forEach(function (k) {
+      if (k === atual.app) return;
+      var outro = temaDe(k);
+      if (!outro || outro === t) return;
+      var d = docDe(k), w = winDe(k);
+      try {
+        if (k === 'recebimento') { var b = d.getElementById('theme'); if (b) b.click(); }
+        else if (w && typeof w.toggleTheme === 'function') w.toggleTheme();
+      } catch (e) { /* painel ainda carregando */ }
+    });
+  }
+
+  // ------------------------------------------------------------------ situação dos dois serviços
+  function situacao() {
+    fetch('saude', {cache: 'no-store'}).then(function (r) { return r.json(); }).then(function (j) {
+      $('foot').innerHTML = ORDEM.map(function (k) {
+        var s = j[k] || {};
+        return '<div class="estado ' + (s.ok ? 'ok' : 'fora') + '"><i></i><span><b>' + esc(APPS[k].pt) + '</b> · ' +
+          (s.ok ? 'no ar' + (s.versao ? ' (v' + esc(s.versao) + ')' : '') : 'fora do ar') + '</span></div>';
+      }).join('') + '<div class="versao">Painel Operacional v' + esc(j.versao || '') + '</div>';
+    }).catch(function () {
+      $('foot').innerHTML = '<div class="estado fora"><i></i><span><b>Sem conexão com o servidor</b></span></div>';
+    });
+  }
+
+  // ------------------------------------------------------------------ início
+  montarMenu();
+  var h = location.hash.replace(/^#/, '').split('/'), k0 = APPS[h[0]] ? h[0] : 'recebimento';
+  var sub0 = h[1] && APPS[k0].subs.some(function (s) { return s.id === h[1]; }) ? h[1] : '';
+  escolher(k0, sub0);
+  window.addEventListener('hashchange', function () {
+    var p = location.hash.replace(/^#/, '').split('/');
+    if (APPS[p[0]] && (p[0] !== atual.app || (p[1] || '') !== atual.sub)) escolher(p[0], p[1] || '');
+  });
+  setInterval(marcar, 700);
+  situacao();
+  setInterval(situacao, 60000);
+})();
+</script>
+</body>
+</html>

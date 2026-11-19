@@ -88,6 +88,22 @@ function flushFetchCount_() {
   try { invalidateProps_(); setProp_(fetchDayKey_(), (Number(getProp_(fetchDayKey_(), '')) || 0) + n); }
   catch (e) { FETCH_PENDING_ += n; }
 }
+/**
+ * V4.15.1: o Google recusou por cota de UrlFetch. A cota é da CONTA Google: outros projetos do Apps Script da mesma conta (Pesquisa,
+ * Segmentos, painel dos fluxos) também gastam, e o contador daqui não vê. O contador de hoje vai para o limite: a fila espera o
+ * dia seguinte, em vez de tentar de novo a cada hora e mostrar erro. → true se era a cota de UrlFetch.
+ */
+function noteFetchQuotaHit_(msg) {
+  const m = String(msg || '');
+  if (!/urlfetch/i.test(m) || errorKind_(m) !== 'QUOTA') return false;
+  try {
+    FETCH_PENDING_ = 0;
+    invalidateProps_();
+    const lim = fetchLimit_();
+    if ((Number(getProp_(fetchDayKey_(), '')) || 0) < lim) setProp_(fetchDayKey_(), lim);
+  } catch (e) { /* só o contador */ }
+  return true;
+}
 /** 'ok' | 'reserve' (economia: só hoje e ontem) | 'stop' (espera o dia seguinte). Versão Node.js: sem cota do Google. */
 function fetchBudgetMode_() {
   if (getProp_('PLATAFORMA', '') === 'node') return 'ok';
@@ -301,9 +317,19 @@ function toIsoTimestamp_(v) {
  *  QUOTA → cota diária do Google (UrlFetch, tempo de gatilho, Drive...): pausa tudo por 1 h;
  *  OTHER → erro comum: nova tentativa (até 4).
  */
+/**
+ * V4.27.1: o computador do painel não alcança o JMS (sem internet, sem DNS, conexão recusada/caiu) — não é erro do dia nem da
+ * consulta. Ex.: "Falha de rede ao consultar o JMS: Exception: fetch failed (ENOTFOUND)".
+ */
+function networkDown_(msg) {
+  const s = String(msg || '');
+  return /Falha de rede ao consultar o JMS/i.test(s) &&
+    /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ENETDOWN|ECONNRESET|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET|getaddrinfo|DNS/i.test(s);
+}
 function errorKind_(msg) {
   const s = String(msg || '');
-  if (/Service invoked too many times|too much computer time|Bandwidth quota|Cota diária do Google|Limit Exceeded|Limite excedido|quota exceeded/i.test(s)) return 'QUOTA';
+  // V4.15.1: a mensagem do Google vem no idioma da conta ("Serviço chamado muitas vezes no mesmo dia: urlfetch." em português).
+  if (/Service invoked too many times|too much computer time|Bandwidth quota|Cota diária do Google|Limit Exceeded|Limite excedido|quota exceeded|chamad[oa] muitas vezes|muitas vezes no mesmo dia|demasiadas veces|tempo de computador|cota de largura de banda/i.test(s)) return 'QUOTA';
   if (/HTTP 401|HTTP 403|HTTP 30[12378]\b|Sessão do JMS|Credencial|credencial|JMS_AUTH|Propriedade de autenticação/.test(s)) return 'AUTH';
   return 'OTHER';
 }
@@ -318,8 +344,16 @@ function publicJmsError_(s) {
   const value = String(s || '');
   if (!value) return '';
   const excerpt = (n) => { const x = value.replace(/\s+/g, ' ').trim(); return x.length > n ? x.slice(0, n) + '…' : x; };
-  if (/Service invoked too many times[^.]*urlfetch/i.test(value)) return 'Cota diária de consultas externas do Google (UrlFetch) esgotada; a importação retoma sozinha';
+  if (/urlfetch/i.test(value) && errorKind_(value) === 'QUOTA') {
+    return 'Cota diária de consultas externas do Google (UrlFetch) esgotada; a importação retoma sozinha no dia seguinte. A cota é da conta ' +
+      'Google (20 mil por dia no Gmail) e soma todos os projetos do Apps Script dessa conta';
+  }
   if (errorKind_(value) === 'QUOTA') return 'Cota diária do Google esgotada (' + excerpt(90) + '); a importação retoma sozinha';
+  if (networkDown_(value)) {
+    return 'Sem conexão com o JMS: o computador do painel não alcançou ' + ((value.match(/https?:\/\/([^/\s)]+)/) || [])[1] || 'o JMS') +
+      ' (internet ou DNS' + ((value.match(/\((E[A-Z_]+|UND_ERR_[A-Z_]+)\)/) || [])[1] ? ', ' + value.match(/\((E[A-Z_]+|UND_ERR_[A-Z_]+)\)/)[1] : '') +
+      '). A fila tenta de novo sozinha a cada ' + APP_CONFIG.PAUSE_NET_MINUTES + ' min';
+  }
   if (/Sessão do JMS/i.test(value)) {
     const m = value.match(/\(código ([^)]*)\)/);
     return 'Sessão/token do JMS expirado ou recusado' + (m ? ' (código ' + m[1].slice(0, 90) + ')' : '') + ': gere um novo AuthToken e atualize JMS_AUTHTOKEN';

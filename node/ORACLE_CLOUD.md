@@ -2,14 +2,27 @@
 
 O painel fica num servidor da Oracle, ligado 24 h, **sem os limites do Google**:
 - não tem os 90 min por dia, as 20 mil consultas por dia nem os 6 min por execução;
-- **todos os painéis num link só**, inclusive Recebimento e Expedição (fluxo operacional). Não precisa mais de dois projetos nem de duas contas;
-- link **https** para a equipe, que abre de qualquer lugar.
+- os painéis do JMS no mesmo servidor: o principal (com Recebimento e Expedição), o Lotes e o Monitor de Recebimento, cada um com o seu link;
+- link **https** para a equipe, que abre de qualquer lugar;
+- **o seu computador pode ficar desligado**: o servidor fica ligado 24 h.
+
+**V4.24.1 — vários painéis no mesmo servidor**, cada um no seu link (seções 6 e 6b):
+
+| Painel | Porta no servidor | Link |
+|---|---|---|
+| Principal | 3000 | `https://dashmaster.xxxx.ts.net` |
+| Lotes | 3400 | `https://dashmaster.xxxx.ts.net:10000` |
+| Monitor de Recebimento | 3600 | `https://dashmaster.xxxx.ts.net:8443` |
+
+**A Produção do Sorter (e o bot do Feishu) não vai para a nuvem:** o site do sorter (10.1.166.9) só abre na rede da base. Ele
+continua num computador ligado na base.
 
 **Tempo:** uns 40 minutos.
 
 **O que precisa:**
 - um cartão de crédito, só para a Oracle verificar a conta (o plano "Always Free" não cobra);
-- o arquivo **`JT_DASHMASTER_V4_15_NODE.zip`**;
+- o arquivo **`JT_DASHMASTER_V4_24_1_NODE.zip`** (painel principal) e, se quiser os outros no mesmo servidor,
+  **`JT_DASHMASTER_V4_24_1_LOTES_NODE.zip`** e **`MONITOR_RECEBIMENTO_V1_4.zip`**;
 - um computador com Windows 10 ou 11 (o PowerShell já tem os comandos `ssh` e `scp`);
 - o **AuthToken do JMS**.
 
@@ -56,12 +69,12 @@ Nos comandos abaixo, troque **`IP`** pelo Public IP address do passo 2.
 ## 4. Mandar o painel para o servidor
 1. Abra **outra janela** do PowerShell, no seu computador, e envie o ZIP:
    ```
-   scp -i C:\DashMaster\chave.key C:\DashMaster\JT_DASHMASTER_V4_15_NODE.zip ubuntu@IP:~/
+   scp -i C:\DashMaster\chave.key C:\DashMaster\JT_DASHMASTER_V4_24_1_NODE.zip ubuntu@IP:~/
    ```
 2. Na janela do **servidor**, extraia:
    ```
    sudo apt-get update && sudo apt-get install -y unzip
-   unzip -o JT_DASHMASTER_V4_15_NODE.zip
+   unzip -o JT_DASHMASTER_V4_24_1_NODE.zip
    ```
    Isso cria a pasta `~/dashmaster`.
 
@@ -103,6 +116,28 @@ bash link-publico.sh
 
 Não precisa abrir nenhuma porta na Oracle: o Tailscale sai do servidor para fora.
 
+## 6b. Lotes e Monitor de Recebimento no mesmo servidor (opcional)
+Cada um vira um serviço próprio, na sua porta, e ganha o seu link. Faça depois das seções 5 e 6 (o principal já no ar).
+
+1. No seu computador, envie os ZIPs:
+   ```
+   scp -i C:\DashMaster\chave.key C:\DashMaster\JT_DASHMASTER_V4_24_1_LOTES_NODE.zip C:\DashMaster\MONITOR_RECEBIMENTO_V1_4.zip ubuntu@IP:~/
+   ```
+2. No servidor, extraia:
+   ```
+   cd ~ && unzip -o JT_DASHMASTER_V4_24_1_LOTES_NODE.zip && unzip -o MONITOR_RECEBIMENTO_V1_4.zip
+   ```
+   Isso cria as pastas `~/dashmaster-lotes` e `~/monitor-recebimento`.
+3. **Lotes** (porta 3400, link na 10000). Ele pede o AuthToken, como o principal:
+   ```
+   cd ~/dashmaster-lotes/node && bash instalar-oracle.sh && bash link-publico.sh
+   ```
+4. **Monitor de Recebimento** (porta 3600, link na 8443). Ele usa o mesmo AuthToken do principal (`~/dashmaster`):
+   ```
+   cd ~/monitor-recebimento && bash instalar-nuvem.sh && bash link-publico.sh
+   ```
+5. Cada `link-publico.sh` mostra o link no fim: o do Lotes termina em `:10000` e o do Monitor em `:8443`.
+
 ## 7. Tela Configurações, pelo seu computador
 A tela Configurações (AuthToken, propriedades, executar funções) **só abre no próprio servidor**. Pelo link da equipe ela fica bloqueada.
 
@@ -113,6 +148,9 @@ Para abrir do seu computador:
    ```
 2. No navegador, abra **http://localhost:3000/config**.
 3. Para fechar, feche a janela do túnel.
+
+Lotes e Monitor: troque a porta no túnel e no endereço — Lotes `-L 3400:localhost:3400` e **http://localhost:3400/config**;
+Monitor `-L 3600:localhost:3600` e **http://localhost:3600/config**.
 
 Tudo o que a tela faz também dá para fazer por comando, no servidor, dentro de `~/dashmaster/node`:
 
@@ -138,6 +176,8 @@ Depois que o painel da Oracle estiver com os dados, desligue a coleta nos projet
    ```
    unzip -o JT_DASHMASTER_<versão>_NODE.zip && sudo systemctl restart dashmaster
    ```
+   Lotes: `unzip -o JT_DASHMASTER_<versão>_LOTES_NODE.zip && sudo systemctl restart dashmaster-lotes`.
+   Monitor: `unzip -o MONITOR_RECEBIMENTO_V<versão>.zip && sudo systemctl restart monitor-recebimento`.
 
 Os dados (`node/dados`) e o `config.json` não vêm no ZIP, então continuam como estão.
 
@@ -146,6 +186,11 @@ De vez em quando, faça uma cópia dos dados:
 1. No servidor:
    ```
    tar czf ~/backup-dashmaster.tgz -C ~/dashmaster/node dados config.json
+   ```
+   Lotes e Monitor, se estiverem no servidor:
+   ```
+   tar czf ~/backup-lotes.tgz -C ~/dashmaster-lotes/node dados config.json
+   tar czf ~/backup-monitor.tgz -C ~/monitor-recebimento dados config.json
    ```
 2. No seu computador:
    ```
@@ -173,7 +218,7 @@ O relatório em Excel funciona sem nada. Para o PDF, o servidor precisa de um na
 |---|---|
 | `Permissions for 'chave.key' are too open` | Rode os dois comandos `icacls` do passo 3 |
 | `Connection timed out` no `ssh` | Confira o IP e se o servidor está **Running** na Oracle |
-| O link da equipe não abre | No servidor: `sudo systemctl status dashmaster` e `sudo tailscale funnel status` |
+| O link da equipe não abre | No servidor: `sudo systemctl status dashmaster` (Lotes: `dashmaster-lotes`, Monitor: `monitor-recebimento`) e `sudo tailscale funnel status` |
 | `Out of capacity` ao criar o servidor | Falta vaga na região: tente outro Availability domain ou mais tarde |
 | O painel diz que o JMS recusou o AuthToken | `node dashmaster.js token` com o token novo |
 | O teste do JMS falha só no servidor da Oracle (no Google funcionava) | Rode `node dashmaster.js executar diagnosticarConexaoJms` e me mande o resultado (sem o token) |
