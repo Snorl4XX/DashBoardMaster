@@ -1,9 +1,23 @@
 /**
- * JMS / J&T Express — Google Planilhas + Apps Script — v6 (12/11/2026)
+ * JMS / J&T Express — Google Planilhas + Apps Script — v7 (19/11/2026)
  *
  * INSTALAÇÃO: apague o código antigo de Código.gs, cole este arquivo,
  * salve, execute instalarAutomacaoJMS UMA vez pelo editor e aceite
  * TODAS as permissões. Depois use o menu "JMS | Automação".
+ * Quem já usa a v6: basta colar e salvar (o acionador de 15 min continua).
+ *
+ * O QUE MUDOU NA v7
+ * - Coluna A: era "Data (partida)", o dia consultado. Agora é "Data (chegada)":
+ *   o dia do "Tempo real de chegada" de cada viagem (actualArrivalTime, o mesmo
+ *   campo na troncal e na secundária). Sem esse horário, vale o dia da partida.
+ * - Viagem que sai num dia e chega no outro (ex.: saiu 18/11 22:00, chegou
+ *   19/11 03:00) ficava de fora; agora entra no dia da chegada. Para isso a
+ *   consulta pega as partidas de alguns dias (troncal: de 3 dias antes até
+ *   amanhã; secundária: de 2 dias antes até hoje) e fica só com as viagens que
+ *   chegaram ontem ou hoje.
+ * - Cada atualização refaz os blocos de ONTEM e de HOJE: a viagem que chegou
+ *   ontem e só foi concluída depois da meia-noite também entra. Os dias
+ *   anteriores ficam salvos como estavam.
  *
  * O QUE MUDOU NA v6
  * - Atualização automática a cada 15 minutos. A cada execução o script
@@ -73,7 +87,11 @@ const JMS_CONFIG = Object.freeze({
   MAX_PAGINAS: 100,
   INTERVALO_MIN: 15, // o Apps Script aceita 1, 5, 10, 15 ou 30
   PAUSA_RETENTATIVA_MIN: 60, // token recusado: tenta de novo a cada 60 min
-  VERSAO: 'v6',
+  VERSAO: 'v7',
+  // v7: partidas consultadas, em dias a partir de hoje (início, fim), para achar as viagens que chegaram ontem ou hoje.
+  JANELA: {primaria: [-3, 1], secundaria: [-2, 0]},
+  // v7: "Tempo real de chegada" (o mesmo nome na troncal e na secundária) e os nomes alternativos do JMS.
+  CAMPOS_CHEGADA: ['actualArrivalTime', 'appArrivalTime', 'appTrackArrivalTime'],
   ENDPOINTS: {
     primaria: '/transportation/tmsShipment/page',
     secundaria: '/transportation/tmsBranchTrackingDetail/page'
@@ -107,10 +125,11 @@ const CORES = Object.freeze({
 });
 
 // Colunas das abas de dados. A coluna C tem o mesmo nome da coluna do JMS.
+// v7: coluna A = dia do "Tempo real de chegada" (até a v6, "Data (partida)", o dia consultado).
 const TITULOS = Object.freeze({
-  primaria: ['Data (partida)', 'Número da tarefa', 'Tempo de deslacre',
+  primaria: ['Data (chegada)', 'Número da tarefa', 'Tempo de deslacre',
     'Situação', 'Destino', 'Atualizado em'],
-  secundaria: ['Data (partida)', 'Número da tarefa', 'Horário de deslacração do veículo',
+  secundaria: ['Data (chegada)', 'Número da tarefa', 'Horário de deslacração do veículo',
     'Situação', 'Destino', 'Atualizado em']
 });
 
@@ -333,7 +352,11 @@ function migrarLayout_(ss) {
     const aba = ss.getSheetByName(par[1]);
     if (!aba) return;
     const titulos = TITULOS[par[0]];
-    if (aba.getRange(1, 3).getDisplayValue() === titulos[2]) return;
+    if (aba.getRange(1, 3).getDisplayValue() === titulos[2]) {
+      // v7: só o título da coluna A muda ("Data (partida)" → "Data (chegada)"); os dias salvos ficam.
+      if (aba.getRange(1, 1).getDisplayValue() !== titulos[0]) aba.getRange(1, 1).setValue(titulos[0]);
+      return;
+    }
     const ultima = aba.getLastRow();
     if (ultima > 1) {
       const copia = aba.copyTo(ss);
@@ -529,7 +552,7 @@ function atualizarDadosJMS_(ss) {
   const cfg = abaConfig_(ss);
   const primCampo = valorCelula_(cfg, CEL.CAMPO_PRIM) || CAMPO_DESLACRE_PADRAO;
   const secCampo = valorCelula_(cfg, CEL.CAMPO_SEC) || CAMPO_DESLACRE_PADRAO;
-  const dia = diaAtualJMS_(); // só o dia atual
+  const dias = diasChegadaJMS_(); // v7: ontem e hoje, pelo Tempo real de chegada
   const linhasJMS = [
     {nome: JMS_CONFIG.ABA_PRIMARIA, tipo: 'primaria', campo: primCampo, linha: 2,
       rotulo: 'Troncal', celula: CEL.CAMPO_PRIM},
@@ -546,7 +569,7 @@ function atualizarDadosJMS_(ss) {
       continue;
     }
     try {
-      const busca = buscarTodasPaginas_(item.tipo, dia.api, ss);
+      const busca = buscarTodasPaginas_(item.tipo, janelaJMS_(item.tipo), ss);
       const registros = busca.registros;
       const celCampo = cfg.getRange(item.celula);
       const nota = String(celCampo.getNote() || '');
@@ -570,22 +593,24 @@ function atualizarDadosJMS_(ss) {
         }
       }
 
-      const resultado = formatarRegistros_(registros, campo, dia.exibir);
-      gravarRegistros_(ss.getSheetByName(item.nome), resultado.linhas, dia.exibir);
+      const resultado = formatarRegistros_(registros, campo, dias);
+      gravarRegistros_(ss.getSheetByName(item.nome), resultado.porDia);
 
-      const qtd = resultado.linhas.length + ' IDs' + (busca.total !== null
-        ? ' (JMS informou ' + busca.total + ', vieram ' + registros.length + ')' : '');
+      const qtdHoje = resultado.porDia[1].linhas.length;
+      const qtd = qtdHoje + ' IDs hoje e ' + resultado.porDia[0].linhas.length + ' ontem, pela chegada' +
+        (busca.total !== null ? ' (partidas consultadas: JMS informou ' + busca.total + ', vieram ' +
+        registros.length + ')' : '');
       if (busca.total !== null && registros.length < busca.total) {
         avisos.push(item.rotulo + ': o JMS informou ' + busca.total + ' e vieram ' + registros.length);
-        atualizarControle_(ss, item.linha, resultado.linhas.length, 'ATENÇÃO: faltaram registros. ' +
+        atualizarControle_(ss, item.linha, qtdHoje, 'ATENÇÃO: faltaram registros. ' +
           qtd + '. Rode Atualizar agora de novo; se continuar, me avise.');
       } else if (resultado.linhas.length && !resultado.campoEncontrado) {
         avisos.push(item.rotulo + ': nenhum campo de deslacre encontrado na resposta do JMS');
-        atualizarControle_(ss, item.linha, resultado.linhas.length,
+        atualizarControle_(ss, item.linha, qtdHoje,
           'ATENÇÃO: nenhum campo de deslacre na resposta do JMS. Use o menu Calibrar campo de ' +
           'deslacre. Horários que o JMS envia — ' + resumoHorarios_(registros) + '.');
       } else {
-        atualizarControle_(ss, item.linha, resultado.linhas.length, 'OK - ' + qtd +
+        atualizarControle_(ss, item.linha, qtdHoje, 'OK - ' + qtd +
           ' | campo de deslacre: ' + campo + (detectado ? ' (detectado agora)' : ''));
       }
     } catch (erro) {
@@ -605,7 +630,8 @@ function atualizarDadosJMS_(ss) {
     if (avisos.length) {
       definirEstado_('ATUALIZADO COM AVISO', avisos.join(' | ') + '. Veja a aba CONTROLE.', ss, 'aguardando');
     } else {
-      definirEstado_('ATUALIZADO', 'Dia ' + dia.exibir + ' atualizado. Dias anteriores ficam salvos acima.', ss, 'ok');
+      definirEstado_('ATUALIZADO', 'Dias ' + dias.ontem.exibir + ' e ' + dias.hoje.exibir +
+        ' atualizados pela data de chegada. Dias anteriores ficam salvos acima.', ss, 'ok');
     }
     return;
   }
@@ -699,10 +725,12 @@ function buscarTodasPaginas_(tipo, dia, ss) {
   return {registros: Array.from(porChave.values()), total: total};
 }
 
+/** dia: 'aaaa-mm-dd' (um dia) ou {inicio, fim} (v7: as partidas de vários dias). */
 function consultarPagina_(tipo, dia, pagina, ss, tamanho) {
   const cfg = abaConfig_(ss);
-  const inicio = dia + ' 00:00:00';
-  const fim = dia + ' 23:59:59';
+  const faixa = typeof dia === 'string' ? {inicio: dia, fim: dia} : dia;
+  const inicio = faixa.inicio + ' 00:00:00';
+  const fim = faixa.fim + ' 23:59:59';
   const base = {current: pagina, size: tamanho || JMS_CONFIG.PAGINA_TAMANHO};
 
   const celMetodo = tipo === 'primaria' ? CEL.METODO_PRIM : CEL.METODO_SEC;
@@ -856,18 +884,24 @@ function rotuloTipo_(erro) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Uma linha por tarefa: [Data, Número da tarefa, horário de deslacre, Situação, Destino, Atualizado em].
- * Ordena pelo horário de deslacre (como a tela do JMS); sem deslacre vão para o fim.
+ * Uma linha por tarefa: [Data (chegada), Número da tarefa, horário de deslacre, Situação, Destino, Atualizado em].
+ * v7: só as viagens que chegaram ontem ou hoje (dias = diasChegadaJMS_()), separadas por dia: {porDia: [ontem, hoje], ...}.
+ * Em cada dia, ordena pelo horário de deslacre (como a tela do JMS); sem deslacre vão para o fim.
  */
-function formatarRegistros_(registros, campo, diaExibir) {
+function formatarRegistros_(registros, campo, dias) {
   const unicos = new Map();
   const hora = agoraJMS_();
+  const exibir = {};
+  exibir[dias.ontem.api] = dias.ontem.exibir;
+  exibir[dias.hoje.api] = dias.hoje.exibir;
   let campoEncontrado = false;
   for (const bruto of registros) {
     const reg = bruto || {};
     const id = String(reg.shipmentNo || '').trim();
     if (!id) continue;
     if (temCampo_(reg, campo)) campoEncontrado = true;
+    const diaExibir = exibir[diaChegada_(reg)];
+    if (!diaExibir) continue; // chegou antes de ontem (já está salvo) ou ainda não tem dia
     const v = valorCampo_(reg, campo);
     const valor = v !== undefined && v !== null ? String(v).trim() : '';
     const situacao = valor ? 'Deslacrado' : 'Aguardando deslacre';
@@ -876,51 +910,59 @@ function formatarRegistros_(registros, campo, diaExibir) {
     const anterior = unicos.get(id);
     if (!anterior || (!anterior[2] && valor)) unicos.set(id, linha);
   }
-  const linhas = Array.from(unicos.values()).sort((a, b) => {
+  const ordem = (a, b) => {
     if (a[2] && !b[2]) return -1;
     if (!a[2] && b[2]) return 1;
     return a[2].localeCompare(b[2]) || a[1].localeCompare(b[1]);
-  });
+  };
+  const todas = Array.from(unicos.values());
   if (!campoEncontrado) {
-    linhas.forEach(l => { l[3] = 'Campo "' + campo + '" não encontrado'; });
+    todas.forEach(l => { l[3] = 'Campo "' + campo + '" não encontrado'; });
   }
-  return {linhas: linhas, campoEncontrado: campoEncontrado};
+  const porDia = [dias.ontem, dias.hoje].map(d => ({
+    exibir: d.exibir,
+    linhas: todas.filter(l => l[0] === d.exibir).sort(ordem)
+  }));
+  return {porDia: porDia, linhas: porDia[0].linhas.concat(porDia[1].linhas), campoEncontrado: campoEncontrado};
 }
 
 /**
- * Mantém salvos os dias anteriores e substitui só o bloco do dia atual,
- * que fica sempre embaixo. Quando o dia vira, a nova data entra logo abaixo.
+ * Mantém salvos os dias anteriores e substitui só os blocos de ontem e de hoje
+ * (porDia, nessa ordem), que ficam sempre embaixo. Quando o dia vira, a nova
+ * data entra logo abaixo e o dia de anteontem fica como estava.
  */
-function gravarRegistros_(aba, linhas, diaExibir) {
+function gravarRegistros_(aba, porDia) {
   if (!aba) throw erroJMS_('CONFIG', 'Aba de dados não encontrada: execute instalarAutomacaoJMS.');
+  const dias = porDia.map(d => d.exibir);
   const ultima = aba.getLastRow();
-  let inicioHoje = Math.max(ultima, 1) + 1; // primeira linha do bloco do dia atual
+  let inicio = Math.max(ultima, 1) + 1; // primeira linha do bloco de ontem
 
   if (ultima > 1) {
     const colunaA = aba.getRange(2, 1, ultima - 1, 1).getDisplayValues().map(l => l[0]);
-    const primeira = colunaA.indexOf(diaExibir);
+    const primeira = colunaA.findIndex(v => dias.indexOf(v) >= 0);
     if (primeira >= 0) {
-      const blocoNoFim = colunaA.slice(primeira).every(v => v === diaExibir);
-      if (blocoNoFim) {
-        inicioHoje = primeira + 2;
+      const blocosNoFim = colunaA.slice(primeira).every(v => dias.indexOf(v) >= 0);
+      if (blocosNoFim) {
+        inicio = primeira + 2;
       } else {
-        // A aba foi reordenada: tira as linhas do dia atual de onde estiverem
+        // A aba foi reordenada: tira as linhas de ontem e de hoje de onde estiverem
         // e regrava o histórico em ordem, sem perder nenhum dia anterior.
         const todas = aba.getRange(2, 1, ultima - 1, 6).getDisplayValues();
-        const historico = todas.filter(l => l[0] !== diaExibir);
+        const historico = todas.filter(l => dias.indexOf(l[0]) < 0);
         aba.getRange(2, 1, ultima - 1, 6).clearContent();
         if (historico.length) {
           aba.getRange(2, 1, historico.length, 6).setNumberFormat('@').setValues(historico);
         }
-        inicioHoje = historico.length + 2;
+        inicio = historico.length + 2;
       }
     }
   }
 
-  const sobra = aba.getLastRow() - inicioHoje + 1;
-  if (sobra > 0) aba.getRange(inicioHoje, 1, sobra, 6).clearContent();
+  const sobra = aba.getLastRow() - inicio + 1;
+  if (sobra > 0) aba.getRange(inicio, 1, sobra, 6).clearContent();
+  const linhas = [].concat(...porDia.map(d => d.linhas));
   if (!linhas.length) return;
-  const intervalo = aba.getRange(inicioHoje, 1, linhas.length, 6);
+  const intervalo = aba.getRange(inicio, 1, linhas.length, 6);
   intervalo.setNumberFormat('@');
   intervalo.setValues(linhas);
 }
@@ -1262,4 +1304,29 @@ function dataJMS_(deslocamentoDias, formato) {
 /** Só o dia atual (horário de São Paulo): api para a consulta, exibir para a planilha. */
 function diaAtualJMS_() {
   return {api: dataJMS_(0, 'yyyy-MM-dd'), exibir: dataJMS_(0, 'dd/MM/yyyy')};
+}
+
+/** v7: ontem e hoje (horário de São Paulo), os dois dias que cada atualização refaz. */
+function diasChegadaJMS_() {
+  const dia = d => ({api: dataJMS_(d, 'yyyy-MM-dd'), exibir: dataJMS_(d, 'dd/MM/yyyy')});
+  return {ontem: dia(-1), hoje: dia(0)};
+}
+
+/** v7: partidas consultadas ({inicio, fim}, aaaa-mm-dd), pela JMS_CONFIG.JANELA da linha. */
+function janelaJMS_(tipo) {
+  const j = JMS_CONFIG.JANELA[tipo];
+  return {inicio: dataJMS_(j[0], 'yyyy-MM-dd'), fim: dataJMS_(j[1], 'yyyy-MM-dd')};
+}
+
+/**
+ * v7: dia da viagem (aaaa-mm-dd) pelo "Tempo real de chegada" (JMS_CONFIG.CAMPOS_CHEGADA). Sem ele, o dia da
+ * partida, como até a v6. '' sem nenhum dos dois.
+ */
+function diaChegada_(reg) {
+  const campos = JMS_CONFIG.CAMPOS_CHEGADA.concat(['actualDepartureTime', 'plannedDepartureTime']);
+  for (const k of campos) {
+    const v = valorCampo_(reg, k);
+    if (typeof v === 'string' && REGEX_DATAHORA.test(v.trim())) return v.trim().slice(0, 10);
+  }
+  return '';
 }
