@@ -1341,6 +1341,24 @@ function migrateToV420_() {
   return n;
 }
 /**
+ * V4.30 (pedido): o dia (coluna Data) de cada ID do Deslacre passa a ser o do Tempo real de chegada, não o do deslacre. Os dias
+ * gravados separaram os IDs pelo deslacre: uma vez, os dias dos últimos 62 com a lista do Deslacre (linha secundária e troncal)
+ * entram na fila de novo e cada um é refeito com os IDs que chegaram nele (os Registros de carga e descarga já consultados no
+ * mesmo dia são reaproveitados; o ID que muda de dia é consultado de novo).
+ */
+function migrateToV430_() {
+  if (getProp_('MIGRATION_V430', '')) return 0;
+  const to = isoToday_(), from = addDaysIso_(to, -62);
+  let n = 0;
+  Object.keys(INDICATORS).filter(k => INDICATORS[k].unseal).forEach(k => {
+    const days = Object.keys(dayFilesMap_(k, from, to)).sort().reverse();
+    if (days.length) n += enqueueJobs_(days.map(d => ['DETAIL_INIT', k, d, 1]), {reset: true});
+  });
+  setProp_('MIGRATION_V430', new Date().toISOString());
+  if (n) logSync_('INFO', 'unseal', '', 'V4.30: ' + n + ' dia(s) do Deslacre na fila de novo (dia pelo Tempo real de chegada).');
+  return n;
+}
+/**
  * V4.25 (pedido): a Falta de Bipagem no Recebimento separa os segmentos em linha troncal (1º segmento) e linha secundária
  * (1º + 2º segmento, "GRU,404-04"); os dias baixados antes guardavam só o 1º segmento. Uma vez: os últimos 31 dias com a
  * lista baixada são baixados de novo — só a lista (é pequena). Enquanto isso, a linha sai só pelo 1º segmento.

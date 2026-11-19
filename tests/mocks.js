@@ -599,6 +599,7 @@ function scanRecordsFor(w) {
  * e os Registros de carga e descarga de cada um. Tudo FICTÍCIO. Regras do teste: i % 5 === 2 → sem bipe de deslacre;
  * i % 7 === 3 → dois registros de descarregamento (tempo = mediana dos dois); i % 11 === 6 → deslacre sem registro de descarga;
  * i % 4 === 0 → um registro de carregamento (tipo 1) na origem (não conta). Os primeiros IDs saem na véspera (chegam de madrugada).
+ * V4.30: o último ID chega às 23h50 e é deslacrado às 00h20 do dia seguinte (o dia dele é o da chegada).
  * Mais um ID de outra base (endCode 99999) e um "Em trânsito" (shipmentState 3), que a consulta não pode trazer.
  */
 function makeUnseal(date, seed) {
@@ -608,6 +609,7 @@ function makeUnseal(date, seed) {
   const at = mins => {
     let d = date, m = Math.round(mins);
     while (m < 0) { m += 1440; d = addDay(d, -1); }
+    while (m >= 1440) { m -= 1440; d = addDay(d, 1); }
     return d + ' ' + pad(Math.floor(m / 60)) + ':' + pad(m % 60) + ':' + pad(Math.floor(rnd() * 60));
   };
   const origins = ['DC FICTICIO 01-SP', 'DC FICTICIO 02-SP', 'PA FICTICIA-SP', 'MGC FICTICIO-SP', 'DC FICTICIO 03-SP'];
@@ -634,6 +636,14 @@ function makeUnseal(date, seed) {
     }
     usUnloads[no] = recs;
   }
+  {
+    const no = 'SETRFIC' + date.replace(/-/g, '').slice(2) + '999';
+    us.push(Object.assign({}, us[0], {id: 'FICMN' + date, shipmentNo: no, plannedDepartureTime: at(1310), actualDepartureTime: at(1313),
+      lockTime: at(1305), actualArrivalTime: date + ' 23:50:00', appArrivalTime: date + ' 23:50:00', unlockTime: addDay(date, 1) + ' 00:20:00',
+      unloadStartTime: addDay(date, 1) + ' 00:21:00', plateNumber: 'FIC1999'}));
+    usUnloads[no] = [{jobCode: no, loadingTypeName: '2', scanStartTime: addDay(date, 1) + ' 00:21:00', scanEndTime: addDay(date, 1) + ' 01:10:00',
+      scanTotalTime: '49', scanWaybillNum: 777}];
+  }
   us.push(Object.assign({}, us[1], {id: 'FICOUTRA' + date, shipmentNo: 'SETRFICOUTRA' + date.replace(/-/g, ''), endCode: '99999', endName: 'BASE FICTICIA'}));
   us.push(Object.assign({}, us[1], {id: 'FICTRANS' + date, shipmentNo: 'SETRFICTRANS' + date.replace(/-/g, ''), shipmentState: 3}));
   return {us: us, usUnloads: usUnloads};
@@ -645,7 +655,8 @@ function makeUnseal(date, seed) {
  * O deslacre vem em actualUnlockTime. Regras do teste: i % 5 === 1 → sem bipe de deslacre; i % 7 === 3 → dois registros de
  * descarregamento na base (tempo = mediana dos dois); i % 9 === 4 → deslacre sem registro de descarga; i % 6 === 2 → uma
  * descarga (tipo 2) numa parada do caminho, em outra base (não conta); todos têm o carregamento (tipo 1) na origem (não conta).
- * Viagens de 3 a 30 h: parte sai 1 ou 2 dias antes. Mais um ID de outra base (endCode 99999) e um "Em trânsito" (shipmentState 3).
+ * Viagens de 3 a 30 h: parte sai 1 ou 2 dias antes. V4.30: o último ID chega às 23h55 e é deslacrado às 00h15 do dia seguinte.
+ * Mais um ID de outra base (endCode 99999) e um "Em trânsito" (shipmentState 3).
  */
 function makeUnsealTrunk(date, seed) {
   let s = seed || 9;
@@ -684,6 +695,13 @@ function makeUnsealTrunk(date, seed) {
         scanNetworkName: 'SP GRU', scanTotalTime: '65', scanWaybillNum: 40});
     }
     utUnloads[no] = recs;
+  }
+  {
+    const no = 'DBGXFIC' + date.replace(/-/g, '').slice(2) + '999';
+    ut.push(Object.assign({}, ut[0], {id: 'FICTMN' + date, shipmentNo: no, plannedDepartureTime: at(1015), actualDepartureTime: at(1025),
+      actuallockTime: at(1007), actualArrivalTime: date + ' 23:55:00', actualUnlockTime: addDay(date, 1) + ' 00:15:00', plateNumber: 'FIC2999'}));
+    utUnloads[no] = [{jobCode: no, loadingTypeName: '2', scanStartTime: addDay(date, 1) + ' 00:25:00', scanEndTime: addDay(date, 1) + ' 03:00:00',
+      scanNetworkCode: '30001', scanNetworkName: 'SP GRU', scanTotalTime: '155', scanWaybillNum: 8999}];
   }
   ut.push(Object.assign({}, ut[2], {id: 'FICTOUTRA' + date, shipmentNo: 'DBGXFICOUTRA' + date.replace(/-/g, ''), endCode: '99999', endName: 'BASE FICTICIA'}));
   ut.push(Object.assign({}, ut[2], {id: 'FICTTRANS' + date, shipmentNo: 'DBGXFICTRANS' + date.replace(/-/g, ''), shipmentState: 3}));

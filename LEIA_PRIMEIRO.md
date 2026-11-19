@@ -4,6 +4,23 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.30.0 — Deslacre: a Data de cada ID pelo Tempo real de chegada
+
+Pedido: "Na coluna Data puxar os dados da coluna Tempo real de chegada", na linha troncal e na secundária (as duas têm a coluna
+com o mesmo nome).
+
+- **Deslacre (linha secundária) e Deslacre (linha troncal):** o dia de cada ID de viagem (coluna **Data** da tabela "Informações
+  gerais") passa a ser o do **Tempo real de chegada**. Até a V4.29 era o dia do deslacre.
+- Exemplo: viagem que chegou às 23h50 do dia 18 e foi deslacrada às 00h20 do dia 19 agora fica no **dia 18** (antes caía no 19).
+- Vale para tudo que conta por dia: IDs do dia, IDs sem deslacre, a taxa, os Resultados, a evolução diária e o relatório.
+- **Não mudou:** o **turno** continua pelo horário do deslacre (sem deslacre, pela chegada), e o tempo continua do deslacre até a
+  Data inicial do bipe de recebimento. ID sem Tempo real de chegada fica no dia do deslacre.
+- **Dias já baixados:** uma vez, os dias do Deslacre dos últimos 62 entram na fila de novo e são refeitos pelo dia da chegada
+  (o ID que muda de dia tem os Registros de carga e descarga consultados de novo). Dias mais antigos ficam como estavam.
+- Atualizar: Node.js — feche a janela preta do painel, extraia o `JT_DASHMASTER_V4_30_NODE.zip` por cima de `C:\dashmaster`
+  e abra de novo; Apps Script — troque os arquivos pelos do `JT_DASHMASTER_V4_30_PRINCIPAL.zip` e faça Implantar → Gerenciar
+  implantações → ✏️ → Nova versão. Em até 1 hora a fila começa a refazer os dias do Deslacre sozinha; não precisa rodar nada.
+
 ## V4.29.2 — XAP pela rota SC BNU (comunicado de 18/11)
 
 Pedido: comunicado "Alteração de rota" e a tabela "Atualizado em 18/11".

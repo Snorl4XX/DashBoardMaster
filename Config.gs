@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.29.2',
+  VERSION: '4.30.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1493,7 +1493,8 @@ const ALL_INDICATORS_ = Object.freeze({
    *  - Bipe de recebimento = "Data inicial" (V4.20; antes "Data final") do Bipe de descarregamento da SP GRU nos Registros de
    *    carga e descarga do ID (tmsBranchTrackingDetail/loading/scan/list?shipmentNo=…, scanStartTime). Tempo do ID = mediana de (Data inicial −
    *    deslacre) dos registros de descarregamento, em minutos (Expedicao.gs → runUnsealDetailJob_).
-   *  - Dia e turno pelo horário do deslacre ("vamos medir pela data dessa coluna"); ID sem deslacre: pela chegada do veículo.
+   *  - Turno pelo horário do deslacre ("vamos medir pela data dessa coluna"); ID sem deslacre: pela chegada do veículo.
+   *  - V4.30 (pedido): dia (coluna Data) pelo Tempo real de chegada (actualArrivalTime), nas duas linhas; até a V4.29, pelo deslacre.
    * Taxa guardada = IDs sem deslacre ÷ IDs do dia (%), sem meta. A lista é consultada com 1 dia antes (saídas da véspera que
    * chegam no dia).
    * V4.12.3: retirado (pedido). V4.17 (pedido "No dashboard principal colocar o dash de deslacre troncal e secundária"): de volta,
@@ -1526,7 +1527,8 @@ const ALL_INDICATORS_ = Object.freeze({
    *    Registros de carga e descarga do ID (trackingDeatil/loading/scan/list?shipmentNo=…). O carregamento na origem (tipo "1")
    *    e a descarga em outra base não contam.
    *  - Mesmo cálculo, cartões, gráficos e tabela da linha secundária (unsealPanel_).
-   * A lista é consultada com 2 dias antes e 1 depois (viagens longas e chegadas adiantadas); o dia de cada ID sai do deslacre.
+   * A lista é consultada com 2 dias antes e 1 depois (viagens longas e chegadas adiantadas); o dia de cada ID sai do Tempo real
+   * de chegada (V4.30; antes, do deslacre).
    */
   unseal_trunk: unsealPanel_({
     key: 'unseal_trunk', order: 13, routeKey: 'UNSEAL_TRUNK',

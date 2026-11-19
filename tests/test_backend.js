@@ -2563,11 +2563,19 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const unl = SU.fetches.filter(f => /tmsBranchTrackingDetail\/loading\/scan\/list/.test(f.url));
   check(unl.length && unl.every(f => f.method === 'get' && /\?shipmentNo=SETRFIC\d+$/.test(f.url)), 'Registros de carga e descarga de cada ID (GET ?shipmentNo=)');
   const all = [].concat(daysU[D18].us, daysU[D19].us), unloads = Object.assign({}, daysU[D18].usUnloads, daysU[D19].usUnloads);
-  const evT = t => t.unlockTime || t.actualArrivalTime;
-  const mine = all.filter(t => t.endCode === '30001' && t.shipmentState === 4 && evT(t).slice(0, 10) === D19);
+  // Turno pelo deslacre (sem ele, pela chegada); dia (V4.30) pelo Tempo real de chegada.
+  const evT = t => t.unlockTime || t.actualArrivalTime, dayT = t => t.actualArrivalTime || t.unlockTime;
+  const mine = all.filter(t => t.endCode === '30001' && t.shipmentState === 4 && dayT(t).slice(0, 10) === D19);
   const rowsU = cU.getArchivedRange_('unseal', D19, D19).rows;
   check(rowsU.length === mine.length && new Set(rowsU.map(r => r.shipment)).size === mine.length && rowsU.every(r => mine.some(t => t.shipmentNo === r.shipment)) &&
-    !rowsU.some(r => /OUTRA|TRANS/.test(r.shipment)), 'um ID por linha: chega na SP GRU, Concluído, deslacre (ou chegada) no dia; sem outra base nem Em trânsito', [rowsU.length, mine.length]);
+    !rowsU.some(r => /OUTRA|TRANS/.test(r.shipment)), 'um ID por linha: chega na SP GRU, Concluído, Tempo real de chegada no dia; sem outra base nem Em trânsito', [rowsU.length, mine.length]);
+  // V4.30: chegou às 23h50 e foi deslacrado às 00h20 do dia seguinte = dia da chegada (coluna Data), turno do deslacre (T3).
+  const mnU = no => rowsU.filter(r => r.shipment === no)[0];
+  const rows18U = cU.getArchivedRange_('unseal', D18, D18).rows, mn18 = rows18U.filter(r => /999$/.test(r.shipment))[0], mn19 = rowsU.filter(r => /999$/.test(r.shipment));
+  check(mn18 && mn18.date === D18 && mn18.unlockTime === D19 + ' 00:20:00' && mn18.shift === 'T3' && mn18.minutes === '1' &&
+    mn19.length === 1 && mn19[0].date === D19 && /^2026-09-19 23:50/.test(mn19[0].arrivalTime) && !mnU(mn18.shipment),
+    'V4.30: dia (Data) pelo Tempo real de chegada — 23h50 no dia 18 com deslacre às 00h20 do dia 19 fica no dia 18 (turno T3 pelo deslacre)',
+    {mn18, mn19: mn19.map(r => [r.shipment, r.date, r.arrivalTime])});;
   const ms = s => Date.parse(s.replace(' ', 'T') + 'Z');
   const med = a => { a = a.slice().sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
   const C = cU.JTCore_, exp = {};
@@ -2658,12 +2666,16 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(unl.length && unl.every(f => f.method === 'get' && /\?shipmentNo=DBGXFIC\d+$/.test(f.url)) && !ST.fetches.some(f => /tmsBranchTrackingDetail\/loading.*DBGX/.test(f.url)),
     'Registros de carga e descarga de cada ID da troncal (trackingDeatil, GET ?shipmentNo=)');
   const all = [].concat(daysT[D18].ut, daysT[D19].ut), unloads = Object.assign({}, daysT[D18].utUnloads, daysT[D19].utUnloads);
-  const evT = t => t.actualUnlockTime || t.actualArrivalTime;
-  const mine = all.filter(t => t.endCode === '30001' && t.shipmentState === 4 && evT(t).slice(0, 10) === D19);
-  check(mine.some(t => t.plannedDepartureTime.slice(0, 10) < D18), 'cenário: viagem que saiu 2 dias antes e foi deslacrada no dia');
+  const evT = t => t.actualUnlockTime || t.actualArrivalTime, dayT = t => t.actualArrivalTime || t.actualUnlockTime;
+  const mine = all.filter(t => t.endCode === '30001' && t.shipmentState === 4 && dayT(t).slice(0, 10) === D19);
+  check(mine.some(t => t.plannedDepartureTime.slice(0, 10) < D18), 'cenário: viagem que saiu 2 dias antes e chegou no dia');
   const rowsT = cT.getArchivedRange_('unseal_trunk', D19, D19).rows;
   check(rowsT.length === mine.length && new Set(rowsT.map(r => r.shipment)).size === mine.length && rowsT.every(r => mine.some(t => t.shipmentNo === r.shipment)) &&
-    !rowsT.some(r => /OUTRA|TRANS/.test(r.shipment)), 'troncal: um ID por linha (chega na SP GRU, Concluído, deslacre ou chegada no dia)', [rowsT.length, mine.length]);
+    !rowsT.some(r => /OUTRA|TRANS/.test(r.shipment)), 'troncal: um ID por linha (chega na SP GRU, Concluído, Tempo real de chegada no dia)', [rowsT.length, mine.length]);
+  const rows18T = cT.getArchivedRange_('unseal_trunk', D18, D18).rows, mnT = rows18T.filter(r => /999$/.test(r.shipment))[0];
+  check(mnT && mnT.date === D18 && mnT.unlockTime === D19 + ' 00:15:00' && mnT.shift === 'T3' && mnT.minutes === '10' &&
+    !rowsT.some(r => r.shipment === mnT.shipment) && rowsT.filter(r => /999$/.test(r.shipment)).every(r => r.date === D19),
+    'troncal V4.30: chegou às 23h55 do dia 18 e deslacrou às 00h15 do dia 19 = dia 18 (Data pela chegada; turno e tempo pelo deslacre)', mnT);
   const ms = s => Date.parse(s.replace(' ', 'T') + 'Z');
   const med = a => { a = a.slice().sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
   const C = cT.JTCore_, exp = {};
@@ -4231,6 +4243,30 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     {loadingTypeName: '2', scanNetworkName: 'SP GRU', scanStartTime: '2026-09-19 10:40:00', scanEndTime: '2026-09-19 15:11:19'}]);
   check(tm.minutes === '40' && tm.end === '2026-09-19 10:40:00' && tm.unloads === '1',
     'tempo do ID = Data inicial do Bipe de descarregamento da SP GRU − deslacre (sem a linha de outra base nem a de carregamento)', tm);
+}
+
+// ---------- V4.30: Deslacre com o dia pelo Tempo real de chegada — dias gravados pelo deslacre são refeitos uma vez ----------
+{
+  const vmV = require('vm');
+  const V18 = '2026-09-18', V19 = '2026-09-19', dV = {[V18]: makeDay(V18, 51), [V19]: makeDay(V19, 52)};
+  const cV = freshCtx(dV);
+  cV.queueHistory(V18, V19, true);
+  runAll(cV);
+  const fieldsV = vmV.runInContext('STORE_FIELDS_.concat(UNSEAL_FIELDS_)', cV);
+  const rowsOf = d => cV.getArchivedRange_('unseal', d, d).rows;
+  // Como gravado na V4.29: o ID que chegou às 23h50 do dia 18 (deslacre às 00h20 do dia 19) estava no dia 19.
+  const mn = rowsOf(V18).filter(r => /999$/.test(r.shipment))[0];
+  const old18 = rowsOf(V18).filter(r => r !== mn), old19 = rowsOf(V19).concat([Object.assign({}, mn, {date: V19})]);
+  cV.saveDayDataset_('unseal', V18, cV.encodeDayFile_(old18, fieldsV), 1, old18.length);
+  cV.saveDayDataset_('unseal', V19, cV.encodeDayFile_(old19, fieldsV), 1, old19.length);
+  const nV = cV.migrateToV430_(), againV = cV.migrateToV430_();
+  check(nV >= 4 && againV === 0 && ['unseal', 'unseal_trunk'].every(k => [V18, V19].every(d => cV.pendingJobs_().some(j => j.type === 'DETAIL_INIT' && j.indicator === k && j.date === d))),
+    'V4.30: uma vez, os dias já baixados do Deslacre (secundária e troncal) entram na fila de novo', {nV, againV});
+  runAll(cV);
+  const new18 = rowsOf(V18), new19 = rowsOf(V19);
+  check(new18.some(r => r.shipment === mn.shipment && r.date === V18) && !new19.some(r => r.shipment === mn.shipment) &&
+    cV.getRateDay_('unseal', V18).totalCount === new18.length && cV.getRateDay_('unseal', V19).totalCount === new19.length,
+    'V4.30: refeito, o ID volta para o dia da chegada (Data) e o total de IDs de cada dia acompanha', [new18.length, new19.length]);
 }
 
 // ---------- V4.22: Produção do Sorter (monitor do sorter da base, gravado como os painéis do JMS) ----------

@@ -817,17 +817,26 @@ function unsealMs_(v) {
   return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : NaN;
 }
 function unsealArrival_(t) { return String(t.actualArrivalTime || t.appArrivalTime || t.appTrackArrivalTime || t.plannedArrivalTime || '').trim(); }
-/** Horário de deslacração do veículo: unlockTime (secundária) ou actualUnlockTime (troncal) — Config.gs → fields.unlockTime. */
-function unsealUnlock_(cfg, t) {
-  const keys = (cfg.fields && cfg.fields.unlockTime) || ['unlockTime'];
+/** O 1º campo preenchido de `keys` no ID ('' sem nenhum). */
+function unsealFirst_(t, keys) {
   for (let i = 0; i < keys.length; i++) {
     const v = t[keys[i]] === null || t[keys[i]] === undefined ? '' : String(t[keys[i]]).trim();
     if (v) return v;
   }
   return '';
 }
-/** Horário que decide o dia e o turno do ID: o deslacre; sem deslacre, a chegada do veículo. */
+/** Horário de deslacração do veículo: unlockTime (secundária) ou actualUnlockTime (troncal) — Config.gs → fields.unlockTime. */
+function unsealUnlock_(cfg, t) { return unsealFirst_(t, (cfg.fields && cfg.fields.unlockTime) || ['unlockTime']); }
+/** Horário que decide o turno do ID: o deslacre; sem deslacre, a chegada do veículo. */
 function unsealEventTime_(cfg, t) { return unsealUnlock_(cfg, t) || unsealArrival_(t); }
+/**
+ * V4.30 (pedido "Na coluna Data puxar os dados da coluna Tempo real de chegada", linha troncal e secundária): o dia (coluna
+ * Data) de cada ID é o do Tempo real de chegada (Config.gs → fields.arrivalTime); sem ele, o do deslacre. Até a V4.29, o dia
+ * saía do deslacre (viagem que chegava às 23h50 e era deslacrada às 00h20 caía no dia seguinte).
+ */
+function unsealDayTime_(cfg, t) {
+  return unsealFirst_(t, (cfg.fields && cfg.fields.arrivalTime) || ['actualArrivalTime']) || unsealUnlock_(cfg, t) || unsealArrival_(t);
+}
 function medianOf_(list) {
   const a = (list || []).filter(v => typeof v === 'number' && Number.isFinite(v)).sort((x, y) => x - y);
   if (!a.length) return null;
@@ -845,8 +854,8 @@ function unsealListPage_(cfg, indicatorKey, isoDate, page, size) {
   return cfg.summary.method === 'get' ? jmsPost_(unsealListUrl_(endpoint, payload), null, 2) : jmsPost_(endpoint, payload, 2);
 }
 /**
- * IDs do dia: chegam na nossa base (endCode), Concluído (shipmentState) e com o deslacre (ou, sem ele, a chegada) no dia.
- * A consulta pega também os dias de antes (viagem que sai à noite e é deslacrada de madrugada).
+ * IDs do dia: chegam na nossa base (endCode), Concluído (shipmentState) e com o Tempo real de chegada no dia (V4.30; sem ele,
+ * o deslacre). A consulta pega também os dias de antes (viagem que sai à noite e chega de madrugada).
  */
 function unsealTrips_(indicatorKey, isoDate) {
   const cfg = getIndicatorConfig_(indicatorKey);
@@ -863,7 +872,7 @@ function unsealTrips_(indicatorKey, isoDate) {
     if (!t || !t.shipmentNo || seen[t.shipmentNo]) return false;
     if (t.endCode !== undefined && t.endCode !== null && t.endCode !== '' && String(t.endCode) !== code) return false;
     if (state && t.shipmentState !== undefined && t.shipmentState !== null && t.shipmentState !== '' && Number(t.shipmentState) !== Number(state)) return false;
-    if (normalizeDateFromValue_(unsealEventTime_(cfg, t), '') !== isoDate) return false;
+    if (normalizeDateFromValue_(unsealDayTime_(cfg, t), '') !== isoDate) return false;
     seen[t.shipmentNo] = true;
     return true;
   });

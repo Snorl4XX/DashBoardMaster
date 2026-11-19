@@ -513,14 +513,14 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
 
     case 'unseal': {
       // Consulta de Viagens Secundárias (captura do pedido): PDD de chegada = a nossa base, Status = Concluído. Saídas da véspera
-      // e do dia: o dia de cada ID sai do horário do deslacre (Expedicao.gs → unsealTrips_).
+      // e do dia: o dia de cada ID sai do Tempo real de chegada (V4.30; Expedicao.gs → unsealTrips_).
       return {current: pageNo, size: pageSize, startDepartureTime: addDaysIso_(isoDate, -1) + ' 00:00:00', endDepartureTime: isoDate + ' 23:59:59',
         endCode: centerCode, shipmentState: cfg.shipmentState || 4, countryId: countryId_()};
     }
 
     case 'unseal_trunk': {
       // V4.17: Consulta de Viagens da linha troncal (captura do pedido; GET, os filtros vão na URL — Expedicao.gs → unsealListUrl_).
-      // PDD de chegada = a nossa base, Status = Concluído. Dois dias antes e um depois: o dia de cada ID sai do deslacre.
+      // PDD de chegada = a nossa base, Status = Concluído. Dois dias antes e um depois: o dia de cada ID sai do Tempo real de chegada.
       return {current: pageNo, size: pageSize, shipmentState: cfg.shipmentState || 4, endCode: centerCode,
         startDateTime: addDaysIso_(isoDate, -2) + ' 00:00:00', endDateTime: addDaysIso_(isoDate, 1) + ' 23:59:59', searchType: 'manage'};
     }
