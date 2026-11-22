@@ -4,6 +4,24 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.29.3 — Tabelas de 22/11 (NAT, BJE, MA, SJP e PPB fora do SP BRE)
+
+Pedido: tabelas "Atualizado em 22/11" (longa distância e secundárias), "Código de alocação de carga das rotas tronco e de
+distribuição do SP GRU" e o comunicado urgente de PPB e MA.
+
+| Código | Até 21/11 | Desde 22/11 |
+|---|---|---|
+| NAT | SP BRE (21/22) | **CE FOR — DOCA 15** (esteira 4, Expedição B) |
+| BJE | SP BRE (21/22) | **PI THE — DOCA 42** (esteira 3, Expedição C) |
+| MA (MA SLZ) | SP BRE (21/22) | **PI THE — DOCA 42** (esteira 3, Expedição C) |
+| SJP | SP BRE (21/22) | **SP RBP — DOCA 40** (esteira 3, Expedição C) |
+| PPB | SP BRE (21/22) | **DC BAU-SP — Esteira 22** (linha 5, "DC PPB-SP") |
+
+- O **SP BRE** fica só com LDB, MIA, SOD, SP, SP1, STM e VCP. As próximas paradas DC NAT-RN, DC BJE-PI, DC SLZ-MA, DC SJP-SP e
+  DC PPB-SP vão junto com o código. O segmento pela fórmula do WPS também muda (NAT → CE FOR, BJE/MA → THE, SJP → SP RBP, PPB → DC BAU-SP).
+- O resto das tabelas é igual ao da V4.29.2 (conferido linha a linha, inclusive a tabela secundária).
+- Vale **desde 22/11 (dia todo)**, a data das tabelas; até 21/11 o histórico continua como era. Nada é baixado de novo.
+
 ## V4.29.2 — XAP pela rota SC BNU (comunicado de 18/11)
 
 Pedido: comunicado "Alteração de rota" e a tabela "Atualizado em 18/11".

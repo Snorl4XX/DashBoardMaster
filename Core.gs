@@ -344,11 +344,19 @@ function JTCoreFactory_() {
   var SEG_FIRST_FROM_2026_11_18_ = {AM: 'AM MAO', BVB: 'AM MAO', BAU: 'DC BAU-SP', JDF: 'DC JDF-MG', TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB',
     AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM', XAP: 'SC BNU'};
   /**
+   * V4.29.3 (tabelas de 22/11 e comunicado de PPB e MA): o SP BRE perde NAT (→ CE FOR), BJE e MA (→ THE, o PI THE), SJP (→ SP RBP) e
+   * PPB (→ DC BAU-SP). Mesma data de Config.gs → ROUTES_FROM_2026_11_22_.
+   */
+  var SEG_FIRST_FROM_2026_11_22_ = {AM: 'AM MAO', BVB: 'AM MAO', BAU: 'DC BAU-SP', JDF: 'DC JDF-MG', TO: 'DF BSB', MRB: 'DF BSB', RO: 'DF BSB',
+    AC: 'DF BSB', RBR: 'DF BSB', CDG: 'RJ SJM', XAP: 'SC BNU', NAT: 'CE FOR', BJE: 'THE', MA: 'THE', SJP: 'SP RBP', PPB: 'DC BAU-SP'};
+  /**
    * Período das rotas pelo dia da remessa: 0 = até 31/10 · 1 = 01/11 a 09/11 (TO/MRB/RO/AC no DF BSB) · 2 = 10/11 a 15/11 ·
-   * 3 = desde 16/11 (tabelas de 16/11) · 4 = desde 18/11, 11h30 (XAP no SC BNU; no dia 18, pelo horário do bipe).
+   * 3 = desde 16/11 (tabelas de 16/11) · 4 = desde 18/11, 11h30 (XAP no SC BNU; no dia 18, pelo horário do bipe) ·
+   * 5 = desde 22/11 (NAT, BJE, MA, SJP e PPB fora do SP BRE).
    */
   function segPeriod_(date, time) {
     var d = date ? String(date).slice(0, 10) : '';
+    if (d >= '2026-11-22') return 5;
     if (d && fromReached('2026-11-18 11:30', d, time)) return 4;
     return d >= '2026-11-16' ? 3 : d >= '2026-11-10' ? 2 : d >= '2026-11-01' ? 1 : 0;
   }
@@ -364,6 +372,7 @@ function JTCoreFactory_() {
     if (up.slice(0, 4) === 'SBN,') return c.indexOf('375-') >= 0 ? 'SBN' : 'REVISAR SBN';
     if (up.slice(0, 4) === 'MOO,') return has(SEG_MOO_) ? 'MOOCA' : 'REVISAR MOO';
     var first = up.split(',')[0], per = segPeriod_(date, time);
+    if (per === 5 && SEG_FIRST_FROM_2026_11_22_[first]) return SEG_FIRST_FROM_2026_11_22_[first];
     if (per === 4 && SEG_FIRST_FROM_2026_11_18_[first]) return SEG_FIRST_FROM_2026_11_18_[first];
     if (per === 3 && SEG_FIRST_FROM_2026_11_16_[first]) return SEG_FIRST_FROM_2026_11_16_[first];
     if (per === 2 && SEG_FIRST_FROM_2026_11_10_[first]) return SEG_FIRST_FROM_2026_11_10_[first];

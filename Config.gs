@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.29.2',
+  VERSION: '4.29.3',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -425,6 +425,33 @@ const table2026_11_18_ = base => base.map(e => {
   return e;
 });
 const DOCK_TABLE_2026_11_18_ = table2026_11_18_(DOCK_TABLE_2026_11_16_);
+/**
+ * V4.29.3 (tabelas "Atualizado em 22/11" das rotas de longa distância e das secundárias, "Código de alocação de carga das rotas
+ * tronco e de distribuição do SP GRU" e o comunicado urgente de PPB e MA): o SP BRE fica só com LDB, MIA, SOD, SP, SP1, STM e VCP
+ * ("Excluir … SJP, NAT, BJE, MA, PPB"). Saem dele:
+ *   - NAT → CE FOR (DOCA 15, esteira 4);
+ *   - BJE e MA ("MA SLZ") → PI THE (DOCA 42, esteira 3);
+ *   - SJP → SP RBP (DOCA 40, esteira 3);
+ *   - PPB → DC BAU-SP (Esteira 22, linha 5; "DC PPB-SP" na tabela secundária).
+ * O resto é igual à tabela de 18/11. Vale desde 22/11 (dia todo), a data das tabelas.
+ */
+const ROUTES_FROM_2026_11_22_ = '2026-11-22';
+const MOVES_2026_11_22_ = [
+  {route: 'CE FOR', codes: ['NAT'], stops: ['DC NAT-RN']},
+  {route: 'PI THE', codes: ['BJE', 'MA'], stops: ['DC BJE-PI', 'DC SLZ-MA', 'MA SLZ']},
+  {route: 'SP RBP', codes: ['SJP'], stops: ['DC SJP-SP']},
+  {route: 'DC BAU-SP', codes: ['PPB'], stops: ['DC PPB-SP']}
+];
+const table2026_11_22_ = base => {
+  const outCodes = [].concat.apply([], MOVES_2026_11_22_.map(m => m.codes)), outStops = [].concat.apply([], MOVES_2026_11_22_.map(m => m.stops));
+  const sem = (list, out) => (list || []).filter(x => out.indexOf(x) < 0), com = (list, more) => (list || []).concat(more.filter(x => (list || []).indexOf(x) < 0));
+  return base.map(e => {
+    if (e.route === 'SP BRE') return Object.assign({}, e, {codes: sem(e.codes, outCodes), stops: sem(e.stops, outStops)});
+    const m = MOVES_2026_11_22_.filter(x => x.route === e.route)[0];
+    return m ? Object.assign({}, e, {codes: com(e.codes, m.codes), stops: com(e.stops, m.stops)}) : e;
+  });
+};
+const DOCK_TABLE_2026_11_22_ = table2026_11_22_(DOCK_TABLE_2026_11_18_);
 const DOCKS_EXPEDICAO = Object.freeze({
   versions: [
     {
@@ -459,7 +486,8 @@ const DOCKS_EXPEDICAO = Object.freeze({
     {from: '2026-11-01', entries: DOCK_TABLE_2026_11_01_},
     {from: BRE_BACK_FROM_2026_11_10_, entries: DOCK_TABLE_2026_11_10_},
     {from: ROUTES_FROM_2026_11_16_, entries: DOCK_TABLE_2026_11_16_},
-    {from: ROUTES_FROM_2026_11_18_, entries: DOCK_TABLE_2026_11_18_}
+    {from: ROUTES_FROM_2026_11_18_, entries: DOCK_TABLE_2026_11_18_},
+    {from: ROUTES_FROM_2026_11_22_, entries: DOCK_TABLE_2026_11_22_}
   ],
   fallback: 'SEM DOCA'
 });
@@ -539,11 +567,14 @@ const ESTEIRA_TABLE_2026_11_10_ = withBreBack_(ESTEIRA_TABLE_2026_10_30_);
 const ESTEIRA_TABLE_2026_11_16_ = table2026_11_16_(ESTEIRA_TABLE_2026_11_10_);
 /** V4.29.2: de 18/11, 11h30, o XAP no SC BNU (Esteira 7). */
 const ESTEIRA_TABLE_2026_11_18_ = table2026_11_18_(ESTEIRA_TABLE_2026_11_16_);
+/** V4.29.3: de 22/11, NAT no CE FOR (Esteira 4), BJE e MA no PI THE e SJP no SP RBP (Esteira 3), PPB no DC BAU-SP (Esteira 5). */
+const ESTEIRA_TABLE_2026_11_22_ = table2026_11_22_(ESTEIRA_TABLE_2026_11_18_);
 const ESTEIRAS_SC_DC = Object.freeze({
   source: 'destination', show: 'line', linePrefix: 'Esteira ',
   versions: [{from: '', entries: ESTEIRA_TABLE_2026_10_24_}, {from: '2026-10-30', entries: ESTEIRA_TABLE_2026_10_30_},
     {from: '2026-11-01', entries: ESTEIRA_TABLE_2026_11_01_}, {from: BRE_BACK_FROM_2026_11_10_, entries: ESTEIRA_TABLE_2026_11_10_},
-    {from: ROUTES_FROM_2026_11_16_, entries: ESTEIRA_TABLE_2026_11_16_}, {from: ROUTES_FROM_2026_11_18_, entries: ESTEIRA_TABLE_2026_11_18_}],
+    {from: ROUTES_FROM_2026_11_16_, entries: ESTEIRA_TABLE_2026_11_16_}, {from: ROUTES_FROM_2026_11_18_, entries: ESTEIRA_TABLE_2026_11_18_},
+    {from: ROUTES_FROM_2026_11_22_, entries: ESTEIRA_TABLE_2026_11_22_}],
   fallback: 'SEM ESTEIRA'
 });
 

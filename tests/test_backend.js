@@ -3940,7 +3940,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const seg = (c, d) => { const r = CN.applyDocks([{segmentRaw: CN.segmentHead2(c), segment: CN.firstSegment(c), date: d}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
   const stop = (v, d) => { const r = CN.applyDocks([{destination: v, date: d}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
   const est = (v, d) => { const r = CN.applyDocks([{destination: v, date: d}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
-  const OLD = '2026-11-15', NEW = '2026-11-16', LATER = '2026-11-30', wrong = [];
+  // LATER = último dia antes da tabela de 22/11 (V4.29.3: NAT, BJE, MA, SJP e PPB saem do SP BRE).
+  const OLD = '2026-11-15', NEW = '2026-11-16', LATER = '2026-11-21', wrong = [];
   const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
   // [código de três segmentos, rota, doca, linha de desvio do DWS] — como nas duas tabelas de 16/11.
   const TAB = [
@@ -3965,7 +3966,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     ['GRU,404-03,1', 'S-SAPOP-SP', 'Esteira 20', 5], ['JDF,1', 'DC JDF-MG', 'Esteira 21', 5], ['BAU,1', 'DC BAU-SP', 'Esteira 22', 5],
     ['MS,1', 'MS CGR', 'Esteira 23', 5], ['GRU,404-02,1', 'S-PENHA-SP', 'Esteira 24', 5], ['GRU,404-07,1', 'F S-PENHA 02-SP', 'Esteira 25', 5]
   ];
-  TAB.forEach(([c, r, d]) => { want(seg(c, NEW), r + ' | ' + d, 'código ' + c + ' em 16/11'); want(seg(c, LATER), r + ' | ' + d, 'código ' + c + ' em 30/11'); });
+  TAB.forEach(([c, r, d]) => { want(seg(c, NEW), r + ' | ' + d, 'código ' + c + ' em 16/11'); want(seg(c, LATER), r + ' | ' + d, 'código ' + c + ' em 21/11'); });
   // Até 15/11 o histórico continua com as docas da época.
   [['SP,368-00,1', 'SP BRE | DOCA 21/22'], ['AM,1', 'SP BRE | DOCA 21/22'], ['BAU,1', 'SP BRE | DOCA 21/22'], ['MRB,1', 'SP BRE | DOCA 21/22'],
     ['CE,1', 'CE FOR | DOCA 09'], ['MS,1', 'MS CGR | DOCA 43'], ['RJ,1', 'RJ SJM | DOCA 10'], ['GRU,404-02,1', 'S-PENHA-SP | Esteira 13'],
@@ -4031,6 +4032,43 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const mudou = t18.map((e, i) => JSON.stringify(e) === JSON.stringify(t16[i]) ? '' : e.route).filter(Boolean);
   check(comHora.length >= 4 && comHora.every(x => /:true$/.test(x)) && mudou.join() === 'SC BNU,SP BRE' && t18.length === t16.length,
     'V4.29.2: o horário do bipe vai junto para o navegador; a tabela de 18/11 só muda o SC BNU e o SP BRE', {comHora, mudou});
+}
+
+// ---------- V4.29.3: tabelas de 22/11 — NAT, BJE, MA, SJP e PPB saem do SP BRE ----------
+{
+  const vmY = require('vm');
+  const cY = createContext({props: {}, jms: fakeJms({}), quiet: true});
+  const CY = cY.JTCore_, DEXP = vmY.runInContext('DOCKS_EXPEDICAO', cY), DPP = vmY.runInContext('DOCKS_PROXIMA_PARADA', cY);
+  const EST = vmY.runInContext('ESTEIRAS_SC_DC', cY);
+  const seg = (c, d) => { const r = CY.applyDocks([{segmentRaw: CY.segmentHead2(c), segment: CY.firstSegment(c), date: d, eventTime: d + ' 12:00:00'}], DEXP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const stop = (v, d) => { const r = CY.applyDocks([{destination: v, date: d, eventTime: d + ' 12:00:00'}], DPP)[0]; return r.dockDest + ' | ' + r.dock; };
+  const est = (v, d) => { const r = CY.applyDocks([{destination: v, date: d, eventTime: d + ' 12:00:00'}], EST)[0]; return r.dockDest + ' | ' + r.dock; };
+  const sb = (c, d) => CY.applySegmentBase([{segmentFull: c, date: d, eventTime: d + ' 12:00:00'}], true)[0].segmentBase;
+  const NEW = '2026-11-22', OLD = '2026-11-21', LATER = '2026-12-05', wrong = [];
+  const want = (got, exp, what) => { if (got !== exp) wrong.push(what + ' → ' + got + ' (esperado ' + exp + ')'); };
+  // [código, rota de 22/11, doca de 22/11] e, antes (21/11), SP BRE nas docas 21/22.
+  [['NAT,1', 'CE FOR', 'DOCA 15'], ['BJE,1', 'PI THE', 'DOCA 42'], ['MA,1', 'PI THE', 'DOCA 42'], ['SJP,1', 'SP RBP', 'DOCA 40'], ['PPB,1', 'DC BAU-SP', 'Esteira 22']]
+    .forEach(([c, r, d]) => { want(seg(c, NEW), r + ' | ' + d, c + ' em 22/11'); want(seg(c, LATER), r + ' | ' + d, c + ' em 05/12'); want(seg(c, OLD), 'SP BRE | DOCA 21/22', c + ' em 21/11'); });
+  // O SP BRE continua com LDB, MIA, SOD, SP, SP1, STM e VCP; o resto da tabela não muda.
+  [['LDB,1', 'SP BRE', 'DOCA 21/22'], ['MIA,1', 'SP BRE', 'DOCA 21/22'], ['SOD,1', 'SP BRE', 'DOCA 21/22'], ['SP,368-00,1', 'SP BRE', 'DOCA 21/22'],
+    ['SP1,1', 'SP BRE', 'DOCA 21/22'], ['STM,1', 'SP BRE', 'DOCA 21/22'], ['VCP,1', 'SP BRE', 'DOCA 21/22'], ['XAP,1', 'SC BNU', 'DOCA 06'], ['CE,1', 'CE FOR', 'DOCA 15'],
+    ['PI,1', 'PI THE', 'DOCA 42'], ['IMP,1', 'PI THE', 'DOCA 42'], ['NE,1', 'SP RBP', 'DOCA 40'], ['BAU,1', 'DC BAU-SP', 'Esteira 22'], ['AM,1', 'AM MAO', 'DOCA 20'],
+    ['MRB,1', 'DF BSB', 'DOCA 44'], ['JDF,1', 'DC JDF-MG', 'Esteira 21'], ['RJ,1', 'RJ SJM', 'DOCA 18'], ['GRU,381-07,1', 'DC JND 02-SP', 'DOCA 21/22']]
+    .forEach(([c, r, d]) => want(seg(c, NEW), r + ' | ' + d, c + ' em 22/11'));
+  // Próxima parada (Envio Errado, Triagem Errada, SC → SC) e esteira do SC → DC.
+  [['DC NAT-RN', 'CE FOR', 'DOCA 15', 4], ['DC BJE-PI', 'PI THE', 'DOCA 42', 3], ['DC SLZ-MA', 'PI THE', 'DOCA 42', 3], ['MA SLZ', 'PI THE', 'DOCA 42', 3],
+    ['DC SJP-SP', 'SP RBP', 'DOCA 40', 3], ['DC PPB-SP', 'DC BAU-SP', 'Esteira 22', 5], ['SP BRE', 'SP BRE', 'DOCA 21/22', 2], ['DC LDB-PR', 'SP BRE', 'DOCA 21/22', 2]]
+    .forEach(([p, r, d, l]) => { want(stop(p, NEW), r + ' | ' + d, 'parada ' + p + ' em 22/11'); want(est(p, NEW), r + ' | Esteira ' + l, 'esteira de ' + p + ' em 22/11'); });
+  [['DC NAT-RN', 'SP BRE | DOCA 21/22'], ['DC PPB-SP', 'SP BRE | DOCA 21/22'], ['DC SLZ-MA', 'SP BRE | DOCA 21/22']]
+    .forEach(([p, e]) => want(stop(p, OLD), e, 'parada ' + p + ' em 21/11'));
+  // Segmento (base) pela fórmula do WPS.
+  [['NAT,1', 'CE FOR', 'SP BRE'], ['BJE,1', 'THE', 'SP BRE'], ['MA,1', 'THE', 'SP BRE'], ['SJP,1', 'SP RBP', 'SP BRE'], ['PPB,1', 'DC BAU-SP', 'SP BRE'],
+    ['LDB,1', 'SP BRE', 'SP BRE'], ['XAP,1', 'SC BNU', 'SC BNU'], ['AM,1', 'AM MAO', 'AM MAO']]
+    .forEach(([c, n, o]) => { want(sb(c, NEW), n, 'segmento ' + c + ' em 22/11'); want(sb(c, OLD), o, 'segmento ' + c + ' em 21/11'); });
+  check(!wrong.length, 'V4.29.3: tabelas de 22/11 — NAT no CE FOR, BJE e MA no PI THE, SJP no SP RBP, PPB no DC BAU-SP; SP BRE só com LDB/MIA/SOD/SP/SP1/STM/VCP; até 21/11 como era', wrong);
+  const exps = vmY.runInContext('EXPEDICOES_', cY), ex = d => CY.expeditionOf(d, exps);
+  check(ex('DOCA 15') === 'Expedição B' && ex('DOCA 42') === 'Expedição C' && ex('DOCA 40') === 'Expedição C' && ex('Esteira 22') === 'Esteiras',
+    'V4.29.3: Expedição A/B/C das rotas que mudaram (CE FOR na B, PI THE e SP RBP na C, DC BAU-SP nas Esteiras)');
 }
 
 // ---------- V4.24.3: Falta de Bipagem na Expedição com mais de 10 mil remessas no dia (lista travada no limite do JMS) ----------
@@ -4206,9 +4244,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
 // ---------- V4.20: Deslacre pela Data inicial — dias gravados antes (Data final) são refeitos uma vez ----------
 {
   const vmD = require('vm');
-  const DD = '2026-09-19', dD = {'2026-09-18': makeDay('2026-09-18', 51), [DD]: makeDay(DD, 52)};
-  const cD = freshCtx(dD);
-  cD.queueHistory('2026-09-18', DD, true);
+  // A migração olha os últimos 62 dias: o dia do teste é "hoje − 3" (com a data fixa de 19/09 o teste vencia em 21/11).
+  const c0 = freshCtx({}), DD = c0.addDaysIso_(c0.isoToday_(), -3), DD0 = c0.addDaysIso_(DD, -1);
+  const dD = {[DD0]: makeDay(DD0, 51), [DD]: makeDay(DD, 52)};
+  const cD = freshCtx(dD, null, {DATA_START_DATE: DD0});
+  cD.queueHistory(DD0, DD, true);
   runAll(cD);
   const fieldsD = vmD.runInContext('STORE_FIELDS_.concat(UNSEAL_FIELDS_)', cD);
   // Como um dia gravado na V4.19: sem o campo timing e com o tempo de antes (aqui, 999).
