@@ -4,6 +4,30 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.30.0 — Painel PA SHEIN (falta de bipagem no recebimento e na expedição)
+
+Pedido: "Desenvolver um dashboard para mostrar os dados de falta de bipagem no recebimento e expedição", seguindo o padrão do
+painel principal, para o **PA SHEIN-GRU-SP** (pedidos SHEIN).
+
+- **Pacote separado** `JT_DASHMASTER_V4_30_PA_SHEIN_NODE.zip` (pasta `C:\dashmaster-pa-shein`, porta **3900**, link
+  `https://NOME.xxxx.ts.net/pa-shein`, atalho "JT DashMaster PA SHEIN"). Passo a passo no `LEIA_PA_SHEIN.md` do ZIP.
+- **Fonte:** JMS › Indicadores de Negócios › Operação › Relatório de falta de bipagem › Falta de bipe de coleta, com os filtros
+  Unidade de Análise Base, Regional SPE, filial PA SHEIN-GRU-SP (311040) e Origem do Pedido SHEIN (D102). Resumo
+  `collect_take_missscan_new` e lista `detail_take_missscan_new` (número vermelho de cada coluna).
+- **Dois painéis:**
+  - *Falta de Bipagem no Recebimento* — "Qtd pedidos não bipados no recebimento da coleta" e a taxa; turno pelo **Horário do bipe
+    de expedição**.
+  - *Falta de Bipagem na Expedição* — "Qtd de pacotes com falta de bipe de envio" e a taxa; turno pelo **Horário de bipagem de
+    recebimento da coleta**.
+- Em cada um, como no principal: cartão da taxa do dia com a quantidade e a parte de cada turno, dia anterior, variação, cartões
+  por turno (T1/T2/T3), SC de chegada e cliente mais afetados, evolução diária dos dias anteriores, gráficos de **turnos**,
+  **clientes mais afetados** e **segmentos afetados (SC de chegada)**, filtros e a **tabela com todas as colunas** (data, remessa,
+  pedidos, turno, SC de chegada, cliente, origem, hora de chegada ao SC, bipe de coleta, bipe de recebimento da coleta e bipe de
+  expedição). Meta: 1,00%, a mesma da Falta de Bipagem do principal.
+- O painel principal não muda (os dois painéis do PA SHEIN só aparecem no pacote deles). Ajuste visual que vale para os dois: a
+  legenda do gráfico de rosca (turnos) desce para baixo dele em cartões estreitos.
+- Propriedades: `PA_NETWORK_CODE` (311040), `PA_AGENT_CODE` (370000), `PA_ORDER_SOURCE` (D102), `PA_NETWORK_NAME`.
+
 ## V4.29.3 — Tabelas de 22/11 (NAT, BJE, MA, SJP e PPB fora do SP BRE)
 
 Pedido: tabelas "Atualizado em 22/11" (longa distância e secundárias), "Código de alocação de carga das rotas tronco e de

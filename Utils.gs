@@ -117,6 +117,25 @@ function agentCode_() { return getProp_('JMS_AGENT_CODE', APP_CONFIG.DEFAULT_AGE
 function agentName_() { return getProp_('JMS_AGENT_NAME', APP_CONFIG.DEFAULT_AGENT_NAME); }
 function distributeId_() { return Number(getProp_('JMS_DISTRIBUTE_ID', String(APP_CONFIG.DEFAULT_DISTRIBUTE_ID))); }
 function countryId_() { return getProp_('JMS_COUNTRY_ID', APP_CONFIG.DEFAULT_COUNTRY_ID); }
+/**
+ * V4.30 (painel PA SHEIN): filtros da tela "Falta de bipe de coleta" — Nome da filial (PA_NETWORK_CODE, padrão 311040 =
+ * PA SHEIN-GRU-SP), Regional (PA_AGENT_CODE, padrão 370000 = SPE) e Origem do Pedido (PA_ORDER_SOURCE, padrão D102 = SHEIN;
+ * mais de uma separada por vírgula).
+ */
+function paFilter_() {
+  const origins = String(getProp_('PA_ORDER_SOURCE', 'D102') || 'D102').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+  return {
+    networkCode: String(getProp_('PA_NETWORK_CODE', '311040') || '311040').trim(),
+    networkName: String(getProp_('PA_NETWORK_NAME', 'PA SHEIN-GRU-SP') || 'PA SHEIN-GRU-SP').trim(),
+    agentCode: String(getProp_('PA_AGENT_CODE', '370000') || '370000').trim(),
+    orderSourceCode: origins.length ? origins : ['D102']
+  };
+}
+/** V4.30: nome da base no topo do painel — no pacote do PA SHEIN (só painéis paShein), a filial (PA SHEIN-GRU-SP); senão, a base. */
+function displayCenter_() {
+  const keys = Object.keys(INDICATORS);
+  return keys.length && keys.every(k => INDICATORS[k].paShein) ? paFilter_().networkName : centerName_();
+}
 /** JMS_TIMEZONE vale para o cabeçalho HTTP (GMT-0300); datas locais usam sempre a zona IANA. */
 function tz_() { const z = getProp_('JMS_TIMEZONE', APP_CONFIG.TZ); return /^GMT[+-]\d{4}$/.test(z) ? APP_CONFIG.TZ : z; }
 

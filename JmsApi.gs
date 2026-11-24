@@ -61,7 +61,7 @@ function credentialSignature_() {
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
  * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS | NOMOVE
- *          | SCANQUERY | UNSEAL | UNSEAL_TRUNK
+ *          | SCANQUERY | UNSEAL | UNSEAL_TRUNK | PA_MISSING
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -119,6 +119,11 @@ const JMS_ROUTES_ = [
   // (trackingDeatil/loading/scan/list, grafia do JMS). Cabeçalhos de rota não capturados: variantes em `alt`.
   {key: 'UNSEAL_TRUNK', pattern: /\/transportation\/(?:tmsShipment|trackingDeatil)\//, name: 'NONE', list: 'NONE',
     alt: [{name: 'monitoringSearch', list: 'NONE'}, {name: 'tmsShipment', list: 'NONE'}]},
+  // V4.30: PA SHEIN — Indicadores de Negócios > Operação > Relatório de falta de bipagem > Falta de bipe de coleta
+  // (/businessIndicatorIndex/NetworkCollectLeakage). Routename = nome da página (regra das outras telas); Routernamelist não
+  // capturado: se o JMS recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_PA_MISSING / JMS_ROUTENAMELIST_PA_MISSING mandam).
+  {key: 'PA_MISSING', pattern: /\/(?:collect|detail)_take_missscan_new(?:\?|$)/, name: 'NetworkCollectLeakage', list: 'NONE',
+    alt: [{name: 'NetworkCollectLeakage|businessIndicatorIndex', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -461,6 +466,19 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
       }
       return {current: pageNo, size: pageSize, groupKey: 'day', startTime: w.start, endTime: w.end,
         centerCode: centerCode, countryId: countryId_(), dimension: 'center'};
+
+    case 'pa_receipt':
+    case 'pa_dispatch': {
+      // V4.30: PA SHEIN — payloads da captura (Falta de bipe de coleta): filial (networkCode), regional (agentCode) e origem do
+      // pedido (orderSourceCode) da tela; a lista é a do número vermelho da coluna (missing).
+      const pa = paFilter_();
+      if (detail) {
+        return {current: pageNo, size: pageSize, startTime: w.start, endTime: w.end, agentCode: pa.agentCode, countryId: countryId_(),
+          missing: cfg.detail.missing, networkCode: pa.networkCode, orderSourceCode: pa.orderSourceCode.slice()};
+      }
+      return {current: pageNo, size: pageSize, dayKey: 'day', groupKey: 'network', startTime: w.start, endTime: w.end,
+        agentCode: pa.agentCode, countryId: countryId_(), networkCode: pa.networkCode, orderSourceCode: pa.orderSourceCode.slice()};
+    }
 
     case 'sc_sc':
       if (detail) {

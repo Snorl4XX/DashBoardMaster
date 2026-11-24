@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.29.3',
+  VERSION: '4.30.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -679,6 +679,62 @@ const EXPEDICOES_ = Object.freeze({groups: [{name: 'Expedição A', from: 5, to:
 const EXPEDITION_CHART_ = {key: 'expedition', type: 'bar', top: 6, title: {pt: 'Expedições ofensoras', zh: '高频发件区'},
   sub: {pt: 'Expedição A = docas 05 a 14 · B = 15 a 23 · C = 38 a 44', zh: '发件区 A = 05–14 号码头 · B = 15–23 · C = 38–44'},
   stats: {max: {pt: 'Expedição mais ofensora', zh: '最多发件区'}, min: {pt: 'Expedição menos ofensora', zh: '最少发件区'}}};
+
+/**
+ * V4.30 (pedido "Desenvolver um dashboard para o PA SHEIN"): Falta de bipagem do PA SHEIN-GRU-SP — Indicadores de Negócios >
+ * Operação > Relatório de falta de bipagem > Falta de bipe de coleta (/businessIndicatorIndex/NetworkCollectLeakage), com os
+ * filtros da tela: Unidade de Análise Base, Regional SPE, Nome da filial PA SHEIN-GRU-SP (311040), Origem do Pedido SHEIN (D102).
+ *   - Resumo (collect_take_missscan_new): uma linha por dia — Qtd pedidos não bipados no recebimento da coleta (warehouseNum /
+ *     warehouseRatio), Qtd de pacotes com falta de bipe de envio (sendNum / sendRatio) e o total de pedidos (totalNum).
+ *   - Lista (detail_take_missscan_new, missing = warehouseNum | sendNum): as remessas do número vermelho de cada coluna.
+ * Turno (pedido): Recebimento pelo "Horário do bipe de expedição" (sendScantime); Expedição pelo "Horário de bipagem de recebimento
+ * da coleta" (warehouseScantime). Segmentos afetados = "SC de Chegada" (centerName). Painel SEPARADO (separate): só no pacote
+ * dashmaster-pa-shein (ou PAINEIS = pa_receipt,pa_dispatch). Filtros da tela: Propriedades PA_NETWORK_CODE, PA_AGENT_CODE e
+ * PA_ORDER_SOURCE (Utils.gs → paFilter_).
+ */
+const PA_TEXTS_ = (word, wordZh) => ({
+  errors: {pt: word, zh: wordZh},
+  errorsDay: {pt: word + ' no dia', zh: '当日' + wordZh}, errorsPeriod: {pt: word + ' no período', zh: '期间' + wordZh},
+  errorsFiltered: {pt: word + ' (com filtro)', zh: wordZh + '（已筛选）'},
+  prevErrorsDay: {pt: word + ' dia anterior', zh: '前一日' + wordZh}, prevErrorsPeriod: {pt: word + ' período anterior', zh: '上一期间' + wordZh},
+  shiftErrors: {pt: word + ' {s}', zh: '{s} ' + wordZh}, shareOfErrors: {pt: '{p} do total', zh: '占 {p}'}
+});
+function paMissing_(o) {
+  return {
+    key: o.key, order: o.order, routeKey: 'PA_MISSING', separate: true, paShein: true,
+    name: o.name, subtitle: o.subtitle,
+    // Mesma meta da Falta de Bipagem do painel principal.
+    goal: {value: 1.00, direction: 'max', strict: true},
+    apiProfile: o.key, detailMatchesErrors: true,
+    summary: {
+      endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/collect_take_missscan_new',
+      rateKeys: o.rateKeys, errorKeys: o.errorKeys, totalKeys: ['totalNum']
+    },
+    detail: {endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/detail_take_missscan_new', missing: o.missing},
+    fields: {
+      shipment: ['billcode'], eventTime: o.shiftField, receiptTime: ['warehouseScantime'], expeditionTime: ['sendScantime'],
+      destination: ['centerName'], client: ['customerName'], pieces: ['packageNumber'], orderSource: ['orderSourceName'],
+      scArrival: ['centerArriverTime'], collectTime: ['takingScanuser']
+    },
+    labels: {destination: {pt: 'SC de chegada', zh: '到达中心'}, client: {pt: 'Cliente', zh: '客户'}},
+    filters: ['shift', 'client', 'destination', 'interval'],
+    topCards: ['destination', 'client'],
+    topCardLabels: {destination: {pt: 'SC de chegada mais afetado', zh: '受影响最多的到达中心'}, client: {pt: 'Cliente mais afetado', zh: '受影响最多的客户'}},
+    charts: [
+      {key: 'shift', type: 'doughnut', title: {pt: 'Turnos', zh: '班次'}, sub: o.shiftSub},
+      {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
+      {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Segmentos afetados (SC de chegada)', zh: '受影响段码（到达中心）'}}
+    ],
+    texts: PA_TEXTS_(o.word, o.wordZh),
+    // Tabela (pedido "colocar todos os dados juntos"): as colunas da lista do JMS.
+    table: [
+      ['date', 'Data', '日期'], ['shipment', 'Número da remessa', '运单号'], ['pieces', 'Pedidos', '票数'], ['shift', 'Turno', '班次'],
+      ['destination', 'SC de chegada', '到达中心'], ['client', 'Cliente', '客户'], ['orderSource', 'Origem do pedido', '订单来源'],
+      ['scArrival', 'Hora de chegada ao SC', '到达中心时间'], ['collectTime', 'Horário do bipe de coleta', '揽收扫描时间'],
+      ['receiptTime', 'Horário de bipagem de recebimento da coleta', '揽收入仓扫描时间'], ['expeditionTime', 'Horário do bipe de expedição', '发件扫描时间']
+    ]
+  };
+}
 
 const ALL_INDICATORS_ = Object.freeze({
   wrong_send: {
@@ -1709,7 +1765,23 @@ const ALL_INDICATORS_ = Object.freeze({
       ['date', 'Data', '日期'], ['sorter', 'Sorter', '分拣机'], ['induction', 'Balança', '供包台'], ['shift', 'Turno', '班次'],
       ['interval', 'Horário', '时间段'], ['column', 'Número da tela', '统计项'], ['qty', 'Quantidade', '数量']
     ]
-  }
+  },
+
+  // ---------- V4.30: PA SHEIN (painel separado; paMissing_ acima) ----------
+  pa_receipt: paMissing_({
+    key: 'pa_receipt', order: 20, missing: 'warehouseNum', rateKeys: ['warehouseRatio'], errorKeys: ['warehouseNum'],
+    name: {pt: 'PA SHEIN · Falta de Bipagem no Recebimento', zh: 'PA SHEIN · 揽收入仓漏扫'},
+    subtitle: {pt: 'Pedidos não bipados no recebimento da coleta (PA SHEIN-GRU-SP · SHEIN)', zh: '揽收入仓未扫描（PA SHEIN-GRU-SP · SHEIN）'},
+    shiftField: ['sendScantime'], shiftSub: {pt: 'Pelo horário do bipe de expedição', zh: '按发件扫描时间'},
+    word: 'Pedidos não bipados', wordZh: '未扫描票数'
+  }),
+  pa_dispatch: paMissing_({
+    key: 'pa_dispatch', order: 21, missing: 'sendNum', rateKeys: ['sendRatio'], errorKeys: ['sendNum'],
+    name: {pt: 'PA SHEIN · Falta de Bipagem na Expedição', zh: 'PA SHEIN · 发件漏扫'},
+    subtitle: {pt: 'Pacotes com falta de bipe de envio (PA SHEIN-GRU-SP · SHEIN)', zh: '发件未扫描（PA SHEIN-GRU-SP · SHEIN）'},
+    shiftField: ['warehouseScantime'], shiftSub: {pt: 'Pelo horário de bipagem de recebimento da coleta', zh: '按揽收入仓扫描时间'},
+    word: 'Pacotes sem bipe de envio', wordZh: '未发件扫描票数'
+  })
 });
 
 /**

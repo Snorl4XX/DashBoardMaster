@@ -2480,6 +2480,32 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // O painel do Sorter nunca aparece no principal (nem no pacote Node.js principal, nem com PAINEIS_FORA do usuário).
   check(keysOf(ctxNode()).indexOf('sorter_flow') < 0 && keysOf(ctxNode({PAINEIS_FORA: 'damage'})).indexOf('sorter_flow') < 0 &&
     full.indexOf('sorter_flow') < 0, 'Produção do Sorter fora do painel principal (painel separado)');
+  // V4.30: PA SHEIN separado — pasta dashmaster-pa-shein, porta 3900, link /pa-shein na 443 (as 3 portas do Funnel já têm dono).
+  const {PA_SHEIN_NODE} = require('../tools/gerar_paineis');
+  const zipP = fsM.readFileSync(buildNode(out, {variant: PA_SHEIN_NODE}).zip), dirP = pathM.join(out, 'extraido-pa-shein');
+  for (let i = 0; zipP.readUInt32LE(i) === 0x04034b50;) {
+    const size = zipP.readUInt32LE(i + 18), nameLen = zipP.readUInt16LE(i + 26), start = i + 30 + nameLen + zipP.readUInt16LE(i + 28);
+    const file = pathM.join(dirP, zipP.slice(i + 30, i + 30 + nameLen).toString('utf8'));
+    fsM.mkdirSync(pathM.dirname(file), {recursive: true});
+    fsM.writeFileSync(file, zlibM.inflateRawSync(zipP.slice(start, start + size)));
+    i = start + size;
+  }
+  const rootP = pathM.join(dirP, 'dashmaster-pa-shein');
+  const ctxP = createContext({root: rootP, props: {}, jms: fakeJms({}), quiet: true});
+  const cfgModP = require(pathM.join(rootP, 'node', 'lib', 'config.js'));
+  const prevEnvP = process.env.DASHMASTER_CONFIG;
+  process.env.DASHMASTER_CONFIG = pathM.join(out, 'config-pa-shein.json');
+  const confP = cfgModP.loadConfig();
+  if (prevEnvP === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnvP;
+  const batWP = fsM.readFileSync(pathM.join(rootP, 'node', 'iniciar-com-windows.bat'), 'utf8');
+  const usadas = Object.keys(others).map(k => others[k]).concat([LOTS_NODE.padrao.porta, SORTER_NODE.padrao.porta, 3600, 3700, 3800]);
+  check(keysOf(ctxP).join() === 'pa_receipt,pa_dispatch' && ctxP.getAppBootstrap().app.panel === 'PA SHEIN' && ctxP.getAppBootstrap().center === 'PA SHEIN-GRU-SP' &&
+    ctxNode().getAppBootstrap().center === 'SP GRU' && confP.porta === 3900 &&
+    confP.portaLink === 443 && confP.caminho === '/pa-shein' && /JT DashMaster PA SHEIN\.lnk/.test(batWP) &&
+    fsM.existsSync(pathM.join(rootP, 'LEIA_PA_SHEIN.md')) && !fsM.existsSync(pathM.join(rootP, 'node', 'config.json')) &&
+    usadas.indexOf(PA_SHEIN_NODE.padrao.porta) < 0 && keysOf(ctxNode()).every(k => k.indexOf('pa_') !== 0) && full.every(k => k.indexOf('pa_') !== 0),
+    'pacote Node.js do PA SHEIN: só os 2 painéis dele, porta 3900 livre, link /pa-shein na 443; fora do principal',
+    {keys: keysOf(ctxP), porta: confP.porta, caminho: confP.caminho});
   fsM.rmSync(out, {recursive: true, force: true});
 }
 
@@ -4992,6 +5018,77 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const q = freshCtx({}, null, {PLATAFORMA: 'node', COTA_GOOGLE: 'gmail'});
   check(q.googlePlan_() === 'workspace' && q.fetchBudgetMode_() === 'ok' && freshCtx({}, null, {COTA_GOOGLE: 'gmail'}).googlePlan_() === 'gmail',
     'V4.27: Node sem cota do Google (COTA_GOOGLE não vale no Node; no Apps Script continua)');
+}
+
+// ---------- V4.30: painel PA SHEIN — falta de bipagem no recebimento da coleta e na expedição (dados FICTÍCIOS) ----------
+{
+  const vmP = require('vm');
+  const DP = '2026-11-23', DP0 = '2026-11-22', hh = n => String(n).padStart(2, '0');
+  const H = [5, 6, 14, 22, 9, 15, 23, 13, 7, 21, 2, 10];
+  const centros = ['BA FEC', 'RJ SJM', 'BA VDC', 'PR SJS', 'MG CGE'], clientes = ['CLIENTE TESTE A', 'CLIENTE TESTE B', 'CLIENTE TESTE C'];
+  const reg = (day, kind, i) => ({
+    billcode: 'TSTPA' + kind + day.replace(/-/g, '') + hh(i), packageNumber: 1 + i % 3,
+    centerArriverTime: day + ' ' + hh((i * 2) % 24) + ':' + hh((i * 7) % 60) + ':00', centerName: centros[i % 5], centerCode: '0000' + (i % 5),
+    customerCode: 'J000TESTE' + (i % 3), customerName: clientes[i % 3], orderSourceCode: 'D102', orderSourceName: 'SHEIN',
+    takingScanuser: '2026-11-19 08:00:00', takingNetworkName: 'PA SHEIN-GRU-SP',
+    // Recebimento: sem o bipe de recebimento da coleta (o turno sai do bipe de expedição; o 1º nem tem esse bipe).
+    warehouseScantime: kind === 'R' ? null : '2026-11-21 ' + hh(H[(i + 3) % 12]) + ':20:00',
+    sendScantime: kind === 'E' ? null : i === 0 ? null : '2026-11-20 ' + hh(H[i % 12]) + ':10:00'
+  });
+  const DIAS = {[DP]: {total: 1000, R: 12, E: 8}, [DP0]: {total: 800, R: 5, E: 4}};
+  Object.keys(DIAS).forEach(d => { DIAS[d].rec = Array.from({length: DIAS[d].R}, (_, i) => reg(d, 'R', i)); DIAS[d].env = Array.from({length: DIAS[d].E}, (_, i) => reg(d, 'E', i)); });
+  const pct = (a, b) => (a / b * 100).toFixed(2) + '%';
+  const seen = [];
+  const intercept = (route, headers, body) => {
+    if (route !== 'collect_take_missscan_new' && route !== 'detail_take_missscan_new') return null;
+    seen.push({route, headers, body});
+    if (body.networkCode !== '311040' || body.agentCode !== '370000' || JSON.stringify(body.orderSourceCode) !== '["D102"]') return [200, {code: 500, msg: 'filtro errado', fail: true}];
+    const day = String(body.startTime).slice(0, 10), d = DIAS[day];
+    if (route === 'collect_take_missscan_new') {
+      const recs = d ? [{createTime: day, dayKey: 'day', agentCode: '370000', agentName: 'SPE', networkCode: '311040', networkName: 'PA SHEIN-GRU-SP',
+        orderSourceCode: 'D102', orderSourceName: 'SHEIN', totalNum: d.total, warehouseNum: d.R, warehouseRatio: pct(d.R, d.total), takingNum: 3,
+        takingRatio: pct(3, d.total), sendNum: d.E, sendRatio: pct(d.E, d.total), totalRatio: pct(d.R + d.E + 3, d.total * 3)}] : [];
+      return [200, {code: 1, msg: '请求成功', data: {records: recs, total: recs.length, size: 1, current: 1, pages: 1, other: null, heads: null}, fail: false, succ: true}];
+    }
+    const lista = ((d || {})[body.missing === 'warehouseNum' ? 'rec' : body.missing === 'sendNum' ? 'env' : 'x'] || [])
+      .filter(r => r.centerArriverTime >= body.startTime && r.centerArriverTime <= body.endTime);
+    const sz = Math.min(1000, Number(body.size) || 20), cur = Number(body.current) || 1;
+    return [200, {code: 1, msg: '请求成功', data: {records: lista.slice((cur - 1) * sz, cur * sz), total: lista.length, size: sz, current: cur,
+      pages: Math.max(1, Math.ceil(lista.length / sz)), other: null, heads: null}, fail: false, succ: true}];
+  };
+  const cP = freshCtx({}, {intercept}, {PAINEIS: 'pa_receipt,pa_dispatch', DATA_START_DATE: DP0});
+  cP.queueHistory(DP0, DP, true);
+  runAll(cP);
+  const keysP = vmP.runInContext('Object.keys(INDICATORS)', cP);
+  const turnoDe = t => { if (!t) return 'N/A'; const h = Number(t.slice(11, 13)); return h >= 6 && h < 14 ? 'T1' : h >= 14 && h < 22 ? 'T2' : 'T3'; };
+  const contar = (lista, campo) => lista.reduce((o, r) => { const k = turnoDe(r[campo]); o[k] = (o[k] || 0) + 1; return o; }, {});
+  const checar = (key, lista, campo, n, n0) => {
+    const rep = cP.computeDashboard_(key, {from: DP, to: DP}), k = rep.cards, esp = contar(lista, campo);
+    const turnos = {}; k.shifts.forEach(x => { turnos[x.shift] = x.qty; });
+    const rows = cP.JTCore_.decodeDataset(cP.getDashboardData(key, {from: DP, to: DP}).dataset);
+    const r0 = rows.filter(r => r.shipment === lista[1].billcode)[0] || {};
+    const ok = Math.abs(k.rate - n / 10) < 1e-9 && k.currentErrors === n && k.previousErrors === n0 && rows.length === n &&
+      ['T1', 'T2', 'T3'].every(s => (turnos[s] || 0) === (esp[s] || 0)) &&
+      r0.shift === turnoDe(lista[1][campo]) && r0.destination === lista[1].centerName && r0.client === lista[1].customerName &&
+      r0.scArrival === lista[1].centerArriverTime && r0.collectTime === '2026-11-19 08:00:00' && String(r0.pieces) === String(lista[1].packageNumber) &&
+      r0.orderSource === 'SHEIN' && rows.filter(r => r.shift === 'N/A').length === (esp['N/A'] || 0);
+    return {ok, rate: k.rate, erros: k.currentErrors, antes: k.previousErrors, turnos, esp, r0};
+  };
+  const rRec = checar('pa_receipt', DIAS[DP].rec, 'sendScantime', 12, 5), rEnv = checar('pa_dispatch', DIAS[DP].env, 'warehouseScantime', 8, 4);
+  check(keysP.join() === 'pa_receipt,pa_dispatch' && rRec.ok && rEnv.ok,
+    'V4.30 PA SHEIN: taxa e quantidade do JMS, dia anterior, turno pelo bipe de expedição (Recebimento) e pelo bipe de recebimento da coleta (Expedição), SC de chegada, cliente e colunas da lista',
+    {keysP, rRec, rEnv});
+  const sumBody = seen.filter(x => x.route === 'collect_take_missscan_new').map(x => x.body)[0] || {};
+  const detBodies = seen.filter(x => x.route === 'detail_take_missscan_new').map(x => x.body);
+  check(sumBody.dayKey === 'day' && sumBody.groupKey === 'network' && [DP0, DP].some(d => sumBody.startTime === d + ' 00:00:00' && sumBody.endTime === d + ' 23:59:59'),
+    'V4.30 PA SHEIN: resumo como na captura (dayKey day, groupKey network, dia inteiro)', sumBody);
+  check(detBodies.some(b => b.missing === 'warehouseNum') && detBodies.some(b => b.missing === 'sendNum') && detBodies.every(b => b.countryId === '1') &&
+    seen.every(x => x.headers.Routename === 'NetworkCollectLeakage'),
+    'V4.30 PA SHEIN: lista do número vermelho de cada coluna (missing warehouseNum / sendNum) e o cabeçalho de rota da tela', detBodies.slice(0, 2));
+  const cat = cP.getPublicCatalog_().filter(x => x.key === 'pa_receipt')[0];
+  check(cat.charts.map(c => c.key).join() === 'shift,client,destination' && cat.labels.destination.pt === 'SC de chegada' &&
+    cat.table.map(c => c[0]).indexOf('expeditionTime') >= 0 && cat.table.map(c => c[0]).indexOf('scArrival') >= 0,
+    'V4.30 PA SHEIN: gráficos de turnos, clientes e segmentos (SC de chegada) e a tabela com todas as colunas', cat.charts.map(c => c.key));
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

@@ -144,6 +144,59 @@ turno. No grupo: Configurações do grupo → Bots → Adicionar bot → Bot
 personalizado; copie o webhook. Em http://localhost:3500/config, seção **Bot do Feishu**: cole o webhook (e o segredo, se ligou a
 assinatura) e clique em **Salvar e mandar um teste**. O computador precisa de internet. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
 `};
+// V4.30 (pedido "Desenvolver um dashboard para o PA SHEIN"): Falta de bipagem do PA SHEIN-GRU-SP (pedidos SHEIN), separada do
+// principal — outra pasta, porta 3900 (3000 principal, 3100 Painel do Sorter, 3200 Pesquisa, 3300 Expedição Incorreta, 3400 Lotes,
+// 3500 Produção do Sorter, 3600 Monitor, 3700 Pátio, 3800 Rota Certa). O Funnel do Tailscale só tem 3 portas (443 principal, 8443
+// Sorter, 10000 Lotes): este painel fica num caminho do link principal, https://NOME.xxxx.ts.net/pa-shein.
+const PA_SHEIN = 'pa_receipt,pa_dispatch';
+const PA_SHEIN_PACOTE = {so: PA_SHEIN, fora: '', nome: 'PA SHEIN'};
+const PA_SHEIN_NODE = {folder: 'dashmaster-pa-shein', zip: 'PA_SHEIN_NODE', pacote: PA_SHEIN_PACOTE, readmeName: 'LEIA_PA_SHEIN.md',
+  padrao: {porta: 3900, portaLink: 443, caminho: '/pa-shein', linkVersao: 2},
+  replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster PA SHEIN.lnk'], ['"JT DashMaster"', '"JT DashMaster PA SHEIN"'],
+    ['o DashMaster vai abrir', 'o painel do PA SHEIN vai abrir']],
+    'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster PA SHEIN (Node.js) - porta 3900']]},
+  readme: v => `# PA SHEIN — Falta de bipagem (Node.js) — J&T DashMaster ${v}
+
+Painel **separado** do principal, no mesmo padrão dele (cartões, turnos, gráficos, filtros, tabela, PDF/Excel, PT ⇄ 中文), com a
+**falta de bipagem do PA SHEIN-GRU-SP** nos pedidos da SHEIN. Os números são os da tela do JMS **Indicadores de Negócios >
+Operação > Relatório de falta de bipagem > Falta de bipe de coleta**, com os filtros Unidade de Análise **Base**, Regional **SPE**,
+Nome da filial **PA SHEIN-GRU-SP** e Origem do Pedido **SHEIN**.
+
+| | Painel principal | PA SHEIN |
+|---|---|---|
+| Pasta | C:\\dashmaster | **C:\\dashmaster-pa-shein** |
+| Neste computador | http://localhost:3000 | **http://localhost:3900** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net/pa-shein** |
+
+## Os dois painéis
+| Painel | Número do JMS | Turno pelo horário |
+|---|---|---|
+| **Falta de Bipagem no Recebimento** | Qtd pedidos não bipados no recebimento da coleta (e a taxa) | do bipe de expedição |
+| **Falta de Bipagem na Expedição** | Qtd de pacotes com falta de bipe de envio (e a taxa) | de bipagem de recebimento da coleta |
+
+Em cada um: cartões do dia (taxa com a quantidade embaixo, dia anterior, variação e um cartão por turno: T1 06h–14h, T2 14h–22h,
+T3 22h–06h), gráficos de **turnos**, **clientes mais afetados** e **segmentos afetados (SC de chegada)**, filtros e a **tabela com
+todas as colunas** da lista do JMS. Os dias anteriores ficam salvos: escolha a data ou um período no topo.
+
+## Instalar (uma vez)
+1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-pa-shein). Não extraia por cima do C:\\dashmaster.
+2. Abra C:\\dashmaster-pa-shein\\node e dê dois cliques em **iniciar.bat**. Deixe a janela preta aberta.
+3. Neste computador, abra **http://localhost:3900/config**: cole o AuthToken do JMS (o mesmo do painel principal), escolha a
+   Data inicial e clique em **Baixar histórico**.
+4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster PA SHEIN").
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica no mesmo endereço do principal, com /pa-shein no fim:
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net/pa-shein (o Funnel só tem as portas 443, 8443 e 10000, e as três já são do principal, do
+   Sorter e do Lotes). Coloque esse link em \`"linkPublico"\` no config.json e escolha uma \`"senha"\` (separada da do principal).
+
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=443 --set-path=/pa-shein off\`
+
+## Ajustes (Configurações → Propriedades)
+| Propriedade | Para que serve |
+|---|---|
+| PA_NETWORK_CODE | código da filial (padrão 311040 = PA SHEIN-GRU-SP) |
+| PA_AGENT_CODE | código da regional (padrão 370000 = SPE) |
+| PA_ORDER_SOURCE | origem do pedido (padrão D102 = SHEIN; mais de uma separada por vírgula) |
+`};
 const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
 // V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.
 const NODE_PACOTE = {so: '', fora: MAIN_OUT, nome: ''};
@@ -488,8 +541,10 @@ if (require.main === module) {
   console.log('node (lotes): ' + nl.zip + ' (' + nl.files.length + ' arquivos)');
   const ns = buildNode(out, {variant: SORTER_NODE});
   console.log('node (sorter): ' + ns.zip + ' (' + ns.files.length + ' arquivos)');
+  const np = buildNode(out, {variant: PA_SHEIN_NODE});
+  console.log('node (pa shein): ' + np.zip + ' (' + np.files.length + ' arquivos)');
   const w = buildNetlify(out);
   console.log('netlify: ' + w.zip + ' (' + w.files.length + ' arquivos)');
 }
 
-module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, LOTS_NODE, SORTER_NODE, MAIN_OUT};
+module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, LOTS_NODE, SORTER_NODE, PA_SHEIN_NODE, MAIN_OUT};
