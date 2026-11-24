@@ -117,16 +117,20 @@ function criarGoogle(codigo, jms, agora) {
     },
     PropertiesService: {getScriptProperties: () => loja(g.props)},
     ScriptApp: {
-      EventType: {CLOCK: 'CLOCK', ON_EDIT: 'ON_EDIT'},
+      EventType: {CLOCK: 'CLOCK', ON_EDIT: 'ON_EDIT', ON_OPEN: 'ON_OPEN'},
       getProjectTriggers: () => g.gatilhos.map(t => ({getHandlerFunction: () => t.fn, getEventType: () => t.tipo, t})),
       deleteTrigger: x => { const i = g.gatilhos.indexOf(x.t); if (i >= 0) g.gatilhos.splice(i, 1); },
       newTrigger: fn => ({
-        forSpreadsheet: () => ({onEdit: () => ({create: () => g.gatilhos.push({fn, tipo: 'ON_EDIT'})})}),
-        timeBased: () => ({everyMinutes: () => ({create: () => g.gatilhos.push({fn, tipo: 'CLOCK'})})})
+        forSpreadsheet: () => ({onEdit: () => ({create: () => g.gatilhos.push({fn, tipo: 'ON_EDIT'})}),
+          onOpen: () => ({create: () => g.gatilhos.push({fn, tipo: 'ON_OPEN'})})}),
+        timeBased: () => ({everyMinutes: n => ({create: () => g.gatilhos.push({fn, tipo: 'CLOCK', min: n})})})
       })
     },
     LockService: {getScriptLock: () => ({tryLock: () => true, releaseLock: () => {}})},
-    UrlFetchApp: {fetch: (u, o) => jms.fetch(u, o)},
+    UrlFetchApp: {
+      fetch: (u, o) => { g.fetchs = (g.fetchs || 0) + 1; return jms.fetch(u, o); },
+      fetchAll: reqs => { g.fetchAlls = (g.fetchAlls || 0) + 1; return reqs.map(r => jms.fetch(r.url, r)); }
+    },
     Utilities: {formatDate: formatar, sleep: () => {}},
     HtmlService: {}
   });
@@ -261,7 +265,8 @@ const g = rodar(ATUAL, '2026-11-19T10:00:00-03:00', null, planilhaV6);
     !ids(p, '20/11/2026').length && ids(p).slice(0, 2).sort().join() === 'DBGXFICANTIGA1,DBGXFICANTIGA2',
     'dia virou: 18/11 salvo; 19/11 refeito com a viagem que chegou 23:30 e foi concluída depois da meia-noite', p.map(l => [l[0], l[1]]));
   const tr = g.jms.pedidos.filter(x => x.linha === 'troncal').pop();
-  check(tr.inicio === '2026-11-17 00:00:00' && tr.fim === '2026-11-21 23:59:59', 'consulta acompanha o dia novo', tr);
+  // v8: a DBGXFIC04 (chegou 18/11) ainda está "Aguardando deslacre": a consulta começa 2 dias antes dela (16/11).
+  check(tr.inicio === '2026-11-16 00:00:00' && tr.fim === '2026-11-21 23:59:59', 'consulta acompanha o dia novo (e vai até a pendente de 18/11)', tr);
 }
 
 // 6) Viagem sem Tempo real de chegada: fica no dia da partida (como na v6).
@@ -272,6 +277,85 @@ const g = rodar(ATUAL, '2026-11-19T10:00:00-03:00', null, planilhaV6);
   const l = g2.linhas('SECUNDARIA').find(x => x[1] === 'SETRFIC99');
   check(l && l[0] === '19/11/2026', 'sem Tempo real de chegada: fica no dia da partida', l);
   check(g2.celula('PRIMARIA', 'A1') === 'Data (chegada)', 'planilha nova: abas já com "Data (chegada)"');
+}
+
+// 7) Pedido do usuário: chegou hoje às 10:00 e só foi deslacrado às 22:00 → o status passa de "Aguardando deslacre" para
+//    "Deslacrado" na atualização seguinte (o JMS registrou o deslacre).
+{
+  const dados = {troncal: [viagem('DBGXFIC24', '2026-11-24 04:00:00', '2026-11-24 10:00:00', null)],
+    secundaria: [viagem('SETRFIC24', '2026-11-24 08:00:00', '2026-11-24 10:00:00', null)]};
+  const g7 = rodar(ATUAL, '2026-11-24T10:05:00-03:00', dados);
+  const t0 = g7.linhas('PRIMARIA').find(l => l[1] === 'DBGXFIC24'), s0 = g7.linhas('SECUNDARIA').find(l => l[1] === 'SETRFIC24');
+  check(t0 && t0[3] === 'Aguardando deslacre' && s0 && s0[3] === 'Aguardando deslacre', '10:05: chegou e ainda não foi deslacrado', [t0, s0]);
+  g7.jms.dados.troncal[0].__deslacre = '2026-11-24 22:00:00';
+  g7.jms.dados.secundaria[0].__deslacre = '2026-11-24 22:00:00';
+  g7.agora = Date.parse('2026-11-24T22:05:00-03:00');
+  g7.ctx.atualizarJMS({triggerUid: 'gatilho'});
+  const t1 = g7.linhas('PRIMARIA').find(l => l[1] === 'DBGXFIC24'), s1 = g7.linhas('SECUNDARIA').find(l => l[1] === 'SETRFIC24');
+  check(t1[2] === '2026-11-24 22:00:00' && t1[3] === 'Deslacrado' && s1[2] === '2026-11-24 22:00:00' && s1[3] === 'Deslacrado' &&
+    /^24\/11\/2026 22:05/.test(t1[5]), '22:05: o JMS deslacrou às 22:00 → "Deslacrado" com o horário (troncal e secundária)', [t1, s1]);
+  // Deslacre só no dia seguinte (01:30 do dia 25): o dia 24 continua sendo atualizado.
+  g7.jms.dados.troncal.push(viagem('DBGXFIC25', '2026-11-24 12:00:00', '2026-11-24 20:00:00', null));
+  g7.ctx.atualizarJMS({triggerUid: 'gatilho'});
+  g7.jms.dados.troncal[1].__deslacre = '2026-11-25 01:30:00';
+  g7.agora = Date.parse('2026-11-25T01:35:00-03:00');
+  g7.ctx.atualizarJMS({triggerUid: 'gatilho'});
+  const t2 = g7.linhas('PRIMARIA').find(l => l[1] === 'DBGXFIC25');
+  check(t2 && t2[0] === '24/11/2026' && t2[3] === 'Deslacrado' && t2[2] === '2026-11-25 01:30:00', 'deslacre depois da meia-noite: a linha do dia 24 é atualizada', t2);
+}
+
+// 8) Pendente de dias anteriores (até 5 dias): atualizada na própria linha; o resto do histórico não muda.
+{
+  const dados = {troncal: [
+    viagem('DBGXFIC21', '2026-11-20 20:00:00', '2026-11-21 06:00:00', '2026-11-23 23:00:00'), // deslacre 2 dias depois
+    viagem('DBGXFIC17', '2026-11-16 20:00:00', '2026-11-17 06:00:00', '2026-11-23 20:00:00'), // pendente há mais de 5 dias
+    viagem('DBGXFIC24', '2026-11-24 01:00:00', '2026-11-24 07:00:00', '2026-11-24 07:30:00')], secundaria: []};
+  const g8 = rodar(ATUAL, '2026-11-24T10:00:00-03:00', dados, gg => {
+    const p = gg.planilha.insertSheet('PRIMARIA');
+    p.getRange(1, 1, 1, 6).setValues([['Data (chegada)', 'Número da tarefa', 'Tempo de deslacre', 'Situação', 'Destino', 'Atualizado em']]);
+    p.getRange(2, 1, 4, 6).setValues([
+      ['17/11/2026', 'DBGXFIC17', '', 'Aguardando deslacre', 'SP GRU', '17/11/2026 23:55:00'],
+      ['21/11/2026', 'DBGXFICOK', '2026-11-21 05:00:00', 'Deslacrado', 'SP GRU', '21/11/2026 23:55:00'],
+      ['21/11/2026', 'DBGXFIC21', '', 'Aguardando deslacre', 'SP GRU', '21/11/2026 23:55:00'],
+      ['22/11/2026', 'DBGXFIC22', '2026-11-22 09:00:00', 'Deslacrado', 'SP GRU', '22/11/2026 23:55:00']]);
+  });
+  const p = g8.linhas('PRIMARIA');
+  check(JSON.stringify(p[2].slice(0, 4)) === JSON.stringify(['21/11/2026', 'DBGXFIC21', '2026-11-23 23:00:00', 'Deslacrado']) && /^24\/11\/2026 10:00/.test(p[2][5]),
+    'pendente do dia 21 (deslacre só no dia 23): atualizada na própria linha', p[2]);
+  check(p[0][3] === 'Aguardando deslacre' && p[0][5] === '17/11/2026 23:55:00' && p[1][5] === '21/11/2026 23:55:00' && p[3][1] === 'DBGXFIC22' &&
+    ids(p, '24/11/2026').join() === 'DBGXFIC24', 'mais de 5 dias e linhas já deslacradas não mudam; hoje continua embaixo', p.map(l => [l[0], l[1], l[3]]));
+  const tr = g8.jms.pedidos.filter(x => x.linha === 'troncal');
+  check(tr.length && tr.every(x => x.inicio === '2026-11-19 00:00:00'), 'consulta vai até a partida da pendente (dia 21 − 2 dias), não até a de 17/11', tr[0]);
+  check(/dias anteriores: 1 deslacre\(s\) atualizado\(s\), 0 ainda aguardando/.test(g8.celula('CONTROLE', 'D2')), 'aba CONTROLE conta os pendentes atualizados',
+    g8.celula('CONTROLE', 'D2'));
+}
+
+// 9) Acionadores: a v8 troca o de 15 min por 5 min e cria o de abertura; abrir a planilha atualiza (no máximo a cada 2 min).
+{
+  const g9 = rodar(ATUAL, '2026-11-24T10:00:00-03:00', {troncal: [], secundaria: []});
+  g9.props.JMS_INTERVALO_INSTALADO = '15';
+  g9.gatilhos.forEach(t => { if (t.tipo === 'CLOCK') t.min = 15; });
+  g9.ctx.atualizarJMS({triggerUid: 'gatilho'});
+  const tipos = g9.gatilhos.map(t => t.fn + ':' + t.tipo + (t.min ? ':' + t.min : '')).sort().join();
+  check(tipos === 'aoAbrirPlanilhaJMS:ON_OPEN,aoEditarTokenJMS:ON_EDIT,atualizarJMS:CLOCK:5', 'acionadores: 5 em 5 min, ao editar o token e ao abrir', tipos);
+  check(/levou \d+ s \| código v8, a cada 5 min$/.test(g9.celula('CONFIGURAÇÃO JMS', 'B14')), 'B14: última execução com quanto levou', g9.celula('CONFIGURAÇÃO JMS', 'B14'));
+  const n = g9.jms.pedidos.length;
+  g9.agora += 60000;
+  g9.ctx.aoAbrirPlanilhaJMS({triggerUid: 'abrir'});
+  check(g9.jms.pedidos.length === n, 'abrir 1 min depois da última consulta: não consulta de novo');
+  g9.agora += 3 * 60000;
+  g9.ctx.aoAbrirPlanilhaJMS({triggerUid: 'abrir'});
+  check(g9.jms.pedidos.length > n, 'abrir 3 min depois: atualiza na hora');
+}
+
+// 10) Muitas páginas (o JMS manda 20 por vez): a 1ª sozinha e as outras ao mesmo tempo; nenhuma viagem falta.
+{
+  const sec = [];
+  for (let i = 0; i < 150; i++) sec.push(viagem('SETRFICP' + String(i).padStart(3, '0'), '2026-11-24 0' + (i % 9) + ':00:00', '2026-11-24 09:30:00', '2026-11-24 09:40:00'));
+  const g10 = rodar(ATUAL, '2026-11-24T10:00:00-03:00', {troncal: [], secundaria: sec});
+  const se = g10.jms.pedidos.filter(x => x.linha === 'secundaria').length;
+  check(ids(g10.linhas('SECUNDARIA'), '24/11/2026').length === 150 && se === 8 && g10.fetchAlls >= 1,
+    '150 viagens em 8 páginas de 20: todas na planilha, páginas 2 a 8 de uma vez', {n: ids(g10.linhas('SECUNDARIA')).length, se, fetchAlls: g10.fetchAlls});
 }
 
 console.log('\n' + oks + ' ok, ' + falhas + ' falha(s)');

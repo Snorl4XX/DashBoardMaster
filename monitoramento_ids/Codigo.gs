@@ -1,10 +1,22 @@
 /**
- * JMS / J&T Express — Google Planilhas + Apps Script — v7 (19/11/2026)
+ * JMS / J&T Express — Google Planilhas + Apps Script — v8 (24/11/2026)
  *
  * INSTALAÇÃO: apague o código antigo de Código.gs, cole este arquivo,
  * salve, execute instalarAutomacaoJMS UMA vez pelo editor e aceite
  * TODAS as permissões. Depois use o menu "JMS | Automação".
- * Quem já usa a v6: basta colar e salvar (o acionador de 15 min continua).
+ * Quem já usa a v6 ou a v7: cole, salve e use uma vez o menu JMS | Automação >
+ * Atualizar agora (os acionadores novos são criados sozinhos).
+ *
+ * O QUE MUDOU NA v8
+ * - O status acompanha o JMS: a viagem que chegou e ficou "Aguardando
+ *   deslacre" passa a "Deslacrado", com o horário, assim que o JMS registra o
+ *   deslacre — também quando o deslacre sai tarde ou no dia seguinte. Ontem e
+ *   hoje são refeitos inteiros; as viagens ainda "Aguardando deslacre" dos 5
+ *   dias anteriores são conferidas de novo no JMS a cada atualização e
+ *   atualizadas na própria linha (os outros dias salvos não mudam).
+ * - Atualização a cada 5 minutos (era 15) e também ao abrir a planilha.
+ * - As páginas do JMS vêm várias ao mesmo tempo: cada atualização leva poucos
+ *   segundos (B14 mostra quanto), o que cabe na cota diária do Google.
  *
  * O QUE MUDOU NA v7
  * - Coluna A: era "Data (partida)", o dia consultado. Agora é "Data (chegada)":
@@ -85,9 +97,16 @@ const JMS_CONFIG = Object.freeze({
   FUSO: 'America/Sao_Paulo',
   PAGINA_TAMANHO: 100,
   MAX_PAGINAS: 100,
-  INTERVALO_MIN: 15, // o Apps Script aceita 1, 5, 10, 15 ou 30
+  // O Apps Script aceita 1, 5, 10, 15 ou 30. v8: 5 min — conta Gmail tem 90 min/dia de acionadores e cada atualização
+  // leva poucos segundos (B14 mostra quanto); 1 min passaria da cota.
+  INTERVALO_MIN: 5,
   PAUSA_RETENTATIVA_MIN: 60, // token recusado: tenta de novo a cada 60 min
-  VERSAO: 'v7',
+  VERSAO: 'v8',
+  // v8: viagens "Aguardando deslacre" de até 5 dias atrás são conferidas de novo; páginas do JMS pedidas ao mesmo tempo.
+  PENDENTES_DIAS: 5,
+  PARALELO: 8,
+  // v8: ao abrir a planilha, atualiza se a última consulta tem mais de 2 min.
+  ABERTURA_MIN: 2,
   // v7: partidas consultadas, em dias a partir de hoje (início, fim), para achar as viagens que chegaram ontem ou hoje.
   JANELA: {primaria: [-3, 1], secundaria: [-2, 0]},
   // v7: "Tempo real de chegada" (o mesmo nome na troncal e na secundária) e os nomes alternativos do JMS.
@@ -179,18 +198,20 @@ function instalarAutomacaoJMS() {
 }
 
 /**
- * Confere os acionadores DESTA conta: um de tempo (atualizarJMS, a cada 15 min)
- * e um de edição (aoEditarTokenJMS). Cria o que faltar, recria se o intervalo
- * mudou e apaga acionadores que chamam funções que não existem mais (sobras de
- * códigos antigos). Retorna os nomes apagados por não existirem.
+ * Confere os acionadores DESTA conta: um de tempo (atualizarJMS, a cada 5 min),
+ * um de edição (aoEditarTokenJMS) e, na v8, um de abertura (aoAbrirPlanilhaJMS).
+ * Cria o que faltar, recria se o intervalo mudou e apaga acionadores que chamam
+ * funções que não existem mais (sobras de códigos antigos). Retorna os nomes
+ * apagados por não existirem.
  */
 function garantirAcionadores_(ss, recriar) {
   const removidos = [];
   let temTempo = false;
   let temEdicao = false;
+  let temAbertura = false;
   ScriptApp.getProjectTriggers().forEach(t => {
     const nome = t.getHandlerFunction();
-    const nosso = nome === 'atualizarJMS' || nome === 'aoEditarTokenJMS';
+    const nosso = nome === 'atualizarJMS' || nome === 'aoEditarTokenJMS' || nome === 'aoAbrirPlanilhaJMS';
     if (!existeFuncao_(nome)) {
       ScriptApp.deleteTrigger(t);
       removidos.push(nome);
@@ -207,8 +228,12 @@ function garantirAcionadores_(ss, recriar) {
     if (nome === 'aoEditarTokenJMS' && tipo === ScriptApp.EventType.ON_EDIT) {
       if (temEdicao) ScriptApp.deleteTrigger(t); else temEdicao = true;
     }
+    if (nome === 'aoAbrirPlanilhaJMS' && tipo === ScriptApp.EventType.ON_OPEN) {
+      if (temAbertura) ScriptApp.deleteTrigger(t); else temAbertura = true;
+    }
   });
   if (!temEdicao) ScriptApp.newTrigger('aoEditarTokenJMS').forSpreadsheet(ss).onEdit().create();
+  if (!temAbertura) ScriptApp.newTrigger('aoAbrirPlanilhaJMS').forSpreadsheet(ss).onOpen().create();
   if (!temTempo) {
     ScriptApp.newTrigger('atualizarJMS').timeBased().everyMinutes(JMS_CONFIG.INTERVALO_MIN).create();
   }
@@ -487,13 +512,24 @@ function limparToken_(bruto) {
 /* ATUALIZAÇÃO                                                         */
 /* ------------------------------------------------------------------ */
 
-/** Menu "Atualizar agora" e acionador de 15 em 15 minutos. */
+/**
+ * v8: acionador ao abrir a planilha. Atualiza na hora, a não ser que a última consulta tenha menos de ABERTURA_MIN
+ * minutos (o acionador de 5 min acabou de rodar).
+ */
+function aoAbrirPlanilhaJMS(evento) {
+  const ultima = Number(PropertiesService.getScriptProperties().getProperty('JMS_ULTIMA_CONSULTA_MS') || 0);
+  if (Date.now() - ultima < JMS_CONFIG.ABERTURA_MIN * 60000) return;
+  atualizarJMS(evento || {triggerUid: 'abertura'});
+}
+
+/** Menu "Atualizar agora" e acionador de 5 em 5 minutos. */
 function atualizarJMS(evento) {
   const automatico = !!(evento && evento.triggerUid);
+  const inicioExecucao = Date.now();
   const ss = planilhaJMS_();
   const props = PropertiesService.getScriptProperties();
 
-  // Conserta o agendamento (ex.: muda de 10 para 15 min, remove acionadores velhos).
+  // Conserta o agendamento (ex.: muda de 15 para 5 min, cria o de abertura, remove acionadores velhos).
   try {
     garantirAcionadores_(ss,
       props.getProperty('JMS_INTERVALO_INSTALADO') !== String(JMS_CONFIG.INTERVALO_MIN));
@@ -501,7 +537,7 @@ function atualizarJMS(evento) {
     console.error('JMS: não foi possível conferir os acionadores: ' + mensagemSegura_(e));
   }
 
-  // Token recusado: o automático não insiste a cada 15 min, mas tenta de novo a cada 60 min.
+  // Token recusado: o automático não insiste a cada 5 min, mas tenta de novo a cada 60 min.
   if (automatico && props.getProperty('JMS_TOKEN_STATUS') === 'RECUSADO') {
     const desde = Number(props.getProperty('JMS_TOKEN_RECUSADO_EM') || 0);
     const espera = JMS_CONFIG.PAUSA_RETENTATIVA_MIN * 60000;
@@ -526,6 +562,8 @@ function atualizarJMS(evento) {
   } finally {
     lock.releaseLock();
   }
+  marcarExecucao_(ss, (automatico ? 'automática' : 'manual (Atualizar agora)') + ', levou ' +
+    Math.round((Date.now() - inicioExecucao) / 1000) + ' s');
   if (!automatico) {
     const cfg = abaConfig_(ss);
     ss.toast(valorCelula_(cfg, CEL.ULT_ERRO) || 'Consulta concluída.',
@@ -548,6 +586,7 @@ function atualizarDadosJMS_(ss) {
     return;
   }
   definirEstado_('CONSULTANDO JMS', '', ss, 'aguardando');
+  props.setProperty('JMS_ULTIMA_CONSULTA_MS', String(Date.now()));
   migrarLayout_(ss);
   const cfg = abaConfig_(ss);
   const primCampo = valorCelula_(cfg, CEL.CAMPO_PRIM) || CAMPO_DESLACRE_PADRAO;
@@ -569,7 +608,10 @@ function atualizarDadosJMS_(ss) {
       continue;
     }
     try {
-      const busca = buscarTodasPaginas_(item.tipo, janelaJMS_(item.tipo), ss);
+      const aba = ss.getSheetByName(item.nome);
+      // v8: viagens de dias anteriores ainda "Aguardando deslacre": a consulta vai até as partidas delas.
+      const pendentes = pendentesAba_(aba, dias);
+      const busca = buscarTodasPaginas_(item.tipo, janelaJMS_(item.tipo, pendentes.desde), ss);
       const registros = busca.registros;
       const celCampo = cfg.getRange(item.celula);
       const nota = String(celCampo.getNote() || '');
@@ -594,10 +636,14 @@ function atualizarDadosJMS_(ss) {
       }
 
       const resultado = formatarRegistros_(registros, campo, dias);
-      gravarRegistros_(ss.getSheetByName(item.nome), resultado.porDia);
+      // Antes de reescrever ontem/hoje (que pode reorganizar a aba): as linhas pendentes ainda estão onde foram lidas.
+      const atualizados = atualizarPendentes_(aba, pendentes, registros, campo);
+      gravarRegistros_(aba, resultado.porDia);
 
       const qtdHoje = resultado.porDia[1].linhas.length;
       const qtd = qtdHoje + ' IDs hoje e ' + resultado.porDia[0].linhas.length + ' ontem, pela chegada' +
+        (pendentes.linhas.length ? '; dias anteriores: ' + atualizados + ' deslacre(s) atualizado(s), ' +
+          (pendentes.linhas.length - atualizados) + ' ainda aguardando' : '') +
         (busca.total !== null ? ' (partidas consultadas: JMS informou ' + busca.total + ', vieram ' +
         registros.length + ')' : '');
       if (busca.total !== null && registros.length < busca.total) {
@@ -699,25 +745,44 @@ function configuracaoHttp_(ss) {
 function buscarTodasPaginas_(tipo, dia, ss) {
   const porChave = new Map();
   let total = null;
-  for (let passada = 1; passada <= 2; passada++) {
-    let recebidos = 0;
-    let pagina = 1;
-    for (; pagina <= JMS_CONFIG.MAX_PAGINAS; pagina++) {
-      const resposta = consultarPagina_(tipo, dia, pagina, ss);
-      const recs = resposta.records || [];
-      if (resposta.total !== undefined && resposta.total !== null &&
-          Number.isFinite(Number(resposta.total)) && Number(resposta.total) >= 0) {
-        total = Number(resposta.total);
-      }
-      recs.forEach((r, i) => {
-        const id = r && (r.id || r.shipmentNo);
-        porChave.set(id ? String(id) : 'sem-id-' + passada + '-' + pagina + '-' + i, r);
-      });
-      recebidos += recs.length;
-      if (!recs.length) break;
-      if (total !== null && recebidos >= total) break;
+  // Guarda uma página e devolve quantos registros vieram nela.
+  const guardar = (resposta, passada, pagina) => {
+    const recs = resposta.records || [];
+    if (resposta.total !== undefined && resposta.total !== null &&
+        Number.isFinite(Number(resposta.total)) && Number(resposta.total) >= 0) {
+      total = Number(resposta.total);
     }
-    if (pagina > JMS_CONFIG.MAX_PAGINAS) {
+    recs.forEach((r, i) => {
+      const id = r && (r.id || r.shipmentNo);
+      porChave.set(id ? String(id) : 'sem-id-' + passada + '-' + pagina + '-' + i, r);
+    });
+    return recs.length;
+  };
+  for (let passada = 1; passada <= 2; passada++) {
+    let recebidos = guardar(consultarPagina_(tipo, dia, 1, ss), passada, 1);
+    let vazia = !recebidos;
+    let pagina = 2;
+    // v8: com o total e o tamanho da 1ª página, as outras são pedidas várias ao mesmo tempo.
+    if (!vazia && total !== null && recebidos < total) {
+      const ultima = Math.min(JMS_CONFIG.MAX_PAGINAS, Math.ceil(total / recebidos));
+      while (pagina <= ultima) {
+        const lote = [];
+        for (let p = pagina; p <= ultima && lote.length < JMS_CONFIG.PARALELO; p++) lote.push(p);
+        consultarPaginas_(tipo, dia, lote, ss).forEach((resposta, k) => {
+          const n = guardar(resposta, passada, lote[k]);
+          recebidos += n;
+          if (!n) vazia = true;
+        });
+        pagina += lote.length;
+      }
+    }
+    // Sem o total (ou faltou registro): uma página por vez até vir vazia, como antes.
+    for (; !vazia && pagina <= JMS_CONFIG.MAX_PAGINAS && !(total !== null && recebidos >= total); pagina++) {
+      const n = guardar(consultarPagina_(tipo, dia, pagina, ss), passada, pagina);
+      recebidos += n;
+      if (!n) vazia = true;
+    }
+    if (!vazia && pagina > JMS_CONFIG.MAX_PAGINAS && !(total !== null && recebidos >= total)) {
       throw erroJMS_('VOLUME', 'Paginação interrompida: mais de ' + JMS_CONFIG.MAX_PAGINAS + ' páginas.');
     }
     if (total === null || porChave.size >= total) break;
@@ -727,6 +792,31 @@ function buscarTodasPaginas_(tipo, dia, ss) {
 
 /** dia: 'aaaa-mm-dd' (um dia) ou {inicio, fim} (v7: as partidas de vários dias). */
 function consultarPagina_(tipo, dia, pagina, ss, tamanho) {
+  const p = pedidoPagina_(tipo, dia, pagina, ss, tamanho);
+  return interpretarResposta_(executarFetch_(p.url, p.options), tipo, p.metodo);
+}
+
+/**
+ * v8: várias páginas ao mesmo tempo (UrlFetchApp.fetchAll). Página que volta com 429/5xx, ou rede fora, é pedida de
+ * novo sozinha (executarFetch_, que também separa o erro de permissão do Google). → [data] na ordem das páginas.
+ */
+function consultarPaginas_(tipo, dia, paginas, ss) {
+  const pedidos = paginas.map(p => pedidoPagina_(tipo, dia, p, ss));
+  let respostas;
+  try {
+    respostas = UrlFetchApp.fetchAll(pedidos.map(p => Object.assign({url: p.url}, p.options)));
+  } catch (erro) {
+    respostas = pedidos.map(() => null);
+  }
+  return pedidos.map((p, i) => {
+    let r = respostas[i];
+    if (!r || [429, 500, 502, 503, 504].indexOf(r.getResponseCode()) >= 0) r = executarFetch_(p.url, p.options);
+    return interpretarResposta_(r, tipo, p.metodo);
+  });
+}
+
+/** Endereço e opções do UrlFetchApp de uma página. → {url, options, metodo} */
+function pedidoPagina_(tipo, dia, pagina, ss, tamanho) {
   const cfg = abaConfig_(ss);
   const faixa = typeof dia === 'string' ? {inicio: dia, fim: dia} : dia;
   const inicio = faixa.inicio + ' 00:00:00';
@@ -772,7 +862,7 @@ function consultarPagina_(tipo, dia, pagina, ss, tamanho) {
     options.contentType = 'application/json;charset=UTF-8';
     options.payload = JSON.stringify(parametros);
   }
-  return interpretarResposta_(executarFetch_(url, options), tipo, metodo);
+  return {url: url, options: options, metodo: metodo};
 }
 
 /** Faz a chamada HTTP. Não esconde erro de permissão do Google atrás de "falha de rede". */
@@ -965,6 +1055,49 @@ function gravarRegistros_(aba, porDia) {
   const intervalo = aba.getRange(inicio, 1, linhas.length, 6);
   intervalo.setNumberFormat('@');
   intervalo.setValues(linhas);
+}
+
+/**
+ * v8: linhas "Aguardando deslacre" de dias anteriores a ontem, até PENDENTES_DIAS dias atrás (ontem e hoje são
+ * refeitos inteiros). → {linhas: [{linha, id}], desde: dia ('aaaa-mm-dd') da mais antiga, ou ''}
+ */
+function pendentesAba_(aba, dias) {
+  const out = {linhas: [], desde: ''};
+  const ultima = aba ? aba.getLastRow() : 0;
+  if (ultima < 2) return out;
+  const limite = somarDias_(dias.hoje.api, -JMS_CONFIG.PENDENTES_DIAS);
+  aba.getRange(2, 1, ultima - 1, 4).getDisplayValues().forEach((l, i) => {
+    const dia = diaApi_(l[0]);
+    const id = String(l[1] || '').trim();
+    if (!dia || !id || dia < limite || dia >= dias.ontem.api || l[3] !== 'Aguardando deslacre') return;
+    out.linhas.push({linha: i + 2, id: id});
+    if (!out.desde || dia < out.desde) out.desde = dia;
+  });
+  return out;
+}
+
+/**
+ * v8: nas linhas pendentes que o JMS já deslacrou, grava o horário (C), "Deslacrado" (D) e o Atualizado em (F) na
+ * própria linha; o resto da aba não muda. → quantas linhas mudaram.
+ */
+function atualizarPendentes_(aba, pendentes, registros, campo) {
+  if (!pendentes.linhas.length) return 0;
+  const deslacre = {};
+  registros.forEach(r => {
+    const id = String((r && r.shipmentNo) || '').trim();
+    const v = id ? valorCampo_(r, campo) : null;
+    const valor = v !== undefined && v !== null ? String(v).trim() : '';
+    if (valor) deslacre[id] = valor;
+  });
+  const hora = agoraJMS_();
+  let n = 0;
+  pendentes.linhas.forEach(p => {
+    if (!deslacre[p.id] || aba.getRange(p.linha, 2).getDisplayValue().trim() !== p.id) return;
+    aba.getRange(p.linha, 3, 1, 2).setValues([[deslacre[p.id], 'Deslacrado']]);
+    aba.getRange(p.linha, 6).setValue(hora);
+    n++;
+  });
+  return n;
 }
 
 function atualizarControle_(ss, linha, quantidade, status) {
@@ -1312,10 +1445,32 @@ function diasChegadaJMS_() {
   return {ontem: dia(-1), hoje: dia(0)};
 }
 
-/** v7: partidas consultadas ({inicio, fim}, aaaa-mm-dd), pela JMS_CONFIG.JANELA da linha. */
-function janelaJMS_(tipo) {
+/**
+ * v7: partidas consultadas ({inicio, fim}, aaaa-mm-dd), pela JMS_CONFIG.JANELA da linha. v8: com viagens pendentes
+ * de dias anteriores (desdeChegada = dia da chegada mais antiga), começa antes delas, com a mesma folga que a janela
+ * dá para as chegadas de ontem.
+ */
+function janelaJMS_(tipo, desdeChegada) {
   const j = JMS_CONFIG.JANELA[tipo];
-  return {inicio: dataJMS_(j[0], 'yyyy-MM-dd'), fim: dataJMS_(j[1], 'yyyy-MM-dd')};
+  let inicio = dataJMS_(j[0], 'yyyy-MM-dd');
+  if (desdeChegada) {
+    const d = somarDias_(desdeChegada, j[0] + 1);
+    if (d < inicio) inicio = d;
+  }
+  return {inicio: inicio, fim: dataJMS_(j[1], 'yyyy-MM-dd')};
+}
+
+/** "24/11/2026" → "2026-11-24" ('' quando não é uma data nesse formato). */
+function diaApi_(exibir) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(exibir || '').trim());
+  return m ? m[3] + '-' + m[2] + '-' + m[1] : '';
+}
+
+/** "2026-11-24" + n dias → "aaaa-mm-dd". */
+function somarDias_(api, n) {
+  const d = new Date(api + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 /**
