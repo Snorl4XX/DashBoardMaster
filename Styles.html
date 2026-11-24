@@ -306,6 +306,18 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .spark{margin-top:auto;height:70px;position:relative;z-index:1}
 .spark canvas{width:100%!important;height:70px!important}
 .kpi-hero .kpi-body{position:relative;z-index:1;display:flex;flex-direction:column;height:100%}
+/* V4.31 (pedido): cartão da taxa do dia sem espaço vazio — a taxa ocupa o cartão (tamanho pela largura dele) e as informações
+   ficam centralizadas no meio; o gráfico pequeno, embaixo, de ponta a ponta. */
+.kpi-hero{container-type:inline-size}
+.kpi-hero .kpi-label{justify-content:center;text-align:center}
+.hero-main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:2px;padding:0 0 4px;position:relative;z-index:1}
+.kpi-hero .hero-main .kpi-value{font-size:clamp(58px,17cqi,112px);line-height:.9;letter-spacing:-.04em;margin:6px 0 6px;white-space:nowrap}
+.kpi-hero .hero-main .kpi-sub{font-size:clamp(13px,2.3cqi,15px);max-width:100%}
+.kpi-hero .hero-parts{display:flex;flex-wrap:wrap;justify-content:center;column-gap:6px;row-gap:2px}
+.kpi-hero .hero-row{justify-content:center;margin-top:8px}
+.kpi-hero .shift-share{align-self:center}
+.kpi-hero .spark{margin-top:0;width:100%;height:50px}
+.kpi-hero .spark canvas{height:50px!important}
 .shift-kpi .kpi-label i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .delta{display:inline-flex;align-items:center;gap:4px;font-weight:800}
 .delta svg{width:14px;height:14px;stroke-width:2.6}

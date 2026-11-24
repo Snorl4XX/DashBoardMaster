@@ -1769,8 +1769,9 @@
     var hero = '<article class="kpi kpi-hero"><div class="kpi-body">' +
       '<div class="kpi-label">' + icon('gauge') + esc(heroLabel +
         (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) : '')) + '</div>' +
-      shareChip + '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroSubs +
-      '<div class="hero-row"><span class="status-pill ' + status + '">' + pill + '</span>' + (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '') + '</div>' +
+      // V4.31 (pedido): sem espaço vazio — taxa grande e as informações centralizadas no meio do cartão.
+      '<div class="hero-main">' + shareChip + '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroSubs +
+      '<div class="hero-row"><span class="status-pill ' + status + '">' + pill + '</span>' + (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '') + '</div></div>' +
       '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
 
     var errLabel = k.filtered ? tx(c, 'errorsFiltered') : day ? tx(c, 'errorsDay') : tx(c, 'errorsPeriod');
