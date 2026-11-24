@@ -2501,11 +2501,21 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const usadas = Object.keys(others).map(k => others[k]).concat([LOTS_NODE.padrao.porta, SORTER_NODE.padrao.porta, 3600, 3700, 3800]);
   check(keysOf(ctxP).join() === 'pa_receipt,pa_dispatch' && ctxP.getAppBootstrap().app.panel === 'PA SHEIN' && ctxP.getAppBootstrap().center === 'PA SHEIN-GRU-SP' &&
     ctxNode().getAppBootstrap().center === 'SP GRU' && confP.porta === 3900 &&
-    confP.portaLink === 443 && confP.caminho === '/pa-shein' && /JT DashMaster PA SHEIN\.lnk/.test(batWP) &&
+    confP.portaLink === 10000 && confP.caminho === '' && /JT DashMaster PA SHEIN\.lnk/.test(batWP) &&
     fsM.existsSync(pathM.join(rootP, 'LEIA_PA_SHEIN.md')) && !fsM.existsSync(pathM.join(rootP, 'node', 'config.json')) &&
     usadas.indexOf(PA_SHEIN_NODE.padrao.porta) < 0 && keysOf(ctxNode()).every(k => k.indexOf('pa_') !== 0) && full.every(k => k.indexOf('pa_') !== 0),
-    'pacote Node.js do PA SHEIN: só os 2 painéis dele, porta 3900 livre, link /pa-shein na 443; fora do principal',
+    'pacote Node.js do PA SHEIN: só os 2 painéis dele, porta 3900 livre, link na porta 10000 (no lugar do Lotes); fora do principal',
     {keys: keysOf(ctxP), porta: confP.porta, caminho: confP.caminho});
+  // V4.30.1 (pedido "Coloque no lugar dos lotes"): config.json de quem instalou com o link /pa-shein (linkVersao 2) passa para a 10000.
+  const cfgAntigoP = pathM.join(out, 'config-pa-shein-antigo.json');
+  fsM.writeFileSync(cfgAntigoP, JSON.stringify({porta: 3900, portaLink: 443, caminho: '/pa-shein', linkVersao: 2,
+    linkPublico: 'https://computador-teste.exemplo.ts.net/pa-shein', senha: 'x'}));
+  process.env.DASHMASTER_CONFIG = cfgAntigoP;
+  const confAntigoP = cfgModP.loadConfig();
+  if (prevEnvP === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnvP;
+  const salvoP = JSON.parse(fsM.readFileSync(cfgAntigoP, 'utf8'));
+  check(confAntigoP.portaLink === 10000 && confAntigoP.caminho === '' && confAntigoP.linkPublico === 'https://computador-teste.exemplo.ts.net:10000' &&
+    salvoP.linkVersao === 3 && salvoP.senha === 'x', 'PA SHEIN instalado com /pa-shein: o config.json passa para a porta 10000 uma vez (senha mantida)', salvoP);
   fsM.rmSync(out, {recursive: true, force: true});
 }
 

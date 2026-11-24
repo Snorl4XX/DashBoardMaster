@@ -146,12 +146,13 @@ assinatura) e clique em **Salvar e mandar um teste**. O computador precisa de in
 `};
 // V4.30 (pedido "Desenvolver um dashboard para o PA SHEIN"): Falta de bipagem do PA SHEIN-GRU-SP (pedidos SHEIN), separada do
 // principal — outra pasta, porta 3900 (3000 principal, 3100 Painel do Sorter, 3200 Pesquisa, 3300 Expedição Incorreta, 3400 Lotes,
-// 3500 Produção do Sorter, 3600 Monitor, 3700 Pátio, 3800 Rota Certa). O Funnel do Tailscale só tem 3 portas (443 principal, 8443
-// Sorter, 10000 Lotes): este painel fica num caminho do link principal, https://NOME.xxxx.ts.net/pa-shein.
+// 3500 Produção do Sorter, 3600 Monitor, 3700 Pátio, 3800 Rota Certa). O Funnel do Tailscale só tem 3 portas (443, 8443 e 10000).
+// V4.30.1 (pedido "Coloque no lugar dos lotes"): o link fica na porta 10000, a que era do painel de Lotes —
+// https://NOME.xxxx.ts.net:10000. linkVersao 3: quem instalou com /pa-shein recebe a porta 10000 uma vez (config.js → migrateLinkPort).
 const PA_SHEIN = 'pa_receipt,pa_dispatch';
 const PA_SHEIN_PACOTE = {so: PA_SHEIN, fora: '', nome: 'PA SHEIN'};
 const PA_SHEIN_NODE = {folder: 'dashmaster-pa-shein', zip: 'PA_SHEIN_NODE', pacote: PA_SHEIN_PACOTE, readmeName: 'LEIA_PA_SHEIN.md',
-  padrao: {porta: 3900, portaLink: 443, caminho: '/pa-shein', linkVersao: 2},
+  padrao: {porta: 3900, portaLink: 10000, caminho: '', linkVersao: 3},
   replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster PA SHEIN.lnk'], ['"JT DashMaster"', '"JT DashMaster PA SHEIN"'],
     ['o DashMaster vai abrir', 'o painel do PA SHEIN vai abrir']],
     'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster PA SHEIN (Node.js) - porta 3900']]},
@@ -166,7 +167,7 @@ Nome da filial **PA SHEIN-GRU-SP** e Origem do Pedido **SHEIN**.
 |---|---|---|
 | Pasta | C:\\dashmaster | **C:\\dashmaster-pa-shein** |
 | Neste computador | http://localhost:3000 | **http://localhost:3900** |
-| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net/pa-shein** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net:10000** |
 
 ## Os dois painéis
 | Painel | Número do JMS | Turno pelo horário |
@@ -184,11 +185,14 @@ todas as colunas** da lista do JMS. Os dias anteriores ficam salvos: escolha a d
 3. Neste computador, abra **http://localhost:3900/config**: cole o AuthToken do JMS (o mesmo do painel principal), escolha a
    Data inicial e clique em **Baixar histórico**.
 4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster PA SHEIN").
-5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica no mesmo endereço do principal, com /pa-shein no fim:
-   https://NOME-DO-COMPUTADOR.xxxx.ts.net/pa-shein (o Funnel só tem as portas 443, 8443 e 10000, e as três já são do principal, do
-   Sorter e do Lotes). Coloque esse link em \`"linkPublico"\` no config.json e escolha uma \`"senha"\` (separada da do principal).
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica na porta **10000** (no lugar do painel de Lotes):
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net:10000. Se a 10000 ainda levar para o Lotes, ele avisa e pergunta antes de trocar
+   (responda S). Coloque esse link em \`"linkPublico"\` no config.json e escolha uma \`"senha"\` (separada da do principal).
+   - O Funnel só tem 3 portas (443 principal, 8443 Sorter, 10000 PA SHEIN). Para o Lotes continuar com link, deixe-o num caminho do
+     link principal: no config.json do Lotes, \`"portaLink": 443\` e \`"caminho": "/lotes"\`, e rode o link-publico.bat dele
+     (link https://NOME-DO-COMPUTADOR.xxxx.ts.net/lotes).
 
-Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=443 --set-path=/pa-shein off\`
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=10000 off\`
 
 ## Ajustes (Configurações → Propriedades)
 | Propriedade | Para que serve |

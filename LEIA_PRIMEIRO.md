@@ -10,7 +10,8 @@ Pedido: "Desenvolver um dashboard para mostrar os dados de falta de bipagem no r
 painel principal, para o **PA SHEIN-GRU-SP** (pedidos SHEIN).
 
 - **Pacote separado** `JT_DASHMASTER_V4_30_PA_SHEIN_NODE.zip` (pasta `C:\dashmaster-pa-shein`, porta **3900**, link
-  `https://NOME.xxxx.ts.net/pa-shein`, atalho "JT DashMaster PA SHEIN"). Passo a passo no `LEIA_PA_SHEIN.md` do ZIP.
+  `https://NOME.xxxx.ts.net:10000` — pedido "Coloque no lugar dos lotes": a porta 10000 do link, que era do painel de Lotes; quem
+  instalou com `/pa-shein` passa para a 10000 sozinho, uma vez; atalho "JT DashMaster PA SHEIN"). Passo a passo no `LEIA_PA_SHEIN.md`.
 - **Fonte:** JMS › Indicadores de Negócios › Operação › Relatório de falta de bipagem › Falta de bipe de coleta, com os filtros
   Unidade de Análise Base, Regional SPE, filial PA SHEIN-GRU-SP (311040) e Origem do Pedido SHEIN (D102). Resumo
   `collect_take_missscan_new` e lista `detail_take_missscan_new` (número vermelho de cada coluna).
