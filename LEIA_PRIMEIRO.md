@@ -25,6 +25,10 @@ painel principal, para o **PA SHEIN-GRU-SP** (pedidos SHEIN).
   **clientes mais afetados** e **segmentos afetados (SC de chegada)**, filtros e a **tabela com todas as colunas** (data, remessa,
   pedidos, turno, SC de chegada, cliente, origem, hora de chegada ao SC, bipe de coleta, bipe de recebimento da coleta e bipe de
   expedição). Meta: 1,00%, a mesma da Falta de Bipagem do principal.
+- **Intervalo de horário** (pedido "mais um gráfico no PA SHEIN, agora um de intervalo de horário"): gráfico ao lado dos turnos,
+  pelo mesmo horário que define o turno de cada painel, com os botões **Ranking** (10 horas com mais ocorrências) e **24 h** (as 24
+  horas em ordem, 00h–01h … 23h–00h), cartões de maior/menor intervalo, filtro por intervalo e a coluna "Intervalo de horário" na
+  tabela e no relatório.
 - O painel principal não muda (os dois painéis do PA SHEIN só aparecem no pacote deles). Ajuste visual que vale para os dois: a
   legenda do gráfico de rosca (turnos) desce para baixo dele em cartões estreitos.
 - Propriedades: `PA_NETWORK_CODE` (311040), `PA_AGENT_CODE` (370000), `PA_ORDER_SOURCE` (D102), `PA_NETWORK_NAME`.

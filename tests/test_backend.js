@@ -5096,9 +5096,14 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     seen.every(x => x.headers.Routename === 'NetworkCollectLeakage'),
     'V4.30 PA SHEIN: lista do número vermelho de cada coluna (missing warehouseNum / sendNum) e o cabeçalho de rota da tela', detBodies.slice(0, 2));
   const cat = cP.getPublicCatalog_().filter(x => x.key === 'pa_receipt')[0];
-  check(cat.charts.map(c => c.key).join() === 'shift,client,destination' && cat.labels.destination.pt === 'SC de chegada' &&
+  const rowsI = cP.JTCore_.decodeDataset(cP.getDashboardData('pa_receipt', {from: DP, to: DP}).dataset);
+  const linhaI = rowsI.filter(r => r.shipment === DIAS[DP].rec[2].billcode)[0] || {};
+  check(linhaI.interval === DIAS[DP].rec[2].sendScantime.slice(11, 13) + 'h - ' + hh((Number(DIAS[DP].rec[2].sendScantime.slice(11, 13)) + 1) % 24) + 'h' &&
+    (rowsI.filter(r => r.shipment === DIAS[DP].rec[0].billcode)[0] || {}).interval === 'N/A',
+    'V4.30.2 PA SHEIN: intervalo de horário pelo mesmo horário do turno (bipe de expedição no Recebimento)', linhaI.interval);
+  check(cat.charts.map(c => c.key).join() === 'shift,interval,client,destination' && cat.labels.destination.pt === 'SC de chegada' &&
     cat.table.map(c => c[0]).indexOf('expeditionTime') >= 0 && cat.table.map(c => c[0]).indexOf('scArrival') >= 0,
-    'V4.30 PA SHEIN: gráficos de turnos, clientes e segmentos (SC de chegada) e a tabela com todas as colunas', cat.charts.map(c => c.key));
+    'V4.30 PA SHEIN: gráficos de turnos, intervalo de horário, clientes e segmentos (SC de chegada) e a tabela com todas as colunas', cat.charts.map(c => c.key));
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

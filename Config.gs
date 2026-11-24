@@ -722,6 +722,8 @@ function paMissing_(o) {
     topCardLabels: {destination: {pt: 'SC de chegada mais afetado', zh: '受影响最多的到达中心'}, client: {pt: 'Cliente mais afetado', zh: '受影响最多的客户'}},
     charts: [
       {key: 'shift', type: 'doughnut', title: {pt: 'Turnos', zh: '班次'}, sub: o.shiftSub},
+      // V4.30.2 (pedido): intervalo de horário, pelo mesmo horário do turno (Ranking ou Linha do tempo com as 24 horas, como no principal).
+      {key: 'interval', type: 'bar', top: 10, ranking: true, title: {pt: 'Intervalo de horário', zh: '时间段'}, sub: o.shiftSub},
       {key: 'client', type: 'bar', horizontal: true, top: 10, title: {pt: 'Clientes mais afetados', zh: '受影响最多的客户'}},
       {key: 'destination', type: 'bar', horizontal: true, top: 10, title: {pt: 'Segmentos afetados (SC de chegada)', zh: '受影响段码（到达中心）'}}
     ],
@@ -729,6 +731,7 @@ function paMissing_(o) {
     // Tabela (pedido "colocar todos os dados juntos"): as colunas da lista do JMS.
     table: [
       ['date', 'Data', '日期'], ['shipment', 'Número da remessa', '运单号'], ['pieces', 'Pedidos', '票数'], ['shift', 'Turno', '班次'],
+      ['interval', 'Intervalo de horário', '时间段'],
       ['destination', 'SC de chegada', '到达中心'], ['client', 'Cliente', '客户'], ['orderSource', 'Origem do pedido', '订单来源'],
       ['scArrival', 'Hora de chegada ao SC', '到达中心时间'], ['collectTime', 'Horário do bipe de coleta', '揽收扫描时间'],
       ['receiptTime', 'Horário de bipagem de recebimento da coleta', '揽收入仓扫描时间'], ['expeditionTime', 'Horário do bipe de expedição', '发件扫描时间']
