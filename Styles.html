@@ -306,18 +306,66 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .spark{margin-top:auto;height:70px;position:relative;z-index:1}
 .spark canvas{width:100%!important;height:70px!important}
 .kpi-hero .kpi-body{position:relative;z-index:1;display:flex;flex-direction:column;height:100%}
-/* V4.31 (pedido): cartão da taxa do dia sem espaço vazio — a taxa ocupa o cartão (tamanho pela largura dele) e as informações
-   ficam centralizadas no meio; o gráfico pequeno, embaixo, de ponta a ponta. */
-.kpi-hero{container-type:inline-size}
-.kpi-hero .kpi-label{justify-content:center;text-align:center}
-.hero-main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:2px;padding:0 0 4px;position:relative;z-index:1}
-.kpi-hero .hero-main .kpi-value{font-size:clamp(58px,17cqi,112px);line-height:.9;letter-spacing:-.04em;margin:6px 0 6px;white-space:nowrap}
-.kpi-hero .hero-main .kpi-sub{font-size:clamp(13px,2.3cqi,15px);max-width:100%}
-.kpi-hero .hero-parts{display:flex;flex-wrap:wrap;justify-content:center;column-gap:6px;row-gap:2px}
-.kpi-hero .hero-row{justify-content:center;margin-top:8px}
-.kpi-hero .shift-share{align-self:center}
-.kpi-hero .spark{margin-top:0;width:100%;height:50px}
-.kpi-hero .spark canvas{height:50px!important}
+/* V4.31 (pedido, print "Taxa do dia"): cartão vermelho principal no formato do print. As medidas seguem a largura do
+   cartão (--u = 1% dela), como no print: cabeçalho com o ícone num quadrado, traço e título em maiúsculas; o número grande
+   à esquerda com as pílulas embaixo; um traço vertical; as informações à direita, uma por linha, com ícone e separador;
+   a minilinha embaixo, de ponta a ponta (cresce se o cartão ficar mais alto, sem espaço vazio). */
+.kpi-hero.hx{container-type:inline-size;padding:0;background:linear-gradient(174deg,#DD0313 0%,#CE0210 24%,#BC010C 55%,#AA010A 100%)}
+.kpi-hero.hx::after{right:auto;left:66.6%;top:-156%;width:68.6%;height:auto;aspect-ratio:1;background:linear-gradient(205deg,rgba(255,255,255,.13) 0%,rgba(255,255,255,.085) 60%,rgba(255,255,255,.05) 100%)}
+.kpi-hero.hx::before{right:auto;bottom:auto;left:51.7%;top:53.6%;width:110.4%;height:auto;aspect-ratio:1;
+  background:radial-gradient(circle closest-side,rgba(255,255,255,.035) 0%,rgba(255,255,255,.05) 74%,rgba(255,120,128,.16) 96%,rgba(255,170,175,.24) 99.4%,rgba(255,255,255,0) 100%)}
+.hx .kpi-body{--u:clamp(6.2px,1cqi,11px);padding:calc(1.45*var(--u)) calc(3.5*var(--u)) calc(3*var(--u));position:relative;z-index:1}
+.hx-deco{position:absolute;z-index:-1;left:65.5%;top:-110%;width:115%;aspect-ratio:1;border-radius:50%;pointer-events:none;
+  background:linear-gradient(225deg,rgba(255,255,255,.05),rgba(255,255,255,.025) 60%,rgba(255,255,255,0))}
+.hx-head{display:flex;align-items:center;gap:calc(1.9*var(--u));min-width:0}
+.hx-ico{width:calc(4*var(--u));height:calc(4*var(--u));border-radius:calc(.8*var(--u));background:rgba(255,255,255,.13);display:grid;place-items:center;flex:none}
+.hx-ico svg{width:calc(3*var(--u));height:calc(3*var(--u));color:#fff;stroke-width:2.4}
+.hx-sep{width:max(1px,calc(.1*var(--u)));height:calc(2.3*var(--u));background:rgba(255,255,255,.45);flex:none}
+.hx-title{font-size:calc(2.48*var(--u));font-weight:800;letter-spacing:.01em;text-transform:uppercase;line-height:1.1;color:#fff;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hx-main{display:flex;align-items:stretch;margin-top:calc(2.4*var(--u));min-width:0}
+.hx-left{flex:none;display:flex;flex-direction:column;justify-content:center;padding-right:calc(1.9*var(--u));border-right:max(1px,calc(.1*var(--u))) solid rgba(255,255,255,.35)}
+.kpi-hero.hx .kpi-value{font-size:calc(13.4*var(--u)*var(--fs,1));font-weight:900;letter-spacing:-.035em;line-height:.86;margin:calc(-.75*var(--u)) 0 0 calc(-.5*var(--u));color:#fff;white-space:nowrap}
+.hx-pills{display:flex;align-items:center;gap:calc(1.5*var(--u));margin-top:calc(2*var(--u));flex-wrap:nowrap}
+.hx .status-pill,.hx .hero-goal{display:inline-flex;align-items:center;gap:calc(1.45*var(--u));height:calc(4.1*var(--u));padding:0 calc(1.9*var(--u));border-radius:999px;
+  font-size:calc(2.05*var(--u));font-weight:800;letter-spacing:-.01em;white-space:nowrap;box-sizing:border-box}
+.hx .status-pill{background:rgba(255,255,255,.89);padding-left:calc(2*var(--u))}
+.hx .status-pill.bad{color:#A8000F} .hx .status-pill.bad svg{color:#DC0A1E}
+.hx .status-pill.good{color:#0B7A3E} .hx .status-pill.none{color:#5B6170}
+.hx .status-pill svg{width:calc(2.2*var(--u));height:calc(2.2*var(--u));stroke-width:2.9}
+.hx .hero-goal{background:rgba(255,255,255,.15);border:max(1px,calc(.1*var(--u))) solid rgba(255,255,255,.32);color:#fff}
+.hx-right{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-start;margin-top:calc(-1.25*var(--u));padding-left:calc(1.85*var(--u))}
+.hx-row{display:flex;align-items:center;gap:calc(1.35*var(--u));min-height:calc(5.75*var(--u));padding:calc(.5*var(--u)) 0;box-sizing:border-box;
+  font-size:calc(1.86*var(--u));font-weight:500;line-height:1.3;color:#fff}
+.hx-row + .hx-row{border-top:max(1px,calc(.1*var(--u))) solid rgba(255,255,255,.35)}
+.hx-row > svg{width:calc(3.2*var(--u));height:calc(3.2*var(--u));color:#fff;stroke-width:1.75;flex:none}
+.hx-text{min-width:0}
+.hx-text b{font-weight:800;color:#fff}
+.hx-text .hx-em{font-size:1.2em;letter-spacing:-.01em}
+.hx-parts{margin-left:.45em}
+.hx-parts span{white-space:nowrap}
+.hx-row.hx-small{font-size:calc(1.62*var(--u))}
+.hx-dots{display:inline-flex;gap:3px;margin-right:6px;vertical-align:middle}
+.hx-dots i{width:.6em;height:.6em;border-radius:50%;border:1.5px solid #fff;display:inline-block}
+.hx .delta{font-size:.9em}
+.hx .spark{flex:1 1 auto;margin-top:calc(2.6*var(--u));min-height:calc(7.8*var(--u));height:auto;position:relative}
+.hx .spark canvas{position:absolute;inset:0;width:100%!important;height:100%!important}
+.hx-unit{font-size:.3em;font-weight:800;letter-spacing:0;margin-left:.12em}
+/* Sem a minilinha (Tempo real): o número e as informações ocupam o cartão. */
+.hx .hx-main:last-child{flex:1}
+.hx .hx-main:last-child > .hx-right{justify-content:center;margin-top:0}
+/* Cartão estreito (celular): número em cima, informações embaixo, tamanhos fixos para continuar legível. */
+@container (max-width:460px){
+  .hx .kpi-body{--u:5.6px;padding:14px 16px 14px}
+  .hx-title{font-size:13px} .hx-ico{width:30px;height:30px;border-radius:8px} .hx-ico svg{width:17px;height:17px}
+  .hx-main{flex-direction:column;margin-top:12px}
+  .hx-left{padding-right:0;border-right:0;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,.35)}
+  .kpi-hero.hx .kpi-value{font-size:calc(clamp(52px,16cqi,76px)*var(--fs,1))}
+  .hx-pills{margin-top:12px;flex-wrap:wrap;gap:8px}
+  .hx .status-pill,.hx .hero-goal{height:30px;font-size:13px;padding:0 13px;gap:7px} .hx .status-pill svg{width:14px;height:14px}
+  .hx-right{padding-left:0}
+  .hx-row{font-size:13px;min-height:40px;gap:10px} .hx-row.hx-small{font-size:12px} .hx-row > svg{width:17px;height:17px}
+  .hx .spark{min-height:56px;margin-top:10px}
+}
 .shift-kpi .kpi-label i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .delta{display:inline-flex;align-items:center;gap:4px;font-weight:800}
 .delta svg{width:14px;height:14px;stroke-width:2.6}

@@ -487,7 +487,10 @@
     warn: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4m0 3v.5"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8v.5"/>',
     // V4.25: Expedição A/B/C (grupos de docas) e os dois segmentos da Falta de Bipagem no Recebimento.
     expedition: '<path d="M3 21V9l9-5 9 5v12"/><path d="M7 21v-8h10v8M7 17h10"/>', segMain: '<path d="M4 6h16M4 12h10M4 18h6"/>',
-    segSub: '<path d="M4 6h16M4 12h10M4 18h6"/>'
+    segSub: '<path d="M4 6h16M4 12h10M4 18h6"/>',
+    // V4.31: ícones das linhas do cartão da taxa do dia (dia anterior e taxa por turno).
+    calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M7.5 13.6h.01M10.5 13.6h.01M13.5 13.6h.01M16.5 13.6h.01M7.5 17h.01M10.5 17h.01M13.5 17h.01"/>',
+    layers: '<path d="M12 3.5l8.5 4.3-8.5 4.3-8.5-4.3z"/><path d="M3.5 12l8.5 4.3 8.5-4.3"/><path d="M3.5 16.2l8.5 4.3 8.5-4.3"/>'
   };
   function icon(name) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICON_PATHS[name] || ICON_PATHS.chart) + '</svg>'; }
 
@@ -1720,6 +1723,27 @@
   }
 
   // ------------------------------------------------------------------ cartões
+  /**
+   * V4.31 (pedido, print "Taxa do dia"): cartão vermelho principal — cabeçalho com o ícone num quadrado, um traço e o
+   * título em maiúsculas; o número grande à esquerda com as pílulas (meta) embaixo; à direita as informações, uma por
+   * linha, com ícone e separador; embaixo, de ponta a ponta, a minilinha dos 14 dias.
+   * o = {icon, title, value, pills, rows: [{icon, html, cls}], sparkId, spark: false}
+   */
+  function heroCardHtml(o) {
+    var rows = (o.rows || []).map(function (r) {
+      return '<div class="hx-row' + (r.cls ? ' ' + r.cls : '') + '">' + icon(r.icon) + '<div class="hx-text">' + r.html + '</div></div>';
+    }).join('');
+    // Número com mais de 5 caracteres (ex.: "123,45" ppm, "12.345" pedidos): a fonte diminui na mesma proporção, para o
+    // número continuar ocupando o lado esquerdo como no print.
+    var len = String(o.value).replace(/<small[^>]*>[\s\S]*?<\/small>/g, '').replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, 'x').length;
+    var fs = len > 5 ? Math.max(0.55, 5 / len) : 1;
+    return '<article class="kpi kpi-hero hx"><div class="kpi-body"><i class="hx-deco" aria-hidden="true"></i>' +
+      '<div class="hx-head"><span class="hx-ico">' + icon(o.icon) + '</span><span class="hx-sep"></span><span class="hx-title">' + esc(o.title) + '</span></div>' +
+      '<div class="hx-main"><div class="hx-left"><div class="kpi-value"' + (fs < 1 ? ' style="--fs:' + fs.toFixed(3) + '"' : '') + '>' + o.value + '</div>' + (o.pills ? '<div class="hx-pills">' + o.pills + '</div>' : '') + '</div>' +
+      (rows ? '<div class="hx-right">' + rows + '</div>' : '') + '</div>' +
+      (o.spark === false ? '' : '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="' + (o.sparkId || 'sparkCanvas') + '" aria-label="' + esc(t('spark')) + '"></canvas></div>') +
+      '</div></article>';
+  }
   function renderKpis(c, k) {
     if (c.unsealCards) return renderUnsealKpis(c, k);
     if (c.heroMetric && c.metricCards) return renderMetricKpis(c, k);
@@ -1729,50 +1753,52 @@
     // Com filtro de turno a meta continua avaliada na taxa do dia (a parte de um turno é sempre menor).
     if (sv && status !== 'none') pill += ' · ' + esc(t('dayGoal'));
     var prevLabel = sv ? t(day ? 'prevShift' : 'prevShiftPeriod', {s: sName}) : day ? t('prevDayRate') : t('prevPeriodRate');
-    var heroSubs = '<div class="kpi-sub">' + esc(prevLabel) + ': <b>' + fmtRate(k.prevRate, c.goal) + '</b>' +
-      (day ? ' · ' + esc(fmtDate(k.prevTo, true)) : ' · ' + esc(fmtRange(k.prevFrom, k.prevTo))) + '</div>';
-    if (!day) {
-      heroSubs += '<div class="kpi-sub">' + esc(t('daysWithRate', {a: k.daysWithRate, b: k.days})) +
-        (k.latestDay ? ' · ' + esc(t('lastDay')) + ' ' + esc(fmtDate(k.latestDay.date)) + ': <b>' + fmtRate(k.latestDay.rate, c.goal) + '</b>' : '') +
-        (k.rateMethod === 'weighted' ? ' · ' + esc(t('weighted')) : k.rateMethod === 'mean' ? ' · ' + esc(t('meanNote')) : '') + '</div>';
-    }
-    var late = c.goal && c.goal.direction === 'min';
-    if (!sv && k.shifts && k.shifts.every(function (x) { return isNum(x.part); })) {
-      // Taxa do dia por turno: T1 + T2 + T3 = taxa do dia (no prazo: parte do fora do prazo).
-      // Remessas sem turno (Avaria: registradas em outras bases, sem horário) entram como uma parte própria:
-      // a soma das partes fecha com a taxa do dia (no prazo: com o fora do prazo).
-      var whole = isNum(k.rate) ? (late ? Core.rateScale(c.goal) - k.rate : k.rate) : null;
-      var sumP = k.shifts.reduce(function (a, x) { return a + x.part; }, 0), naP = isNum(whole) ? whole - sumP : 0;
-      var items = k.shifts.map(function (x) {
-        return '<span><i style="background:' + SHIFT_COLORS[x.shift] + '"></i>' + x.shift + ' <b>' + fmtRate(x.part, c.goal) + '</b></span>';
-      });
-      if (isNum(whole) && naP > Math.max(whole * 0.002, 1e-9)) items.push('<span><i style="background:#9CA3AF"></i>' + esc(vlabel('shift', 'N/A')) + ' <b>' + fmtRate(naP, c.goal) + '</b></span>');
-      heroSubs += '<div class="kpi-sub hero-parts">' + esc(t(late ? 'latePartsLine' : 'partsLine')) + ': ' + items.join(' + ') +
-        (isNum(whole) ? ' = <b>' + fmtRate(whole, c.goal) + '</b>' : '') + '</div>';
-    }
+    // V4.31 (pedido, print do cartão): as informações ficam à direita, uma por linha, com ícone e separador.
+    var rows = [], late = c.goal && c.goal.direction === 'min';
+    var prevRow = {icon: 'calendar', html: esc(prevLabel) + ': <b class="hx-em">' + fmtRate(k.prevRate, c.goal) + '</b> · ' +
+      esc(day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo))};
+    var daysRow = day ? null : {icon: 'trend', html: esc(t('daysWithRate', {a: k.daysWithRate, b: k.days})) +
+      (k.latestDay ? ' · ' + esc(t('lastDay')) + ' ' + esc(fmtDate(k.latestDay.date)) + ': <b>' + fmtRate(k.latestDay.rate, c.goal) + '</b>' : '') +
+      (k.rateMethod === 'weighted' ? ' · ' + esc(t('weighted')) : k.rateMethod === 'mean' ? ' · ' + esc(t('meanNote')) : '')};
     if (sv) {
-      // Parte do turno: a taxa do dia (todos os turnos) logo abaixo, para comparar.
-      heroSubs = '<div class="kpi-sub">' + esc(t(day ? 'dayRateAll' : 'periodRateAll')) + ': <b>' + fmtRate(sv.dayRate, c.goal) + '</b></div>' + heroSubs +
-        '<div class="kpi-sub">' + esc(t(sv.late ? 'shiftLateHint' : 'shiftRateHint')) + '</div>';
-    } else if (k.filtered) heroSubs += '<div class="kpi-sub">' + esc(t('officialNotFiltered')) + '</div>';
-    if (state.rateView && state.rateView.kind && !isNum(k.rate)) heroSubs += '<div class="kpi-sub">' + esc(t(state.okFetching ? 'okFetching' : 'okMissing', {o: state.rateView.label, r: orderKindWhy()})) + '</div>';
+      // Filtro de turno: participação do turno, a taxa do dia (todos os turnos) para comparar, o anterior do turno e a explicação.
+      rows.push({icon: 'layers', html: '<span class="hx-dots">' + sv.shifts.map(function (s) { return '<i style="background:' + SHIFT_COLORS[s] + '"></i>'; }).join('') +
+        '</span><b class="hx-em">' + fmtPct(sv.share, 1) + '</b> ' + esc(t('shiftShare', {s: sName}))});
+      rows.push({icon: 'gauge', html: esc(t(day ? 'dayRateAll' : 'periodRateAll')) + ': <b class="hx-em">' + fmtRate(sv.dayRate, c.goal) + '</b>'});
+      rows.push(prevRow);
+      if (daysRow) rows.push(daysRow);
+      rows.push({icon: 'info', html: esc(t(sv.late ? 'shiftLateHint' : 'shiftRateHint')), cls: 'hx-small'});
+    } else {
+      rows.push(prevRow);
+      if (daysRow) rows.push(daysRow);
+      if (k.shifts && k.shifts.every(function (x) { return isNum(x.part); })) {
+        // Taxa do dia por turno: T1 + T2 + T3 = taxa do dia (no prazo: parte do fora do prazo).
+        // Remessas sem turno (Avaria: registradas em outras bases, sem horário) entram como uma parte própria:
+        // a soma das partes fecha com a taxa do dia (no prazo: com o fora do prazo).
+        var whole = isNum(k.rate) ? (late ? Core.rateScale(c.goal) - k.rate : k.rate) : null;
+        var sumP = k.shifts.reduce(function (a, x) { return a + x.part; }, 0), naP = isNum(whole) ? whole - sumP : 0;
+        var items = k.shifts.map(function (x) { return '<span>' + x.shift + ' <b>' + fmtRate(x.part, c.goal) + '</b></span>'; });
+        if (isNum(whole) && naP > Math.max(whole * 0.002, 1e-9)) items.push('<span>' + esc(vlabel('shift', 'N/A')) + ' <b>' + fmtRate(naP, c.goal) + '</b></span>');
+        rows.push({icon: 'layers', cls: 'hx-partsrow', html: esc(t(late ? 'latePartsLine' : 'partsLine')) + ':<span class="hx-parts">' + items.join(' + ') +
+          (isNum(whole) ? ' = <span><b>' + fmtRate(whole, c.goal) + '</b></span>' : '') + '</span>'});
+      }
+      rows.push({icon: 'info', html: esc(t('officialNotFiltered'))});
+    }
+    if (state.rateView && state.rateView.kind && !isNum(k.rate)) rows.push({icon: 'warn', cls: 'hx-small', html: esc(t(state.okFetching ? 'okFetching' : 'okMissing', {o: state.rateView.label, r: orderKindWhy()}))});
     // V3.35 (Avaria): a linha do JMS do dia (da opção escolhida) — os mesmos 3 números da tabela do JMS, para conferir.
     if (c.orderKinds && day) {
       var jr = activeRates().filter(function (r) { return r.date === state.to; })[0];
-      if (jr && isNum(jr.rate)) heroSubs += '<div class="kpi-sub hm-sync">' + esc(t('jmsRowLine', {q: fmtInt(jr.totalCount), e: fmtInt(jr.errorCount), r: fmtNum(Number(jr.rate), 2)})) + '</div>';
+      if (jr && isNum(jr.rate)) rows.push({icon: 'table', cls: 'hx-small', html: esc(t('jmsRowLine', {q: fmtInt(jr.totalCount), e: fmtInt(jr.errorCount), r: fmtNum(Number(jr.rate), 2)}))});
     }
     var heroLabel = sv ? t(sv.late ? (day ? 'shiftLateOf' : 'shiftLateOfPeriod') : (day ? 'shiftRateOf' : 'shiftRateOfPeriod'), {s: sName, date: fmtDate(state.to, true)}) +
         (day ? '' : ' · ' + fmtRange(state.from, state.to))
       : day ? tx(c, 'rateOfDay', {date: fmtDate(state.to, true)}) : tx(c, 'rateOfPeriod') + ' · ' + fmtRange(state.from, state.to);
-    var shareChip = sv ? '<div class="shift-share">' + sv.shifts.map(function (s) { return '<i style="background:' + SHIFT_COLORS[s] + '"></i>'; }).join('') +
-      '<b>' + fmtPct(sv.share, 1) + '</b> ' + esc(t('shiftShare', {s: sName})) + '</div>' : '';
-    var hero = '<article class="kpi kpi-hero"><div class="kpi-body">' +
-      '<div class="kpi-label">' + icon('gauge') + esc(heroLabel +
-        (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) : '')) + '</div>' +
-      // V4.31 (pedido): sem espaço vazio — taxa grande e as informações centralizadas no meio do cartão.
-      '<div class="hero-main">' + shareChip + '<div class="kpi-value">' + fmtRate(k.rate, c.goal) + '</div>' + heroSubs +
-      '<div class="hero-row"><span class="status-pill ' + status + '">' + pill + '</span>' + (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '') + '</div></div>' +
-      '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
+    // ppm (Avaria): a unidade menor, ao lado do número.
+    var heroVal = c.goal && c.goal.unit === 'ppm' && isNum(k.rate) ? esc(fmtNum(k.rate, c.goal.digits || 2)) + '<small class="hx-unit">ppm</small>' : fmtRate(k.rate, c.goal);
+    var hero = heroCardHtml({icon: 'gauge', value: heroVal, rows: rows,
+      title: heroLabel + (state.rateView && state.rateView.kind ? ' · ' + vlabel(c.orderKinds.field, state.rateView.label) : ''),
+      pills: '<span class="status-pill ' + status + '">' + pill + '</span>' +
+        (hasGoal(c.goal) || !isNum(k.rate) ? '<span class="hero-goal">' + esc(goalLabel(c.goal)) + '</span>' : '')});
 
     var errLabel = k.filtered ? tx(c, 'errorsFiltered') : day ? tx(c, 'errorsDay') : tx(c, 'errorsPeriod');
     var errSub = k.filtered ? t('distinctShipments') : t('officialJms') + (isNum(k.officialErrors) && k.detailTotal && k.detailTotal !== k.officialErrors ? ' · ' + t('detailLoaded', {n: fmtInt(k.detailTotal)}) : '');
@@ -1852,14 +1878,13 @@
     var comparable = prev.length === len;
     var prevLbl = (day ? t('usPrevDay', {d: fmtDate(pTo, true)}) : t('usPrevPeriod')) + (!comparable && prev.length ? ' (' + t('usDaysOf', {a: prev.length, b: len}) + ')' : '');
     var share = rows.length ? miss.length / rows.length * 100 : null;
-    var heroSubs = '<div class="kpi-sub">' + esc(t('usMissOf', {p: fmtPct(share, 1), n: fmtInt(rows.length)})) + '</div>' +
-      '<div class="kpi-sub">' + esc(prevLbl) + ': <b>' + fmtInt(prevMiss) + '</b>' + (filtered || !comparable ? '' : ' ' + qtyDelta(miss.length, prevMiss, true)) +
-      (isNum(prevTrips) ? ' · ' + esc(t('usOfTrips', {n: fmtInt(prevTrips)})) : '') + '</div>' +
-      (filtered ? '<div class="kpi-sub">' + esc(t('usFilteredNote')) + '</div>' : '');
-    var hero = '<article class="kpi kpi-hero"><div class="kpi-body"><div class="kpi-label">' + icon('unseal') +
-      esc(day ? t('usMissDay', {date: fmtDate(state.to, true)}) : t('usMissPeriod') + ' · ' + fmtRange(state.from, state.to)) + '</div>' +
-      '<div class="kpi-value">' + fmtInt(miss.length) + '</div>' + heroSubs +
-      '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="sparkCanvas" aria-label="' + esc(t('spark')) + '"></canvas></div></div></article>';
+    // V4.31: mesmo formato do cartão da taxa do dia (print) — a parte dos IDs na pílula, o dia anterior à direita.
+    var urows = [{icon: 'calendar', html: esc(prevLbl) + ': <b class="hx-em">' + fmtInt(prevMiss) + '</b>' + (filtered || !comparable ? '' : ' ' + qtyDelta(miss.length, prevMiss, true)) +
+      (isNum(prevTrips) ? ' · ' + esc(t('usOfTrips', {n: fmtInt(prevTrips)})) : '')}];
+    if (filtered) urows.push({icon: 'info', html: esc(t('usFilteredNote'))});
+    var hero = heroCardHtml({icon: 'unseal', value: fmtInt(miss.length), rows: urows,
+      title: day ? t('usMissDay', {date: fmtDate(state.to, true)}) : t('usMissPeriod') + ' · ' + fmtRange(state.from, state.to),
+      pills: '<span class="hero-goal">' + esc(t('usMissOf', {p: fmtPct(share, 1), n: fmtInt(rows.length)})) + '</span>'});
     var medSub = esc(t('usMedianSub', {n: fmtInt(timed.length)})) + (day ? '<br>' + esc(prevLbl) + ': <b>' + esc(fmtDur(prevMed)) + '</b>' +
       (isNum(med) && isNum(prevMed) && !filtered ? ' ' + qtyDelta(med, prevMed, true) : '') : '');
     var medCard = kpiCard('timer', t('usMedian'), esc(fmtDur(med)), medSub, 'us-median');
@@ -2217,29 +2242,51 @@
     var sub = def.sub ? metricSum(def.sub, state.from, state.to) : null, prevSub = def.sub ? metricSum(def.sub, k.prevFrom, k.prevTo) : null;
     var prevWord = day ? t('hmPrev') : t('hmPrevPeriod'), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
     var label = day ? L(def.label) + ' · ' + (isLive() ? t('srcLive') : fmtDate(state.to, true)) : L(def.labelPeriod) + ' · ' + fmtRange(state.from, state.to);
-    var big = cur, lines = '';
+    // V4.31: o cartão vermelho (kpi-hero) usa o formato do cartão da taxa do dia (print): cada informação numa linha
+    // com ícone, à direita. `lines` continua para o cartão branco (kpi-big).
+    var big = cur, lines = '', rows = [];
+    var add = function (ic, html, line, rcls) { lines += line; rows.push({icon: ic, html: html, cls: rcls}); };
     // V4.22.12: com o filtro de def.byFilter (ex.: balança no Sorter), o número grande vem de outra lista (quantidade alimentada).
     var bfk = def.byFilter ? Object.keys(def.byFilter).filter(function (x) { return f[x] && f[x].length; })[0] : null;
     var col = bfk ? def.byFilter[bfk].column : def.column;
     if (bfk) label = L(def.byFilter[bfk].label) + ' · ' + (day ? fmtDate(state.to, true) : fmtRange(state.from, state.to));
+    var subPct = function (wrapOpen, wrapClose) {
+      return isNum(sub) && cur && !def.subNoPct ? wrapOpen + fmtPct(sub / cur * 100, 1) + ' ' + esc(def.subOf ? L(def.subOf) : t('hmOfDay')) + wrapClose : '';
+    };
     if (filtersFor(f, col).length) {
       var fq = listQty(col);
       big = fq || null;
       label = t('hmFiltered', {label: label});
-      if (!fq) lines += '<div class="kpi-sub">' + esc(t('hmNoDetail')) + '</div>';
+      if (!fq) add('warn', esc(t('hmNoDetail')), '<div class="kpi-sub">' + esc(t('hmNoDetail')) + '</div>', 'hx-small');
       // V4.18 (Criação de Lotes): com filtro, as remessas dos lotes da lista filtrada (soma de def.subSum).
-      if (def.subSum && fq) lines += '<div class="kpi-sub">' + esc(L(def.subLabel)) + ': <b>' + fmtInt(listSum(def.column, def.subSum)) + '</b></div>';
-      lines += '<div class="hero-metric"><span>' + esc(t('hmOfficial')) + '</span><b>' + fmtInt(cur) + '</b>' + (def.sub ?
-        '<small>' + esc(L(def.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + (isNum(sub) && cur && !def.subNoPct ? ' (' + fmtPct(sub / cur * 100, 1) + ' ' + esc(def.subOf ? L(def.subOf) : t('hmOfDay')) + ')' : '') + '</small>' : '') + '</div>';
+      if (def.subSum && fq) {
+        var ss = esc(L(def.subLabel)) + ': <b>' + fmtInt(listSum(def.column, def.subSum)) + '</b>';
+        add('layers', ss, '<div class="kpi-sub">' + ss + '</div>');
+      }
+      add('info', esc(t('hmOfficial')) + ': <b class="hx-em">' + fmtInt(cur) + '</b>' +
+          (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + subPct(' (', ')') : ''),
+        '<div class="hero-metric"><span>' + esc(t('hmOfficial')) + '</span><b>' + fmtInt(cur) + '</b>' + (def.sub ?
+          '<small>' + esc(L(def.subLabel)) + ': <b>' + fmtInt(sub) + '</b>' + subPct(' (', ')') + '</small>' : '') + '</div>');
     } else if (def.sub) {
-      lines += '<div class="hero-metric"><span>' + esc(L(def.subLabel)) + '</span><b>' + fmtInt(sub) + '</b>' +
-        (isNum(sub) && cur && !def.subNoPct ? '<em>' + fmtPct(sub / cur * 100, 1) + ' ' + esc(def.subOf ? L(def.subOf) : t('hmOfDay')) + '</em>' : '') + '</div>';
+      add('layers', esc(L(def.subLabel)) + ': <b class="hx-em">' + fmtInt(sub) + '</b>' + subPct(' · ', ''),
+        '<div class="hero-metric"><span>' + esc(L(def.subLabel)) + '</span><b>' + fmtInt(sub) + '</b>' + subPct('<em>', '</em>') + '</div>');
+    }
+    // V3.34: Tempo real (Sem Movimentação) — só a linha de agora: sem dia anterior e sem a minicurva de vários dias.
+    var live = isLive();
+    if (!live) {
+      var ph = esc(prevWord) + ' (' + esc(prevWhen) + '): <b class="hx-em">' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
+        (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +
+        (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days})));
+      add('calendar', ph, '<div class="kpi-sub hm-prev">' + ph + '</div>');
     }
     // V3.26: quando o número foi consultado no JMS (dia escolhido; no período, o mais antigo dos dias) — para comparar
     // com a tela do JMS sabendo de que hora é o número do painel.
     var syncs = activeRates().filter(function (r) { return r.date >= state.from && r.date <= state.to && r.syncedAt && r.metrics && isNum(r.metrics[def.key]); })
       .map(function (r) { return r.syncedAt; }).sort();
-    var syncLine = syncs.length ? '<div class="kpi-sub hm-sync">' + esc(t(day ? 'hmSynced' : 'hmSyncedPeriod', {t: fmtTs(day ? syncs[syncs.length - 1] : syncs[0])})) + '</div>' : '';
+    if (syncs.length) {
+      var sy = esc(t(day ? 'hmSynced' : 'hmSyncedPeriod', {t: fmtTs(day ? syncs[syncs.length - 1] : syncs[0])}));
+      add('history', sy, '<div class="kpi-sub hm-sync">' + sy + '</div>', 'hx-small');
+    }
     // Sem Movimentação (V3.28): o "Horário da última operação" mais recente da tabela principal do JMS (AAAAMMDDhhmmss).
     // V3.32: também no Histórico (a linha do horário mais recente do dia mostrado) e o período escolhido.
     if (cfg() && cfg().refTypes) {
@@ -2248,21 +2295,24 @@
       var rs = rt ? String(Math.round(Number(rt.metrics.refTime))) : '', ri = rt && isNum(rt.metrics.refType) ? Number(rt.metrics.refType) : 0;
       var rtype = ri && cfg().refTypes && cfg().refTypes[ri - 1] ? vlabel('scanType', cfg().refTypes[ri - 1]) : '—';
       var nRows = rt && rt.types ? rt.types.length : 0;
-      if (rs.length === 14) syncLine += '<div class="kpi-sub hm-sync">' + esc(t(hist ? 'hmRefTimeHist' : 'hmRefTime', {type: rtype, t: rs.slice(6, 8) + '/' + rs.slice(4, 6) + '/' + rs.slice(0, 4) + ' ' +
-        rs.slice(8, 10) + ':' + rs.slice(10, 12) + ':' + rs.slice(12, 14)})) + (nRows > 1 ? ' ' + esc(t('hmRefOf', {n: nRows})) : '') + '</div>';
-      if (!hist && !isNum(cur) && state.to === ((state.boot && state.boot.today) || state.to)) syncLine += '<div class="kpi-sub">' + esc(t('hmSnapWait')) + '</div>';
-      if (hist && state.hist.from && state.hist.from !== state.hist.to) {
-        syncLine += '<div class="kpi-sub hm-sync">' + esc(t('histRangeNote', {a: fmtDate(state.hist.from, true), b: fmtDate(state.hist.to, true), d: fmtDate(state.to, true)})) + '</div>';
+      if (rs.length === 14) {
+        var rf = esc(t(hist ? 'hmRefTimeHist' : 'hmRefTime', {type: rtype, t: rs.slice(6, 8) + '/' + rs.slice(4, 6) + '/' + rs.slice(0, 4) + ' ' +
+          rs.slice(8, 10) + ':' + rs.slice(10, 12) + ':' + rs.slice(12, 14)})) + (nRows > 1 ? ' ' + esc(t('hmRefOf', {n: nRows})) : '');
+        add('idealTime', rf, '<div class="kpi-sub hm-sync">' + rf + '</div>', 'hx-small');
       }
-      if (hist && !rt) syncLine += '<div class="kpi-sub">' + esc(t('histNoRows', {a: fmtDate(state.hist.from || state.to, true), b: fmtDate(state.hist.to || state.to, true)})) + '</div>';
+      if (!hist && !isNum(cur) && state.to === ((state.boot && state.boot.today) || state.to)) add('info', esc(t('hmSnapWait')), '<div class="kpi-sub">' + esc(t('hmSnapWait')) + '</div>', 'hx-small');
+      if (hist && state.hist.from && state.hist.from !== state.hist.to) {
+        var hn = esc(t('histRangeNote', {a: fmtDate(state.hist.from, true), b: fmtDate(state.hist.to, true), d: fmtDate(state.to, true)}));
+        add('info', hn, '<div class="kpi-sub hm-sync">' + hn + '</div>', 'hx-small');
+      }
+      if (hist && !rt) {
+        var hr = esc(t('histNoRows', {a: fmtDate(state.hist.from || state.to, true), b: fmtDate(state.hist.to || state.to, true)}));
+        add('warn', hr, '<div class="kpi-sub">' + hr + '</div>', 'hx-small');
+      }
     }
-    // V3.34: Tempo real (Sem Movimentação) — só a linha de agora: sem dia anterior e sem a minicurva de vários dias.
-    var live = isLive();
-    if (!live) lines += '<div class="kpi-sub hm-prev">' + esc(prevWord) + ' (' + esc(prevWhen) + '): <b>' + fmtInt(prev) + '</b> ' + dlt(cur, prev, false) +
-      (def.sub ? ' · ' + esc(L(def.subLabel)) + ': <b>' + fmtInt(prevSub) + '</b> ' + dlt(sub, prevSub, true) : '') +
-      (comparable ? '' : '<br>' + esc(t('daysWithData', {a: metricDayCount(def.key, k.prevFrom, k.prevTo), b: k.days}))) + '</div>';
-    lines += syncLine;
-    return '<article class="kpi ' + cls + ' hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon(def.icon || (def.column === 'Chegou' ? 'check' : 'arrival_flow')) + esc(label) + '</div>' +
+    var ic = def.icon || (def.column === 'Chegou' ? 'check' : 'arrival_flow');
+    if (cls === 'kpi-hero') return heroCardHtml({icon: ic, title: label, value: fmtInt(big), rows: rows, sparkId: sparkId, spark: !live});
+    return '<article class="kpi ' + cls + ' hero-qty"><div class="kpi-body"><div class="kpi-label">' + icon(ic) + esc(label) + '</div>' +
       '<div class="kpi-value">' + fmtInt(big) + '</div>' + lines +
       (live ? '' : '<div class="spark" title="' + esc(t('spark')) + '"><canvas id="' + sparkId + '" aria-label="' + esc(t('spark')) + '"></canvas></div>') + '</div></article>';
   }
@@ -2678,6 +2728,23 @@
     var ic = n > 0 ? icon('up') : n < 0 ? icon('down') : '';
     return '<span class="delta">' + ic + fmtNum(Math.abs(n), digits === undefined ? 1 : digits) + '%</span>';
   }
+  /**
+   * V4.31: minilinha do cartão vermelho como no print — linha branca, pontos brancos cheios, área embaixo em degradê
+   * (mais clara perto da linha) e a meta tracejada; espessuras proporcionais à largura do cartão.
+   */
+  function sparkStyle(canvas) {
+    var w = (canvas.parentNode && canvas.parentNode.clientWidth) || 600, cl = function (v, a, b) { return Math.max(a, Math.min(b, v)); };
+    var dot = cl(w * 0.007, 3, 6.5), line = cl(w * 0.0031, 2, 3.6);
+    return {dot: dot, line: line, goal: cl(w * 0.0011, 1.1, 1.8), dash: [cl(w * 0.0065, 4, 8), cl(w * 0.005, 3, 6)],
+      pad: {top: dot + line + 2, bottom: 0, left: dot + 1, right: dot + 1}};
+  }
+  function sparkFill(ctx) {
+    var ch = ctx.chart, a = ch.chartArea;
+    if (!a) return 'rgba(255,255,255,.14)';
+    var g = ch.ctx.createLinearGradient(0, a.top, 0, a.bottom);
+    g.addColorStop(0, 'rgba(255,255,255,.3)'); g.addColorStop(0.55, 'rgba(255,255,255,.15)'); g.addColorStop(1, 'rgba(255,255,255,.02)');
+    return g;
+  }
   function drawSpark(c) {
     destroyChart('spark');
     var canvas = $('#sparkCanvas');
@@ -2697,13 +2764,15 @@
     }
     if (!evo.points.some(function (p) { return p.rate !== null; })) return;
     var gSpark = state.shiftInfo ? null : goalLine(c.goal, evo.points.map(function (p) { return p.rate; }));
+    var sp = sparkStyle(canvas);
     state.charts.spark = new Chart(canvas, {
       type: 'line',
       data: {labels: evo.labels.map(function (d) { return fmtDate(d); }), datasets: [
-        {data: evo.points.map(function (p) { return p.rate; }), borderColor: '#fff', borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 2.5, pointBackgroundColor: '#fff', spanGaps: true, fill: true, backgroundColor: 'rgba(255,255,255,.12)'},
-        {data: evo.points.map(function () { return gSpark; }), borderColor: 'rgba(255,255,255,.6)', borderDash: [4, 4], borderWidth: 1.2, pointRadius: 0}
+        {data: evo.points.map(function (p) { return p.rate; }), borderColor: '#fff', borderWidth: sp.line, cubicInterpolationMode: 'monotone', pointRadius: sp.dot, pointHoverRadius: sp.dot + 1.5,
+          pointBackgroundColor: '#fff', pointBorderWidth: 0, spanGaps: true, fill: 'start', backgroundColor: sparkFill},
+        {data: evo.points.map(function () { return gSpark; }), borderColor: 'rgba(255,255,255,.62)', borderDash: sp.dash, borderWidth: sp.goal, pointRadius: 0, fill: false}
       ]},
-      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 700}, layout: {padding: {top: 6, bottom: 2}},
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 700}, layout: {padding: sp.pad},
         plugins: {legend: {display: false}, datalabels: {display: false}, tooltip: {displayColors: false, filter: function (i) { return i.datasetIndex === 0; },
           callbacks: {label: function (ctx) { return fmtRate(ctx.raw, c.goal); }}}},
         scales: {x: {display: false}, y: {display: false, grace: '15%'}}}
@@ -2716,13 +2785,13 @@
     activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[key])) byDate[r.date] = Number(r.metrics[key]); });
     var days = Core.dateRange(from, to), vals = days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; });
     if (!vals.some(isNum)) return;
-    var col = color || '#fff', white = col === '#fff';
+    var col = color || '#fff', white = col === '#fff', sp = sparkStyle(canvas);
     state.charts[slot || 'spark'] = new Chart(canvas, {
       type: 'line',
       data: {labels: days.map(function (d) { return fmtDate(d); }), datasets: [
-        {data: vals, borderColor: col, borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 2.5, pointBackgroundColor: col, spanGaps: true, fill: true,
-          backgroundColor: white ? 'rgba(255,255,255,.12)' : 'rgba(230,0,18,.08)'}]},
-      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 700}, layout: {padding: {top: 6, bottom: 2}},
+        {data: vals, borderColor: col, borderWidth: white ? sp.line : 2, cubicInterpolationMode: 'monotone', pointRadius: white ? sp.dot : 2.5, pointBackgroundColor: col,
+          pointBorderWidth: 0, spanGaps: true, fill: white ? 'start' : true, backgroundColor: white ? sparkFill : 'rgba(230,0,18,.08)'}]},
+      options: {responsive: true, maintainAspectRatio: false, animation: {duration: 700}, layout: {padding: white ? sp.pad : {top: 6, bottom: 2}},
         plugins: {legend: {display: false}, datalabels: {display: false}, tooltip: {displayColors: false, callbacks: {label: function (ctx) { return fmtInt(ctx.raw); }}}},
         scales: {x: {display: false}, y: {display: false, grace: '15%'}}}
     });

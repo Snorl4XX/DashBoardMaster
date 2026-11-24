@@ -4,6 +4,26 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.31.0 — Cartão da taxa do dia no formato do print
+
+Pedido: "Mudar o cartão que mostra a taxa do dia para o formato do print que anexei", em todos os painéis do principal.
+
+- **Cabeçalho:** ícone num quadrado, um traço e o título em maiúsculas ("TAXA DO DIA 23/11/2026").
+- **À esquerda:** a taxa bem grande e, embaixo, as pílulas "✕ Fora da meta" / "✓ Na meta" e "Meta ≤ 0,50%".
+- **À direita**, depois de um traço vertical, uma informação por linha, com ícone e separador:
+  - 📅 Dia anterior: **0,84%** · 22/11/2026;
+  - camadas: Por turno: T1 **0,13%** + T2 **0,19%** + T3 **0,31%** = **0,63%**;
+  - ⓘ Taxa oficial do JMS · não muda com filtros (agora sempre aparece).
+- **Embaixo**, de ponta a ponta: a minilinha dos 14 dias, com pontos brancos, área em degradê e a meta tracejada.
+- As medidas acompanham a largura do cartão, como no print. Na tela de 1920 px ele fica igual à imagem. Em telas menores
+  os textos da direita podem quebrar em duas linhas; no celular, o número fica em cima e as informações embaixo.
+- Vale para os 10 painéis do principal: Envio Errado, Triagem Errada, Falta de Bipagem no Recebimento e na Expedição,
+  SC → SC, SC → DC, Avaria (ppm com a unidade menor), Sem Movimentação e os dois Deslacres (mesmo formato, com os números
+  deles: quantidade, dia anterior e as linhas de consulta do JMS).
+- Com filtro de turno, as linhas da direita mostram a participação do turno, a taxa do dia (todos os turnos), o dia
+  anterior do turno e a explicação; no período, entra a linha "N de N dias com taxa · Último dia".
+- Substitui a proposta anterior do cartão centralizado (não aprovada).
+
 ## V4.30.0 — Painel PA SHEIN (falta de bipagem no recebimento e na expedição)
 
 Pedido: "Desenvolver um dashboard para mostrar os dados de falta de bipagem no recebimento e expedição", seguindo o padrão do
