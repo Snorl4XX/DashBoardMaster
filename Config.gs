@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.33.0',
+  VERSION: '4.33.1',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1804,7 +1804,7 @@ const ALL_INDICATORS_ = Object.freeze({
         'present', 'program', 'presenceRate', 'efficiency', 'headcountRows',
         'presentT1', 'presentT2', 'presentT3', 'programT1', 'programT2', 'programT3',
         'presentAdm', 'presentAssist', 'presentOper', 'presentTemp', 'presentDiar',
-        'programAdm', 'programAssist', 'programOper', 'programTemp', 'programDiar'],
+        'programAdm', 'programAssist', 'programOper', 'programTemp', 'programDiar', 'hcLastDay', 'feishuFail'],
       percentMetrics: []},
     // Poucas linhas por dia (3 turnos): todos os dias com a lista, lida de novo junto com o resumo.
     detail: {days: 0, refreshHours: 1, maxPerDay: 1000},

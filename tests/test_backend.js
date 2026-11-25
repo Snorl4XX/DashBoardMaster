@@ -5232,7 +5232,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     [DE0]: {T1: [[3, 3], [5, 6], [40, 44], [12, 15], [8, 9]], T2: [[2, 3], [4, 5], [35, 40], [10, 12], [6, 8]], T3: [[1, 1], [3, 3], [30, 33], [8, 10], [5, 6]]},
     [DE]: {T1: [[3, 3], [6, 6], [42, 44], [14, 15], [9, 9]], T2: [[3, 3], [5, 5], [38, 40], [11, 12], [7, 8]], T3: [[1, 1], [2, 3], [28, 33], [9, 10], [4, 6]]}
   };
-  const PROC = {[DE0]: 12345, [DE]: 15678};
+  const DE1 = '2026-11-25', PROC = {[DE0]: 12345, [DE]: 15678, [DE1]: 9999};
   const items = [];
   let rid = 0;
   const sp = (d, hm) => Date.parse(d + 'T' + hm + ':00-03:00');
@@ -5287,7 +5287,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     tb.colunas.data === 'Data 日期' && tb.colunas.turno === 'Turno 班次' && tb.colunas.funcoes.every(x => /presentes ✓ \/ programados ✓/.test(x)) && !tb.aviso &&
     tbJs.indexOf('segredo-teste') < 0 && tbJs.indexOf('Pessoa Teste') < 0 && cE.__state.props.FEISHU_BASE_APP === 'WIKITESTE|bascnTESTE',
     'V4.33 Eficiência: teste da base do Feishu (wiki → base, colunas, últimos dias, linha repetida), sem o App Secret nem nomes', tb);
-  cE.queueHistory(DE0, DE, true);
+  cE.queueHistory(DE0, DE1, true);
   runAll(cE);
   const keysE = vmE.runInContext('Object.keys(INDICATORS)', cE);
   const rE = cE.getRateDay_('efficiency', DE), mE = (rE || {}).metrics || {}, m0 = (cE.getRateDay_('efficiency', DE0) || {}).metrics || {};
@@ -5324,6 +5324,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cS = ctxE({FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_BASE_LINK: LINK}), tS = cS.testarBaseFeishu();
   secret = 'segredo-teste';
   const tL = ctxE({FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_BASE_LINK: 'https://empresa-teste.feishu.cn/wiki/WIKITESTE'}).testarBaseFeishu();
+  // V4.33.1: dia do JMS sem linhas na base → o último dia da base (para o cartão dizer até quando ela vai); Feishu não lido → feishuFail.
+  const m1 = (cE.getRateDay_('efficiency', DE1) || {}).metrics || {};
+  check(m1.processed === PROC[DE1] && m1.present === null && m1.efficiency === null && m1.hcLastDay === Number(DE.replace(/-/g, '')) && m1.feishuFail === 0 &&
+    mE.hcLastDay === Number(DE.replace(/-/g, '')) && mN.feishuFail === 1,
+    'V4.33.1 Eficiência: dia sem linhas na base guarda o último dia da base; sem ler o Feishu, feishuFail', {m1, mN});
   check(mN.processed === PROC[DE] && mN.present === null && mN.efficiency === null && cN.allTabRows_('LOG').some(r => /Eficiência: colaboradores do Feishu não lidos/.test(String(r[4]))) &&
     tN.ok === false && /falta App ID, App Secret, link da base/.test(tN.erro) && tS.ok === false && /confira o App ID e o App Secret/.test(tS.erro) &&
     tL.ok === false && /\?table=tbl/.test(tL.erro),

@@ -4,6 +4,13 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.33.1 — Eficiência: o cartão diz por que faltam os colaboradores
+
+Pedido: "Não está pegando os dados" (print: Qtd processada do JMS certa, colaboradores vazios em 24/11; a base só tinha linhas de
+25/11). Num dia sem colaboradores, o cartão vermelho agora diz o motivo:
+- a base do Feishu não foi lida → "clique em Salvar e testar a base" (Configurações mostra o erro);
+- a base foi lida mas não tem linhas desse dia → "o último dia na base é DD/MM/AAAA".
+
 ## V4.33.0 — Painel Eficiência do SP GRU (pacote separado)
 
 Pedido: "Desenvolver um dashboard que mostre a eficiência do SP GRU", com os dados da base do Feishu (colaboradores presentes e

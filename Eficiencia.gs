@@ -253,7 +253,9 @@ function efHeadcountDay_(isoDate, items) {
     if (!b || r.sent > b.sent || (r.sent === b.sent && r.order > b.order)) best[r.shift] = r;
   });
   const rows = Object.keys(best).sort().map(k => best[k]);
-  return {rows: rows, columns: hc.columns, linhasDoDia: hc.rows.filter(r => r.date === isoDate).length};
+  // V4.33.1: o último dia que a base tem (para o painel dizer, num dia sem linhas, até quando a base vai).
+  const lastDate = hc.rows.reduce((m, r) => (r.date > m ? r.date : m), '');
+  return {rows: rows, columns: hc.columns, linhasDoDia: hc.rows.filter(r => r.date === isoDate).length, lastDate: lastDate};
 }
 /** Números do dia a partir das linhas do Feishu (por turno e por função). */
 function efHeadcountMetrics_(day) {
@@ -267,6 +269,9 @@ function efHeadcountMetrics_(day) {
     EF_ROLES_.forEach(x => { add('present' + x.key, r.roles[x.key].present); add('program' + x.key, r.roles[x.key].program); });
   });
   m.presenceRate = m.present !== null && m.program > 0 ? Math.round(m.present / m.program * 10000) / 100 : null;
+  // V4.33.1: último dia da base (AAAAMMDD) e a leitura do Feishu certa (feishuFail 0).
+  m.hcLastDay = day.lastDate ? Number(day.lastDate.replace(/-/g, '')) : null;
+  m.feishuFail = 0;
   return m;
 }
 
@@ -302,7 +307,7 @@ function efSummaryFrom_(indicatorKey, isoDate, jms, hm, feishuErro) {
   const raw = Object.assign({date: isoDate, source: 'JMS+FEISHU'}, jms || {}, hm || {});
   Object.keys(EF_JMS_FIELDS_).forEach(k => { if (raw[k] === undefined) raw[k] = null; });
   raw.efficiency = has && raw.processed !== null && hm.present > 0 ? Math.round(raw.processed / hm.present * 100) / 100 : null;
-  if (feishuErro) raw.feishuErro = feishuErro.slice(0, 200);
+  if (feishuErro) { raw.feishuErro = feishuErro.slice(0, 200); raw.feishuFail = 1; }
   // A "taxa" do dia não aparece neste painel (cartões próprios): a eficiência, ou 0 enquanto faltam os colaboradores.
   return {indicator: indicatorKey, date: isoDate, rate: raw.efficiency === null ? 0 : raw.efficiency,
     errorCount: has ? hm.present : 0, totalCount: raw.processed === null ? 0 : raw.processed, empty: false, raw: raw};
