@@ -4753,46 +4753,53 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     const tot = (h, d) => ['A', 'B'].reduce((a, dv) => a + ((hourRow(dv, d || DS, 0, h) || {}).sorter_sorttotal || 0), 0);
     const Dm1 = new Date(Date.parse(DS + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
     // Números esperados do T1 (06h–14h de DS): total, a hora mais produzida e a balança com o maior número no turno.
+    // V4.32.1: as 3 horas e as 3 balanças que mais produziram (empate: a hora que veio antes; a balança de menor número, A antes do B).
     const turnoEsperado = hs => {
       const total = hs.reduce((a, x) => a + tot(x.h, x.d), 0);
-      const top = hs.reduce((m, x) => (tot(x.h, x.d) > 0 && (!m || tot(x.h, x.d) > m.q) ? {h: x.h, q: tot(x.h, x.d)} : m), null);
+      const tops = hs.map((x, i) => ({h: x.h, q: tot(x.h, x.d), i})).filter(o => o.q > 0).sort((a, b) => b.q - a.q || a.i - b.i).slice(0, 3);
       const bal = [];
       ['A', 'B'].forEach(dv => { for (let n = 1; n <= 12; n++) bal.push({name: 'Sorter ' + dv + ' · Balança ' + String(n).padStart(2, '0'), n,
         q: hs.reduce((a, x) => a + ((hourRow(dv, x.d, n, x.h) || {}).sorter_sorttotal || 0), 0)}); });
       bal.sort((a, b) => b.q - a.q || (a.name < b.name ? -1 : 1));
-      return {total, top, bal: bal[0]};
+      return {total, top: tops[0], tops, bal: bal[0], bals: bal.slice(0, 3)};
     };
     const hT1 = [6, 7, 8, 9, 10, 11, 12, 13].map(h => ({h, d: DS})), e1 = turnoEsperado(hT1);
     const hh = h => String(h).padStart(2, '0') + 'h–' + String((h + 1) % 24).padStart(2, '0') + 'h';
-    const pctTxt = q => ' (' + String(Math.round(q / e1.total * 1000) / 10).replace('.', ',') + '% do turno / 占班次)';
-    const n13 = cT.feishuTurnoTick_(at(13, 7)), n14a = cT.feishuTurnoTick_(at(14, 3)), hourly = cT.feishuSorterTick_(at(14, 7));
-    const s14 = cT.feishuTurnoTick_(at(14, 7)), s14b = cT.feishuTurnoTick_(at(14, 30));
+    const pctTxt = q => ' (' + String(Math.round(q / e1.total * 1000) / 10).replace('.', ',') + '%)';
+    // V4.32.1 (pedido "mudar o horário de envio para a hora exata"): sai às 14:00, não às 14:05.
+    const n13 = cT.feishuTurnoTick_(at(13, 7)), n14a = cT.feishuTurnoTick_(at(13, 59)), hourly = cT.feishuSorterTick_(at(14, 0));
+    const s14 = cT.feishuTurnoTick_(at(14, 0)), s14b = cT.feishuTurnoTick_(at(14, 30));
     const m1 = (sent[0] || {}).p || {}, t1 = JSON.stringify(m1.card || {});
     const sign = require('crypto').createHmac('sha256', m1.timestamp + '\n' + SEG_T).update('').digest('base64');
     const fields = ((m1.card || {}).elements || []).filter(e => e.fields).map(e => e.fields.map(f => f.text.content))[0] || [];
     check(n13 === null && n14a === null && hourly === null && s14 && s14.ok && s14b === null && sent.length === 1 && sent[0].url === HOOK_T && m1.sign === sign &&
       /Fechamento do turno T1 \(06h–14h\)/.test(m1.card.header.title.content) &&
       t1.indexOf('📦 **Total produzido no turno / 班次总产量**\\n**' + cT.feishuN_(e1.total) + '** volumes (Sorter A ') >= 0 &&
-      t1.indexOf('⏰ **Hora mais produzida / 产量最高时段**\\n**' + hh(e1.top.h) + '**: **' + cT.feishuN_(e1.top.q) + '** volumes' + pctTxt(e1.top.q)) >= 0 &&
-      t1.indexOf('🏆 **Balança com maior número no turno / 班次供包量最多的供包台**\\n' + e1.bal.name + ' / 供包台' + String(e1.bal.n).padStart(2, '0') +
+      t1.indexOf('⏰ **3 horários mais produzidos / 产量最高的3个时段** (% do turno / 占班次)\\n🥇 **' + hh(e1.top.h) + '**') >= 0 &&
+      e1.tops.length === 3 && e1.tops.every((o, i) => t1.indexOf(['🥇', '🥈', '🥉'][i] + ' **' + hh(o.h) + '**: **' + cT.feishuN_(o.q) + '** volumes' + pctTxt(o.q) + ' · Sorter A ') >= 0) &&
+      t1.indexOf('🏆 **3 balanças mais produzidas no turno / 班次供包量最多的3个供包台** (% do turno / 占班次)\\n🥇 ' + e1.bal.name + ' / 供包台' + String(e1.bal.n).padStart(2, '0') +
         ': **' + cT.feishuN_(e1.bal.q) + '**' + pctTxt(e1.bal.q)) >= 0 &&
-      fields.length === 8 && fields.every((f, i) => f.replace('⭐ ', '') === hh(6 + i) + ': **' + cT.feishuN_(tot(6 + i)) + '**') &&
-      fields.filter(f => /^⭐ /.test(f)).length === 1 && fields[e1.top.h - 6].indexOf('⭐ ') === 0 && t1.indexOf('06:00 às') >= 0 && t1.indexOf('13:59') >= 0,
-      'Bot do fechamento do turno: às 14:07, no grupo principal (com assinatura), o total do T1, a hora mais produzida, a balança com o maior número e cada hora',
+      e1.bals.every((b, i) => t1.indexOf(['🥇', '🥈', '🥉'][i] + ' ' + b.name + ' / 供包台' + String(b.n).padStart(2, '0') + ': **' + cT.feishuN_(b.q) + '**') >= 0) &&
+      fields.length === 8 && fields.every((f, i) => f.replace(/^(🥇|🥈|🥉) /, '') === hh(6 + i) + ': **' + cT.feishuN_(tot(6 + i)) + '**') &&
+      fields.filter(f => /^(🥇|🥈|🥉) /.test(f)).length === 3 && e1.tops.every((o, i) => fields[o.h - 6].indexOf(['🥇', '🥈', '🥉'][i] + ' ') === 0) &&
+      t1.indexOf('06:00 às') >= 0 && t1.indexOf('13:59') >= 0,
+      'Bot do fechamento do turno: às 14:00 (hora exata), no grupo principal (com assinatura), o total do T1, os 3 horários e as 3 balanças mais produzidas e cada hora',
       {n13, n14a, s14, s14b, e1, t1: t1.slice(0, 900)});
     // T3 (22h de ontem → 06h): a última hora (05h–06h) zerada no simulado — espera até o minuto 15 e manda como está.
     const hT3 = [{h: 22, d: Dm1}, {h: 23, d: Dm1}].concat([0, 1, 2, 3, 4, 5].map(h => ({h, d: DS}))), e3 = turnoEsperado(hT3);
-    const n0 = sent.length, w1 = cT.feishuTurnoTick_(at(6, 6)), w2 = cT.feishuTurnoTick_(at(6, 8)), w3 = cT.feishuTurnoTick_(at(6, 16));
+    const n0 = sent.length, w1 = cT.feishuTurnoTick_(at(6, 0)), w2 = cT.feishuTurnoTick_(at(6, 3)), w3 = cT.feishuTurnoTick_(at(6, 16));
     const t3 = JSON.stringify(((sent[n0] || {}).p || {}).card || {});
     check(w1 && w1.aguardando && w2 === null && w3 && w3.ok && sent.length === n0 + 1 && /Fechamento do turno T3 \(22h–06h\)/.test(t3) &&
-      t3.indexOf('**' + cT.feishuN_(e3.total) + '** volumes') >= 0 && t3.indexOf('**' + hh(e3.top.h) + '**: **' + cT.feishuN_(e3.top.q) + '**') >= 0 &&
-      t3.indexOf(e3.bal.name + ' / 供包台') >= 0 && t3.indexOf('22h–23h: **') >= 0 && t3.indexOf('05h–06h: 0') >= 0 &&
+      t3.indexOf('**' + cT.feishuN_(e3.total) + '** volumes') >= 0 && t3.indexOf('🥇 **' + hh(e3.top.h) + '**: **' + cT.feishuN_(e3.top.q) + '**') >= 0 &&
+      t3.indexOf('🥇 ' + e3.bal.name + ' / 供包台') >= 0 && t3.indexOf('22h–23h: **') >= 0 && t3.indexOf('05h–06h: 0') >= 0 &&
       t3.indexOf(Dm1.slice(8, 10) + '/' + Dm1.slice(5, 7) + ' 22:00 às ' + DS.slice(8, 10) + '/' + DS.slice(5, 7) + ' 05:59') >= 0,
       'Bot do fechamento do turno: T3 das 22h de ontem às 06h; última hora ainda zerada espera até o minuto 15', {w1, w2, w3, e3, t3: t3.slice(0, 600)});
     // Teste pela tela (um turno escolhido), sem mostrar o webhook nem o segredo; turno inválido; sem webhook nada sai.
     const tt = cT.testarFeishuTurno(DS + ' T2'), bad = cT.testarFeishuTurno('T9'), js = JSON.stringify(tt);
     const e2 = turnoEsperado([14, 15, 16, 17, 18, 19, 20, 21].map(h => ({h, d: DS})));
-    check(tt.ok && /turno T2 \(14h–22h\) de /.test(tt.enviado) && tt.numeros.totalDoTurno === e2.total && tt.numeros.horaMaisProduzida === hh(e2.top.h) + ': ' + e2.top.q &&
+    check(tt.ok && /turno T2 \(14h–22h\) de /.test(tt.enviado) && tt.numeros.totalDoTurno === e2.total &&
+      tt.numeros.horasMaisProduzidas.join('|') === e2.tops.map(o => hh(o.h) + ': ' + o.q).join('|') &&
+      tt.numeros.balancasMaisProduzidas.join('|') === e2.bals.map(b => b.name.replace('Balança 0', 'Balança ') + ': ' + b.q).join('|') &&
       tt.numeros.porHora.length === 8 && js.indexOf('principal-falso') < 0 && js.indexOf(SEG_T) < 0 && bad.ok === false && /Turno inválido/.test(bad.erro),
       'testarFeishuTurno: manda o turno escolhido e mostra os números, sem o webhook nem o segredo', {tt, bad});
     delete cT.__state.props.FEISHU_TURNO_WEBHOOK;
@@ -4805,16 +4812,19 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     const sent = [];
     const siteB = createFakeSorter({modo: 'xadmin'}), jmsB = fakeJms({});
     const cB = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
-      SORTER_URL: 'http://sorter.falso/home', FEISHU_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/hora', FEISHU_TURNO_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/turno'},
+      SORTER_URL: 'http://sorter.falso/home', FEISHU_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/hora', FEISHU_TURNO_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/turno',
+      FEISHU_MINUTO: '0', FEISHU_TURNO_MINUTO: '5'},
     jms: (url, req, state) => url.indexOf('https://open.feishu.cn/') === 0 ? (sent.push({g: url.split('/').pop(), p: JSON.parse(req.payload)}),
       {getResponseCode: () => 200, getContentText: () => '{"code":0}'}) : /^http:\/\/sorter\.falso/.test(url) ? siteB.fetchMock(url, req) : jmsB(url, req, state), quiet: true});
     cB.setupProject();
     const at = (h, m) => Date.parse(DS + 'T' + String(h + 3).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':00Z');
-    const a = cB.feishuSorterTick_(at(14, 7)), b = cB.feishuTurnoTick_(at(14, 7));
+    // FEISHU_MINUTO "0" (o de hora em hora na hora exata) e FEISHU_TURNO_MINUTO "5" (o do turno 5 minutos depois).
+    const a = cB.feishuSorterTick_(at(14, 0)), b0 = cB.feishuTurnoTick_(at(14, 0)), b = cB.feishuTurnoTick_(at(14, 5));
     const msgOf = g => JSON.stringify((sent.filter(x => x.g === g)[0] || {}).p || {});
-    check(a && a.ok && b && b.ok && sent.length === 2 && /13h–14h/.test(msgOf('hora')) && /Fechamento do turno T1/.test(msgOf('turno')) &&
-      /Hora mais produzida/.test(msgOf('turno')) && !/Hora mais produzida/.test(msgOf('hora')),
-      'Os dois bots: o de hora em hora no grupo dele e o fechamento do turno no grupo principal', {a, b, grupos: sent.map(x => x.g)});
+    check(a && a.ok && b0 === null && b && b.ok && sent.length === 2 && /13h–14h/.test(msgOf('hora')) && /Fechamento do turno T1/.test(msgOf('turno')) &&
+      /3 horários mais produzidos/.test(msgOf('turno')) && !/3 horários mais produzidos/.test(msgOf('hora')),
+      'Os dois bots: o de hora em hora no grupo dele e o fechamento do turno no grupo principal; minuto de cada um configurável (0 vale)',
+      {a, b0, b, grupos: sent.map(x => x.g)});
   }
   // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
   check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&

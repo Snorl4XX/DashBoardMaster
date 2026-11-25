@@ -4,6 +4,17 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.32.1 — Bot do fechamento do turno na hora exata e com o top 3
+
+Pedido: "mudar o horário de envio para a hora exata em vez de 5 minutos depois da hora" e "mostrar os três horários mais produzidos
+e as três balanças mais produzidas".
+
+- **Na hora exata:** 14:00 (T1), 22:00 (T2) e 06:00 (T3). Para atrasar uns minutos (se o site do sorter fechar a última hora com
+  atraso): Propriedade `FEISHU_TURNO_MINUTO` (ex.: 5). O bot de hora em hora continua no minuto 5 (`FEISHU_MINUTO`; agora aceita 0).
+- **3 horários mais produzidos** (🥇🥈🥉, com a quantidade, a % do turno e Sorter A · Sorter B) e **3 balanças mais produzidas**
+  (🥇🥈🥉, sorter, balança, quantidade e % do turno), no lugar da hora e da balança campeãs. Na produção por hora, as medalhas
+  marcam as 3 mais produzidas.
+
 ## V4.32.0 — Bot do fechamento do turno (Produção do Sorter)
 
 Pedido: "Baseado no Bot de produção do Sorter, quero criar um bot que mostra a hora mais produzida, a balança que teve maior número

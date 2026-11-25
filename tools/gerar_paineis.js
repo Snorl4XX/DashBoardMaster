@@ -145,11 +145,12 @@ personalizado; copie o webhook. Em http://localhost:3500/config, seção **Bot d
 assinatura) e clique em **Salvar e mandar um teste**. O computador precisa de internet. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
 
 ## Bot do fechamento do turno (opcional, V4.32)
-No fim de cada turno (14h, 22h e 06h, no minuto 5), um cartão no **grupo principal** do Feishu com o turno que acabou:
+No fim de cada turno, na hora exata (14:00, 22:00 e 06:00), um cartão no **grupo principal** do Feishu com o turno que acabou:
 - 📦 o total produzido no sorter no turno (Sorter A + B);
-- ⏰ a hora mais produzida do turno (com a quantidade e a % do turno);
-- 🏆 a balança com o maior número no turno (sorter, balança, quantidade e % do turno);
-- 📊 a produção de cada hora do turno (⭐ na mais produzida).
+- ⏰ os 3 horários mais produzidos do turno (🥇🥈🥉, com a quantidade e a % do turno);
+- 🏆 as 3 balanças mais produzidas no turno (sorter, balança, quantidade e % do turno);
+- 📊 a produção de cada hora do turno (🥇🥈🥉 nas 3 mais produzidas).
+Para mandar alguns minutos depois (o site às vezes fecha a última hora com atraso): Propriedade \`FEISHU_TURNO_MINUTO\` (ex.: 5).
 
 É um bot à parte do de hora em hora. No grupo principal: Configurações do grupo → Bots → Adicionar bot → Bot personalizado
 (ex.: "Fechamento do turno"); copie o webhook. Em http://localhost:3500/config, seção **Bot do fechamento do turno**: cole o webhook

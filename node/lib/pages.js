@@ -147,9 +147,9 @@ escolha "Grupo 2" abaixo e cole o webhook dele (até 5 grupos).</p>
 <pre class="out" id="feishuOut"></pre></section>
 
 <section class="card"><h2>Bot do fechamento do turno</h2>
-<p class="hint">No fim de cada turno (14h, 22h e 06h, no minuto 5), o painel manda no grupo principal do Feishu o fechamento do turno
-que acabou: o total produzido no sorter no turno (Sorter A + B), a hora mais produzida, a balança com o maior número no turno e a
-produção de cada hora. É um bot à parte do de hora em hora: no grupo principal, Configurações do grupo → Bots → Adicionar bot →
+<p class="hint">No fim de cada turno, na hora exata (14:00, 22:00 e 06:00), o painel manda no grupo principal do Feishu o fechamento
+do turno que acabou: o total produzido no sorter no turno (Sorter A + B), os 3 horários mais produzidos, as 3 balanças mais
+produzidas e a produção de cada hora. É um bot à parte do de hora em hora: no grupo principal, Configurações do grupo → Bots → Adicionar bot →
 Bot personalizado (ex.: "Fechamento do turno"); copie o webhook e cole abaixo. Se quiser que a mensagem saia pelo mesmo bot de hora
 em hora, cole o webhook dele. Se ligar a "Assinatura" no bot, cole o segredo também.</p>
 <p class="small" id="feishuTurnoState"></p>
@@ -255,7 +255,7 @@ O valor salvo não aparece de novo nesta tela.</p>
       if ($('#feishuTurnoState')) {
         var ftOn = s.props.some(function (p) { return p.k === 'FEISHU_TURNO_WEBHOOK'; });
         $('#feishuTurnoState').textContent = ftOn ? 'Bot ligado no grupo principal' + (s.props.some(function (p) { return p.k === 'FEISHU_TURNO_SEGREDO'; }) ? ' (com segredo)' : '') +
-          '. Manda o fechamento no fim de cada turno (14h, 22h e 06h).' : 'Bot desligado: cole o webhook do bot do grupo principal para ligar.';
+          '. Manda o fechamento no fim de cada turno, na hora exata (14:00, 22:00 e 06:00).' : 'Bot desligado: cole o webhook do bot do grupo principal para ligar.';
       }
       if ($('#sUrl') && !$('#sUrl').value) {
         var su = s.props.filter(function (p) { return p.k === 'SORTER_URL'; })[0];
