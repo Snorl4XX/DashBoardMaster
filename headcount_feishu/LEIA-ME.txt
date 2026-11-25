@@ -3,8 +3,10 @@ SC SP GRU — HEADCOUNT DIÁRIO POR TURNO NO FEISHU (formulário + histórico + 
 
 Como vai funcionar
 ------------------
-- Os líderes recebem só o LINK DO FORMULÁRIO. Preenchem Data, Turno e as quantidades e clicam
-  em Enviar (提交). O formulário volta em branco sozinho, pronto para o próximo turno.
+- Os líderes recebem só o LINK DO FORMULÁRIO. Escolhem o Turno, preenchem as quantidades e
+  clicam em Enviar (提交). O formulário volta em branco sozinho, pronto para o próximo turno.
+- A DATA se preenche sozinha: é o dia em que o formulário foi enviado (o líder não digita nem
+  consegue mudar).
 - Cada envio vira uma linha na tabela de HISTÓRICO (a "planilha separada"). Só você (e quem
   você escolher) abre a tabela. Os líderes não veem nem mexem no histórico.
 - O TOTAL DO DIA fica num painel (仪表盘) que soma, na hora, tudo o que foi enviado no dia,
@@ -30,7 +32,10 @@ chinês entre parênteses ajudam a achar.
 2. Acertar os campos (列/字段)
 -----------------------------
 Clique na setinha do título de cada coluna > Editar campo (编辑字段):
-1. "Data 日期": tipo DATA (日期), formato dia/mês/ano.
+1. "Data 日期": tipo DATA DE CRIAÇÃO (创建时间), formato só a data, dia/mês/ano (sem hora).
+   Assim a data é a do envio, automática, e o campo não aparece no formulário.
+   Se o Feishu não deixar trocar o tipo, apague a coluna "Data 日期" e crie outra com o mesmo
+   nome, já com o tipo Data de criação (创建时间).
 2. "Turno 班次": tipo OPÇÃO ÚNICA (单选), com 3 opções, nesta ordem:
      Manhã 早班  |  Tarde 中班  |  Noite 夜班
 3. As 10 colunas de quantidade: tipo NÚMERO (数字), formato inteiro (整数, sem casas decimais).
@@ -50,13 +55,12 @@ Clique na setinha do título de cada coluna > Editar campo (编辑字段):
 2. Título do formulário: SC SP GRU — Headcount Diário por Turno
    Descrição: Preencha os números do SEU turno e clique em Enviar. Quando não houver ninguém
    num cargo, coloque 0.
-3. As perguntas já vêm na ordem das colunas (Data, Turno e os 5 cargos, Presentes e Programado
-   lado a lado). Os campos de fórmula, "Enviado por" e "Enviado em" não aparecem para quem
+3. As perguntas já vêm na ordem das colunas (Turno e os 5 cargos, Presentes e Programado lado
+   a lado). Data, os campos de fórmula, "Enviado por" e "Enviado em" não aparecem para quem
    preenche: o Feishu preenche sozinho.
 4. Marque como OBRIGATÓRIO (必填) todas as perguntas. Assim nenhum cargo fica em branco
    (sem ninguém = 0).
-5. Se o campo Data tiver a opção de vir com a data de hoje (默认值 / 当天), ligue.
-6. Depois do envio (提交后): deixe a mensagem "Recebido, obrigado!" e a opção de preencher
+5. Depois do envio (提交后): deixe a mensagem "Recebido, obrigado!" e a opção de preencher
    de novo (再次填写).
 
 
@@ -86,6 +90,10 @@ Clique na setinha do título de cada coluna > Editar campo (编辑字段):
    total.
 4. Para ver outros dias: tire o filtro Hoje ou use "Data está no intervalo" (日期 在范围内).
 O painel atualiza na hora: cada formulário enviado já entra no total.
+
+Turno da noite: a Data é o dia do envio. Se a Noite enviar depois da meia-noite, o envio entra
+no dia seguinte. Combine com os líderes da noite de enviar antes da meia-noite (ou peça para
+ajustar a Data para "dia operacional").
 
 Dica: crie também uma visualização em grade "Hoje" (表格视图) com filtro Data = Hoje e
 agrupada por Turno (分组). Mostra quem enviou cada turno e a que horas.
