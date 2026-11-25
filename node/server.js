@@ -166,6 +166,8 @@ const FN_HELP = {
   testarFeishu: 'Bot do Feishu: manda agora a última hora para todos os grupos (ou a hora do parâmetro, ex.: "16" = 16:00 às 16:59 de hoje)',
   testarFeishuTurno: 'Bot do fechamento do turno: manda agora o último turno que fechou no grupo principal (ou o do parâmetro: "T1", "T2", "T3" ou "2026-11-24 T2")',
   baixarHistoricoAvaria: 'Avaria: baixa o histórico agora',
+  testarBaseFeishu: 'Eficiência: lê a base Headcount do Feishu e mostra as colunas e os últimos dias (sem o App Secret)',
+  diagnosticarEficiencia: 'Eficiência: a conta de um dia — JMS, colaboradores do Feishu e o resultado (data opcional, padrão ontem)',
   testProjectInstallation: 'confere se os arquivos do painel carregaram'
 };
 function publicFunctions() {
@@ -340,7 +342,7 @@ function maskProp(k, v) {
 }
 const INTERNAL_PROPS = ['DB_SPREADSHEET_ID', 'DATA_FOLDER_ID', 'REPORT_FOLDER_ID', 'PLATAFORMA'];
 /** Propriedades de configuração (as que o LEIA_PRIMEIRO/DIAGNOSTICO mandam ajustar); o resto é controle interno do painel. */
-const USER_PROP = /^(JMS_|DATA_START_DATE$|ATUALIZACAO_MIN$|DETAIL_|DASHBOARD_MAX_ROWS$|MAX_CLIENT_ROWS$|GROUPED_CLIENT_ROWS$|EXPEDICAO_IDS_|DOCKS_|PAGE_SIZE$|ARRIVAL_CAP$|[A-Z_]+_MIN_POR_DIA$|SORTER_URL$|SORTER_TROCA_[A-Z]$|FEISHU_(WEBHOOK|SEGREDO)(_[2-5])?$|FEISHU_TURNO_(WEBHOOK|SEGREDO)$|FEISHU_(MINUTO|ESPERA|TURNO_MINUTO)$)/;
+const USER_PROP = /^(JMS_|DATA_START_DATE$|ATUALIZACAO_MIN$|DETAIL_|DASHBOARD_MAX_ROWS$|MAX_CLIENT_ROWS$|GROUPED_CLIENT_ROWS$|EXPEDICAO_IDS_|DOCKS_|PAGE_SIZE$|ARRIVAL_CAP$|[A-Z_]+_MIN_POR_DIA$|SORTER_URL$|SORTER_TROCA_[A-Z]$|FEISHU_(WEBHOOK|SEGREDO)(_[2-5])?$|FEISHU_TURNO_(WEBHOOK|SEGREDO)$|FEISHU_(MINUTO|ESPERA|TURNO_MINUTO)$|FEISHU_(APP_ID|APP_SECRET|BASE_LINK)$|EF_(AGENT|SITE)_CODE$)/;
 
 async function configApi(req, res, name) {
   if (name === 'estado' && req.method === 'GET') {
@@ -583,7 +585,7 @@ async function handle(req, res) {
       sendHtml(req, res, 403, pages.deniedPage());
       return;
     }
-    if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir, semJms: !!cfg.semJms})); return; }
+    if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir, semJms: !!cfg.semJms, feishuBase: !!cfg.feishuBase})); return; }
     if (p.indexOf('/config/api/') === 0) {
       if (req.method === 'POST' && !sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
       await configApi(req, res, p.slice('/config/api/'.length));

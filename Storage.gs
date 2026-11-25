@@ -2234,6 +2234,8 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   // V4.22.13 (Produção do Sorter: "valores do filtro não batem com os gráficos"): a lista do dia é refeita junto com o resumo
   // (poucas consultas na rede da base) — cartões, filtros e gráficos do mesmo momento. Antes a lista podia ficar até 2 h atrás.
   if (cfgR.sorter) return true;
+  // V4.33 (Eficiência): a lista do dia são as linhas do Feishu (3 turnos) — refeita junto com o resumo.
+  if (cfgR.efficiency) return true;
   let minH = cfgR.detail && cfgR.detail.refreshHours ? Math.max(cfgR.detail.refreshHours, heavyDetailLimited_(cfgR) ? 12 : 0) : 0;
   // Expedição: dia fechado só muda a situação (chegou/entregue) — atualizado no máximo a cada closedRefreshHours.
   if (cfgR.detail && cfgR.detail.closedRefreshHours && date < isoToday_()) minH = Math.max(minH, cfgR.detail.closedRefreshHours);
@@ -2408,6 +2410,8 @@ function runDetailJob_(job, deadline) {
   if (cfg.unseal) return runUnsealDetailJob_(job, deadline, cfg, st);
   // V4.22: Produção do Sorter — cada hora de cada balança de cada sorter (Sorter.gs).
   if (cfg.sorter) return runSorterDetailJob_(job, deadline, cfg, st);
+  // V4.33: Eficiência do SP GRU — colaboradores do Feishu por turno e função (Eficiencia.gs).
+  if (cfg.efficiency) return runEfficiencyDetailJob_(job, deadline, cfg, st);
   // Recebimento retomando um dia já fechado: o plano gravado (fatias e totais) dispensa ~80 consultas por execução.
   const plan = (cfg.grouped && storedGroupedPlan_(job, st)) ||
     planDetailDownload_(job.indicator, job.date, (total, type) => validateDetailTotal_(cfg, job.indicator, job.date, total, type));

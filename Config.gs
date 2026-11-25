@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.32.1',
+  VERSION: '4.33.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1784,7 +1784,92 @@ const ALL_INDICATORS_ = Object.freeze({
     subtitle: {pt: 'Pacotes com falta de bipe de envio (PA SHEIN-GRU-SP · SHEIN)', zh: '发件未扫描（PA SHEIN-GRU-SP · SHEIN）'},
     shiftField: ['warehouseScantime'], shiftSub: {pt: 'Pelo horário de bipagem de recebimento da coleta', zh: '按揽收入仓扫描时间'},
     word: 'Pacotes sem bipe de envio', wordZh: '未发件扫描票数'
-  })
+  }),
+
+  /**
+   * V4.33 (pedido "Desenvolver um dashboard que mostre a eficiência do SP GRU"): Eficiência = Qtd processada total (JMS, Análise
+   * de entrada e saída de transbordo novo) ÷ colaboradores presentes (base Headcount do Feishu, todos os presentes dos 3 turnos).
+   * Painel SEPARADO (pacote dashmaster-eficiencia). Leitura do JMS e do Feishu em Eficiencia.gs. Cada linha da lista do dia =
+   * turno × função × situação (Presentes / Programados), quantidade = o número da base.
+   */
+  efficiency: {
+    key: 'efficiency', order: 22, routeKey: 'TRANSIT_PORT', separate: true, efficiency: true,
+    name: {pt: 'Eficiência SP GRU', zh: 'SP GRU 人效'},
+    subtitle: {pt: 'Qtd processada total (JMS) ÷ colaboradores presentes (Feishu)', zh: '总处理量（JMS）÷ 实到人数（飞书）'},
+    goal: {value: null, direction: 'min', strict: false},
+    apiProfile: 'efficiency', detailMatchesErrors: false, grouped: true, light: true,
+    detailsOkColumn: 'Presentes',
+    summary: {endpoint: 'https://gw.jtjms-br.com/businessindicator/bigdataReport/detail/transit_out_ports_list',
+      metrics: ['processed', 'arrival', 'send', 'operate', 'inbound', 'city', 'outbound', 'transfer', 'other',
+        'present', 'program', 'presenceRate', 'efficiency', 'headcountRows',
+        'presentT1', 'presentT2', 'presentT3', 'programT1', 'programT2', 'programT3',
+        'presentAdm', 'presentAssist', 'presentOper', 'presentTemp', 'presentDiar',
+        'programAdm', 'programAssist', 'programOper', 'programTemp', 'programDiar'],
+      percentMetrics: []},
+    // Poucas linhas por dia (3 turnos): todos os dias com a lista, lida de novo junto com o resumo.
+    detail: {days: 0, refreshHours: 1, maxPerDay: 1000},
+    fields: {},
+    groupFields: ['column', 'shift', 'role'],
+    labels: {shift: {pt: 'Turno', zh: '班次'}, role: {pt: 'Função', zh: '岗位'}, column: {pt: 'Situação', zh: '状态'}},
+    labelsOne: {shift: {pt: 'Turno', zh: '班次'}, role: {pt: 'Função', zh: '岗位'}},
+    filters: ['shift', 'role'],
+    facetColumns: ['Presentes'],
+    topCards: [],
+    hideShiftCards: true, hideEvolution: true, hideTarget: true, hideDetailTable: true,
+    heroMetric: {key: 'processed', column: 'Presentes', icon: 'gauge',
+      label: {pt: 'Qtd processada total', zh: '总处理量'}, labelPeriod: {pt: 'Qtd processada total no período', zh: '期间总处理量'}},
+    navMetric: 'efficiency',
+    metricCards: true,
+    texts: {
+      navQty: {pt: 'Eficiência · {date}', zh: '人效 · {date}'},
+      distinctShipments: {pt: 'Colaboradores', zh: '人数'},
+      tableCount: {pt: '{n} colaboradores', zh: '{n} 人'}, listRows: {pt: '{n} colaboradores', zh: '{n} 人'}, shipments: {pt: 'colaboradores', zh: '人'},
+      detailsOk: {pt: 'Dados completos · {n} colaboradores', zh: '数据完整 · {n} 人'},
+      dsHelp: {pt: 'Para conferir um dia, rode diagnosticarEficiencia() (Configurações → Executar função).', zh: '如需核对某天，请运行 diagnosticarEficiencia()。'}
+    },
+    metricPanels: [
+      {column: 'Presentes', title: {pt: 'Eficiência e produção', zh: '人效与产量'}, metrics: [
+        {key: 'efficiency', label: {pt: 'Eficiência (volumes por colaborador)', zh: '人效（件/人）'}, digits: 1, good: true},
+        {key: 'processed', label: {pt: 'Qtd processada total', zh: '总处理量'}},
+        {key: 'present', label: {pt: 'Colaboradores presentes', zh: '实到人数'}},
+        {key: 'program', label: {pt: 'Colaboradores programados', zh: '应到人数'}},
+        {key: 'presenceRate', label: {pt: '% Presença', zh: '出勤率'}, pct: true, good: true, rateOf: {num: 'present', den: 'program'}}
+      ]},
+      {column: 'Presentes', title: {pt: 'Presentes por turno', zh: '各班次实到'}, metrics: [
+        {key: 'presentT1', label: {pt: 'T1 (06h–14h)', zh: 'T1'}}, {key: 'presentT2', label: {pt: 'T2 (14h–22h)', zh: 'T2'}},
+        {key: 'presentT3', label: {pt: 'T3 (22h–06h)', zh: 'T3'}}
+      ]},
+      {column: 'Presentes', title: {pt: 'Presentes por função', zh: '各岗位实到'}, metrics: [
+        {key: 'presentAdm', label: {pt: 'Administrativo', zh: '行政'}}, {key: 'presentAssist', label: {pt: 'Assistente Operacional', zh: '运营助理'}},
+        {key: 'presentOper', label: {pt: 'Operacional', zh: '操作员'}}, {key: 'presentTemp', label: {pt: 'Temporário', zh: '临时工'}},
+        {key: 'presentDiar', label: {pt: 'Diarista', zh: '日结工'}}
+      ]},
+      {column: 'Presentes', title: {pt: 'JMS · Análise de entrada e saída de transbordo', zh: 'JMS · 中转进出港分析'}, metrics: [
+        {key: 'arrival', label: {pt: 'Quantidade recebida', zh: '到件量'}}, {key: 'send', label: {pt: 'Quantidade expedida', zh: '发件量'}},
+        {key: 'operate', label: {pt: 'Volume de transferência de carga', zh: '操作量'}}, {key: 'inbound', label: {pt: 'Entrada', zh: '进港'}},
+        {key: 'city', label: {pt: 'Intracidade', zh: '同城'}}, {key: 'outbound', label: {pt: 'Saída de porto', zh: '出港'}},
+        {key: 'transfer', label: {pt: 'Transbordo', zh: '中转'}}, {key: 'other', label: {pt: 'Outros', zh: '其他'}}
+      ]}
+    ],
+    charts: [
+      {key: 'mEff', metric: 'efficiency', type: 'bar', days: 15, digits: 1,
+        title: {pt: 'Eficiência diária (volumes por colaborador)', zh: '每日人效（件/人）'}},
+      {key: 'mQty', metric: 'processed', type: 'bar', days: 15, title: {pt: 'Produção diária · Qtd processada total', zh: '每日总处理量'}},
+      {key: 'shiftPresent', dim: 'shift', where: {column: 'Presentes'}, type: 'bar', allShifts: true,
+        title: {pt: 'Colaboradores presentes por turno', zh: '各班次实到人数'}, sub: {pt: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', zh: 'T1 06–14 · T2 14–22 · T3 22–06'}},
+      {key: 'rolePresent', dim: 'role', where: {column: 'Presentes'}, type: 'bar', top: 6, hideNA: true,
+        title: {pt: 'Colaboradores presentes por função', zh: '各岗位实到人数'},
+        sub: {pt: 'Administrativo, Assistente Operacional, Operacional, Temporário e Diarista', zh: '行政、运营助理、操作员、临时工、日结工'}}
+    ],
+    // Tabelas do dia/período: presentes e programados por turno e por função (com o Total).
+    crossTables: [
+      {key: 'tShift', rowDim: 'shift', title: {pt: 'Colaboradores por turno', zh: '各班次人数'}, cols: ['Presentes', 'Programados']},
+      {key: 'tRole', rowDim: 'role', title: {pt: 'Colaboradores por função', zh: '各岗位人数'}, cols: ['Presentes', 'Programados']}
+    ],
+    table: [
+      ['date', 'Data', '日期'], ['shift', 'Turno', '班次'], ['role', 'Função', '岗位'], ['column', 'Situação', '状态'], ['qty', 'Quantidade', '数量']
+    ]
+  }
 });
 
 /**
@@ -1977,6 +2062,8 @@ function catalogEntry_(cfg) {
     agendaEvery: cfg.agendaEvery ? agendaEveryHours_(cfg) : null,
     // V4.4 (Deslacre): cartões próprios e o texto de cada situação do bipe de deslacre.
     unsealCards: !!cfg.unsealCards, situations: cfg.situations || null,
+    // V4.33: Eficiência do SP GRU — cartões próprios (Client.html → renderEfficiencyKpis).
+    efficiency: !!cfg.efficiency,
     // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).
     refTypes: cfg.detail && cfg.detail.typeFromSummary ? (cfg.detail.types || []).map(t => t.column) : null,
     labelsOne: cfg.labelsOne || null, detailCards: cfg.detailCards || null, hideDetailTable: !!cfg.hideDetailTable,

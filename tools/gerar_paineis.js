@@ -215,11 +215,76 @@ Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" 
 | PA_AGENT_CODE | código da regional (padrão 370000 = SPE) |
 | PA_ORDER_SOURCE | origem do pedido (padrão D102 = SHEIN; mais de uma separada por vírgula) |
 `};
+// V4.33 (pedido "Desenvolver um dashboard que mostre a eficiência do SP GRU", pacote separado): Eficiência do SP GRU — outra pasta,
+// porta 4000 (3000 principal … 3900 PA SHEIN). As 3 portas do Funnel já têm dono (443 principal, 8443 Sorter, 10000 PA SHEIN): o
+// link fica num caminho do link principal (https://NOME.xxxx.ts.net/eficiencia). feishuBase: Configurações pede a base do Feishu.
+const EFICIENCIA = 'efficiency';
+const EFICIENCIA_PACOTE = {so: EFICIENCIA, fora: '', nome: 'Eficiência SP GRU'};
+const EFICIENCIA_NODE = {folder: 'dashmaster-eficiencia', zip: 'EFICIENCIA_NODE', pacote: EFICIENCIA_PACOTE, readmeName: 'LEIA_EFICIENCIA.md',
+  padrao: {porta: 4000, portaLink: 443, caminho: '/eficiencia', feishuBase: true, linkVersao: 2},
+  replace: {'node/iniciar-com-windows.bat': [['JT DashMaster.lnk', 'JT DashMaster Eficiencia.lnk'], ['"JT DashMaster"', '"JT DashMaster Eficiencia"'],
+    ['o DashMaster vai abrir', 'o painel de Eficiência vai abrir']],
+    'node/iniciar.bat': [['title J^&T DashMaster (Node.js)', 'title J^&T DashMaster Eficiencia (Node.js) - porta 4000']]},
+  readme: v => `# Eficiência do SP GRU (Node.js) — J&T DashMaster ${v}
+
+Painel **separado** do principal, no mesmo padrão dele (cartões, turnos, gráficos, filtros, tabelas, PDF/Excel, PT ⇄ 中文), com a
+**eficiência do SP GRU**:
+
+> **Eficiência = Qtd processada total ÷ colaboradores presentes**
+
+- **Qtd processada total:** JMS › Cabine de dados › **Análise de entrada e saída de transbordo novo** (Regional SPE, SC SP GRU,
+  Pedido principal), coluna "Qtd processada total".
+- **Colaboradores:** a base **Headcount** do Feishu (uma linha por turno). Entram **todos os presentes** (Administrativo,
+  Assistente Operacional, Operacional, Temporário e Diarista) dos 3 turnos do dia. Os programados aparecem nos cartões e nas
+  tabelas. Duas linhas do mesmo dia e turno: vale a enviada por último.
+
+| | Painel principal | Eficiência |
+|---|---|---|
+| Pasta | C:\\dashmaster | **C:\\dashmaster-eficiencia** |
+| Neste computador | http://localhost:3000 | **http://localhost:4000** |
+| Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net/eficiencia** |
+
+## O que aparece
+- **Filtros:** data (no topo), turno e função.
+- **Cartões:** eficiência do dia (cartão vermelho), quantidade produzida, colaboradores presentes (de programados), eficiência e
+  produção do dia anterior, um cartão por turno (T1 06h–14h, T2 14h–22h, T3 22h–06h) e % de presença.
+- **Gráficos:** eficiência diária, produção diária, colaboradores por turno e por função.
+- **Tabelas:** colaboradores por turno e por função (presentes e programados) e os dados gerais de cada dia (todos os números).
+
+## Instalar (uma vez)
+1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-eficiencia). Não extraia por cima do C:\\dashmaster.
+2. Abra C:\\dashmaster-eficiencia\\node e dê dois cliques em **iniciar.bat**. Deixe a janela preta aberta.
+3. Neste computador, abra **http://localhost:4000/config**:
+   - **AuthToken do JMS:** o mesmo do painel principal.
+   - **Base do Feishu (colaboradores):** App ID, App Secret e o link da base Headcount (com a tabela aberta). Clique em **Salvar e
+     testar a base**: o teste mostra as colunas que achou e os últimos dias com os presentes de cada turno.
+   - **Histórico:** escolha a Data inicial e clique em **Baixar histórico**.
+4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Eficiencia").
+5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica no mesmo endereço do principal, com /eficiencia no fim:
+   https://NOME-DO-COMPUTADOR.xxxx.ts.net/eficiencia (as 3 portas do Funnel já são do principal, do Sorter e do PA SHEIN). Coloque
+   esse link em \`"linkPublico"\` no config.json e escolha uma \`"senha"\` (separada da do principal).
+
+Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=443 --set-path=/eficiencia off\`
+
+## Aplicativo do Feishu (uma vez, quem administra o Feishu)
+1. https://open.feishu.cn/app → **Criar aplicativo personalizado** (ou use um que a base já tenha, como o do Controle de Pátio).
+2. **Permissões:** \`bitable:app:readonly\` (ler bases) e \`wiki:wiki:readonly\` (a base está dentro de um wiki). Publique a versão.
+3. **Credenciais:** copie o **App ID** e o **App Secret**.
+4. Na base Headcount: **…** (canto de cima) → **Mais** → **Adicionar aplicativo** (添加文档应用) → escolha o aplicativo (leitura).
+
+## Ajustes (Configurações → Propriedades)
+| Propriedade | Para que serve |
+|---|---|
+| EF_AGENT_CODE | código da regional (padrão 370000 = SPE) |
+| EF_SITE_CODE | código do SC (padrão 30001 = SP GRU) |
+
+Para conferir a conta de um dia: Configurações → Executar função → **diagnosticarEficiencia** (data opcional, padrão ontem).
+`};
 const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
 // V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.
 const NODE_PACOTE = {so: '', fora: MAIN_OUT, nome: ''};
 
-const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Sorter', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
+const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Sorter', 'Eficiencia', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
 // V4.22: Sorter.gs (Produção do Sorter) só vai nos pacotes Node.js — o Google não enxerga a rede da base.
 const GS_APPS = GS_ORDER.filter(f => f !== 'Sorter');
 const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
@@ -561,8 +626,10 @@ if (require.main === module) {
   console.log('node (sorter): ' + ns.zip + ' (' + ns.files.length + ' arquivos)');
   const np = buildNode(out, {variant: PA_SHEIN_NODE});
   console.log('node (pa shein): ' + np.zip + ' (' + np.files.length + ' arquivos)');
+  const ne = buildNode(out, {variant: EFICIENCIA_NODE});
+  console.log('node (eficiencia): ' + ne.zip + ' (' + ne.files.length + ' arquivos)');
   const w = buildNetlify(out);
   console.log('netlify: ' + w.zip + ' (' + w.files.length + ' arquivos)');
 }
 
-module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, LOTS_NODE, SORTER_NODE, PA_SHEIN_NODE, MAIN_OUT};
+module.exports = {build, buildNode, buildNetlify, netlifyPage, PACKAGES, LOTS_NODE, SORTER_NODE, PA_SHEIN_NODE, EFICIENCIA_NODE, MAIN_OUT};

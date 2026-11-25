@@ -61,7 +61,7 @@ function credentialSignature_() {
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
  * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS | NOMOVE
- *          | SCANQUERY | UNSEAL | UNSEAL_TRUNK | PA_MISSING
+ *          | SCANQUERY | UNSEAL | UNSEAL_TRUNK | PA_MISSING | TRANSIT_PORT
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -124,6 +124,11 @@ const JMS_ROUTES_ = [
   // capturado: se o JMS recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_PA_MISSING / JMS_ROUTENAMELIST_PA_MISSING mandam).
   {key: 'PA_MISSING', pattern: /\/(?:collect|detail)_take_missscan_new(?:\?|$)/, name: 'NetworkCollectLeakage', list: 'NONE',
     alt: [{name: 'NetworkCollectLeakage|businessIndicatorIndex', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
+  // V4.33: Eficiência do SP GRU — Cabine de dados > Análise de entrada e saída de transbordo novo (/dataCabinndex/TransitPortNew).
+  // Routename = nome da página (regra das outras telas); Routernamelist não capturado: se o JMS recusar, as variantes de `alt`
+  // são testadas sozinhas (JMS_ROUTENAME_TRANSIT_PORT / JMS_ROUTENAMELIST_TRANSIT_PORT mandam).
+  {key: 'TRANSIT_PORT', pattern: /\/transit_out_ports_list(?:\?|$)/, name: 'TransitPortNew', list: 'NONE',
+    alt: [{name: 'TransitPortNew|dataCabinndex', list: 'NONE'}, {name: 'NONE', list: 'NONE'}]},
   // Consulta de Pacote Problemático: capturado ao vivo (routename problemPieceQuery).
   {key: 'PROBLEM_PIECE', pattern: /\/servicequality\/problemPiece\/registrationPage(?:\?|$)/, name: 'problemPieceQuery', list: '服务质量>异常管理>问题件管理>问题件查询'}
 ];
@@ -580,6 +585,8 @@ function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   if (cfg.unseal) return unsealSummary_(indicatorKey, isoDate);
   // V4.22: Produção do Sorter — o monitor do sorter da base, não o JMS (Sorter.gs).
   if (cfg.sorter) return sorterSummary_(indicatorKey, isoDate);
+  // V4.33: Eficiência do SP GRU — o número do JMS e os colaboradores da base do Feishu (Eficiencia.gs).
+  if (cfg.efficiency) return efficiencySummary_(indicatorKey, isoDate);
   const endpoint = endpointFor_(cfg, 'summary');
   const payloadOf = page => Object.assign(buildPayload_(indicatorKey, isoDate, page, APP_CONFIG.PAGE_SIZE, false), extra || {});
   const json = jmsPost_(endpoint, payloadOf(1), 2);

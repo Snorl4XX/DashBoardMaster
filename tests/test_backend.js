@@ -2516,6 +2516,29 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const salvoP = JSON.parse(fsM.readFileSync(cfgAntigoP, 'utf8'));
   check(confAntigoP.portaLink === 10000 && confAntigoP.caminho === '' && confAntigoP.linkPublico === 'https://computador-teste.exemplo.ts.net:10000' &&
     salvoP.linkVersao === 3 && salvoP.senha === 'x', 'PA SHEIN instalado com /pa-shein: o config.json passa para a porta 10000 uma vez (senha mantida)', salvoP);
+  // V4.33: Eficiência do SP GRU separada — pasta dashmaster-eficiencia, porta 4000, link /eficiencia na 443, base do Feishu em Configurações.
+  const {EFICIENCIA_NODE} = require('../tools/gerar_paineis');
+  const zipE = fsM.readFileSync(buildNode(out, {variant: EFICIENCIA_NODE}).zip), dirE = pathM.join(out, 'extraido-eficiencia');
+  for (let i = 0; zipE.readUInt32LE(i) === 0x04034b50;) {
+    const size = zipE.readUInt32LE(i + 18), nameLen = zipE.readUInt16LE(i + 26), start = i + 30 + nameLen + zipE.readUInt16LE(i + 28);
+    const file = pathM.join(dirE, zipE.slice(i + 30, i + 30 + nameLen).toString('utf8'));
+    fsM.mkdirSync(pathM.dirname(file), {recursive: true});
+    fsM.writeFileSync(file, zlibM.inflateRawSync(zipE.slice(start, start + size)));
+    i = start + size;
+  }
+  const rootE = pathM.join(dirE, 'dashmaster-eficiencia');
+  const ctxEf = createContext({root: rootE, props: {}, jms: fakeJms({}), quiet: true});
+  const cfgModE = require(pathM.join(rootE, 'node', 'lib', 'config.js'));
+  process.env.DASHMASTER_CONFIG = pathM.join(out, 'config-eficiencia.json');
+  const confE = cfgModE.loadConfig();
+  if (prevEnvP === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnvP;
+  const pagE = require(pathM.join(rootE, 'node', 'lib', 'pages.js')).configPage({version: 'x', dataDir: out, semJms: false, feishuBase: confE.feishuBase});
+  check(keysOf(ctxEf).join() === 'efficiency' && ctxEf.getAppBootstrap().app.panel === 'Eficiência SP GRU' && confE.porta === 4000 && confE.portaLink === 443 &&
+    confE.caminho === '/eficiencia' && confE.feishuBase === true && /Base do Feishu \(colaboradores\)/.test(pagE) && /AuthToken do JMS/.test(pagE) &&
+    fsM.existsSync(pathM.join(rootE, 'Eficiencia.gs')) && fsM.existsSync(pathM.join(rootE, 'LEIA_EFICIENCIA.md')) && !fsM.existsSync(pathM.join(rootE, 'node', 'config.json')) &&
+    usadas.concat([PA_SHEIN_NODE.padrao.porta]).indexOf(EFICIENCIA_NODE.padrao.porta) < 0 && keysOf(ctxNode()).indexOf('efficiency') < 0 && full.indexOf('efficiency') < 0,
+    'pacote Node.js da Eficiência: só o painel dela, porta 4000 livre, link /eficiencia na 443, base do Feishu em Configurações; fora do principal',
+    {keys: keysOf(ctxEf), porta: confE.porta, caminho: confE.caminho});
   fsM.rmSync(out, {recursive: true, force: true});
 }
 
@@ -5197,6 +5220,114 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(cat.charts.map(c => c.key).join() === 'shift,interval,client,destination' && cat.labels.destination.pt === 'SC de chegada' &&
     cat.table.map(c => c[0]).indexOf('expeditionTime') >= 0 && cat.table.map(c => c[0]).indexOf('scArrival') >= 0,
     'V4.30 PA SHEIN: gráficos de turnos, intervalo de horário, clientes e segmentos (SC de chegada) e a tabela com todas as colunas', cat.charts.map(c => c.key));
+}
+
+// ---------- V4.33: Eficiência do SP GRU — Qtd processada total (JMS) ÷ colaboradores presentes (Feishu) (dados FICTÍCIOS) ----------
+{
+  const vmE = require('vm');
+  const DE = '2026-11-24', DE0 = '2026-11-23';
+  const ROLES = ['Administrativo', 'Assistente Operacional', 'Operacional', 'Temporário', 'Diarista'];
+  // Presentes / programados por turno e função (números fictícios); processado = transhipmentNum.
+  const HC = {
+    [DE0]: {T1: [[3, 3], [5, 6], [40, 44], [12, 15], [8, 9]], T2: [[2, 3], [4, 5], [35, 40], [10, 12], [6, 8]], T3: [[1, 1], [3, 3], [30, 33], [8, 10], [5, 6]]},
+    [DE]: {T1: [[3, 3], [6, 6], [42, 44], [14, 15], [9, 9]], T2: [[3, 3], [5, 5], [38, 40], [11, 12], [7, 8]], T3: [[1, 1], [2, 3], [28, 33], [9, 10], [4, 6]]}
+  };
+  const PROC = {[DE0]: 12345, [DE]: 15678};
+  const items = [];
+  let rid = 0;
+  const sp = (d, hm) => Date.parse(d + 'T' + hm + ':00-03:00');
+  Object.keys(HC).forEach(d => ['T1', 'T2', 'T3'].forEach((s, k) => {
+    // Data sem hora no fuso da base (meia-noite na China) no T1 de DE: tem que continuar sendo o dia DE.
+    const data = d === DE && s === 'T1' ? Date.parse(d + 'T00:00:00+08:00') : sp(d, ['09:30', '15:30', '22:30'][k]);
+    const f = {'Data 日期': data, 'Turno 班次': s, 'Enviado em 提交时间': sp(d, ['13:05', '21:06', '23:07'][k]), 'Enviado por 提交人': [{name: 'Pessoa Teste'}]};
+    let tp = 0, tg = 0;
+    ROLES.forEach((r, j) => { f[r + ' - Presentes 实到'] = HC[d][s][j][0]; f[r + ' - Programados 应到'] = {type: 2, value: [HC[d][s][j][1]]}; tp += HC[d][s][j][0]; tg += HC[d][s][j][1]; });
+    f['Total de Presença'] = tp; f['Total Programado 应到总计'] = tg;
+    items.push({record_id: 'rec' + (++rid), fields: f});
+  }));
+  // Correção: o T2 de DE enviado antes com números errados (a linha certa foi enviada depois e vale).
+  const dup = {'Data 日期': sp(DE, '15:00'), 'Turno 班次': 'T2', 'Enviado em 提交时间': sp(DE, '14:00')};
+  ROLES.forEach(r => { dup[r + ' - Presentes 实到'] = 99; dup[r + ' - Programados 应到'] = 99; });
+  items.unshift({record_id: 'recDup', fields: dup});
+  const tot = (d, i) => ['T1', 'T2', 'T3'].reduce((a, s) => a + HC[d][s].reduce((b, x) => b + x[i], 0), 0);
+  const feishu = [], seenE = [];
+  let secret = 'segredo-teste';
+  const feishuFake = (url, req) => {
+    const body = req && req.payload ? JSON.parse(req.payload) : {}, auth = ((req && req.headers) || {}).Authorization || '';
+    feishu.push({url, auth});
+    let r;
+    if (/\/auth\/v3\/tenant_access_token\/internal$/.test(url)) r = body.app_id === 'cli_teste' && body.app_secret === secret ? {code: 0, tenant_access_token: 't-falso', expire: 7200} : {code: 10014, msg: 'app secret invalid'};
+    else if (auth !== 'Bearer t-falso') r = {code: 99991663, msg: 'token invalid'};
+    else if (/\/wiki\/v2\/spaces\/get_node\?token=WIKITESTE/.test(url)) r = {code: 0, data: {node: {obj_type: 'bitable', obj_token: 'bascnTESTE'}}};
+    else if (/\/bitable\/v1\/apps\/bascnTESTE\/tables\/tblTESTE\/records\?page_size=500/.test(url)) {
+      const start = Number((/page_token=(\d+)/.exec(url) || [])[1] || 0), page = items.slice(start, start + 4);
+      r = {code: 0, data: {items: page, has_more: start + 4 < items.length, page_token: String(start + 4), total: items.length}};
+    } else r = {code: 1254040, msg: 'NOTEXIST'};
+    return {getResponseCode: () => 200, getContentText: () => JSON.stringify(r)};
+  };
+  const intercept = (route, headers, body) => {
+    if (route !== 'transit_out_ports_list') return null;
+    seenE.push({headers, body});
+    const day = String(body.startTime).slice(0, 10), recs = PROC[day] ? [{scantime: day, agentName: 'SPE', agentCode: '370000', inputsite: 'SP GRU',
+      scansitecode: '30001', operateArrivalNum: 20000, operateSendNum: 18000, operateNum: 38000, inboundNum: 12, cityNum: 34, outboundNum: 56, transferNum: 7,
+      otherNum: PROC[day] - 109, transhipmentNum: PROC[day], PAGEHELPER_ROW_ID: 1, ROW_ID: 1}] : [];
+    return [200, {code: 1, msg: '请求成功', data: {records: recs, total: recs.length, size: 1, current: 1, pages: 1, other: null, heads: null}, fail: false, succ: true}];
+  };
+  const LINK = 'https://empresa-teste.feishu.cn/wiki/WIKITESTE?table=tblTESTE&view=vewTESTE';
+  const ctxE = props => {
+    const base = fakeJms({}, {intercept});
+    const c = createContext({props: Object.assign({}, baseProps, {PAINEIS: 'efficiency', DATA_START_DATE: DE0}, props || {}),
+      jms: (url, req, state) => (url.indexOf('https://open.feishu.cn/') === 0 ? feishuFake(url, req) : base(url, req, state)), quiet: true});
+    c.setupProject();
+    return c;
+  };
+  const cE = ctxE({FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_BASE_LINK: LINK});
+  const tb = cE.testarBaseFeishu(), tbJs = JSON.stringify(tb);
+  check(tb.ok && tb.diasNaBase === 2 && /T1 \d+ · T2 \d+ · T3 \d+/.test(tb.ultimosDias[0]) && /linha\(s\) repetida\(s\): vale a enviada por último/.test(tb.ultimosDias[0]) &&
+    tb.colunas.data === 'Data 日期' && tb.colunas.turno === 'Turno 班次' && tb.colunas.funcoes.every(x => /presentes ✓ \/ programados ✓/.test(x)) && !tb.aviso &&
+    tbJs.indexOf('segredo-teste') < 0 && tbJs.indexOf('Pessoa Teste') < 0 && cE.__state.props.FEISHU_BASE_APP === 'WIKITESTE|bascnTESTE',
+    'V4.33 Eficiência: teste da base do Feishu (wiki → base, colunas, últimos dias, linha repetida), sem o App Secret nem nomes', tb);
+  cE.queueHistory(DE0, DE, true);
+  runAll(cE);
+  const keysE = vmE.runInContext('Object.keys(INDICATORS)', cE);
+  const rE = cE.getRateDay_('efficiency', DE), mE = (rE || {}).metrics || {}, m0 = (cE.getRateDay_('efficiency', DE0) || {}).metrics || {};
+  const pres = tot(DE, 0), prog = tot(DE, 1);
+  check(keysE.join() === 'efficiency' && mE.processed === PROC[DE] && mE.present === pres && mE.program === prog &&
+    mE.efficiency === Math.round(PROC[DE] / pres * 100) / 100 && m0.efficiency === Math.round(PROC[DE0] / tot(DE0, 0) * 100) / 100 &&
+    mE.presentT1 === HC[DE].T1.reduce((a, x) => a + x[0], 0) && mE.presentT2 === HC[DE].T2.reduce((a, x) => a + x[0], 0) &&
+    mE.presentOper === HC[DE].T1[2][0] + HC[DE].T2[2][0] + HC[DE].T3[2][0] && mE.programDiar === HC[DE].T1[4][1] + HC[DE].T2[4][1] + HC[DE].T3[4][1] &&
+    mE.presenceRate === Math.round(pres / prog * 10000) / 100 && mE.headcountRows === 3 && mE.outbound === 56,
+    'V4.33 Eficiência: Qtd processada total ÷ todos os presentes dos 3 turnos (a linha repetida do turno vale a enviada por último; data sem hora no fuso da base)',
+    {mE, esperado: {pres, prog, ef: PROC[DE] / pres}});
+  const b0 = (seenE[0] || {}).body || {};
+  check(b0.agentCode === '370000' && b0.scansitecode === '30001' && b0.mergeWaybill === 1 && b0.countryId === '1' && /^\d{4}-\d{2}-\d{2} 00:00:00$/.test(b0.startTime) &&
+    /23:59:59$/.test(b0.endTime) && seenE.every(x => x.headers.Routename === 'TransitPortNew'),
+    'V4.33 Eficiência: pedido do JMS como na captura (SPE 370000, SP GRU 30001, Pedido principal, dia inteiro) e o cabeçalho da tela', b0);
+  const dsE = cE.JTCore_.decodeDataset(cE.getDashboardData('efficiency', {from: DE, to: DE}).dataset);
+  const sumE = (col, f) => dsE.filter(r => r.column === col && (!f || f(r))).reduce((a, r) => a + Number(r.qty), 0);
+  const catE = cE.getPublicCatalog_().filter(x => x.key === 'efficiency')[0];
+  check(sumE('Presentes') === pres && sumE('Programados') === prog && sumE('Presentes', r => r.shift === 'T3') === HC[DE].T3.reduce((a, x) => a + x[0], 0) &&
+    sumE('Presentes', r => r.role === 'Temporário') === HC[DE].T1[3][0] + HC[DE].T2[3][0] + HC[DE].T3[3][0] && catE.efficiency === true &&
+    catE.filters.map(x => x.key).join() === 'shift,role' && catE.charts.map(x => x.key).join() === 'mEff,mQty,shiftPresent,rolePresent' &&
+    catE.crossTables.map(x => x.rowDim).join() === 'shift,role',
+    'V4.33 Eficiência: lista do dia por turno × função × presentes/programados; filtros turno e função; gráficos diários, turnos e funções; tabelas',
+    {n: dsE.length, charts: catE.charts.map(x => x.key)});
+  const dg = cE.diagnosticarEficiencia(DE);
+  check(dg.eficiencia === mE.efficiency && dg.feishu.linhas.length === 3 && /repetida/.test(dg.feishu.repetidas) && dg.jms.processed === PROC[DE],
+    'V4.33 Eficiência: diagnosticarEficiencia mostra o JMS, os colaboradores e a conta do dia', dg);
+  // Sem a base do Feishu: o número do JMS entra (sem a eficiência) e o LOG avisa; App Secret errado: dica.
+  const cN = ctxE({});
+  cN.queueHistory(DE, DE, true);
+  runAll(cN);
+  const mN = (cN.getRateDay_('efficiency', DE) || {}).metrics || {}, tN = cN.testarBaseFeishu();
+  secret = 'outro';
+  const cS = ctxE({FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_BASE_LINK: LINK}), tS = cS.testarBaseFeishu();
+  secret = 'segredo-teste';
+  const tL = ctxE({FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_BASE_LINK: 'https://empresa-teste.feishu.cn/wiki/WIKITESTE'}).testarBaseFeishu();
+  check(mN.processed === PROC[DE] && mN.present === null && mN.efficiency === null && cN.allTabRows_('LOG').some(r => /Eficiência: colaboradores do Feishu não lidos/.test(String(r[4]))) &&
+    tN.ok === false && /falta App ID, App Secret, link da base/.test(tN.erro) && tS.ok === false && /confira o App ID e o App Secret/.test(tS.erro) &&
+    tL.ok === false && /\?table=tbl/.test(tL.erro),
+    'V4.33 Eficiência: sem a base do Feishu entra só o JMS (aviso no LOG); App Secret errado e link sem a tabela: mensagens com a dica', {mN, tN, tS, tL});
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

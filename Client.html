@@ -490,7 +490,9 @@
     segSub: '<path d="M4 6h16M4 12h10M4 18h6"/>',
     // V4.31: ícones das linhas do cartão da taxa do dia (dia anterior e taxa por turno).
     calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M7.5 13.6h.01M10.5 13.6h.01M13.5 13.6h.01M16.5 13.6h.01M7.5 17h.01M10.5 17h.01M13.5 17h.01"/>',
-    layers: '<path d="M12 3.5l8.5 4.3-8.5 4.3-8.5-4.3z"/><path d="M3.5 12l8.5 4.3 8.5-4.3"/><path d="M3.5 16.2l8.5 4.3 8.5-4.3"/>'
+    layers: '<path d="M12 3.5l8.5 4.3-8.5 4.3-8.5-4.3z"/><path d="M3.5 12l8.5 4.3 8.5-4.3"/><path d="M3.5 16.2l8.5 4.3 8.5-4.3"/>',
+    // V4.33 (Eficiência): função dos colaboradores.
+    role: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.5.3 4.5 2.5 4.5 5"/>'
   };
   function icon(name) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICON_PATHS[name] || ICON_PATHS.chart) + '</svg>'; }
 
@@ -1745,6 +1747,7 @@
       '</div></article>';
   }
   function renderKpis(c, k) {
+    if (c.efficiency) return renderEfficiencyKpis(c, k);
     if (c.unsealCards) return renderUnsealKpis(c, k);
     if (c.heroMetric && c.metricCards) return renderMetricKpis(c, k);
     var grid = $('#kpiGrid'), day = k.mode === 'day', sv = k.shiftView, sName = sv ? shiftName(sv) : '';
@@ -1836,6 +1839,76 @@
         '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(tp.pct) ? tp.pct : 0) + '" style="background:' + RED + '"></i></div></div></article>';
     }).join('');
     grid.innerHTML = hero + errors + prev + variation + shifts + valueCardsHtml(c) + tops;
+    fillGridGaps(grid);
+    requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
+    drawSpark(c);
+  }
+  // ------------------------------------------------------------------ Eficiência do SP GRU (V4.33): cartões próprios
+  /**
+   * Eficiência = Qtd processada total (JMS) ÷ colaboradores presentes (Feishu, os 3 turnos). No período: a soma das quantidades
+   * ÷ a soma dos presentes dos dias com os dois números. null = sem conta.
+   */
+  function efValue(from, to) {
+    var a = 0, b = 0, any = false;
+    activeRates().forEach(function (r) {
+      var m = r.metrics || {};
+      if (r.date < from || r.date > to || !isNum(m.processed) || !(Number(m.present) > 0)) return;
+      a += Number(m.processed); b += Number(m.present); any = true;
+    });
+    return any && b ? a / b : null;
+  }
+  function renderEfficiencyKpis(c, k) {
+    var grid = $('#kpiGrid'), day = k.mode === 'day', f = filtersObj(), fk = Object.keys(f), sel = f.shift && f.shift.length ? f.shift : null;
+    var ef = function (pt, zh) { return L({pt: pt, zh: zh}); }, n1 = function (v) { return isNum(v) ? fmtNum(v, 1) : '—'; };
+    var when = day ? fmtDate(state.to, true) : fmtRange(state.from, state.to), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
+    var eff = efValue(state.from, state.to), prevEff = efValue(k.prevFrom, k.prevTo);
+    var proc = metricSum('processed', state.from, state.to), prevProc = metricSum('processed', k.prevFrom, k.prevTo);
+    var pres = metricSum('present', state.from, state.to), prog = metricSum('program', state.from, state.to);
+    var prevPres = metricSum('present', k.prevFrom, k.prevTo);
+    // Com filtro (turno ou função): os colaboradores das linhas do Feishu com o filtro; a eficiência continua a do dia inteiro.
+    var presF = pres, progF = prog;
+    if (fk.length) { presF = listQty('Presentes'); progF = listQty('Programados'); }
+    var rate = isNum(presF) && progF ? presF / progF * 100 : null;
+    var dPct = function (a, b) { return isNum(a) && isNum(b) && b ? qtyDelta(a, b, false) : ''; };
+    var rows = [{icon: 'calendar', html: esc(day ? ef('Dia anterior', '前一日') : ef('Período anterior', '上一期间')) + ': <b class="hx-em">' + n1(prevEff) + '</b> · ' +
+      esc(prevWhen) + (isNum(eff) ? ' ' + dPct(eff, prevEff) : '')}];
+    rows.push({icon: 'layers', html: '<b>' + fmtInt(proc) + '</b> ' + esc(ef('processados', '件处理量')) + ' ÷ <b>' + fmtInt(pres) + '</b> ' + esc(ef('presentes', '实到'))});
+    rows.push({icon: 'info', html: esc(ef('Qtd processada total (JMS) ÷ presentes nos 3 turnos (Feishu)', '总处理量（JMS）÷ 3个班次实到（飞书）'))});
+    if (!isNum(pres) || !(pres > 0)) rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('Sem os colaboradores do Feishu ' + (day ? 'neste dia' : 'no período') +
+      ' — confira a Base do Feishu em Configurações.', '该日期没有飞书人数 — 请在设置中检查飞书表格。'))});
+    else if (!isNum(proc)) rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('Sem a Qtd processada do JMS ' + (day ? 'neste dia' : 'no período') + '.', '该日期没有JMS处理量。'))});
+    if (fk.length) rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('Com filtro: a eficiência é a do dia inteiro (o JMS não separa por turno); os colaboradores seguem o filtro.',
+      '筛选时：人效为全天（JMS不按班次拆分）；人数按筛选显示。'))});
+    var hero = heroCardHtml({icon: 'gauge', value: n1(eff), rows: rows,
+      title: (day ? ef('Eficiência do dia ', '人效 · ') : ef('Eficiência do período · ', '期间人效 · ')) + when,
+      pills: '<span class="hero-goal">' + esc(ef('volumes por colaborador', '件/人')) + '</span>' +
+        (isNum(pres) && prog ? '<span class="hero-goal">' + esc(ef('Presença ', '出勤率 ')) + fmtPct(pres / prog * 100, 1) + '</span>' : '')});
+    var cards = '';
+    cards += kpiCard('qty', day ? ef('Quantidade produzida no dia', '当日处理量') : ef('Quantidade produzida no período', '期间处理量'), fmtInt(proc),
+      esc(ef('Qtd processada total (JMS)', '总处理量（JMS）')) + '<br>' + esc(day ? t('mcPrevShort', {n: fmtInt(prevProc)}) : t('mcPrevPeriodShort', {n: fmtInt(prevProc)})) + ' ' + dPct(proc, prevProc));
+    cards += kpiCard('login', (fk.length ? ef('Colaboradores presentes (com filtro)', '实到人数（已筛选）') : ef('Colaboradores presentes', '实到人数')) +
+      (day ? '' : ef(' · soma dos dias', ' · 各日合计')), fmtInt(presF),
+      esc(ef('de ', '应到 ')) + '<b>' + fmtInt(progF) + '</b> ' + esc(ef('programados', '人')) + (isNum(rate) ? ' · <b>' + fmtPct(rate, 1) + '</b> ' + esc(ef('de presença', '出勤')) : '') +
+      (fk.length ? '' : '<br>' + esc(day ? t('mcPrevShort', {n: fmtInt(prevPres)}) : t('mcPrevPeriodShort', {n: fmtInt(prevPres)})) + ' ' + dPct(pres, prevPres)));
+    cards += kpiCard('history', day ? ef('Eficiência do dia anterior', '前一日人效') : ef('Eficiência do período anterior', '上一期间人效'), n1(prevEff),
+      esc(prevWhen) + ' · ' + esc(ef('volumes por colaborador', '件/人')));
+    cards += kpiCard('history', day ? ef('Produção do dia anterior', '前一日处理量') : ef('Produção do período anterior', '上一期间处理量'), fmtInt(prevProc),
+      esc(prevWhen) + ' · ' + esc(ef('Qtd processada total', '总处理量')));
+    // Um cartão por turno: presentes (de programados), a parte do turno e o dia anterior.
+    var totP = 0;
+    ['T1', 'T2', 'T3'].forEach(function (s) { totP += Number(metricSum('present' + s, state.from, state.to)) || 0; });
+    cards += ['T1', 'T2', 'T3'].map(function (s) {
+      var v = metricSum('present' + s, state.from, state.to), g = metricSum('program' + s, state.from, state.to), pv = metricSum('present' + s, k.prevFrom, k.prevTo);
+      var share = isNum(v) && totP ? v / totP * 100 : null, on = sel && sel.indexOf(s) >= 0;
+      return '<article class="kpi shift-kpi' + (sel && !on ? ' faded' : '') + (on ? ' selected' : '') + '"><div class="kpi-label"><i style="background:' + SHIFT_COLORS[s] + '"></i>' +
+        s + ' · ' + SHIFT_HOURS[s] + '</div><div class="kpi-value">' + fmtInt(v) + '<small class="sc-unit"> ' + esc(ef('presentes', '实到')) + '</small></div>' +
+        '<div class="kpi-sub">' + esc(ef('de ', '应到 ')) + '<b>' + fmtInt(g) + '</b> ' + esc(ef('programados', '人')) + (isNum(share) ? ' · <b>' + fmtPct(share, 1) + '</b> ' + esc(t('participation')) : '') +
+        '<br>' + esc(day ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dPct(v, pv) + '</div>' +
+        '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(share) ? share : 0) + '" style="background:' + SHIFT_COLORS[s] + '"></i></div></div></article>';
+    }).join('');
+    cards += kpiCard('check', ef('% de presença', '出勤率'), isNum(rate) ? fmtPct(rate, 1) : '—', esc(ef('presentes ÷ programados', '实到 ÷ 应到')) +
+      (isNum(presF) ? '<br>' + fmtInt(presF) + ' ÷ ' + fmtInt(progF) : ''));
+    grid.innerHTML = hero + cards;
     fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
@@ -2455,7 +2528,7 @@
       else { requestDailySeries(fkey, dd.detail, from, to, fo); note = t(state.dailyF && state.dailyF.error ? 'dailyFError' : 'dailyFLoading'); }
     }
     var days = Core.dateRange(from, to);
-    return {key: def.key, metric: mk, type: def.type || 'bar', bad: !!def.bad, title: title, note: note, filtered: filtered,
+    return {key: def.key, metric: mk, type: def.type || 'bar', bad: !!def.bad, title: title, note: note, filtered: filtered, digits: def.digits || 0,
       days: days, values: days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; })};
   }
   function requestDailySeries(fkey, col, from, to, fo) {
@@ -2474,6 +2547,9 @@
   }
   function renderMetricChart(card, spec) {
     var key = spec.key, vals = spec.values, days = spec.days, last = days.length - 1;
+    // V4.33 (Eficiência): número com casas decimais (digits) nos rótulos, na dica e nos destaques.
+    var fmtInt = spec.digits ? function (v) { return isNum(v) ? fmtNum(v, spec.digits) : '—'; } : fmtIntG;
+    var compactInt = spec.digits ? fmtInt : compactIntG;
     $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '');
     $('small', card).textContent = (spec.type === 'line' ? t('metricLineSub', {date: fmtDate(state.to, true)}) :
       t(spec.filtered ? 'metricSubFiltered' : 'metricSub', {n: days.length, date: fmtDate(state.to, true)})) +
@@ -2750,6 +2826,8 @@
     var canvas = $('#sparkCanvas');
     if (!canvas || !window.Chart) return;
     var to = state.to, from = Core.addDays(to, -13);
+    // V4.33 (Eficiência): a minilinha é a eficiência de cada dia (volumes por colaborador).
+    if (c.efficiency) { drawQtySpark(canvas, 'efficiency', from, to, '#fff', 'spark', 1); return; }
     if (c.heroMetric && c.metricCards) {
       drawQtySpark(canvas, c.heroMetric.key, from, to, '#fff', 'spark');
       var c2 = $('#sparkCanvas2');
@@ -2780,7 +2858,7 @@
   }
 
   /** Minilinha do cartão principal do Recebimento: a quantidade oficial dos 14 dias até a data escolhida. */
-  function drawQtySpark(canvas, key, from, to, color, slot) {
+  function drawQtySpark(canvas, key, from, to, color, slot, digits) {
     var byDate = {};
     activeRates().forEach(function (r) { if (r.metrics && isNum(r.metrics[key])) byDate[r.date] = Number(r.metrics[key]); });
     var days = Core.dateRange(from, to), vals = days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; });
@@ -2792,7 +2870,7 @@
         {data: vals, borderColor: col, borderWidth: white ? sp.line : 2, cubicInterpolationMode: 'monotone', pointRadius: white ? sp.dot : 2.5, pointBackgroundColor: col,
           pointBorderWidth: 0, spanGaps: true, fill: white ? 'start' : true, backgroundColor: white ? sparkFill : 'rgba(230,0,18,.08)'}]},
       options: {responsive: true, maintainAspectRatio: false, animation: {duration: 700}, layout: {padding: white ? sp.pad : {top: 6, bottom: 2}},
-        plugins: {legend: {display: false}, datalabels: {display: false}, tooltip: {displayColors: false, callbacks: {label: function (ctx) { return fmtInt(ctx.raw); }}}},
+        plugins: {legend: {display: false}, datalabels: {display: false}, tooltip: {displayColors: false, callbacks: {label: function (ctx) { return digits ? fmtNum(ctx.raw, digits) : fmtInt(ctx.raw); }}}},
         scales: {x: {display: false}, y: {display: false, grace: '15%'}}}
     });
   }
@@ -3629,6 +3707,9 @@
           y: {beginAtZero: true, grace: '18%', grid: {color: GRID}, border: {display: false}, ticks: {color: MUTED, callback: function (v) { return compactInt(v); }}}}}
     });
   }
+  /** Os formatos de sempre, para as funções que trocam fmtInt/compactInt por um com casas decimais (V4.33). */
+  function fmtIntG(n) { return fmtInt(n); }
+  function compactIntG(v) { return compactInt(v); }
   /** 172.842 → "172,8 mil" (rótulos curtos nas colunas). */
   function compactInt(v) {
     if (!isNum(v)) return '';
@@ -3646,7 +3727,7 @@
     var head2 = '<tr>' + shown.map(function (pn) { return pn.metrics.map(function (m) { return '<th>' + esc(L(m.label)) + '</th>'; }).join(''); }).join('') + '</tr>';
     var body = days.slice().reverse().map(function (d) {
       return '<tr' + (d === state.to ? ' class="sel"' : '') + '><td>' + esc(fmtDate(d, true)) + '</td>' + shown.map(function (pn) {
-        return pn.metrics.map(function (m) { var v = byDate[d] && byDate[d][m.key]; return '<td>' + (isNum(v) ? (m.pct ? fmtPct(v, 2) : fmtInt(v)) : '—') + '</td>'; }).join('');
+        return pn.metrics.map(function (m) { var v = byDate[d] && byDate[d][m.key]; return '<td>' + (isNum(v) ? (m.pct ? fmtPct(v, 2) : m.digits ? fmtNum(v, m.digits) : fmtInt(v)) : '—') + '</td>'; }).join('');
       }).join('') + '</tr>';
     }).join('');
     return '<section class="card mp-section"><div class="chart-head"><span class="chart-ico">' + icon('table') + '</span><div class="chart-titles"><h3>' +

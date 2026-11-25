@@ -43,7 +43,9 @@ const DEFAULTS = {
   // o caminho no fim). Vazio = o painel fica na raiz do link.
   caminho: '',
   // V4.22: pacote sem JMS (Produção do Sorter): a tela Configurações mostra o sorter no lugar do AuthToken.
-  semJms: false
+  semJms: false,
+  // V4.33: pacote da Eficiência do SP GRU: a tela Configurações também pede a base do Feishu (App ID, App Secret e link).
+  feishuBase: false
 };
 /**
  * V4.21: padrões do pacote (node/padrao.json, vem no ZIP). Ex.: o painel de Lotes separado usa a porta 3400 e o link na

@@ -20,7 +20,7 @@ const {makeDriveApp, makeBlob} = require('./drive');
 const {fetchAllSync, sleepSync} = require('./syncfetch');
 
 const TZ = 'America/Sao_Paulo';
-const FILE_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Sorter', 'Analytics', 'Report', 'Triggers', 'Code'];
+const FILE_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Sorter', 'Eficiencia', 'Analytics', 'Report', 'Triggers', 'Code'];
 const LOCK_MS = 10 * 60 * 1000;
 const TRIGGERS = ['syncHourly', 'processSyncQueue', 'auditYesterday'];
 
@@ -303,6 +303,8 @@ class GasRuntime {
       const req = typeof r === 'string' ? {url: r} : Object.assign({}, r);
       req.url = String(req.url || '');
       if (self.cfg.jmsUrl) req.url = req.url.replace(/^https:\/\/gw\.jtjms-br\.com/, self.cfg.jmsUrl.replace(/\/+$/, ''));
+      // V4.33: API do Feishu num endereço de teste (DASHMASTER_FEISHU_URL, só para testes e demonstrações).
+      if (process.env.DASHMASTER_FEISHU_URL) req.url = req.url.replace(/^https:\/\/open\.(feishu\.cn|larksuite\.com)/, process.env.DASHMASTER_FEISHU_URL.replace(/\/+$/, ''));
       if (req.payload && typeof req.payload !== 'string' && (Buffer.isBuffer(req.payload) || Array.isArray(req.payload))) {
         req.payload = {__bytes: Buffer.from(req.payload).toString('base64')};
       }

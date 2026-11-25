@@ -160,8 +160,22 @@ em hora, cole o webhook dele. Se ligar a "Assinatura" no bot, cole o segredo tam
 <div class="actions"><button id="saveFeishuTurno">Salvar e mandar um teste</button><button class="ghost" id="offFeishuTurno">Desligar o bot do fechamento</button></div>
 <pre class="out" id="feishuTurnoOut"></pre></section>`;
 
+// V4.33 (Eficiência do SP GRU): a base Headcount do Feishu — aplicativo da empresa (App ID e App Secret) e o link da base.
+const FEISHU_BASE_CARD = `<section class="card"><h2>Base do Feishu (colaboradores)</h2>
+<p class="hint">A eficiência usa os colaboradores presentes da base Headcount do Feishu (somente leitura). Precisa de um aplicativo
+da empresa no Feishu com as permissões <b>bitable:app:readonly</b> e <b>wiki:wiki:readonly</b>, e com acesso à base (na base: … →
+Mais → Adicionar aplicativo / 添加文档应用). Cole o App ID, o App Secret e o link da base com a tabela aberta (o link do wiki serve,
+com ?table=…). O App Secret salvo não aparece de novo nesta tela.</p>
+<p class="small" id="feishuBaseState"></p>
+<label for="fbApp">App ID</label><input id="fbApp" autocomplete="off" spellcheck="false" placeholder="cli_…">
+<label for="fbSecret" style="margin-top:10px">App Secret</label><input id="fbSecret" type="password" autocomplete="new-password">
+<label for="fbLink" style="margin-top:10px">Link da base (com a tabela)</label><input id="fbLink" autocomplete="off" spellcheck="false" placeholder="https://….feishu.cn/wiki/…?table=tbl…&amp;view=vew…">
+<div class="actions"><button id="saveFeishuBase">Salvar e testar a base</button></div>
+<pre class="out" id="feishuBaseOut"></pre></section>`;
+
 function configPage(opts) {
-  const page = configPageHtml(opts);
+  let page = configPageHtml(opts);
+  if (opts.feishuBase) page = page.replace(/(<section class="card"><h2>AuthToken do JMS<\/h2>[\s\S]*?<\/section>)/, (m, x) => x + '\n\n' + FEISHU_BASE_CARD);
   if (!opts.semJms) return page;
   return page.replace(/<section class="card"><h2>AuthToken do JMS<\/h2>[\s\S]*?<\/section>/, () => SORTER_CARD)
     .replace('Primeiro dia que o painel deve baixar do JMS', 'Primeiro dia que o painel deve baixar do sorter');
@@ -252,6 +266,15 @@ O valor salvo não aparece de novo nesta tela.</p>
           return n + (s.props.some(function (p) { return p.k === feishuKey('FEISHU_SEGREDO', n); }) ? ' (com segredo)' : '');
         }).join(', ') + '. Manda o resumo de hora em hora.' : 'Bot desligado: cole o webhook do bot para ligar.';
       }
+      if ($('#feishuBaseState')) {
+        var fbHas = function (k) { return s.props.some(function (p) { return p.k === k; }); };
+        $('#feishuBaseState').textContent = fbHas('FEISHU_APP_ID') && fbHas('FEISHU_APP_SECRET') && fbHas('FEISHU_BASE_LINK') ?
+          'Base configurada (App ID, App Secret e link salvos).' : 'Falta: ' + [['FEISHU_APP_ID', 'App ID'], ['FEISHU_APP_SECRET', 'App Secret'], ['FEISHU_BASE_LINK', 'link da base']]
+            .filter(function (x) { return !fbHas(x[0]); }).map(function (x) { return x[1]; }).join(', ') + '.';
+        var fl = s.props.filter(function (p) { return p.k === 'FEISHU_BASE_LINK'; })[0], fa = s.props.filter(function (p) { return p.k === 'FEISHU_APP_ID'; })[0];
+        if (fl && !$('#fbLink').value) $('#fbLink').value = fl.v;
+        if (fa && !$('#fbApp').value) $('#fbApp').value = fa.v;
+      }
       if ($('#feishuTurnoState')) {
         var ftOn = s.props.some(function (p) { return p.k === 'FEISHU_TURNO_WEBHOOK'; });
         $('#feishuTurnoState').textContent = ftOn ? 'Bot ligado no grupo principal' + (s.props.some(function (p) { return p.k === 'FEISHU_TURNO_SEGREDO'; }) ? ' (com segredo)' : '') +
@@ -312,6 +335,21 @@ O valor salvo não aparece de novo nesta tela.</p>
     api('remover', {k: feishuKey('FEISHU_WEBHOOK', g)}).then(function () { return api('remover', {k: feishuKey('FEISHU_SEGREDO', g)}); })
       .then(function () { show(out, 'Bot do grupo ' + g + ' desligado (webhook e segredo apagados).'); load(); })
       .catch(function (e) { show(out, e.message, true); });
+  };
+  if ($('#saveFeishuBase')) $('#saveFeishuBase').onclick = function () {
+    var app = $('#fbApp').value.trim(), sec = $('#fbSecret').value.trim(), link = $('#fbLink').value.trim(), out = $('#feishuBaseOut'), btn = this;
+    var has = function (k) { return (window.__props || []).some(function (p) { return p.k === k; }); };
+    if (!app && !has('FEISHU_APP_ID')) { show(out, 'Cole o App ID do aplicativo do Feishu.', true); return; }
+    if (!sec && !has('FEISHU_APP_SECRET')) { show(out, 'Cole o App Secret do aplicativo do Feishu.', true); return; }
+    if (!link && !has('FEISHU_BASE_LINK')) { show(out, 'Cole o link da base (com ?table=…).', true); return; }
+    if (link && !/^https:[/][/][^/ ]+[.](feishu[.]cn|larksuite[.]com)[/](wiki|base)[/][A-Za-z0-9]+[^ ]*[?&]table=tbl[A-Za-z0-9]+/.test(link)) {
+      show(out, 'Link inválido. Abra a tabela Headcount no Feishu e copie o link do navegador (…/wiki/… ou …/base/…, com ?table=tbl…).', true); return;
+    }
+    busy(btn, true);
+    var put = function (k, v) { return v ? api('propriedade', {k: k, v: v}) : Promise.resolve(null); };
+    put('FEISHU_APP_ID', app).then(function () { return put('FEISHU_APP_SECRET', sec); }).then(function () { return put('FEISHU_BASE_LINK', link); })
+      .then(function () { $('#fbSecret').value = ''; return runFn('testarBaseFeishu', [], out, btn); })
+      .catch(function (e) { show(out, e.message, true); busy(btn, false); });
   };
   if ($('#saveFeishuTurno')) $('#saveFeishuTurno').onclick = function () {
     var hook = $('#ftHook').value.trim(), seg = $('#ftSeg').value.trim(), out = $('#feishuTurnoOut'), btn = this, turno = $('#ftTurno').value;

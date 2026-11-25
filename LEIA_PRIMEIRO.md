@@ -4,6 +4,29 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.33.0 — Painel Eficiência do SP GRU (pacote separado)
+
+Pedido: "Desenvolver um dashboard que mostre a eficiência do SP GRU", com os dados da base do Feishu (colaboradores presentes e
+programados) e do JMS (quantidade produzida). Pacote **separado** (`JT_DASHMASTER_V4_33_EFICIENCIA_NODE.zip`, pasta
+`C:\dashmaster-eficiencia`, porta **4000**, link `https://NOME.xxxx.ts.net/eficiencia`). Passo a passo no `LEIA_EFICIENCIA.md`.
+
+- **Conta:** Eficiência = **Qtd processada total** ÷ **colaboradores presentes** (todos: Administrativo, Assistente Operacional,
+  Operacional, Temporário e Diarista, somando os 3 turnos do dia). No período: a soma das quantidades ÷ a soma dos presentes.
+- **JMS:** Cabine de dados › Análise de entrada e saída de transbordo novo (`transit_out_ports_list`, Regional SPE 370000, SC SP GRU
+  30001, Pedido principal). "Qtd processada total" = `transhipmentNum`; os outros números da linha entram na tabela.
+- **Feishu:** base Headcount (uma linha por turno), lida pela API do Feishu com um aplicativo da empresa (App ID e App Secret em
+  Configurações → **Base do Feishu**) e o link da base (o do wiki serve, com `?table=…`). Somente leitura. Duas linhas do mesmo dia
+  e turno: vale a enviada por último. O nome de quem enviou não é lido.
+- **Filtros:** data, turno e função. Com filtro, os colaboradores seguem o filtro e a eficiência continua a do dia inteiro (o JMS
+  não separa a quantidade por turno).
+- **Cartões:** eficiência do dia (cartão vermelho no formato novo, com a minilinha de 14 dias), quantidade produzida,
+  colaboradores presentes (de programados), eficiência e produção do dia anterior, T1/T2/T3 e % de presença.
+- **Gráficos:** eficiência diária, produção diária, presentes por turno e por função.
+- **Tabelas:** por turno e por função (presentes e programados) e os dados gerais de cada dia (eficiência, produção, presentes,
+  programados, % presença, presentes por turno e por função e os números do JMS).
+- Teste e conferência: **Salvar e testar a base** (colunas reconhecidas e últimos dias) e Executar função →
+  `diagnosticarEficiencia` (a conta de um dia).
+
 ## V4.32.1 — Bot do fechamento do turno na hora exata e com o top 3
 
 Pedido: "mudar o horário de envio para a hora exata em vez de 5 minutos depois da hora" e "mostrar os três horários mais produzidos
