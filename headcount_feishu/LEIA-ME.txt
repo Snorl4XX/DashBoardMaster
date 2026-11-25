@@ -32,10 +32,13 @@ chinês entre parênteses ajudam a achar.
 2. Acertar os campos (列/字段)
 -----------------------------
 Clique na setinha do título de cada coluna > Editar campo (编辑字段):
-1. "Data 日期": tipo DATA DE CRIAÇÃO (创建时间), formato só a data, dia/mês/ano (sem hora).
-   Assim a data é a do envio, automática, e o campo não aparece no formulário.
-   Se o Feishu não deixar trocar o tipo, apague a coluna "Data 日期" e crie outra com o mesmo
-   nome, já com o tipo Data de criação (创建时间).
+1. "Data 日期": tipo DATA DE CRIAÇÃO (创建时间, pode aparecer como "Hora de criação"), formato
+   só a data, sem hora. Assim a data é a do envio, automática, e o campo não aparece no
+   formulário.
+   Se esse tipo não aparecer: a Data é a 1ª coluna (coluna principal / 索引列, com cadeado) e
+   o Feishu não aceita todos os tipos nela. Então crie antes o "Enviado em 提交时间" (item 4) e
+   mude a Data para FÓRMULA (公式): no editor, clique só no campo "Enviado em 提交时间"; em
+   Formatação, escolha data sem hora (2026/11/24). Dá no mesmo: dia do envio, automático.
 2. "Turno 班次": tipo OPÇÃO ÚNICA (单选), com 3 opções, nesta ordem:
      Manhã 早班  |  Tarde 中班  |  Noite 夜班
 3. As 10 colunas de quantidade: tipo NÚMERO (数字), formato inteiro (整数, sem casas decimais).
@@ -45,7 +48,9 @@ Clique na setinha do título de cada coluna > Editar campo (编辑字段):
    - "Total Programado 应出勤合计": fórmula SUM( das 5 colunas "- Programado" ).
    - "Enviado por 提交人": tipo CRIADO POR (创建人).
    - "Enviado em 提交时间": tipo DATA DE CRIAÇÃO (创建时间), com hora.
-5. Apague a linha de exemplo (botão direito na linha > Excluir registro / 删除记录).
+5. Apague a linha de exemplo e as linhas vazias que o Feishu cria junto (marque a caixinha do
+   cabeçalho para selecionar todas > botão direito > Excluir registros / 删除记录). A tabela
+   tem que ficar sem nenhuma linha antes de mandar o formulário para os líderes.
 
 
 3. Criar o formulário (表单视图)
