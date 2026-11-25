@@ -1262,3 +1262,188 @@ function testarFeishu(hora, grupo) {
     return {ok: false, erro: String(e && e.message || e), recebeu: e && e.enviados && e.enviados.length ? 'grupo(s) ' + e.enviados.join(', ') : 'nenhum grupo'};
   }
 }
+
+// ------------------------------------------------------------------ V4.32: bot do fechamento do turno (grupo principal)
+/**
+ * Pedido: "baseado no Bot de produção do Sorter, um bot que mostra a hora mais produzida, a balança que teve maior número no turno
+ * correspondente. Ele vai soltar os dados no grupo principal quando for no final do turno. Mostrar também a quantidade total produzida
+ * no sorter pelo turno." Um bot à parte do de hora em hora: o webhook do bot do grupo principal (FEISHU_TURNO_WEBHOOK) e, se o bot
+ * tiver assinatura, o segredo (FEISHU_TURNO_SEGREDO), em Configurações. No fim de cada turno (14h, 22h e 06h, a partir do minuto
+ * FEISHU_MINUTO), direto do site do sorter (Sorter A + B, "no group by"): o total do turno (a janela do turno inteiro), o total de
+ * cada hora do turno (a hora mais produzida) e a quantidade de cada balança no turno (a maior). Uma mensagem por turno; até 3
+ * tentativas. Os números vêm do mesmo jeito que o fechamento do turno do bot de hora em hora.
+ */
+function feishuTurnoGroup_() {
+  const url = String(getProp_('FEISHU_TURNO_WEBHOOK', '') || '').trim();
+  return url ? {n: 'principal', url: url, seg: String(getProp_('FEISHU_TURNO_SEGREDO', '') || '').trim()} : null;
+}
+function feishuTurnoOn_() { return !!(INDICATORS.sorter_flow && feishuTurnoGroup_()); }
+/** Hora que fecha cada turno (a última hora dele): T1 13h, T2 21h, T3 5h (o T3 do dia D = 22h de D-1 até 06h de D). */
+const FEISHU_TURNO_FIM_ = {T1: 13, T2: 21, T3: 5};
+/** "11h–12h". */
+function feishuHoraTxt_(h) { return JTCore_.intervalOf(String(h).padStart(2, '0') + ':00:00').replace(' - ', '–'); }
+/**
+ * O último turno que fechou até `nowMs` (ou o último `shift` que fechou): {date, shift, sc}. `date` = o dia em que o turno termina.
+ */
+function feishuTurnoUltimo_(nowMs, shift) {
+  const s = Utilities.formatDate(new Date(nowMs || Date.now()), tz_(), 'yyyy-MM-dd HH'), today = s.slice(0, 10), hour = Number(s.slice(11, 13));
+  const cands = [];
+  [0, -1].forEach(dd => Object.keys(FEISHU_TURNO_FIM_).forEach(t => {
+    const date = addDaysIso_(today, dd), end = FEISHU_TURNO_FIM_[t] + 1;
+    if (dd === 0 && hour < end) return;  // ainda não fechou hoje
+    if (!shift || shift === t) cands.push({date: date, shift: t, ord: dd * 24 + end});
+  }));
+  const c = cands.sort((a, b) => b.ord - a.ord)[0];
+  return {date: c.date, shift: c.shift, sc: feishuShiftClose_(c.date, FEISHU_TURNO_FIM_[c.shift])};
+}
+/**
+ * Números do turno `sc` (feishuShiftClose_) que termina em `date`, direto do site, para cada sorter: o total do turno, o total de
+ * cada hora e a quantidade de cada balança. Erro do sorter sobe com sorterFalha = true.
+ */
+function feishuTurnoData_(date, sc) {
+  const x = {date: date, shift: sc.shift, label: sc.label, window: sc.w, total: sorterSum_([]), bySorter: {}, hours: [], feed: [], site: {}};
+  sc.parts.forEach(p => p.hours.forEach(h => x.hours.push({date: p.date, hour: h, txt: feishuHoraTxt_(h), total: 0, bySorter: {}})));
+  try {
+    const ss = sorterSessions_();
+    ss.sessions.forEach(s => {
+      const nome = s.dev.nome, info = x.site[nome] = {};
+      const t = sorterWindowTotals_(s, sc.w, info);
+      Object.keys(x.total).forEach(k => { x.total[k] += t[k] || 0; });
+      x.bySorter[nome] = t;
+      x.hours.forEach(h => {
+        const th = sorterWindowTotals_(s, feishuWindow_(h.date, h.hour, 1));
+        h.total += th.total || 0;
+        h.bySorter[nome] = th.total || 0;
+      });
+      const f = sorterWindowFeed_(s, sc.w, info);
+      Object.keys(f.q).forEach(n => x.feed.push({sorter: nome, n: Number(n), qty: f.q[n]}));
+    });
+  } catch (e) { const err = new Error(String(e && e.message || e)); err.sorterFalha = true; throw err; }
+  const nm = b => b.sorter + ' ' + String(b.n).padStart(4, '0');
+  // Empate: a hora que veio primeiro no turno; a balança de menor número (Sorter A antes do B).
+  x.topHour = x.hours.reduce((m, h) => (h.total > 0 && (!m || h.total > m.total) ? h : m), null);
+  x.topFeed = x.feed.filter(b => b.qty > 0).sort((a, b) => b.qty - a.qty || (nm(a) < nm(b) ? -1 : 1))[0] || null;
+  x.vazio = !(x.total.total > 0) && !x.topHour && !x.topFeed;
+  // A última hora do turno ainda zerada (o site às vezes fecha a hora alguns minutos depois): o bot espera um pouco.
+  x.ultimaVazia = !x.vazio && !(x.hours[x.hours.length - 1].total > 0);
+  return x;
+}
+/** Cartão do fechamento do turno: total do turno, a hora mais produzida, a balança com o maior número e a produção de cada hora. */
+function feishuTurnoCard_(x) {
+  const dm = v => v.slice(8, 10) + '/' + v.slice(5, 7), dia = dm(x.date), tot = x.total.total;
+  const pct = q => (tot > 0 ? ' (' + String(Math.round(q / tot * 1000) / 10).replace('.', ',') + '% do turno / 占班次)' : '');
+  const porSorter = m => Object.keys(m).sort().map(k => k + ' ' + feishuN_(m[k])).join(' · ');
+  const md = t => ({tag: 'div', text: {tag: 'lark_md', content: t}});
+  const totSorter = {};
+  Object.keys(x.bySorter).forEach(k => { totSorter[k] = x.bySorter[k].total; });
+  const els = [];
+  els.push(md('📦 **Total produzido no turno / 班次总产量**\n**' + feishuN_(tot) + '** volumes' +
+    (Object.keys(totSorter).length ? ' (' + porSorter(totSorter) + ')' : '')));
+  if (x.vazio) els.push(md('😴 **Sem produção no turno / 本班次无产量** — o site do sorter mostra 0 no período.'));
+  els.push({tag: 'hr'});
+  const th = x.topHour;
+  els.push(md('⏰ **Hora mais produzida / 产量最高时段**\n' + (th ? '**' + th.txt + '**: **' + feishuN_(th.total) + '** volumes' + pct(th.total) +
+    (Object.keys(th.bySorter).length > 1 ? '\n' + porSorter(th.bySorter) : '') : 'Sem produção no turno / 本班次无产量')));
+  const tf = x.topFeed;
+  els.push({tag: 'hr'});
+  els.push(md('🏆 **Balança com maior número no turno / 班次供包量最多的供包台**\n' + (tf ? tf.sorter + ' · ' + feishuBal_(tf.n) + ': **' +
+    feishuN_(tf.qty) + '**' + pct(tf.qty) : 'Sem balanças com produção no turno / 本班次无供包')));
+  // A produção de cada hora do turno, em duas colunas (⭐ na mais produzida).
+  els.push({tag: 'hr'});
+  els.push(md('📊 **Produção por hora / 每小时产量** — ' + x.label));
+  els.push({tag: 'div', fields: x.hours.map(h => ({is_short: true, text: {tag: 'lark_md',
+    content: (th && h === th ? '⭐ ' : '') + h.txt + ': ' + (h.total > 0 ? '**' + feishuN_(h.total) + '**' : '0')}}))});
+  const w0 = x.window.start, w1 = x.window.end, iso = v => { const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(v); return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0'); };
+  els.push({tag: 'note', elements: [{tag: 'plain_text', content: '🤖 Painel Produção do Sorter · dados do sorter de ' + dm(iso(w0)) + ' ' + w0.slice(-8, -3) +
+    ' às ' + dm(iso(w1)) + ' ' + w1.slice(-8, -3) + ' (Sorter A + B; balanças / 供包台: quantidade alimentada)'}]});
+  return {msg_type: 'interactive', card: {config: {wide_screen_mode: true},
+    header: {template: 'red', title: {tag: 'plain_text', content: '🏁 Fechamento do turno ' + x.label + ' / 班次总结 · ' + dia}}, elements: els}};
+}
+/** Aviso quando o painel não conseguiu ler o sorter no fim do turno (depois das 3 tentativas). */
+function feishuTurnoWarnCard_(date, sc, erro) {
+  const rede = /^Não consegui acessar o sorter/.test(String(erro));
+  return {msg_type: 'interactive', card: {config: {wide_screen_mode: true},
+    header: {template: 'orange', title: {tag: 'plain_text', content: '⚠️ Fechamento do turno ' + sc.label + ' / 班次总结 · ' +
+      (rede ? 'sem acesso ao sorter' : 'não consegui ler o sorter')}},
+    elements: [{tag: 'div', text: {tag: 'lark_md', content: 'Não consegui ler o sorter para o fechamento do turno ' + sc.label + ' de ' +
+      date.slice(8, 10) + '/' + date.slice(5, 7) + ' (' + String(erro).slice(0, 140) + ').\nO próximo turno sai normalmente quando o computador do ' +
+      'painel alcançar o sorter. / 无法连接分拣机，下一个班次会正常发送。'}}]}};
+}
+/** Busca o turno no site e manda no grupo principal. */
+function feishuSendTurno_(date, sc, opts) {
+  opts = opts || {};
+  const x = feishuTurnoData_(date, sc);
+  if ((x.vazio || x.ultimaVazia) && opts.esperar) return {aguardando: true, numeros: x};
+  feishuPost_(feishuTurnoCard_(x), opts.grupo || feishuTurnoGroup_());
+  return {numeros: x};
+}
+/**
+ * Na fila (a cada minuto no Node), junto do bot de hora em hora: no fim de cada turno (14h, 22h e 06h, a partir do minuto
+ * FEISHU_MINUTO), manda o fechamento do turno no grupo principal, uma vez por turno. Turno zerado ou com a última hora ainda zerada:
+ * espera (de 5 em 5 min) até o minuto FEISHU_ESPERA e depois manda como estiver. Até 3 tentativas; depois, um aviso no grupo.
+ */
+function feishuTurnoTick_(nowMs) {
+  const g = feishuTurnoGroup_();
+  if (!INDICATORS.sorter_flow || !g) return null;
+  const h = feishuLastHour_(nowMs), sc = feishuShiftClose_(h.date, h.hour);
+  if (!sc) return null;
+  const key = h.date + ' ' + sc.shift, min = Math.max(0, Math.min(55, Number(getProp_('FEISHU_MINUTO', '')) || 5));
+  if (h.minute < min || getProp_('FEISHU_TURNO_ULTIMA', '') === key) return null;
+  const lim = Math.max(min + 5, Math.min(59, Number(getProp_('FEISHU_ESPERA', '')) || 15));
+  const vz = String(getProp_('FEISHU_TURNO_VAZIO', '')).split('|'), espera = h.minute < lim;
+  if (vz[0] === key && h.minute - Number(vz[1]) < 5 && espera) return null;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return null;
+  try {
+    const r = feishuSendTurno_(h.date, sc, {esperar: espera, grupo: g});
+    if (r.aguardando) { setProp_('FEISHU_TURNO_VAZIO', key + '|' + h.minute); return {ok: false, turno: key, aguardando: true}; }
+    setProp_('FEISHU_TURNO_ULTIMA', key);
+    deleteProp_('FEISHU_TURNO_TENTATIVA');
+    deleteProp_('FEISHU_TURNO_VAZIO');
+    return {ok: true, turno: key};
+  } catch (e) {
+    const t = String(getProp_('FEISHU_TURNO_TENTATIVA', '')).split('|'), n = (t[0] === key ? Number(t[1]) || 0 : 0) + 1;
+    const msg = String(e && e.message || e);
+    if (n >= FEISHU_TENTATIVAS_) {
+      setProp_('FEISHU_TURNO_ULTIMA', key);
+      deleteProp_('FEISHU_TURNO_TENTATIVA');
+      deleteProp_('FEISHU_TURNO_VAZIO');
+      if (e && e.sorterFalha) { try { feishuPost_(feishuTurnoWarnCard_(h.date, sc, msg), g); } catch (e2) { /* fica no LOG */ } }
+    } else setProp_('FEISHU_TURNO_TENTATIVA', key + '|' + n);
+    logSync_('WARN', 'sorter_flow', h.date, 'Bot do fechamento do turno (' + key + ', tentativa ' + n + '): ' + msg.slice(0, 300));
+    return {ok: false, turno: key, erro: msg};
+  } finally { lock.releaseLock(); }
+}
+/**
+ * Configurações → "Salvar e mandar um teste" (ou Executar função): manda agora o fechamento de um turno no grupo principal.
+ * turno: vazio = o último turno que fechou; "T1", "T2" ou "T3" = o último desse turno; "2026-11-24 T2" = o T2 de 24/11
+ * ("2026-11-24 T3" = o T3 que termina às 06h de 24/11, das 22h de 23/11). Mostra os números enviados — nunca o webhook nem o segredo.
+ */
+function testarFeishuTurno(turno) {
+  if (!INDICATORS.sorter_flow) return {ok: false, erro: 'O bot do fechamento do turno é do painel Produção do Sorter.'};
+  const g = feishuTurnoGroup_();
+  if (!g) return {ok: false, erro: 'Cole o webhook do bot do grupo principal em Configurações (Bot do fechamento do turno).'};
+  const s = String(turno === undefined || turno === null ? '' : turno).trim();
+  let ref;
+  if (s) {
+    const m = /^(?:(\d{4}-\d{2}-\d{2})\s+)?(T[123])$/i.exec(s);
+    if (!m) return {ok: false, erro: 'Turno inválido: use "T1", "T2" ou "T3" (o último que fechou) ou "2026-11-24 T2".'};
+    const sh = m[2].toUpperCase();
+    ref = m[1] ? {date: m[1], shift: sh, sc: feishuShiftClose_(m[1], FEISHU_TURNO_FIM_[sh])} : feishuTurnoUltimo_(Date.now(), sh);
+  } else ref = feishuTurnoUltimo_(Date.now());
+  try {
+    const x = feishuSendTurno_(ref.date, ref.sc, {grupo: g}).numeros, por = {};
+    Object.keys(x.bySorter).forEach(k => { por[k] = x.bySorter[k].total; });
+    return {ok: true, enviado: 'Mensagem enviada no grupo principal: fechamento do turno ' + x.label + ' de ' + ref.date,
+      segredo: g.seg ? 'com segredo' : 'sem segredo',
+      oQueOSiteRespondeu: x.site,
+      periodo: x.window.start + ' → ' + x.window.end,
+      numeros: {totalDoTurno: x.total.total, porSorter: por,
+        horaMaisProduzida: x.topHour ? x.topHour.txt + ': ' + x.topHour.total : 'sem produção',
+        balancaComMaiorNumero: x.topFeed ? x.topFeed.sorter + ' · Balança ' + x.topFeed.n + ': ' + x.topFeed.qty : 'sem produção',
+        porHora: x.hours.map(h => h.txt + ': ' + h.total)},
+      proxima: 'No fim de cada turno (14h, 22h e 06h), a partir do minuto ' + (Number(getProp_('FEISHU_MINUTO', '')) || 5) + '.'};
+  } catch (e) {
+    return {ok: false, erro: String(e && e.message || e)};
+  }
+}

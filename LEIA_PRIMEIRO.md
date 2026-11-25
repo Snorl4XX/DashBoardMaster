@@ -4,6 +4,27 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.32.0 — Bot do fechamento do turno (Produção do Sorter)
+
+Pedido: "Baseado no Bot de produção do Sorter, quero criar um bot que mostra a hora mais produzida, a balança que teve maior número
+no turno correspondente. Ele vai soltar os dados no grupo principal quando for no final do turno. Mostrar também a quantidade total
+produzida no sorter pelo turno."
+
+- **Quando:** no fim de cada turno — às 14:05 (T1, 06h–14h), 22:05 (T2, 14h–22h) e 06:05 (T3, 22h do dia anterior às 06h). Uma
+  mensagem por turno. Se a última hora do turno ainda estiver zerada no site, espera até o minuto 15 e manda como estiver.
+- **Onde:** no grupo principal do Feishu, por um bot à parte (`FEISHU_TURNO_WEBHOOK` e, com assinatura, `FEISHU_TURNO_SEGREDO`,
+  em Configurações → **Bot do fechamento do turno**). O bot de hora em hora continua igual, nos grupos dele.
+- **O cartão:**
+  - 📦 total produzido no turno (Sorter A + B, com a parte de cada um);
+  - ⏰ hora mais produzida (quantidade e % do turno, com A e B);
+  - 🏆 balança com o maior número no turno (sorter, balança / 供包台, quantidade e % do turno);
+  - 📊 produção de cada hora do turno, em duas colunas, com ⭐ na mais produzida.
+- Os números vêm direto do site do sorter, como no bot de hora em hora: a janela do turno inteiro (sem agrupar) para o total e as
+  balanças, e cada hora para a hora mais produzida.
+- Sem acesso ao sorter: 3 tentativas; depois, um aviso no grupo principal (o próximo turno sai normalmente).
+- Teste: **Salvar e mandar um teste** (o último turno que fechou, ou T1/T2/T3) ou Executar função → `testarFeishuTurno`
+  ("T2" ou "2026-11-24 T2"). O resultado mostra os números enviados, sem o webhook nem o segredo.
+
 ## V4.31.0 — Cartão da taxa do dia no formato do print
 
 Pedido: "Mudar o cartão que mostra a taxa do dia para o formato do print que anexei", em todos os painéis do principal.

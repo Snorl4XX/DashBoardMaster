@@ -143,6 +143,19 @@ produção (Sorter A + B), Valid total, No Sort Code e as balanças (3 que mais,
 turno. No grupo: Configurações do grupo → Bots → Adicionar bot → Bot
 personalizado; copie o webhook. Em http://localhost:3500/config, seção **Bot do Feishu**: cole o webhook (e o segredo, se ligou a
 assinatura) e clique em **Salvar e mandar um teste**. O computador precisa de internet. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
+
+## Bot do fechamento do turno (opcional, V4.32)
+No fim de cada turno (14h, 22h e 06h, no minuto 5), um cartão no **grupo principal** do Feishu com o turno que acabou:
+- 📦 o total produzido no sorter no turno (Sorter A + B);
+- ⏰ a hora mais produzida do turno (com a quantidade e a % do turno);
+- 🏆 a balança com o maior número no turno (sorter, balança, quantidade e % do turno);
+- 📊 a produção de cada hora do turno (⭐ na mais produzida).
+
+É um bot à parte do de hora em hora. No grupo principal: Configurações do grupo → Bots → Adicionar bot → Bot personalizado
+(ex.: "Fechamento do turno"); copie o webhook. Em http://localhost:3500/config, seção **Bot do fechamento do turno**: cole o webhook
+(e o segredo, se ligou a assinatura), escolha o turno do teste e clique em **Salvar e mandar um teste**. O T3 é das 22h do dia
+anterior às 06h. Para mandar de novo um turno: Configurações → Executar função → **testarFeishuTurno** com "T1", "T2", "T3" ou
+"2026-11-24 T2".
 `};
 // V4.30 (pedido "Desenvolver um dashboard para o PA SHEIN"): Falta de bipagem do PA SHEIN-GRU-SP (pedidos SHEIN), separada do
 // principal — outra pasta, porta 3900 (3000 principal, 3100 Painel do Sorter, 3200 Pesquisa, 3300 Expedição Incorreta, 3400 Lotes,

@@ -1999,6 +1999,10 @@ function processSyncQueue(opts) {
   if (typeof feishuSorterTick_ === 'function') {
     try { feishuSorterTick_(); } catch (e) { logSync_('WARN', 'sorter_flow', '', 'Bot do Feishu: ' + String(e && e.message || e).slice(0, 300)); }
   }
+  // V4.32: bot do fechamento do turno — no fim de cada turno, no grupo principal (só com FEISHU_TURNO_WEBHOOK em Configurações).
+  if (typeof feishuTurnoTick_ === 'function') {
+    try { feishuTurnoTick_(); } catch (e) { logSync_('WARN', 'sorter_flow', '', 'Bot do fechamento do turno: ' + String(e && e.message || e).slice(0, 300)); }
+  }
   if (!opts.force && queueLooksIdle_()) return {ok: true, idle: true, done: 0, failed: 0, waiting: 0, partial: 0};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(3000)) return {ok: false, busy: true};

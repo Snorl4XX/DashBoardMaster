@@ -144,7 +144,21 @@ escolha "Grupo 2" abaixo e cole o webhook dele (até 5 grupos).</p>
 <label for="fHook" style="margin-top:10px">Webhook do bot desse grupo</label><input id="fHook" autocomplete="off" spellcheck="false" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…">
 <label for="fSeg" style="margin-top:10px">Segredo da assinatura (opcional)</label><input id="fSeg" type="password" autocomplete="new-password">
 <div class="actions"><button id="saveFeishu">Salvar e mandar um teste</button><button class="ghost" id="offFeishu">Desligar o bot deste grupo</button></div>
-<pre class="out" id="feishuOut"></pre></section>`;
+<pre class="out" id="feishuOut"></pre></section>
+
+<section class="card"><h2>Bot do fechamento do turno</h2>
+<p class="hint">No fim de cada turno (14h, 22h e 06h, no minuto 5), o painel manda no grupo principal do Feishu o fechamento do turno
+que acabou: o total produzido no sorter no turno (Sorter A + B), a hora mais produzida, a balança com o maior número no turno e a
+produção de cada hora. É um bot à parte do de hora em hora: no grupo principal, Configurações do grupo → Bots → Adicionar bot →
+Bot personalizado (ex.: "Fechamento do turno"); copie o webhook e cole abaixo. Se quiser que a mensagem saia pelo mesmo bot de hora
+em hora, cole o webhook dele. Se ligar a "Assinatura" no bot, cole o segredo também.</p>
+<p class="small" id="feishuTurnoState"></p>
+<label for="ftHook">Webhook do bot do grupo principal</label><input id="ftHook" autocomplete="off" spellcheck="false" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…">
+<label for="ftSeg" style="margin-top:10px">Segredo da assinatura (opcional)</label><input id="ftSeg" type="password" autocomplete="new-password">
+<label for="ftTurno" style="margin-top:10px">Turno do teste</label><select id="ftTurno"><option value="">O último que fechou</option>
+<option value="T1">T1 (06h–14h)</option><option value="T2">T2 (14h–22h)</option><option value="T3">T3 (22h–06h)</option></select>
+<div class="actions"><button id="saveFeishuTurno">Salvar e mandar um teste</button><button class="ghost" id="offFeishuTurno">Desligar o bot do fechamento</button></div>
+<pre class="out" id="feishuTurnoOut"></pre></section>`;
 
 function configPage(opts) {
   const page = configPageHtml(opts);
@@ -238,6 +252,11 @@ O valor salvo não aparece de novo nesta tela.</p>
           return n + (s.props.some(function (p) { return p.k === feishuKey('FEISHU_SEGREDO', n); }) ? ' (com segredo)' : '');
         }).join(', ') + '. Manda o resumo de hora em hora.' : 'Bot desligado: cole o webhook do bot para ligar.';
       }
+      if ($('#feishuTurnoState')) {
+        var ftOn = s.props.some(function (p) { return p.k === 'FEISHU_TURNO_WEBHOOK'; });
+        $('#feishuTurnoState').textContent = ftOn ? 'Bot ligado no grupo principal' + (s.props.some(function (p) { return p.k === 'FEISHU_TURNO_SEGREDO'; }) ? ' (com segredo)' : '') +
+          '. Manda o fechamento no fim de cada turno (14h, 22h e 06h).' : 'Bot desligado: cole o webhook do bot do grupo principal para ligar.';
+      }
       if ($('#sUrl') && !$('#sUrl').value) {
         var su = s.props.filter(function (p) { return p.k === 'SORTER_URL'; })[0];
         $('#sUrl').value = su ? su.v : 'http://10.1.166.9';
@@ -292,6 +311,25 @@ O valor salvo não aparece de novo nesta tela.</p>
     var out = $('#feishuOut'), g = Number($('#fGrupo').value) || 1;
     api('remover', {k: feishuKey('FEISHU_WEBHOOK', g)}).then(function () { return api('remover', {k: feishuKey('FEISHU_SEGREDO', g)}); })
       .then(function () { show(out, 'Bot do grupo ' + g + ' desligado (webhook e segredo apagados).'); load(); })
+      .catch(function (e) { show(out, e.message, true); });
+  };
+  if ($('#saveFeishuTurno')) $('#saveFeishuTurno').onclick = function () {
+    var hook = $('#ftHook').value.trim(), seg = $('#ftSeg').value.trim(), out = $('#feishuTurnoOut'), btn = this, turno = $('#ftTurno').value;
+    var has = (window.__props || []).some(function (p) { return p.k === 'FEISHU_TURNO_WEBHOOK'; });
+    if (!hook && !has) { show(out, 'Cole o endereço do webhook do bot do grupo principal.', true); return; }
+    if (hook && !/^https:[/][/]open[.](feishu[.]cn|larksuite[.]com)[/]open-apis[/]bot[/]v2[/]hook[/][A-Za-z0-9-]+$/.test(hook)) {
+      show(out, 'Endereço inválido. Ele começa com https://open.feishu.cn/open-apis/bot/v2/hook/', true); return;
+    }
+    busy(btn, true);
+    (hook ? api('propriedade', {k: 'FEISHU_TURNO_WEBHOOK', v: hook}) : Promise.resolve(null)).then(function () {
+      return seg ? api('propriedade', {k: 'FEISHU_TURNO_SEGREDO', v: seg}) : null;
+    }).then(function () { $('#ftHook').value = ''; $('#ftSeg').value = ''; return runFn('testarFeishuTurno', [turno], out, btn); })
+      .catch(function (e) { show(out, e.message, true); busy(btn, false); });
+  };
+  if ($('#offFeishuTurno')) $('#offFeishuTurno').onclick = function () {
+    var out = $('#feishuTurnoOut');
+    api('remover', {k: 'FEISHU_TURNO_WEBHOOK'}).then(function () { return api('remover', {k: 'FEISHU_TURNO_SEGREDO'}); })
+      .then(function () { show(out, 'Bot do fechamento do turno desligado (webhook e segredo apagados).'); load(); })
       .catch(function (e) { show(out, e.message, true); });
   };
   if ($('#saveTok')) $('#saveTok').onclick = function () {
