@@ -61,7 +61,7 @@ function credentialSignature_() {
  * do JMS (último trecho da URL da tela), como no ErrorSendRate capturado.
  * Para mudar: JMS_ROUTENAME_<ROTA> e JMS_ROUTENAMELIST_<ROTA>; use NONE para não enviar.
  * <ROTA> = WRONG_SEND | SORTING_ERROR | MISSING_SCAN | SC_SC | SC_DC | DAMAGE | PROBLEM_PIECE | ARRIVAL | SEND | TRACKING | LOTS | NOMOVE
- *          | SCANQUERY | UNSEAL | UNSEAL_TRUNK | PA_MISSING | TRANSIT_PORT
+ *          | SCANQUERY | PA_MISSING | TRANSIT_PORT
  */
 const JMS_ROUTES_ = [
   {key: 'WRONG_SEND', pattern: /\/center_wrong_send_(?:total|detail|sum)(?:\?|$)/, name: 'ErrorSendRate', list: '经营指标>时效>错发率'},
@@ -110,15 +110,6 @@ const JMS_ROUTES_ = [
   // recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_SCANQUERY / JMS_ROUTENAMELIST_SCANQUERY mandam).
   {key: 'SCANQUERY', pattern: /\/operatingplatform\/scanRecordQuery\/listPage(?:\?|$)/, name: 'scanQueryConstantlyNew', list: 'NONE',
     alt: [{name: 'NONE', list: 'NONE'}, {name: 'scanQueryConstantly', list: 'NONE'}]},
-  // V4.4: Deslacre — Transporte > Transporte de linha secundária > Gestão de viagens de linha secundária > Consulta de Viagens
-  // Secundárias (lista) e os Registros de carga e descarga de cada ID. Cabeçalhos de rota não capturados: variantes em `alt`.
-  {key: 'UNSEAL', pattern: /\/transportation\/(?:tmsBranchTrackingDetail|tmsnewBranchShipment)\//, name: 'NONE', list: 'NONE',
-    alt: [{name: 'branchTrackingDetail', list: 'NONE'}, {name: 'tmsBranchTrackingDetail', list: 'NONE'}]},
-  // V4.17: Deslacre da linha troncal — Transporte > Análise de dados > Dados de monitoramento > Consulta de Viagens
-  // (/transportPlatformIndex/monitoringSearch: tmsShipment/page) e os Registros de carga e descarga de cada ID
-  // (trackingDeatil/loading/scan/list, grafia do JMS). Cabeçalhos de rota não capturados: variantes em `alt`.
-  {key: 'UNSEAL_TRUNK', pattern: /\/transportation\/(?:tmsShipment|trackingDeatil)\//, name: 'NONE', list: 'NONE',
-    alt: [{name: 'monitoringSearch', list: 'NONE'}, {name: 'tmsShipment', list: 'NONE'}]},
   // V4.30: PA SHEIN — Indicadores de Negócios > Operação > Relatório de falta de bipagem > Falta de bipe de coleta
   // (/businessIndicatorIndex/NetworkCollectLeakage). Routename = nome da página (regra das outras telas); Routernamelist não
   // capturado: se o JMS recusar, as variantes de `alt` são testadas sozinhas (JMS_ROUTENAME_PA_MISSING / JMS_ROUTENAMELIST_PA_MISSING mandam).
@@ -219,7 +210,7 @@ function validateJmsAuth_() {
   });
 }
 
-/** payload null = GET (V4.4: as consultas de um ID do Deslacre vão na URL, ex.: ".../loading/scan/list?shipmentNo=…"). */
+/** payload null = GET (os parâmetros vão na URL). */
 function jmsRequestObject_(url, payload) {
   if (payload === null) return {url: url, method: 'get', headers: jmsHeaders_(url), followRedirects: false, muteHttpExceptions: true};
   return {
@@ -534,20 +525,6 @@ function buildPayload_(indicatorKey, isoDate, page, size, detail, win) {
         scanAgentCode: agentCode, scanCode: centerCode}), {countryId: countryId_()});
     }
 
-    case 'unseal': {
-      // Consulta de Viagens Secundárias (captura do pedido): PDD de chegada = a nossa base, Status = Concluído. Saídas da véspera
-      // e do dia: o dia de cada ID sai do horário do deslacre (Expedicao.gs → unsealTrips_).
-      return {current: pageNo, size: pageSize, startDepartureTime: addDaysIso_(isoDate, -1) + ' 00:00:00', endDepartureTime: isoDate + ' 23:59:59',
-        endCode: centerCode, shipmentState: cfg.shipmentState || 4, countryId: countryId_()};
-    }
-
-    case 'unseal_trunk': {
-      // V4.17: Consulta de Viagens da linha troncal (captura do pedido; GET, os filtros vão na URL — Expedicao.gs → unsealListUrl_).
-      // PDD de chegada = a nossa base, Status = Concluído. Dois dias antes e um depois: o dia de cada ID sai do deslacre.
-      return {current: pageNo, size: pageSize, shipmentState: cfg.shipmentState || 4, endCode: centerCode,
-        startDateTime: addDaysIso_(isoDate, -2) + ' 00:00:00', endDateTime: addDaysIso_(isoDate, 1) + ' 23:59:59', searchType: 'manage'};
-    }
-
     case 'sc_dc':
       if (detail) {
         return {current: pageNo, size: pageSize, startTime1: w.start, endTime1: w.end,
@@ -581,8 +558,6 @@ function summaryHasMetric_(row, cfg) {
 /** `extra` (opcional): parâmetros a mais no resumo, ex.: Avaria {mainSubCode: 1} = só pedidos principais. */
 function fetchSummaryDay_(indicatorKey, isoDate, extra) {
   const cfg = getIndicatorConfig_(indicatorKey);
-  // V4.4: Deslacre — a "tabela" do dia é a própria lista de IDs (Expedicao.gs → unsealSummary_).
-  if (cfg.unseal) return unsealSummary_(indicatorKey, isoDate);
   // V4.22: Produção do Sorter — o monitor do sorter da base, não o JMS (Sorter.gs).
   if (cfg.sorter) return sorterSummary_(indicatorKey, isoDate);
   // V4.33: Eficiência do SP GRU — o número do JMS e os colaboradores da base do Feishu (Eficiencia.gs).
@@ -1124,7 +1099,7 @@ function planDetailType_(indicatorKey, isoDate, validateTotal, type) {
 
 /** V4.25.4: a lista do indicador pode ir em fatias de horário de uma página (pedido com startTime/endTime). */
 function onePageSliceable_(cfg) {
-  if (cfg.grouped || cfg.byRoute || cfg.unseal || cfg.sorter || cfg.apiProfile === 'damage') return false;
+  if (cfg.grouped || cfg.byRoute || cfg.sorter || cfg.apiProfile === 'damage') return false;
   if ((cfg.detail && cfg.detail.noSlice) || getProp_('JMS_NO_SLICE_' + cfg.routeKey, '') || getProp_('JMS_PAGINAR', '')) return false;
   return true;
 }

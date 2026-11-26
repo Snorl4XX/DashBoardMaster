@@ -1002,7 +1002,7 @@ function JTCoreFactory_() {
     var total = sf ? rows.reduce(function (a, r) { return a + wf(r); }, 0) : distinctCount(rows);
     base.total = total;
     if (sf) base.sumField = sf;
-    // V4.4 (Deslacre): valor por grupo em vez de contagem — agg 'median' | 'max' | 'avg' do campo numérico valueField
+    // Gráfico de tempo: valor por grupo em vez de contagem — agg 'median' | 'max' | 'avg' do campo numérico valueField
     // (ex.: tempo mediano de cada ID por turno; os 10 IDs que mais demoraram). Linha sem valor fica de fora.
     if (def.agg && def.valueField) return aggChart(def, rows, base);
     var shiftDim = def.key === 'segmentByShift' ? 'segment' : def.byShift;
@@ -1038,7 +1038,7 @@ function JTCoreFactory_() {
       base.datasets = [{label: 'qty', data: hours.map(function (l) { return byLabel[l] || 0; })}];
       return base;
     }
-    // allShifts (V4.4, Deslacre): colunas T1, T2 e T3 sempre, na ordem (turno sem ocorrência aparece com 0).
+    // allShifts: colunas T1, T2 e T3 sempre, na ordem (turno sem ocorrência aparece com 0).
     if (def.allShifts && SHIFT_KEYS[def.key]) {
       var byL = {}; groups.forEach(function (g) { byL[g.label] = g.value; });
       base.labels = SHIFTS.concat(byL['N/A'] ? ['N/A'] : []);

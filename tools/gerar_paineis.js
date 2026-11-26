@@ -306,7 +306,9 @@ Para conferir a conta de um dia: Configurações → Executar função → **dia
 `};
 const PACOTE_RE = /^const PACOTE_PAINEIS_ = \{[^\n]*\};$/m;
 // V4.15.2 (pedido): a versão Node.js com os painéis do principal (sem Recebimento e Expedição). V4.21: e sem a Criação de Lotes.
-const NODE_PACOTE = {so: '', fora: MAIN_OUT, nome: ''};
+// V4.35 (pedido "adicionar o dash de eficiência no dash principal"): + a Eficiência SP GRU (painel separado; mais = vai junto).
+const MAIN_PACOTE = {so: '', fora: MAIN_OUT, nome: '', mais: 'efficiency'};
+const NODE_PACOTE = MAIN_PACOTE;
 
 const GS_ORDER = ['Config', 'Core', 'Utils', 'JmsApi', 'Storage', 'Expedicao', 'Sorter', 'Eficiencia', 'Analytics', 'Report', 'Triggers', 'Code', 'Api'];
 // V4.22: Sorter.gs (Produção do Sorter) só vai nos pacotes Node.js — o Google não enxerga a rede da base.
@@ -315,7 +317,7 @@ const HTML = ['Index', 'Client', 'Styles', 'Mascot'];
 
 const PACKAGES = [
   {
-    id: 'principal', zip: 'PRINCIPAL', pacote: {so: '', fora: MAIN_OUT, nome: ''},
+    id: 'principal', zip: 'PRINCIPAL', pacote: MAIN_PACOTE,
     readme: v => `# Painel principal — J&T DashMaster ${v}
 
 Este pacote é o **painel principal**. Ele mostra:
@@ -323,8 +325,14 @@ Este pacote é o **painel principal**. Ele mostra:
 - Falta de Bipagem no Recebimento e na Expedição;
 - Expedição SC → SC e SC → DC;
 - Avaria e Sem Movimentação;
-- Deslacre (linha secundária) e Deslacre (linha troncal) — V4.17;
+- Eficiência SP GRU (V4.35): Qtd processada (JMS) ÷ colaboradores presentes (base do Feishu);
 - Resultados.
+
+**V4.35: o Deslacre (linha secundária e linha troncal) saiu do código** (pedido). Os dias já baixados dele ficam guardados, mas não
+são mais consultados nem mostrados.
+
+**Eficiência SP GRU:** precisa da base do Feishu. Na versão Node.js: Configurações → **Base do Feishu (colaboradores)** — App ID, App
+Secret e o link da base. No Apps Script: Propriedades do script \`FEISHU_APP_ID\`, \`FEISHU_APP_SECRET\` e \`FEISHU_BASE_LINK\`.
 
 **V4.21: a Criação de Lotes (sacas) saiu daqui.** Ela tem pacotes próprios: \`JT_DASHMASTER_..._LOTES.zip\` (Apps Script) e \`JT_DASHMASTER_..._LOTES_NODE.zip\` (Node.js, link próprio no Tailscale). V4.26: ela fica fora do principal mesmo com \`PAINEIS_FORA\` preenchida.
 
@@ -380,7 +388,7 @@ function versionOf(config) { const m = config.match(/VERSION:\s*'([^']+)'/); ret
 /** Linha PACOTE_PAINEIS_ do Config.gs de um pacote ({so, fora, nome}). */
 function pacoteLine(pacote) {
   return 'const PACOTE_PAINEIS_ = ' + JSON.stringify(pacote).replace(/"/g, "'").replace(/,'/g, ", '").replace(/':/g, "': ")
-    .replace(/^\{/, '{').replace(/'(so|fora|nome)': /g, '$1: ') + ';';
+    .replace(/^\{/, '{').replace(/'(so|fora|nome|mais)': /g, '$1: ') + ';';
 }
 
 /** Monta os pacotes em `outDir`. Devolve [{id, dir, zip}]. */

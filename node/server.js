@@ -181,6 +181,16 @@ function publicFunctions() {
   return first.concat(rest).map(n => ({nome: n, desc: FN_HELP[n] || ''}));
 }
 function panelVersion() { const m = String(main.source).match(/VERSION:\s*'([^']+)'/); return m ? m[1] : '?'; }
+/**
+ * V4.35: a Eficiência SP GRU também vai no pacote principal (Config.gs → PACOTE_PAINEIS_: so ou mais com "efficiency"). Com ela, a
+ * tela Configurações pede a base do Feishu (App ID, App Secret e link), como no pacote próprio da Eficiência (padrao.json).
+ */
+function pacoteTemEficiencia() {
+  const m = /^const PACOTE_PAINEIS_ = (\{[^\n]*\});$/m.exec(String(main.source));
+  if (!m) return false;
+  const campo = k => { const x = new RegExp('\\b' + k + ":\\s*'([^']*)'").exec(m[1]); return x ? x[1] : ''; };
+  return (campo('so') + ',' + campo('mais')).split(/[\s,;]+/).indexOf('efficiency') >= 0;
+}
 
 // ------------------------------------------------------------------ agendador (os gatilhos do Apps Script)
 const sched = {pending: [], running: null, startedAt: 0, last: {}, lastSummary: '', lastLogged: ''};
@@ -585,7 +595,7 @@ async function handle(req, res) {
       sendHtml(req, res, 403, pages.deniedPage());
       return;
     }
-    if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir, semJms: !!cfg.semJms, feishuBase: !!cfg.feishuBase})); return; }
+    if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir, semJms: !!cfg.semJms, feishuBase: !!cfg.feishuBase || pacoteTemEficiencia()})); return; }
     if (p.indexOf('/config/api/') === 0) {
       if (req.method === 'POST' && !sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
       await configApi(req, res, p.slice('/config/api/'.length));

@@ -218,18 +218,10 @@
       snapListFetching: 'Baixando os pedidos da linha mais recente (Total de pedidos sem movimentação)…',
       snapListLater: 'A lista de pedidos da linha nova ainda está baixando; os cartões já são da linha mais recente.',
       dcNoDetail: 'Contado na lista baixada: {h}',
-      usMissDay: 'IDs sem bipe de deslacre · {date}', usMissPeriod: 'IDs sem bipe de deslacre no período',
-      usMissOf: '{p} dos {n} IDs de viagem', usOfTrips: 'de {n} IDs', usPrevDay: 'Dia anterior ({d})', usPrevPeriod: 'Período anterior',
-      usFilteredNote: 'Contado nos IDs filtrados.', usDaysOf: '{a} de {b} dias',
-      usMedian: 'Tempo mediano: deslacre → bipe de recebimento', usMedianSub: 'Mediana dos {n} IDs com deslacre e Data inicial do descarregamento',
-      usTop: 'ID com maior tempo mediano', usFrom: 'PDD de saída: {o}', usNoTime: 'Nenhum ID com deslacre e Data inicial do descarregamento.',
-      usTrips: 'IDs de viagem', usTripsSub: 'Com deslacre: {a} · sem deslacre: {b}',
-      usShiftMissUnit: 'sem deslacre', usShiftShare: 'dos IDs sem deslacre', usShiftTrips: '{n} IDs no turno',
-      usShiftMed: 'Tempo mediano', usShiftTop: 'Maior mediana',
-      usMinutes: 'Tempo (min)', usTipIds: '{n} ID(s)', usTimedHint: 'com deslacre e Data inicial',
-      usAggMedianSub: 'Mediana do tempo de cada ID (deslacre → Data inicial) · {n} IDs com tempo',
-      usAggMaxSub: 'Tempo de cada ID (mediana dos registros de descarregamento) · {n} IDs com tempo',
-      usColMedian: 'Tempo mediano', usColTime: 'Tempo', usColIds: 'IDs'
+      usMinutes: 'Tempo (min)', usTipIds: '{n} item(ns)', usTimedHint: 'com tempo',
+      usAggMedianSub: 'Mediana do tempo de cada item · {n} com tempo',
+      usAggMaxSub: 'Tempo de cada item · {n} com tempo',
+      usColMedian: 'Tempo mediano', usColTime: 'Tempo', usColIds: 'Itens'
     },
     zh: {
       panel: '运营看板', autoSync: '自动更新', refresh: '刷新', downloadReport: '下载报告',
@@ -407,18 +399,10 @@
       snapListFetching: '正在下载最新一行的断更件明细…',
       snapListLater: '新一行的明细仍在下载；卡片已是最新一行的数据。',
       dcNoDetail: '按下载的列表计数：{h}',
-      usMissDay: '{date} 未解封扫描车次', usMissPeriod: '期间未解封扫描车次',
-      usMissOf: '占 {n} 个车次的 {p}', usOfTrips: '共 {n} 个车次', usPrevDay: '前一日（{d}）', usPrevPeriod: '上一期间',
-      usFilteredNote: '按筛选后的车次计数。', usDaysOf: '{b} 天中的 {a} 天',
-      usMedian: '中位时长：解封 → 卸车扫描', usMedianSub: '{n} 个有解封和卸车开始时间的车次的中位数',
-      usTop: '中位时长最长的车次', usFrom: '始发网点：{o}', usNoTime: '没有同时有解封和卸车开始时间的车次。',
-      usTrips: '车次', usTripsSub: '已解封：{a} · 未解封：{b}',
-      usShiftMissUnit: '未解封', usShiftShare: '占未解封车次', usShiftTrips: '本班次 {n} 个车次',
-      usShiftMed: '中位时长', usShiftTop: '最长中位时长',
-      usMinutes: '时长（分钟）', usTipIds: '{n} 个车次', usTimedHint: '有解封和卸车开始时间',
-      usAggMedianSub: '各车次时长（解封 → 卸车开始时间）的中位数 · {n} 个车次有时长',
-      usAggMaxSub: '各车次时长（卸车记录的中位数） · {n} 个车次有时长',
-      usColMedian: '中位时长', usColTime: '时长', usColIds: '车次'
+      usMinutes: '时长（分钟）', usTipIds: '{n} 项', usTimedHint: '有时长',
+      usAggMedianSub: '各项时长的中位数 · {n} 项有时长',
+      usAggMaxSub: '各项时长 · {n} 项有时长',
+      usColMedian: '中位时长', usColTime: '时长', usColIds: '数量'
     }
   };
 
@@ -426,8 +410,6 @@
   var ICON_PATHS = {
     wrong_send: '<path d="M3 8l8-4 8 4-8 4-8-4zM3 8v9l8 4 8-4V8M11 12v9"/><path d="M16 3l5 5m0-5l-5 5"/>',
     sorting_error: '<path d="M4 7h10m0 0l-3-3m3 3l-3 3M20 17H10m0 0l3-3m-3 3l3 3"/>',
-    unseal: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/><path d="M12 15v2"/>',
-    unseal_trunk: '<path d="M2 11h11v6H2zM13 13h4l3 3v1h-7z"/><circle cx="6" cy="18.5" r="1.5"/><circle cx="16" cy="18.5" r="1.5"/><path d="M5 11V8a3 3 0 0 1 5.6-1.5"/>',
     timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/>',
     situation: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>',
     missing_receipt: '<path d="M4 8V5h4M20 8V5h-4M4 16v3h4M20 16v3h-4M12 7v10m-4-4l4 4 4-4"/>',
@@ -1770,7 +1752,6 @@
   }
   function renderKpis(c, k) {
     if (c.efficiency) return renderEfficiencyKpis(c, k);
-    if (c.unsealCards) return renderUnsealKpis(c, k);
     if (c.heroMetric && c.metricCards) return renderMetricKpis(c, k);
     var grid = $('#kpiGrid'), day = k.mode === 'day', sv = k.shiftView, sName = sv ? shiftName(sv) : '';
     var status = k.targetMet === true ? 'good' : k.targetMet === false ? 'bad' : 'none';
@@ -1942,76 +1923,12 @@
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
     drawSpark(c);
   }
-  // ------------------------------------------------------------------ Deslacre (V4.4): cartões próprios
-  /** Minutos → "42 min" / "1 h 05 min" (negativo: Data inicial antes do deslacre). */
+  /** Minutos → "42 min" / "1 h 05 min" (gráficos de tempo). */
   function fmtDur(v) {
     if (v === null || v === undefined || v === '' || !isFinite(Number(v))) return '—';
     var n = Number(v), neg = n < 0, a = Math.round(Math.abs(n));
     var txt = a < 60 ? a + ' min' : Math.floor(a / 60) + ' h ' + String(a % 60).padStart(2, '0') + ' min';
     return (neg ? '−' : '') + txt;
-  }
-  function numOr(v) { if (v === null || v === undefined || v === '') return null; var n = Number(v); return isFinite(n) ? n : null; }
-  /** ID de maior tempo entre as linhas (tempo de cada ID = mediana dos registros de descarregamento). */
-  function slowestTrip(rows) {
-    return rows.reduce(function (m, r) { var v = numOr(r.minutes); return v !== null && (!m || v > Number(m.minutes)) ? r : m; }, null);
-  }
-  /**
-   * Deslacre (V4.4, pedido): cartões contados nos IDs de viagem filtrados (uma linha por ID).
-   *  - IDs sem bipe de deslacre (com o dia/período anterior do JMS);
-   *  - tempo mediano do deslacre até o bipe de recebimento (Data inicial do Bipe de descarregamento na SP GRU; V4.20);
-   *  - ID com o maior tempo mediano; IDs de viagem do período;
-   *  - um cartão por turno: IDs sem deslacre, tempo mediano do turno e o ID de maior tempo do turno.
-   */
-  function renderUnsealKpis(c, k) {
-    var grid = $('#kpiGrid'), rows = state.filtered || [], sit = c.situations || {missing: 'Sem bipe de deslacre'};
-    var day = state.from === state.to, f = filtersObj(), filtered = Object.keys(f).length > 0;
-    var miss = rows.filter(function (r) { return r.situation === sit.missing; });
-    var timed = rows.filter(function (r) { return numOr(r.minutes) !== null; });
-    var med = Core.median(timed.map(function (r) { return Number(r.minutes); }));
-    var top = slowestTrip(timed);
-    // Dia/período anterior: números gravados do JMS (IDs, sem deslacre, tempo mediano do dia).
-    var len = Core.daysBetween(state.from, state.to) + 1, pFrom = Core.addDays(state.from, -len), pTo = Core.addDays(state.from, -1);
-    var prev = (state.data.rates || []).filter(function (r) { return r.date >= pFrom && r.date <= pTo && r.metrics; });
-    var sumM = function (list, key) { var any = false, n = 0; list.forEach(function (r) { var v = numOr(r.metrics[key]); if (v !== null) { any = true; n += v; } }); return any ? n : null; };
-    var prevMiss = sumM(prev, 'noUnlockNum'), prevTrips = sumM(prev, 'tripNum');
-    // Tempo mediano do dia anterior (gravado por dia); no período, só a quantidade é comparada (mediana não se soma).
-    var prevMed = day && prev.length === 1 ? numOr(prev[0].metrics.medianMin) : null;
-    // Período anterior incompleto (menos dias gravados que o período): o número aparece, sem a variação.
-    var comparable = prev.length === len;
-    var prevLbl = (day ? t('usPrevDay', {d: fmtDate(pTo, true)}) : t('usPrevPeriod')) + (!comparable && prev.length ? ' (' + t('usDaysOf', {a: prev.length, b: len}) + ')' : '');
-    var share = rows.length ? miss.length / rows.length * 100 : null;
-    // V4.31: mesmo formato do cartão da taxa do dia (print) — a parte dos IDs na pílula, o dia anterior à direita.
-    var urows = [{icon: 'calendar', html: esc(prevLbl) + ': <b class="hx-em">' + fmtInt(prevMiss) + '</b>' + (filtered || !comparable ? '' : ' ' + qtyDelta(miss.length, prevMiss, true)) +
-      (isNum(prevTrips) ? ' · ' + esc(t('usOfTrips', {n: fmtInt(prevTrips)})) : '')}];
-    if (filtered) urows.push({icon: 'info', html: esc(t('usFilteredNote'))});
-    var hero = heroCardHtml({icon: 'unseal', value: fmtInt(miss.length), rows: urows,
-      title: day ? t('usMissDay', {date: fmtDate(state.to, true)}) : t('usMissPeriod') + ' · ' + fmtRange(state.from, state.to),
-      pills: '<span class="hero-goal">' + esc(t('usMissOf', {p: fmtPct(share, 1), n: fmtInt(rows.length)})) + '</span>'});
-    var medSub = esc(t('usMedianSub', {n: fmtInt(timed.length)})) + (day ? '<br>' + esc(prevLbl) + ': <b>' + esc(fmtDur(prevMed)) + '</b>' +
-      (isNum(med) && isNum(prevMed) && !filtered ? ' ' + qtyDelta(med, prevMed, true) : '') : '');
-    var medCard = kpiCard('timer', t('usMedian'), esc(fmtDur(med)), medSub, 'us-median');
-    var topCard = '<article class="kpi us-top"><div class="kpi-label">' + icon('max') + esc(t('usTop')) + '</div>' +
-      '<div class="kpi-value text" title="' + esc(top ? top.tripId || top.shipment : '') + '">' + (top ? esc(top.tripId || top.shipment) : '—') + '</div>' +
-      '<div class="kpi-sub">' + (top ? '<b>' + esc(fmtDur(top.minutes)) + '</b> · ' + esc(vlabel('route', top.route)) + '<br>' + esc(t('usFrom', {o: vlabel('station', top.station)})) +
-        (top.shift ? ' · ' + esc(top.shift) : '') : esc(t('usNoTime'))) + '</div></article>';
-    var trips = kpiCard('tripId', t('usTrips'), fmtInt(rows.length), esc(t('usTripsSub', {a: fmtInt(rows.length - miss.length), b: fmtInt(miss.length)})) +
-      (isNum(prevTrips) ? '<br>' + esc(prevLbl) + ': <b>' + fmtInt(prevTrips) + '</b>' : ''));
-    var shifts = ['T1', 'T2', 'T3'].map(function (s) {
-      var sr = rows.filter(function (r) { return r.shift === s; }), sm = sr.filter(function (r) { return r.situation === sit.missing; });
-      var st = sr.filter(function (r) { return numOr(r.minutes) !== null; }), smed = Core.median(st.map(function (r) { return Number(r.minutes); }));
-      var stop = slowestTrip(st), pct = miss.length ? sm.length / miss.length * 100 : null;
-      var sel = f.shift && f.shift.length && f.shift.indexOf(s) < 0;
-      return '<article class="kpi shift-kpi us-shift' + (sel ? ' faded' : '') + '"><div class="kpi-label"><i style="background:' + SHIFT_COLORS[s] + '"></i>' + s + ' · ' + SHIFT_HOURS[s] + '</div>' +
-        '<div class="kpi-value">' + fmtInt(sm.length) + '<small class="us-unit"> ' + esc(t('usShiftMissUnit')) + '</small></div>' +
-        '<div class="kpi-sub">' + (isNum(pct) ? '<b>' + fmtPct(pct, 1) + '</b> ' + esc(t('usShiftShare')) + ' · ' : '') + esc(t('usShiftTrips', {n: fmtInt(sr.length)})) +
-        '<br>' + esc(t('usShiftMed')) + ': <b>' + esc(fmtDur(smed)) + '</b>' +
-        '<br>' + esc(t('usShiftTop')) + ': <b>' + (stop ? esc(stop.tripId || stop.shipment) + '</b> (' + esc(fmtDur(stop.minutes)) + ')' : '—</b>') + '</div>' +
-        '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(pct) ? pct : 0) + '" style="background:' + SHIFT_COLORS[s] + '"></i></div></div></article>';
-    }).join('');
-    grid.innerHTML = hero + medCard + topCard + trips + shifts;
-    fillGridGaps(grid);
-    requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
-    drawSpark(c);
   }
   // ------------------------------------------------------------------ Recebimento: cartões por quantidade (V3.16)
   /** Soma de um número do resumo do JMS (rates[].metrics) entre duas datas; null se nenhum dia tem o número. */
@@ -3275,7 +3192,7 @@
       if ((d === 'tripId' || d === 'shipment') && x.length > Math.max(10, maxChars - 4)) { var h = Math.ceil(x.length / 2); return [x.slice(0, h), x.slice(h)]; }
       return wrapLines(x, maxChars, 3);
     };
-    // V4.4 (Deslacre): coluna = tempo (mediana / maior) em minutos, não quantidade.
+    // Gráfico de tempo (agg): coluna = tempo (mediana / maior) em minutos, não quantidade.
     if (spec.valueAgg) {
       var ns = spec.datasets[0].n || [];
       return columnsConfig({sig: 'cols-val', labels: names.map(lab), values: values, pcts: null,
@@ -3357,7 +3274,7 @@
     } else out.push(rpStat('min', biLabel(cs.min || {pt: 'Menor ' + lcFirst(dl.pt), zh: '最少' + (dl.zh || '')}), name(minI), both(data[minI]), 'named'));
     return out.join('');
   }
-  /** V4.4 (Deslacre): cartões embaixo de um gráfico de tempo — IDs com tempo, maior e menor tempo. */
+  /** Cartões embaixo de um gráfico de tempo (agg) — itens com tempo, maior e menor tempo. */
   function valueChartStats(spec) {
     var data = spec.datasets[0].data, ns = spec.datasets[0].n || [];
     var idx = data.map(function (v, i) { return i; }).filter(function (i) { return spec.labels[i] !== 'N/A'; });
@@ -3366,7 +3283,7 @@
     var minI = idx.reduce(function (m, i) { return data[i] < data[m] ? i : m; }, idx[0]);
     var name = function (i) { return '<span class="accent">' + esc(vlabel(spec.dim || spec.key, spec.labels[i])) + '</span>'; };
     var sub = function (i) { return '<em>' + esc(fmtDur(data[i])) + '</em> <span class="rp-sep">|</span> ' + esc(t('usTipIds', {n: fmtInt(ns[i])})); };
-    return rpStat('total', biLabel({pt: 'IDs com tempo', zh: '有时长的车次'}), esc(fmtInt(spec.total)), esc(t('usTimedHint'))) +
+    return rpStat('total', biLabel({pt: 'Itens com tempo', zh: '有时长的项'}), esc(fmtInt(spec.total)), esc(t('usTimedHint'))) +
       rpStat('max', biLabel({pt: 'Maior tempo', zh: '最长'}), name(maxI), sub(maxI), 'named') +
       (idx.length > 1 ? rpStat('min', biLabel({pt: 'Menor tempo', zh: '最短'}), name(minI), sub(minI), 'named') : '');
   }
@@ -3859,7 +3776,7 @@
   }
   function renderDetailTable() {
     var c = cfg(), cols = c.table || [];
-    // Título e busca do painel (Deslacre: "Informações gerais", uma linha por ID de viagem).
+    // Título e busca do painel (texts.shipmentTable / texts.tableFind do indicador).
     var h2 = $('#detailCard [data-i18n="shipmentTable"]'), fi = $('#tableFind');
     if (h2) h2.textContent = tx(c, 'shipmentTable');
     if (fi) fi.setAttribute('placeholder', tx(c, 'tableFind'));

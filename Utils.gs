@@ -146,7 +146,7 @@ function isoToday_() { return Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-d
  *  - 'diario' (padrão): AGENDA (V4.6, pedido do usuário). Nada é atualizado o tempo todo; fora da agenda, só o botão
  *    Atualizar do painel consulta o JMS.
  *      · Envio Errado, Triagem Errada, Falta de Bipagem (Recebimento e Expedição), SC → SC, SC → DC, Avaria (e os outros
- *        painéis de dia fechado: Deslacre, fluxos) — às HORAS_ATUALIZACAO (padrão "6,8": 6h e 8h). Em cada horário, o
+ *        painéis de dia fechado) — às HORAS_ATUALIZACAO (padrão "6,8": 6h e 8h). Em cada horário, o
  *        último dia fechado é baixado de novo (taxa; a lista, se mudou) e os dias anteriores que ainda não têm o número
  *        final. SC → SC e SC → DC: também a janela de ontem (14h → 13:59 de hoje), ainda em andamento.
  *      · Sem Movimentação: foto a cada SEM_MOVIMENTACAO_HORAS (padrão 2: 0h, 2h, 4h…).

@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.34.6',
+  VERSION: '4.35.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -129,13 +129,7 @@ const FILTER_LABELS = Object.freeze({
   packType:        {pt: 'Tipo de ensacamento', zh: '建包类型'},
   source:          {pt: 'Origem da criação', zh: '建包来源'},
   chip:            {pt: 'Chip nº', zh: '芯片号'},
-  waybill:         {pt: 'Remessa', zh: '运单号'},
-  unlockTime:      {pt: 'Horário de deslacração do veículo', zh: '解封时间'},
-  arrivalTime:     {pt: 'Tempo real de chegada', zh: '实际到达时间'},
-  minutes:         {pt: 'Tempo mediano', zh: '中位时长'},
-  plate:           {pt: 'Placa do carro', zh: '车牌'},
-  carrier:         {pt: 'Transportadora', zh: '承运商'},
-  unloads:         {pt: 'Registros de descarregamento', zh: '卸车记录'}
+  waybill:         {pt: 'Remessa', zh: '运单号'}
 });
 
 /**
@@ -597,69 +591,6 @@ const ECO_BAG_SITES_2026_08_24_ = [
 
 /** Cores fixas por turno (validadas para daltonismo). A cor segue o turno em todos os gráficos. */
 const SHIFT_COLORS = Object.freeze({T1: '#E60012', T2: '#2A78D6', T3: '#4A3AA7', 'N/A': '#9CA3AF'});
-
-/**
- * V4.17 — o que o Deslacre da linha secundária e o da linha troncal têm em comum: o resumo do dia, os cartões
- * (Client.html → renderUnsealKpis), os gráficos, os filtros e a tabela "Informações gerais". `own` = o que é de cada linha:
- * chave, nome, consultas do JMS (summary.endpoint/method, detail, unload), listTitle e listMenu (a tela no JMS), diagnostic
- * (função de diagnóstico) e fields (o campo do horário de deslacração muda: unlockTime / actualUnlockTime).
- */
-function unsealPanel_(own) {
-  return Object.assign({
-    subtitle: {pt: 'IDs sem bipe de deslacre e tempo do deslacre até o bipe de recebimento', zh: '未解封扫描车次及解封至卸车扫描时长'},
-    goal: {value: null, direction: 'max', strict: false},
-    detailMatchesErrors: false, light: true, unseal: true,
-    shipmentState: 4,
-    labels: {
-      tripId: {pt: 'Número do ID', zh: '车次号'}, route: {pt: 'Nome da viagem', zh: '车次名称'}, station: {pt: 'PDD de saída', zh: '始发网点'},
-      shift: {pt: 'Turno', zh: '班次'}, situation: {pt: 'Bipe de deslacre', zh: '解封扫描'}, minutes: {pt: 'Tempo mediano', zh: '中位时长'},
-      eventTime: {pt: 'Horário de deslacração do veículo', zh: '解封时间'}, receiptTime: {pt: 'Bipe de recebimento (Data inicial)', zh: '卸车开始时间'}
-    },
-    situations: {missing: 'Sem bipe de deslacre', done: 'Com bipe de deslacre'},
-    filters: ['tripId', 'route', 'station', 'shift'],
-    topCards: [],
-    hideShiftCards: true, hideEvolution: true, hideTarget: true,
-    // Cartões próprios (Client.html → renderUnsealKpis): IDs sem deslacre, tempo mediano, ID de maior tempo e um cartão por turno.
-    unsealCards: true,
-    texts: {
-      errors: {pt: 'IDs sem bipe de deslacre', zh: '未解封扫描车次'},
-      errorsDay: {pt: 'IDs sem bipe de deslacre no dia', zh: '当日未解封扫描车次'}, errorsPeriod: {pt: 'IDs sem bipe de deslacre no período', zh: '期间未解封扫描车次'},
-      errorsFiltered: {pt: 'IDs sem bipe de deslacre (com filtro)', zh: '未解封扫描车次（已筛选）'},
-      prevErrorsDay: {pt: 'Dia anterior', zh: '前一日'}, prevErrorsPeriod: {pt: 'Período anterior', zh: '上一期间'},
-      shiftErrors: {pt: 'Sem deslacre {s}', zh: '{s} 未解封'}, shareOfErrors: {pt: '{p} dos IDs sem deslacre', zh: '占未解封车次 {p}'},
-      rateOfDay: {pt: '% de IDs sem bipe de deslacre · {date}', zh: '{date} 未解封扫描率'}, rateOfPeriod: {pt: '% de IDs sem bipe de deslacre no período', zh: '期间未解封扫描率'},
-      distinctShipments: {pt: 'IDs de viagem', zh: '车次'}, tableCount: {pt: '{n} IDs', zh: '{n} 车次'},
-      tableCountOf: {pt: '{n} de {m} IDs', zh: '{n} / {m} 车次'}, detailsOk: {pt: 'Detalhes completos · {n} IDs de viagem', zh: '明细完整 · {n} 车次'},
-      shipments: {pt: 'IDs', zh: '车次'},
-      shipmentTable: {pt: 'Informações gerais', zh: '基本信息'}, tableFind: {pt: 'Localizar ID na tabela', zh: '在表中查找车次'}
-    },
-    charts: [
-      {key: 'missShift', dim: 'shift', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', top: 4, allShifts: true,
-        title: {pt: 'Turnos com maior falta de bipe de deslacre', zh: '未解封扫描最多的班次'},
-        sub: {pt: 'Turno pelo horário do deslacre (sem deslacre, pela chegada do veículo)', zh: '按解封时间划分班次（未解封按车辆到达时间）'}},
-      {key: 'mNoUnlock', metric: 'noUnlockNum', type: 'bar', bad: true, days: 15,
-        title: {pt: 'Evolução: dias com mais falta de bipe de deslacre', zh: '每日未解封扫描车次'}},
-      {key: 'medShift', dim: 'shift', agg: 'median', valueField: 'minutes', type: 'bar', top: 4, unit: 'min', allShifts: true,
-        title: {pt: 'Tempo mediano do deslacre até o bipe de recebimento por turno', zh: '各班次解封至卸车扫描中位时长'}},
-      {key: 'topTime', dim: 'tripId', agg: 'max', valueField: 'minutes', type: 'bar', horizontal: true, top: 10, unit: 'min',
-        title: {pt: 'IDs que mais demoraram do deslacre ao bipe de recebimento (top 10)', zh: '解封至卸车扫描最慢的车次（前10）'}},
-      {key: 'origin', dim: 'station', type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'PDD de saída que mais mandou', zh: '发车最多的始发网点'}},
-      {key: 'missOrigin', dim: 'station', where: {situation: 'Sem bipe de deslacre'}, type: 'bar', horizontal: true, top: 10,
-        title: {pt: 'PDD de saída dos IDs sem bipe de deslacre', zh: '未解封车次的始发网点'}}
-    ],
-    table: [
-      ['date', 'Data', '日期'], ['tripId', 'Número do ID', '车次号'], ['route', 'Nome da viagem', '车次名称'],
-      ['station', 'PDD de saída', '始发网点'], ['situation', 'Bipe de deslacre', '解封扫描'], ['shift', 'Turno', '班次'],
-      ['arrivalTime', 'Tempo real de chegada', '实际到达时间'], ['unlockTime', 'Horário de deslacração do veículo', '解封时间'],
-      ['receiptTime', 'Bipe de recebimento (Data inicial)', '卸车开始时间'], ['minutes', 'Tempo mediano (deslacre → recebimento)', '中位时长'],
-      ['plate', 'Placa do carro', '车牌'], ['carrier', 'Transportadora', '承运商']
-    ]
-  }, own, {
-    summary: Object.assign({rateFromCounts: true, rateKeys: [], errorKeys: ['noUnlockNum'], totalKeys: ['tripNum'],
-      metrics: ['tripNum', 'noUnlockNum', 'unlockNum', 'medianMin', 'timedNum']}, own.summary)
-  });
-}
 
 /**
  * goal.direction:
@@ -1575,64 +1506,8 @@ const ALL_INDICATORS_ = Object.freeze({
     ]
   },
 
-  /**
-   * DESLACRE (linha secundária) — V4.4 (pedido "DASHBOARD DE DESLACRE"). Transporte > Transporte de linha secundária > Gestão
-   * de viagens de linha secundária > Consulta de Viagens Secundárias (tmsBranchTrackingDetail/page), com os filtros da tela:
-   * PDD de chegada = a nossa base (endCode 30001) e Status = Concluído (shipmentState 4). Uma linha por ID de viagem.
-   *  - "Horário de deslacração do veículo" (unlockTime) vazio = ID SEM bipe de deslacre.
-   *  - Bipe de recebimento = "Data inicial" (V4.20; antes "Data final") do Bipe de descarregamento da SP GRU nos Registros de
-   *    carga e descarga do ID (tmsBranchTrackingDetail/loading/scan/list?shipmentNo=…, scanStartTime). Tempo do ID = mediana de (Data inicial −
-   *    deslacre) dos registros de descarregamento, em minutos (Expedicao.gs → runUnsealDetailJob_).
-   *  - Dia e turno pelo horário do deslacre ("vamos medir pela data dessa coluna"); ID sem deslacre: pela chegada do veículo.
-   * Taxa guardada = IDs sem deslacre ÷ IDs do dia (%), sem meta. A lista é consultada com 1 dia antes (saídas da véspera que
-   * chegam no dia).
-   * V4.12.3: retirado (pedido). V4.17 (pedido "No dashboard principal colocar o dash de deslacre troncal e secundária"): de volta,
-   * ao lado do Deslacre da linha troncal (unseal_trunk). Cartões, gráficos e tabela: unsealPanel_ (os mesmos nos dois).
-   */
-  unseal: unsealPanel_({
-    key: 'unseal', order: 12, routeKey: 'UNSEAL',
-    name: {pt: 'Deslacre (linha secundária)', zh: '解封（支线）'},
-    apiProfile: 'unseal', listTitle: 'Consulta de Viagens Secundárias', diagnostic: 'diagnosticarDeslacre',
-    listMenu: 'Transporte > Transporte de linha secundária > Gestão de viagens de linha secundária > Consulta de Viagens Secundárias',
-    summary: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page'},
-    // refreshHours: hoje, a lista e os Registros de carga e descarga são consultados de novo no máximo de hora em hora
-    // (conta Gmail: a cada 3 h). Só os IDs novos ou ainda descarregando consultam os Registros de novo.
-    detail: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/page', refreshHours: 1},
-    unload: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsBranchTrackingDetail/loading/scan/list', unloadTypes: ['2']},
-    fields: {
-      shipment: ['shipmentNo'], tripId: ['shipmentNo'], route: ['shipmentName'], station: ['startName'],
-      eventTime: ['__eventTime'], receiptTime: ['__unloadEnd'], unlockTime: ['unlockTime'],
-      arrivalTime: ['actualArrivalTime', 'appArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
-      plate: ['plateNumber'], carrier: ['carrierShortName', 'carrierName'], unloads: ['__unloads'], timing: ['__timing']
-    }
-  }),
-
-  /**
-   * DESLACRE (linha troncal) — V4.17 (pedido "deslacre da troncal"). Transporte > Análise de dados > Dados de monitoramento >
-   * Consulta de Viagens (tmsShipment/page, GET com os filtros na URL, como a captura): PDD de chegada = a nossa base
-   * (endCode 30001), Status = Concluído (shipmentState 4), searchType manage. Uma linha por ID de viagem (DBGX…).
-   *  - "Horário de deslacração do veículo" = actualUnlockTime; vazio = ID SEM bipe de deslacre.
-   *  - Bipe de recebimento = "Data inicial" (scanStartTime; V4.20) do Bipe de descarregamento (loadingTypeName "2") na nossa base nos
-   *    Registros de carga e descarga do ID (trackingDeatil/loading/scan/list?shipmentNo=…). O carregamento na origem (tipo "1")
-   *    e a descarga em outra base não contam.
-   *  - Mesmo cálculo, cartões, gráficos e tabela da linha secundária (unsealPanel_).
-   * A lista é consultada com 2 dias antes e 1 depois (viagens longas e chegadas adiantadas); o dia de cada ID sai do deslacre.
-   */
-  unseal_trunk: unsealPanel_({
-    key: 'unseal_trunk', order: 13, routeKey: 'UNSEAL_TRUNK',
-    name: {pt: 'Deslacre (linha troncal)', zh: '解封（干线）'},
-    apiProfile: 'unseal_trunk', listTitle: 'Consulta de Viagens (linha troncal)', diagnostic: 'diagnosticarDeslacreTroncal',
-    listMenu: 'Transporte > Análise de dados > Dados de monitoramento > Consulta de Viagens',
-    summary: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsShipment/page', method: 'get'},
-    detail: {endpoint: 'https://gw.jtjms-br.com/transportation/tmsShipment/page', refreshHours: 1},
-    unload: {endpoint: 'https://gw.jtjms-br.com/transportation/trackingDeatil/loading/scan/list', unloadTypes: ['2']},
-    fields: {
-      shipment: ['shipmentNo'], tripId: ['shipmentNo'], route: ['shipmentName', 'lineSimpleName'], station: ['startName'],
-      eventTime: ['__eventTime'], receiptTime: ['__unloadEnd'], unlockTime: ['actualUnlockTime'],
-      arrivalTime: ['actualArrivalTime', 'appTrackArrivalTime'], minutes: ['__minutes'], situation: ['__situation'],
-      plate: ['plateNumber'], carrier: ['carrierName', 'carrierShortName'], unloads: ['__unloads'], timing: ['__timing']
-    }
-  }),
+  // V4.35 (pedido "retirar totalmente os dashboards de Deslacre, os dois, até do arquivo do dash"): o Deslacre da linha
+  // secundária (unseal) e o da linha troncal (unseal_trunk) saíram do código.
 
   /**
    * V4.22 (pedido "dashboard no mesmo esquema que o principal para http://10.1.166.9"): Produção do Sorter — o monitor do
@@ -1789,7 +1664,8 @@ const ALL_INDICATORS_ = Object.freeze({
   /**
    * V4.33 (pedido "Desenvolver um dashboard que mostre a eficiência do SP GRU"): Eficiência = Qtd processada total (JMS, Análise
    * de entrada e saída de transbordo novo) ÷ colaboradores presentes (base Headcount do Feishu, todos os presentes dos 3 turnos).
-   * Painel SEPARADO (pacote dashmaster-eficiencia). Leitura do JMS e do Feishu em Eficiencia.gs. Cada linha da lista do dia =
+   * Painel SEPARADO (pacote dashmaster-eficiencia). V4.35 (pedido "adicionar o dash de eficiência no dash principal"): também no
+   * pacote principal (PACOTE_PAINEIS_.mais). Leitura do JMS e do Feishu em Eficiencia.gs. Cada linha da lista do dia =
    * turno × função × situação (Presentes / Programados), quantidade = o número da base.
    */
   efficiency: {
@@ -1892,7 +1768,9 @@ function activeIndicators_(all) {
   // V4.3: sem as propriedades, vale o pacote instalado (painel principal / painel dos fluxos — PACOTE_PAINEIS_).
   if (!only.trim() && !drop.trim()) { only = PACOTE_PAINEIS_.so; drop = PACOTE_PAINEIS_.fora; }
   const list = x => x.split(/[\s,;]+/).map(k => k.trim()).filter(k => k && all[k]);
-  const keep = list(only), out = list(drop), revived = list(back);
+  // V4.35: PACOTE_PAINEIS_.mais = painéis separados que também vão neste pacote (a Eficiência no principal). PAINEIS e
+  // PAINEIS_FORA continuam valendo mais.
+  const keep = list(only), out = list(drop), revived = list(back + ',' + (PACOTE_PAINEIS_.mais || ''));
   // V4.7: painel retirado (Config: retired, ex.: Fluxo de Lotes) fica fora, a não ser que PAINEIS ou REATIVAR_PAINEIS o nomeie.
   // V4.22: painel separado (Config: separate, ex.: Produção do Sorter) só aparece no pacote dele (ou PAINEIS / REATIVAR_PAINEIS).
   const retired = k => (!!all[k].retired || !!all[k].separate) && keep.indexOf(k) < 0 && revived.indexOf(k) < 0;
@@ -1903,7 +1781,7 @@ function activeIndicators_(all) {
 }
 /**
  * V4.3 — pacote instalado. O gerador (tools/gerar_paineis.js) troca a linha abaixo em cada pacote:
- *   painel principal  → {so: '', fora: 'lot_flow', nome: ''}
+ *   painel principal  → {so: '', fora: 'lot_flow', nome: '', mais: 'efficiency'}  (V4.35: + Eficiência SP GRU)
  *   painel de Lotes   → {so: 'lot_flow', fora: '', nome: 'Criação de Lotes'}
  * No repositório (e em quem instalou um único painel com tudo): vazio = todos os painéis.
  * As Propriedades do script PAINEIS / PAINEIS_FORA / NOME_PAINEL, quando preenchidas, valem mais que o pacote.
@@ -1965,7 +1843,7 @@ function getIndicatorConfig_(key) {
     // é para clicar em Executar sem preencher nada antes. Veja "Manutenção" em LEIA_PRIMEIRO.md.
     if (key === undefined || key === null || key === '') {
       throw new Error('Esta função exige um indicador como parâmetro (ex.: "wrong_send", "sorting_error", ' +
-        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage", "unseal", "unseal_trunk" ou "no_move"). Ela não é para ser executada direto pelo ' +
+        '"missing_receipt", "missing_dispatch", "sc_sc", "sc_dc", "damage" ou "no_move"). Ela não é para ser executada direto pelo ' +
         'botão ▶ Executar sem argumentos — chame-a com o parâmetro preenchido (veja "Manutenção" em LEIA_PRIMEIRO.md) ' +
         'ou teste pelo próprio painel (Implantar → App da Web).');
     }
@@ -2060,8 +1938,6 @@ function catalogEntry_(cfg) {
     snapshot: !!cfg.snapshot,
     // V4.6: agenda do painel — a cada N horas (Sem Movimentação, Criação de Lotes); sem isso, às HORAS_ATUALIZACAO.
     agendaEvery: cfg.agendaEvery ? agendaEveryHours_(cfg) : null,
-    // V4.4 (Deslacre): cartões próprios e o texto de cada situação do bipe de deslacre.
-    unsealCards: !!cfg.unsealCards, situations: cfg.situations || null,
     // V4.33: Eficiência do SP GRU — cartões próprios (Client.html → renderEfficiencyKpis).
     efficiency: !!cfg.efficiency,
     // Sem Movimentação: nome de cada tipo de bipe pela posição (metrics.refType = linha do horário mais recente).

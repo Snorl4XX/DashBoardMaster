@@ -4,6 +4,26 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.35.0 — Painel principal: Eficiência SP GRU dentro; Deslacre retirado do código
+
+Pedido: "Agora vamos alterar o dash principal, quero adicionar o dash de eficiência nele, retirar totalmente os dashboards de Deslacre,
+os dois, até do arquivo do dash."
+
+- **Eficiência SP GRU no principal:** o pacote principal (Node.js e Apps Script) traz a Eficiência (Qtd processada do JMS ÷
+  colaboradores presentes da base do Feishu). No Config.gs do pacote: `PACOTE_PAINEIS_ = {so: '', fora: 'lot_flow', nome: '', mais:
+  'efficiency'}` — `mais` = painéis separados que também vão no pacote. `PAINEIS_FORA = efficiency` tira de novo.
+  - Node.js: Configurações mostra o cartão **Base do Feishu (colaboradores)** (App ID, App Secret e link da base) quando o pacote tem a
+    Eficiência. Apps Script: Propriedades do script FEISHU_APP_ID, FEISHU_APP_SECRET e FEISHU_BASE_LINK.
+  - O pacote próprio da Eficiência (dashmaster-eficiencia, porta 4000) continua sendo gerado; quem usar a Eficiência pelo principal
+    pode desligar o separado.
+- **Deslacre (linha secundária) e Deslacre (linha troncal) saíram do código** (Config, JmsApi, Expedicao, Storage, Triggers, Client,
+  Styles, Analytics e os testes): sem painel, sem consulta ao JMS, sem cartões próprios, sem `diagnosticarDeslacre` /
+  `diagnosticarDeslacreTroncal` e sem a migração da V4.20. Os dias já baixados ficam na planilha/banco, mas não são mais lidos.
+  Quem tinha `unseal` em REATIVAR_PAINEIS / PAINEIS_FORA: o nome é ignorado.
+  - A tela /token (troca do AuthToken pelo link) continua testando o token numa consulta pequena ao JMS (Consulta de Viagens); isso
+    não é o painel.
+- O pacote principal passa a ter 8 painéis do JMS + a Eficiência.
+
 ## V4.34.6 — Premiação: as 3 balanças de cada turno em cada critério (cartões vermelhos)
 
 Pedido (print dos cartões do resumo): "Quero cartão que mostre as três balanças … junto com essas do print. Campeão de produtividade

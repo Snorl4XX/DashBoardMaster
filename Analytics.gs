@@ -18,9 +18,6 @@ const STORE_FIELDS_ = ['date', 'shipment', 'eventTime', 'receiptTime', 'expediti
  */
 const EXTRA_FIELDS_ = ['port', 'sackType', 'items', 'packType', 'source', 'chip',
   'waybill', 'pieces', 'scanType', 'aging', 'problem', 'senderRegional', 'senderBase', 'recentBase', 'orderSource', 'destRegional', 'destState', 'deliveryBase',
-  // V4.4 (Deslacre): horários do ID, tempo mediano, situação do bipe de deslacre, placa, transportadora, registros de descarregamento.
-  // V4.20: timing = regra do tempo do ID ("inicio" = pela Data inicial do descarregamento).
-  'unlockTime', 'arrivalTime', 'minutes', 'situation', 'plate', 'carrier', 'unloads', 'timing',
   // V4.30 (PA SHEIN): hora de chegada ao SC e horário do bipe de coleta.
   'scArrival', 'collectTime'];
 /** Versão das regras de rederiveRow_. Arquivos com outra versão são recalculados na leitura. */

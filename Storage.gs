@@ -1323,24 +1323,6 @@ function migrateToV4126_() {
   return n;
 }
 /**
- * V4.20 (pedido): o tempo do Deslacre passa a ir do deslacre até a Data inicial do Bipe de descarregamento da SP GRU (antes, a
- * Data final). Os dias gravados guardam só o resultado: uma vez, os dias dos últimos 62 com a lista do Deslacre (linha
- * secundária e troncal) entram na fila de novo. Cada ID sem o cálculo novo (timing) tem os Registros de carga e descarga
- * consultados de novo (Expedicao.gs → runUnsealDetailJob_); o tempo mediano do dia é refeito.
- */
-function migrateToV420_() {
-  if (getProp_('MIGRATION_V420', '')) return 0;
-  const to = isoToday_(), from = addDaysIso_(to, -62);
-  let n = 0;
-  Object.keys(INDICATORS).filter(k => INDICATORS[k].unseal).forEach(k => {
-    const days = Object.keys(dayFilesMap_(k, from, to)).sort().reverse();
-    if (days.length) n += enqueueJobs_(days.map(d => ['DETAIL_INIT', k, d, 1]), {reset: true});
-  });
-  setProp_('MIGRATION_V420', new Date().toISOString());
-  if (n) logSync_('INFO', 'unseal', '', 'V4.20: ' + n + ' dia(s) do Deslacre na fila de novo (tempo pela Data inicial do descarregamento).');
-  return n;
-}
-/**
  * V4.25 (pedido): a Falta de Bipagem no Recebimento separa os segmentos em linha troncal (1º segmento) e linha secundária
  * (1º + 2º segmento, "GRU,404-04"); os dias baixados antes guardavam só o 1º segmento. Uma vez: os últimos 31 dias com a
  * lista baixada são baixados de novo — só a lista (é pequena). Enquanto isso, a linha sai só pelo 1º segmento.
@@ -1368,7 +1350,7 @@ function migrateToV4243_() {
   let n = 0;
   const routes = {};
   Object.keys(INDICATORS).filter(k => !INDICATORS[k].grouped && INDICATORS[k].detailMatchesErrors && !INDICATORS[k].byRoute &&
-      !INDICATORS[k].unseal && !INDICATORS[k].sorter).forEach(k => {
+      !INDICATORS[k].sorter).forEach(k => {
     const sm = statusMap_(k, from, to), rates = {};
     getRates_(k, from, to).forEach(r => { rates[r.date] = r; });
     const jobs = [];
@@ -1417,7 +1399,7 @@ function migrateToV4254_() {
   let n = 0;
   const routes = {};
   Object.keys(INDICATORS).filter(k => !INDICATORS[k].grouped && INDICATORS[k].detailMatchesErrors && !INDICATORS[k].byRoute &&
-      !INDICATORS[k].unseal && !INDICATORS[k].sorter).forEach(k => {
+      !INDICATORS[k].sorter).forEach(k => {
     const sm = statusMap_(k, from, to), files = dayFilesMap_(k, from, to), rates = {};
     getRates_(k, from, to).forEach(r => { rates[r.date] = r; });
     const jobs = [];
@@ -1440,7 +1422,7 @@ function migrateToV4254_() {
  */
 function detailGapDays_(indicator, from, to) {
   const cfg = INDICATORS[indicator];
-  if (!cfg || cfg.grouped || !cfg.detailMatchesErrors || cfg.byRoute || cfg.unseal || cfg.sorter) return [];
+  if (!cfg || cfg.grouped || !cfg.detailMatchesErrors || cfg.byRoute || cfg.sorter) return [];
   const last = lastClosedDate_(indicator);
   if (to > last) to = last;
   if (!isIso_(from) || !isIso_(to) || from > to) return [];
@@ -2226,10 +2208,7 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) return true;
   const changed = !prev || prev.errorCount !== summary.errorCount || prev.totalCount !== summary.totalCount;
   const cfgR = indicatorCfg_(indicator) || {};
-  // V4.4 (Deslacre): hoje e ontem os Registros de carga e descarga mudam sem mudar a contagem (descarregamento em andamento):
-  // a lista é refeita pelo intervalo (detail.refreshHours), sem marcar o dia como desatualizado.
-  const live = !!(cfgR.unseal && date >= addDaysIso_(isoToday_(), -1));
-  if (!changed && st.details === 'COMPLETE' && !live) return false;
+  if (!changed && st.details === 'COMPLETE') return false;
   if (manual) return true;
   // V4.22.13 (Produção do Sorter: "valores do filtro não batem com os gráficos"): a lista do dia é refeita junto com o resumo
   // (poucas consultas na rede da base) — cartões, filtros e gráficos do mesmo momento. Antes a lista podia ficar até 2 h atrás.
@@ -2406,8 +2385,6 @@ function runDetailJob_(job, deadline) {
     updateDayStatus_(job.indicator, job.date, {detailsStatus: 'SKIPPED', error: ''});
     return 'done';
   }
-  // V4.4: Deslacre — lista de IDs e os Registros de carga e descarga de cada um (Expedicao.gs).
-  if (cfg.unseal) return runUnsealDetailJob_(job, deadline, cfg, st);
   // V4.22: Produção do Sorter — cada hora de cada balança de cada sorter (Sorter.gs).
   if (cfg.sorter) return runSorterDetailJob_(job, deadline, cfg, st);
   // V4.33: Eficiência do SP GRU — colaboradores do Feishu por turno e função (Eficiencia.gs).

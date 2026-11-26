@@ -153,7 +153,7 @@ function buildSummaryReportSheet_(sh, dash) {
     const ch = dash.charts.filter(x => x.key === def.key)[0];
     if (!ch || !ch.labels.length) return;
     const dim = def.dim || def.key, lab = dimLabel_(cfg, dim);
-    // V4.4 (Deslacre): gráfico de tempo (mediana/maior) em minutos, não quantidade de remessas.
+    // Gráfico de tempo (agg: mediana/maior) em minutos, não quantidade de remessas.
     const valHead = def.agg ? bilingual_('Tempo (min)', '时长（分钟）') : bilingual_('Remessas', '运单量');
     headerRow_(sh.getRange(n, 1, 1, 2).setValues([[bilingual_(def.title.pt, def.title.zh), valHead]]));
     sh.getRange(n + 1, 1, ch.labels.length, 2).setValues(ch.labels.map((l, j) => [reportValue_(cfg, dim, l), ch.datasets[0].data[j]]));
