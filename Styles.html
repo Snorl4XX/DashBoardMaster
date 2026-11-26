@@ -401,9 +401,6 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-dot{width:8px;height:8px;border-radius:50%;display:inline-block}.aw-dot.ok{background:var(--good)}.aw-dot.live{background:var(--red);animation:awpulse 1.6s infinite}
 @keyframes awpulse{0%,100%{opacity:1}50%{opacity:.3}}
 .aw-empty{display:flex;align-items:center;gap:12px;justify-content:center;padding:40px}
-.aw-sum{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px}
-.aw-geral{border-top:3px solid var(--aw-top-bg)}
-.aw-geral .kpi-value.text{font-size:18px}
 .aw-sh{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:15px}
 .aw-sh i{width:11px;height:11px;border-radius:3px;display:inline-block}
 .aw-shstat{margin-left:auto;font-size:12px;color:var(--muted)}
@@ -523,8 +520,8 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-rgrid p{margin:4px 0 0;color:var(--ink-2)}
 .aw-req{grid-column:1/-1}
 .aw-req ul{margin:4px 0 0;padding-left:18px;color:var(--ink-2)}
-@media (max-width:1100px){.aw-sum{grid-template-columns:repeat(2,minmax(0,1fr))}.aw-rgrid{grid-template-columns:1fr}}
-@media (max-width:560px){.aw-sum{grid-template-columns:1fr}.aw-date{flex-wrap:wrap}}
+@media (max-width:1100px){.aw-rgrid{grid-template-columns:1fr}}
+@media (max-width:560px){.aw-date{flex-wrap:wrap}}
 /* Cartão estreito (celular): número em cima, informações embaixo, tamanhos fixos para continuar legível. */
 @container (max-width:460px){
   .hx .kpi-body{--u:5.6px;padding:14px 16px 14px}

@@ -4,6 +4,12 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.35.4 — Premiação (Sorter): sem os 4 cartões do resumo
+
+Pedido (print dos cartões do topo): "tirar esses cartões também". Saíram os 4 cartões do resumo (Balanças que alimentaram, Balanças
+que bateram a meta, Horas excepcionais e Campeão geral do dia). Logo abaixo do cabeçalho vêm os 9 cartões das 3 balanças; o campeão
+geral continua marcado neles e no ranking.
+
 ## V4.35.3 — Premiação (Sorter): mais enxuta (sem a tabela do resultado, os gráficos e os quadros de turno e do dia)
 
 Pedido (print da tabela "Resultado da premiação / 奖励项目"): "Tirar essa parte." A tabela saiu da tela. Depois (print dos três

@@ -154,7 +154,7 @@ T2 14h–22h, T3 22h–06h). Escolha o dia no topo da tela (‹ › ou o calend�
   ganha 1 prêmio Miau + 1 medalha. Sem 3 na meta, aparecem os mais perto e quanto faltou.
 - **Campeão geral do dia:** entre todas as balanças de T1, T2 e T3, quem mais produziu no turno (total de pacotes); não usa a
   média (1 mochila + 1 medalha). Só o campeão do turno é pela média.
-- **As 3 balanças de cada critério:** logo abaixo do resumo, 9 cartões (um por turno para cada critério da tabela; borda vermelha em cima e quem bateu a meta em verde): por
+- **As 3 balanças de cada critério:** logo abaixo do cabeçalho, 9 cartões (um por turno para cada critério da tabela; borda vermelha em cima e quem bateu a meta em verde): por
   hora (as 3 maiores horas, perto ou acima de 2.400), do turno (as 3 maiores médias, perto ou acima de 1.800) e geral (as 3 que mais
   produziram no turno), com quanto faltou ou "bateu a meta".
 - **Classificação das horas:** em cada intervalo de 1 hora do dia de trabalho, quantas balanças ficaram em cada faixa da tabela

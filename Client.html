@@ -4023,25 +4023,9 @@
       root.innerHTML = html; bindAwards(root); return;
     }
     (d.avisos || []).forEach(function (a) { html += '<div class="alert warn"><div>' + esc(a) + '</div></div>'; });
-    // Resumo do dia.
-    // V4.34.4 (pedido "tira esse valor de quantidade … fique somente o valor das balanças que bateram a meta"): balanças com média do
-    // turno de 1.800 ou mais (a meta do prêmio do turno). Cada balança conta uma vez, mesmo que tenha batido em mais de um turno.
-    var c = d.contagem || {}, metaSet = {};
-    ['T1', 'T2', 'T3'].forEach(function (tn) { (d.turnos[tn].ranking || []).forEach(function (x) { if (x.media >= d.metaTurno) metaSet[x.nome] = 1; }); });
-    var balMeta = Object.keys(metaSet).length;
+    // V4.35.4 (pedido "tirar esses cartões também"): os 4 cartões do resumo (balanças que alimentaram, que bateram a meta, horas
+    // excepcionais e campeão geral) saíram da tela. O campeão geral (g) continua marcado nos cartões das 3 balanças e no ranking.
     var g = d.campeaoGeral;
-    html += '<section class="aw-sum">' +
-      '<article class="kpi"><div class="kpi-label">' + icon('qty') + esc(P('Balanças que alimentaram', '供件供包台')) + '</div><div class="kpi-value">' + fmtInt((d.balancas || []).length) +
-        '</div><div class="kpi-sub">' + esc(P('Sorter A e B no dia de trabalho', 'A/B套 · 工作日')) + '</div></article>' +
-      '<article class="kpi"><div class="kpi-label">' + icon('check') + esc(P('Balanças que bateram a meta', '达标供包台')) + '</div><div class="kpi-value">' + fmtInt(balMeta) +
-        '</div><div class="kpi-sub">' + esc(P('média do turno ≥ 1.800 em pelo menos um turno', '至少一个班次平均 ≥ 1,800')) + '<br>' + ['T1', 'T2', 'T3'].map(function (tn) {
-          return tn + ' <b>' + fmtInt(d.turnos[tn].naMeta || 0) + '</b>'; }).join(' · ') + '</div></article>' +
-      '<article class="kpi"><div class="kpi-label">' + icon('max') + esc(P('Horas excepcionais (≥ 2.400)', '卓越小时（≥2,400）')) + '</div><div class="kpi-value">' + fmtInt(c.excepcional || 0) +
-        '</div><div class="kpi-sub">' + esc(P('concorrem a campeão da hora', '可参评单小时冠军')) + '</div></article>' +
-      '<article class="kpi aw-geral"><div class="kpi-label">🎒 ' + esc(P('Campeão geral do dia', '三个班次全天冠军')) + '</div>' +
-        (g ? '<div class="kpi-value text">' + balName(g.nome) + '</div><div class="kpi-sub"><b>' + fmtInt(g.total) + '</b> ' + esc(P('pacotes no turno', '件（班次合计）')) + ' · ' + g.turno +
-          '<br>🎁 ' + esc(P('1 mochila + 1 medalha', '背包1个 + 徽章1枚')) + '</div>'
-          : '<div class="kpi-value">—</div>') + '</article></section>';
     // V4.34.6 (pedido "cartão que mostre as três balanças … um cartão para cada turno representando cada critério", em vermelho):
     // por hora = as 3 balanças com a maior hora do turno (perto ou acima de 2.400); do turno = as 3 maiores médias (perto ou acima de
     // 1.800); geral = as 3 que mais produziram no turno.
