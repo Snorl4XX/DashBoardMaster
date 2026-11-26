@@ -4,6 +4,11 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.35.2 — Premiação (Sorter): quem bateu a meta com o fundo verde
+
+Pedido (print do cartão do turno): "Os que bateu a meta preencher com verde na tela de fundo." Nos cartões das 3 balanças, a linha de
+quem bateu a meta tem o fundo verde (e a borda verde); a etiqueta "bateu a meta" fica clara por cima.
+
 ## V4.35.1 — Premiação (Sorter): cartões das 3 balanças sem o fundo vermelho
 
 Pedido (print dos cartões): "Tirar essa cor vermelha, deixa no formato da parte da tela de fundo, só deixa uma borda vermelha na parte
