@@ -4,6 +4,16 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.34.3 — Premiação: resultado da tabela no fundo padrão
+
+Pedido (print da tabela do resultado): "tira essa cor e coloque na cor padrão de fundo." As células do vencedor de T1, T2 e T3 na
+tabela "Resultado da premiação" não têm mais o fundo creme: ficam no fundo padrão da tabela, como as outras colunas.
+- Pedido "isso está muito feio, melhora" (cabeçalho da Premiação): novo cabeçalho no estilo do cartão da taxa do dia (faixa
+  vermelha com o troféu), título em português e chinês, a data com ‹ › num grupo só, o botão "Ler de novo" em destaque e etiquetas
+  com a situação (Em andamento / Dia fechado), o dia de trabalho (06h → 06h), Sorter A e B e a hora da leitura.
+- Pedido "arruma isso também" (Regras de premiação): um cartão por prêmio, com número, ícone, nome em português e chinês, o critério
+  igual ao da tabela, o prêmio em destaque e "como é contado"; os requisitos gerais em lista com ícones, nas duas línguas.
+
 ## V4.34.2 — Premiação: sem campeão fica em branco; ranking de todas as balanças
 
 Pedido (print do gráfico do campeão por hora): "Ficou bugado, refazer! … Se não tiver campeão, deixar em branco. … muita gente passou

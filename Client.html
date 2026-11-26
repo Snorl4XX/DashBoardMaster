@@ -4079,17 +4079,27 @@
     var fxName = function (k) { return fx[k] ? L(fx[k]) : k; };
     var chip = function (k) { return '<span class="aw-chip aw-' + k + '">' + esc(fxName(k)) + '</span>'; };
     var balName = function (nome) { return esc(nome).replace(' · ', ' · <b>') + '</b>'; };
-    var html = '<section class="card aw-head"><div class="aw-title"><span class="aw-ico">' + icon('trophy') + '</span><div><h2>' +
-      esc(P('Premiação por produtividade no abastecimento', '分拣机供件效率PK奖励机制')) + '</h2><p class="muted small">' +
-      esc(P('Quantidade alimentada em cada balança, hora a hora (site do sorter, Sorter A e B). Dia de trabalho: 06h → 06h do dia seguinte.',
-        '各供包台每小时供件量（分拣机系统，A/B套）。工作日：当日06点至次日06点。')) + '</p></div></div>' +
-      '<div class="aw-date"><button type="button" class="btn btn-light aw-prev" aria-label="' + esc(P('Dia anterior', '前一天')) + '">‹</button>' +
-      '<input type="date" id="awDate" value="' + esc(aw.date || '') + '"' + (today ? ' max="' + esc(today) + '"' : '') + '>' +
-      '<button type="button" class="btn btn-light aw-next" aria-label="' + esc(P('Dia seguinte', '后一天')) + '">›</button>' +
-      '<button type="button" class="btn btn-dark aw-reload">' + esc(P('Ler de novo', '重新读取')) + '</button></div>' +
-      (d ? '<p class="aw-status small">' + (d.fechado ? '<span class="aw-dot ok"></span>' + esc(P('Dia fechado', '已结束')) :
-        '<span class="aw-dot live"></span>' + esc(P('Em andamento: os números mudam até as 06h do dia seguinte', '进行中：次日06点前数据会更新'))) +
-        ' · ' + esc(P('lido no sorter às ', '读取时间 ') + d.lidoEm) + '</p>' : '') + '</section>';
+    // V4.34.3 (pedido "isso está muito feio, melhora"): cabeçalho no estilo do cartão da taxa do dia (faixa vermelha), com a data e o
+    // "ler de novo" agrupados, e etiquetas com a situação do dia, o dia de trabalho e a hora da leitura.
+    var dm = function (iso) { return iso ? L({pt: iso.slice(8, 10) + '/' + iso.slice(5, 7), zh: iso.slice(5, 7) + '-' + iso.slice(8, 10)}) : ''; };
+    var dia = (d && d.data) || aw.date || '', chips = [];
+    if (d) {
+      chips.push(d.fechado ? '<span class="aw-hchip ok">' + icon('check') + esc(P('Dia fechado', '已结束')) + '</span>'
+        : '<span class="aw-hchip live"><i class="aw-hdot"></i>' + esc(P('Em andamento · os números mudam até as 06h', '进行中 · 06点前数据会更新')) + '</span>');
+    } else if (aw.busy) chips.push('<span class="aw-hchip live"><i class="aw-hdot"></i>' + esc(P('Lendo o sorter…', '正在读取分拣机…')) + '</span>');
+    if (dia) chips.push('<span class="aw-hchip">' + icon('calendar') + esc(P('Dia de trabalho: ', '工作日：') + dm(dia) + ' 06h → ' + dm(Core.addDays(dia, 1)) + ' 06h') + '</span>');
+    chips.push('<span class="aw-hchip">' + icon('qty') + esc(P('Sorter A e B · cada balança, hora a hora', 'A/B套 · 各供包台每小时')) + '</span>');
+    if (d && d.lidoEm) chips.push('<span class="aw-hchip">' + icon('timer') + esc(P('Lido no sorter: ', '读取时间：') + d.lidoEm) + '</span>');
+    var html = '<section class="aw-hero"><span class="aw-hdeco" aria-hidden="true"></span><div class="aw-hmain"><span class="aw-hico">' + icon('trophy') + '</span>' +
+      '<div class="aw-htext"><div class="aw-hkick">' + esc(P('Produção do Sorter · Premiação', '分拣机 · 奖励')) + '</div><h2>' +
+      esc(P('Premiação por produtividade no abastecimento', '分拣机供件效率PK奖励机制')) + '</h2><div class="aw-hzh">' +
+      esc(P('分拣机供件效率PK奖励机制', 'Premiação por produtividade no abastecimento')) + '</div></div>' +
+      '<div class="aw-hctl"><div class="aw-dgroup"><button type="button" class="aw-prev" aria-label="' + esc(P('Dia anterior', '前一天')) + '">‹</button>' +
+      '<label class="aw-dfield"><input type="date" id="awDate" value="' + esc(aw.date || dia || '') + '"' + (today ? ' max="' + esc(today) + '"' : '') +
+      ' aria-label="' + esc(P('Dia de trabalho', '工作日')) + '"></label>' +
+      '<button type="button" class="aw-next" aria-label="' + esc(P('Dia seguinte', '后一天')) + '">›</button></div>' +
+      '<button type="button" class="aw-reload"' + (aw.busy ? ' disabled' : '') + '>' + icon('history') + esc(P('Ler de novo', '重新读取')) + '</button></div></div>' +
+      '<div class="aw-hchips">' + chips.join('') + '</div></section>';
     if (aw.error) html += '<div class="alert"><div><b>' + esc(t('errorTitle')) + '</b>' + esc(aw.error) + '</div></div>';
     if (!d) {
       html += aw.busy ? '<section class="card aw-empty"><div class="mini-loader"></div><p>' + esc(P('Lendo o sorter (Sorter A e B, hora a hora)…', '正在读取分拣机数据…')) + '</p></section>' : '';
@@ -4274,22 +4284,42 @@
           return '<td class="aw-c aw-avgc ' + (a !== null ? 'aw-' + faixaOf(a) : 'aw-zero') + (i === 0 ? ' aw-sep' : '') + '">' + (a !== null ? fmtInt(a) : '') + '</td>';
         }).join('') + '</tr>';
       }).join('') + '</tbody></table></div></section>';
-    // Regras.
-    html += '<section class="card aw-rules"><div class="chart-head"><span class="chart-ico">' + icon('info') + '</span><div class="chart-titles"><h3>' +
-      esc(P('Regras de premiação', '奖励规则说明')) + '</h3></div></div><div class="aw-rgrid">' +
-      '<div><b>1. ' + esc(P('Campeão de produtividade por hora', '单小时效率冠军')) + '</b><p>' + esc(P('2.400 pacotes ou mais em uma hora. Em cada turno, a maior hora ganha: 1 garrafa + 1 medalha.',
-        '每小时供件效率达到2,400件及以上即可参评；每个班次最高者获水杯1个 + 徽章1枚。')) + '</p></div>' +
-      '<div><b>2. ' + esc(P('Campeão de produtividade do turno', '当班次效率冠军')) + '</b><p>' + esc(P('Maior média de produtividade por hora no turno, com mínimo de 1.800. Os 3 melhores de cada turno; o 1º ganha 1 prêmio Miau + 1 medalha.',
-        '当班次平均小时效率最高，且 ≥ 1,800件；每班次前三名，第一名获喵喵1个 + 徽章1枚。')) + '</p></div>' +
-      '<div><b>3. ' + esc(P('Campeão geral do dia', '三个班次全天冠军')) + '</b><p>' + esc(P('Entre todas as balanças de T1, T2 e T3, quem mais produziu no turno (total de pacotes alimentados): 1 mochila + 1 medalha. Este prêmio não usa a média.',
-        'T1、T2、T3三个班次综合效率最高者获背包1个 + 徽章1枚。')) + '</p></div>' +
-      '<div class="aw-req"><b>' + esc(P('Requisitos gerais', '总体要求')) + '</b><ul>' + [
-        ['Os prêmios valem pelos números do sistema (site do sorter).', '所有奖励以系统实际统计数据为准。'],
-        ['Precisa garantir a precisão do bipe dos pacotes, sem falta de bipagem por erro humano.', '必须保证包裹扫描准确率，不得出现人为漏扫。'],
-        ['Não pode causar travamento do equipamento, avaria de pacotes ou acidentes por causa da produtividade.', '不得因追求效率造成设备堵塞、包裹损坏或安全事故。'],
-        ['Em falha do equipamento, a hora parada não entra na média (só as horas com produção). Parada dentro de uma hora ainda conta nela: confira antes de entregar o prêmio.',
-          '如遇设备故障，扣除非正常停机时间后计算（只计有供件的小时；小时内的停机仍计入，颁奖前请核对）。']
-      ].map(function (x) { return '<li>' + esc(P(x[0], x[1])) + '</li>'; }).join('') + '</ul></div></div></section>';
+    // Regras (V4.34.3, pedido "arruma isso também"): um cartão por prêmio (critério igual ao da tabela, prêmio e como é contado) e os
+    // requisitos gerais em lista, nas duas línguas.
+    var Lb = function (pt, zh) { return '<span>' + esc(P(pt, zh)) + '</span><small>' + esc(P(zh, pt)) + '</small>'; };
+    var regras = [
+      {ic: '⏱️', pt: 'Campeão de produtividade por hora', zh: '单小时效率冠军', critPt: 'Produtividade por hora ≥ 2.400 pacotes', critZh: '当小时供件效率 ≥ 2,400件',
+        premPt: '1 garrafa + 1 medalha', premZh: '水杯1个 + 徽章1枚',
+        comoPt: 'Em cada turno, ganha a maior hora de uma balança com 2.400 pacotes ou mais. Se ninguém chegar a 2.400, o turno fica sem campeão.',
+        comoZh: '每个班次单小时供件最高且 ≥ 2,400件者获奖；无人达到则该班次无冠军。'},
+      {ic: '🏆', pt: 'Campeão de produtividade do turno', zh: '当班次效率冠军', critPt: 'Maior média de produtividade por hora no turno, com mínimo de 1.800 pacotes', critZh: '当班次平均小时效率最高，且 ≥ 1,800件',
+        premPt: '1 prêmio Miau + 1 medalha', premZh: '喵喵1个 + 徽章1枚',
+        comoPt: 'Média = total da balança no turno ÷ horas com produção. A tela mostra o top 3 de cada turno; o 1º ganha.',
+        comoZh: '平均 = 班次合计 ÷ 有供件的小时。显示各班次前三，第一名获奖。'},
+      {ic: '🎒', pt: 'Campeão geral entre os três turnos', zh: '三个班次全天冠军', critPt: 'Maior produtividade geral entre os turnos T1, T2 e T3', critZh: 'T1、T2、T3三个班次综合效率最高',
+        premPt: '1 mochila + 1 medalha', premZh: '背包1个 + 徽章1枚',
+        comoPt: 'Ganha quem mais produziu no turno (total de pacotes), entre todas as balanças de T1, T2 e T3.',
+        comoZh: '在T1、T2、T3全部供包台中，班次供件总量最多者获奖。'}
+    ];
+    var reqs = [
+      ['📊', 'Os prêmios valem pelos números do sistema (site do sorter).', '所有奖励以系统实际统计数据为准。'],
+      ['🔍', 'Precisa garantir a precisão do bipe dos pacotes, sem falta de bipagem por erro humano.', '必须保证包裹扫描准确率，不得出现人为漏扫。'],
+      ['⚠️', 'Não pode causar travamento do equipamento, avaria de pacotes ou acidentes por causa da produtividade.', '不得因追求效率造成设备堵塞、包裹损坏或安全事故。'],
+      ['🛠️', 'Em falha do equipamento, a hora parada não entra na média (só as horas com produção). Parada dentro de uma hora ainda conta nela: confira antes de entregar o prêmio.',
+        '如遇设备故障，扣除非正常停机时间后计算（只计有供件的小时；小时内的停机仍计入，颁奖前请核对）。']
+    ];
+    html += '<section class="card aw-rules"><div class="chart-head"><span class="chart-ico">📋</span><div class="chart-titles"><h3>' +
+      esc(P('Regras de premiação', '奖励规则说明')) + ' <span class="rp-zh">/ ' + esc(P('奖励规则说明', 'Regras de premiação')) + '</span></h3><small>' +
+      esc(P('As regras da tabela de premiação e como cada uma é contada nesta tela', '奖励表规则及本页面的计算方式')) + '</small></div></div>' +
+      '<div class="aw-rlgrid">' + regras.map(function (r, i) {
+        return '<article class="aw-rlcard"><div class="aw-rltop"><span class="aw-rlnum">' + (i + 1) + '</span><span class="aw-rlemo">' + r.ic + '</span>' +
+          '<div class="aw-rltitle"><h4>' + esc(P(r.pt, r.zh)) + '</h4><small>' + esc(P(r.zh, r.pt)) + '</small></div></div>' +
+          '<div class="aw-rllabel">' + esc(P('Critério de premiação', '获奖标准')) + '</div><div class="aw-rlcrit">' + Lb(r.critPt, r.critZh) + '</div>' +
+          '<div class="aw-rlprize">🎁 ' + esc(P(r.premPt, r.premZh)) + '</div>' +
+          '<div class="aw-rlhow"><div class="aw-rllabel">' + esc(P('Como é contado', '计算方式')) + '</div>' + Lb(r.comoPt, r.comoZh) + '</div></article>';
+      }).join('') + '</div>' +
+      '<div class="aw-rlreq"><div class="aw-rlreqt">' + esc(P('Requisitos gerais', '总体要求')) + '<span>' + esc(P('总体要求', 'Requisitos gerais')) + '</span></div><ul>' +
+      reqs.map(function (x) { return '<li><span class="aw-rlic">' + x[0] + '</span><div>' + Lb(x[1], x[2]) + '</div></li>'; }).join('') + '</ul></div></section>';
     root.innerHTML = html;
     bindAwards(root);
     drawAwardCharts(d);
