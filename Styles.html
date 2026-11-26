@@ -416,6 +416,22 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-avgc{font-weight:900}
 .aw-sep{border-left:2px solid var(--line)}
 .aw-rules{margin-top:12px}
+.aw-podhead{margin:12px 0 6px;font-size:12px;font-weight:800;color:var(--muted)}
+.aw-geralcard{margin-top:12px;border-top:3px solid var(--aw-top-bg)}
+.aw-ggrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.7fr);gap:12px}
+.aw-cmp{display:flex;flex-direction:column;gap:8px}
+.aw-cmprow{display:grid;grid-template-columns:40px minmax(0,1.1fr) minmax(70px,1fr) 210px;gap:12px;align-items:center;padding:10px 12px;border-radius:10px;background:var(--card);border:1px solid var(--line)}
+.aw-cmprow.aw-p1{border-color:var(--aw-top-bg);box-shadow:0 0 0 1px var(--aw-top-bg) inset}
+.aw-cmpt{display:flex;align-items:center;gap:6px;font-weight:800}
+.aw-cmpt i{width:11px;height:11px;border-radius:3px;display:inline-block}
+.aw-cmpn{font-size:14px;min-width:0}
+.aw-bar{height:10px;border-radius:999px;background:var(--line);overflow:hidden}
+.aw-bar i{display:block;height:100%;border-radius:999px}
+.aw-cmpv{text-align:right;white-space:nowrap}
+.aw-cmpv b{font-size:18px;font-weight:900;color:var(--red)}
+.aw-cmpv small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+@media (max-width:1100px){.aw-ggrid{grid-template-columns:1fr}}
+@media (max-width:560px){.aw-cmprow{grid-template-columns:auto minmax(0,1fr)}.aw-bar{grid-column:1/-1}.aw-cmpv{grid-column:1/-1;text-align:left}}
 .aw-charts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
 .aw-chart{padding:16px 18px}
 .aw-chart .chart-ico{font-size:17px}

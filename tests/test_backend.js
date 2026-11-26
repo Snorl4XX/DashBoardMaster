@@ -4890,6 +4890,9 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       nLog2 === nLog && siteP.log.length > nLog2 && r3.data === DS,
       'V4.34 Premiação: direto do site, por balança e hora (06h → 06h, T3 até 06h do dia seguinte); top 3 por turno pela média (≥ 1.800), maior hora ≥ 2.400, campeão geral; memória e "ler de novo"',
       {T1: r.turnos.T1.top3, esp: esp.T1, hora: r.turnos.T1.campeaoHora, geral: r.campeaoGeral});
+    check(['T1', 'T2', 'T3'].every(t => r.turnos[t].outrosNaMeta.length === Math.max(0, r.turnos[t].naMeta - 3) &&
+      r.turnos[t].outrosNaMeta.every(x => x.media >= 1800 && x.media <= (r.turnos[t].top3[2] || {media: Infinity}).media)),
+      'V4.34.1 Premiação: "também na meta" = as outras balanças com média ≥ 1.800 (do 4º em diante)', r.turnos.T1.outrosNaMeta);
     // Regra pura: hora parada fora da média; ninguém com 2.400; menos de 3 na meta (os mais perto, para mostrar quanto faltou).
     const sl = [];
     [6, 7, 8].forEach(h => sl.push({sorter: 'Sorter A', n: 1, hour: h, qty: h === 8 ? 0 : 1900}));

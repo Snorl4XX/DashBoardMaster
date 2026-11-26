@@ -153,6 +153,8 @@ T2 14h–22h, T3 22h–06h). Escolha o dia no topo da tela (‹ › ou o calend�
 - **Campeões do turno (top 3):** maior média por hora no turno (total ÷ horas em que a balança alimentou), mínimo de 1.800; o 1º
   ganha 1 prêmio Miau + 1 medalha. Sem 3 na meta, aparecem os mais perto e quanto faltou.
 - **Campeão geral do dia:** o campeão de turno com a maior média (1 mochila + 1 medalha).
+- Cada prêmio tem o seu quadro no mesmo formato (nome, número grande, classificação e prêmio): em cada turno, o campeão da hora e o
+  campeão do turno (com o 2º e o 3º embaixo); depois dos turnos, o campeão geral com os três campeões de turno lado a lado.
 - **Mapa balança × hora:** cada hora colorida pela classificação e a média de cada turno.
 Hora parada (nada alimentado) não entra na média; parada dentro de uma hora conta nela — confira antes de entregar o prêmio.
 

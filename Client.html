@@ -4178,15 +4178,23 @@
           }).join(' · ') + (tt.horasExcepcionais.length > 6 ? ' …' : '') + '</div>' : '') + '</div>'
           : '<div class="aw-none">' + esc(P('Ninguém chegou a 2.400 em uma hora neste turno.', '本班次无单小时 ≥ 2,400。')) +
             (tt.melhorHora ? '<br>' + esc(P('Melhor hora: ', '最高小时：')) + balName(tt.melhorHora.nome) + ' · ' + esc(hh(tt.melhorHora.hora)) + ' · <b>' + fmtInt(tt.melhorHora.qtd) + '</b>' : '') + '</div>') + '</div>';
-      var top = '<div class="aw-block"><div class="aw-bt">🏆 ' + esc(P('Campeões do turno · top 3', '当班次效率冠军 · 前三')) + '<small>' + esc(P('maior média por hora, mínimo 1.800', '平均小时效率最高，且 ≥ 1,800')) + '</small></div>' +
-        (tt.top3.length ? '<ol class="aw-podium">' + tt.top3.map(function (x, i) {
-          var isG = g && g.turno === tn && g.nome === x.nome && i === 0;
-          return '<li class="aw-p' + (i + 1) + '"><span class="aw-medal">' + medals[i] + '</span><div class="aw-pbody"><div class="aw-name">' + balName(x.nome) +
-            (isG ? ' <span class="aw-badge">🎒 ' + esc(P('geral do dia', '全天冠军')) + '</span>' : '') + '</div>' +
+      // V4.34.1 (pedido "fazer também para os outros"): o campeão do turno no mesmo formato do campeão da hora; 2º e 3º logo abaixo.
+      var c1 = tt.top3[0], isG1 = !!(c1 && g && g.turno === tn && g.nome === c1.nome);
+      var top = '<div class="aw-block"><div class="aw-bt">🏆 ' + esc(P('Campeão de produtividade do turno', '当班次效率冠军')) + '<small>' + esc(P('maior média por hora no turno, mínimo 1.800', '当班次平均小时效率最高，且 ≥ 1,800件')) + '</small></div>' +
+        (c1 ? '<div class="aw-win"><div class="aw-name">🥇 ' + balName(c1.nome) + (isG1 ? ' <span class="aw-badge">🎒 ' + esc(P('geral do dia', '全天冠军')) + '</span>' : '') + '</div>' +
+          '<div class="aw-num">' + fmtInt(c1.media) + '<small> ' + esc(P('pacotes/h', '件/小时')) + '</small></div>' +
+          '<div class="aw-meta">' + esc(P(c1.horas + ' h com produção', c1.horas + '小时供件')) + ' · ' + chip(c1.faixa) + '</div>' +
+          '<div class="aw-prize">🎁 ' + esc(P('1 prêmio Miau + 1 medalha', '喵喵1个 + 徽章1枚')) + '</div>' +
+          '<div class="aw-more small">' + esc(P(c1.horasNaMeta + ' h na meta (≥ 1.800) · melhor hora ', c1.horasNaMeta + '小时达标（≥ 1,800）· 最高 ')) + esc(hh(c1.melhorHora)) + ' (' + fmtInt(c1.melhorQtd) + ')</div></div>'
+          : '<div class="aw-none">' + esc(P('Nenhuma balança chegou à média de 1.800 por hora neste turno.', '本班次无供包台平均达到每小时1,800件。')) + '</div>') +
+        (tt.top3.length > 1 ? '<div class="aw-podhead">' + esc(P('Top 3 do turno', '班次前三')) + '</div><ol class="aw-podium">' + tt.top3.slice(1).map(function (x, k) {
+          return '<li><span class="aw-medal">' + medals[k + 1] + '</span><div class="aw-pbody"><div class="aw-name">' + balName(x.nome) + '</div>' +
             '<div class="aw-meta"><b>' + fmtInt(x.media) + '</b>/h ' + chip(x.faixa) + '</div><div class="aw-sub small">' +
-            esc(P(x.horas + ' h com produção · ' + x.horasNaMeta + ' na meta · melhor ', x.horas + '小时供件 · ' + x.horasNaMeta + '小时达标 · 最高 ')) + esc(hh(x.melhorHora)) + ' (' + fmtInt(x.melhorQtd) + ')' +
-            '</div>' + (i === 0 ? '<div class="aw-prize">🎁 ' + esc(P('1 prêmio Miau + 1 medalha', '喵喵1个 + 徽章1枚')) + '</div>' : '') + '</div></li>';
-        }).join('') + '</ol>' : '<div class="aw-none">' + esc(P('Nenhuma balança chegou à média de 1.800 por hora.', '无供包台平均达到每小时1,800件。')) + '</div>') +
+            esc(P(x.horas + ' h com produção · ' + x.horasNaMeta + ' na meta · melhor ', x.horas + '小时供件 · ' + x.horasNaMeta + '小时达标 · 最高 ')) + esc(hh(x.melhorHora)) + ' (' + fmtInt(x.melhorQtd) + ')</div></div></li>';
+        }).join('') + '</ol>' : '') +
+        ((tt.outrosNaMeta || []).length ? '<div class="aw-more small">' + esc(P('Também na meta (≥ 1.800): ', '其他达标（≥ 1,800）：')) + tt.outrosNaMeta.slice(0, 5).map(function (x) {
+          return esc(awShort(x.nome)) + ' (' + fmtInt(x.media) + ')';
+        }).join(' · ') + (tt.outrosNaMeta.length > 5 ? ' …' : '') + '</div>' : '') +
         (tt.top3.length < 3 && tt.perto.length ? '<div class="aw-near small"><b>' + esc(P('Mais perto da meta:', '最接近目标：')) + '</b> ' + tt.perto.slice(0, 3 - tt.top3.length).map(function (x) {
           return balName(x.nome) + ' ' + fmtInt(x.media) + '/h (' + esc(P('faltou ', '差 ')) + fmtInt(Math.ceil(d.metaTurno - x.media)) + ')';
         }).join(' · ') + '</div>' : '') + '</div>';
@@ -4194,6 +4202,29 @@
         '<span class="aw-shstat">' + (tt.media !== null ? esc(P('média ', '平均 ')) + '<b>' + fmtInt(tt.media) + '</b>/h · ' : '') + fmtInt(tt.balancas) + ' ' + esc(P('balanças', '供包台')) +
         ' · ' + fmtInt(tt.naMeta) + ' ' + esc(P('na meta', '达标')) + '</span></div>' + hora + top + '</article>';
     }).join('') + '</section>';
+    // V4.34.1: o campeão geral entre os três turnos no mesmo formato, com os campeões de cada turno lado a lado.
+    var champs = ['T1', 'T2', 'T3'].map(function (tn) { return {t: tn, x: d.turnos[tn].top3[0] || null}; });
+    var maxC = champs.reduce(function (m, c) { return c.x && c.x.media > m ? c.x.media : m; }, 0);
+    var dTot = 0, dHoras = 0;
+    ['T1', 'T2', 'T3'].forEach(function (tn) { dTot += d.turnos[tn].total || 0; dHoras += d.turnos[tn].horasAtivas || 0; });
+    html += '<section class="card aw-shift aw-geralcard"><div class="aw-sh"><i style="background:var(--aw-top-bg)"></i><b>' + esc(P('Dia', '全天')) + '</b> · T1 + T2 + T3 · 06h–06h' +
+      '<span class="aw-shstat">' + (dHoras ? esc(P('média ', '平均 ')) + '<b>' + fmtInt(dTot / dHoras) + '</b>/h · ' : '') + fmtInt((d.balancas || []).length) + ' ' + esc(P('balanças', '供包台')) + ' · ' +
+      fmtInt(champs.filter(function (c) { return c.x; }).length) + ' ' + esc(P('campeões de turno', '班次冠军')) + '</span></div><div class="aw-ggrid">' +
+      '<div class="aw-block"><div class="aw-bt">🎒 ' + esc(P('Campeão geral entre os três turnos', '三个班次全天冠军')) + '<small>' + esc(P('maior produtividade geral entre T1, T2 e T3', 'T1、T2、T3三个班次综合效率最高')) + '</small></div>' +
+      (g ? '<div class="aw-win"><div class="aw-name">' + balName(g.nome) + '</div><div class="aw-num">' + fmtInt(g.media) + '<small> ' + esc(P('pacotes/h', '件/小时')) + '</small></div>' +
+        '<div class="aw-meta">' + g.turno + ' · ' + esc(SHIFT_HOURS[g.turno]) + ' · ' + chip(g.faixa) + '</div><div class="aw-prize">🎁 ' + esc(P('1 mochila + 1 medalha', '背包1个 + 徽章1枚')) + '</div>' +
+        '<div class="aw-more small">' + esc(P(g.horas + ' h com produção · ' + g.horasNaMeta + ' na meta · melhor hora ', g.horas + '小时供件 · ' + g.horasNaMeta + '小时达标 · 最高 ')) + esc(hh(g.melhorHora)) + ' (' + fmtInt(g.melhorQtd) + ')</div></div>'
+        : '<div class="aw-none">' + esc(P('Nenhum turno teve campeão (ninguém com média de 1.800 por hora).', '无班次冠军（无平均每小时 ≥ 1,800件）。')) + '</div>') + '</div>' +
+      '<div class="aw-block"><div class="aw-bt">🏆 ' + esc(P('Os campeões de cada turno', '各班次冠军')) + '<small>' + esc(P('quem tem a maior média por hora ganha a mochila', '平均小时效率最高者获背包')) + '</small></div><div class="aw-cmp">' +
+      champs.map(function (c) {
+        var win = !!(g && c.x && g.turno === c.t && g.nome === c.x.nome), dif = g && c.x ? Math.round(g.media) - Math.round(c.x.media) : 0;
+        return '<div class="aw-cmprow' + (win ? ' aw-p1' : '') + '"><span class="aw-cmpt"><i style="background:' + SHIFT_COLORS[c.t] + '"></i>' + c.t + '</span>' +
+          (c.x ? '<span class="aw-cmpn">' + (win ? '🎒 ' : '🥇 ') + balName(c.x.nome) + '</span>' +
+            '<span class="aw-bar"><i style="width:' + (maxC ? (c.x.media / maxC * 100).toFixed(1) : 0) + '%;background:' + SHIFT_COLORS[c.t] + '"></i></span>' +
+            '<span class="aw-cmpv"><b>' + fmtInt(c.x.media) + '</b>/h ' + chip(c.x.faixa) + '<small>' + (win ? esc(P('campeão geral do dia', '全天冠军')) :
+              dif > 0 ? esc(P('faltaram ' + fmtInt(dif) + '/h para o campeão', '比冠军少 ' + fmtInt(dif) + '件/小时')) : esc(P('mesma média; ganhou quem alimentou mais', '平均相同，总量多者胜'))) + '</small></span>'
+            : '<span class="aw-cmpn muted">' + esc(P('Sem campeão: ninguém com média de 1.800', '无冠军：无平均 ≥ 1,800')) + '</span><span></span><span></span>') + '</div>';
+      }).join('') + '</div></div></div></section>';
     // Mapa balança × hora (classificação de cada hora).
     var hs = d.horas || [], tIdx = {T1: [0, 8], T2: [8, 16], T3: [16, 24]};
     var avgOf = function (arr) { var v = arr.filter(function (q) { return q > 0; }); return v.length ? v.reduce(function (a, q) { return a + q; }, 0) / v.length : null; };

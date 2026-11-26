@@ -4,6 +4,17 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.34.1 — Premiação: um quadro para cada prêmio
+
+Pedido (print dos turnos): "Tem como fazer também para os outros que são: Campeão de produtividade por turno e campeão geral entre os
+três turnos."
+
+- Em cada turno, o **Campeão de produtividade do turno** ganhou o mesmo quadro do campeão da hora: nome, a média por hora em número
+  grande, horas com produção, classificação, prêmio (Miau + medalha), horas na meta e a melhor hora. O 2º e o 3º ficam logo abaixo
+  ("Top 3 do turno") e as outras balanças na meta aparecem em "Também na meta".
+- Depois dos três turnos, o quadro **Campeão geral entre os três turnos** (o dia inteiro): o vencedor no mesmo formato (mochila +
+  medalha) e os três campeões de turno lado a lado, com barra, classificação e quanto faltou para o campeão.
+
 ## V4.34.0 — Premiação do abastecimento (Produção do Sorter)
 
 Pedido: "Desenvolva um dashboard que mostre o resultado de premiação … Os três que bateram a meta em cada turno. … Vamos medir a

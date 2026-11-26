@@ -1524,7 +1524,9 @@ function sorterPremioFrom_(date, slots, extra) {
       campeaoHora: horasBoas[0] || null, horasExcepcionais: horasBoas,
       melhorHora: cand.reduce((m, x) => (!m || x.melhorQtd > m.qtd ? {nome: x.nome, hora: x.melhorHora, qtd: x.melhorQtd} : m), null),
       balancas: cand.length, horasAtivas: nHoras, total: soma, media: nHoras ? Math.round(soma / nHoras * 10) / 10 : null, contagem: cont,
-      naMeta: porMedia.filter(x => x.media >= SORTER_PREMIO_META_TURNO_).length
+      naMeta: porMedia.filter(x => x.media >= SORTER_PREMIO_META_TURNO_).length,
+      // V4.34.1: as outras balanças na meta (do 4º em diante), como o "também chegaram a 2.400" do campeão da hora.
+      outrosNaMeta: porMedia.filter(x => x.media >= SORTER_PREMIO_META_TURNO_).slice(3).map(x => ({nome: x.nome, media: x.media}))
     };
   });
   const campeoes = ['T1', 'T2', 'T3'].map(t => turnos[t].top3[0] ? Object.assign({turno: t}, turnos[t].top3[0]) : null).filter(Boolean);
