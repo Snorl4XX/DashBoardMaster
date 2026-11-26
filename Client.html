@@ -4083,35 +4083,8 @@
           }).join('') + '</ol>' : '<div class="aw-t3none">—</div>') + '</article>';
       }).join('');
     }).join('') + '</section>';
-    // V4.34 (pedido "mostre esses resultados baseados na tabela anexada"): as duas tabelas das regras, com o resultado do dia.
-    var winH = function (tn) {
-      var x = d.turnos[tn].campeaoHora;
-      return x ? '<b>' + balName(x.nome) + '</b><br><span class="aw-tnum">' + fmtInt(x.qtd) + '</span> · ' + esc(hh(x.hora)) : '';
-    };
-    var winT = function (tn) {
-      var x = d.turnos[tn].top3[0];
-      return x ? '<b>' + balName(x.nome) + '</b><br>' + esc(P('média ', '平均 ')) + '<span class="aw-tnum">' + fmtInt(x.media) + '</span>/h ' + chip(x.faixa) : '';
-    };
-    // V4.34.2 (pedido "segue essa tabela, não foge dela"): as mesmas 6 colunas e os mesmos textos da tabela de premiação, nas duas
-    // línguas como na tabela, e o resultado do dia em T1, T2 e T3 ao lado.
-    var prizeRows = [
-      {zh: '单小时效率冠军', pt: 'Campeão de produtividade por hora', critZh: '当小时供件效率 ≥ 2,400件', critPt: 'Produtividade por hora ≥ 2.400 pacotes',
-        premZh: '水杯1个 + 徽章1枚', premPt: '1 garrafa + 1 medalha', cells: ['T1', 'T2', 'T3'].map(winH)},
-      {zh: '当班次效率冠军', pt: 'Campeão de produtividade do turno', critZh: '当班次平均小时效率最高，且 ≥ 1,800件', critPt: 'Maior média de produtividade por hora no turno, com mínimo de 1.800 pacotes',
-        premZh: '喵喵1个 + 徽章1枚', premPt: '1 prêmio Miau + 1 medalha', cells: ['T1', 'T2', 'T3'].map(winT)},
-      {zh: '三个班次全天冠军', pt: 'Campeão geral entre os três turnos', critZh: 'T1、T2、T3三个班次综合效率最高', critPt: 'Maior produtividade geral entre os turnos T1, T2 e T3',
-        premZh: '背包1个 + 徽章1枚', premPt: '1 mochila + 1 medalha',
-        geral: g ? '<b>' + balName(g.nome) + '</b> · <span class="aw-tnum">' + fmtInt(g.total) + '</span> ' + esc(P('pacotes no turno', '件（班次合计）')) + ' · ' + g.turno + ' · ' + esc(SHIFT_HOURS[g.turno]) : ''}
-    ];
-    html += '<section class="aw-tables"><article class="card aw-tcard"><div class="chart-head"><span class="chart-ico">' + icon('trophy') + '</span><div class="chart-titles"><h3>' +
-      esc(P('Resultado da premiação', '奖励结果')) + ' <span class="rp-zh">/ ' + esc(P('奖励项目', 'Tipo de premiação')) + '</span></h3><small>' +
-      esc(P('A tabela de premiação e, ao lado, quem ganhou em cada turno', '奖励表及各班次获奖者')) + '</small></div></div><div class="table-scroll"><table class="data-table aw-ptable"><thead><tr>' +
-      ['奖励项目', 'Tipo de premiação', '获奖标准', 'Critério de premiação', '奖励金额（建议）', 'Premiação sugerida'].map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
-      ['T1', 'T2', 'T3'].map(function (tn) { return '<th class="aw-resh">🏆 ' + tn + ' · ' + SHIFT_HOURS[tn] + '</th>'; }).join('') + '</tr></thead><tbody>' +
-      prizeRows.map(function (r) {
-        return '<tr><td class="aw-zhname"><b>' + esc(r.zh) + '</b></td><td>' + esc(r.pt) + '</td><td>' + esc(r.critZh) + '</td><td>' + esc(r.critPt) + '</td><td>' + esc(r.premZh) + '</td><td>' + esc(r.premPt) + '</td>' +
-          (r.geral !== undefined ? '<td colspan="3" class="aw-gcell aw-res">' + (r.geral ? '🎒 ' + r.geral : '') + '</td>' : r.cells.map(function (x) { return '<td class="aw-res">' + x + '</td>'; }).join('')) + '</tr>';
-      }).join('') + '</tbody></table></div></article>';
+    // V4.34: a tabela da classificação das horas (a de cima, "Resultado da premiação", saiu na V4.35.3 — pedido "tirar essa parte").
+    html += '<section class="aw-tables">';
     var faixasAsc = (d.faixas || []).slice().reverse(), rangeTxt = function (f, i) {
       var next = faixasAsc[i + 1];
       if (f.min === null) return P('Menos de ' + fmtInt(d.metaTurno) + ' pacotes', '低于' + fmtInt(d.metaTurno) + '件');
@@ -4162,75 +4135,9 @@
             }).join('') + '</div>' : '<div class="aw-mnone">—</div>') + '</div>';
         }).join('') + '</article>';
     }).join('') + '</section>';
-    // V4.34 (pedido "um gráfico que mostre esses resultados, separado um de cada"): um gráfico por premiação.
-    var chartCard = function (key, ic, pt, zh, sub, foot) {
-      return '<article class="card chart-card aw-chart"><div class="chart-head"><span class="chart-ico">' + ic + '</span><div class="chart-titles"><h3>' + esc(P(pt, zh)) +
-        ' <span class="rp-zh">/ ' + esc(P(zh, pt)) + '</span></h3><small>' + esc(sub) + '</small></div></div><div class="aw-cwrap"><canvas id="' + key + '" role="img" aria-label="' + esc(P(pt, zh)) + '"></canvas></div>' +
-        '<div class="aw-cfoot"><span><i class="aw-gsw"></i>' + esc(P('dourado = campeão', '金色 = 冠军')) + '</span><span>' + foot + '</span></div></article>';
-    };
-    html += '<section class="aw-charts">' +
-      chartCard('awChartHora', '⏱️', 'Campeão de produtividade por hora', '单小时效率冠军', P('Produtividade por hora ≥ 2.400 pacotes · 1 garrafa + 1 medalha', '当小时供件效率 ≥ 2,400件 · 水杯1个 + 徽章1枚'),
-        '<i class="aw-dash"></i>' + esc(P('meta 2.400 · sem campeão, o turno fica em branco', '目标 2,400 · 无冠军留空'))) +
-      chartCard('awChartTurno', '🏆', 'Campeão de produtividade do turno', '当班次效率冠军', P('Maior média de produtividade por hora no turno, com mínimo de 1.800 pacotes · 1 prêmio Miau + 1 medalha', '当班次平均小时效率最高，且 ≥ 1,800件 · 喵喵1个 + 徽章1枚'),
-        '<i class="aw-dash"></i>' + esc(P('mínimo 1.800 · top 3 de cada turno, o 🥇 ganha', '最低 1,800 · 各班次前三，🥇获奖'))) +
-      chartCard('awChartGeral', '🎒', 'Campeão geral entre os três turnos', '三个班次全天冠军', P('Maior produtividade geral entre os turnos T1, T2 e T3 · 1 mochila + 1 medalha', 'T1、T2、T3三个班次综合效率最高 · 背包1个 + 徽章1枚'),
-        esc(P('quem mais produziu em cada turno (pacotes no turno); o maior ganha', '各班次供件最多者（班次件数），最高者获奖'))) +
-      '</section>';
-    // Um bloco por turno.
+    // V4.35.3 (pedido "tirar esse também", três vezes): saíram da tela os três gráficos (por hora, do turno e geral), os quadros de
+    // cada turno (campeão da hora e do turno) e o quadro do dia (campeão geral e quem mais produziu em cada turno).
     var medals = ['🥇', '🥈', '🥉'];
-    html += '<section class="aw-shifts">' + ['T1', 'T2', 'T3'].map(function (tn) {
-      var tt = d.turnos[tn], ch = tt.campeaoHora;
-      var hora = '<div class="aw-block"><div class="aw-bt">⏱️ ' + esc(P('Campeão de produtividade por hora', '单小时效率冠军')) + '<small>' + esc(P('Produtividade por hora ≥ 2.400 pacotes', '当小时供件效率 ≥ 2,400件')) + '</small></div>' +
-        (ch ? '<div class="aw-win"><div class="aw-name">' + balName(ch.nome) + '</div><div class="aw-num">' + fmtInt(ch.qtd) + '<small> ' + esc(P('pacotes', '件')) + '</small></div>' +
-          '<div class="aw-meta">' + esc(hh(ch.hora)) + ' · ' + chip('excepcional') + '</div><div class="aw-prize">🎁 ' + esc(P('1 garrafa + 1 medalha', '水杯1个 + 徽章1枚')) + '</div>' +
-          (tt.horasExcepcionais.length > 1 ? '<div class="aw-more small">' + esc(P('Também chegaram a 2.400: ', '其他 ≥ 2,400：')) + tt.horasExcepcionais.slice(1, 6).map(function (x) {
-            return esc(x.nome.replace('Sorter ', '').replace(' · Balança ', '-')) + ' ' + esc(hh(x.hora).slice(0, 3)) + ' (' + fmtInt(x.qtd) + ')';
-          }).join(' · ') + (tt.horasExcepcionais.length > 6 ? ' …' : '') + '</div>' : '') + '</div>'
-          : '<div class="aw-none aw-blank">—</div>') + '</div>';
-      // V4.34.1 (pedido "fazer também para os outros"): o campeão do turno no mesmo formato do campeão da hora; 2º e 3º logo abaixo.
-      var c1 = tt.top3[0], isG1 = !!(c1 && g && g.turno === tn && g.nome === c1.nome);
-      var top = '<div class="aw-block"><div class="aw-bt">🏆 ' + esc(P('Campeão de produtividade do turno', '当班次效率冠军')) + '<small>' + esc(P('Maior média de produtividade por hora no turno, com mínimo de 1.800 pacotes', '当班次平均小时效率最高，且 ≥ 1,800件')) + '</small></div>' +
-        (c1 ? '<div class="aw-win"><div class="aw-name">🥇 ' + balName(c1.nome) + (isG1 ? ' <span class="aw-badge">🎒 ' + esc(P('geral do dia', '全天冠军')) + '</span>' : '') + '</div>' +
-          '<div class="aw-num">' + fmtInt(c1.media) + '<small> ' + esc(P('pacotes/h · média do turno', '件/小时 · 班次平均')) + '</small></div>' +
-          '<div class="aw-meta">' + esc(P(c1.horas + ' h com produção', c1.horas + '小时供件')) + ' · ' + chip(c1.faixa) + '</div>' +
-          '<div class="aw-prize">🎁 ' + esc(P('1 prêmio Miau + 1 medalha', '喵喵1个 + 徽章1枚')) + '</div>' +
-          '<div class="aw-more small">' + esc(P(c1.horasNaMeta + ' h na meta (≥ 1.800) · melhor hora ', c1.horasNaMeta + '小时达标（≥ 1,800）· 最高 ')) + esc(hh(c1.melhorHora)) + ' (' + fmtInt(c1.melhorQtd) + ')</div></div>'
-          : '<div class="aw-none aw-blank">—</div>') +
-        (tt.top3.length > 1 ? '<div class="aw-podhead">' + esc(P('Top 3 do turno', '班次前三')) + '</div><ol class="aw-podium">' + tt.top3.slice(1).map(function (x, k) {
-          return '<li><span class="aw-medal">' + medals[k + 1] + '</span><div class="aw-pbody"><div class="aw-name">' + balName(x.nome) + (g && g.turno === tn && g.nome === x.nome ? ' <span class="aw-badge">🎒 ' + esc(P('geral do dia', '全天冠军')) + '</span>' : '') + '</div>' +
-            '<div class="aw-meta">' + esc(P('média ', '平均 ')) + '<b>' + fmtInt(x.media) + '</b>/h ' + chip(x.faixa) + '</div><div class="aw-sub small">' +
-            esc(P(x.horas + ' h com produção · ' + x.horasNaMeta + ' na meta · melhor ', x.horas + '小时供件 · ' + x.horasNaMeta + '小时达标 · 最高 ')) + esc(hh(x.melhorHora)) + ' (' + fmtInt(x.melhorQtd) + ')</div></div></li>';
-        }).join('') + '</ol>' : '') +
-        ((tt.outrosNaMeta || []).length ? '<div class="aw-more small">' + esc(P('Também na meta (≥ 1.800): ', '其他达标（≥ 1,800）：')) + tt.outrosNaMeta.slice(0, 5).map(function (x) {
-          return esc(awShort(x.nome)) + ' (' + fmtInt(x.media) + ')';
-        }).join(' · ') + (tt.outrosNaMeta.length > 5 ? ' …' : '') + '</div>' : '') +
-        '</div>';
-      return '<article class="card aw-shift"><div class="aw-sh"><i style="background:' + SHIFT_COLORS[tn] + '"></i><b>' + tn + '</b> · ' + SHIFT_HOURS[tn] +
-        '<span class="aw-shstat">' + (tt.media !== null ? esc(P('média ', '平均 ')) + '<b>' + fmtInt(tt.media) + '</b>/h · ' : '') + fmtInt(tt.balancas) + ' ' + esc(P('balanças', '供包台')) +
-        ' · ' + fmtInt(tt.naMeta) + ' ' + esc(P('na meta', '达标')) + '</span></div>' + hora + top + '</article>';
-    }).join('') + '</section>';
-    // V4.34.2: o campeão geral é quem MAIS PRODUZIU no turno (total de pacotes) entre T1, T2 e T3; ao lado, quem mais produziu em cada turno.
-    var champs = ['T1', 'T2', 'T3'].map(function (tn) { return {t: tn, x: d.turnos[tn].maisProduziu || null}; });
-    var maxC = champs.reduce(function (m, c) { return c.x && c.x.total > m ? c.x.total : m; }, 0);
-    var dTot = ['T1', 'T2', 'T3'].reduce(function (a, tn) { return a + (d.turnos[tn].total || 0); }, 0);
-    html += '<section class="card aw-shift aw-geralcard"><div class="aw-sh"><i style="background:var(--aw-top-bg)"></i><b>' + esc(P('Dia', '全天')) + '</b> · T1 + T2 + T3 · 06h–06h' +
-      '<span class="aw-shstat">' + esc(P('total do dia ', '全天合计 ')) + '<b>' + fmtInt(dTot) + '</b> ' + esc(P('pacotes', '件')) + ' · ' + fmtInt((d.balancas || []).length) + ' ' + esc(P('balanças', '供包台')) + '</span></div><div class="aw-ggrid">' +
-      '<div class="aw-block"><div class="aw-bt">🎒 ' + esc(P('Campeão geral entre os três turnos', '三个班次全天冠军')) + '<small>' + esc(P('Maior produtividade geral entre os turnos T1, T2 e T3', 'T1、T2、T3三个班次综合效率最高')) + '</small></div>' +
-      (g ? '<div class="aw-win"><div class="aw-name">' + balName(g.nome) + '</div><div class="aw-num">' + fmtInt(g.total) + '<small> ' + esc(P('pacotes no turno', '件（班次合计）')) + '</small></div>' +
-        '<div class="aw-meta">' + g.turno + ' · ' + esc(SHIFT_HOURS[g.turno]) + ' · ' + esc(P(g.horas + ' h com produção', g.horas + '小时供件')) + '</div>' +
-        '<div class="aw-prize">🎁 ' + esc(P('1 mochila + 1 medalha', '背包1个 + 徽章1枚')) + '</div>' +
-        '<div class="aw-more small">' + esc(P('Melhor hora: ', '最高小时：')) + esc(hh(g.melhorHora)) + ' (' + fmtInt(g.melhorQtd) + ')</div></div>'
-        : '<div class="aw-none aw-blank">—</div>') + '</div>' +
-      '<div class="aw-block"><div class="aw-bt">📦 ' + esc(P('Quem mais produziu em cada turno', '各班次供件最多')) + '<small>' + esc(P('o maior total de pacotes no turno ganha a mochila', '班次供件总量最多者获背包')) + '</small></div><div class="aw-cmp">' +
-      champs.map(function (c) {
-        var win = !!(g && c.x && g.turno === c.t && g.nome === c.x.nome), dif = g && c.x ? g.total - c.x.total : 0;
-        return '<div class="aw-cmprow' + (win ? ' aw-p1' : '') + '"><span class="aw-cmpt"><i style="background:' + SHIFT_COLORS[c.t] + '"></i>' + c.t + '</span>' +
-          (c.x ? '<span class="aw-cmpn">' + (win ? '🎒 ' : '') + balName(c.x.nome) + '</span>' +
-            '<span class="aw-bar"><i style="width:' + (maxC ? (c.x.total / maxC * 100).toFixed(1) : 0) + '%;background:' + SHIFT_COLORS[c.t] + '"></i></span>' +
-            '<span class="aw-cmpv"><b>' + fmtInt(c.x.total) + '</b> ' + esc(P('pacotes', '件')) + '<small>' + (win ? esc(P('campeão geral do dia', '全天冠军')) :
-              dif > 0 ? esc(P('faltaram ' + fmtInt(dif) + ' pacotes para o campeão', '比冠军少 ' + fmtInt(dif) + '件')) : esc(P('mesmo total; ganhou quem fez em menos horas', '总量相同，用时少者胜'))) + '</small></span>'
-            : '<span class="aw-cmpn aw-blank">—</span><span></span><span></span>') + '</div>';
-      }).join('') + '</div></div></div></section>';
     // V4.34.2 (pergunta "muita gente passou de 1.800 alcançando mais de 2.000 … por que não aparecem?"): todas as balanças de cada turno.
     var rkTab = /^T[123]$/.test(aw.tab || '') ? aw.tab : 'T1';
     html += '<section class="card aw-rank"><div class="chart-head"><span class="chart-ico">' + icon('table') + '</span><div class="chart-titles"><h3>' +
@@ -4316,114 +4223,9 @@
       reqs.map(function (x) { return '<li><span class="aw-rlic">' + x[0] + '</span><div>' + Lb(x[1], x[2]) + '</div></li>'; }).join('') + '</ul></div></section>';
     root.innerHTML = html;
     bindAwards(root);
-    drawAwardCharts(d);
   }
   /** Rótulo curto da balança: "Sorter A · Balança 04" → "A-04". */
   function awShort(nome) { var m = /Sorter\s+(\S+)\s+·\s+Balança\s+(\d+)/.exec(String(nome || '')); return m ? m[1] + '-' + m[2] : String(nome || ''); }
-  /** Linha tracejada da meta (valor no eixo y, ou no x nos gráficos deitados), com o rótulo no fim. */
-  function awGoalPlugin(value, label, horizontal) {
-    return {id: 'awGoal', afterDatasetsDraw: function (ch) {
-      var a = ch.chartArea, sc = horizontal ? ch.scales.x : ch.scales.y;
-      if (!a || !sc) return;
-      var px = sc.getPixelForValue(value), g = ch.ctx;
-      g.save(); g.strokeStyle = MUTED; g.lineWidth = 1.5; g.setLineDash([6, 4]); g.beginPath();
-      if (horizontal) { g.moveTo(px, a.top); g.lineTo(px, a.bottom); } else { g.moveTo(a.left, px); g.lineTo(a.right, px); }
-      g.stroke(); g.setLineDash([]); g.fillStyle = MUTED; g.font = '700 11px ' + Chart.defaults.font.family;
-      // O rótulo fica fora da área das barras (à direita), para não ficar em cima de nenhuma barra.
-      if (horizontal) { g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillText(label, px, a.top - 5); } else { g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillText(label, a.right + 6, px); }
-      g.restore();
-    }};
-  }
-  function drawAwardCharts(d) {
-    ['awHora', 'awTurno', 'awGeral'].forEach(destroyChart);
-    if (!window.Chart || !d || !d.turnos) return;
-    var P = function (pt, zh) { return L({pt: pt, zh: zh}); }, T = ['T1', 'T2', 'T3'];
-    var hh = function (h) { return String(h).padStart(2, '0') + 'h–' + String((h + 1) % 24).padStart(2, '0') + 'h'; };
-    var tint = function (hex, a) { var n = parseInt(String(hex).slice(1), 16); return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')'; };
-    var GOLD = '#F7B500', GOLD_INK = '#3A2700';
-    var axTitle = function (txt) { return {display: true, text: txt, color: MUTED, font: {weight: '700', size: 11}}; };
-    // Rótulo em pílula: dourada no campeão, clara (cor do turno) nos outros.
-    var pill = function (isWin, shiftOf, extra) {
-      return Object.assign({clip: false, textAlign: 'center', borderRadius: 7, padding: {top: 4, bottom: 4, left: 7, right: 7}, font: {weight: '800', size: 11.5, lineHeight: 1.3},
-        backgroundColor: function (ctx) { return isWin(ctx.dataIndex) ? GOLD : tint(SHIFT_COLORS[shiftOf(ctx.dataIndex)], .16); },
-        color: function (ctx) { return isWin(ctx.dataIndex) ? GOLD_INK : INK; }}, extra);
-    };
-    var base = function () {
-      return {responsive: true, maintainAspectRatio: false, animation: {duration: 500}, layout: {padding: {top: 52, right: 78}},
-        plugins: {legend: {display: false}},
-        scales: {x: {grid: {display: false}, border: {color: GRID}, ticks: {color: INK, font: {weight: '700'}}},
-          y: {beginAtZero: true, grace: '12%', grid: {color: GRID}, border: {display: false}, ticks: {color: MUTED, callback: function (v) { return fmtInt(v); }}}}};
-    };
-    var xLabels = T.map(function (t) { return t + ' · ' + SHIFT_HOURS[t]; });
-    // 1) Campeão de produtividade por hora: em cada turno, a maior hora com 2.400 ou mais. Sem campeão, o turno fica em branco.
-    var c1 = $('#awChartHora');
-    if (c1) {
-      var best = T.map(function (t) { return d.turnos[t].campeaoHora || null; });
-      var o1 = base();
-      o1.scales.y.suggestedMax = Math.round(d.metaHora * 1.1);
-      o1.layout.padding = {top: 68, right: 78};
-      o1.scales.y.title = axTitle(P('pacotes na hora', '单小时件数'));
-      o1.plugins.tooltip = {callbacks: {title: function (it) { return xLabels[it[0].dataIndex]; },
-        label: function (ctx) { var b = best[ctx.dataIndex]; return b ? ' ' + b.nome + ' · ' + hh(b.hora) + ': ' + fmtInt(b.qtd) + ' ' + P('pacotes', '件') : ''; }}};
-      o1.plugins.datalabels = pill(function (i) { return !!best[i]; }, function (i) { return T[i]; }, {anchor: 'end', align: 'end', offset: 6,
-        display: function (ctx) { return !!best[ctx.dataIndex]; },
-        formatter: function (v, ctx) { var b = best[ctx.dataIndex]; return b ? '🏆 ' + awShort(b.nome) + '\n' + hh(b.hora) + '\n' + fmtInt(b.qtd) : ''; }});
-      state.charts.awHora = new Chart(c1, {type: 'bar', plugins: plugins([awGoalPlugin(d.metaHora, P('meta ', '目标 ') + fmtInt(d.metaHora))]),
-        data: {labels: xLabels, datasets: [{data: best.map(function (b) { return b ? b.qtd : null; }),
-          backgroundColor: T.map(function (t) { return SHIFT_COLORS[t]; }), borderColor: GOLD, borderWidth: 3, borderRadius: {topLeft: 6, topRight: 6}, borderSkipped: 'start',
-          maxBarThickness: 76, categoryPercentage: .7, barPercentage: .9}]}, options: o1});
-    }
-    // 2) Campeão de produtividade do turno: o top 3 de cada turno pela média, deitado (uma linha por colocação); o 🥇 é o campeão.
-    var c2 = $('#awChartTurno');
-    if (c2) {
-      var medal = ['🥇', '🥈', '🥉'], alpha = [1, .5, .32], rows = [];
-      T.forEach(function (t) { [0, 1, 2].forEach(function (i) { rows.push({t: t, i: i, x: d.turnos[t].top3[i] || null}); }); });
-      var win2 = function (k) { return rows[k].i === 0 && !!rows[k].x; };
-      var o2 = base();
-      o2.indexAxis = 'y';
-      o2.layout.padding = {top: 22, right: 92};
-      o2.scales = {x: {beginAtZero: true, suggestedMax: Math.round(d.metaTurno * 1.2), grid: {color: GRID}, border: {display: false},
-          ticks: {color: MUTED, callback: function (v) { return fmtInt(v); }}, title: axTitle(P('média por hora no turno', '班次平均每小时'))},
-        y: {grid: {display: false}, border: {color: GRID}, ticks: {color: INK, font: {weight: '700', size: 11}, autoSkip: false}}};
-      o2.plugins.tooltip = {callbacks: {title: function (it) { var r = rows[it[0].dataIndex]; return r.t + ' · ' + (r.i + 1) + 'º'; },
-        label: function (ctx) { var r = rows[ctx.dataIndex]; return r.x ? ' ' + r.x.nome + ': ' + P('média ', '平均 ') + fmtInt(r.x.media) + '/h' : ''; }}};
-      o2.plugins.datalabels = pill(win2, function (k) { return rows[k].t; }, {anchor: 'end', align: 'end', offset: 6, font: {weight: '800', size: 11},
-        padding: {top: 2, bottom: 2, left: 6, right: 6}, display: function (ctx) { return !!rows[ctx.dataIndex].x; },
-        formatter: function (v, ctx) { var r = rows[ctx.dataIndex]; return r.x ? (win2(ctx.dataIndex) ? '🥇 ' : '') + fmtInt(r.x.media) + '/h' : ''; }});
-      // Linha fina entre os turnos.
-      var groups = {id: 'awGroups', beforeDatasetsDraw: function (ch) {
-        var a = ch.chartArea, y = ch.scales.y, g = ch.ctx;
-        if (!a || !y) return;
-        g.save(); g.strokeStyle = GRID; g.lineWidth = 1;
-        [2, 5].forEach(function (k) { var py = (y.getPixelForValue(k) + y.getPixelForValue(k + 1)) / 2; g.beginPath(); g.moveTo(a.left - 90, py); g.lineTo(a.right, py); g.stroke(); });
-        g.restore();
-      }};
-      state.charts.awTurno = new Chart(c2, {type: 'bar', plugins: plugins([groups, awGoalPlugin(d.metaTurno, P('mínimo ', '最低 ') + fmtInt(d.metaTurno), true)]),
-        data: {labels: rows.map(function (r) { return r.t + '  ' + medal[r.i] + ' ' + (r.x ? awShort(r.x.nome) : ''); }),
-          datasets: [{data: rows.map(function (r) { return r.x ? r.x.media : null; }), backgroundColor: rows.map(function (r) { return tint(SHIFT_COLORS[r.t], alpha[r.i]); }),
-            borderColor: rows.map(function (r, k) { return win2(k) ? GOLD : 'transparent'; }), borderWidth: rows.map(function (r, k) { return win2(k) ? 2 : 0; }),
-            borderRadius: 5, borderSkipped: false, barPercentage: .82, categoryPercentage: .9}]}, options: o2});
-    }
-    // 3) Campeão geral entre os três turnos: quem mais produziu em cada turno; o maior (dourado) ganha.
-    var c3 = $('#awChartGeral');
-    if (c3) {
-      var ch3 = T.map(function (t) { return d.turnos[t].maisProduziu || null; }), g = d.campeaoGeral;
-      var isG = function (i) { return !!(g && ch3[i] && g.turno === T[i] && g.nome === ch3[i].nome); };
-      var o3 = base();
-      o3.layout.padding = {top: 52, right: 12};
-      o3.scales.y.title = axTitle(P('pacotes no turno', '班次件数'));
-      o3.plugins.tooltip = {callbacks: {title: function (it) { return xLabels[it[0].dataIndex] + ' · ' + P('quem mais produziu', '供件最多'); },
-        label: function (ctx) { var x = ch3[ctx.dataIndex]; return x ? ' ' + x.nome + ': ' + fmtInt(x.total) + ' ' + P('pacotes', '件') : ''; }}};
-      o3.plugins.datalabels = pill(isG, function (i) { return T[i]; }, {anchor: 'end', align: 'end', offset: 6,
-        display: function (ctx) { return !!ch3[ctx.dataIndex]; },
-        formatter: function (v, ctx) { var x = ch3[ctx.dataIndex]; return x ? (isG(ctx.dataIndex) ? '🎒 ' : '') + awShort(x.nome) + '\n' + fmtInt(x.total) + ' ' + P('pacotes', '件') : ''; }});
-      state.charts.awGeral = new Chart(c3, {type: 'bar', plugins: plugins([]),
-        data: {labels: xLabels, datasets: [{data: ch3.map(function (x) { return x ? x.total : null; }),
-          backgroundColor: T.map(function (t, i) { return isG(i) ? SHIFT_COLORS[t] : tint(SHIFT_COLORS[t], .38); }),
-          borderColor: T.map(function (t, i) { return isG(i) ? GOLD : 'transparent'; }), borderWidth: T.map(function (t, i) { return isG(i) ? 3 : 0; }),
-          borderRadius: {topLeft: 6, topRight: 6}, borderSkipped: 'start', maxBarThickness: 76, categoryPercentage: .7, barPercentage: .9}]}, options: o3});
-    }
-  }
   function bindAwards(root) {
     var inp = $('#awDate', root), shift = function (n) { var cur = state.awards.date || (inp && inp.value); if (cur) awardsGo(Core.addDays(cur, n)); };
     if (inp) inp.addEventListener('change', function () { if (/^\d{4}-\d{2}-\d{2}$/.test(inp.value)) awardsGo(inp.value); });

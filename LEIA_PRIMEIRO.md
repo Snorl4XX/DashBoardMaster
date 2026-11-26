@@ -4,6 +4,14 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.35.3 — Premiação (Sorter): mais enxuta (sem a tabela do resultado, os gráficos e os quadros de turno e do dia)
+
+Pedido (print da tabela "Resultado da premiação / 奖励项目"): "Tirar essa parte." A tabela saiu da tela. Depois (print dos três
+gráficos): "tirar esse também" — os gráficos Campeão por hora, Campeão do turno e Campeão geral também saíram. E o quadro do dia
+("Dia · T1 + T2 + T3": campeão geral e quem mais produziu em cada turno) e os quadros de cada turno (T1, T2, T3: campeão da hora
+e campeão do turno) também saíram. Os vencedores continuam nos 9 cartões das 3 balanças (por hora, do turno e geral, um por turno);
+a "Classificação das horas", os cartões por turno com as balanças na meta, o ranking, o mapa balança × hora e as regras continuam.
+
 ## V4.35.2 — Premiação (Sorter): quem bateu a meta com o fundo verde
 
 Pedido (print do cartão do turno): "Os que bateu a meta preencher com verde na tela de fundo." Nos cartões das 3 balanças, a linha de

@@ -404,27 +404,9 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-sum{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px}
 .aw-geral{border-top:3px solid var(--aw-top-bg)}
 .aw-geral .kpi-value.text{font-size:18px}
-.aw-shifts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
-.aw-shift{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
 .aw-sh{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:15px}
 .aw-sh i{width:11px;height:11px;border-radius:3px;display:inline-block}
 .aw-shstat{margin-left:auto;font-size:12px;color:var(--muted)}
-.aw-block{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--row-alt)}
-.aw-bt{font-weight:800;font-size:13px;margin-bottom:8px;display:flex;flex-direction:column;gap:1px}
-.aw-bt small{font-weight:600;color:var(--muted);font-size:11.5px}
-.aw-name{font-size:14px}
-.aw-num{font-size:30px;font-weight:900;letter-spacing:-.02em;line-height:1.1;color:var(--red)}
-.aw-num small{font-size:13px;font-weight:700;color:var(--muted)}
-.aw-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px}
-.aw-prize{margin-top:6px;font-size:12.5px;font-weight:700;color:var(--ink-2)}
-.aw-more,.aw-near{margin-top:8px;color:var(--muted);line-height:1.45}
-.aw-none{color:var(--muted);font-size:13px;line-height:1.5}
-.aw-podium{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
-.aw-podium li{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:10px;background:var(--card);border:1px solid var(--line)}
-.aw-podium li.aw-p1{border-color:var(--aw-top-bg);box-shadow:0 0 0 1px var(--aw-top-bg) inset}
-.aw-medal{font-size:24px;line-height:1}
-.aw-pbody{min-width:0;flex:1}
-.aw-sub{color:var(--muted);margin-top:2px}
 .aw-badge{display:inline-block;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;background:var(--aw-top-bg);color:var(--aw-top-fg);margin-left:4px}
 .aw-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:800;white-space:nowrap}
 .aw-chip small{font-weight:600;opacity:.85}
@@ -519,42 +501,15 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-rlreq li{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.45;color:var(--ink)}
 .aw-rlic{width:32px;height:32px;border-radius:10px;background:var(--soft-2);display:grid;place-items:center;flex:none;font-size:16px}
 @media (max-width:1100px){.aw-rlgrid{grid-template-columns:1fr}.aw-rlreq ul{grid-template-columns:1fr}}
-.aw-blank{color:var(--muted);font-size:20px;font-weight:700;line-height:1}
 .aw-rank{margin-top:12px;padding:16px 18px}
 .aw-rkwrap[hidden]{display:none}
 .aw-rktable td{vertical-align:middle;white-space:nowrap}
 .aw-rktable tr.aw-rktop td{font-weight:700}
 .aw-rktable tr.aw-rkbelow td{opacity:.62}
 .aw-rktable tr.aw-rkcut td{background:var(--soft-2);color:var(--muted);font-size:11.5px;font-weight:800;text-align:left}
-.aw-podhead{margin:12px 0 6px;font-size:12px;font-weight:800;color:var(--muted)}
-.aw-geralcard{margin-top:12px;border-top:3px solid var(--aw-top-bg)}
-.aw-ggrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.7fr);gap:12px}
-.aw-cmp{display:flex;flex-direction:column;gap:8px}
-.aw-cmprow{display:grid;grid-template-columns:40px minmax(0,1.1fr) minmax(70px,1fr) 210px;gap:12px;align-items:center;padding:10px 12px;border-radius:10px;background:var(--card);border:1px solid var(--line)}
-.aw-cmprow.aw-p1{border-color:var(--aw-top-bg);box-shadow:0 0 0 1px var(--aw-top-bg) inset}
-.aw-cmpt{display:flex;align-items:center;gap:6px;font-weight:800}
-.aw-cmpt i{width:11px;height:11px;border-radius:3px;display:inline-block}
-.aw-cmpn{font-size:14px;min-width:0}
-.aw-bar{height:10px;border-radius:999px;background:var(--line);overflow:hidden}
-.aw-bar i{display:block;height:100%;border-radius:999px}
-.aw-cmpv{text-align:right;white-space:nowrap}
-.aw-cmpv b{font-size:18px;font-weight:900;color:var(--red)}
-.aw-cmpl{font-size:11.5px;font-weight:700;color:var(--muted)}
-.aw-cmpv small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
-@media (max-width:1100px){.aw-ggrid{grid-template-columns:1fr}}
-@media (max-width:560px){.aw-cmprow{grid-template-columns:auto minmax(0,1fr)}.aw-bar{grid-column:1/-1}.aw-cmpv{grid-column:1/-1;text-align:left}}
-.aw-charts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
-.aw-chart{padding:16px 18px}
-.aw-chart .chart-ico{font-size:17px}
-.aw-cwrap{position:relative;height:300px}
-.aw-cfoot{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11.5px;color:var(--muted);font-weight:600}
-.aw-cfoot span{display:inline-flex;align-items:center;gap:6px}
-.aw-gsw{width:12px;height:12px;border-radius:3px;background:#F7B500;display:inline-block}
-.aw-dash{width:16px;border-top:2px dashed var(--muted);display:inline-block}
 .data-table.aw-ptable thead th.aw-resh{background:#9E000C}
 .data-table.aw-ptable tbody td.aw-zhname{min-width:120px}
 .data-table.aw-ptable tbody td.aw-res{min-width:170px}
-@media (max-width:1100px){.aw-charts{grid-template-columns:1fr}}
 .aw-tables{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:12px}
 .aw-tcard{padding:16px 18px}
 .aw-ptable td,.aw-ctable td{vertical-align:middle;font-size:12.5px;line-height:1.45;white-space:normal}
@@ -568,7 +523,7 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-rgrid p{margin:4px 0 0;color:var(--ink-2)}
 .aw-req{grid-column:1/-1}
 .aw-req ul{margin:4px 0 0;padding-left:18px;color:var(--ink-2)}
-@media (max-width:1100px){.aw-shifts{grid-template-columns:1fr}.aw-sum{grid-template-columns:repeat(2,minmax(0,1fr))}.aw-rgrid{grid-template-columns:1fr}}
+@media (max-width:1100px){.aw-sum{grid-template-columns:repeat(2,minmax(0,1fr))}.aw-rgrid{grid-template-columns:1fr}}
 @media (max-width:560px){.aw-sum{grid-template-columns:1fr}.aw-date{flex-wrap:wrap}}
 /* Cartão estreito (celular): número em cima, informações embaixo, tamanhos fixos para continuar legível. */
 @container (max-width:460px){
