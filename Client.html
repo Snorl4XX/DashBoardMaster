@@ -34,7 +34,8 @@
     if (dark) document.documentElement.setAttribute('data-theme', 'dark'); else document.documentElement.removeAttribute('data-theme');
     store('jt_theme', dark ? 'dark' : 'light');
     applyThemeColors();
-    if (state.view === 'results') { if (state.results.data) renderResults(); } else if (state.data) renderDashboard();
+    if (state.view === 'awards') renderAwards();
+    else if (state.view === 'results') { if (state.results.data) renderResults(); } else if (state.data) renderDashboard();
   }
   var PAGE_SIZE = 50;
 
@@ -491,6 +492,8 @@
     // V4.31: ícones das linhas do cartão da taxa do dia (dia anterior e taxa por turno).
     calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M7.5 13.6h.01M10.5 13.6h.01M13.5 13.6h.01M16.5 13.6h.01M7.5 17h.01M10.5 17h.01M13.5 17h.01"/>',
     layers: '<path d="M12 3.5l8.5 4.3-8.5 4.3-8.5-4.3z"/><path d="M3.5 12l8.5 4.3 8.5-4.3"/><path d="M3.5 16.2l8.5 4.3 8.5-4.3"/>',
+    // V4.34 (Premiação do Sorter): troféu.
+    trophy: '<path d="M8 21h8M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 6h3v1.5A3.5 3.5 0 0 1 16.6 11M7 6H4v1.5A3.5 3.5 0 0 0 7.4 11"/>',
     // V4.33 (Eficiência): função dos colaboradores.
     role: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.5.3 4.5 2.5 4.5 5"/>'
   };
@@ -501,6 +504,7 @@
     boot: null, catalog: [], catalogMap: {}, lang: 'pt', view: 'dashboard', indicator: 'wrong_send',
     from: '', to: '', filters: {}, data: null, filtered: [], seq: 0,
     evoMode: 'period', intervalMode: 'ranking', chartViews: {}, charts: {}, dropdowns: {},
+    awards: {date: '', data: null, busy: false, error: '', at: 0},
     table: {sortKey: null, sortDir: 'desc', page: 1, query: ''},
     results: {indicator: '', shift: 'all', periodicity: 'day', from: '', to: '', data: null},
     autoSnap: {},
@@ -859,7 +863,7 @@
         // Biblioteca chegou depois do tempo limite: redesenha com gráficos.
         if (!ok || !window.Chart || state.chartDefaultsSet) return;
         setupChartDefaults();
-        if (state.view === 'results') renderResults(); else if (state.data) renderDashboard();
+        if (state.view === 'awards') renderAwards(); else if (state.view === 'results') renderResults(); else if (state.data) renderDashboard();
       });
       state.boot = boot;
       // V4.27: dias guardados no navegador com mais de 100 dias saem (em segundo plano).
@@ -961,6 +965,7 @@
   var POLL_MS = 2 * 60 * 1000;
   function reloadSilently() {
     state.lastReloadAt = Date.now();
+    if (state.view === 'awards') { if (state.awards.data && !state.awards.data.fechado) loadAwards(); return; }
     if (state.view === 'results') loadResults(true); else loadDashboard({silent: true});
   }
   /** Algum dia do período aberto (e do período anterior, usado nas comparações) foi gravado depois da leitura do painel? */
@@ -989,6 +994,7 @@
       // Não recarrega com uma lista de filtro ou o menu de relatório abertos (tenta de novo na próxima conferência).
       var busy = Object.keys(state.dropdowns).some(function (k) { return state.dropdowns[k].isOpen; }) || !$('#reportPop').hidden || $('#progress').classList.contains('on');
       if (busy) return;
+      if (state.view === 'awards') return;
       if (state.view === 'results') {
         var maxT = Object.keys(stamps).reduce(function (m, k) { return Math.max(m, Number(stamps[k].t) || 0); }, 0);
         if (state.results.data && maxT > Number(state.results.data.stampT || 0)) reloadSilently();
@@ -1017,7 +1023,8 @@
     if (!state.boot || !state.boot.initialized) return;
     buildNav(); buildSelects(); buildPresets(); renderSourceField(); updateSidebarStatus(state.lastSync, state.lastSyncTs);
     renderSyncBanner(state.pauses);
-    if (state.view === 'results') renderResults();
+    if (state.view === 'awards') renderAwards();
+    else if (state.view === 'results') renderResults();
     else if (state.data) { buildFilterGrid(); renderDashboard(); }
   }
 
@@ -1036,11 +1043,18 @@
     html += '<div class="nav-label">' + esc(t('analyses')) + '</div>' +
       '<button type="button" class="nav-item' + (state.view === 'results' ? ' active' : '') + '" data-view="results">' +
       '<span class="nav-ico">' + icon('results') + '</span><span class="nav-copy"><b>' + esc(t('results')) + '</b><small>' + esc(t('resultsNavSub')) + '</small></span></button>';
+    // V4.34: Premiação do abastecimento (só com a Produção do Sorter).
+    if (state.catalogMap && state.catalogMap.sorter_flow) {
+      html += '<button type="button" class="nav-item' + (state.view === 'awards' ? ' active' : '') + '" data-view="awards">' +
+        '<span class="nav-ico">' + icon('trophy') + '</span><span class="nav-copy"><b>' + esc(L({pt: 'Premiação', zh: '供件效率奖励'})) + '</b><small>' +
+        esc(L({pt: 'Campeões por balança e turno', zh: '各班次供包台冠军'})) + '</small></span></button>';
+    }
     nav.innerHTML = html;
     $$('.nav-item', nav).forEach(function (b) {
       b.addEventListener('click', function () {
         toggleSidebar(false);
-        if (b.getAttribute('data-view') === 'results') openResults(); else selectIndicator(b.getAttribute('data-ind'));
+        var v = b.getAttribute('data-view');
+        if (v === 'results') openResults(); else if (v === 'awards') openAwards(); else selectIndicator(b.getAttribute('data-ind'));
       });
     });
   }
@@ -1197,6 +1211,9 @@
     state.view = view;
     $('#viewDashboard').classList.toggle('hidden', view !== 'dashboard');
     $('#viewResults').classList.toggle('hidden', view !== 'results');
+    if ($('#viewAwards')) $('#viewAwards').classList.toggle('hidden', view !== 'awards');
+    // V4.34: a Premiação tem a própria data (dia de trabalho); a barra de período fica escondida.
+    $('.toolbar').classList.toggle('hidden', view === 'awards');
     $('#indicatorField').classList.toggle('hidden', view !== 'dashboard');
     $('#resultsIndicatorField').classList.toggle('hidden', view !== 'results');
     $('#resultsShiftField').classList.toggle('hidden', view !== 'results');
@@ -1295,6 +1312,11 @@
     if (state.view === 'results') {
       $('#pageTitle').textContent = t('results');
       $('#pageSubtitle').textContent = t('resultsTitle');
+      return;
+    }
+    if (state.view === 'awards') {
+      $('#pageTitle').textContent = L({pt: 'Premiação · Abastecimento da esteira', zh: '分拣机供件效率PK奖励'});
+      $('#pageSubtitle').textContent = L({pt: 'Produtividade de cada balança, hora a hora, direto do site do sorter', zh: '各供包台每小时供件效率（分拣机系统实时数据）'});
       return;
     }
     if (!c) return;
@@ -4025,6 +4047,278 @@
   }
 
   // ------------------------------------------------------------------ resultados
+  // ------------------------------------------------------------------ V4.34: Premiação do abastecimento (Produção do Sorter)
+  /**
+   * Tela "Premiação" (分拣机供件效率PK奖励机制): o dia de trabalho (06h → 06h) lido no site do sorter (getSorterAwards). Por turno:
+   * o campeão da hora (maior hora ≥ 2.400) e os 3 melhores pela média por hora (mínimo 1.800); o mapa balança × hora com a
+   * classificação de cada hora; as regras.
+   */
+  function openAwards() { setView('awards'); renderHeader(); renderAwards(); return loadAwards(); }
+  function loadAwards(force) {
+    if (state.view !== 'awards') return;
+    var seq = ++state.seq, aw = state.awards;
+    aw.busy = true; renderAwards(); setBusy(true);
+    return call('getSorterAwards', aw.date || '', !!force).then(function (res) {
+      if (seq !== state.seq) return;
+      aw.data = res; aw.date = res.data; aw.error = ''; aw.at = Date.now();
+    }).catch(function (e) {
+      if (seq !== state.seq) return;
+      aw.error = e.message;
+    }).then(function () { if (seq === state.seq) { aw.busy = false; setBusy(false); renderAwards(); } });
+  }
+  function awardsGo(date) { state.awards.date = date; state.awards.data = null; loadAwards(); }
+  function renderAwards() {
+    var root = $('#awardsRoot');
+    if (!root || state.view !== 'awards') return;
+    renderHeader();
+    var aw = state.awards, d = aw.data, P = function (pt, zh) { return L({pt: pt, zh: zh}); };
+    var today = (state.boot && state.boot.today) || '';
+    var hh = function (h) { return String(h).padStart(2, '0') + 'h–' + String((h + 1) % 24).padStart(2, '0') + 'h'; };
+    var fx = {};
+    ((d && d.faixas) || []).forEach(function (f) { fx[f.key] = f; });
+    var fxName = function (k) { return fx[k] ? L(fx[k]) : k; };
+    var chip = function (k) { return '<span class="aw-chip aw-' + k + '">' + esc(fxName(k)) + '</span>'; };
+    var balName = function (nome) { return esc(nome).replace(' · ', ' · <b>') + '</b>'; };
+    var html = '<section class="card aw-head"><div class="aw-title"><span class="aw-ico">' + icon('trophy') + '</span><div><h2>' +
+      esc(P('Premiação por produtividade no abastecimento', '分拣机供件效率PK奖励机制')) + '</h2><p class="muted small">' +
+      esc(P('Quantidade alimentada em cada balança, hora a hora (site do sorter, Sorter A e B). Dia de trabalho: 06h → 06h do dia seguinte.',
+        '各供包台每小时供件量（分拣机系统，A/B套）。工作日：当日06点至次日06点。')) + '</p></div></div>' +
+      '<div class="aw-date"><button type="button" class="btn btn-light aw-prev" aria-label="' + esc(P('Dia anterior', '前一天')) + '">‹</button>' +
+      '<input type="date" id="awDate" value="' + esc(aw.date || '') + '"' + (today ? ' max="' + esc(today) + '"' : '') + '>' +
+      '<button type="button" class="btn btn-light aw-next" aria-label="' + esc(P('Dia seguinte', '后一天')) + '">›</button>' +
+      '<button type="button" class="btn btn-dark aw-reload">' + esc(P('Ler de novo', '重新读取')) + '</button></div>' +
+      (d ? '<p class="aw-status small">' + (d.fechado ? '<span class="aw-dot ok"></span>' + esc(P('Dia fechado', '已结束')) :
+        '<span class="aw-dot live"></span>' + esc(P('Em andamento: os números mudam até as 06h do dia seguinte', '进行中：次日06点前数据会更新'))) +
+        ' · ' + esc(P('lido no sorter às ', '读取时间 ') + d.lidoEm) + '</p>' : '') + '</section>';
+    if (aw.error) html += '<div class="alert"><div><b>' + esc(t('errorTitle')) + '</b>' + esc(aw.error) + '</div></div>';
+    if (!d) {
+      html += aw.busy ? '<section class="card aw-empty"><div class="mini-loader"></div><p>' + esc(P('Lendo o sorter (Sorter A e B, hora a hora)…', '正在读取分拣机数据…')) + '</p></section>' : '';
+      root.innerHTML = html; bindAwards(root); return;
+    }
+    (d.avisos || []).forEach(function (a) { html += '<div class="alert warn"><div>' + esc(a) + '</div></div>'; });
+    // Resumo do dia.
+    var c = d.contagem || {}, horas = Object.keys(c).reduce(function (a, k) { return a + c[k]; }, 0), naMeta = horas - (c.nao || 0);
+    var g = d.campeaoGeral;
+    html += '<section class="aw-sum">' +
+      '<article class="kpi"><div class="kpi-label">' + icon('qty') + esc(P('Balanças que alimentaram', '供件供包台')) + '</div><div class="kpi-value">' + fmtInt((d.balancas || []).length) +
+        '</div><div class="kpi-sub">' + esc(P('Sorter A e B no dia de trabalho', 'A/B套 · 工作日')) + '</div></article>' +
+      '<article class="kpi"><div class="kpi-label">' + icon('check') + esc(P('Horas na meta (≥ 1.800)', '达标小时（≥1,800）')) + '</div><div class="kpi-value">' + fmtInt(naMeta) +
+        '<small class="sc-unit"> / ' + fmtInt(horas) + '</small></div><div class="kpi-sub">' + (horas ? '<b>' + fmtPct(naMeta / horas * 100, 1) + '</b> ' : '') +
+        esc(P('das horas de balança com produção', '有供件的小时')) + '</div></article>' +
+      '<article class="kpi"><div class="kpi-label">' + icon('max') + esc(P('Horas excepcionais (≥ 2.400)', '卓越小时（≥2,400）')) + '</div><div class="kpi-value">' + fmtInt(c.excepcional || 0) +
+        '</div><div class="kpi-sub">' + esc(P('concorrem a campeão da hora', '可参评单小时冠军')) + '</div></article>' +
+      '<article class="kpi aw-geral"><div class="kpi-label">🎒 ' + esc(P('Campeão geral do dia', '三个班次全天冠军')) + '</div>' +
+        (g ? '<div class="kpi-value text">' + balName(g.nome) + '</div><div class="kpi-sub"><b>' + fmtInt(g.media) + '</b>/h · ' + g.turno + ' · ' + chip(g.faixa) +
+          '<br>🎁 ' + esc(P('1 mochila + 1 medalha', '背包1个 + 徽章1枚')) + '</div>'
+          : '<div class="kpi-value">—</div><div class="kpi-sub">' + esc(P('Nenhum turno com campeão (média ≥ 1.800)', '无班次达标（平均≥1,800）')) + '</div>') + '</article></section>';
+    // V4.34 (pedido "mostre esses resultados baseados na tabela anexada"): as duas tabelas das regras, com o resultado do dia.
+    var winH = function (tn) {
+      var x = d.turnos[tn].campeaoHora;
+      return x ? '<b>' + balName(x.nome) + '</b><br><span class="aw-tnum">' + fmtInt(x.qtd) + '</span> · ' + esc(hh(x.hora)) : '<span class="muted">' + esc(P('Ninguém ≥ 2.400', '无 ≥ 2,400')) + '</span>';
+    };
+    var winT = function (tn) {
+      var x = d.turnos[tn].top3[0];
+      return x ? '<b>' + balName(x.nome) + '</b><br><span class="aw-tnum">' + fmtInt(x.media) + '</span>/h ' + chip(x.faixa) : '<span class="muted">' + esc(P('Ninguém com média ≥ 1.800', '无平均 ≥ 1,800')) + '</span>';
+    };
+    var prizeRows = [
+      {zh: '单小时效率冠军', pt: 'Campeão de produtividade por hora', crit: P('Produtividade por hora ≥ 2.400 pacotes (a maior hora de cada turno)', '当小时供件效率 ≥ 2,400件（每班次最高）'),
+        premio: P('1 garrafa + 1 medalha', '水杯1个 + 徽章1枚'), cells: ['T1', 'T2', 'T3'].map(winH)},
+      {zh: '当班次效率冠军', pt: 'Campeão de produtividade do turno', crit: P('Maior média de produtividade por hora no turno, com mínimo de 1.800', '当班次平均小时效率最高，且 ≥ 1,800件'),
+        premio: P('1 prêmio Miau + 1 medalha', '喵喵1个 + 徽章1枚'), cells: ['T1', 'T2', 'T3'].map(winT)},
+      {zh: '三个班次全天冠军', pt: 'Campeão geral entre os três turnos', crit: P('Maior produtividade geral entre os turnos T1, T2 e T3', 'T1、T2、T3三个班次综合效率最高'),
+        premio: P('1 mochila + 1 medalha', '背包1个 + 徽章1枚'),
+        geral: g ? '<b>' + balName(g.nome) + '</b> · <span class="aw-tnum">' + fmtInt(g.media) + '</span>/h · ' + g.turno + ' ' + chip(g.faixa) : '<span class="muted">' + esc(P('Nenhum campeão de turno', '无班次冠军')) + '</span>'}
+    ];
+    var shiftHead = ['T1', 'T2', 'T3'].map(function (tn) { return '<th>' + tn + ' · ' + SHIFT_HOURS[tn] + '</th>'; }).join('');
+    html += '<section class="aw-tables"><article class="card aw-tcard"><div class="chart-head"><span class="chart-ico">' + icon('trophy') + '</span><div class="chart-titles"><h3>' +
+      esc(P('Resultado da premiação', '奖励结果')) + ' <span class="rp-zh">/ ' + esc(P('奖励项目', 'Tipo de premiação')) + '</span></h3><small>' +
+      esc(P('A tabela de premiação com os vencedores do dia', '奖励表及当日获奖者')) + '</small></div></div><div class="table-scroll"><table class="data-table aw-ptable"><thead><tr><th>' +
+      esc(P('Tipo de premiação', '奖励项目')) + '</th><th>' + esc(P('Critério de premiação', '获奖标准')) + '</th><th>' + esc(P('Premiação sugerida', '奖励金额（建议）')) + '</th>' + shiftHead + '</tr></thead><tbody>' +
+      prizeRows.map(function (r) {
+        return '<tr><td><b>' + esc(L({pt: r.pt, zh: r.zh})) + '</b><br><small class="muted">' + esc(Lo({pt: r.pt, zh: r.zh})) + '</small></td><td>' + esc(r.crit) + '</td><td>🎁 ' + esc(r.premio) + '</td>' +
+          (r.geral ? '<td colspan="3" class="aw-gcell">🎒 ' + r.geral + '</td>' : r.cells.map(function (x) { return '<td>' + x + '</td>'; }).join('')) + '</tr>';
+      }).join('') + '</tbody></table></div></article>';
+    var faixasAsc = (d.faixas || []).slice().reverse(), rangeTxt = function (f, i) {
+      var next = faixasAsc[i + 1];
+      if (f.min === null) return P('Menos de ' + fmtInt(d.metaTurno) + ' pacotes', '低于' + fmtInt(d.metaTurno) + '件');
+      if (!next) return P(fmtInt(f.min) + ' pacotes ou mais', fmtInt(f.min) + '件及以上');
+      return fmtInt(f.min) + '–' + fmtInt(next.min - 1) + ' ' + P('pacotes', '件');
+    };
+    var cnt = function (tn, k) { return tn ? ((d.turnos[tn].contagem || {})[k] || 0) : ((d.contagem || {})[k] || 0); };
+    var totOf = function (tn) { return faixasAsc.reduce(function (a, f) { return a + cnt(tn, f.key); }, 0); };
+    var cell = function (tn, k) { var n = cnt(tn, k), tt = totOf(tn); return '<td class="num">' + fmtInt(n) + (tt ? ' <small class="muted">' + fmtPct(n / tt * 100, 1) + '</small>' : '') + '</td>'; };
+    html += '<article class="card aw-tcard"><div class="chart-head"><span class="chart-ico">' + icon('gauge') + '</span><div class="chart-titles"><h3>' +
+      esc(P('Classificação das horas', '单小时供件效率评价')) + ' <span class="rp-zh">/ ' + esc(P('评价标准', 'Classificação')) + '</span></h3><small>' +
+      esc(P('Quantas horas de balança ficaram em cada faixa da tabela de avaliação', '各评价等级的供包台小时数')) + '</small></div></div><div class="table-scroll"><table class="data-table aw-ctable"><thead><tr><th>' +
+      esc(P('Produtividade por hora', '单小时供件效率')) + '</th><th>' + esc(P('Classificação', '评价标准')) + '</th>' +
+      ['T1', 'T2', 'T3'].map(function (tn) { return '<th class="num">' + tn + '</th>'; }).join('') + '<th class="num">' + esc(P('Dia', '全天')) + '</th></tr></thead><tbody>' +
+      faixasAsc.map(function (f, i) {
+        return '<tr><td>' + esc(rangeTxt(f, i)) + '</td><td>' + chip(f.key) + '</td>' + ['T1', 'T2', 'T3'].map(function (tn) { return cell(tn, f.key); }).join('') + cell('', f.key) + '</tr>';
+      }).join('') + '<tr class="cross-total"><td colspan="2"><b>' + esc(P('Horas de balança com produção', '有供件的供包台小时')) + '</b></td>' +
+      ['T1', 'T2', 'T3', ''].map(function (tn) { return '<td class="num"><b>' + fmtInt(totOf(tn)) + '</b></td>'; }).join('') + '</tr></tbody></table></div></article></section>';
+    // V4.34 (pedido "um gráfico que mostre esses resultados, separado um de cada"): um gráfico por premiação.
+    var chartCard = function (key, ic, pt, zh, sub) {
+      return '<article class="card chart-card aw-chart"><div class="chart-head"><span class="chart-ico">' + ic + '</span><div class="chart-titles"><h3>' + esc(P(pt, zh)) +
+        ' <span class="rp-zh">/ ' + esc(P(zh, pt)) + '</span></h3><small>' + esc(sub) + '</small></div></div><div class="aw-cwrap"><canvas id="' + key + '" role="img" aria-label="' + esc(P(pt, zh)) + '"></canvas></div></article>';
+    };
+    html += '<section class="aw-charts">' +
+      chartCard('awChartHora', '⏱️', 'Campeão de produtividade por hora', '单小时效率冠军', P('Maior hora de uma balança em cada turno · meta 2.400', '各班次单小时最高供件量 · 目标 2,400')) +
+      chartCard('awChartTurno', '🏆', 'Campeões do turno · top 3', '当班次效率冠军 · 前三', P('Maior média por hora no turno · mínimo 1.800', '班次平均小时效率 · 最低 1,800')) +
+      chartCard('awChartGeral', '🎒', 'Campeão geral do dia', '三个班次全天冠军', P('Os campeões de T1, T2 e T3 · o maior ganha', 'T1、T2、T3冠军对比 · 最高者获奖')) +
+      '</section>';
+    // Um bloco por turno.
+    var medals = ['🥇', '🥈', '🥉'];
+    html += '<section class="aw-shifts">' + ['T1', 'T2', 'T3'].map(function (tn) {
+      var tt = d.turnos[tn], ch = tt.campeaoHora;
+      var hora = '<div class="aw-block"><div class="aw-bt">⏱️ ' + esc(P('Campeão de produtividade por hora', '单小时效率冠军')) + '<small>' + esc(P('maior hora com 2.400 ou mais', '单小时 ≥ 2,400件')) + '</small></div>' +
+        (ch ? '<div class="aw-win"><div class="aw-name">' + balName(ch.nome) + '</div><div class="aw-num">' + fmtInt(ch.qtd) + '<small> ' + esc(P('pacotes', '件')) + '</small></div>' +
+          '<div class="aw-meta">' + esc(hh(ch.hora)) + ' · ' + chip('excepcional') + '</div><div class="aw-prize">🎁 ' + esc(P('1 garrafa + 1 medalha', '水杯1个 + 徽章1枚')) + '</div>' +
+          (tt.horasExcepcionais.length > 1 ? '<div class="aw-more small">' + esc(P('Também chegaram a 2.400: ', '其他 ≥ 2,400：')) + tt.horasExcepcionais.slice(1, 6).map(function (x) {
+            return esc(x.nome.replace('Sorter ', '').replace(' · Balança ', '-')) + ' ' + esc(hh(x.hora).slice(0, 3)) + ' (' + fmtInt(x.qtd) + ')';
+          }).join(' · ') + (tt.horasExcepcionais.length > 6 ? ' …' : '') + '</div>' : '') + '</div>'
+          : '<div class="aw-none">' + esc(P('Ninguém chegou a 2.400 em uma hora neste turno.', '本班次无单小时 ≥ 2,400。')) +
+            (tt.melhorHora ? '<br>' + esc(P('Melhor hora: ', '最高小时：')) + balName(tt.melhorHora.nome) + ' · ' + esc(hh(tt.melhorHora.hora)) + ' · <b>' + fmtInt(tt.melhorHora.qtd) + '</b>' : '') + '</div>') + '</div>';
+      var top = '<div class="aw-block"><div class="aw-bt">🏆 ' + esc(P('Campeões do turno · top 3', '当班次效率冠军 · 前三')) + '<small>' + esc(P('maior média por hora, mínimo 1.800', '平均小时效率最高，且 ≥ 1,800')) + '</small></div>' +
+        (tt.top3.length ? '<ol class="aw-podium">' + tt.top3.map(function (x, i) {
+          var isG = g && g.turno === tn && g.nome === x.nome && i === 0;
+          return '<li class="aw-p' + (i + 1) + '"><span class="aw-medal">' + medals[i] + '</span><div class="aw-pbody"><div class="aw-name">' + balName(x.nome) +
+            (isG ? ' <span class="aw-badge">🎒 ' + esc(P('geral do dia', '全天冠军')) + '</span>' : '') + '</div>' +
+            '<div class="aw-meta"><b>' + fmtInt(x.media) + '</b>/h ' + chip(x.faixa) + '</div><div class="aw-sub small">' +
+            esc(P(x.horas + ' h com produção · ' + x.horasNaMeta + ' na meta · melhor ', x.horas + '小时供件 · ' + x.horasNaMeta + '小时达标 · 最高 ')) + esc(hh(x.melhorHora)) + ' (' + fmtInt(x.melhorQtd) + ')' +
+            '</div>' + (i === 0 ? '<div class="aw-prize">🎁 ' + esc(P('1 prêmio Miau + 1 medalha', '喵喵1个 + 徽章1枚')) + '</div>' : '') + '</div></li>';
+        }).join('') + '</ol>' : '<div class="aw-none">' + esc(P('Nenhuma balança chegou à média de 1.800 por hora.', '无供包台平均达到每小时1,800件。')) + '</div>') +
+        (tt.top3.length < 3 && tt.perto.length ? '<div class="aw-near small"><b>' + esc(P('Mais perto da meta:', '最接近目标：')) + '</b> ' + tt.perto.slice(0, 3 - tt.top3.length).map(function (x) {
+          return balName(x.nome) + ' ' + fmtInt(x.media) + '/h (' + esc(P('faltou ', '差 ')) + fmtInt(Math.ceil(d.metaTurno - x.media)) + ')';
+        }).join(' · ') + '</div>' : '') + '</div>';
+      return '<article class="card aw-shift"><div class="aw-sh"><i style="background:' + SHIFT_COLORS[tn] + '"></i><b>' + tn + '</b> · ' + SHIFT_HOURS[tn] +
+        '<span class="aw-shstat">' + (tt.media !== null ? esc(P('média ', '平均 ')) + '<b>' + fmtInt(tt.media) + '</b>/h · ' : '') + fmtInt(tt.balancas) + ' ' + esc(P('balanças', '供包台')) +
+        ' · ' + fmtInt(tt.naMeta) + ' ' + esc(P('na meta', '达标')) + '</span></div>' + hora + top + '</article>';
+    }).join('') + '</section>';
+    // Mapa balança × hora (classificação de cada hora).
+    var hs = d.horas || [], tIdx = {T1: [0, 8], T2: [8, 16], T3: [16, 24]};
+    var avgOf = function (arr) { var v = arr.filter(function (q) { return q > 0; }); return v.length ? v.reduce(function (a, q) { return a + q; }, 0) / v.length : null; };
+    var faixaOf = function (q) { var k = 'nao'; (d.faixas || []).forEach(function (f) { if (k === 'nao' && f.min !== null && q >= f.min) k = f.key; }); return k; };
+    html += '<section class="card aw-map"><div class="chart-head"><span class="chart-ico">' + icon('table') + '</span><div class="chart-titles"><h3>' +
+      esc(P('Balança × hora', '供包台 × 小时')) + ' <span class="rp-zh">/ ' + esc(P('分拣机单小时供件效率', 'Produtividade por hora')) + '</span></h3><small>' +
+      esc(P('Pacotes alimentados em cada hora; a cor é a classificação da hora. Média por turno = total ÷ horas com produção.', '每小时供件量，颜色为评价等级。班次平均 = 合计 ÷ 有供件的小时。')) + '</small></div></div>' +
+      '<div class="aw-legend">' + (d.faixas || []).slice().reverse().map(function (f) {
+        return '<span class="aw-chip aw-' + f.key + '">' + esc(L(f)) + ' <small>' + (f.min === null ? '&lt; ' + fmtInt(d.metaTurno) : '≥ ' + fmtInt(f.min)) + '</small></span>';
+      }).join('') + '</div>' +
+      '<div class="table-scroll aw-scroll"><table class="aw-table"><thead><tr><th class="aw-bal">' + esc(P('Balança', '供包台')) + '</th>' +
+      hs.map(function (h, i) { return '<th class="aw-h ' + (i < 8 ? 's1' : i < 16 ? 's2' : 's3') + (i === 8 || i === 16 ? ' aw-sep' : '') + '">' + String(h).padStart(2, '0') + 'h</th>'; }).join('') +
+      ['T1', 'T2', 'T3'].map(function (tn, i) { return '<th class="aw-avg' + (i === 0 ? ' aw-sep' : '') + '">' + esc(P('Média ', '平均 ')) + tn + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      (d.balancas || []).map(function (b) {
+        return '<tr><th class="aw-bal">' + balName(b.nome) + '</th>' + b.horas.map(function (q, i) {
+          return '<td class="aw-c ' + (q > 0 ? 'aw-' + faixaOf(q) : 'aw-zero') + (i === 8 || i === 16 ? ' aw-sep' : '') + '" title="' + esc(b.nome + ' · ' + hh(hs[i]) + ': ' + fmtInt(q)) + '">' +
+            (q > 0 ? fmtInt(q) : '') + '</td>';
+        }).join('') + ['T1', 'T2', 'T3'].map(function (tn, i) {
+          var a = avgOf(b.horas.slice(tIdx[tn][0], tIdx[tn][1]));
+          return '<td class="aw-c aw-avgc ' + (a !== null ? 'aw-' + faixaOf(a) : 'aw-zero') + (i === 0 ? ' aw-sep' : '') + '">' + (a !== null ? fmtInt(a) : '') + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div></section>';
+    // Regras.
+    html += '<section class="card aw-rules"><div class="chart-head"><span class="chart-ico">' + icon('info') + '</span><div class="chart-titles"><h3>' +
+      esc(P('Regras de premiação', '奖励规则说明')) + '</h3></div></div><div class="aw-rgrid">' +
+      '<div><b>1. ' + esc(P('Campeão de produtividade por hora', '单小时效率冠军')) + '</b><p>' + esc(P('2.400 pacotes ou mais em uma hora. Em cada turno, a maior hora ganha: 1 garrafa + 1 medalha.',
+        '每小时供件效率达到2,400件及以上即可参评；每个班次最高者获水杯1个 + 徽章1枚。')) + '</p></div>' +
+      '<div><b>2. ' + esc(P('Campeão de produtividade do turno', '当班次效率冠军')) + '</b><p>' + esc(P('Maior média de produtividade por hora no turno, com mínimo de 1.800. Os 3 melhores de cada turno; o 1º ganha 1 prêmio Miau + 1 medalha.',
+        '当班次平均小时效率最高，且 ≥ 1,800件；每班次前三名，第一名获喵喵1个 + 徽章1枚。')) + '</p></div>' +
+      '<div><b>3. ' + esc(P('Campeão geral do dia', '三个班次全天冠军')) + '</b><p>' + esc(P('Entre T1, T2 e T3, o campeão de turno com a maior média: 1 mochila + 1 medalha.',
+        'T1、T2、T3三个班次综合效率最高者获背包1个 + 徽章1枚。')) + '</p></div>' +
+      '<div class="aw-req"><b>' + esc(P('Requisitos gerais', '总体要求')) + '</b><ul>' + [
+        ['Os prêmios valem pelos números do sistema (site do sorter).', '所有奖励以系统实际统计数据为准。'],
+        ['Precisa garantir a precisão do bipe dos pacotes, sem falta de bipagem por erro humano.', '必须保证包裹扫描准确率，不得出现人为漏扫。'],
+        ['Não pode causar travamento do equipamento, avaria de pacotes ou acidentes por causa da produtividade.', '不得因追求效率造成设备堵塞、包裹损坏或安全事故。'],
+        ['Em falha do equipamento, a hora parada não entra na média (só as horas com produção). Parada dentro de uma hora ainda conta nela: confira antes de entregar o prêmio.',
+          '如遇设备故障，扣除非正常停机时间后计算（只计有供件的小时；小时内的停机仍计入，颁奖前请核对）。']
+      ].map(function (x) { return '<li>' + esc(P(x[0], x[1])) + '</li>'; }).join('') + '</ul></div></div></section>';
+    root.innerHTML = html;
+    bindAwards(root);
+    drawAwardCharts(d);
+  }
+  /** Rótulo curto da balança: "Sorter A · Balança 04" → "A-04". */
+  function awShort(nome) { var m = /Sorter\s+(\S+)\s+·\s+Balança\s+(\d+)/.exec(String(nome || '')); return m ? m[1] + '-' + m[2] : String(nome || ''); }
+  /** Linha tracejada da meta (valor no eixo y, ou no x nos gráficos deitados), com o rótulo no fim. */
+  function awGoalPlugin(value, label, horizontal) {
+    return {id: 'awGoal', afterDatasetsDraw: function (ch) {
+      var a = ch.chartArea, sc = horizontal ? ch.scales.x : ch.scales.y;
+      if (!a || !sc) return;
+      var px = sc.getPixelForValue(value), g = ch.ctx;
+      g.save(); g.strokeStyle = MUTED; g.lineWidth = 1.5; g.setLineDash([6, 4]); g.beginPath();
+      if (horizontal) { g.moveTo(px, a.top); g.lineTo(px, a.bottom); } else { g.moveTo(a.left, px); g.lineTo(a.right, px); }
+      g.stroke(); g.setLineDash([]); g.fillStyle = MUTED; g.font = '700 11px ' + Chart.defaults.font.family;
+      // O rótulo fica fora da área das barras (à direita), para não ficar em cima de nenhuma barra.
+      if (horizontal) { g.textAlign = 'left'; g.fillText(label, px + 4, a.top + 10); } else { g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillText(label, a.right + 6, px); }
+      g.restore();
+    }};
+  }
+  function drawAwardCharts(d) {
+    ['awHora', 'awTurno', 'awGeral'].forEach(destroyChart);
+    if (!window.Chart || !d || !d.turnos) return;
+    var P = function (pt, zh) { return L({pt: pt, zh: zh}); }, T = ['T1', 'T2', 'T3'];
+    var hh = function (h) { return String(h).padStart(2, '0') + 'h–' + String((h + 1) % 24).padStart(2, '0') + 'h'; };
+    var tint = function (hex, a) { var n = parseInt(String(hex).slice(1), 16); return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')'; };
+    var base = function (extra) {
+      return Object.assign({responsive: true, maintainAspectRatio: false, animation: {duration: 500}, layout: {padding: {top: 34, right: 78}},
+        plugins: {legend: {display: false}},
+        scales: {x: {grid: {display: false}, border: {color: GRID}, ticks: {color: MUTED, font: {weight: '700'}}},
+          y: {beginAtZero: true, grace: '22%', grid: {color: GRID}, border: {display: false}, ticks: {color: MUTED, callback: function (v) { return fmtInt(v); }}}}}, extra || {});
+    };
+    // 1) Campeão por hora: a maior hora de cada turno (sem 2.400, a barra fica cinza: sem campeão).
+    var c1 = $('#awChartHora');
+    if (c1) {
+      var best = T.map(function (t) { var tt = d.turnos[t]; return tt.campeaoHora ? {x: tt.campeaoHora, ok: true} : {x: tt.melhorHora, ok: false}; });
+      var o1 = base();
+      o1.plugins.tooltip = {callbacks: {title: function (it) { return T[it[0].dataIndex] + ' · ' + SHIFT_HOURS[T[it[0].dataIndex]]; },
+        label: function (ctx) { var b = best[ctx.dataIndex].x; return b ? ' ' + b.nome + ' · ' + hh(b.hora) + ': ' + fmtInt(b.qtd) : ''; }}};
+      o1.plugins.datalabels = {anchor: 'end', align: 'end', offset: 2, clip: false, textAlign: 'center', color: INK, font: {weight: '800', size: 11.5},
+        formatter: function (v, ctx) { var b = best[ctx.dataIndex]; return b.x ? (b.ok ? '🏆 ' : '') + awShort(b.x.nome) + ' · ' + hh(b.x.hora).slice(0, 3) + '\n' + fmtInt(b.x.qtd) + (b.ok ? '' : ' (' + P('sem campeão', '无冠军') + ')') : ''; }};
+      state.charts.awHora = new Chart(c1, {type: 'bar', plugins: plugins([awGoalPlugin(d.metaHora, P('meta ', '目标 ') + fmtInt(d.metaHora))]),
+        data: {labels: T.map(function (t) { return t + ' · ' + SHIFT_HOURS[t]; }), datasets: [{data: best.map(function (b) { return b.x ? b.x.qtd : 0; }),
+          backgroundColor: best.map(function (b, i) { return b.ok ? SHIFT_COLORS[T[i]] : tint('#9CA3AF', .55); }), borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start',
+          maxBarThickness: 72, categoryPercentage: .7, barPercentage: .9}]}, options: o1});
+    }
+    // 2) Top 3 de cada turno: 1º, 2º e 3º lado a lado (cor do turno; o 1º mais forte).
+    var c2 = $('#awChartTurno');
+    if (c2) {
+      var medal = ['🥇', '🥈', '🥉'], alpha = [1, .62, .38];
+      var o2 = base();
+      o2.plugins.tooltip = {callbacks: {title: function (it) { return T[it[0].dataIndex] + ' · ' + (it[0].datasetIndex + 1) + 'º'; },
+        label: function (ctx) { var x = d.turnos[T[ctx.dataIndex]].top3[ctx.datasetIndex]; return x ? ' ' + x.nome + ': ' + fmtInt(x.media) + '/h' : ''; }}};
+      o2.plugins.datalabels = {anchor: 'end', align: 'end', offset: 1, clip: false, textAlign: 'center', color: INK, font: {weight: '800', size: 10.5},
+        formatter: function (v, ctx) { var x = d.turnos[T[ctx.dataIndex]].top3[ctx.datasetIndex]; return x ? medal[ctx.datasetIndex] + '\n' + awShort(x.nome) + '\n' + fmtInt(x.media) : ''; }};
+      state.charts.awTurno = new Chart(c2, {type: 'bar', plugins: plugins([awGoalPlugin(d.metaTurno, P('mínimo ', '最低 ') + fmtInt(d.metaTurno))]),
+        data: {labels: T.map(function (t) { return t + ' · ' + SHIFT_HOURS[t]; }), datasets: [0, 1, 2].map(function (i) {
+          return {label: (i + 1) + 'º', data: T.map(function (t) { var x = d.turnos[t].top3[i]; return x ? x.media : null; }),
+            backgroundColor: T.map(function (t) { return tint(SHIFT_COLORS[t], alpha[i]); }), borderColor: CARD, borderWidth: {left: 1, right: 1},
+            borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start', maxBarThickness: 46, categoryPercentage: .78, barPercentage: .94};
+        })}, options: o2});
+    }
+    // 3) Campeão geral: os campeões de cada turno, o maior com a borda dourada.
+    var c3 = $('#awChartGeral');
+    if (c3) {
+      var ch3 = T.map(function (t) { return d.turnos[t].top3[0] || null; }), g = d.campeaoGeral;
+      var isG = function (i) { return g && ch3[i] && g.turno === T[i] && g.nome === ch3[i].nome; };
+      var o3 = base();
+      o3.plugins.tooltip = {callbacks: {title: function (it) { return T[it[0].dataIndex] + ' · ' + P('campeão do turno', '班次冠军'); },
+        label: function (ctx) { var x = ch3[ctx.dataIndex]; return x ? ' ' + x.nome + ': ' + fmtInt(x.media) + '/h' : ' ' + P('sem campeão', '无冠军'); }}};
+      o3.plugins.datalabels = {anchor: 'end', align: 'end', offset: 2, clip: false, textAlign: 'center', color: INK, font: {weight: '800', size: 11.5},
+        formatter: function (v, ctx) { var x = ch3[ctx.dataIndex]; return x ? (isG(ctx.dataIndex) ? '🎒 ' : '') + awShort(x.nome) + '\n' + fmtInt(x.media) + '/h' : P('sem campeão', '无冠军'); }};
+      state.charts.awGeral = new Chart(c3, {type: 'bar', plugins: plugins([awGoalPlugin(d.metaTurno, P('mínimo ', '最低 ') + fmtInt(d.metaTurno))]),
+        data: {labels: T.map(function (t) { return t + ' · ' + SHIFT_HOURS[t]; }), datasets: [{data: ch3.map(function (x) { return x ? x.media : 0; }),
+          backgroundColor: T.map(function (t, i) { return isG(i) ? SHIFT_COLORS[t] : tint(SHIFT_COLORS[t], .45); }),
+          borderColor: T.map(function (t, i) { return isG(i) ? '#F7B500' : 'transparent'; }), borderWidth: T.map(function (t, i) { return isG(i) ? 3 : 0; }),
+          borderRadius: {topLeft: 4, topRight: 4}, borderSkipped: 'start', maxBarThickness: 72, categoryPercentage: .7, barPercentage: .9}]}, options: o3});
+    }
+  }
+  function bindAwards(root) {
+    var inp = $('#awDate', root), shift = function (n) { var cur = state.awards.date || (inp && inp.value); if (cur) awardsGo(Core.addDays(cur, n)); };
+    if (inp) inp.addEventListener('change', function () { if (/^\d{4}-\d{2}-\d{2}$/.test(inp.value)) awardsGo(inp.value); });
+    var pv = $('.aw-prev', root), nx = $('.aw-next', root), rl = $('.aw-reload', root);
+    if (pv) pv.addEventListener('click', function () { shift(-1); });
+    if (nx) nx.addEventListener('click', function () { var tdy = (state.boot && state.boot.today) || ''; if (!tdy || (state.awards.date || '') < tdy) shift(1); });
+    if (rl) rl.addEventListener('click', function () { loadAwards(true); });
+  }
   function openResults() {
     setView('results');
     renderHeader();

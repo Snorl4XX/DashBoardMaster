@@ -4849,6 +4849,59 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       'Os dois bots: o de hora em hora no grupo dele e o fechamento do turno no grupo principal; minuto de cada um configurável (0 vale)',
       {a, b0, b, grupos: sent.map(x => x.g)});
   }
+  // V4.34 (pedido "dashboard que mostre o resultado de premiação … medir a meta por balanças, de uma em uma hora … puxar
+  // diretamente do sorter"): quantidade alimentada por balança e hora no dia de trabalho (06h → 06h), direto do site.
+  {
+    const feedP = (dv, d, n, h) => {
+      if (h === 12 && n === 4) return null;  // pausa: hora sem produção não entra na média
+      const s = (n * 7919 + h * 104729 + (dv === 'A' ? 17 : 3) * 1299709 + Number(d.slice(8, 10)) * 31) % 1000;
+      return Math.round(1650 + (n % 5) * 110 + (dv === 'A' ? 60 : 0) + (s - 500) * 0.95);
+    };
+    const siteP = createFakeSorter({modo: 'xadmin', feed: feedP}), jmsP = fakeJms({});
+    const cP = createContext({props: {DATA_START_DATE: DS, MODO_ATUALIZACAO: 'continuo', ATUALIZACAO_MIN: '60', PAINEIS: 'sorter_flow',
+      SORTER_URL: 'http://sorter.falso/home'},
+    jms: (url, req, state) => (/^http:\/\/sorter\.falso/.test(url) ? siteP.fetchMock(url, req) : jmsP(url, req, state)), quiet: true});
+    cP.setupProject();
+    const D1 = new Date(Date.parse(DS + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10);
+    const HORAS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5];
+    const turnoDe = h => (h >= 6 && h < 14 ? 'T1' : h >= 14 && h < 22 ? 'T2' : 'T3');
+    // O esperado, calculado aqui com a mesma regra: média = total ÷ horas com produção; top 3 com média ≥ 1.800; maior hora ≥ 2.400.
+    const esp = {};
+    ['T1', 'T2', 'T3'].forEach(t => {
+      const bal = [], horas = [];
+      ['A', 'B'].forEach(dv => { for (let n = 1; n <= 12; n++) {
+        const nome = 'Sorter ' + dv + ' · Balança ' + String(n).padStart(2, '0');
+        const vs = HORAS.filter(h => turnoDe(h) === t).map(h => ({h, q: feedP(dv, h >= 6 ? DS : D1, n, h) || 0})).filter(x => x.q > 0);
+        vs.forEach(x => { if (x.q >= 2400) horas.push({nome, hora: x.h, qtd: x.q}); });
+        if (vs.length) bal.push({nome, media: Math.round(vs.reduce((a, x) => a + x.q, 0) / vs.length * 10) / 10, total: vs.reduce((a, x) => a + x.q, 0), horas: vs.length});
+      } });
+      bal.sort((a, b) => b.media - a.media || b.total - a.total || (a.nome < b.nome ? -1 : 1));
+      horas.sort((a, b) => b.qtd - a.qtd || HORAS.indexOf(a.hora) - HORAS.indexOf(b.hora) || (a.nome < b.nome ? -1 : 1));
+      esp[t] = {top3: bal.filter(x => x.media >= 1800).slice(0, 3), hora: horas[0] || null, n: bal.length};
+    });
+    const r = cP.getSorterAwards(DS), nLog = siteP.log.length, r2 = cP.getSorterAwards(DS), nLog2 = siteP.log.length, r3 = cP.getSorterAwards(DS, true);
+    const ok = ['T1', 'T2', 'T3'].every(t => JSON.stringify(r.turnos[t].top3.map(x => [x.nome, x.media])) === JSON.stringify(esp[t].top3.map(x => [x.nome, x.media])) &&
+      JSON.stringify(r.turnos[t].campeaoHora) === JSON.stringify(esp[t].hora) && r.turnos[t].balancas === esp[t].n);
+    const a04 = r.balancas.filter(b => b.nome === 'Sorter A · Balança 04')[0] || {};
+    const geralEsp = ['T1', 'T2', 'T3'].map(t => esp[t].top3[0] && Object.assign({turno: t}, esp[t].top3[0])).filter(Boolean).sort((a, b) => b.media - a.media || b.total - a.total)[0];
+    check(ok && r.data === DS && r.fechado === true && r.balancas.length === 24 && a04.horas[HORAS.indexOf(12)] === 0 &&
+      a04.horas[HORAS.indexOf(0)] === feedP('A', D1, 4, 0) && r.campeaoGeral && r.campeaoGeral.nome === geralEsp.nome && r.campeaoGeral.turno === geralEsp.turno &&
+      r.turnos.T1.top3.every(x => x.faixa === (x.media >= 2400 ? 'excepcional' : x.media >= 2200 ? 'excelente' : x.media >= 2000 ? 'bom' : 'atingiu')) &&
+      nLog2 === nLog && siteP.log.length > nLog2 && r3.data === DS,
+      'V4.34 Premiação: direto do site, por balança e hora (06h → 06h, T3 até 06h do dia seguinte); top 3 por turno pela média (≥ 1.800), maior hora ≥ 2.400, campeão geral; memória e "ler de novo"',
+      {T1: r.turnos.T1.top3, esp: esp.T1, hora: r.turnos.T1.campeaoHora, geral: r.campeaoGeral});
+    // Regra pura: hora parada fora da média; ninguém com 2.400; menos de 3 na meta (os mais perto, para mostrar quanto faltou).
+    const sl = [];
+    [6, 7, 8].forEach(h => sl.push({sorter: 'Sorter A', n: 1, hour: h, qty: h === 8 ? 0 : 1900}));
+    [6, 7, 8].forEach(h => sl.push({sorter: 'Sorter A', n: 2, hour: h, qty: 1700}));
+    [6, 7].forEach(h => sl.push({sorter: 'Sorter B', n: 3, hour: h, qty: 2399}));
+    const pf = cP.sorterPremioFrom_(DS, sl);
+    check(pf.turnos.T1.top3.map(x => x.nome + ' ' + x.media).join('|') === 'Sorter B · Balança 03 2399|Sorter A · Balança 01 1900' &&
+      pf.turnos.T1.top3[0].faixa === 'excelente' && pf.turnos.T1.campeaoHora === null && pf.turnos.T1.melhorHora.qtd === 2399 &&
+      pf.turnos.T1.perto.map(x => x.nome).join() === 'Sorter A · Balança 02' && pf.turnos.T2.top3.length === 0 && pf.campeaoGeral.nome === 'Sorter B · Balança 03' &&
+      pf.contagem.excelente === 2 && pf.contagem.atingiu === 2 && pf.contagem.nao === 3,
+      'V4.34 Premiação: hora parada fora da média, sem campeão da hora abaixo de 2.400, os mais perto da meta e a contagem por classificação', pf.turnos.T1);
+  }
   // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
   check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&
     (() => { try { createContext({props: {}, jms: fakeJms({}), quiet: true}).validateJmsAuth_(); return false; } catch (e) { return true; } })(),

@@ -144,6 +144,18 @@ turno. No grupo: Configurações do grupo → Bots → Adicionar bot → Bot
 personalizado; copie o webhook. Em http://localhost:3500/config, seção **Bot do Feishu**: cole o webhook (e o segredo, se ligou a
 assinatura) e clique em **Salvar e mandar um teste**. O computador precisa de internet. Para conferir, rode **diagnosticarSorter** em Configurações → Executar função.
 
+## Premiação do abastecimento (V4.34)
+No menu, em Análises: **Premiação** (分拣机供件效率PK奖励机制). Lê **direto do site do sorter** (tela "feeder feed quantity",
+Sorter A e B) a quantidade alimentada em cada balança, **hora a hora**, no dia de trabalho (06h → 06h do dia seguinte: T1 06h–14h,
+T2 14h–22h, T3 22h–06h). Escolha o dia no topo da tela (‹ › ou o calendário); "Ler de novo" busca no sorter na hora.
+- **Classificação de cada hora:** abaixo de 1.800 Não atingiu · 1.800 Atingiu a meta · 2.000 Bom · 2.200 Excelente · 2.400 Excepcional.
+- **Campeão de produtividade por hora:** em cada turno, a maior hora de uma balança com 2.400 ou mais (1 garrafa + 1 medalha).
+- **Campeões do turno (top 3):** maior média por hora no turno (total ÷ horas em que a balança alimentou), mínimo de 1.800; o 1º
+  ganha 1 prêmio Miau + 1 medalha. Sem 3 na meta, aparecem os mais perto e quanto faltou.
+- **Campeão geral do dia:** o campeão de turno com a maior média (1 mochila + 1 medalha).
+- **Mapa balança × hora:** cada hora colorida pela classificação e a média de cada turno.
+Hora parada (nada alimentado) não entra na média; parada dentro de uma hora conta nela — confira antes de entregar o prêmio.
+
 ## Bot do fechamento do turno (opcional, V4.32)
 No fim de cada turno, na hora exata (14:00, 22:00 e 06:00), um cartão no **grupo principal** do Feishu com o turno que acabou:
 - 📦 o total produzido no sorter no turno (Sorter A + B);

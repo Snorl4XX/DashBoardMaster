@@ -1457,3 +1457,117 @@ function testarFeishuTurno(turno) {
     return {ok: false, erro: String(e && e.message || e)};
   }
 }
+
+// ------------------------------------------------------------------ V4.34: Premiação do abastecimento (分拣机供件效率PK奖励机制)
+/**
+ * Pedido: "dashboard que mostre o resultado de premiação … vamos medir a meta por balanças … pegar os intervalos de horários, de
+ * uma em uma hora (ex.: a Balança 01 das 01h às 02h bateu a meta alcançando 2.500)", "puxar diretamente do sorter (o link do IP)".
+ * Direto do site do sorter (tela "feeder feed quantity", Sorter A e B), a quantidade alimentada por balança em cada hora do dia de
+ * trabalho (06h do dia → 06h do dia seguinte: T1 06h–14h, T2 14h–22h, T3 22h–06h).
+ *  - Cada balança × hora recebe a classificação da tabela (abaixo de 1.800 Não atingiu; 1.800 Atingiu; 2.000 Bom; 2.200 Excelente;
+ *    2.400 Excepcional).
+ *  - Campeão de produtividade por hora: em cada turno, a maior hora de uma balança, com 2.400 ou mais (garrafa + medalha).
+ *  - Campeão do turno: a maior média por hora da balança no turno (total ÷ horas em que ela alimentou), com mínimo de 1.800 —
+ *    os 3 melhores de cada turno (pedido). O melhor dos 3 campeões é o campeão geral do dia (mochila + medalha).
+ * Hora parada (sem nada alimentado) não entra na média, como pede a regra de descontar paradas.
+ */
+const SORTER_PREMIO_FAIXAS_ = [
+  {min: 2400, key: 'excepcional', pt: 'Excepcional', zh: '卓越'},
+  {min: 2200, key: 'excelente', pt: 'Excelente', zh: '优秀'},
+  {min: 2000, key: 'bom', pt: 'Bom', zh: '良好'},
+  {min: 1800, key: 'atingiu', pt: 'Atingiu a meta', zh: '达标'},
+  {min: -Infinity, key: 'nao', pt: 'Não atingiu a meta', zh: '未达标'}
+];
+const SORTER_PREMIO_META_HORA_ = 2400, SORTER_PREMIO_META_TURNO_ = 1800;
+/** Horas do dia de trabalho, em ordem: 06h … 23h do dia, 00h … 05h do dia seguinte. */
+const SORTER_PREMIO_HORAS_ = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5];
+function sorterPremioFaixa_(q) { return SORTER_PREMIO_FAIXAS_.filter(f => q >= f.min)[0].key; }
+function sorterPremioTurno_(h) { return h >= 6 && h < 14 ? 'T1' : h >= 14 && h < 22 ? 'T2' : 'T3'; }
+/**
+ * Premiação a partir das horas lidas: slots = [{sorter, n, hour, qty}] (hour 0–23 do dia de trabalho). Função pura (testes).
+ */
+function sorterPremioFrom_(date, slots, extra) {
+  const bal = {}, nome = (s, n) => s + ' · ' + sorterInductionLabel_(n), pos = h => SORTER_PREMIO_HORAS_.indexOf(h);
+  slots.forEach(x => {
+    if (!(x.qty > 0) || pos(x.hour) < 0) return;
+    const k = nome(x.sorter, x.n), b = bal[k] = bal[k] || {nome: k, sorter: x.sorter, n: Number(x.n), horas: {}};
+    b.horas[x.hour] = (b.horas[x.hour] || 0) + x.qty;
+  });
+  const lista = Object.keys(bal).map(k => bal[k]).sort((a, b) => (a.sorter < b.sorter ? -1 : a.sorter > b.sorter ? 1 : a.n - b.n));
+  const contar = () => { const c = {}; SORTER_PREMIO_FAIXAS_.forEach(f => { c[f.key] = 0; }); return c; };
+  const turnos = {}, totalCont = contar();
+  ['T1', 'T2', 'T3'].forEach(t => {
+    const horasT = SORTER_PREMIO_HORAS_.filter(h => sorterPremioTurno_(h) === t), cont = contar();
+    const cand = [], horasBoas = [];
+    let soma = 0, nHoras = 0;
+    lista.forEach(b => {
+      const hs = horasT.filter(h => b.horas[h] > 0);
+      if (!hs.length) return;
+      const total = hs.reduce((a, h) => a + b.horas[h], 0), melhor = hs.reduce((m, h) => (b.horas[h] > b.horas[m] ? h : m), hs[0]);
+      hs.forEach(h => {
+        const f = sorterPremioFaixa_(b.horas[h]);
+        cont[f]++; totalCont[f]++;
+        if (b.horas[h] >= SORTER_PREMIO_META_HORA_) horasBoas.push({nome: b.nome, hora: h, qtd: b.horas[h]});
+      });
+      soma += total; nHoras += hs.length;
+      const media = total / hs.length;
+      cand.push({nome: b.nome, sorter: b.sorter, n: b.n, total: total, horas: hs.length, media: Math.round(media * 10) / 10, faixa: sorterPremioFaixa_(media),
+        melhorHora: melhor, melhorQtd: b.horas[melhor], horasNaMeta: hs.filter(h => b.horas[h] >= SORTER_PREMIO_META_TURNO_).length});
+    });
+    const porMedia = cand.slice().sort((a, b) => b.media - a.media || b.total - a.total || (a.nome < b.nome ? -1 : 1));
+    // Empate na hora: a que veio antes no turno, depois a balança de menor número (Sorter A antes do B).
+    horasBoas.sort((a, b) => b.qtd - a.qtd || pos(a.hora) - pos(b.hora) || (a.nome < b.nome ? -1 : 1));
+    turnos[t] = {
+      top3: porMedia.filter(x => x.media >= SORTER_PREMIO_META_TURNO_).slice(0, 3),
+      // Sem 3 na meta: os mais perto dela, para a equipe saber quanto faltou.
+      perto: porMedia.filter(x => x.media < SORTER_PREMIO_META_TURNO_).slice(0, 3),
+      campeaoHora: horasBoas[0] || null, horasExcepcionais: horasBoas,
+      melhorHora: cand.reduce((m, x) => (!m || x.melhorQtd > m.qtd ? {nome: x.nome, hora: x.melhorHora, qtd: x.melhorQtd} : m), null),
+      balancas: cand.length, horasAtivas: nHoras, total: soma, media: nHoras ? Math.round(soma / nHoras * 10) / 10 : null, contagem: cont,
+      naMeta: porMedia.filter(x => x.media >= SORTER_PREMIO_META_TURNO_).length
+    };
+  });
+  const campeoes = ['T1', 'T2', 'T3'].map(t => turnos[t].top3[0] ? Object.assign({turno: t}, turnos[t].top3[0]) : null).filter(Boolean);
+  const geral = campeoes.sort((a, b) => b.media - a.media || b.total - a.total)[0] || null;
+  return Object.assign({ok: true, data: date, horas: SORTER_PREMIO_HORAS_,
+    faixas: SORTER_PREMIO_FAIXAS_.map(f => ({key: f.key, min: isFinite(f.min) ? f.min : null, pt: f.pt, zh: f.zh})),
+    metaHora: SORTER_PREMIO_META_HORA_, metaTurno: SORTER_PREMIO_META_TURNO_,
+    turnos: turnos, campeaoGeral: geral, contagem: totalCont,
+    balancas: lista.map(b => ({nome: b.nome, horas: SORTER_PREMIO_HORAS_.map(h => b.horas[h] || 0)}))}, extra || {});
+}
+var SORTER_PREMIO_CACHE_ = {};
+/**
+ * Tela "Premiação" (call('getSorterAwards')): o dia de trabalho `date` (vazio = o último que fechou, às 06h). Lido no site do
+ * sorter na hora; o resultado fica 5 min na memória (dia em andamento) ou 6 h (dia fechado). force = ler de novo.
+ */
+function getSorterAwards(date, force) {
+  if (!INDICATORS.sorter_flow) throw new Error('A premiação é do painel Produção do Sorter.');
+  const now = new Date(), today = isoToday_(), hNow = Number(Utilities.formatDate(now, tz_(), 'H'));
+  const ultimo = addDaysIso_(today, hNow >= 6 ? -1 : -2);
+  let d = isIso_(date) ? String(date) : ultimo;
+  if (d > today) d = today;
+  const next = addDaysIso_(d, 1), fechado = d <= ultimo;
+  const c = SORTER_PREMIO_CACHE_[d];
+  if (!force && c && Date.now() - c.at < (fechado ? 6 * 3600000 : 300000)) return c.data;
+  const slots = [], avisos = [];
+  const ss = sorterSessions_();
+  ss.sessions.forEach(s => {
+    [[d, h => h >= 6], [next, h => h < 6]].forEach(par => {
+      if (par[0] > today) return;
+      const fo = sorterFetchOutlets_(s, par[0]);
+      if (fo.info && fo.info.horas === 'dia inteiro' && sorterFeedSum_(fo.rows) > 0) {
+        avisos.push(s.dev.nome + ' em ' + par[0] + ': o site não deu a quantidade por hora (só o total do dia), então esse dia não entra na premiação.');
+      }
+      fo.rows.forEach(r => {
+        if (!sorterIsHour_(r.hour) || !par[1](r.hour)) return;
+        Object.keys(r.q).forEach(n => slots.push({sorter: s.dev.nome, n: Number(n), hour: r.hour, qty: r.q[n]}));
+      });
+    });
+  });
+  sorterWarnSkipped_('sorter_flow', d, ss.skipped);
+  (ss.skipped || []).forEach(x => avisos.push('Sorter ' + x.id + ' fora da leitura: ' + String(x.error).slice(0, 140)));
+  const data = sorterPremioFrom_(d, slots, {fechado: fechado, ultimoFechado: ultimo, hoje: today,
+    lidoEm: Utilities.formatDate(now, tz_(), 'dd/MM/yyyy HH:mm'), avisos: avisos});
+  SORTER_PREMIO_CACHE_[d] = {at: Date.now(), data: data};
+  return data;
+}

@@ -119,6 +119,9 @@ function createFakeSorter(opts) {
     const device = modo === 'cookie' ? (ck.deviceId === '3' ? 'A' : 'B') : modo === 'global' ? global.device : sess.device;
     log.push({method: req.method, path: req.path, device, query: req.query ? req.query.toString() : ''});
     const xa = /^xadmin/.test(modo);
+    // V4.34 (Premiação): opts.feed(device, date, n, h) = a quantidade alimentada da balança n na hora h (tela "feeder feed
+    // quantity"), em escala de produção; sem ela, a do hourRow.
+    const feedOf = (dv, d, n, h) => { if (opts.feed) return opts.feed(dv, d, n, h); const r = hourRow(dv, d, n, h); return r ? r.sorter_sorttotal : null; };
     // V4.23.8: opts.parado = {B: [13]} — esse sorter não produz nessas horas (janela sem agrupar).
     const parado = h => !!(opts.parado && (opts.parado[device] || []).indexOf(h) >= 0);
     if (req.method === 'GET' && req.path === '/home' && xa) {
@@ -164,7 +167,7 @@ function createFakeSorter(opts) {
           stampOf(Date.parse(hs[hs.length - 1].date + 'T' + String(hs[hs.length - 1].h).padStart(2, '0') + ':59:00Z')) : date + ' 00:00~' + date + ' 23:59'};
         for (let n = 1; n <= COLS; n++) {
           let t = null;
-          if (n <= BALANCAS) hs.forEach(x => { if (parado(x.h)) return; const r = hourRow(device, x.date, n, x.h); if (r) t = (t || 0) + r.sorter_sorttotal; });
+          if (n <= BALANCAS) hs.forEach(x => { if (parado(x.h)) return; const v = feedOf(device, x.date, n, x.h); if (v) t = (t || 0) + v; });
           if (group === '0' && n === 1 && opts.diaExtra && hs.length === 24) t += opts.diaExtra;
           row['total_' + n] = t;
         }
@@ -176,7 +179,7 @@ function createFakeSorter(opts) {
           opts.horario === 'semZero' ? d3[0] + '-' + d3[1] + '-' + d3[2] + ' ' + h + ':00' :
           opts.horario === 'estranho' ? 'Período ' + (h + 1) : date + ' ' + hh + ':00:00~' + date + ' ' + hh + ':59:59';
         const row = {timearea: ta};
-        for (let n = 1; n <= COLS; n++) { const r = n <= BALANCAS ? hourRow(device, date, n, h) : null; row['total_' + n] = r ? r.sorter_sorttotal : null; }
+        for (let n = 1; n <= COLS; n++) { const v = n <= BALANCAS ? feedOf(device, date, n, h) : null; row['total_' + n] = v || null; }
         data.push(row);
       }
       if (opts.linhaTotal) {

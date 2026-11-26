@@ -4,6 +4,23 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.34.0 — Premiação do abastecimento (Produção do Sorter)
+
+Pedido: "Desenvolva um dashboard que mostre o resultado de premiação … Os três que bateram a meta em cada turno. … Vamos medir a
+meta por balanças" (Mecanismo de Competição e Premiação por Produtividade no Abastecimento da Esteira de Triagem — 分拣机供件效率PK
+奖励机制), "pegar os intervalos de horários, de uma em uma hora" e "puxar diretamente do sorter (o link do IP)".
+
+- Nova tela **Premiação** no menu do pacote da Produção do Sorter (Análises). Lê direto do site do sorter (feeder feed quantity, Sorter
+  A e B) a quantidade alimentada por balança em cada hora do dia de trabalho (06h → 06h). Guarda 5 min (dia em andamento) ou 6 h (dia
+  fechado) na memória; "Ler de novo" busca na hora.
+- Classificação de cada balança × hora pela tabela: < 1.800 Não atingiu · 1.800–1.999 Atingiu a meta · 2.000–2.199 Bom ·
+  2.200–2.399 Excelente · 2.400+ Excepcional.
+- Por turno: **campeão de produtividade por hora** (a maior hora ≥ 2.400; garrafa + medalha) e **top 3 do turno** (maior média por
+  hora, mínimo 1.800; o 1º ganha prêmio Miau + medalha). **Campeão geral do dia**: o campeão de turno com a maior média (mochila +
+  medalha).
+- Média do turno = total da balança ÷ horas em que ela alimentou (hora parada fica fora, como pede a regra de descontar paradas).
+- Mapa balança × hora colorido, com a média de cada turno, e as regras e os requisitos gerais na tela.
+
 ## V4.33.1 — Eficiência: o cartão diz por que faltam os colaboradores
 
 Pedido: "Não está pegando os dados" (print: Qtd processada do JMS certa, colaboradores vazios em 24/11; a base só tinha linhas de
