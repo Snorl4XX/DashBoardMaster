@@ -1506,8 +1506,8 @@ const ALL_INDICATORS_ = Object.freeze({
     ]
   },
 
-  // V4.35 (pedido "retirar totalmente os dashboards de Deslacre, os dois, até do arquivo do dash"): o Deslacre da linha
-  // secundária (unseal) e o da linha troncal (unseal_trunk) saíram do código.
+  // V4.35 (pedido "retirar totalmente os dashboards de Deslacre, os dois, até do arquivo do dash"): os dois painéis de Deslacre
+  // (linha secundária e linha troncal) saíram do código.
 
   /**
    * V4.22 (pedido "dashboard no mesmo esquema que o principal para http://10.1.166.9"): Produção do Sorter — o monitor do
