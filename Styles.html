@@ -446,32 +446,31 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-avgc{font-weight:900}
 .aw-sep{border-left:2px solid var(--line)}
 .aw-rules{margin-top:12px;padding:16px 18px}
-/* V4.34.6: as 3 balanças de cada turno em cada critério, em cartões vermelhos. */
+/* V4.34.6: as 3 balanças de cada turno em cada critério. V4.35.1 (pedido "tirar essa cor vermelha, deixa no formato da tela de
+   fundo, só uma borda vermelha na parte de cima"): fundo e cores dos outros cartões, borda vermelha no topo. */
 .aw-t3grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
-.aw-t3card{position:relative;overflow:hidden;border-radius:16px;padding:14px 16px 16px;color:#fff;display:flex;flex-direction:column;gap:9px;
-  background:linear-gradient(150deg,#EC1120 0%,var(--red) 45%,#A8000C 100%);box-shadow:0 10px 26px rgba(230,0,18,.2)}
-.aw-t3card::after{content:"";position:absolute;right:-60px;top:-80px;width:190px;height:190px;border-radius:50%;background:rgba(255,255,255,.07);pointer-events:none}
-.aw-t3head{position:relative;z-index:1;display:flex;align-items:center;gap:10px}
-.aw-t3ico{width:36px;height:36px;border-radius:11px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);display:grid;place-items:center;font-size:18px;flex:none}
+.aw-t3card{position:relative;padding:14px 16px 16px;display:flex;flex-direction:column;gap:9px;border-top:3px solid var(--red)}
+.aw-t3head{display:flex;align-items:center;gap:10px}
+.aw-t3ico{width:36px;height:36px;border-radius:11px;background:var(--soft-2);border:1px solid var(--line);display:grid;place-items:center;font-size:18px;flex:none}
 .aw-t3tt{min-width:0;flex:1}
-.aw-t3tt b{display:block;font-size:14px;font-weight:800;line-height:1.2;color:#fff}
-.aw-t3tt small{display:block;margin-top:1px;font-size:11px;color:rgba(255,255,255,.8);font-weight:600}
-.aw-t3shift{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:#fff;color:#B3000D;font-size:11.5px;font-weight:800;white-space:nowrap;flex:none}
+.aw-t3tt b{display:block;font-size:14px;font-weight:800;line-height:1.2;color:var(--ink)}
+.aw-t3tt small{display:block;margin-top:1px;font-size:11px;color:var(--muted);font-weight:600}
+.aw-t3shift{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--soft-2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;white-space:nowrap;flex:none}
 .aw-t3shift i{width:9px;height:9px;border-radius:2px;display:inline-block}
-.aw-t3meta{position:relative;z-index:1;font-size:11.5px;font-weight:700;color:rgba(255,255,255,.86)}
-.aw-t3list{position:relative;z-index:1;list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.aw-t3list li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:11px;background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.16)}
-.aw-t3list li.ok{background:rgba(255,255,255,.2);border-color:rgba(255,255,255,.5)}
+.aw-t3meta{font-size:11.5px;font-weight:700;color:var(--muted)}
+.aw-t3list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.aw-t3list li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:11px;background:var(--row-alt);border:1px solid var(--line)}
+.aw-t3list li.ok{border-color:var(--good)}
 .aw-t3pos{font-size:21px;line-height:1;flex:none}
 .aw-t3body{min-width:0;flex:1}
-.aw-t3name{font-size:13px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.aw-t3sub{margin-top:1px;font-size:11px;color:rgba(255,255,255,.78)}
+.aw-t3name{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.aw-t3sub{margin-top:1px;font-size:11px;color:var(--muted)}
 .aw-t3val{text-align:right;flex:none}
-.aw-t3val b{font-size:19px;font-weight:900;letter-spacing:-.3px;color:#fff}
-.aw-t3val small{margin-left:3px;font-size:11px;font-weight:700;color:rgba(255,255,255,.82)}
-.aw-t3st{display:block;margin-top:2px;font-size:10.5px;font-weight:800;color:rgba(255,255,255,.85)}
-.aw-t3st.ok{display:table;margin-left:auto;padding:1px 8px;border-radius:999px;background:#fff;color:#11713A}
-.aw-t3none{position:relative;z-index:1;font-size:18px;font-weight:800;color:rgba(255,255,255,.8)}
+.aw-t3val b{font-size:19px;font-weight:900;letter-spacing:-.3px;color:var(--red)}
+.aw-t3val small{margin-left:3px;font-size:11px;font-weight:700;color:var(--muted)}
+.aw-t3st{display:block;margin-top:2px;font-size:10.5px;font-weight:800;color:var(--muted)}
+.aw-t3st.ok{display:table;margin-left:auto;padding:1px 8px;border-radius:999px;background:var(--aw-at-bg);color:var(--aw-at-fg)}
+.aw-t3none{font-size:18px;font-weight:800;color:var(--muted)}
 @media (max-width:1100px){.aw-t3grid{grid-template-columns:1fr}}
 /* V4.34.5: classificação por intervalo de 1 hora e um cartão por turno com as balanças que bateram a meta. */
 .data-table.aw-hctable thead th{cursor:default}

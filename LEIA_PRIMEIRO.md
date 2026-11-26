@@ -4,6 +4,12 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.35.1 — Premiação (Sorter): cartões das 3 balanças sem o fundo vermelho
+
+Pedido (print dos cartões): "Tirar essa cor vermelha, deixa no formato da parte da tela de fundo, só deixa uma borda vermelha na parte
+de cima do cartão." Os 9 cartões (por hora, do turno e geral, um por turno) agora têm o fundo e as cores dos outros cartões da tela e
+uma borda vermelha no topo; o número continua em vermelho e "bateu a meta" em verde.
+
 ## V4.35.0 — Painel principal: Eficiência SP GRU dentro; Deslacre retirado do código
 
 Pedido: "Agora vamos alterar o dash principal, quero adicionar o dash de eficiência nele, retirar totalmente os dashboards de Deslacre,

@@ -4072,7 +4072,7 @@
     html += '<section class="aw-t3grid">' + crit3.map(function (cr) {
       return ['T1', 'T2', 'T3'].map(function (tn) {
         var lst = cr.top(d.turnos[tn].ranking || []);
-        return '<article class="aw-t3card"><div class="aw-t3head"><span class="aw-t3ico">' + cr.ic + '</span><div class="aw-t3tt"><b>' + esc(P(cr.pt, cr.zh)) + '</b><small>' +
+        return '<article class="card aw-t3card"><div class="aw-t3head"><span class="aw-t3ico">' + cr.ic + '</span><div class="aw-t3tt"><b>' + esc(P(cr.pt, cr.zh)) + '</b><small>' +
           esc(P(cr.zh, cr.pt)) + '</small></div><span class="aw-t3shift"><i style="background:' + SHIFT_COLORS[tn] + '"></i>' + tn + ' · ' + SHIFT_HOURS[tn] + '</span></div>' +
           '<div class="aw-t3meta">' + esc(P(cr.metaPt, cr.metaZh)) + '</div>' +
           (lst.length ? '<ol class="aw-t3list">' + lst.map(function (x, i) {
