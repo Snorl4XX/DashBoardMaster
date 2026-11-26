@@ -1512,7 +1512,8 @@ function sorterPremioFrom_(date, slots, extra) {
       soma += total; nHoras += hs.length;
       const media = total / hs.length;
       cand.push({nome: b.nome, sorter: b.sorter, n: b.n, total: total, horas: hs.length, media: Math.round(media * 10) / 10, faixa: sorterPremioFaixa_(media),
-        melhorHora: melhor, melhorQtd: b.horas[melhor], horasNaMeta: hs.filter(h => b.horas[h] >= SORTER_PREMIO_META_TURNO_).length});
+        melhorHora: melhor, melhorQtd: b.horas[melhor], horasNaMeta: hs.filter(h => b.horas[h] >= SORTER_PREMIO_META_TURNO_).length,
+        horas2000: hs.filter(h => b.horas[h] >= 2000).length, horas2400: hs.filter(h => b.horas[h] >= SORTER_PREMIO_META_HORA_).length});
     });
     const porMedia = cand.slice().sort((a, b) => b.media - a.media || b.total - a.total || (a.nome < b.nome ? -1 : 1));
     // Empate na hora: a que veio antes no turno, depois a balança de menor número (Sorter A antes do B).
@@ -1526,11 +1527,19 @@ function sorterPremioFrom_(date, slots, extra) {
       balancas: cand.length, horasAtivas: nHoras, total: soma, media: nHoras ? Math.round(soma / nHoras * 10) / 10 : null, contagem: cont,
       naMeta: porMedia.filter(x => x.media >= SORTER_PREMIO_META_TURNO_).length,
       // V4.34.1: as outras balanças na meta (do 4º em diante), como o "também chegaram a 2.400" do campeão da hora.
-      outrosNaMeta: porMedia.filter(x => x.media >= SORTER_PREMIO_META_TURNO_).slice(3).map(x => ({nome: x.nome, media: x.media}))
+      outrosNaMeta: porMedia.filter(x => x.media >= SORTER_PREMIO_META_TURNO_).slice(3).map(x => ({nome: x.nome, media: x.media})),
+      // V4.34.2: quem mais produziu no turno (total de pacotes); empate: quem fez em menos horas.
+      maisProduziu: cand.slice().sort((a, b) => b.total - a.total || a.horas - b.horas || (a.nome < b.nome ? -1 : 1))[0] || null,
+      // V4.34.2 (pergunta "muita gente passou de 1.800 … por que não aparecem?"): todas as balanças do turno, pela média.
+      ranking: porMedia.map(x => ({nome: x.nome, media: x.media, faixa: x.faixa, total: x.total, horas: x.horas, horasNaMeta: x.horasNaMeta,
+        horas2000: x.horas2000, horas2400: x.horas2400, melhorHora: x.melhorHora, melhorQtd: x.melhorQtd}))
     };
   });
-  const campeoes = ['T1', 'T2', 'T3'].map(t => turnos[t].top3[0] ? Object.assign({turno: t}, turnos[t].top3[0]) : null).filter(Boolean);
-  const geral = campeoes.sort((a, b) => b.media - a.media || b.total - a.total)[0] || null;
+  // V4.34.2 (pedido "você misturou a média com as outras opções … teve gente que produziu mais"): só o campeão do turno é pela
+  // média. O campeão geral é quem MAIS PRODUZIU no turno (total de pacotes) entre todas as balanças de T1, T2 e T3, sem média e
+  // sem o mínimo de 1.800 do prêmio do turno.
+  const geral = ['T1', 'T2', 'T3'].map(t => turnos[t].maisProduziu ? Object.assign({turno: t}, turnos[t].maisProduziu) : null).filter(Boolean)
+    .sort((a, b) => b.total - a.total || a.horas - b.horas || (a.nome < b.nome ? -1 : 1))[0] || null;
   return Object.assign({ok: true, data: date, horas: SORTER_PREMIO_HORAS_,
     faixas: SORTER_PREMIO_FAIXAS_.map(f => ({key: f.key, min: isFinite(f.min) ? f.min : null, pt: f.pt, zh: f.zh})),
     metaHora: SORTER_PREMIO_META_HORA_, metaTurno: SORTER_PREMIO_META_TURNO_,

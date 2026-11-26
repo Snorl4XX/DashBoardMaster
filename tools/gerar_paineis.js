@@ -152,9 +152,13 @@ T2 14h–22h, T3 22h–06h). Escolha o dia no topo da tela (‹ › ou o calend�
 - **Campeão de produtividade por hora:** em cada turno, a maior hora de uma balança com 2.400 ou mais (1 garrafa + 1 medalha).
 - **Campeões do turno (top 3):** maior média por hora no turno (total ÷ horas em que a balança alimentou), mínimo de 1.800; o 1º
   ganha 1 prêmio Miau + 1 medalha. Sem 3 na meta, aparecem os mais perto e quanto faltou.
-- **Campeão geral do dia:** o campeão de turno com a maior média (1 mochila + 1 medalha).
+- **Campeão geral do dia:** entre todas as balanças de T1, T2 e T3, quem mais produziu no turno (total de pacotes); não usa a
+  média (1 mochila + 1 medalha). Só o campeão do turno é pela média.
 - Cada prêmio tem o seu quadro no mesmo formato (nome, número grande, classificação e prêmio): em cada turno, o campeão da hora e o
   campeão do turno (com o 2º e o 3º embaixo); depois dos turnos, o campeão geral com os três campeões de turno lado a lado.
+- **Ranking do turno:** todas as balanças de cada turno (abas T1, T2, T3) pela média, com as horas que passaram de 1.800, 2.000 e
+  2.400; quem tem média de 1.800 ou mais bateu a meta do turno.
+- Sem campeão (ninguém com 2.400 numa hora, ou ninguém com média de 1.800 no turno), o lugar fica em branco.
 - **Mapa balança × hora:** cada hora colorida pela classificação e a média de cada turno.
 Hora parada (nada alimentado) não entra na média; parada dentro de uma hora conta nela — confira antes de entregar o prêmio.
 

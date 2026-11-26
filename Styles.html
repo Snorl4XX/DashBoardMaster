@@ -354,9 +354,9 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .hx .hx-main:last-child{flex:1}
 .hx .hx-main:last-child > .hx-right{justify-content:center;margin-top:0}
 /* V4.34: Premiação do abastecimento (Produção do Sorter). Cores das classificações da tabela de avaliação. */
-:root{--aw-nao-bg:#EEF0F3;--aw-nao-fg:#5B6170;--aw-at-bg:#DDF4E4;--aw-at-fg:#11713A;--aw-bom-bg:#B4E8C5;--aw-bom-fg:#0B5A2C;
+:root{--aw-res-bg:#FFF9E6;--aw-nao-bg:#EEF0F3;--aw-nao-fg:#5B6170;--aw-at-bg:#DDF4E4;--aw-at-fg:#11713A;--aw-bom-bg:#B4E8C5;--aw-bom-fg:#0B5A2C;
   --aw-exc-bg:#CFE2FF;--aw-exc-fg:#123F8C;--aw-top-bg:#F7B500;--aw-top-fg:#3A2700}
-:root[data-theme="dark"]{--aw-nao-bg:#2A2D36;--aw-nao-fg:#A3A9B6;--aw-at-bg:rgba(34,197,94,.16);--aw-at-fg:#7EE2A2;--aw-bom-bg:rgba(34,197,94,.34);--aw-bom-fg:#C9F7D9;
+:root[data-theme="dark"]{--aw-res-bg:rgba(247,181,0,.07);--aw-nao-bg:#2A2D36;--aw-nao-fg:#A3A9B6;--aw-at-bg:rgba(34,197,94,.16);--aw-at-fg:#7EE2A2;--aw-bom-bg:rgba(34,197,94,.34);--aw-bom-fg:#C9F7D9;
   --aw-exc-bg:rgba(59,130,246,.32);--aw-exc-fg:#CFE0FF;--aw-top-bg:#E8A900;--aw-top-fg:#241800}
 .aw-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 20px}
 .aw-title{display:flex;gap:12px;align-items:center;min-width:0}
@@ -416,6 +416,13 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-avgc{font-weight:900}
 .aw-sep{border-left:2px solid var(--line)}
 .aw-rules{margin-top:12px}
+.aw-blank{color:var(--muted);font-size:20px;font-weight:700;line-height:1}
+.aw-rank{margin-top:12px;padding:16px 18px}
+.aw-rkwrap[hidden]{display:none}
+.aw-rktable td{vertical-align:middle;white-space:nowrap}
+.aw-rktable tr.aw-rktop td{font-weight:700}
+.aw-rktable tr.aw-rkbelow td{opacity:.62}
+.aw-rktable tr.aw-rkcut td{background:var(--soft-2);color:var(--muted);font-size:11.5px;font-weight:800;text-align:left}
 .aw-podhead{margin:12px 0 6px;font-size:12px;font-weight:800;color:var(--muted)}
 .aw-geralcard{margin-top:12px;border-top:3px solid var(--aw-top-bg)}
 .aw-ggrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.7fr);gap:12px}
@@ -429,18 +436,27 @@ select:focus,input[type=date]:focus,.find input:focus{border-color:var(--red);bo
 .aw-bar i{display:block;height:100%;border-radius:999px}
 .aw-cmpv{text-align:right;white-space:nowrap}
 .aw-cmpv b{font-size:18px;font-weight:900;color:var(--red)}
+.aw-cmpl{font-size:11.5px;font-weight:700;color:var(--muted)}
 .aw-cmpv small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
 @media (max-width:1100px){.aw-ggrid{grid-template-columns:1fr}}
 @media (max-width:560px){.aw-cmprow{grid-template-columns:auto minmax(0,1fr)}.aw-bar{grid-column:1/-1}.aw-cmpv{grid-column:1/-1;text-align:left}}
 .aw-charts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
 .aw-chart{padding:16px 18px}
 .aw-chart .chart-ico{font-size:17px}
-.aw-cwrap{position:relative;height:280px}
+.aw-cwrap{position:relative;height:300px}
+.aw-cfoot{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11.5px;color:var(--muted);font-weight:600}
+.aw-cfoot span{display:inline-flex;align-items:center;gap:6px}
+.aw-gsw{width:12px;height:12px;border-radius:3px;background:#F7B500;display:inline-block}
+.aw-dash{width:16px;border-top:2px dashed var(--muted);display:inline-block}
+.data-table.aw-ptable thead th.aw-resh{background:#9E000C}
+.data-table.aw-ptable tbody td.aw-zhname{min-width:120px}
+.data-table.aw-ptable tbody td.aw-res{min-width:170px;background:var(--aw-res-bg)}
 @media (max-width:1100px){.aw-charts{grid-template-columns:1fr}}
 .aw-tables{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:12px}
 .aw-tcard{padding:16px 18px}
 .aw-ptable td,.aw-ctable td{vertical-align:middle;font-size:12.5px;line-height:1.45;white-space:normal}
-.aw-ptable td:nth-child(2){max-width:300px}
+.data-table.aw-ptable tbody td,.data-table.aw-ctable tbody td{white-space:normal;overflow:visible;text-overflow:clip}
+.data-table.aw-ptable tbody td:nth-child(n+2):nth-child(-n+6){min-width:120px;max-width:230px}
 .aw-ptable td:nth-child(n+4){min-width:150px}
 .aw-tnum{font-weight:900;color:var(--red);font-size:14px}
 .aw-gcell{text-align:center;font-size:13px}

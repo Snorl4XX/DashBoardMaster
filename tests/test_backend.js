@@ -4877,15 +4877,17 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       } });
       bal.sort((a, b) => b.media - a.media || b.total - a.total || (a.nome < b.nome ? -1 : 1));
       horas.sort((a, b) => b.qtd - a.qtd || HORAS.indexOf(a.hora) - HORAS.indexOf(b.hora) || (a.nome < b.nome ? -1 : 1));
-      esp[t] = {top3: bal.filter(x => x.media >= 1800).slice(0, 3), hora: horas[0] || null, n: bal.length};
+      esp[t] = {top3: bal.filter(x => x.media >= 1800).slice(0, 3), hora: horas[0] || null, n: bal.length, todas: bal};
     });
     const r = cP.getSorterAwards(DS), nLog = siteP.log.length, r2 = cP.getSorterAwards(DS), nLog2 = siteP.log.length, r3 = cP.getSorterAwards(DS, true);
     const ok = ['T1', 'T2', 'T3'].every(t => JSON.stringify(r.turnos[t].top3.map(x => [x.nome, x.media])) === JSON.stringify(esp[t].top3.map(x => [x.nome, x.media])) &&
       JSON.stringify(r.turnos[t].campeaoHora) === JSON.stringify(esp[t].hora) && r.turnos[t].balancas === esp[t].n);
     const a04 = r.balancas.filter(b => b.nome === 'Sorter A · Balança 04')[0] || {};
-    const geralEsp = ['T1', 'T2', 'T3'].map(t => esp[t].top3[0] && Object.assign({turno: t}, esp[t].top3[0])).filter(Boolean).sort((a, b) => b.media - a.media || b.total - a.total)[0];
+    // V4.34.2: campeão geral = quem mais produziu no turno (total), entre todas as balanças de T1, T2 e T3 (sem média).
+    const geralEsp = [].concat(...['T1', 'T2', 'T3'].map(t => esp[t].todas.map(x => Object.assign({turno: t}, x))))
+      .sort((a, b) => b.total - a.total || a.horas - b.horas || (a.nome < b.nome ? -1 : 1))[0];
     check(ok && r.data === DS && r.fechado === true && r.balancas.length === 24 && a04.horas[HORAS.indexOf(12)] === 0 &&
-      a04.horas[HORAS.indexOf(0)] === feedP('A', D1, 4, 0) && r.campeaoGeral && r.campeaoGeral.nome === geralEsp.nome && r.campeaoGeral.turno === geralEsp.turno &&
+      a04.horas[HORAS.indexOf(0)] === feedP('A', D1, 4, 0) && r.campeaoGeral && r.campeaoGeral.nome === geralEsp.nome && r.campeaoGeral.turno === geralEsp.turno && r.campeaoGeral.total === geralEsp.total &&
       r.turnos.T1.top3.every(x => x.faixa === (x.media >= 2400 ? 'excepcional' : x.media >= 2200 ? 'excelente' : x.media >= 2000 ? 'bom' : 'atingiu')) &&
       nLog2 === nLog && siteP.log.length > nLog2 && r3.data === DS,
       'V4.34 Premiação: direto do site, por balança e hora (06h → 06h, T3 até 06h do dia seguinte); top 3 por turno pela média (≥ 1.800), maior hora ≥ 2.400, campeão geral; memória e "ler de novo"',
@@ -4893,6 +4895,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     check(['T1', 'T2', 'T3'].every(t => r.turnos[t].outrosNaMeta.length === Math.max(0, r.turnos[t].naMeta - 3) &&
       r.turnos[t].outrosNaMeta.every(x => x.media >= 1800 && x.media <= (r.turnos[t].top3[2] || {media: Infinity}).media)),
       'V4.34.1 Premiação: "também na meta" = as outras balanças com média ≥ 1.800 (do 4º em diante)', r.turnos.T1.outrosNaMeta);
+    check(['T1', 'T2', 'T3'].every(t => { const rk = r.turnos[t].ranking;
+      return rk.length === r.turnos[t].balancas && rk.every((x, i) => !i || rk[i - 1].media >= x.media) &&
+        JSON.stringify(rk.slice(0, 3).filter(x => x.media >= 1800).map(x => x.nome)) === JSON.stringify(r.turnos[t].top3.map(x => x.nome)) &&
+        rk.filter(x => x.media >= 1800).length === r.turnos[t].naMeta; }) &&
+      (() => { const x = r.turnos.T1.ranking.filter(b => b.nome === 'Sorter A · Balança 04')[0];
+        const vs = [6, 7, 8, 9, 10, 11, 12, 13].map(h => feedP('A', DS, 4, h) || 0).filter(q => q > 0);
+        return x && x.horas === vs.length && x.horas2000 === vs.filter(q => q >= 2000).length && x.horas2400 === vs.filter(q => q >= 2400).length &&
+          x.horasNaMeta === vs.filter(q => q >= 1800).length; })(),
+      'V4.34.2 Premiação: ranking de todas as balanças do turno pela média, com as horas ≥ 1.800 / ≥ 2.000 / ≥ 2.400', r.turnos.T1.ranking.slice(0, 4));
     // Regra pura: hora parada fora da média; ninguém com 2.400; menos de 3 na meta (os mais perto, para mostrar quanto faltou).
     const sl = [];
     [6, 7, 8].forEach(h => sl.push({sorter: 'Sorter A', n: 1, hour: h, qty: h === 8 ? 0 : 1900}));
@@ -4901,9 +4912,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     const pf = cP.sorterPremioFrom_(DS, sl);
     check(pf.turnos.T1.top3.map(x => x.nome + ' ' + x.media).join('|') === 'Sorter B · Balança 03 2399|Sorter A · Balança 01 1900' &&
       pf.turnos.T1.top3[0].faixa === 'excelente' && pf.turnos.T1.campeaoHora === null && pf.turnos.T1.melhorHora.qtd === 2399 &&
-      pf.turnos.T1.perto.map(x => x.nome).join() === 'Sorter A · Balança 02' && pf.turnos.T2.top3.length === 0 && pf.campeaoGeral.nome === 'Sorter B · Balança 03' &&
+      pf.turnos.T1.perto.map(x => x.nome).join() === 'Sorter A · Balança 02' && pf.turnos.T2.top3.length === 0 && pf.campeaoGeral.nome === 'Sorter A · Balança 02' && pf.campeaoGeral.total === 5100 && pf.turnos.T1.maisProduziu.nome === 'Sorter A · Balança 02' &&
       pf.contagem.excelente === 2 && pf.contagem.atingiu === 2 && pf.contagem.nao === 3,
-      'V4.34 Premiação: hora parada fora da média, sem campeão da hora abaixo de 2.400, os mais perto da meta e a contagem por classificação', pf.turnos.T1);
+      'V4.34 Premiação: hora parada fora da média, sem campeão da hora abaixo de 2.400, os mais perto da meta e a contagem por classificação; ' +
+      'V4.34.2: o campeão geral é quem mais produziu (A-02: 5.100 pacotes com média 1.700), não a melhor média', {T1: pf.turnos.T1, geral: pf.campeaoGeral});
   }
   // Sem nenhum painel do JMS, o AuthToken não é exigido; com o JMS, continua exigido.
   check((() => { try { cS.validateJmsAuth_(); return true; } catch (e) { return false; } })() &&

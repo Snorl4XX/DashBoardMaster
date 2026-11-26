@@ -4,6 +4,28 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.34.2 — Premiação: sem campeão fica em branco; ranking de todas as balanças
+
+Pedido (print do gráfico do campeão por hora): "Ficou bugado, refazer! … Se não tiver campeão, deixar em branco. … muita gente passou
+de 1800 alcançando mais de 2000. Porque eles não aparecem?"
+
+- Sem campeão, o lugar fica em branco: no gráfico (sem barra cinza e sem "sem campeão" escrito em cima da linha da meta), na tabela
+  do resultado e nos quadros dos turnos e do dia. Sai também o "mais perto da meta".
+- Novo **Ranking do turno** (abas T1, T2, T3): todas as balanças pela média do turno, com classificação, horas com produção, horas
+  ≥ 1.800, ≥ 2.000 e ≥ 2.400, melhor hora e total. Quem tem média de 1.800 ou mais fica em cima; os de baixo, separados e mais claros.
+- Pedido "você misturou a média com as outras opções … teve gente que produziu mais": só o **campeão do turno** (2º da tabela) é pela
+  média. O **campeão geral** agora é quem **mais produziu no turno (total de pacotes)** entre todas as balanças de T1, T2 e T3, sem média
+  e sem o mínimo de 1.800 (antes era a melhor média entre os campeões de turno). O quadro e o gráfico dele mostram o total de pacotes.
+- O gráfico do top 3 de cada turno ficou deitado (uma linha por colocação), para o nome e a média não encostarem uns nos outros.
+- Pedido "segue essa tabela, não foge dela": a tabela do resultado tem as mesmas 6 colunas e os mesmos textos da tabela de premiação
+  (奖励项目, Tipo de premiação, 获奖标准, Critério de premiação, 奖励金额（建议）, Premiação sugerida), e o vencedor de T1, T2 e T3 ao
+  lado. Os quadros e os gráficos usam o mesmo nome e o mesmo critério da tabela.
+- Pedido "deixa os gráficos bonitos para poder entender o campeão": nos três gráficos o campeão fica em dourado (borda da barra e o
+  rótulo em pílula dourada), os outros ficam claros; cada gráfico tem a legenda "dourado = campeão" e a linha da meta explicada.
+- Pergunta "o segundo da tabela não é para mostrar a média?": é a média, sim. Agora a palavra **média** aparece em todo lugar do campeão
+  do turno (tabela, quadros, 2º e 3º, gráfico e o título do eixo), para não confundir com o número de uma hora só.
+- Gráficos com o título do eixo (pacotes na hora / média por hora no turno) e a linha da meta sempre visível.
+
 ## V4.34.1 — Premiação: um quadro para cada prêmio
 
 Pedido (print dos turnos): "Tem como fazer também para os outros que são: Campeão de produtividade por turno e campeão geral entre os
