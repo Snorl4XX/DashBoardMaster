@@ -4,6 +4,18 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.34.5 — Premiação: classificação hora a hora e um cartão por turno
+
+Pedido (print da tabela "Classificação das horas"): "Adicionar cartão que mostra a balança que bateu as metas dos critérios
+estabelecidos na tabela, um cartão para cada turno. … Mudar a tabela Classificação das horas / 评价标准: colocar a quantidade de
+intervalo de horários que bateu a meta no dia, a cada 1 hora. Esse somatório não faz sentido, tirar isso. Tira o que mostra o total."
+
+- **Classificação das horas / 评价标准**: as faixas da tabela de avaliação nas linhas e uma coluna para cada intervalo de 1 hora
+  (06h–07h … 05h–06h, agrupados em T1, T2 e T3). Cada célula é quantas balanças ficaram naquela faixa naquela hora, colorida pela
+  classificação; passando o mouse, aparecem quais balanças e quanto. Saíram a linha do total, a coluna do dia e os %.
+- Novo **cartão por turno** (T1, T2, T3) com as balanças que bateram a meta, separadas pelas faixas da tabela (Excepcional,
+  Excelente, Bom, Atingiu a meta), cada uma com o intervalo de 1 hora e a quantidade. Faixa sem ninguém fica com "—".
+
 ## V4.34.4 — Premiação: cartão "Balanças que bateram a meta"
 
 Pedido (sobre o cartão "Horas na meta (≥ 1.800): 0 / 243"): "Tira esse valor de quantidade, agora quero que fique somente o valor das

@@ -4160,18 +4160,50 @@
       if (!next) return P(fmtInt(f.min) + ' pacotes ou mais', fmtInt(f.min) + '件及以上');
       return fmtInt(f.min) + '–' + fmtInt(next.min - 1) + ' ' + P('pacotes', '件');
     };
-    var cnt = function (tn, k) { return tn ? ((d.turnos[tn].contagem || {})[k] || 0) : ((d.contagem || {})[k] || 0); };
-    var totOf = function (tn) { return faixasAsc.reduce(function (a, f) { return a + cnt(tn, f.key); }, 0); };
-    var cell = function (tn, k) { var n = cnt(tn, k), tt = totOf(tn); return '<td class="num">' + fmtInt(n) + (tt ? ' <small class="muted">' + fmtPct(n / tt * 100, 1) + '</small>' : '') + '</td>'; };
+    // V4.34.5 (pedido "colocar a quantidade de intervalo de horários que bateu a meta no dia, a cada 1 hora … tira o que mostra o
+    // total"): uma coluna por intervalo de 1 hora do dia de trabalho; em cada faixa da tabela de avaliação, quantas balanças ficaram
+    // nela naquela hora (passando o mouse, quais). Sem total, sem coluna do dia e sem %.
+    var hs = d.horas || [], bal = d.balancas || [], H2 = function (h) { return String(h).padStart(2, '0') + 'h'; };
+    var fxOf = function (q) { var k = 'nao'; (d.faixas || []).forEach(function (f) { if (k === 'nao' && f.min !== null && q >= f.min) k = f.key; }); return k; };
+    var quem = {};
+    faixasAsc.forEach(function (f) { quem[f.key] = hs.map(function () { return []; }); });
+    bal.forEach(function (b) { (b.horas || []).forEach(function (q, i) { if (q > 0 && quem[fxOf(q)]) quem[fxOf(q)][i].push({n: awShort(b.nome), q: q}); }); });
     html += '<article class="card aw-tcard"><div class="chart-head"><span class="chart-ico">' + icon('gauge') + '</span><div class="chart-titles"><h3>' +
       esc(P('Classificação das horas', '单小时供件效率评价')) + ' <span class="rp-zh">/ ' + esc(P('评价标准', 'Classificação')) + '</span></h3><small>' +
-      esc(P('Quantas horas de balança ficaram em cada faixa da tabela de avaliação', '各评价等级的供包台小时数')) + '</small></div></div><div class="table-scroll"><table class="data-table aw-ctable"><thead><tr><th>' +
-      esc(P('Produtividade por hora', '单小时供件效率')) + '</th><th>' + esc(P('Classificação', '评价标准')) + '</th>' +
-      ['T1', 'T2', 'T3'].map(function (tn) { return '<th class="num">' + tn + '</th>'; }).join('') + '<th class="num">' + esc(P('Dia', '全天')) + '</th></tr></thead><tbody>' +
-      faixasAsc.map(function (f, i) {
-        return '<tr><td>' + esc(rangeTxt(f, i)) + '</td><td>' + chip(f.key) + '</td>' + ['T1', 'T2', 'T3'].map(function (tn) { return cell(tn, f.key); }).join('') + cell('', f.key) + '</tr>';
-      }).join('') + '<tr class="cross-total"><td colspan="2"><b>' + esc(P('Horas de balança com produção', '有供件的供包台小时')) + '</b></td>' +
-      ['T1', 'T2', 'T3', ''].map(function (tn) { return '<td class="num"><b>' + fmtInt(totOf(tn)) + '</b></td>'; }).join('') + '</tr></tbody></table></div></article></section>';
+      esc(P('Em cada intervalo de 1 hora, quantas balanças ficaram em cada faixa da tabela de avaliação (passe o mouse para ver quais)',
+        '每个1小时区间内，各评价等级的供包台数量（鼠标悬停查看明细）')) + '</small></div></div><div class="table-scroll"><table class="data-table aw-hctable"><thead><tr>' +
+      '<th rowspan="2">' + esc(P('Produtividade por hora', '单小时供件效率')) + '</th><th rowspan="2">' + esc(P('Classificação', '评价标准')) + '</th>' +
+      ['T1', 'T2', 'T3'].map(function (tn, k) { return '<th colspan="8" class="aw-hgrp' + (k ? ' aw-sep' : '') + '"><i style="background:' + SHIFT_COLORS[tn] + '"></i>' + tn + ' · ' + SHIFT_HOURS[tn] + '</th>'; }).join('') +
+      '</tr><tr>' + hs.map(function (h, i) { return '<th class="aw-hh' + (i === 8 || i === 16 ? ' aw-sep' : '') + '">' + H2(h) + '<small>–' + H2((h + 1) % 24) + '</small></th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      faixasAsc.map(function (f, fi) {
+        return '<tr><td>' + esc(rangeTxt(f, fi)) + '</td><td>' + chip(f.key) + '</td>' + hs.map(function (h, i) {
+          var l = quem[f.key][i].slice().sort(function (a, b) { return b.q - a.q; });
+          return '<td class="aw-hc' + (l.length ? ' aw-' + f.key : '') + (i === 8 || i === 16 ? ' aw-sep' : '') + '"' +
+            (l.length ? ' title="' + esc(hh(h) + ' · ' + L(fx[f.key] || {pt: f.key, zh: f.key}) + ': ' + l.map(function (x) { return x.n + ' (' + fmtInt(x.q) + ')'; }).join(', ')) + '"' : '') + '>' +
+            (l.length ? fmtInt(l.length) : '') + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div></article></section>';
+    // V4.34.5 (pedido "cartão que mostra a balança que bateu as metas dos critérios estabelecidos na tabela, um cartão para cada
+    // turno"): em cada turno, as balanças que chegaram a cada faixa da tabela de avaliação, com o intervalo de 1 hora e a quantidade.
+    var tIdx2 = {T1: [0, 8], T2: [8, 16], T3: [16, 24]};
+    var faixasMeta = (d.faixas || []).filter(function (f) { return f.min !== null; });
+    html += '<section class="aw-mcards">' + ['T1', 'T2', 'T3'].map(function (tn) {
+      var porFx = {};
+      faixasMeta.forEach(function (f) { porFx[f.key] = []; });
+      bal.forEach(function (b) {
+        for (var i = tIdx2[tn][0]; i < tIdx2[tn][1]; i++) { var q = (b.horas || [])[i] || 0; if (q > 0 && porFx[fxOf(q)]) porFx[fxOf(q)].push({nome: b.nome, h: hs[i], q: q}); }
+      });
+      return '<article class="card aw-mcard"><div class="aw-sh"><i style="background:' + SHIFT_COLORS[tn] + '"></i><b>' + tn + '</b> · ' + SHIFT_HOURS[tn] +
+        '<span class="aw-shstat">' + esc(P('Balanças que bateram a meta', '达标供包台')) + '</span></div>' +
+        faixasMeta.map(function (f) {
+          var l = porFx[f.key].sort(function (a, b) { return b.q - a.q || (a.nome < b.nome ? -1 : 1); });
+          return '<div class="aw-mgrp"><div class="aw-mgh">' + chip(f.key) + '<span>' + esc(rangeTxt(f, faixasAsc.indexOf(f))) + '</span></div>' +
+            (l.length ? '<div class="aw-mlist">' + l.map(function (x) {
+              return '<span class="aw-mitem aw-' + f.key + '" title="' + esc(x.nome + ' · ' + hh(x.h) + ': ' + fmtInt(x.q)) + '"><b>' + esc(awShort(x.nome)) + '</b>' + esc(hh(x.h)) + ' · ' + fmtInt(x.q) + '</span>';
+            }).join('') + '</div>' : '<div class="aw-mnone">—</div>') + '</div>';
+        }).join('') + '</article>';
+    }).join('') + '</section>';
     // V4.34 (pedido "um gráfico que mostre esses resultados, separado um de cada"): um gráfico por premiação.
     var chartCard = function (key, ic, pt, zh, sub, foot) {
       return '<article class="card chart-card aw-chart"><div class="chart-head"><span class="chart-ico">' + ic + '</span><div class="chart-titles"><h3>' + esc(P(pt, zh)) +
