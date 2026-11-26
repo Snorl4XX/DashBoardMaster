@@ -4107,14 +4107,18 @@
     }
     (d.avisos || []).forEach(function (a) { html += '<div class="alert warn"><div>' + esc(a) + '</div></div>'; });
     // Resumo do dia.
-    var c = d.contagem || {}, horas = Object.keys(c).reduce(function (a, k) { return a + c[k]; }, 0), naMeta = horas - (c.nao || 0);
+    // V4.34.4 (pedido "tira esse valor de quantidade … fique somente o valor das balanças que bateram a meta"): balanças com média do
+    // turno de 1.800 ou mais (a meta do prêmio do turno). Cada balança conta uma vez, mesmo que tenha batido em mais de um turno.
+    var c = d.contagem || {}, metaSet = {};
+    ['T1', 'T2', 'T3'].forEach(function (tn) { (d.turnos[tn].ranking || []).forEach(function (x) { if (x.media >= d.metaTurno) metaSet[x.nome] = 1; }); });
+    var balMeta = Object.keys(metaSet).length;
     var g = d.campeaoGeral;
     html += '<section class="aw-sum">' +
       '<article class="kpi"><div class="kpi-label">' + icon('qty') + esc(P('Balanças que alimentaram', '供件供包台')) + '</div><div class="kpi-value">' + fmtInt((d.balancas || []).length) +
         '</div><div class="kpi-sub">' + esc(P('Sorter A e B no dia de trabalho', 'A/B套 · 工作日')) + '</div></article>' +
-      '<article class="kpi"><div class="kpi-label">' + icon('check') + esc(P('Horas na meta (≥ 1.800)', '达标小时（≥1,800）')) + '</div><div class="kpi-value">' + fmtInt(naMeta) +
-        '<small class="sc-unit"> / ' + fmtInt(horas) + '</small></div><div class="kpi-sub">' + (horas ? '<b>' + fmtPct(naMeta / horas * 100, 1) + '</b> ' : '') +
-        esc(P('das horas de balança com produção', '有供件的小时')) + '</div></article>' +
+      '<article class="kpi"><div class="kpi-label">' + icon('check') + esc(P('Balanças que bateram a meta', '达标供包台')) + '</div><div class="kpi-value">' + fmtInt(balMeta) +
+        '</div><div class="kpi-sub">' + esc(P('média do turno ≥ 1.800 em pelo menos um turno', '至少一个班次平均 ≥ 1,800')) + '<br>' + ['T1', 'T2', 'T3'].map(function (tn) {
+          return tn + ' <b>' + fmtInt(d.turnos[tn].naMeta || 0) + '</b>'; }).join(' · ') + '</div></article>' +
       '<article class="kpi"><div class="kpi-label">' + icon('max') + esc(P('Horas excepcionais (≥ 2.400)', '卓越小时（≥2,400）')) + '</div><div class="kpi-value">' + fmtInt(c.excepcional || 0) +
         '</div><div class="kpi-sub">' + esc(P('concorrem a campeão da hora', '可参评单小时冠军')) + '</div></article>' +
       '<article class="kpi aw-geral"><div class="kpi-label">🎒 ' + esc(P('Campeão geral do dia', '三个班次全天冠军')) + '</div>' +

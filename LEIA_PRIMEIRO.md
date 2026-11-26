@@ -4,6 +4,13 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.34.4 — Premiação: cartão "Balanças que bateram a meta"
+
+Pedido (sobre o cartão "Horas na meta (≥ 1.800): 0 / 243"): "Tira esse valor de quantidade, agora quero que fique somente o valor das
+balanças que bateram a meta." O cartão agora é **Balanças que bateram a meta**: só o número de balanças com média do turno de 1.800 ou
+mais (a meta do prêmio do turno) em pelo menos um turno — cada balança conta uma vez — e embaixo quantas em cada turno. Sai o "/ 243"
+(horas de balança) e o %.
+
 ## V4.34.3 — Premiação: resultado da tabela no fundo padrão
 
 Pedido (print da tabela do resultado): "tira essa cor e coloque na cor padrão de fundo." As células do vencedor de T1, T2 e T3 na
