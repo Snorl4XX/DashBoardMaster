@@ -156,6 +156,9 @@ T2 14h–22h, T3 22h–06h). Escolha o dia no topo da tela (‹ › ou o calend�
   média (1 mochila + 1 medalha). Só o campeão do turno é pela média.
 - Cada prêmio tem o seu quadro no mesmo formato (nome, número grande, classificação e prêmio): em cada turno, o campeão da hora e o
   campeão do turno (com o 2º e o 3º embaixo); depois dos turnos, o campeão geral com os três campeões de turno lado a lado.
+- **As 3 balanças de cada critério:** logo abaixo do resumo, 9 cartões vermelhos (um por turno para cada critério da tabela): por
+  hora (as 3 maiores horas, perto ou acima de 2.400), do turno (as 3 maiores médias, perto ou acima de 1.800) e geral (as 3 que mais
+  produziram no turno), com quanto faltou ou "bateu a meta".
 - **Classificação das horas:** em cada intervalo de 1 hora do dia de trabalho, quantas balanças ficaram em cada faixa da tabela
   de avaliação (passando o mouse, quais). Logo abaixo, um cartão por turno com as balanças que bateram a meta, separadas por faixa,
   com o horário e a quantidade.

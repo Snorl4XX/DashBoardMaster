@@ -4125,6 +4125,47 @@
         (g ? '<div class="kpi-value text">' + balName(g.nome) + '</div><div class="kpi-sub"><b>' + fmtInt(g.total) + '</b> ' + esc(P('pacotes no turno', '件（班次合计）')) + ' · ' + g.turno +
           '<br>🎁 ' + esc(P('1 mochila + 1 medalha', '背包1个 + 徽章1枚')) + '</div>'
           : '<div class="kpi-value">—</div>') + '</article></section>';
+    // V4.34.6 (pedido "cartão que mostre as três balanças … um cartão para cada turno representando cada critério", em vermelho):
+    // por hora = as 3 balanças com a maior hora do turno (perto ou acima de 2.400); do turno = as 3 maiores médias (perto ou acima de
+    // 1.800); geral = as 3 que mais produziram no turno.
+    var md3 = ['🥇', '🥈', '🥉'], pos3 = function (h) { return (d.horas || []).indexOf(h); };
+    var falta = function (n) { return P('faltaram ' + fmtInt(n), '差 ' + fmtInt(n)); };
+    var crit3 = [
+      {ic: '⏱️', pt: 'Campeão de produtividade por hora', zh: '单小时效率冠军', metaPt: 'Meta: 2.400 pacotes em uma hora', metaZh: '目标：单小时 ≥ 2,400件',
+        top: function (rk) { return rk.slice().sort(function (a, b) { return b.melhorQtd - a.melhorQtd || pos3(a.melhorHora) - pos3(b.melhorHora) || (a.nome < b.nome ? -1 : 1); }).slice(0, 3); },
+        val: function (x) {
+          var ok = x.melhorQtd >= d.metaHora;
+          return {v: fmtInt(x.melhorQtd), u: P('pacotes', '件'), sub: hh(x.melhorHora), ok: ok, st: ok ? '✓ ' + P('bateu a meta', '达标') : falta(d.metaHora - x.melhorQtd)};
+        }},
+      {ic: '🏆', pt: 'Campeão de produtividade do turno', zh: '当班次效率冠军', metaPt: 'Meta: média de 1.800 pacotes por hora no turno', metaZh: '目标：班次平均 ≥ 1,800件/小时',
+        top: function (rk) { return rk.slice(0, 3); },
+        val: function (x) {
+          var ok = x.media >= d.metaTurno;
+          return {v: fmtInt(x.media), u: P('/h (média)', '/小时（平均）'), sub: P(x.horas + ' h com produção', x.horas + '小时供件'), ok: ok,
+            st: ok ? '✓ ' + P('bateu a meta', '达标') : falta(Math.ceil(d.metaTurno - x.media))};
+        }},
+      {ic: '🎒', pt: 'Campeão geral entre os três turnos', zh: '三个班次全天冠军', metaPt: 'Quem mais produziu no turno (total de pacotes)', metaZh: '班次供件总量最多',
+        top: function (rk) { return rk.slice().sort(function (a, b) { return b.total - a.total || a.horas - b.horas || (a.nome < b.nome ? -1 : 1); }).slice(0, 3); },
+        val: function (x, tn) {
+          var ok = !!(g && g.turno === tn && g.nome === x.nome), dif = g ? g.total - x.total : 0;
+          return {v: fmtInt(x.total), u: P('pacotes', '件'), sub: P(x.horas + ' h com produção', x.horas + '小时供件'), ok: ok,
+            st: ok ? '🎒 ' + P('campeão geral do dia', '全天冠军') : (g && dif > 0 ? P(fmtInt(dif) + ' a menos que o campeão', '比冠军少 ' + fmtInt(dif)) : '')};
+        }}
+    ];
+    html += '<section class="aw-t3grid">' + crit3.map(function (cr) {
+      return ['T1', 'T2', 'T3'].map(function (tn) {
+        var lst = cr.top(d.turnos[tn].ranking || []);
+        return '<article class="aw-t3card"><div class="aw-t3head"><span class="aw-t3ico">' + cr.ic + '</span><div class="aw-t3tt"><b>' + esc(P(cr.pt, cr.zh)) + '</b><small>' +
+          esc(P(cr.zh, cr.pt)) + '</small></div><span class="aw-t3shift"><i style="background:' + SHIFT_COLORS[tn] + '"></i>' + tn + ' · ' + SHIFT_HOURS[tn] + '</span></div>' +
+          '<div class="aw-t3meta">' + esc(P(cr.metaPt, cr.metaZh)) + '</div>' +
+          (lst.length ? '<ol class="aw-t3list">' + lst.map(function (x, i) {
+            var v = cr.val(x, tn);
+            return '<li' + (v.ok ? ' class="ok"' : '') + '><span class="aw-t3pos">' + md3[i] + '</span><div class="aw-t3body"><div class="aw-t3name">' + balName(x.nome) + '</div>' +
+              '<div class="aw-t3sub">' + esc(v.sub) + '</div></div><div class="aw-t3val"><div><b>' + v.v + '</b><small>' + esc(v.u) + '</small></div>' +
+              (v.st ? '<span class="aw-t3st' + (v.ok ? ' ok' : '') + '">' + esc(v.st) + '</span>' : '') + '</div></li>';
+          }).join('') + '</ol>' : '<div class="aw-t3none">—</div>') + '</article>';
+      }).join('');
+    }).join('') + '</section>';
     // V4.34 (pedido "mostre esses resultados baseados na tabela anexada"): as duas tabelas das regras, com o resultado do dia.
     var winH = function (tn) {
       var x = d.turnos[tn].campeaoHora;

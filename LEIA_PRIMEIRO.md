@@ -4,6 +4,21 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.34.6 — Premiação: as 3 balanças de cada turno em cada critério (cartões vermelhos)
+
+Pedido (print dos cartões do resumo): "Quero cartão que mostre as três balanças … junto com essas do print. Campeão de produtividade
+por hora: as três balanças de cada turno que chegou perto ou que passou desse valor do critério. Campeão de produtividade do turno: as
+três balanças de cada turno que chegou perto ou que passou. Campeão geral entre os três turnos: as três balanças de cada turno que
+produziu mais. Destaca com uma cor vermelha os cartões. Fazer um cartão para cada turno representando cada critério."
+
+- Logo abaixo dos cartões do resumo, 9 cartões vermelhos: uma linha por critério e um cartão por turno (T1, T2, T3), cada um com as 3
+  balanças (🥇🥈🥉):
+  - **Por hora:** as 3 balanças com a maior hora do turno (cada balança pela sua melhor hora), com o intervalo e "bateu a meta" (≥ 2.400)
+    ou quanto faltou.
+  - **Do turno:** as 3 maiores médias do turno, com as horas com produção e "bateu a meta" (≥ 1.800) ou quanto faltou.
+  - **Geral:** as 3 que mais produziram no turno (total de pacotes); o campeão geral do dia aparece marcado, os outros com quanto
+    ficaram abaixo dele.
+
 ## V4.34.5 — Premiação: classificação hora a hora e um cartão por turno
 
 Pedido (print da tabela "Classificação das horas"): "Adicionar cartão que mostra a balança que bateu as metas dos critérios
