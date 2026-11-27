@@ -5096,6 +5096,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       g1[0][c] = txtDia(d); g1[1][c] = '出勤人数 Colaboradores Presentes'; g1[1][c + 1] = '应出勤人数 Efetivo Programado';
       P1[d].forEach((v, j) => { g1[2 + j][0] = CATS[j]; if (v[0] !== null) g1[2 + j][c] = v[0]; g1[2 + j][c + 1] = v[1]; });
     });
+    // Erro de digitação no cabeçalho: uma data fora de ordem no fim (não pode derrubar a linha de datas inteira).
+    const cx = 190 + 2 * Object.keys(P1).length;
+    g1[0][cx] = txtDia(dAdd(DE0, -1)); g1[1][cx] = '出勤人数 Colaboradores Presentes'; g1[1][cx + 1] = '应出勤人数 Efetivo Programado';
+    CATS.forEach((x, j) => { g1[2 + j][cx] = 5; g1[2 + j][cx + 1] = 6; });
+    grids.r0 = [['Resumo', txtDia(DE0), txtDia(DE)], ['Total', 1, 2]];
     // Aba da eficiência: um bloco por mês (o antigo em cima), datas "aaaa/mm/dd", subtítulo e a linha dos números.
     const ge = Array.from({length: 8}, () => []);
     ge[0][0] = 'SP GRU'; ge[0][2] = DV.replace(/-/g, '/'); ge[0][3] = dAdd(DV, 1).replace(/-/g, '/');
@@ -5109,13 +5114,15 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       const c = 2 + 2 * k;
       gp[0][c] = serial(d); gp[1][c] = '正式工出勤 Presença de colaboradores efetivos'; gp[1][c + 1] = '临时工出勤 Presença de colaboradores temporários';
       if (!PR[d]) return;
+      gp[2][0] = 'GRU'; gp[2][1] = 'TI'; gp[3][1] = 'T2'; gp[4][1] = 'T3'; gp[5][0] = '合计';
       PR[d].forEach((v, j) => { gp[2 + j][c] = v[0]; gp[2 + j][c + 1] = v[1]; });
       gp[5][c] = PR[d].reduce((a, v) => a + v[0], 0); gp[5][c + 1] = PR[d].reduce((a, v) => a + v[1], 0);
     });
     grids.p1 = g1; grids['44cb2d'] = ge; grids.pr1 = gp;
   };
   montar();
-  const TABS = {shtPRES: [{sheet_id: 'p1', title: 'GRU', grid_properties: {row_count: 8, column_count: 250}}],
+  const TABS = {shtPRES: [{sheet_id: 'r0', title: 'Resumo', grid_properties: {row_count: 2, column_count: 3}},
+    {sheet_id: 'p1', title: 'GRU', grid_properties: {row_count: 8, column_count: 250}}],
     shtEFIC: [{sheet_id: 'zCbCFd', title: '日操作量 Volume operacional diário', grid_properties: {row_count: 5, column_count: 10}},
       {sheet_id: 'old9', title: '效率 antigo', hidden: true, grid_properties: {row_count: 5, column_count: 10}},
       {sheet_id: '44cb2d', title: '日均效率 Eficiência média diária', grid_properties: {row_count: 8, column_count: 40}},
@@ -5144,7 +5151,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
       const rng = decodeURIComponent(/\/values\/([^?]+)/.exec(url)[1]), m = /^(\w+)!([A-Z]+)1:([A-Z]+)(\d+)$/.exec(rng);
       const g = grids[m[1]] || [], a = colIdx(m[2]) - 1, b = colIdx(m[3]) - 1, rows = Number(m[4]);
       const values = g.slice(0, rows).map(row => { const out = []; for (let c = a; c <= b; c++) out.push(row[c] === undefined ? null : row[c]); return out; });
-      r = /valueRenderOption=UnformattedValue/.test(url) ? {code: 0, data: {revision: 1, spreadsheetToken: 'x', valueRange: {range: rng, values}}} : {code: 9999, msg: 'sem opção'};
+      r = /valueRenderOption=UnformattedValue&dateTimeRenderOption=FormattedString/.test(url) ? {code: 0, data: {revision: 1, spreadsheetToken: 'x', valueRange: {range: rng, values}}} : {code: 9999, msg: 'sem opção'};
     } else r = {code: 1310214, msg: 'not found'};
     return {getResponseCode: () => http, getContentText: () => JSON.stringify(r)};
   };
@@ -5172,6 +5179,14 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     cE.efCellDate_(txtDia(DE)) === DE && cE.efCellDate_(Number(DE.slice(5, 7)) + '月' + Number(DE.slice(8, 10)) + '日') === DE &&
     cE.efCellDate_('01-' + MES[(Number(HOJE.slice(5, 7)) + 5) % 12]) < HOJE && ['GRU', 547, '', null, 'Total', '32/13/2026'].every(v => cE.efCellDate_(v) === ''),
     'V4.36 Eficiência: datas do cabeçalho das planilhas (número de série, aaaa/mm/dd, dd/mm/aaaa, "01-nov", 11月14日)');
+  const yWrap = (() => { let y = Number(HOJE.slice(0, 4)) + 1; while (y + '-12-31' > dAdd(HOJE, 7)) y--; return y; })();
+  const gW = cE.efGridRecords_([['GRU', '30-dez', null, '31-dez', null, '01-jan', null, '02-jan'],
+    [null, 'Presentes', 'Programado', 'Presentes', 'Programado', 'Presentes', 'Programado', 'Presentes', 'Programado'],
+    ['操作员工 Operacional', 10, 11, 12, 13, null, 14, null, 15]]);
+  check(['GRU TI', 'TII', 'T3', '早班', 'turno 2'].map(cE.efShiftOf_).join() === 'T1,T2,T3,T1,T2' && ['合计', 'Total', 'GRU', 'Temporários'].every(x => cE.efShiftOf_(x) === '') &&
+    gW.filter(x => x.kind === 'present').map(x => x.date).join() === yWrap + '-12-30,' + yWrap + '-12-31' &&
+    gW.filter(x => x.kind === 'program').map(x => x.date).join() === [yWrap + '-12-30', yWrap + '-12-31', (yWrap + 1) + '-01-01', (yWrap + 1) + '-01-02'].join(),
+    'V4.36.1 Eficiência: turno "TI" (letra I) = T1; datas sem ano pela linha inteira (dezembro → janeiro = ano seguinte)', gW);
   const t0 = cE.testarPlanilhasFeishu();
   const login = cE.efLoginUrl_(RET, 'estado-1');
   check(t0.ok === false && /Conta do Feishu não conectada/.test(t0.erro) &&
@@ -5186,7 +5201,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const tb = cE.testarPlanilhasFeishu(), tbJs = JSON.stringify(tb);
   const linhaDE = (tb.ultimosDias || []).filter(x => x.indexOf(DE + ':') === 0)[0] || '';
   check(tb.ok && tb.abas.presentesProgramados === 'GRU' && tb.abas.eficiencia === '日均效率 Eficiência média diária' && tb.abas.presenca === '人员出勤 Presença de colaboradores' &&
-    tb.categorias.every(x => /✓$/.test(x)) && /eficiência da matriz 412 · presença 380 efetivos \+ 680 temporários \(T1 120\+300 · T2 110\+200 · T3 150\+180\)/.test(linhaDE) &&
+    tb.categorias.every(x => /✓$/.test(x)) && tb.planilha1.abasDaPlanilha.join() === 'Resumo,GRU' && tb.planilha1.categorias.length === 5 && /eficiência da matriz 412 · presença 380 efetivos \+ 680 temporários \(T1 120\+300 · T2 110\+200 · T3 150\+180\)/.test(linhaDE) &&
     /planilha 1: 1042 presentes de 1074 programados/.test(linhaDE) && tb.ultimoDia === DE1 && !tb.aviso && /dia\(s\) na fila/.test(tb.diasNaFila) &&
     ['segredo-teste', 'u-2', 'r-2'].every(x => tbJs.indexOf(x) < 0) && JSON.parse(cE.__state.props.FEISHU_NODES).WIKIPRES === 'shtPRES',
     'V4.36 Eficiência: teste das planilhas (wiki → planilha, abas pelo nome, categorias, turnos sem nome + total, últimos dias), sem tokens', tb);

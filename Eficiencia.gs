@@ -243,17 +243,21 @@ function efColName_(n) {
   for (let x = n; x > 0; x = Math.floor((x - 1) / 26)) s = String.fromCharCode(65 + (x - 1) % 26) + s;
   return s;
 }
-/** A grade da aba (valores sem formatação: data = número de série), lida em blocos de 100 colunas. */
+/**
+ * A grade da aba, lida em blocos de 100 colunas: números sem formatação e as DATAS como aparecem na tela (V4.36.1: "01-nov" é
+ * lido como a pessoa vê — o ano escondido da célula pode ser de outro ano, de uma planilha copiada). Até 4000 colunas: a planilha
+ * de presentes cresce 2 colunas por dia e os dias novos ficam no fim.
+ */
 function efGrid_(sp, tab) {
   const gp = tab.grid_properties || {};
-  const cols = Math.max(1, Math.min(Number(gp.column_count) || 200, 1500));
+  const cols = Math.max(1, Math.min(Number(gp.column_count) || 200, 4000));
   let rows = Math.max(1, Math.min(Number(gp.row_count) || 200, 1000));
-  if (rows * cols > 300000) rows = Math.max(50, Math.floor(300000 / cols));
+  if (rows * cols > 400000) rows = Math.max(60, Math.floor(400000 / cols));
   const grid = [];
   for (let c0 = 1; c0 <= cols; c0 += 100) {
     const c1 = Math.min(cols, c0 + 99), range = tab.sheet_id + '!' + efColName_(c0) + '1:' + efColName_(c1) + rows;
     const j = efUserGet_('/open-apis/sheets/v2/spreadsheets/' + encodeURIComponent(sp) + '/values/' + encodeURIComponent(range) +
-      '?valueRenderOption=UnformattedValue');
+      '?valueRenderOption=UnformattedValue&dateTimeRenderOption=FormattedString');
     const vals = (j.data && j.data.valueRange && j.data.valueRange.values) || [];
     vals.forEach((row, r) => {
       if (!Array.isArray(row)) return;
@@ -291,34 +295,42 @@ function efNum_(v) {
 }
 const EF_MESES_ = {jan: 1, fev: 2, feb: 2, mar: 3, abr: 4, apr: 4, mai: 5, may: 5, jun: 6, jul: 7, ago: 8, aug: 8, set: 9, sep: 9,
   out: 10, oct: 10, nov: 11, dez: 12, dec: 12};
-/** Dia sem ano ("01-nov", "11月14日"): o ano de hoje; mais de 60 dias no futuro → o ano anterior. */
+const EF_MES_RE_ = '(jan|fev|feb|mar|abr|apr|mai|may|jun|jul|ago|aug|set|sep|out|oct|nov|dez|dec)[a-z]*\\.?';
+/** Dia sem ano ("01-nov", "11月14日") sozinho: o ano de hoje; mais de 60 dias no futuro → o ano anterior. */
 function efComAno_(m, d) {
   const hoje = isoToday_(), y = Number(hoje.slice(0, 4));
   const iso = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
   return iso > addDaysIso_(hoje, 60) ? (y - 1) + iso.slice(4) : iso;
 }
-/** Data de uma célula do cabeçalho → AAAA-MM-DD, ou '' (não é data). */
-function efCellDate_(v) {
-  const ok = (y, m, d) => (y >= 2000 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31 ?
-    y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0') : '');
+/** Partes da data de uma célula do cabeçalho → {y (0 = sem ano), m, d}, ou null (não é data). */
+function efCellDateParts_(v) {
+  const ok = (y, m, d) => (m >= 1 && m <= 12 && d >= 1 && d <= 31 && (!y || (y >= 2000 && y <= 2100)) ? {y: y, m: m, d: d} : null);
   if (typeof v === 'number') {
-    if (!(v >= 40000 && v < 60000)) return '';
-    return new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000).toISOString().slice(0, 10);
+    if (!(v >= 40000 && v < 60000)) return null;
+    const s = new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000).toISOString();
+    return {y: +s.slice(0, 4), m: +s.slice(5, 7), d: +s.slice(8, 10)};
   }
   const s = efNorm_(efText_(v));
-  if (!s || s.length > 30) return '';
+  if (!s || s.length > 30) return null;
   let m = /^(\d{4})\s*[\/\-.年]\s*(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})/.exec(s);
   if (m) return ok(+m[1], +m[2], +m[3]);
   m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
   if (m) return ok(+m[3], +m[2], +m[1]);
-  m = /^(\d{1,2})\s*[-\/. ]?\s*(jan|fev|feb|mar|abr|apr|mai|may|jun|jul|ago|aug|set|sep|out|oct|nov|dez|dec)[a-z]*\.?(?:\s*[-\/. ]\s*(\d{2,4}))?$/.exec(s);
-  if (m) {
-    if (+m[1] < 1 || +m[1] > 31) return '';
-    return m[3] ? ok(m[3].length === 2 ? 2000 + +m[3] : +m[3], EF_MESES_[m[2]], +m[1]) : efComAno_(EF_MESES_[m[2]], +m[1]);
-  }
+  m = new RegExp('^(\\d{1,2})\\s*[-\\/. ]?\\s*(?:de\\s+)?' + EF_MES_RE_ + '(?:\\s*[-\\/. ]\\s*(?:de\\s+)?(\\d{2,4}))?$').exec(s);
+  if (m) return ok(m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : 0, EF_MESES_[m[2]], +m[1]);
+  m = new RegExp('^' + EF_MES_RE_ + '\\s*[-\\/. ]?\\s*(\\d{1,2})(?:\\s*,?\\s*(\\d{4}))?$').exec(s);
+  if (m) return ok(m[3] ? +m[3] : 0, EF_MESES_[m[1]], +m[2]);
   m = /^(\d{1,2})\s*月\s*(\d{1,2})\s*日?$/.exec(s);
-  if (m && +m[1] <= 12 && +m[2] <= 31) return efComAno_(+m[1], +m[2]);
-  return '';
+  if (m) return ok(0, +m[1], +m[2]);
+  m = /^(\d{1,2})\s*-\s*(\d{1,2})\s*月$/.exec(s);
+  if (m) return ok(0, +m[2], +m[1]);
+  return null;
+}
+/** Data de uma célula sozinha → AAAA-MM-DD, ou '' (não é data). Na grade, o ano das datas sem ano vem da linha inteira. */
+function efCellDate_(v) {
+  const p = efCellDateParts_(v);
+  if (!p) return '';
+  return p.y ? p.y + '-' + String(p.m).padStart(2, '0') + '-' + String(p.d).padStart(2, '0') : efComAno_(p.m, p.d);
 }
 /** Tipo da coluna pelo subtítulo: program, efetivo, temporario, eficiencia, present (ou ''). */
 function efSubKind_(s) {
@@ -332,10 +344,13 @@ function efSubKind_(s) {
   return '';
 }
 function efRoleOf_(label) { const t = efNorm_(label); return t ? EF_ROLES_.filter(r => r.re.test(t))[0] || null : null; }
+/** Turno pelo nome da linha: T1/T2/T3, "TI" (com a letra I, como na planilha da matriz), TII, TIII, turno 1, 早班/中班/晚班… */
 function efShiftOf_(label) {
   const t = efNorm_(label);
   let m = /(?:^|[^a-z0-9])t\s*([123])(?![0-9])/.exec(t) || /turno\s*([123])/.exec(t) || /^([123])\s*(?:º|o)?\s*(?:turno)?$/.exec(t);
   if (m) return 'T' + m[1];
+  m = /(?:^|[^a-z0-9])t\s*(iii|ii|i|l)(?![a-z0-9])/.exec(t);
+  if (m) return 'T' + (m[1] === 'l' ? 1 : m[1].length);
   if (/早班|manha/.test(t)) return 'T1';
   if (/中班|tarde/.test(t)) return 'T2';
   if (/晚班|夜班|noite|madrugada/.test(t)) return 'T3';
@@ -345,23 +360,33 @@ function efIsTotal_(label) { return /total|合计|总计|汇总|小计/.test(efN
 /**
  * Números de uma grade organizada por datas no cabeçalho (uma ou mais colunas por data; blocos de mês um embaixo do outro):
  * [{date, i (linha), pos (coluna dentro da data), label (nome da linha), sub (subtítulo da coluna), kind, value}].
+ * V4.36.1: datas sem ano ("01-nov") ganham o ano pela linha inteira (virou de dezembro para janeiro = ano seguinte; o último dia
+ * preenchido fica até hoje); uma data repetida ou fora de ordem no cabeçalho não derruba mais a linha toda.
  */
 function efGridRecords_(grid) {
-  const out = [], nRows = grid.length;
-  const datesOf = r => {
-    const row = grid[r] || [], cols = [];
-    for (let c = 0; c < row.length; c++) { const d = row[c] === undefined ? '' : efCellDate_(row[c]); if (d) cols.push({c: c, d: d}); }
-    return cols;
-  };
-  const isDateRow = {};
-  // Linha de datas: 2 ou mais datas em ordem crescente (números grandes numa linha de dados não viram datas).
+  const out = [], nRows = grid.length, hoje = isoToday_(), y0 = Number(hoje.slice(0, 4));
+  const iso = (y, m, d) => y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  const dateRows = {};
   for (let r = 0; r < nRows; r++) {
-    const dc = datesOf(r);
-    if (dc.length >= 2 && dc.every((x, k) => !k || x.d > dc[k - 1].d)) isDateRow[r] = dc;
+    const row = grid[r] || [], dc = [];
+    for (let c = 0; c < row.length; c++) {
+      if (row[c] === undefined || row[c] === null || row[c] === '') continue;
+      const p = efCellDateParts_(row[c]);
+      if (p) dc.push({c: c, y: p.y, m: p.m, d: p.d});
+    }
+    if (dc.length < 2) continue;
+    // Datas sem ano, na ordem das colunas: o mês/dia voltou (dezembro → janeiro) = ano seguinte.
+    let off = 0, prev = -1;
+    dc.forEach(x => { if (x.y) return; const k = x.m * 100 + x.d; if (prev >= 0 && k < prev - 600) off++; prev = k; x.off = off; });
+    // A maioria em ordem crescente (números de uma linha de dados não viram datas; um erro de digitação não derruba a linha).
+    const key = x => (x.y || 3000 + x.off) * 10000 + x.m * 100 + x.d;
+    let inc = 0;
+    for (let k = 1; k < dc.length; k++) if (key(dc[k]) > key(dc[k - 1])) inc++;
+    if (inc >= Math.max(1, Math.ceil((dc.length - 1) * 0.7))) dateRows[r] = dc;
   }
-  Object.keys(isDateRow).map(Number).sort((a, b) => a - b).forEach(r => {
-    const dc = isDateRow[r], c0 = dc[0].c;
-    const spans = dc.map((x, k) => ({d: x.d, from: x.c, to: k + 1 < dc.length ? dc[k + 1].c - 1 : x.c + (k > 0 ? x.c - dc[k - 1].c : 1) - 1}));
+  Object.keys(dateRows).map(Number).sort((a, b) => a - b).forEach(r => {
+    const dc = dateRows[r], c0 = dc[0].c;
+    const spans = dc.map((x, k) => ({k: k, from: x.c, to: k + 1 < dc.length ? dc[k + 1].c - 1 : x.c + (k > 0 ? x.c - dc[k - 1].c : 1) - 1}));
     const textLeft = row => { const t = []; for (let c = 0; c < c0; c++) { const s = efText_(row[c]).trim(); if (s) t.push(s); } return t.join(' '); };
     // Linha logo abaixo das datas: subtítulos (texto) — ou já os números (sem subtítulo).
     const next = grid[r + 1] || [];
@@ -369,9 +394,10 @@ function efGridRecords_(grid) {
     spans.forEach(sp => { for (let c = sp.from; c <= sp.to; c++) { if (efNum_(next[c]) !== null) subNum++; else if (efText_(next[c]).trim()) subTxt++; } });
     const hasSub = subTxt > 0 && subTxt >= subNum;
     const sub = c => hasSub ? efText_(next[c]).trim() : '';
+    const raw = [];
     let seen = false;
     for (let dr = r + (hasSub ? 2 : 1); dr < nRows; dr++) {
-      if (isDateRow[dr]) break;
+      if (dateRows[dr]) break;
       const row = grid[dr] || [], label = textLeft(row);
       let any = false;
       spans.forEach(sp => {
@@ -380,14 +406,38 @@ function efGridRecords_(grid) {
           if (v === null) continue;
           any = true;
           const sb = sub(c);
-          out.push({date: sp.d, i: dr, pos: c - sp.from, label: label, sub: sb, kind: efSubKind_(sb) || efSubKind_(label), value: v});
+          raw.push({k: sp.k, i: dr, pos: c - sp.from, label: label, sub: sb, kind: efSubKind_(sb) || efSubKind_(label), value: v});
         }
       });
       if (any) seen = true;
       else if (!label && seen) break;
     }
+    // Ano das datas sem ano: o maior em que o último dia preenchido (sem contar o programado) fica até hoje (+7 dias);
+    // sem nada preenchido, o maior em que a primeira data fica até daqui a 31 dias.
+    let base = y0;
+    if (dc.some(x => !x.y)) {
+      const cheios = {};
+      raw.forEach(x => { if (x.kind !== 'program' && x.value) cheios[x.k] = 1; });
+      const ks = Object.keys(cheios).map(Number), lim7 = addDaysIso_(hoje, 7), lim31 = addDaysIso_(hoje, 31);
+      const sem = dc.filter(x => !x.y), dateY = (x, Y) => iso(Y + x.off, x.m, x.d);
+      base = 0;
+      for (let Y = y0 + 1; Y >= y0 - 6 && !base; Y--) {
+        const last = ks.filter(k => !dc[k].y).reduce((a, k) => { const d = dateY(dc[k], Y); return d > a ? d : a; }, '');
+        if (last ? last <= lim7 : dateY(sem[0], Y) <= lim31) base = Y;
+      }
+      base = base || y0;
+    }
+    const dates = dc.map(x => (x.y ? iso(x.y, x.m, x.d) : iso(base + x.off, x.m, x.d)));
+    raw.forEach(x => out.push({date: dates[x.k], i: x.i, pos: x.pos, label: x.label, sub: x.sub, kind: x.kind, value: x.value}));
   });
   return out;
+}
+/** Resumo de uma grade para o teste das Configurações (sem nomes: só contagens, datas e os nomes das categorias). */
+function efResumoGrade_(recs) {
+  const datas = {}, rot = {};
+  recs.forEach(x => { datas[x.date] = 1; const r = efRoleOf_(x.label); if (r) rot[r.nome] = 1; });
+  const ds = Object.keys(datas).sort();
+  return {datas: ds.length, primeira: ds[0] || '—', ultima: ds[ds.length - 1] || '—', categorias: Object.keys(rot)};
 }
 /**
  * As duas planilhas lidas agora (ficam na memória por 3 min — o resumo e a lista de vários dias leem as mesmas grades):
@@ -404,10 +454,23 @@ function efPlanilhas_(force) {
   if (L.pres) {
     try {
       const sp = efSpToken_(L.pres), tabs = efTabs_(sp), vis = tabs.filter(t => !t.hidden);
-      const tab = (L.pres.sheet && tabs.filter(t => t.sheet_id === L.pres.sheet)[0]) || vis[0] || tabs[0];
-      if (!tab) throw new Error('a planilha não tem abas');
-      out.pres = efGridRecords_(efGrid_(sp, tab));
-      out.abas.presentesProgramados = tab.title || tab.sheet_id;
+      const pedida = L.pres.sheet ? tabs.filter(t => t.sheet_id === L.pres.sheet) : [];
+      const ordem = pedida.concat(vis.filter(t => pedida.indexOf(t) < 0)).slice(0, 8);
+      if (!ordem.length) throw new Error('a planilha não tem abas');
+      let achou = null, primeira = null;
+      for (let k = 0; k < ordem.length && !achou; k++) {
+        const recs = efGridRecords_(efGrid_(sp, ordem[k])), it = {tab: ordem[k], recs: recs};
+        if (recs.some(x => efRoleOf_(x.label))) achou = it;
+        else if (!primeira) primeira = it;
+      }
+      const usa = achou || primeira;
+      out.pres = achou ? achou.recs : [];
+      out.abas.presentesProgramados = usa.tab.title || usa.tab.sheet_id;
+      out.resumo1 = Object.assign({abasDaPlanilha: tabs.map(t => t.title || t.sheet_id)}, efResumoGrade_(usa.recs));
+      if (!achou) {
+        out.erros.push('Planilha de presentes e programados: não achei as linhas das categorias (Administrativo, Assistente Operacional, ' +
+          'Operacional, Temporário, Diarista) embaixo de uma linha de datas (abas olhadas: ' + ordem.map(t => t.title || t.sheet_id).join(', ') + ')');
+      }
     } catch (e) { out.erros.push('Planilha de presentes e programados: ' + msg(e)); }
   }
   if (L.efic) {
@@ -460,8 +523,10 @@ function efDiaPlanilhas_(date, P) {
     if ((last.efetivo || 0) === s('efetivo') && (last.temporario || 0) === s('temporario')) { total = last; parts = rest; }
   }
   if (!total && parts.length === 1) { total = parts[0]; parts = []; }
-  const semNome = !parts.some(p => efShiftOf_(p.label));
-  parts.forEach((p, k) => { p.shift = efShiftOf_(p.label) || (semNome && parts.length === 3 ? EF_SHIFTS_[k] : ''); });
+  // Turno pelo nome; com 3 linhas, as que não têm nome reconhecido ficam com os turnos que faltam, na ordem.
+  parts.forEach(p => { p.shift = efShiftOf_(p.label); });
+  const usados = parts.map(p => p.shift).filter(Boolean), faltam = EF_SHIFTS_.filter(x => usados.indexOf(x) < 0), sem = parts.filter(p => !p.shift);
+  if (parts.length === 3 && usados.length === new Set(usados).size && sem.length === faltam.length) sem.forEach((p, k) => { p.shift = faltam[k]; });
   const soma = k => (parts.some(p => p[k] !== null) ? parts.reduce((a, p) => a + (p[k] || 0), 0) : null);
   return {date: date, roles: roles, efOficial: efPick ? efPick.value : null,
     efetivos: total ? total.efetivo : soma('efetivo'), temporarios: total ? total.temporario : soma('temporario'),
@@ -639,7 +704,7 @@ function testarPlanilhasFeishu() {
     const rotulos = {};
     P.presenca.forEach(x => { rotulos[x.label || '(sem nome)'] = 1; });
     const filaN = efQueueSheetChanges_(true);
-    return {ok: true, abas: P.abas,
+    return {ok: true, abas: P.abas, planilha1: P.resumo1 || '—',
       categorias: EF_ROLES_.map(r => r.nome + ': ' + (P.pres.some(x => efRoleOf_(x.label) === r) ? '✓' : '✗ não achei a linha')),
       linhasDaPresenca: Object.keys(rotulos).slice(0, 12), diasComNumeros: P.dates.length,
       primeiroDia: P.dates[0] || '—', ultimoDia: P.lastDate || '—', ultimosDias: ultimos,

@@ -1894,6 +1894,9 @@
     if (isNum(efe) || isNum(tmp)) rows.push({icon: 'login', html: esc(ef('Presença: ', '出勤：')) + '<b>' + fmtInt(efe) + '</b> ' + esc(ef('efetivos', '正式工')) + ' + <b>' +
       fmtInt(tmp) + '</b> ' + esc(ef('temporários', '临时工')) + ' = <b>' + fmtInt(pres) + '</b>' + (day ? '' : esc(ef(' (soma dos dias)', '（各日合计）')))});
     rows.push({icon: 'layers', html: '<b>' + fmtInt(proc) + '</b> ' + esc(ef('processados no ' + (day ? 'dia' : 'período') + ' (JMS)', '处理量（JMS）'))});
+    // V4.36.1: presença lida, mas sem os presentes por categoria (planilha de presentes e programados): diz onde conferir.
+    if (isNum(pres) && !isNum(cat)) rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('Sem os presentes por categoria (planilha de presentes e programados) ' +
+      (day ? 'neste dia' : 'no período') + ' — Configurações → Planilhas do Feishu → Testar as planilhas.', '该日期没有各类别出勤（出勤表）— 请在设置中测试表格。'))});
     if (!isNum(eff)) {
       // Diz o motivo: o Feishu não foi lido, ou as planilhas não têm este dia (e até que dia elas vão).
       var ld = String(mt.hcLastDay || ''), ldTxt = /^\d{8}$/.test(ld) ? fmtDate(ld.slice(0, 4) + '-' + ld.slice(4, 6) + '-' + ld.slice(6, 8), true) : '';

@@ -4,6 +4,21 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.36.1 — Eficiência: T1 ("TI") e os presentes por categoria (planilha EFI GRU)
+
+Pedido: "O dash não está pegando os dados de presença das categorias de colaboradores da tabela EFI GRU. E você ignorou o do T1,
+arrumar isso."
+
+- **T1:** na aba "人员出勤 Presença de colaboradores" o turno está escrito **"TI"** (com a letra I). Agora "TI", "TII" e "TIII"
+  valem como T1, T2 e T3; e com 3 linhas de turno, a que não tiver nome reconhecido fica com o turno que falta.
+- **Categorias (planilha de presentes e programados):** a linha das datas não é mais descartada inteira por uma data repetida ou
+  fora de ordem; as datas sem ano ("01-nov") ganham o ano pela linha inteira (de dezembro para janeiro = ano seguinte; o último dia
+  preenchido fica até hoje) e são lidas como aparecem na tela; a aba certa é a que tem as categorias (o link sem ?sheet= pode abrir
+  em outra aba); a planilha pode ter até 4000 colunas (2 por dia).
+- **Testar as planilhas** agora mostra também a "planilha1": as abas da planilha, quantas datas achou, a primeira e a última e as
+  categorias encontradas. O cartão da eficiência avisa quando falta a presença por categoria no dia.
+- Os dias já gravados são relidos sozinhos na conferência de hora em hora (ou na hora, com **Testar as planilhas**).
+
 ## V4.36.0 — Eficiência: os números da matriz, das planilhas do Feishu (com a sua conta)
 
 Pedido: "Quero puxar de dois lugares, um lugar para puxar a quantidade e o segundo o restante dos dados. São tudo do Feishu, porém é
