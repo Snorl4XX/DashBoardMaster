@@ -1848,76 +1848,94 @@
   }
   // ------------------------------------------------------------------ Eficiência do SP GRU (V4.33): cartões próprios
   /**
-   * Eficiência = Qtd processada total (JMS) ÷ colaboradores presentes (Feishu, os 3 turnos). No período: a soma das quantidades
-   * ÷ a soma dos presentes dos dias com os dois números. null = sem conta.
+   * V4.36: a eficiência do dia é a da MATRIZ (planilha "SP GRU 效能监控表"); sem ela, a mesma conta com o volume do JMS
+   * (Qtd processada ÷ presença de efetivos + temporários). No período: a média das eficiências dos dias.
+   * Devolve {v, n (dias), mat (dias da matriz), calc (dias calculados)}.
    */
-  function efValue(from, to) {
-    var a = 0, b = 0, any = false;
+  function efStats(from, to) {
+    var s = 0, n = 0, mat = 0, calc = 0;
     activeRates().forEach(function (r) {
       var m = r.metrics || {};
-      if (r.date < from || r.date > to || !isNum(m.processed) || !(Number(m.present) > 0)) return;
-      a += Number(m.processed); b += Number(m.present); any = true;
+      if (r.date < from || r.date > to || !(Number(m.efficiency) > 0)) return;
+      s += Number(m.efficiency); n++;
+      if (Number(m.efSource) === 1) mat++; else calc++;
     });
-    return any && b ? a / b : null;
+    return {v: n ? s / n : null, n: n, mat: mat, calc: calc};
   }
+  function efValue(from, to) { return efStats(from, to).v; }
   function renderEfficiencyKpis(c, k) {
     var grid = $('#kpiGrid'), day = k.mode === 'day', f = filtersObj(), fk = Object.keys(f), sel = f.shift && f.shift.length ? f.shift : null;
-    var ef = function (pt, zh) { return L({pt: pt, zh: zh}); }, n1 = function (v) { return isNum(v) ? fmtNum(v, 1) : '—'; };
+    var ef = function (pt, zh) { return L({pt: pt, zh: zh}); }, n0 = function (v) { return isNum(v) ? fmtNum(v, Math.abs(v) >= 100 ? 0 : 1) : '—'; };
     var when = day ? fmtDate(state.to, true) : fmtRange(state.from, state.to), prevWhen = day ? fmtDate(k.prevTo, true) : fmtRange(k.prevFrom, k.prevTo);
-    var eff = efValue(state.from, state.to), prevEff = efValue(k.prevFrom, k.prevTo);
+    var st = efStats(state.from, state.to), eff = st.v, prevEff = efValue(k.prevFrom, k.prevTo);
     var proc = metricSum('processed', state.from, state.to), prevProc = metricSum('processed', k.prevFrom, k.prevTo);
-    var pres = metricSum('present', state.from, state.to), prog = metricSum('program', state.from, state.to);
-    var prevPres = metricSum('present', k.prevFrom, k.prevTo);
-    // Com filtro (turno ou função): os colaboradores das linhas do Feishu com o filtro; a eficiência continua a do dia inteiro.
-    var presF = pres, progF = prog;
-    if (fk.length) { presF = listQty('Presentes'); progF = listQty('Programados'); }
-    var rate = isNum(presF) && progF ? presF / progF * 100 : null;
+    var efe = metricSum('presentEfetivos', state.from, state.to), tmp = metricSum('presentTemporarios', state.from, state.to);
+    var pres = metricSum('present', state.from, state.to), prevPres = metricSum('present', k.prevFrom, k.prevTo);
+    var cat = metricSum('presentCat', state.from, state.to), prog = metricSum('program', state.from, state.to);
+    // Com filtro: turno → efetivos + temporários dos turnos escolhidos; função → presentes / programados da categoria (planilha 1).
+    var presF = pres, catF = cat, progF = prog;
+    if (sel) presF = (Number(listQty('Efetivos')) || 0) + (Number(listQty('Temporários')) || 0);
+    else if (fk.length) presF = listQty('Presentes');
+    if (fk.length) { catF = listQty('Presentes'); progF = listQty('Programados'); }
+    var rate = isNum(catF) && progF ? catF / progF * 100 : null;
     var dPct = function (a, b) { return isNum(a) && isNum(b) && b ? qtyDelta(a, b, false) : ''; };
-    var rows = [{icon: 'calendar', html: esc(day ? ef('Dia anterior', '前一日') : ef('Período anterior', '上一期间')) + ': <b class="hx-em">' + n1(prevEff) + '</b> · ' +
+    var mt = (activeRates().filter(function (r) { return r.date === state.to; })[0] || {}).metrics || {};
+    var rows = [{icon: 'calendar', html: esc(day ? ef('Dia anterior', '前一日') : ef('Período anterior', '上一期间')) + ': <b class="hx-em">' + n0(prevEff) + '</b> · ' +
       esc(prevWhen) + (isNum(eff) ? ' ' + dPct(eff, prevEff) : '')}];
-    rows.push({icon: 'layers', html: '<b>' + fmtInt(proc) + '</b> ' + esc(ef('processados', '件处理量')) + ' ÷ <b>' + fmtInt(pres) + '</b> ' + esc(ef('presentes', '实到'))});
-    rows.push({icon: 'info', html: esc(ef('Qtd processada total (JMS) ÷ presentes nos 3 turnos (Feishu)', '总处理量（JMS）÷ 3个班次实到（飞书）'))});
-    if (!isNum(pres) || !(pres > 0)) {
-      // V4.33.1: diz o motivo — o Feishu não foi lido, ou a base não tem linhas deste dia (e até que dia ela vai).
-      var mt = (activeRates().filter(function (r) { return r.date === state.to; })[0] || {}).metrics || {}, ld = String(mt.hcLastDay || '');
-      var ldTxt = /^\d{8}$/.test(ld) ? fmtDate(ld.slice(0, 4) + '-' + ld.slice(4, 6) + '-' + ld.slice(6, 8), true) : '';
-      rows.push({icon: 'warn', cls: 'hx-small', html: esc(Number(mt.feishuFail) === 1
-        ? ef('O painel não conseguiu ler a base do Feishu. Em Configurações, clique em "Salvar e testar a base" para ver o motivo.', '无法读取飞书表格。请在设置中点击“保存并测试表格”查看原因。')
-        : ldTxt ? ef('A base do Feishu não tem linhas ' + (day ? 'deste dia' : 'deste período') + ' (o último dia na base é ' + ldTxt + ').', '飞书表格没有该日期的数据（表格最后日期：' + ldTxt + '）。')
-          : ef('Sem os colaboradores do Feishu ' + (day ? 'neste dia' : 'no período') + ' — confira a Base do Feishu em Configurações.', '该日期没有飞书人数 — 请在设置中检查飞书表格。'))});
+    if (day && Number(mt.efSource) === 1) rows.push({icon: 'check', html: esc(ef('Resultado da matriz (planilha 效能监控表 · Eficiência média diária)', '总部结果（效能监控表 · 日均效率）'))});
+    else if (day && Number(mt.efSource) === 2) {
+      rows.push({icon: 'info', html: esc(ef('Calculada: ', '计算值：')) + '<b>' + fmtInt(proc) + '</b> ' + esc(ef('processados (JMS) ÷ ', '处理量（JMS）÷ ')) + '<b>' + fmtInt(pres) + '</b> ' +
+        esc(ef('presentes', '出勤人数'))});
+      rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('A matriz ainda não preencheu a eficiência deste dia — o painel mostra a mesma conta com o volume do JMS.',
+        '总部尚未填写该日人效 — 暂按JMS处理量计算。'))});
     }
-    else if (!isNum(proc)) rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('Sem a Qtd processada do JMS ' + (day ? 'neste dia' : 'no período') + '.', '该日期没有JMS处理量。'))});
-    if (fk.length) rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('Com filtro: a eficiência é a do dia inteiro (o JMS não separa por turno); os colaboradores seguem o filtro.',
-      '筛选时：人效为全天（JMS不按班次拆分）；人数按筛选显示。'))});
-    var hero = heroCardHtml({icon: 'gauge', value: n1(eff), rows: rows,
-      title: (day ? ef('Eficiência do dia ', '人效 · ') : ef('Eficiência do período · ', '期间人效 · ')) + when,
+    else if (!day && st.n) rows.push({icon: 'info', html: esc(ef('Média de ' + st.n + ' dia(s)', st.n + ' 天平均')) +
+      (st.calc ? ' · ' + esc(ef(st.mat + ' da matriz, ' + st.calc + ' calculado(s) com o volume do JMS', st.mat + ' 天总部结果，' + st.calc + ' 天按JMS计算')) : ' · ' + esc(ef('resultado da matriz', '总部结果')))});
+    if (isNum(efe) || isNum(tmp)) rows.push({icon: 'login', html: esc(ef('Presença: ', '出勤：')) + '<b>' + fmtInt(efe) + '</b> ' + esc(ef('efetivos', '正式工')) + ' + <b>' +
+      fmtInt(tmp) + '</b> ' + esc(ef('temporários', '临时工')) + ' = <b>' + fmtInt(pres) + '</b>' + (day ? '' : esc(ef(' (soma dos dias)', '（各日合计）')))});
+    rows.push({icon: 'layers', html: '<b>' + fmtInt(proc) + '</b> ' + esc(ef('processados no ' + (day ? 'dia' : 'período') + ' (JMS)', '处理量（JMS）'))});
+    if (!isNum(eff)) {
+      // Diz o motivo: o Feishu não foi lido, ou as planilhas não têm este dia (e até que dia elas vão).
+      var ld = String(mt.hcLastDay || ''), ldTxt = /^\d{8}$/.test(ld) ? fmtDate(ld.slice(0, 4) + '-' + ld.slice(4, 6) + '-' + ld.slice(6, 8), true) : '';
+      rows.push({icon: 'warn', cls: 'hx-small', html: esc(Number(mt.feishuFail) === 1
+        ? ef('O painel não conseguiu ler as planilhas do Feishu. Em Configurações → Planilhas do Feishu, clique em "Testar as planilhas" para ver o motivo.', '无法读取飞书表格。请在设置 → 飞书表格中点击“测试表格”查看原因。')
+        : ldTxt ? ef('As planilhas da matriz ainda não têm ' + (day ? 'este dia' : 'este período') + ' (o último dia preenchido é ' + ldTxt + ').', '总部表格尚无该日期数据（最后填写日期：' + ldTxt + '）。')
+          : ef('Sem a eficiência ' + (day ? 'neste dia' : 'no período') + ' — confira as Planilhas do Feishu em Configurações.', '该日期没有人效 — 请在设置中检查飞书表格。'))});
+    }
+    if (fk.length) rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('Com filtro: a eficiência é a do dia inteiro; os colaboradores seguem o filtro.', '筛选时：人效为全天；人数按筛选显示。'))});
+    var hero = heroCardHtml({icon: 'gauge', value: n0(eff), rows: rows,
+      title: (day ? ef('Eficiência do dia · ', '人效 · ') : ef('Eficiência média do período · ', '期间平均人效 · ')) + when,
       pills: '<span class="hero-goal">' + esc(ef('volumes por colaborador', '件/人')) + '</span>' +
-        (isNum(pres) && prog ? '<span class="hero-goal">' + esc(ef('Presença ', '出勤率 ')) + fmtPct(pres / prog * 100, 1) + '</span>' : '')});
+        (isNum(cat) && prog ? '<span class="hero-goal">' + esc(ef('Presença ', '出勤率 ')) + fmtPct(cat / prog * 100, 1) + '</span>' : '')});
     var cards = '';
     cards += kpiCard('qty', day ? ef('Quantidade produzida no dia', '当日处理量') : ef('Quantidade produzida no período', '期间处理量'), fmtInt(proc),
       esc(ef('Qtd processada total (JMS)', '总处理量（JMS）')) + '<br>' + esc(day ? t('mcPrevShort', {n: fmtInt(prevProc)}) : t('mcPrevPeriodShort', {n: fmtInt(prevProc)})) + ' ' + dPct(proc, prevProc));
-    cards += kpiCard('login', (fk.length ? ef('Colaboradores presentes (com filtro)', '实到人数（已筛选）') : ef('Colaboradores presentes', '实到人数')) +
-      (day ? '' : ef(' · soma dos dias', ' · 各日合计')), fmtInt(presF),
-      esc(ef('de ', '应到 ')) + '<b>' + fmtInt(progF) + '</b> ' + esc(ef('programados', '人')) + (isNum(rate) ? ' · <b>' + fmtPct(rate, 1) + '</b> ' + esc(ef('de presença', '出勤')) : '') +
+    var presSub = sel ? fmtInt(listQty('Efetivos')) + ' ' + esc(ef('efetivos', '正式工')) + ' + ' + fmtInt(listQty('Temporários')) + ' ' + esc(ef('temporários', '临时工'))
+      : fk.length ? esc(ef('categoria filtrada (planilha de presentes)', '筛选类别（出勤表）'))
+        : fmtInt(efe) + ' ' + esc(ef('efetivos', '正式工')) + ' + ' + fmtInt(tmp) + ' ' + esc(ef('temporários', '临时工'));
+    cards += kpiCard('login', (fk.length ? ef('Colaboradores presentes (com filtro)', '出勤人数（已筛选）') : ef('Colaboradores presentes', '出勤人数')) +
+      (day ? '' : ef(' · soma dos dias', ' · 各日合计')), fmtInt(presF), presSub +
       (fk.length ? '' : '<br>' + esc(day ? t('mcPrevShort', {n: fmtInt(prevPres)}) : t('mcPrevPeriodShort', {n: fmtInt(prevPres)})) + ' ' + dPct(pres, prevPres)));
-    cards += kpiCard('history', day ? ef('Eficiência do dia anterior', '前一日人效') : ef('Eficiência do período anterior', '上一期间人效'), n1(prevEff),
+    cards += kpiCard('history', day ? ef('Eficiência do dia anterior', '前一日人效') : ef('Eficiência média do período anterior', '上一期间平均人效'), n0(prevEff),
       esc(prevWhen) + ' · ' + esc(ef('volumes por colaborador', '件/人')));
     cards += kpiCard('history', day ? ef('Produção do dia anterior', '前一日处理量') : ef('Produção do período anterior', '上一期间处理量'), fmtInt(prevProc),
       esc(prevWhen) + ' · ' + esc(ef('Qtd processada total', '总处理量')));
-    // Um cartão por turno: presentes (de programados), a parte do turno e o dia anterior.
+    // Um cartão por turno: presença de efetivos + temporários (aba de presença da matriz), a parte do turno e o dia anterior.
     var totP = 0;
     ['T1', 'T2', 'T3'].forEach(function (s) { totP += Number(metricSum('present' + s, state.from, state.to)) || 0; });
-    cards += ['T1', 'T2', 'T3'].map(function (s) {
-      var v = metricSum('present' + s, state.from, state.to), g = metricSum('program' + s, state.from, state.to), pv = metricSum('present' + s, k.prevFrom, k.prevTo);
+    if (totP) cards += ['T1', 'T2', 'T3'].map(function (s) {
+      var v = metricSum('present' + s, state.from, state.to), pv = metricSum('present' + s, k.prevFrom, k.prevTo);
+      var e1 = metricSum('presentEf' + s, state.from, state.to), t1 = metricSum('presentTp' + s, state.from, state.to);
       var share = isNum(v) && totP ? v / totP * 100 : null, on = sel && sel.indexOf(s) >= 0;
       return '<article class="kpi shift-kpi' + (sel && !on ? ' faded' : '') + (on ? ' selected' : '') + '"><div class="kpi-label"><i style="background:' + SHIFT_COLORS[s] + '"></i>' +
-        s + ' · ' + SHIFT_HOURS[s] + '</div><div class="kpi-value">' + fmtInt(v) + '<small class="sc-unit"> ' + esc(ef('presentes', '实到')) + '</small></div>' +
-        '<div class="kpi-sub">' + esc(ef('de ', '应到 ')) + '<b>' + fmtInt(g) + '</b> ' + esc(ef('programados', '人')) + (isNum(share) ? ' · <b>' + fmtPct(share, 1) + '</b> ' + esc(t('participation')) : '') +
+        s + ' · ' + SHIFT_HOURS[s] + '</div><div class="kpi-value">' + fmtInt(v) + '<small class="sc-unit"> ' + esc(ef('presentes', '出勤')) + '</small></div>' +
+        '<div class="kpi-sub"><b>' + fmtInt(e1) + '</b> ' + esc(ef('efetivos', '正式工')) + ' + <b>' + fmtInt(t1) + '</b> ' + esc(ef('temporários', '临时工')) +
+        (isNum(share) ? ' · <b>' + fmtPct(share, 1) + '</b> ' + esc(t('participation')) : '') +
         '<br>' + esc(day ? t('mcPrevShort', {n: fmtInt(pv)}) : t('mcPrevPeriodShort', {n: fmtInt(pv)})) + ' ' + dPct(v, pv) + '</div>' +
         '<div class="kpi-foot"><div class="bar"><i data-w="' + (isNum(share) ? share : 0) + '" style="background:' + SHIFT_COLORS[s] + '"></i></div></div></article>';
     }).join('');
-    cards += kpiCard('check', ef('% de presença', '出勤率'), isNum(rate) ? fmtPct(rate, 1) : '—', esc(ef('presentes ÷ programados', '实到 ÷ 应到')) +
-      (isNum(presF) ? '<br>' + fmtInt(presF) + ' ÷ ' + fmtInt(progF) : ''));
+    cards += kpiCard('check', ef('% de presença', '出勤率'), isNum(rate) ? fmtPct(rate, 1) : '—', esc(ef('presentes ÷ programados (planilha de presentes e programados)', '出勤人数 ÷ 应出勤人数')) +
+      (isNum(catF) ? '<br>' + fmtInt(catF) + ' ÷ ' + fmtInt(progF) : ''));
     grid.innerHTML = hero + cards;
     fillGridGaps(grid);
     requestAnimationFrame(function () { $$('.bar i', grid).forEach(function (i) { i.style.width = Math.max(0, Math.min(100, Number(i.getAttribute('data-w')))) + '%'; }); });
@@ -2474,7 +2492,7 @@
       else { requestDailySeries(fkey, dd.detail, from, to, fo); note = t(state.dailyF && state.dailyF.error ? 'dailyFError' : 'dailyFLoading'); }
     }
     var days = Core.dateRange(from, to);
-    return {key: def.key, metric: mk, type: def.type || 'bar', bad: !!def.bad, title: title, note: note, filtered: filtered, digits: def.digits || 0,
+    return {key: def.key, metric: mk, type: def.type || 'bar', bad: !!def.bad, title: title, sub: def.sub, note: note, filtered: filtered, digits: def.digits || 0,
       days: days, values: days.map(function (d) { return byDate[d] === undefined ? null : byDate[d]; })};
   }
   function requestDailySeries(fkey, col, from, to, fo) {
@@ -2497,7 +2515,9 @@
     var fmtInt = spec.digits ? function (v) { return isNum(v) ? fmtNum(v, spec.digits) : '—'; } : fmtIntG;
     var compactInt = spec.digits ? fmtInt : compactIntG;
     $('h3', card).innerHTML = esc(L(spec.title)) + (Lo(spec.title) ? ' <span class="rp-zh">/ ' + esc(Lo(spec.title)) + '</span>' : '');
-    $('small', card).textContent = (spec.type === 'line' ? t('metricLineSub', {date: fmtDate(state.to, true)}) :
+    // V4.36: subtítulo próprio do gráfico (spec.sub; ex.: Eficiência = resultado da matriz, não o JMS).
+    $('small', card).textContent = spec.sub ? L(spec.sub).replace('{n}', days.length).replace('{date}', fmtDate(state.to, true)) + (spec.note ? ' · ' + spec.note : '') :
+      (spec.type === 'line' ? t('metricLineSub', {date: fmtDate(state.to, true)}) :
       t(spec.filtered ? 'metricSubFiltered' : 'metricSub', {n: days.length, date: fmtDate(state.to, true)})) +
       (spec.note ? ' · ' + spec.note : '');
     var view = state.chartViews[key] || (window.Chart ? 'chart' : 'table'), tools = $('.chart-tools', card);

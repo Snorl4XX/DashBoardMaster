@@ -4,6 +4,34 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.36.0 — Eficiência: os números da matriz, das planilhas do Feishu (com a sua conta)
+
+Pedido: "Quero puxar de dois lugares, um lugar para puxar a quantidade e o segundo o restante dos dados. São tudo do Feishu, porém é
+criado pela matriz e só consigo adicionar informação e visualizar. Também quero que salve os dados quando você puxar. Lá é atualizado
+manualmente." e "não tenho permissão para adicionar App".
+
+- **Eficiência do dia = a da matriz** (planilha "SP GRU 效能监控表", aba "日均效率 Eficiência média diária"). Dia que a matriz ainda
+  não preencheu: a mesma conta dela com o volume do JMS (Qtd processada total ÷ presença de efetivos + temporários) — o cartão diz
+  "Calculada" e avisa. No período: a média das eficiências dos dias.
+- **Duas planilhas** (Configurações → **Planilhas do Feishu (Eficiência)**):
+  1. **Presentes e programados** por categoria (Administrativo, Assistente Operacional, Operacional, Temporário, Diarista) → % de
+     presença, gráfico e tabela por categoria.
+  2. **SP GRU 效能监控表** → a eficiência da matriz e a aba "人员出勤 Presença de colaboradores" (efetivos e temporários por turno e
+     o total) → presença, cartões por turno, gráfico e tabela por turno.
+- **Sem adicionar aplicativo nas planilhas:** o painel lê com a **sua conta do Feishu** (login oficial do Feishu: botão **Entrar com
+  o Feishu**, uma vez). O que você consegue abrir, o painel consegue ler — **somente leitura**. O acesso é renovado sozinho; o
+  painel guarda só o acesso da conta (nunca a senha) e ele não aparece na tela. **Desconectar** apaga o acesso.
+- As planilhas são lidas **pelas datas do cabeçalho e pelos nomes das linhas e colunas** (não pela posição): blocos de mês um
+  embaixo do outro, datas como "01-nov", "2026/11/14" ou data do Feishu, colunas mescladas — tudo é entendido.
+- **Dados gravados:** cada dia lido fica salvo no painel. Se a matriz apagar ou mudar o dia depois, o painel continua com o que leu
+  (e relê o que mudou). **De hora em hora** o painel confere as planilhas e põe na fila os dias que mudaram ou ganharam números.
+- Para conferir: Configurações → **Testar as planilhas** (abas, categorias, linhas da presença e os últimos dias) ou Executar função
+  → **diagnosticarEficiencia** (um dia: volume do JMS, números das planilhas e a eficiência que vale).
+
+**No aplicativo do Feishu (uma vez):** permissões de **usuário** \`sheets:spreadsheet:readonly\`, \`wiki:wiki:readonly\` e
+\`offline_access\`; em **Segurança → URL de redirecionamento**, o endereço que aparece no cartão (ex.:
+\`http://localhost:3000/config/feishu/retorno\`; no painel separado da Eficiência, porta 4000); publique uma versão.
+
 ## V4.35.4 — Premiação (Sorter): sem os 4 cartões do resumo
 
 Pedido (print dos cartões do topo): "tirar esses cartões também". Saíram os 4 cartões do resumo (Balanças que alimentaram, Balanças

@@ -160,17 +160,29 @@ em hora, cole o webhook dele. Se ligar a "Assinatura" no bot, cole o segredo tam
 <div class="actions"><button id="saveFeishuTurno">Salvar e mandar um teste</button><button class="ghost" id="offFeishuTurno">Desligar o bot do fechamento</button></div>
 <pre class="out" id="feishuTurnoOut"></pre></section>`;
 
-// V4.33 (Eficiência do SP GRU): a base Headcount do Feishu — aplicativo da empresa (App ID e App Secret) e o link da base.
-const FEISHU_BASE_CARD = `<section class="card"><h2>Base do Feishu (colaboradores)</h2>
-<p class="hint">A eficiência usa os colaboradores presentes da base Headcount do Feishu (somente leitura). Precisa de um aplicativo
-da empresa no Feishu com as permissões <b>bitable:app:readonly</b> e <b>wiki:wiki:readonly</b>, e com acesso à base (na base: … →
-Mais → Adicionar aplicativo / 添加文档应用). Cole o App ID, o App Secret e o link da base com a tabela aberta (o link do wiki serve,
-com ?table=…). O App Secret salvo não aparece de novo nesta tela.</p>
+// V4.33 (Eficiência do SP GRU). V4.36 (pedido "Quero puxar de dois lugares … São tudo do Feishu, porém é criado pela matriz e
+// só consigo adicionar informação e visualizar" / "não tenho permissão para adicionar App"): duas planilhas da matriz, lidas com
+// a CONTA do Feishu de quem configura (login oficial do Feishu). O aplicativo (App ID e App Secret) serve só para o login.
+const FEISHU_BASE_CARD = `<section class="card"><h2>Planilhas do Feishu (Eficiência)</h2>
+<p class="hint">A Eficiência lê duas planilhas da matriz no Feishu, <b>somente leitura</b>, com a <b>sua conta do Feishu</b> — o que
+você consegue abrir, o painel consegue ler (não precisa adicionar aplicativo nas planilhas). 1) Cole o App ID e o App Secret de um
+aplicativo do Feishu (servem só para o login). 2) Cole os dois links. 3) Clique em <b>Entrar com o Feishu</b> e autorize. O painel
+guarda cada dia lido, renova o acesso sozinho e confere as planilhas de hora em hora. O App Secret e o acesso da conta não aparecem
+nesta tela.</p>
 <p class="small" id="feishuBaseState"></p>
 <label for="fbApp">App ID</label><input id="fbApp" autocomplete="off" spellcheck="false" placeholder="cli_…">
 <label for="fbSecret" style="margin-top:10px">App Secret</label><input id="fbSecret" type="password" autocomplete="new-password">
-<label for="fbLink" style="margin-top:10px">Link da base (com a tabela)</label><input id="fbLink" autocomplete="off" spellcheck="false" placeholder="https://….feishu.cn/wiki/…?table=tbl…&amp;view=vew…">
-<div class="actions"><button id="saveFeishuBase">Salvar e testar a base</button></div>
+<label for="fbPres" style="margin-top:10px">Link 1 — presentes e programados por categoria</label>
+<input id="fbPres" autocomplete="off" spellcheck="false" placeholder="https://….feishu.cn/wiki/…">
+<label for="fbEfic" style="margin-top:10px">Link 2 — SP GRU 效能监控表 (eficiência e presença de efetivos e temporários)</label>
+<input id="fbEfic" autocomplete="off" spellcheck="false" placeholder="https://….feishu.cn/wiki/…?sheet=…">
+<div class="actions"><button id="saveFeishuBase">Salvar</button><button id="fbLogin">Entrar com o Feishu</button>
+<button class="ghost" id="fbTest">Testar as planilhas</button><button class="ghost" id="fbOff">Desconectar</button></div>
+<details class="small" style="margin-top:10px"><summary>O que liberar no aplicativo do Feishu (uma vez)</summary>
+<ol><li>open.feishu.cn → o aplicativo → <b>Permissões e escopos</b> (权限管理) → permissões de <b>usuário</b> (用户身份):
+<code>sheets:spreadsheet:readonly</code>, <code>wiki:wiki:readonly</code> e <code>offline_access</code>.</li>
+<li><b>Segurança</b> (安全设置) → <b>URL de redirecionamento</b> (重定向URL): <code id="fbRedirect"></code></li>
+<li>Crie e publique uma versão do aplicativo (版本管理与发布). Depois: <b>Entrar com o Feishu</b>.</li></ol></details>
 <pre class="out" id="feishuBaseOut"></pre></section>`;
 
 function configPage(opts) {
@@ -268,12 +280,17 @@ O valor salvo não aparece de novo nesta tela.</p>
       }
       if ($('#feishuBaseState')) {
         var fbHas = function (k) { return s.props.some(function (p) { return p.k === k; }); };
-        $('#feishuBaseState').textContent = fbHas('FEISHU_APP_ID') && fbHas('FEISHU_APP_SECRET') && fbHas('FEISHU_BASE_LINK') ?
-          'Base configurada (App ID, App Secret e link salvos).' : 'Falta: ' + [['FEISHU_APP_ID', 'App ID'], ['FEISHU_APP_SECRET', 'App Secret'], ['FEISHU_BASE_LINK', 'link da base']]
-            .filter(function (x) { return !fbHas(x[0]); }).map(function (x) { return x[1]; }).join(', ') + '.';
-        var fl = s.props.filter(function (p) { return p.k === 'FEISHU_BASE_LINK'; })[0], fa = s.props.filter(function (p) { return p.k === 'FEISHU_APP_ID'; })[0];
-        if (fl && !$('#fbLink').value) $('#fbLink').value = fl.v;
-        if (fa && !$('#fbApp').value) $('#fbApp').value = fa.v;
+        var fbVal = function (k) { return (s.props.filter(function (p) { return p.k === k; })[0] || {}).v || ''; };
+        var falta = [['FEISHU_APP_ID', 'App ID'], ['FEISHU_APP_SECRET', 'App Secret']].filter(function (x) { return !fbHas(x[0]); }).map(function (x) { return x[1]; });
+        if (!fbHas('FEISHU_LINK_PRESENCA') && !fbHas('FEISHU_LINK_EFICIENCIA')) falta.push('os links das planilhas');
+        var quando = function (iso) { var d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d.toLocaleString('pt-BR', {dateStyle: 'short', timeStyle: 'short'}) : ''; };
+        var conta = fbHas('FEISHU_USER_SEGREDO') ? 'Conta do Feishu conectada' + (fbVal('FEISHU_USER_RENOVADO') ? ' (acesso renovado em ' + quando(fbVal('FEISHU_USER_RENOVADO')) + ')' : '') + '.'
+          : fbHas('FEISHU_USER_TOKEN') ? 'Conta do Feishu conectada sem renovação automática: falta a permissão offline_access no aplicativo (o acesso vence em ~2 h).'
+            : 'Conta do Feishu não conectada: clique em "Entrar com o Feishu".';
+        $('#feishuBaseState').textContent = (falta.length ? 'Falta: ' + falta.join(', ') + '. ' : '') + conta + (fbVal('FEISHU_USER_ERRO') ? ' ⚠ ' + fbVal('FEISHU_USER_ERRO') : '');
+        [['fbPres', 'FEISHU_LINK_PRESENCA'], ['fbEfic', 'FEISHU_LINK_EFICIENCIA'], ['fbApp', 'FEISHU_APP_ID']].forEach(function (x) {
+          if (fbVal(x[1]) && !$('#' + x[0]).value) $('#' + x[0]).value = fbVal(x[1]);
+        });
       }
       if ($('#feishuTurnoState')) {
         var ftOn = s.props.some(function (p) { return p.k === 'FEISHU_TURNO_WEBHOOK'; });
@@ -336,21 +353,49 @@ O valor salvo não aparece de novo nesta tela.</p>
       .then(function () { show(out, 'Bot do grupo ' + g + ' desligado (webhook e segredo apagados).'); load(); })
       .catch(function (e) { show(out, e.message, true); });
   };
-  if ($('#saveFeishuBase')) $('#saveFeishuBase').onclick = function () {
-    var app = $('#fbApp').value.trim(), sec = $('#fbSecret').value.trim(), link = $('#fbLink').value.trim(), out = $('#feishuBaseOut'), btn = this;
+  // V4.36: planilhas do Feishu da Eficiência (login com a conta do Feishu).
+  var fbRetorno = location.origin + location.pathname.replace(/[/]+$/, '') + '/feishu/retorno';
+  if ($('#fbRedirect')) $('#fbRedirect').textContent = fbRetorno;
+  var fbLinkOk = function (l) { return /^https:[/][/][^/ ]+[.](feishu[.]cn|larksuite[.]com)[/](wiki|sheets)[/][A-Za-z0-9]+/.test(l); };
+  var fbSalvar = function (out) {
+    var app = $('#fbApp').value.trim(), sec = $('#fbSecret').value.trim(), pres = $('#fbPres').value.trim(), efic = $('#fbEfic').value.trim();
     var has = function (k) { return (window.__props || []).some(function (p) { return p.k === k; }); };
-    if (!app && !has('FEISHU_APP_ID')) { show(out, 'Cole o App ID do aplicativo do Feishu.', true); return; }
-    if (!sec && !has('FEISHU_APP_SECRET')) { show(out, 'Cole o App Secret do aplicativo do Feishu.', true); return; }
-    if (!link && !has('FEISHU_BASE_LINK')) { show(out, 'Cole o link da base (com ?table=…).', true); return; }
-    if (link && !/^https:[/][/][^/ ]+[.](feishu[.]cn|larksuite[.]com)[/](wiki|base)[/][A-Za-z0-9]+[^ ]*[?&]table=tbl[A-Za-z0-9]+/.test(link)) {
-      show(out, 'Link inválido. Abra a tabela Headcount no Feishu e copie o link do navegador (…/wiki/… ou …/base/…, com ?table=tbl…).', true); return;
-    }
-    busy(btn, true);
+    if (!app && !has('FEISHU_APP_ID')) return Promise.reject(new Error('Cole o App ID do aplicativo do Feishu.'));
+    if (!sec && !has('FEISHU_APP_SECRET')) return Promise.reject(new Error('Cole o App Secret do aplicativo do Feishu.'));
+    if (!pres && !efic && !has('FEISHU_LINK_PRESENCA') && !has('FEISHU_LINK_EFICIENCIA')) return Promise.reject(new Error('Cole os links das duas planilhas.'));
+    var bad = [pres, efic].filter(function (l) { return l && !fbLinkOk(l); });
+    if (bad.length) return Promise.reject(new Error('Link inválido. Abra a planilha no Feishu e copie o link do navegador (…/wiki/… ou …/sheets/…).'));
     var put = function (k, v) { return v ? api('propriedade', {k: k, v: v}) : Promise.resolve(null); };
-    put('FEISHU_APP_ID', app).then(function () { return put('FEISHU_APP_SECRET', sec); }).then(function () { return put('FEISHU_BASE_LINK', link); })
-      .then(function () { $('#fbSecret').value = ''; return runFn('testarBaseFeishu', [], out, btn); })
+    return put('FEISHU_APP_ID', app).then(function () { return put('FEISHU_APP_SECRET', sec); })
+      .then(function () { return put('FEISHU_LINK_PRESENCA', pres); }).then(function () { return put('FEISHU_LINK_EFICIENCIA', efic); })
+      .then(function () { $('#fbSecret').value = ''; });
+  };
+  if ($('#saveFeishuBase')) $('#saveFeishuBase').onclick = function () {
+    var out = $('#feishuBaseOut'), btn = this;
+    busy(btn, true);
+    fbSalvar(out).then(function () { show(out, 'Salvo. Agora clique em "Entrar com o Feishu" (uma vez) e depois em "Testar as planilhas".'); load(); })
+      .catch(function (e) { show(out, e.message, true); }).then(function () { busy(btn, false); });
+  };
+  if ($('#fbLogin')) $('#fbLogin').onclick = function () {
+    var out = $('#feishuBaseOut'), btn = this;
+    busy(btn, true);
+    fbSalvar(out).then(function () { location.href = 'config/feishu/entrar'; })
       .catch(function (e) { show(out, e.message, true); busy(btn, false); });
   };
+  if ($('#fbTest')) $('#fbTest').onclick = function () { runFn('testarPlanilhasFeishu', [], $('#feishuBaseOut'), this); };
+  if ($('#fbOff')) $('#fbOff').onclick = function () {
+    if (!confirm('Desconectar a conta do Feishu? O painel para de ler as planilhas até você entrar de novo (os dias já lidos continuam).')) return;
+    runFn('desconectarFeishu', [], $('#feishuBaseOut'), this);
+  };
+  // Volta do login do Feishu: mostra o resultado e já testa as planilhas.
+  if ($('#fbTest') && /[?&]feishu=ok/.test(location.search)) {
+    var faltam = (/[?&]faltam=([^&]*)/.exec(location.search) || [])[1];
+    history.replaceState(null, '', location.pathname);
+    $('#feishuBaseState').scrollIntoView({block: 'center'});
+    if (faltam) show($('#feishuBaseOut'), 'Conta conectada, mas o aplicativo não tem a(s) permissão(ões): ' + decodeURIComponent(faltam) +
+      '. Libere no aplicativo do Feishu, publique uma versão e entre de novo.', true);
+    else runFn('testarPlanilhasFeishu', [], $('#feishuBaseOut'), $('#fbTest'));
+  }
   if ($('#saveFeishuTurno')) $('#saveFeishuTurno').onclick = function () {
     var hook = $('#ftHook').value.trim(), seg = $('#ftSeg').value.trim(), out = $('#feishuTurnoOut'), btn = this, turno = $('#ftTurno').value;
     var has = (window.__props || []).some(function (p) { return p.k === 'FEISHU_TURNO_WEBHOOK'; });
@@ -417,4 +462,15 @@ O valor salvo não aparece de novo nesta tela.</p>
 </script></body></html>`;
 }
 
-module.exports = {loginPage, deniedPage, configPage, tokenPage, esc};
+/** V4.36: erro no login do Feishu (volta para as Configurações). */
+function feishuErroPage(o) {
+  return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>Login do Feishu</title><style>body{font:15px/1.5 system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;color:#1f2329;background:#f6f7f9}' +
+    '.card{background:#fff;border:1px solid #e3e5e8;border-radius:12px;padding:20px}h1{font-size:20px;margin:0 0 10px}code{background:#f0f1f3;padding:2px 5px;border-radius:5px;word-break:break-all}' +
+    'a{color:#c8102e;font-weight:700}@media (prefers-color-scheme:dark){body{background:#111;color:#e8e8e8}.card{background:#1b1c1f;border-color:#2c2d31}code{background:#2a2b2f}}</style></head>' +
+    '<body><div class="card"><h1>Não foi possível entrar com o Feishu</h1><p>' + esc(o.erro || 'Erro desconhecido.') + '</p>' +
+    (o.retorno ? '<p>Endereço de retorno usado (tem que estar cadastrado no aplicativo, em Segurança → URL de redirecionamento): <code>' + esc(o.retorno) + '</code></p>' : '') +
+    '<p><a href="' + esc(o.voltar || '../../config') + '">Voltar para as Configurações</a></p></div></body></html>';
+}
+
+module.exports = {loginPage, deniedPage, configPage, tokenPage, feishuErroPage, esc};

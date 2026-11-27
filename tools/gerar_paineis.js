@@ -239,7 +239,7 @@ Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" 
 `};
 // V4.33 (pedido "Desenvolver um dashboard que mostre a eficiência do SP GRU", pacote separado): Eficiência do SP GRU — outra pasta,
 // porta 4000 (3000 principal … 3900 PA SHEIN). As 3 portas do Funnel já têm dono (443 principal, 8443 Sorter, 10000 PA SHEIN): o
-// link fica num caminho do link principal (https://NOME.xxxx.ts.net/eficiencia). feishuBase: Configurações pede a base do Feishu.
+// link fica num caminho do link principal (https://NOME.xxxx.ts.net/eficiencia). feishuBase: Configurações pede as planilhas do Feishu.
 const EFICIENCIA = 'efficiency';
 const EFICIENCIA_PACOTE = {so: EFICIENCIA, fora: '', nome: 'Eficiência SP GRU'};
 const EFICIENCIA_NODE = {folder: 'dashmaster-eficiencia', zip: 'EFICIENCIA_NODE', pacote: EFICIENCIA_PACOTE, readmeName: 'LEIA_EFICIENCIA.md',
@@ -252,13 +252,17 @@ const EFICIENCIA_NODE = {folder: 'dashmaster-eficiencia', zip: 'EFICIENCIA_NODE'
 Painel **separado** do principal, no mesmo padrão dele (cartões, turnos, gráficos, filtros, tabelas, PDF/Excel, PT ⇄ 中文), com a
 **eficiência do SP GRU**:
 
-> **Eficiência = Qtd processada total ÷ colaboradores presentes**
+> **Eficiência = a da matriz** (planilha "SP GRU 效能监控表", aba "日均效率 Eficiência média diária"). Dia que a matriz ainda não
+> preencheu: a mesma conta dela com o volume do JMS — **Qtd processada total ÷ presença (efetivos + temporários)**.
 
+- **Planilhas da matriz no Feishu** (somente leitura, com a **sua conta do Feishu**: o que você consegue abrir, o painel consegue
+  ler — não precisa adicionar aplicativo nas planilhas):
+  1. **Presentes e programados** por categoria (Administrativo, Assistente Operacional, Operacional, Temporário, Diarista).
+  2. **SP GRU 效能监控表:** a eficiência de cada dia e a presença de **efetivos** e **temporários** por turno.
 - **Qtd processada total:** JMS › Cabine de dados › **Análise de entrada e saída de transbordo novo** (Regional SPE, SC SP GRU,
   Pedido principal), coluna "Qtd processada total".
-- **Colaboradores:** a base **Headcount** do Feishu (uma linha por turno). Entram **todos os presentes** (Administrativo,
-  Assistente Operacional, Operacional, Temporário e Diarista) dos 3 turnos do dia. Os programados aparecem nos cartões e nas
-  tabelas. Duas linhas do mesmo dia e turno: vale a enviada por último.
+- Cada dia lido fica **gravado** no painel. De hora em hora o painel confere as planilhas e relê os dias que mudaram (a matriz
+  preenche à mão, às vezes dias depois).
 
 | | Painel principal | Eficiência |
 |---|---|---|
@@ -267,19 +271,21 @@ Painel **separado** do principal, no mesmo padrão dele (cartões, turnos, gráf
 | Link do Tailscale | https://NOME.xxxx.ts.net | **https://NOME.xxxx.ts.net/eficiencia** |
 
 ## O que aparece
-- **Filtros:** data (no topo), turno e função.
-- **Cartões:** eficiência do dia (cartão vermelho), quantidade produzida, colaboradores presentes (de programados), eficiência e
-  produção do dia anterior, um cartão por turno (T1 06h–14h, T2 14h–22h, T3 22h–06h) e % de presença.
-- **Gráficos:** eficiência diária, produção diária, colaboradores por turno e por função.
-- **Tabelas:** colaboradores por turno e por função (presentes e programados) e os dados gerais de cada dia (todos os números).
+- **Filtros:** data (no topo), turno e categoria.
+- **Cartões:** eficiência do dia (cartão vermelho: da matriz ou calculada), quantidade produzida, presença (efetivos + temporários),
+  eficiência e produção do dia anterior, um cartão por turno (T1 06h–14h, T2 14h–22h, T3 22h–06h) e % de presença.
+- **Gráficos:** eficiência diária da matriz, produção diária, presença por turno e presentes por categoria.
+- **Tabelas:** presença por turno (efetivos e temporários), colaboradores por categoria (presentes e programados) e os dados gerais
+  de cada dia (todos os números).
 
 ## Instalar (uma vez)
 1. Extraia este ZIP em **C:\\** (fica a pasta C:\\dashmaster-eficiencia). Não extraia por cima do C:\\dashmaster.
 2. Abra C:\\dashmaster-eficiencia\\node e dê dois cliques em **iniciar.bat**. Deixe a janela preta aberta.
 3. Neste computador, abra **http://localhost:4000/config**:
    - **AuthToken do JMS:** o mesmo do painel principal.
-   - **Base do Feishu (colaboradores):** App ID, App Secret e o link da base Headcount (com a tabela aberta). Clique em **Salvar e
-     testar a base**: o teste mostra as colunas que achou e os últimos dias com os presentes de cada turno.
+   - **Planilhas do Feishu (Eficiência):** App ID e App Secret do aplicativo (só para o login), os **dois links** das planilhas e
+     **Entrar com o Feishu** (login oficial do Feishu, uma vez). Depois, **Testar as planilhas**: mostra as abas, as categorias e
+     os últimos dias que achou.
    - **Histórico:** escolha a Data inicial e clique em **Baixar histórico**.
 4. Para abrir sozinho com o Windows: dois cliques em **iniciar-com-windows.bat** (cria o atalho "JT DashMaster Eficiencia").
 5. **Link do Tailscale:** dois cliques em **link-publico.bat**. O link fica no mesmo endereço do principal, com /eficiencia no fim:
@@ -288,11 +294,15 @@ Painel **separado** do principal, no mesmo padrão dele (cartões, turnos, gráf
 
 Para tirar só este link do ar: \`"C:\\Program Files\\Tailscale\\tailscale.exe" funnel --https=443 --set-path=/eficiencia off\`
 
-## Aplicativo do Feishu (uma vez, quem administra o Feishu)
-1. https://open.feishu.cn/app → **Criar aplicativo personalizado** (ou use um que a base já tenha, como o do Controle de Pátio).
-2. **Permissões:** \`bitable:app:readonly\` (ler bases) e \`wiki:wiki:readonly\` (a base está dentro de um wiki). Publique a versão.
-3. **Credenciais:** copie o **App ID** e o **App Secret**.
-4. Na base Headcount: **…** (canto de cima) → **Mais** → **Adicionar aplicativo** (添加文档应用) → escolha o aplicativo (leitura).
+## Aplicativo do Feishu (uma vez)
+O aplicativo serve só para o **login** com a sua conta; ele **não** precisa ser adicionado às planilhas da matriz.
+1. https://open.feishu.cn/app → o aplicativo (ou **Criar aplicativo personalizado**). **Credenciais:** copie o **App ID** e o
+   **App Secret**.
+2. **Permissões e escopos** (权限管理) → permissões de **usuário** (用户身份): \`sheets:spreadsheet:readonly\`,
+   \`wiki:wiki:readonly\` e \`offline_access\` (renova o acesso sozinho).
+3. **Segurança** (安全设置) → **URL de redirecionamento** (重定向URL): \`http://localhost:4000/config/feishu/retorno\` (o endereço
+   exato aparece no cartão das Configurações; se abrir as Configurações por outro endereço, cadastre esse também).
+4. **Publique uma versão** (版本管理与发布). Se a empresa pedir aprovação do administrador, ela precisa ser aprovada.
 
 ## Ajustes (Configurações → Propriedades)
 | Propriedade | Para que serve |
@@ -323,14 +333,16 @@ Este pacote é o **painel principal**. Ele mostra:
 - Falta de Bipagem no Recebimento e na Expedição;
 - Expedição SC → SC e SC → DC;
 - Avaria e Sem Movimentação;
-- Eficiência SP GRU (V4.35): Qtd processada (JMS) ÷ colaboradores presentes (base do Feishu);
+- Eficiência SP GRU (V4.35; V4.36: a da matriz, das planilhas do Feishu);
 - Resultados.
 
 **V4.35: o Deslacre (linha secundária e linha troncal) saiu do código** (pedido). Os dias já baixados dele ficam guardados, mas não
 são mais consultados nem mostrados.
 
-**Eficiência SP GRU:** precisa da base do Feishu. Na versão Node.js: Configurações → **Base do Feishu (colaboradores)** — App ID, App
-Secret e o link da base. No Apps Script: Propriedades do script \`FEISHU_APP_ID\`, \`FEISHU_APP_SECRET\` e \`FEISHU_BASE_LINK\`.
+**Eficiência SP GRU:** lê duas planilhas da matriz no Feishu com a sua conta. Na versão Node.js: Configurações → **Planilhas do
+Feishu (Eficiência)** — App ID, App Secret, os dois links e **Entrar com o Feishu**. No aplicativo do Feishu: permissões de usuário
+\`sheets:spreadsheet:readonly\`, \`wiki:wiki:readonly\` e \`offline_access\`, e a URL de redirecionamento
+\`http://localhost:3000/config/feishu/retorno\` (o endereço exato aparece no cartão).
 
 **V4.21: a Criação de Lotes (sacas) saiu daqui.** Ela tem pacotes próprios: \`JT_DASHMASTER_..._LOTES.zip\` (Apps Script) e \`JT_DASHMASTER_..._LOTES_NODE.zip\` (Node.js, link próprio no Tailscale). V4.26: ela fica fora do principal mesmo com \`PAINEIS_FORA\` preenchida.
 

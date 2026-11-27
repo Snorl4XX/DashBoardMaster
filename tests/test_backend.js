@@ -2542,10 +2542,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   if (prevEnvP === undefined) delete process.env.DASHMASTER_CONFIG; else process.env.DASHMASTER_CONFIG = prevEnvP;
   const pagE = require(pathM.join(rootE, 'node', 'lib', 'pages.js')).configPage({version: 'x', dataDir: out, semJms: false, feishuBase: confE.feishuBase});
   check(keysOf(ctxEf).join() === 'efficiency' && ctxEf.getAppBootstrap().app.panel === 'Eficiência SP GRU' && confE.porta === 4000 && confE.portaLink === 443 &&
-    confE.caminho === '/eficiencia' && confE.feishuBase === true && /Base do Feishu \(colaboradores\)/.test(pagE) && /AuthToken do JMS/.test(pagE) &&
+    confE.caminho === '/eficiencia' && confE.feishuBase === true && /Planilhas do Feishu \(Eficiência\)/.test(pagE) && /Entrar com o Feishu/.test(pagE) && /AuthToken do JMS/.test(pagE) &&
     fsM.existsSync(pathM.join(rootE, 'Eficiencia.gs')) && fsM.existsSync(pathM.join(rootE, 'LEIA_EFICIENCIA.md')) && !fsM.existsSync(pathM.join(rootE, 'node', 'config.json')) &&
     usadas.concat([PA_SHEIN_NODE.padrao.porta]).indexOf(EFICIENCIA_NODE.padrao.porta) < 0 && keysOf(ctxNode()).indexOf('efficiency') >= 0 && full.indexOf('efficiency') < 0,
-    'pacote Node.js da Eficiência: só o painel dela, porta 4000 livre, link /eficiencia na 443, base do Feishu em Configurações; V4.35: também no principal',
+    'pacote Node.js da Eficiência: só o painel dela, porta 4000 livre, link /eficiencia na 443, planilhas do Feishu em Configurações; V4.35: também no principal',
     {keys: keysOf(ctxEf), porta: confE.porta, caminho: confE.caminho});
   fsM.rmSync(out, {recursive: true, force: true});
 }
@@ -5069,117 +5069,210 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     'V4.30 PA SHEIN: gráficos de turnos, intervalo de horário, clientes e segmentos (SC de chegada) e a tabela com todas as colunas', cat.charts.map(c => c.key));
 }
 
-// ---------- V4.33: Eficiência do SP GRU — Qtd processada total (JMS) ÷ colaboradores presentes (Feishu) (dados FICTÍCIOS) ----------
+// ---------- V4.33: Eficiência do SP GRU. V4.36: planilhas da matriz no Feishu, lidas com a conta do usuário (dados FICTÍCIOS) ----------
 {
   const vmE = require('vm');
-  const DE = '2026-11-24', DE0 = '2026-11-23';
-  const ROLES = ['Administrativo', 'Assistente Operacional', 'Operacional', 'Temporário', 'Diarista'];
-  // Presentes / programados por turno e função (números fictícios); processado = transhipmentNum.
-  const HC = {
-    [DE0]: {T1: [[3, 3], [5, 6], [40, 44], [12, 15], [8, 9]], T2: [[2, 3], [4, 5], [35, 40], [10, 12], [6, 8]], T3: [[1, 1], [3, 3], [30, 33], [8, 10], [5, 6]]},
-    [DE]: {T1: [[3, 3], [6, 6], [42, 44], [14, 15], [9, 9]], T2: [[3, 3], [5, 5], [38, 40], [11, 12], [7, 8]], T3: [[1, 1], [2, 3], [28, 33], [9, 10], [4, 6]]}
+  const c0 = createContext({props: Object.assign({}, baseProps), jms: fakeJms({}), quiet: true});
+  const HOJE = c0.isoToday_(), dAdd = (d, n) => c0.addDaysIso_(d, n);
+  const DE0 = dAdd(HOJE, -4), DE = dAdd(HOJE, -3), DE1 = dAdd(HOJE, -2), DV = dAdd(HOJE, -45);
+  const MES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const txtDia = d => d.slice(8, 10) + '-' + MES[Number(d.slice(5, 7)) - 1];
+  const serial = d => Math.round((Date.parse(d + 'T00:00:00Z') - Date.UTC(1899, 11, 30)) / 86400000);
+  const PROC = {[DE0]: 400000, [DE]: 420000, [DE1]: 390000};
+  // Planilha 1: presentes / programados por categoria (fictícios). Ordem: Adm, Assist, Oper, Temp, Diar.
+  const CATS = ['职能人员 Qtd. Colab. Administrativo', '操作助理 Assistente Operacional', '操作员工 Operacional', '月结工总数 Temporário Total', '日结工总数 Diarista Total'];
+  const P1 = {[DE0]: [[30, 32], [40, 42], [500, 520], [300, 320], [150, 160]], [DE]: [[31, 32], [41, 42], [505, 520], [310, 320], [155, 160]],
+    [DE1]: [[29, 32], [39, 42], [490, 520], [290, 320], [140, 160]], [dAdd(HOJE, 5)]: [[null, 32], [null, 42], [null, 520], [null, 320], [null, 160]]};
+  // Aba de presença: 3 turnos sem nome e a linha do total (a soma), efetivos / temporários.
+  const PR = {[DE0]: [[118, 290], [108, 195], [148, 175]], [DE]: [[120, 300], [110, 200], [150, 180]], [DE1]: [[115, 280], [105, 190], [140, 170]]};
+  let EFF = {[DV]: 401, [DE0]: 398, [DE]: 412, [DE1]: ''};
+  const grids = {};
+  const montar = () => {
+    // Planilha 1: datas em texto "dd-mmm" (mescladas em 2 colunas) a partir da coluna 191 (atravessa o bloco de 100 colunas).
+    const g1 = Array.from({length: 8}, () => []);
+    g1[0][0] = 'GRU';
+    Object.keys(P1).sort().forEach((d, k) => {
+      const c = 190 + 2 * k;
+      g1[0][c] = txtDia(d); g1[1][c] = '出勤人数 Colaboradores Presentes'; g1[1][c + 1] = '应出勤人数 Efetivo Programado';
+      P1[d].forEach((v, j) => { g1[2 + j][0] = CATS[j]; if (v[0] !== null) g1[2 + j][c] = v[0]; g1[2 + j][c + 1] = v[1]; });
+    });
+    // Aba da eficiência: um bloco por mês (o antigo em cima), datas "aaaa/mm/dd", subtítulo e a linha dos números.
+    const ge = Array.from({length: 8}, () => []);
+    ge[0][0] = 'SP GRU'; ge[0][2] = DV.replace(/-/g, '/'); ge[0][3] = dAdd(DV, 1).replace(/-/g, '/');
+    ge[1][2] = ge[1][3] = '操作效率 Eficiência Operacional'; ge[2][2] = EFF[DV]; ge[2][3] = 399;
+    ge[4][0] = 'SP GRU';
+    [DE0, DE, DE1].forEach((d, k) => { ge[4][2 + k] = d.replace(/-/g, '/'); ge[5][2 + k] = '操作效率 Eficiência Operacional'; ge[6][2 + k] = EFF[d]; });
+    // Aba de presença: datas como número de série (mescladas em 2 colunas); 3 linhas de turno sem nome e o total.
+    const gp = Array.from({length: 7}, () => []);
+    gp[0][0] = 'SP GRU';
+    Object.keys(PR).sort().forEach((d, k) => {
+      const c = 2 + 2 * k;
+      gp[0][c] = serial(d); gp[1][c] = '正式工出勤 Presença de colaboradores efetivos'; gp[1][c + 1] = '临时工出勤 Presença de colaboradores temporários';
+      if (!PR[d]) return;
+      PR[d].forEach((v, j) => { gp[2 + j][c] = v[0]; gp[2 + j][c + 1] = v[1]; });
+      gp[5][c] = PR[d].reduce((a, v) => a + v[0], 0); gp[5][c + 1] = PR[d].reduce((a, v) => a + v[1], 0);
+    });
+    grids.p1 = g1; grids['44cb2d'] = ge; grids.pr1 = gp;
   };
-  const DE1 = '2026-11-25', PROC = {[DE0]: 12345, [DE]: 15678, [DE1]: 9999};
-  const items = [];
-  let rid = 0;
-  const sp = (d, hm) => Date.parse(d + 'T' + hm + ':00-03:00');
-  Object.keys(HC).forEach(d => ['T1', 'T2', 'T3'].forEach((s, k) => {
-    // Data sem hora no fuso da base (meia-noite na China) no T1 de DE: tem que continuar sendo o dia DE.
-    const data = d === DE && s === 'T1' ? Date.parse(d + 'T00:00:00+08:00') : sp(d, ['09:30', '15:30', '22:30'][k]);
-    const f = {'Data 日期': data, 'Turno 班次': s, 'Enviado em 提交时间': sp(d, ['13:05', '21:06', '23:07'][k]), 'Enviado por 提交人': [{name: 'Pessoa Teste'}]};
-    let tp = 0, tg = 0;
-    ROLES.forEach((r, j) => { f[r + ' - Presentes 实到'] = HC[d][s][j][0]; f[r + ' - Programados 应到'] = {type: 2, value: [HC[d][s][j][1]]}; tp += HC[d][s][j][0]; tg += HC[d][s][j][1]; });
-    f['Total de Presença'] = tp; f['Total Programado 应到总计'] = tg;
-    items.push({record_id: 'rec' + (++rid), fields: f});
-  }));
-  // Correção: o T2 de DE enviado antes com números errados (a linha certa foi enviada depois e vale).
-  const dup = {'Data 日期': sp(DE, '15:00'), 'Turno 班次': 'T2', 'Enviado em 提交时间': sp(DE, '14:00')};
-  ROLES.forEach(r => { dup[r + ' - Presentes 实到'] = 99; dup[r + ' - Programados 应到'] = 99; });
-  items.unshift({record_id: 'recDup', fields: dup});
-  const tot = (d, i) => ['T1', 'T2', 'T3'].reduce((a, s) => a + HC[d][s].reduce((b, x) => b + x[i], 0), 0);
+  montar();
+  const TABS = {shtPRES: [{sheet_id: 'p1', title: 'GRU', grid_properties: {row_count: 8, column_count: 250}}],
+    shtEFIC: [{sheet_id: 'zCbCFd', title: '日操作量 Volume operacional diário', grid_properties: {row_count: 5, column_count: 10}},
+      {sheet_id: 'old9', title: '效率 antigo', hidden: true, grid_properties: {row_count: 5, column_count: 10}},
+      {sheet_id: '44cb2d', title: '日均效率 Eficiência média diária', grid_properties: {row_count: 8, column_count: 40}},
+      {sheet_id: 'pr1', title: '人员出勤 Presença de colaboradores', grid_properties: {row_count: 7, column_count: 40}}]};
+  const colIdx = s => s.split('').reduce((a, ch) => a * 26 + ch.charCodeAt(0) - 64, 0);
   const feishu = [], seenE = [];
-  let secret = 'segredo-teste';
+  let secret = 'segredo-teste', tokN = 1, validos = {}, refreshOk = {};
   const feishuFake = (url, req) => {
     const body = req && req.payload ? JSON.parse(req.payload) : {}, auth = ((req && req.headers) || {}).Authorization || '';
-    feishu.push({url, auth});
-    let r;
-    if (/\/auth\/v3\/tenant_access_token\/internal$/.test(url)) r = body.app_id === 'cli_teste' && body.app_secret === secret ? {code: 0, tenant_access_token: 't-falso', expire: 7200} : {code: 10014, msg: 'app secret invalid'};
-    else if (auth !== 'Bearer t-falso') r = {code: 99991663, msg: 'token invalid'};
-    else if (/\/wiki\/v2\/spaces\/get_node\?token=WIKITESTE/.test(url)) r = {code: 0, data: {node: {obj_type: 'bitable', obj_token: 'bascnTESTE'}}};
-    else if (/\/bitable\/v1\/apps\/bascnTESTE\/tables\/tblTESTE\/records\?page_size=500/.test(url)) {
-      const start = Number((/page_token=(\d+)/.exec(url) || [])[1] || 0), page = items.slice(start, start + 4);
-      r = {code: 0, data: {items: page, has_more: start + 4 < items.length, page_token: String(start + 4), total: items.length}};
-    } else r = {code: 1254040, msg: 'NOTEXIST'};
-    return {getResponseCode: () => 200, getContentText: () => JSON.stringify(r)};
+    feishu.push({url, auth, body});
+    let r, http = 200;
+    if (/\/open-apis\/authen\/v2\/oauth\/token$/.test(url)) {
+      const novo = () => { tokN++; validos['u-' + tokN] = 1; refreshOk['r-' + tokN] = 1; return {code: 0, access_token: 'u-' + tokN, expires_in: 7200, refresh_token: 'r-' + tokN,
+        refresh_token_expires_in: 604800, scope: 'sheets:spreadsheet:readonly wiki:wiki:readonly offline_access', token_type: 'Bearer'}; };
+      if (body.client_id !== 'cli_teste' || body.client_secret !== secret) { http = 400; r = {code: 20002, error: 'invalid_client', error_description: 'client secret invalid'}; }
+      else if (body.grant_type === 'authorization_code') r = body.code === 'codigo-teste' && body.redirect_uri === 'http://localhost:4000/config/feishu/retorno' ? novo() : (http = 400, {code: 20003, error: 'invalid_grant', error_description: 'authorization code expired'});
+      else if (body.grant_type === 'refresh_token' && refreshOk[body.refresh_token]) { delete refreshOk[body.refresh_token]; r = novo(); }
+      else { http = 400; r = {code: 20037, error: 'invalid_grant', error_description: 'refresh token expired'}; }
+    }
+    else if (!validos[auth.replace(/^Bearer /, '')]) r = {code: 99991677, msg: 'user access token expired'};
+    else if (/\/wiki\/v2\/spaces\/get_node\?token=WIKIPRES&obj_type=wiki$/.test(url)) r = {code: 0, data: {node: {obj_type: 'sheet', obj_token: 'shtPRES', title: 'Presença'}}};
+    else if (/\/wiki\/v2\/spaces\/get_node\?token=WIKIEFIC&obj_type=wiki$/.test(url)) r = {code: 0, data: {node: {obj_type: 'sheet', obj_token: 'shtEFIC', title: 'SP GRU 效能监控表'}}};
+    else if (/\/wiki\/v2\/spaces\/get_node\?token=WIKIDOC/.test(url)) r = {code: 0, data: {node: {obj_type: 'docx', obj_token: 'doxTESTE'}}};
+    else if (/\/sheets\/v3\/spreadsheets\/(shtPRES|shtEFIC)\/sheets\/query$/.test(url)) r = {code: 0, data: {sheets: TABS[/(shtPRES|shtEFIC)/.exec(url)[1]]}};
+    else if (/\/sheets\/v2\/spreadsheets\/(shtPRES|shtEFIC)\/values\//.test(url)) {
+      const rng = decodeURIComponent(/\/values\/([^?]+)/.exec(url)[1]), m = /^(\w+)!([A-Z]+)1:([A-Z]+)(\d+)$/.exec(rng);
+      const g = grids[m[1]] || [], a = colIdx(m[2]) - 1, b = colIdx(m[3]) - 1, rows = Number(m[4]);
+      const values = g.slice(0, rows).map(row => { const out = []; for (let c = a; c <= b; c++) out.push(row[c] === undefined ? null : row[c]); return out; });
+      r = /valueRenderOption=UnformattedValue/.test(url) ? {code: 0, data: {revision: 1, spreadsheetToken: 'x', valueRange: {range: rng, values}}} : {code: 9999, msg: 'sem opção'};
+    } else r = {code: 1310214, msg: 'not found'};
+    return {getResponseCode: () => http, getContentText: () => JSON.stringify(r)};
   };
   const intercept = (route, headers, body) => {
     if (route !== 'transit_out_ports_list') return null;
     seenE.push({headers, body});
     const day = String(body.startTime).slice(0, 10), recs = PROC[day] ? [{scantime: day, agentName: 'SPE', agentCode: '370000', inputsite: 'SP GRU',
-      scansitecode: '30001', operateArrivalNum: 20000, operateSendNum: 18000, operateNum: 38000, inboundNum: 12, cityNum: 34, outboundNum: 56, transferNum: 7,
+      scansitecode: '30001', operateArrivalNum: 200000, operateSendNum: 180000, operateNum: 380000, inboundNum: 12, cityNum: 34, outboundNum: 56, transferNum: 7,
       otherNum: PROC[day] - 109, transhipmentNum: PROC[day], PAGEHELPER_ROW_ID: 1, ROW_ID: 1}] : [];
     return [200, {code: 1, msg: '请求成功', data: {records: recs, total: recs.length, size: 1, current: 1, pages: 1, other: null, heads: null}, fail: false, succ: true}];
   };
-  const LINK = 'https://empresa-teste.feishu.cn/wiki/WIKITESTE?table=tblTESTE&view=vewTESTE';
+  const LINKS = {FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_LINK_PRESENCA: 'https://empresa-teste.feishu.cn/wiki/WIKIPRES',
+    FEISHU_LINK_EFICIENCIA: 'https://empresa-teste.feishu.cn/wiki/WIKIEFIC?sheet=zCbCFd'};
   const ctxE = props => {
     const base = fakeJms({}, {intercept});
     const c = createContext({props: Object.assign({}, baseProps, {PAINEIS: 'efficiency', DATA_START_DATE: DE0}, props || {}),
-      jms: (url, req, state) => (url.indexOf('https://open.feishu.cn/') === 0 ? feishuFake(url, req) : base(url, req, state)), quiet: true});
+      jms: (url, req, state) => (/^https:\/\/(open|accounts)\.feishu\.cn\//.test(url) ? feishuFake(url, req) : base(url, req, state)), quiet: true});
     c.setupProject();
     return c;
   };
-  const cE = ctxE({FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_BASE_LINK: LINK});
-  const tb = cE.testarBaseFeishu(), tbJs = JSON.stringify(tb);
-  check(tb.ok && tb.diasNaBase === 2 && /T1 \d+ · T2 \d+ · T3 \d+/.test(tb.ultimosDias[0]) && /linha\(s\) repetida\(s\): vale a enviada por último/.test(tb.ultimosDias[0]) &&
-    tb.colunas.data === 'Data 日期' && tb.colunas.turno === 'Turno 班次' && tb.colunas.funcoes.every(x => /presentes ✓ \/ programados ✓/.test(x)) && !tb.aviso &&
-    tbJs.indexOf('segredo-teste') < 0 && tbJs.indexOf('Pessoa Teste') < 0 && cE.__state.props.FEISHU_BASE_APP === 'WIKITESTE|bascnTESTE',
-    'V4.33 Eficiência: teste da base do Feishu (wiki → base, colunas, últimos dias, linha repetida), sem o App Secret nem nomes', tb);
+  const RET = 'http://localhost:4000/config/feishu/retorno';
+  const cE = ctxE(LINKS);
+  // Datas do cabeçalho: série, aaaa/mm/dd, dd/mm/aaaa, "01-nov" (ano pelo dia de hoje) e 11月14日; o resto não é data.
+  check(cE.efCellDate_(serial(DE)) === DE && cE.efCellDate_('2026/11/14') === '2026-11-14' && cE.efCellDate_('14/11/2026') === '2026-11-14' &&
+    cE.efCellDate_(txtDia(DE)) === DE && cE.efCellDate_(Number(DE.slice(5, 7)) + '月' + Number(DE.slice(8, 10)) + '日') === DE &&
+    cE.efCellDate_('01-' + MES[(Number(HOJE.slice(5, 7)) + 5) % 12]) < HOJE && ['GRU', 547, '', null, 'Total', '32/13/2026'].every(v => cE.efCellDate_(v) === ''),
+    'V4.36 Eficiência: datas do cabeçalho das planilhas (número de série, aaaa/mm/dd, dd/mm/aaaa, "01-nov", 11月14日)');
+  const t0 = cE.testarPlanilhasFeishu();
+  const login = cE.efLoginUrl_(RET, 'estado-1');
+  check(t0.ok === false && /Conta do Feishu não conectada/.test(t0.erro) &&
+    login.indexOf('https://accounts.feishu.cn/open-apis/authen/v1/authorize?client_id=cli_teste&response_type=code&redirect_uri=' + encodeURIComponent(RET)) === 0 &&
+    login.indexOf('scope=' + encodeURIComponent('sheets:spreadsheet:readonly wiki:wiki:readonly offline_access')) > 0 && /state=estado-1$/.test(login) && login.indexOf('segredo') < 0,
+    'V4.36 Eficiência: sem a conta conectada o teste pede o login; o endereço do login oficial do Feishu leva as permissões de leitura e o state', {t0, login});
+  const con = cE.efConectar_('codigo-teste', RET);
+  let errCod = '';
+  try { cE.efConectar_('codigo-velho', RET); } catch (e) { errCod = e.message; }
+  check(con.ok && con.renovavel && con.faltamPermissoes.length === 0 && cE.__state.props.FEISHU_USER_TOKEN === 'u-2' && cE.__state.props.FEISHU_USER_SEGREDO === 'r-2' &&
+    /login demorou ou já foi usado/.test(errCod), 'V4.36 Eficiência: volta do login troca o código pelo acesso da conta (renovável); código vencido: dica', {con, errCod});
+  const tb = cE.testarPlanilhasFeishu(), tbJs = JSON.stringify(tb);
+  const linhaDE = (tb.ultimosDias || []).filter(x => x.indexOf(DE + ':') === 0)[0] || '';
+  check(tb.ok && tb.abas.presentesProgramados === 'GRU' && tb.abas.eficiencia === '日均效率 Eficiência média diária' && tb.abas.presenca === '人员出勤 Presença de colaboradores' &&
+    tb.categorias.every(x => /✓$/.test(x)) && /eficiência da matriz 412 · presença 380 efetivos \+ 680 temporários \(T1 120\+300 · T2 110\+200 · T3 150\+180\)/.test(linhaDE) &&
+    /planilha 1: 1042 presentes de 1074 programados/.test(linhaDE) && tb.ultimoDia === DE1 && !tb.aviso && /dia\(s\) na fila/.test(tb.diasNaFila) &&
+    ['segredo-teste', 'u-2', 'r-2'].every(x => tbJs.indexOf(x) < 0) && JSON.parse(cE.__state.props.FEISHU_NODES).WIKIPRES === 'shtPRES',
+    'V4.36 Eficiência: teste das planilhas (wiki → planilha, abas pelo nome, categorias, turnos sem nome + total, últimos dias), sem tokens', tb);
   cE.queueHistory(DE0, DE1, true);
   runAll(cE);
   const keysE = vmE.runInContext('Object.keys(INDICATORS)', cE);
-  const rE = cE.getRateDay_('efficiency', DE), mE = (rE || {}).metrics || {}, m0 = (cE.getRateDay_('efficiency', DE0) || {}).metrics || {};
-  const pres = tot(DE, 0), prog = tot(DE, 1);
-  check(keysE.join() === 'efficiency' && mE.processed === PROC[DE] && mE.present === pres && mE.program === prog &&
-    mE.efficiency === Math.round(PROC[DE] / pres * 100) / 100 && m0.efficiency === Math.round(PROC[DE0] / tot(DE0, 0) * 100) / 100 &&
-    mE.presentT1 === HC[DE].T1.reduce((a, x) => a + x[0], 0) && mE.presentT2 === HC[DE].T2.reduce((a, x) => a + x[0], 0) &&
-    mE.presentOper === HC[DE].T1[2][0] + HC[DE].T2[2][0] + HC[DE].T3[2][0] && mE.programDiar === HC[DE].T1[4][1] + HC[DE].T2[4][1] + HC[DE].T3[4][1] &&
-    mE.presenceRate === Math.round(pres / prog * 10000) / 100 && mE.headcountRows === 3 && mE.outbound === 56,
-    'V4.33 Eficiência: Qtd processada total ÷ todos os presentes dos 3 turnos (a linha repetida do turno vale a enviada por último; data sem hora no fuso da base)',
-    {mE, esperado: {pres, prog, ef: PROC[DE] / pres}});
-  const b0 = (seenE[0] || {}).body || {};
-  check(b0.agentCode === '370000' && b0.scansitecode === '30001' && b0.mergeWaybill === 1 && b0.countryId === '1' && /^\d{4}-\d{2}-\d{2} 00:00:00$/.test(b0.startTime) &&
-    /23:59:59$/.test(b0.endTime) && seenE.every(x => x.headers.Routename === 'TransitPortNew'),
-    'V4.33 Eficiência: pedido do JMS como na captura (SPE 370000, SP GRU 30001, Pedido principal, dia inteiro) e o cabeçalho da tela', b0);
+  const mt = d => (cE.getRateDay_('efficiency', d) || {}).metrics || {};
+  const mE = mt(DE), m1 = mt(DE1), m0 = mt(DE0);
+  const cat = d => P1[d].reduce((a, v) => a + v[0], 0), prog = d => P1[d].reduce((a, v) => a + v[1], 0);
+  check(keysE.join() === 'efficiency' && mE.efficiency === 412 && mE.efSource === 1 && mE.efOficial === 412 && mE.processed === PROC[DE] &&
+    mE.presentEfetivos === 380 && mE.presentTemporarios === 680 && mE.present === 1060 && mE.presentT1 === 420 && mE.presentEfT2 === 110 && mE.presentTpT3 === 180 &&
+    mE.presentAdm === 31 && mE.programDiar === 160 && mE.presentCat === cat(DE) && mE.program === prog(DE) &&
+    mE.presenceRate === Math.round(cat(DE) / prog(DE) * 10000) / 100 && mE.efCalc === Math.round(PROC[DE] / 1060 * 100) / 100 && mE.hcLastDay === Number(DE1.replace(/-/g, '')) &&
+    m0.efficiency === 398 && m1.efSource === 2 && m1.efOficial === null && m1.efficiency === Math.round(PROC[DE1] / (360 + 640) * 100) / 100 && m1.present === 1000,
+    'V4.36 Eficiência: a da matriz quando ela tem o dia; sem ela, Qtd processada (JMS) ÷ efetivos + temporários; presença por turno e por categoria',
+    {mE, m1});
   const dsE = cE.JTCore_.decodeDataset(cE.getDashboardData('efficiency', {from: DE, to: DE}).dataset);
   const sumE = (col, f) => dsE.filter(r => r.column === col && (!f || f(r))).reduce((a, r) => a + Number(r.qty), 0);
   const catE = cE.getPublicCatalog_().filter(x => x.key === 'efficiency')[0];
-  check(sumE('Presentes') === pres && sumE('Programados') === prog && sumE('Presentes', r => r.shift === 'T3') === HC[DE].T3.reduce((a, x) => a + x[0], 0) &&
-    sumE('Presentes', r => r.role === 'Temporário') === HC[DE].T1[3][0] + HC[DE].T2[3][0] + HC[DE].T3[3][0] && catE.efficiency === true &&
+  check(sumE('Efetivos') === 380 && sumE('Temporários') === 680 && sumE('Efetivos', r => r.shift === 'T3') === 150 && sumE('Presentes') === cat(DE) &&
+    sumE('Programados') === prog(DE) && sumE('Presentes', r => r.role === 'Temporário') === 310 && catE.efficiency === true &&
     catE.filters.map(x => x.key).join() === 'shift,role' && catE.charts.map(x => x.key).join() === 'mEff,mQty,shiftPresent,rolePresent' &&
-    catE.crossTables.map(x => x.rowDim).join() === 'shift,role',
-    'V4.33 Eficiência: lista do dia por turno × função × presentes/programados; filtros turno e função; gráficos diários, turnos e funções; tabelas',
+    catE.crossTables.map(x => x.rowDim + ':' + x.cols.join('+')).join() === 'shift:Efetivos+Temporários,role:Presentes+Programados',
+    'V4.36 Eficiência: lista do dia (efetivos/temporários por turno; presentes/programados por categoria); filtros, gráficos e tabelas',
     {n: dsE.length, charts: catE.charts.map(x => x.key)});
-  const dg = cE.diagnosticarEficiencia(DE);
-  check(dg.eficiencia === mE.efficiency && dg.feishu.linhas.length === 3 && /repetida/.test(dg.feishu.repetidas) && dg.jms.processed === PROC[DE],
-    'V4.33 Eficiência: diagnosticarEficiencia mostra o JMS, os colaboradores e a conta do dia', dg);
-  // Sem a base do Feishu: o número do JMS entra (sem a eficiência) e o LOG avisa; App Secret errado: dica.
+  const b0 = (seenE[0] || {}).body || {};
+  check(b0.agentCode === '370000' && b0.scansitecode === '30001' && b0.mergeWaybill === 1 && b0.countryId === '1' && /^\d{4}-\d{2}-\d{2} 00:00:00$/.test(b0.startTime) &&
+    /23:59:59$/.test(b0.endTime) && seenE.every(x => x.headers.Routename === 'TransitPortNew') &&
+    feishu.filter(f => /\/values\//.test(f.url)).some(f => /p1!CW1:GR8\?/.test(decodeURIComponent(f.url))),
+    'V4.33 Eficiência: pedido do JMS como na captura (SPE 370000, SP GRU 30001, Pedido principal, dia inteiro); planilha larga lida em blocos de 100 colunas', b0);
+  // Acesso vencido: renova sozinho (uma vez; o token de renovação troca).
+  cE.setProp_('FEISHU_USER_EXPIRA', '0');
+  const nOauth = () => feishu.filter(f => /oauth\/token$/.test(f.url)).length, n1 = nOauth();
+  const tk = cE.efUserToken_(), tk2 = cE.efUserToken_();
+  check(tk === 'u-3' && tk2 === 'u-3' && nOauth() === n1 + 1 && cE.__state.props.FEISHU_USER_SEGREDO === 'r-3' && !cE.__state.props.FEISHU_USER_ERRO,
+    'V4.36 Eficiência: acesso da conta vencido é renovado sozinho, uma vez (o token de renovação troca)', {tk, n: nOauth() - n1});
+  // A matriz muda as planilhas à mão: a conferência de hora em hora põe na fila só os dias que mudaram (e espera 50 min para conferir de novo).
+  EFF[DE] = 430; PR[DE][0] = [125, 300]; EFF[DE1] = 405; montar();
+  cE.setProp_('EF_CONFERENCIA_AT', '0');
+  const hr = cE.syncHourly(), nQ = cE.efQueueSheetChanges_();
+  runAll(cE);
+  const mE2 = mt(DE), m12 = mt(DE1);
+  check(hr.ok && nQ === 0 && mE2.efficiency === 430 && mE2.presentEfetivos === 385 && mE2.presentEfT1 === 125 && m12.efficiency === 405 && m12.efSource === 1 &&
+    cE.allTabRows_('LOG').some(r => /Eficiência: 2 dia\(s\) com números novos ou mudados/.test(String(r[4]))),
+    'V4.36 Eficiência: de hora em hora os dias mudados nas planilhas voltam para a fila (a matriz preenche depois); 50 min até a próxima conferência', {mE2, m12, nQ});
+  // A matriz apaga um dia antigo da planilha: o painel continua com o que leu.
+  EFF[DE0] = ''; delete PR[DE0]; P1[DE0] = P1[DE0].map(v => [null, v[1]]); montar();
+  cE.enqueueJobs_([['SUMMARY', 'efficiency', DE0, 0]], {reset: true});
+  runAll(cE);
+  const m02 = mt(DE0);
+  check(m02.efficiency === 398 && m02.efSource === 1 && m02.presentEfetivos === 374 && m02.presentAdm === 30 && m02.processed === PROC[DE0],
+    'V4.36 Eficiência: dia lido fica gravado — apagado depois na planilha, o painel continua com os números lidos', m02);
+  const dg = cE.diagnosticarEficiencia(DE), st = cE.statusPlanilhasFeishu(), stJs = JSON.stringify(st);
+  check(dg.planilhas.eficienciaDaMatriz === 430 && /430 \(da matriz\)/.test(String(dg.eficiencia)) && dg.jms.processed === PROC[DE] && dg.gravado.origem === 'matriz' &&
+    st.conectado && st.renovavel && st.app && st.linkPresenca && st.linkEficiencia && ['u-3', 'r-3', 'segredo-teste'].every(x => stJs.indexOf(x) < 0),
+    'V4.36 Eficiência: diagnosticarEficiencia e a situação da conexão (sem tokens)', {dg, st});
+  // Token de renovação recusado: aviso para entrar de novo; os dias gravados continuam e o dia avisa que o Feishu não foi lido.
+  cE.setProp_('FEISHU_USER_SEGREDO', 'r-invalido'); cE.setProp_('FEISHU_USER_EXPIRA', '0');
+  const tV = cE.testarPlanilhasFeishu();
+  cE.setProp_('EF_AVISO_FEISHU', '');
+  cE.enqueueJobs_([['SUMMARY', 'efficiency', DE, 0]], {reset: true});
+  runAll(cE);
+  const mV = mt(DE);
+  check(tV.ok === false && /venceu — entre de novo/.test(tV.erro) && /Entrar com o Feishu/.test(tV.erro) && /venceu/.test(cE.__state.props.FEISHU_USER_ERRO || '') &&
+    mV.efficiency === 430 && mV.feishuFail === 1 && mV.presentEfetivos === 385 && cE.allTabRows_('LOG').some(r => /Eficiência: planilhas do Feishu não lidas/.test(String(r[4]))),
+    'V4.36 Eficiência: acesso recusado pede para entrar de novo; o painel continua com os dias gravados', {tV, mV});
+  const off = cE.desconectarFeishu(), st2 = cE.statusPlanilhasFeishu();
+  check(off.ok && !st2.conectado && !cE.__state.props.FEISHU_USER_TOKEN && !cE.__state.props.FEISHU_USER_SEGREDO && cE.efQueueSheetChanges_(true) === 0,
+    'V4.36 Eficiência: desconectar apaga o acesso da conta (e a conferência de hora em hora para)', st2);
+  // Sem nada configurado: o volume do JMS entra (sem a eficiência) e o LOG avisa; App Secret errado; link que não é de planilha.
   const cN = ctxE({});
   cN.queueHistory(DE, DE, true);
   runAll(cN);
-  const mN = (cN.getRateDay_('efficiency', DE) || {}).metrics || {}, tN = cN.testarBaseFeishu();
+  const mN = (cN.getRateDay_('efficiency', DE) || {}).metrics || {}, tN = cN.testarPlanilhasFeishu();
   secret = 'outro';
-  const cS = ctxE({FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_BASE_LINK: LINK}), tS = cS.testarBaseFeishu();
+  let errS = '';
+  try { ctxE(LINKS).efConectar_('codigo-teste', RET); } catch (e) { errS = e.message; }
   secret = 'segredo-teste';
-  const tL = ctxE({FEISHU_APP_ID: 'cli_teste', FEISHU_APP_SECRET: 'segredo-teste', FEISHU_BASE_LINK: 'https://empresa-teste.feishu.cn/wiki/WIKITESTE'}).testarBaseFeishu();
-  // V4.33.1: dia do JMS sem linhas na base → o último dia da base (para o cartão dizer até quando ela vai); Feishu não lido → feishuFail.
-  const m1 = (cE.getRateDay_('efficiency', DE1) || {}).metrics || {};
-  check(m1.processed === PROC[DE1] && m1.present === null && m1.efficiency === null && m1.hcLastDay === Number(DE.replace(/-/g, '')) && m1.feishuFail === 0 &&
-    mE.hcLastDay === Number(DE.replace(/-/g, '')) && mN.feishuFail === 1,
-    'V4.33.1 Eficiência: dia sem linhas na base guarda o último dia da base; sem ler o Feishu, feishuFail', {m1, mN});
-  check(mN.processed === PROC[DE] && mN.present === null && mN.efficiency === null && cN.allTabRows_('LOG').some(r => /Eficiência: colaboradores do Feishu não lidos/.test(String(r[4]))) &&
-    tN.ok === false && /falta App ID, App Secret, link da base/.test(tN.erro) && tS.ok === false && /confira o App ID e o App Secret/.test(tS.erro) &&
-    tL.ok === false && /\?table=tbl/.test(tL.erro),
-    'V4.33 Eficiência: sem a base do Feishu entra só o JMS (aviso no LOG); App Secret errado e link sem a tabela: mensagens com a dica', {mN, tN, tS, tL});
+  const cD = ctxE(Object.assign({}, LINKS, {FEISHU_LINK_PRESENCA: 'https://empresa-teste.feishu.cn/wiki/WIKIDOC', FEISHU_LINK_EFICIENCIA: ''}));
+  cD.efConectar_('codigo-teste', RET);
+  const tD = cD.testarPlanilhasFeishu(), tX = ctxE(Object.assign({}, LINKS, {FEISHU_LINK_PRESENCA: 'https://empresa-teste.feishu.cn/docx/ABC'})).testarPlanilhasFeishu();
+  check(mN.processed === PROC[DE] && mN.present === null && mN.efficiency === null && mN.feishuFail === 1 &&
+    cN.allTabRows_('LOG').some(r => /Eficiência: planilhas do Feishu não lidas/.test(String(r[4]))) &&
+    tN.ok === false && /falta App ID e App Secret/.test(tN.erro) && /confira o App ID e o App Secret/.test(errS) &&
+    tD.ok === false && /não é de uma planilha \(tipo docx\)/.test(tD.erro) && tX.ok === false && /não reconhecido/.test(tX.erro),
+    'V4.36 Eficiência: sem as planilhas entra só o JMS (aviso no LOG); App Secret errado e link que não é de planilha: mensagens com a dica', {mN, tN, errS, tD, tX});
 }
 
 console.log('OK: ' + passed + ' verificações do servidor passaram (JMS simulado; não valida o acesso real).');

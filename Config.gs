@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.35.4',
+  VERSION: '4.36.0',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1663,7 +1663,8 @@ const ALL_INDICATORS_ = Object.freeze({
 
   /**
    * V4.33 (pedido "Desenvolver um dashboard que mostre a eficiência do SP GRU"): Eficiência = Qtd processada total (JMS, Análise
-   * de entrada e saída de transbordo novo) ÷ colaboradores presentes (base Headcount do Feishu, todos os presentes dos 3 turnos).
+   * de entrada e saída de transbordo novo) ÷ colaboradores presentes. V4.36: a eficiência é a da MATRIZ e a presença vem das duas
+   * planilhas da matriz no Feishu (lidas com a conta do usuário); sem a eficiência da matriz no dia, a mesma conta com o JMS.
    * Painel SEPARADO (pacote dashmaster-eficiencia). V4.35 (pedido "adicionar o dash de eficiência no dash principal"): também no
    * pacote principal (PACOTE_PAINEIS_.mais). Leitura do JMS e do Feishu em Eficiencia.gs. Cada linha da lista do dia =
    * turno × função × situação (Presentes / Programados), quantidade = o número da base.
@@ -1671,7 +1672,8 @@ const ALL_INDICATORS_ = Object.freeze({
   efficiency: {
     key: 'efficiency', order: 22, routeKey: 'TRANSIT_PORT', separate: true, efficiency: true,
     name: {pt: 'Eficiência SP GRU', zh: 'SP GRU 人效'},
-    subtitle: {pt: 'Qtd processada total (JMS) ÷ colaboradores presentes (Feishu)', zh: '总处理量（JMS）÷ 实到人数（飞书）'},
+    // V4.36: a eficiência é a da matriz (planilha 效能监控表 no Feishu); sem ela, o volume do JMS ÷ a presença da matriz.
+    subtitle: {pt: 'Eficiência da matriz (Feishu) · volume do JMS · presença de efetivos e temporários', zh: '总部人效（飞书）· JMS处理量 · 正式工与临时工出勤'},
     goal: {value: null, direction: 'min', strict: false},
     apiProfile: 'efficiency', detailMatchesErrors: false, grouped: true, light: true,
     detailsOkColumn: 'Presentes',
@@ -1680,16 +1682,19 @@ const ALL_INDICATORS_ = Object.freeze({
         'present', 'program', 'presenceRate', 'efficiency', 'headcountRows',
         'presentT1', 'presentT2', 'presentT3', 'programT1', 'programT2', 'programT3',
         'presentAdm', 'presentAssist', 'presentOper', 'presentTemp', 'presentDiar',
-        'programAdm', 'programAssist', 'programOper', 'programTemp', 'programDiar', 'hcLastDay', 'feishuFail'],
+        'programAdm', 'programAssist', 'programOper', 'programTemp', 'programDiar', 'hcLastDay', 'feishuFail',
+        // V4.36: planilhas da matriz — eficiência oficial, a calculada, de onde veio (1 matriz, 2 calculada) e a presença.
+        'efOficial', 'efCalc', 'efSource', 'presentEfetivos', 'presentTemporarios', 'presentCat', 'presentSource',
+        'presentEfT1', 'presentEfT2', 'presentEfT3', 'presentTpT1', 'presentTpT2', 'presentTpT3'],
       percentMetrics: []},
     // Poucas linhas por dia (3 turnos): todos os dias com a lista, lida de novo junto com o resumo.
     detail: {days: 0, refreshHours: 1, maxPerDay: 1000},
     fields: {},
     groupFields: ['column', 'shift', 'role'],
-    labels: {shift: {pt: 'Turno', zh: '班次'}, role: {pt: 'Função', zh: '岗位'}, column: {pt: 'Situação', zh: '状态'}},
-    labelsOne: {shift: {pt: 'Turno', zh: '班次'}, role: {pt: 'Função', zh: '岗位'}},
+    labels: {shift: {pt: 'Turno', zh: '班次'}, role: {pt: 'Categoria', zh: '类别'}, column: {pt: 'Situação', zh: '状态'}},
+    labelsOne: {shift: {pt: 'Turno', zh: '班次'}, role: {pt: 'Categoria', zh: '类别'}},
     filters: ['shift', 'role'],
-    facetColumns: ['Presentes'],
+    facetColumns: ['Presentes', 'Efetivos', 'Temporários'],
     topCards: [],
     hideShiftCards: true, hideEvolution: true, hideTarget: true, hideDetailTable: true,
     heroMetric: {key: 'processed', column: 'Presentes', icon: 'gauge',
@@ -1705,20 +1710,23 @@ const ALL_INDICATORS_ = Object.freeze({
     },
     metricPanels: [
       {column: 'Presentes', title: {pt: 'Eficiência e produção', zh: '人效与产量'}, metrics: [
-        {key: 'efficiency', label: {pt: 'Eficiência (volumes por colaborador)', zh: '人效（件/人）'}, digits: 1, good: true},
-        {key: 'processed', label: {pt: 'Qtd processada total', zh: '总处理量'}},
-        {key: 'present', label: {pt: 'Colaboradores presentes', zh: '实到人数'}},
-        {key: 'program', label: {pt: 'Colaboradores programados', zh: '应到人数'}},
-        {key: 'presenceRate', label: {pt: '% Presença', zh: '出勤率'}, pct: true, good: true, rateOf: {num: 'present', den: 'program'}}
+        {key: 'efficiency', label: {pt: 'Eficiência (da matriz; volumes por colaborador)', zh: '人效（总部；件/人）'}, digits: 0, good: true},
+        {key: 'processed', label: {pt: 'Qtd processada total (JMS)', zh: '总处理量（JMS）'}},
+        {key: 'present', label: {pt: 'Presença (efetivos + temporários)', zh: '出勤（正式工 + 临时工）'}},
+        {key: 'presentEfetivos', label: {pt: 'Efetivos presentes', zh: '正式工出勤'}},
+        {key: 'presentTemporarios', label: {pt: 'Temporários presentes', zh: '临时工出勤'}}
       ]},
-      {column: 'Presentes', title: {pt: 'Presentes por turno', zh: '各班次实到'}, metrics: [
+      {column: 'Presentes', title: {pt: 'Presença por turno (efetivos + temporários)', zh: '各班次出勤（正式工 + 临时工）'}, metrics: [
         {key: 'presentT1', label: {pt: 'T1 (06h–14h)', zh: 'T1'}}, {key: 'presentT2', label: {pt: 'T2 (14h–22h)', zh: 'T2'}},
         {key: 'presentT3', label: {pt: 'T3 (22h–06h)', zh: 'T3'}}
       ]},
-      {column: 'Presentes', title: {pt: 'Presentes por função', zh: '各岗位实到'}, metrics: [
-        {key: 'presentAdm', label: {pt: 'Administrativo', zh: '行政'}}, {key: 'presentAssist', label: {pt: 'Assistente Operacional', zh: '运营助理'}},
-        {key: 'presentOper', label: {pt: 'Operacional', zh: '操作员'}}, {key: 'presentTemp', label: {pt: 'Temporário', zh: '临时工'}},
-        {key: 'presentDiar', label: {pt: 'Diarista', zh: '日结工'}}
+      {column: 'Presentes', title: {pt: 'Presentes por categoria (planilha de presentes e programados)', zh: '各类别出勤（出勤表）'}, metrics: [
+        {key: 'presentAdm', label: {pt: 'Administrativo', zh: '职能人员'}}, {key: 'presentAssist', label: {pt: 'Assistente Operacional', zh: '操作助理'}},
+        {key: 'presentOper', label: {pt: 'Operacional', zh: '操作员工'}}, {key: 'presentTemp', label: {pt: 'Temporário', zh: '月结工'}},
+        {key: 'presentDiar', label: {pt: 'Diarista', zh: '日结工'}},
+        {key: 'presentCat', label: {pt: 'Total de presentes', zh: '出勤人数合计'}},
+        {key: 'program', label: {pt: 'Efetivo programado', zh: '应出勤人数'}},
+        {key: 'presenceRate', label: {pt: '% Presença', zh: '出勤率'}, pct: true, good: true, rateOf: {num: 'presentCat', den: 'program'}}
       ]},
       {column: 'Presentes', title: {pt: 'JMS · Análise de entrada e saída de transbordo', zh: 'JMS · 中转进出港分析'}, metrics: [
         {key: 'arrival', label: {pt: 'Quantidade recebida', zh: '到件量'}}, {key: 'send', label: {pt: 'Quantidade expedida', zh: '发件量'}},
@@ -1728,22 +1736,25 @@ const ALL_INDICATORS_ = Object.freeze({
       ]}
     ],
     charts: [
-      {key: 'mEff', metric: 'efficiency', type: 'bar', days: 15, digits: 1,
-        title: {pt: 'Eficiência diária (volumes por colaborador)', zh: '每日人效（件/人）'}},
+      {key: 'mEff', metric: 'efficiency', type: 'bar', days: 15, digits: 0,
+        title: {pt: 'Eficiência diária da matriz (volumes por colaborador)', zh: '每日总部人效（件/人）'},
+        sub: {pt: 'Resultado da matriz (dia sem ele: Qtd processada do JMS ÷ presença) · {n} dias até {date} (coluna vermelha = dia escolhido)',
+          zh: '总部结果（无结果的日期：JMS处理量 ÷ 出勤人数）· 截至 {date} 的 {n} 天（红色柱 = 所选日期）'}},
       {key: 'mQty', metric: 'processed', type: 'bar', days: 15, title: {pt: 'Produção diária · Qtd processada total', zh: '每日总处理量'}},
-      {key: 'shiftPresent', dim: 'shift', where: {column: 'Presentes'}, type: 'bar', allShifts: true,
-        title: {pt: 'Colaboradores presentes por turno', zh: '各班次实到人数'}, sub: {pt: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', zh: 'T1 06–14 · T2 14–22 · T3 22–06'}},
+      {key: 'shiftPresent', dim: 'shift', where: {column: ['Efetivos', 'Temporários']}, type: 'bar', allShifts: true,
+        title: {pt: 'Presença por turno (efetivos + temporários)', zh: '各班次出勤（正式工 + 临时工）'}, sub: {pt: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', zh: 'T1 06–14 · T2 14–22 · T3 22–06'}},
       {key: 'rolePresent', dim: 'role', where: {column: 'Presentes'}, type: 'bar', top: 6, hideNA: true,
-        title: {pt: 'Colaboradores presentes por função', zh: '各岗位实到人数'},
-        sub: {pt: 'Administrativo, Assistente Operacional, Operacional, Temporário e Diarista', zh: '行政、运营助理、操作员、临时工、日结工'}}
+        title: {pt: 'Colaboradores presentes por categoria', zh: '各类别出勤人数'},
+        sub: {pt: 'Administrativo, Assistente Operacional, Operacional, Temporário e Diarista', zh: '职能人员、操作助理、操作员工、月结工、日结工'}}
     ],
-    // Tabelas do dia/período: presentes e programados por turno e por função (com o Total).
+    // Tabelas do dia/período (com o Total): efetivos e temporários por turno (aba de presença da matriz) e presentes e
+    // programados por categoria (planilha de presentes e programados).
     crossTables: [
-      {key: 'tShift', rowDim: 'shift', title: {pt: 'Colaboradores por turno', zh: '各班次人数'}, cols: ['Presentes', 'Programados']},
-      {key: 'tRole', rowDim: 'role', title: {pt: 'Colaboradores por função', zh: '各岗位人数'}, cols: ['Presentes', 'Programados']}
+      {key: 'tShift', rowDim: 'shift', title: {pt: 'Presença por turno', zh: '各班次出勤'}, cols: ['Efetivos', 'Temporários']},
+      {key: 'tRole', rowDim: 'role', title: {pt: 'Colaboradores por categoria', zh: '各类别人数'}, cols: ['Presentes', 'Programados']}
     ],
     table: [
-      ['date', 'Data', '日期'], ['shift', 'Turno', '班次'], ['role', 'Função', '岗位'], ['column', 'Situação', '状态'], ['qty', 'Quantidade', '数量']
+      ['date', 'Data', '日期'], ['shift', 'Turno', '班次'], ['role', 'Categoria', '类别'], ['column', 'Situação', '状态'], ['qty', 'Quantidade', '数量']
     ]
   }
 });

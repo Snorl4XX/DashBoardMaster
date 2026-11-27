@@ -1,27 +1,43 @@
 /**
  * V4.33 (pedido "Desenvolver um dashboard que mostre a eficiência do SP GRU"): Eficiência do SP GRU.
  *
- *   Eficiência = Qtd processada total (JMS) ÷ colaboradores presentes (base do Feishu).
+ * V4.36 (pedido "A base da onde ele vai puxar os dados, quero mudar. Quero puxar de dois lugares … São tudo do Feishu, porém é
+ * criado pela matriz e só consigo adicionar informação e visualizar. Também quero que salve os dados quando você puxar. Lá é
+ * atualizado manualmente."):
+ *
+ *   Eficiência do dia = a da MATRIZ (planilha "SP GRU 效能监控表", aba "日均效率 Eficiência média diária"). Sem ela (a matriz ainda
+ *   não preencheu o dia): a mesma conta da matriz com o volume do JMS — Qtd processada total ÷ (presença de efetivos + temporários).
  *
  * - JMS: Cabine de dados › Análise de entrada e saída de transbordo novo (dataCabinndex/TransitPortNew), pedido
  *   bigdataReport/detail/transit_out_ports_list com os filtros da tela (Regional SPE 370000, SC SP GRU 30001, Pedido mãe e filhos
  *   = Pedido principal → mergeWaybill 1). "Qtd processada total" = transhipmentNum; os outros números da linha vão para a tabela.
- * - Feishu: a base "Headcount" (uma linha por turno: Data, Turno e, para Administrativo, Assistente Operacional, Operacional,
- *   Temporário e Diarista, os Presentes e os Programados). Lida pela API aberta do Feishu com um aplicativo da empresa
- *   (FEISHU_APP_ID / FEISHU_APP_SECRET em Configurações) e o link da base (FEISHU_BASE_LINK: o link do wiki ou da base, com
- *   ?table=…). SOMENTE LEITURA: nada é alterado no Feishu.
- * - Divisor (pedido): TODOS os presentes — Total de Presença (as 5 funções) somando os 3 turnos do dia. Mais de uma linha do
- *   mesmo dia e turno (correção): vale a enviada por último ("Enviado em"). O nome de quem enviou não é lido.
- * - O dia de cada linha é o do campo "Data" no horário de São Paulo (data sem hora no fuso da base também é entendida).
+ * - Feishu: DUAS PLANILHAS da matriz, lidas com a CONTA do Feishu de quem configurou (Configurações → "Entrar com o Feishu": login
+ *   oficial do Feishu; o painel guarda só o token da conta e o renova sozinho). Como a planilha é da matriz, o aplicativo da
+ *   empresa (App ID e App Secret) não precisa — nem consegue — ser adicionado a ela: vale o acesso de leitura da conta.
+ *   SOMENTE LEITURA: nada é alterado no Feishu.
+ *   1. FEISHU_LINK_PRESENCA: presentes e programados de cada dia por categoria (Administrativo, Assistente Operacional,
+ *      Operacional, Temporário Total, Diarista Total) — duas colunas por dia (出勤人数 Presentes / 应出勤人数 Programado).
+ *   2. FEISHU_LINK_EFICIENCIA ("SP GRU 效能监控表"): aba da eficiência (o resultado da matriz, um bloco por mês) e aba "人员出勤
+ *      Presença de colaboradores" (正式工 efetivos / 临时工 temporários de cada dia, uma linha por turno e a linha do total).
+ *   As grades são lidas pelas DATAS do cabeçalho (cada data com as colunas dela até a próxima data) e pelos nomes das linhas e das
+ *   colunas — não dependem da posição exata das células nem do mês do bloco.
+ * - Cada dia lido fica GRAVADO no painel: se a planilha mudar ou apagar o dia depois, o painel continua com o que leu. De hora em
+ *   hora o painel confere as planilhas e relê os dias que mudaram ou ganharam números (a matriz atualiza à mão, às vezes dias depois).
  */
-/** API aberta do Feishu (open.feishu.cn) ou do Lark (open.larksuite.com), conforme o link da base. */
-function efApi_() { return /larksuite\.com/i.test(String(getProp_('FEISHU_BASE_LINK', ''))) ? 'https://open.larksuite.com' : 'https://open.feishu.cn'; }
+/** API aberta do Feishu (open.feishu.cn) ou do Lark (open.larksuite.com), conforme os links das planilhas. */
+function efApi_() {
+  return /larksuite\.com/i.test(String(getProp_('FEISHU_LINK_PRESENCA', '')) + String(getProp_('FEISHU_LINK_EFICIENCIA', ''))) ?
+    'https://open.larksuite.com' : 'https://open.feishu.cn';
+}
+/** Login do Feishu (accounts.feishu.cn) ou do Lark. */
+function efAccounts_() { return efApi_().replace('://open.', '://accounts.'); }
+/** Categorias da planilha 1 (nome da linha, em português ou chinês). Ordem importa: "Assistente Operacional" antes de "Operacional". */
 const EF_ROLES_ = [
-  {key: 'Adm', nome: 'Administrativo', re: /^administrativ/},
-  {key: 'Assist', nome: 'Assistente Operacional', re: /^assistente\s*operacional/},
-  {key: 'Oper', nome: 'Operacional', re: /^operacional/},
-  {key: 'Temp', nome: 'Temporário', re: /^temporari/},
-  {key: 'Diar', nome: 'Diarista', re: /^diarista/}
+  {key: 'Adm', nome: 'Administrativo', re: /administrativ|职能/},
+  {key: 'Assist', nome: 'Assistente Operacional', re: /assistente|操作助理/},
+  {key: 'Oper', nome: 'Operacional', re: /operacional|操作员/},
+  {key: 'Temp', nome: 'Temporário', re: /temporari|月结/},
+  {key: 'Diar', nome: 'Diarista', re: /diarista|日结/}
 ];
 const EF_SHIFTS_ = ['T1', 'T2', 'T3'];
 /** Números da linha do JMS (transit_out_ports_list) → nome no painel. */
@@ -52,33 +68,49 @@ function efJmsDay_(isoDate) {
   return out;
 }
 
-// ------------------------------------------------------------------ Feishu
-/** Link da base → {node} (wiki) ou {app} (base), e a tabela (?table=tbl…). */
+// ------------------------------------------------------------------ Feishu: conexão com a conta (login oficial, OAuth)
+/** Permissões pedidas no login: ler planilhas, ler o wiki (os links são do wiki) e renovar sozinho (offline_access). */
+const EF_ESCOPOS_ = 'sheets:spreadsheet:readonly wiki:wiki:readonly offline_access';
+/** O aplicativo do Feishu (App ID e App Secret): só para o login — ele não precisa ser adicionado às planilhas. */
+function efAppCfg_() {
+  const id = String(getProp_('FEISHU_APP_ID', '') || '').trim(), secret = String(getProp_('FEISHU_APP_SECRET', '') || '').trim();
+  const faltam = [!id && 'App ID', !secret && 'App Secret'].filter(Boolean);
+  if (faltam.length) throw new Error('Planilhas do Feishu não configuradas: falta ' + faltam.join(' e ') + ' do aplicativo (Configurações → Planilhas do Feishu).');
+  return {id: id, secret: secret};
+}
+/** Link de uma planilha → {link, node (wiki), sp (…/sheets/…), sheet (?sheet=…)}. */
 function efParseLink_(link) {
   const s = String(link || '').trim();
-  const table = (/[?&]table=(tbl[A-Za-z0-9]+)/.exec(s) || [])[1] || '';
-  const wiki = /\/wiki\/([A-Za-z0-9]+)/.exec(s), base = /\/base\/([A-Za-z0-9]+)/.exec(s);
-  return {node: wiki ? wiki[1] : '', app: base ? base[1] : '', table: table};
+  const wiki = /\/wiki\/([A-Za-z0-9]+)/.exec(s), sp = /\/sheets\/([A-Za-z0-9]+)/.exec(s), sheet = /[?&#]sheet=([A-Za-z0-9]+)/.exec(s);
+  return {link: s, node: wiki ? wiki[1] : '', sp: sp ? sp[1] : '', sheet: sheet ? sheet[1] : ''};
 }
-function efFeishuCfg_() {
-  const id = String(getProp_('FEISHU_APP_ID', '') || '').trim(), secret = String(getProp_('FEISHU_APP_SECRET', '') || '').trim();
-  const link = String(getProp_('FEISHU_BASE_LINK', '') || '').trim();
-  const faltam = [!id && 'App ID', !secret && 'App Secret', !link && 'link da base'].filter(Boolean);
-  if (faltam.length) throw new Error('Base do Feishu não configurada: falta ' + faltam.join(', ') + ' (Configurações → Base do Feishu).');
-  const p = efParseLink_(link);
-  if (!p.table) throw new Error('O link da base do Feishu precisa ter a tabela (…?table=tbl…): copie o link com a tabela Headcount aberta.');
-  if (!p.node && !p.app) throw new Error('Link da base do Feishu não reconhecido: use o link do wiki (…/wiki/…) ou da base (…/base/…).');
-  return {id: id, secret: secret, link: link, node: p.node, app: p.app, table: p.table};
+/** Os dois links (FEISHU_LINK_PRESENCA e FEISHU_LINK_EFICIENCIA). soft: sem nenhum → null em vez de erro. */
+function efLinksCfg_(soft) {
+  const pres = String(getProp_('FEISHU_LINK_PRESENCA', '') || '').trim(), efic = String(getProp_('FEISHU_LINK_EFICIENCIA', '') || '').trim();
+  if (!pres && !efic) {
+    if (soft) return null;
+    throw new Error('Planilhas do Feishu não configuradas: falta o link das planilhas (Configurações → Planilhas do Feishu).');
+  }
+  const out = {pres: pres ? efParseLink_(pres) : null, efic: efic ? efParseLink_(efic) : null};
+  [out.pres, out.efic].forEach(p => {
+    if (p && !p.node && !p.sp) throw new Error('Link de planilha do Feishu não reconhecido: use o link do wiki (…/wiki/…) ou da planilha (…/sheets/…).');
+  });
+  return out;
 }
 /** Dica para os códigos de erro mais comuns do Feishu. */
 function efFeishuHint_(code, msg) {
   const c = Number(code), m = String(msg || '');
-  if ([10003, 10014, 99991663].indexOf(c) >= 0 || /app_?secret|app_?id|invalid param/i.test(m)) return 'confira o App ID e o App Secret';
-  if ([99991672, 99991679].indexOf(c) >= 0 || /scope|access denied|permission/i.test(m)) {
-    return 'o aplicativo precisa das permissões "bitable:app:readonly" e "wiki:wiki:readonly" e de acesso à base (na base: … → Mais → ' +
-      'Adicionar aplicativo / 添加文档应用)';
+  if ([10003, 10014, 20002, 20005, 99991663].indexOf(c) >= 0 || /app_?secret|app_?id|client|invalid param/i.test(m)) return 'confira o App ID e o App Secret';
+  if (/redirect/i.test(m) || c === 20029) return 'o endereço de retorno precisa estar cadastrado no aplicativo (Segurança → URL de redirecionamento)';
+  if ([20003, 20004].indexOf(c) >= 0 || /authorization code|code (is )?(expired|invalid|used)/i.test(m)) return 'o login demorou ou já foi usado: clique em "Entrar com o Feishu" de novo';
+  if ([20026, 20037, 20064, 20073, 20074, 99991668, 99991677, 99991669].indexOf(c) >= 0 || /refresh|token (is )?(expired|invalid)|invalid_grant/i.test(m)) {
+    return 'o acesso da conta venceu: Configurações → Planilhas do Feishu → "Entrar com o Feishu"';
   }
-  if ([1254040, 1254041, 1254004, 131005, 131006].indexOf(c) >= 0 || /not ?found|notexist|not exist/i.test(m)) return 'confira o link da base (tabela e página)';
+  if ([99991672, 99991679, 20027].indexOf(c) >= 0 || /scope/i.test(m)) {
+    return 'o aplicativo precisa das permissões de usuário "sheets:spreadsheet:readonly", "wiki:wiki:readonly" e "offline_access" (publique uma versão e entre com o Feishu de novo)';
+  }
+  if ([131006, 91403, 1310213, 1310235].indexOf(c) >= 0 || /permission|forbidden|access denied|no auth/i.test(m)) return 'a sua conta do Feishu precisa conseguir abrir a planilha';
+  if ([131005, 91402, 1310211, 1310214, 1310249].indexOf(c) >= 0 || /not ?found|notexist|not exist/i.test(m)) return 'confira o link da planilha';
   return '';
 }
 function efFeishuFetch_(method, path, body, token) {
@@ -91,58 +123,148 @@ function efFeishuFetch_(method, path, body, token) {
   const j = safeJsonParse_(res.getContentText(), null) || {};
   const code = j.code !== undefined ? Number(j.code) : (res.getResponseCode() === 200 ? 0 : res.getResponseCode());
   if (res.getResponseCode() !== 200 || code !== 0) {
-    const dica = efFeishuHint_(code, j.msg);
-    const err = new Error('O Feishu recusou (código ' + code + (j.msg ? ': ' + String(j.msg).slice(0, 100) : '') + ')' + (dica ? ' — ' + dica : '') + '.');
+    const msg = String(j.msg || j.error_description || j.error || '');
+    const dica = efFeishuHint_(code, msg);
+    const err = new Error('O Feishu recusou (código ' + code + (msg ? ': ' + msg.slice(0, 100) : '') + ')' + (dica ? ' — ' + dica : '') + '.');
     err.feishuCode = code;
     throw err;
   }
   return j;
 }
-/** Token do aplicativo (tenant_access_token). Fica na memória até perto de vencer. */
-var EF_TOKEN_ = null;
-function efFeishuToken_(fc) {
-  const sig = fc.id + '|' + fc.secret.length + '|' + fc.secret.slice(-4);
-  if (EF_TOKEN_ && EF_TOKEN_.sig === sig && EF_TOKEN_.ate > Date.now()) return EF_TOKEN_.valor;
-  const j = efFeishuFetch_('post', '/open-apis/auth/v3/tenant_access_token/internal', {app_id: fc.id, app_secret: fc.secret});
-  if (!j.tenant_access_token) throw new Error('O Feishu não devolveu o token do aplicativo — confira o App ID e o App Secret.');
-  EF_TOKEN_ = {sig: sig, valor: j.tenant_access_token, ate: Date.now() + Math.max(60, (Number(j.expire) || 7200) - 300) * 1000};
-  return EF_TOKEN_.valor;
+/** Endereço do login do Feishu (Configurações → "Entrar com o Feishu"). */
+function efLoginUrl_(redirectUri, state) {
+  const app = efAppCfg_();
+  return efAccounts_() + '/open-apis/authen/v1/authorize?client_id=' + encodeURIComponent(app.id) + '&response_type=code' +
+    '&redirect_uri=' + encodeURIComponent(redirectUri) + '&scope=' + encodeURIComponent(EF_ESCOPOS_) + '&state=' + encodeURIComponent(state);
 }
-/** app_token da base: o do link (…/base/…) ou o do nó do wiki (guardado em FEISHU_BASE_APP, junto do nó). */
-function efFeishuApp_(fc, token) {
-  if (fc.app) return fc.app;
-  const saved = String(getProp_('FEISHU_BASE_APP', '') || '').split('|');
-  if (saved[0] === fc.node && saved[1]) return saved[1];
-  const j = efFeishuFetch_('get', '/open-apis/wiki/v2/spaces/get_node?token=' + encodeURIComponent(fc.node) + '&obj_type=wiki', null, token);
-  const node = (j.data && j.data.node) || {};
-  if (node.obj_type && node.obj_type !== 'bitable') throw new Error('O link do wiki não é de uma base (tipo ' + node.obj_type + '): abra a base Headcount e copie o link.');
-  if (!node.obj_token) throw new Error('O Feishu não devolveu a base desse link do wiki.');
-  setProp_('FEISHU_BASE_APP', fc.node + '|' + node.obj_token);
-  return node.obj_token;
+function efOAuth_(body) {
+  const app = efAppCfg_();
+  const j = efFeishuFetch_('post', '/open-apis/authen/v2/oauth/token', Object.assign({client_id: app.id, client_secret: app.secret}, body));
+  if (!j.access_token) throw new Error('O Feishu não devolveu o acesso da conta.');
+  return j;
+}
+/** Guarda o acesso da conta (o token vale ~2 h; o de renovação troca a cada renovação). */
+function efSaveUserToken_(j) {
+  setProp_('FEISHU_USER_TOKEN', j.access_token);
+  setProp_('FEISHU_USER_EXPIRA', String(Date.now() + Math.max(60, (Number(j.expires_in) || 7200) - 300) * 1000));
+  if (j.refresh_token) setProp_('FEISHU_USER_SEGREDO', j.refresh_token);
+  if (j.refresh_token_expires_in) setProp_('FEISHU_USER_RENOVAR_ATE', new Date(Date.now() + Number(j.refresh_token_expires_in) * 1000).toISOString());
+  setProp_('FEISHU_USER_RENOVADO', new Date().toISOString());
+  deleteProp_('FEISHU_USER_ERRO');
+}
+/** Volta do login do Feishu: troca o código pelo acesso da conta. */
+function efConectar_(code, redirectUri) {
+  if (!code) throw new Error('O Feishu não devolveu o código do login.');
+  const j = efOAuth_({grant_type: 'authorization_code', code: String(code), redirect_uri: String(redirectUri || '')});
+  efSaveUserToken_(j);
+  setProp_('FEISHU_USER_EM', new Date().toISOString());
+  EF_PLAN_ = null;
+  const escopos = String(j.scope || '');
+  const faltam = escopos ? ['sheets:spreadsheet:readonly', 'wiki:wiki:readonly'].filter(s => escopos.split(/\s+/).indexOf(s) < 0) : [];
+  if (!j.refresh_token) faltam.push('offline_access');
+  return {ok: true, renovavel: !!j.refresh_token, faltamPermissoes: faltam};
+}
+/** Configurações → "Desconectar": apaga o acesso da conta do Feishu guardado no painel. */
+function desconectarFeishu() {
+  ['FEISHU_USER_TOKEN', 'FEISHU_USER_EXPIRA', 'FEISHU_USER_SEGREDO', 'FEISHU_USER_RENOVAR_ATE', 'FEISHU_USER_RENOVADO', 'FEISHU_USER_EM', 'FEISHU_USER_ERRO']
+    .forEach(k => deleteProp_(k));
+  EF_PLAN_ = null;
+  return {ok: true, mensagem: 'Conta do Feishu desconectada. Para ler as planilhas de novo: "Entrar com o Feishu".'};
 }
 /**
- * Todas as linhas da tabela (páginas de 500). Ficam na memória por 2 min (o resumo e a lista do dia leem a mesma tabela).
- * Devolve [{fields, id}].
+ * Acesso da conta (user_access_token) válido: o guardado ou um renovado agora. A renovação troca o token de renovação, então só
+ * uma execução renova por vez (trava); quem esperou relê o que a outra gravou.
  */
-var EF_RECORDS_ = null;
-function efFeishuRecords_(force) {
-  const fc = efFeishuCfg_(), sig = fc.link + '|' + fc.id;
-  if (!force && EF_RECORDS_ && EF_RECORDS_.sig === sig && EF_RECORDS_.ate > Date.now()) return EF_RECORDS_.items;
-  const token = efFeishuToken_(fc), app = efFeishuApp_(fc, token), items = [];
-  let pageToken = '';
-  for (let i = 0; i < 200; i++) {
-    const j = efFeishuFetch_('get', '/open-apis/bitable/v1/apps/' + encodeURIComponent(app) + '/tables/' + encodeURIComponent(fc.table) +
-      '/records?page_size=500' + (pageToken ? '&page_token=' + encodeURIComponent(pageToken) : ''), null, token);
-    const d = j.data || {};
-    (d.items || []).forEach(it => items.push({id: it.record_id, fields: it.fields || {}}));
-    if (!d.has_more) break;
-    if (!d.page_token) throw new Error('Paginação incompleta no Feishu.');
-    pageToken = d.page_token;
+function efUserToken_() {
+  const valido = () => {
+    const t = String(getProp_('FEISHU_USER_TOKEN', '') || ''), ate = Number(getProp_('FEISHU_USER_EXPIRA', '0')) || 0;
+    return t && ate > Date.now() ? t : '';
+  };
+  let t = valido();
+  if (t) return t;
+  invalidateProps_();
+  t = valido();
+  if (t) return t;
+  if (!getProp_('FEISHU_USER_SEGREDO', '')) {
+    throw new Error('Conta do Feishu não conectada: Configurações → Planilhas do Feishu → "Entrar com o Feishu".');
   }
-  EF_RECORDS_ = {sig: sig, ate: Date.now() + 120000, items: items};
-  return items;
+  const lock = LockService.getUserLock ? LockService.getUserLock() : LockService.getScriptLock();
+  const got = lock.tryLock(30000);
+  try {
+    invalidateProps_();
+    t = valido();
+    if (t) return t;
+    try { efSaveUserToken_(efOAuth_({grant_type: 'refresh_token', refresh_token: String(getProp_('FEISHU_USER_SEGREDO', ''))})); }
+    catch (e) {
+      invalidateProps_();
+      t = valido();
+      if (t) return t;
+      if (e && e.feishuCode === undefined) throw e;
+      const msg = 'O acesso da conta do Feishu venceu — entre de novo (Configurações → Planilhas do Feishu → "Entrar com o Feishu"). ' +
+        String(e && e.message || e).slice(0, 200);
+      setProp_('FEISHU_USER_ERRO', msg.slice(0, 300));
+      throw new Error(msg);
+    }
+    return valido() || String(getProp_('FEISHU_USER_TOKEN', ''));
+  } finally { if (got) lock.releaseLock(); }
 }
-/** Texto de um campo do Bitable (texto rico, opção, fórmula…). */
+/** GET com o acesso da conta; token recusado (vencido antes da hora) → renova uma vez e tenta de novo. */
+function efUserGet_(path) {
+  try { return efFeishuFetch_('get', path, null, efUserToken_()); }
+  catch (e) {
+    if ([99991668, 99991677, 99991669].indexOf(Number(e && e.feishuCode)) < 0 || !getProp_('FEISHU_USER_SEGREDO', '')) throw e;
+    setProp_('FEISHU_USER_EXPIRA', '0');
+    return efFeishuFetch_('get', path, null, efUserToken_());
+  }
+}
+
+// ------------------------------------------------------------------ Feishu: leitura das planilhas (somente leitura)
+/** Token da planilha: o do link (…/sheets/…) ou o do nó do wiki (guardado em FEISHU_NODES). */
+function efSpToken_(p) {
+  if (p.sp) return p.sp;
+  const map = safeJsonParse_(getProp_('FEISHU_NODES', '{}'), {}) || {};
+  if (map[p.node]) return map[p.node];
+  const j = efUserGet_('/open-apis/wiki/v2/spaces/get_node?token=' + encodeURIComponent(p.node) + '&obj_type=wiki');
+  const node = (j.data && j.data.node) || {};
+  if (node.obj_type && node.obj_type !== 'sheet') throw new Error('O link do wiki não é de uma planilha (tipo ' + node.obj_type + '): abra a planilha e copie o link.');
+  if (!node.obj_token) throw new Error('O Feishu não devolveu a planilha desse link do wiki.');
+  map[p.node] = node.obj_token;
+  setProp_('FEISHU_NODES', JSON.stringify(map));
+  return node.obj_token;
+}
+/** Abas da planilha: [{sheet_id, title, hidden, grid_properties: {row_count, column_count}}]. */
+function efTabs_(sp) {
+  const j = efUserGet_('/open-apis/sheets/v3/spreadsheets/' + encodeURIComponent(sp) + '/sheets/query');
+  return ((j.data && j.data.sheets) || []).filter(t => t && t.sheet_id && (!t.resource_type || t.resource_type === 'sheet'));
+}
+/** 1 → A, 27 → AA. */
+function efColName_(n) {
+  let s = '';
+  for (let x = n; x > 0; x = Math.floor((x - 1) / 26)) s = String.fromCharCode(65 + (x - 1) % 26) + s;
+  return s;
+}
+/** A grade da aba (valores sem formatação: data = número de série), lida em blocos de 100 colunas. */
+function efGrid_(sp, tab) {
+  const gp = tab.grid_properties || {};
+  const cols = Math.max(1, Math.min(Number(gp.column_count) || 200, 1500));
+  let rows = Math.max(1, Math.min(Number(gp.row_count) || 200, 1000));
+  if (rows * cols > 300000) rows = Math.max(50, Math.floor(300000 / cols));
+  const grid = [];
+  for (let c0 = 1; c0 <= cols; c0 += 100) {
+    const c1 = Math.min(cols, c0 + 99), range = tab.sheet_id + '!' + efColName_(c0) + '1:' + efColName_(c1) + rows;
+    const j = efUserGet_('/open-apis/sheets/v2/spreadsheets/' + encodeURIComponent(sp) + '/values/' + encodeURIComponent(range) +
+      '?valueRenderOption=UnformattedValue');
+    const vals = (j.data && j.data.valueRange && j.data.valueRange.values) || [];
+    vals.forEach((row, r) => {
+      if (!Array.isArray(row)) return;
+      grid[r] = grid[r] || [];
+      row.forEach((v, i) => { if (v !== null && v !== undefined && v !== '') grid[r][c0 - 1 + i] = v; });
+    });
+  }
+  for (let r = 0; r < grid.length; r++) grid[r] = grid[r] || [];
+  return grid;
+}
+/** Texto de uma célula (texto rico, link, opção…). */
 function efText_(v) {
   if (v === null || v === undefined) return '';
   if (Array.isArray(v)) return v.map(efText_).filter(Boolean).join(' ');
@@ -154,244 +276,398 @@ function efText_(v) {
   }
   return String(v);
 }
-/** Número de um campo (número, texto "1.234", fórmula). null = vazio. */
+/** Número de uma célula (número, texto "1.234", fórmula). null = vazio. */
 function efNum_(v) {
   if (v === null || v === undefined || v === '') return null;
   if (typeof v === 'number') return isFinite(v) ? v : null;
+  if (typeof v === 'boolean') return null;
   if (Array.isArray(v)) { for (const x of v) { const n = efNum_(x); if (n !== null) return n; } return null; }
   if (typeof v === 'object') return efNum_(v.value !== undefined ? v.value : v.text);
   const s = String(v).trim().replace(/\s/g, '');
-  if (!s) return null;
-  const n = Number(/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s.replace(',', '.'));
-  return isFinite(n) ? n : null;
+  if (!s || !/^-?[\d.,]+%?$/.test(s)) return null;
+  const pct = /%$/.test(s), t = s.replace('%', '');
+  const n = Number(/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(',', '.'));
+  return isFinite(n) ? (pct ? n / 100 : n) : null;
 }
-/** Milissegundos de um campo de data/hora (número, texto "2026/11/25 14:45", "25/11/2026"). null = vazio. */
-function efMs_(v) {
-  if (v === null || v === undefined || v === '') return null;
-  if (typeof v === 'number') return isFinite(v) && v > 0 ? (v < 1e11 ? v * 1000 : v) : null;
-  if (Array.isArray(v)) { for (const x of v) { const t = efMs_(x); if (t !== null) return t; } return null; }
-  if (typeof v === 'object') return efMs_(v.value !== undefined ? v.value : v.text);
-  const s = String(v).trim();
-  if (/^\d{10,13}$/.test(s)) return efMs_(Number(s));
-  let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
-  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0) + 3, +(m[5] || 0), +(m[6] || 0));
-  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
-  if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1], +(m[4] || 0) + 3, +(m[5] || 0), +(m[6] || 0));
-  return null;
+const EF_MESES_ = {jan: 1, fev: 2, feb: 2, mar: 3, abr: 4, apr: 4, mai: 5, may: 5, jun: 6, jul: 7, ago: 8, aug: 8, set: 9, sep: 9,
+  out: 10, oct: 10, nov: 11, dez: 12, dec: 12};
+/** Dia sem ano ("01-nov", "11月14日"): o ano de hoje; mais de 60 dias no futuro → o ano anterior. */
+function efComAno_(m, d) {
+  const hoje = isoToday_(), y = Number(hoje.slice(0, 4));
+  const iso = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  return iso > addDaysIso_(hoje, 60) ? (y - 1) + iso.slice(4) : iso;
 }
-/**
- * Dia (AAAA-MM-DD) do campo "Data". Com hora: o dia em São Paulo. Data sem hora (meia-noite) no fuso da base (ex.: China):
- * o dia desse fuso — senão a data de 25/11 virava 24/11 em São Paulo.
- */
-function efDayOf_(v) {
-  const ms = efMs_(v);
-  if (ms === null) return '';
-  const tzs = [tz_(), 'Asia/Shanghai', 'UTC'];
-  for (const z of tzs) {
-    const s = Utilities.formatDate(new Date(ms), z, 'yyyy-MM-dd HH:mm:ss');
-    if (s.slice(11) === '00:00:00') return s.slice(0, 10);
+/** Data de uma célula do cabeçalho → AAAA-MM-DD, ou '' (não é data). */
+function efCellDate_(v) {
+  const ok = (y, m, d) => (y >= 2000 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31 ?
+    y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0') : '');
+  if (typeof v === 'number') {
+    if (!(v >= 40000 && v < 60000)) return '';
+    return new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000).toISOString().slice(0, 10);
   }
-  return Utilities.formatDate(new Date(ms), tz_(), 'yyyy-MM-dd');
+  const s = efNorm_(efText_(v));
+  if (!s || s.length > 30) return '';
+  let m = /^(\d{4})\s*[\/\-.年]\s*(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})/.exec(s);
+  if (m) return ok(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (m) return ok(+m[3], +m[2], +m[1]);
+  m = /^(\d{1,2})\s*[-\/. ]?\s*(jan|fev|feb|mar|abr|apr|mai|may|jun|jul|ago|aug|set|sep|out|oct|nov|dez|dec)[a-z]*\.?(?:\s*[-\/. ]\s*(\d{2,4}))?$/.exec(s);
+  if (m) {
+    if (+m[1] < 1 || +m[1] > 31) return '';
+    return m[3] ? ok(m[3].length === 2 ? 2000 + +m[3] : +m[3], EF_MESES_[m[2]], +m[1]) : efComAno_(EF_MESES_[m[2]], +m[1]);
+  }
+  m = /^(\d{1,2})\s*月\s*(\d{1,2})\s*日?$/.exec(s);
+  if (m && +m[1] <= 12 && +m[2] <= 31) return efComAno_(+m[1], +m[2]);
+  return '';
 }
-/** Colunas da tabela reconhecidas pelo nome: {date, shift, sent, totalPresent, totalProgram, roles: {Adm: {present, program}}}. */
-function efColumns_(names) {
-  const col = {date: '', shift: '', sent: '', totalPresent: '', totalProgram: '', roles: {}};
-  names.forEach(n => {
-    const s = efNorm_(n);
-    if (!col.date && /^data(\s|$)/.test(s)) col.date = n;
-    else if (!col.shift && /^turno/.test(s)) col.shift = n;
-    else if (!col.sent && /^enviado em/.test(s)) col.sent = n;
-    else if (!col.totalPresent && /^total de presen/.test(s)) col.totalPresent = n;
-    else if (!col.totalProgram && /^total program/.test(s)) col.totalProgram = n;
-    else {
-      const r = EF_ROLES_.filter(x => x.re.test(s))[0];
-      if (!r) return;
-      const kind = /presen/.test(s) ? 'present' : /program/.test(s) ? 'program' : '';
-      if (!kind) return;
-      col.roles[r.key] = col.roles[r.key] || {};
-      if (!col.roles[r.key][kind]) col.roles[r.key][kind] = n;
+/** Tipo da coluna pelo subtítulo: program, efetivo, temporario, eficiencia, present (ou ''). */
+function efSubKind_(s) {
+  const t = efNorm_(s);
+  if (!t) return '';
+  if (/应出勤|programad/.test(t)) return 'program';
+  if (/正式工|efetiv/.test(t)) return 'efetivo';
+  if (/临时工|tempor/.test(t)) return 'temporario';
+  if (/效率|eficien/.test(t)) return 'eficiencia';
+  if (/出勤|presen/.test(t)) return 'present';
+  return '';
+}
+function efRoleOf_(label) { const t = efNorm_(label); return t ? EF_ROLES_.filter(r => r.re.test(t))[0] || null : null; }
+function efShiftOf_(label) {
+  const t = efNorm_(label);
+  let m = /(?:^|[^a-z0-9])t\s*([123])(?![0-9])/.exec(t) || /turno\s*([123])/.exec(t) || /^([123])\s*(?:º|o)?\s*(?:turno)?$/.exec(t);
+  if (m) return 'T' + m[1];
+  if (/早班|manha/.test(t)) return 'T1';
+  if (/中班|tarde/.test(t)) return 'T2';
+  if (/晚班|夜班|noite|madrugada/.test(t)) return 'T3';
+  return '';
+}
+function efIsTotal_(label) { return /total|合计|总计|汇总|小计/.test(efNorm_(label)); }
+/**
+ * Números de uma grade organizada por datas no cabeçalho (uma ou mais colunas por data; blocos de mês um embaixo do outro):
+ * [{date, i (linha), pos (coluna dentro da data), label (nome da linha), sub (subtítulo da coluna), kind, value}].
+ */
+function efGridRecords_(grid) {
+  const out = [], nRows = grid.length;
+  const datesOf = r => {
+    const row = grid[r] || [], cols = [];
+    for (let c = 0; c < row.length; c++) { const d = row[c] === undefined ? '' : efCellDate_(row[c]); if (d) cols.push({c: c, d: d}); }
+    return cols;
+  };
+  const isDateRow = {};
+  // Linha de datas: 2 ou mais datas em ordem crescente (números grandes numa linha de dados não viram datas).
+  for (let r = 0; r < nRows; r++) {
+    const dc = datesOf(r);
+    if (dc.length >= 2 && dc.every((x, k) => !k || x.d > dc[k - 1].d)) isDateRow[r] = dc;
+  }
+  Object.keys(isDateRow).map(Number).sort((a, b) => a - b).forEach(r => {
+    const dc = isDateRow[r], c0 = dc[0].c;
+    const spans = dc.map((x, k) => ({d: x.d, from: x.c, to: k + 1 < dc.length ? dc[k + 1].c - 1 : x.c + (k > 0 ? x.c - dc[k - 1].c : 1) - 1}));
+    const textLeft = row => { const t = []; for (let c = 0; c < c0; c++) { const s = efText_(row[c]).trim(); if (s) t.push(s); } return t.join(' '); };
+    // Linha logo abaixo das datas: subtítulos (texto) — ou já os números (sem subtítulo).
+    const next = grid[r + 1] || [];
+    let subTxt = 0, subNum = 0;
+    spans.forEach(sp => { for (let c = sp.from; c <= sp.to; c++) { if (efNum_(next[c]) !== null) subNum++; else if (efText_(next[c]).trim()) subTxt++; } });
+    const hasSub = subTxt > 0 && subTxt >= subNum;
+    const sub = c => hasSub ? efText_(next[c]).trim() : '';
+    let seen = false;
+    for (let dr = r + (hasSub ? 2 : 1); dr < nRows; dr++) {
+      if (isDateRow[dr]) break;
+      const row = grid[dr] || [], label = textLeft(row);
+      let any = false;
+      spans.forEach(sp => {
+        for (let c = sp.from; c <= sp.to; c++) {
+          const v = efNum_(row[c]);
+          if (v === null) continue;
+          any = true;
+          const sb = sub(c);
+          out.push({date: sp.d, i: dr, pos: c - sp.from, label: label, sub: sb, kind: efSubKind_(sb) || efSubKind_(label), value: v});
+        }
+      });
+      if (any) seen = true;
+      else if (!label && seen) break;
     }
   });
-  return col;
+  return out;
 }
 /**
- * Linhas da base normalizadas: [{date, shift, sent, present, program, roles: {Adm: {present, program}}}]. Só os números (o nome
- * de quem enviou não é lido).
+ * As duas planilhas lidas agora (ficam na memória por 3 min — o resumo e a lista de vários dias leem as mesmas grades):
+ * {pres (planilha 1), efic (aba da eficiência), presenca (aba da presença), abas, erros, lastDate, dates}.
  */
-function efHeadcountRows_(items) {
-  const names = [];
-  items.forEach(it => Object.keys(it.fields).forEach(k => { if (names.indexOf(k) < 0) names.push(k); }));
-  const col = efColumns_(names);
-  const out = [];
-  items.forEach((it, i) => {
-    const f = it.fields, date = col.date ? efDayOf_(f[col.date]) : '';
-    if (!date) return;
-    const st = efText_(f[col.shift]).toUpperCase(), sm = /T\s*([123])/.exec(st);
-    const roles = {};
-    let present = 0, program = 0, anyP = false, anyG = false;
-    EF_ROLES_.forEach(r => {
-      const c = col.roles[r.key] || {}, p = c.present ? efNum_(f[c.present]) : null, g = c.program ? efNum_(f[c.program]) : null;
-      roles[r.key] = {present: p, program: g};
-      if (p !== null) { present += p; anyP = true; }
-      if (g !== null) { program += g; anyG = true; }
-    });
-    // Sem as colunas das funções: o Total de Presença / Total Programado da linha.
-    if (!anyP && col.totalPresent) { const t = efNum_(f[col.totalPresent]); if (t !== null) { present = t; anyP = true; } }
-    if (!anyG && col.totalProgram) { const t = efNum_(f[col.totalProgram]); if (t !== null) { program = t; anyG = true; } }
-    if (!anyP && !anyG) return;
-    out.push({date: date, shift: sm ? 'T' + sm[1] : 'N/A', sent: (col.sent && efMs_(f[col.sent])) || efMs_(f[col.date]) || 0, order: i,
-      present: anyP ? present : null, program: anyG ? program : null, roles: roles});
-  });
-  return {rows: out, columns: col};
+var EF_PLAN_ = null;
+function efPlanilhas_(force) {
+  const L = efLinksCfg_(), sig = (L.pres ? L.pres.link : '') + '|' + (L.efic ? L.efic.link : '');
+  if (!force && EF_PLAN_ && EF_PLAN_.sig === sig && EF_PLAN_.ate > Date.now()) return EF_PLAN_.data;
+  EF_PLAN_ = null;
+  efUserToken_(); // conta não conectada / acesso vencido: um aviso só (não um por planilha)
+  const out = {pres: [], efic: [], presenca: [], abas: {}, erros: []};
+  const msg = e => String(e && e.message || e).replace(/^Error:\s*/, '');
+  if (L.pres) {
+    try {
+      const sp = efSpToken_(L.pres), tabs = efTabs_(sp), vis = tabs.filter(t => !t.hidden);
+      const tab = (L.pres.sheet && tabs.filter(t => t.sheet_id === L.pres.sheet)[0]) || vis[0] || tabs[0];
+      if (!tab) throw new Error('a planilha não tem abas');
+      out.pres = efGridRecords_(efGrid_(sp, tab));
+      out.abas.presentesProgramados = tab.title || tab.sheet_id;
+    } catch (e) { out.erros.push('Planilha de presentes e programados: ' + msg(e)); }
+  }
+  if (L.efic) {
+    try {
+      const sp = efSpToken_(L.efic), tabs = efTabs_(sp), vis = tabs.filter(t => !t.hidden);
+      const by = (pref, re) => vis.filter(t => pref.test(efNorm_(t.title)))[0] || vis.filter(t => re.test(efNorm_(t.title)))[0];
+      const tEf = by(/日均效率|eficiencia media diaria/, /效率|eficien/) || (L.efic.sheet && tabs.filter(t => t.sheet_id === L.efic.sheet)[0]);
+      const tPr = by(/人员出勤|presenca de colab/, /出勤|presenca/);
+      if (!tEf && !tPr) throw new Error('não achei as abas "日均效率 Eficiência média diária" e "人员出勤 Presença de colaboradores"');
+      if (tEf) { out.efic = efGridRecords_(efGrid_(sp, tEf)); out.abas.eficiencia = tEf.title || tEf.sheet_id; }
+      if (tPr && tPr !== tEf) { out.presenca = efGridRecords_(efGrid_(sp, tPr)); out.abas.presenca = tPr.title || tPr.sheet_id; }
+      if (!tEf) out.erros.push('Planilha da eficiência: não achei a aba "日均效率 Eficiência média diária"');
+      if (!tPr) out.erros.push('Planilha da eficiência: não achei a aba "人员出勤 Presença de colaboradores"');
+    } catch (e) { out.erros.push('Planilha da eficiência: ' + msg(e)); }
+  }
+  if (out.erros.length && !out.pres.length && !out.efic.length && !out.presenca.length) throw new Error(out.erros.join(' · '));
+  // Último dia com números (presença ou eficiência; o programado pode vir antes do dia) — até hoje.
+  const hoje = isoToday_(), dias = {};
+  out.pres.filter(x => x.kind !== 'program').concat(out.efic, out.presenca).forEach(x => { if (x.date <= hoje && x.value) dias[x.date] = 1; });
+  out.dates = Object.keys(dias).sort();
+  out.lastDate = out.dates[out.dates.length - 1] || '';
+  EF_PLAN_ = {sig: sig, ate: Date.now() + 180000, data: out};
+  return out;
 }
-/** As linhas que valem no dia: uma por turno (a enviada por último). */
-function efHeadcountDay_(isoDate, items) {
-  const hc = efHeadcountRows_(items || efFeishuRecords_());
-  const best = {};
-  hc.rows.filter(r => r.date === isoDate).forEach(r => {
-    const b = best[r.shift];
-    if (!b || r.sent > b.sent || (r.sent === b.sent && r.order > b.order)) best[r.shift] = r;
+/** Números de um dia nas planilhas: categorias (planilha 1), eficiência da matriz e presença de efetivos/temporários por turno. */
+function efDiaPlanilhas_(date, P) {
+  const roles = {};
+  EF_ROLES_.forEach(r => { roles[r.key] = {present: null, program: null}; });
+  P.pres.filter(x => x.date === date).forEach(x => {
+    const r = efRoleOf_(x.label);
+    if (!r) return;
+    const kind = x.kind === 'present' || x.kind === 'program' ? x.kind : (x.pos === 0 ? 'present' : x.pos === 1 ? 'program' : '');
+    if (kind && roles[r.key][kind] === null) roles[r.key][kind] = x.value;
   });
-  const rows = Object.keys(best).sort().map(k => best[k]);
-  // V4.33.1: o último dia que a base tem (para o painel dizer, num dia sem linhas, até quando a base vai).
-  const lastDate = hc.rows.reduce((m, r) => (r.date > m ? r.date : m), '');
-  return {rows: rows, columns: hc.columns, linhasDoDia: hc.rows.filter(r => r.date === isoDate).length, lastDate: lastDate};
+  const ef = P.efic.filter(x => x.date === date && x.value !== null);
+  const efPick = ef.filter(x => x.kind === 'eficiencia' && efIsTotal_(x.label))[0] || ef.filter(x => x.kind === 'eficiencia')[0] ||
+    ef.filter(x => !x.kind)[0] || null;
+  // Presença: uma linha por turno e a do total (pelo nome; sem nome, a última linha que é a soma das outras).
+  const byRow = {};
+  P.presenca.filter(x => x.date === date).forEach(x => {
+    const kind = x.kind === 'efetivo' || x.kind === 'temporario' ? x.kind : (x.pos === 0 ? 'efetivo' : x.pos === 1 ? 'temporario' : '');
+    if (!kind) return;
+    const row = byRow[x.i] = byRow[x.i] || {i: x.i, label: x.label, efetivo: null, temporario: null};
+    if (row[kind] === null) row[kind] = x.value;
+  });
+  let rows = Object.keys(byRow).map(k => byRow[k]).sort((a, b) => a.i - b.i), total = rows.filter(r => efIsTotal_(r.label))[0] || null;
+  let parts = rows.filter(r => r !== total);
+  if (!total && parts.length >= 3) {
+    const last = parts[parts.length - 1], rest = parts.slice(0, -1), s = k => rest.reduce((a, r) => a + (r[k] || 0), 0);
+    if ((last.efetivo || 0) === s('efetivo') && (last.temporario || 0) === s('temporario')) { total = last; parts = rest; }
+  }
+  if (!total && parts.length === 1) { total = parts[0]; parts = []; }
+  const semNome = !parts.some(p => efShiftOf_(p.label));
+  parts.forEach((p, k) => { p.shift = efShiftOf_(p.label) || (semNome && parts.length === 3 ? EF_SHIFTS_[k] : ''); });
+  const soma = k => (parts.some(p => p[k] !== null) ? parts.reduce((a, p) => a + (p[k] || 0), 0) : null);
+  return {date: date, roles: roles, efOficial: efPick ? efPick.value : null,
+    efetivos: total ? total.efetivo : soma('efetivo'), temporarios: total ? total.temporario : soma('temporario'),
+    shifts: parts.filter(p => p.shift), linhasPresenca: rows.map(r => r.label || '(sem nome)'), lastDate: P.lastDate || ''};
 }
-/** Números do dia a partir das linhas do Feishu (por turno e por função). */
-function efHeadcountMetrics_(day) {
-  const m = {present: null, program: null, headcountRows: day.rows.length};
-  EF_SHIFTS_.forEach(s => { m['present' + s] = null; m['program' + s] = null; });
-  EF_ROLES_.forEach(r => { m['present' + r.key] = null; m['program' + r.key] = null; });
-  const add = (k, v) => { if (v === null || v === undefined) return; m[k] = (m[k] || 0) + v; };
-  day.rows.forEach(r => {
-    add('present', r.present); add('program', r.program);
-    if (EF_SHIFTS_.indexOf(r.shift) >= 0) { add('present' + r.shift, r.present); add('program' + r.shift, r.program); }
-    EF_ROLES_.forEach(x => { add('present' + x.key, r.roles[x.key].present); add('program' + x.key, r.roles[x.key].program); });
+/** Números lidos das planilhas (os que ficam gravados por dia). */
+const EF_FEISHU_KEYS_ = ['efOficial', 'presentEfetivos', 'presentTemporarios']
+  .concat(EF_SHIFTS_.map(s => 'presentEf' + s), EF_SHIFTS_.map(s => 'presentTp' + s))
+  .concat(EF_ROLES_.map(r => 'present' + r.key), EF_ROLES_.map(r => 'program' + r.key));
+/** Dia das planilhas → os números de EF_FEISHU_KEYS_ (zero do total = vazio). */
+function efPlanMetrics_(day) {
+  const m = {};
+  EF_FEISHU_KEYS_.forEach(k => { m[k] = null; });
+  m.efOficial = day.efOficial > 0 ? Math.round(day.efOficial * 100) / 100 : null;
+  m.presentEfetivos = day.efetivos;
+  m.presentTemporarios = day.temporarios;
+  if (!(m.presentEfetivos > 0) && !(m.presentTemporarios > 0)) { m.presentEfetivos = null; m.presentTemporarios = null; }
+  day.shifts.forEach(p => {
+    if (EF_SHIFTS_.indexOf(p.shift) < 0) return;
+    m['presentEf' + p.shift] = p.efetivo;
+    m['presentTp' + p.shift] = p.temporario;
   });
-  m.presenceRate = m.present !== null && m.program > 0 ? Math.round(m.present / m.program * 10000) / 100 : null;
-  // V4.33.1: último dia da base (AAAAMMDD) e a leitura do Feishu certa (feishuFail 0).
+  EF_ROLES_.forEach(r => { m['present' + r.key] = day.roles[r.key].present; m['program' + r.key] = day.roles[r.key].program; });
   m.hcLastDay = day.lastDate ? Number(day.lastDate.replace(/-/g, '')) : null;
+  return m;
+}
+/** Dia gravado antes: o número que a planilha não tem mais (apagado ou ainda não preenchido) continua o gravado. */
+function efKeep_(m, prev) {
+  const out = Object.assign({}, m || {});
+  EF_FEISHU_KEYS_.forEach(k => {
+    if (out[k] === null || out[k] === undefined) out[k] = prev && prev[k] !== null && prev[k] !== undefined ? prev[k] : null;
+  });
+  if (!m && prev && prev.hcLastDay) out.hcLastDay = prev.hcLastDay;
+  return out;
+}
+/** Totais do dia a partir dos números gravados: presentes (efetivos + temporários), categorias, turnos e % de presença. */
+function efDerive_(m) {
+  const sum = keys => (keys.some(k => m[k] !== null && m[k] !== undefined) ? keys.reduce((a, k) => a + (Number(m[k]) || 0), 0) : null);
+  m.presentCat = sum(EF_ROLES_.map(r => 'present' + r.key));
+  m.program = sum(EF_ROLES_.map(r => 'program' + r.key));
+  EF_SHIFTS_.forEach(s => { m['present' + s] = sum(['presentEf' + s, 'presentTp' + s]); m['program' + s] = null; });
+  const ef = sum(['presentEfetivos', 'presentTemporarios']);
+  m.present = ef > 0 ? ef : (m.presentCat > 0 ? m.presentCat : null);
+  m.presentSource = ef > 0 ? 2 : (m.presentCat > 0 ? 1 : 0);
+  m.presenceRate = m.presentCat !== null && m.program > 0 ? Math.round(m.presentCat / m.program * 10000) / 100 : null;
+  m.headcountRows = EF_FEISHU_KEYS_.filter(k => m[k] !== null && m[k] !== undefined).length;
   m.feishuFail = 0;
   return m;
+}
+/** Números do Feishu do dia (lidos agora + os gravados antes). Erro de leitura → só os gravados e o aviso. */
+function efFeishuDay_(date, prevMetrics) {
+  let base = null, erro = '';
+  try {
+    const P = efPlanilhas_();
+    base = efPlanMetrics_(efDiaPlanilhas_(date, P));
+    if (P.erros.length) erro = P.erros.join(' · ');
+  } catch (e) { erro = String(e && e.message || e); }
+  return {m: efDerive_(efKeep_(base, prevMetrics)), erro: erro};
 }
 
 // ------------------------------------------------------------------ resumo e lista do dia
 /**
- * Resumo do dia (tarefa SUMMARY): o número do JMS e os colaboradores do Feishu. Sem o Feishu (não configurado ou fora do ar):
- * o número do JMS entra e os colaboradores ficam os já gravados (aviso no LOG, uma vez por dia).
+ * Resumo do dia (tarefa SUMMARY): o volume do JMS e os números das planilhas da matriz. Sem o Feishu (não configurado, conta
+ * desconectada ou fora do ar): o volume do JMS entra e os números do Feishu ficam os já gravados (aviso no LOG, uma vez por dia).
  */
 function efficiencySummary_(indicatorKey, isoDate) {
-  const jms = efJmsDay_(isoDate);
-  let hm = null, feishuErro = '';
-  try { hm = efHeadcountMetrics_(efHeadcountDay_(isoDate)); }
-  catch (e) {
-    feishuErro = String(e && e.message || e);
-    const prev = getRateDay_(indicatorKey, isoDate);
-    if (prev && prev.metrics && prev.metrics.headcountRows > 0) hm = efKeepHeadcount_(prev.metrics);
-    if (getProp_('EF_AVISO_FEISHU', '') !== isoToday_()) {
-      setProp_('EF_AVISO_FEISHU', isoToday_());
-      logSync_('WARN', indicatorKey, isoDate, 'Eficiência: colaboradores do Feishu não lidos — ' + feishuErro.slice(0, 300));
-    }
+  const jms = efJmsDay_(isoDate), prev = getRateDay_(indicatorKey, isoDate);
+  const fd = efFeishuDay_(isoDate, prev && prev.metrics);
+  if (fd.erro && getProp_('EF_AVISO_FEISHU', '') !== isoToday_()) {
+    setProp_('EF_AVISO_FEISHU', isoToday_());
+    logSync_('WARN', indicatorKey, isoDate, 'Eficiência: planilhas do Feishu não lidas — ' + fd.erro.slice(0, 300));
   }
-  return efSummaryFrom_(indicatorKey, isoDate, jms, hm, feishuErro);
-}
-function efKeepHeadcount_(metrics) {
-  const out = {};
-  ['present', 'program', 'presenceRate', 'headcountRows'].concat(EF_SHIFTS_.map(s => 'present' + s), EF_SHIFTS_.map(s => 'program' + s),
-    EF_ROLES_.map(r => 'present' + r.key), EF_ROLES_.map(r => 'program' + r.key)).forEach(k => { out[k] = metrics[k] === undefined ? null : metrics[k]; });
-  return out;
+  return efSummaryFrom_(indicatorKey, isoDate, jms, fd.m, fd.erro);
 }
 function efSummaryFrom_(indicatorKey, isoDate, jms, hm, feishuErro) {
-  const has = !!(hm && hm.headcountRows > 0 && hm.present !== null);
+  const has = !!(hm && (hm.present > 0 || hm.efOficial > 0));
   if (!jms && !has) return {indicator: indicatorKey, date: isoDate, empty: true};
   const raw = Object.assign({date: isoDate, source: 'JMS+FEISHU'}, jms || {}, hm || {});
   Object.keys(EF_JMS_FIELDS_).forEach(k => { if (raw[k] === undefined) raw[k] = null; });
-  raw.efficiency = has && raw.processed !== null && hm.present > 0 ? Math.round(raw.processed / hm.present * 100) / 100 : null;
-  if (feishuErro) { raw.feishuErro = feishuErro.slice(0, 200); raw.feishuFail = 1; }
-  // A "taxa" do dia não aparece neste painel (cartões próprios): a eficiência, ou 0 enquanto faltam os colaboradores.
+  // A mesma conta da matriz (volume ÷ presença de efetivos + temporários), com o volume do JMS: vale quando a matriz não tem o dia.
+  raw.efCalc = raw.processed !== null && raw.processed !== undefined && hm && hm.present > 0 ? Math.round(raw.processed / hm.present * 100) / 100 : null;
+  raw.efficiency = raw.efOficial > 0 ? raw.efOficial : raw.efCalc;
+  raw.efSource = raw.efOficial > 0 ? 1 : (raw.efCalc !== null ? 2 : 0);
+  if (feishuErro) { raw.feishuErro = String(feishuErro).slice(0, 200); raw.feishuFail = 1; }
+  // A "taxa" do dia não aparece neste painel (cartões próprios): a eficiência, ou 0 enquanto falta.
   return {indicator: indicatorKey, date: isoDate, rate: raw.efficiency === null ? 0 : raw.efficiency,
-    errorCount: has ? hm.present : 0, totalCount: raw.processed === null ? 0 : raw.processed, empty: false, raw: raw};
+    errorCount: hm && hm.present > 0 ? hm.present : 0, totalCount: raw.processed === null ? 0 : raw.processed, empty: false, raw: raw};
 }
 /**
- * Lista do dia (tarefa DETAIL_INIT): uma linha por turno × função × situação (Presentes / Programados), para os gráficos de
- * turnos e funções e as tabelas. Também regrava o resumo com os colaboradores lidos agora.
+ * Lista do dia (tarefa DETAIL_INIT), a partir dos números gravados do dia: Presentes / Programados por categoria (planilha 1) e
+ * Efetivos / Temporários por turno (aba de presença) — para os gráficos e as tabelas. Também regrava o resumo.
  */
 function runEfficiencyDetailJob_(job, deadline, cfg, st) {
-  const ind = job.indicator, date = job.date;
-  const day = efHeadcountDay_(date), acc = GroupAccumulator_(cfg);
+  const ind = job.indicator, date = job.date, prev = getRateDay_(ind, date), pm = prev && prev.metrics || null;
+  const fd = efFeishuDay_(date, pm), m = fd.m, acc = GroupAccumulator_(cfg);
   let rowsIn = 0;
-  day.rows.forEach(r => EF_ROLES_.forEach(x => {
-    [['present', 'Presentes'], ['program', 'Programados']].forEach(kc => {
-      const v = r.roles[x.key][kc[0]];
-      if (!(v > 0)) return;
-      acc.addRow({date: date, column: kc[1], shift: r.shift, role: x.nome, qty: v});
-      rowsIn++;
-    });
-  }));
-  // Linha só com os totais (base sem as colunas das funções): função "N/A".
-  day.rows.forEach(r => {
-    if (EF_ROLES_.some(x => r.roles[x.key].present !== null || r.roles[x.key].program !== null)) return;
-    if (r.present > 0) { acc.addRow({date: date, column: 'Presentes', shift: r.shift, role: '', qty: r.present}); rowsIn++; }
-    if (r.program > 0) { acc.addRow({date: date, column: 'Programados', shift: r.shift, role: '', qty: r.program}); rowsIn++; }
-  });
+  const add = (column, shift, role, v) => { if (!(v > 0)) return; acc.addRow({date: date, column: column, shift: shift, role: role, qty: v}); rowsIn++; };
+  EF_ROLES_.forEach(r => { add('Presentes', 'N/A', r.nome, m['present' + r.key]); add('Programados', 'N/A', r.nome, m['program' + r.key]); });
+  const porTurno = EF_SHIFTS_.some(s => m['presentEf' + s] > 0 || m['presentTp' + s] > 0);
+  if (porTurno) EF_SHIFTS_.forEach(s => { add('Efetivos', s, '', m['presentEf' + s]); add('Temporários', s, '', m['presentTp' + s]); });
+  else { add('Efetivos', 'N/A', '', m.presentEfetivos); add('Temporários', 'N/A', '', m.presentTemporarios); }
   const ds = acc.build();
   saveDayDataset_(ind, date, ds, 1, acc.total());
   groupedShiftAgg_(ind, date, ds);
-  const prev = getRateDay_(ind, date), jms = {};
-  Object.keys(EF_JMS_FIELDS_).forEach(k => { jms[k] = prev && prev.metrics ? prev.metrics[k] : null; });
-  const summary = efSummaryFrom_(ind, date, jms.processed === null || jms.processed === undefined ? null : jms, efHeadcountMetrics_(day), '');
+  const jms = {};
+  Object.keys(EF_JMS_FIELDS_).forEach(k => { jms[k] = pm ? pm[k] : null; });
+  const summary = efSummaryFrom_(ind, date, jms.processed === null || jms.processed === undefined ? null : jms, m, fd.erro);
   if (!summary.empty) upsertRate_(summary);
   updateDayStatus_(ind, date, {detailsStatus: 'COMPLETE', expectedPages: 1, savedPages: 1, expectedRecords: acc.total(), savedRows: rowsIn, error: ''});
   return 'done';
 }
+/**
+ * De hora em hora (syncHourly) e no teste das Configurações: lê as planilhas e põe na fila os dias que mudaram ou ganharam
+ * números desde a última leitura (a matriz preenche à mão, às vezes dias depois). Devolve quantos dias entraram na fila.
+ */
+function efQueueSheetChanges_(force) {
+  if (!INDICATORS.efficiency || !efLinksCfg_(true)) return 0;
+  if (!getProp_('FEISHU_USER_SEGREDO', '') && !getProp_('FEISHU_USER_TOKEN', '')) return 0;
+  const agora = Date.now();
+  if (!force && agora - (Number(getProp_('EF_CONFERENCIA_AT', '0')) || 0) < 50 * 60000) return 0;
+  setProp_('EF_CONFERENCIA_AT', String(agora));
+  let P;
+  try { P = efPlanilhas_(true); }
+  catch (e) {
+    if (getProp_('EF_AVISO_FEISHU', '') !== isoToday_()) {
+      setProp_('EF_AVISO_FEISHU', isoToday_());
+      logSync_('WARN', 'efficiency', '', 'Eficiência: conferência das planilhas do Feishu não feita — ' + String(e && e.message || e).slice(0, 300));
+    }
+    return 0;
+  }
+  const hoje = isoToday_(), inicio = String(getProp_('DATA_START_DATE', '') || ''), limite = addDaysIso_(hoje, -400);
+  const from = inicio > limite ? inicio : limite;
+  const todos = {};
+  P.pres.concat(P.efic, P.presenca).forEach(x => { if (x.date >= from && x.date <= hoje) todos[x.date] = 1; });
+  const mudou = Object.keys(todos).sort().filter(d => {
+    const base = efPlanMetrics_(efDiaPlanilhas_(d, P)), prev = getRateDay_('efficiency', d), pm = prev && prev.metrics;
+    if (!pm) return base.efOficial > 0 || base.presentEfetivos > 0 || base.presentTemporarios > 0 || EF_ROLES_.some(r => base['present' + r.key] > 0);
+    return EF_FEISHU_KEYS_.some(k => base[k] !== null && base[k] !== undefined && base[k] !== pm[k]);
+  });
+  if (mudou.length) {
+    enqueueJobs_(mudou.map(d => ['SUMMARY', 'efficiency', d, 0]), {reset: true});
+    logSync_('INFO', 'efficiency', '', 'Eficiência: ' + mudou.length + ' dia(s) com números novos ou mudados nas planilhas do Feishu — lendo de novo.');
+  }
+  return mudou.length;
+}
 
 // ------------------------------------------------------------------ Configurações
+/** Situação da conexão (cartão "Planilhas do Feishu" nas Configurações). Nunca mostra tokens nem o App Secret. */
+function statusPlanilhasFeishu() {
+  const tem = k => !!String(getProp_(k, '') || '').trim();
+  return {app: tem('FEISHU_APP_ID') && tem('FEISHU_APP_SECRET'), linkPresenca: tem('FEISHU_LINK_PRESENCA'), linkEficiencia: tem('FEISHU_LINK_EFICIENCIA'),
+    conectado: tem('FEISHU_USER_SEGREDO') || (tem('FEISHU_USER_TOKEN') && Number(getProp_('FEISHU_USER_EXPIRA', '0')) > Date.now()),
+    renovavel: tem('FEISHU_USER_SEGREDO'), conectadoEm: getProp_('FEISHU_USER_EM', ''), renovadoEm: getProp_('FEISHU_USER_RENOVADO', ''),
+    renovarAte: getProp_('FEISHU_USER_RENOVAR_ATE', ''), erro: getProp_('FEISHU_USER_ERRO', ''),
+    conferidoEm: Number(getProp_('EF_CONFERENCIA_AT', '0')) ? new Date(Number(getProp_('EF_CONFERENCIA_AT', '0'))).toISOString() : ''};
+}
 /**
- * Configurações → "Salvar e testar a base" (ou Executar função): lê a base do Feishu e mostra o que achou — as colunas
- * reconhecidas, quantas linhas e os últimos dias com os colaboradores por turno. Nunca mostra o App Secret nem nomes de pessoas.
- * Com a leitura certa, os dias já gravados são consultados de novo (para entrar os colaboradores).
+ * Configurações → "Testar as planilhas" (ou Executar função): lê as duas planilhas e mostra o que achou — as abas, as
+ * categorias, as linhas da presença e os últimos dias. Nunca mostra tokens, o App Secret nem nomes de pessoas. Põe na fila os
+ * dias com números novos ou mudados (para entrarem no painel).
  */
-function testarBaseFeishu() {
-  if (!INDICATORS.efficiency) return {ok: false, erro: 'A base do Feishu é do painel Eficiência do SP GRU.'};
+function testarPlanilhasFeishu() {
+  if (!INDICATORS.efficiency) return {ok: false, erro: 'As planilhas do Feishu são do painel Eficiência do SP GRU.'};
   try {
-    const items = efFeishuRecords_(true), hc = efHeadcountRows_(items), c = hc.columns;
-    const faltam = [];
-    if (!c.date) faltam.push('Data');
-    if (!c.shift) faltam.push('Turno');
-    EF_ROLES_.forEach(r => { if (!(c.roles[r.key] || {}).present) faltam.push(r.nome + ' - Presentes'); });
-    const dias = hc.rows.map(r => r.date).filter((d, i, a) => a.indexOf(d) === i).sort().reverse();
-    const ultimos = dias.slice(0, 5).map(d => {
-      const day = efHeadcountDay_(d, items), m = efHeadcountMetrics_(day);
-      return d + ': ' + m.present + ' presentes de ' + m.program + ' programados (' + day.rows.map(r => r.shift + ' ' + r.present).join(' · ') + ')' +
-        (day.linhasDoDia > day.rows.length ? ' — ' + (day.linhasDoDia - day.rows.length) + ' linha(s) repetida(s): vale a enviada por último' : '');
+    efAppCfg_();
+    efLinksCfg_();
+    const P = efPlanilhas_(true), hoje = isoToday_();
+    const fmt = v => (v === null || v === undefined ? '—' : String(Math.round(v * 100) / 100));
+    const ultimos = P.dates.filter(d => d <= hoje).slice(-5).reverse().map(d => {
+      const day = efDiaPlanilhas_(d, P), m = efDerive_(efPlanMetrics_(day));
+      return d + ': eficiência da matriz ' + fmt(m.efOficial) + ' · presença ' + fmt(m.presentEfetivos) + ' efetivos + ' + fmt(m.presentTemporarios) +
+        ' temporários' + (day.shifts.length ? ' (' + day.shifts.map(p => p.shift + ' ' + fmt(p.efetivo) + '+' + fmt(p.temporario)).join(' · ') + ')' : '') +
+        ' · planilha 1: ' + fmt(m.presentCat) + ' presentes de ' + fmt(m.program) + ' programados';
     });
-    let refeitos = 0;
-    if (dias.length) {
-      const from = getProp_('DATA_START_DATE', '') || dias[dias.length - 1], to = isoToday_();
-      const datas = getRates_('efficiency', from, to).map(r => r.date).concat(dias.filter(d => d >= from && d <= to))
-        .filter((d, i, a) => a.indexOf(d) === i);
-      if (datas.length) { enqueueJobs_(datas.map(d => ['SUMMARY', 'efficiency', d, 0]), {reset: true}); refeitos = datas.length; }
-    }
-    return {ok: true, linhas: items.length, linhasComNumeros: hc.rows.length, diasNaBase: dias.length,
-      colunas: {data: c.date || 'NÃO ACHEI', turno: c.shift || 'NÃO ACHEI', enviadoEm: c.sent || '—',
-        funcoes: EF_ROLES_.map(r => r.nome + ': ' + ((c.roles[r.key] || {}).present ? 'presentes ✓' : 'presentes ✗') + ' / ' + ((c.roles[r.key] || {}).program ? 'programados ✓' : 'programados ✗'))},
-      ultimosDias: ultimos, aviso: faltam.length ? 'Colunas não encontradas: ' + faltam.join(', ') + '.' : '',
-      diasNaFila: refeitos ? refeitos + ' dia(s) na fila para entrar os colaboradores (clique em Atualizar no painel daqui a pouco).' : ''};
+    const rotulos = {};
+    P.presenca.forEach(x => { rotulos[x.label || '(sem nome)'] = 1; });
+    const filaN = efQueueSheetChanges_(true);
+    return {ok: true, abas: P.abas,
+      categorias: EF_ROLES_.map(r => r.nome + ': ' + (P.pres.some(x => efRoleOf_(x.label) === r) ? '✓' : '✗ não achei a linha')),
+      linhasDaPresenca: Object.keys(rotulos).slice(0, 12), diasComNumeros: P.dates.length,
+      primeiroDia: P.dates[0] || '—', ultimoDia: P.lastDate || '—', ultimosDias: ultimos,
+      aviso: P.erros.join(' · '),
+      diasNaFila: filaN ? filaN + ' dia(s) na fila para entrar no painel (clique em Atualizar no painel daqui a pouco).' : 'Nenhum dia novo ou mudado.'};
   } catch (e) {
     return {ok: false, erro: String(e && e.message || e)};
   }
 }
-/** Diagnóstico de um dia (Executar função): o número do JMS, os colaboradores do Feishu e a conta. */
+/** Nome antigo (V4.33), mantido para quem tem o atalho: o mesmo teste das planilhas. */
+function testarBaseFeishu() { return testarPlanilhasFeishu(); }
+/** Diagnóstico de um dia (Executar função): o volume do JMS, os números das planilhas e a eficiência que vale. */
 function diagnosticarEficiencia(date) {
   const d = date && /^\d{4}-\d{2}-\d{2}$/.test(String(date)) ? String(date) : addDaysIso_(isoToday_(), -1);
-  const out = {dia: d, conta: 'Qtd processada total (JMS) ÷ colaboradores presentes (Feishu, os 3 turnos)'};
+  const out = {dia: d, conta: 'Eficiência da matriz (planilha 效能监控表); sem ela: Qtd processada total (JMS) ÷ presença (efetivos + temporários)'};
   try { out.jms = efJmsDay_(d) || 'sem linha do JMS neste dia'; } catch (e) { out.jmsErro = String(e && e.message || e); }
   try {
-    const day = efHeadcountDay_(d), m = efHeadcountMetrics_(day);
-    out.feishu = {linhas: day.rows.map(r => r.shift + ': ' + r.present + ' presentes / ' + r.program + ' programados'), presentes: m.present, programados: m.program};
-    if (day.linhasDoDia > day.rows.length) out.feishu.repetidas = (day.linhasDoDia - day.rows.length) + ' linha(s) repetida(s): vale a enviada por último';
+    const P = efPlanilhas_(true), day = efDiaPlanilhas_(d, P), m = efDerive_(efPlanMetrics_(day));
+    out.planilhas = {eficienciaDaMatriz: m.efOficial, efetivos: m.presentEfetivos, temporarios: m.presentTemporarios,
+      turnos: day.shifts.map(p => p.shift + ': ' + p.efetivo + ' efetivos + ' + p.temporario + ' temporários'),
+      linhasDaPresenca: day.linhasPresenca, presentesCategorias: m.presentCat, programados: m.program, presenca: m.presenceRate};
+    if (P.erros.length) out.avisos = P.erros;
   } catch (e) { out.feishuErro = String(e && e.message || e); }
-  const proc = out.jms && out.jms.processed, pres = out.feishu && out.feishu.presentes;
-  out.eficiencia = proc !== undefined && proc !== null && pres > 0 ? Math.round(proc / pres * 100) / 100 : 'sem conta (falta ' + (pres > 0 ? 'o JMS' : 'o Feishu') + ')';
+  const prev = getRateDay_('efficiency', d);
+  if (prev && prev.metrics) out.gravado = {eficiencia: prev.metrics.efficiency, origem: prev.metrics.efSource === 1 ? 'matriz' : prev.metrics.efSource === 2 ? 'calculada' : '—'};
+  const proc = out.jms && out.jms.processed, pl = out.planilhas || {}, pres = (pl.efetivos || 0) + (pl.temporarios || 0);
+  out.eficiencia = pl.eficienciaDaMatriz > 0 ? pl.eficienciaDaMatriz + ' (da matriz)' :
+    proc !== undefined && proc !== null && pres > 0 ? Math.round(proc / pres * 100) / 100 + ' (calculada com o volume do JMS)' :
+    'sem conta (falta ' + (pres > 0 ? 'o JMS' : 'a presença nas planilhas') + ')';
   return out;
 }

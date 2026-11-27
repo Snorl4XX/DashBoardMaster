@@ -166,8 +166,11 @@ const FN_HELP = {
   testarFeishu: 'Bot do Feishu: manda agora a última hora para todos os grupos (ou a hora do parâmetro, ex.: "16" = 16:00 às 16:59 de hoje)',
   testarFeishuTurno: 'Bot do fechamento do turno: manda agora o último turno que fechou no grupo principal (ou o do parâmetro: "T1", "T2", "T3" ou "2026-11-24 T2")',
   baixarHistoricoAvaria: 'Avaria: baixa o histórico agora',
-  testarBaseFeishu: 'Eficiência: lê a base Headcount do Feishu e mostra as colunas e os últimos dias (sem o App Secret)',
-  diagnosticarEficiencia: 'Eficiência: a conta de um dia — JMS, colaboradores do Feishu e o resultado (data opcional, padrão ontem)',
+  testarPlanilhasFeishu: 'Eficiência: lê as duas planilhas da matriz no Feishu e mostra as abas, as categorias e os últimos dias (sem tokens)',
+  statusPlanilhasFeishu: 'Eficiência: situação da conta do Feishu conectada (sem tokens)',
+  desconectarFeishu: 'Eficiência: apaga o acesso da conta do Feishu guardado no painel (os dias já lidos continuam)',
+  testarBaseFeishu: 'Eficiência: o mesmo que testarPlanilhasFeishu (nome antigo)',
+  diagnosticarEficiencia: 'Eficiência: um dia — volume do JMS, números das planilhas da matriz e a eficiência que vale (data opcional, padrão ontem)',
   testProjectInstallation: 'confere se os arquivos do painel carregaram'
 };
 function publicFunctions() {
@@ -352,7 +355,44 @@ function maskProp(k, v) {
 }
 const INTERNAL_PROPS = ['DB_SPREADSHEET_ID', 'DATA_FOLDER_ID', 'REPORT_FOLDER_ID', 'PLATAFORMA'];
 /** Propriedades de configuração (as que o LEIA_PRIMEIRO/DIAGNOSTICO mandam ajustar); o resto é controle interno do painel. */
-const USER_PROP = /^(JMS_|DATA_START_DATE$|ATUALIZACAO_MIN$|DETAIL_|DASHBOARD_MAX_ROWS$|MAX_CLIENT_ROWS$|GROUPED_CLIENT_ROWS$|EXPEDICAO_IDS_|DOCKS_|PAGE_SIZE$|ARRIVAL_CAP$|[A-Z_]+_MIN_POR_DIA$|SORTER_URL$|SORTER_TROCA_[A-Z]$|FEISHU_(WEBHOOK|SEGREDO)(_[2-5])?$|FEISHU_TURNO_(WEBHOOK|SEGREDO)$|FEISHU_(MINUTO|ESPERA|TURNO_MINUTO)$|FEISHU_(APP_ID|APP_SECRET|BASE_LINK)$|EF_(AGENT|SITE)_CODE$)/;
+const USER_PROP = /^(JMS_|DATA_START_DATE$|ATUALIZACAO_MIN$|DETAIL_|DASHBOARD_MAX_ROWS$|MAX_CLIENT_ROWS$|GROUPED_CLIENT_ROWS$|EXPEDICAO_IDS_|DOCKS_|PAGE_SIZE$|ARRIVAL_CAP$|[A-Z_]+_MIN_POR_DIA$|SORTER_URL$|SORTER_TROCA_[A-Z]$|FEISHU_(WEBHOOK|SEGREDO)(_[2-5])?$|FEISHU_TURNO_(WEBHOOK|SEGREDO)$|FEISHU_(MINUTO|ESPERA|TURNO_MINUTO)$|FEISHU_(APP_ID|APP_SECRET|BASE_LINK|LINK_PRESENCA|LINK_EFICIENCIA)$|EF_(AGENT|SITE)_CODE$)/;
+
+/**
+ * V4.36: login com a conta do Feishu (planilhas da Eficiência). /config/feishu/entrar manda para o login oficial do Feishu;
+ * /config/feishu/retorno recebe o código e o painel guarda o acesso da conta (somente leitura). O "state" (aleatório, 10 min)
+ * garante que o retorno é do login começado aqui.
+ */
+const FEISHU_STATES = new Map();
+async function feishuLogin(req, res, p, url) {
+  const B = req.jtBase || '', agora = Date.now();
+  for (const [k, v] of FEISHU_STATES) if (v.ate < agora) FEISHU_STATES.delete(k);
+  const erro = (msg, retorno) => sendHtml(req, res, 200, pages.feishuErroPage({erro: msg, retorno: retorno, voltar: B + '/config'}));
+  if (p === '/config/feishu/entrar') {
+    const state = require('crypto').randomBytes(16).toString('hex'), retorno = baseUrl(req) + '/config/feishu/retorno';
+    if (FEISHU_STATES.size > 50) FEISHU_STATES.clear();
+    FEISHU_STATES.set(state, {retorno, ate: agora + 10 * 60000});
+    try {
+      const out = await web.run({fn: 'efLoginUrl_', args: [retorno, state]}, {timeoutMs: 60000, baseUrl: baseUrl(req)});
+      send(res, 302, '', {Location: JSON.parse(out.json)});
+    } catch (e) { erro(nodeText(e.message), retorno); }
+    return;
+  }
+  const state = String(url.searchParams.get('state') || ''), st = FEISHU_STATES.get(state);
+  if (!st) { erro('O login do Feishu expirou ou não começou neste painel. Volte e clique em "Entrar com o Feishu" de novo.'); return; }
+  FEISHU_STATES.delete(state);
+  const code = String(url.searchParams.get('code') || '');
+  if (!code) {
+    erro(url.searchParams.get('error') === 'access_denied' ? 'O acesso não foi autorizado na tela do Feishu.' : 'O Feishu não devolveu o código do login.', st.retorno);
+    return;
+  }
+  try {
+    const out = await web.run({fn: 'efConectar_', args: [code, st.retorno]}, {timeoutMs: 60000, baseUrl: baseUrl(req)});
+    const r = JSON.parse(out.json) || {};
+    log('info', 'Conta do Feishu conectada pela tela Configurações (planilhas da Eficiência, somente leitura).');
+    const faltam = (r.faltamPermissoes || []).join(',');
+    send(res, 303, '', {Location: B + '/config?feishu=ok' + (faltam ? '&faltam=' + encodeURIComponent(faltam) : '')});
+  } catch (e) { erro(nodeText(e.message), st.retorno); }
+}
 
 async function configApi(req, res, name) {
   if (name === 'estado' && req.method === 'GET') {
@@ -596,6 +636,7 @@ async function handle(req, res) {
       return;
     }
     if (p === '/config') { sendHtml(req, res, 200, pages.configPage({version: SERVER_VERSION, dataDir: cfg.dataDir, semJms: !!cfg.semJms, feishuBase: !!cfg.feishuBase || pacoteTemEficiencia()})); return; }
+    if (p === '/config/feishu/entrar' || p === '/config/feishu/retorno') { await feishuLogin(req, res, p, url); return; }
     if (p.indexOf('/config/api/') === 0) {
       if (req.method === 'POST' && !sameOrigin(req)) { sendJson(res, 403, {ok: false, error: 'Origem não permitida.'}); return; }
       await configApi(req, res, p.slice('/config/api/'.length));

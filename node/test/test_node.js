@@ -316,6 +316,30 @@ function firstDiff(a, b, p) {
   const net = await api('refreshNow', ['wrong_send', '2026-09-19', '2026-09-19']).then(r => r, e => ({erro: e.message}));
   check(net && (net.erro || net.ok === false || net.ok === true), 'JMS fora do ar não derruba o servidor', net);
 
+  // ---------- 8b. V4.36: Eficiência — login com a conta do Feishu (planilhas da matriz) pelas Configurações ----------
+  await admin('propriedade', {k: 'FEISHU_APP_ID', v: 'cli_node'});
+  await admin('propriedade', {k: 'FEISHU_APP_SECRET', v: 'segredo-node-app'});
+  await admin('propriedade', {k: 'FEISHU_LINK_EFICIENCIA', v: 'https://empresa-teste.feishu.cn/wiki/WIKINODE?sheet=abc'});
+  const cfgF = await request(port, 'GET', '/config'), entrarF = await request(port, 'GET', '/config/feishu/entrar');
+  const locF = String(entrarF.headers.location || ''), stateF = (/[?&]state=([a-f0-9]+)/.exec(locF) || [])[1] || '';
+  const retF = 'http://127.0.0.1:' + port + '/config/feishu/retorno';
+  const ruimF = await request(port, 'GET', '/config/feishu/retorno?code=x&state=nao-existe');
+  const negF = await request(port, 'GET', '/config/feishu/retorno?error=access_denied&state=' + stateF);
+  const de2F = await request(port, 'GET', '/config/feishu/retorno?code=x&state=' + stateF);
+  const remF = await request(port, 'GET', '/config/feishu/entrar', undefined, {'X-Forwarded-For': '203.0.113.9', 'Tailscale-User-Login': 'alguem@exemplo'});
+  const estFs = await admin('estado');
+  // (o cartão "Planilhas do Feishu" aparece nos pacotes com a Eficiência: conferido no teste do pacote, tests/test_backend.js)
+  const pagF = require(path.join(ROOT, 'node', 'lib', 'pages.js')).configPage({version: 'x', dataDir: '.', semJms: false, feishuBase: true});
+  check(/Planilhas do Feishu \(Eficiência\)/.test(pagF) && /id="fbRedirect"/.test(pagF) && /config\/feishu\/entrar/.test(pagF) && !badScripts(pagF).length,
+    'V4.36 Eficiência: cartão "Planilhas do Feishu" com os dois links, o login e o endereço de retorno; script sem erro', badScripts(pagF).map(x => x.slice(0, 80)));
+  check(cfgF.status === 200 && !badScripts(cfgF.text).length && entrarF.status === 302 && locF.indexOf('https://accounts.feishu.cn/open-apis/authen/v1/authorize?client_id=cli_node&response_type=code&redirect_uri=' + encodeURIComponent(retF)) === 0 &&
+    /offline_access/.test(decodeURIComponent(locF)) && stateF.length === 32 && locF.indexOf('segredo-node-app') < 0 &&
+    ruimF.status === 200 && /expirou ou não começou neste painel/.test(ruimF.text) && /O acesso não foi autorizado/.test(negF.text) && negF.text.indexOf(retF) > 0 &&
+    /expirou/.test(de2F.text) && remF.status !== 302 &&
+    estFs.props.some(p => p.k === 'FEISHU_LINK_EFICIENCIA' && !p.interna) && estFs.props.some(p => p.k === 'FEISHU_APP_SECRET' && p.secret),
+    'V4.36 Eficiência: "Entrar com o Feishu" leva ao login oficial (state de uso único; retorno recusado sem ele; só neste computador)',
+    {status: entrarF.status, locF, ruim: ruimF.text.slice(0, 200), remoto: remF.status});
+
   // ---------- 9. Senha do painel ----------
   const port2 = await freePort();
   const srv2 = await startServer({porta: port2, senha: 'segredo-teste'});

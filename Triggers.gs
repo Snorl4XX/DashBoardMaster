@@ -29,6 +29,10 @@ function syncHourly() {
   let queued = (dailyMode_() ? runAgenda_() : queueRecentRefresh_()) + history;
   // V4.25.5: dias fechados com a lista menor que os erros do JMS voltam para a fila (conferência de hora em hora).
   try { queued += healDetailGaps_(); } catch (e) { logSync_('WARN', '', '', 'Conferência da lista não concluída: ' + e); }
+  // V4.36: Eficiência — a matriz preenche as planilhas do Feishu à mão (às vezes dias depois): de hora em hora, os dias que
+  // mudaram ou ganharam números voltam para a fila.
+  try { if (typeof efQueueSheetChanges_ === 'function') queued += efQueueSheetChanges_(); }
+  catch (e) { logSync_('WARN', 'efficiency', '', 'Conferência das planilhas do Feishu não concluída: ' + e); }
   return {ok: true, queued: queued, worker: processSyncQueue({budgetMs: 240000})};
 }
 
