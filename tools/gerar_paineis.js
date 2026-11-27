@@ -299,7 +299,8 @@ O aplicativo serve só para o **login** com a sua conta; ele **não** precisa se
 1. https://open.feishu.cn/app → o aplicativo (ou **Criar aplicativo personalizado**). **Credenciais:** copie o **App ID** e o
    **App Secret**.
 2. **Permissões e escopos** (权限管理) → permissões de **usuário** (用户身份): \`sheets:spreadsheet:readonly\`,
-   \`wiki:wiki:readonly\` e \`offline_access\` (renova o acesso sozinho).
+   \`wiki:wiki:readonly\`, \`docx:document:readonly\` (a tabela EFI GRU é uma planilha dentro de um documento) e
+   \`offline_access\` (renova o acesso sozinho).
 3. **Segurança** (安全设置) → **URL de redirecionamento** (重定向URL): \`http://localhost:4000/config/feishu/retorno\` (o endereço
    exato aparece no cartão das Configurações; se abrir as Configurações por outro endereço, cadastre esse também).
 4. **Publique uma versão** (版本管理与发布). Se a empresa pedir aprovação do administrador, ela precisa ser aprovada.
@@ -341,7 +342,7 @@ são mais consultados nem mostrados.
 
 **Eficiência SP GRU:** lê duas planilhas da matriz no Feishu com a sua conta. Na versão Node.js: Configurações → **Planilhas do
 Feishu (Eficiência)** — App ID, App Secret, os dois links e **Entrar com o Feishu**. No aplicativo do Feishu: permissões de usuário
-\`sheets:spreadsheet:readonly\`, \`wiki:wiki:readonly\` e \`offline_access\`, e a URL de redirecionamento
+\`sheets:spreadsheet:readonly\`, \`wiki:wiki:readonly\`, \`docx:document:readonly\` e \`offline_access\`, e a URL de redirecionamento
 \`http://localhost:3000/config/feishu/retorno\` (o endereço exato aparece no cartão).
 
 **V4.21: a Criação de Lotes (sacas) saiu daqui.** Ela tem pacotes próprios: \`JT_DASHMASTER_..._LOTES.zip\` (Apps Script) e \`JT_DASHMASTER_..._LOTES_NODE.zip\` (Node.js, link próprio no Tailscale). V4.26: ela fica fora do principal mesmo com \`PAINEIS_FORA\` preenchida.

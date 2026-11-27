@@ -7,7 +7,7 @@
 const APP_CONFIG = Object.freeze({
   APP_NAME: 'J&T Express · Painel de Indicadores',
   APP_NAME_ZH: 'J&T Express · 指标看板',
-  VERSION: '4.36.3',
+  VERSION: '4.36.4',
   TZ: 'America/Sao_Paulo',
   RED: '#E60012',
   DARK: '#1F2430',
@@ -1685,7 +1685,7 @@ const ALL_INDICATORS_ = Object.freeze({
         'programAdm', 'programAssist', 'programOper', 'programTemp', 'programDiar', 'hcLastDay', 'feishuFail',
         // V4.36: planilhas da matriz — eficiência oficial, a calculada, de onde veio (1 matriz, 2 calculada) e a presença.
         'efOficial', 'efCalc', 'efSource', 'presentEfetivos', 'presentTemporarios', 'presentCat', 'presentSource',
-        'presentEfT1', 'presentEfT2', 'presentEfT3', 'presentTpT1', 'presentTpT2', 'presentTpT3', 'presStatus', 'efParser'],
+        'presentEfT1', 'presentEfT2', 'presentEfT3', 'presentTpT1', 'presentTpT2', 'presentTpT3', 'presStatus', 'efParser', 'catFonte'],
       percentMetrics: []},
     // Poucas linhas por dia (3 turnos): todos os dias com a lista, lida de novo junto com o resumo.
     detail: {days: 0, refreshHours: 1, maxPerDay: 1000},

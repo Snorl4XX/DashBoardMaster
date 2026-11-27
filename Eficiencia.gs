@@ -70,7 +70,8 @@ function efJmsDay_(isoDate) {
 
 // ------------------------------------------------------------------ Feishu: conexão com a conta (login oficial, OAuth)
 /** Permissões pedidas no login: ler planilhas, ler o wiki (os links são do wiki) e renovar sozinho (offline_access). */
-const EF_ESCOPOS_ = 'sheets:spreadsheet:readonly wiki:wiki:readonly offline_access';
+// V4.36.4: + docx:document:readonly — a tabela EFI GRU (planilha 1) é uma planilha DENTRO de um documento do Feishu.
+const EF_ESCOPOS_ = 'sheets:spreadsheet:readonly wiki:wiki:readonly docx:document:readonly offline_access';
 /** O aplicativo do Feishu (App ID e App Secret): só para o login — ele não precisa ser adicionado às planilhas. */
 function efAppCfg_() {
   const id = String(getProp_('FEISHU_APP_ID', '') || '').trim(), secret = String(getProp_('FEISHU_APP_SECRET', '') || '').trim();
@@ -82,7 +83,8 @@ function efAppCfg_() {
 function efParseLink_(link) {
   const s = String(link || '').trim();
   const wiki = /\/wiki\/([A-Za-z0-9]+)/.exec(s), sp = /\/sheets\/([A-Za-z0-9]+)/.exec(s), sheet = /[?&#]sheet=([A-Za-z0-9]+)/.exec(s);
-  return {link: s, node: wiki ? wiki[1] : '', sp: sp ? sp[1] : '', sheet: sheet ? sheet[1] : ''};
+  const doc = /\/docx\/([A-Za-z0-9]+)/.exec(s);
+  return {link: s, node: wiki ? wiki[1] : '', sp: sp ? sp[1] : '', doc: doc ? doc[1] : '', sheet: sheet ? sheet[1] : ''};
 }
 /** Os dois links (FEISHU_LINK_PRESENCA e FEISHU_LINK_EFICIENCIA). soft: sem nenhum → null em vez de erro. */
 function efLinksCfg_(soft) {
@@ -93,7 +95,7 @@ function efLinksCfg_(soft) {
   }
   const out = {pres: pres ? efParseLink_(pres) : null, efic: efic ? efParseLink_(efic) : null};
   [out.pres, out.efic].forEach(p => {
-    if (p && !p.node && !p.sp) throw new Error('Link de planilha do Feishu não reconhecido: use o link do wiki (…/wiki/…) ou da planilha (…/sheets/…).');
+    if (p && !p.node && !p.sp && !p.doc) throw new Error('Link de planilha do Feishu não reconhecido: use o link do wiki (…/wiki/…), da planilha (…/sheets/…) ou do documento (…/docx/…).');
   });
   return out;
 }
@@ -107,7 +109,7 @@ function efFeishuHint_(code, msg) {
     return 'o acesso da conta venceu: Configurações → Planilhas do Feishu → "Entrar com o Feishu"';
   }
   if ([99991672, 99991679, 20027].indexOf(c) >= 0 || /scope/i.test(m)) {
-    return 'o aplicativo precisa das permissões de usuário "sheets:spreadsheet:readonly", "wiki:wiki:readonly" e "offline_access" (publique uma versão e entre com o Feishu de novo)';
+    return 'o aplicativo precisa das permissões de usuário "sheets:spreadsheet:readonly", "wiki:wiki:readonly", "docx:document:readonly" e "offline_access" (publique uma versão e entre com o Feishu de novo)';
   }
   if ([131006, 91403, 1310213, 1310235].indexOf(c) >= 0 || /permission|forbidden|access denied|no auth/i.test(m)) return 'a sua conta do Feishu precisa conseguir abrir a planilha';
   if ([131005, 91402, 1310211, 1310214, 1310249].indexOf(c) >= 0 || /not ?found|notexist|not exist/i.test(m)) return 'confira o link da planilha';
@@ -160,7 +162,7 @@ function efConectar_(code, redirectUri) {
   setProp_('FEISHU_USER_EM', new Date().toISOString());
   EF_PLAN_ = null;
   const escopos = String(j.scope || '');
-  const faltam = escopos ? ['sheets:spreadsheet:readonly', 'wiki:wiki:readonly'].filter(s => escopos.split(/\s+/).indexOf(s) < 0) : [];
+  const faltam = escopos ? ['sheets:spreadsheet:readonly', 'wiki:wiki:readonly', 'docx:document:readonly'].filter(s => escopos.split(/\s+/).indexOf(s) < 0) : [];
   if (!j.refresh_token) faltam.push('offline_access');
   return {ok: true, renovavel: !!j.refresh_token, faltamPermissoes: faltam};
 }
@@ -220,17 +222,48 @@ function efUserGet_(path) {
 
 // ------------------------------------------------------------------ Feishu: leitura das planilhas (somente leitura)
 /** Token da planilha: o do link (…/sheets/…) ou o do nó do wiki (guardado em FEISHU_NODES). */
-function efSpToken_(p) {
-  if (p.sp) return p.sp;
+/**
+ * O que o link abre: {type: 'sheet' | 'docx' | outro, token}. Link do wiki: o nó do wiki (guardado em FEISHU_NODES; valor antigo
+ * sem tipo = planilha). V4.36.4: o link da planilha 1 (EFI GRU) é um DOCUMENTO com a planilha dentro.
+ */
+function efNodeOf_(p) {
+  if (p.sp) return {type: 'sheet', token: p.sp};
+  if (p.doc) return {type: 'docx', token: p.doc};
   const map = safeJsonParse_(getProp_('FEISHU_NODES', '{}'), {}) || {};
-  if (map[p.node]) return map[p.node];
+  const v = String(map[p.node] || '');
+  if (v) { const m = /^(\w+):(.+)$/.exec(v); return m ? {type: m[1], token: m[2]} : {type: 'sheet', token: v}; }
   const j = efUserGet_('/open-apis/wiki/v2/spaces/get_node?token=' + encodeURIComponent(p.node) + '&obj_type=wiki');
   const node = (j.data && j.data.node) || {};
-  if (node.obj_type && node.obj_type !== 'sheet') throw new Error('O link do wiki não é de uma planilha (tipo ' + node.obj_type + '): abra a planilha e copie o link.');
-  if (!node.obj_token) throw new Error('O Feishu não devolveu a planilha desse link do wiki.');
-  map[p.node] = node.obj_token;
+  if (!node.obj_token) throw new Error('O Feishu não devolveu o conteúdo desse link do wiki.');
+  const type = String(node.obj_type || 'sheet');
+  map[p.node] = (type === 'sheet' ? '' : type + ':') + node.obj_token;
   setProp_('FEISHU_NODES', JSON.stringify(map));
-  return node.obj_token;
+  return {type: type, token: node.obj_token};
+}
+function efSpToken_(p) {
+  const no = efNodeOf_(p);
+  if (no.type !== 'sheet') throw new Error('O link do wiki não é de uma planilha (tipo ' + no.type + '): abra a planilha e copie o link.');
+  return no.token;
+}
+/**
+ * V4.36.4: planilhas DENTRO de um documento do Feishu (bloco "planilha" do documento): [{sp, sheetId}]. O token do bloco é
+ * "<planilha>_<aba>" e a planilha é lida pela mesma API das planilhas.
+ */
+function efDocSheets_(doc) {
+  const out = [];
+  let pageToken = '';
+  for (let i = 0; i < 50; i++) {
+    const j = efUserGet_('/open-apis/docx/v1/documents/' + encodeURIComponent(doc) + '/blocks?page_size=500&document_revision_id=-1' +
+      (pageToken ? '&page_token=' + encodeURIComponent(pageToken) : ''));
+    const d = j.data || {};
+    (d.items || []).forEach(b => {
+      const tok = String((b && b.sheet && b.sheet.token) || ''), k = tok.lastIndexOf('_');
+      if (k > 0) out.push({sp: tok.slice(0, k), sheetId: tok.slice(k + 1)});
+    });
+    if (!d.has_more || !d.page_token) break;
+    pageToken = d.page_token;
+  }
+  return out;
 }
 /** Abas da planilha: [{sheet_id, title, hidden, grid_properties: {row_count, column_count}}]. */
 function efTabs_(sp) {
@@ -500,13 +533,30 @@ function efPlanilhas_(force) {
   const msg = e => String(e && e.message || e).replace(/^Error:\s*/, '');
   if (L.pres) {
     try {
-      const sp = efSpToken_(L.pres), tabs = efTabs_(sp), vis = tabs.filter(t => !t.hidden);
-      const pedida = L.pres.sheet ? tabs.filter(t => t.sheet_id === L.pres.sheet) : [];
-      const ordem = pedida.concat(vis.filter(t => pedida.indexOf(t) < 0)).slice(0, 8);
+      // Planilha comum: as abas (a do link primeiro). V4.36.4: documento com planilhas dentro: cada planilha do documento.
+      const no = efNodeOf_(L.pres);
+      let ordem = [], nomes = [];
+      if (no.type === 'docx' || no.type === 'doc') {
+        const blocos = efDocSheets_(no.token);
+        if (!blocos.length) throw new Error('o documento do link não tem planilha dentro (a tabela precisa ser uma planilha do Feishu)');
+        blocos.slice(0, 8).forEach((b, k) => {
+          let tab = null;
+          try { tab = efTabs_(b.sp).filter(t => t.sheet_id === b.sheetId)[0] || null; } catch (e) { tab = null; }
+          tab = tab || {sheet_id: b.sheetId, title: '', grid_properties: {row_count: 200, column_count: 1500}};
+          tab = Object.assign({}, tab, {title: 'planilha ' + (k + 1) + ' do documento' + (tab.title ? ' (' + tab.title + ')' : '')});
+          ordem.push({sp: b.sp, tab: tab});
+        });
+        nomes = ordem.map(x => x.tab.title);
+      } else if (no.type === 'sheet') {
+        const tabs = efTabs_(no.token), vis = tabs.filter(t => !t.hidden);
+        const pedida = L.pres.sheet ? tabs.filter(t => t.sheet_id === L.pres.sheet) : [];
+        ordem = pedida.concat(vis.filter(t => pedida.indexOf(t) < 0)).slice(0, 8).map(t => ({sp: no.token, tab: t}));
+        nomes = tabs.map(t => t.title || t.sheet_id);
+      } else throw new Error('O link do wiki não é de uma planilha nem de um documento com planilha (tipo ' + no.type + ').');
       if (!ordem.length) throw new Error('a planilha não tem abas');
       let achou = null, primeira = null;
       for (let k = 0; k < ordem.length && !achou; k++) {
-        const recs = efGridRecords_(efGrid_(sp, ordem[k])), it = {tab: ordem[k], recs: recs};
+        const recs = efGridRecords_(efGrid_(ordem[k].sp, ordem[k].tab)), it = {tab: ordem[k].tab, recs: recs};
         if (recs.some(x => efRoleOf_(x.label))) achou = it;
         else if (!primeira) primeira = it;
       }
@@ -514,10 +564,10 @@ function efPlanilhas_(force) {
       out.pres = achou ? achou.recs : [];
       out.st1 = achou ? 0 : 3;
       out.abas.presentesProgramados = usa.tab.title || usa.tab.sheet_id;
-      out.resumo1 = Object.assign({abasDaPlanilha: tabs.map(t => t.title || t.sheet_id)}, efResumoGrade_(usa.recs));
+      out.resumo1 = Object.assign({abasDaPlanilha: nomes}, efResumoGrade_(usa.recs));
       if (!achou) {
         out.erros.push('Planilha de presentes e programados: não achei as linhas das categorias (Administrativo, Assistente Operacional, ' +
-          'Operacional, Temporário, Diarista) embaixo de uma linha de datas (abas olhadas: ' + ordem.map(t => t.title || t.sheet_id).join(', ') + ')');
+          'Operacional, Temporário, Diarista) embaixo de uma linha de datas (abas olhadas: ' + ordem.map(x => x.tab.title || x.tab.sheet_id).join(', ') + ')');
       }
     } catch (e) { out.erros.push('Planilha de presentes e programados: ' + msg(e)); }
   }
@@ -585,7 +635,9 @@ function efDiaPlanilhas_(date, P) {
  * V4.36.3: versão da leitura das planilhas. Números das categorias gravados por uma leitura mais antiga (que podia pôr os números
  * de uma coluna no dia errado) são trocados pela leitura atual — também quando a planilha não tem mais o dia.
  */
-const EF_PARSER_ = 4;
+const EF_PARSER_ = 5;
+/** As 10 chaves das categorias (presentes e programados de Administrativo, Assistente Operacional, Operacional, Temporário e Diarista). */
+const EF_CAT_KEYS_ = EF_ROLES_.map(r => 'present' + r.key).concat(EF_ROLES_.map(r => 'program' + r.key));
 /** Números lidos das planilhas (os que ficam gravados por dia). */
 const EF_FEISHU_KEYS_ = ['efOficial', 'presentEfetivos', 'presentTemporarios']
   .concat(EF_SHIFTS_.map(s => 'presentEf' + s), EF_SHIFTS_.map(s => 'presentTp' + s))
@@ -606,6 +658,9 @@ function efPlanMetrics_(day) {
   EF_ROLES_.forEach(r => { m['present' + r.key] = day.roles[r.key].present; m['program' + r.key] = day.roles[r.key].program; });
   m.hcLastDay = day.lastDate ? Number(day.lastDate.replace(/-/g, '')) : null;
   m.efParser = EF_PARSER_;
+  // V4.36.4: de onde vieram as categorias — catFonte = versão da leitura da tabela EFI GRU. Sem catFonte, as categorias gravadas
+  // são da base do formulário antiga (V4.33) e não valem mais.
+  m.catFonte = EF_CAT_KEYS_.some(k => m[k] !== null && m[k] !== undefined) ? EF_PARSER_ : null;
   // V4.36.3: por que faltam as categorias no dia (0 tem; 1 sem o link 1; 2 erro na leitura; 3 sem as linhas; 4 a planilha não tem o dia).
   m.presStatus = day.st1 ? day.st1 : (EF_ROLES_.some(r => day.roles[r.key].present !== null || day.roles[r.key].program !== null) ? 0 : 4);
   return m;
@@ -617,14 +672,43 @@ function efPlanMetrics_(day) {
 function efKeep_(m, prev) {
   const out = Object.assign({}, m || {});
   const leu1 = !!m && (Number(m.presStatus) === 0 || Number(m.presStatus) === 4);
-  const velha = !!prev && Number(prev.efParser) !== EF_PARSER_;
+  // V4.36.4: categorias gravadas só ficam se vieram da tabela EFI GRU (catFonte) — as da base do formulário antiga (sem catFonte)
+  // nunca ficam; as de uma leitura mais antiga da tabela ficam só enquanto a tabela não é lida de novo.
+  const fonte = prev ? Number(prev.catFonte) || 0 : 0, guardaCat = fonte > 0 && (fonte === EF_PARSER_ || !leu1);
+  let guardou = false;
   EF_FEISHU_KEYS_.forEach(k => {
     if (out[k] !== null && out[k] !== undefined) return;
-    const cat = /^(present|program)(Adm|Assist|Oper|Temp|Diar)$/.test(k);
-    out[k] = prev && prev[k] !== null && prev[k] !== undefined && !(cat && leu1 && velha) ? prev[k] : null;
+    const cat = EF_CAT_KEYS_.indexOf(k) >= 0, v = prev && prev[k] !== null && prev[k] !== undefined && (!cat || guardaCat) ? prev[k] : null;
+    out[k] = v;
+    if (cat && v !== null) guardou = true;
   });
+  out.catFonte = EF_CAT_KEYS_.some(k => out[k] !== null && out[k] !== undefined) ? ((m && m.catFonte) || (guardou ? fonte : null) || EF_PARSER_) : null;
   if (!m && prev) { if (prev.hcLastDay) out.hcLastDay = prev.hcLastDay; if (prev.efParser) out.efParser = prev.efParser; }
   return out;
+}
+/**
+ * V4.36.4 (pedido "Será que não está puxando os dados da minha base do formulário? Porque os dados estão iguais"): uma vez — tira
+ * dos dias gravados as categorias que vieram da base do formulário antiga (sem catFonte). Só no painel; nada muda no Feishu.
+ */
+function efLimparCategoriasFormulario_() {
+  if (!INDICATORS.efficiency || getProp_('EF_CATEGORIAS_LIMPAS', '') === '1') return 0;
+  let n = 0;
+  getRates_('efficiency', null, null).forEach(r => {
+    const m = r.metrics || {};
+    if (Number(m.catFonte) > 0 || !EF_CAT_KEYS_.some(k => m[k] !== null && m[k] !== undefined)) return;
+    const hm = Object.assign({}, m);
+    EF_CAT_KEYS_.forEach(k => { hm[k] = null; });
+    efDerive_(hm);
+    hm.catFonte = null;
+    hm.feishuFail = m.feishuFail;
+    const jms = {};
+    Object.keys(EF_JMS_FIELDS_).forEach(k => { jms[k] = m[k] === undefined ? null : m[k]; });
+    const s = efSummaryFrom_('efficiency', r.date, jms.processed === null ? null : jms, hm, '');
+    if (!s.empty) { upsertRate_(s); n++; }
+  });
+  setProp_('EF_CATEGORIAS_LIMPAS', '1');
+  if (n) logSync_('INFO', 'efficiency', '', 'Eficiência: categorias da base do formulário antiga tiradas de ' + n + ' dia(s) (agora só valem as da tabela EFI GRU).');
+  return n;
 }
 /** Totais do dia a partir dos números gravados: presentes (efetivos + temporários), categorias, turnos e % de presença. */
 function efDerive_(m) {
@@ -731,7 +815,9 @@ function runEfficiencyDetailJob_(job, deadline, cfg, st) {
  * números desde a última leitura (a matriz preenche à mão, às vezes dias depois). Devolve quantos dias entraram na fila.
  */
 function efQueueSheetChanges_(force) {
-  if (!INDICATORS.efficiency || !efLinksCfg_(true)) return 0;
+  if (!INDICATORS.efficiency) return 0;
+  try { efLimparCategoriasFormulario_(); } catch (e) { logSync_('WARN', 'efficiency', '', 'Eficiência: limpeza das categorias antigas não concluída: ' + e); }
+  if (!efLinksCfg_(true)) return 0;
   if (!getProp_('FEISHU_USER_SEGREDO', '') && !getProp_('FEISHU_USER_TOKEN', '')) return 0;
   // V4.36.2: uma vez — as listas dos dias gravados antes (sem o T1 "TI" e sem as categorias) são refeitas com os números gravados.
   let refeitas = 0;
@@ -761,12 +847,12 @@ function efQueueSheetChanges_(force) {
   // V4.36.3: e os dias gravados por uma leitura antiga com categorias (podiam estar no dia errado), se a planilha 1 foi lida.
   const CAT = EF_ROLES_.map(r => 'present' + r.key).concat(EF_ROLES_.map(r => 'program' + r.key)), nz = v => (v === undefined ? null : v);
   if (P.st1 === 0) getRates_('efficiency', from, hoje).forEach(r => {
-    if (r.metrics && Number(r.metrics.efParser) !== EF_PARSER_ && CAT.some(k => nz(r.metrics[k]) !== null)) todos[r.date] = 1;
+    if (r.metrics && Number(r.metrics.catFonte) !== EF_PARSER_ && CAT.some(k => nz(r.metrics[k]) !== null)) todos[r.date] = 1;
   });
   const mudou = Object.keys(todos).sort().filter(d => {
     const base = efPlanMetrics_(efDiaPlanilhas_(d, P)), prev = getRateDay_('efficiency', d), pm = prev && prev.metrics;
     if (!pm) return base.efOficial > 0 || base.presentEfetivos > 0 || base.presentTemporarios > 0 || EF_ROLES_.some(r => base['present' + r.key] > 0);
-    if (P.st1 === 0 && Number(pm.efParser) !== EF_PARSER_ && CAT.some(k => nz(base[k]) !== nz(pm[k]))) return true;
+    if (P.st1 === 0 && Number(pm.catFonte) !== EF_PARSER_ && CAT.some(k => nz(base[k]) !== nz(pm[k]))) return true;
     return EF_FEISHU_KEYS_.some(k => base[k] !== null && base[k] !== undefined && base[k] !== pm[k]);
   });
   if (mudou.length) {

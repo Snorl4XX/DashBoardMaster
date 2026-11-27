@@ -821,6 +821,8 @@ function dayCacheFor_(cfg, params) {
 
 function getDashboardData(indicatorKey, params) {
   const cfg = getIndicatorConfig_(indicatorKey);
+  // V4.36.4: Eficiência — uma vez, sem esperar a conferência de hora em hora: tira as categorias da base do formulário antiga.
+  if (cfg.efficiency && typeof efLimparCategoriasFormulario_ === 'function') safeCall_(() => efLimparCategoriasFormulario_());
   JTCore_.setFilterScopes(cfg.filterScopes || {});
   JTCore_.setColumnSets(cfg.columnSets || {});
   const allRates = getRates_(indicatorKey, null, null);

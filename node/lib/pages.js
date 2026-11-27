@@ -180,7 +180,9 @@ nesta tela.</p>
 <button class="ghost" id="fbTest">Testar as planilhas</button><button class="ghost" id="fbOff">Desconectar</button></div>
 <details class="small" style="margin-top:10px"><summary>O que liberar no aplicativo do Feishu (uma vez)</summary>
 <ol><li>open.feishu.cn → o aplicativo → <b>Permissões e escopos</b> (权限管理) → permissões de <b>usuário</b> (用户身份):
-<code>sheets:spreadsheet:readonly</code>, <code>wiki:wiki:readonly</code> e <code>offline_access</code>.</li>
+<code>sheets:spreadsheet:readonly</code>, <code>wiki:wiki:readonly</code>, <code>docx:document:readonly</code> (a tabela EFI GRU é uma
+planilha dentro de um documento) e <code>offline_access</code>. Depois de adicionar uma permissão, publique a versão e clique em
+<b>Entrar com o Feishu</b> de novo.</li>
 <li><b>Segurança</b> (安全设置) → <b>URL de redirecionamento</b> (重定向URL): <code id="fbRedirect"></code></li>
 <li>Crie e publique uma versão do aplicativo (版本管理与发布). Depois: <b>Entrar com o Feishu</b>.</li></ol></details>
 <pre class="out" id="feishuBaseOut"></pre></section>`;
@@ -356,7 +358,7 @@ O valor salvo não aparece de novo nesta tela.</p>
   // V4.36: planilhas do Feishu da Eficiência (login com a conta do Feishu).
   var fbRetorno = location.origin + location.pathname.replace(/[/]+$/, '') + '/feishu/retorno';
   if ($('#fbRedirect')) $('#fbRedirect').textContent = fbRetorno;
-  var fbLinkOk = function (l) { return /^https:[/][/][^/ ]+[.](feishu[.]cn|larksuite[.]com)[/](wiki|sheets)[/][A-Za-z0-9]+/.test(l); };
+  var fbLinkOk = function (l) { return /^https:[/][/][^/ ]+[.](feishu[.]cn|larksuite[.]com)[/](wiki|sheets|docx)[/][A-Za-z0-9]+/.test(l); };
   var fbSalvar = function (out) {
     var app = $('#fbApp').value.trim(), sec = $('#fbSecret').value.trim(), pres = $('#fbPres').value.trim(), efic = $('#fbEfic').value.trim();
     var has = function (k) { return (window.__props || []).some(function (p) { return p.k === k; }); };
@@ -364,7 +366,7 @@ O valor salvo não aparece de novo nesta tela.</p>
     if (!sec && !has('FEISHU_APP_SECRET')) return Promise.reject(new Error('Cole o App Secret do aplicativo do Feishu.'));
     if (!pres && !efic && !has('FEISHU_LINK_PRESENCA') && !has('FEISHU_LINK_EFICIENCIA')) return Promise.reject(new Error('Cole os links das duas planilhas.'));
     var bad = [pres, efic].filter(function (l) { return l && !fbLinkOk(l); });
-    if (bad.length) return Promise.reject(new Error('Link inválido. Abra a planilha no Feishu e copie o link do navegador (…/wiki/… ou …/sheets/…).'));
+    if (bad.length) return Promise.reject(new Error('Link inválido. Abra a planilha no Feishu e copie o link do navegador (…/wiki/…, …/sheets/… ou …/docx/…).'));
     var put = function (k, v) { return v ? api('propriedade', {k: k, v: v}) : Promise.resolve(null); };
     return put('FEISHU_APP_ID', app).then(function () { return put('FEISHU_APP_SECRET', sec); })
       .then(function () { return put('FEISHU_LINK_PRESENCA', pres); }).then(function () { return put('FEISHU_LINK_EFICIENCIA', efic); })

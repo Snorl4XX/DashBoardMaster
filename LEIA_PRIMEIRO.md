@@ -4,6 +4,18 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.36.4 — Eficiência: a tabela EFI GRU é uma planilha dentro de um documento; categorias do formulário antigo removidas
+
+O teste das planilhas mostrou a causa das categorias vazias: "O link do wiki não é de uma planilha (tipo docx)". A tabela EFI GRU
+(presentes e programados por categoria) é uma **planilha dentro de um documento** do Feishu.
+
+- O painel agora lê as planilhas que ficam dentro de um documento (cada planilha do documento; vale a que tem as categorias).
+- Precisa de mais uma permissão de **usuário** no aplicativo do Feishu: \`docx:document:readonly\`. Depois de adicionar, publique a
+  versão e clique em **Entrar com o Feishu** de novo (o acesso antigo não tem essa permissão). Sem ela, o teste diz qual falta.
+- **Categorias do formulário antigo:** os números de categoria que apareciam ("os dados estão iguais" aos do formulário) eram os
+  gravados da época da base do formulário (Headcount, V4.33). Eles saem dos dias gravados uma vez, ao abrir o painel — agora só valem
+  as categorias lidas da tabela EFI GRU. A eficiência e a presença da matriz (planilha 效能监控表) continuam.
+
 ## V4.36.3 — Eficiência: gráficos iguais aos cartões e categorias no dia certo
 
 Pedidos: "Ainda está dando o mesmo erro, corrija imediatamente isso. Faz uma análise completa." e "Tem dias mostrando os resultados
