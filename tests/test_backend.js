@@ -5226,7 +5226,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     tb.planilha1.cabecalhoCorrigido.some(a => /^coluna [A-Z]+ \(linha 1\): ".+" lido como /.test(a) && a.indexOf('lido como ' + DE) > 0) &&
     tb.planilha1.cabecalhoCorrigido.some(a => /já apareceu antes na linha — ignorada/.test(a)) &&
     new RegExp('^' + DE + ' \\(colunas [A-Z]+-[A-Z]+\\): Administrativo 31/32 · Assistente Operacional 41/42').test(tb.planilha1.ultimosDias[1] || '') && /eficiência da matriz 412 · presença 380 efetivos \+ 680 temporários \(T1 120\+300 · T2 110\+200 · T3 150\+180\)/.test(linhaDE) &&
-    /planilha 1: 1042 presentes de 1074 programados/.test(linhaDE) && tb.ultimoDia === DE1 && !tb.aviso && /dia\(s\) na fila/.test(tb.diasNaFila) &&
+    /planilha 1: 1042 presentes de 1074 programados/.test(linhaDE) && tb.ultimoDia === DE1 && !tb.aviso && /3 dia\(s\) novo\(s\) na fila/.test(tb.diasNaFila) &&
     ['segredo-teste', 'u-2', 'r-2'].every(x => tbJs.indexOf(x) < 0) && JSON.parse(cE.__state.props.FEISHU_NODES).WIKIDOCS === 'docx:doxPRES' && JSON.parse(cE.__state.props.FEISHU_NODES).WIKIEFIC === 'shtEFIC',
     'V4.36 Eficiência: teste das planilhas (abas pelo nome, categorias, turnos sem nome + total, últimos dias), sem tokens; ' +
     'V4.36.4: tabela EFI GRU = planilha dentro de um documento do Feishu (blocos do documento em 2 páginas)', tb);
@@ -5290,7 +5290,11 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   // números do print do usuário (26-nov da planilha EFI GRU).
   PR[DE][0] = [130, 300]; PR[DE][1] = [105, 200]; P1[DE] = [[30, 30], [7, 7], [541, 655], [277, 383], [432, 433]]; montar();
   cE.setProp_('EF_CONFERENCIA_AT', '0');
-  const nS = cE.efQueueSheetChanges_();
+  const jmsAntes = seenE.length, nS = cE.efQueueSheetChanges_(), mNaHora = mt(DE);
+  const filaDE = cE.pendingJobs_().filter(j => j.indicator === 'efficiency' && j.date === DE && j.type === 'SUMMARY').length;
+  check(mNaHora.presentCat === 1287 && mNaHora.presentOper === 541 && mNaHora.presentEfT1 === 130 && mNaHora.processed === PROC[DE] && mNaHora.efficiency === 430 &&
+    filaDE === 0 && seenE.length === jmsAntes,
+    'V4.36.5 Eficiência: os números das planilhas entram na hora nos dias gravados (sem a fila e sem consultar o JMS)', {mNaHora, filaDE});
   runAll(cE);
   const dsS = cE.JTCore_.decodeDataset(cE.getDashboardData('efficiency', {from: DE, to: DE}).dataset);
   const sumS = (col, f) => dsS.filter(r => r.column === col && (!f || f(r))).reduce((a, r) => a + Number(r.qty), 0);

@@ -855,11 +855,35 @@ function efQueueSheetChanges_(force) {
     if (P.st1 === 0 && Number(pm.catFonte) !== EF_PARSER_ && CAT.some(k => nz(base[k]) !== nz(pm[k]))) return true;
     return EF_FEISHU_KEYS_.some(k => base[k] !== null && base[k] !== undefined && base[k] !== pm[k]);
   });
+  // V4.36.5 (pedido "não está aparecendo" — só o último dia tinha as categorias): o dia que já tem o volume do JMS gravado recebe os
+  // números das planilhas NA HORA (sem esperar a fila nem consultar o JMS de novo); só o dia novo vai para a fila (precisa do JMS).
+  const novos = [];
+  let atualizados = 0;
+  mudou.forEach(d => {
+    const prev = getRateDay_('efficiency', d), pm = prev && prev.metrics;
+    if (!pm) { novos.push(d); return; }
+    try { if (efAplicarPlanilhasDia_(d, P, pm)) atualizados++; else novos.push(d); }
+    catch (e) { novos.push(d); }
+  });
+  if (novos.length) enqueueJobs_(novos.map(d => ['SUMMARY', 'efficiency', d, 0]), {reset: true});
+  EF_ULTIMA_CONF_ = {atualizados: atualizados, fila: novos.length};
   if (mudou.length) {
-    enqueueJobs_(mudou.map(d => ['SUMMARY', 'efficiency', d, 0]), {reset: true});
-    logSync_('INFO', 'efficiency', '', 'Eficiência: ' + mudou.length + ' dia(s) com números novos ou mudados nas planilhas do Feishu — lendo de novo.');
+    logSync_('INFO', 'efficiency', '', 'Eficiência: ' + mudou.length + ' dia(s) com números novos ou mudados nas planilhas do Feishu — ' +
+      atualizados + ' atualizado(s) na hora' + (novos.length ? ', ' + novos.length + ' na fila (dia novo: precisa do volume do JMS)' : '') + '.');
   }
   return mudou.length;
+}
+var EF_ULTIMA_CONF_ = {atualizados: 0, fila: 0};
+/** V4.36.5: grava no dia os números das planilhas (lidas agora) com o volume do JMS já gravado — sem consultar o JMS. */
+function efAplicarPlanilhasDia_(date, P, pm) {
+  const base = efPlanMetrics_(efDiaPlanilhas_(date, P)), m = efDerive_(efKeep_(base, pm));
+  m.presStatus = base.presStatus;
+  const jms = {};
+  Object.keys(EF_JMS_FIELDS_).forEach(k => { jms[k] = pm[k] === undefined ? null : pm[k]; });
+  const s = efSummaryFrom_('efficiency', date, jms.processed === null ? null : jms, m, P.erros.length ? P.erros.join(' · ') : '');
+  if (s.empty) return false;
+  upsertRate_(s);
+  return true;
 }
 
 // ------------------------------------------------------------------ Configurações
@@ -898,7 +922,10 @@ function testarPlanilhasFeishu() {
       linhasDaPresenca: Object.keys(rotulos).slice(0, 12), diasComNumeros: P.dates.length,
       primeiroDia: P.dates[0] || '—', ultimoDia: P.lastDate || '—', ultimosDias: ultimos,
       aviso: P.erros.join(' · '), cabecalhoCorrigidoPlanilha2: (P.avisosCabecalho || []).slice(0, 10),
-      diasNaFila: filaN ? filaN + ' dia(s) na fila para entrar no painel (clique em Atualizar no painel daqui a pouco).' : 'Nenhum dia novo ou mudado.'};
+      diasNaFila: !filaN ? 'Nenhum dia novo ou mudado.' :
+        (EF_ULTIMA_CONF_.atualizados ? EF_ULTIMA_CONF_.atualizados + ' dia(s) atualizado(s) agora com as planilhas (clique em Atualizar no painel)' : '') +
+        (EF_ULTIMA_CONF_.atualizados && EF_ULTIMA_CONF_.fila ? '; ' : '') +
+        (EF_ULTIMA_CONF_.fila ? EF_ULTIMA_CONF_.fila + ' dia(s) novo(s) na fila para entrar no painel (precisam do volume do JMS)' : '') + '.'};
   } catch (e) {
     return {ok: false, erro: String(e && e.message || e)};
   }

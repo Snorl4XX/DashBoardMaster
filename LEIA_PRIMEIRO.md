@@ -4,6 +4,15 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.36.5 — Eficiência: números das planilhas entram na hora em todos os dias
+
+Pedido: "não está aparecendo" (em Dados gerais, só o último dia tinha as categorias).
+
+- Antes, cada dia com números novos nas planilhas ia para a fila e só era gravado depois de consultar o JMS de novo — com a fila
+  cheia ou o JMS pausado, as categorias esperavam. Agora o dia que já tem o volume do JMS recebe os números das planilhas **na hora**
+  (na conferência de hora em hora e no **Testar as planilhas**), sem consultar o JMS. Só o dia novo (sem o volume do JMS) vai para
+  a fila.
+
 ## V4.36.4 — Eficiência: a tabela EFI GRU é uma planilha dentro de um documento; categorias do formulário antigo removidas
 
 O teste das planilhas mostrou a causa das categorias vazias: "O link do wiki não é de uma planilha (tipo docx)". A tabela EFI GRU
