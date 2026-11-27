@@ -12,6 +12,8 @@ Pedido: "não está aparecendo" (em Dados gerais, só o último dia tinha as cat
   cheia ou o JMS pausado, as categorias esperavam. Agora o dia que já tem o volume do JMS recebe os números das planilhas **na hora**
   (na conferência de hora em hora e no **Testar as planilhas**), sem consultar o JMS. Só o dia novo (sem o volume do JMS) vai para
   a fila.
+- Gráfico **Presença por turno** em rosca, com o total no meio (pedido "colocar o gráfico de turno em gráfico circular com o número
+  total no meio. Padrão dos dashboards anteriores").
 
 ## V4.36.4 — Eficiência: a tabela EFI GRU é uma planilha dentro de um documento; categorias do formulário antigo removidas
 

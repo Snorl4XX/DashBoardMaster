@@ -1741,7 +1741,8 @@ const ALL_INDICATORS_ = Object.freeze({
         sub: {pt: 'Resultado da matriz (dia sem ele: Qtd processada do JMS ÷ presença) · {n} dias até {date} (coluna vermelha = dia escolhido)',
           zh: '总部结果（无结果的日期：JMS处理量 ÷ 出勤人数）· 截至 {date} 的 {n} 天（红色柱 = 所选日期）'}},
       {key: 'mQty', metric: 'processed', type: 'bar', days: 15, title: {pt: 'Produção diária · Qtd processada total', zh: '每日总处理量'}},
-      {key: 'shiftPresent', dim: 'shift', where: {column: ['Efetivos', 'Temporários']}, type: 'bar', allShifts: true,
+      // V4.36.5 (pedido "colocar o gráfico de turno em gráfico circular com o número total no meio"): rosca, como nos outros painéis.
+      {key: 'shiftPresent', dim: 'shift', where: {column: ['Efetivos', 'Temporários']}, type: 'doughnut',
         title: {pt: 'Presença por turno (efetivos + temporários)', zh: '各班次出勤（正式工 + 临时工）'}, sub: {pt: 'T1 06h–14h · T2 14h–22h · T3 22h–06h', zh: 'T1 06–14 · T2 14–22 · T3 22–06'}},
       {key: 'rolePresent', dim: 'role', where: {column: 'Presentes'}, type: 'bar', top: 6, hideNA: true,
         title: {pt: 'Colaboradores presentes por categoria', zh: '各类别出勤人数'},
