@@ -5247,6 +5247,29 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   check(hr.ok && nQ === 0 && mE2.efficiency === 430 && mE2.presentEfetivos === 385 && mE2.presentEfT1 === 125 && m12.efficiency === 405 && m12.efSource === 1 &&
     cE.allTabRows_('LOG').some(r => /Eficiência: 2 dia\(s\) com números novos ou mudados/.test(String(r[4]))),
     'V4.36 Eficiência: de hora em hora os dias mudados nas planilhas voltam para a fila (a matriz preenche depois); 50 min até a próxima conferência', {mE2, m12, nQ});
+  // V4.36.2: só a divisão dos turnos e as categorias mudam (o total do dia é o mesmo): a lista do dia (gráfico e tabelas) acompanha
+  // o cartão — antes ela só era refeita quando o total mudava (o T1 "TI" aparecia no cartão e não no gráfico). Categorias com os
+  // números do print do usuário (26-nov da planilha EFI GRU).
+  PR[DE][0] = [130, 300]; PR[DE][1] = [105, 200]; P1[DE] = [[30, 30], [7, 7], [541, 655], [277, 383], [432, 433]]; montar();
+  cE.setProp_('EF_CONFERENCIA_AT', '0');
+  const nS = cE.efQueueSheetChanges_();
+  runAll(cE);
+  const dsS = cE.JTCore_.decodeDataset(cE.getDashboardData('efficiency', {from: DE, to: DE}).dataset);
+  const sumS = (col, f) => dsS.filter(r => r.column === col && (!f || f(r))).reduce((a, r) => a + Number(r.qty), 0);
+  check(nS === 1 && mt(DE).present === mE2.present && sumS('Efetivos', r => r.shift === 'T1') === 130 && sumS('Efetivos', r => r.shift === 'T2') === 105 &&
+    sumS('Temporários', r => r.shift === 'T1') === 300 && sumS('Presentes') === 1287 && sumS('Programados') === 1508 &&
+    sumS('Presentes', r => r.role === 'Operacional') === 541 && sumS('Programados', r => r.role === 'Diarista') === 433 && mt(DE).presentCat === 1287 &&
+    cE.__state.props.EF_LISTAS_REFEITAS === '4.36.2',
+    'V4.36.2 Eficiência: turnos e categorias mudam sem mudar o total — a lista do dia (gráfico e tabelas) é refeita junto com o cartão',
+    {nS, n: dsS.length, t1: sumS('Efetivos', r => r.shift === 'T1'), pres: sumS('Presentes')});
+  // Uma vez, ao atualizar: as listas dos dias gravados antes são refeitas.
+  cE.setProp_('EF_LISTAS_REFEITAS', '');
+  cE.setProp_('EF_CONFERENCIA_AT', String(Date.now()));
+  cE.efQueueSheetChanges_();
+  const pendE = cE.pendingJobs_().filter(j => j.indicator === 'efficiency' && j.type === 'DETAIL_INIT').map(j => j.date);
+  check([DE0, DE, DE1].every(d => pendE.indexOf(d) >= 0) && cE.__state.props.EF_LISTAS_REFEITAS === '4.36.2',
+    'V4.36.2 Eficiência: ao atualizar, as listas dos dias já gravados são refeitas uma vez', pendE);
+  runAll(cE);
   // A matriz apaga um dia antigo da planilha: o painel continua com o que leu.
   EFF[DE0] = ''; delete PR[DE0]; P1[DE0] = P1[DE0].map(v => [null, v[1]]); montar();
   cE.enqueueJobs_([['SUMMARY', 'efficiency', DE0, 0]], {reset: true});

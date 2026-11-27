@@ -645,6 +645,15 @@ function runEfficiencyDetailJob_(job, deadline, cfg, st) {
 function efQueueSheetChanges_(force) {
   if (!INDICATORS.efficiency || !efLinksCfg_(true)) return 0;
   if (!getProp_('FEISHU_USER_SEGREDO', '') && !getProp_('FEISHU_USER_TOKEN', '')) return 0;
+  // V4.36.2: uma vez — as listas dos dias gravados antes (sem o T1 "TI" e sem as categorias) são refeitas com os números gravados.
+  let refeitas = 0;
+  if (getProp_('EF_LISTAS_REFEITAS', '') !== '4.36.2') {
+    const ini = String(getProp_('DATA_START_DATE', '') || '') || addDaysIso_(isoToday_(), -400);
+    const dias = getRates_('efficiency', ini, isoToday_()).map(r => r.date);
+    if (dias.length) refeitas = enqueueJobs_(dias.map(d => ['DETAIL_INIT', 'efficiency', d, 1]), {reset: true}) || 0;
+    setProp_('EF_LISTAS_REFEITAS', '4.36.2');
+    if (dias.length) logSync_('INFO', 'efficiency', '', 'Eficiência: ' + dias.length + ' lista(s) de dia refeitas (turnos e categorias das planilhas da matriz).');
+  }
   const agora = Date.now();
   if (!force && agora - (Number(getProp_('EF_CONFERENCIA_AT', '0')) || 0) < 50 * 60000) return 0;
   setProp_('EF_CONFERENCIA_AT', String(agora));

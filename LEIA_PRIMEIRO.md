@@ -4,6 +4,16 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.36.2 — Eficiência: gráficos e tabelas com o T1 e as categorias
+
+Pedido: "O valor do T1 aparece no cartão, porém não aparece no gráfico de coluna e tabelas. Corrigir isso! Também a separação de
+colaboradores por categoria não está aparecendo os dados."
+
+- Causa: a lista do dia (que alimenta os gráficos e as tabelas) só era refeita quando o **total** de presentes ou o volume do dia
+  mudava. O T1 ("TI") e as categorias mudam sem mudar o total (que vem da linha 合计) — o cartão (resumo) atualizava e a lista não.
+- Agora a lista da Eficiência é refeita **sempre** junto com o resumo do dia. E, uma vez ao atualizar, o painel refaz as listas de
+  todos os dias já gravados (aparece no LOG: "lista(s) de dia refeitas").
+
 ## V4.36.1 — Eficiência: T1 ("TI") e os presentes por categoria (planilha EFI GRU)
 
 Pedido: "O dash não está pegando os dados de presença das categorias de colaboradores da tabela EFI GRU. E você ignorou o do T1,

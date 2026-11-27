@@ -2208,13 +2208,14 @@ function detailNeedsRefresh_(indicator, date, prev, summary, st, manual) {
   if (!st || DETAIL_USABLE_.indexOf(st.details) < 0) return true;
   const changed = !prev || prev.errorCount !== summary.errorCount || prev.totalCount !== summary.totalCount;
   const cfgR = indicatorCfg_(indicator) || {};
+  // V4.36.2 (Eficiência: "o T1 aparece no cartão, porém não aparece no gráfico de coluna e tabelas"): a lista do dia vem das
+  // planilhas da matriz e muda sem mudar o total (turnos, categorias) — refeita sempre junto com o resumo (leitura em memória).
+  if (cfgR.efficiency) return true;
   if (!changed && st.details === 'COMPLETE') return false;
   if (manual) return true;
   // V4.22.13 (Produção do Sorter: "valores do filtro não batem com os gráficos"): a lista do dia é refeita junto com o resumo
   // (poucas consultas na rede da base) — cartões, filtros e gráficos do mesmo momento. Antes a lista podia ficar até 2 h atrás.
   if (cfgR.sorter) return true;
-  // V4.33 (Eficiência): a lista do dia são as linhas do Feishu (3 turnos) — refeita junto com o resumo.
-  if (cfgR.efficiency) return true;
   let minH = cfgR.detail && cfgR.detail.refreshHours ? Math.max(cfgR.detail.refreshHours, heavyDetailLimited_(cfgR) ? 12 : 0) : 0;
   // Expedição: dia fechado só muda a situação (chegou/entregue) — atualizado no máximo a cada closedRefreshHours.
   if (cfgR.detail && cfgR.detail.closedRefreshHours && date < isoToday_()) minH = Math.max(minH, cfgR.detail.closedRefreshHours);
