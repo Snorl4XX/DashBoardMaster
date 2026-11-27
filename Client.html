@@ -1863,6 +1863,19 @@
     return {v: n ? s / n : null, n: n, mat: mat, calc: calc};
   }
   function efValue(from, to) { return efStats(from, to).v; }
+  /** V4.36.3: por que faltam os presentes por categoria no dia escolhido (metrics.presStatus, gravado a cada leitura). */
+  function efPresHint() {
+    var mt = (activeRates().filter(function (r) { return r.date === state.to; })[0] || {}).metrics || {}, st = Number(mt.presStatus);
+    var ef = function (pt, zh) { return L({pt: pt, zh: zh}); };
+    if (st === 1) return ef('A planilha de presentes e programados (link 1) não está configurada — Configurações → Planilhas do Feishu.', '未配置出勤表（链接1）— 请在设置中配置。');
+    if (st === 2) return ef('O painel não conseguiu ler a planilha de presentes e programados (link 1). Configurações → Planilhas do Feishu → Testar as planilhas mostra o motivo.',
+      '无法读取出勤表（链接1）。请在设置中点击“测试表格”查看原因。');
+    if (st === 3) return ef('Na planilha de presentes e programados (link 1) o painel não achou as linhas das categorias embaixo de uma linha de datas. Testar as planilhas mostra o que foi achado.',
+      '出勤表（链接1）中未找到日期行下的类别行。请点击“测试表格”查看。');
+    if (st === 4) return ef('A planilha de presentes e programados (link 1) não tem números deste dia.', '出勤表（链接1）没有该日期的数据。');
+    return ef('Sem os presentes por categoria (planilha de presentes e programados) neste dia — Configurações → Planilhas do Feishu → Testar as planilhas.',
+      '该日期没有各类别出勤（出勤表）— 请在设置中测试表格。');
+  }
   function renderEfficiencyKpis(c, k) {
     var grid = $('#kpiGrid'), day = k.mode === 'day', f = filtersObj(), fk = Object.keys(f), sel = f.shift && f.shift.length ? f.shift : null;
     var ef = function (pt, zh) { return L({pt: pt, zh: zh}); }, n0 = function (v) { return isNum(v) ? fmtNum(v, Math.abs(v) >= 100 ? 0 : 1) : '—'; };
@@ -1894,9 +1907,8 @@
     if (isNum(efe) || isNum(tmp)) rows.push({icon: 'login', html: esc(ef('Presença: ', '出勤：')) + '<b>' + fmtInt(efe) + '</b> ' + esc(ef('efetivos', '正式工')) + ' + <b>' +
       fmtInt(tmp) + '</b> ' + esc(ef('temporários', '临时工')) + ' = <b>' + fmtInt(pres) + '</b>' + (day ? '' : esc(ef(' (soma dos dias)', '（各日合计）')))});
     rows.push({icon: 'layers', html: '<b>' + fmtInt(proc) + '</b> ' + esc(ef('processados no ' + (day ? 'dia' : 'período') + ' (JMS)', '处理量（JMS）'))});
-    // V4.36.1: presença lida, mas sem os presentes por categoria (planilha de presentes e programados): diz onde conferir.
-    if (isNum(pres) && !isNum(cat)) rows.push({icon: 'warn', cls: 'hx-small', html: esc(ef('Sem os presentes por categoria (planilha de presentes e programados) ' +
-      (day ? 'neste dia' : 'no período') + ' — Configurações → Planilhas do Feishu → Testar as planilhas.', '该日期没有各类别出勤（出勤表）— 请在设置中测试表格。'))});
+    // V4.36.1/V4.36.3: presença lida, mas sem os presentes por categoria (planilha de presentes e programados): diz o motivo.
+    if (isNum(pres) && !isNum(cat)) rows.push({icon: 'warn', cls: 'hx-small', html: esc(efPresHint())});
     if (!isNum(eff)) {
       // Diz o motivo: o Feishu não foi lido, ou as planilhas não têm este dia (e até que dia elas vão).
       var ld = String(mt.hcLastDay || ''), ldTxt = /^\d{8}$/.test(ld) ? fmtDate(ld.slice(0, 4) + '-' + ld.slice(4, 6) + '-' + ld.slice(6, 8), true) : '';
@@ -3048,7 +3060,8 @@
     if (!hasData) {
       destroyChart(key);
       body.innerHTML = '<div class="chart-wrap' + (key === 'evolution' ? ' large' : '') + '"><div class="chart-empty"><div><b>' + esc(t('noData')) + '</b>' +
-        esc(key === 'evolution' ? t('noRateHint') : detailHint(spec.where && spec.where.column)) + '</div></div></div>';
+        esc(key === 'evolution' ? t('noRateHint') : c.efficiency && spec.where && spec.where.column === 'Presentes' ? efPresHint() :
+          detailHint(spec.where && spec.where.column)) + '</div></div></div>';
       return;
     }
     if (view === 'table' || !window.Chart) {

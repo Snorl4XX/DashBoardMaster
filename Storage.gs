@@ -698,6 +698,9 @@ function compactDay_(indicator, date, deadline) {
  */
 function scanArchive_(indicator, from, to, opts, sink) {
   opts = opts || {};
+  // V4.36.3: Eficiência — a lista vem dos números gravados de cada dia (os mesmos dos cartões), não do arquivo do dia.
+  const cfgEf = indicatorCfg_(indicator);
+  if (cfgEf && cfgEf.efficiency && typeof efArchiveFromRates_ === 'function') return efArchiveFromRates_(indicator, from, to, sink);
   const maxFiles = opts.maxFiles === undefined ? maxDetailFiles_() : opts.maxFiles;
   const maxRows = opts.maxRows === undefined ? maxClientRows_() : opts.maxRows;
   const deadline = opts.deadline || (Date.now() + loadBudgetMs_());

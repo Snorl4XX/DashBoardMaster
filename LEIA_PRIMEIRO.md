@@ -4,6 +4,26 @@ Painel web no padrão J&T (branco e vermelho), bilíngue **PT-BR ⇄ 中文**, p
 
 *Feito por Caike Oliveira.*
 
+## V4.36.3 — Eficiência: gráficos iguais aos cartões e categorias no dia certo
+
+Pedidos: "Ainda está dando o mesmo erro, corrija imediatamente isso. Faz uma análise completa." e "Tem dias mostrando os resultados
+de categoria e outros dias mostrando dados aleatórios que não fazem sentido".
+
+Análise (o caminho inteiro do número: planilha → número do dia → lista do dia → gráfico/tabela):
+- **Gráfico e tabelas atrás do cartão:** eles liam a lista do dia gravada à parte, que só era refeita quando a fila rodava. Agora
+  os gráficos, as tabelas e os relatórios da Eficiência são montados **na hora, dos mesmos números dos cartões** — não ficam mais
+  diferentes do cartão.
+- **Números no dia errado ("dados aleatórios"):** o cabeçalho da planilha EFI GRU é digitado à mão. Uma data digitada errada
+  levava os números daquela coluna para outro dia. Agora vale a **posição** da coluna (as vizinhas em sequência, 2 colunas por
+  dia): a data errada é corrigida e aparece no teste; uma data repetida na linha é ignorada (vale a primeira).
+- **Ano das datas sem ano ("01-nov"):** agora é o ano que põe mais datas entre 1 ano atrás e daqui a 60 dias (antes era pela
+  última coluna preenchida — colunas futuras já preenchidas puxavam o ano para trás). Uma data isolada fora de ordem não vira o ano.
+- **Números errados gravados antes:** as categorias gravadas por uma leitura antiga são trocadas pela leitura atual (a conferência
+  de hora em hora põe esses dias na fila sozinha).
+- **Conferir com a planilha:** Configurações → Planilhas do Feishu → **Testar as planilhas** mostra em "planilha1" os últimos dias
+  com **as colunas de onde vieram** os números (ex.: "2026-11-26 (colunas KL-KM): Administrativo 30/30 · …") e as datas do
+  cabeçalho que foram corrigidas. O cartão e o gráfico de categorias dizem o motivo quando faltam as categorias no dia.
+
 ## V4.36.2 — Eficiência: gráficos e tabelas com o T1 e as categorias
 
 Pedido: "O valor do T1 aparece no cartão, porém não aparece no gráfico de coluna e tabelas. Corrigir isso! Também a separação de

@@ -364,8 +364,10 @@ function efIsTotal_(label) { return /total|合计|总计|汇总|小计/.test(efN
  * preenchido fica até hoje); uma data repetida ou fora de ordem no cabeçalho não derruba mais a linha toda.
  */
 function efGridRecords_(grid) {
-  const out = [], nRows = grid.length, hoje = isoToday_(), y0 = Number(hoje.slice(0, 4));
+  const out = [], avisos = [], nRows = grid.length, hoje = isoToday_(), y0 = Number(hoje.slice(0, 4));
   const iso = (y, m, d) => y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  const lo = addDaysIso_(hoje, -365), hi = addDaysIso_(hoje, 60), lim7 = addDaysIso_(hoje, 7);
+  const dd = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 864e5);
   const dateRows = {};
   for (let r = 0; r < nRows; r++) {
     const row = grid[r] || [], dc = [];
@@ -375,9 +377,14 @@ function efGridRecords_(grid) {
       if (p) dc.push({c: c, y: p.y, m: p.m, d: p.d});
     }
     if (dc.length < 2) continue;
-    // Datas sem ano, na ordem das colunas: o mês/dia voltou (dezembro → janeiro) = ano seguinte.
-    let off = 0, prev = -1;
-    dc.forEach(x => { if (x.y) return; const k = x.m * 100 + x.d; if (prev >= 0 && k < prev - 600) off++; prev = k; x.off = off; });
+    // Datas sem ano, na ordem das colunas: o mês/dia volta (dezembro → janeiro) e CONTINUA baixo = ano seguinte. Uma data
+    // isolada fora de ordem (erro de digitação) não vira o ano.
+    const sem = dc.filter(x => !x.y), ks = sem.map(x => x.m * 100 + x.d);
+    let off = 0;
+    sem.forEach((x, j) => {
+      if (j && ks[j] < ks[j - 1] - 600 && (j + 1 >= sem.length || (ks[j + 1] >= ks[j] && ks[j + 1] < ks[j - 1] - 600))) off++;
+      x.off = off;
+    });
     // A maioria em ordem crescente (números de uma linha de dados não viram datas; um erro de digitação não derruba a linha).
     const key = x => (x.y || 3000 + x.off) * 10000 + x.m * 100 + x.d;
     let inc = 0;
@@ -406,38 +413,77 @@ function efGridRecords_(grid) {
           if (v === null) continue;
           any = true;
           const sb = sub(c);
-          raw.push({k: sp.k, i: dr, pos: c - sp.from, label: label, sub: sb, kind: efSubKind_(sb) || efSubKind_(label), value: v});
+          raw.push({k: sp.k, c: c, i: dr, pos: c - sp.from, label: label, sub: sb, kind: efSubKind_(sb) || efSubKind_(label), value: v});
         }
       });
       if (any) seen = true;
       else if (!label && seen) break;
     }
-    // Ano das datas sem ano: o maior em que o último dia preenchido (sem contar o programado) fica até hoje (+7 dias);
-    // sem nada preenchido, o maior em que a primeira data fica até daqui a 31 dias.
+    // V4.36.3: ano das datas sem ano = o que põe mais datas entre 1 ano atrás e daqui a 60 dias; empate: o último dia
+    // preenchido (sem o programado) até hoje (+7 dias). Antes era só pelo último dia preenchido (colunas futuras preenchidas
+    // puxavam o ano para trás).
     let base = y0;
     if (dc.some(x => !x.y)) {
       const cheios = {};
       raw.forEach(x => { if (x.kind !== 'program' && x.value) cheios[x.k] = 1; });
-      const ks = Object.keys(cheios).map(Number), lim7 = addDaysIso_(hoje, 7), lim31 = addDaysIso_(hoje, 31);
-      const sem = dc.filter(x => !x.y), dateY = (x, Y) => iso(Y + x.off, x.m, x.d);
-      base = 0;
-      for (let Y = y0 + 1; Y >= y0 - 6 && !base; Y--) {
-        const last = ks.filter(k => !dc[k].y).reduce((a, k) => { const d = dateY(dc[k], Y); return d > a ? d : a; }, '');
-        if (last ? last <= lim7 : dateY(sem[0], Y) <= lim31) base = Y;
+      const kc = Object.keys(cheios).map(Number);
+      let best = null;
+      for (let Y = y0 + 1; Y >= y0 - 6; Y--) {
+        const ds = dc.map(x => (x.y ? iso(x.y, x.m, x.d) : iso(Y + x.off, x.m, x.d)));
+        const score = ds.filter(d => d >= lo && d <= hi).length, last = kc.reduce((a, k) => (ds[k] > a ? ds[k] : a), '');
+        const okLast = !last || last <= lim7 ? 1 : 0;
+        if (!best || score > best.score || (score === best.score && okLast > best.okLast)) best = {Y: Y, score: score, okLast: okLast};
       }
-      base = base || y0;
+      base = best.Y;
     }
     const dates = dc.map(x => (x.y ? iso(x.y, x.m, x.d) : iso(base + x.off, x.m, x.d)));
-    raw.forEach(x => out.push({date: dates[x.k], i: x.i, pos: x.pos, label: x.label, sub: x.sub, kind: x.kind, value: x.value}));
+    // V4.36.3: data digitada errada no cabeçalho (os números iam para o dia errado): com as vizinhas em sequência e o mesmo
+    // espaço entre as colunas, vale o dia que a posição dela pede. Fica no aviso do teste das planilhas.
+    const n = dates.length, passo = k => dc[k].c - dc[k - 1].c;
+    for (let k = 0; k < n; k++) {
+      let certo = '';
+      if (k > 0 && k < n - 1 && passo(k) === passo(k + 1) && dd(dates[k - 1], dates[k + 1]) === 2 && dd(dates[k - 1], dates[k]) !== 1) certo = addDaysIso_(dates[k - 1], 1);
+      else if (k === 0 && n >= 3 && passo(1) === passo(2) && dd(dates[1], dates[2]) === 1 && dd(dates[0], dates[1]) !== 1) certo = addDaysIso_(dates[1], -1);
+      else if (k === n - 1 && n >= 3 && passo(n - 1) === passo(n - 2) && dd(dates[n - 3], dates[n - 2]) === 1 && dd(dates[n - 2], dates[n - 1]) !== 1) certo = addDaysIso_(dates[n - 2], 1);
+      if (certo) {
+        avisos.push('coluna ' + efColName_(dc[k].c + 1) + ' (linha ' + (r + 1) + '): "' + efText_(grid[r][dc[k].c]).slice(0, 20) + '" lido como ' + certo);
+        dates[k] = certo;
+      }
+    }
+    // A mesma data duas vezes na linha: vale a primeira.
+    const vistas = {};
+    dates.forEach((d, k) => {
+      if (!vistas[d]) { vistas[d] = 1; return; }
+      avisos.push('coluna ' + efColName_(dc[k].c + 1) + ' (linha ' + (r + 1) + '): a data ' + d + ' já apareceu antes na linha — ignorada');
+      dates[k] = '';
+    });
+    raw.forEach(x => { if (dates[x.k]) out.push({date: dates[x.k], c: x.c, i: x.i, pos: x.pos, label: x.label, sub: x.sub, kind: x.kind, value: x.value}); });
   });
+  out.avisos = avisos;
   return out;
 }
-/** Resumo de uma grade para o teste das Configurações (sem nomes: só contagens, datas e os nomes das categorias). */
+/**
+ * Resumo de uma grade para o teste das Configurações (sem nomes: só contagens, datas, colunas e os números das categorias):
+ * os últimos dias com as colunas de onde vieram — para conferir com a planilha — e as datas do cabeçalho corrigidas.
+ */
 function efResumoGrade_(recs) {
-  const datas = {}, rot = {};
-  recs.forEach(x => { datas[x.date] = 1; const r = efRoleOf_(x.label); if (r) rot[r.nome] = 1; });
-  const ds = Object.keys(datas).sort();
-  return {datas: ds.length, primeira: ds[0] || '—', ultima: ds[ds.length - 1] || '—', categorias: Object.keys(rot)};
+  const datas = {}, rot = {}, dia = {};
+  recs.forEach(x => {
+    datas[x.date] = 1;
+    const r = efRoleOf_(x.label);
+    if (!r) return;
+    rot[r.nome] = 1;
+    const kind = x.kind === 'present' || x.kind === 'program' ? x.kind : (x.pos === 0 ? 'present' : x.pos === 1 ? 'program' : '');
+    if (!kind) return;
+    const d = dia[x.date] = dia[x.date] || {cols: [], v: {}}, col = efColName_(x.c + 1);
+    if (d.cols.indexOf(col) < 0) d.cols.push(col);
+    if (d.v[r.key + kind] === undefined) d.v[r.key + kind] = x.value;
+  });
+  const ds = Object.keys(datas).sort(), hoje = isoToday_(), fmt = v => (v === undefined ? '—' : String(v));
+  const ultimos = Object.keys(dia).filter(d => d <= hoje && EF_ROLES_.some(r => dia[d].v[r.key + 'present'])).sort().slice(-7).reverse()
+    .map(d => d + ' (colunas ' + dia[d].cols.join('-') + '): ' + EF_ROLES_.map(r => r.nome + ' ' + fmt(dia[d].v[r.key + 'present']) + '/' + fmt(dia[d].v[r.key + 'program'])).join(' · '));
+  return {datas: ds.length, primeira: ds[0] || '—', ultima: ds[ds.length - 1] || '—', categorias: Object.keys(rot), ultimosDias: ultimos,
+    cabecalhoCorrigido: (recs.avisos || []).slice(0, 10)};
 }
 /**
  * As duas planilhas lidas agora (ficam na memória por 3 min — o resumo e a lista de vários dias leem as mesmas grades):
@@ -449,7 +495,8 @@ function efPlanilhas_(force) {
   if (!force && EF_PLAN_ && EF_PLAN_.sig === sig && EF_PLAN_.ate > Date.now()) return EF_PLAN_.data;
   EF_PLAN_ = null;
   efUserToken_(); // conta não conectada / acesso vencido: um aviso só (não um por planilha)
-  const out = {pres: [], efic: [], presenca: [], abas: {}, erros: []};
+  // st1 (V4.36.3): situação da planilha 1 — 0 lida com as categorias, 1 sem o link, 2 erro na leitura, 3 sem as linhas das categorias.
+  const out = {pres: [], efic: [], presenca: [], abas: {}, erros: [], st1: L.pres ? 2 : 1};
   const msg = e => String(e && e.message || e).replace(/^Error:\s*/, '');
   if (L.pres) {
     try {
@@ -465,6 +512,7 @@ function efPlanilhas_(force) {
       }
       const usa = achou || primeira;
       out.pres = achou ? achou.recs : [];
+      out.st1 = achou ? 0 : 3;
       out.abas.presentesProgramados = usa.tab.title || usa.tab.sheet_id;
       out.resumo1 = Object.assign({abasDaPlanilha: tabs.map(t => t.title || t.sheet_id)}, efResumoGrade_(usa.recs));
       if (!achou) {
@@ -487,6 +535,7 @@ function efPlanilhas_(force) {
     } catch (e) { out.erros.push('Planilha da eficiência: ' + msg(e)); }
   }
   if (out.erros.length && !out.pres.length && !out.efic.length && !out.presenca.length) throw new Error(out.erros.join(' · '));
+  out.avisosCabecalho = (out.efic.avisos || []).map(a => 'aba da eficiência, ' + a).concat((out.presenca.avisos || []).map(a => 'aba de presença, ' + a));
   // Último dia com números (presença ou eficiência; o programado pode vir antes do dia) — até hoje.
   const hoje = isoToday_(), dias = {};
   out.pres.filter(x => x.kind !== 'program').concat(out.efic, out.presenca).forEach(x => { if (x.date <= hoje && x.value) dias[x.date] = 1; });
@@ -530,8 +579,13 @@ function efDiaPlanilhas_(date, P) {
   const soma = k => (parts.some(p => p[k] !== null) ? parts.reduce((a, p) => a + (p[k] || 0), 0) : null);
   return {date: date, roles: roles, efOficial: efPick ? efPick.value : null,
     efetivos: total ? total.efetivo : soma('efetivo'), temporarios: total ? total.temporario : soma('temporario'),
-    shifts: parts.filter(p => p.shift), linhasPresenca: rows.map(r => r.label || '(sem nome)'), lastDate: P.lastDate || ''};
+    shifts: parts.filter(p => p.shift), linhasPresenca: rows.map(r => r.label || '(sem nome)'), lastDate: P.lastDate || '', st1: P.st1 || 0};
 }
+/**
+ * V4.36.3: versão da leitura das planilhas. Números das categorias gravados por uma leitura mais antiga (que podia pôr os números
+ * de uma coluna no dia errado) são trocados pela leitura atual — também quando a planilha não tem mais o dia.
+ */
+const EF_PARSER_ = 4;
 /** Números lidos das planilhas (os que ficam gravados por dia). */
 const EF_FEISHU_KEYS_ = ['efOficial', 'presentEfetivos', 'presentTemporarios']
   .concat(EF_SHIFTS_.map(s => 'presentEf' + s), EF_SHIFTS_.map(s => 'presentTp' + s))
@@ -551,15 +605,25 @@ function efPlanMetrics_(day) {
   });
   EF_ROLES_.forEach(r => { m['present' + r.key] = day.roles[r.key].present; m['program' + r.key] = day.roles[r.key].program; });
   m.hcLastDay = day.lastDate ? Number(day.lastDate.replace(/-/g, '')) : null;
+  m.efParser = EF_PARSER_;
+  // V4.36.3: por que faltam as categorias no dia (0 tem; 1 sem o link 1; 2 erro na leitura; 3 sem as linhas; 4 a planilha não tem o dia).
+  m.presStatus = day.st1 ? day.st1 : (EF_ROLES_.some(r => day.roles[r.key].present !== null || day.roles[r.key].program !== null) ? 0 : 4);
   return m;
 }
-/** Dia gravado antes: o número que a planilha não tem mais (apagado ou ainda não preenchido) continua o gravado. */
+/**
+ * Dia gravado antes: o número que a planilha não tem mais (apagado ou ainda não preenchido) continua o gravado. Exceção (V4.36.3):
+ * as categorias gravadas por uma leitura antiga não ficam quando a planilha de presentes foi lida agora (podiam ser do dia errado).
+ */
 function efKeep_(m, prev) {
   const out = Object.assign({}, m || {});
+  const leu1 = !!m && (Number(m.presStatus) === 0 || Number(m.presStatus) === 4);
+  const velha = !!prev && Number(prev.efParser) !== EF_PARSER_;
   EF_FEISHU_KEYS_.forEach(k => {
-    if (out[k] === null || out[k] === undefined) out[k] = prev && prev[k] !== null && prev[k] !== undefined ? prev[k] : null;
+    if (out[k] !== null && out[k] !== undefined) return;
+    const cat = /^(present|program)(Adm|Assist|Oper|Temp|Diar)$/.test(k);
+    out[k] = prev && prev[k] !== null && prev[k] !== undefined && !(cat && leu1 && velha) ? prev[k] : null;
   });
-  if (!m && prev && prev.hcLastDay) out.hcLastDay = prev.hcLastDay;
+  if (!m && prev) { if (prev.hcLastDay) out.hcLastDay = prev.hcLastDay; if (prev.efParser) out.efParser = prev.efParser; }
   return out;
 }
 /** Totais do dia a partir dos números gravados: presentes (efetivos + temporários), categorias, turnos e % de presença. */
@@ -584,7 +648,11 @@ function efFeishuDay_(date, prevMetrics) {
     base = efPlanMetrics_(efDiaPlanilhas_(date, P));
     if (P.erros.length) erro = P.erros.join(' · ');
   } catch (e) { erro = String(e && e.message || e); }
-  return {m: efDerive_(efKeep_(base, prevMetrics)), erro: erro};
+  const m = efDerive_(efKeep_(base, prevMetrics));
+  let semLink1 = false;
+  try { const L = efLinksCfg_(true); semLink1 = !L || !L.pres; } catch (e) { semLink1 = false; }
+  m.presStatus = base ? base.presStatus : (semLink1 ? 1 : 2);
+  return {m: m, erro: erro};
 }
 
 // ------------------------------------------------------------------ resumo e lista do dia
@@ -619,15 +687,35 @@ function efSummaryFrom_(indicatorKey, isoDate, jms, hm, feishuErro) {
  * Lista do dia (tarefa DETAIL_INIT), a partir dos números gravados do dia: Presentes / Programados por categoria (planilha 1) e
  * Efetivos / Temporários por turno (aba de presença) — para os gráficos e as tabelas. Também regrava o resumo.
  */
-function runEfficiencyDetailJob_(job, deadline, cfg, st) {
-  const ind = job.indicator, date = job.date, prev = getRateDay_(ind, date), pm = prev && prev.metrics || null;
-  const fd = efFeishuDay_(date, pm), m = fd.m, acc = GroupAccumulator_(cfg);
-  let rowsIn = 0;
-  const add = (column, shift, role, v) => { if (!(v > 0)) return; acc.addRow({date: date, column: column, shift: shift, role: role, qty: v}); rowsIn++; };
+/** Linhas da lista de um dia a partir dos números do dia (os mesmos dos cartões). Devolve quantas linhas. */
+function efRowsFromMetrics_(date, m, addRow) {
+  let n = 0;
+  const add = (column, shift, role, v) => { v = Number(v); if (!(v > 0)) return; addRow({date: date, column: column, shift: shift, role: role, qty: v}); n++; };
   EF_ROLES_.forEach(r => { add('Presentes', 'N/A', r.nome, m['present' + r.key]); add('Programados', 'N/A', r.nome, m['program' + r.key]); });
   const porTurno = EF_SHIFTS_.some(s => m['presentEf' + s] > 0 || m['presentTp' + s] > 0);
   if (porTurno) EF_SHIFTS_.forEach(s => { add('Efetivos', s, '', m['presentEf' + s]); add('Temporários', s, '', m['presentTp' + s]); });
   else { add('Efetivos', 'N/A', '', m.presentEfetivos); add('Temporários', 'N/A', '', m.presentTemporarios); }
+  return n;
+}
+/**
+ * V4.36.3 (pedido "o T1 aparece no cartão, porém não aparece no gráfico de coluna e tabelas"): a lista do período (gráficos,
+ * tabelas e relatórios) é montada na hora dos números gravados de cada dia — os mesmos dos cartões. Não depende mais do arquivo
+ * do dia (que podia ficar atrás do cartão até a fila refazer). Mesmo retorno do scanArchive_.
+ */
+function efArchiveFromRates_(indicator, from, to, sink) {
+  const cfg = getIndicatorConfig_(indicator), loaded = [], empty = [], com = {};
+  getRates_(indicator, from, to).forEach(r => {
+    const acc = GroupAccumulator_(cfg);
+    if (efRowsFromMetrics_(r.date, r.metrics || {}, row => acc.addRow(row))) { sink.addEncoded(acc.build()); loaded.push(r.date); com[r.date] = 1; }
+  });
+  dateRangeIso_(from, to).forEach(d => { if (!com[d]) empty.push(d); });
+  return {loadedDates: loaded.sort(), partialDates: [], staleDates: [], notDownloaded: [], notLoaded: [], emptyDates: empty.sort(), readFiles: 0,
+    fullyLoaded: true};
+}
+function runEfficiencyDetailJob_(job, deadline, cfg, st) {
+  const ind = job.indicator, date = job.date, prev = getRateDay_(ind, date), pm = prev && prev.metrics || null;
+  const fd = efFeishuDay_(date, pm), m = fd.m, acc = GroupAccumulator_(cfg);
+  const rowsIn = efRowsFromMetrics_(date, m, row => acc.addRow(row));
   const ds = acc.build();
   saveDayDataset_(ind, date, ds, 1, acc.total());
   groupedShiftAgg_(ind, date, ds);
@@ -670,9 +758,15 @@ function efQueueSheetChanges_(force) {
   const from = inicio > limite ? inicio : limite;
   const todos = {};
   P.pres.concat(P.efic, P.presenca).forEach(x => { if (x.date >= from && x.date <= hoje) todos[x.date] = 1; });
+  // V4.36.3: e os dias gravados por uma leitura antiga com categorias (podiam estar no dia errado), se a planilha 1 foi lida.
+  const CAT = EF_ROLES_.map(r => 'present' + r.key).concat(EF_ROLES_.map(r => 'program' + r.key)), nz = v => (v === undefined ? null : v);
+  if (P.st1 === 0) getRates_('efficiency', from, hoje).forEach(r => {
+    if (r.metrics && Number(r.metrics.efParser) !== EF_PARSER_ && CAT.some(k => nz(r.metrics[k]) !== null)) todos[r.date] = 1;
+  });
   const mudou = Object.keys(todos).sort().filter(d => {
     const base = efPlanMetrics_(efDiaPlanilhas_(d, P)), prev = getRateDay_('efficiency', d), pm = prev && prev.metrics;
     if (!pm) return base.efOficial > 0 || base.presentEfetivos > 0 || base.presentTemporarios > 0 || EF_ROLES_.some(r => base['present' + r.key] > 0);
+    if (P.st1 === 0 && Number(pm.efParser) !== EF_PARSER_ && CAT.some(k => nz(base[k]) !== nz(pm[k]))) return true;
     return EF_FEISHU_KEYS_.some(k => base[k] !== null && base[k] !== undefined && base[k] !== pm[k]);
   });
   if (mudou.length) {
@@ -717,7 +811,7 @@ function testarPlanilhasFeishu() {
       categorias: EF_ROLES_.map(r => r.nome + ': ' + (P.pres.some(x => efRoleOf_(x.label) === r) ? '✓' : '✗ não achei a linha')),
       linhasDaPresenca: Object.keys(rotulos).slice(0, 12), diasComNumeros: P.dates.length,
       primeiroDia: P.dates[0] || '—', ultimoDia: P.lastDate || '—', ultimosDias: ultimos,
-      aviso: P.erros.join(' · '),
+      aviso: P.erros.join(' · '), cabecalhoCorrigidoPlanilha2: (P.avisosCabecalho || []).slice(0, 10),
       diasNaFila: filaN ? filaN + ' dia(s) na fila para entrar no painel (clique em Atualizar no painel daqui a pouco).' : 'Nenhum dia novo ou mudado.'};
   } catch (e) {
     return {ok: false, erro: String(e && e.message || e)};

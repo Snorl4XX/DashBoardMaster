@@ -5084,6 +5084,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const P1 = {[DE0]: [[30, 32], [40, 42], [500, 520], [300, 320], [150, 160]], [DE]: [[31, 32], [41, 42], [505, 520], [310, 320], [155, 160]],
     [DE1]: [[29, 32], [39, 42], [490, 520], [290, 320], [140, 160]], [dAdd(HOJE, 5)]: [[null, 32], [null, 42], [null, 520], [null, 320], [null, 160]]};
   // Aba de presença: 3 turnos sem nome e a linha do total (a soma), efetivos / temporários.
+  // Cabeçalho longo como o da matriz: 8 dias antes de DE0 (fora do histórico do painel).
+  for (let k = 1; k <= 8; k++) P1[dAdd(DE0, -k)] = [[20 + k, 30], [5, 5], [400, 450], [200, 250], [100, 120]];
   const PR = {[DE0]: [[118, 290], [108, 195], [148, 175]], [DE]: [[120, 300], [110, 200], [150, 180]], [DE1]: [[115, 280], [105, 190], [140, 170]]};
   let EFF = {[DV]: 401, [DE0]: 398, [DE]: 412, [DE1]: ''};
   const grids = {};
@@ -5093,7 +5095,8 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     g1[0][0] = 'GRU';
     Object.keys(P1).sort().forEach((d, k) => {
       const c = 190 + 2 * k;
-      g1[0][c] = txtDia(d); g1[1][c] = '出勤人数 Colaboradores Presentes'; g1[1][c + 1] = '应出勤人数 Efetivo Programado';
+      // V4.36.3: o dia DE digitado errado no cabeçalho (10 dias depois) — os números são do DE (a posição manda).
+      g1[0][c] = txtDia(d === DE ? dAdd(DE, 10) : d); g1[1][c] = '出勤人数 Colaboradores Presentes'; g1[1][c + 1] = '应出勤人数 Efetivo Programado';
       P1[d].forEach((v, j) => { g1[2 + j][0] = CATS[j]; if (v[0] !== null) g1[2 + j][c] = v[0]; g1[2 + j][c + 1] = v[1]; });
     });
     // Erro de digitação no cabeçalho: uma data fora de ordem no fim (não pode derrubar a linha de datas inteira).
@@ -5187,6 +5190,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     gW.filter(x => x.kind === 'present').map(x => x.date).join() === yWrap + '-12-30,' + yWrap + '-12-31' &&
     gW.filter(x => x.kind === 'program').map(x => x.date).join() === [yWrap + '-12-30', yWrap + '-12-31', (yWrap + 1) + '-01-01', (yWrap + 1) + '-01-02'].join(),
     'V4.36.1 Eficiência: turno "TI" (letra I) = T1; datas sem ano pela linha inteira (dezembro → janeiro = ano seguinte)', gW);
+  const kOld = cE.efKeep_({presStatus: 0}, {efParser: 3, presentAdm: 99, efOficial: 5}), kNew = cE.efKeep_({presStatus: 0}, {efParser: 4, presentAdm: 99});
+  const kFail = cE.efKeep_({presStatus: 2}, {efParser: 3, presentAdm: 99}), kNull = cE.efKeep_(null, {efParser: 3, presentAdm: 99});
+  check(kOld.presentAdm === null && kOld.efOficial === 5 && kNew.presentAdm === 99 && kFail.presentAdm === 99 && kNull.presentAdm === 99,
+    'V4.36.3 Eficiência: categorias gravadas por uma leitura antiga são trocadas pela leitura atual (ficam se a planilha não foi lida)', {kOld, kNew, kFail, kNull});
   const t0 = cE.testarPlanilhasFeishu();
   const login = cE.efLoginUrl_(RET, 'estado-1');
   check(t0.ok === false && /Conta do Feishu não conectada/.test(t0.erro) &&
@@ -5201,7 +5208,10 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const tb = cE.testarPlanilhasFeishu(), tbJs = JSON.stringify(tb);
   const linhaDE = (tb.ultimosDias || []).filter(x => x.indexOf(DE + ':') === 0)[0] || '';
   check(tb.ok && tb.abas.presentesProgramados === 'GRU' && tb.abas.eficiencia === '日均效率 Eficiência média diária' && tb.abas.presenca === '人员出勤 Presença de colaboradores' &&
-    tb.categorias.every(x => /✓$/.test(x)) && tb.planilha1.abasDaPlanilha.join() === 'Resumo,GRU' && tb.planilha1.categorias.length === 5 && /eficiência da matriz 412 · presença 380 efetivos \+ 680 temporários \(T1 120\+300 · T2 110\+200 · T3 150\+180\)/.test(linhaDE) &&
+    tb.categorias.every(x => /✓$/.test(x)) && tb.planilha1.abasDaPlanilha.join() === 'Resumo,GRU' && tb.planilha1.categorias.length === 5 &&
+    tb.planilha1.cabecalhoCorrigido.some(a => /^coluna [A-Z]+ \(linha 1\): ".+" lido como /.test(a) && a.indexOf('lido como ' + DE) > 0) &&
+    tb.planilha1.cabecalhoCorrigido.some(a => /já apareceu antes na linha — ignorada/.test(a)) &&
+    new RegExp('^' + DE + ' \\(colunas [A-Z]+-[A-Z]+\\): Administrativo 31/32 · Assistente Operacional 41/42').test(tb.planilha1.ultimosDias[1] || '') && /eficiência da matriz 412 · presença 380 efetivos \+ 680 temporários \(T1 120\+300 · T2 110\+200 · T3 150\+180\)/.test(linhaDE) &&
     /planilha 1: 1042 presentes de 1074 programados/.test(linhaDE) && tb.ultimoDia === DE1 && !tb.aviso && /dia\(s\) na fila/.test(tb.diasNaFila) &&
     ['segredo-teste', 'u-2', 'r-2'].every(x => tbJs.indexOf(x) < 0) && JSON.parse(cE.__state.props.FEISHU_NODES).WIKIPRES === 'shtPRES',
     'V4.36 Eficiência: teste das planilhas (wiki → planilha, abas pelo nome, categorias, turnos sem nome + total, últimos dias), sem tokens', tb);
@@ -5262,6 +5272,18 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
     cE.__state.props.EF_LISTAS_REFEITAS === '4.36.2',
     'V4.36.2 Eficiência: turnos e categorias mudam sem mudar o total — a lista do dia (gráfico e tabelas) é refeita junto com o cartão',
     {nS, n: dsS.length, t1: sumS('Efetivos', r => r.shift === 'T1'), pres: sumS('Presentes')});
+  // V4.36.3: gráficos, tabelas e relatórios montados dos números do cartão — mesmo com o arquivo do dia velho (sem o T1 e sem as
+  // categorias, como ficou no computador do usuário até a fila refazer), o painel mostra o mesmo que o cartão.
+  const cfgEf = cE.getIndicatorConfig_('efficiency'), velho = cE.GroupAccumulator_(cfgEf);
+  velho.addRow({date: DE, column: 'Efetivos', shift: 'T2', role: '', qty: 1}); velho.addRow({date: DE, column: 'Temporários', shift: 'T3', role: '', qty: 1});
+  cE.saveDayDataset_('efficiency', DE, velho.build(), 1, 2);
+  const dsV = cE.JTCore_.decodeDataset(cE.getDashboardData('efficiency', {from: DE, to: DE}).dataset);
+  const sumV = (col, f) => dsV.filter(r => r.column === col && (!f || f(r))).reduce((a, r) => a + Number(r.qty), 0);
+  const repV = cE.getArchivedRange_('efficiency', DE, DE), mV3 = mt(DE);
+  check(sumV('Efetivos', r => r.shift === 'T1') === mV3.presentEfT1 && sumV('Temporários', r => r.shift === 'T3') === mV3.presentTpT3 &&
+    sumV('Presentes', r => r.role === 'Operacional') === mV3.presentOper && sumV('Programados') === mV3.program && mV3.presStatus === 0 &&
+    repV.rows.filter(r => r.column === 'Efetivos' && r.shift === 'T1').reduce((a, r) => a + Number(r.qty), 0) === mV3.presentEfT1 && repV.fullyLoaded,
+    'V4.36.3 Eficiência: gráficos, tabelas e relatórios vêm dos números do cartão (arquivo do dia velho não aparece mais)', {n: dsV.length, mV3});
   // Uma vez, ao atualizar: as listas dos dias gravados antes são refeitas.
   cE.setProp_('EF_LISTAS_REFEITAS', '');
   cE.setProp_('EF_CONFERENCIA_AT', String(Date.now()));
@@ -5306,7 +5328,7 @@ check(nUp === 2 && nUp2 === 0 && mapUp.main === 'MAIN' && mapUp.sub === 'SUB' &&
   const cD = ctxE(Object.assign({}, LINKS, {FEISHU_LINK_PRESENCA: 'https://empresa-teste.feishu.cn/wiki/WIKIDOC', FEISHU_LINK_EFICIENCIA: ''}));
   cD.efConectar_('codigo-teste', RET);
   const tD = cD.testarPlanilhasFeishu(), tX = ctxE(Object.assign({}, LINKS, {FEISHU_LINK_PRESENCA: 'https://empresa-teste.feishu.cn/docx/ABC'})).testarPlanilhasFeishu();
-  check(mN.processed === PROC[DE] && mN.present === null && mN.efficiency === null && mN.feishuFail === 1 &&
+  check(mN.processed === PROC[DE] && mN.present === null && mN.efficiency === null && mN.feishuFail === 1 && mN.presStatus === 1 &&
     cN.allTabRows_('LOG').some(r => /Eficiência: planilhas do Feishu não lidas/.test(String(r[4]))) &&
     tN.ok === false && /falta App ID e App Secret/.test(tN.erro) && /confira o App ID e o App Secret/.test(errS) &&
     tD.ok === false && /não é de uma planilha \(tipo docx\)/.test(tD.erro) && tX.ok === false && /não reconhecido/.test(tX.erro),
